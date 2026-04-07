@@ -1580,13 +1580,22 @@ function renderHealth(health) {
     return;
   }
 
-  const rows = Object.entries(health).map(([key, val]) => {
-    const ok = val === 'ok' || val === true || val === 'healthy' || val === 'up' ||
-               (typeof val === 'object' && val && (val.status === 'ok' || val.status === 'healthy'));
+  // Flatten: show individual components instead of the nested object
+  const entries = [];
+  for (const [key, val] of Object.entries(health)) {
+    if (key === 'components' && val && typeof val === 'object') {
+      for (const [cKey, cVal] of Object.entries(val)) {
+        entries.push([cKey, cVal]);
+      }
+    } else {
+      entries.push([key, val]);
+    }
+  }
+
+  const rows = entries.map(([key, val]) => {
+    const ok = val === 'ok' || val === true || val === 'healthy' || val === 'up';
     const dotClass = ok ? 'ok' : 'err';
-    const statusText = typeof val === 'string' ? val
-      : (val && typeof val === 'object' && val.status) ? val.status
-      : (ok ? 'ok' : 'degraded');
+    const statusText = typeof val === 'string' ? val : (ok ? 'ok' : 'degraded');
     return `
       <div class="health-row">
         <span class="health-name">${escHtml(key)}</span>
