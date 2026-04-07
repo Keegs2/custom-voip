@@ -2,7 +2,8 @@
 FROM redis:7-alpine
 
 # Copy custom configuration with proper permissions
-COPY --chmod=644 redis.conf /usr/local/etc/redis/redis.conf
+COPY redis.conf /usr/local/etc/redis/redis.conf
+RUN chmod 644 /usr/local/etc/redis/redis.conf && chown redis:redis /usr/local/etc/redis/redis.conf
 
 # Copy Lua scripts for atomic operations
 COPY --chmod=644 scripts/ /usr/local/etc/redis/scripts/
