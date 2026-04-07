@@ -36,20 +36,9 @@ INSERT INTO customer_rate_assignments (customer_id, inbound_rate_table_id, outbo
 (3, 1, 1),
 (4, 1, 1);
 
--- Test RCF numbers (E.164 forward-to for PSTN testing)
+-- Single test RCF number for POC demo
 INSERT INTO rcf_numbers (did, customer_id, forward_to, pass_caller_id, ring_timeout) VALUES
-('+15551234567', 1, '+15559876543', true, 30),
-('+15551234568', 1, '+15559876544', false, 25),
-('+15551234569', 4, '+15559876545', true, 30);
-
--- RCF entries for local Zoiper softphone testing
--- These forward to local FreeSWITCH extensions instead of PSTN
--- DID +15550001001 -> Extension 1001 (initial test setup)
--- Update via API to change routing: 1001 -> 1002 -> 1003
-INSERT INTO rcf_numbers (did, customer_id, forward_to, pass_caller_id, ring_timeout, failover_to) VALUES
-('+15550001001', 1, '1001', true, 30, '1002'),
-('+15550001002', 1, '1002', true, 30, '1003'),
-('+15550001003', 1, '1003', true, 30, NULL);
+('+15551234567', 1, '+15559876543', true, 30);
 
 -- Test SIP trunk
 INSERT INTO sip_trunks (id, customer_id, trunk_name, max_channels, cps_limit, auth_type) VALUES
