@@ -3,30 +3,34 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>RCF Manager</title>
+  <title>Custom VoIP Admin</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
-      --bg:           #0f1117;
-      --surface:      #1a1d27;
-      --surface-raised: #1e2130;
-      --border:       #2a2f45;
-      --border-focus: #3b82f6;
-      --text:         #e2e8f0;
-      --muted:        #718096;
-      --accent:       #3b82f6;
-      --accent-h:     #2563eb;
-      --accent-glow:  rgba(59, 130, 246, 0.28);
-      --danger:       #7f1d1d;
-      --danger-text:  #fca5a5;
-      --danger-h:     #991b1b;
-      --danger-glow:  rgba(239, 68, 68, 0.18);
-      --success:      #22c55e;
-      --warn:         #f59e0b;
-      --radius:       10px;
-      --shadow:       0 1px 4px rgba(0,0,0,.4), 0 1px 2px rgba(0,0,0,.3);
-      --shadow-lg:    0 8px 32px rgba(0,0,0,.55);
+      --bg:              #0f1117;
+      --sidebar-bg:      #0d0f15;
+      --surface:         #1a1d27;
+      --surface-raised:  #1e2130;
+      --border:          #2a2f45;
+      --border-focus:    #3b82f6;
+      --text:            #e2e8f0;
+      --muted:           #718096;
+      --accent:          #3b82f6;
+      --accent-h:        #2563eb;
+      --accent-glow:     rgba(59, 130, 246, 0.28);
+      --danger:          #7f1d1d;
+      --danger-text:     #fca5a5;
+      --danger-h:        #991b1b;
+      --danger-glow:     rgba(239, 68, 68, 0.18);
+      --success-bg:      #065f46;
+      --success-text:    #6ee7b7;
+      --success:         #22c55e;
+      --warn:            #f59e0b;
+      --radius:          10px;
+      --shadow:          0 1px 4px rgba(0,0,0,.4), 0 1px 2px rgba(0,0,0,.3);
+      --shadow-lg:       0 8px 32px rgba(0,0,0,.55);
+      --sidebar-w:       240px;
     }
 
     body {
@@ -34,43 +38,188 @@
       background: var(--bg);
       color: var(--text);
       min-height: 100vh;
-      padding: 24px 16px 60px;
+      display: flex;
     }
 
-    /* ---- Layout ---- */
-    .page-header {
-      max-width: 760px;
-      margin: 0 auto 28px;
+    /* =========================================================
+       SIDEBAR
+    ========================================================= */
+
+    #sidebar {
+      width: var(--sidebar-w);
+      min-height: 100vh;
+      background: var(--sidebar-bg);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      position: fixed;
+      top: 0;
+      left: 0;
+      bottom: 0;
+      z-index: 100;
+      transition: transform .25s ease;
+    }
+
+    .sidebar-brand {
+      padding: 24px 20px 20px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .brand-title {
+      font-size: 1.15rem;
+      font-weight: 800;
+      letter-spacing: -.2px;
+      color: var(--text);
+      text-shadow: 0 0 22px rgba(59, 130, 246, 0.5);
+    }
+
+    .brand-title span {
+      color: var(--accent);
+    }
+
+    .brand-sub {
+      font-size: .72rem;
+      color: var(--muted);
+      margin-top: 3px;
+      letter-spacing: .3px;
+    }
+
+    .sidebar-nav {
+      flex: 1;
+      padding: 12px 0;
+      overflow-y: auto;
+    }
+
+    .nav-section-label {
+      font-size: .65rem;
+      font-weight: 700;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      padding: 16px 20px 6px;
+    }
+
+    .nav-item {
       display: flex;
       align-items: center;
+      gap: 11px;
+      padding: 10px 20px;
+      cursor: pointer;
+      color: var(--muted);
+      font-size: .9rem;
+      font-weight: 500;
+      border-left: 3px solid transparent;
+      transition: color .15s, background .15s, border-color .15s;
+      user-select: none;
+      text-decoration: none;
+    }
+
+    .nav-item:hover {
+      color: var(--text);
+      background: rgba(255,255,255,.03);
+    }
+
+    .nav-item.active {
+      color: var(--accent);
+      background: rgba(59, 130, 246, 0.08);
+      border-left-color: var(--accent);
+    }
+
+    .nav-icon {
+      font-size: 1rem;
+      width: 18px;
+      text-align: center;
+      flex-shrink: 0;
+      line-height: 1;
+    }
+
+    .sidebar-footer {
+      padding: 16px 20px;
+      border-top: 1px solid var(--border);
+      font-size: .72rem;
+      color: var(--muted);
+    }
+
+    /* =========================================================
+       MAIN LAYOUT
+    ========================================================= */
+
+    #main-wrapper {
+      margin-left: var(--sidebar-w);
+      flex: 1;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    #topbar {
+      display: none;
+      align-items: center;
+      gap: 12px;
+      padding: 14px 20px;
+      background: var(--sidebar-bg);
+      border-bottom: 1px solid var(--border);
+      position: sticky;
+      top: 0;
+      z-index: 50;
+    }
+
+    #hamburger {
+      background: none;
+      border: none;
+      cursor: pointer;
+      color: var(--text);
+      font-size: 1.3rem;
+      line-height: 1;
+      padding: 4px;
+    }
+
+    #topbar-title {
+      font-size: 1rem;
+      font-weight: 700;
+      color: var(--text);
+    }
+
+    #page-container {
+      flex: 1;
+      padding: 32px 36px 64px;
+      overflow-y: auto;
+    }
+
+    /* =========================================================
+       PAGE HEADER
+    ========================================================= */
+
+    .page-hd {
+      display: flex;
+      align-items: flex-start;
       justify-content: space-between;
       gap: 12px;
       flex-wrap: wrap;
+      margin-bottom: 28px;
       padding-bottom: 20px;
       border-bottom: 1px solid var(--border);
     }
 
     .page-title {
-      font-size: 1.5rem;
+      font-size: 1.45rem;
       font-weight: 700;
       letter-spacing: -.3px;
       color: var(--text);
     }
 
-    .page-title span {
-      color: var(--accent);
-      text-shadow: 0 0 18px rgba(59, 130, 246, 0.45);
-    }
+    .page-title span { color: var(--accent); }
 
     .page-subtitle {
-      font-size: .85rem;
+      font-size: .82rem;
       color: var(--muted);
-      margin-top: 3px;
+      margin-top: 4px;
     }
 
-    .main { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+    /* =========================================================
+       CARDS
+    ========================================================= */
 
-    /* ---- Cards ---- */
     .card {
       background: var(--surface);
       border: 1px solid var(--border);
@@ -80,117 +229,152 @@
       transition: border-color .2s;
     }
 
-    .card:hover {
-      border-color: #363c57;
-    }
+    .card:hover { border-color: #363c57; }
 
-    /* ---- RCF entry card ---- */
-    .rcf-card {
-      display: grid;
-      grid-template-columns: 1fr auto;
-      gap: 4px 16px;
-      align-items: start;
-    }
-
-    .rcf-did {
-      font-size: 1.15rem;
+    .card-title {
+      font-size: .95rem;
       font-weight: 700;
-      letter-spacing: .3px;
-      font-variant-numeric: tabular-nums;
       color: var(--text);
+      margin-bottom: 14px;
     }
 
-    .rcf-customer {
-      font-size: .78rem;
+    /* =========================================================
+       STATS GRID
+    ========================================================= */
+
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+
+    .stat-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+      position: relative;
+      overflow: hidden;
+      transition: border-color .2s;
+    }
+
+    .stat-card:hover { border-color: #363c57; }
+
+    .stat-label {
+      font-size: .72rem;
+      font-weight: 700;
       color: var(--muted);
-      margin-top: 3px;
+      text-transform: uppercase;
+      letter-spacing: .7px;
+      margin-bottom: 10px;
     }
 
-    .rcf-customer code {
-      color: #94a3b8;
-      background: rgba(255,255,255,.05);
-      padding: 1px 5px;
-      border-radius: 4px;
+    .stat-value {
+      font-size: 2rem;
+      font-weight: 800;
+      color: var(--text);
+      font-variant-numeric: tabular-nums;
+      line-height: 1;
     }
+
+    .stat-icon {
+      position: absolute;
+      top: 16px;
+      right: 18px;
+      font-size: 1.4rem;
+      opacity: .18;
+    }
+
+    /* =========================================================
+       SECTION GRID
+    ========================================================= */
+
+    .section-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+
+    @media (max-width: 900px) {
+      .section-grid { grid-template-columns: 1fr; }
+    }
+
+    /* =========================================================
+       BADGES
+    ========================================================= */
 
     .badge {
       display: inline-flex;
       align-items: center;
-      gap: 5px;
-      font-size: .72rem;
-      font-weight: 600;
-      padding: 3px 10px;
+      font-size: .68rem;
+      font-weight: 700;
+      padding: 2px 9px;
       border-radius: 999px;
-      letter-spacing: .4px;
+      letter-spacing: .5px;
       text-transform: uppercase;
       white-space: nowrap;
     }
 
-    .badge-active {
-      background: rgba(34, 197, 94, 0.12);
-      color: #4ade80;
-      border: 1px solid rgba(34, 197, 94, 0.25);
-    }
+    .badge-active   { background: rgba(34,197,94,.12);  color: #4ade80; border: 1px solid rgba(34,197,94,.25); }
+    .badge-disabled { background: rgba(239,68,68,.10);  color: #f87171; border: 1px solid rgba(239,68,68,.22); }
+    .badge-suspended{ background: rgba(239,68,68,.10);  color: #f87171; border: 1px solid rgba(239,68,68,.22); }
+    .badge-closed   { background: rgba(113,128,150,.10);color: #718096; border: 1px solid rgba(113,128,150,.25);}
+    .badge-rcf      { background: rgba(59,130,246,.12); color: #93c5fd; border: 1px solid rgba(59,130,246,.3); }
+    .badge-api      { background: rgba(139,92,246,.12); color: #c4b5fd; border: 1px solid rgba(139,92,246,.3); }
+    .badge-trunk    { background: rgba(34,197,94,.10);  color: #86efac; border: 1px solid rgba(34,197,94,.25); }
+    .badge-hybrid   { background: rgba(245,158,11,.10); color: #fcd34d; border: 1px solid rgba(245,158,11,.3); }
+    .badge-premium  { background: rgba(59,130,246,.12); color: #93c5fd; border: 1px solid rgba(59,130,246,.3); }
+    .badge-standard { background: rgba(113,128,150,.10);color: #94a3b8; border: 1px solid rgba(113,128,150,.25);}
+    .badge-economy  { background: rgba(245,158,11,.10); color: #fcd34d; border: 1px solid rgba(245,158,11,.3); }
 
-    .badge-disabled {
-      background: rgba(239, 68, 68, 0.1);
-      color: #f87171;
-      border: 1px solid rgba(239, 68, 68, 0.22);
-    }
+    /* =========================================================
+       HEALTH INDICATORS
+    ========================================================= */
 
-    .rcf-forward-area {
-      grid-column: 1 / -1;
-      margin-top: 16px;
+    .health-grid {
       display: flex;
       flex-direction: column;
-      gap: 8px;
+      gap: 10px;
     }
 
-    .forward-label {
-      font-size: .72rem;
-      font-weight: 600;
-      color: var(--muted);
-      text-transform: uppercase;
-      letter-spacing: .6px;
-    }
-
-    .forward-row {
+    .health-row {
       display: flex;
-      gap: 8px;
       align-items: center;
-    }
-
-    .forward-input {
-      flex: 1;
-      font-size: 1rem;
-      font-weight: 600;
-      font-variant-numeric: tabular-nums;
-      padding: 9px 13px;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 10px 14px;
       background: var(--surface-raised);
-      color: var(--text);
-      border: 2px solid var(--border);
       border-radius: 8px;
-      outline: none;
-      transition: border-color .15s, box-shadow .15s;
-      min-width: 0;
+      border: 1px solid var(--border);
     }
 
-    .forward-input:focus {
-      border-color: var(--border-focus);
-      box-shadow: 0 0 0 3px var(--accent-glow);
+    .health-name {
+      font-size: .85rem;
+      font-weight: 600;
+      color: var(--text);
     }
 
-    .forward-input.dirty {
-      border-color: var(--warn);
-      box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.18);
+    .health-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      flex-shrink: 0;
     }
 
-    .forward-input.saved {
-      border-color: var(--success);
-      box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.18);
+    .health-dot.ok  { background: var(--success); box-shadow: 0 0 8px rgba(34,197,94,.5); }
+    .health-dot.err { background: #ef4444;        box-shadow: 0 0 8px rgba(239,68,68,.5); }
+
+    .health-status-text {
+      font-size: .75rem;
+      color: var(--muted);
     }
 
-    /* ---- Buttons ---- */
+    /* =========================================================
+       BUTTONS
+    ========================================================= */
+
     .btn {
       display: inline-flex;
       align-items: center;
@@ -212,80 +396,53 @@
     .btn-primary {
       background: var(--accent);
       color: #fff;
-      box-shadow: 0 0 12px rgba(59, 130, 246, 0.25);
+      box-shadow: 0 0 12px rgba(59,130,246,.25);
     }
-
-    .btn-primary:hover:not(:disabled) {
-      background: var(--accent-h);
-      box-shadow: 0 0 20px rgba(59, 130, 246, 0.45);
-    }
+    .btn-primary:hover:not(:disabled) { background: var(--accent-h); box-shadow: 0 0 20px rgba(59,130,246,.45); }
 
     .btn-danger {
       background: var(--danger);
       color: var(--danger-text);
-      border: 1px solid rgba(239, 68, 68, 0.3);
+      border: 1px solid rgba(239,68,68,.3);
     }
-
-    .btn-danger:hover:not(:disabled) {
-      background: var(--danger-h);
-      box-shadow: 0 0 14px var(--danger-glow);
-    }
+    .btn-danger:hover:not(:disabled) { background: var(--danger-h); box-shadow: 0 0 14px var(--danger-glow); }
 
     .btn-ghost {
       background: transparent;
       color: var(--muted);
       border: 1px solid var(--border);
     }
+    .btn-ghost:hover:not(:disabled) { background: rgba(255,255,255,.04); color: var(--text); border-color: #3d4460; }
 
-    .btn-ghost:hover:not(:disabled) {
-      background: rgba(255,255,255,.04);
-      color: var(--text);
-      border-color: #3d4460;
+    .btn-success {
+      background: var(--success-bg);
+      color: var(--success-text);
+      border: 1px solid rgba(110,231,183,.2);
     }
+    .btn-success:hover:not(:disabled) { filter: brightness(1.1); }
 
-    .btn-sm { font-size: .8rem; padding: 6px 11px; }
+    .btn-sm { font-size: .78rem; padding: 5px 10px; }
+    .btn-xs { font-size: .72rem; padding: 3px 8px; }
 
-    /* ---- Divider row inside RCF card ---- */
-    .rcf-actions {
-      grid-column: 1 / -1;
-      display: flex;
-      gap: 8px;
-      margin-top: 10px;
-      padding-top: 12px;
-      border-top: 1px solid var(--border);
-      flex-wrap: wrap;
-    }
+    /* =========================================================
+       FORMS
+    ========================================================= */
 
-    /* ---- New RCF form ---- */
-    .create-card .card-title {
-      font-size: 1rem;
-      font-weight: 700;
-      margin-bottom: 16px;
-      color: var(--text);
-    }
-
-    .form-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 12px;
-    }
-
-    @media (max-width: 540px) {
-      .form-grid { grid-template-columns: 1fr; }
-    }
+    .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    @media (max-width: 600px) { .form-grid { grid-template-columns: 1fr; } }
 
     .form-group { display: flex; flex-direction: column; gap: 5px; }
 
     .form-label {
-      font-size: .72rem;
-      font-weight: 600;
+      font-size: .7rem;
+      font-weight: 700;
       color: var(--muted);
       text-transform: uppercase;
-      letter-spacing: .6px;
+      letter-spacing: .7px;
     }
 
     .form-control {
-      font-size: .95rem;
+      font-size: .92rem;
       padding: 9px 12px;
       border: 1.5px solid var(--border);
       border-radius: 8px;
@@ -301,10 +458,7 @@
       box-shadow: 0 0 0 3px var(--accent-glow);
     }
 
-    .form-control option {
-      background: var(--surface-raised);
-      color: var(--text);
-    }
+    .form-control option { background: var(--surface-raised); color: var(--text); }
 
     select.form-control { cursor: pointer; }
 
@@ -315,17 +469,478 @@
       justify-content: flex-end;
     }
 
-    /* ---- Feedback toast ---- */
+    .toggle-wrap {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .toggle {
+      position: relative;
+      width: 40px;
+      height: 22px;
+      flex-shrink: 0;
+    }
+
+    .toggle input { opacity: 0; width: 0; height: 0; }
+
+    .toggle-slider {
+      position: absolute;
+      inset: 0;
+      background: rgba(255,255,255,.1);
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      cursor: pointer;
+      transition: background .2s;
+    }
+
+    .toggle-slider::before {
+      content: '';
+      position: absolute;
+      width: 16px; height: 16px;
+      left: 2px; top: 2px;
+      border-radius: 50%;
+      background: var(--muted);
+      transition: transform .2s, background .2s;
+    }
+
+    .toggle input:checked + .toggle-slider { background: rgba(59,130,246,.25); border-color: var(--accent); }
+    .toggle input:checked + .toggle-slider::before { transform: translateX(18px); background: var(--accent); }
+
+    /* =========================================================
+       TABLES
+    ========================================================= */
+
+    .table-wrap {
+      overflow-x: auto;
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: .88rem;
+    }
+
+    thead {
+      background: var(--surface-raised);
+    }
+
+    th {
+      text-align: left;
+      padding: 11px 14px;
+      font-size: .68rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .7px;
+      color: var(--muted);
+      white-space: nowrap;
+      border-bottom: 1px solid var(--border);
+    }
+
+    td {
+      padding: 12px 14px;
+      border-bottom: 1px solid rgba(42,47,69,.5);
+      vertical-align: middle;
+    }
+
+    tr:last-child td { border-bottom: none; }
+
+    tbody tr {
+      cursor: pointer;
+      transition: background .12s;
+    }
+
+    tbody tr:hover { background: rgba(255,255,255,.025); }
+
+    .expand-row td {
+      padding: 0;
+      cursor: default;
+    }
+
+    .expand-row:hover { background: none; }
+
+    .expand-inner {
+      padding: 16px 20px 20px;
+      background: rgba(13,15,21,.5);
+      border-top: 1px solid var(--border);
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+      gap: 14px 20px;
+    }
+
+    .detail-field { display: flex; flex-direction: column; gap: 4px; }
+
+    .detail-label {
+      font-size: .67rem;
+      font-weight: 700;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: .6px;
+    }
+
+    .detail-value {
+      font-size: .9rem;
+      color: var(--text);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .expand-actions {
+      grid-column: 1 / -1;
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      padding-top: 12px;
+      border-top: 1px solid var(--border);
+      margin-top: 6px;
+    }
+
+    /* =========================================================
+       RCF CARDS
+    ========================================================= */
+
+    .rcf-card {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 4px 16px;
+      align-items: start;
+    }
+
+    .rcf-did {
+      font-size: 1.1rem;
+      font-weight: 700;
+      letter-spacing: .3px;
+      font-variant-numeric: tabular-nums;
+      color: var(--text);
+    }
+
+    .rcf-customer {
+      font-size: .76rem;
+      color: var(--muted);
+      margin-top: 3px;
+    }
+
+    .rcf-customer code {
+      color: #94a3b8;
+      background: rgba(255,255,255,.05);
+      padding: 1px 5px;
+      border-radius: 4px;
+    }
+
+    .rcf-forward-area {
+      grid-column: 1 / -1;
+      margin-top: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .forward-label {
+      font-size: .68rem;
+      font-weight: 700;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: .7px;
+    }
+
+    .forward-row { display: flex; gap: 8px; align-items: center; }
+
+    .forward-input {
+      flex: 1;
+      font-size: .95rem;
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+      padding: 9px 13px;
+      background: var(--surface-raised);
+      color: var(--text);
+      border: 2px solid var(--border);
+      border-radius: 8px;
+      outline: none;
+      transition: border-color .15s, box-shadow .15s;
+      min-width: 0;
+    }
+
+    .forward-input:focus { border-color: var(--border-focus); box-shadow: 0 0 0 3px var(--accent-glow); }
+    .forward-input.dirty { border-color: var(--warn); box-shadow: 0 0 0 3px rgba(245,158,11,.18); }
+    .forward-input.saved { border-color: var(--success); box-shadow: 0 0 0 3px rgba(34,197,94,.18); }
+
+    .rcf-actions {
+      grid-column: 1 / -1;
+      display: flex;
+      gap: 8px;
+      margin-top: 10px;
+      padding-top: 12px;
+      border-top: 1px solid var(--border);
+      flex-wrap: wrap;
+    }
+
+    /* =========================================================
+       TRUNK CARDS
+    ========================================================= */
+
+    .trunk-card { margin-bottom: 12px; }
+
+    .trunk-header {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      flex-wrap: wrap;
+    }
+
+    .trunk-name {
+      font-size: 1rem;
+      font-weight: 700;
+      color: var(--text);
+      flex: 1;
+      min-width: 0;
+    }
+
+    .trunk-meta {
+      font-size: .78rem;
+      color: var(--muted);
+      margin-top: 4px;
+    }
+
+    .trunk-stats-row {
+      display: flex;
+      gap: 20px;
+      flex-wrap: wrap;
+      margin-top: 14px;
+      padding-top: 14px;
+      border-top: 1px solid var(--border);
+    }
+
+    .trunk-stat {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+
+    .trunk-stat-label {
+      font-size: .65rem;
+      font-weight: 700;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: .6px;
+    }
+
+    .trunk-stat-value {
+      font-size: .95rem;
+      font-weight: 700;
+      color: var(--text);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .trunk-expand {
+      display: none;
+      margin-top: 16px;
+      padding-top: 16px;
+      border-top: 1px solid var(--border);
+    }
+
+    .trunk-expand.open { display: block; }
+
+    .sub-section-title {
+      font-size: .72rem;
+      font-weight: 700;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: .8px;
+      margin-bottom: 10px;
+      margin-top: 18px;
+    }
+
+    .sub-section-title:first-child { margin-top: 0; }
+
+    .ip-list { display: flex; flex-direction: column; gap: 6px; }
+
+    .ip-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 12px;
+      background: var(--surface-raised);
+      border-radius: 7px;
+      border: 1px solid var(--border);
+      font-size: .85rem;
+      font-family: monospace;
+    }
+
+    .ip-row .ip-addr { flex: 1; color: var(--text); }
+    .ip-row .ip-desc { color: var(--muted); font-size: .75rem; font-family: inherit; }
+
+    .did-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: var(--surface-raised);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 4px 10px;
+      font-size: .82rem;
+      font-variant-numeric: tabular-nums;
+      color: var(--text);
+      margin: 3px;
+    }
+
+    /* =========================================================
+       TIER CARDS
+    ========================================================= */
+
+    .tiers-section-title {
+      font-size: 1rem;
+      font-weight: 700;
+      color: var(--text);
+      margin: 0 0 14px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .tiers-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+      gap: 16px;
+      margin-bottom: 32px;
+    }
+
+    .tier-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      transition: border-color .2s;
+    }
+
+    .tier-card:hover { border-color: #363c57; }
+
+    .tier-card.tier-highlight {
+      border-color: rgba(59,130,246,.4);
+      box-shadow: 0 0 0 1px rgba(59,130,246,.15);
+    }
+
+    .tier-name {
+      font-size: .88rem;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: .8px;
+      color: var(--accent);
+    }
+
+    .tier-cps {
+      font-size: 2.2rem;
+      font-weight: 800;
+      color: var(--text);
+      line-height: 1;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .tier-cps span { font-size: .8rem; font-weight: 500; color: var(--muted); }
+
+    .tier-price {
+      font-size: .9rem;
+      color: var(--muted);
+    }
+
+    .tier-price strong { color: var(--text); }
+
+    .tier-features {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+    }
+
+    .tier-features li {
+      font-size: .82rem;
+      color: var(--muted);
+      display: flex;
+      align-items: flex-start;
+      gap: 7px;
+    }
+
+    .tier-features li::before {
+      content: '+';
+      color: var(--accent);
+      font-weight: 700;
+      flex-shrink: 0;
+    }
+
+    .tier-cap-bar {
+      height: 6px;
+      border-radius: 999px;
+      background: var(--surface-raised);
+      overflow: hidden;
+      margin-top: 4px;
+    }
+
+    .tier-cap-fill {
+      height: 100%;
+      background: linear-gradient(90deg, var(--accent), #7c3aed);
+      border-radius: 999px;
+    }
+
+    .tier-upgrade-note {
+      font-size: .75rem;
+      color: var(--warn);
+      padding: 7px 10px;
+      background: rgba(245,158,11,.07);
+      border: 1px solid rgba(245,158,11,.2);
+      border-radius: 6px;
+    }
+
+    /* =========================================================
+       SECTION HEADING
+    ========================================================= */
+
+    .section-heading {
+      font-size: .7rem;
+      font-weight: 700;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: .9px;
+      margin-bottom: 10px;
+    }
+
+    /* =========================================================
+       INLINE EDIT INPUT IN TABLE
+    ========================================================= */
+
+    .inline-input {
+      font-size: .85rem;
+      padding: 5px 8px;
+      border: 1.5px solid var(--border);
+      border-radius: 6px;
+      background: var(--surface-raised);
+      color: var(--text);
+      outline: none;
+      width: 100%;
+      min-width: 180px;
+      transition: border-color .15s, box-shadow .15s;
+    }
+
+    .inline-input:focus {
+      border-color: var(--border-focus);
+      box-shadow: 0 0 0 3px var(--accent-glow);
+    }
+
+    /* =========================================================
+       TOAST
+    ========================================================= */
+
     #toast {
       position: fixed;
       bottom: 24px;
       left: 50%;
       transform: translateX(-50%) translateY(80px);
-      background: #1e2130;
+      background: var(--surface-raised);
       color: var(--text);
       padding: 12px 22px;
       border-radius: 8px;
-      font-size: .9rem;
+      font-size: .88rem;
       font-weight: 500;
       border: 1px solid var(--border);
       box-shadow: var(--shadow-lg);
@@ -334,43 +949,47 @@
       z-index: 999;
       pointer-events: none;
       white-space: nowrap;
+      max-width: calc(100vw - 48px);
     }
 
-    #toast.show {
-      transform: translateX(-50%) translateY(0);
-      opacity: 1;
-    }
+    #toast.show { transform: translateX(-50%) translateY(0); opacity: 1; }
 
     #toast.toast-ok {
       background: #0f2720;
-      border-color: rgba(34, 197, 94, 0.3);
+      border-color: rgba(34,197,94,.3);
       color: #4ade80;
-      box-shadow: var(--shadow-lg), 0 0 20px rgba(34, 197, 94, 0.12);
+      box-shadow: var(--shadow-lg), 0 0 20px rgba(34,197,94,.12);
     }
 
     #toast.toast-err {
       background: #200f0f;
-      border-color: rgba(239, 68, 68, 0.3);
+      border-color: rgba(239,68,68,.3);
       color: #f87171;
-      box-shadow: var(--shadow-lg), 0 0 20px rgba(239, 68, 68, 0.12);
+      box-shadow: var(--shadow-lg), 0 0 20px rgba(239,68,68,.12);
     }
 
-    /* ---- States ---- */
+    /* =========================================================
+       STATE MESSAGES
+    ========================================================= */
+
     .state-msg {
       text-align: center;
       padding: 52px 16px;
       color: var(--muted);
-      font-size: .95rem;
+      font-size: .92rem;
     }
 
     .state-msg strong {
       display: block;
-      font-size: 1.1rem;
+      font-size: 1.05rem;
       color: var(--text);
       margin-bottom: 6px;
     }
 
-    /* ---- Loading spinner ---- */
+    /* =========================================================
+       SPINNER
+    ========================================================= */
+
     .spinner {
       display: inline-block;
       width: 18px; height: 18px;
@@ -383,205 +1002,868 @@
 
     @keyframes spin { to { transform: rotate(360deg); } }
 
-    /* ---- Section heading ---- */
-    .section-heading {
-      font-size: .72rem;
-      font-weight: 700;
-      color: var(--muted);
-      text-transform: uppercase;
-      letter-spacing: .9px;
-      margin-bottom: 10px;
+    /* =========================================================
+       COLLAPSIBLE FORM
+    ========================================================= */
+
+    .create-section { display: none; margin-bottom: 20px; }
+    .create-section.open { display: block; }
+
+    /* =========================================================
+       OVERLAY (mobile sidebar)
+    ========================================================= */
+
+    #sidebar-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,.55);
+      z-index: 99;
     }
 
-    /* ---- Collapsible create form ---- */
-    #create-section { display: none; }
-    #create-section.open { display: block; }
+    /* =========================================================
+       MOBILE
+    ========================================================= */
 
-    /* ---- Mobile tweaks ---- */
-    @media (max-width: 480px) {
-      .page-header { flex-direction: column; align-items: flex-start; }
-      .rcf-card { grid-template-columns: 1fr; }
-      .badge { align-self: flex-start; }
+    @media (max-width: 768px) {
+      :root { --sidebar-w: 0px; }
+
+      #sidebar {
+        transform: translateX(-240px);
+        width: 240px;
+      }
+
+      #sidebar.open {
+        transform: translateX(0);
+        box-shadow: var(--shadow-lg);
+      }
+
+      #sidebar-overlay.open { display: block; }
+
+      #main-wrapper { margin-left: 0; }
+
+      #topbar { display: flex; }
+
+      #page-container { padding: 20px 16px 48px; }
+
+      .stats-grid { grid-template-columns: 1fr 1fr; }
+
+      .form-grid { grid-template-columns: 1fr; }
+
+      table { font-size: .8rem; }
+      th, td { padding: 9px 10px; }
+    }
+
+    @media (max-width: 420px) {
+      .stats-grid { grid-template-columns: 1fr; }
     }
   </style>
 </head>
 <body>
 
-<header class="page-header">
-  <div>
-    <div class="page-title">RCF <span>Manager</span></div>
-    <div class="page-subtitle">Remote Call Forwarding — change where a number rings</div>
+<!-- SIDEBAR OVERLAY -->
+<div id="sidebar-overlay" onclick="closeSidebar()"></div>
+
+<!-- SIDEBAR -->
+<nav id="sidebar">
+  <div class="sidebar-brand">
+    <div class="brand-title">Custom <span>VoIP</span></div>
+    <div class="brand-sub">Admin Dashboard</div>
   </div>
-  <button class="btn btn-primary" id="toggle-create-btn" onclick="toggleCreate()">+ New Number</button>
-</header>
 
-<div class="main">
+  <div class="sidebar-nav">
+    <div class="nav-section-label">Overview</div>
+    <a class="nav-item" data-page="dashboard" onclick="navigate('dashboard')">
+      <span class="nav-icon">#</span> Dashboard
+    </a>
 
-  <!-- Create form (hidden by default) -->
-  <div id="create-section">
-    <div class="card create-card">
-      <div class="card-title">Add a new forwarding number</div>
-      <div class="form-grid">
-        <div class="form-group">
-          <label class="form-label" for="new-customer">Customer</label>
-          <select class="form-control" id="new-customer">
-            <option value="">Loading...</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label class="form-label" for="new-did">DID (inbound number)</label>
-          <input class="form-control" id="new-did" type="tel" placeholder="+12125551234" />
-        </div>
-        <div class="form-group">
-          <label class="form-label" for="new-forward-to">Forward to</label>
-          <input class="form-control" id="new-forward-to" type="tel" placeholder="+18005559999 or 1001" />
-        </div>
-        <div class="form-group">
-          <label class="form-label" for="new-ring-timeout">Ring timeout (seconds)</label>
-          <input class="form-control" id="new-ring-timeout" type="number" value="30" min="5" max="120" />
+    <div class="nav-section-label">Management</div>
+    <a class="nav-item" data-page="customers" onclick="navigate('customers')">
+      <span class="nav-icon">@</span> Customers
+    </a>
+    <a class="nav-item" data-page="rcf" onclick="navigate('rcf')">
+      <span class="nav-icon">~</span> RCF Numbers
+    </a>
+    <a class="nav-item" data-page="api-dids" onclick="navigate('api-dids')">
+      <span class="nav-icon">&lt;&gt;</span> API DIDs
+    </a>
+    <a class="nav-item" data-page="trunks" onclick="navigate('trunks')">
+      <span class="nav-icon">=</span> SIP Trunks
+    </a>
+    <a class="nav-item" data-page="tiers" onclick="navigate('tiers')">
+      <span class="nav-icon">*</span> CPS Tiers
+    </a>
+  </div>
+
+  <div class="sidebar-footer">Custom VoIP Platform</div>
+</nav>
+
+<!-- MAIN WRAPPER -->
+<div id="main-wrapper">
+
+  <!-- MOBILE TOPBAR -->
+  <div id="topbar">
+    <button id="hamburger" onclick="openSidebar()">&#9776;</button>
+    <span id="topbar-title">Dashboard</span>
+  </div>
+
+  <!-- PAGE CONTAINER -->
+  <div id="page-container">
+
+    <!-- ===================== DASHBOARD ===================== -->
+    <div id="page-dashboard" class="page" style="display:none">
+      <div class="page-hd">
+        <div>
+          <div class="page-title">Dashboard</div>
+          <div class="page-subtitle">Platform overview and health</div>
         </div>
       </div>
-      <div class="form-footer">
-        <button class="btn btn-ghost" onclick="toggleCreate()">Cancel</button>
-        <button class="btn btn-primary" id="create-btn" onclick="createRCF()">Save Number</button>
+
+      <div class="stats-grid" id="dash-stats">
+        <div class="stat-card">
+          <div class="stat-label">Total Customers</div>
+          <div class="stat-value" id="stat-customers"><span class="spinner"></span></div>
+          <div class="stat-icon">@</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Active RCF Numbers</div>
+          <div class="stat-value" id="stat-rcf"><span class="spinner"></span></div>
+          <div class="stat-icon">~</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Active Trunks</div>
+          <div class="stat-value" id="stat-trunks"><span class="spinner"></span></div>
+          <div class="stat-icon">=</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">API DIDs</div>
+          <div class="stat-value" id="stat-api-dids"><span class="spinner"></span></div>
+          <div class="stat-icon">&lt;&gt;</div>
+        </div>
+      </div>
+
+      <div class="section-grid">
+        <div class="card">
+          <div class="card-title">System Health</div>
+          <div id="health-grid"><div class="state-msg" style="padding:20px"><span class="spinner"></span></div></div>
+        </div>
+        <div class="card">
+          <div class="card-title">Quick Navigation</div>
+          <div style="display:flex;flex-direction:column;gap:8px;margin-top:4px">
+            <button class="btn btn-ghost" style="justify-content:flex-start" onclick="navigate('customers')">@ Manage Customers</button>
+            <button class="btn btn-ghost" style="justify-content:flex-start" onclick="navigate('rcf')">~ RCF Forwarding Numbers</button>
+            <button class="btn btn-ghost" style="justify-content:flex-start" onclick="navigate('api-dids')">&lt;&gt; API DID Webhooks</button>
+            <button class="btn btn-ghost" style="justify-content:flex-start" onclick="navigate('trunks')">=  SIP Trunk Management</button>
+            <button class="btn btn-ghost" style="justify-content:flex-start" onclick="navigate('tiers')">* CPS Tier Configuration</button>
+          </div>
+        </div>
       </div>
     </div>
-  </div>
 
-  <!-- List -->
-  <div class="section-heading" id="list-heading" style="display:none">Active numbers</div>
-  <div id="rcf-list">
-    <div class="state-msg"><span class="spinner"></span></div>
-  </div>
+    <!-- ===================== CUSTOMERS ===================== -->
+    <div id="page-customers" class="page" style="display:none">
+      <div class="page-hd">
+        <div>
+          <div class="page-title">Customers</div>
+          <div class="page-subtitle">Account management and billing</div>
+        </div>
+        <button class="btn btn-primary" onclick="toggleCreateSection('cust-create')">+ New Customer</button>
+      </div>
 
-</div>
+      <div class="create-section" id="cust-create">
+        <div class="card" style="margin-bottom:0">
+          <div class="card-title">Create Customer</div>
+          <div class="form-grid">
+            <div class="form-group">
+              <label class="form-label">Name</label>
+              <input class="form-control" id="cust-name" type="text" placeholder="Acme Corp" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Account Type</label>
+              <select class="form-control" id="cust-acct-type">
+                <option value="rcf">RCF</option>
+                <option value="api">API</option>
+                <option value="trunk">Trunk</option>
+                <option value="hybrid">Hybrid</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Traffic Grade</label>
+              <select class="form-control" id="cust-traffic-grade">
+                <option value="standard">Standard</option>
+                <option value="premium">Premium</option>
+                <option value="economy">Economy</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Credit Limit ($)</label>
+              <input class="form-control" id="cust-credit-limit" type="number" value="0" min="0" step="0.01" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Daily Limit ($)</label>
+              <input class="form-control" id="cust-daily-limit" type="number" value="500" min="0" step="0.01" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">CPM Limit</label>
+              <input class="form-control" id="cust-cpm-limit" type="number" value="60" min="1" />
+            </div>
+          </div>
+          <div class="form-footer">
+            <button class="btn btn-ghost" onclick="toggleCreateSection('cust-create')">Cancel</button>
+            <button class="btn btn-primary" id="cust-create-btn" onclick="createCustomer()">Create Customer</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="customers-table-wrap">
+        <div class="state-msg"><span class="spinner"></span></div>
+      </div>
+    </div>
+
+    <!-- ===================== RCF ===================== -->
+    <div id="page-rcf" class="page" style="display:none">
+      <div class="page-hd">
+        <div>
+          <div class="page-title">RCF <span>Numbers</span></div>
+          <div class="page-subtitle">Remote Call Forwarding — change where a number rings</div>
+        </div>
+        <button class="btn btn-primary" onclick="toggleCreateSection('rcf-create')">+ New Number</button>
+      </div>
+
+      <div class="create-section" id="rcf-create">
+        <div class="card" style="margin-bottom:0">
+          <div class="card-title">Add forwarding number</div>
+          <div class="form-grid">
+            <div class="form-group">
+              <label class="form-label">Customer</label>
+              <select class="form-control" id="rcf-new-customer">
+                <option value="">Select customer...</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">DID (inbound number)</label>
+              <input class="form-control" id="rcf-new-did" type="tel" placeholder="+12125551234" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Forward to</label>
+              <input class="form-control" id="rcf-new-forward" type="tel" placeholder="+18005559999 or 1001" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Ring timeout (seconds)</label>
+              <input class="form-control" id="rcf-new-timeout" type="number" value="30" min="5" max="120" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Pass Caller ID</label>
+              <div class="toggle-wrap" style="margin-top:8px">
+                <label class="toggle">
+                  <input type="checkbox" id="rcf-new-pass-cid" checked />
+                  <span class="toggle-slider"></span>
+                </label>
+                <span style="font-size:.85rem;color:var(--muted)">Enabled</span>
+              </div>
+            </div>
+          </div>
+          <div class="form-footer">
+            <button class="btn btn-ghost" onclick="toggleCreateSection('rcf-create')">Cancel</button>
+            <button class="btn btn-primary" id="rcf-create-btn" onclick="createRCF()">Save Number</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="section-heading" id="rcf-list-heading" style="display:none">Active numbers</div>
+      <div id="rcf-list">
+        <div class="state-msg"><span class="spinner"></span></div>
+      </div>
+    </div>
+
+    <!-- ===================== API DIDS ===================== -->
+    <div id="page-api-dids" class="page" style="display:none">
+      <div class="page-hd">
+        <div>
+          <div class="page-title">API <span>DIDs</span></div>
+          <div class="page-subtitle">Webhook-driven inbound call routing</div>
+        </div>
+        <button class="btn btn-primary" onclick="toggleCreateSection('apidid-create')">+ New API DID</button>
+      </div>
+
+      <div class="create-section" id="apidid-create">
+        <div class="card" style="margin-bottom:0">
+          <div class="card-title">Create API DID</div>
+          <div class="form-grid">
+            <div class="form-group">
+              <label class="form-label">Customer</label>
+              <select class="form-control" id="apidid-customer">
+                <option value="">Select customer...</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">DID</label>
+              <input class="form-control" id="apidid-did" type="tel" placeholder="+12125551234" />
+            </div>
+            <div class="form-group" style="grid-column:1/-1">
+              <label class="form-label">Voice URL (required)</label>
+              <input class="form-control" id="apidid-voice-url" type="url" placeholder="https://example.com/voice" />
+            </div>
+            <div class="form-group" style="grid-column:1/-1">
+              <label class="form-label">Status Callback (optional)</label>
+              <input class="form-control" id="apidid-status-cb" type="url" placeholder="https://example.com/status" />
+            </div>
+          </div>
+          <div class="form-footer">
+            <button class="btn btn-ghost" onclick="toggleCreateSection('apidid-create')">Cancel</button>
+            <button class="btn btn-primary" id="apidid-create-btn" onclick="createApiDid()">Create DID</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="apidids-table-wrap">
+        <div class="state-msg"><span class="spinner"></span></div>
+      </div>
+    </div>
+
+    <!-- ===================== TRUNKS ===================== -->
+    <div id="page-trunks" class="page" style="display:none">
+      <div class="page-hd">
+        <div>
+          <div class="page-title">SIP <span>Trunks</span></div>
+          <div class="page-subtitle">SIP trunk accounts and IP authentication</div>
+        </div>
+        <button class="btn btn-primary" onclick="toggleCreateSection('trunk-create')">+ New Trunk</button>
+      </div>
+
+      <div class="create-section" id="trunk-create">
+        <div class="card" style="margin-bottom:0">
+          <div class="card-title">Create SIP Trunk</div>
+          <div class="form-grid">
+            <div class="form-group">
+              <label class="form-label">Customer</label>
+              <select class="form-control" id="trunk-customer">
+                <option value="">Select customer...</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Trunk Name</label>
+              <input class="form-control" id="trunk-name" type="text" placeholder="acme-primary" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Max Channels</label>
+              <input class="form-control" id="trunk-max-channels" type="number" value="10" min="1" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">CPS Limit</label>
+              <input class="form-control" id="trunk-cps" type="number" value="10" min="1" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Auth Type</label>
+              <select class="form-control" id="trunk-auth-type">
+                <option value="ip">IP Auth</option>
+                <option value="credential">Credential</option>
+                <option value="both">Both</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-footer">
+            <button class="btn btn-ghost" onclick="toggleCreateSection('trunk-create')">Cancel</button>
+            <button class="btn btn-primary" id="trunk-create-btn" onclick="createTrunk()">Create Trunk</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="trunks-list">
+        <div class="state-msg"><span class="spinner"></span></div>
+      </div>
+    </div>
+
+    <!-- ===================== TIERS ===================== -->
+    <div id="page-tiers" class="page" style="display:none">
+      <div class="page-hd">
+        <div>
+          <div class="page-title">CPS <span>Tiers</span></div>
+          <div class="page-subtitle">Calls-per-second tiers for trunks and API calling</div>
+        </div>
+      </div>
+      <div id="tiers-content">
+        <div class="state-msg"><span class="spinner"></span></div>
+      </div>
+    </div>
+
+  </div><!-- /page-container -->
+</div><!-- /main-wrapper -->
 
 <!-- Toast -->
 <div id="toast"></div>
 
 <script>
-  /* =========================================================
-     Utilities
-  ========================================================= */
+/* =========================================================
+   UTILITIES
+========================================================= */
 
-  /** Format E.164 to a readable US number. Falls back to the raw string. */
-  function fmt(num) {
-    if (!num) return '';
-    const digits = num.replace(/\D/g, '');
-    if (digits.length === 11 && digits[0] === '1') {
-      return `+1 (${digits.slice(1,4)}) ${digits.slice(4,7)}-${digits.slice(7)}`;
-    }
-    if (digits.length === 10) {
-      return `(${digits.slice(0,3)}) ${digits.slice(3,6)}-${digits.slice(6)}`;
-    }
-    // Non-US or local extension — return as-is
-    return num;
+function fmt(num) {
+  if (!num) return '';
+  const digits = String(num).replace(/\D/g, '');
+  if (digits.length === 11 && digits[0] === '1') {
+    return `+1 (${digits.slice(1,4)}) ${digits.slice(4,7)}-${digits.slice(7)}`;
   }
-
-  let toastTimer = null;
-
-  function toast(msg, type = 'ok') {
-    const el = document.getElementById('toast');
-    el.textContent = msg;
-    el.className = `show toast-${type}`;
-    if (toastTimer) clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => { el.className = ''; }, 3200);
+  if (digits.length === 10) {
+    return `(${digits.slice(0,3)}) ${digits.slice(3,6)}-${digits.slice(6)}`;
   }
+  return num;
+}
 
-  function setButtonLoading(btn, loading) {
-    if (loading) {
-      btn.dataset.label = btn.innerHTML;
-      btn.innerHTML = '<span class="spinner"></span>';
-      btn.disabled = true;
-    } else {
-      btn.innerHTML = btn.dataset.label || btn.innerHTML;
-      btn.disabled = false;
-    }
+function escHtml(str) {
+  return String(str == null ? '' : str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function fmtMoney(val) {
+  if (val == null) return '$0.00';
+  return '$' + Number(val).toFixed(2);
+}
+
+let toastTimer = null;
+function toast(msg, type = 'ok') {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = `show toast-${type}`;
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el.className = ''; }, 3500);
+}
+
+function setButtonLoading(btn, loading) {
+  if (!btn) return;
+  if (loading) {
+    btn.dataset.label = btn.innerHTML;
+    btn.innerHTML = '<span class="spinner"></span>';
+    btn.disabled = true;
+  } else {
+    btn.innerHTML = btn.dataset.label || btn.innerHTML;
+    btn.disabled = false;
   }
+}
 
-  /* =========================================================
-     State
-  ========================================================= */
-
-  let rcfList = [];         // current snapshot from API
-  let customers = [];       // for the create form dropdown
-  let pendingEdits = {};    // did -> new forward_to value (before save)
-
-  /* =========================================================
-     API helpers
-  ========================================================= */
-
-  async function apiFetch(path, options = {}) {
-    const res = await fetch(path, {
-      headers: { 'Content-Type': 'application/json', ...options.headers },
-      ...options
-    });
-    if (!res.ok) {
-      let detail = `HTTP ${res.status}`;
-      try {
-        const body = await res.json();
-        detail = body.detail || JSON.stringify(body);
-      } catch (_) { /* ignore */ }
-      throw new Error(detail);
-    }
-    // 204 No Content
-    if (res.status === 204) return null;
-    return res.json();
-  }
-
-  /* =========================================================
-     Load & render
-  ========================================================= */
-
-  async function loadAll() {
+async function api(method, path, body) {
+  const opts = {
+    method,
+    headers: { 'Content-Type': 'application/json' }
+  };
+  if (body !== undefined) opts.body = JSON.stringify(body);
+  const res = await fetch(path, opts);
+  if (!res.ok) {
+    let detail = `HTTP ${res.status}`;
     try {
-      const [list, custs] = await Promise.all([
-        apiFetch('/rcf'),
-        apiFetch('/customers')
-      ]);
-      rcfList = list;
-      customers = custs;
-      renderList();
-      populateCustomerDropdown();
-    } catch (err) {
-      document.getElementById('rcf-list').innerHTML =
-        `<div class="state-msg"><strong>Could not load data</strong>${err.message}</div>`;
-    }
+      const b = await res.json();
+      detail = b.detail || JSON.stringify(b);
+    } catch (_) {}
+    throw new Error(detail);
+  }
+  if (res.status === 204) return null;
+  return res.json();
+}
+
+function toggleCreateSection(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.classList.toggle('open');
+}
+
+/* =========================================================
+   ROUTER
+========================================================= */
+
+const PAGE_TITLES = {
+  dashboard: 'Dashboard',
+  customers: 'Customers',
+  rcf:       'RCF Numbers',
+  'api-dids':'API DIDs',
+  trunks:    'SIP Trunks',
+  tiers:     'CPS Tiers'
+};
+
+let currentPage = null;
+
+function navigate(page) {
+  if (!PAGE_TITLES[page]) page = 'dashboard';
+
+  // Close mobile sidebar
+  closeSidebar();
+
+  // Update nav items
+  document.querySelectorAll('.nav-item').forEach(el => {
+    el.classList.toggle('active', el.dataset.page === page);
+  });
+
+  // Update topbar title
+  const tb = document.getElementById('topbar-title');
+  if (tb) tb.textContent = PAGE_TITLES[page] || page;
+
+  // Show/hide pages
+  document.querySelectorAll('.page').forEach(el => {
+    el.style.display = 'none';
+  });
+  const pageEl = document.getElementById('page-' + page);
+  if (pageEl) pageEl.style.display = 'block';
+
+  // Update hash without firing hashchange again
+  if (location.hash !== '#' + page) {
+    history.replaceState(null, '', '#' + page);
   }
 
-  function renderList() {
-    const container = document.getElementById('rcf-list');
-    const heading   = document.getElementById('list-heading');
+  if (currentPage === page) return;
+  currentPage = page;
 
-    if (rcfList.length === 0) {
-      heading.style.display = 'none';
-      container.innerHTML =
-        '<div class="state-msg"><strong>No forwarding numbers yet</strong>Click "+ New Number" above to add one.</div>';
-      return;
-    }
+  // Load page data
+  switch (page) {
+    case 'dashboard': loadDashboard(); break;
+    case 'customers': loadCustomers(); break;
+    case 'rcf':       loadRCF();       break;
+    case 'api-dids':  loadApiDids();   break;
+    case 'trunks':    loadTrunks();    break;
+    case 'tiers':     loadTiers();     break;
+  }
+}
 
-    heading.style.display = 'block';
-    container.innerHTML = rcfList.map(r => renderCard(r)).join('');
+window.addEventListener('hashchange', () => {
+  const page = (location.hash || '').replace('#', '') || 'dashboard';
+  currentPage = null; // force reload
+  navigate(page);
+});
+
+function openSidebar() {
+  document.getElementById('sidebar').classList.add('open');
+  document.getElementById('sidebar-overlay').classList.add('open');
+}
+
+function closeSidebar() {
+  document.getElementById('sidebar').classList.remove('open');
+  document.getElementById('sidebar-overlay').classList.remove('open');
+}
+
+/* =========================================================
+   DASHBOARD
+========================================================= */
+
+async function loadDashboard() {
+  // Fetch counts in parallel
+  try {
+    const [customers, rcf, trunks, apiDids] = await Promise.allSettled([
+      api('GET', '/customers'),
+      api('GET', '/rcf'),
+      api('GET', '/trunks'),
+      api('GET', '/api-dids')
+    ]);
+
+    const val = (r, fallback = '--') => r.status === 'fulfilled' ? r.value.length : fallback;
+
+    document.getElementById('stat-customers').textContent = val(customers);
+    document.getElementById('stat-rcf').textContent      = val(rcf);
+    document.getElementById('stat-trunks').textContent   = val(trunks);
+    document.getElementById('stat-api-dids').textContent = val(apiDids);
+  } catch (_) {}
+
+  // Health
+  try {
+    const health = await api('GET', '/health/detailed');
+    renderHealth(health);
+  } catch (err) {
+    document.getElementById('health-grid').innerHTML =
+      `<div class="state-msg" style="padding:20px"><strong>Health unavailable</strong>${escHtml(err.message)}</div>`;
+  }
+}
+
+function renderHealth(health) {
+  const grid = document.getElementById('health-grid');
+  if (!health || typeof health !== 'object') {
+    grid.innerHTML = '<div class="state-msg" style="padding:20px">No health data available</div>';
+    return;
   }
 
-  function renderCard(r) {
-    const pending = pendingEdits[r.did];
-    const fwdValue   = pending !== undefined ? pending : r.forward_to;
-    const isDirty    = pending !== undefined && pending !== r.forward_to;
-    const inputClass = isDirty ? 'dirty' : '';
+  const rows = Object.entries(health).map(([key, val]) => {
+    const ok = val === 'ok' || val === true || val === 'healthy' || val === 'up' ||
+               (typeof val === 'object' && val && (val.status === 'ok' || val.status === 'healthy'));
+    const dotClass = ok ? 'ok' : 'err';
+    const statusText = typeof val === 'string' ? val
+      : (val && typeof val === 'object' && val.status) ? val.status
+      : (ok ? 'ok' : 'degraded');
+    return `
+      <div class="health-row">
+        <span class="health-name">${escHtml(key)}</span>
+        <span class="health-status-text">${escHtml(statusText)}</span>
+        <span class="health-dot ${dotClass}"></span>
+      </div>`;
+  });
 
-    const badgeHtml = r.enabled
-      ? '<span class="badge badge-active">Active</span>'
-      : '<span class="badge badge-disabled">Disabled</span>';
+  grid.innerHTML = `<div class="health-grid">${rows.join('')}</div>`;
+}
 
-    // Escape DID for use as an HTML attribute
-    const safeDid = r.did.replace(/"/g, '&quot;');
+/* =========================================================
+   CUSTOMERS
+========================================================= */
+
+let customersList = [];
+let expandedCustomer = null;
+let editingCustomer = null;
+
+async function loadCustomers() {
+  const wrap = document.getElementById('customers-table-wrap');
+  wrap.innerHTML = '<div class="state-msg"><span class="spinner"></span></div>';
+  try {
+    customersList = await api('GET', '/customers');
+    renderCustomersTable();
+  } catch (err) {
+    wrap.innerHTML = `<div class="state-msg"><strong>Failed to load</strong>${escHtml(err.message)}</div>`;
+  }
+}
+
+function renderCustomersTable() {
+  const wrap = document.getElementById('customers-table-wrap');
+
+  if (customersList.length === 0) {
+    wrap.innerHTML = '<div class="state-msg"><strong>No customers yet</strong>Click "+ New Customer" to add one.</div>';
+    return;
+  }
+
+  const rows = customersList.map(c => {
+    const isExpanded = expandedCustomer === c.id;
+    const acctBadge = `<span class="badge badge-${escHtml(c.account_type)}">${escHtml(c.account_type)}</span>`;
+    const statusBadge = `<span class="badge badge-${escHtml(c.status || 'active')}">${escHtml(c.status || 'active')}</span>`;
+    const gradeBadge = `<span class="badge badge-${escHtml(c.traffic_grade || 'standard')}">${escHtml(c.traffic_grade || 'standard')}</span>`;
+
+    let expandHtml = '';
+    if (isExpanded) {
+      if (editingCustomer === c.id) {
+        expandHtml = `
+        <tr class="expand-row">
+          <td colspan="7">
+            <div class="expand-inner">
+              <div class="form-group"><label class="form-label">Name</label>
+                <input class="form-control" id="edit-cust-name-${c.id}" value="${escHtml(c.name)}" /></div>
+              <div class="form-group"><label class="form-label">Status</label>
+                <select class="form-control" id="edit-cust-status-${c.id}">
+                  <option value="active" ${c.status==='active'?'selected':''}>Active</option>
+                  <option value="suspended" ${c.status==='suspended'?'selected':''}>Suspended</option>
+                  <option value="closed" ${c.status==='closed'?'selected':''}>Closed</option>
+                </select></div>
+              <div class="form-group"><label class="form-label">Traffic Grade</label>
+                <select class="form-control" id="edit-cust-grade-${c.id}">
+                  <option value="standard" ${c.traffic_grade==='standard'?'selected':''}>Standard</option>
+                  <option value="premium" ${c.traffic_grade==='premium'?'selected':''}>Premium</option>
+                  <option value="economy" ${c.traffic_grade==='economy'?'selected':''}>Economy</option>
+                </select></div>
+              <div class="form-group"><label class="form-label">Credit Limit ($)</label>
+                <input class="form-control" id="edit-cust-credit-${c.id}" type="number" value="${c.credit_limit || 0}" /></div>
+              <div class="form-group"><label class="form-label">Daily Limit ($)</label>
+                <input class="form-control" id="edit-cust-daily-${c.id}" type="number" value="${c.daily_limit || 0}" /></div>
+              <div class="form-group"><label class="form-label">CPM Limit</label>
+                <input class="form-control" id="edit-cust-cpm-${c.id}" type="number" value="${c.cpm_limit || 0}" /></div>
+              <div class="expand-actions">
+                <button class="btn btn-primary btn-sm" onclick="saveCustomerEdit(${c.id})">Save Changes</button>
+                <button class="btn btn-ghost btn-sm" onclick="cancelCustomerEdit(${c.id})">Cancel</button>
+              </div>
+            </div>
+          </td>
+        </tr>`;
+      } else {
+        expandHtml = `
+        <tr class="expand-row">
+          <td colspan="7">
+            <div class="expand-inner">
+              <div class="detail-field"><div class="detail-label">Balance</div><div class="detail-value">${fmtMoney(c.balance)}</div></div>
+              <div class="detail-field"><div class="detail-label">Credit Limit</div><div class="detail-value">${fmtMoney(c.credit_limit)}</div></div>
+              <div class="detail-field"><div class="detail-label">Daily Limit</div><div class="detail-value">${fmtMoney(c.daily_limit)}</div></div>
+              <div class="detail-field"><div class="detail-label">CPM Limit</div><div class="detail-value">${c.cpm_limit != null ? c.cpm_limit : '--'}</div></div>
+              <div class="detail-field"><div class="detail-label">Fraud Score</div><div class="detail-value">${c.fraud_score != null ? c.fraud_score : '0'}</div></div>
+              <div class="detail-field"><div class="detail-label">Customer ID</div><div class="detail-value">${c.id}</div></div>
+              <div class="expand-actions">
+                <button class="btn btn-primary btn-sm" onclick="startCustomerEdit(${c.id})">Edit</button>
+                <span style="display:flex;align-items:center;gap:6px;margin-left:8px">
+                  <input type="number" class="form-control" id="credit-amt-${c.id}" placeholder="Amount" style="width:120px;padding:5px 8px;font-size:.82rem" step="0.01" min="0.01" />
+                  <button class="btn btn-success btn-sm" onclick="addCredit(${c.id})">Add Credit</button>
+                </span>
+              </div>
+            </div>
+          </td>
+        </tr>`;
+      }
+    }
 
     return `
-<div class="card rcf-card" id="card-${encodeURIComponent(r.did)}">
+    <tr onclick="toggleExpandCustomer(${c.id})">
+      <td style="font-variant-numeric:tabular-nums;color:var(--muted);font-size:.8rem">${c.id}</td>
+      <td style="font-weight:600">${escHtml(c.name)}</td>
+      <td>${acctBadge}</td>
+      <td style="font-variant-numeric:tabular-nums">${fmtMoney(c.balance)}</td>
+      <td>${statusBadge}</td>
+      <td>${gradeBadge}</td>
+      <td style="color:var(--muted);font-size:.82rem">${c.created_at ? new Date(c.created_at).toLocaleDateString() : '--'}</td>
+    </tr>
+    ${expandHtml}`;
+  }).join('');
+
+  wrap.innerHTML = `
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th><th>Name</th><th>Type</th><th>Balance</th><th>Status</th><th>Grade</th><th>Created</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+  </div>`;
+}
+
+function toggleExpandCustomer(id) {
+  if (expandedCustomer === id) {
+    expandedCustomer = null;
+    editingCustomer = null;
+  } else {
+    expandedCustomer = id;
+    editingCustomer = null;
+  }
+  renderCustomersTable();
+}
+
+function startCustomerEdit(id) {
+  editingCustomer = id;
+  renderCustomersTable();
+}
+
+function cancelCustomerEdit(id) {
+  editingCustomer = null;
+  renderCustomersTable();
+}
+
+async function saveCustomerEdit(id) {
+  const name   = document.getElementById(`edit-cust-name-${id}`)?.value?.trim();
+  const status = document.getElementById(`edit-cust-status-${id}`)?.value;
+  const grade  = document.getElementById(`edit-cust-grade-${id}`)?.value;
+  const credit = parseFloat(document.getElementById(`edit-cust-credit-${id}`)?.value || 0);
+  const daily  = parseFloat(document.getElementById(`edit-cust-daily-${id}`)?.value || 0);
+  const cpm    = parseInt(document.getElementById(`edit-cust-cpm-${id}`)?.value || 0, 10);
+
+  try {
+    const updated = await api('PUT', `/customers/${id}`, {
+      name, status, traffic_grade: grade,
+      credit_limit: credit, daily_limit: daily, cpm_limit: cpm
+    });
+    const idx = customersList.findIndex(c => c.id === id);
+    if (idx !== -1) {
+      customersList[idx] = { ...customersList[idx], ...updated, traffic_grade: grade, credit_limit: credit, daily_limit: daily, cpm_limit: cpm, status };
+    }
+    editingCustomer = null;
+    renderCustomersTable();
+    toast('Customer updated');
+  } catch (err) {
+    toast(err.message, 'err');
+  }
+}
+
+async function addCredit(id) {
+  const input = document.getElementById(`credit-amt-${id}`);
+  const amount = parseFloat(input?.value);
+  if (!amount || amount <= 0) { toast('Enter a valid amount', 'err'); return; }
+
+  try {
+    const result = await api('POST', `/customers/${id}/credit?amount=${amount}`);
+    const idx = customersList.findIndex(c => c.id === id);
+    if (idx !== -1) customersList[idx].balance = result.balance;
+    renderCustomersTable();
+    toast(`Added ${fmtMoney(amount)} credit`);
+  } catch (err) {
+    toast(err.message, 'err');
+  }
+}
+
+async function createCustomer() {
+  const name   = document.getElementById('cust-name').value.trim();
+  const type   = document.getElementById('cust-acct-type').value;
+  const grade  = document.getElementById('cust-traffic-grade').value;
+  const credit = parseFloat(document.getElementById('cust-credit-limit').value || 0);
+  const daily  = parseFloat(document.getElementById('cust-daily-limit').value || 500);
+  const cpm    = parseInt(document.getElementById('cust-cpm-limit').value || 60, 10);
+
+  if (!name) { toast('Name is required', 'err'); return; }
+
+  const btn = document.getElementById('cust-create-btn');
+  setButtonLoading(btn, true);
+  try {
+    const created = await api('POST', '/customers', {
+      name, account_type: type, traffic_grade: grade,
+      credit_limit: credit, daily_limit: daily, cpm_limit: cpm
+    });
+    customersList.unshift({ ...created, balance: 0, credit_limit: credit, daily_limit: daily, cpm_limit: cpm, traffic_grade: grade });
+    renderCustomersTable();
+    document.getElementById('cust-name').value = '';
+    document.getElementById('cust-create').classList.remove('open');
+    toast(`Customer "${created.name}" created`);
+  } catch (err) {
+    toast(err.message, 'err');
+  } finally {
+    setButtonLoading(btn, false);
+  }
+}
+
+/* =========================================================
+   RCF
+========================================================= */
+
+let rcfList = [];
+let rcfCustomers = [];
+let pendingEdits = {};
+
+async function loadRCF() {
+  document.getElementById('rcf-list').innerHTML = '<div class="state-msg"><span class="spinner"></span></div>';
+  document.getElementById('rcf-list-heading').style.display = 'none';
+  try {
+    const [list, custs] = await Promise.all([
+      api('GET', '/rcf'),
+      api('GET', '/customers')
+    ]);
+    rcfList = list;
+    rcfCustomers = custs;
+    renderRCFList();
+    populateRCFCustomerDropdown();
+  } catch (err) {
+    document.getElementById('rcf-list').innerHTML =
+      `<div class="state-msg"><strong>Could not load data</strong>${escHtml(err.message)}</div>`;
+  }
+}
+
+function renderRCFList() {
+  const container = document.getElementById('rcf-list');
+  const heading   = document.getElementById('rcf-list-heading');
+
+  if (rcfList.length === 0) {
+    heading.style.display = 'none';
+    container.innerHTML = '<div class="state-msg"><strong>No forwarding numbers yet</strong>Click "+ New Number" above to add one.</div>';
+    return;
+  }
+
+  heading.style.display = 'block';
+  container.innerHTML = '<div style="display:flex;flex-direction:column;gap:12px">' +
+    rcfList.map(r => renderRCFCard(r)).join('') + '</div>';
+}
+
+function renderRCFCard(r) {
+  const pending    = pendingEdits[r.did];
+  const fwdValue   = pending !== undefined ? pending : r.forward_to;
+  const isDirty    = pending !== undefined && pending !== r.forward_to;
+  const inputClass = isDirty ? 'dirty' : '';
+
+  const badgeHtml = r.enabled
+    ? '<span class="badge badge-active">Active</span>'
+    : '<span class="badge badge-disabled">Disabled</span>';
+
+  const safeDid = r.did.replace(/"/g, '&quot;');
+
+  return `
+<div class="card rcf-card" id="rcf-card-${encodeURIComponent(r.did)}">
   <div>
     <div class="rcf-did">${fmt(r.did)}</div>
-    <div class="rcf-customer">${escHtml(r.customer_name || '')} &mdash; <code style="font-size:.8em">${escHtml(r.did)}</code></div>
+    <div class="rcf-customer">${escHtml(r.customer_name || '')} &mdash; <code style="font-size:.78em">${escHtml(r.did)}</code></div>
   </div>
   <div>${badgeHtml}</div>
 
@@ -590,208 +1872,673 @@
     <div class="forward-row">
       <input
         class="forward-input ${inputClass}"
-        id="fwd-${encodeURIComponent(r.did)}"
+        id="rcf-fwd-${encodeURIComponent(r.did)}"
         type="tel"
         value="${escHtml(fwdValue)}"
         placeholder="+18005559999 or 1001"
         data-did="${safeDid}"
         data-original="${escHtml(r.forward_to)}"
-        oninput="onForwardInput(this)"
-        onkeydown="if(event.key==='Enter') saveForward(this.dataset.did)"
+        oninput="onRCFForwardInput(this)"
+        onkeydown="if(event.key==='Enter') saveRCFForward(this.dataset.did)"
       />
       <button
         class="btn btn-primary"
-        id="save-btn-${encodeURIComponent(r.did)}"
-        onclick="saveForward('${safeDid}')"
+        id="rcf-save-btn-${encodeURIComponent(r.did)}"
+        onclick="saveRCFForward('${safeDid}')"
         ${!isDirty ? 'disabled' : ''}
       >Save</button>
     </div>
-    <div style="font-size:.78rem;color:var(--muted)">
+    <div style="font-size:.76rem;color:var(--muted)">
       Currently: <strong>${fmt(r.forward_to)}</strong>
-      &nbsp;&middot;&nbsp;
-      Ring timeout: ${r.ring_timeout != null ? r.ring_timeout + 's' : '30s'}
+      &nbsp;&middot;&nbsp;Ring timeout: ${r.ring_timeout != null ? r.ring_timeout + 's' : '30s'}
     </div>
   </div>
 
   <div class="rcf-actions">
-    <button class="btn btn-ghost btn-sm" onclick="toggleEnabled('${safeDid}', ${!r.enabled})">
+    <button class="btn btn-ghost btn-sm" onclick="toggleRCFEnabled('${safeDid}', ${!r.enabled})">
       ${r.enabled ? 'Disable' : 'Enable'}
     </button>
-    <button class="btn btn-danger btn-sm" onclick="confirmDelete('${safeDid}')">Delete</button>
+    <button class="btn btn-danger btn-sm" onclick="confirmRCFDelete('${safeDid}')">Delete</button>
   </div>
 </div>`;
+}
+
+function populateRCFCustomerDropdown() {
+  const sel = document.getElementById('rcf-new-customer');
+  if (rcfCustomers.length === 0) {
+    sel.innerHTML = '<option value="">No customers found</option>';
+    return;
+  }
+  sel.innerHTML = '<option value="">Select customer...</option>' +
+    rcfCustomers.map(c => `<option value="${c.id}">${escHtml(c.name)}</option>`).join('');
+}
+
+function onRCFForwardInput(input) {
+  const did      = input.dataset.did;
+  const original = input.dataset.original;
+  const val      = input.value.trim();
+  pendingEdits[did] = val;
+
+  const isDirty = val !== original;
+  input.className = 'forward-input' + (isDirty ? ' dirty' : '');
+
+  const saveBtn = document.getElementById('rcf-save-btn-' + encodeURIComponent(did));
+  if (saveBtn) saveBtn.disabled = !isDirty || val === '';
+}
+
+async function saveRCFForward(did) {
+  const saveBtn = document.getElementById('rcf-save-btn-' + encodeURIComponent(did));
+  const input   = document.getElementById('rcf-fwd-' + encodeURIComponent(did));
+  if (!input) return;
+
+  const newVal = input.value.trim();
+  if (!newVal) { toast('Destination cannot be empty', 'err'); return; }
+
+  setButtonLoading(saveBtn, true);
+  try {
+    await api('PUT', '/rcf/' + encodeURIComponent(did), { forward_to: newVal });
+    const entry = rcfList.find(r => r.did === did);
+    if (entry) entry.forward_to = newVal;
+    delete pendingEdits[did];
+    input.dataset.original = newVal;
+    input.className = 'forward-input saved';
+    setTimeout(() => { if (input) input.className = 'forward-input'; }, 1800);
+    toast(`Saved — calls to ${fmt(did)} now ring ${fmt(newVal)}`);
+  } catch (err) {
+    toast(err.message, 'err');
+  } finally {
+    setButtonLoading(saveBtn, false);
+    if (saveBtn) saveBtn.disabled = true;
+  }
+}
+
+async function toggleRCFEnabled(did, newState) {
+  try {
+    await api('PUT', '/rcf/' + encodeURIComponent(did), { enabled: newState });
+    const entry = rcfList.find(r => r.did === did);
+    if (entry) entry.enabled = newState;
+    renderRCFList();
+    toast(newState ? 'Number enabled' : 'Number disabled');
+  } catch (err) {
+    toast(err.message, 'err');
+  }
+}
+
+function confirmRCFDelete(did) {
+  if (!confirm(`Delete ${fmt(did)}?\n\nThis cannot be undone.`)) return;
+  deleteRCF(did);
+}
+
+async function deleteRCF(did) {
+  try {
+    await api('DELETE', '/rcf/' + encodeURIComponent(did));
+    rcfList = rcfList.filter(r => r.did !== did);
+    delete pendingEdits[did];
+    renderRCFList();
+    toast(`${fmt(did)} deleted`);
+  } catch (err) {
+    toast(err.message, 'err');
+  }
+}
+
+async function createRCF() {
+  const customerId = document.getElementById('rcf-new-customer').value;
+  const did        = document.getElementById('rcf-new-did').value.trim();
+  const forwardTo  = document.getElementById('rcf-new-forward').value.trim();
+  const timeout    = parseInt(document.getElementById('rcf-new-timeout').value, 10);
+  const passCid    = document.getElementById('rcf-new-pass-cid').checked;
+
+  if (!customerId) { toast('Please select a customer', 'err'); return; }
+  if (!did)        { toast('DID is required', 'err'); return; }
+  if (!forwardTo)  { toast('Forward-to number is required', 'err'); return; }
+
+  const btn = document.getElementById('rcf-create-btn');
+  setButtonLoading(btn, true);
+  try {
+    await api('POST', '/rcf', {
+      customer_id: parseInt(customerId, 10),
+      did,
+      forward_to: forwardTo,
+      pass_caller_id: passCid,
+      ring_timeout: isNaN(timeout) ? 30 : timeout
+    });
+    const list = await api('GET', '/rcf');
+    rcfList = list;
+    renderRCFList();
+    document.getElementById('rcf-new-did').value     = '';
+    document.getElementById('rcf-new-forward').value = '';
+    document.getElementById('rcf-new-timeout').value = '30';
+    document.getElementById('rcf-create').classList.remove('open');
+    toast(`${fmt(did)} created`);
+  } catch (err) {
+    toast(err.message, 'err');
+  } finally {
+    setButtonLoading(btn, false);
+  }
+}
+
+/* =========================================================
+   API DIDS
+========================================================= */
+
+let apiDidsList = [];
+let expandedApiDid = null;
+
+async function loadApiDids() {
+  const wrap = document.getElementById('apidids-table-wrap');
+  wrap.innerHTML = '<div class="state-msg"><span class="spinner"></span></div>';
+  try {
+    const [dids, custs] = await Promise.all([
+      api('GET', '/api-dids'),
+      api('GET', '/customers')
+    ]);
+    apiDidsList = dids;
+    populateApiDidCustomerDropdown(custs);
+    renderApiDidsTable();
+  } catch (err) {
+    wrap.innerHTML = `<div class="state-msg"><strong>Failed to load</strong>${escHtml(err.message)}</div>`;
+  }
+}
+
+function populateApiDidCustomerDropdown(custs) {
+  const sel = document.getElementById('apidid-customer');
+  sel.innerHTML = '<option value="">Select customer...</option>' +
+    custs.map(c => `<option value="${c.id}">${escHtml(c.name)}</option>`).join('');
+}
+
+function renderApiDidsTable() {
+  const wrap = document.getElementById('apidids-table-wrap');
+
+  if (apiDidsList.length === 0) {
+    wrap.innerHTML = '<div class="state-msg"><strong>No API DIDs yet</strong>Click "+ New API DID" to add one.</div>';
+    return;
   }
 
-  function escHtml(str) {
-    return String(str)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;');
-  }
+  const rows = apiDidsList.map(d => {
+    const isExpanded = expandedApiDid === d.did;
+    const enabledBadge = d.enabled
+      ? '<span class="badge badge-active">Enabled</span>'
+      : '<span class="badge badge-disabled">Disabled</span>';
 
-  function populateCustomerDropdown() {
-    const sel = document.getElementById('new-customer');
-    if (customers.length === 0) {
-      sel.innerHTML = '<option value="">No customers found</option>';
-      return;
+    let expandHtml = '';
+    if (isExpanded) {
+      expandHtml = `
+      <tr class="expand-row">
+        <td colspan="6">
+          <div class="expand-inner">
+            <div class="form-group" style="grid-column:1/-1"><label class="form-label">Voice URL</label>
+              <input class="form-control inline-input" id="apidid-edit-voice-${escHtml(d.did)}" value="${escHtml(d.voice_url || '')}" style="max-width:500px" /></div>
+            <div class="form-group" style="grid-column:1/-1"><label class="form-label">Status Callback</label>
+              <input class="form-control inline-input" id="apidid-edit-cb-${escHtml(d.did)}" value="${escHtml(d.status_callback || '')}" style="max-width:500px" /></div>
+            <div class="expand-actions">
+              <button class="btn btn-primary btn-sm" onclick="saveApiDid('${escHtml(d.did)}')">Save</button>
+              <button class="btn btn-ghost btn-sm" onclick="toggleApiDidEnabled('${escHtml(d.did)}', ${!d.enabled})">${d.enabled ? 'Disable' : 'Enable'}</button>
+              <button class="btn btn-danger btn-sm" onclick="confirmDeleteApiDid('${escHtml(d.did)}')">Delete</button>
+            </div>
+          </div>
+        </td>
+      </tr>`;
     }
-    sel.innerHTML = customers
-      .map(c => `<option value="${c.id}">${escHtml(c.name)}</option>`)
-      .join('');
+
+    return `
+    <tr onclick="toggleExpandApiDid('${escHtml(d.did)}')">
+      <td style="font-variant-numeric:tabular-nums;font-weight:600">${fmt(d.did)}<br><span style="font-size:.72rem;color:var(--muted);font-family:monospace">${escHtml(d.did)}</span></td>
+      <td>${escHtml(d.customer_name || '--')}</td>
+      <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.82rem;color:var(--muted)">${escHtml(d.voice_url || '--')}</td>
+      <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.82rem;color:var(--muted)">${escHtml(d.status_callback || '--')}</td>
+      <td>${enabledBadge}</td>
+    </tr>
+    ${expandHtml}`;
+  }).join('');
+
+  wrap.innerHTML = `
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>DID</th><th>Customer</th><th>Voice URL</th><th>Status Callback</th><th>Status</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+  </div>`;
+}
+
+function toggleExpandApiDid(did) {
+  expandedApiDid = expandedApiDid === did ? null : did;
+  renderApiDidsTable();
+}
+
+async function saveApiDid(did) {
+  const voiceUrl  = document.getElementById(`apidid-edit-voice-${did}`)?.value?.trim();
+  const statusCb  = document.getElementById(`apidid-edit-cb-${did}`)?.value?.trim();
+
+  if (!voiceUrl) { toast('Voice URL is required', 'err'); return; }
+
+  try {
+    const updated = await api('PUT', `/api-dids/${encodeURIComponent(did)}`, {
+      voice_url: voiceUrl,
+      status_callback: statusCb || null
+    });
+    const idx = apiDidsList.findIndex(d => d.did === did);
+    if (idx !== -1) apiDidsList[idx] = { ...apiDidsList[idx], ...updated };
+    renderApiDidsTable();
+    toast('API DID updated');
+  } catch (err) {
+    toast(err.message, 'err');
+  }
+}
+
+async function toggleApiDidEnabled(did, newState) {
+  try {
+    await api('PUT', `/api-dids/${encodeURIComponent(did)}`, { enabled: newState });
+    const idx = apiDidsList.findIndex(d => d.did === did);
+    if (idx !== -1) apiDidsList[idx].enabled = newState;
+    renderApiDidsTable();
+    toast(newState ? 'DID enabled' : 'DID disabled');
+  } catch (err) {
+    toast(err.message, 'err');
+  }
+}
+
+function confirmDeleteApiDid(did) {
+  if (!confirm(`Delete API DID ${fmt(did)}?\n\nThis cannot be undone.`)) return;
+  deleteApiDid(did);
+}
+
+async function deleteApiDid(did) {
+  try {
+    await api('DELETE', `/api-dids/${encodeURIComponent(did)}`);
+    apiDidsList = apiDidsList.filter(d => d.did !== did);
+    if (expandedApiDid === did) expandedApiDid = null;
+    renderApiDidsTable();
+    toast(`${fmt(did)} deleted`);
+  } catch (err) {
+    toast(err.message, 'err');
+  }
+}
+
+async function createApiDid() {
+  const customerId = document.getElementById('apidid-customer').value;
+  const did        = document.getElementById('apidid-did').value.trim();
+  const voiceUrl   = document.getElementById('apidid-voice-url').value.trim();
+  const statusCb   = document.getElementById('apidid-status-cb').value.trim();
+
+  if (!customerId) { toast('Please select a customer', 'err'); return; }
+  if (!did)        { toast('DID is required', 'err'); return; }
+  if (!voiceUrl)   { toast('Voice URL is required', 'err'); return; }
+
+  const btn = document.getElementById('apidid-create-btn');
+  setButtonLoading(btn, true);
+  try {
+    const created = await api('POST', '/api-dids', {
+      customer_id: parseInt(customerId, 10),
+      did,
+      voice_url: voiceUrl,
+      status_callback: statusCb || null
+    });
+    // Re-fetch to get customer_name
+    apiDidsList = await api('GET', '/api-dids');
+    renderApiDidsTable();
+    document.getElementById('apidid-did').value        = '';
+    document.getElementById('apidid-voice-url').value  = '';
+    document.getElementById('apidid-status-cb').value  = '';
+    document.getElementById('apidid-create').classList.remove('open');
+    toast(`API DID ${fmt(did)} created`);
+  } catch (err) {
+    toast(err.message, 'err');
+  } finally {
+    setButtonLoading(btn, false);
+  }
+}
+
+/* =========================================================
+   TRUNKS
+========================================================= */
+
+let trunksList = [];
+let expandedTrunk = null;
+let trunkDetails = {}; // id -> { ips, dids, stats }
+
+async function loadTrunks() {
+  const list = document.getElementById('trunks-list');
+  list.innerHTML = '<div class="state-msg"><span class="spinner"></span></div>';
+  try {
+    const [trunks, custs] = await Promise.all([
+      api('GET', '/trunks'),
+      api('GET', '/customers')
+    ]);
+    trunksList = trunks;
+    populateTrunkCustomerDropdown(custs);
+    renderTrunksList();
+  } catch (err) {
+    list.innerHTML = `<div class="state-msg"><strong>Failed to load</strong>${escHtml(err.message)}</div>`;
+  }
+}
+
+function populateTrunkCustomerDropdown(custs) {
+  const sel = document.getElementById('trunk-customer');
+  sel.innerHTML = '<option value="">Select customer...</option>' +
+    custs.map(c => `<option value="${c.id}">${escHtml(c.name)}</option>`).join('');
+}
+
+function renderTrunksList() {
+  const list = document.getElementById('trunks-list');
+
+  if (trunksList.length === 0) {
+    list.innerHTML = '<div class="state-msg"><strong>No SIP trunks yet</strong>Click "+ New Trunk" to add one.</div>';
+    return;
   }
 
-  /* =========================================================
-     Inline edit — forward_to
-  ========================================================= */
+  list.innerHTML = '<div style="display:flex;flex-direction:column;gap:12px">' +
+    trunksList.map(t => renderTrunkCard(t)).join('') + '</div>';
+}
 
-  function onForwardInput(input) {
-    const did = input.dataset.did;
-    const original = input.dataset.original;
-    const val = input.value.trim();
-    pendingEdits[did] = val;
+function renderTrunkCard(t) {
+  const isExpanded = expandedTrunk === t.id;
+  const detail     = trunkDetails[t.id] || {};
+  const enabledBadge = t.enabled
+    ? '<span class="badge badge-active">Active</span>'
+    : '<span class="badge badge-disabled">Disabled</span>';
 
-    const isDirty = val !== original;
-    input.className = 'forward-input' + (isDirty ? ' dirty' : '');
+  let expandHtml = '';
+  if (isExpanded) {
+    // Stats section
+    const stats = detail.stats;
+    const statsHtml = stats ? `
+      <div class="trunk-stats-row">
+        <div class="trunk-stat"><div class="trunk-stat-label">Channels</div><div class="trunk-stat-value">${stats.current_channels} / ${stats.max_channels}</div></div>
+        <div class="trunk-stat"><div class="trunk-stat-label">Utilization</div><div class="trunk-stat-value">${stats.channel_utilization}</div></div>
+        <div class="trunk-stat"><div class="trunk-stat-label">Last Hour Calls</div><div class="trunk-stat-value">${stats.last_hour?.total_calls ?? '--'}</div></div>
+        <div class="trunk-stat"><div class="trunk-stat-label">ASR</div><div class="trunk-stat-value">${stats.last_hour?.asr ?? '--'}</div></div>
+        <div class="trunk-stat"><div class="trunk-stat-label">Avg Duration</div><div class="trunk-stat-value">${stats.last_hour?.avg_duration_sec != null ? stats.last_hour.avg_duration_sec.toFixed(1) + 's' : '--'}</div></div>
+        <div class="trunk-stat"><div class="trunk-stat-label">Cost (1hr)</div><div class="trunk-stat-value">${stats.last_hour?.total_cost != null ? fmtMoney(stats.last_hour.total_cost) : '--'}</div></div>
+      </div>` : '<div style="color:var(--muted);font-size:.82rem;margin-top:8px">Loading stats...</div>';
 
-    const saveBtn = document.getElementById('save-btn-' + encodeURIComponent(did));
-    if (saveBtn) saveBtn.disabled = !isDirty || val === '';
+    // IPs section
+    const ips = detail.ips || [];
+    const ipRowsHtml = ips.length === 0
+      ? '<div style="color:var(--muted);font-size:.82rem">No IPs configured</div>'
+      : '<div class="ip-list">' + ips.map(ip => `
+          <div class="ip-row">
+            <span class="ip-addr">${escHtml(ip.ip_address)}</span>
+            <span class="ip-desc">${escHtml(ip.description || '')}</span>
+            <button class="btn btn-danger btn-xs" onclick="event.stopPropagation();deleteTrunkIp(${t.id}, ${ip.id})">Remove</button>
+          </div>`).join('') + '</div>';
+
+    // DIDs section
+    const dids = detail.dids || [];
+    const didsHtml = dids.length === 0
+      ? '<div style="color:var(--muted);font-size:.82rem">No DIDs assigned</div>'
+      : '<div style="display:flex;flex-wrap:wrap">' + dids.map(d => `
+          <span class="did-chip">${fmt(d.did)}</span>`).join('') + '</div>';
+
+    expandHtml = `
+      <div class="trunk-expand open">
+        ${statsHtml}
+
+        <div class="sub-section-title" style="margin-top:18px">Authorized IPs</div>
+        ${ipRowsHtml}
+        <div style="display:flex;gap:8px;margin-top:10px;align-items:center;flex-wrap:wrap">
+          <input class="form-control" id="trunk-new-ip-${t.id}" placeholder="192.0.2.1" style="max-width:180px;padding:6px 10px;font-size:.85rem;font-family:monospace" onclick="event.stopPropagation()" />
+          <input class="form-control" id="trunk-new-ip-desc-${t.id}" placeholder="Description (optional)" style="max-width:220px;padding:6px 10px;font-size:.85rem" onclick="event.stopPropagation()" />
+          <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();addTrunkIp(${t.id})">Add IP</button>
+        </div>
+
+        <div class="sub-section-title">Assigned DIDs</div>
+        ${didsHtml}
+        <div style="display:flex;gap:8px;margin-top:10px;align-items:center;flex-wrap:wrap">
+          <input class="form-control" id="trunk-new-did-${t.id}" placeholder="+12125551234" style="max-width:220px;padding:6px 10px;font-size:.85rem;font-family:monospace" onclick="event.stopPropagation()" />
+          <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();addTrunkDid(${t.id})">Assign DID</button>
+        </div>
+
+        <div class="rcf-actions" style="margin-top:14px">
+          <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();toggleTrunkEnabled(${t.id}, ${!t.enabled})">${t.enabled ? 'Disable' : 'Enable'}</button>
+        </div>
+      </div>`;
   }
 
-  async function saveForward(did) {
-    const saveBtn = document.getElementById('save-btn-' + encodeURIComponent(did));
-    const input   = document.getElementById('fwd-' + encodeURIComponent(did));
-    if (!input) return;
+  return `
+<div class="card trunk-card" id="trunk-card-${t.id}">
+  <div class="trunk-header" onclick="toggleExpandTrunk(${t.id})" style="cursor:pointer">
+    <div>
+      <div class="trunk-name">${escHtml(t.trunk_name)}</div>
+      <div class="trunk-meta">${escHtml(t.customer_name || '')} &mdash; ${escHtml(t.auth_type)} auth</div>
+    </div>
+    ${enabledBadge}
+    <div style="display:flex;gap:16px;margin-left:auto;flex-shrink:0">
+      <div class="trunk-stat"><div class="trunk-stat-label">Max Ch.</div><div class="trunk-stat-value">${t.max_channels}</div></div>
+      <div class="trunk-stat"><div class="trunk-stat-label">CPS</div><div class="trunk-stat-value">${t.cps_limit}</div></div>
+      <div class="trunk-stat"><div class="trunk-stat-label">IPs</div><div class="trunk-stat-value">${t.ip_count || 0}</div></div>
+      <div class="trunk-stat"><div class="trunk-stat-label">DIDs</div><div class="trunk-stat-value">${t.did_count || 0}</div></div>
+    </div>
+    <span style="color:var(--muted);font-size:1rem;margin-left:4px">${isExpanded ? '&#x25B4;' : '&#x25BE;'}</span>
+  </div>
+  ${expandHtml}
+</div>`;
+}
 
-    const newVal = input.value.trim();
-    if (!newVal) { toast('Destination cannot be empty', 'err'); return; }
+async function toggleExpandTrunk(id) {
+  if (expandedTrunk === id) {
+    expandedTrunk = null;
+    renderTrunksList();
+    return;
+  }
+  expandedTrunk = id;
+  renderTrunksList(); // show loading state
 
-    setButtonLoading(saveBtn, true);
-    try {
-      await apiFetch('/rcf/' + encodeURIComponent(did), {
-        method: 'PUT',
-        body: JSON.stringify({ forward_to: newVal })
-      });
+  // Fetch details
+  try {
+    const [stats, ips, dids] = await Promise.allSettled([
+      api('GET', `/trunks/${id}/stats`),
+      api('GET', `/trunks/${id}/ips`),
+      api('GET', `/trunks/${id}/dids`)
+    ]);
+    trunkDetails[id] = {
+      stats: stats.status === 'fulfilled' ? stats.value : null,
+      ips:   ips.status   === 'fulfilled' ? ips.value   : [],
+      dids:  dids.status  === 'fulfilled' ? dids.value  : []
+    };
+    renderTrunksList();
+  } catch (err) {
+    toast(err.message, 'err');
+  }
+}
 
-      // Update local state
-      const entry = rcfList.find(r => r.did === did);
-      if (entry) entry.forward_to = newVal;
-      delete pendingEdits[did];
+async function addTrunkIp(trunkId) {
+  const ipInput   = document.getElementById(`trunk-new-ip-${trunkId}`);
+  const descInput = document.getElementById(`trunk-new-ip-desc-${trunkId}`);
+  const ip        = ipInput?.value?.trim();
+  const desc      = descInput?.value?.trim();
 
-      input.dataset.original = newVal;
-      input.className = 'forward-input saved';
-      setTimeout(() => { if (input) input.className = 'forward-input'; }, 1800);
+  if (!ip) { toast('IP address is required', 'err'); return; }
 
-      toast(`Saved — calls to ${fmt(did)} now ring ${fmt(newVal)}`);
-    } catch (err) {
-      toast(err.message, 'err');
-    } finally {
-      setButtonLoading(saveBtn, false);
-      if (saveBtn) saveBtn.disabled = true;
+  try {
+    const result = await api('POST', `/trunks/${trunkId}/ips`, { ip_address: ip, description: desc || null });
+    if (!trunkDetails[trunkId]) trunkDetails[trunkId] = { ips: [], dids: [], stats: null };
+    trunkDetails[trunkId].ips.push(result);
+    const trunk = trunksList.find(t => t.id === trunkId);
+    if (trunk) trunk.ip_count = (trunk.ip_count || 0) + 1;
+    renderTrunksList();
+    toast(`IP ${ip} added`);
+  } catch (err) {
+    toast(err.message, 'err');
+  }
+}
+
+async function deleteTrunkIp(trunkId, ipId) {
+  if (!confirm('Remove this IP?')) return;
+  try {
+    await api('DELETE', `/trunks/${trunkId}/ips/${ipId}`);
+    if (trunkDetails[trunkId]?.ips) {
+      trunkDetails[trunkId].ips = trunkDetails[trunkId].ips.filter(ip => ip.id !== ipId);
     }
+    const trunk = trunksList.find(t => t.id === trunkId);
+    if (trunk && trunk.ip_count > 0) trunk.ip_count--;
+    renderTrunksList();
+    toast('IP removed');
+  } catch (err) {
+    toast(err.message, 'err');
   }
+}
 
-  /* =========================================================
-     Toggle enabled
-  ========================================================= */
+async function addTrunkDid(trunkId) {
+  const input = document.getElementById(`trunk-new-did-${trunkId}`);
+  const did   = input?.value?.trim();
+  if (!did) { toast('DID is required', 'err'); return; }
 
-  async function toggleEnabled(did, newState) {
-    try {
-      await apiFetch('/rcf/' + encodeURIComponent(did), {
-        method: 'PUT',
-        body: JSON.stringify({ enabled: newState })
-      });
-      const entry = rcfList.find(r => r.did === did);
-      if (entry) entry.enabled = newState;
-      renderList();
-      toast(newState ? 'Number enabled' : 'Number disabled');
-    } catch (err) {
-      toast(err.message, 'err');
-    }
+  try {
+    const result = await api('POST', `/trunks/${trunkId}/dids`, { did });
+    if (!trunkDetails[trunkId]) trunkDetails[trunkId] = { ips: [], dids: [], stats: null };
+    trunkDetails[trunkId].dids.push(result);
+    const trunk = trunksList.find(t => t.id === trunkId);
+    if (trunk) trunk.did_count = (trunk.did_count || 0) + 1;
+    renderTrunksList();
+    toast(`DID ${fmt(did)} assigned`);
+  } catch (err) {
+    toast(err.message, 'err');
   }
+}
 
-  /* =========================================================
-     Delete
-  ========================================================= */
-
-  function confirmDelete(did) {
-    // Simple confirm — keeps the UI dependency-free
-    if (!confirm(`Delete ${fmt(did)}?\n\nThis cannot be undone.`)) return;
-    deleteRCF(did);
+async function toggleTrunkEnabled(id, newState) {
+  try {
+    await api('PUT', `/trunks/${id}`, { enabled: newState });
+    const trunk = trunksList.find(t => t.id === id);
+    if (trunk) trunk.enabled = newState;
+    renderTrunksList();
+    toast(newState ? 'Trunk enabled' : 'Trunk disabled');
+  } catch (err) {
+    toast(err.message, 'err');
   }
+}
 
-  async function deleteRCF(did) {
-    try {
-      await apiFetch('/rcf/' + encodeURIComponent(did), { method: 'DELETE' });
-      rcfList = rcfList.filter(r => r.did !== did);
-      delete pendingEdits[did];
-      renderList();
-      toast(`${fmt(did)} deleted`);
-    } catch (err) {
-      toast(err.message, 'err');
-    }
+async function createTrunk() {
+  const customerId  = document.getElementById('trunk-customer').value;
+  const trunkName   = document.getElementById('trunk-name').value.trim();
+  const maxChannels = parseInt(document.getElementById('trunk-max-channels').value, 10);
+  const cps         = parseInt(document.getElementById('trunk-cps').value, 10);
+  const authType    = document.getElementById('trunk-auth-type').value;
+
+  if (!customerId) { toast('Please select a customer', 'err'); return; }
+  if (!trunkName)  { toast('Trunk name is required', 'err'); return; }
+  if (isNaN(maxChannels) || maxChannels < 1) { toast('Max channels must be at least 1', 'err'); return; }
+
+  const btn = document.getElementById('trunk-create-btn');
+  setButtonLoading(btn, true);
+  try {
+    const created = await api('POST', '/trunks', {
+      customer_id: parseInt(customerId, 10),
+      trunk_name: trunkName,
+      max_channels: maxChannels,
+      cps_limit: isNaN(cps) ? 10 : cps,
+      auth_type: authType
+    });
+    // Re-fetch to get customer_name and counts
+    trunksList = await api('GET', '/trunks');
+    renderTrunksList();
+    document.getElementById('trunk-name').value = '';
+    document.getElementById('trunk-create').classList.remove('open');
+    toast(`Trunk "${trunkName}" created`);
+  } catch (err) {
+    toast(err.message, 'err');
+  } finally {
+    setButtonLoading(btn, false);
   }
+}
 
-  /* =========================================================
-     Create
-  ========================================================= */
+/* =========================================================
+   TIERS
+========================================================= */
 
-  function toggleCreate() {
-    const section = document.getElementById('create-section');
-    section.classList.toggle('open');
-    document.getElementById('toggle-create-btn').textContent =
-      section.classList.contains('open') ? 'Cancel' : '+ New Number';
+async function loadTiers() {
+  const content = document.getElementById('tiers-content');
+  content.innerHTML = '<div class="state-msg"><span class="spinner"></span></div>';
+  try {
+    const [trunkTiers, apiTiers] = await Promise.all([
+      api('GET', '/tiers/trunk'),
+      api('GET', '/tiers/api')
+    ]);
+    renderTiers(trunkTiers, apiTiers);
+  } catch (err) {
+    content.innerHTML = `<div class="state-msg"><strong>Failed to load tiers</strong>${escHtml(err.message)}</div>`;
   }
+}
 
-  async function createRCF() {
-    const customerId = document.getElementById('new-customer').value;
-    const did        = document.getElementById('new-did').value.trim();
-    const forwardTo  = document.getElementById('new-forward-to').value.trim();
-    const timeout    = parseInt(document.getElementById('new-ring-timeout').value, 10);
+function renderTiers(trunkTiers, apiTiers) {
+  const content = document.getElementById('tiers-content');
 
-    if (!customerId) { toast('Please select a customer', 'err'); return; }
-    if (!did)        { toast('DID is required', 'err'); return; }
-    if (!forwardTo)  { toast('Forward-to number is required', 'err'); return; }
+  const trunkCards = (trunkTiers || []).map(t => renderTierCard(t, 'trunk')).join('');
+  const apiCards   = (apiTiers   || []).map(t => renderTierCard(t, 'api')).join('');
 
-    const btn = document.getElementById('create-btn');
-    setButtonLoading(btn, true);
+  content.innerHTML = `
+    <div class="card" style="margin-bottom:24px;padding:18px 22px 6px">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">
+        <div>
+          <div class="tiers-section-title" style="margin:0;border:none;padding:0;font-size:1rem">SIP Trunk Tiers</div>
+          <div style="font-size:.78rem;color:var(--muted);margin-top:3px">Capped at 10 CPS. Upgrade to API for higher limits.</div>
+        </div>
+        <div style="margin-left:auto">
+          <span class="badge" style="background:rgba(245,158,11,.1);color:#fcd34d;border:1px solid rgba(245,158,11,.3)">Max 10 CPS</span>
+        </div>
+      </div>
+      <div class="tiers-grid">${trunkCards || '<div class="state-msg" style="padding:20px">No trunk tiers found</div>'}</div>
+    </div>
 
-    try {
-      const created = await apiFetch('/rcf', {
-        method: 'POST',
-        body: JSON.stringify({
-          customer_id: parseInt(customerId, 10),
-          did,
-          forward_to: forwardTo,
-          pass_caller_id: true,
-          ring_timeout: isNaN(timeout) ? 30 : timeout
-        })
-      });
+    <div class="card" style="padding:18px 22px 6px">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">
+        <div>
+          <div class="tiers-section-title" style="margin:0;border:none;padding:0;font-size:1rem">API Calling Tiers</div>
+          <div style="font-size:.78rem;color:var(--muted);margin-top:3px">Higher CPS limits with per-call billing for programmatic call control.</div>
+        </div>
+        <div style="margin-left:auto">
+          <span class="badge badge-active">Up to 100 CPS</span>
+        </div>
+      </div>
+      <div class="tiers-grid">${apiCards || '<div class="state-msg" style="padding:20px">No API tiers found</div>'}</div>
+    </div>`;
+}
 
-      // Reload list from server to get customer_name populated
-      const list = await apiFetch('/rcf');
-      rcfList = list;
-      renderList();
+function renderTierCard(t, type) {
+  const maxCps   = type === 'trunk' ? 10 : 100;
+  const fillPct  = Math.min(100, Math.round((t.cps_limit / maxCps) * 100));
+  const isMaxed  = type === 'trunk' && t.cps_limit >= 10;
+  const isHighlight = type === 'api' && t.name === 'api_professional';
 
-      // Reset form
-      document.getElementById('new-did').value = '';
-      document.getElementById('new-forward-to').value = '';
-      document.getElementById('new-ring-timeout').value = '30';
-      toggleCreate();
+  const features = t.features && typeof t.features === 'object'
+    ? Object.entries(t.features).map(([k, v]) => `<li>${escHtml(k)}: ${escHtml(String(v))}</li>`).join('')
+    : (t.description ? `<li>${escHtml(t.description)}</li>` : '');
 
-      toast(`${fmt(did)} created — forwarding to ${fmt(forwardTo)}`);
-    } catch (err) {
-      toast(err.message, 'err');
-    } finally {
-      setButtonLoading(btn, false);
-    }
-  }
+  const upgradeNote = isMaxed
+    ? `<div class="tier-upgrade-note">Hard cap reached. Upgrade to API Calling for up to 100 CPS and advanced features.</div>`
+    : '';
 
-  /* =========================================================
-     Boot
-  ========================================================= */
+  return `
+  <div class="tier-card ${isHighlight ? 'tier-highlight' : ''}">
+    <div>
+      <div class="tier-name">${escHtml(t.name)}</div>
+      ${t.description && !t.features ? '' : `<div style="font-size:.78rem;color:var(--muted);margin-top:3px">${escHtml(t.description || '')}</div>`}
+    </div>
+    <div>
+      <div class="tier-cps">${t.cps_limit} <span>CPS</span></div>
+      <div class="tier-cap-bar" style="margin-top:8px"><div class="tier-cap-fill" style="width:${fillPct}%"></div></div>
+    </div>
+    <div class="tier-price">
+      <strong>${t.monthly_fee === 0 ? 'Free' : fmtMoney(t.monthly_fee) + '/mo'}</strong>
+      ${t.per_call_fee > 0 ? ` &middot; ${fmtMoney(t.per_call_fee)}/call` : ''}
+    </div>
+    ${features ? `<ul class="tier-features">${features}</ul>` : ''}
+    ${upgradeNote}
+  </div>`;
+}
 
-  loadAll();
+/* =========================================================
+   BOOT
+========================================================= */
+
+(function boot() {
+  const hash = (location.hash || '').replace('#', '') || 'dashboard';
+  navigate(hash);
+})();
 </script>
 </body>
 </html>
