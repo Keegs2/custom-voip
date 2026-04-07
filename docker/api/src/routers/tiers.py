@@ -1,18 +1,17 @@
 """CPS Tier Management Endpoints.
 
 Implements tiered CPS (Calls Per Second) limits for SIP Trunks and API Calling.
-This system encourages high-volume SIP trunk customers to upgrade to API calling
-for higher CPS limits and revenue generation.
+CPS controls the rate of new call setup. Concurrent call capacity (call paths)
+is managed separately per trunk via call_path_packages.
 
 TIER STRUCTURE:
-SIP Trunks (capped at 10 CPS):
-- trunk_free: 5 CPS, $0/month
-- trunk_paid: 10 CPS, $49.99/month
+SIP Trunks (capped at 5 CPS):
+- trunk_standard: 5 CPS, $0/month
 
 API Calling (higher limits, per-call fees):
-- api_starter: 25 CPS, $99/month, $0.01/call
-- api_professional: 50 CPS, $299/month, $0.008/call
-- api_enterprise: 100 CPS, $799/month, $0.005/call
+- api_basic: 5 CPS, $99/month, $0.01/call
+- api_standard: 8 CPS, $299/month, $0.008/call
+- api_premium: 15 CPS, $799/month, $0.005/call
 """
 import json
 
@@ -27,7 +26,7 @@ from db import redis_client as cache
 router = APIRouter()
 
 # Constants
-MAX_TRUNK_CPS = 10  # Hard cap for SIP trunk CPS
+MAX_TRUNK_CPS = 5  # Hard cap for SIP trunk CPS
 
 
 # Pydantic Models
@@ -201,25 +200,25 @@ def build_upgrade_recommendations(
 
     # Trunk upgrade recommendations
     if trunk_tier_name:
-        if trunk_tier_name == 'trunk_free':
+        if trunk_tier_name == 'trunk_standard':
             recommendations.append(
-                "Upgrade to trunk_paid ($49.99/mo) for 10 CPS - double your current limit."
+                "Add call path packages to increase concurrent call capacity on your trunk."
             )
         if trunk_cps_limit and trunk_cps_limit >= MAX_TRUNK_CPS:
             recommendations.append(
-                "You've reached the maximum trunk CPS (10). "
-                "Upgrade to API Calling for up to 100 CPS and advanced features."
+                "You've reached the maximum trunk CPS (5). "
+                "Upgrade to API Calling for up to 15 CPS and advanced features."
             )
 
     # API upgrade recommendations
     if api_tier_name:
-        if api_tier_name == 'api_starter':
+        if api_tier_name == 'api_basic':
             recommendations.append(
-                "Upgrade to api_professional ($299/mo) for 50 CPS and lower per-call fees ($0.008 vs $0.01)."
+                "Upgrade to api_standard ($299/mo) for 8 CPS and lower per-call fees ($0.008 vs $0.01)."
             )
-        elif api_tier_name == 'api_professional':
+        elif api_tier_name == 'api_standard':
             recommendations.append(
-                "Upgrade to api_enterprise ($799/mo) for 100 CPS and the lowest per-call fees ($0.005)."
+                "Upgrade to api_premium ($799/mo) for 15 CPS and the lowest per-call fees ($0.005)."
             )
 
     # Cross-sell recommendations

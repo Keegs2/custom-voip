@@ -121,7 +121,7 @@ async def sync_cps_tier_to_redis(
     Args:
         customer_id: The customer's database ID
         tier_type: Either 'trunk' or 'api'
-        tier_name: The tier name (e.g., 'trunk_free', 'api_starter')
+        tier_name: The tier name (e.g., 'trunk_standard', 'api_basic')
         cps_limit: The CPS limit for this tier
 
     Returns:

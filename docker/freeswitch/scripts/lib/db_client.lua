@@ -443,23 +443,23 @@ function M.get_customer_tier(customer_id, tier_type)
         if tier_type == "trunk" then
             return {
                 tier_id = nil,
-                tier_name = "trunk_free",
+                tier_name = "trunk_standard",
                 tier_type = "trunk",
                 cps_limit = 5,
                 monthly_fee = 0,
                 per_call_fee = 0,
-                description = "Default free trunk tier",
+                description = "Standard SIP trunk - 5 CPS call setup rate",
                 features = "{}"
             }
         else
             return {
                 tier_id = nil,
-                tier_name = "api_starter",
+                tier_name = "api_basic",
                 tier_type = "api",
-                cps_limit = 25,
-                monthly_fee = 99.00,
+                cps_limit = 5,
+                monthly_fee = 49.00,
                 per_call_fee = 0.0100,
-                description = "Default API starter tier",
+                description = "API Basic - 5 CPS",
                 features = "{}"
             }
         end

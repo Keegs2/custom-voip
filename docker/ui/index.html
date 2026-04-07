@@ -2984,17 +2984,17 @@ function renderTiers(trunkTiers, apiTiers) {
 }
 
 function renderTierCard(t, type) {
-  const maxCps   = type === 'trunk' ? 10 : 100;
+  const maxCps   = type === 'trunk' ? 5 : 15;
   const fillPct  = Math.min(100, Math.round((t.cps_limit / maxCps) * 100));
-  const isMaxed  = type === 'trunk' && t.cps_limit >= 10;
-  const isHighlight = type === 'api' && t.name === 'api_professional';
+  const isMaxed  = type === 'trunk' && t.cps_limit >= 5;
+  const isHighlight = type === 'api' && t.name === 'api_standard';
 
   const features = t.features && typeof t.features === 'object'
     ? Object.entries(t.features).map(([k, v]) => `<li>${escHtml(k)}: ${escHtml(String(v))}</li>`).join('')
     : (t.description ? `<li>${escHtml(t.description)}</li>` : '');
 
   const upgradeNote = isMaxed
-    ? `<div class="tier-upgrade-note">Hard cap reached. Upgrade to API Calling for up to 100 CPS and advanced features.</div>`
+    ? `<div class="tier-upgrade-note">Trunk CPS is fixed at 5. Purchase additional call paths for more concurrent capacity.</div>`
     : '';
 
   return `

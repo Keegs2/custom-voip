@@ -1,4 +1,8 @@
-"""SIP Trunk management endpoints."""
+"""SIP Trunk management endpoints.
+
+Supports call path packages for managing concurrent call capacity per trunk.
+CPS (call setup rate) is managed separately via cps_tiers.
+"""
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional, List
@@ -12,7 +16,7 @@ class TrunkCreate(BaseModel):
     customer_id: int
     trunk_name: str
     max_channels: int
-    cps_limit: int = 10
+    cps_limit: int = 5
     auth_type: str = "ip"  # ip, credential, both
     tech_prefix: Optional[str] = None
 
@@ -33,6 +37,10 @@ class TrunkDID(BaseModel):
     did: str
 
 
+class CallPathAssign(BaseModel):
+    package_id: int
+
+
 @router.get("")
 async def list_trunks(
     customer_id: Optional[int] = None,
@@ -45,10 +53,12 @@ async def list_trunks(
         SELECT t.id, t.trunk_name, t.customer_id, t.max_channels, t.cps_limit,
                t.auth_type, t.tech_prefix, t.enabled, t.created_at,
                c.name as customer_name,
+               cpp.name as package_name, cpp.call_paths,
                (SELECT COUNT(*) FROM trunk_auth_ips WHERE trunk_id = t.id) as ip_count,
                (SELECT COUNT(*) FROM trunk_dids WHERE trunk_id = t.id) as did_count
         FROM sip_trunks t
         JOIN customers c ON t.customer_id = c.id
+        LEFT JOIN call_path_packages cpp ON t.call_path_package_id = cpp.id
         WHERE 1=1
     """
     values = []
@@ -94,16 +104,32 @@ async def create_trunk(trunk: TrunkCreate):
     return dict(result)
 
 
+# Call Path Packages
+
+@router.get("/call-paths")
+async def list_call_path_packages():
+    """List all available call path packages.
+
+    Returns active packages sorted by sort_order for display in pricing/selection UI.
+    """
+    results = await db.fetch_all(
+        "SELECT * FROM call_path_packages WHERE is_active = true ORDER BY sort_order"
+    )
+    return [dict(r) for r in results]
+
+
 @router.get("/{trunk_id}")
 async def get_trunk(trunk_id: int):
-    """Get trunk by ID."""
+    """Get trunk by ID with call path package info."""
     result = await db.fetch_one(
         """
         SELECT t.*, c.name as customer_name,
+               cpp.name as package_name, cpp.call_paths,
                (SELECT COUNT(*) FROM trunk_auth_ips WHERE trunk_id = t.id) as ip_count,
                (SELECT COUNT(*) FROM trunk_dids WHERE trunk_id = t.id) as did_count
         FROM sip_trunks t
         JOIN customers c ON t.customer_id = c.id
+        LEFT JOIN call_path_packages cpp ON t.call_path_package_id = cpp.id
         WHERE t.id = $1
         """,
         trunk_id
@@ -139,6 +165,51 @@ async def update_trunk(trunk_id: int, trunk: TrunkUpdate):
     if not result:
         raise HTTPException(status_code=404, detail="Trunk not found")
     return dict(result)
+
+
+@router.put("/{trunk_id}/call-paths")
+async def assign_call_path_package(trunk_id: int, body: CallPathAssign):
+    """Assign a call path package to a trunk.
+
+    Updates the trunk's call_path_package_id and sets max_channels to match
+    the package's call_paths count.
+
+    Args:
+        trunk_id: The trunk to update
+        body: Contains package_id to assign
+    """
+    # Verify trunk exists
+    trunk = await db.fetch_one(
+        "SELECT id FROM sip_trunks WHERE id = $1",
+        trunk_id
+    )
+    if not trunk:
+        raise HTTPException(status_code=404, detail="Trunk not found")
+
+    # Look up the package
+    package = await db.fetch_one(
+        "SELECT id, name, call_paths FROM call_path_packages WHERE id = $1 AND is_active = true",
+        body.package_id
+    )
+    if not package:
+        raise HTTPException(status_code=404, detail="Call path package not found or inactive")
+
+    # Update trunk with the package and set max_channels to match
+    result = await db.fetch_one(
+        """
+        UPDATE sip_trunks
+        SET call_path_package_id = $1, max_channels = $2
+        WHERE id = $3
+        RETURNING id, trunk_name, max_channels, call_path_package_id, enabled
+        """,
+        body.package_id, package["call_paths"], trunk_id
+    )
+
+    return {
+        **dict(result),
+        "package_name": package["name"],
+        "call_paths": package["call_paths"]
+    }
 
 
 # Trunk IPs

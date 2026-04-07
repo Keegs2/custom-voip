@@ -1,5 +1,7 @@
--- CPS (Calls Per Second) Tier System
--- Implements tiered rate limiting for SIP Trunks and API Calling
+-- CPS (Calls Per Second) Tier System + Call Path Packages
+-- Implements Metaswitch-style separation of CPS (call setup rate) and
+-- Call Paths (concurrent call capacity) as independent dimensions.
+-- Platform total capacity: 300 CPS.
 
 -- CPS tier definitions table
 CREATE TABLE cps_tiers (
@@ -62,84 +64,95 @@ CREATE TABLE cps_tier_changes (
 
 CREATE INDEX idx_tier_changes_customer ON cps_tier_changes(customer_id, created_at DESC);
 
--- Insert default SIP Trunk tiers
+-- Insert SIP Trunk CPS tier
+-- All trunks get 5 CPS (call setup rate). No upgrades available.
+-- Call paths (concurrent call capacity) are purchased separately per-trunk.
 INSERT INTO cps_tiers (name, tier_type, cps_limit, monthly_fee, per_call_fee, description, sort_order, features) VALUES
 (
-    'trunk_free',
+    'trunk_standard',
     'trunk',
     5,
     0.00,
     0.0000,
-    'Free SIP trunk tier - 5 CPS included with trunk',
+    'Standard SIP trunk - 5 CPS call setup rate. Call paths purchased separately.',
     1,
-    '{"included": true, "support": "community", "features": ["basic_routing", "failover"]}'
-),
-(
-    'trunk_paid',
-    'trunk',
-    10,
-    49.99,
-    0.0000,
-    'Paid SIP trunk tier - up to 10 CPS',
-    2,
-    '{"included": false, "support": "email", "features": ["basic_routing", "failover", "analytics", "priority_routing"]}'
+    '{"cps": 5, "support": "email", "features": ["basic_routing", "failover", "cdr_access"]}'
 );
 
--- Insert default API Calling tiers
+-- Insert API Calling CPS tiers
+-- CPS controls call setup rate only; platform total capacity is 300 CPS.
 INSERT INTO cps_tiers (name, tier_type, cps_limit, monthly_fee, per_call_fee, description, sort_order, features) VALUES
 (
-    'api_starter',
+    'api_basic',
     'api',
-    25,
-    99.00,
+    5,
+    49.00,
     0.0100,
-    'API Starter - 25 CPS, ideal for small applications',
+    'API Basic - 5 CPS, ideal for low-volume applications',
     10,
-    '{"support": "email", "features": ["webhooks", "call_control", "basic_analytics", "recordings"]}'
+    '{"cps": 5, "support": "email", "features": ["webhooks", "call_control", "basic_analytics"]}'
 ),
 (
-    'api_professional',
+    'api_standard',
     'api',
-    50,
-    299.00,
+    8,
+    149.00,
     0.0080,
-    'API Professional - 50 CPS, for growing businesses',
+    'API Standard - 8 CPS, for growing businesses',
     20,
-    '{"support": "priority", "features": ["webhooks", "call_control", "advanced_analytics", "recordings", "conference", "transcription"]}'
+    '{"cps": 8, "support": "priority", "features": ["webhooks", "call_control", "advanced_analytics", "recordings", "conference"]}'
 ),
 (
-    'api_enterprise',
+    'api_premium',
     'api',
-    100,
-    799.00,
+    15,
+    399.00,
     0.0050,
-    'API Enterprise - 100 CPS, for high-volume operations',
+    'API Premium - 15 CPS, for high-volume operations',
     30,
-    '{"support": "dedicated", "features": ["webhooks", "call_control", "advanced_analytics", "recordings", "conference", "transcription", "custom_tts", "speech_recognition", "sla_guarantee"]}'
-),
-(
-    'api_unlimited',
-    'api',
-    1000,
-    0.00,
-    0.0000,
-    'API Unlimited - Custom pricing, negotiated rates',
-    40,
-    '{"support": "dedicated", "custom_pricing": true, "features": ["all_features", "custom_sla", "dedicated_infrastructure"]}'
+    '{"cps": 15, "support": "dedicated", "features": ["webhooks", "call_control", "advanced_analytics", "recordings", "conference", "transcription", "custom_tts", "sla_guarantee"]}'
 );
+
+-- Call Path packages (Metaswitch-style)
+-- Call paths = concurrent call capacity, independent of CPS
+-- Purchased per-trunk, not per-customer
+CREATE TABLE call_path_packages (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(50) NOT NULL UNIQUE,
+    call_paths INT NOT NULL CHECK (call_paths > 0),
+    monthly_fee DECIMAL(10,2) NOT NULL DEFAULT 0,
+    description TEXT,
+    is_active BOOLEAN DEFAULT true,
+    sort_order INTEGER DEFAULT 0,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+INSERT INTO call_path_packages (name, call_paths, monthly_fee, description, sort_order) VALUES
+('paths_10', 10, 25.00, '10 concurrent call paths', 1),
+('paths_25', 25, 50.00, '25 concurrent call paths', 2),
+('paths_50', 50, 90.00, '50 concurrent call paths', 3),
+('paths_100', 100, 160.00, '100 concurrent call paths', 4),
+('paths_200', 200, 280.00, '200 concurrent call paths', 5);
+
+-- Add call_path_package_id to sip_trunks
+ALTER TABLE sip_trunks ADD COLUMN IF NOT EXISTS call_path_package_id INTEGER REFERENCES call_path_packages(id);
+
+-- Grant permissions for call path packages
+GRANT SELECT ON call_path_packages TO api, freeswitch;
+GRANT UPDATE (call_path_package_id) ON sip_trunks TO api;
 
 -- Function to automatically set default tiers for new customers
 CREATE OR REPLACE FUNCTION set_default_cps_tiers()
 RETURNS TRIGGER AS $$
 BEGIN
-    -- Set free trunk tier if customer has trunk account type
+    -- Set standard trunk tier if customer has trunk account type
     IF NEW.account_type IN ('trunk', 'hybrid') AND NEW.trunk_tier_id IS NULL THEN
-        SELECT id INTO NEW.trunk_tier_id FROM cps_tiers WHERE name = 'trunk_free';
+        SELECT id INTO NEW.trunk_tier_id FROM cps_tiers WHERE name = 'trunk_standard';
     END IF;
 
-    -- Set starter API tier if customer has API account type
+    -- Set basic API tier if customer has API account type
     IF NEW.account_type IN ('api', 'hybrid') AND NEW.api_tier_id IS NULL THEN
-        SELECT id INTO NEW.api_tier_id FROM cps_tiers WHERE name = 'api_starter';
+        SELECT id INTO NEW.api_tier_id FROM cps_tiers WHERE name = 'api_basic';
     END IF;
 
     RETURN NEW;

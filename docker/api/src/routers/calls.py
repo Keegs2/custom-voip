@@ -1,9 +1,9 @@
 """API Calling endpoints - initiate and control calls.
 
 Implements tiered CPS (Calls Per Second) limits for API calling:
-- api_starter: 25 CPS, $0.01/call
-- api_professional: 50 CPS, $0.008/call
-- api_enterprise: 100 CPS, $0.005/call
+- api_basic: 5 CPS, $0.01/call
+- api_standard: 8 CPS, $0.008/call
+- api_premium: 15 CPS, $0.005/call
 """
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 from pydantic import BaseModel
@@ -19,8 +19,8 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 # Default API tier settings (fallback if not configured)
-DEFAULT_API_CPS_LIMIT = 25
-DEFAULT_API_TIER = "api_starter"
+DEFAULT_API_CPS_LIMIT = 5
+DEFAULT_API_TIER = "api_basic"
 
 
 class CallCreate(BaseModel):
@@ -257,17 +257,17 @@ def _get_upgrade_message(tier_name: str, current_cps: int, cps_limit: int) -> st
         Upgrade recommendation message
     """
     messages = {
-        "api_starter": (
-            f"Your current plan (Starter) allows {cps_limit} CPS. "
-            "Upgrade to Professional ($299/mo) for 50 CPS and lower per-call fees ($0.008)."
+        "api_basic": (
+            f"Your current plan (Basic) allows {cps_limit} CPS. "
+            "Upgrade to Standard ($299/mo) for 8 CPS and lower per-call fees ($0.008)."
         ),
-        "api_professional": (
-            f"Your current plan (Professional) allows {cps_limit} CPS. "
-            "Upgrade to Enterprise ($799/mo) for 100 CPS and the lowest per-call fees ($0.005)."
+        "api_standard": (
+            f"Your current plan (Standard) allows {cps_limit} CPS. "
+            "Upgrade to Premium ($799/mo) for 15 CPS and the lowest per-call fees ($0.005)."
         ),
-        "api_enterprise": (
-            f"Your current plan (Enterprise) allows {cps_limit} CPS. "
-            "Contact sales for custom Unlimited tier with negotiated rates."
+        "api_premium": (
+            f"Your current plan (Premium) allows {cps_limit} CPS. "
+            "You are on the highest tier. Contact sales for custom volume pricing."
         ),
     }
 
