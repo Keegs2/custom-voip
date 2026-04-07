@@ -1,0 +1,150 @@
+<?xml version="1.0"?>
+<!--
+  FreeSWITCH Main Configuration
+  Voice Platform - High Volume Production Configuration
+
+  This file defines global variables and includes other configuration files.
+  Variables defined here are available throughout all configurations using $${variable}.
+-->
+<document type="freeswitch/xml">
+
+  <!-- ============================================ -->
+  <!-- AUDIO/PROMPTS CONFIGURATION                 -->
+  <!-- ============================================ -->
+  <!-- Note: safarov/freeswitch image has empty sounds dir by default -->
+  <!-- For MVP, we use tone streams. For production, mount sound files -->
+  <X-PRE-PROCESS cmd="set" data="sounds_dir=/usr/share/freeswitch/sounds"/>
+  <X-PRE-PROCESS cmd="set" data="sound_prefix=$${sounds_dir}/en/us/callie"/>
+  <!-- Use silence or tones as hold music for MVP (no sound files needed) -->
+  <X-PRE-PROCESS cmd="set" data="hold_music=silence_stream://-1"/>
+
+  <!-- ============================================ -->
+  <!-- DOMAIN CONFIGURATION                        -->
+  <!-- ============================================ -->
+  <X-PRE-PROCESS cmd="set" data="domain=voiceplatform.local"/>
+  <X-PRE-PROCESS cmd="set" data="domain_name=$${domain}"/>
+
+  <!-- ============================================ -->
+  <!-- SIP PORT CONFIGURATION                      -->
+  <!-- ============================================ -->
+  <!-- Internal profile - receives from Kamailio SBC -->
+  <X-PRE-PROCESS cmd="set" data="internal_sip_port=5080"/>
+  <X-PRE-PROCESS cmd="set" data="internal_tls_port=5081"/>
+
+  <!-- External profile - direct carrier connections (if needed) -->
+  <X-PRE-PROCESS cmd="set" data="external_sip_port=5060"/>
+  <X-PRE-PROCESS cmd="set" data="external_tls_port=5061"/>
+
+  <!-- ============================================ -->
+  <!-- RTP PORT RANGE                              -->
+  <!-- ============================================ -->
+  <!-- Wide range for high-volume: 10,000+ concurrent calls -->
+  <X-PRE-PROCESS cmd="set" data="rtp_start_port=16384"/>
+  <X-PRE-PROCESS cmd="set" data="rtp_end_port=32768"/>
+
+  <!-- ============================================ -->
+  <!-- EXTERNAL IP (for NAT traversal)            -->
+  <!-- ============================================ -->
+  <!-- Set these to your public IP in production -->
+  <!-- Can also use 'stun:stun.freeswitch.org' or 'auto-nat' -->
+  <X-PRE-PROCESS cmd="set" data="external_rtp_ip=auto-nat"/>
+  <X-PRE-PROCESS cmd="set" data="external_sip_ip=auto-nat"/>
+
+  <!-- Override with environment variables if set -->
+  <X-PRE-PROCESS cmd="exec-set" data="external_rtp_ip=echo ${EXTERNAL_RTP_IP:-auto-nat}"/>
+  <X-PRE-PROCESS cmd="exec-set" data="external_sip_ip=echo ${EXTERNAL_SIP_IP:-auto-nat}"/>
+
+  <!-- ============================================ -->
+  <!-- DATABASE CONFIGURATION (PostgreSQL via PgBouncer) -->
+  <!-- ============================================ -->
+  <X-PRE-PROCESS cmd="set" data="pg_host=postgres"/>
+  <X-PRE-PROCESS cmd="set" data="pg_port=6432"/>
+  <X-PRE-PROCESS cmd="set" data="pg_dbname=voip"/>
+  <X-PRE-PROCESS cmd="set" data="pg_user=freeswitch"/>
+  <X-PRE-PROCESS cmd="set" data="pg_pass=fs_secret"/>
+
+  <!-- Override from environment -->
+  <X-PRE-PROCESS cmd="exec-set" data="pg_host=echo ${DB_HOST:-postgres}"/>
+  <X-PRE-PROCESS cmd="exec-set" data="pg_port=echo ${DB_PORT:-6432}"/>
+  <X-PRE-PROCESS cmd="exec-set" data="pg_dbname=echo ${DB_NAME:-voip}"/>
+  <X-PRE-PROCESS cmd="exec-set" data="pg_user=echo ${DB_USER:-freeswitch}"/>
+  <X-PRE-PROCESS cmd="exec-set" data="pg_pass=echo ${DB_PASS:-fs_secret}"/>
+
+  <!-- ============================================ -->
+  <!-- REDIS CONFIGURATION                         -->
+  <!-- ============================================ -->
+  <X-PRE-PROCESS cmd="set" data="redis_host=redis"/>
+  <X-PRE-PROCESS cmd="set" data="redis_port=6379"/>
+
+  <X-PRE-PROCESS cmd="exec-set" data="redis_host=echo ${REDIS_HOST:-redis}"/>
+  <X-PRE-PROCESS cmd="exec-set" data="redis_port=echo ${REDIS_PORT:-6379}"/>
+
+  <!-- ============================================ -->
+  <!-- API SERVER CONFIGURATION                    -->
+  <!-- ============================================ -->
+  <X-PRE-PROCESS cmd="set" data="api_host=api"/>
+  <X-PRE-PROCESS cmd="set" data="api_port=8000"/>
+
+  <X-PRE-PROCESS cmd="exec-set" data="api_host=echo ${API_HOST:-api}"/>
+  <X-PRE-PROCESS cmd="exec-set" data="api_port=echo ${API_PORT:-8000}"/>
+
+  <!-- ============================================ -->
+  <!-- EVENT SOCKET PASSWORD                       -->
+  <!-- ============================================ -->
+  <!-- SECURITY: Change this in production! -->
+  <X-PRE-PROCESS cmd="set" data="esl_password=ClueCon"/>
+  <X-PRE-PROCESS cmd="exec-set" data="esl_password=echo ${ESL_PASSWORD:-ClueCon}"/>
+
+  <!-- ============================================ -->
+  <!-- CODEC PREFERENCES                           -->
+  <!-- ============================================ -->
+  <X-PRE-PROCESS cmd="set" data="global_codec_prefs=PCMU,PCMA,G722,speex"/>
+  <X-PRE-PROCESS cmd="set" data="outbound_codec_prefs=PCMU,PCMA"/>
+
+  <!-- ============================================ -->
+  <!-- TLS CONFIGURATION                           -->
+  <!-- ============================================ -->
+  <X-PRE-PROCESS cmd="set" data="tls_cert_dir=/etc/freeswitch/tls"/>
+
+  <!-- ============================================ -->
+  <!-- RECORDING CONFIGURATION                     -->
+  <!-- ============================================ -->
+  <X-PRE-PROCESS cmd="set" data="recordings_dir=/var/lib/freeswitch/recordings"/>
+
+  <!-- ============================================ -->
+  <!-- DEFAULT TIMEOUTS                            -->
+  <!-- ============================================ -->
+  <X-PRE-PROCESS cmd="set" data="default_ring_timeout=30"/>
+  <X-PRE-PROCESS cmd="set" data="default_hold_timeout=1800"/>
+  <X-PRE-PROCESS cmd="set" data="default_rtp_timeout=60"/>
+
+  <!-- ============================================ -->
+  <!-- SECTION INCLUDES                            -->
+  <!-- ============================================ -->
+
+  <section name="configuration" description="Configuration">
+    <X-PRE-PROCESS cmd="include" data="autoload_configs/*.xml"/>
+  </section>
+
+  <section name="dialplan" description="Dialplan">
+    <X-PRE-PROCESS cmd="include" data="dialplan/*.xml"/>
+  </section>
+
+  <section name="directory" description="Directory">
+    <X-PRE-PROCESS cmd="include" data="directory/*.xml"/>
+  </section>
+
+  <!-- Phrases (for say applications) -->
+  <!-- Include language files from safarov/freeswitch image -->
+  <section name="phrases" description="Speech Phrase Management">
+    <macros>
+      <X-PRE-PROCESS cmd="include" data="/usr/share/freeswitch/lang/en/*.xml"/>
+    </macros>
+  </section>
+
+  <!-- Languages section for mod_say_en -->
+  <section name="languages" description="Language Configuration">
+    <X-PRE-PROCESS cmd="include" data="/usr/share/freeswitch/lang/en/*.xml"/>
+  </section>
+
+</document>

@@ -1,0 +1,400 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Public Dialplan - Voice Platform Call Routing
+  All inbound calls are processed through Lua scripts for:
+  - RCF (Remote Call Forwarding)
+  - API Calling (webhook-driven)
+  - SIP Trunk (customer PBX interconnect)
+
+  Design Philosophy:
+  - Fast path: Set variables, call Lua, let Lua handle routing
+  - Security: Reject obviously invalid/malicious requests early
+  - Logging: Capture key variables for debugging without overhead
+  - Failsafe: Always have a final catch-all that rejects properly
+
+  LOCAL TESTING ADDITIONS (for Zoiper):
+  - Extensions 1001-1003 can call each other
+  - Dial 555XXXX for test RCF DIDs (routes through Lua)
+  - Default context for registered users
+
+  DYNAMIC ROUTING via Lua Scripts:
+  - inbound_router.lua: RCF, API DID, and Trunk DID routing with Redis caching
+  - api_outbound.lua: API Calling product outbound calls with tier-aware CPS
+  - trunk_outbound.lua: SIP Trunk customer outbound calls
+-->
+<include>
+
+  <!-- ============================================ -->
+  <!-- DEFAULT CONTEXT - Registered Users          -->
+  <!-- ============================================ -->
+  <!--
+    This context handles calls FROM registered users (Zoiper, etc.)
+    Allows local extension dialing and test RCF calls
+  -->
+  <context name="default">
+
+    <!-- Local extension dialing (1001, 1002, 1003, etc.) -->
+    <extension name="local_extension">
+      <condition field="destination_number" expression="^(10[0-9]{2})$">
+        <action application="log" data="INFO Local extension call: ${caller_id_number} -> $1"/>
+        <action application="set" data="hangup_after_bridge=true"/>
+        <action application="set" data="call_timeout=30"/>
+        <action application="set" data="continue_on_fail=true"/>
+        <!-- Ring the called extension -->
+        <action application="bridge" data="user/$1@$${domain}"/>
+        <!-- If no answer or not registered -->
+        <action application="log" data="INFO Extension $1 unavailable"/>
+        <action application="hangup" data="USER_NOT_REGISTERED"/>
+      </condition>
+    </extension>
+
+    <!-- Test RCF DIDs: 555XXXX pattern -->
+    <!-- Routes through Lua for dynamic RCF lookup -->
+    <extension name="test_rcf_did">
+      <condition field="destination_number" expression="^(555\d{4})$">
+        <action application="log" data="INFO Test RCF call: ${caller_id_number} -> $1"/>
+        <action application="set" data="direction=inbound"/>
+        <action application="set" data="call_start_time=${strftime(%Y-%m-%d %H:%M:%S)}"/>
+        <action application="set" data="is_local_test=true"/>
+        <!-- Transfer to public context for Lua-based RCF routing -->
+        <action application="transfer" data="$1 XML public"/>
+      </condition>
+    </extension>
+
+    <!-- Echo test for registered users -->
+    <extension name="echo_test_default">
+      <condition field="destination_number" expression="^9196$">
+        <action application="answer"/>
+        <action application="echo"/>
+      </condition>
+    </extension>
+
+    <!-- Allow calling any DID (for testing outbound through RCF) -->
+    <!-- This transfers to public context which has Lua-based routing -->
+    <extension name="default_outbound">
+      <condition field="destination_number" expression="^(\+?1?\d{10,15})$">
+        <action application="log" data="INFO Outbound from registered user: ${caller_id_number} -> $1"/>
+        <action application="set" data="direction=outbound"/>
+        <action application="set" data="is_local_test=true"/>
+        <!-- Transfer to public context where Lua handles routing -->
+        <action application="transfer" data="$1 XML public"/>
+      </condition>
+    </extension>
+
+    <!-- Catchall for unmatched in default context -->
+    <extension name="default_catchall">
+      <condition field="destination_number" expression=".*">
+        <action application="log" data="WARNING Unmatched in default context: ${destination_number}"/>
+        <action application="playback" data="tone_stream://%(200,100,400,450);%(200,100,400,450);%(200,100,400,450)"/>
+        <action application="hangup" data="NO_ROUTE_DESTINATION"/>
+      </condition>
+    </extension>
+
+  </context>
+
+  <!-- ============================================ -->
+  <!-- PUBLIC CONTEXT - Carrier/External Traffic   -->
+  <!-- ============================================ -->
+  <context name="public">
+
+    <!-- ============================================ -->
+    <!-- ANTI-FRAUD: Block known attack patterns     -->
+    <!-- ============================================ -->
+
+    <!-- Block empty destinations (scanner behavior) -->
+    <extension name="block_empty_dest" continue="false">
+      <condition field="destination_number" expression="^$">
+        <action application="log" data="WARNING Blocked empty destination from ${sip_from_uri}"/>
+        <action application="respond" data="404 Not Found"/>
+      </condition>
+    </extension>
+
+    <!-- Block SIP URIs with @ (potential injection) -->
+    <extension name="block_uri_injection" continue="false">
+      <condition field="destination_number" expression="@">
+        <action application="log" data="WARNING Blocked URI injection attempt: ${destination_number}"/>
+        <action application="respond" data="403 Forbidden"/>
+      </condition>
+    </extension>
+
+    <!-- Block obviously invalid destinations (non-digits except +) -->
+    <extension name="block_invalid_chars" continue="false">
+      <condition field="destination_number" expression="[^0-9+*#]">
+        <action application="log" data="WARNING Blocked invalid characters in destination: ${destination_number}"/>
+        <action application="respond" data="404 Not Found"/>
+      </condition>
+    </extension>
+
+    <!-- Block excessively long destinations (>20 digits) -->
+    <extension name="block_long_dest" continue="false">
+      <condition field="destination_number" expression="^.{21,}$">
+        <action application="log" data="WARNING Blocked excessive length destination: ${destination_number}"/>
+        <action application="respond" data="404 Not Found"/>
+      </condition>
+    </extension>
+
+    <!-- ============================================ -->
+    <!-- SPECIAL NUMBERS (Testing/Admin)            -->
+    <!-- ============================================ -->
+
+    <!-- Echo test (for carrier/audio verification) -->
+    <extension name="echo_test">
+      <condition field="destination_number" expression="^9196$">
+        <action application="answer"/>
+        <action application="echo"/>
+      </condition>
+    </extension>
+
+    <!-- Delay echo (test for latency) -->
+    <extension name="delay_echo">
+      <condition field="destination_number" expression="^9195$">
+        <action application="answer"/>
+        <action application="delay_echo" data="5000"/>
+      </condition>
+    </extension>
+
+    <!-- Tone test (DTMF verification) -->
+    <extension name="tone_test">
+      <condition field="destination_number" expression="^9198$">
+        <action application="answer"/>
+        <action application="playback" data="tone_stream://%(500,500,440,480)"/>
+        <action application="sleep" data="5000"/>
+        <action application="hangup"/>
+      </condition>
+    </extension>
+
+    <!-- Milliwatt test (audio level verification) -->
+    <extension name="milliwatt">
+      <condition field="destination_number" expression="^9197$">
+        <action application="answer"/>
+        <action application="playback" data="tone_stream://%(10000,0,1000);loops=-1"/>
+      </condition>
+    </extension>
+
+    <!-- ============================================ -->
+    <!-- LOCAL EXTENSION DIALING (Registered Users) -->
+    <!-- ============================================ -->
+    <!--
+      Allows registered Zoiper/Linphone clients to call each other
+      Extensions 1001, 1002, 1003 pattern: 10XX
+
+      SECURITY: This only works for registered users because:
+      - External carriers don't send 4-digit numbers
+      - The bridge uses user/ which requires registration lookup
+    -->
+    <extension name="local_extension">
+      <condition field="destination_number" expression="^(10[0-9]{2})$">
+        <action application="log" data="INFO Local extension call: ${caller_id_number} -> $1"/>
+        <action application="set" data="hangup_after_bridge=true"/>
+        <action application="set" data="call_timeout=30"/>
+        <action application="set" data="continue_on_fail=true"/>
+        <!-- Ring the called extension -->
+        <action application="bridge" data="user/$1@$${domain}"/>
+        <!-- If no answer or not registered -->
+        <action application="log" data="INFO Extension $1 unavailable or not registered"/>
+        <action application="hangup" data="USER_NOT_REGISTERED"/>
+      </condition>
+    </extension>
+
+    <!-- ============================================ -->
+    <!-- OUTBOUND API CALLS (Originated via ESL)    -->
+    <!-- ============================================ -->
+    <!--
+      Calls originated via Event Socket for API Calling product
+      These have outbound_api=true set by the originate command
+      Uses api_outbound.lua with tier-aware CPS limits (25/50/100+ CPS)
+    -->
+    <extension name="outbound_api">
+      <condition field="${outbound_api}" expression="^true$">
+        <action application="log" data="INFO API Outbound: ${uuid} to ${destination_number} customer=${customer_id}"/>
+        <action application="set" data="direction=outbound"/>
+        <action application="set" data="product_type=api"/>
+        <action application="set" data="call_start_time=${strftime(%Y-%m-%d %H:%M:%S)}"/>
+
+        <!-- Set hangup hook for cleanup -->
+        <action application="set" data="api_on_answer="/>
+        <action application="set" data="hangup_after_bridge=true"/>
+        <action application="set" data="continue_on_fail=false"/>
+
+        <!-- Execute Lua script for API call handling with tier-aware CPS -->
+        <action application="lua" data="api_outbound.lua"/>
+
+        <!-- Fallback if Lua doesn't handle -->
+        <action application="log" data="ERR API Outbound script did not complete call"/>
+        <action application="hangup" data="NORMAL_TEMPORARY_FAILURE"/>
+      </condition>
+    </extension>
+
+    <!-- ============================================ -->
+    <!-- OUTBOUND API CALLS (product_type routing)   -->
+    <!-- ============================================ -->
+    <!--
+      Alternative routing for API calls based on product_type variable
+      This handles cases where calls are transferred to API processing
+    -->
+    <extension name="api_product_type">
+      <condition field="${product_type}" expression="^api$">
+        <condition field="${direction}" expression="^outbound$">
+          <action application="log" data="INFO API Product Type Route: ${uuid} to ${destination_number}"/>
+          <action application="set" data="call_start_time=${strftime(%Y-%m-%d %H:%M:%S)}"/>
+
+          <!-- Execute API outbound script with tier enforcement -->
+          <action application="lua" data="api_outbound.lua"/>
+
+          <!-- Fallback -->
+          <action application="log" data="ERR API product_type route did not complete"/>
+          <action application="hangup" data="NORMAL_TEMPORARY_FAILURE"/>
+        </condition>
+      </condition>
+    </extension>
+
+    <!-- ============================================ -->
+    <!-- TRUNK OUTBOUND (From Customer PBX)         -->
+    <!-- ============================================ -->
+    <!--
+      Calls from authenticated SIP trunk customers
+      trunk_id is set by IP-based auth lookup in Lua
+    -->
+    <extension name="trunk_outbound">
+      <condition field="${trunk_id}" expression="^\d+$">
+        <action application="log" data="INFO Trunk Outbound: trunk=${trunk_id} to ${destination_number}"/>
+        <action application="set" data="direction=outbound"/>
+        <action application="set" data="product_type=trunk"/>
+        <action application="set" data="call_start_time=${strftime(%Y-%m-%d %H:%M:%S)}"/>
+
+        <!-- Execute Lua script for trunk call handling -->
+        <action application="lua" data="trunk_outbound.lua"/>
+
+        <!-- Fallback if Lua doesn't handle -->
+        <action application="log" data="ERR Trunk script did not complete call"/>
+        <action application="hangup" data="NORMAL_TEMPORARY_FAILURE"/>
+      </condition>
+    </extension>
+
+    <!-- ============================================ -->
+    <!-- INBOUND CALLS (Main Lua-based routing)     -->
+    <!-- ============================================ -->
+    <!--
+      All inbound calls to DIDs (RCF, API, Trunk)
+      Routes through inbound_router.lua for dynamic lookup:
+      1. Check Redis cache for RCF routes
+      2. Query PostgreSQL for RCF/API/Trunk DID mappings
+      3. Apply velocity limits and fraud checks
+      4. Route to destination or webhook
+
+      This is the primary routing mechanism for the platform.
+    -->
+    <extension name="inbound_handler">
+      <condition field="destination_number" expression="^(\+?1?\d{10,15})$">
+        <action application="log" data="INFO Inbound: ${caller_id_number} -> ${destination_number} from ${network_addr}"/>
+
+        <!-- Set common channel variables -->
+        <action application="set" data="direction=inbound"/>
+        <action application="set" data="call_start_time=${strftime(%Y-%m-%d %H:%M:%S)}"/>
+        <action application="set" data="sip_source_ip=${network_addr}"/>
+
+        <!-- Execute Lua routing script -->
+        <!-- inbound_router.lua handles: RCF lookup, API DID lookup, Trunk DID lookup -->
+        <!-- It also handles caching, velocity limits, and fraud prevention -->
+        <action application="lua" data="inbound_router.lua"/>
+
+        <!-- Fallback if Lua script doesn't handle the call -->
+        <!-- This should rarely happen if the script is working correctly -->
+        <action application="log" data="WARNING Lua router did not handle call, rejecting"/>
+        <action application="respond" data="404 Not Found"/>
+      </condition>
+    </extension>
+
+    <!-- ============================================ -->
+    <!-- SHORTER NUMBER FORMATS                     -->
+    <!-- ============================================ -->
+    <!--
+      Handle 10-digit and other formats without +/1 prefix
+      Normalize and route through main handler
+    -->
+    <extension name="inbound_short">
+      <condition field="destination_number" expression="^(\d{10})$">
+        <action application="log" data="INFO Inbound (short): ${caller_id_number} -> ${destination_number}"/>
+
+        <!-- Normalize to E.164 -->
+        <action application="set" data="destination_number=+1$1"/>
+
+        <!-- Transfer to main handler -->
+        <action application="transfer" data="+1$1 XML public"/>
+      </condition>
+    </extension>
+
+    <!-- ============================================ -->
+    <!-- STAR CODES (Feature Access)                -->
+    <!-- ============================================ -->
+    <!--
+      Handle star codes if needed (e.g., *67 for CLID blocking)
+      Could be used for trunk customers with feature codes
+    -->
+    <extension name="star_codes">
+      <condition field="destination_number" expression="^\*\d{2,4}$">
+        <action application="log" data="INFO Star code: ${destination_number} from ${caller_id_number}"/>
+        <!-- Handle star codes in Lua or reject -->
+        <action application="respond" data="404 Not Found"/>
+      </condition>
+    </extension>
+
+    <!-- ============================================ -->
+    <!-- EMERGENCY NUMBERS                          -->
+    <!-- ============================================ -->
+    <!--
+      Route emergency calls through appropriate carrier
+      IMPORTANT: Ensure 911 routing is properly configured and tested
+    -->
+    <extension name="emergency_911">
+      <condition field="destination_number" expression="^(911|933)$">
+        <action application="log" data="CRIT 911 CALL: from ${caller_id_number} (${sip_from_uri})"/>
+
+        <!-- Set emergency call flags -->
+        <action application="set" data="is_emergency=true"/>
+        <action application="set" data="emergency_callback=${caller_id_number}"/>
+
+        <!-- Route to emergency carrier (configure in production!) -->
+        <action application="bridge" data="sofia/gateway/carrier_standard/911"/>
+
+        <!-- If bridge fails, try backup -->
+        <action application="bridge" data="sofia/gateway/carrier_premium/911"/>
+
+        <!-- Absolute last resort -->
+        <action application="log" data="CRIT 911 ROUTING FAILED"/>
+        <action application="playback" data="ivr/ivr-call_cannot_be_completed_as_dialed.wav"/>
+        <action application="hangup" data="NETWORK_OUT_OF_ORDER"/>
+      </condition>
+    </extension>
+
+    <!-- ============================================ -->
+    <!-- CATCHALL - Reject Unknown                  -->
+    <!-- ============================================ -->
+    <!--
+      Final fallback - reject anything that wasn't matched
+      This should rarely be hit if dialplan is complete
+    -->
+    <extension name="unmatched">
+      <condition field="destination_number" expression=".*">
+        <action application="log" data="WARNING Unmatched call: ${caller_id_number} -> ${destination_number} from ${network_addr}"/>
+
+        <!-- Respond with appropriate SIP error -->
+        <action application="respond" data="404 Not Found"/>
+      </condition>
+    </extension>
+
+  </context>
+
+  <!-- ============================================ -->
+  <!-- FEATURES CONTEXT (for transfers, etc.)      -->
+  <!-- ============================================ -->
+  <context name="features">
+    <!-- Handle attended transfer parking, etc. -->
+    <extension name="feature_default">
+      <condition field="destination_number" expression=".*">
+        <action application="transfer" data="${destination_number} XML public"/>
+      </condition>
+    </extension>
+  </context>
+
+</include>

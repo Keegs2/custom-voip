@@ -1,0 +1,86 @@
+# Dispatcher list - FreeSWITCH backends
+# Format: setid  destination  flags  priority  attrs
+#
+# Flags:
+#   0 - No flags (use default)
+#   1 - Inactive (destination is down)
+#   2 - Probing (being tested)
+#   4 - Disable DNS SRV lookups
+#   8 - Disable DNS A lookups
+#   16 - Delete entry on expire
+#
+# Priority: Lower = higher priority (0-255)
+#
+# Attrs: Key-value pairs for custom routing
+#   weight=N - Relative weight for weighted distribution
+#   maxload=N - Max concurrent calls (for call-load algorithm)
+#   socket=udp:IP:PORT - Force specific local socket
+#   duid=STRING - Unique destination ID
+#
+# Load balancing algorithms (used in ds_select_dst):
+#   0 - Hash over Call-ID
+#   1 - Hash over From URI
+#   2 - Hash over To URI
+#   3 - Hash over Request-URI
+#   4 - Round-Robin
+#   5 - Hash over authorization username
+#   6 - Random
+#   7 - Hash over PV
+#   8 - Priority-based selection (use priority field)
+#   9 - Weight-based (use weight attr)
+#   10 - Call-load distribution (use maxload attr)
+#   11 - Relative weight (percentage)
+#   12 - Parallel forking to all
+
+# ============================================================
+# Group 1: Primary FreeSWITCH Media Servers
+# ============================================================
+# These handle all call processing - RCF, API Calling, SIP Trunk
+
+# Primary FreeSWITCH instance (Docker service name)
+# Weight: 100, MaxLoad: 2000 concurrent calls
+1 sip:freeswitch:5080 0 0 weight=100;maxload=2000;duid=fs-primary
+
+# Add additional FreeSWITCH instances here for horizontal scaling:
+# 1 sip:freeswitch-2:5080 0 0 weight=100;maxload=2000;duid=fs-secondary
+# 1 sip:freeswitch-3:5080 0 0 weight=100;maxload=2000;duid=fs-tertiary
+
+# ============================================================
+# Group 2: Carrier Gateways (Outbound PSTN)
+# ============================================================
+# These are upstream carriers for terminating calls to PSTN
+# Add your carrier IPs here when ready for production
+
+# Example carrier configurations (uncomment and modify):
+# Primary carrier - Bandwidth/Level3/etc
+# 2 sip:carrier1.example.com:5060 0 0 weight=50;duid=carrier-primary
+
+# Secondary carrier for failover
+# 2 sip:carrier2.example.com:5060 0 1 weight=30;duid=carrier-secondary
+
+# Tertiary carrier (least cost routing or overflow)
+# 2 sip:carrier3.example.com:5060 0 2 weight=20;duid=carrier-tertiary
+
+# ============================================================
+# Group 3: Premium Traffic Carriers
+# ============================================================
+# Higher quality/cost carriers for premium traffic grade
+
+# Premium carrier (higher cost, better quality)
+# 3 sip:premium-carrier.example.com:5060 0 0 weight=100;duid=carrier-premium
+
+# ============================================================
+# Notes:
+# ============================================================
+# - Kamailio will probe each destination every ds_ping_interval seconds
+# - Destinations that fail ds_probing_threshold probes are marked inactive
+# - Inactive destinations are retried and reactivated after ds_inactive_threshold successes
+# - Use ds_mark_dst("p") to manually mark a destination for probing
+# - Use ds_mark_dst("i") to manually mark a destination as inactive
+# - Use ds_mark_dst("a") to manually mark a destination as active
+#
+# To reload dispatcher list without restart:
+#   kamcmd dispatcher.reload
+#
+# To view dispatcher status:
+#   kamcmd dispatcher.list

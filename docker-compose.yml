@@ -1,0 +1,218 @@
+# Voice Platform - Docker Compose Configuration
+# Optimized for high-volume performance
+#
+# Usage:
+#   docker compose up -d          # Start all services
+#   docker compose logs -f        # Follow logs
+#   docker compose down           # Stop all services
+#
+version: '3.8'
+
+services:
+  # PostgreSQL with TimescaleDB and PgBouncer
+  postgres:
+    build: ./docker/postgres
+    container_name: voip-postgres
+    environment:
+      POSTGRES_DB: voip
+      POSTGRES_USER: voip
+      POSTGRES_PASSWORD: voip_secret
+      # Performance tuning
+      POSTGRES_INITDB_ARGS: "--data-checksums"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "5432:5432"   # Direct PostgreSQL
+      - "6432:6432"   # PgBouncer
+    networks:
+      - voip-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U voip -d voip"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+    restart: unless-stopped
+
+  # Redis - High-performance caching and real-time state
+  redis:
+    build: ./docker/redis
+    container_name: voip-redis
+    ports:
+      - "6380:6379"  # Use 6380 on host to avoid conflict with local Redis
+    volumes:
+      - redis_data:/data
+    networks:
+      - voip-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    sysctls:
+      - net.core.somaxconn=65535
+    restart: unless-stopped
+
+  # FreeSWITCH - Core voice switch
+  freeswitch:
+    build: ./docker/freeswitch
+    container_name: voip-freeswitch
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=voip
+      - DB_USER=freeswitch
+      - DB_PASS=fs_secret
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - API_HOST=api
+      - API_PORT=8000
+      - TEST_MODE=true  # Enable for testing without carriers
+    ports:
+      - "5080:5080/udp"
+      - "5080:5080/tcp"
+      - "5081:5081/tcp"
+      - "8022:8021/tcp"  # Use 8022 on host to avoid conflict
+      # RTP ports - use host networking in production
+      - "16384-16484:16384-16484/udp"
+    volumes:
+      # drachtio image uses /usr/local/freeswitch/conf
+      # Note: not read-only because entrypoint script needs to modify config
+      - ./docker/freeswitch/conf:/usr/local/freeswitch/conf
+      - ./docker/freeswitch/scripts:/usr/local/freeswitch/scripts
+      - freeswitch_logs:/var/log/freeswitch
+    networks:
+      - voip-network
+    cap_add:
+      - NET_ADMIN
+      - SYS_NICE
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 4G
+        reservations:
+          cpus: '2'
+          memory: 2G
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+      core:
+        soft: -1
+        hard: -1
+    restart: unless-stopped
+
+  # FastAPI - REST API layer
+  api:
+    build: ./docker/api
+    container_name: voip-api
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      - DATABASE_URL=postgresql://api:api_secret@postgres:5432/voip
+      - REDIS_URL=redis://redis:6379
+      - FREESWITCH_ESL_HOST=freeswitch
+      - FREESWITCH_ESL_PORT=8021
+      - FREESWITCH_ESL_PASSWORD=ClueCon
+      - TEST_MODE=true
+    ports:
+      - "8088:8000"  # Use 8088 on host to avoid conflict with other services
+    volumes:
+      - ./docker/api/src:/app:ro
+    networks:
+      - voip-network
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+    restart: unless-stopped
+
+  # Kamailio SBC - Front-end security (optional for initial testing)
+  kamailio:
+    build: ./docker/kamailio
+    container_name: voip-kamailio
+    depends_on:
+      - freeswitch
+    ports:
+      - "5060:5060/udp"
+      - "5060:5060/tcp"
+      - "5061:5061/tcp"
+    volumes:
+      - ./docker/kamailio/kamailio.cfg:/etc/kamailio/kamailio.cfg:ro
+      - ./docker/kamailio/dispatcher.list:/etc/kamailio/dispatcher.list:ro
+    networks:
+      - voip-network
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 128M
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    restart: unless-stopped
+    profiles:
+      - with-sbc  # Only start with: docker compose --profile with-sbc up
+
+  # Webhook test server
+  webhook-test:
+    build: ./docker/webhook-test
+    container_name: voip-webhook-test
+    ports:
+      - "9000:9000"
+    networks:
+      - voip-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 128M
+    restart: unless-stopped
+
+networks:
+  voip-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  freeswitch_logs:
+    driver: local

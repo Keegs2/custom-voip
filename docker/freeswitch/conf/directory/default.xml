@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  FreeSWITCH Directory Configuration
+  Contains user definitions for SIP registration
+
+  For local testing with Zoiper softphones:
+  - Extensions 1001, 1002, 1003 are pre-configured
+  - Register to FreeSWITCH on port 5080
+  - Password for all test users: "test1234"
+
+  SECURITY: Change passwords in production!
+-->
+<include>
+  <domain name="$${domain}">
+    <params>
+      <!-- Dial string for calling registered users -->
+      <param name="dial-string" value="{presence_id=${dialed_user}@${dialed_domain}}${sofia_contact(*/${dialed_user}@${dialed_domain})}"/>
+      <!-- Allow users to register -->
+      <param name="parse" value="true"/>
+    </params>
+
+    <variables>
+      <variable name="record_stereo" value="true"/>
+      <variable name="default_gateway" value="carrier_standard"/>
+      <variable name="default_areacode" value=""/>
+      <variable name="transfer_fallback_extension" value="operator"/>
+    </variables>
+
+    <groups>
+      <group name="default">
+        <users>
+          <!--
+            Test Extension 1001
+            For local RCF testing with Zoiper
+          -->
+          <user id="1001">
+            <params>
+              <param name="password" value="test1234"/>
+              <param name="vm-password" value="1001"/>
+            </params>
+            <variables>
+              <variable name="toll_allow" value="domestic,international,local"/>
+              <variable name="accountcode" value="1001"/>
+              <variable name="user_context" value="default"/>
+              <variable name="effective_caller_id_name" value="Extension 1001"/>
+              <variable name="effective_caller_id_number" value="1001"/>
+              <variable name="outbound_caller_id_name" value="$${outbound_caller_name}"/>
+              <variable name="outbound_caller_id_number" value="$${outbound_caller_id}"/>
+              <variable name="callgroup" value="test"/>
+            </variables>
+          </user>
+
+          <!--
+            Test Extension 1002
+            For local RCF testing with Zoiper
+          -->
+          <user id="1002">
+            <params>
+              <param name="password" value="test1234"/>
+              <param name="vm-password" value="1002"/>
+            </params>
+            <variables>
+              <variable name="toll_allow" value="domestic,international,local"/>
+              <variable name="accountcode" value="1002"/>
+              <variable name="user_context" value="default"/>
+              <variable name="effective_caller_id_name" value="Extension 1002"/>
+              <variable name="effective_caller_id_number" value="1002"/>
+              <variable name="outbound_caller_id_name" value="$${outbound_caller_name}"/>
+              <variable name="outbound_caller_id_number" value="$${outbound_caller_id}"/>
+              <variable name="callgroup" value="test"/>
+            </variables>
+          </user>
+
+          <!--
+            Test Extension 1003
+            For local RCF testing with Zoiper
+          -->
+          <user id="1003">
+            <params>
+              <param name="password" value="test1234"/>
+              <param name="vm-password" value="1003"/>
+            </params>
+            <variables>
+              <variable name="toll_allow" value="domestic,international,local"/>
+              <variable name="accountcode" value="1003"/>
+              <variable name="user_context" value="default"/>
+              <variable name="effective_caller_id_name" value="Extension 1003"/>
+              <variable name="effective_caller_id_number" value="1003"/>
+              <variable name="outbound_caller_id_name" value="$${outbound_caller_name}"/>
+              <variable name="outbound_caller_id_number" value="$${outbound_caller_id}"/>
+              <variable name="callgroup" value="test"/>
+            </variables>
+          </user>
+
+        </users>
+      </group>
+    </groups>
+
+  </domain>
+</include>

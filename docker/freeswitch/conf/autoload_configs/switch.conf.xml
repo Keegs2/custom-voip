@@ -1,0 +1,175 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  FreeSWITCH Core Configuration - Optimized for High Volume Voice Platform
+  Target: 500+ CPS, 10,000+ concurrent sessions
+
+  Memory Planning (per session ~1-3MB depending on features):
+  - 10,000 sessions * 2MB = ~20GB
+  - Ensure host has adequate RAM + swap disabled for predictable performance
+-->
+<configuration name="switch.conf" description="Core Configuration">
+  <settings>
+    <!-- ============================================ -->
+    <!-- HIGH VOLUME SESSION MANAGEMENT               -->
+    <!-- ============================================ -->
+
+    <!-- Maximum concurrent sessions - adjust based on RAM (each session ~2MB avg) -->
+    <param name="max-sessions" value="10000"/>
+
+    <!-- Sessions per second limit - prevents overload spikes -->
+    <!-- 500 CPS target, set slightly higher for bursts -->
+    <param name="sessions-per-second" value="600"/>
+
+    <!-- Minimum idle CPU percentage before rejecting new calls -->
+    <param name="min-idle-cpu" value="5"/>
+
+    <!-- ============================================ -->
+    <!-- DATABASE HANDLES (for mod_db, etc)          -->
+    <!-- ============================================ -->
+    <param name="max-db-handles" value="100"/>
+    <param name="db-handle-timeout" value="10"/>
+
+    <!-- ============================================ -->
+    <!-- LOGGING - Tuned for production              -->
+    <!-- ============================================ -->
+    <!-- 0=CONSOLE, 1=ALERT, 2=CRIT, 3=ERR, 4=WARN, 5=NOTICE, 6=INFO, 7=DEBUG -->
+    <param name="loglevel" value="warning"/>
+    <param name="colorize-console" value="false"/>
+
+    <!-- Disable debug for performance (enable for troubleshooting) -->
+    <param name="debug-level" value="0"/>
+
+    <!-- ============================================ -->
+    <!-- RTP MEDIA SETTINGS                          -->
+    <!-- ============================================ -->
+    <!-- Wide RTP port range for high concurrency -->
+    <!-- 10,000 calls * 2 ports (RTP+RTCP) = 20,000 ports minimum -->
+    <param name="rtp-start-port" value="16384"/>
+    <param name="rtp-end-port" value="32768"/>
+
+    <!-- RTP timeout - hang up if no media received -->
+    <param name="rtp-timeout-sec" value="60"/>
+
+    <!-- RTP hold timeout - longer for hold scenarios -->
+    <param name="rtp-hold-timeout-sec" value="1800"/>
+
+    <!-- Enable RTP autoflush for better performance -->
+    <param name="rtp-autoflush-during-bridge" value="true"/>
+
+    <!-- ============================================ -->
+    <!-- CORE PERFORMANCE TUNING                     -->
+    <!-- ============================================ -->
+
+    <!-- Threading model -->
+    <param name="switchname" value="voiceplatform"/>
+
+    <!-- Event system heartbeat interval -->
+    <param name="event-heartbeat-interval" value="20"/>
+
+    <!-- Reduce memory allocation overhead -->
+    <param name="max-audio-channels" value="2"/>
+
+    <!-- CPU affinity (optional - set if binding to specific cores) -->
+    <!-- <param name="cpu-idle-smoothing-depth" value="30"/> -->
+
+    <!-- ============================================ -->
+    <!-- SQL/DATABASE TUNING                         -->
+    <!-- ============================================ -->
+
+    <!-- Auto-create schemas for core DB -->
+    <param name="auto-create-schemas" value="true"/>
+
+    <!-- Clear SQL on startup (clean state) -->
+    <param name="auto-clear-sql" value="true"/>
+
+    <!-- Use ODBC for better connection handling (if configured) -->
+    <!-- <param name="core-db-dsn" value="odbc://voip"/> -->
+
+    <!-- SQL query threading -->
+    <param name="core-dbtype" value="sqlite"/>
+
+    <!-- ============================================ -->
+    <!-- SIP/SESSION TIMERS                          -->
+    <!-- ============================================ -->
+
+    <!-- Maximum call duration (12 hours) - prevent zombie calls -->
+    <param name="max-duration" value="43200"/>
+
+    <!-- Enable session thread local storage for performance -->
+    <param name="enable-use-system-time" value="false"/>
+
+    <!-- Monotonic clock for accurate timing -->
+    <param name="enable-monotonic-timing" value="true"/>
+
+    <!-- ============================================ -->
+    <!-- SECURITY SETTINGS                           -->
+    <!-- ============================================ -->
+
+    <!-- Disable core dumps in production (enable for debugging) -->
+    <param name="dump-cores" value="false"/>
+
+    <!-- Mailer (disable if not needed) -->
+    <param name="mailer-app" value=""/>
+
+    <!-- ============================================ -->
+    <!-- DIALPLAN CACHING                            -->
+    <!-- ============================================ -->
+
+    <!-- Cache dialplan XML for faster routing -->
+    <!-- Disable if using dynamic XML handler (we are using Lua) -->
+    <param name="dialplan-timestamps" value="true"/>
+
+    <!-- ============================================ -->
+    <!-- MISCELLANEOUS                               -->
+    <!-- ============================================ -->
+
+    <!-- Enable clock nanosleep for better timing precision -->
+    <param name="enable-clock-nanosleep" value="true"/>
+
+    <!-- Abort on out of memory (fail fast) -->
+    <param name="abort-on-oom" value="false"/>
+
+    <!-- ODBC max retries -->
+    <param name="odbc-max-retries" value="60"/>
+
+    <!-- Tones processing -->
+    <param name="tones-dir" value="$${sounds_dir}/en/us/callie"/>
+
+  </settings>
+
+  <!-- ============================================ -->
+  <!-- CLI KEY BINDINGS (for fs_cli debugging)     -->
+  <!-- ============================================ -->
+  <cli-keybindings>
+    <key name="1" value="help"/>
+    <key name="2" value="status"/>
+    <key name="3" value="show channels"/>
+    <key name="4" value="show calls"/>
+    <key name="5" value="sofia status"/>
+    <key name="6" value="sofia status profile internal"/>
+    <key name="7" value="show registrations"/>
+    <key name="8" value="show api"/>
+    <key name="9" value="fsctl pause"/>
+    <key name="10" value="fsctl resume"/>
+    <key name="11" value="fsctl shutdown"/>
+    <key name="12" value="reloadxml"/>
+  </cli-keybindings>
+
+  <!-- ============================================ -->
+  <!-- DEFAULT PTIME SETTINGS PER CODEC            -->
+  <!-- ============================================ -->
+  <default-ptimes>
+    <!-- G.711 - 20ms is standard for PSTN -->
+    <codec name="PCMU" ptime="20"/>
+    <codec name="PCMA" ptime="20"/>
+
+    <!-- G.729 - 20ms is optimal -->
+    <codec name="G729" ptime="20"/>
+
+    <!-- Opus - 20ms for real-time voice -->
+    <codec name="opus" ptime="20"/>
+
+    <!-- G.722 - 20ms -->
+    <codec name="G722" ptime="20"/>
+  </default-ptimes>
+</configuration>

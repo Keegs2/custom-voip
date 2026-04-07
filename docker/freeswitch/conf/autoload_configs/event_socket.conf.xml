@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Event Socket Configuration for API Integration
+  SECURITY WARNING: Event Socket provides full control of FreeSWITCH!
+
+  The API server uses ESL to:
+  - Originate outbound calls (API Calling product)
+  - Monitor call status
+  - Execute dialplan actions
+  - Collect real-time statistics
+
+  Password should be set via environment variable in production:
+  ${ESL_PASSWORD:-DefaultChangeMe2024}
+-->
+<configuration name="event_socket.conf" description="Event Socket">
+  <settings>
+    <!-- Disable NAT mapping (container networking handles this) -->
+    <param name="nat-map" value="false"/>
+
+    <!-- Listen on all interfaces within Docker network -->
+    <!-- In production, could bind to specific internal IP -->
+    <param name="listen-ip" value="0.0.0.0"/>
+    <param name="listen-port" value="8021"/>
+
+    <!--
+      SECURITY: Change this password in production!
+      Use environment variable: ${ESL_PASSWORD}
+      Or mount a secrets file
+
+      The default "ClueCon" password is well-known and DANGEROUS
+    -->
+    <param name="password" value="$${esl_password}"/>
+
+    <!-- ACL for network-level access control -->
+    <!-- Only allows connections from event_socket ACL defined in acl.conf.xml -->
+    <param name="apply-inbound-acl" value="event_socket"/>
+
+    <!-- Don't stop on bind error - allows IPv4 to work when IPv6 fails in Docker -->
+    <param name="stop-on-bind-error" value="false"/>
+
+    <!-- Explicitly disable IPv6 listening -->
+    <param name="listen-ipv6" value="false"/>
+  </settings>
+</configuration>

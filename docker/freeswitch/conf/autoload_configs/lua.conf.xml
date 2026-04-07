@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Lua Module Configuration - High Volume Voice Platform
+  All call routing logic is implemented in Lua for flexibility
+
+  This configuration works with the SignalWire-sourced FreeSWITCH build
+  that includes mod_lua with Lua 5.3 support.
+
+  Script Dependencies:
+  - lua-hiredis: Redis connectivity for caching and velocity control
+  - luasql-postgres: PostgreSQL connectivity for RCF/API/Trunk lookups
+-->
+<configuration name="lua.conf" description="Lua Configuration">
+  <settings>
+    <!-- ============================================ -->
+    <!-- SCRIPT LOCATIONS                            -->
+    <!-- ============================================ -->
+
+    <!-- Main script directory - where inbound_router.lua etc. live -->
+    <param name="script-directory" value="/usr/local/freeswitch/scripts/"/>
+
+    <!-- Lua module search paths for luarocks-installed libraries -->
+    <!-- lua-hiredis and luasql-postgres are installed here -->
+    <!-- Note: For subdirectory modules like luasql.postgres, need ?/?.so pattern -->
+    <param name="module-directory" value="/usr/local/lib/lua/5.3/?.so"/>
+    <param name="module-directory" value="/usr/local/lib/lua/5.3/?/?.so"/>
+    <param name="module-directory" value="/usr/lib/lua/5.3/?.so"/>
+    <param name="module-directory" value="/usr/lib/lua/5.3/?/?.so"/>
+
+    <!-- ============================================ -->
+    <!-- STARTUP SCRIPT                              -->
+    <!-- ============================================ -->
+    <!-- Runs once when FreeSWITCH starts -->
+    <!-- Used to initialize connections, load config, etc. -->
+    <param name="startup-script" value="startup.lua"/>
+
+    <!-- ============================================ -->
+    <!-- XML HANDLER (Dynamic Dialplan)              -->
+    <!-- ============================================ -->
+    <!-- If you need dynamic dialplan lookup, enable these -->
+    <!-- We use static XML dialplan with Lua app execution instead -->
+    <!-- <param name="xml-handler-script" value="xml_handler.lua"/> -->
+    <!-- <param name="xml-handler-bindings" value="dialplan"/> -->
+
+  </settings>
+
+  <!-- ============================================ -->
+  <!-- HOOK SCRIPTS (Event-driven)                 -->
+  <!-- ============================================ -->
+  <!--
+    Hook scripts are called for specific events.
+    Useful for CDR, hangup processing, channel cleanup, etc.
+  -->
+  <!--
+  <hook event="CHANNEL_HANGUP_COMPLETE" subclass="" script="cdr_hook.lua"/>
+  -->
+  <!--
+  <hook event="CHANNEL_DESTROY" subclass="" script="channel_release.lua"/>
+  -->
+
+</configuration>

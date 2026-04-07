@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  CDR CSV Configuration - Fast async writes for billing and analytics
+  CDRs are written to CSV files for:
+  - Backup/disaster recovery
+  - Billing verification
+  - Analytics processing
+  - Debugging
+
+  Primary CDR storage should be PostgreSQL (via Lua or mod_json_cdr webhook)
+-->
+<configuration name="cdr_csv.conf" description="CDR CSV">
+  <settings>
+    <!-- Base directory for CDR files -->
+    <param name="log-base" value="/var/log/freeswitch/cdr-csv"/>
+
+    <!-- Log only A-leg (caller side) - avoid double counting -->
+    <param name="legs" value="a"/>
+
+    <!-- Use template defined below -->
+    <param name="default-template" value="voiceplatform"/>
+
+    <!-- Single master file (vs per-account files) -->
+    <param name="master-file-only" value="true"/>
+
+    <!-- Rotate file on HUP signal -->
+    <param name="rotate-on-hup" value="true"/>
+
+    <!-- DEBUG: Log even if call fails early -->
+    <!-- <param name="debug" value="true"/> -->
+
+  </settings>
+
+  <templates>
+    <!--
+      Voice Platform CDR Template
+      Fields are designed to support:
+      - Billing (customer_id, product_type, duration, billsec)
+      - Analytics (traffic_grade, carrier_used, hangup_cause)
+      - Fraud detection (fraud_score, blocked_reason)
+      - Debugging (uuid, sip_call_id, timestamps)
+    -->
+    <template name="voiceplatform">"${uuid}","${sip_call_id}","${customer_id}","${product_type}","${trunk_id}","${direction}","${caller_id_number}","${caller_id_name}","${destination_number}","${start_stamp}","${answer_stamp}","${end_stamp}","${duration}","${billsec}","${hangup_cause}","${sip_hangup_disposition}","${carrier_used}","${traffic_grade}","${fraud_score}","${blocked_reason}","${network_addr}","${sip_received_ip}"</template>
+
+    <!-- Minimal template for high-volume debugging -->
+    <template name="minimal">"${uuid}","${customer_id}","${destination_number}","${billsec}","${hangup_cause}"</template>
+
+    <!-- Default template (fallback) -->
+    <template name="default">"${uuid}","${caller_id_number}","${destination_number}","${start_stamp}","${answer_stamp}","${end_stamp}","${duration}","${billsec}","${hangup_cause}"</template>
+  </templates>
+</configuration>

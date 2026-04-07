@@ -1,0 +1,170 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Access Control Lists for Voice Platform
+  SECURITY: Configure these carefully - ACLs control who can send SIP to FreeSWITCH
+
+  ACL Usage:
+  - trusted: Traffic from Kamailio SBC (internal Docker network)
+  - carriers: Outbound carrier gateway IPs (for return traffic)
+  - sip_trunks: Customer SIP trunk source IPs (if allowing direct connections)
+  - event_socket: IPs allowed to connect to Event Socket
+
+  IMPORTANT:
+  - In production, replace Docker network ranges with specific IPs
+  - NEVER use 0.0.0.0/0 in production
+  - Add carrier IPs from your carrier contracts
+-->
+<configuration name="acl.conf" description="ACL Configuration">
+  <network-lists>
+
+    <!-- ============================================ -->
+    <!-- TRUSTED - Kamailio SBC / Internal Services  -->
+    <!-- ============================================ -->
+    <!--
+      This ACL allows traffic from:
+      - Kamailio SBC (main SIP entry point)
+      - API server (for ESL commands)
+      - Internal monitoring
+    -->
+    <list name="trusted" default="deny">
+      <!-- Loopback -->
+      <node type="allow" cidr="127.0.0.0/8"/>
+      <node type="allow" cidr="::1/128"/>
+
+      <!-- Docker default bridge network -->
+      <node type="allow" cidr="172.16.0.0/12"/>
+
+      <!-- Docker compose default network -->
+      <node type="allow" cidr="192.168.0.0/16"/>
+
+      <!-- Common internal networks -->
+      <node type="allow" cidr="10.0.0.0/8"/>
+
+      <!--
+        PRODUCTION: Replace above with specific IPs:
+        <node type="allow" cidr="10.0.1.10/32"/>  - Kamailio SBC
+        <node type="allow" cidr="10.0.1.20/32"/>  - API Server
+      -->
+    </list>
+
+    <!-- ============================================ -->
+    <!-- CARRIERS - Upstream Termination Partners    -->
+    <!-- ============================================ -->
+    <!--
+      Add carrier gateway IPs here.
+      These are the SIP proxies that send us return traffic
+      (183/200 responses, in-dialog requests, etc.)
+    -->
+    <list name="carriers" default="deny">
+      <!-- Loopback for testing -->
+      <node type="allow" cidr="127.0.0.0/8"/>
+
+      <!--
+        PRODUCTION: Add your carrier IPs here:
+
+        Example: Bandwidth.com ranges
+        <node type="allow" cidr="65.202.0.0/19"/>
+        <node type="allow" cidr="67.231.0.0/20"/>
+
+        Example: Level3/Lumen
+        <node type="allow" cidr="4.0.0.0/8"/>
+
+        Example: Telnyx
+        <node type="allow" cidr="192.76.120.0/22"/>
+
+        Example: Twilio (if using as carrier)
+        <node type="allow" cidr="54.172.60.0/23"/>
+        <node type="allow" cidr="54.244.51.0/24"/>
+      -->
+
+      <!-- Placeholder: REMOVE IN PRODUCTION -->
+      <!-- Allowing all carriers temporarily for testing -->
+      <!-- <node type="allow" cidr="0.0.0.0/0"/> -->
+    </list>
+
+    <!-- ============================================ -->
+    <!-- SIP_TRUNKS - Direct Customer Connections    -->
+    <!-- ============================================ -->
+    <!--
+      For SIP Trunk customers connecting directly
+      (bypassing Kamailio for certain use cases)
+
+      SECURITY NOTE: Only enable if customers connect directly to FreeSWITCH
+      Normally all traffic should come through Kamailio
+    -->
+    <list name="sip_trunks" default="deny">
+      <!--
+        Add customer trunk IPs here as they're provisioned:
+
+        Example:
+        <node type="allow" cidr="203.0.113.50/32"/>  - Customer ABC PBX
+        <node type="allow" cidr="198.51.100.0/24"/> - Customer XYZ Office Range
+
+        These can also be managed dynamically via mod_xml_curl
+        to fetch from database
+      -->
+    </list>
+
+    <!-- ============================================ -->
+    <!-- EVENT_SOCKET - ESL Access Control           -->
+    <!-- ============================================ -->
+    <!--
+      Controls who can connect to Event Socket (port 8021)
+      This is critical for security - ESL gives full control
+    -->
+    <list name="event_socket" default="deny">
+      <!-- Loopback only by default -->
+      <node type="allow" cidr="127.0.0.0/8"/>
+      <node type="allow" cidr="::1/128"/>
+
+      <!-- Docker internal network (for API server) -->
+      <node type="allow" cidr="172.16.0.0/12"/>
+      <node type="allow" cidr="10.0.0.0/8"/>
+      <node type="allow" cidr="192.168.0.0/16"/>
+
+      <!--
+        PRODUCTION: Restrict to specific API server IP:
+        <node type="allow" cidr="10.0.1.20/32"/>  - API Server only
+      -->
+    </list>
+
+    <!-- ============================================ -->
+    <!-- LOOPBACK - Local access only                -->
+    <!-- ============================================ -->
+    <list name="loopback.auto" default="deny">
+      <node type="allow" cidr="127.0.0.0/8"/>
+      <node type="allow" cidr="::1/128"/>
+    </list>
+
+    <!-- ============================================ -->
+    <!-- BLOCKED - Known bad actors                  -->
+    <!-- ============================================ -->
+    <!--
+      Add IPs that should be blocked at this layer.
+      Note: Rate limiting and blocking should primarily happen at Kamailio.
+      This is a secondary defense.
+    -->
+    <list name="blocked" default="allow">
+      <!--
+        Add blocked IPs/ranges here:
+        <node type="deny" cidr="192.0.2.0/24"/>
+      -->
+    </list>
+
+    <!-- ============================================ -->
+    <!-- DOMAINS - Legacy/compatibility ACL          -->
+    <!-- ============================================ -->
+    <!--
+      This was originally allowing all traffic - DANGEROUS
+      Now restricted to internal only
+    -->
+    <list name="domains" default="deny">
+      <!-- Only allow from internal/trusted sources -->
+      <node type="allow" cidr="127.0.0.0/8"/>
+      <node type="allow" cidr="172.16.0.0/12"/>
+      <node type="allow" cidr="10.0.0.0/8"/>
+      <node type="allow" cidr="192.168.0.0/16"/>
+    </list>
+
+  </network-lists>
+</configuration>

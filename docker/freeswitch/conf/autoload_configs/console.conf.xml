@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Console configuration for Docker stdout logging -->
+<configuration name="console.conf" description="Console Logger">
+  <mappings>
+    <map name="all" value="console,debug,info,notice,warning,err,crit,alert"/>
+  </mappings>
+  <settings>
+    <param name="colorize" value="true"/>
+    <param name="loglevel" value="info"/>
+  </settings>
+</configuration>

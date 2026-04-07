@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Sofia SIP Module Configuration
+  Main configuration file for the SIP stack
+
+  Profile Definitions:
+  - internal: Traffic from Kamailio SBC (port 5080)
+  - Additional profiles can be added for direct carrier connections
+-->
+<configuration name="sofia.conf" description="Sofia SIP Endpoint">
+
+  <!-- ============================================ -->
+  <!-- GLOBAL SETTINGS                             -->
+  <!-- ============================================ -->
+  <global_settings>
+    <!-- Logging level (0=off, 1-9 increasing verbosity) -->
+    <param name="log-level" value="0"/>
+
+    <!-- Auto-restart profiles on failure -->
+    <param name="auto-restart" value="true"/>
+
+    <!-- Debug presence events (0=off) -->
+    <param name="debug-presence" value="0"/>
+
+    <!-- SIP trace level (0=off) -->
+    <param name="tracelevel" value="0"/>
+
+    <!-- Enable SIP capture via Homer/SIPCAPTURE (if using) -->
+    <!-- <param name="capture-server" value="udp:192.168.1.100:9060"/> -->
+
+    <!-- RFC compliance for multipart MIME -->
+    <param name="rfc2833-pt" value="101"/>
+
+    <!-- Maximum UDP packet size -->
+    <param name="max-udp-body-length" value="65536"/>
+
+    <!-- Port range for ephemeral SIP ports -->
+    <!-- <param name="sip-port-range-start" value="5100"/> -->
+    <!-- <param name="sip-port-range-end" value="5199"/> -->
+
+  </global_settings>
+
+  <!-- ============================================ -->
+  <!-- SIP PROFILES                                -->
+  <!-- ============================================ -->
+  <profiles>
+    <!-- Internal profile - receives traffic from Kamailio SBC -->
+    <X-PRE-PROCESS cmd="include" data="../sofia/internal.xml"/>
+
+    <!--
+      Additional profiles can be added here:
+
+      External profile for direct carrier connections:
+      <X-PRE-PROCESS cmd="include" data="../sip_profiles/external.xml"/>
+
+      WebRTC profile for browser clients:
+      <X-PRE-PROCESS cmd="include" data="../sip_profiles/webrtc.xml"/>
+    -->
+  </profiles>
+
+</configuration>

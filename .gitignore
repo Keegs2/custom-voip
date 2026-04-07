@@ -1,0 +1,39 @@
+# Environment and secrets
+.env
+*.key
+*.pem
+*.crt
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Claude Code
+.claude/
+
+# Docker volumes (should never be committed)
+postgres_data/
+redis_data/
+freeswitch_logs/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Terraform state
+*.tfstate
+*.tfstate.backup
+.terraform/
+
+# Keys and credentials
+.keys/
+*.json.key
