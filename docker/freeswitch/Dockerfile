@@ -245,10 +245,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=builder /usr/local/freeswitch /usr/local/freeswitch
 
 # Copy shared libraries that FreeSWITCH needs
+# Libraries may be in /usr/lib/ or /usr/lib/x86_64-linux-gnu/ depending on arch
 COPY --from=builder /usr/lib/*sofia* /usr/lib/
 COPY --from=builder /usr/lib/*spandsp* /usr/lib/
 COPY --from=builder /usr/lib/*ks* /usr/lib/
 COPY --from=builder /usr/lib/*signalwire* /usr/lib/
+# Also copy from arch-specific lib dir (amd64 builds install here)
+RUN mkdir -p /usr/lib/x86_64-linux-gnu
+COPY --from=builder /usr/lib/x86_64-linux-gnu/*sofia* /usr/lib/x86_64-linux-gnu/
+COPY --from=builder /usr/lib/x86_64-linux-gnu/*spandsp* /usr/lib/x86_64-linux-gnu/
+COPY --from=builder /usr/lib/x86_64-linux-gnu/*ks* /usr/lib/x86_64-linux-gnu/
+COPY --from=builder /usr/lib/x86_64-linux-gnu/*signalwire* /usr/lib/x86_64-linux-gnu/
 
 # Copy Lua libraries from luarocks
 COPY --from=builder /usr/local/lib/lua /usr/local/lib/lua
