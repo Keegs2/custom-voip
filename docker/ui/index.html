@@ -1,0 +1,700 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>RCF Manager</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #f4f6f9;
+      --surface:   #ffffff;
+      --border:    #e2e8f0;
+      --text:      #1a202c;
+      --muted:     #718096;
+      --accent:    #3b82f6;
+      --accent-h:  #2563eb;
+      --danger:    #ef4444;
+      --danger-h:  #dc2626;
+      --success:   #22c55e;
+      --warn:      #f59e0b;
+      --radius:    10px;
+      --shadow:    0 1px 3px rgba(0,0,0,.08), 0 1px 2px rgba(0,0,0,.06);
+      --shadow-lg: 0 4px 16px rgba(0,0,0,.10);
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      padding: 24px 16px 60px;
+    }
+
+    /* ---- Layout ---- */
+    .page-header {
+      max-width: 760px;
+      margin: 0 auto 28px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .page-title {
+      font-size: 1.5rem;
+      font-weight: 700;
+      letter-spacing: -.3px;
+    }
+
+    .page-title span {
+      color: var(--accent);
+    }
+
+    .page-subtitle {
+      font-size: .85rem;
+      color: var(--muted);
+      margin-top: 2px;
+    }
+
+    .main { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+
+    /* ---- Cards ---- */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 20px 22px;
+    }
+
+    /* ---- RCF entry card ---- */
+    .rcf-card {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 4px 16px;
+      align-items: start;
+    }
+
+    .rcf-did {
+      font-size: 1.15rem;
+      font-weight: 700;
+      letter-spacing: .3px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .rcf-customer {
+      font-size: .78rem;
+      color: var(--muted);
+      margin-top: 2px;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: .72rem;
+      font-weight: 600;
+      padding: 3px 9px;
+      border-radius: 999px;
+      letter-spacing: .3px;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+
+    .badge-active   { background: #dcfce7; color: #15803d; }
+    .badge-disabled { background: #fee2e2; color: #b91c1c; }
+
+    .rcf-forward-area {
+      grid-column: 1 / -1;
+      margin-top: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .forward-label {
+      font-size: .75rem;
+      font-weight: 600;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: .5px;
+    }
+
+    .forward-row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .forward-input {
+      flex: 1;
+      font-size: 1rem;
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+      padding: 9px 13px;
+      border: 2px solid var(--border);
+      border-radius: 8px;
+      outline: none;
+      transition: border-color .15s;
+      min-width: 0;
+    }
+
+    .forward-input:focus { border-color: var(--accent); }
+    .forward-input.dirty { border-color: var(--warn); }
+    .forward-input.saved { border-color: var(--success); }
+
+    /* ---- Buttons ---- */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: .88rem;
+      font-weight: 600;
+      padding: 9px 16px;
+      border-radius: 8px;
+      border: none;
+      cursor: pointer;
+      transition: background .15s, opacity .15s, transform .08s;
+      white-space: nowrap;
+      line-height: 1;
+    }
+
+    .btn:active { transform: scale(.97); }
+    .btn:disabled { opacity: .5; cursor: not-allowed; transform: none; }
+
+    .btn-primary  { background: var(--accent);  color: #fff; }
+    .btn-primary:hover:not(:disabled)  { background: var(--accent-h); }
+
+    .btn-danger   { background: var(--danger);  color: #fff; }
+    .btn-danger:hover:not(:disabled)   { background: var(--danger-h); }
+
+    .btn-ghost    { background: transparent; color: var(--muted); border: 1px solid var(--border); }
+    .btn-ghost:hover:not(:disabled)    { background: var(--bg); color: var(--text); }
+
+    .btn-sm { font-size: .8rem; padding: 6px 11px; }
+
+    /* ---- Divider row inside RCF card ---- */
+    .rcf-actions {
+      grid-column: 1 / -1;
+      display: flex;
+      gap: 8px;
+      margin-top: 6px;
+      flex-wrap: wrap;
+    }
+
+    /* ---- New RCF form ---- */
+    .create-card .card-title {
+      font-size: 1rem;
+      font-weight: 700;
+      margin-bottom: 16px;
+    }
+
+    .form-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    @media (max-width: 540px) {
+      .form-grid { grid-template-columns: 1fr; }
+    }
+
+    .form-group { display: flex; flex-direction: column; gap: 5px; }
+
+    .form-label {
+      font-size: .75rem;
+      font-weight: 600;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: .5px;
+    }
+
+    .form-control {
+      font-size: .95rem;
+      padding: 9px 12px;
+      border: 1.5px solid var(--border);
+      border-radius: 8px;
+      outline: none;
+      transition: border-color .15s;
+      background: var(--surface);
+      color: var(--text);
+      width: 100%;
+    }
+
+    .form-control:focus { border-color: var(--accent); }
+
+    select.form-control { cursor: pointer; }
+
+    .form-footer {
+      margin-top: 16px;
+      display: flex;
+      gap: 8px;
+      justify-content: flex-end;
+    }
+
+    /* ---- Feedback toast ---- */
+    #toast {
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%) translateY(80px);
+      background: var(--text);
+      color: #fff;
+      padding: 12px 22px;
+      border-radius: 8px;
+      font-size: .9rem;
+      font-weight: 500;
+      box-shadow: var(--shadow-lg);
+      transition: transform .25s ease, opacity .25s ease;
+      opacity: 0;
+      z-index: 999;
+      pointer-events: none;
+      white-space: nowrap;
+    }
+
+    #toast.show {
+      transform: translateX(-50%) translateY(0);
+      opacity: 1;
+    }
+
+    #toast.toast-ok    { background: #166534; }
+    #toast.toast-err   { background: #991b1b; }
+
+    /* ---- States ---- */
+    .state-msg {
+      text-align: center;
+      padding: 48px 16px;
+      color: var(--muted);
+      font-size: .95rem;
+    }
+
+    .state-msg strong { display: block; font-size: 1.1rem; color: var(--text); margin-bottom: 6px; }
+
+    /* ---- Loading spinner ---- */
+    .spinner {
+      display: inline-block;
+      width: 18px; height: 18px;
+      border: 2.5px solid rgba(255,255,255,.35);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin .6s linear infinite;
+      vertical-align: middle;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ---- Section heading ---- */
+    .section-heading {
+      font-size: .75rem;
+      font-weight: 700;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: .8px;
+      margin-bottom: 10px;
+    }
+
+    /* ---- Collapsible create form ---- */
+    #create-section { display: none; }
+    #create-section.open { display: block; }
+
+    /* ---- Mobile tweaks ---- */
+    @media (max-width: 480px) {
+      .page-header { flex-direction: column; align-items: flex-start; }
+      .rcf-card { grid-template-columns: 1fr; }
+      .badge { align-self: flex-start; }
+    }
+  </style>
+</head>
+<body>
+
+<header class="page-header">
+  <div>
+    <div class="page-title">RCF <span>Manager</span></div>
+    <div class="page-subtitle">Remote Call Forwarding — change where a number rings</div>
+  </div>
+  <button class="btn btn-primary" id="toggle-create-btn" onclick="toggleCreate()">+ New Number</button>
+</header>
+
+<div class="main">
+
+  <!-- Create form (hidden by default) -->
+  <div id="create-section">
+    <div class="card create-card">
+      <div class="card-title">Add a new forwarding number</div>
+      <div class="form-grid">
+        <div class="form-group">
+          <label class="form-label" for="new-customer">Customer</label>
+          <select class="form-control" id="new-customer">
+            <option value="">Loading...</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="new-did">DID (inbound number)</label>
+          <input class="form-control" id="new-did" type="tel" placeholder="+12125551234" />
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="new-forward-to">Forward to</label>
+          <input class="form-control" id="new-forward-to" type="tel" placeholder="+18005559999 or 1001" />
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="new-ring-timeout">Ring timeout (seconds)</label>
+          <input class="form-control" id="new-ring-timeout" type="number" value="30" min="5" max="120" />
+        </div>
+      </div>
+      <div class="form-footer">
+        <button class="btn btn-ghost" onclick="toggleCreate()">Cancel</button>
+        <button class="btn btn-primary" id="create-btn" onclick="createRCF()">Save Number</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- List -->
+  <div class="section-heading" id="list-heading" style="display:none">Active numbers</div>
+  <div id="rcf-list">
+    <div class="state-msg"><span class="spinner" style="border-color:rgba(0,0,0,.15);border-top-color:var(--accent)"></span></div>
+  </div>
+
+</div>
+
+<!-- Toast -->
+<div id="toast"></div>
+
+<script>
+  /* =========================================================
+     Utilities
+  ========================================================= */
+
+  /** Format E.164 to a readable US number. Falls back to the raw string. */
+  function fmt(num) {
+    if (!num) return '';
+    const digits = num.replace(/\D/g, '');
+    if (digits.length === 11 && digits[0] === '1') {
+      return `+1 (${digits.slice(1,4)}) ${digits.slice(4,7)}-${digits.slice(7)}`;
+    }
+    if (digits.length === 10) {
+      return `(${digits.slice(0,3)}) ${digits.slice(3,6)}-${digits.slice(6)}`;
+    }
+    // Non-US or local extension — return as-is
+    return num;
+  }
+
+  let toastTimer = null;
+
+  function toast(msg, type = 'ok') {
+    const el = document.getElementById('toast');
+    el.textContent = msg;
+    el.className = `show toast-${type}`;
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { el.className = ''; }, 3200);
+  }
+
+  function setButtonLoading(btn, loading) {
+    if (loading) {
+      btn.dataset.label = btn.innerHTML;
+      btn.innerHTML = '<span class="spinner"></span>';
+      btn.disabled = true;
+    } else {
+      btn.innerHTML = btn.dataset.label || btn.innerHTML;
+      btn.disabled = false;
+    }
+  }
+
+  /* =========================================================
+     State
+  ========================================================= */
+
+  let rcfList = [];         // current snapshot from API
+  let customers = [];       // for the create form dropdown
+  let pendingEdits = {};    // did -> new forward_to value (before save)
+
+  /* =========================================================
+     API helpers
+  ========================================================= */
+
+  async function apiFetch(path, options = {}) {
+    const res = await fetch(path, {
+      headers: { 'Content-Type': 'application/json', ...options.headers },
+      ...options
+    });
+    if (!res.ok) {
+      let detail = `HTTP ${res.status}`;
+      try {
+        const body = await res.json();
+        detail = body.detail || JSON.stringify(body);
+      } catch (_) { /* ignore */ }
+      throw new Error(detail);
+    }
+    // 204 No Content
+    if (res.status === 204) return null;
+    return res.json();
+  }
+
+  /* =========================================================
+     Load & render
+  ========================================================= */
+
+  async function loadAll() {
+    try {
+      const [list, custs] = await Promise.all([
+        apiFetch('/rcf'),
+        apiFetch('/customers')
+      ]);
+      rcfList = list;
+      customers = custs;
+      renderList();
+      populateCustomerDropdown();
+    } catch (err) {
+      document.getElementById('rcf-list').innerHTML =
+        `<div class="state-msg"><strong>Could not load data</strong>${err.message}</div>`;
+    }
+  }
+
+  function renderList() {
+    const container = document.getElementById('rcf-list');
+    const heading   = document.getElementById('list-heading');
+
+    if (rcfList.length === 0) {
+      heading.style.display = 'none';
+      container.innerHTML =
+        '<div class="state-msg"><strong>No forwarding numbers yet</strong>Click "+ New Number" above to add one.</div>';
+      return;
+    }
+
+    heading.style.display = 'block';
+    container.innerHTML = rcfList.map(r => renderCard(r)).join('');
+  }
+
+  function renderCard(r) {
+    const pending = pendingEdits[r.did];
+    const fwdValue   = pending !== undefined ? pending : r.forward_to;
+    const isDirty    = pending !== undefined && pending !== r.forward_to;
+    const inputClass = isDirty ? 'dirty' : '';
+
+    const badgeHtml = r.enabled
+      ? '<span class="badge badge-active">Active</span>'
+      : '<span class="badge badge-disabled">Disabled</span>';
+
+    // Escape DID for use as an HTML attribute
+    const safeDid = r.did.replace(/"/g, '&quot;');
+
+    return `
+<div class="card rcf-card" id="card-${encodeURIComponent(r.did)}">
+  <div>
+    <div class="rcf-did">${fmt(r.did)}</div>
+    <div class="rcf-customer">${escHtml(r.customer_name || '')} &mdash; <code style="font-size:.8em">${escHtml(r.did)}</code></div>
+  </div>
+  <div>${badgeHtml}</div>
+
+  <div class="rcf-forward-area">
+    <div class="forward-label">Forwards to</div>
+    <div class="forward-row">
+      <input
+        class="forward-input ${inputClass}"
+        id="fwd-${encodeURIComponent(r.did)}"
+        type="tel"
+        value="${escHtml(fwdValue)}"
+        placeholder="+18005559999 or 1001"
+        data-did="${safeDid}"
+        data-original="${escHtml(r.forward_to)}"
+        oninput="onForwardInput(this)"
+        onkeydown="if(event.key==='Enter') saveForward(this.dataset.did)"
+      />
+      <button
+        class="btn btn-primary"
+        id="save-btn-${encodeURIComponent(r.did)}"
+        onclick="saveForward('${safeDid}')"
+        ${!isDirty ? 'disabled' : ''}
+      >Save</button>
+    </div>
+    <div style="font-size:.78rem;color:var(--muted)">
+      Currently: <strong>${fmt(r.forward_to)}</strong>
+      &nbsp;&middot;&nbsp;
+      Ring timeout: ${r.ring_timeout != null ? r.ring_timeout + 's' : '30s'}
+    </div>
+  </div>
+
+  <div class="rcf-actions">
+    <button class="btn btn-ghost btn-sm" onclick="toggleEnabled('${safeDid}', ${!r.enabled})">
+      ${r.enabled ? 'Disable' : 'Enable'}
+    </button>
+    <button class="btn btn-danger btn-sm" onclick="confirmDelete('${safeDid}')">Delete</button>
+  </div>
+</div>`;
+  }
+
+  function escHtml(str) {
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function populateCustomerDropdown() {
+    const sel = document.getElementById('new-customer');
+    if (customers.length === 0) {
+      sel.innerHTML = '<option value="">No customers found</option>';
+      return;
+    }
+    sel.innerHTML = customers
+      .map(c => `<option value="${c.id}">${escHtml(c.name)}</option>`)
+      .join('');
+  }
+
+  /* =========================================================
+     Inline edit — forward_to
+  ========================================================= */
+
+  function onForwardInput(input) {
+    const did = input.dataset.did;
+    const original = input.dataset.original;
+    const val = input.value.trim();
+    pendingEdits[did] = val;
+
+    const isDirty = val !== original;
+    input.className = 'forward-input' + (isDirty ? ' dirty' : '');
+
+    const saveBtn = document.getElementById('save-btn-' + encodeURIComponent(did));
+    if (saveBtn) saveBtn.disabled = !isDirty || val === '';
+  }
+
+  async function saveForward(did) {
+    const saveBtn = document.getElementById('save-btn-' + encodeURIComponent(did));
+    const input   = document.getElementById('fwd-' + encodeURIComponent(did));
+    if (!input) return;
+
+    const newVal = input.value.trim();
+    if (!newVal) { toast('Destination cannot be empty', 'err'); return; }
+
+    setButtonLoading(saveBtn, true);
+    try {
+      await apiFetch('/rcf/' + encodeURIComponent(did), {
+        method: 'PUT',
+        body: JSON.stringify({ forward_to: newVal })
+      });
+
+      // Update local state
+      const entry = rcfList.find(r => r.did === did);
+      if (entry) entry.forward_to = newVal;
+      delete pendingEdits[did];
+
+      input.dataset.original = newVal;
+      input.className = 'forward-input saved';
+      setTimeout(() => { if (input) input.className = 'forward-input'; }, 1800);
+
+      toast(`Saved — calls to ${fmt(did)} now ring ${fmt(newVal)}`);
+    } catch (err) {
+      toast(err.message, 'err');
+    } finally {
+      setButtonLoading(saveBtn, false);
+      if (saveBtn) saveBtn.disabled = true;
+    }
+  }
+
+  /* =========================================================
+     Toggle enabled
+  ========================================================= */
+
+  async function toggleEnabled(did, newState) {
+    try {
+      await apiFetch('/rcf/' + encodeURIComponent(did), {
+        method: 'PUT',
+        body: JSON.stringify({ enabled: newState })
+      });
+      const entry = rcfList.find(r => r.did === did);
+      if (entry) entry.enabled = newState;
+      renderList();
+      toast(newState ? 'Number enabled' : 'Number disabled');
+    } catch (err) {
+      toast(err.message, 'err');
+    }
+  }
+
+  /* =========================================================
+     Delete
+  ========================================================= */
+
+  function confirmDelete(did) {
+    // Simple confirm — keeps the UI dependency-free
+    if (!confirm(`Delete ${fmt(did)}?\n\nThis cannot be undone.`)) return;
+    deleteRCF(did);
+  }
+
+  async function deleteRCF(did) {
+    try {
+      await apiFetch('/rcf/' + encodeURIComponent(did), { method: 'DELETE' });
+      rcfList = rcfList.filter(r => r.did !== did);
+      delete pendingEdits[did];
+      renderList();
+      toast(`${fmt(did)} deleted`);
+    } catch (err) {
+      toast(err.message, 'err');
+    }
+  }
+
+  /* =========================================================
+     Create
+  ========================================================= */
+
+  function toggleCreate() {
+    const section = document.getElementById('create-section');
+    section.classList.toggle('open');
+    document.getElementById('toggle-create-btn').textContent =
+      section.classList.contains('open') ? 'Cancel' : '+ New Number';
+  }
+
+  async function createRCF() {
+    const customerId = document.getElementById('new-customer').value;
+    const did        = document.getElementById('new-did').value.trim();
+    const forwardTo  = document.getElementById('new-forward-to').value.trim();
+    const timeout    = parseInt(document.getElementById('new-ring-timeout').value, 10);
+
+    if (!customerId) { toast('Please select a customer', 'err'); return; }
+    if (!did)        { toast('DID is required', 'err'); return; }
+    if (!forwardTo)  { toast('Forward-to number is required', 'err'); return; }
+
+    const btn = document.getElementById('create-btn');
+    setButtonLoading(btn, true);
+
+    try {
+      const created = await apiFetch('/rcf', {
+        method: 'POST',
+        body: JSON.stringify({
+          customer_id: parseInt(customerId, 10),
+          did,
+          forward_to: forwardTo,
+          pass_caller_id: true,
+          ring_timeout: isNaN(timeout) ? 30 : timeout
+        })
+      });
+
+      // Reload list from server to get customer_name populated
+      const list = await apiFetch('/rcf');
+      rcfList = list;
+      renderList();
+
+      // Reset form
+      document.getElementById('new-did').value = '';
+      document.getElementById('new-forward-to').value = '';
+      document.getElementById('new-ring-timeout').value = '30';
+      toggleCreate();
+
+      toast(`${fmt(did)} created — forwarding to ${fmt(forwardTo)}`);
+    } catch (err) {
+      toast(err.message, 'err');
+    } finally {
+      setButtonLoading(btn, false);
+    }
+  }
+
+  /* =========================================================
+     Boot
+  ========================================================= */
+
+  loadAll();
+</script>
+</body>
+</html>

@@ -202,6 +202,23 @@ services:
           memory: 128M
     restart: unless-stopped
 
+  # Web UI for RCF management
+  ui:
+    build: ./docker/ui
+    container_name: voip-ui
+    depends_on:
+      - api
+    ports:
+      - "8080:80"
+    networks:
+      - voip-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 128M
+    restart: unless-stopped
+
 networks:
   voip-network:
     driver: bridge
