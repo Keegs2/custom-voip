@@ -24,6 +24,8 @@ CREATE TABLE cdrs (
     -- Billing
     rate_per_min DECIMAL(10,6),
     total_cost DECIMAL(12,6) DEFAULT 0,
+    carrier_cost DECIMAL(12,6) DEFAULT 0,
+    margin DECIMAL(12,6) DEFAULT 0,
     rated_at TIMESTAMPTZ,
 
     -- Call details
@@ -110,10 +112,10 @@ SELECT add_continuous_aggregate_policy('cdr_hourly_stats',
 
 -- Function for efficient rate lookup (longest prefix match)
 CREATE OR REPLACE FUNCTION get_rate(p_rate_table_id INT, p_destination VARCHAR)
-RETURNS TABLE(rate_per_min DECIMAL, connection_fee DECIMAL, min_duration INT, increment INT, prefix VARCHAR)
+RETURNS TABLE(rate_per_min DECIMAL, cost_per_min DECIMAL, connection_fee DECIMAL, min_duration INT, increment INT, prefix VARCHAR)
 LANGUAGE SQL STABLE
 AS $$
-    SELECT r.rate_per_min, r.connection_fee, r.min_duration, r.increment, r.prefix
+    SELECT r.rate_per_min, r.cost_per_min, r.connection_fee, r.min_duration, r.increment, r.prefix
     FROM rates r
     WHERE r.rate_table_id = p_rate_table_id
       AND p_destination LIKE r.prefix || '%'
@@ -133,6 +135,8 @@ DECLARE
     v_duration_ms INT;
     v_rate_table_id INT;
     v_rate DECIMAL;
+    v_cost DECIMAL;
+    v_carrier_cost DECIMAL;
     v_connection_fee DECIMAL;
     v_min_duration INT;
     v_increment INT;
@@ -157,8 +161,8 @@ BEGIN
     v_rate_table_id := COALESCE(v_rate_table_id, 1);
 
     -- Get rate
-    SELECT rate_per_min, connection_fee, min_duration, increment
-    INTO v_rate, v_connection_fee, v_min_duration, v_increment
+    SELECT rate_per_min, cost_per_min, connection_fee, min_duration, increment
+    INTO v_rate, v_cost, v_connection_fee, v_min_duration, v_increment
     FROM get_rate(v_rate_table_id, v_destination);
 
     -- Default rate if no match
@@ -174,11 +178,16 @@ BEGIN
     -- Calculate cost
     v_total_cost := v_connection_fee + (v_billable_ms / 60000.0 * v_rate);
 
+    -- Calculate carrier cost and margin
+    v_carrier_cost := v_billable_ms / 60000.0 * COALESCE(v_cost, 0);
+
     -- Update CDR
     UPDATE cdrs
     SET billable_ms = v_billable_ms,
         rate_per_min = v_rate,
         total_cost = v_total_cost,
+        carrier_cost = v_carrier_cost,
+        margin = v_total_cost - v_carrier_cost,
         rated_at = NOW()
     WHERE uuid = p_uuid;
 

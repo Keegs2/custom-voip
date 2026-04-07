@@ -59,6 +59,7 @@ CREATE TABLE rates (
     prefix VARCHAR(20) NOT NULL,
     description VARCHAR(100),
     rate_per_min DECIMAL(10,6) NOT NULL,
+    cost_per_min DECIMAL(10,6) NOT NULL DEFAULT 0,
     connection_fee DECIMAL(10,6) DEFAULT 0,
     min_duration INT DEFAULT 0,  -- Minimum billable seconds
     increment INT DEFAULT 6,      -- Billing increment (6-second billing)

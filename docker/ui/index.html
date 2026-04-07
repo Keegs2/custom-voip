@@ -1262,6 +1262,126 @@
     /* History table - no cursor pointer on rows */
     .history-table tbody tr { cursor: default; }
     .history-table tbody tr:hover { background: rgba(255,255,255,.015); }
+
+    /* =========================================================
+       RATES & MARGINS PAGE
+    ========================================================= */
+
+    .rates-table tbody tr { cursor: default; }
+    .rates-table tbody tr:hover { background: rgba(255,255,255,.025); }
+
+    .rates-table tr.row-negative { background: rgba(239,68,68,0.08); }
+    .rates-table tr.row-negative:hover { background: rgba(239,68,68,0.13); }
+
+    .rates-table tr.row-low { background: rgba(251,191,36,0.06); }
+    .rates-table tr.row-low:hover { background: rgba(251,191,36,0.10); }
+
+    .rates-table th.sortable { cursor: pointer; user-select: none; }
+    .rates-table th.sortable:hover { color: var(--text); }
+    .sort-indicator { margin-left: 4px; opacity: .6; font-size: .7em; }
+
+    .margin-color-pos  { color: #6ee7b7; }
+    .margin-color-warn { color: #fbbf24; }
+    .margin-color-neg  { color: #fca5a5; }
+    .margin-color-red  { color: #f87171; font-weight: 700; }
+
+    .rates-warning-banner {
+      background: rgba(239,68,68,0.1);
+      border: 1px solid rgba(239,68,68,0.35);
+      border-radius: var(--radius);
+      padding: 12px 18px;
+      color: #fca5a5;
+      font-size: .88rem;
+      font-weight: 600;
+      margin-bottom: 20px;
+      letter-spacing: .1px;
+    }
+
+    .margin-list { display: flex; flex-direction: column; gap: 6px; }
+
+    .margin-list-row {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+      padding: 7px 12px;
+      background: var(--surface-raised);
+      border-radius: 7px;
+      border: 1px solid var(--border);
+      font-size: .85rem;
+    }
+
+    .margin-list-prefix {
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      color: var(--text);
+      min-width: 72px;
+      flex-shrink: 0;
+    }
+
+    .margin-list-desc {
+      color: var(--muted);
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: .8rem;
+    }
+
+    .margin-list-pct {
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      flex-shrink: 0;
+    }
+
+    .rates-add-form {
+      display: none;
+      margin-bottom: 20px;
+    }
+
+    .rates-add-form.open { display: block; }
+
+    .margin-preview {
+      font-size: .82rem;
+      color: var(--muted);
+      margin-top: 6px;
+      font-variant-numeric: tabular-nums;
+      min-height: 1.2em;
+    }
+
+    .inline-rate-input {
+      font-size: .83rem;
+      padding: 4px 7px;
+      border: 1.5px solid var(--border);
+      border-radius: 6px;
+      background: var(--surface-raised);
+      color: var(--text);
+      outline: none;
+      width: 90px;
+      transition: border-color .15s, box-shadow .15s;
+    }
+
+    .inline-rate-input:focus {
+      border-color: var(--border-focus);
+      box-shadow: 0 0 0 3px var(--accent-glow);
+    }
+
+    .inline-desc-input {
+      font-size: .83rem;
+      padding: 4px 7px;
+      border: 1.5px solid var(--border);
+      border-radius: 6px;
+      background: var(--surface-raised);
+      color: var(--text);
+      outline: none;
+      width: 160px;
+      transition: border-color .15s, box-shadow .15s;
+    }
+
+    .inline-desc-input:focus {
+      border-color: var(--border-focus);
+      box-shadow: 0 0 0 3px var(--accent-glow);
+    }
   </style>
 </head>
 <body>
@@ -1297,6 +1417,9 @@
     </a>
     <a class="nav-item" data-page="tiers" onclick="navigate('tiers')">
       <span class="nav-icon">*</span> CPS Tiers
+    </a>
+    <a class="nav-item" data-page="rates" onclick="navigate('rates')">
+      <span class="nav-icon">$</span> Rates &amp; Margins
     </a>
 
     <div class="nav-section-label">Testing</div>
@@ -1597,6 +1720,85 @@
       </div>
     </div>
 
+    <!-- ===================== RATES & MARGINS ===================== -->
+    <div id="page-rates" class="page" style="display:none">
+      <div class="page-hd">
+        <div>
+          <div class="page-title">Rates <span>&amp; Margins</span></div>
+          <div class="page-subtitle">Rate table management and margin analysis</div>
+        </div>
+        <button class="btn btn-primary" onclick="toggleRatesAddForm()">+ Add Rate</button>
+      </div>
+
+      <!-- ADD RATE FORM -->
+      <div class="rates-add-form" id="rates-add-form">
+        <div class="card" style="margin-bottom:0">
+          <div class="card-title">Add New Rate</div>
+          <div class="form-grid" style="grid-template-columns:repeat(auto-fill,minmax(180px,1fr))">
+            <div class="form-group">
+              <label class="form-label">Prefix</label>
+              <input class="form-control" id="rate-new-prefix" type="text" placeholder="1441" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Description</label>
+              <input class="form-control" id="rate-new-desc" type="text" placeholder="Bermuda" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Sell Rate / min ($)</label>
+              <input class="form-control" id="rate-new-sell" type="number" step="0.0001" min="0" placeholder="0.0100" oninput="updateMarginPreview()" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Cost Rate / min ($)</label>
+              <input class="form-control" id="rate-new-cost" type="number" step="0.0001" min="0" placeholder="0.0050" oninput="updateMarginPreview()" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Connection Fee ($)</label>
+              <input class="form-control" id="rate-new-conn-fee" type="number" step="0.0001" min="0" value="0" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Increment (seconds)</label>
+              <input class="form-control" id="rate-new-increment" type="number" step="1" min="1" value="6" />
+            </div>
+          </div>
+          <div class="margin-preview" id="rate-new-margin-preview"></div>
+          <div class="form-footer">
+            <button class="btn btn-ghost" onclick="toggleRatesAddForm()">Cancel</button>
+            <button class="btn btn-primary" id="rate-create-btn" onclick="createRate()">Add Rate</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- STAT CARDS -->
+      <div class="stats-grid" id="rates-stats-grid">
+        <div class="state-msg" style="grid-column:1/-1;padding:24px"><span class="spinner"></span></div>
+      </div>
+
+      <!-- WARNING BANNER -->
+      <div id="rates-warning-banner" style="display:none" class="rates-warning-banner"></div>
+
+      <!-- RATE TABLE -->
+      <div class="card" style="padding:0;margin-bottom:24px">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px 0">
+          <div class="card-title" style="margin-bottom:0">Rate Table</div>
+        </div>
+        <div id="rates-table-wrap" style="margin-top:14px">
+          <div class="state-msg" style="padding:32px"><span class="spinner"></span></div>
+        </div>
+      </div>
+
+      <!-- MARGIN ANALYSIS -->
+      <div class="section-grid">
+        <div class="card">
+          <div class="card-title">Low / Negative Margins</div>
+          <div id="rates-low-margins-list"><div class="state-msg" style="padding:20px"><span class="spinner"></span></div></div>
+        </div>
+        <div class="card">
+          <div class="card-title">Best Margins</div>
+          <div id="rates-best-margins-list"><div class="state-msg" style="padding:20px"><span class="spinner"></span></div></div>
+        </div>
+      </div>
+    </div>
+
     <!-- ===================== SIPP TESTING ===================== -->
     <div id="page-sipp" class="page" style="display:none">
       <div class="page-hd">
@@ -1750,6 +1952,7 @@ const PAGE_TITLES = {
   'api-dids':'API DIDs',
   trunks:    'SIP Trunks',
   tiers:     'CPS Tiers',
+  rates:     'Rates & Margins',
   sipp:      'SIPp Testing'
 };
 
@@ -1793,6 +1996,7 @@ function navigate(page) {
     case 'api-dids':  loadApiDids();   break;
     case 'trunks':    loadTrunks();    break;
     case 'tiers':     loadTiers();     break;
+    case 'rates':     loadRatesPage(); break;
     case 'sipp':      loadSippPage();  break;
   }
 }
@@ -3109,6 +3313,417 @@ function renderSippHistory() {
         <tbody>${rows}</tbody>
       </table>
     </div>`;
+}
+
+/* =========================================================
+   RATES & MARGINS
+========================================================= */
+
+let ratesList        = [];   // full list from GET /rates
+let ratesMarginsData = null; // data from GET /rates/margins
+let ratesEditingId   = null; // rate id currently being inline-edited
+let ratesSortCol     = 'margin_pct'; // default sort column
+let ratesSortAsc     = true;
+
+// ------------------------------------------------------------------
+// Page entry point — fetches both endpoints in parallel
+// ------------------------------------------------------------------
+async function loadRatesPage() {
+  // Reset state on each page load
+  ratesEditingId = null;
+
+  // Show loading in all areas
+  document.getElementById('rates-stats-grid').innerHTML =
+    '<div class="state-msg" style="grid-column:1/-1;padding:24px"><span class="spinner"></span></div>';
+  document.getElementById('rates-table-wrap').innerHTML =
+    '<div class="state-msg" style="padding:32px"><span class="spinner"></span></div>';
+  document.getElementById('rates-low-margins-list').innerHTML =
+    '<div class="state-msg" style="padding:20px"><span class="spinner"></span></div>';
+  document.getElementById('rates-best-margins-list').innerHTML =
+    '<div class="state-msg" style="padding:20px"><span class="spinner"></span></div>';
+
+  try {
+    const [ratesRes, marginsRes] = await Promise.all([
+      api('GET', '/rates?rate_table_id=1&limit=100'),
+      api('GET', '/rates/margins')
+    ]);
+    ratesList        = ratesRes.rates || [];
+    ratesMarginsData = marginsRes;
+    renderRatesStats();
+    renderRatesTable();
+    renderMarginAnalysis();
+  } catch (err) {
+    const msg = `<div class="state-msg"><strong>Failed to load rates</strong>${escHtml(err.message)}</div>`;
+    document.getElementById('rates-stats-grid').innerHTML = msg;
+    document.getElementById('rates-table-wrap').innerHTML = msg;
+  }
+}
+
+// ------------------------------------------------------------------
+// Stat cards + warning banner
+// ------------------------------------------------------------------
+function renderRatesStats() {
+  const m = ratesMarginsData || {};
+  const total     = m.total_rates   ?? ratesList.length;
+  const avgPct    = m.avg_margin_pct != null ? Number(m.avg_margin_pct) : null;
+  const negCount  = (m.negative_margins || []).length;
+  const lowCount  = (m.low_margins      || []).length;
+
+  // Color logic for avg margin
+  let avgColor = 'var(--text)';
+  if (avgPct !== null) {
+    if (avgPct > 30)       avgColor = '#6ee7b7';
+    else if (avgPct >= 15) avgColor = '#fbbf24';
+    else                   avgColor = '#fca5a5';
+  }
+
+  const negColor = negCount > 0 ? '#fca5a5' : 'var(--text)';
+  const lowColor = lowCount > 0 ? '#fbbf24' : 'var(--text)';
+
+  document.getElementById('rates-stats-grid').innerHTML = `
+    <div class="stat-card">
+      <div class="stat-label">Total Rates</div>
+      <div class="stat-value">${total}</div>
+      <div class="stat-icon">$</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Avg Margin %</div>
+      <div class="stat-value" style="color:${avgColor}">${avgPct !== null ? avgPct.toFixed(1) + '%' : '--'}</div>
+      <div class="stat-icon">%</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Negative Margins</div>
+      <div class="stat-value" style="color:${negColor}">${negCount}</div>
+      <div class="stat-icon">!</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Low Margins</div>
+      <div class="stat-value" style="color:${lowColor}">${lowCount}</div>
+      <div class="stat-icon">~</div>
+    </div>`;
+
+  // Warning banner
+  const banner = document.getElementById('rates-warning-banner');
+  if (negCount > 0) {
+    banner.style.display = 'block';
+    banner.textContent = `WARNING: ${negCount} rate${negCount === 1 ? '' : 's'} have negative margins — you are losing money on these destinations`;
+  } else {
+    banner.style.display = 'none';
+  }
+}
+
+// ------------------------------------------------------------------
+// Rate table
+// ------------------------------------------------------------------
+function fmtRate(val) {
+  if (val == null) return '--';
+  return '$' + Number(val).toFixed(4);
+}
+
+function marginPctClass(pct) {
+  if (pct == null) return '';
+  if (pct < 0)    return 'margin-color-red';
+  if (pct < 15)   return 'margin-color-neg';
+  if (pct < 30)   return 'margin-color-warn';
+  return 'margin-color-pos';
+}
+
+function marginClass(val) {
+  if (val == null) return '';
+  return val < 0 ? 'margin-color-neg' : 'margin-color-pos';
+}
+
+function sortedRates() {
+  const col = ratesSortCol;
+  const asc = ratesSortAsc;
+  return [...ratesList].sort((a, b) => {
+    let av = a[col] ?? '';
+    let bv = b[col] ?? '';
+    if (typeof av === 'string') av = av.toLowerCase();
+    if (typeof bv === 'string') bv = bv.toLowerCase();
+    if (av < bv) return asc ? -1 : 1;
+    if (av > bv) return asc ? 1  : -1;
+    return 0;
+  });
+}
+
+function renderRatesTable() {
+  const wrap = document.getElementById('rates-table-wrap');
+
+  if (ratesList.length === 0) {
+    wrap.innerHTML = '<div class="state-msg" style="padding:32px"><strong>No rates found</strong>Add your first rate using the button above.</div>';
+    return;
+  }
+
+  const cols = [
+    { key: 'prefix',       label: 'Prefix'    },
+    { key: 'description',  label: 'Description' },
+    { key: 'rate_per_min', label: 'Sell Rate' },
+    { key: 'cost_per_min', label: 'Cost Rate' },
+    { key: 'margin_per_min', label: 'Margin'  },
+    { key: 'margin_pct',   label: 'Margin %'  },
+    { key: 'increment',    label: 'Increment' },
+    { key: null,           label: 'Actions'   }
+  ];
+
+  const thCells = cols.map(c => {
+    if (!c.key) return '<th>Actions</th>';
+    const active   = ratesSortCol === c.key;
+    const indicator = active
+      ? `<span class="sort-indicator">${ratesSortAsc ? '&#x25B2;' : '&#x25BC;'}</span>`
+      : '<span class="sort-indicator">&#x25BD;</span>';
+    return `<th class="sortable" onclick="setRatesSort('${c.key}')">${c.label}${indicator}</th>`;
+  }).join('');
+
+  const rows = sortedRates().map(r => {
+    const isEditing = ratesEditingId === r.id;
+    const negMargin = (r.margin_per_min ?? 0) < 0 || (r.margin_pct ?? 0) < 0;
+    const lowMargin = !negMargin && (r.margin_pct ?? 100) < 30;
+    const rowClass  = negMargin ? 'row-negative' : (lowMargin ? 'row-low' : '');
+
+    if (isEditing) {
+      return `
+      <tr class="${rowClass}">
+        <td style="font-variant-numeric:tabular-nums;font-weight:600">${escHtml(r.prefix)}</td>
+        <td><input class="inline-desc-input" id="rate-edit-desc-${r.id}" value="${escHtml(r.description || '')}" /></td>
+        <td><input class="inline-rate-input" id="rate-edit-sell-${r.id}" type="number" step="0.0001" min="0" value="${Number(r.rate_per_min).toFixed(4)}" /></td>
+        <td><input class="inline-rate-input" id="rate-edit-cost-${r.id}" type="number" step="0.0001" min="0" value="${Number(r.cost_per_min).toFixed(4)}" /></td>
+        <td class="${marginClass(r.margin_per_min)}">${fmtRate(r.margin_per_min)}</td>
+        <td class="${marginPctClass(r.margin_pct)}">${r.margin_pct != null ? Number(r.margin_pct).toFixed(1) + '%' : '--'}</td>
+        <td style="color:var(--muted)">${r.increment != null ? r.increment + 's' : '--'}</td>
+        <td style="white-space:nowrap">
+          <button class="btn btn-success btn-xs" onclick="saveRate(${r.id})">Save</button>
+          <button class="btn btn-ghost btn-xs" style="margin-left:4px" onclick="cancelEditRate()">Cancel</button>
+        </td>
+      </tr>`;
+    }
+
+    return `
+    <tr class="${rowClass}">
+      <td style="font-variant-numeric:tabular-nums;font-weight:600">${escHtml(r.prefix)}</td>
+      <td style="color:var(--muted);font-size:.85rem">${escHtml(r.description || '--')}</td>
+      <td style="font-variant-numeric:tabular-nums">${fmtRate(r.rate_per_min)}</td>
+      <td style="font-variant-numeric:tabular-nums">${fmtRate(r.cost_per_min)}</td>
+      <td class="${marginClass(r.margin_per_min)}" style="font-variant-numeric:tabular-nums">${fmtRate(r.margin_per_min)}</td>
+      <td class="${marginPctClass(r.margin_pct)}" style="font-variant-numeric:tabular-nums;font-weight:600">${r.margin_pct != null ? Number(r.margin_pct).toFixed(1) + '%' : '--'}</td>
+      <td style="color:var(--muted)">${r.increment != null ? r.increment + 's' : '--'}</td>
+      <td style="white-space:nowrap">
+        <button class="btn btn-ghost btn-xs" onclick="editRate(${r.id})">Edit</button>
+        <button class="btn btn-danger btn-xs" style="margin-left:4px" onclick="deleteRate(${r.id})">Delete</button>
+      </td>
+    </tr>`;
+  }).join('');
+
+  wrap.innerHTML = `
+  <div class="table-wrap">
+    <table class="rates-table">
+      <thead><tr>${thCells}</tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+  </div>`;
+}
+
+function setRatesSort(col) {
+  if (ratesSortCol === col) {
+    ratesSortAsc = !ratesSortAsc;
+  } else {
+    ratesSortCol = col;
+    ratesSortAsc = true;
+  }
+  renderRatesTable();
+}
+
+// ------------------------------------------------------------------
+// Margin analysis cards
+// ------------------------------------------------------------------
+function renderMarginAnalysis() {
+  const m = ratesMarginsData || {};
+
+  // Low + Negative
+  const lowEl  = document.getElementById('rates-low-margins-list');
+  const negative = m.negative_margins || [];
+  const low      = m.low_margins      || [];
+  const combined = [...negative, ...low];
+
+  if (combined.length === 0) {
+    lowEl.innerHTML = '<div style="color:var(--muted);font-size:.88rem;padding:4px 0">All margins are healthy</div>';
+  } else {
+    lowEl.innerHTML = '<div class="margin-list">' + combined.map(r => {
+      const pct     = r.margin_pct != null ? Number(r.margin_pct) : null;
+      const cls     = pct !== null && pct < 0 ? 'margin-color-red' : 'margin-color-warn';
+      const pctText = pct !== null ? pct.toFixed(1) + '%' : '--';
+      return `
+      <div class="margin-list-row">
+        <span class="margin-list-prefix">${escHtml(r.prefix)}</span>
+        <span class="margin-list-desc">${escHtml(r.description || '')}</span>
+        <span class="margin-list-pct ${cls}">${pctText}</span>
+      </div>`;
+    }).join('') + '</div>';
+  }
+
+  // Best
+  const bestEl = document.getElementById('rates-best-margins-list');
+  const best   = m.best_margins || [];
+
+  if (best.length === 0) {
+    bestEl.innerHTML = '<div style="color:var(--muted);font-size:.88rem;padding:4px 0">No data available</div>';
+  } else {
+    bestEl.innerHTML = '<div class="margin-list">' + best.map(r => {
+      const pct     = r.margin_pct != null ? Number(r.margin_pct) : null;
+      const pctText = pct !== null ? pct.toFixed(1) + '%' : '--';
+      return `
+      <div class="margin-list-row">
+        <span class="margin-list-prefix">${escHtml(r.prefix)}</span>
+        <span class="margin-list-desc">${escHtml(r.description || '')}</span>
+        <span class="margin-list-pct margin-color-pos">${pctText}</span>
+      </div>`;
+    }).join('') + '</div>';
+  }
+}
+
+// ------------------------------------------------------------------
+// Inline edit
+// ------------------------------------------------------------------
+function editRate(rateId) {
+  ratesEditingId = rateId;
+  renderRatesTable();
+}
+
+function cancelEditRate() {
+  ratesEditingId = null;
+  renderRatesTable();
+}
+
+async function saveRate(rateId) {
+  const desc = document.getElementById(`rate-edit-desc-${rateId}`)?.value?.trim();
+  const sell = parseFloat(document.getElementById(`rate-edit-sell-${rateId}`)?.value);
+  const cost = parseFloat(document.getElementById(`rate-edit-cost-${rateId}`)?.value);
+
+  if (isNaN(sell) || sell < 0) { toast('Sell rate must be a non-negative number', 'err'); return; }
+  if (isNaN(cost) || cost < 0) { toast('Cost rate must be a non-negative number', 'err'); return; }
+
+  try {
+    await api('PUT', `/rates/${rateId}`, {
+      rate_per_min: sell,
+      cost_per_min: cost,
+      description:  desc
+    });
+    ratesEditingId = null;
+    toast('Rate updated');
+    await reloadRatesData();
+  } catch (err) {
+    toast(err.message, 'err');
+  }
+}
+
+// ------------------------------------------------------------------
+// Delete
+// ------------------------------------------------------------------
+async function deleteRate(rateId) {
+  const rate = ratesList.find(r => r.id === rateId);
+  const label = rate ? `${rate.prefix} (${rate.description || 'no description'})` : String(rateId);
+  if (!confirm(`Delete rate ${label}?\n\nThis cannot be undone.`)) return;
+
+  try {
+    await api('DELETE', `/rates/${rateId}`);
+    toast('Rate deleted');
+    await reloadRatesData();
+  } catch (err) {
+    toast(err.message, 'err');
+  }
+}
+
+// ------------------------------------------------------------------
+// Add Rate form
+// ------------------------------------------------------------------
+function toggleRatesAddForm() {
+  const form = document.getElementById('rates-add-form');
+  form.classList.toggle('open');
+  if (!form.classList.contains('open')) {
+    // Clear on close
+    document.getElementById('rate-new-prefix').value    = '';
+    document.getElementById('rate-new-desc').value      = '';
+    document.getElementById('rate-new-sell').value      = '';
+    document.getElementById('rate-new-cost').value      = '';
+    document.getElementById('rate-new-conn-fee').value  = '0';
+    document.getElementById('rate-new-increment').value = '6';
+    document.getElementById('rate-new-margin-preview').textContent = '';
+  }
+}
+
+function updateMarginPreview() {
+  const sell = parseFloat(document.getElementById('rate-new-sell')?.value);
+  const cost = parseFloat(document.getElementById('rate-new-cost')?.value);
+  const preview = document.getElementById('rate-new-margin-preview');
+  if (!preview) return;
+
+  if (isNaN(sell) || isNaN(cost)) {
+    preview.textContent = '';
+    preview.className = 'margin-preview';
+    return;
+  }
+
+  const margin = sell - cost;
+  const pct    = sell > 0 ? (margin / sell) * 100 : (cost === 0 ? 0 : -Infinity);
+  const pctStr = isFinite(pct) ? pct.toFixed(1) + '%' : 'N/A';
+  const sign   = margin >= 0 ? '+' : '';
+  preview.textContent = `Margin: ${sign}${fmtRate(margin)} (${pctStr})`;
+  preview.className   = 'margin-preview ' + (margin < 0 ? 'margin-color-neg' : margin > 0 ? 'margin-color-pos' : '');
+}
+
+async function createRate() {
+  const prefix   = document.getElementById('rate-new-prefix').value.trim();
+  const desc     = document.getElementById('rate-new-desc').value.trim();
+  const sell     = parseFloat(document.getElementById('rate-new-sell').value);
+  const cost     = parseFloat(document.getElementById('rate-new-cost').value);
+  const connFee  = parseFloat(document.getElementById('rate-new-conn-fee').value) || 0;
+  const incr     = parseInt(document.getElementById('rate-new-increment').value, 10) || 6;
+
+  if (!prefix)        { toast('Prefix is required', 'err'); return; }
+  if (isNaN(sell))    { toast('Sell rate is required', 'err'); return; }
+  if (isNaN(cost))    { toast('Cost rate is required', 'err'); return; }
+  if (sell < 0)       { toast('Sell rate must be non-negative', 'err'); return; }
+  if (cost < 0)       { toast('Cost rate must be non-negative', 'err'); return; }
+
+  const btn = document.getElementById('rate-create-btn');
+  setButtonLoading(btn, true);
+  try {
+    await api('POST', '/rates', {
+      rate_table_id:  1,
+      prefix,
+      description:    desc || null,
+      rate_per_min:   sell,
+      cost_per_min:   cost,
+      connection_fee: connFee,
+      increment:      incr
+    });
+    toggleRatesAddForm();
+    toast(`Rate ${prefix} added`);
+    await reloadRatesData();
+  } catch (err) {
+    toast(err.message, 'err');
+  } finally {
+    setButtonLoading(btn, false);
+  }
+}
+
+// ------------------------------------------------------------------
+// Re-fetch both endpoints and re-render
+// ------------------------------------------------------------------
+async function reloadRatesData() {
+  try {
+    const [ratesRes, marginsRes] = await Promise.all([
+      api('GET', '/rates?rate_table_id=1&limit=100'),
+      api('GET', '/rates/margins')
+    ]);
+    ratesList        = ratesRes.rates || [];
+    ratesMarginsData = marginsRes;
+    renderRatesStats();
+    renderRatesTable();
+    renderMarginAnalysis();
+  } catch (err) {
+    toast('Failed to refresh rates: ' + err.message, 'err');
+  }
 }
 
 /* =========================================================
