@@ -198,21 +198,37 @@ end
 
 -- Check if this is a webhook-controlled call or simple bridge
 if webhook_url ~= "" then
-    -- Webhook-controlled call - use httapi
+    -- Webhook-controlled call - use voice_webhook.lua engine
     freeswitch.consoleLog("INFO", string.format(
-        "[%s] Executing webhook: %s\n",
+        "[%s] Webhook-controlled call: handing off to voice_webhook engine, url=%s\n",
         uuid, webhook_url
     ))
+
+    -- Set up variables for the webhook engine
+    set_var("voice_url", webhook_url)
+    set_var("direction", "outbound")
 
     -- Set fallback URL if provided
     local fallback_url = get_var("fallback_url", "")
     if fallback_url ~= "" then
-        set_var("httapi_fallback_url", fallback_url)
+        set_var("fallback_url", fallback_url)
     end
 
-    -- Execute httapi with webhook URL
+    -- Derive status_callback from webhook_url base if not explicitly set
+    local callback_url_var = get_var("callback_url", "")
+    if callback_url_var ~= "" then
+        set_var("status_callback", callback_url_var)
+    else
+        local status_base = webhook_url:match("^(https?://[^/]+)")
+        if status_base then
+            set_var("status_callback", status_base .. "/status")
+        end
+    end
+
+    -- Execute the webhook engine script
+    -- voice_webhook.lua handles the full TwiML-compatible XML fetch/parse/execute loop
     pcall(function()
-        session:execute("httapi", "{url=" .. webhook_url .. "}")
+        session:execute("lua", "voice_webhook.lua")
     end)
 
 else

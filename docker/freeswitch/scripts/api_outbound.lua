@@ -353,37 +353,67 @@ if callback_url then
     set_var("api_callback_url", callback_url)
 end
 
--- Execute bridge
-pcall(function()
-    session:execute("bridge", dial_string)
-end)
+-- Check if this is a webhook-controlled call
+-- If webhook_url is set, hand off to voice_webhook.lua after bridge connects
+if webhook_url then
+    -- Set up variables for the webhook engine
+    set_var("voice_url", webhook_url)
+    set_var("direction", "outbound")
 
--- Check if bridge succeeded
-local bridge_result = get_var("bridge_result", "")
-local hangup_cause_var = get_var("originate_disposition", get_var("hangup_cause", ""))
+    if callback_url then
+        set_var("status_callback", callback_url)
+    else
+        -- Derive status_callback from webhook_url base
+        local status_base = webhook_url:match("^(https?://[^/]+)")
+        if status_base then
+            set_var("status_callback", status_base .. "/status")
+        end
+    end
 
-if bridge_result ~= "SUCCESS" then
-    freeswitch.consoleLog("WARNING", string.format(
-        "[%s] API Bridge failed: result=%s cause=%s\n",
-        uuid, bridge_result, hangup_cause_var
+    freeswitch.consoleLog("INFO", string.format(
+        "[%s] Webhook-controlled call: handing off to voice_webhook engine, url=%s\n",
+        uuid, webhook_url
     ))
 
-    -- Try failover carrier
-    if gateway ~= "carrier_backup" then
-        freeswitch.consoleLog("INFO", "[" .. uuid .. "] Trying failover carrier\n")
+    -- Execute the webhook engine script
+    -- voice_webhook.lua handles the full TwiML-compatible XML fetch/parse/execute loop
+    pcall(function()
+        session:execute("lua", "voice_webhook.lua")
+    end)
+else
+    -- No webhook - simple bridge to destination
+    -- Execute bridge
+    pcall(function()
+        session:execute("bridge", dial_string)
+    end)
 
-        dial_string = string.format(
-            "{origination_caller_id_number=%s,origination_caller_id_name=%s,call_timeout=60}sofia/gateway/carrier_backup/%s",
-            outbound_caller_id,
-            outbound_caller_name,
-            normalized_dest:gsub("^%+", "")
-        )
+    -- Check if bridge succeeded
+    local bridge_result = get_var("bridge_result", "")
+    local hangup_cause_var = get_var("originate_disposition", get_var("hangup_cause", ""))
 
-        set_var("carrier_used", "carrier_backup")
+    if bridge_result ~= "SUCCESS" then
+        freeswitch.consoleLog("WARNING", string.format(
+            "[%s] API Bridge failed: result=%s cause=%s\n",
+            uuid, bridge_result, hangup_cause_var
+        ))
 
-        pcall(function()
-            session:execute("bridge", dial_string)
-        end)
+        -- Try failover carrier
+        if gateway ~= "carrier_backup" then
+            freeswitch.consoleLog("INFO", "[" .. uuid .. "] Trying failover carrier\n")
+
+            dial_string = string.format(
+                "{origination_caller_id_number=%s,origination_caller_id_name=%s,call_timeout=60}sofia/gateway/carrier_backup/%s",
+                outbound_caller_id,
+                outbound_caller_name,
+                normalized_dest:gsub("^%+", "")
+            )
+
+            set_var("carrier_used", "carrier_backup")
+
+            pcall(function()
+                session:execute("bridge", dial_string)
+            end)
+        end
     end
 end
 

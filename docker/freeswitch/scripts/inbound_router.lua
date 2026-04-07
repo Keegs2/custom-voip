@@ -408,21 +408,36 @@ if product_type == "rcf" then
     end)
 
 elseif product_type == "api" then
-    -- API Calling - Execute webhook-driven logic
+    -- API Calling - Execute webhook-driven voice control via voice_webhook.lua
     if voice_url then
         set_var("voice_url", voice_url)
         if fallback_url then
             set_var("fallback_url", fallback_url)
         end
+        set_var("direction", "inbound")
 
-        -- Use httapi for webhook control
+        -- Derive status_callback from voice_url base if not explicitly set
+        -- Convention: status callback at /status on the same host
+        local status_base = voice_url:match("^(https?://[^/]+)")
+        if status_base then
+            set_var("status_callback", status_base .. "/status")
+        end
+
         freeswitch.consoleLog("INFO", string.format(
-            "[%s] API DID: executing webhook %s\n",
+            "[%s] API DID: handing off to voice_webhook engine, voice_url=%s\n",
             uuid, voice_url
         ))
 
+        -- Answer the call before handing off to the webhook engine
         pcall(function()
-            session:execute("httapi", "{url=" .. voice_url .. "}")
+            session:answer()
+        end)
+
+        -- Execute the webhook engine script
+        -- This loads and runs voice_webhook.lua which handles the full
+        -- TwiML-compatible XML fetch/parse/execute loop
+        pcall(function()
+            session:execute("lua", "voice_webhook.lua")
         end)
     else
         freeswitch.consoleLog("ERR", "[" .. uuid .. "] API DID without voice_url\n")
