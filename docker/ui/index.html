@@ -1679,6 +1679,660 @@
       overflow: hidden;
       margin: 12px 0;
     }
+
+    /* =========================================================
+       IVR BUILDER PAGE
+    ========================================================= */
+
+    /* Override the default page-container padding for the IVR page
+       so the three-pane layout fills the viewport */
+    #page-ivr {
+      position: fixed;
+      inset: 0;
+      left: var(--sidebar-w);
+      display: none;
+      flex-direction: column;
+      overflow: hidden;
+      background: var(--bg);
+    }
+
+    #page-ivr.visible { display: flex; }
+
+    /* Top bar */
+    .ivr-topbar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 12px 20px;
+      background: var(--sidebar-bg);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+      flex-wrap: wrap;
+    }
+
+    .ivr-topbar-title {
+      font-size: 1rem;
+      font-weight: 700;
+      color: var(--text);
+      letter-spacing: -.2px;
+    }
+
+    .ivr-flow-name {
+      font-size: .92rem;
+      font-weight: 600;
+      padding: 7px 12px;
+      border: 1.5px solid var(--border);
+      border-radius: 7px;
+      background: var(--surface-raised);
+      color: var(--text);
+      outline: none;
+      width: 200px;
+      transition: border-color .15s, box-shadow .15s;
+    }
+
+    .ivr-flow-name:focus {
+      border-color: var(--border-focus);
+      box-shadow: 0 0 0 3px var(--accent-glow);
+    }
+
+    .ivr-topbar-sep {
+      flex: 1;
+    }
+
+    .ivr-topbar-select {
+      font-size: .85rem;
+      padding: 7px 10px;
+      border: 1.5px solid var(--border);
+      border-radius: 7px;
+      background: var(--surface-raised);
+      color: var(--text);
+      outline: none;
+      cursor: pointer;
+      max-width: 180px;
+      transition: border-color .15s;
+    }
+
+    .ivr-topbar-select:focus { border-color: var(--border-focus); }
+
+    /* Three-pane layout */
+    .ivr-workspace {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+    }
+
+    /* Left palette */
+    .ivr-palette {
+      width: 200px;
+      flex-shrink: 0;
+      background: var(--sidebar-bg);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      overflow-y: auto;
+      padding: 14px 10px;
+      gap: 6px;
+    }
+
+    .ivr-palette-label {
+      font-size: .62rem;
+      font-weight: 700;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: .9px;
+      padding: 4px 6px 8px;
+    }
+
+    .palette-verb {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 9px 10px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      cursor: grab;
+      user-select: none;
+      transition: border-color .15s, box-shadow .15s, transform .1s;
+      border-left-width: 3px;
+    }
+
+    .palette-verb:hover {
+      border-color: rgba(255,255,255,.15);
+      box-shadow: 0 2px 12px rgba(0,0,0,.3);
+      transform: translateY(-1px);
+    }
+
+    .palette-verb:active { cursor: grabbing; transform: scale(.97); }
+
+    .palette-verb-icon {
+      font-size: 1rem;
+      width: 20px;
+      text-align: center;
+      flex-shrink: 0;
+      line-height: 1;
+    }
+
+    .palette-verb-body { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+
+    .palette-verb-name {
+      font-size: .82rem;
+      font-weight: 700;
+      color: var(--text);
+    }
+
+    .palette-verb-desc {
+      font-size: .67rem;
+      color: var(--muted);
+      line-height: 1.3;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* Verb accent colors */
+    .palette-verb[data-verb="say"]    { border-left-color: #3b82f6; }
+    .palette-verb[data-verb="play"]   { border-left-color: #8b5cf6; }
+    .palette-verb[data-verb="gather"] { border-left-color: #22c55e; }
+    .palette-verb[data-verb="dial"]   { border-left-color: #f59e0b; }
+    .palette-verb[data-verb="hangup"] { border-left-color: #ef4444; }
+    .palette-verb[data-verb="pause"]  { border-left-color: #64748b; }
+
+    /* Center canvas */
+    .ivr-canvas-wrap {
+      flex: 1;
+      overflow-y: auto;
+      overflow-x: auto;
+      padding: 28px 24px 64px;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+    }
+
+    .ivr-canvas {
+      min-width: 440px;
+      width: 100%;
+      max-width: 900px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+    }
+
+    /* Start node */
+    .ivr-start-node {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 80px;
+      height: 32px;
+      background: rgba(59,130,246,.12);
+      border: 1.5px solid rgba(59,130,246,.4);
+      border-radius: 999px;
+      font-size: .72rem;
+      font-weight: 800;
+      color: var(--accent);
+      letter-spacing: .8px;
+      text-transform: uppercase;
+      margin: 0 auto;
+    }
+
+    /* Drop zone between nodes */
+    .ivr-drop-zone {
+      height: 6px;
+      margin: 0 auto;
+      width: calc(100% - 24px);
+      border-radius: 3px;
+      background: transparent;
+      transition: background .15s, height .15s;
+      position: relative;
+    }
+
+    .ivr-drop-zone::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      border-radius: 3px;
+      background: var(--border);
+      opacity: 0;
+      transition: opacity .15s;
+    }
+
+    .ivr-drop-zone.drag-over {
+      height: 14px;
+      background: rgba(59,130,246,.18);
+      box-shadow: 0 0 12px rgba(59,130,246,.35);
+    }
+
+    .ivr-drop-zone.drag-over::before { opacity: 0; }
+
+    /* Connector line */
+    .ivr-connector {
+      width: 2px;
+      background: var(--border);
+      min-height: 12px;
+      margin: 0 auto;
+    }
+
+    /* Flow node card */
+    .ivr-node {
+      background: var(--surface);
+      border: 1.5px solid var(--border);
+      border-radius: 10px;
+      display: flex;
+      align-items: stretch;
+      gap: 0;
+      position: relative;
+      transition: border-color .15s, box-shadow .15s;
+      overflow: hidden;
+    }
+
+    .ivr-node.selected {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-glow), 0 4px 20px rgba(0,0,0,.35);
+    }
+
+    .ivr-node-accent {
+      width: 4px;
+      flex-shrink: 0;
+      border-radius: 0;
+    }
+
+    .ivr-node[data-verb="say"]    .ivr-node-accent { background: #3b82f6; }
+    .ivr-node[data-verb="play"]   .ivr-node-accent { background: #8b5cf6; }
+    .ivr-node[data-verb="gather"] .ivr-node-accent { background: #22c55e; }
+    .ivr-node[data-verb="dial"]   .ivr-node-accent { background: #f59e0b; }
+    .ivr-node[data-verb="hangup"] .ivr-node-accent { background: #ef4444; }
+    .ivr-node[data-verb="pause"]  .ivr-node-accent { background: #64748b; }
+
+    .ivr-node-drag-handle {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 22px;
+      flex-shrink: 0;
+      cursor: grab;
+      color: var(--muted);
+      font-size: .8rem;
+      opacity: .4;
+      padding: 0 2px;
+      transition: opacity .15s;
+    }
+
+    .ivr-node:hover .ivr-node-drag-handle { opacity: .8; }
+
+    .ivr-node-body {
+      flex: 1;
+      min-width: 0;
+      padding: 10px 10px 10px 6px;
+      cursor: pointer;
+    }
+
+    .ivr-node-type-label {
+      font-size: .62rem;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: .8px;
+      margin-bottom: 3px;
+    }
+
+    .ivr-node[data-verb="say"]    .ivr-node-type-label { color: #60a5fa; }
+    .ivr-node[data-verb="play"]   .ivr-node-type-label { color: #a78bfa; }
+    .ivr-node[data-verb="gather"] .ivr-node-type-label { color: #4ade80; }
+    .ivr-node[data-verb="dial"]   .ivr-node-type-label { color: #fbbf24; }
+    .ivr-node[data-verb="hangup"] .ivr-node-type-label { color: #f87171; }
+    .ivr-node[data-verb="pause"]  .ivr-node-type-label { color: #94a3b8; }
+
+    .ivr-node-summary {
+      font-size: .83rem;
+      color: var(--text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 100%;
+    }
+
+    .ivr-node-del {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 32px;
+      flex-shrink: 0;
+      cursor: pointer;
+      color: var(--muted);
+      font-size: .85rem;
+      font-weight: 700;
+      opacity: 0;
+      transition: opacity .15s, color .15s;
+      background: none;
+      border: none;
+      padding: 0;
+    }
+
+    .ivr-node:hover .ivr-node-del { opacity: 1; }
+    .ivr-node-del:hover { color: #f87171; }
+
+    /* Gather branches */
+    .ivr-gather-branches {
+      margin-top: 6px;
+    }
+
+    .ivr-branch-tabs {
+      display: flex;
+      gap: 4px;
+      flex-wrap: wrap;
+      padding: 0 4px;
+    }
+
+    .ivr-branch-tab {
+      font-size: .7rem;
+      font-weight: 700;
+      padding: 4px 10px;
+      border-radius: 6px 6px 0 0;
+      border: 1px solid var(--border);
+      border-bottom: none;
+      background: var(--surface-raised);
+      color: var(--muted);
+      cursor: pointer;
+      user-select: none;
+      transition: color .12s, background .12s, border-color .12s;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .ivr-branch-tab.active {
+      background: rgba(59,130,246,.1);
+      color: var(--accent);
+      border-color: rgba(59,130,246,.3);
+    }
+
+    .ivr-branch-tab-add {
+      font-size: .7rem;
+      font-weight: 700;
+      padding: 4px 8px;
+      border-radius: 6px 6px 0 0;
+      border: 1px dashed var(--border);
+      border-bottom: none;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      transition: color .12s, border-color .12s;
+    }
+
+    .ivr-branch-tab-add:hover { color: var(--accent); border-color: var(--accent); }
+
+    .ivr-branch-tab-del {
+      width: 14px;
+      height: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 50%;
+      font-size: .6rem;
+      background: rgba(239,68,68,.15);
+      color: #f87171;
+      cursor: pointer;
+      flex-shrink: 0;
+      line-height: 1;
+      transition: background .12s;
+    }
+
+    .ivr-branch-tab-del:hover { background: rgba(239,68,68,.3); }
+
+    .ivr-branch-panel {
+      border: 1px solid var(--border);
+      border-radius: 0 8px 8px 8px;
+      background: rgba(10,12,20,.3);
+      padding: 14px 14px 10px;
+      display: none;
+    }
+
+    .ivr-branch-panel.active { display: block; }
+
+    .ivr-branch-empty {
+      font-size: .78rem;
+      color: var(--muted);
+      text-align: center;
+      padding: 16px 0 8px;
+      font-style: italic;
+    }
+
+    /* Right config panel */
+    .ivr-config-panel {
+      width: 260px;
+      flex-shrink: 0;
+      background: var(--sidebar-bg);
+      border-left: 1px solid var(--border);
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .ivr-config-header {
+      padding: 14px 16px 10px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .ivr-config-title {
+      font-size: .78rem;
+      font-weight: 700;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: .8px;
+    }
+
+    .ivr-config-body {
+      flex: 1;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .ivr-config-empty {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex: 1;
+      font-size: .82rem;
+      color: var(--muted);
+      text-align: center;
+      padding: 32px 16px;
+      line-height: 1.6;
+    }
+
+    .ivr-config-group {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+
+    .ivr-config-label {
+      font-size: .67rem;
+      font-weight: 700;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: .6px;
+    }
+
+    .ivr-config-input {
+      font-size: .88rem;
+      padding: 8px 10px;
+      border: 1.5px solid var(--border);
+      border-radius: 7px;
+      background: var(--surface-raised);
+      color: var(--text);
+      outline: none;
+      width: 100%;
+      transition: border-color .15s, box-shadow .15s;
+    }
+
+    .ivr-config-input:focus {
+      border-color: var(--border-focus);
+      box-shadow: 0 0 0 3px var(--accent-glow);
+    }
+
+    textarea.ivr-config-input {
+      resize: vertical;
+      min-height: 72px;
+      font-family: inherit;
+      line-height: 1.5;
+    }
+
+    select.ivr-config-input { cursor: pointer; }
+
+    .ivr-config-input option { background: var(--surface-raised); }
+
+    /* XML Modal */
+    .ivr-modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,.65);
+      z-index: 200;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+
+    .ivr-modal-overlay.open { display: flex; }
+
+    .ivr-modal {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      box-shadow: var(--shadow-lg);
+      width: 100%;
+      max-width: 680px;
+      max-height: 80vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .ivr-modal-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+
+    .ivr-modal-title {
+      font-size: .95rem;
+      font-weight: 700;
+      color: var(--text);
+    }
+
+    .ivr-modal-close {
+      background: none;
+      border: none;
+      color: var(--muted);
+      font-size: 1.2rem;
+      cursor: pointer;
+      padding: 2px 6px;
+      border-radius: 5px;
+      line-height: 1;
+      transition: color .12s, background .12s;
+    }
+
+    .ivr-modal-close:hover { color: var(--text); background: rgba(255,255,255,.06); }
+
+    .ivr-modal-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px;
+    }
+
+    .ivr-xml-block {
+      background: #0d0f15;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px;
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      font-size: .8rem;
+      overflow-x: auto;
+      white-space: pre;
+      line-height: 1.65;
+      color: #c9d1d9;
+    }
+
+    .ivr-modal-footer {
+      padding: 14px 20px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+
+    /* Load flow modal list */
+    .ivr-flow-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .ivr-flow-list-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 14px;
+      background: var(--surface-raised);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      cursor: pointer;
+      transition: border-color .12s, background .12s;
+    }
+
+    .ivr-flow-list-item:hover {
+      border-color: rgba(59,130,246,.4);
+      background: rgba(59,130,246,.05);
+    }
+
+    .ivr-flow-list-name {
+      font-size: .88rem;
+      font-weight: 600;
+      color: var(--text);
+      flex: 1;
+    }
+
+    .ivr-flow-list-meta {
+      font-size: .75rem;
+      color: var(--muted);
+    }
+
+    .ivr-canvas-placeholder {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 320px;
+      gap: 12px;
+      color: var(--muted);
+      font-size: .88rem;
+      text-align: center;
+      border: 2px dashed var(--border);
+      border-radius: 12px;
+      padding: 40px;
+    }
+
+    .ivr-canvas-placeholder strong {
+      font-size: 1rem;
+      color: var(--text);
+      display: block;
+      margin-bottom: 4px;
+    }
+
+    @media (max-width: 768px) {
+      #page-ivr { left: 0; }
+      .ivr-config-panel { display: none; }
+    }
   </style>
 </head>
 <body>
@@ -1717,6 +2371,9 @@
     </a>
     <a class="nav-item" data-page="rates" onclick="navigate('rates')">
       <span class="nav-icon">$</span> Rates &amp; Margins
+    </a>
+    <a class="nav-item" data-page="ivr" onclick="navigate('ivr')">
+      <span class="nav-icon">&#9654;&#9475;</span> IVR Builder
     </a>
 
     <div class="nav-section-label">Testing</div>
@@ -2616,6 +3273,138 @@
   </div><!-- /page-container -->
 </div><!-- /main-wrapper -->
 
+<!-- ===================== IVR BUILDER (outside page-container, fixed layout) ===================== -->
+<div id="page-ivr">
+
+  <!-- Top bar -->
+  <div class="ivr-topbar">
+    <span class="ivr-topbar-title">IVR <span style="color:var(--accent)">Builder</span></span>
+    <input class="ivr-flow-name" id="ivr-flow-name" type="text" value="New IVR Flow"
+           oninput="ivrFlow.name = this.value" />
+    <select class="ivr-topbar-select" id="ivr-customer-sel" onchange="ivrOnCustomerChange()">
+      <option value="">Customer...</option>
+    </select>
+    <select class="ivr-topbar-select" id="ivr-did-sel" onchange="ivrFlow.did = this.value || null">
+      <option value="">DID...</option>
+    </select>
+    <div class="ivr-topbar-sep"></div>
+    <button class="btn btn-ghost btn-sm" onclick="ivrLoadFlows()">Load Flow</button>
+    <button class="btn btn-ghost btn-sm" onclick="ivrPreviewXml()">Preview XML</button>
+    <button class="btn btn-primary btn-sm" onclick="ivrSaveFlow()">Save Flow</button>
+  </div>
+
+  <!-- Three-pane workspace -->
+  <div class="ivr-workspace">
+
+    <!-- Left: verb palette -->
+    <div class="ivr-palette">
+      <div class="ivr-palette-label">Verb Palette</div>
+      <div class="palette-verb" data-verb="say" draggable="true"
+           ondragstart="ivrPaletteDragStart(event,'say')">
+        <span class="palette-verb-icon">A</span>
+        <div class="palette-verb-body">
+          <span class="palette-verb-name">Say</span>
+          <span class="palette-verb-desc">Speak text to caller</span>
+        </div>
+      </div>
+      <div class="palette-verb" data-verb="play" draggable="true"
+           ondragstart="ivrPaletteDragStart(event,'play')">
+        <span class="palette-verb-icon">&#9834;</span>
+        <div class="palette-verb-body">
+          <span class="palette-verb-name">Play</span>
+          <span class="palette-verb-desc">Play an audio file</span>
+        </div>
+      </div>
+      <div class="palette-verb" data-verb="gather" draggable="true"
+           ondragstart="ivrPaletteDragStart(event,'gather')">
+        <span class="palette-verb-icon">#</span>
+        <div class="palette-verb-body">
+          <span class="palette-verb-name">Gather</span>
+          <span class="palette-verb-desc">Collect keypad digits</span>
+        </div>
+      </div>
+      <div class="palette-verb" data-verb="dial" draggable="true"
+           ondragstart="ivrPaletteDragStart(event,'dial')">
+        <span class="palette-verb-icon">&#9742;</span>
+        <div class="palette-verb-body">
+          <span class="palette-verb-name">Dial</span>
+          <span class="palette-verb-desc">Dial a phone number</span>
+        </div>
+      </div>
+      <div class="palette-verb" data-verb="hangup" draggable="true"
+           ondragstart="ivrPaletteDragStart(event,'hangup')">
+        <span class="palette-verb-icon">X</span>
+        <div class="palette-verb-body">
+          <span class="palette-verb-name">Hangup</span>
+          <span class="palette-verb-desc">End the call</span>
+        </div>
+      </div>
+      <div class="palette-verb" data-verb="pause" draggable="true"
+           ondragstart="ivrPaletteDragStart(event,'pause')">
+        <span class="palette-verb-icon">&#9646;&#9646;</span>
+        <div class="palette-verb-body">
+          <span class="palette-verb-name">Pause</span>
+          <span class="palette-verb-desc">Wait N seconds</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Center: canvas -->
+    <div class="ivr-canvas-wrap" id="ivr-canvas-wrap">
+      <div class="ivr-canvas" id="ivr-canvas">
+        <!-- Rendered by renderFlow() -->
+      </div>
+    </div>
+
+    <!-- Right: config panel -->
+    <div class="ivr-config-panel" id="ivr-config-panel">
+      <div class="ivr-config-header">
+        <span class="ivr-config-title">Node Config</span>
+        <button class="ivr-modal-close" onclick="ivrDeselectNode()" title="Close">&times;</button>
+      </div>
+      <div id="ivr-config-body" class="ivr-config-body">
+        <div class="ivr-config-empty">Select a node on the canvas to configure it.</div>
+      </div>
+    </div>
+
+  </div><!-- /ivr-workspace -->
+</div><!-- /#page-ivr -->
+
+<!-- XML Preview Modal -->
+<div class="ivr-modal-overlay" id="ivr-xml-modal" onclick="if(event.target===this)ivrCloseXmlModal()">
+  <div class="ivr-modal">
+    <div class="ivr-modal-header">
+      <span class="ivr-modal-title">Generated XML</span>
+      <button class="ivr-modal-close" onclick="ivrCloseXmlModal()">&times;</button>
+    </div>
+    <div class="ivr-modal-body">
+      <div class="ivr-xml-block" id="ivr-xml-content"></div>
+    </div>
+    <div class="ivr-modal-footer">
+      <button class="btn btn-ghost btn-sm" id="ivr-xml-copy-btn" onclick="ivrCopyXml()">Copy</button>
+      <button class="btn btn-ghost btn-sm" onclick="ivrCloseXmlModal()">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Load Flow Modal -->
+<div class="ivr-modal-overlay" id="ivr-load-modal" onclick="if(event.target===this)ivrCloseLoadModal()">
+  <div class="ivr-modal">
+    <div class="ivr-modal-header">
+      <span class="ivr-modal-title">Load Flow</span>
+      <button class="ivr-modal-close" onclick="ivrCloseLoadModal()">&times;</button>
+    </div>
+    <div class="ivr-modal-body">
+      <div id="ivr-flow-list-wrap">
+        <div class="state-msg"><span class="spinner"></span></div>
+      </div>
+    </div>
+    <div class="ivr-modal-footer">
+      <button class="btn btn-ghost btn-sm" onclick="ivrCloseLoadModal()">Cancel</button>
+    </div>
+  </div>
+</div>
+
 <!-- Toast -->
 <div id="toast"></div>
 
@@ -2707,6 +3496,7 @@ const PAGE_TITLES = {
   trunks:    'SIP Trunks',
   tiers:     'CPS Tiers',
   rates:     'Rates & Margins',
+  ivr:       'IVR Builder',
   sipp:      'SIPp Testing',
   docs:      'API Docs'
 };
@@ -2728,12 +3518,19 @@ function navigate(page) {
   const tb = document.getElementById('topbar-title');
   if (tb) tb.textContent = PAGE_TITLES[page] || page;
 
-  // Show/hide pages
-  document.querySelectorAll('.page').forEach(el => {
-    el.style.display = 'none';
-  });
-  const pageEl = document.getElementById('page-' + page);
-  if (pageEl) pageEl.style.display = 'block';
+  // IVR page is a fixed-layout element outside #page-container — handle separately
+  const ivrPageEl = document.getElementById('page-ivr');
+  if (page === 'ivr') {
+    document.querySelectorAll('.page').forEach(el => { el.style.display = 'none'; });
+    document.getElementById('page-container').style.display = 'none';
+    if (ivrPageEl) ivrPageEl.classList.add('visible');
+  } else {
+    document.getElementById('page-container').style.display = '';
+    if (ivrPageEl) ivrPageEl.classList.remove('visible');
+    document.querySelectorAll('.page').forEach(el => { el.style.display = 'none'; });
+    const pageEl = document.getElementById('page-' + page);
+    if (pageEl) pageEl.style.display = 'block';
+  }
 
   // Update hash without firing hashchange again
   if (location.hash !== '#' + page) {
@@ -2752,6 +3549,7 @@ function navigate(page) {
     case 'trunks':    loadTrunks();    break;
     case 'tiers':     loadTiers();     break;
     case 'rates':     loadRatesPage(); break;
+    case 'ivr':       loadIvrPage();   break;
     case 'sipp':      loadSippPage();  break;
     case 'docs':      /* static page, no data fetch needed */ break;
   }
@@ -4569,6 +5367,758 @@ async function reloadRatesData() {
   } catch (err) {
     toast('Failed to refresh rates: ' + err.message, 'err');
   }
+}
+
+/* =========================================================
+   IVR BUILDER
+========================================================= */
+
+// --------------- State ---------------
+
+let ivrFlow = {
+  id: null,
+  name: 'New IVR Flow',
+  customerId: null,
+  did: null,
+  nodes: []
+};
+
+let ivrSelectedNodeId = null;
+let ivrDragVerb = null;     // verb type being dragged from palette
+let ivrDragNodeId = null;   // node id being reordered
+
+// Default config per verb type
+function ivrDefaultConfig(verb) {
+  switch (verb) {
+    case 'say':    return { text: '', voice: 'woman' };
+    case 'play':   return { url: '' };
+    case 'gather': return { numDigits: '1', timeout: '5' };
+    case 'dial':   return { number: '', callerId: '', timeout: '30' };
+    case 'hangup': return {};
+    case 'pause':  return { duration: '1' };
+    default:       return {};
+  }
+}
+
+function ivrMakeNode(verb) {
+  return {
+    id: 'node_' + Math.random().toString(36).slice(2, 10),
+    type: verb,
+    config: ivrDefaultConfig(verb),
+    prompt: [],     // for gather: verbs played during input
+    branches: {}    // for gather: keyed by digit/timeout/default
+  };
+}
+
+// --------------- Page load ---------------
+
+async function loadIvrPage() {
+  renderFlow();
+  // Populate customer dropdown
+  try {
+    const customers = await api('GET', '/customers');
+    const sel = document.getElementById('ivr-customer-sel');
+    sel.innerHTML = '<option value="">Customer...</option>';
+    customers.forEach(c => {
+      const opt = document.createElement('option');
+      opt.value = c.id;
+      opt.textContent = c.name;
+      if (ivrFlow.customerId == c.id) opt.selected = true;
+      sel.appendChild(opt);
+    });
+  } catch (_) {}
+}
+
+async function ivrOnCustomerChange() {
+  const sel = document.getElementById('ivr-customer-sel');
+  ivrFlow.customerId = sel.value || null;
+  // Refresh DID dropdown
+  const didSel = document.getElementById('ivr-did-sel');
+  didSel.innerHTML = '<option value="">DID...</option>';
+  if (!ivrFlow.customerId) return;
+  try {
+    const dids = await api('GET', `/api-dids?customer_id=${ivrFlow.customerId}`);
+    (Array.isArray(dids) ? dids : []).forEach(d => {
+      const opt = document.createElement('option');
+      opt.value = d.did;
+      opt.textContent = d.did;
+      if (ivrFlow.did === d.did) opt.selected = true;
+      didSel.appendChild(opt);
+    });
+  } catch (_) {}
+}
+
+// --------------- Rendering ---------------
+
+function renderFlow() {
+  const canvas = document.getElementById('ivr-canvas');
+  if (!canvas) return;
+
+  if (ivrFlow.nodes.length === 0) {
+    canvas.innerHTML = `
+      <div class="ivr-start-node">START</div>
+      <div class="ivr-connector" style="min-height:16px"></div>
+      ${ivrDropZoneHtml('nodes', 0)}
+      <div class="ivr-canvas-placeholder">
+        <strong>Flow is empty</strong>
+        Drag a verb from the left panel and drop it here to start building.
+      </div>`;
+  } else {
+    let html = `<div class="ivr-start-node">START</div>`;
+    html += renderNodeList(ivrFlow.nodes, 'nodes');
+    canvas.innerHTML = html;
+  }
+
+  // Reattach drop-zone listeners after re-render
+  canvas.querySelectorAll('.ivr-drop-zone').forEach(el => {
+    el.addEventListener('dragover', ivrDropZoneDragOver);
+    el.addEventListener('dragleave', ivrDropZoneDragLeave);
+    el.addEventListener('drop', ivrDropZoneDrop);
+  });
+}
+
+function renderNodeList(nodes, path) {
+  // Always start with a drop zone
+  let html = `<div class="ivr-connector" style="min-height:12px"></div>`;
+  html += ivrDropZoneHtml(path, 0);
+
+  nodes.forEach((node, idx) => {
+    html += renderNodeHtml(node, path, idx);
+    html += `<div class="ivr-connector" style="min-height:12px"></div>`;
+    html += ivrDropZoneHtml(path, idx + 1);
+  });
+
+  return html;
+}
+
+function ivrDropZoneHtml(path, position) {
+  return `<div class="ivr-drop-zone" data-path="${escHtml(path)}" data-position="${position}"></div>`;
+}
+
+function ivrNodeSummary(node) {
+  switch (node.type) {
+    case 'say':    return node.config.text ? `"${node.config.text.slice(0, 50)}"` : '(no text)';
+    case 'play':   return node.config.url  ? node.config.url.slice(0, 50) : '(no URL)';
+    case 'gather': {
+      const branches = Object.keys(node.branches || {});
+      const bStr = branches.length > 0 ? ` — ${branches.length} branch${branches.length !== 1 ? 'es' : ''}` : '';
+      return `Max ${node.config.numDigits || 1} digit${bStr}`;
+    }
+    case 'dial':   return node.config.number || '(no number)';
+    case 'hangup': return 'End call';
+    case 'pause':  return `${node.config.duration || 1}s`;
+    default:       return '';
+  }
+}
+
+function ivrVerbIcon(verb) {
+  switch (verb) {
+    case 'say':    return 'A';
+    case 'play':   return '&#9834;';
+    case 'gather': return '#';
+    case 'dial':   return '&#9742;';
+    case 'hangup': return 'X';
+    case 'pause':  return '&#9646;&#9646;';
+    default:       return '?';
+  }
+}
+
+function renderNodeHtml(node, path, idx) {
+  const isSelected = node.id === ivrSelectedNodeId;
+  const selectedClass = isSelected ? ' selected' : '';
+  const summary = ivrNodeSummary(node);
+
+  let gatherHtml = '';
+  if (node.type === 'gather') {
+    gatherHtml = renderGatherBranchesHtml(node, path, idx);
+  }
+
+  return `
+    <div class="ivr-node${selectedClass}" data-verb="${node.type}" data-id="${node.id}"
+         draggable="true"
+         ondragstart="ivrNodeDragStart(event,'${node.id}')"
+         ondragend="ivrNodeDragEnd(event)">
+      <div class="ivr-node-accent"></div>
+      <div class="ivr-node-drag-handle" title="Drag to reorder">&#8942;</div>
+      <div class="ivr-node-body" onclick="ivrSelectNode('${node.id}')">
+        <div class="ivr-node-type-label">${node.type.toUpperCase()}</div>
+        <div class="ivr-node-summary">${escHtml(summary)}</div>
+      </div>
+      <button class="ivr-node-del" title="Delete node"
+              onclick="event.stopPropagation();ivrRemoveNode('${node.id}')">&times;</button>
+    </div>
+    ${gatherHtml}`;
+}
+
+function renderGatherBranchesHtml(node, path, idx) {
+  const branches = node.branches || {};
+  const keys = Object.keys(branches);
+  // Pick the active branch tab — default to first key, or 'timeout'
+  const activeBranch = node._activeBranch || (keys.length > 0 ? keys[0] : null);
+
+  const tabsHtml = keys.map(k => {
+    const isActive = k === activeBranch;
+    const label = k === 'timeout' ? 'Timeout' : k === 'default' ? 'Default' : `Digit ${k}`;
+    return `
+      <div class="ivr-branch-tab${isActive ? ' active' : ''}"
+           onclick="ivrSetActiveBranch('${node.id}','${k}')">
+        ${escHtml(label)}
+        <span class="ivr-branch-tab-del"
+              onclick="event.stopPropagation();ivrRemoveBranch('${node.id}','${k}')">&times;</span>
+      </div>`;
+  }).join('');
+
+  const addTabHtml = `
+    <div class="ivr-branch-tab-add" onclick="ivrAddBranch('${node.id}')">+ Branch</div>`;
+
+  let branchPanelHtml = '';
+  if (activeBranch && branches[activeBranch] !== undefined) {
+    const branchPath = `${path}[${idx}].branches.${activeBranch}`;
+    const childNodes = branches[activeBranch];
+    if (childNodes.length === 0) {
+      branchPanelHtml = `
+        <div class="ivr-branch-panel active">
+          <div class="ivr-branch-empty">Drop verbs here to build the "${activeBranch}" branch.</div>
+          ${ivrDropZoneHtml(branchPath, 0)}
+        </div>`;
+    } else {
+      branchPanelHtml = `
+        <div class="ivr-branch-panel active">
+          ${renderNodeList(childNodes, branchPath)}
+        </div>`;
+    }
+  } else if (keys.length === 0) {
+    branchPanelHtml = `
+      <div class="ivr-branch-panel active">
+        <div class="ivr-branch-empty">No branches yet. Click "+ Branch" to add one.</div>
+      </div>`;
+  }
+
+  return `
+    <div class="ivr-gather-branches">
+      <div class="ivr-branch-tabs">${tabsHtml}${addTabHtml}</div>
+      ${branchPanelHtml}
+    </div>`;
+}
+
+// --------------- Node tree traversal helpers ---------------
+
+// Parse a path like "nodes[2].branches.1[0]" into a traversal spec
+function ivrGetNodeList(path) {
+  // Returns the array that the path points to, or null
+  let ref = ivrFlow;
+  const parts = path.split(/[\.\[\]]+/).filter(Boolean);
+  for (let i = 0; i < parts.length; i++) {
+    const p = parts[i];
+    if (ref == null) return null;
+    if (Array.isArray(ref)) {
+      ref = ref[parseInt(p, 10)];
+    } else if (typeof ref === 'object') {
+      ref = ref[p];
+    }
+  }
+  return Array.isArray(ref) ? ref : null;
+}
+
+// Find a node by id anywhere in the tree. Returns { node, list, index } or null
+function ivrFindNode(id, nodes) {
+  if (!nodes) nodes = ivrFlow.nodes;
+  for (let i = 0; i < nodes.length; i++) {
+    if (nodes[i].id === id) return { node: nodes[i], list: nodes, index: i };
+    // Search gather prompt
+    if (nodes[i].prompt && nodes[i].prompt.length > 0) {
+      const found = ivrFindNode(id, nodes[i].prompt);
+      if (found) return found;
+    }
+    // Search gather branches
+    if (nodes[i].branches) {
+      for (const branchNodes of Object.values(nodes[i].branches)) {
+        const found = ivrFindNode(id, branchNodes);
+        if (found) return found;
+      }
+    }
+  }
+  return null;
+}
+
+// --------------- Add / Remove / Move ---------------
+
+function ivrAddNode(verb, path, position) {
+  const node = ivrMakeNode(verb);
+  const list = ivrGetNodeList(path);
+  if (!list) return;
+  list.splice(position, 0, node);
+  ivrSelectedNodeId = node.id;
+  renderFlow();
+  ivrRenderConfigPanel(node);
+}
+
+function ivrRemoveNode(id) {
+  const found = ivrFindNode(id);
+  if (!found) return;
+  found.list.splice(found.index, 1);
+  if (ivrSelectedNodeId === id) {
+    ivrSelectedNodeId = null;
+    ivrRenderConfigPanel(null);
+  }
+  renderFlow();
+}
+
+function ivrSelectNode(id) {
+  ivrSelectedNodeId = id;
+  const found = ivrFindNode(id);
+  renderFlow();
+  ivrRenderConfigPanel(found ? found.node : null);
+}
+
+function ivrDeselectNode() {
+  ivrSelectedNodeId = null;
+  renderFlow();
+  ivrRenderConfigPanel(null);
+}
+
+function ivrSetActiveBranch(nodeId, branchKey) {
+  const found = ivrFindNode(nodeId);
+  if (!found) return;
+  found.node._activeBranch = branchKey;
+  renderFlow();
+}
+
+function ivrAddBranch(nodeId) {
+  const found = ivrFindNode(nodeId);
+  if (!found) return;
+  const node = found.node;
+  if (!node.branches) node.branches = {};
+  // Prompt for digit/key
+  const key = prompt('Enter branch key (digit 0-9, *, #, "timeout", or "default"):');
+  if (!key || key.trim() === '') return;
+  const k = key.trim();
+  if (node.branches[k] !== undefined) {
+    toast('Branch "' + k + '" already exists', 'err');
+    return;
+  }
+  node.branches[k] = [];
+  node._activeBranch = k;
+  renderFlow();
+}
+
+function ivrRemoveBranch(nodeId, branchKey) {
+  const found = ivrFindNode(nodeId);
+  if (!found) return;
+  delete found.node.branches[branchKey];
+  if (found.node._activeBranch === branchKey) {
+    const remaining = Object.keys(found.node.branches);
+    found.node._activeBranch = remaining.length > 0 ? remaining[0] : null;
+  }
+  renderFlow();
+}
+
+// --------------- Config Panel ---------------
+
+function ivrRenderConfigPanel(node) {
+  const body = document.getElementById('ivr-config-body');
+  if (!body) return;
+  if (!node) {
+    body.innerHTML = '<div class="ivr-config-empty">Select a node on the canvas to configure it.</div>';
+    return;
+  }
+
+  let html = `<div style="font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.8px;color:var(--muted);margin-bottom:2px">${node.type.toUpperCase()}</div>`;
+
+  switch (node.type) {
+    case 'say':
+      html += `
+        <div class="ivr-config-group">
+          <label class="ivr-config-label">Text to speak</label>
+          <textarea class="ivr-config-input" rows="4"
+            oninput="ivrUpdateConfig('${node.id}','text',this.value)"
+            placeholder="Enter spoken text...">${escHtml(node.config.text || '')}</textarea>
+        </div>
+        <div class="ivr-config-group">
+          <label class="ivr-config-label">Voice</label>
+          <select class="ivr-config-input"
+            onchange="ivrUpdateConfig('${node.id}','voice',this.value)">
+            <option value="woman" ${node.config.voice === 'woman' ? 'selected' : ''}>Woman</option>
+            <option value="man"   ${node.config.voice === 'man'   ? 'selected' : ''}>Man</option>
+          </select>
+        </div>`;
+      break;
+
+    case 'play':
+      html += `
+        <div class="ivr-config-group">
+          <label class="ivr-config-label">Audio URL</label>
+          <input class="ivr-config-input" type="url"
+            value="${escHtml(node.config.url || '')}"
+            placeholder="https://example.com/audio.mp3"
+            oninput="ivrUpdateConfig('${node.id}','url',this.value)" />
+        </div>`;
+      break;
+
+    case 'gather':
+      html += `
+        <div class="ivr-config-group">
+          <label class="ivr-config-label">Max Digits</label>
+          <input class="ivr-config-input" type="number" min="1" max="20"
+            value="${escHtml(node.config.numDigits || '1')}"
+            oninput="ivrUpdateConfig('${node.id}','numDigits',this.value)" />
+        </div>
+        <div class="ivr-config-group">
+          <label class="ivr-config-label">Timeout (seconds)</label>
+          <input class="ivr-config-input" type="number" min="1" max="60"
+            value="${escHtml(node.config.timeout || '5')}"
+            oninput="ivrUpdateConfig('${node.id}','timeout',this.value)" />
+        </div>
+        <div style="font-size:.72rem;color:var(--muted);line-height:1.5">
+          Use the branch tabs below the node to define what happens for each digit input.
+          Drop Say/Play verbs into the node flow above for the gather prompt.
+        </div>`;
+      break;
+
+    case 'dial':
+      html += `
+        <div class="ivr-config-group">
+          <label class="ivr-config-label">Phone Number</label>
+          <input class="ivr-config-input" type="tel"
+            value="${escHtml(node.config.number || '')}"
+            placeholder="+12125551234"
+            oninput="ivrUpdateConfig('${node.id}','number',this.value)" />
+        </div>
+        <div class="ivr-config-group">
+          <label class="ivr-config-label">Caller ID (optional)</label>
+          <input class="ivr-config-input" type="tel"
+            value="${escHtml(node.config.callerId || '')}"
+            placeholder="+12125550000"
+            oninput="ivrUpdateConfig('${node.id}','callerId',this.value)" />
+        </div>
+        <div class="ivr-config-group">
+          <label class="ivr-config-label">Timeout (seconds)</label>
+          <input class="ivr-config-input" type="number" min="5" max="120"
+            value="${escHtml(node.config.timeout || '30')}"
+            oninput="ivrUpdateConfig('${node.id}','timeout',this.value)" />
+        </div>`;
+      break;
+
+    case 'hangup':
+      html += `<div style="font-size:.82rem;color:var(--muted);line-height:1.5">This verb ends the call immediately. No configuration required.</div>`;
+      break;
+
+    case 'pause':
+      html += `
+        <div class="ivr-config-group">
+          <label class="ivr-config-label">Duration (seconds)</label>
+          <input class="ivr-config-input" type="number" min="1" max="120"
+            value="${escHtml(node.config.duration || '1')}"
+            oninput="ivrUpdateConfig('${node.id}','duration',this.value)" />
+        </div>`;
+      break;
+  }
+
+  html += `
+    <div style="margin-top:auto;padding-top:12px;border-top:1px solid var(--border)">
+      <button class="btn btn-danger btn-sm" style="width:100%"
+              onclick="ivrRemoveNode('${node.id}')">Delete Node</button>
+    </div>`;
+
+  body.innerHTML = html;
+}
+
+function ivrUpdateConfig(nodeId, key, value) {
+  const found = ivrFindNode(nodeId);
+  if (!found) return;
+  found.node.config[key] = value;
+  // Update summary in DOM without full re-render for performance
+  const card = document.querySelector(`.ivr-node[data-id="${nodeId}"] .ivr-node-summary`);
+  if (card) card.textContent = ivrNodeSummary(found.node);
+}
+
+// --------------- Drag and Drop ---------------
+
+function ivrPaletteDragStart(event, verb) {
+  ivrDragVerb = verb;
+  ivrDragNodeId = null;
+  event.dataTransfer.setData('text/plain', 'verb:' + verb);
+  event.dataTransfer.effectAllowed = 'copy';
+}
+
+function ivrNodeDragStart(event, nodeId) {
+  ivrDragNodeId = nodeId;
+  ivrDragVerb = null;
+  event.dataTransfer.setData('text/plain', 'node:' + nodeId);
+  event.dataTransfer.effectAllowed = 'move';
+}
+
+function ivrNodeDragEnd(event) {
+  ivrDragNodeId = null;
+  ivrDragVerb = null;
+}
+
+function ivrDropZoneDragOver(event) {
+  event.preventDefault();
+  event.dataTransfer.dropEffect = ivrDragNodeId ? 'move' : 'copy';
+  this.classList.add('drag-over');
+}
+
+function ivrDropZoneDragLeave(event) {
+  this.classList.remove('drag-over');
+}
+
+function ivrDropZoneDrop(event) {
+  event.preventDefault();
+  this.classList.remove('drag-over');
+
+  const path     = this.dataset.path;
+  const position = parseInt(this.dataset.position, 10);
+
+  if (ivrDragVerb) {
+    // New node from palette
+    ivrAddNode(ivrDragVerb, path, position);
+    ivrDragVerb = null;
+  } else if (ivrDragNodeId) {
+    // Reorder existing node
+    const found = ivrFindNode(ivrDragNodeId);
+    if (!found) return;
+    const nodeCopy = found.node;
+
+    // Remove from original location
+    found.list.splice(found.index, 1);
+
+    // Insert at new location
+    const targetList = ivrGetNodeList(path);
+    if (!targetList) { renderFlow(); return; }
+
+    // Adjust position if removing from same list shifted things
+    let insertAt = position;
+    if (targetList === found.list && found.index < position) {
+      insertAt = Math.max(0, position - 1);
+    }
+    targetList.splice(insertAt, 0, nodeCopy);
+
+    ivrDragNodeId = null;
+    renderFlow();
+  }
+}
+
+// --------------- XML Generation ---------------
+
+function escXml(str) {
+  if (str == null) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+function nodesToXml(nodes, indent) {
+  let xml = '';
+  if (!nodes || nodes.length === 0) return xml;
+  for (const node of nodes) {
+    switch (node.type) {
+      case 'say': {
+        const voice = node.config.voice ? ` voice="${escXml(node.config.voice)}"` : '';
+        xml += `${indent}<Say${voice}>${escXml(node.config.text)}</Say>\n`;
+        break;
+      }
+      case 'play':
+        xml += `${indent}<Play>${escXml(node.config.url)}</Play>\n`;
+        break;
+      case 'gather': {
+        const attrs = [];
+        if (node.config.numDigits) attrs.push(`numDigits="${escXml(node.config.numDigits)}"`);
+        if (node.config.timeout)   attrs.push(`timeout="${escXml(node.config.timeout)}"`);
+        const attrStr = attrs.length > 0 ? ' ' + attrs.join(' ') : '';
+        xml += `${indent}<Gather${attrStr}>\n`;
+        xml += nodesToXml(node.prompt || [], indent + '  ');
+        xml += `${indent}</Gather>\n`;
+        // Emit branch comments for documentation
+        const branchKeys = Object.keys(node.branches || {});
+        if (branchKeys.length > 0) {
+          xml += `${indent}<!-- Branch routing (handled by webhook callbacks):\n`;
+          for (const k of branchKeys) {
+            xml += `${indent}     Digit "${k}":\n`;
+            xml += nodesToXml(node.branches[k], indent + '       ');
+          }
+          xml += `${indent}-->\n`;
+        }
+        break;
+      }
+      case 'dial': {
+        const dattrs = [];
+        if (node.config.callerId) dattrs.push(`callerId="${escXml(node.config.callerId)}"`);
+        if (node.config.timeout)  dattrs.push(`timeout="${escXml(node.config.timeout)}"`);
+        const dAttrStr = dattrs.length > 0 ? ' ' + dattrs.join(' ') : '';
+        xml += `${indent}<Dial${dAttrStr}>${escXml(node.config.number)}</Dial>\n`;
+        break;
+      }
+      case 'hangup':
+        xml += `${indent}<Hangup/>\n`;
+        break;
+      case 'pause':
+        xml += `${indent}<Pause length="${escXml(node.config.duration || '1')}"/>\n`;
+        break;
+    }
+  }
+  return xml;
+}
+
+function generateXml() {
+  let xml = '<?xml version="1.0" encoding="UTF-8"?>\n<Response>\n';
+  xml += nodesToXml(ivrFlow.nodes, '  ');
+  xml += '</Response>';
+  return xml;
+}
+
+// --------------- XML Preview Modal ---------------
+
+function ivrPreviewXml() {
+  const xml = generateXml();
+  const block = document.getElementById('ivr-xml-content');
+  // Basic XML syntax highlighting
+  block.innerHTML = ivrHighlightXml(xml);
+  document.getElementById('ivr-xml-modal').classList.add('open');
+}
+
+function ivrHighlightXml(xml) {
+  // Escape HTML first, then apply span-based highlighting
+  const escaped = xml
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+
+  return escaped
+    // Comments: <!-- ... -->
+    .replace(/(&lt;!--[\s\S]*?--&gt;)/g, '<span style="color:#6a737d">$1</span>')
+    // XML declaration
+    .replace(/(&lt;\?xml[^?]*\?&gt;)/g, '<span style="color:#79c0ff">$1</span>')
+    // Closing tags
+    .replace(/(&lt;\/\w+&gt;)/g, '<span style="color:#7ee787">$1</span>')
+    // Self-closing and opening tags with attributes
+    .replace(/(&lt;\w+)([^&]*?)(\/?&gt;)/g, (_, open, attrs, close) => {
+      const coloredAttrs = attrs.replace(/(\w+)=(&quot;[^&]*&quot;)/g,
+        '<span style="color:#79c0ff">$1</span>=<span style="color:#a5d6a7">$2</span>');
+      return `<span style="color:#7ee787">${open}</span>${coloredAttrs}<span style="color:#7ee787">${close}</span>`;
+    });
+}
+
+function ivrCloseXmlModal() {
+  document.getElementById('ivr-xml-modal').classList.remove('open');
+}
+
+async function ivrCopyXml() {
+  const xml = generateXml();
+  try {
+    await navigator.clipboard.writeText(xml);
+    const btn = document.getElementById('ivr-xml-copy-btn');
+    const orig = btn.textContent;
+    btn.textContent = 'Copied!';
+    setTimeout(() => { btn.textContent = orig; }, 1800);
+  } catch (_) {
+    toast('Copy failed — select text manually', 'err');
+  }
+}
+
+// --------------- Save / Load ---------------
+
+async function ivrSaveFlow() {
+  const body = {
+    customer_id:  ivrFlow.customerId,
+    did:          ivrFlow.did,
+    name:         ivrFlow.name,
+    flow_config:  { nodes: ivrFlow.nodes }
+  };
+
+  try {
+    if (ivrFlow.id) {
+      await api('PUT', `/ivr/${ivrFlow.id}`, body);
+    } else {
+      const result = await api('POST', '/ivr', body);
+      if (result && result.id) ivrFlow.id = result.id;
+    }
+    toast('Flow saved', 'ok');
+  } catch (err) {
+    toast('Save failed: ' + err.message, 'err');
+  }
+}
+
+async function ivrLoadFlows() {
+  const wrap = document.getElementById('ivr-flow-list-wrap');
+  wrap.innerHTML = '<div class="state-msg"><span class="spinner"></span></div>';
+  document.getElementById('ivr-load-modal').classList.add('open');
+
+  try {
+    const flows = await api('GET', '/ivr');
+    const list = Array.isArray(flows) ? flows : [];
+    if (list.length === 0) {
+      wrap.innerHTML = '<div class="state-msg"><strong>No saved flows</strong>Save a flow first.</div>';
+      return;
+    }
+    wrap.innerHTML = `<div class="ivr-flow-list">${list.map(f => `
+      <div class="ivr-flow-list-item" onclick="ivrLoadFlow(${f.id})">
+        <div>
+          <div class="ivr-flow-list-name">${escHtml(f.name || 'Untitled')}</div>
+          <div class="ivr-flow-list-meta">${escHtml(f.did || 'No DID')} &mdash; ${escHtml(f.customer_name || '')}</div>
+        </div>
+        <button class="btn btn-ghost btn-xs" onclick="event.stopPropagation();ivrDeleteFlow(${f.id},this)">Delete</button>
+      </div>`).join('')}</div>`;
+  } catch (err) {
+    wrap.innerHTML = `<div class="state-msg"><strong>Failed to load</strong>${escHtml(err.message)}</div>`;
+  }
+}
+
+async function ivrLoadFlow(id) {
+  try {
+    const flow = await api('GET', `/ivr/${id}`);
+    ivrFlow.id         = flow.id;
+    ivrFlow.name       = flow.name || 'Untitled';
+    ivrFlow.customerId = flow.customer_id || null;
+    ivrFlow.did        = flow.did || null;
+    ivrFlow.nodes      = (flow.flow_config && flow.flow_config.nodes) ? flow.flow_config.nodes : [];
+    ivrSelectedNodeId  = null;
+
+    // Update UI
+    const nameInput = document.getElementById('ivr-flow-name');
+    if (nameInput) nameInput.value = ivrFlow.name;
+    const custSel = document.getElementById('ivr-customer-sel');
+    if (custSel && ivrFlow.customerId) {
+      custSel.value = ivrFlow.customerId;
+      await ivrOnCustomerChange();
+    }
+    const didSel = document.getElementById('ivr-did-sel');
+    if (didSel && ivrFlow.did) didSel.value = ivrFlow.did;
+
+    ivrCloseLoadModal();
+    renderFlow();
+    ivrRenderConfigPanel(null);
+    toast('Flow loaded', 'ok');
+  } catch (err) {
+    toast('Load failed: ' + err.message, 'err');
+  }
+}
+
+async function ivrDeleteFlow(id, btn) {
+  if (!confirm('Delete this flow?')) return;
+  try {
+    await api('DELETE', `/ivr/${id}`);
+    toast('Flow deleted', 'ok');
+    if (ivrFlow.id === id) {
+      ivrFlow = { id: null, name: 'New IVR Flow', customerId: null, did: null, nodes: [] };
+      const nameInput = document.getElementById('ivr-flow-name');
+      if (nameInput) nameInput.value = ivrFlow.name;
+      ivrSelectedNodeId = null;
+      renderFlow();
+      ivrRenderConfigPanel(null);
+    }
+    // Refresh list
+    ivrLoadFlows();
+  } catch (err) {
+    toast('Delete failed: ' + err.message, 'err');
+  }
+}
+
+function ivrCloseLoadModal() {
+  document.getElementById('ivr-load-modal').classList.remove('open');
 }
 
 /* =========================================================
