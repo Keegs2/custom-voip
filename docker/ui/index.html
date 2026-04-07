@@ -1057,6 +1057,211 @@
     @media (max-width: 420px) {
       .stats-grid { grid-template-columns: 1fr; }
     }
+
+    /* =========================================================
+       SIPP TESTING PAGE
+    ========================================================= */
+
+    .preset-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 16px;
+      margin-bottom: 28px;
+    }
+
+    .preset-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 22px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      transition: border-color .2s, box-shadow .2s;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .preset-card:hover {
+      border-color: rgba(59,130,246,.4);
+      box-shadow: 0 0 18px rgba(59,130,246,.12);
+    }
+
+    .preset-card-name {
+      font-size: .97rem;
+      font-weight: 700;
+      color: var(--text);
+    }
+
+    .preset-card-desc {
+      font-size: .8rem;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+
+    .preset-card-params {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      padding: 10px 12px;
+      background: var(--surface-raised);
+      border-radius: 7px;
+      border: 1px solid var(--border);
+    }
+
+    .preset-param {
+      font-size: .73rem;
+      color: var(--muted);
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .preset-param strong {
+      color: #94a3b8;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .preset-card-footer {
+      margin-top: auto;
+      padding-top: 10px;
+    }
+
+    /* Collapsible custom test */
+    .collapsible-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      cursor: pointer;
+      user-select: none;
+      padding: 16px 22px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      transition: border-color .2s, background .15s;
+      margin-bottom: 0;
+    }
+
+    .collapsible-header:hover {
+      border-color: #363c57;
+      background: var(--surface-raised);
+    }
+
+    .collapsible-header.open {
+      border-bottom-left-radius: 0;
+      border-bottom-right-radius: 0;
+      border-bottom-color: transparent;
+    }
+
+    .collapsible-title {
+      font-size: .95rem;
+      font-weight: 700;
+      color: var(--text);
+    }
+
+    .collapsible-chevron {
+      color: var(--muted);
+      font-size: .85rem;
+      transition: transform .2s;
+    }
+
+    .collapsible-header.open .collapsible-chevron {
+      transform: rotate(180deg);
+    }
+
+    .collapsible-body {
+      display: none;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-top: none;
+      border-bottom-left-radius: var(--radius);
+      border-bottom-right-radius: var(--radius);
+      padding: 22px;
+      margin-bottom: 28px;
+    }
+
+    .collapsible-body.open {
+      display: block;
+    }
+
+    /* Verdict badges */
+    .verdict-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.05rem;
+      font-weight: 800;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      padding: 8px 28px;
+      border-radius: 8px;
+    }
+
+    .verdict-pass {
+      background: rgba(34,197,94,0.15);
+      color: #6ee7b7;
+      border: 1px solid rgba(34,197,94,0.3);
+      box-shadow: 0 0 15px rgba(34,197,94,0.2);
+    }
+
+    .verdict-warn {
+      background: rgba(245,158,11,0.15);
+      color: #fcd34d;
+      border: 1px solid rgba(245,158,11,0.3);
+      box-shadow: 0 0 15px rgba(245,158,11,0.2);
+    }
+
+    .verdict-fail {
+      background: rgba(239,68,68,0.15);
+      color: #fca5a5;
+      border: 1px solid rgba(239,68,68,0.3);
+      box-shadow: 0 0 15px rgba(239,68,68,0.2);
+    }
+
+    /* Results area */
+    .sipp-results-area {
+      margin-top: 4px;
+    }
+
+    .sipp-results-area.running {
+      animation: sipp-pulse 1.8s ease-in-out infinite;
+      border-radius: var(--radius);
+    }
+
+    @keyframes sipp-pulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(59,130,246,0); }
+      50%       { box-shadow: 0 0 24px 4px rgba(59,130,246,.22); }
+    }
+
+    .sipp-result-header {
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      margin-bottom: 22px;
+      flex-wrap: wrap;
+    }
+
+    .sipp-result-meta {
+      font-size: .78rem;
+      color: var(--muted);
+      line-height: 1.7;
+    }
+
+    .sipp-section-label {
+      font-size: .68rem;
+      font-weight: 700;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: .8px;
+      margin-bottom: 10px;
+      margin-top: 22px;
+    }
+
+    .sipp-section-label:first-child { margin-top: 0; }
+
+    /* History table - no cursor pointer on rows */
+    .history-table tbody tr { cursor: default; }
+    .history-table tbody tr:hover { background: rgba(255,255,255,.015); }
   </style>
 </head>
 <body>
@@ -1092,6 +1297,11 @@
     </a>
     <a class="nav-item" data-page="tiers" onclick="navigate('tiers')">
       <span class="nav-icon">*</span> CPS Tiers
+    </a>
+
+    <div class="nav-section-label">Testing</div>
+    <a class="nav-item" data-page="sipp" onclick="navigate('sipp')">
+      <span class="nav-icon">&#9654;</span> SIPp Testing
     </a>
   </div>
 
@@ -1387,6 +1597,66 @@
       </div>
     </div>
 
+    <!-- ===================== SIPP TESTING ===================== -->
+    <div id="page-sipp" class="page" style="display:none">
+      <div class="page-hd">
+        <div>
+          <div class="page-title">SIPp <span>Testing</span></div>
+          <div class="page-subtitle">Load test the platform with configurable SIP call scenarios</div>
+        </div>
+      </div>
+
+      <!-- PRESETS -->
+      <div class="section-heading" style="margin-bottom:14px">Test Presets</div>
+      <div id="sipp-preset-grid" class="preset-grid">
+        <div class="state-msg" style="grid-column:1/-1;padding:32px"><span class="spinner"></span></div>
+      </div>
+
+      <!-- CUSTOM TEST -->
+      <div class="collapsible-header" id="sipp-custom-header" onclick="toggleSippCustom()">
+        <span class="collapsible-title">Custom Test Configuration</span>
+        <span class="collapsible-chevron">&#x25BC;</span>
+      </div>
+      <div class="collapsible-body" id="sipp-custom-body">
+        <div class="form-grid" style="grid-template-columns:repeat(auto-fill,minmax(200px,1fr))">
+          <div class="form-group">
+            <label class="form-label">Target Number</label>
+            <input class="form-control" id="sipp-target" type="text" value="9196" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">CPS Rate</label>
+            <input class="form-control" id="sipp-rate" type="number" value="100" min="1" max="500" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Total Calls</label>
+            <input class="form-control" id="sipp-calls" type="number" value="1000" min="1" max="10000" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Timeout (s)</label>
+            <input class="form-control" id="sipp-timeout" type="number" value="60" min="5" max="120" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Call Duration (ms, 0 = immediate hangup)</label>
+            <input class="form-control" id="sipp-duration" type="number" value="0" min="0" max="30000" />
+          </div>
+        </div>
+        <div class="form-footer">
+          <button class="btn btn-primary" id="sipp-custom-run-btn" onclick="runCustomSippTest()">Run Custom Test</button>
+        </div>
+      </div>
+
+      <!-- RESULTS -->
+      <div class="section-heading" style="margin-top:28px;margin-bottom:14px">Results</div>
+      <div class="sipp-results-area" id="sipp-results-area">
+        <div class="card">
+          <div class="state-msg" style="padding:32px 16px">
+            <strong>No tests run yet</strong>
+            Select a preset above or configure a custom test to begin.
+          </div>
+        </div>
+      </div>
+    </div>
+
   </div><!-- /page-container -->
 </div><!-- /main-wrapper -->
 
@@ -1479,7 +1749,8 @@ const PAGE_TITLES = {
   rcf:       'RCF Numbers',
   'api-dids':'API DIDs',
   trunks:    'SIP Trunks',
-  tiers:     'CPS Tiers'
+  tiers:     'CPS Tiers',
+  sipp:      'SIPp Testing'
 };
 
 let currentPage = null;
@@ -1522,6 +1793,7 @@ function navigate(page) {
     case 'api-dids':  loadApiDids();   break;
     case 'trunks':    loadTrunks();    break;
     case 'tiers':     loadTiers();     break;
+    case 'sipp':      loadSippPage();  break;
   }
 }
 
@@ -2538,6 +2810,305 @@ function renderTierCard(t, type) {
     ${features ? `<ul class="tier-features">${features}</ul>` : ''}
     ${upgradeNote}
   </div>`;
+}
+
+/* =========================================================
+   SIPP TESTING
+========================================================= */
+
+let sippPresets       = [];  // cached preset list
+let sippTestHistory   = [];  // last 5 results, newest first
+let sippRunning       = false;
+
+// Toggle the Custom Test collapsible panel
+function toggleSippCustom() {
+  const header = document.getElementById('sipp-custom-header');
+  const body   = document.getElementById('sipp-custom-body');
+  header.classList.toggle('open');
+  body.classList.toggle('open');
+}
+
+// Fetches presets and renders preset cards. Called once per page visit.
+async function loadSippPage() {
+  const grid = document.getElementById('sipp-preset-grid');
+  grid.innerHTML = '<div class="state-msg" style="grid-column:1/-1;padding:32px"><span class="spinner"></span></div>';
+
+  try {
+    sippPresets = await api('GET', '/sipp/presets');
+    renderSippPresets();
+  } catch (err) {
+    grid.innerHTML = `<div class="state-msg" style="grid-column:1/-1"><strong>Failed to load presets</strong>${escHtml(err.message)}</div>`;
+  }
+}
+
+function renderSippPresets() {
+  const grid = document.getElementById('sipp-preset-grid');
+
+  if (!sippPresets || sippPresets.length === 0) {
+    grid.innerHTML = '<div class="state-msg" style="grid-column:1/-1">No presets available.</div>';
+    return;
+  }
+
+  grid.innerHTML = sippPresets.map(p => {
+    const d = p.defaults || {};
+    return `
+    <div class="preset-card">
+      <div class="preset-card-name">${escHtml(p.name)}</div>
+      <div class="preset-card-desc">${escHtml(p.description || '')}</div>
+      <div class="preset-card-params">
+        <div class="preset-param"><span>Target</span><strong>${escHtml(String(d.target ?? '--'))}</strong></div>
+        <div class="preset-param"><span>Rate</span><strong>${escHtml(String(d.rate ?? '--'))} CPS</strong></div>
+        <div class="preset-param"><span>Calls</span><strong>${escHtml(String(d.calls ?? '--'))}</strong></div>
+        <div class="preset-param"><span>Timeout</span><strong>${escHtml(String(d.timeout ?? '--'))}s</strong></div>
+        <div class="preset-param"><span>Duration</span><strong>${escHtml(String(d.duration ?? 0))}ms</strong></div>
+      </div>
+      <div class="preset-card-footer">
+        <button
+          class="btn btn-primary btn-sm sipp-run-btn"
+          data-preset-id="${escHtml(p.id)}"
+          onclick="runSippPreset('${escHtml(p.id)}')"
+          ${sippRunning ? 'disabled' : ''}
+        >Run</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// Called when a preset card's Run button is clicked
+function runSippPreset(presetId) {
+  const preset = sippPresets.find(p => p.id === presetId);
+  if (!preset) return;
+  const d = preset.defaults || {};
+  runSippTest({
+    target:   d.target   ?? '9196',
+    rate:     d.rate     ?? 100,
+    calls:    d.calls    ?? 1000,
+    timeout:  d.timeout  ?? 60,
+    duration: d.duration ?? 0,
+    preset:   presetId
+  }, presetId);
+}
+
+// Called when the custom test form is submitted
+function runCustomSippTest() {
+  const target   = document.getElementById('sipp-target').value.trim() || '9196';
+  const rate     = parseInt(document.getElementById('sipp-rate').value, 10)    || 100;
+  const calls    = parseInt(document.getElementById('sipp-calls').value, 10)   || 1000;
+  const timeout  = parseInt(document.getElementById('sipp-timeout').value, 10) || 60;
+  const duration = parseInt(document.getElementById('sipp-duration').value, 10) || 0;
+
+  runSippTest({ target, rate, calls, timeout, duration });
+}
+
+// Core: POSTs to /sipp/run, renders results, updates history
+async function runSippTest(config, clickedPresetId) {
+  if (sippRunning) return;
+  sippRunning = true;
+
+  // Disable all run buttons and show spinner on the clicked one
+  const allRunBtns = document.querySelectorAll('.sipp-run-btn, #sipp-custom-run-btn');
+  allRunBtns.forEach(btn => { btn.disabled = true; });
+
+  // Show spinner on clicked preset button (if any)
+  const clickedBtn = clickedPresetId
+    ? document.querySelector(`[data-preset-id="${clickedPresetId}"]`)
+    : document.getElementById('sipp-custom-run-btn');
+  if (clickedBtn) {
+    clickedBtn.dataset.label = clickedBtn.innerHTML;
+    clickedBtn.innerHTML = '<span class="spinner"></span> Running...';
+  }
+
+  // Show pulsing results area while running
+  const resultsArea = document.getElementById('sipp-results-area');
+  resultsArea.classList.add('running');
+  resultsArea.innerHTML = `
+    <div class="card" style="text-align:center;padding:40px 20px">
+      <div><span class="spinner"></span></div>
+      <div style="margin-top:16px;color:var(--muted);font-size:.88rem">
+        Test running — this may take up to ${config.timeout || 60} seconds...
+      </div>
+    </div>`;
+
+  let response = null;
+  try {
+    response = await api('POST', '/sipp/run', config);
+    resultsArea.classList.remove('running');
+    renderSippResults(response);
+
+    // Add to history (keep last 5) — stamp a local timestamp for display
+    response._timestamp = Date.now();
+    sippTestHistory.unshift(response);
+    if (sippTestHistory.length > 5) sippTestHistory.length = 5;
+
+    // Render history below results
+    renderSippHistory();
+
+    const verdict = response.verdict || 'DONE';
+    toast(`Test complete — ${verdict}`, verdict === 'PASS' ? 'ok' : 'err');
+
+  } catch (err) {
+    resultsArea.classList.remove('running');
+    resultsArea.innerHTML = `
+      <div class="card">
+        <div class="state-msg" style="padding:28px 16px">
+          <strong>Test failed</strong>
+          ${escHtml(err.message)}
+        </div>
+      </div>`;
+    toast(`Test error: ${err.message}`, 'err');
+  } finally {
+    sippRunning = false;
+    // Re-enable all buttons
+    allRunBtns.forEach(btn => { btn.disabled = false; });
+    if (clickedBtn && clickedBtn.dataset.label) {
+      clickedBtn.innerHTML = clickedBtn.dataset.label;
+      delete clickedBtn.dataset.label;
+    }
+    // Re-render presets to restore button states
+    renderSippPresets();
+  }
+}
+
+function renderSippResults(data) {
+  const r       = data.results || {};
+  const verdict = data.verdict || 'DONE';
+  const cfg     = data.config  || {};
+
+  const verdictClass = verdict === 'PASS' ? 'verdict-pass'
+                     : verdict === 'WARN' ? 'verdict-warn'
+                     :                      'verdict-fail';
+
+  const presetLabel = data.preset
+    ? (sippPresets.find(p => p.id === data.preset)?.name || data.preset)
+    : 'Custom';
+
+  const failedColor = (r.failed || 0) > 0
+    ? 'color:#f87171'
+    : 'color:var(--muted)';
+
+  const successColor = 'color:#4ade80';
+
+  const pct = r.total_calls > 0
+    ? ((r.successful / r.total_calls) * 100).toFixed(1)
+    : '0.0';
+
+  const resultsHtml = `
+    <div class="card">
+      <!-- Verdict + meta -->
+      <div class="sipp-result-header">
+        <div class="verdict-badge ${verdictClass}">${escHtml(verdict)}</div>
+        <div class="sipp-result-meta">
+          <div>Preset: <strong style="color:var(--text)">${escHtml(presetLabel)}</strong></div>
+          <div>Target: <strong style="color:var(--text)">${escHtml(String(cfg.target ?? '--'))}</strong>
+            &nbsp;&middot;&nbsp; Rate: <strong style="color:var(--text)">${escHtml(String(cfg.rate ?? '--'))} CPS</strong>
+            &nbsp;&middot;&nbsp; Duration: <strong style="color:var(--text)">${escHtml(String(cfg.duration ?? 0))}ms</strong>
+          </div>
+        </div>
+      </div>
+
+      <!-- Key metrics -->
+      <div class="sipp-section-label">Key Metrics</div>
+      <div class="stats-grid" style="margin-bottom:0">
+        <div class="stat-card">
+          <div class="stat-label">Total Calls</div>
+          <div class="stat-value">${escHtml(String(r.total_calls ?? '--'))}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Successful</div>
+          <div class="stat-value" style="${successColor}">${escHtml(String(r.successful ?? '--'))}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Failed</div>
+          <div class="stat-value" style="${failedColor}">${escHtml(String(r.failed ?? '--'))}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Effective CPS</div>
+          <div class="stat-value">${r.effective_cps != null ? Number(r.effective_cps).toFixed(1) : '--'}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Retransmissions</div>
+          <div class="stat-value" style="${(r.retransmissions || 0) > 0 ? 'color:#fcd34d' : ''}">${escHtml(String(r.retransmissions ?? '--'))}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Elapsed Time</div>
+          <div class="stat-value">${r.elapsed_seconds != null ? Number(r.elapsed_seconds).toFixed(2) + 's' : '--'}</div>
+        </div>
+      </div>
+
+      <!-- SIP Message Breakdown -->
+      <div class="sipp-section-label">SIP Message Breakdown</div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Message</th>
+              <th style="text-align:right">Count</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td>INVITE Sent</td><td style="text-align:right;font-variant-numeric:tabular-nums">${escHtml(String(r.invite_sent ?? '--'))}</td></tr>
+            <tr><td>100 Trying</td><td style="text-align:right;font-variant-numeric:tabular-nums">${escHtml(String(r.response_100 ?? '--'))}</td></tr>
+            <tr><td>200 OK</td><td style="text-align:right;font-variant-numeric:tabular-nums;color:#4ade80">${escHtml(String(r.response_200 ?? '--'))}</td></tr>
+            <tr><td>Timeouts</td><td style="text-align:right;font-variant-numeric:tabular-nums;${(r.timeouts || 0) > 0 ? 'color:#f87171' : 'color:var(--muted)'}">${escHtml(String(r.timeouts ?? '--'))}</td></tr>
+            <tr><td>Unexpected Messages</td><td style="text-align:right;font-variant-numeric:tabular-nums;${(r.unexpected_msg || 0) > 0 ? 'color:#fcd34d' : 'color:var(--muted)'}">${escHtml(String(r.unexpected_msg ?? '--'))}</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div id="sipp-history-section"></div>
+    </div>`;
+
+  document.getElementById('sipp-results-area').innerHTML = resultsHtml;
+  renderSippHistory();
+}
+
+function renderSippHistory() {
+  const section = document.getElementById('sipp-history-section');
+  if (!section) return;
+
+  if (sippTestHistory.length === 0) {
+    section.innerHTML = '';
+    return;
+  }
+
+  const rows = sippTestHistory.map((entry, idx) => {
+    const r       = entry.results || {};
+    const cfg     = entry.config  || {};
+    const verdict = entry.verdict || '--';
+    const vcls    = verdict === 'PASS' ? 'badge-active'
+                  : verdict === 'WARN' ? 'badge-hybrid'
+                  :                      'badge-disabled';
+    const presetLabel = entry.preset
+      ? (sippPresets.find(p => p.id === entry.preset)?.name || entry.preset)
+      : 'Custom';
+    const successPct = r.total_calls > 0
+      ? ((r.successful / r.total_calls) * 100).toFixed(1) + '%'
+      : '--';
+    const ts = entry._timestamp ? new Date(entry._timestamp).toLocaleTimeString() : '--';
+
+    return `<tr>
+      <td style="color:var(--muted);font-size:.78rem;white-space:nowrap">${escHtml(ts)}</td>
+      <td>${escHtml(presetLabel)}</td>
+      <td style="font-variant-numeric:tabular-nums">${escHtml(String(cfg.rate ?? '--'))}</td>
+      <td style="font-variant-numeric:tabular-nums">${escHtml(String(cfg.calls ?? '--'))}</td>
+      <td style="font-variant-numeric:tabular-nums">${escHtml(successPct)}</td>
+      <td style="font-variant-numeric:tabular-nums">${r.effective_cps != null ? Number(r.effective_cps).toFixed(1) : '--'}</td>
+      <td><span class="badge ${vcls}">${escHtml(verdict)}</span></td>
+    </tr>`;
+  }).join('');
+
+  section.innerHTML = `
+    <div class="sipp-section-label" style="margin-top:24px">Test History (last 5)</div>
+    <div class="table-wrap history-table">
+      <table class="history-table">
+        <thead>
+          <tr>
+            <th>Time</th><th>Preset</th><th>Rate</th><th>Calls</th><th>Success %</th><th>CPS</th><th>Verdict</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
 }
 
 /* =========================================================

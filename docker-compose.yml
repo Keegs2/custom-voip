@@ -202,6 +202,21 @@ services:
           memory: 128M
     restart: unless-stopped
 
+  # SIPp load testing microservice
+  sipp:
+    build: ./docker/sipp
+    container_name: voip-sipp
+    depends_on:
+      - freeswitch
+    networks:
+      - voip-network
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 512M
+    restart: unless-stopped
+
   # Web UI for RCF management
   ui:
     build: ./docker/ui
