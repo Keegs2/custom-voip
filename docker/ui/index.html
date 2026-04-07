@@ -6,6 +6,7 @@
   <title>Custom VoIP Admin</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
 
     :root {
       --bg:              #0f1117;
@@ -798,10 +799,16 @@
     }
 
     .tiers-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+      display: flex;
       gap: 16px;
       margin-bottom: 32px;
+      align-items: stretch;
+      flex-wrap: wrap;
+    }
+
+    .tiers-grid .tier-card {
+      flex: 1 1 220px;
+      min-width: 200px;
     }
 
     .tier-card {
@@ -813,6 +820,14 @@
       flex-direction: column;
       gap: 14px;
       transition: border-color .2s;
+    }
+
+    .tier-card-full {
+      width: 100%;
+    }
+
+    .tier-features-section {
+      flex: 1;
     }
 
     .tier-card:hover { border-color: #363c57; }
@@ -1382,6 +1397,288 @@
       border-color: var(--border-focus);
       box-shadow: 0 0 0 3px var(--accent-glow);
     }
+
+    /* =========================================================
+       API DOCS PAGE
+    ========================================================= */
+
+    .docs-layout {
+      max-width: 900px;
+      margin: 0 auto;
+    }
+
+    .docs-toc {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px 24px;
+      margin-bottom: 36px;
+    }
+
+    .docs-toc-title {
+      font-size: .7rem;
+      font-weight: 700;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: .9px;
+      margin-bottom: 12px;
+    }
+
+    .docs-toc-list {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .docs-toc-list a {
+      color: var(--accent);
+      text-decoration: none;
+      font-size: .88rem;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 3px 0;
+      transition: color .15s;
+    }
+
+    .docs-toc-list a:hover {
+      color: #93c5fd;
+    }
+
+    .docs-toc-list a::before {
+      content: '';
+      display: inline-block;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--border);
+      flex-shrink: 0;
+    }
+
+    .docs-section {
+      margin-bottom: 48px;
+    }
+
+    .docs-section-hd {
+      font-size: 1.2rem;
+      font-weight: 700;
+      color: var(--text);
+      padding-left: 14px;
+      border-left: 3px solid var(--accent);
+      margin-bottom: 14px;
+      line-height: 1.3;
+    }
+
+    .docs-sub-hd {
+      font-size: .82rem;
+      font-weight: 700;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: .8px;
+      margin: 22px 0 10px;
+    }
+
+    .docs-prose {
+      font-size: .9rem;
+      color: var(--muted);
+      line-height: 1.7;
+      margin-bottom: 16px;
+    }
+
+    .docs-prose strong {
+      color: var(--text);
+    }
+
+    .docs-code-block {
+      background: #0d0f15;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px;
+      font-family: 'SF Mono', 'Fira Code', 'Fira Mono', monospace;
+      font-size: .82rem;
+      overflow-x: auto;
+      margin: 12px 0;
+      white-space: pre;
+      line-height: 1.6;
+      color: #c9d1d9;
+    }
+
+    code.inline {
+      background: var(--surface-raised);
+      padding: 2px 7px;
+      border-radius: 4px;
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      font-size: .82em;
+      color: #93c5fd;
+      border: 1px solid var(--border);
+    }
+
+    .docs-endpoint-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 12px 0;
+      font-size: .86rem;
+    }
+
+    .docs-endpoint-table td {
+      padding: 8px 12px;
+      border-bottom: 1px solid rgba(42,47,69,.5);
+      vertical-align: middle;
+    }
+
+    .docs-endpoint-table tr:last-child td {
+      border-bottom: none;
+    }
+
+    .docs-endpoint-table td:first-child {
+      width: 80px;
+    }
+
+    .docs-endpoint-wrap {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+      margin: 12px 0;
+    }
+
+    .method {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: .68rem;
+      font-weight: 800;
+      padding: 3px 8px;
+      border-radius: 4px;
+      letter-spacing: .6px;
+      font-family: 'SF Mono', monospace;
+      min-width: 58px;
+    }
+
+    .method-get    { background: rgba(34,197,94,.12);  color: #4ade80; border: 1px solid rgba(34,197,94,.25); }
+    .method-post   { background: rgba(59,130,246,.12); color: #93c5fd; border: 1px solid rgba(59,130,246,.3); }
+    .method-put    { background: rgba(245,158,11,.10); color: #fcd34d; border: 1px solid rgba(245,158,11,.3); }
+    .method-delete { background: rgba(239,68,68,.10);  color: #f87171; border: 1px solid rgba(239,68,68,.22); }
+
+    .docs-endpoint-path {
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      font-size: .84rem;
+      color: var(--text);
+    }
+
+    .docs-endpoint-desc {
+      color: var(--muted);
+      font-size: .82rem;
+    }
+
+    /* JSON syntax highlighting */
+    .json-key    { color: #79c0ff; }
+    .json-str    { color: #a5d6a7; }
+    .json-num    { color: #f0c27f; }
+    .json-bool   { color: #ffa657; }
+    .json-null   { color: var(--muted); }
+    .json-punct  { color: #8b949e; }
+
+    .docs-note {
+      background: rgba(59,130,246,.07);
+      border: 1px solid rgba(59,130,246,.2);
+      border-radius: 8px;
+      padding: 12px 16px;
+      font-size: .85rem;
+      color: #93c5fd;
+      margin: 14px 0;
+      line-height: 1.6;
+    }
+
+    .docs-webhook-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin: 10px 0;
+    }
+
+    .docs-webhook-item {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+      padding: 8px 12px;
+      background: var(--surface-raised);
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      font-size: .85rem;
+    }
+
+    .docs-webhook-item code.inline {
+      flex-shrink: 0;
+    }
+
+    .docs-webhook-item span {
+      color: var(--muted);
+    }
+
+    .docs-divider {
+      border: none;
+      border-top: 1px solid var(--border);
+      margin: 32px 0;
+    }
+
+    .docs-base-url-block {
+      background: #0d0f15;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px 20px;
+      margin: 16px 0;
+      font-size: .88rem;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .docs-base-url-block .url-line {
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      color: #93c5fd;
+      font-size: .9rem;
+    }
+
+    .docs-base-url-block .url-note {
+      color: var(--muted);
+      font-size: .8rem;
+    }
+
+    .docs-tier-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: .86rem;
+      margin: 12px 0;
+    }
+
+    .docs-tier-table th {
+      text-align: left;
+      padding: 9px 14px;
+      font-size: .68rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .7px;
+      color: var(--muted);
+      border-bottom: 1px solid var(--border);
+      background: var(--surface-raised);
+    }
+
+    .docs-tier-table td {
+      padding: 10px 14px;
+      border-bottom: 1px solid rgba(42,47,69,.5);
+    }
+
+    .docs-tier-table tr:last-child td {
+      border-bottom: none;
+    }
+
+    .docs-tier-wrap {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+      margin: 12px 0;
+    }
   </style>
 </head>
 <body>
@@ -1425,6 +1722,11 @@
     <div class="nav-section-label">Testing</div>
     <a class="nav-item" data-page="sipp" onclick="navigate('sipp')">
       <span class="nav-icon">&#9654;</span> SIPp Testing
+    </a>
+
+    <div class="nav-section-label">Resources</div>
+    <a class="nav-item" data-page="docs" onclick="navigate('docs')">
+      <span class="nav-icon">?</span> API Docs
     </a>
   </div>
 
@@ -1859,6 +2161,458 @@
       </div>
     </div>
 
+    <!-- ===================== API DOCS ===================== -->
+    <div id="page-docs" class="page" style="display:none">
+      <div class="page-hd">
+        <div>
+          <div class="page-title">API <span>Documentation</span></div>
+          <div class="page-subtitle">Complete guide to the Custom VoIP Platform API</div>
+        </div>
+      </div>
+
+      <div class="docs-layout">
+
+        <!-- Base URL -->
+        <div class="docs-base-url-block">
+          <div class="url-line">Base URL: http://{your-domain}/v1</div>
+          <div class="url-note">All requests use JSON. Set <code class="inline">Content-Type: application/json</code> on write operations.</div>
+        </div>
+
+        <!-- Table of Contents -->
+        <div class="docs-toc">
+          <div class="docs-toc-title">On this page</div>
+          <ul class="docs-toc-list">
+            <li><a href="#doc-rcf">Remote Call Forwarding (RCF)</a></li>
+            <li><a href="#doc-calls">API Calling (Programmable Voice)</a></li>
+            <li><a href="#doc-trunks">SIP Trunking</a></li>
+            <li><a href="#doc-cdrs">CDR (Call Detail Records)</a></li>
+            <li><a href="#doc-customers">Customer Management</a></li>
+            <li><a href="#doc-billing">Rate Limits &amp; Billing</a></li>
+            <li><a href="#doc-health">Health &amp; Status</a></li>
+          </ul>
+        </div>
+
+        <!-- Section 1: RCF -->
+        <div class="docs-section" id="doc-rcf">
+          <div class="docs-section-hd">1. Remote Call Forwarding (RCF)</div>
+          <p class="docs-prose">
+            RCF lets you assign a phone number (DID) that automatically forwards to any destination.
+            Update the forwarding destination instantly via API or through the web dashboard — no carrier
+            coordination required. Changes take effect within seconds.
+          </p>
+
+          <div class="docs-sub-hd">Endpoints</div>
+          <div class="docs-endpoint-wrap">
+            <table class="docs-endpoint-table">
+              <tbody>
+                <tr>
+                  <td><span class="method method-get">GET</span></td>
+                  <td class="docs-endpoint-path">/rcf</td>
+                  <td class="docs-endpoint-desc">List all RCF numbers</td>
+                </tr>
+                <tr>
+                  <td><span class="method method-post">POST</span></td>
+                  <td class="docs-endpoint-path">/rcf</td>
+                  <td class="docs-endpoint-desc">Create an RCF number</td>
+                </tr>
+                <tr>
+                  <td><span class="method method-get">GET</span></td>
+                  <td class="docs-endpoint-path">/rcf/{did}</td>
+                  <td class="docs-endpoint-desc">Get RCF details</td>
+                </tr>
+                <tr>
+                  <td><span class="method method-put">PUT</span></td>
+                  <td class="docs-endpoint-path">/rcf/{did}</td>
+                  <td class="docs-endpoint-desc">Update forwarding destination</td>
+                </tr>
+                <tr>
+                  <td><span class="method method-delete">DELETE</span></td>
+                  <td class="docs-endpoint-path">/rcf/{did}</td>
+                  <td class="docs-endpoint-desc">Remove an RCF number</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="docs-sub-hd">Example — Create an RCF number</div>
+          <div class="docs-code-block"><span class="json-punct">POST /rcf</span>
+<span class="json-punct">{</span>
+  <span class="json-key">"customer_id"</span><span class="json-punct">:</span> <span class="json-num">1</span><span class="json-punct">,</span>
+  <span class="json-key">"did"</span><span class="json-punct">:</span> <span class="json-str">"+12125551234"</span><span class="json-punct">,</span>
+  <span class="json-key">"forward_to"</span><span class="json-punct">:</span> <span class="json-str">"+18005559999"</span><span class="json-punct">,</span>
+  <span class="json-key">"pass_caller_id"</span><span class="json-punct">:</span> <span class="json-bool">true</span><span class="json-punct">,</span>
+  <span class="json-key">"ring_timeout"</span><span class="json-punct">:</span> <span class="json-num">30</span>
+<span class="json-punct">}</span></div>
+
+          <div class="docs-sub-hd">Example — Change where a number forwards</div>
+          <div class="docs-code-block"><span class="json-punct">PUT /rcf/+12125551234</span>
+<span class="json-punct">{</span>
+  <span class="json-key">"forward_to"</span><span class="json-punct">:</span> <span class="json-str">"+13475551111"</span>
+<span class="json-punct">}</span></div>
+        </div>
+
+        <hr class="docs-divider">
+
+        <!-- Section 2: API Calling -->
+        <div class="docs-section" id="doc-calls">
+          <div class="docs-section-hd">2. API Calling (Programmable Voice)</div>
+          <p class="docs-prose">
+            Initiate and control calls programmatically. When a call connects, your webhook URL receives
+            events and you respond with instructions to control the call flow. This enables IVR systems,
+            call queues, conference bridges, and any custom voice application.
+          </p>
+
+          <div class="docs-sub-hd">Endpoints</div>
+          <div class="docs-endpoint-wrap">
+            <table class="docs-endpoint-table">
+              <tbody>
+                <tr>
+                  <td><span class="method method-post">POST</span></td>
+                  <td class="docs-endpoint-path">/calls</td>
+                  <td class="docs-endpoint-desc">Initiate an outbound call</td>
+                </tr>
+                <tr>
+                  <td><span class="method method-get">GET</span></td>
+                  <td class="docs-endpoint-path">/calls/{call_id}</td>
+                  <td class="docs-endpoint-desc">Get call status</td>
+                </tr>
+                <tr>
+                  <td><span class="method method-post">POST</span></td>
+                  <td class="docs-endpoint-path">/calls/{call_id}/update</td>
+                  <td class="docs-endpoint-desc">Modify a live call (hangup, transfer)</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="docs-sub-hd">Example — Make an outbound call</div>
+          <div class="docs-code-block"><span class="json-punct">POST /calls</span>
+<span class="json-punct">{</span>
+  <span class="json-key">"from_did"</span><span class="json-punct">:</span> <span class="json-str">"+15553001001"</span><span class="json-punct">,</span>
+  <span class="json-key">"to"</span><span class="json-punct">:</span> <span class="json-str">"+18005559999"</span><span class="json-punct">,</span>
+  <span class="json-key">"webhook_url"</span><span class="json-punct">:</span> <span class="json-str">"https://your-server.com/voice"</span><span class="json-punct">,</span>
+  <span class="json-key">"timeout"</span><span class="json-punct">:</span> <span class="json-num">60</span>
+<span class="json-punct">}</span></div>
+
+          <div class="docs-sub-hd">Response</div>
+          <div class="docs-code-block"><span class="json-punct">{</span>
+  <span class="json-key">"call_id"</span><span class="json-punct">:</span> <span class="json-str">"uuid-here"</span><span class="json-punct">,</span>
+  <span class="json-key">"status"</span><span class="json-punct">:</span> <span class="json-str">"initiated"</span><span class="json-punct">,</span>
+  <span class="json-key">"tier"</span><span class="json-punct">:</span> <span class="json-str">"api_basic"</span><span class="json-punct">,</span>
+  <span class="json-key">"per_call_fee"</span><span class="json-punct">:</span> <span class="json-num">0.01</span>
+<span class="json-punct">}</span></div>
+
+          <div class="docs-sub-hd">Webhook Events</div>
+          <p class="docs-prose">
+            Your webhook receives POST requests with call events. Respond with XML to control the call:
+          </p>
+          <div class="docs-webhook-list">
+            <div class="docs-webhook-item"><code class="inline">&lt;Say&gt;</code> <span>Text to speech — speak text to the caller</span></div>
+            <div class="docs-webhook-item"><code class="inline">&lt;Play&gt;</code> <span>Play an audio file from a URL</span></div>
+            <div class="docs-webhook-item"><code class="inline">&lt;Gather&gt;</code> <span>Collect DTMF (keypad) input from the caller</span></div>
+            <div class="docs-webhook-item"><code class="inline">&lt;Dial&gt;</code> <span>Connect to another number or SIP endpoint</span></div>
+            <div class="docs-webhook-item"><code class="inline">&lt;Hangup&gt;</code> <span>End the call</span></div>
+          </div>
+
+          <div class="docs-sub-hd">Example — Hangup a live call</div>
+          <div class="docs-code-block"><span class="json-punct">POST /calls/{call_id}/update</span>
+<span class="json-punct">{</span>
+  <span class="json-key">"action"</span><span class="json-punct">:</span> <span class="json-str">"hangup"</span>
+<span class="json-punct">}</span></div>
+        </div>
+
+        <hr class="docs-divider">
+
+        <!-- Section 3: SIP Trunking -->
+        <div class="docs-section" id="doc-trunks">
+          <div class="docs-section-hd">3. SIP Trunking</div>
+          <p class="docs-prose">
+            Connect your PBX or SBC directly to our platform via SIP. Authenticate with IP address.
+            CPS and Call Paths are configured independently — <strong>CPS controls call setup rate</strong>,
+            while <strong>Call Paths control how many simultaneous calls</strong> your trunk can support at once.
+          </p>
+
+          <div class="docs-sub-hd">Endpoints</div>
+          <div class="docs-endpoint-wrap">
+            <table class="docs-endpoint-table">
+              <tbody>
+                <tr>
+                  <td><span class="method method-get">GET</span></td>
+                  <td class="docs-endpoint-path">/trunks</td>
+                  <td class="docs-endpoint-desc">List trunks</td>
+                </tr>
+                <tr>
+                  <td><span class="method method-post">POST</span></td>
+                  <td class="docs-endpoint-path">/trunks</td>
+                  <td class="docs-endpoint-desc">Create a trunk</td>
+                </tr>
+                <tr>
+                  <td><span class="method method-get">GET</span></td>
+                  <td class="docs-endpoint-path">/trunks/{id}</td>
+                  <td class="docs-endpoint-desc">Get trunk details</td>
+                </tr>
+                <tr>
+                  <td><span class="method method-put">PUT</span></td>
+                  <td class="docs-endpoint-path">/trunks/{id}</td>
+                  <td class="docs-endpoint-desc">Update trunk settings</td>
+                </tr>
+                <tr>
+                  <td><span class="method method-get">GET</span></td>
+                  <td class="docs-endpoint-path">/trunks/{id}/stats</td>
+                  <td class="docs-endpoint-desc">Real-time trunk statistics</td>
+                </tr>
+                <tr>
+                  <td><span class="method method-get">GET</span></td>
+                  <td class="docs-endpoint-path">/trunks/{id}/ips</td>
+                  <td class="docs-endpoint-desc">List authorized IPs</td>
+                </tr>
+                <tr>
+                  <td><span class="method method-post">POST</span></td>
+                  <td class="docs-endpoint-path">/trunks/{id}/ips</td>
+                  <td class="docs-endpoint-desc">Add an authorized IP</td>
+                </tr>
+                <tr>
+                  <td><span class="method method-delete">DELETE</span></td>
+                  <td class="docs-endpoint-path">/trunks/{id}/ips/{ip_id}</td>
+                  <td class="docs-endpoint-desc">Remove an authorized IP</td>
+                </tr>
+                <tr>
+                  <td><span class="method method-get">GET</span></td>
+                  <td class="docs-endpoint-path">/trunks/call-paths</td>
+                  <td class="docs-endpoint-desc">List call path packages</td>
+                </tr>
+                <tr>
+                  <td><span class="method method-put">PUT</span></td>
+                  <td class="docs-endpoint-path">/trunks/{id}/call-paths</td>
+                  <td class="docs-endpoint-desc">Assign a call path package to a trunk</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="docs-sub-hd">Example — Create a trunk</div>
+          <div class="docs-code-block"><span class="json-punct">POST /trunks</span>
+<span class="json-punct">{</span>
+  <span class="json-key">"customer_id"</span><span class="json-punct">:</span> <span class="json-num">3</span><span class="json-punct">,</span>
+  <span class="json-key">"trunk_name"</span><span class="json-punct">:</span> <span class="json-str">"Main Office PBX"</span><span class="json-punct">,</span>
+  <span class="json-key">"max_channels"</span><span class="json-punct">:</span> <span class="json-num">50</span><span class="json-punct">,</span>
+  <span class="json-key">"cps_limit"</span><span class="json-punct">:</span> <span class="json-num">5</span><span class="json-punct">,</span>
+  <span class="json-key">"auth_type"</span><span class="json-punct">:</span> <span class="json-str">"ip"</span>
+<span class="json-punct">}</span></div>
+
+          <div class="docs-sub-hd">Example — Add an authorized IP</div>
+          <div class="docs-code-block"><span class="json-punct">POST /trunks/1/ips</span>
+<span class="json-punct">{</span>
+  <span class="json-key">"ip_address"</span><span class="json-punct">:</span> <span class="json-str">"203.0.113.50"</span><span class="json-punct">,</span>
+  <span class="json-key">"description"</span><span class="json-punct">:</span> <span class="json-str">"Office PBX"</span>
+<span class="json-punct">}</span></div>
+        </div>
+
+        <hr class="docs-divider">
+
+        <!-- Section 4: CDR -->
+        <div class="docs-section" id="doc-cdrs">
+          <div class="docs-section-hd">4. CDR (Call Detail Records)</div>
+          <p class="docs-prose">
+            Query call history with flexible filters. CDRs include duration, billing, and routing details.
+            Use the summary endpoint for aggregated statistics across a date range.
+          </p>
+
+          <div class="docs-sub-hd">Endpoints</div>
+          <div class="docs-endpoint-wrap">
+            <table class="docs-endpoint-table">
+              <tbody>
+                <tr>
+                  <td><span class="method method-get">GET</span></td>
+                  <td class="docs-endpoint-path">/cdrs</td>
+                  <td class="docs-endpoint-desc">Query CDRs with filters</td>
+                </tr>
+                <tr>
+                  <td><span class="method method-get">GET</span></td>
+                  <td class="docs-endpoint-path">/cdrs/summary</td>
+                  <td class="docs-endpoint-desc">Aggregated CDR statistics</td>
+                </tr>
+                <tr>
+                  <td><span class="method method-get">GET</span></td>
+                  <td class="docs-endpoint-path">/cdrs/{uuid}</td>
+                  <td class="docs-endpoint-desc">Get a single CDR by UUID</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="docs-sub-hd">Example — Query recent CDRs</div>
+          <div class="docs-code-block"><span class="json-punct">GET /cdrs?customer_id=1&amp;limit=10&amp;start_date=2026-04-01T00:00:00</span></div>
+        </div>
+
+        <hr class="docs-divider">
+
+        <!-- Section 5: Customers -->
+        <div class="docs-section" id="doc-customers">
+          <div class="docs-section-hd">5. Customer Management</div>
+          <p class="docs-prose">
+            Manage customer accounts, balances, and credit. Customers are the top-level billing entity —
+            all trunks, RCF numbers, and API DIDs are associated with a customer.
+          </p>
+
+          <div class="docs-sub-hd">Endpoints</div>
+          <div class="docs-endpoint-wrap">
+            <table class="docs-endpoint-table">
+              <tbody>
+                <tr>
+                  <td><span class="method method-get">GET</span></td>
+                  <td class="docs-endpoint-path">/customers</td>
+                  <td class="docs-endpoint-desc">List customers</td>
+                </tr>
+                <tr>
+                  <td><span class="method method-post">POST</span></td>
+                  <td class="docs-endpoint-path">/customers</td>
+                  <td class="docs-endpoint-desc">Create a customer</td>
+                </tr>
+                <tr>
+                  <td><span class="method method-get">GET</span></td>
+                  <td class="docs-endpoint-path">/customers/{id}</td>
+                  <td class="docs-endpoint-desc">Get a customer</td>
+                </tr>
+                <tr>
+                  <td><span class="method method-put">PUT</span></td>
+                  <td class="docs-endpoint-path">/customers/{id}</td>
+                  <td class="docs-endpoint-desc">Update customer details</td>
+                </tr>
+                <tr>
+                  <td><span class="method method-get">GET</span></td>
+                  <td class="docs-endpoint-path">/customers/{id}/balance</td>
+                  <td class="docs-endpoint-desc">Get balance and credit info</td>
+                </tr>
+                <tr>
+                  <td><span class="method method-post">POST</span></td>
+                  <td class="docs-endpoint-path">/customers/{id}/credit</td>
+                  <td class="docs-endpoint-desc">Add credit to account</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <hr class="docs-divider">
+
+        <!-- Section 6: Rate Limits & Billing -->
+        <div class="docs-section" id="doc-billing">
+          <div class="docs-section-hd">6. Rate Limits &amp; Billing</div>
+          <p class="docs-prose">
+            CPS (Calls Per Second) limits are enforced per account tier. Call Paths for SIP trunks
+            are purchased separately and control concurrent call capacity.
+          </p>
+
+          <div class="docs-sub-hd">API Calling Tiers</div>
+          <div class="docs-tier-wrap">
+            <table class="docs-tier-table">
+              <thead>
+                <tr><th>Tier</th><th>CPS</th><th>Monthly Fee</th><th>Per-Call Fee</th></tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>API Basic</td>
+                  <td>5 CPS</td>
+                  <td>$49/mo</td>
+                  <td>$0.0100</td>
+                </tr>
+                <tr>
+                  <td>API Standard</td>
+                  <td>8 CPS</td>
+                  <td>$149/mo</td>
+                  <td>$0.0080</td>
+                </tr>
+                <tr>
+                  <td>API Premium</td>
+                  <td>15 CPS</td>
+                  <td>$399/mo</td>
+                  <td>$0.0050</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="docs-sub-hd">SIP Trunk Tiers</div>
+          <div class="docs-tier-wrap">
+            <table class="docs-tier-table">
+              <thead>
+                <tr><th>Tier</th><th>CPS</th><th>Monthly Fee</th></tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Trunk Standard</td>
+                  <td>5 CPS</td>
+                  <td>$29/mo</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="docs-sub-hd">Call Path Packages (SIP Trunks)</div>
+          <p class="docs-prose">
+            Call paths are purchased per-trunk and control concurrent call capacity. CPS and call paths
+            are independent — a 5-CPS trunk with 100 call paths can handle 100 simultaneous calls at up
+            to 5 new calls per second.
+          </p>
+          <div class="docs-tier-wrap">
+            <table class="docs-tier-table">
+              <thead>
+                <tr><th>Package</th><th>Call Paths</th><th>Monthly Fee</th></tr>
+              </thead>
+              <tbody>
+                <tr><td>Starter</td><td>10</td><td>$10/mo</td></tr>
+                <tr><td>Small</td><td>25</td><td>$20/mo</td></tr>
+                <tr><td>Medium</td><td>50</td><td>$35/mo</td></tr>
+                <tr><td>Large</td><td>100</td><td>$60/mo</td></tr>
+                <tr><td>Enterprise</td><td>200</td><td>$100/mo</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="docs-sub-hd">CPS Limit Exceeded</div>
+          <p class="docs-prose">
+            When your CPS limit is exceeded, the API returns <code class="inline">429 Too Many Requests</code>
+            with a response body that includes upgrade recommendations:
+          </p>
+          <div class="docs-code-block"><span class="json-punct">{</span>
+  <span class="json-key">"detail"</span><span class="json-punct">:</span> <span class="json-str">"CPS limit exceeded"</span><span class="json-punct">,</span>
+  <span class="json-key">"current_tier"</span><span class="json-punct">:</span> <span class="json-str">"api_basic"</span><span class="json-punct">,</span>
+  <span class="json-key">"cps_limit"</span><span class="json-punct">:</span> <span class="json-num">5</span><span class="json-punct">,</span>
+  <span class="json-key">"upgrade_to"</span><span class="json-punct">:</span> <span class="json-str">"api_standard"</span>
+<span class="json-punct">}</span></div>
+        </div>
+
+        <hr class="docs-divider">
+
+        <!-- Section 7: Health -->
+        <div class="docs-section" id="doc-health">
+          <div class="docs-section-hd">7. Health &amp; Status</div>
+          <p class="docs-prose">
+            Use the health endpoints to verify platform availability and check individual component status.
+          </p>
+
+          <div class="docs-endpoint-wrap">
+            <table class="docs-endpoint-table">
+              <tbody>
+                <tr>
+                  <td><span class="method method-get">GET</span></td>
+                  <td class="docs-endpoint-path">/health</td>
+                  <td class="docs-endpoint-desc">Basic health check — returns 200 if up</td>
+                </tr>
+                <tr>
+                  <td><span class="method method-get">GET</span></td>
+                  <td class="docs-endpoint-path">/health/detailed</td>
+                  <td class="docs-endpoint-desc">Component-level health (database, SIP, billing)</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+      </div><!-- /.docs-layout -->
+    </div><!-- /#page-docs -->
+
   </div><!-- /page-container -->
 </div><!-- /main-wrapper -->
 
@@ -1953,7 +2707,8 @@ const PAGE_TITLES = {
   trunks:    'SIP Trunks',
   tiers:     'CPS Tiers',
   rates:     'Rates & Margins',
-  sipp:      'SIPp Testing'
+  sipp:      'SIPp Testing',
+  docs:      'API Docs'
 };
 
 let currentPage = null;
@@ -1998,6 +2753,7 @@ function navigate(page) {
     case 'tiers':     loadTiers();     break;
     case 'rates':     loadRatesPage(); break;
     case 'sipp':      loadSippPage();  break;
+    case 'docs':      /* static page, no data fetch needed */ break;
   }
 }
 
@@ -2952,56 +3708,116 @@ async function loadTiers() {
 function renderTiers(trunkTiers, apiTiers) {
   const content = document.getElementById('tiers-content');
 
-  const trunkCards = (trunkTiers || []).map(t => renderTierCard(t, 'trunk')).join('');
-  const apiCards   = (apiTiers   || []).map(t => renderTierCard(t, 'api')).join('');
+  // Trunk tiers: only one tier now, render as a single full-width card
+  const trunkTiersArr = trunkTiers || [];
+  const trunkSection = trunkTiersArr.length === 0
+    ? '<div class="state-msg" style="padding:20px">No trunk tiers found</div>'
+    : trunkTiersArr.length === 1
+      ? renderTierCard(trunkTiersArr[0], 'trunk', true)
+      : `<div class="tiers-grid">${trunkTiersArr.map(t => renderTierCard(t, 'trunk', false)).join('')}</div>`;
+
+  const apiCards = (apiTiers || []).map(t => renderTierCard(t, 'api', false)).join('');
 
   content.innerHTML = `
-    <div class="card" style="margin-bottom:24px;padding:18px 22px 6px">
+    <div class="card" style="margin-bottom:24px;padding:18px 22px 18px">
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">
         <div>
           <div class="tiers-section-title" style="margin:0;border:none;padding:0;font-size:1rem">SIP Trunk Tiers</div>
-          <div style="font-size:.78rem;color:var(--muted);margin-top:3px">Capped at 10 CPS. Upgrade to API for higher limits.</div>
+          <div style="font-size:.78rem;color:var(--muted);margin-top:3px">Standard SIP trunk access. CPS and call paths are configured independently.</div>
         </div>
         <div style="margin-left:auto">
-          <span class="badge" style="background:rgba(245,158,11,.1);color:#fcd34d;border:1px solid rgba(245,158,11,.3)">Max 10 CPS</span>
+          <span class="badge" style="background:rgba(245,158,11,.1);color:#fcd34d;border:1px solid rgba(245,158,11,.3)">5 CPS Standard</span>
         </div>
       </div>
-      <div class="tiers-grid">${trunkCards || '<div class="state-msg" style="padding:20px">No trunk tiers found</div>'}</div>
+      ${trunkSection}
     </div>
 
-    <div class="card" style="padding:18px 22px 6px">
+    <div class="card" style="padding:18px 22px 18px;margin-bottom:24px">
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">
         <div>
           <div class="tiers-section-title" style="margin:0;border:none;padding:0;font-size:1rem">API Calling Tiers</div>
           <div style="font-size:.78rem;color:var(--muted);margin-top:3px">Higher CPS limits with per-call billing for programmatic call control.</div>
         </div>
         <div style="margin-left:auto">
-          <span class="badge badge-active">Up to 100 CPS</span>
+          <span class="badge badge-active">Up to 15 CPS</span>
         </div>
       </div>
       <div class="tiers-grid">${apiCards || '<div class="state-msg" style="padding:20px">No API tiers found</div>'}</div>
+    </div>
+
+    <div class="card" style="padding:18px 22px 18px" id="call-paths-section">
+      <div style="margin-bottom:14px">
+        <div class="tiers-section-title" style="margin:0;border:none;padding:0;font-size:1rem">Call Path Packages</div>
+        <div style="font-size:.78rem;color:var(--muted);margin-top:3px">
+          Call paths are purchased per-trunk and control concurrent call capacity. CPS and call paths are independent.
+        </div>
+      </div>
+      <div id="call-paths-content"><div class="state-msg" style="padding:20px"><span class="spinner"></span></div></div>
     </div>`;
+
+  // Load call path packages
+  loadCallPaths();
 }
 
-function renderTierCard(t, type) {
-  const maxCps   = type === 'trunk' ? 5 : 15;
-  const fillPct  = Math.min(100, Math.round((t.cps_limit / maxCps) * 100));
-  const isMaxed  = type === 'trunk' && t.cps_limit >= 5;
+function toTitleCase(str) {
+  return String(str)
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, ch => ch.toUpperCase());
+}
+
+function renderTierCard(t, type, fullWidth) {
+  const maxCps      = type === 'trunk' ? 5 : 15;
+  const fillPct     = Math.min(100, Math.round((t.cps_limit / maxCps) * 100));
+  const isMaxed     = type === 'trunk' && t.cps_limit >= 5;
   const isHighlight = type === 'api' && t.name === 'api_standard';
 
-  const features = t.features && typeof t.features === 'object'
-    ? Object.entries(t.features).map(([k, v]) => `<li>${escHtml(k)}: ${escHtml(String(v))}</li>`).join('')
-    : (t.description ? `<li>${escHtml(t.description)}</li>` : '');
+  // Parse the features JSON field correctly.
+  // Expected shape: { "cps": 5, "support": "email", "features": ["webhooks", "call_control"] }
+  let featureItems = '';
+  if (t.features && typeof t.features === 'object') {
+    const feat = t.features;
+    const lines = [];
+
+    // Show support level (capitalized), skip cps (redundant)
+    if (feat.support != null) {
+      lines.push(`<li>Support: ${escHtml(toTitleCase(String(feat.support)))}</li>`);
+    }
+
+    // Show the features array as a bulleted list with readable names
+    const featureArr = feat.features;
+    if (Array.isArray(featureArr)) {
+      featureArr.forEach(f => {
+        lines.push(`<li>${escHtml(toTitleCase(String(f)))}</li>`);
+      });
+    }
+
+    // Show any other keys except 'cps', 'support', 'features'
+    const skip = new Set(['cps', 'support', 'features']);
+    for (const [k, v] of Object.entries(feat)) {
+      if (!skip.has(k)) {
+        lines.push(`<li>${escHtml(toTitleCase(k))}: ${escHtml(String(v))}</li>`);
+      }
+    }
+
+    featureItems = lines.join('');
+  } else if (t.description) {
+    featureItems = `<li>${escHtml(t.description)}</li>`;
+  }
 
   const upgradeNote = isMaxed
     ? `<div class="tier-upgrade-note">Trunk CPS is fixed at 5. Purchase additional call paths for more concurrent capacity.</div>`
     : '';
 
+  // Build a human-readable name from the tier name field
+  const displayName = toTitleCase(t.name.replace(/^(api_|trunk_)/, ''));
+
+  const perCallFee = parseFloat(t.per_call_fee);
+
   return `
-  <div class="tier-card ${isHighlight ? 'tier-highlight' : ''}">
+  <div class="tier-card ${isHighlight ? 'tier-highlight' : ''} ${fullWidth ? 'tier-card-full' : ''}">
     <div>
-      <div class="tier-name">${escHtml(t.name)}</div>
-      ${t.description && !t.features ? '' : `<div style="font-size:.78rem;color:var(--muted);margin-top:3px">${escHtml(t.description || '')}</div>`}
+      <div class="tier-name">${escHtml(displayName)}</div>
+      ${t.description ? `<div style="font-size:.78rem;color:var(--muted);margin-top:3px">${escHtml(t.description)}</div>` : ''}
     </div>
     <div>
       <div class="tier-cps">${t.cps_limit} <span>CPS</span></div>
@@ -3009,11 +3825,40 @@ function renderTierCard(t, type) {
     </div>
     <div class="tier-price">
       <strong>${t.monthly_fee === 0 ? 'Free' : fmtMoney(t.monthly_fee) + '/mo'}</strong>
-      ${t.per_call_fee > 0 ? ` &middot; ${fmtMoney(t.per_call_fee)}/call` : ''}
+      ${!isNaN(perCallFee) && perCallFee > 0 ? ` &middot; $${perCallFee.toFixed(4)}/call` : ''}
     </div>
-    ${features ? `<ul class="tier-features">${features}</ul>` : ''}
+    ${featureItems ? `<div class="tier-features-section"><ul class="tier-features">${featureItems}</ul></div>` : ''}
     ${upgradeNote}
   </div>`;
+}
+
+async function loadCallPaths() {
+  const el = document.getElementById('call-paths-content');
+  if (!el) return;
+  try {
+    const packages = await api('GET', '/trunks/call-paths');
+    if (!packages || packages.length === 0) {
+      el.innerHTML = '<div class="state-msg" style="padding:16px">No call path packages configured.</div>';
+      return;
+    }
+    const rows = packages.map(p => `
+      <tr>
+        <td style="font-weight:600">${escHtml(p.name || p.package || '--')}</td>
+        <td style="font-variant-numeric:tabular-nums">${escHtml(String(p.call_paths ?? p.paths ?? '--'))}</td>
+        <td style="font-variant-numeric:tabular-nums">${p.monthly_fee != null ? fmtMoney(p.monthly_fee) + '/mo' : '--'}</td>
+      </tr>`).join('');
+    el.innerHTML = `
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Package</th><th>Call Paths</th><th>Monthly Fee</th></tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
+  } catch (err) {
+    el.innerHTML = `<div class="state-msg" style="padding:16px"><strong>Could not load call paths</strong>${escHtml(err.message)}</div>`;
+  }
 }
 
 /* =========================================================
