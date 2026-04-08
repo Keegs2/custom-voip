@@ -8897,7 +8897,7 @@ function renderCarrierCard(c) {
   // Connection detail block
   const auth = c.auth_type === 'credential' ? 'Credential' : c.auth_type === 'both' ? 'IP + Credential' : 'IP-based';
   const connLines = [
-    ['SIP Proxy',    `${escHtml(c.host || '--')}:${escHtml(String(c.port || 5060))}`],
+    ['SIP Proxy',    `${escHtml(c.sip_proxy || c.host || '--')}:${escHtml(String(c.port || 5060))}`],
     ['Transport',    escHtml((c.transport || 'udp').toUpperCase())],
     ['Auth',         auth],
     ['Codecs',       escHtml(c.codec_prefs || 'PCMU,PCMA')],
@@ -8991,7 +8991,7 @@ function renderCarrierFormFields(carrier) {
   </div>
   <div class="form-group">
     <label class="form-label">SIP Proxy Hostname / IP</label>
-    <input class="form-control" id="${prefix}-host" type="text" value="${escHtml(c.host || '')}" placeholder="sip.carrier.com" />
+    <input class="form-control" id="${prefix}-host" type="text" value="${escHtml(c.sip_proxy || c.host || '')}" placeholder="sip.carrier.com" />
   </div>
   <div class="form-group">
     <label class="form-label">Port</label>
