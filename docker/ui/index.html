@@ -3268,6 +3268,74 @@
       .portal-action-row { flex-direction: column; align-items: stretch; }
       .btn-portal-save { justify-content: center; }
     }
+
+    /* =========================================================
+       DASHBOARD ADMIN HUB — health bar + tab bar
+    ========================================================= */
+
+    .dash-health-bar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      padding: 12px 20px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      margin-bottom: 20px;
+    }
+
+    .dash-health-bar-label {
+      font-size: .65rem;
+      font-weight: 700;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: .9px;
+      margin-right: 4px;
+      white-space: nowrap;
+    }
+
+    .dash-tab-bar {
+      display: flex;
+      align-items: stretch;
+      border-bottom: 2px solid var(--border);
+      margin-bottom: 24px;
+      gap: 0;
+    }
+
+    .dash-tab-btn {
+      font-size: .9rem;
+      font-weight: 600;
+      color: var(--muted);
+      background: none;
+      border: none;
+      border-bottom: 2px solid transparent;
+      padding: 10px 22px;
+      cursor: pointer;
+      transition: color .15s, border-color .15s, background .15s;
+      margin-bottom: -2px;
+      white-space: nowrap;
+      letter-spacing: -.1px;
+    }
+
+    .dash-tab-btn:hover {
+      color: var(--text);
+      background: rgba(255,255,255,.025);
+    }
+
+    .dash-tab-btn.active {
+      color: var(--accent);
+      border-bottom-color: var(--accent);
+      background: rgba(59,130,246,.06);
+    }
+
+    .dash-tab-pane {
+      display: none;
+    }
+
+    .dash-tab-pane.active {
+      display: block;
+    }
   </style>
 </head>
 <body>
@@ -3282,29 +3350,12 @@
   </div>
 
   <div class="sidebar-nav">
-    <div class="nav-section-label">Admin</div>
-    <a class="nav-item" data-page="customers" onclick="navigate('customers')">
-      <span class="nav-icon">@</span> Customers
-    </a>
-    <a class="nav-item" data-page="cdrs" onclick="navigate('cdrs')">
-      <span class="nav-icon">&#9776;</span> CDRs
-    </a>
-    <a class="nav-item" data-page="rates" onclick="navigate('rates')">
-      <span class="nav-icon">$</span> Rates &amp; Margins
-    </a>
-    <a class="nav-item" data-page="tiers" onclick="navigate('tiers')">
-      <span class="nav-icon">*</span> CPS Tiers
-    </a>
-
-    <div class="nav-section-label" style="display:flex;align-items:center;justify-content:space-between;padding-right:14px">
-      <span>Services</span>
-      <span style="font-size:.6rem;font-weight:700;background:rgba(59,130,246,.15);color:#93c5fd;border:1px solid rgba(59,130,246,.3);border-radius:999px;padding:1px 7px;text-transform:none;letter-spacing:.2px;white-space:nowrap">Customer Portal</span>
-    </div>
+    <div class="nav-section-label">Products</div>
     <a class="nav-item" data-page="rcf" onclick="navigate('rcf')">
-      <span class="nav-icon">~</span> RCF Numbers
+      <span class="nav-icon">~</span> RCF
     </a>
     <a class="nav-item" data-page="api-dids" onclick="navigate('api-dids')">
-      <span class="nav-icon">&lt;&gt;</span> API DIDs
+      <span class="nav-icon">&lt;&gt;</span> API Calling
     </a>
     <a class="nav-item" data-page="trunks" onclick="navigate('trunks')">
       <span class="nav-icon">=</span> SIP Trunks
@@ -3340,85 +3391,9 @@
     <!-- ===================== DASHBOARD ===================== -->
     <div id="page-dashboard" class="page" style="display:none">
 
-      <!-- Welcome hero -->
-      <div class="dash-welcome">
-        <div class="dash-welcome-title">Custom VoIP Platform</div>
-        <div class="dash-welcome-sub">Manage your voice services, configure call routing, and monitor platform health.</div>
-      </div>
-
-      <!-- Primary navigation cards — 2 rows of 3 -->
-      <div class="dash-nav-grid">
-
-        <div class="dash-nav-card" onclick="navigate('customers')">
-          <span class="dash-card-badge" id="badge-customers">...</span>
-          <div class="dash-card-icon dash-card-icon-blue">@</div>
-          <div class="dash-card-name">Customers</div>
-          <div class="dash-card-desc">Manage customer accounts, balances, and credit limits.</div>
-        </div>
-
-        <div class="dash-nav-card" onclick="navigate('rcf')">
-          <span class="dash-card-badge" id="badge-rcf">...</span>
-          <div class="dash-card-icon dash-card-icon-green">~</div>
-          <div class="dash-card-name">RCF Numbers</div>
-          <div class="dash-card-desc">Configure call forwarding — route any DID to any destination instantly.</div>
-        </div>
-
-        <div class="dash-nav-card" onclick="navigate('api-dids')">
-          <span class="dash-card-badge" id="badge-api-dids">...</span>
-          <div class="dash-card-icon dash-card-icon-purple">&lt;&gt;</div>
-          <div class="dash-card-name">API DIDs</div>
-          <div class="dash-card-desc">Webhook-driven voice. Assign DIDs to your programmable voice applications.</div>
-        </div>
-
-        <div class="dash-nav-card" onclick="navigate('trunks')">
-          <span class="dash-card-badge" id="badge-trunks">...</span>
-          <div class="dash-card-icon dash-card-icon-amber">=</div>
-          <div class="dash-card-name">SIP Trunks</div>
-          <div class="dash-card-desc">Connect PBX systems with IP-authenticated SIP trunks and call paths.</div>
-        </div>
-
-        <div class="dash-nav-card" onclick="navigate('ivr')">
-          <span class="dash-card-badge" id="badge-ivr">...</span>
-          <div class="dash-card-icon dash-card-icon-cyan">&#9654;&#9475;</div>
-          <div class="dash-card-name">IVR Builder</div>
-          <div class="dash-card-desc">Visually design call flows with drag-and-drop — no code required.</div>
-        </div>
-
-        <div class="dash-nav-card" onclick="navigate('rates')">
-          <span class="dash-card-badge" id="badge-rates">...</span>
-          <div class="dash-card-icon dash-card-icon-emerald">$</div>
-          <div class="dash-card-name">Rates &amp; Margins</div>
-          <div class="dash-card-desc">Set per-minute rates, track carrier costs, and monitor margins.</div>
-        </div>
-
-      </div>
-
-      <!-- Utility cards -->
-      <div class="dash-util-grid">
-
-        <div class="dash-util-card" onclick="navigate('tiers')">
-          <div class="dash-card-icon dash-card-icon-muted">*</div>
-          <div class="dash-card-name">CPS Tiers</div>
-          <div class="dash-card-desc">View and manage CPS tier packages for trunks and API calling.</div>
-        </div>
-
-        <div class="dash-util-card" onclick="navigate('sipp')">
-          <div class="dash-card-icon dash-card-icon-muted">&#9654;</div>
-          <div class="dash-card-name">SIPp Testing</div>
-          <div class="dash-card-desc">Run SIP load tests to measure platform capacity and performance.</div>
-        </div>
-
-        <div class="dash-util-card" onclick="navigate('docs')">
-          <div class="dash-card-icon dash-card-icon-muted">?</div>
-          <div class="dash-card-name">API Docs</div>
-          <div class="dash-card-desc">Complete API reference for integrating with the platform.</div>
-        </div>
-
-      </div>
-
-      <!-- Platform status -->
-      <div class="dash-status-section">
-        <div class="dash-status-label">Platform Status</div>
+      <!-- Platform health bar — always visible -->
+      <div class="dash-health-bar">
+        <span class="dash-health-bar-label">Platform</span>
         <div class="dash-status-pills" id="dash-status-pills">
           <span class="dash-status-pill loading"><span class="dash-pill-dot"></span>API</span>
           <span class="dash-status-pill loading"><span class="dash-pill-dot"></span>Database</span>
@@ -3426,69 +3401,282 @@
         </div>
       </div>
 
-      <!-- Footer -->
-      <div class="dash-footer">Platform v1.0.0</div>
-
-    </div>
-
-    <!-- ===================== CUSTOMERS ===================== -->
-    <div id="page-customers" class="page" style="display:none">
-      <div class="page-hd">
-        <div>
-          <div class="page-title">Customers</div>
-          <div class="page-subtitle">Account management and billing</div>
-        </div>
-        <button class="btn btn-primary" onclick="toggleCreateSection('cust-create')">+ New Customer</button>
+      <!-- Tab bar -->
+      <div class="dash-tab-bar">
+        <button class="dash-tab-btn active" id="dash-tab-btn-customers" onclick="switchDashTab('customers')">Customers</button>
+        <button class="dash-tab-btn" id="dash-tab-btn-cdrs"      onclick="switchDashTab('cdrs')">CDRs</button>
+        <button class="dash-tab-btn" id="dash-tab-btn-rates"     onclick="switchDashTab('rates')">Rates</button>
+        <button class="dash-tab-btn" id="dash-tab-btn-tiers"     onclick="switchDashTab('tiers')">Tiers</button>
       </div>
 
-      <div class="create-section" id="cust-create">
-        <div class="card" style="margin-bottom:0">
-          <div class="card-title">Create Customer</div>
-          <div class="form-grid">
-            <div class="form-group">
-              <label class="form-label">Name</label>
-              <input class="form-control" id="cust-name" type="text" placeholder="Acme Corp" />
+      <!-- Tab: Customers -->
+      <div class="dash-tab-pane active" id="dash-tab-customers">
+        <div class="page-hd">
+          <div>
+            <div class="page-title">Customers</div>
+            <div class="page-subtitle">Account management and billing</div>
+          </div>
+          <button class="btn btn-primary" onclick="toggleCreateSection('cust-create')">+ New Customer</button>
+        </div>
+
+        <div class="create-section" id="cust-create">
+          <div class="card" style="margin-bottom:0">
+            <div class="card-title">Create Customer</div>
+            <div class="form-grid">
+              <div class="form-group">
+                <label class="form-label">Name</label>
+                <input class="form-control" id="cust-name" type="text" placeholder="Acme Corp" />
+              </div>
+              <div class="form-group">
+                <label class="form-label">Account Type</label>
+                <select class="form-control" id="cust-acct-type">
+                  <option value="rcf">RCF</option>
+                  <option value="api">API</option>
+                  <option value="trunk">Trunk</option>
+                  <option value="hybrid">Hybrid</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Traffic Grade</label>
+                <select class="form-control" id="cust-traffic-grade">
+                  <option value="standard">Standard</option>
+                  <option value="premium">Premium</option>
+                  <option value="economy">Economy</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Credit Limit ($)</label>
+                <input class="form-control" id="cust-credit-limit" type="number" value="0" min="0" step="0.01" />
+              </div>
+              <div class="form-group">
+                <label class="form-label">Daily Limit ($)</label>
+                <input class="form-control" id="cust-daily-limit" type="number" value="500" min="0" step="0.01" />
+              </div>
+              <div class="form-group">
+                <label class="form-label">CPM Limit</label>
+                <input class="form-control" id="cust-cpm-limit" type="number" value="60" min="1" />
+              </div>
             </div>
-            <div class="form-group">
-              <label class="form-label">Account Type</label>
-              <select class="form-control" id="cust-acct-type">
-                <option value="rcf">RCF</option>
-                <option value="api">API</option>
-                <option value="trunk">Trunk</option>
-                <option value="hybrid">Hybrid</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label class="form-label">Traffic Grade</label>
-              <select class="form-control" id="cust-traffic-grade">
-                <option value="standard">Standard</option>
-                <option value="premium">Premium</option>
-                <option value="economy">Economy</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label class="form-label">Credit Limit ($)</label>
-              <input class="form-control" id="cust-credit-limit" type="number" value="0" min="0" step="0.01" />
-            </div>
-            <div class="form-group">
-              <label class="form-label">Daily Limit ($)</label>
-              <input class="form-control" id="cust-daily-limit" type="number" value="500" min="0" step="0.01" />
-            </div>
-            <div class="form-group">
-              <label class="form-label">CPM Limit</label>
-              <input class="form-control" id="cust-cpm-limit" type="number" value="60" min="1" />
+            <div class="form-footer">
+              <button class="btn btn-ghost" onclick="toggleCreateSection('cust-create')">Cancel</button>
+              <button class="btn btn-primary" id="cust-create-btn" onclick="createCustomer()">Create Customer</button>
             </div>
           </div>
-          <div class="form-footer">
-            <button class="btn btn-ghost" onclick="toggleCreateSection('cust-create')">Cancel</button>
-            <button class="btn btn-primary" id="cust-create-btn" onclick="createCustomer()">Create Customer</button>
+        </div>
+
+        <div id="customers-table-wrap">
+          <div class="state-msg"><span class="spinner"></span></div>
+        </div>
+      </div>
+
+      <!-- Tab: CDRs -->
+      <div class="dash-tab-pane" id="dash-tab-cdrs">
+        <div class="page-hd">
+          <div>
+            <div class="page-title">Call Detail <span>Records</span></div>
+            <div class="page-subtitle">Complete call history with billing, routing, and margin data</div>
+          </div>
+          <button class="btn btn-ghost" onclick="exportCsv()">&#8595; Export CSV</button>
+        </div>
+
+        <!-- FILTER BAR -->
+        <div class="cdr-filter-bar" id="cdr-filter-bar">
+          <div class="cdr-filter-group">
+            <label class="form-label">Customer</label>
+            <select class="form-control cdr-filter-input" id="cdr-customer-sel">
+              <option value="">All Customers</option>
+            </select>
+          </div>
+          <div class="cdr-filter-group">
+            <label class="form-label">Product</label>
+            <select class="form-control cdr-filter-input" id="cdr-product-sel">
+              <option value="">All</option>
+              <option value="rcf">RCF</option>
+              <option value="api">API</option>
+              <option value="trunk">Trunk</option>
+            </select>
+          </div>
+          <div class="cdr-filter-group">
+            <label class="form-label">Direction</label>
+            <select class="form-control cdr-filter-input" id="cdr-direction-sel">
+              <option value="">All</option>
+              <option value="inbound">Inbound</option>
+              <option value="outbound">Outbound</option>
+            </select>
+          </div>
+          <div class="cdr-filter-group">
+            <label class="form-label">Start</label>
+            <input class="form-control cdr-filter-input" type="datetime-local" id="cdr-start-date" />
+          </div>
+          <div class="cdr-filter-group">
+            <label class="form-label">End</label>
+            <input class="form-control cdr-filter-input" type="datetime-local" id="cdr-end-date" />
+          </div>
+          <div class="cdr-filter-group">
+            <label class="form-label">Destination Prefix</label>
+            <input class="form-control cdr-filter-input" type="text" id="cdr-dest-prefix" placeholder="e.g. 1212" style="width:120px" />
+          </div>
+          <div class="cdr-filter-group" style="justify-content:flex-end;align-self:flex-end">
+            <label class="cdr-rated-label">
+              <input type="checkbox" id="cdr-rated-only" />
+              Rated only
+            </label>
+          </div>
+          <div class="cdr-filter-group" style="align-self:flex-end;gap:8px;display:flex;flex-direction:row">
+            <button class="btn btn-primary" id="cdr-search-btn" onclick="searchCdrs()">Search</button>
+          </div>
+        </div>
+
+        <!-- STATS BAR -->
+        <div id="cdr-stats-bar" style="display:none" class="cdr-stats-bar"></div>
+
+        <!-- SUMMARY TOGGLE -->
+        <div class="cdr-summary-toggle" id="cdr-summary-toggle" style="display:none">
+          <div class="cdr-tab-bar">
+            <button class="cdr-tab active" id="tab-records" onclick="switchCdrTab('records')">Records</button>
+            <button class="cdr-tab" id="tab-summary" onclick="switchCdrTab('summary')">Summary</button>
+            <div class="cdr-tab-group-sel" id="cdr-group-sel-wrap" style="display:none">
+              <label class="form-label" style="margin-bottom:0">Group by</label>
+              <select class="form-control" id="cdr-group-by" onchange="loadCdrSummary()" style="padding:5px 8px;font-size:.82rem;width:auto">
+                <option value="day">Day</option>
+                <option value="hour">Hour</option>
+                <option value="destination">Destination</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <!-- RECORDS VIEW -->
+        <div id="cdr-records-view">
+          <div id="cdr-table-wrap" class="table-wrap" style="display:none">
+            <table id="cdr-table">
+              <thead>
+                <tr>
+                  <th>Time</th>
+                  <th>Dir</th>
+                  <th>From</th>
+                  <th>To</th>
+                  <th>Customer</th>
+                  <th>Product</th>
+                  <th>Duration</th>
+                  <th>Billed</th>
+                  <th>Cost</th>
+                  <th>Margin</th>
+                  <th>Hangup</th>
+                  <th>Carrier</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody id="cdr-tbody"></tbody>
+            </table>
+          </div>
+          <div id="cdr-state" class="state-msg" style="display:none"></div>
+          <div id="cdr-pagination" style="display:none" class="cdr-pagination">
+            <span id="cdr-count-label" class="cdr-count-label"></span>
+            <button class="btn btn-ghost btn-sm" id="cdr-load-more-btn" onclick="loadMoreCdrs()">Load More</button>
+          </div>
+        </div>
+
+        <!-- SUMMARY VIEW -->
+        <div id="cdr-summary-view" style="display:none">
+          <div id="cdr-summary-wrap" class="table-wrap">
+            <div class="state-msg"><span class="spinner"></span></div>
           </div>
         </div>
       </div>
 
-      <div id="customers-table-wrap">
-        <div class="state-msg"><span class="spinner"></span></div>
+      <!-- Tab: Rates -->
+      <div class="dash-tab-pane" id="dash-tab-rates">
+        <div class="page-hd">
+          <div>
+            <div class="page-title">Rates <span>&amp; Margins</span></div>
+            <div class="page-subtitle">Rate table management and margin analysis</div>
+          </div>
+          <button class="btn btn-primary" onclick="toggleRatesAddForm()">+ Add Rate</button>
+        </div>
+
+        <!-- ADD RATE FORM -->
+        <div class="rates-add-form" id="rates-add-form">
+          <div class="card" style="margin-bottom:0">
+            <div class="card-title">Add New Rate</div>
+            <div class="form-grid" style="grid-template-columns:repeat(auto-fill,minmax(180px,1fr))">
+              <div class="form-group">
+                <label class="form-label">Prefix</label>
+                <input class="form-control" id="rate-new-prefix" type="text" placeholder="1441" />
+              </div>
+              <div class="form-group">
+                <label class="form-label">Description</label>
+                <input class="form-control" id="rate-new-desc" type="text" placeholder="Bermuda" />
+              </div>
+              <div class="form-group">
+                <label class="form-label">Sell Rate / min ($)</label>
+                <input class="form-control" id="rate-new-sell" type="number" step="0.0001" min="0" placeholder="0.0100" oninput="updateMarginPreview()" />
+              </div>
+              <div class="form-group">
+                <label class="form-label">Cost Rate / min ($)</label>
+                <input class="form-control" id="rate-new-cost" type="number" step="0.0001" min="0" placeholder="0.0050" oninput="updateMarginPreview()" />
+              </div>
+              <div class="form-group">
+                <label class="form-label">Connection Fee ($)</label>
+                <input class="form-control" id="rate-new-conn-fee" type="number" step="0.0001" min="0" value="0" />
+              </div>
+              <div class="form-group">
+                <label class="form-label">Increment (seconds)</label>
+                <input class="form-control" id="rate-new-increment" type="number" step="1" min="1" value="6" />
+              </div>
+            </div>
+            <div class="margin-preview" id="rate-new-margin-preview"></div>
+            <div class="form-footer">
+              <button class="btn btn-ghost" onclick="toggleRatesAddForm()">Cancel</button>
+              <button class="btn btn-primary" id="rate-create-btn" onclick="createRate()">Add Rate</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- STAT CARDS -->
+        <div class="stats-grid" id="rates-stats-grid">
+          <div class="state-msg" style="grid-column:1/-1;padding:24px"><span class="spinner"></span></div>
+        </div>
+
+        <!-- WARNING BANNER -->
+        <div id="rates-warning-banner" style="display:none" class="rates-warning-banner"></div>
+
+        <!-- RATE TABLE -->
+        <div class="card" style="padding:0;margin-bottom:24px">
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px 0">
+            <div class="card-title" style="margin-bottom:0">Rate Table</div>
+          </div>
+          <div id="rates-table-wrap" style="margin-top:14px">
+            <div class="state-msg" style="padding:32px"><span class="spinner"></span></div>
+          </div>
+        </div>
+
+        <!-- MARGIN ANALYSIS -->
+        <div class="section-grid">
+          <div class="card">
+            <div class="card-title">Low / Negative Margins</div>
+            <div id="rates-low-margins-list"><div class="state-msg" style="padding:20px"><span class="spinner"></span></div></div>
+          </div>
+          <div class="card">
+            <div class="card-title">Best Margins</div>
+            <div id="rates-best-margins-list"><div class="state-msg" style="padding:20px"><span class="spinner"></span></div></div>
+          </div>
+        </div>
       </div>
+
+      <!-- Tab: Tiers -->
+      <div class="dash-tab-pane" id="dash-tab-tiers">
+        <div class="page-hd">
+          <div>
+            <div class="page-title">CPS <span>Tiers</span></div>
+            <div class="page-subtitle">Calls-per-second tiers for trunks and API calling</div>
+          </div>
+        </div>
+        <div id="tiers-content">
+          <div class="state-msg"><span class="spinner"></span></div>
+        </div>
+      </div>
+
     </div>
 
     <!-- ===================== RCF ===================== -->
@@ -3542,97 +3730,6 @@
       </div>
     </div>
 
-    <!-- ===================== TIERS ===================== -->
-    <div id="page-tiers" class="page" style="display:none">
-      <div class="page-hd">
-        <div>
-          <div class="page-title">CPS <span>Tiers</span></div>
-          <div class="page-subtitle">Calls-per-second tiers for trunks and API calling</div>
-        </div>
-      </div>
-      <div id="tiers-content">
-        <div class="state-msg"><span class="spinner"></span></div>
-      </div>
-    </div>
-
-    <!-- ===================== RATES & MARGINS ===================== -->
-    <div id="page-rates" class="page" style="display:none">
-      <div class="page-hd">
-        <div>
-          <div class="page-title">Rates <span>&amp; Margins</span></div>
-          <div class="page-subtitle">Rate table management and margin analysis</div>
-        </div>
-        <button class="btn btn-primary" onclick="toggleRatesAddForm()">+ Add Rate</button>
-      </div>
-
-      <!-- ADD RATE FORM -->
-      <div class="rates-add-form" id="rates-add-form">
-        <div class="card" style="margin-bottom:0">
-          <div class="card-title">Add New Rate</div>
-          <div class="form-grid" style="grid-template-columns:repeat(auto-fill,minmax(180px,1fr))">
-            <div class="form-group">
-              <label class="form-label">Prefix</label>
-              <input class="form-control" id="rate-new-prefix" type="text" placeholder="1441" />
-            </div>
-            <div class="form-group">
-              <label class="form-label">Description</label>
-              <input class="form-control" id="rate-new-desc" type="text" placeholder="Bermuda" />
-            </div>
-            <div class="form-group">
-              <label class="form-label">Sell Rate / min ($)</label>
-              <input class="form-control" id="rate-new-sell" type="number" step="0.0001" min="0" placeholder="0.0100" oninput="updateMarginPreview()" />
-            </div>
-            <div class="form-group">
-              <label class="form-label">Cost Rate / min ($)</label>
-              <input class="form-control" id="rate-new-cost" type="number" step="0.0001" min="0" placeholder="0.0050" oninput="updateMarginPreview()" />
-            </div>
-            <div class="form-group">
-              <label class="form-label">Connection Fee ($)</label>
-              <input class="form-control" id="rate-new-conn-fee" type="number" step="0.0001" min="0" value="0" />
-            </div>
-            <div class="form-group">
-              <label class="form-label">Increment (seconds)</label>
-              <input class="form-control" id="rate-new-increment" type="number" step="1" min="1" value="6" />
-            </div>
-          </div>
-          <div class="margin-preview" id="rate-new-margin-preview"></div>
-          <div class="form-footer">
-            <button class="btn btn-ghost" onclick="toggleRatesAddForm()">Cancel</button>
-            <button class="btn btn-primary" id="rate-create-btn" onclick="createRate()">Add Rate</button>
-          </div>
-        </div>
-      </div>
-
-      <!-- STAT CARDS -->
-      <div class="stats-grid" id="rates-stats-grid">
-        <div class="state-msg" style="grid-column:1/-1;padding:24px"><span class="spinner"></span></div>
-      </div>
-
-      <!-- WARNING BANNER -->
-      <div id="rates-warning-banner" style="display:none" class="rates-warning-banner"></div>
-
-      <!-- RATE TABLE -->
-      <div class="card" style="padding:0;margin-bottom:24px">
-        <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px 0">
-          <div class="card-title" style="margin-bottom:0">Rate Table</div>
-        </div>
-        <div id="rates-table-wrap" style="margin-top:14px">
-          <div class="state-msg" style="padding:32px"><span class="spinner"></span></div>
-        </div>
-      </div>
-
-      <!-- MARGIN ANALYSIS -->
-      <div class="section-grid">
-        <div class="card">
-          <div class="card-title">Low / Negative Margins</div>
-          <div id="rates-low-margins-list"><div class="state-msg" style="padding:20px"><span class="spinner"></span></div></div>
-        </div>
-        <div class="card">
-          <div class="card-title">Best Margins</div>
-          <div id="rates-best-margins-list"><div class="state-msg" style="padding:20px"><span class="spinner"></span></div></div>
-        </div>
-      </div>
-    </div>
 
     <!-- ===================== SIPP TESTING ===================== -->
     <div id="page-sipp" class="page" style="display:none">
@@ -4146,122 +4243,6 @@
       </div><!-- /.docs-layout -->
     </div><!-- /#page-docs -->
 
-    <!-- ===================== CDRs ===================== -->
-    <div id="page-cdrs" class="page" style="display:none">
-      <div class="page-hd">
-        <div>
-          <div class="page-title">Call Detail <span>Records</span></div>
-          <div class="page-subtitle">Complete call history with billing, routing, and margin data</div>
-        </div>
-        <button class="btn btn-ghost" onclick="exportCsv()">&#8595; Export CSV</button>
-      </div>
-
-      <!-- FILTER BAR -->
-      <div class="cdr-filter-bar" id="cdr-filter-bar">
-        <div class="cdr-filter-group">
-          <label class="form-label">Customer</label>
-          <select class="form-control cdr-filter-input" id="cdr-customer-sel">
-            <option value="">All Customers</option>
-          </select>
-        </div>
-        <div class="cdr-filter-group">
-          <label class="form-label">Product</label>
-          <select class="form-control cdr-filter-input" id="cdr-product-sel">
-            <option value="">All</option>
-            <option value="rcf">RCF</option>
-            <option value="api">API</option>
-            <option value="trunk">Trunk</option>
-          </select>
-        </div>
-        <div class="cdr-filter-group">
-          <label class="form-label">Direction</label>
-          <select class="form-control cdr-filter-input" id="cdr-direction-sel">
-            <option value="">All</option>
-            <option value="inbound">Inbound</option>
-            <option value="outbound">Outbound</option>
-          </select>
-        </div>
-        <div class="cdr-filter-group">
-          <label class="form-label">Start</label>
-          <input class="form-control cdr-filter-input" type="datetime-local" id="cdr-start-date" />
-        </div>
-        <div class="cdr-filter-group">
-          <label class="form-label">End</label>
-          <input class="form-control cdr-filter-input" type="datetime-local" id="cdr-end-date" />
-        </div>
-        <div class="cdr-filter-group">
-          <label class="form-label">Destination Prefix</label>
-          <input class="form-control cdr-filter-input" type="text" id="cdr-dest-prefix" placeholder="e.g. 1212" style="width:120px" />
-        </div>
-        <div class="cdr-filter-group" style="justify-content:flex-end;align-self:flex-end">
-          <label class="cdr-rated-label">
-            <input type="checkbox" id="cdr-rated-only" />
-            Rated only
-          </label>
-        </div>
-        <div class="cdr-filter-group" style="align-self:flex-end;gap:8px;display:flex;flex-direction:row">
-          <button class="btn btn-primary" id="cdr-search-btn" onclick="searchCdrs()">Search</button>
-        </div>
-      </div>
-
-      <!-- STATS BAR -->
-      <div id="cdr-stats-bar" style="display:none" class="cdr-stats-bar"></div>
-
-      <!-- SUMMARY TOGGLE -->
-      <div class="cdr-summary-toggle" id="cdr-summary-toggle" style="display:none">
-        <div class="cdr-tab-bar">
-          <button class="cdr-tab active" id="tab-records" onclick="switchCdrTab('records')">Records</button>
-          <button class="cdr-tab" id="tab-summary" onclick="switchCdrTab('summary')">Summary</button>
-          <div class="cdr-tab-group-sel" id="cdr-group-sel-wrap" style="display:none">
-            <label class="form-label" style="margin-bottom:0">Group by</label>
-            <select class="form-control" id="cdr-group-by" onchange="loadCdrSummary()" style="padding:5px 8px;font-size:.82rem;width:auto">
-              <option value="day">Day</option>
-              <option value="hour">Hour</option>
-              <option value="destination">Destination</option>
-            </select>
-          </div>
-        </div>
-      </div>
-
-      <!-- RECORDS VIEW -->
-      <div id="cdr-records-view">
-        <div id="cdr-table-wrap" class="table-wrap" style="display:none">
-          <table id="cdr-table">
-            <thead>
-              <tr>
-                <th>Time</th>
-                <th>Dir</th>
-                <th>From</th>
-                <th>To</th>
-                <th>Customer</th>
-                <th>Product</th>
-                <th>Duration</th>
-                <th>Billed</th>
-                <th>Cost</th>
-                <th>Margin</th>
-                <th>Hangup</th>
-                <th>Carrier</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody id="cdr-tbody"></tbody>
-          </table>
-        </div>
-        <div id="cdr-state" class="state-msg" style="display:none"></div>
-        <div id="cdr-pagination" style="display:none" class="cdr-pagination">
-          <span id="cdr-count-label" class="cdr-count-label"></span>
-          <button class="btn btn-ghost btn-sm" id="cdr-load-more-btn" onclick="loadMoreCdrs()">Load More</button>
-        </div>
-      </div>
-
-      <!-- SUMMARY VIEW -->
-      <div id="cdr-summary-view" style="display:none">
-        <div id="cdr-summary-wrap" class="table-wrap">
-          <div class="state-msg"><span class="spinner"></span></div>
-        </div>
-      </div>
-
-    </div><!-- /#page-cdrs -->
 
   </div><!-- /page-container -->
 </div><!-- /main-wrapper -->
@@ -4483,27 +4464,47 @@ function toggleCreateSection(id) {
 
 const PAGE_TITLES = {
   dashboard: 'Dashboard',
-  customers: 'Customers',
-  rcf:       'RCF Numbers',
-  'api-dids':'API DIDs',
+  customers: 'Dashboard',
+  cdrs:      'Dashboard',
+  tiers:     'Dashboard',
+  rates:     'Dashboard',
+  rcf:       'RCF',
+  'api-dids':'API Calling',
   trunks:    'SIP Trunks',
-  cdrs:      'Call Detail Records',
-  tiers:     'CPS Tiers',
-  rates:     'Rates & Margins',
   ivr:       'IVR Builder',
   sipp:      'SIPp Testing',
   docs:      'API Docs'
 };
 
+// Admin tabs that live inside the dashboard
+const DASH_TAB_PAGES = new Set(['customers', 'cdrs', 'rates', 'tiers']);
+
 let currentPage = null;
 
 function navigate(page) {
+  // Redirect admin sub-pages into dashboard with the right tab active
+  if (DASH_TAB_PAGES.has(page)) {
+    const tab = page;
+    // Navigate to dashboard first (only calls loadDashboard if not already there)
+    _navigateTo('dashboard');
+    switchDashTab(tab);
+    // Update hash to the logical destination so deep links work
+    if (location.hash !== '#' + tab) {
+      history.replaceState(null, '', '#' + tab);
+    }
+    return;
+  }
+
+  _navigateTo(page);
+}
+
+function _navigateTo(page) {
   if (!PAGE_TITLES[page]) page = 'dashboard';
 
   // Close mobile sidebar
   closeSidebar();
 
-  // Update nav items
+  // Update nav items — dashboard is never highlighted (no sidebar item for it)
   document.querySelectorAll('.nav-item').forEach(el => {
     el.classList.toggle('active', el.dataset.page === page);
   });
@@ -4536,14 +4537,14 @@ function navigate(page) {
 
   // Load page data
   switch (page) {
-    case 'dashboard': loadDashboard(); break;
-    case 'customers': loadCustomers(); break;
+    case 'dashboard':
+      // Reset tab-loaded flags so returning to dashboard always re-fetches health
+      // but keeps tabs lazy (only reload if the tab is actually switched to)
+      loadDashboard();
+      break;
     case 'rcf':       loadRCF();       break;
     case 'api-dids':  loadApiDids();   break;
     case 'trunks':    loadTrunks();    break;
-    case 'cdrs':      loadCdrsPage();  break;
-    case 'tiers':     loadTiers();     break;
-    case 'rates':     loadRatesPage(); break;
     case 'ivr':       loadIvrPage();   break;
     case 'sipp':      loadSippPage();  break;
     case 'docs':      /* static page, no data fetch needed */ break;
@@ -4551,9 +4552,14 @@ function navigate(page) {
 }
 
 window.addEventListener('hashchange', () => {
-  const page = (location.hash || '').replace('#', '') || 'dashboard';
-  currentPage = null; // force reload
-  navigate(page);
+  const hash = (location.hash || '').replace('#', '') || 'dashboard';
+  // If it's a dash tab, we don't need to reset currentPage for the dashboard itself
+  if (DASH_TAB_PAGES.has(hash)) {
+    navigate(hash);
+  } else {
+    currentPage = null; // force reload
+    navigate(hash);
+  }
 });
 
 function openSidebar() {
@@ -4571,44 +4577,53 @@ function closeSidebar() {
 ========================================================= */
 
 async function loadDashboard() {
-  // Fetch all counts and health in parallel; failures are handled gracefully
-  const [customers, rcf, apiDids, trunks, health, ivr, rates] = await Promise.allSettled([
-    api('GET', '/customers'),
-    api('GET', '/rcf'),
-    api('GET', '/api-dids'),
-    api('GET', '/trunks'),
+  // Load platform health status
+  const healthResult = await Promise.allSettled([
     api('GET', '/health/detailed'),
-    api('GET', '/ivr'),
-    api('GET', '/rates'),
   ]);
+  renderDashboardStatus(
+    healthResult[0].status === 'fulfilled' ? healthResult[0].value : null
+  );
 
-  // Helper: extract array length or return null
-  const count = (result) =>
-    result.status === 'fulfilled' && Array.isArray(result.value)
-      ? result.value.length
-      : null;
+  // Load the default tab (Customers) if not already loaded
+  if (!dashTabLoaded['customers']) {
+    switchDashTab('customers');
+  }
+}
 
-  // Update count badges — show "N customers" style text, or hide if unknown
-  const setBadge = (id, n, singular, plural) => {
-    const el = document.getElementById(id);
-    if (!el) return;
-    if (n === null) {
-      el.style.display = 'none';
-    } else {
-      el.textContent = `${n} ${n === 1 ? singular : plural}`;
-      el.style.display = '';
+/* =========================================================
+   DASHBOARD TAB SWITCHING
+========================================================= */
+
+// Track which tabs have been loaded so we don't double-load
+const dashTabLoaded = {};
+
+function switchDashTab(tab) {
+  const tabs = ['customers', 'cdrs', 'rates', 'tiers'];
+  if (!tabs.includes(tab)) tab = 'customers';
+
+  // Update tab button styles
+  tabs.forEach(t => {
+    const btn = document.getElementById(`dash-tab-btn-${t}`);
+    if (btn) btn.classList.toggle('active', t === tab);
+  });
+
+  // Show/hide tab panes
+  tabs.forEach(t => {
+    const pane = document.getElementById(`dash-tab-${t}`);
+    if (pane) pane.classList.toggle('active', t === tab);
+  });
+
+  // Load data for the tab if not yet loaded
+  if (!dashTabLoaded[tab]) {
+    dashTabLoaded[tab] = true;
+    switch (tab) {
+      case 'customers': loadCustomers();  break;
+      case 'cdrs':      loadCdrsPage();   break;
+      case 'rates':     loadRatesPage();  break;
+      case 'tiers':     loadTiers();      break;
     }
-  };
-
-  setBadge('badge-customers', count(customers), 'customer',   'customers');
-  setBadge('badge-rcf',       count(rcf),       'number',     'numbers');
-  setBadge('badge-api-dids',  count(apiDids),   'DID',        'DIDs');
-  setBadge('badge-trunks',    count(trunks),    'trunk',      'trunks');
-  setBadge('badge-ivr',       count(ivr),       'flow',       'flows');
-  setBadge('badge-rates',     count(rates),     'rate',       'rates');
-
-  // Render status pills
-  renderDashboardStatus(health.status === 'fulfilled' ? health.value : null);
+  }
 }
 
 function renderDashboardStatus(health) {
