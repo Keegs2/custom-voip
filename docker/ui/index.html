@@ -5366,6 +5366,29 @@ function renderTrunkCard(t) {
           <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();addTrunkDid(${t.id})">Assign DID</button>
         </div>
 
+        <div class="sub-section-title">Call Paths &amp; Capacity</div>
+        <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+          <div style="font-size:.85rem;color:var(--text)">
+            Current: <strong>${t.max_channels}</strong> call paths
+            ${t.package_name ? ` (${escHtml(t.package_name)})` : ''}
+          </div>
+          <div style="font-size:.82rem;color:var(--muted)">CPS Limit: ${t.cps_limit}</div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <select class="form-control" id="trunk-callpath-${t.id}" style="max-width:260px;padding:6px 10px;font-size:.85rem" onclick="event.stopPropagation()">
+            <option value="">-- Change Call Path Package --</option>
+          </select>
+          <button class="btn btn-primary btn-sm" onclick="event.stopPropagation();assignCallPaths(${t.id})">Apply</button>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px">
+          <label style="font-size:.82rem;color:var(--muted)">Manual override:</label>
+          <input class="form-control" id="trunk-channels-${t.id}" type="number" min="1" max="1000" value="${t.max_channels}" style="max-width:100px;padding:6px 10px;font-size:.85rem" onclick="event.stopPropagation()" />
+          <label style="font-size:.82rem;color:var(--muted)">channels</label>
+          <input class="form-control" id="trunk-cps-${t.id}" type="number" min="1" max="100" value="${t.cps_limit}" style="max-width:80px;padding:6px 10px;font-size:.85rem" onclick="event.stopPropagation()" />
+          <label style="font-size:.82rem;color:var(--muted)">CPS</label>
+          <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();updateTrunkCapacity(${t.id})">Save</button>
+        </div>
+
         <div class="rcf-actions" style="margin-top:14px">
           <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();toggleTrunkEnabled(${t.id}, ${!t.enabled})">${t.enabled ? 'Disable' : 'Enable'}</button>
         </div>
@@ -5414,6 +5437,65 @@ async function toggleExpandTrunk(id) {
       dids:  dids.status  === 'fulfilled' ? dids.value  : []
     };
     renderTrunksList();
+    // Populate call path dropdown after render
+    loadCallPathDropdown(id);
+  } catch (err) {
+    toast(err.message, 'err');
+  }
+}
+
+let callPathPackagesCache = null;
+
+async function loadCallPathDropdown(trunkId) {
+  const sel = document.getElementById(`trunk-callpath-${trunkId}`);
+  if (!sel) return;
+  if (!callPathPackagesCache) {
+    try {
+      callPathPackagesCache = await api('GET', '/trunks/call-paths');
+    } catch (e) {
+      callPathPackagesCache = [];
+    }
+  }
+  callPathPackagesCache.forEach(p => {
+    const opt = document.createElement('option');
+    opt.value = p.id;
+    opt.textContent = `${p.call_paths} paths — $${parseFloat(p.monthly_fee).toFixed(2)}/mo`;
+    sel.appendChild(opt);
+  });
+}
+
+async function assignCallPaths(trunkId) {
+  const sel = document.getElementById(`trunk-callpath-${trunkId}`);
+  const packageId = sel?.value;
+  if (!packageId) { toast('Select a call path package', 'err'); return; }
+  try {
+    await api('PUT', `/trunks/${trunkId}/call-paths`, { package_id: parseInt(packageId) });
+    toast('Call path package assigned', 'ok');
+    // Refresh trunk data
+    expandedTrunk = null;
+    await loadTrunksPage();
+    expandedTrunk = trunkId;
+    await toggleExpandTrunk(trunkId);
+  } catch (err) {
+    toast(err.message, 'err');
+  }
+}
+
+async function updateTrunkCapacity(trunkId) {
+  const channels = document.getElementById(`trunk-channels-${trunkId}`)?.value;
+  const cps = document.getElementById(`trunk-cps-${trunkId}`)?.value;
+  if (!channels || !cps) { toast('Enter channels and CPS values', 'err'); return; }
+  try {
+    await api('PUT', `/trunks/${trunkId}`, {
+      max_channels: parseInt(channels),
+      cps_limit: parseInt(cps)
+    });
+    toast('Trunk capacity updated', 'ok');
+    // Update local data
+    const t = trunksList.find(x => x.id === trunkId);
+    if (t) { t.max_channels = parseInt(channels); t.cps_limit = parseInt(cps); }
+    renderTrunksList();
+    loadCallPathDropdown(trunkId);
   } catch (err) {
     toast(err.message, 'err');
   }
