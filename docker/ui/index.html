@@ -1158,99 +1158,90 @@
 
     .dash-welcome {
       text-align: center;
-      padding: 48px 0 44px;
+      padding: 36px 0 32px;
       border-bottom: 1px solid var(--border);
-      margin-bottom: 40px;
+      margin-bottom: 32px;
     }
 
     .dash-welcome-title {
-      font-size: 2.2rem;
+      font-size: 1.8rem;
       font-weight: 800;
       letter-spacing: -.5px;
       color: var(--text);
       text-shadow: 0 0 40px rgba(59,130,246,0.25);
-      margin-bottom: 12px;
+      margin-bottom: 10px;
     }
 
     .dash-welcome-sub {
-      font-size: 1rem;
+      font-size: .95rem;
       color: var(--muted);
-      max-width: 560px;
-      margin: 0 auto;
-      line-height: 1.65;
+      max-width: 540px;
+      margin: 0 auto 20px;
+      line-height: 1.6;
     }
 
-    /* Primary nav cards — 3 columns */
-    .dash-nav-grid {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 16px;
-      margin-bottom: 16px;
+    /* Health pills inline under subtitle */
+    .dash-welcome-pills {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      flex-wrap: wrap;
     }
 
-    /* Utility cards — also 3 columns but shorter */
-    .dash-util-grid {
+    /* Unified 3x2 card grid */
+    .dash-card-grid {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
       gap: 16px;
       margin-bottom: 40px;
     }
 
-    .dash-nav-card {
+    .dash-card {
       background: var(--surface);
       border: 1px solid var(--border);
       border-radius: var(--radius);
-      padding: 28px 24px 24px;
+      border-top-width: 2px;
+      padding: 20px 20px 16px;
       cursor: pointer;
       position: relative;
-      overflow: hidden;
-      min-height: 200px;
       display: flex;
       flex-direction: column;
-      gap: 12px;
-      transition: border-color .2s, box-shadow .2s, transform .15s;
+      gap: 0;
+      transition: box-shadow .2s, transform .15s;
       user-select: none;
+      min-height: 148px;
     }
 
-    .dash-nav-card:hover {
-      border-color: var(--accent);
-      box-shadow: 0 0 20px rgba(59,130,246,0.15);
+    /* Per-card top border accent colors */
+    .dash-card-accent-blue   { border-top-color: #3b82f6; }
+    .dash-card-accent-green  { border-top-color: #22c55e; }
+    .dash-card-accent-purple { border-top-color: #a855f7; }
+    .dash-card-accent-amber  { border-top-color: #f59e0b; }
+    .dash-card-accent-cyan   { border-top-color: #06b6d4; }
+    .dash-card-accent-grey   { border-top-color: #64748b; }
+
+    .dash-card:hover {
+      box-shadow: 0 4px 16px rgba(59,130,246,0.12);
       transform: translateY(-2px);
     }
 
-    .dash-nav-card:active {
+    .dash-card:active {
       transform: translateY(0);
     }
 
-    .dash-util-card {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 20px 22px;
-      cursor: pointer;
-      position: relative;
-      overflow: hidden;
+    .dash-card-header {
       display: flex;
-      flex-direction: column;
-      gap: 8px;
-      transition: border-color .2s, box-shadow .2s, transform .15s;
-      user-select: none;
-    }
-
-    .dash-util-card:hover {
-      border-color: var(--accent);
-      box-shadow: 0 0 20px rgba(59,130,246,0.15);
-      transform: translateY(-2px);
-    }
-
-    .dash-util-card:active {
-      transform: translateY(0);
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 8px;
     }
 
     .dash-card-icon {
-      font-size: 2.2rem;
+      font-size: 1.5rem;
       line-height: 1;
       font-weight: 400;
+      flex-shrink: 0;
     }
 
     .dash-card-icon-blue   { color: #60a5fa; }
@@ -1262,7 +1253,7 @@
     .dash-card-icon-muted  { color: var(--muted); }
 
     .dash-card-name {
-      font-size: 1.05rem;
+      font-size: 1rem;
       font-weight: 700;
       color: var(--text);
       letter-spacing: -.1px;
@@ -1271,10 +1262,28 @@
     .dash-card-desc {
       font-size: .82rem;
       color: var(--muted);
-      line-height: 1.55;
+      line-height: 1.5;
       flex: 1;
+      margin-bottom: 12px;
     }
 
+    .dash-card-open {
+      display: block;
+      text-align: right;
+      font-size: .78rem;
+      font-weight: 600;
+      color: var(--accent);
+      opacity: .75;
+      letter-spacing: .2px;
+      transition: opacity .15s;
+      text-decoration: none;
+    }
+
+    .dash-card:hover .dash-card-open {
+      opacity: 1;
+    }
+
+    /* Keep legacy badge class in case used elsewhere */
     .dash-card-badge {
       position: absolute;
       top: 14px;
@@ -1290,19 +1299,7 @@
       letter-spacing: .3px;
     }
 
-    .dash-util-card .dash-card-icon {
-      font-size: 1.4rem;
-    }
-
-    .dash-util-card .dash-card-name {
-      font-size: .95rem;
-    }
-
-    .dash-util-card .dash-card-desc {
-      font-size: .79rem;
-    }
-
-    /* Platform status bar */
+    /* Platform status bar — kept for admin page usage */
     .dash-status-section {
       margin-bottom: 36px;
     }
@@ -1319,51 +1316,49 @@
     .dash-status-pills {
       display: flex;
       align-items: center;
-      gap: 12px;
+      gap: 8px;
       flex-wrap: wrap;
     }
 
     .dash-status-pill {
       display: inline-flex;
       align-items: center;
-      gap: 8px;
-      padding: 9px 16px;
+      gap: 6px;
+      padding: 4px 10px;
       border-radius: 999px;
-      font-size: .83rem;
-      font-weight: 600;
+      font-size: .72rem;
+      font-weight: 500;
       border: 1px solid transparent;
       transition: box-shadow .2s;
     }
 
     .dash-status-pill.healthy {
-      background: rgba(34,197,94,0.1);
-      border-color: rgba(34,197,94,0.25);
-      color: #4ade80;
-      box-shadow: 0 0 12px rgba(34,197,94,0.08);
+      background: rgba(34,197,94,0.07);
+      border-color: rgba(34,197,94,0.18);
+      color: #86efac;
     }
 
     .dash-status-pill.unhealthy {
-      background: rgba(239,68,68,0.1);
-      border-color: rgba(239,68,68,0.25);
+      background: rgba(239,68,68,0.08);
+      border-color: rgba(239,68,68,0.2);
       color: #f87171;
-      box-shadow: 0 0 12px rgba(239,68,68,0.1);
     }
 
     .dash-status-pill.loading {
-      background: rgba(113,128,150,0.08);
+      background: rgba(113,128,150,0.06);
       border-color: var(--border);
       color: var(--muted);
     }
 
     .dash-pill-dot {
-      width: 7px;
-      height: 7px;
+      width: 5px;
+      height: 5px;
       border-radius: 50%;
       flex-shrink: 0;
     }
 
-    .dash-status-pill.healthy  .dash-pill-dot { background: #22c55e; box-shadow: 0 0 6px rgba(34,197,94,0.7); }
-    .dash-status-pill.unhealthy .dash-pill-dot { background: #ef4444; box-shadow: 0 0 6px rgba(239,68,68,0.7); }
+    .dash-status-pill.healthy  .dash-pill-dot { background: #22c55e; box-shadow: 0 0 4px rgba(34,197,94,0.5); }
+    .dash-status-pill.unhealthy .dash-pill-dot { background: #ef4444; box-shadow: 0 0 4px rgba(239,68,68,0.5); }
     .dash-status-pill.loading  .dash-pill-dot { background: var(--muted); }
 
     .dash-footer {
@@ -1407,15 +1402,13 @@
       table { font-size: .8rem; }
       th, td { padding: 9px 10px; }
 
-      .dash-welcome { padding: 32px 0 28px; }
-      .dash-welcome-title { font-size: 1.6rem; }
-      .dash-nav-grid  { grid-template-columns: 1fr 1fr; }
-      .dash-util-grid { grid-template-columns: 1fr 1fr; }
+      .dash-welcome { padding: 28px 0 24px; }
+      .dash-welcome-title { font-size: 1.45rem; }
+      .dash-card-grid { grid-template-columns: 1fr 1fr; }
     }
 
     @media (max-width: 520px) {
-      .dash-nav-grid  { grid-template-columns: 1fr; }
-      .dash-util-grid { grid-template-columns: 1fr; }
+      .dash-card-grid { grid-template-columns: 1fr; }
     }
 
     @media (max-width: 420px) {
@@ -3525,54 +3518,72 @@
       <div class="dash-welcome">
         <div class="dash-welcome-title">Custom <span style="color:var(--accent)">VoIP</span> Platform</div>
         <div class="dash-welcome-sub">Unified voice infrastructure — remote call forwarding, programmable calling, SIP trunks, and platform administration.</div>
-      </div>
-
-      <!-- Platform health -->
-      <div class="dash-status-section">
-        <div class="dash-status-label">Platform Health</div>
-        <div class="dash-status-pills" id="dash-home-status-pills">
+        <div class="dash-welcome-pills" id="dash-home-status-pills">
           <span class="dash-status-pill loading"><span class="dash-pill-dot"></span>API</span>
           <span class="dash-status-pill loading"><span class="dash-pill-dot"></span>Database</span>
           <span class="dash-status-pill loading"><span class="dash-pill-dot"></span>Redis</span>
         </div>
       </div>
 
-      <!-- Navigation cards — Row 1 -->
-      <div class="dash-nav-grid">
-        <div class="dash-nav-card" onclick="navigate('admin')" style="border-color:rgba(59,130,246,.3)">
-          <div class="dash-card-icon dash-card-icon-blue">&#9881;</div>
-          <div class="dash-card-name">Administration</div>
-          <div class="dash-card-desc">Manage customers, billing, rates, and platform configuration.</div>
-        </div>
-        <div class="dash-nav-card" onclick="navigate('rcf')">
-          <div class="dash-card-icon dash-card-icon-green">~</div>
-          <div class="dash-card-name">RCF</div>
-          <div class="dash-card-desc">Remote Call Forwarding — route DIDs to any destination.</div>
-        </div>
-        <div class="dash-nav-card" onclick="navigate('api-dids')">
-          <div class="dash-card-icon dash-card-icon-purple">&lt;&gt;</div>
-          <div class="dash-card-name">API Calling</div>
-          <div class="dash-card-desc">Programmable voice with webhook-driven call control.</div>
-        </div>
-        <div class="dash-nav-card" onclick="navigate('trunks')">
-          <div class="dash-card-icon dash-card-icon-emerald">=</div>
-          <div class="dash-card-name">SIP Trunks</div>
-          <div class="dash-card-desc">Connect PBX systems with IP-authenticated trunks.</div>
-        </div>
-      </div>
+      <!-- Unified 3x2 navigation grid -->
+      <div class="dash-card-grid">
 
-      <!-- Navigation cards — Row 2 -->
-      <div class="dash-util-grid">
-        <div class="dash-util-card" onclick="navigate('ivr')">
-          <div class="dash-card-icon dash-card-icon-amber">&#9654;&#9475;</div>
-          <div class="dash-card-name">IVR Builder</div>
+        <!-- Row 1 -->
+        <div class="dash-card dash-card-accent-blue" onclick="navigate('admin')">
+          <div class="dash-card-header">
+            <span class="dash-card-icon dash-card-icon-blue">&#9881;</span>
+            <span class="dash-card-name">Administration</span>
+          </div>
+          <div class="dash-card-desc">Manage customers, billing, rates, and platform configuration.</div>
+          <span class="dash-card-open">Open &rsaquo;</span>
+        </div>
+
+        <div class="dash-card dash-card-accent-green" onclick="navigate('rcf')">
+          <div class="dash-card-header">
+            <span class="dash-card-icon dash-card-icon-green">&#8651;</span>
+            <span class="dash-card-name">RCF</span>
+          </div>
+          <div class="dash-card-desc">Remote Call Forwarding — route DIDs to any destination.</div>
+          <span class="dash-card-open">Open &rsaquo;</span>
+        </div>
+
+        <div class="dash-card dash-card-accent-purple" onclick="navigate('api-dids')">
+          <div class="dash-card-header">
+            <span class="dash-card-icon dash-card-icon-purple">&#9113;</span>
+            <span class="dash-card-name">API Calling</span>
+          </div>
+          <div class="dash-card-desc">Programmable voice with webhook-driven call control.</div>
+          <span class="dash-card-open">Open &rsaquo;</span>
+        </div>
+
+        <!-- Row 2 -->
+        <div class="dash-card dash-card-accent-amber" onclick="navigate('trunks')">
+          <div class="dash-card-header">
+            <span class="dash-card-icon dash-card-icon-amber">&#8644;</span>
+            <span class="dash-card-name">SIP Trunks</span>
+          </div>
+          <div class="dash-card-desc">Connect PBX systems with IP-authenticated trunks.</div>
+          <span class="dash-card-open">Open &rsaquo;</span>
+        </div>
+
+        <div class="dash-card dash-card-accent-cyan" onclick="navigate('ivr')">
+          <div class="dash-card-header">
+            <span class="dash-card-icon dash-card-icon-cyan">&#9654;</span>
+            <span class="dash-card-name">IVR Builder</span>
+          </div>
           <div class="dash-card-desc">Design call flows visually with drag-and-drop.</div>
+          <span class="dash-card-open">Open &rsaquo;</span>
         </div>
-        <div class="dash-util-card" onclick="navigate('docs')">
-          <div class="dash-card-icon dash-card-icon-cyan">?</div>
-          <div class="dash-card-name">API Docs</div>
+
+        <div class="dash-card dash-card-accent-grey" onclick="navigate('docs')">
+          <div class="dash-card-header">
+            <span class="dash-card-icon dash-card-icon-muted">&#9782;</span>
+            <span class="dash-card-name">API Docs</span>
+          </div>
           <div class="dash-card-desc">Complete API reference and integration guide.</div>
+          <span class="dash-card-open">Open &rsaquo;</span>
         </div>
+
       </div>
 
       <div class="dash-footer">Custom VoIP Platform</div>
