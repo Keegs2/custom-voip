@@ -3336,6 +3336,137 @@
     .dash-tab-pane.active {
       display: block;
     }
+
+    /* =========================================================
+       CARRIER CARDS
+    ========================================================= */
+
+    .carrier-cards-grid {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .carrier-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px 22px;
+      transition: border-color .2s;
+    }
+
+    .carrier-card:hover { border-color: #363c57; }
+
+    .carrier-card-hd {
+      display: flex;
+      align-items: flex-start;
+      gap: 14px;
+      flex-wrap: wrap;
+    }
+
+    .carrier-name {
+      font-size: 1.05rem;
+      font-weight: 700;
+      color: var(--text);
+    }
+
+    .carrier-gw-name {
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      font-size: .75rem;
+      color: var(--muted);
+      margin-top: 3px;
+    }
+
+    .carrier-badges {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      margin-top: 2px;
+    }
+
+    .badge-primary-carrier {
+      background: rgba(59,130,246,.14);
+      color: #93c5fd;
+      border: 1px solid rgba(59,130,246,.3);
+    }
+
+    .badge-failover-carrier {
+      background: rgba(113,128,150,.12);
+      color: #94a3b8;
+      border: 1px solid rgba(113,128,150,.3);
+    }
+
+    .carrier-conn-block {
+      font-family: 'SF Mono', 'Fira Code', 'Fira Mono', monospace;
+      font-size: .8rem;
+      background: #0d0f15;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      line-height: 1.8;
+      color: #c9d1d9;
+      margin-top: 14px;
+      white-space: pre;
+      overflow-x: auto;
+    }
+
+    .carrier-conn-key   { color: var(--muted); }
+    .carrier-conn-value { color: #93c5fd; }
+
+    .carrier-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 16px;
+      padding-top: 14px;
+      border-top: 1px solid var(--border);
+      align-items: center;
+    }
+
+    .carrier-test-result {
+      font-size: .82rem;
+      font-weight: 600;
+      margin-left: 4px;
+    }
+
+    .carrier-test-result.ok  { color: #4ade80; }
+    .carrier-test-result.err { color: #f87171; }
+
+    .carrier-edit-section {
+      margin-top: 16px;
+      padding-top: 16px;
+      border-top: 1px solid var(--border);
+    }
+
+    .carrier-form-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 12px;
+    }
+
+    .carrier-form-check-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 18px;
+      margin-top: 4px;
+    }
+
+    .carrier-check-label {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      font-size: .85rem;
+      color: var(--muted);
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .carrier-check-label input[type=checkbox] {
+      width: 15px;
+      height: 15px;
+      accent-color: var(--accent);
+      cursor: pointer;
+    }
   </style>
 </head>
 <body>
@@ -3467,6 +3598,7 @@
         <button class="dash-tab-btn" id="dash-tab-btn-rates"     onclick="switchDashTab('rates')">Rates</button>
         <button class="dash-tab-btn" id="dash-tab-btn-tiers"     onclick="switchDashTab('tiers')">Tiers</button>
         <button class="dash-tab-btn" id="dash-tab-btn-sipp"      onclick="switchDashTab('sipp')">SIPp Testing</button>
+        <button class="dash-tab-btn" id="dash-tab-btn-carriers"  onclick="switchDashTab('carriers')">Carriers</button>
       </div>
 
       <!-- Tab: Customers -->
@@ -3794,6 +3926,34 @@
               Select a preset above or configure a custom test to begin.
             </div>
           </div>
+        </div>
+      </div>
+
+      <!-- Tab: Carriers -->
+      <div class="dash-tab-pane" id="dash-tab-carriers">
+        <div class="page-hd">
+          <div>
+            <div class="page-title">Carrier <span>Connections</span></div>
+            <div class="page-subtitle">Configure SIP trunk connections to upstream carriers</div>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <button class="btn btn-ghost" id="carrier-test-all-btn" onclick="testAllCarriers()">Test All</button>
+            <button class="btn btn-primary" onclick="toggleCarrierCreateForm()">+ Add Carrier</button>
+          </div>
+        </div>
+
+        <!-- Add Carrier form -->
+        <div class="create-section" id="carrier-create-section">
+          <div class="card" style="margin-bottom:0" id="carrier-create-form-card">
+            <div class="card-title">Add Carrier</div>
+            <div id="carrier-create-form-body">
+              <!-- rendered by renderCarrierForm() -->
+            </div>
+          </div>
+        </div>
+
+        <div id="carriers-list">
+          <div class="state-msg"><span class="spinner"></span></div>
         </div>
       </div>
 
@@ -4530,6 +4690,7 @@ const PAGE_TITLES = {
   tiers:     'Administration',
   rates:     'Administration',
   sipp:      'Administration',
+  carriers:  'Administration',
   rcf:       'RCF',
   'api-dids':'API Calling',
   trunks:    'SIP Trunks',
@@ -4538,7 +4699,7 @@ const PAGE_TITLES = {
 };
 
 // Admin tabs that live inside the admin page
-const ADMIN_TAB_PAGES = new Set(['customers', 'cdrs', 'rates', 'tiers', 'sipp']);
+const ADMIN_TAB_PAGES = new Set(['customers', 'cdrs', 'rates', 'tiers', 'sipp', 'carriers']);
 
 let currentPage = null;
 
@@ -4681,7 +4842,7 @@ async function loadAdmin() {
 const dashTabLoaded = {};
 
 function switchDashTab(tab) {
-  const tabs = ['customers', 'cdrs', 'rates', 'tiers', 'sipp'];
+  const tabs = ['customers', 'cdrs', 'rates', 'tiers', 'sipp', 'carriers'];
   if (!tabs.includes(tab)) tab = 'customers';
 
   // Update tab button styles
@@ -4700,11 +4861,12 @@ function switchDashTab(tab) {
   if (!dashTabLoaded[tab]) {
     dashTabLoaded[tab] = true;
     switch (tab) {
-      case 'customers': loadCustomers();  break;
-      case 'cdrs':      loadCdrsPage();   break;
-      case 'rates':     loadRatesPage();  break;
-      case 'tiers':     loadTiers();      break;
-      case 'sipp':      loadSippPage();   break;
+      case 'customers': loadCustomers();    break;
+      case 'cdrs':      loadCdrsPage();     break;
+      case 'rates':     loadRatesPage();    break;
+      case 'tiers':     loadTiers();        break;
+      case 'sipp':      loadSippPage();     break;
+      case 'carriers':  loadCarriersTab();  break;
     }
   }
 }
@@ -8756,6 +8918,391 @@ async function loadCdrSummary() {
   } catch (err) {
     wrap.innerHTML = `<div class="state-msg"><strong>Error loading summary</strong>${escHtml(err.message)}</div>`;
   }
+}
+
+/* =========================================================
+   CARRIERS
+========================================================= */
+
+let carriersList = [];
+// Tracks which carrier card is in edit mode (by carrier id)
+let carrierEditingId = null;
+// Tracks test results keyed by carrier id: { ok: bool, latency_ms: number|null, msg: string }
+const carrierTestResults = {};
+
+async function loadCarriersTab() {
+  const wrap = document.getElementById('carriers-list');
+  if (!wrap) return;
+  wrap.innerHTML = '<div class="state-msg"><span class="spinner"></span></div>';
+  try {
+    carriersList = await api('GET', '/carriers');
+    renderCarrierCards();
+  } catch (err) {
+    wrap.innerHTML = `<div class="state-msg"><strong>Failed to load carriers</strong>${escHtml(err.message)}</div>`;
+  }
+}
+
+function renderCarrierCards() {
+  const wrap = document.getElementById('carriers-list');
+  if (!wrap) return;
+  if (!carriersList.length) {
+    wrap.innerHTML = '<div class="state-msg"><strong>No carriers configured</strong>Add your first carrier connection above.</div>';
+    return;
+  }
+  wrap.innerHTML = '<div class="carrier-cards-grid">' +
+    carriersList.map(c => renderCarrierCard(c)).join('') +
+  '</div>';
+}
+
+function renderCarrierCard(c) {
+  const statusBadge = c.enabled
+    ? '<span class="badge badge-active">Enabled</span>'
+    : '<span class="badge badge-disabled">Disabled</span>';
+
+  const roleBadges = [
+    c.is_primary  ? '<span class="badge badge-primary-carrier">Primary</span>'  : '',
+    c.is_failover ? '<span class="badge badge-failover-carrier">Failover</span>' : '',
+  ].filter(Boolean).join('');
+
+  // Product type badges
+  const productTypes = Array.isArray(c.product_types) ? c.product_types : [];
+  const productBadges = productTypes.map(pt => {
+    const cls = pt === 'rcf' ? 'badge-rcf' : pt === 'api' ? 'badge-api' : pt === 'trunk' ? 'badge-trunk' : '';
+    return `<span class="badge ${cls}">${escHtml(pt)}</span>`;
+  }).join('');
+
+  // Connection detail block
+  const auth = c.auth_type === 'credential' ? 'Credential' : c.auth_type === 'both' ? 'IP + Credential' : 'IP-based';
+  const connLines = [
+    ['SIP Proxy',    `${escHtml(c.host || '--')}:${escHtml(String(c.port || 5060))}`],
+    ['Transport',    escHtml((c.transport || 'udp').toUpperCase())],
+    ['Auth',         auth],
+    ['Codecs',       escHtml(c.codec_prefs || 'PCMU,PCMA')],
+    ['Registration', c.register ? 'Yes' : 'No'],
+  ];
+
+  if ((c.auth_type === 'credential' || c.auth_type === 'both') && c.username) {
+    connLines.push(['Username', escHtml(c.username)]);
+    connLines.push(['Password', '&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;']);
+  }
+  if (c.max_channels != null) connLines.push(['Max Channels', escHtml(String(c.max_channels))]);
+  if (c.cps_limit    != null) connLines.push(['CPS Limit',    escHtml(String(c.cps_limit))]);
+
+  const keyWidth = Math.max(...connLines.map(([k]) => k.length));
+  const connHtml = connLines.map(([k, v]) =>
+    `<span class="carrier-conn-key">${k.padEnd(keyWidth)}  </span><span class="carrier-conn-value">${v}</span>`
+  ).join('\n');
+
+  // Test result (if any)
+  const tr = carrierTestResults[c.id];
+  let testResultHtml = '';
+  if (tr) {
+    if (tr.ok) {
+      testResultHtml = `<span class="carrier-test-result ok">Reachable${tr.latency_ms != null ? ` (${tr.latency_ms}ms)` : ''}</span>`;
+    } else {
+      testResultHtml = `<span class="carrier-test-result err">Unreachable &mdash; ${escHtml(tr.msg)}</span>`;
+    }
+  }
+
+  // Edit form or normal view
+  const isEditing = carrierEditingId === c.id;
+  const editSection = isEditing
+    ? `<div class="carrier-edit-section" id="carrier-edit-section-${c.id}">${renderCarrierFormFields(c)}</div>`
+    : '';
+
+  const enableLabel  = c.enabled ? 'Disable' : 'Enable';
+  const enableClass  = c.enabled ? 'btn-ghost' : 'btn-success';
+
+  return `
+<div class="carrier-card" id="carrier-card-${c.id}">
+  <div class="carrier-card-hd">
+    <div style="flex:1;min-width:0">
+      <div class="carrier-name">${escHtml(c.display_name || c.gateway_name)}</div>
+      <div class="carrier-gw-name">${escHtml(c.gateway_name)}</div>
+      <div class="carrier-badges" style="margin-top:8px">
+        ${statusBadge}
+        ${roleBadges}
+        ${productBadges}
+      </div>
+    </div>
+  </div>
+
+  <div class="carrier-conn-block">${connHtml}</div>
+
+  ${editSection}
+
+  <div class="carrier-actions">
+    <button class="btn btn-ghost btn-sm" id="carrier-test-btn-${c.id}" onclick="testCarrier(${c.id})">Test Connection</button>
+    ${testResultHtml}
+    <span style="flex:1"></span>
+    <button class="btn btn-ghost btn-sm" onclick="${isEditing ? `cancelEditCarrier(${c.id})` : `editCarrier(${c.id})`}">
+      ${isEditing ? 'Cancel' : 'Edit'}
+    </button>
+    ${isEditing
+      ? `<button class="btn btn-primary btn-sm" id="carrier-save-btn-${c.id}" onclick="saveCarrier(${c.id})">Save</button>`
+      : ''
+    }
+    <button class="btn ${enableClass} btn-sm" onclick="toggleCarrierEnabled(${c.id}, ${!c.enabled})">${enableLabel}</button>
+    <button class="btn btn-danger btn-sm" onclick="deleteCarrier(${c.id})">Delete</button>
+  </div>
+</div>`;
+}
+
+function renderCarrierFormFields(carrier) {
+  // carrier may be null when creating
+  const c = carrier || {};
+  const id = c.id;
+  const prefix = id ? `ce-${id}` : 'cnew';
+  const authType = c.auth_type || 'ip';
+  const showCred = authType === 'credential' || authType === 'both';
+
+  return `
+<div class="carrier-form-grid">
+  <div class="form-group">
+    <label class="form-label">Display Name</label>
+    <input class="form-control" id="${prefix}-display-name" type="text" value="${escHtml(c.display_name || '')}" placeholder="Acme Carrier" />
+  </div>
+  <div class="form-group">
+    <label class="form-label">Description</label>
+    <input class="form-control" id="${prefix}-description" type="text" value="${escHtml(c.description || '')}" placeholder="Optional description" />
+  </div>
+  <div class="form-group">
+    <label class="form-label">SIP Proxy Hostname / IP</label>
+    <input class="form-control" id="${prefix}-host" type="text" value="${escHtml(c.host || '')}" placeholder="sip.carrier.com" />
+  </div>
+  <div class="form-group">
+    <label class="form-label">Port</label>
+    <input class="form-control" id="${prefix}-port" type="number" value="${c.port != null ? c.port : 5060}" min="1" max="65535" />
+  </div>
+  <div class="form-group">
+    <label class="form-label">Transport</label>
+    <select class="form-control" id="${prefix}-transport" onchange="onCarrierAuthChange('${prefix}')">
+      <option value="udp"${(c.transport||'udp')==='udp'?' selected':''}>UDP</option>
+      <option value="tcp"${c.transport==='tcp'?' selected':''}>TCP</option>
+      <option value="tls"${c.transport==='tls'?' selected':''}>TLS</option>
+    </select>
+  </div>
+  <div class="form-group">
+    <label class="form-label">Auth Type</label>
+    <select class="form-control" id="${prefix}-auth-type" onchange="onCarrierAuthChange('${prefix}')">
+      <option value="ip"${authType==='ip'?' selected':''}>IP-based</option>
+      <option value="credential"${authType==='credential'?' selected':''}>Credential</option>
+      <option value="both"${authType==='both'?' selected':''}>IP + Credential</option>
+    </select>
+  </div>
+  <div class="form-group" id="${prefix}-cred-username-wrap" style="${showCred ? '' : 'display:none'}">
+    <label class="form-label">Username</label>
+    <input class="form-control" id="${prefix}-username" type="text" value="${escHtml(c.username || '')}" placeholder="sip-user" />
+  </div>
+  <div class="form-group" id="${prefix}-cred-password-wrap" style="${showCred ? '' : 'display:none'}">
+    <label class="form-label">Password</label>
+    <input class="form-control" id="${prefix}-password" type="text" value="${escHtml(c.password || '')}" placeholder="leave blank to keep unchanged" />
+  </div>
+  <div class="form-group">
+    <label class="form-label">Codec Preferences</label>
+    <input class="form-control" id="${prefix}-codec-prefs" type="text" value="${escHtml(c.codec_prefs || 'PCMU,PCMA')}" placeholder="PCMU,PCMA" />
+  </div>
+  <div class="form-group">
+    <label class="form-label">Max Channels (optional)</label>
+    <input class="form-control" id="${prefix}-max-channels" type="number" value="${c.max_channels != null ? c.max_channels : ''}" min="1" placeholder="unlimited" />
+  </div>
+  <div class="form-group">
+    <label class="form-label">CPS Limit (optional)</label>
+    <input class="form-control" id="${prefix}-cps-limit" type="number" value="${c.cps_limit != null ? c.cps_limit : ''}" min="1" placeholder="unlimited" />
+  </div>
+</div>
+
+<div style="margin-top:14px">
+  <div class="form-label" style="margin-bottom:8px">Product Types</div>
+  <div class="carrier-form-check-row">
+    <label class="carrier-check-label"><input type="checkbox" id="${prefix}-pt-rcf"   ${(c.product_types||[]).includes('rcf')   ? 'checked' : ''} /> RCF</label>
+    <label class="carrier-check-label"><input type="checkbox" id="${prefix}-pt-api"   ${(c.product_types||[]).includes('api')   ? 'checked' : ''} /> API</label>
+    <label class="carrier-check-label"><input type="checkbox" id="${prefix}-pt-trunk" ${(c.product_types||[]).includes('trunk') ? 'checked' : ''} /> Trunk</label>
+  </div>
+</div>
+
+<div style="margin-top:14px">
+  <div class="form-label" style="margin-bottom:8px">Role &amp; Options</div>
+  <div class="carrier-form-check-row">
+    <label class="carrier-check-label"><input type="checkbox" id="${prefix}-is-primary"  ${c.is_primary  ? 'checked' : ''} /> Is Primary</label>
+    <label class="carrier-check-label"><input type="checkbox" id="${prefix}-is-failover" ${c.is_failover ? 'checked' : ''} /> Is Failover</label>
+    <label class="carrier-check-label"><input type="checkbox" id="${prefix}-register"    ${c.register    ? 'checked' : ''} /> Register</label>
+    <label class="carrier-check-label"><input type="checkbox" id="${prefix}-caller-id-in-from" ${c.caller_id_in_from ? 'checked' : ''} /> Caller ID in From</label>
+    <label class="carrier-check-label"><input type="checkbox" id="${prefix}-enabled"     ${c.enabled !== false ? 'checked' : ''} /> Enabled</label>
+  </div>
+</div>
+
+<div class="form-footer" style="justify-content:flex-start">
+  ${id
+    ? `<button class="btn btn-ghost btn-sm" onclick="cancelEditCarrier(${id})">Cancel</button>
+       <button class="btn btn-primary btn-sm" id="carrier-save-btn-${id}" onclick="saveCarrier(${id})">Save Changes</button>`
+    : `<button class="btn btn-ghost btn-sm" onclick="toggleCarrierCreateForm()">Cancel</button>
+       <button class="btn btn-primary btn-sm" id="carrier-create-btn" onclick="createCarrier()">Create Carrier</button>`
+  }
+</div>`;
+}
+
+function onCarrierAuthChange(prefix) {
+  const authType = document.getElementById(`${prefix}-auth-type`)?.value;
+  const show = authType === 'credential' || authType === 'both';
+  const userWrap = document.getElementById(`${prefix}-cred-username-wrap`);
+  const passWrap = document.getElementById(`${prefix}-cred-password-wrap`);
+  if (userWrap) userWrap.style.display = show ? '' : 'none';
+  if (passWrap) passWrap.style.display = show ? '' : 'none';
+}
+
+function readCarrierFormValues(prefix) {
+  const get    = id => document.getElementById(`${prefix}-${id}`);
+  const val    = id => get(id)?.value?.trim() ?? '';
+  const numVal = id => { const v = get(id)?.value; return v === '' || v == null ? null : Number(v); };
+  const chk    = id => !!get(id)?.checked;
+
+  const productTypes = [];
+  if (chk('pt-rcf'))   productTypes.push('rcf');
+  if (chk('pt-api'))   productTypes.push('api');
+  if (chk('pt-trunk')) productTypes.push('trunk');
+
+  const payload = {
+    display_name:      val('display-name'),
+    description:       val('description'),
+    host:              val('host'),
+    port:              numVal('port') ?? 5060,
+    transport:         val('transport') || 'udp',
+    auth_type:         val('auth-type') || 'ip',
+    username:          val('username'),
+    codec_prefs:       val('codec-prefs'),
+    max_channels:      numVal('max-channels'),
+    cps_limit:         numVal('cps-limit'),
+    product_types:     productTypes,
+    is_primary:        chk('is-primary'),
+    is_failover:       chk('is-failover'),
+    register:          chk('register'),
+    caller_id_in_from: chk('caller-id-in-from'),
+    enabled:           chk('enabled'),
+  };
+
+  // Include password only if the field has a value (to avoid clearing it on edit)
+  const password = val('password');
+  if (password) payload.password = password;
+
+  return payload;
+}
+
+function editCarrier(id) {
+  carrierEditingId = id;
+  renderCarrierCards();
+}
+
+function cancelEditCarrier(id) {
+  if (carrierEditingId === id) carrierEditingId = null;
+  renderCarrierCards();
+}
+
+async function saveCarrier(id) {
+  const btn = document.getElementById(`carrier-save-btn-${id}`);
+  setButtonLoading(btn, true);
+  try {
+    const payload = readCarrierFormValues(`ce-${id}`);
+    const updated = await api('PUT', `/carriers/${id}`, payload);
+    const idx = carriersList.findIndex(c => c.id === id);
+    if (idx !== -1) carriersList[idx] = updated;
+    carrierEditingId = null;
+    renderCarrierCards();
+    toast('Carrier updated', 'ok');
+  } catch (err) {
+    setButtonLoading(btn, false);
+    toast('Save failed: ' + err.message, 'err');
+  }
+}
+
+async function createCarrier() {
+  const btn = document.getElementById('carrier-create-btn');
+  setButtonLoading(btn, true);
+  try {
+    const payload = readCarrierFormValues('cnew');
+    if (!payload.display_name) { toast('Display name is required', 'err'); setButtonLoading(btn, false); return; }
+    if (!payload.host)         { toast('SIP Proxy hostname is required', 'err'); setButtonLoading(btn, false); return; }
+    const created = await api('POST', '/carriers', payload);
+    carriersList.push(created);
+    // Hide create form
+    const sec = document.getElementById('carrier-create-section');
+    if (sec) sec.classList.remove('open');
+    renderCarrierCards();
+    toast('Carrier created', 'ok');
+  } catch (err) {
+    setButtonLoading(btn, false);
+    toast('Create failed: ' + err.message, 'err');
+  }
+}
+
+function toggleCarrierCreateForm() {
+  const sec = document.getElementById('carrier-create-section');
+  if (!sec) return;
+  const opening = !sec.classList.contains('open');
+  sec.classList.toggle('open', opening);
+  if (opening) {
+    // Render fresh empty form
+    const body = document.getElementById('carrier-create-form-body');
+    if (body) body.innerHTML = renderCarrierFormFields(null);
+  }
+}
+
+async function toggleCarrierEnabled(id, enabled) {
+  try {
+    const updated = await api('PUT', `/carriers/${id}`, { enabled });
+    const idx = carriersList.findIndex(c => c.id === id);
+    if (idx !== -1) carriersList[idx] = updated;
+    renderCarrierCards();
+    toast(enabled ? 'Carrier enabled' : 'Carrier disabled', 'ok');
+  } catch (err) {
+    toast('Update failed: ' + err.message, 'err');
+  }
+}
+
+async function deleteCarrier(id) {
+  const carrier = carriersList.find(c => c.id === id);
+  const name = carrier ? (carrier.display_name || carrier.gateway_name) : String(id);
+  if (!confirm(`Delete carrier "${name}"? This cannot be undone.`)) return;
+  try {
+    await api('DELETE', `/carriers/${id}`);
+    carriersList = carriersList.filter(c => c.id !== id);
+    delete carrierTestResults[id];
+    if (carrierEditingId === id) carrierEditingId = null;
+    renderCarrierCards();
+    toast('Carrier deleted', 'ok');
+  } catch (err) {
+    toast('Delete failed: ' + err.message, 'err');
+  }
+}
+
+async function testCarrier(id) {
+  const btn = document.getElementById(`carrier-test-btn-${id}`);
+  setButtonLoading(btn, true);
+  try {
+    const result = await api('POST', `/carriers/${id}/test`);
+    carrierTestResults[id] = {
+      ok:         result.reachable === true,
+      latency_ms: result.latency_ms ?? null,
+      msg:        result.reachable ? '' : (result.error || 'connection timeout'),
+    };
+    renderCarrierCards();
+  } catch (err) {
+    carrierTestResults[id] = { ok: false, latency_ms: null, msg: err.message };
+    renderCarrierCards();
+  }
+}
+
+async function testAllCarriers() {
+  const btn = document.getElementById('carrier-test-all-btn');
+  setButtonLoading(btn, true);
+  const enabled = carriersList.filter(c => c.enabled);
+  if (!enabled.length) {
+    toast('No enabled carriers to test', 'err');
+    setButtonLoading(btn, false);
+    return;
+  }
+  await Promise.allSettled(enabled.map(c => testCarrier(c.id)));
+  setButtonLoading(btn, false);
 }
 
 /* =========================================================

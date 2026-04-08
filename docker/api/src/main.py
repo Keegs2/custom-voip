@@ -11,7 +11,7 @@ import logging
 
 from db.database import init_db, close_db
 from db.redis_client import init_redis, close_redis
-from routers import rcf, calls, trunks, cdrs, customers, health, tiers, api_dids, rates, ivr
+from routers import rcf, calls, trunks, cdrs, customers, health, tiers, api_dids, rates, ivr, carriers
 
 # Configure logging
 logging.basicConfig(
@@ -82,6 +82,7 @@ app.include_router(tiers.router, prefix="/v1/tiers", tags=["CPS Tiers"])
 app.include_router(api_dids.router, prefix="/v1/api-dids", tags=["API DIDs"])
 app.include_router(rates.router, prefix="/v1/rates", tags=["Rates"])
 app.include_router(ivr.router, prefix="/v1/ivr", tags=["IVR Builder"])
+app.include_router(carriers.router, prefix="/v1/carriers", tags=["Carriers"])
 
 # Backward-compatible routes (no /v1/ prefix) for testing
 app.include_router(customers.router, prefix="/customers", tags=["Customers"])
@@ -93,6 +94,7 @@ app.include_router(tiers.router, prefix="/tiers", tags=["CPS Tiers"])
 app.include_router(api_dids.router, prefix="/api-dids", tags=["API DIDs"])
 app.include_router(rates.router, prefix="/rates", tags=["Rates"])
 app.include_router(ivr.router, prefix="/ivr", tags=["IVR Builder"])
+app.include_router(carriers.router, prefix="/carriers", tags=["Carriers"])
 
 
 @app.get("/")
