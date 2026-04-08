@@ -4981,12 +4981,47 @@ function renderCustomersTable() {
                       <div style="font-size:.9rem;font-weight:700;color:var(--text);flex:1">${escHtml(t.trunk_name)}</div>
                       ${statusBadge}
                       <span style="font-size:.75rem;color:var(--muted)">${escHtml(t.auth_type)} auth</span>
+                      <span style="font-size:.75rem;color:var(--muted)">ID: ${t.id}</span>
                     </div>
                     <div style="display:flex;gap:18px;flex-wrap:wrap;font-size:.78rem;color:var(--muted);margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid var(--border)">
                       <span>Channels: <strong style="color:var(--text)">${escHtml(channels)}</strong></span>
                       <span>CPS: <strong style="color:var(--text)">${t.cps_limit != null ? t.cps_limit : '--'}</strong></span>
                       <span>IPs: <strong style="color:var(--text)">${ips.length}</strong></span>
                       <span>DIDs: <strong style="color:var(--text)">${dids.length}</strong></span>
+                    </div>
+
+                    <div style="font-size:.63rem;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.7px;margin-bottom:8px">Customer Connection Details</div>
+                    <div style="background:#0d0f15;border:1px solid var(--border);border-radius:6px;padding:10px 14px;margin-bottom:12px;font-family:monospace;font-size:.82rem">
+                      <div style="display:flex;gap:8px;margin-bottom:6px">
+                        <span style="color:var(--muted);min-width:110px">SIP Server:</span>
+                        <span style="color:var(--text)">34.74.71.32:5080</span>
+                      </div>
+                      <div style="display:flex;gap:8px;margin-bottom:6px">
+                        <span style="color:var(--muted);min-width:110px">Auth Type:</span>
+                        <span style="color:var(--text)">${escHtml(t.auth_type).toUpperCase()}</span>
+                      </div>
+                      ${t.auth_type === 'ip' || t.auth_type === 'both' ? `
+                      <div style="display:flex;gap:8px;margin-bottom:6px">
+                        <span style="color:var(--muted);min-width:110px">Auth IPs:</span>
+                        <span style="color:var(--text)">${ips.length > 0 ? ips.map(ip => escHtml(ip.ip_address) + (ip.description ? ' ('+escHtml(ip.description)+')' : '')).join(', ') : '<span style="color:var(--danger-text)">None configured</span>'}</span>
+                      </div>` : ''}
+                      ${t.tech_prefix ? `
+                      <div style="display:flex;gap:8px;margin-bottom:6px">
+                        <span style="color:var(--muted);min-width:110px">Tech Prefix:</span>
+                        <span style="color:var(--text)">${escHtml(t.tech_prefix)}</span>
+                      </div>` : ''}
+                      <div style="display:flex;gap:8px;margin-bottom:6px">
+                        <span style="color:var(--muted);min-width:110px">Max Channels:</span>
+                        <span style="color:var(--text)">${t.max_channels}</span>
+                      </div>
+                      <div style="display:flex;gap:8px;margin-bottom:6px">
+                        <span style="color:var(--muted);min-width:110px">CPS Limit:</span>
+                        <span style="color:var(--text)">${t.cps_limit}</span>
+                      </div>
+                      <div style="display:flex;gap:8px">
+                        <span style="color:var(--muted);min-width:110px">DIDs:</span>
+                        <span style="color:var(--text)">${dids.length > 0 ? dids.map(d => escHtml(d.did)).join(', ') : 'None assigned'}</span>
+                      </div>
                     </div>
 
                     <div style="font-size:.63rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.7px;margin-bottom:6px">Call Paths</div>
