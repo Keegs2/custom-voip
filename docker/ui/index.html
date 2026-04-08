@@ -3474,10 +3474,6 @@
   </div>
 
   <div class="sidebar-nav">
-    <a class="nav-item nav-item-admin" data-page="admin" onclick="navigate('admin')" style="margin-top:8px;margin-bottom:4px">
-      <span class="nav-icon">&#9881;</span> Administration
-    </a>
-
     <div class="nav-section-label" style="margin-top:8px">Products</div>
     <a class="nav-item" data-page="rcf" onclick="navigate('rcf')">
       <span class="nav-icon">~</span> RCF
@@ -3493,6 +3489,10 @@
     </a>
     <a class="nav-item" data-page="docs" onclick="navigate('docs')">
       <span class="nav-icon">?</span> API Docs
+    </a>
+
+    <a class="nav-item nav-item-admin" data-page="admin" onclick="navigate('admin')" style="margin-top:8px;margin-bottom:4px">
+      <span class="nav-icon">&#9881;</span> Administration
     </a>
   </div>
 
@@ -3518,11 +3518,6 @@
       <div class="dash-welcome">
         <div class="dash-welcome-title">Custom <span style="color:var(--accent)">VoIP</span> Platform</div>
         <div class="dash-welcome-sub">Unified voice infrastructure — remote call forwarding, programmable calling, SIP trunks, and platform administration.</div>
-        <div class="dash-welcome-pills" id="dash-home-status-pills">
-          <span class="dash-status-pill loading"><span class="dash-pill-dot"></span>API</span>
-          <span class="dash-status-pill loading"><span class="dash-pill-dot"></span>Database</span>
-          <span class="dash-status-pill loading"><span class="dash-pill-dot"></span>Redis</span>
-        </div>
       </div>
 
       <!-- Unified 3x2 navigation grid -->
@@ -3591,16 +3586,6 @@
 
     <!-- ===================== ADMIN ===================== -->
     <div id="page-admin" class="page" style="display:none">
-
-      <!-- Platform health bar — always visible -->
-      <div class="dash-health-bar">
-        <span class="dash-health-bar-label">Platform</span>
-        <div class="dash-status-pills" id="dash-status-pills">
-          <span class="dash-status-pill loading"><span class="dash-pill-dot"></span>API</span>
-          <span class="dash-status-pill loading"><span class="dash-pill-dot"></span>Database</span>
-          <span class="dash-status-pill loading"><span class="dash-pill-dot"></span>Redis</span>
-        </div>
-      </div>
 
       <!-- Tab bar -->
       <div class="dash-tab-bar">
@@ -4776,7 +4761,6 @@ function _navigateTo(page) {
   // Load page data
   switch (page) {
     case 'dashboard':
-      loadHomepage();
       break;
     case 'admin':
       loadAdmin();
@@ -4814,35 +4798,11 @@ function closeSidebar() {
    HOMEPAGE
 ========================================================= */
 
-async function loadHomepage() {
-  // Load platform health status for the homepage pills
-  const healthResult = await Promise.allSettled([
-    api('GET', '/health/detailed'),
-  ]);
-  renderHomepageStatus(
-    healthResult[0].status === 'fulfilled' ? healthResult[0].value : null
-  );
-}
-
-function renderHomepageStatus(health) {
-  const container = document.getElementById('dash-home-status-pills');
-  if (!container) return;
-  renderStatusPills(container, health);
-}
-
 /* =========================================================
    ADMIN PAGE
 ========================================================= */
 
 async function loadAdmin() {
-  // Load platform health status
-  const healthResult = await Promise.allSettled([
-    api('GET', '/health/detailed'),
-  ]);
-  renderDashboardStatus(
-    healthResult[0].status === 'fulfilled' ? healthResult[0].value : null
-  );
-
   // Load the default tab (Customers) if not already loaded
   if (!dashTabLoaded['customers']) {
     switchDashTab('customers');
@@ -4884,58 +4844,6 @@ function switchDashTab(tab) {
       case 'carriers':  loadCarriersTab();  break;
     }
   }
-}
-
-// Shared helper — renders health pills into any container element
-function renderStatusPills(container, health) {
-  if (!container) return;
-
-  // Determine whether a named component is healthy
-  const isHealthy = (val) =>
-    val === true || val === 'ok' || val === 'healthy' || val === 'up';
-
-  // Extract top-level components from the health response.
-  // The response may look like: { status: 'ok', components: { api: 'ok', db: 'ok', redis: 'ok' } }
-  // or it may be a flat object. We look for known keys in both places.
-  const lookupComponent = (name, aliases = []) => {
-    if (!health || typeof health !== 'object') return null;
-
-    const candidates = [name, ...aliases];
-    // Check components sub-object first
-    const comps = health.components;
-    if (comps && typeof comps === 'object') {
-      for (const key of candidates) {
-        if (key in comps) return isHealthy(comps[key]);
-      }
-    }
-    // Fall back to top-level keys
-    for (const key of candidates) {
-      if (key in health) return isHealthy(health[key]);
-    }
-    // If overall status is known, surface that for the API pill
-    if (name === 'api' && 'status' in health) return isHealthy(health.status);
-    return null;
-  };
-
-  const pillData = [
-    { label: 'API',      healthy: lookupComponent('api',      ['api_server', 'server']) },
-    { label: 'Database', healthy: lookupComponent('database', ['db', 'postgres', 'sql']) },
-    { label: 'Redis',    healthy: lookupComponent('redis',    ['cache', 'redis_cache']) },
-  ];
-
-  container.innerHTML = pillData.map(({ label, healthy }) => {
-    const stateClass = healthy === null ? 'loading' : (healthy ? 'healthy' : 'unhealthy');
-    const statusText = healthy === null ? 'Checking...' : (healthy ? 'Healthy' : 'Degraded');
-    return `
-      <span class="dash-status-pill ${stateClass}">
-        <span class="dash-pill-dot"></span>
-        ${escHtml(label)}: ${escHtml(statusText)}
-      </span>`;
-  }).join('');
-}
-
-function renderDashboardStatus(health) {
-  renderStatusPills(document.getElementById('dash-status-pills'), health);
 }
 
 /* =========================================================
