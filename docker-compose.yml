@@ -88,7 +88,9 @@ services:
       - REDIS_PORT=6379
       - API_HOST=api
       - API_PORT=8000
-      - TEST_MODE=true  # Enable for testing without carriers
+      - EXTERNAL_RTP_IP=${EXTERNAL_RTP_IP:-auto-nat}
+      - EXTERNAL_SIP_IP=${EXTERNAL_SIP_IP:-auto-nat}
+      - TEST_MODE=${TEST_MODE:-true}
     ports:
       - "5080:5080/udp"
       - "5080:5080/tcp"
