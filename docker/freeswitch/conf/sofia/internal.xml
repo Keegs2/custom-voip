@@ -247,8 +247,10 @@
   <!-- ============================================ -->
   <gateways>
     <!--
-      Standard Traffic Gateway (Primary Carrier)
-      Used for: standard traffic grade calls, RCF, API calling
+      Low-CPS trunk for RCF and SIP Trunk customers. Standard carrier rates.
+
+      Used for: All RCF (Remote Call Forwarding) and SIP Trunk product calls.
+      API Calling customers use carrier_premium instead.
 
       CONFIGURE THESE WITH YOUR CARRIER CREDENTIALS:
       - Replace proxy with carrier SIP proxy address
@@ -290,8 +292,10 @@
     </gateway>
 
     <!--
-      Premium Traffic Gateway (Higher Quality/Cost)
-      Used for: premium traffic grade calls
+      High-CPS trunk for API Calling customers. Individually negotiated rates.
+
+      Used for: All API Calling product calls (outbound API, inbound API DID,
+      webhook-driven calls). Supports higher CPS than carrier_standard.
     -->
     <gateway name="carrier_premium">
       <param name="proxy" value="sip.carrier-premium.example.com"/>
@@ -311,8 +315,10 @@
     </gateway>
 
     <!--
-      Backup/Overflow Gateway
-      Used for: failover when primary carriers are unavailable
+      Failover gateway for both trunks. Used when primary fails.
+
+      Used for: Automatic failover when carrier_standard or carrier_premium
+      is unavailable. All product types (RCF, API, Trunk) fail over here.
     -->
     <gateway name="carrier_backup">
       <param name="proxy" value="sip.carrier-backup.example.com"/>

@@ -280,17 +280,15 @@ end
 -- ============================================
 -- STEP 7: Select Carrier Gateway
 -- ============================================
--- API calls typically use premium routing
+-- API calls ALWAYS use carrier_premium (high-CPS trunk, negotiated rates)
+-- traffic_grade is retained as a secondary factor for priority within the trunk
 local traffic_grade = get_var("traffic_grade", "premium")
-local gateway = nil
+local gateway = "carrier_premium"
 
-if traffic_grade == "premium" then
-    gateway = "carrier_premium"
-elseif traffic_grade == "standard" then
-    gateway = "carrier_standard"
-else
-    gateway = "carrier_premium"  -- Default to premium for API calls
-end
+freeswitch.consoleLog("INFO", string.format(
+    "[api_outbound] Routing via %s (product: api, traffic_grade: %s)\n",
+    gateway, traffic_grade
+))
 
 -- Test mode check
 local test_mode = os.getenv("TEST_MODE")

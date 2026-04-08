@@ -157,13 +157,14 @@ end
 -- ============================================
 -- STEP 4: Select Carrier Gateway
 -- ============================================
-local gateway = nil
+-- API calls ALWAYS use carrier_premium (high-CPS trunk, negotiated rates)
+-- traffic_grade is retained as a secondary factor for priority within the trunk
+local gateway = "carrier_premium"
 
-if traffic_grade == "premium" then
-    gateway = "carrier_premium"
-else
-    gateway = "carrier_standard"
-end
+freeswitch.consoleLog("INFO", string.format(
+    "[outbound_api] Routing via %s (product: api, traffic_grade: %s)\n",
+    gateway, traffic_grade
+))
 
 set_var("carrier_used", gateway)
 
@@ -262,18 +263,20 @@ else
             uuid, get_var("originate_disposition", "unknown")
         ))
 
-        -- Try failover carrier
-        if gateway == "carrier_standard" then
-            freeswitch.consoleLog("INFO", "[" .. uuid .. "] Trying failover carrier\n")
+        -- Try failover carrier (carrier_backup is the failover for all trunks)
+        if gateway ~= "carrier_backup" then
+            freeswitch.consoleLog("INFO", string.format(
+                "[outbound_api] Primary bridge failed, trying carrier_backup (product: api)\n"
+            ))
 
             dial_string = string.format(
-                "{origination_caller_id_number=%s,call_timeout=%d}sofia/gateway/carrier_premium/%s",
+                "{origination_caller_id_number=%s,call_timeout=%d}sofia/gateway/carrier_backup/%s",
                 from_did ~= "" and from_did or "anonymous",
                 call_timeout,
                 normalized_dest:gsub("^%+", "")
             )
 
-            set_var("carrier_used", "carrier_premium")
+            set_var("carrier_used", "carrier_backup")
 
             pcall(function()
                 session:execute("bridge", dial_string)

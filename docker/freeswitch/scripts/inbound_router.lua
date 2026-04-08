@@ -343,7 +343,14 @@ end
 
 if product_type == "rcf" then
     -- Remote Call Forwarding - Bridge to destination
-    local gateway = (traffic_grade == "premium") and "carrier_premium" or "carrier_standard"
+    -- RCF product always routes via carrier_standard (low-CPS trunk, standard rates)
+    -- traffic_grade is used as a secondary factor for priority within the same trunk
+    local gateway = "carrier_standard"
+    freeswitch.consoleLog("INFO", string.format(
+        "[inbound_router] Routing via %s (product: rcf, traffic_grade: %s)\n",
+        gateway, traffic_grade
+    ))
+
     local is_local_test = get_var("is_local_test", "false")
     local is_local_forward = is_local_extension(forward_to)
 
@@ -403,12 +410,46 @@ if product_type == "rcf" then
         dial_string = "{origination_caller_id_number=" .. normalized_did .. "}" .. dial_string
     end
 
+    -- Set bridge failure handling for failover
+    set_var("continue_on_fail", "true")
+
     pcall(function()
         session:execute("bridge", dial_string)
     end)
 
+    -- If PSTN bridge failed, try carrier_backup as failover
+    if not is_local_forward then
+        local bridge_result = get_var("bridge_result", "")
+        if bridge_result ~= "SUCCESS" then
+            freeswitch.consoleLog("INFO", string.format(
+                "[inbound_router] Primary bridge failed for RCF, trying carrier_backup (product: rcf)\n"
+            ))
+            set_var("carrier_used", "carrier_backup")
+
+            local failover_dial = string.format(
+                "{ignore_early_media=false,call_timeout=%d}sofia/gateway/carrier_backup/%s",
+                ring_timeout, forward_to
+            )
+            if not pass_caller_id then
+                failover_dial = "{origination_caller_id_number=" .. normalized_did .. "}" .. failover_dial
+            end
+
+            pcall(function()
+                session:execute("bridge", failover_dial)
+            end)
+        end
+    end
+
 elseif product_type == "api" then
     -- API Calling - Execute webhook-driven voice control via voice_webhook.lua
+    -- API product always routes via carrier_premium (high-CPS trunk, negotiated rates)
+    -- traffic_grade is used as a secondary factor for priority within the same trunk
+    freeswitch.consoleLog("INFO", string.format(
+        "[inbound_router] Routing via carrier_premium (product: api, traffic_grade: %s)\n",
+        traffic_grade
+    ))
+    set_var("carrier_gateway", "carrier_premium")
+
     if voice_url then
         set_var("voice_url", voice_url)
         if fallback_url then
@@ -446,7 +487,11 @@ elseif product_type == "api" then
 
 elseif product_type == "trunk" then
     -- SIP Trunk inbound - route to customer's PBX
-    -- This requires customer endpoint configuration
+    -- Trunk product always routes via carrier_standard (low-CPS trunk, standard rates)
+    freeswitch.consoleLog("INFO", string.format(
+        "[inbound_router] Routing via carrier_standard (product: trunk, trunk_id: %s)\n",
+        tostring(trunk_id)
+    ))
     freeswitch.consoleLog("INFO", string.format(
         "[%s] Trunk inbound: trunk_id=%s\n",
         uuid, tostring(trunk_id)

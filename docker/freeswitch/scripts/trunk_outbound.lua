@@ -295,15 +295,14 @@ end
 -- ============================================
 -- STEP 7: Select Carrier Gateway
 -- ============================================
-local gateway = nil
+-- Trunk calls ALWAYS use carrier_standard (low-CPS trunk, standard rates)
+-- traffic_grade is retained as a secondary factor for priority within the trunk
+local gateway = "carrier_standard"
 
-if traffic_grade == "premium" then
-    gateway = "carrier_premium"
-elseif traffic_grade == "standard" then
-    gateway = "carrier_standard"
-else
-    gateway = "carrier_standard"
-end
+freeswitch.consoleLog("INFO", string.format(
+    "[trunk_outbound] Routing via %s (product: trunk, traffic_grade: %s)\n",
+    gateway, traffic_grade
+))
 
 -- Test mode check
 local test_mode = os.getenv("TEST_MODE")

@@ -736,8 +736,13 @@ local function execute_dial(verb)
     -- Build dial strings for all targets
     -- Multiple targets are separated by | for sequential or , for simultaneous
     local dial_strings = {}
-    local gateway = (get_var("traffic_grade", "standard") == "premium")
-        and "carrier_premium" or "carrier_standard"
+    -- Webhook-driven calls are always API product -> use carrier_premium (high-CPS trunk)
+    -- traffic_grade is retained as a secondary factor for priority within the trunk
+    local gateway = "carrier_premium"
+    log_info(uuid, string.format(
+        "Dial: using gateway %s (product: api, traffic_grade: %s)",
+        gateway, get_var("traffic_grade", "standard")
+    ))
 
     for _, target in ipairs(dial_targets) do
         local clean_target = target:gsub("[^%d+*#]", "")
