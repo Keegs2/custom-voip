@@ -5024,24 +5024,17 @@ function renderCustomersTable() {
                       </div>
                     </div>
 
-                    <div style="font-size:.63rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.7px;margin-bottom:6px">Call Paths</div>
-                    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
-                      <span style="font-size:.82rem;color:var(--text)">Current: <strong>${t.max_channels}</strong> paths${t.package_name ? ' ('+escHtml(t.package_name)+')' : ''}</span>
-                      <span style="font-size:.78rem;color:var(--muted)">CPS: ${t.cps_limit}</span>
+                    <div style="font-size:.63rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.7px;margin-bottom:6px">Capacity</div>
+                    <div style="display:flex;gap:20px;align-items:baseline;flex-wrap:wrap;margin-bottom:10px;font-size:.82rem">
+                      <div><span style="color:var(--muted)">Call Paths:</span> <strong style="color:var(--text)">${t.max_channels}</strong>${t.package_name ? ` <span style="color:var(--muted);font-size:.75rem">(${escHtml(t.package_name)})</span>` : ''}</div>
+                      <div><span style="color:var(--muted)">CPS Limit:</span> <strong style="color:var(--text)">${t.cps_limit}</strong> <span style="color:var(--muted);font-size:.75rem">(standard trunk tier)</span></div>
                     </div>
-                    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px">
-                      <select class="form-control" id="cust-callpath-${t.id}" style="max-width:220px;padding:4px 8px;font-size:.82rem" onclick="event.stopPropagation()">
-                        <option value="">-- Select package --</option>
+                    <div style="font-size:.75rem;color:var(--muted);margin-bottom:6px">Change call path package:</div>
+                    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+                      <select class="form-control" id="cust-callpath-${t.id}" style="max-width:280px;padding:5px 10px;font-size:.82rem" onclick="event.stopPropagation()">
+                        <option value="">Current: ${t.max_channels} paths${t.package_name ? ' ('+escHtml(t.package_name)+')' : ''} — no change</option>
                       </select>
                       <button class="btn btn-primary btn-xs" onclick="event.stopPropagation();custAssignCallPaths(${t.id}, ${c.id})">Apply</button>
-                    </div>
-                    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
-                      <label style="font-size:.78rem;color:var(--muted)">Override:</label>
-                      <input class="form-control" id="cust-trunk-ch-${t.id}" type="number" min="1" max="1000" value="${t.max_channels}" style="max-width:80px;padding:4px 8px;font-size:.82rem" onclick="event.stopPropagation()" />
-                      <label style="font-size:.78rem;color:var(--muted)">ch</label>
-                      <input class="form-control" id="cust-trunk-cps-${t.id}" type="number" min="1" max="100" value="${t.cps_limit}" style="max-width:70px;padding:4px 8px;font-size:.82rem" onclick="event.stopPropagation()" />
-                      <label style="font-size:.78rem;color:var(--muted)">CPS</label>
-                      <button class="btn btn-ghost btn-xs" onclick="event.stopPropagation();custUpdateTrunkCapacity(${t.id}, ${c.id})">Save</button>
                     </div>
 
                     <div style="font-size:.63rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.7px;margin-bottom:6px">Authorized IPs</div>

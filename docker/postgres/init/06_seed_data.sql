@@ -42,16 +42,16 @@ INSERT INTO rcf_numbers (did, customer_id, forward_to, pass_caller_id, ring_time
 
 -- Test SIP trunk
 INSERT INTO sip_trunks (id, customer_id, trunk_name, max_channels, cps_limit, auth_type) VALUES
-(1, 3, 'Main Office', 50, 10, 'ip'),
+(1, 3, 'Main Office', 50, 5, 'ip'),
 (2, 3, 'Branch Office', 20, 5, 'ip'),
-(3, 4, 'Hybrid Trunk', 10, 3, 'ip');
+(3, 4, 'Hybrid Trunk', 10, 5, 'ip');
 
--- Trunk IPs (use test IPs - replace in production)
+-- Trunk auth IPs (public IPs — customers provide their PBX public IP)
 INSERT INTO trunk_auth_ips (trunk_id, ip_address, description) VALUES
-(1, '10.0.0.100', 'Main PBX'),
-(1, '10.0.0.101', 'Backup PBX'),
-(2, '10.0.1.100', 'Branch PBX'),
-(3, '10.0.2.100', 'Hybrid PBX');
+(1, '203.0.113.50', 'Main Office PBX'),
+(1, '203.0.113.51', 'Backup PBX'),
+(2, '198.51.100.25', 'Branch Office PBX'),
+(3, '192.0.2.100', 'Hybrid Customer PBX');
 
 -- Trunk DIDs
 INSERT INTO trunk_dids (trunk_id, did) VALUES
