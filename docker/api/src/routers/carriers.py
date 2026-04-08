@@ -26,65 +26,21 @@ _table_created = False
 
 
 async def _ensure_table():
-    """Create the carrier_gateways table if it does not already exist,
-    then seed default gateways when the table is empty."""
+    """Check the carrier_gateways table exists (created by SQL init scripts).
+    Seed default gateways if the table is empty."""
     global _table_created
     if _table_created:
         return
 
-    await db.execute("""
-        CREATE TABLE IF NOT EXISTS carrier_gateways (
-            id SERIAL PRIMARY KEY,
-            gateway_name VARCHAR(50) NOT NULL UNIQUE,
-            display_name VARCHAR(100) NOT NULL,
-            description TEXT,
-            sip_proxy VARCHAR(255) NOT NULL,
-            port INT DEFAULT 5060,
-            transport VARCHAR(10) DEFAULT 'udp' CHECK (transport IN ('udp', 'tcp', 'tls')),
-            auth_type VARCHAR(20) DEFAULT 'ip' CHECK (auth_type IN ('ip', 'credential', 'both')),
-            username VARCHAR(100),
-            password VARCHAR(100),
-            register BOOLEAN DEFAULT false,
-            caller_id_in_from BOOLEAN DEFAULT true,
-            codec_prefs VARCHAR(255) DEFAULT 'PCMU,PCMA',
-            max_channels INT,
-            cps_limit INT,
-            product_types TEXT[] DEFAULT '{}',
-            is_primary BOOLEAN DEFAULT false,
-            is_failover BOOLEAN DEFAULT false,
-            enabled BOOLEAN DEFAULT true,
-            created_at TIMESTAMPTZ DEFAULT NOW(),
-            updated_at TIMESTAMPTZ DEFAULT NOW()
-        )
-    """)
-
-    # Grant permissions (safe to re-run; will no-op if already granted)
+    # Table is created by 08_carrier_gateways.sql init script.
+    # Just verify it exists — don't try to CREATE (api user lacks permission).
     try:
-        await db.execute("GRANT ALL ON carrier_gateways TO api")
-        await db.execute("GRANT SELECT ON carrier_gateways TO freeswitch")
-        await db.execute("GRANT USAGE, SELECT ON carrier_gateways_id_seq TO api")
-    except Exception as e:
-        # Permissions may fail in dev if roles don't exist yet — non-fatal
-        logger.warning(f"Could not set carrier_gateways permissions: {e}")
-
-    # Seed default gateways if table is empty
-    count = await db.fetch_one("SELECT COUNT(*) AS c FROM carrier_gateways")
-    if count["c"] == 0:
-        await db.execute("""
-            INSERT INTO carrier_gateways
-                (gateway_name, display_name, description, sip_proxy, product_types, is_primary, is_failover)
-            VALUES
-                ('carrier_standard', 'Standard Trunk',
-                 'Low-CPS trunk for RCF and SIP Trunk customers. Standard carrier rates.',
-                 'sip.carrier-standard.example.com', ARRAY['rcf','trunk'], true, false),
-                ('carrier_premium', 'High-CPS Trunk',
-                 'High-CPS trunk for API Calling customers. Individually negotiated rates.',
-                 'sip.carrier-premium.example.com', ARRAY['api'], true, false),
-                ('carrier_backup', 'Backup / Failover',
-                 'Failover gateway for both trunks. Used when primary fails.',
-                 'sip.carrier-backup.example.com', ARRAY['rcf','trunk','api'], false, true)
-        """)
-        logger.info("Seeded 3 default carrier gateways")
+        await db.fetch_one("SELECT 1 FROM carrier_gateways LIMIT 1")
+    except Exception:
+        # Table doesn't exist — this means the DB wasn't initialized properly
+        logger.error("carrier_gateways table does not exist. Run DB init scripts.")
+        _table_created = True
+        return
 
     _table_created = True
 
