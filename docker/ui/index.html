@@ -598,6 +598,122 @@
     }
 
     /* =========================================================
+       CUSTOMER SERVICE SUB-SECTIONS (inside expanded row)
+    ========================================================= */
+
+    /* Full-width wrapper that sits below the stats grid inside .expand-inner */
+    .cust-services-wrap {
+      grid-column: 1 / -1;
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+      margin-top: 4px;
+    }
+
+    /* Each service block (RCF, API, Trunk) */
+    .cust-service-section {
+      border-top: 1px solid var(--border);
+      padding-top: 14px;
+      margin-top: 14px;
+    }
+
+    .cust-service-section:first-child {
+      border-top: none;
+      padding-top: 0;
+      margin-top: 0;
+    }
+
+    /* Section label — muted uppercase, like a sub-heading */
+    .cust-svc-label {
+      font-size: .63rem;
+      font-weight: 700;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: .9px;
+      margin-bottom: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    /* "Manage" / "Add" text links */
+    .svc-manage-link {
+      font-size: .72rem;
+      font-weight: 600;
+      color: var(--accent);
+      text-decoration: none;
+      opacity: .85;
+      cursor: pointer;
+      letter-spacing: 0;
+      text-transform: none;
+      transition: opacity .15s;
+    }
+
+    .svc-manage-link:hover { opacity: 1; text-decoration: underline; }
+
+    /* Compact table inside expanded customer row — no outer border */
+    .cust-svc-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: .8rem;
+    }
+
+    .cust-svc-table th {
+      font-size: .62rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .6px;
+      color: var(--muted);
+      padding: 5px 8px 5px 0;
+      border-bottom: 1px solid var(--border);
+      background: none;
+      white-space: nowrap;
+    }
+
+    .cust-svc-table td {
+      padding: 7px 8px 7px 0;
+      border-bottom: 1px solid rgba(42,47,69,.35);
+      vertical-align: middle;
+      color: var(--text);
+    }
+
+    .cust-svc-table tr:last-child td { border-bottom: none; }
+
+    /* Compact inline forward-edit inside customer svc table */
+    .cust-fwd-input {
+      font-size: .8rem;
+      padding: 4px 8px;
+      border: 1.5px solid var(--border);
+      border-radius: 6px;
+      background: var(--surface-raised);
+      color: var(--text);
+      outline: none;
+      width: 150px;
+      transition: border-color .15s, box-shadow .15s;
+    }
+
+    .cust-fwd-input:focus {
+      border-color: var(--border-focus);
+      box-shadow: 0 0 0 3px var(--accent-glow);
+    }
+
+    .cust-fwd-input.dirty  { border-color: var(--warn); }
+    .cust-fwd-input.saved  { border-color: var(--success); }
+
+    /* Tier info line inside service section */
+    .cust-tier-info {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: .8rem;
+      color: var(--muted);
+      margin-bottom: 10px;
+    }
+
+    .cust-tier-info strong { color: var(--text); }
+
+    /* =========================================================
        RCF CARDS
     ========================================================= */
 
@@ -4260,6 +4376,10 @@ let customersList = [];
 let expandedCustomer = null;
 let editingCustomer = null;
 
+// Lazy-loaded service data keyed by customer id.
+// Shape: { tier: {...}, rcf: [...], apiDids: [...], trunks: [...], loading: bool, error: str|null }
+const customerServices = {};
+
 async function loadCustomers() {
   const wrap = document.getElementById('customers-table-wrap');
   wrap.innerHTML = '<div class="state-msg"><span class="spinner"></span></div>';
@@ -4288,10 +4408,49 @@ function renderCustomersTable() {
     let expandHtml = '';
     if (isExpanded) {
       if (editingCustomer === c.id) {
+        // Build the optional API tier section for api and hybrid customers.
+        // We read the currently cached tier (if available) to pre-select it.
+        const editAcctType = (c.account_type || '').toLowerCase();
+        const showApiTierEdit  = editAcctType === 'api'   || editAcctType === 'hybrid';
+        const showTrunkTierEdit = editAcctType === 'trunk' || editAcctType === 'hybrid';
+        const cachedTier = customerServices[c.id]?.tier;
+        const currentApiTierName = cachedTier?.api_tier || '';
+
+        let apiTierSection = '';
+        if (showApiTierEdit) {
+          // Build the select with the three known API tiers.
+          // Pre-select the customer's current API tier when we know it.
+          const apiTierOptions = [
+            { value: 'api_basic',    label: 'Basic — 5 CPS'    },
+            { value: 'api_standard', label: 'Standard — 8 CPS'  },
+            { value: 'api_premium',  label: 'Premium — 15 CPS'  },
+          ].map(opt => `<option value="${opt.value}" ${currentApiTierName===opt.value?'selected':''}>${escHtml(opt.label)}</option>`).join('');
+
+          apiTierSection = `
+              <div class="form-group" style="grid-column:1/-1;border-top:1px solid var(--border);padding-top:14px;margin-top:4px">
+                <div style="font-size:.63rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.9px;margin-bottom:10px">CPS Tier</div>
+                <div class="form-grid">
+                  <div class="form-group"><label class="form-label">API Tier</label>
+                    <select class="form-control" id="edit-cust-api-tier-${c.id}">
+                      <option value="__unchanged__"${!currentApiTierName?' selected':''}>Keep current${currentApiTierName ? ' ('+escHtml(currentApiTierName)+')' : ''}</option>
+                      ${apiTierOptions}
+                    </select></div>
+                  ${showTrunkTierEdit ? `<div class="form-group"><label class="form-label">Trunk Tier</label><div style="font-size:.85rem;color:var(--muted);padding:9px 0">Standard — 5 CPS (fixed)</div></div>` : ''}
+                </div>
+              </div>`;
+        } else if (showTrunkTierEdit) {
+          apiTierSection = `
+              <div class="form-group" style="grid-column:1/-1;border-top:1px solid var(--border);padding-top:14px;margin-top:4px">
+                <div style="font-size:.63rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.9px;margin-bottom:6px">CPS Tier</div>
+                <div style="font-size:.85rem;color:var(--muted)">Trunk CPS: <strong style="color:var(--text)">5</strong> (Standard — fixed)</div>
+              </div>`;
+        }
+
         expandHtml = `
         <tr class="expand-row">
           <td colspan="7">
             <div class="expand-inner">
+              <div style="grid-column:1/-1;font-size:.63rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.9px;margin-bottom:2px">General</div>
               <div class="form-group"><label class="form-label">Name</label>
                 <input class="form-control" id="edit-cust-name-${c.id}" value="${escHtml(c.name)}" /></div>
               <div class="form-group"><label class="form-label">Status</label>
@@ -4312,6 +4471,7 @@ function renderCustomersTable() {
                 <input class="form-control" id="edit-cust-daily-${c.id}" type="number" value="${c.daily_limit || 0}" /></div>
               <div class="form-group"><label class="form-label">CPM Limit</label>
                 <input class="form-control" id="edit-cust-cpm-${c.id}" type="number" value="${c.cpm_limit || 0}" /></div>
+              ${apiTierSection}
               <div class="expand-actions">
                 <button class="btn btn-primary btn-sm" onclick="saveCustomerEdit(${c.id})">Save Changes</button>
                 <button class="btn btn-ghost btn-sm" onclick="cancelCustomerEdit(${c.id})">Cancel</button>
@@ -4320,6 +4480,168 @@ function renderCustomersTable() {
           </td>
         </tr>`;
       } else {
+        // ---- Detail view (non-edit mode) ----
+        const svc = customerServices[c.id];
+        const acctType = (c.account_type || '').toLowerCase();
+
+        // Tier info line (shown when we have data)
+        let tierHtml = '';
+        if (svc && !svc.loading && svc.tier) {
+          const t = svc.tier;
+          const parts = [];
+          if (t.trunk_tier) parts.push(`Trunk: <strong>${escHtml(t.trunk_tier)}</strong>${t.trunk_cps != null ? ' &mdash; ' + escHtml(String(t.trunk_cps)) + ' CPS' : ''}`);
+          if (t.api_tier)   parts.push(`API: <strong>${escHtml(t.api_tier)}</strong>${t.api_cps   != null ? ' &mdash; ' + escHtml(String(t.api_cps))   + ' CPS' : ''}`);
+          if (parts.length) {
+            tierHtml = `<div class="detail-field"><div class="detail-label">CPS Tier</div><div class="detail-value" style="font-size:.82rem">${parts.join(' &nbsp;|&nbsp; ')}</div></div>`;
+          }
+        }
+
+        // --- Build type-specific service sub-sections ---
+        let serviceSectionsHtml = '';
+
+        if (svc && svc.loading) {
+          serviceSectionsHtml = `
+            <div class="cust-services-wrap">
+              <div class="cust-service-section" style="color:var(--muted);font-size:.82rem;display:flex;align-items:center;gap:8px">
+                <span class="spinner" style="width:14px;height:14px;border-width:2px"></span> Loading services...
+              </div>
+            </div>`;
+        } else if (svc && !svc.loading) {
+          const sections = [];
+
+          // RCF section (for rcf and hybrid)
+          if (acctType === 'rcf' || acctType === 'hybrid') {
+            const rcfList = svc.rcf;
+            let rcfBodyHtml = '';
+            if (!rcfList) {
+              rcfBodyHtml = `<div style="font-size:.8rem;color:var(--muted)">Could not load RCF numbers.</div>`;
+            } else if (rcfList.length === 0) {
+              rcfBodyHtml = `<div style="font-size:.8rem;color:var(--muted)">No RCF numbers yet.</div>`;
+            } else {
+              const rcfRows = rcfList.map(r => {
+                const statusBadge = r.enabled
+                  ? '<span class="badge badge-active" style="font-size:.6rem">Active</span>'
+                  : '<span class="badge badge-disabled" style="font-size:.6rem">Off</span>';
+                const safeDid = escHtml(r.did);
+                const encDid  = encodeURIComponent(r.did);
+                return `
+                  <tr>
+                    <td style="font-family:monospace;font-size:.8rem;white-space:nowrap">${fmt(r.did)}</td>
+                    <td>
+                      <input class="cust-fwd-input"
+                        id="cust-fwd-${encDid}"
+                        type="tel"
+                        value="${escHtml(r.forward_to)}"
+                        placeholder="+18005559999"
+                        onchange="quickUpdateRcfForward('${safeDid}', this)"
+                        onkeydown="if(event.key==='Enter'){this.blur()}"
+                        onclick="event.stopPropagation()"
+                      />
+                    </td>
+                    <td>${statusBadge}</td>
+                  </tr>`;
+              }).join('');
+              rcfBodyHtml = `
+                <table class="cust-svc-table">
+                  <thead><tr><th>DID</th><th>Forward To</th><th>Status</th></tr></thead>
+                  <tbody>${rcfRows}</tbody>
+                </table>`;
+            }
+            sections.push(`
+              <div class="cust-service-section">
+                <div class="cust-svc-label">
+                  RCF Numbers
+                  <a class="svc-manage-link" onclick="event.stopPropagation();navigate('rcf')">+ Add / Manage</a>
+                </div>
+                ${rcfBodyHtml}
+              </div>`);
+          }
+
+          // API section (for api and hybrid)
+          if (acctType === 'api' || acctType === 'hybrid') {
+            const apiList = svc.apiDids;
+            const apiTierInfo = svc.tier?.api_tier
+              ? `<div class="cust-tier-info">API Tier: <strong>${escHtml(svc.tier.api_tier)}</strong>${svc.tier.api_cps != null ? ' &mdash; ' + escHtml(String(svc.tier.api_cps)) + ' CPS' : ''}</div>`
+              : '';
+            let apiBodyHtml = '';
+            if (!apiList) {
+              apiBodyHtml = `<div style="font-size:.8rem;color:var(--muted)">Could not load API DIDs.</div>`;
+            } else if (apiList.length === 0) {
+              apiBodyHtml = `<div style="font-size:.8rem;color:var(--muted)">No API DIDs configured.</div>`;
+            } else {
+              const apiRows = apiList.map(d => {
+                const statusBadge = d.enabled
+                  ? '<span class="badge badge-active" style="font-size:.6rem">Active</span>'
+                  : '<span class="badge badge-disabled" style="font-size:.6rem">Off</span>';
+                const voiceUrl = d.voice_url || '--';
+                return `
+                  <tr>
+                    <td style="font-family:monospace;font-size:.8rem;white-space:nowrap">${fmt(d.did)}</td>
+                    <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)">${escHtml(voiceUrl)}</td>
+                    <td>${statusBadge}</td>
+                  </tr>`;
+              }).join('');
+              apiBodyHtml = `
+                <table class="cust-svc-table">
+                  <thead><tr><th>DID</th><th>Voice URL</th><th>Status</th></tr></thead>
+                  <tbody>${apiRows}</tbody>
+                </table>`;
+            }
+            sections.push(`
+              <div class="cust-service-section">
+                <div class="cust-svc-label">
+                  API Configuration
+                  <a class="svc-manage-link" onclick="event.stopPropagation();navigate('api-dids')">Manage API DIDs</a>
+                </div>
+                ${apiTierInfo}
+                ${apiBodyHtml}
+              </div>`);
+          }
+
+          // Trunk section (for trunk and hybrid)
+          if (acctType === 'trunk' || acctType === 'hybrid') {
+            const trunkList = svc.trunks;
+            let trunkBodyHtml = '';
+            if (!trunkList) {
+              trunkBodyHtml = `<div style="font-size:.8rem;color:var(--muted)">Could not load trunks.</div>`;
+            } else if (trunkList.length === 0) {
+              trunkBodyHtml = `<div style="font-size:.8rem;color:var(--muted)">No trunks configured.</div>`;
+            } else {
+              const trunkRows = trunkList.map(t => {
+                const statusBadge = t.enabled
+                  ? '<span class="badge badge-active" style="font-size:.6rem">Active</span>'
+                  : '<span class="badge badge-disabled" style="font-size:.6rem">Off</span>';
+                const channels = `${t.current_channels != null ? t.current_channels : '?'}/${t.max_channels}`;
+                return `
+                  <tr>
+                    <td style="font-weight:600">${escHtml(t.trunk_name)}</td>
+                    <td style="font-variant-numeric:tabular-nums">${escHtml(channels)}</td>
+                    <td style="font-variant-numeric:tabular-nums">${t.cps_limit != null ? t.cps_limit : '--'}</td>
+                    <td style="font-variant-numeric:tabular-nums">${t.ip_count != null ? t.ip_count : '--'}</td>
+                    <td>${statusBadge}</td>
+                  </tr>`;
+              }).join('');
+              trunkBodyHtml = `
+                <table class="cust-svc-table">
+                  <thead><tr><th>Trunk</th><th>Channels</th><th>CPS</th><th>IPs</th><th>Status</th></tr></thead>
+                  <tbody>${trunkRows}</tbody>
+                </table>`;
+            }
+            sections.push(`
+              <div class="cust-service-section">
+                <div class="cust-svc-label">
+                  Trunk Configuration
+                  <a class="svc-manage-link" onclick="event.stopPropagation();navigate('trunks')">Manage Trunks</a>
+                </div>
+                ${trunkBodyHtml}
+              </div>`);
+          }
+
+          if (sections.length) {
+            serviceSectionsHtml = `<div class="cust-services-wrap">${sections.join('')}</div>`;
+          }
+        }
+
         expandHtml = `
         <tr class="expand-row">
           <td colspan="7">
@@ -4330,10 +4652,12 @@ function renderCustomersTable() {
               <div class="detail-field"><div class="detail-label">CPM Limit</div><div class="detail-value">${c.cpm_limit != null ? c.cpm_limit : '--'}</div></div>
               <div class="detail-field"><div class="detail-label">Fraud Score</div><div class="detail-value">${c.fraud_score != null ? c.fraud_score : '0'}</div></div>
               <div class="detail-field"><div class="detail-label">Customer ID</div><div class="detail-value">${c.id}</div></div>
+              ${tierHtml}
+              ${serviceSectionsHtml}
               <div class="expand-actions">
                 <button class="btn btn-primary btn-sm" onclick="startCustomerEdit(${c.id})">Edit</button>
                 <span style="display:flex;align-items:center;gap:6px;margin-left:8px">
-                  <input type="number" class="form-control" id="credit-amt-${c.id}" placeholder="Amount" style="width:120px;padding:5px 8px;font-size:.82rem" step="0.01" min="0.01" />
+                  <input type="number" class="form-control" id="credit-amt-${c.id}" placeholder="Amount" style="width:120px;padding:5px 8px;font-size:.82rem" step="0.01" min="0.01" onclick="event.stopPropagation()" />
                   <button class="btn btn-success btn-sm" onclick="addCredit(${c.id})">Add Credit</button>
                 </span>
               </div>
@@ -4373,11 +4697,87 @@ function toggleExpandCustomer(id) {
   if (expandedCustomer === id) {
     expandedCustomer = null;
     editingCustomer = null;
-  } else {
-    expandedCustomer = id;
-    editingCustomer = null;
+    renderCustomersTable();
+    return;
   }
+  expandedCustomer = id;
+  editingCustomer = null;
   renderCustomersTable();
+
+  // Trigger lazy load of type-specific service data (tier, RCF, API DIDs, trunks).
+  const customer = customersList.find(c => c.id === id);
+  if (customer && !customerServices[id]) {
+    loadCustomerServices(id, customer.account_type);
+  }
+}
+
+// Fetch tier info + type-specific services for the expanded customer row.
+// Results are stored in customerServices[id] and the row is re-rendered.
+async function loadCustomerServices(id, accountType) {
+  customerServices[id] = { loading: true, error: null, tier: null, rcf: null, apiDids: null, trunks: null };
+  renderCustomersTable();
+
+  const type = (accountType || '').toLowerCase();
+  const needsRcf    = type === 'rcf'    || type === 'hybrid';
+  const needsApi    = type === 'api'    || type === 'hybrid';
+  const needsTrunk  = type === 'trunk'  || type === 'hybrid';
+
+  try {
+    const fetches = [api('GET', `/tiers/customers/${id}`)];
+    if (needsRcf)   fetches.push(api('GET', `/rcf?customer_id=${id}`));
+    if (needsApi)   fetches.push(api('GET', `/api-dids?customer_id=${id}`));
+    if (needsTrunk) fetches.push(api('GET', `/trunks?customer_id=${id}`));
+
+    const results = await Promise.allSettled(fetches);
+    let idx = 0;
+
+    const tierResult     = results[idx++];
+    const rcfResult      = needsRcf   ? results[idx++] : null;
+    const apiDidsResult  = needsApi   ? results[idx++] : null;
+    const trunksResult   = needsTrunk ? results[idx++] : null;
+
+    customerServices[id] = {
+      loading:  false,
+      error:    null,
+      tier:     tierResult.status     === 'fulfilled' ? tierResult.value     : null,
+      rcf:      rcfResult   && rcfResult.status   === 'fulfilled' ? rcfResult.value   : null,
+      apiDids:  apiDidsResult && apiDidsResult.status === 'fulfilled' ? apiDidsResult.value : null,
+      trunks:   trunksResult  && trunksResult.status  === 'fulfilled' ? trunksResult.value  : null,
+    };
+  } catch (err) {
+    customerServices[id] = { loading: false, error: err.message, tier: null, rcf: null, apiDids: null, trunks: null };
+  }
+
+  renderCustomersTable();
+}
+
+// Called from the inline "Edit Forward" input inside the customer detail view.
+// Fires a PUT to update the RCF forward_to and updates the cached service data.
+async function quickUpdateRcfForward(did, inputEl) {
+  const newForward = inputEl.value.trim();
+  if (!newForward) { toast('Destination cannot be empty', 'err'); return; }
+
+  inputEl.disabled = true;
+  try {
+    await api('PUT', '/rcf/' + encodeURIComponent(did), { forward_to: newForward });
+
+    // Update the cached RCF list in every customer's service data
+    for (const svc of Object.values(customerServices)) {
+      if (svc.rcf) {
+        const entry = svc.rcf.find(r => r.did === did);
+        if (entry) entry.forward_to = newForward;
+      }
+    }
+
+    inputEl.className = 'cust-fwd-input saved';
+    setTimeout(() => { if (inputEl) inputEl.className = 'cust-fwd-input'; }, 1800);
+    toast(`Forward updated for ${fmt(did)}`);
+  } catch (err) {
+    inputEl.className = 'cust-fwd-input';
+    toast(err.message, 'err');
+  } finally {
+    inputEl.disabled = false;
+  }
 }
 
 function startCustomerEdit(id) {
@@ -4398,6 +4798,10 @@ async function saveCustomerEdit(id) {
   const daily  = parseFloat(document.getElementById(`edit-cust-daily-${id}`)?.value || 0);
   const cpm    = parseInt(document.getElementById(`edit-cust-cpm-${id}`)?.value || 0, 10);
 
+  // Optional: new API tier selected from the edit form
+  const apiTierEl  = document.getElementById(`edit-cust-api-tier-${id}`);
+  const newApiTier = apiTierEl ? apiTierEl.value : null;
+
   try {
     const updated = await api('PUT', `/customers/${id}`, {
       name, status, traffic_grade: grade,
@@ -4407,6 +4811,22 @@ async function saveCustomerEdit(id) {
     if (idx !== -1) {
       customersList[idx] = { ...customersList[idx], ...updated, traffic_grade: grade, credit_limit: credit, daily_limit: daily, cpm_limit: cpm, status };
     }
+
+    // If the user changed the API tier, fire the tier update call
+    if (newApiTier && newApiTier !== '__unchanged__') {
+      try {
+        await api('PUT', `/tiers/customers/${id}`, { api_tier: newApiTier });
+        // Invalidate cached service data so the tier badge refreshes on next expand
+        delete customerServices[id];
+      } catch (tierErr) {
+        // Tier update is non-fatal — surface as a warning but don't block the rest
+        toast(`Customer saved, but tier update failed: ${tierErr.message}`, 'err');
+        editingCustomer = null;
+        renderCustomersTable();
+        return;
+      }
+    }
+
     editingCustomer = null;
     renderCustomersTable();
     toast('Customer updated');
