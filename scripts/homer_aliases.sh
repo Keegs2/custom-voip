@@ -19,7 +19,7 @@ add_alias() {
   curl -s -X POST http://localhost:9080/api/v3/alias \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer $T" \
-    -d "{\"ip\":\"$1\",\"port\":$2,\"alias\":\"$3\"}"
+    -d "{\"ip\":\"$1\",\"port\":$2,\"alias\":\"$3\",\"mask\":32,\"captureID\":\"0\",\"status\":true}"
   echo " -> $3 ($1:$2)"
 }
 
