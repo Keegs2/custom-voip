@@ -2877,6 +2877,397 @@
       #page-ivr { left: 0; }
       .ivr-config-panel { display: none; }
     }
+
+    /* =========================================================
+       CUSTOMER PORTAL — SERVICE PAGES
+    ========================================================= */
+
+    /* Warm portal page header */
+    .portal-hd {
+      margin-bottom: 32px;
+      padding-bottom: 22px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .portal-title {
+      font-size: 1.6rem;
+      font-weight: 800;
+      letter-spacing: -.4px;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .portal-title-icon {
+      font-size: 1.5rem;
+      line-height: 1;
+    }
+
+    .portal-subtitle {
+      font-size: .9rem;
+      color: var(--muted);
+      margin-top: 6px;
+      line-height: 1.55;
+    }
+
+    .portal-badge {
+      display: inline-flex;
+      align-items: center;
+      font-size: .65rem;
+      font-weight: 700;
+      padding: 3px 10px;
+      border-radius: 999px;
+      letter-spacing: .5px;
+      text-transform: uppercase;
+      white-space: nowrap;
+      background: rgba(59,130,246,.12);
+      color: #93c5fd;
+      border: 1px solid rgba(59,130,246,.28);
+    }
+
+    /* Portal cards — warmer, more padding than admin cards */
+    .portal-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      box-shadow: var(--shadow);
+      padding: 26px 28px;
+      transition: border-color .2s, box-shadow .2s;
+    }
+
+    .portal-card:hover {
+      border-color: #3a4060;
+      box-shadow: 0 4px 20px rgba(0,0,0,.35);
+    }
+
+    .portal-cards-grid {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    /* DID display inside portal cards */
+    .portal-did {
+      font-size: 1.45rem;
+      font-weight: 800;
+      letter-spacing: .5px;
+      font-variant-numeric: tabular-nums;
+      color: var(--text);
+    }
+
+    .portal-did-raw {
+      font-size: .75rem;
+      color: var(--muted);
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      margin-top: 2px;
+    }
+
+    /* Card header row */
+    .portal-card-hd {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+    }
+
+    /* Read-only display field (not an input — clean, label above value) */
+    .portal-field {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      margin-bottom: 6px;
+    }
+
+    .portal-field-label {
+      font-size: .67rem;
+      font-weight: 700;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: .7px;
+    }
+
+    .portal-field-value {
+      font-size: .88rem;
+      color: var(--text);
+      padding: 8px 12px;
+      background: rgba(255,255,255,.03);
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .portal-field-value.mono {
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      font-size: .82rem;
+      color: #94a3b8;
+    }
+
+    /* Editable action area inside portal card */
+    .portal-action-area {
+      margin-top: 20px;
+      padding-top: 18px;
+      border-top: 1px solid var(--border);
+    }
+
+    .portal-action-label {
+      font-size: .7rem;
+      font-weight: 700;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: .7px;
+      margin-bottom: 8px;
+    }
+
+    .portal-action-row {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+
+    /* Portal inputs — slightly larger, very prominent */
+    .portal-input {
+      flex: 1;
+      font-size: .97rem;
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+      padding: 10px 14px;
+      background: var(--surface-raised);
+      color: var(--text);
+      border: 2px solid var(--border);
+      border-radius: 9px;
+      outline: none;
+      transition: border-color .15s, box-shadow .15s;
+      min-width: 0;
+    }
+
+    .portal-input::placeholder { color: var(--muted); font-weight: 400; }
+
+    .portal-input:focus {
+      border-color: var(--border-focus);
+      box-shadow: 0 0 0 3px var(--accent-glow);
+    }
+
+    .portal-input.dirty {
+      border-color: var(--warn);
+      box-shadow: 0 0 0 3px rgba(245,158,11,.15);
+    }
+
+    .portal-input.saved {
+      border-color: var(--success);
+      box-shadow: 0 0 0 3px rgba(34,197,94,.15);
+    }
+
+    /* Save button — prominent green */
+    .btn-portal-save {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: .88rem;
+      font-weight: 700;
+      padding: 10px 20px;
+      border-radius: 9px;
+      border: none;
+      cursor: pointer;
+      background: rgba(34,197,94,.15);
+      color: #4ade80;
+      border: 1px solid rgba(34,197,94,.3);
+      transition: background .15s, box-shadow .15s, transform .08s;
+      white-space: nowrap;
+    }
+
+    .btn-portal-save:hover:not(:disabled) {
+      background: rgba(34,197,94,.25);
+      box-shadow: 0 0 16px rgba(34,197,94,.2);
+    }
+
+    .btn-portal-save:active { transform: scale(.97); }
+
+    .btn-portal-save:disabled {
+      opacity: .35;
+      cursor: not-allowed;
+      transform: none;
+      box-shadow: none;
+    }
+
+    /* Info note beneath a field */
+    .portal-note {
+      font-size: .73rem;
+      color: var(--muted);
+      margin-top: 6px;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .portal-note-icon {
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: rgba(113,128,150,.15);
+      border: 1px solid rgba(113,128,150,.3);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: .6rem;
+      color: var(--muted);
+      flex-shrink: 0;
+      font-weight: 700;
+    }
+
+    /* Trunk monitor cards */
+    .portal-trunk-stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+      gap: 12px;
+      margin-top: 16px;
+    }
+
+    .portal-stat-block {
+      background: var(--surface-raised);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+
+    .portal-stat-label {
+      font-size: .63rem;
+      font-weight: 700;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: .7px;
+    }
+
+    .portal-stat-value {
+      font-size: 1.25rem;
+      font-weight: 800;
+      color: var(--text);
+      font-variant-numeric: tabular-nums;
+      line-height: 1.1;
+    }
+
+    .portal-stat-sub {
+      font-size: .7rem;
+      color: var(--muted);
+    }
+
+    /* Channel utilization bar */
+    .portal-util-bar {
+      height: 5px;
+      background: var(--surface);
+      border-radius: 999px;
+      overflow: hidden;
+      margin-top: 6px;
+    }
+
+    .portal-util-fill {
+      height: 100%;
+      border-radius: 999px;
+      transition: width .5s ease;
+    }
+
+    .portal-util-fill.low    { background: var(--success); }
+    .portal-util-fill.medium { background: var(--warn); }
+    .portal-util-fill.high   { background: #ef4444; }
+
+    /* IP chip list inside trunk cards */
+    .portal-ip-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 8px;
+    }
+
+    .portal-ip-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 11px;
+      background: var(--surface-raised);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      font-size: .78rem;
+      color: #94a3b8;
+    }
+
+    .portal-ip-desc {
+      color: var(--muted);
+      font-family: inherit;
+      font-size: .72rem;
+    }
+
+    /* Section separator inside portal card */
+    .portal-card-section {
+      margin-top: 20px;
+      padding-top: 18px;
+      border-top: 1px solid rgba(42,47,69,.6);
+    }
+
+    .portal-section-label {
+      font-size: .66rem;
+      font-weight: 700;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: .8px;
+      margin-bottom: 10px;
+    }
+
+    /* Empty state for portal pages */
+    .portal-empty {
+      text-align: center;
+      padding: 64px 24px;
+      color: var(--muted);
+    }
+
+    .portal-empty-icon {
+      font-size: 2.8rem;
+      margin-bottom: 16px;
+      opacity: .35;
+    }
+
+    .portal-empty strong {
+      display: block;
+      font-size: 1.05rem;
+      color: var(--text);
+      margin-bottom: 8px;
+    }
+
+    /* Expand toggle for portal trunk cards */
+    .portal-expand-toggle {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: .78rem;
+      font-weight: 600;
+      color: var(--muted);
+      cursor: pointer;
+      user-select: none;
+      margin-top: 14px;
+      padding-top: 12px;
+      border-top: 1px solid var(--border);
+      transition: color .12s;
+    }
+
+    .portal-expand-toggle:hover { color: var(--text); }
+
+    .portal-expand-body {
+      display: none;
+      margin-top: 14px;
+    }
+
+    .portal-expand-body.open { display: block; }
+
+    @media (max-width: 640px) {
+      .portal-action-row { flex-direction: column; align-items: stretch; }
+      .btn-portal-save { justify-content: center; }
+    }
   </style>
 </head>
 <body>
@@ -2905,7 +3296,10 @@
       <span class="nav-icon">*</span> CPS Tiers
     </a>
 
-    <div class="nav-section-label">Services</div>
+    <div class="nav-section-label" style="display:flex;align-items:center;justify-content:space-between;padding-right:14px">
+      <span>Services</span>
+      <span style="font-size:.6rem;font-weight:700;background:rgba(59,130,246,.15);color:#93c5fd;border:1px solid rgba(59,130,246,.3);border-radius:999px;padding:1px 7px;text-transform:none;letter-spacing:.2px;white-space:nowrap">Customer Portal</span>
+    </div>
     <a class="nav-item" data-page="rcf" onclick="navigate('rcf')">
       <span class="nav-icon">~</span> RCF Numbers
     </a>
@@ -3099,18 +3493,16 @@
 
     <!-- ===================== RCF ===================== -->
     <div id="page-rcf" class="page" style="display:none">
-      <div class="page-hd">
-        <div>
-          <div class="page-title">RCF <span>Numbers</span></div>
-          <div class="page-subtitle">Remote Call Forwarding — change where a number rings</div>
+
+      <div class="portal-hd">
+        <div class="portal-title">
+          <span class="portal-title-icon">~</span>
+          Your Numbers
+          <span class="portal-badge">Customer Portal</span>
         </div>
+        <div class="portal-subtitle">Change where your calls forward to. Updates take effect within seconds.</div>
       </div>
 
-      <div style="background:rgba(59,130,246,.07);border:1px solid rgba(59,130,246,.2);border-radius:8px;padding:10px 16px;font-size:.85rem;color:#93c5fd;margin-bottom:20px">
-        RCF number configuration is managed from the <a onclick="navigate('customers')" style="color:#60a5fa;cursor:pointer;text-decoration:underline">Customers page</a>.
-      </div>
-
-      <div class="section-heading" id="rcf-list-heading" style="display:none">Active numbers</div>
       <div id="rcf-list">
         <div class="state-msg"><span class="spinner"></span></div>
       </div>
@@ -3118,15 +3510,14 @@
 
     <!-- ===================== API DIDS ===================== -->
     <div id="page-api-dids" class="page" style="display:none">
-      <div class="page-hd">
-        <div>
-          <div class="page-title">API <span>DIDs</span></div>
-          <div class="page-subtitle">Webhook-driven inbound call routing</div>
-        </div>
-      </div>
 
-      <div style="background:rgba(59,130,246,.07);border:1px solid rgba(59,130,246,.2);border-radius:8px;padding:10px 16px;font-size:.85rem;color:#93c5fd;margin-bottom:20px">
-        API DID configuration is managed from the <a onclick="navigate('customers')" style="color:#60a5fa;cursor:pointer;text-decoration:underline">Customers page</a>.
+      <div class="portal-hd">
+        <div class="portal-title">
+          <span class="portal-title-icon">&lt;&gt;</span>
+          Your API Numbers
+          <span class="portal-badge">Customer Portal</span>
+        </div>
+        <div class="portal-subtitle">Configure webhook URLs for your voice applications. Change where inbound calls deliver events.</div>
       </div>
 
       <div id="apidids-table-wrap">
@@ -3136,15 +3527,14 @@
 
     <!-- ===================== TRUNKS ===================== -->
     <div id="page-trunks" class="page" style="display:none">
-      <div class="page-hd">
-        <div>
-          <div class="page-title">SIP <span>Trunks</span></div>
-          <div class="page-subtitle">SIP trunk accounts and IP authentication</div>
-        </div>
-      </div>
 
-      <div style="background:rgba(59,130,246,.07);border:1px solid rgba(59,130,246,.2);border-radius:8px;padding:10px 16px;font-size:.85rem;color:#93c5fd;margin-bottom:20px">
-        Trunk configuration is managed from the <a onclick="navigate('customers')" style="color:#60a5fa;cursor:pointer;text-decoration:underline">Customers page</a>.
+      <div class="portal-hd">
+        <div class="portal-title">
+          <span class="portal-title-icon">=</span>
+          Your SIP Trunks
+          <span class="portal-badge">Customer Portal</span>
+        </div>
+        <div class="portal-subtitle">Monitor your trunk performance and capacity. Contact support to adjust channel limits or authorized IPs.</div>
       </div>
 
       <div id="trunks-list">
@@ -5251,7 +5641,6 @@ let pendingEdits = {};
 
 async function loadRCF() {
   document.getElementById('rcf-list').innerHTML = '<div class="state-msg"><span class="spinner"></span></div>';
-  document.getElementById('rcf-list-heading').style.display = 'none';
   try {
     const [list, custs] = await Promise.all([
       api('GET', '/rcf'),
@@ -5269,39 +5658,70 @@ async function loadRCF() {
 
 function renderRCFList() {
   const container = document.getElementById('rcf-list');
-  const heading   = document.getElementById('rcf-list-heading');
 
   if (rcfList.length === 0) {
-    heading.style.display = 'none';
-    container.innerHTML = '<div class="state-msg"><strong>No forwarding numbers yet</strong>Add RCF numbers from the Customers page.</div>';
+    container.innerHTML = `
+      <div class="portal-empty">
+        <div class="portal-empty-icon">~</div>
+        <strong>No forwarding numbers yet</strong>
+        You don't have any RCF numbers assigned to your account.
+      </div>`;
     return;
   }
 
-  heading.style.display = 'block';
-  container.innerHTML = '<div style="display:flex;flex-direction:column;gap:12px">' +
+  container.innerHTML = '<div class="portal-cards-grid">' +
     rcfList.map(r => renderRCFCard(r)).join('') + '</div>';
 }
 
 function renderRCFCard(r) {
-  const badgeHtml = r.enabled
+  const encDid = encodeURIComponent(r.did);
+  const safeDid = escHtml(r.did);
+
+  const statusBadge = r.enabled
     ? '<span class="badge badge-active">Active</span>'
     : '<span class="badge badge-disabled">Disabled</span>';
 
-  return `
-<div class="card rcf-card" id="rcf-card-${encodeURIComponent(r.did)}">
-  <div>
-    <div class="rcf-did">${fmt(r.did)}</div>
-    <div class="rcf-customer">${escHtml(r.customer_name || '')} &mdash; <code style="font-size:.78em">${escHtml(r.did)}</code></div>
-  </div>
-  <div>${badgeHtml}</div>
+  const callerIdNote = r.pass_caller_id
+    ? `<div class="portal-note"><span class="portal-note-icon">i</span> Caller ID passed through to destination</div>`
+    : '';
 
-  <div class="rcf-forward-area">
-    <div class="forward-label">Forwards to</div>
-    <div style="font-size:1rem;font-weight:600;color:var(--text);padding:8px 0">${fmt(r.forward_to) || escHtml(r.forward_to)}</div>
-    <div style="font-size:.76rem;color:var(--muted)">
-      Ring timeout: ${r.ring_timeout != null ? r.ring_timeout + 's' : '30s'}
-      &nbsp;&middot;&nbsp; Pass Caller ID: ${r.pass_caller_id ? 'Yes' : 'No'}
+  const timeoutNote = `<div class="portal-note" style="margin-top:4px"><span class="portal-note-icon">i</span> Ring timeout: ${r.ring_timeout != null ? r.ring_timeout + 's' : '30s'}</div>`;
+
+  return `
+<div class="portal-card" id="rcf-card-${encDid}">
+  <div class="portal-card-hd">
+    <div>
+      <div class="portal-did">${fmt(r.did)}</div>
+      <div class="portal-did-raw">${safeDid}</div>
     </div>
+    <div style="display:flex;align-items:flex-start;gap:8px;flex-shrink:0">
+      ${statusBadge}
+    </div>
+  </div>
+
+  <div class="portal-action-area">
+    <div class="portal-action-label">Forward calls to</div>
+    <div class="portal-action-row">
+      <input
+        class="portal-input"
+        id="rcf-fwd-${encDid}"
+        type="tel"
+        value="${escHtml(r.forward_to)}"
+        placeholder="+18005559999"
+        data-did="${safeDid}"
+        data-original="${escHtml(r.forward_to)}"
+        oninput="onRCFForwardInput(this)"
+        onkeydown="if(event.key==='Enter'){saveRCFForward('${safeDid}')}"
+      />
+      <button
+        class="btn-portal-save"
+        id="rcf-save-btn-${encDid}"
+        onclick="saveRCFForward('${safeDid}')"
+        disabled
+      >Save</button>
+    </div>
+    ${callerIdNote}
+    ${timeoutNote}
   </div>
 </div>`;
 }
@@ -5324,7 +5744,7 @@ function onRCFForwardInput(input) {
   pendingEdits[did] = val;
 
   const isDirty = val !== original;
-  input.className = 'forward-input' + (isDirty ? ' dirty' : '');
+  input.className = 'portal-input' + (isDirty ? ' dirty' : '');
 
   const saveBtn = document.getElementById('rcf-save-btn-' + encodeURIComponent(did));
   if (saveBtn) saveBtn.disabled = !isDirty || val === '';
@@ -5345,14 +5765,18 @@ async function saveRCFForward(did) {
     if (entry) entry.forward_to = newVal;
     delete pendingEdits[did];
     input.dataset.original = newVal;
-    input.className = 'forward-input saved';
-    setTimeout(() => { if (input) input.className = 'forward-input'; }, 1800);
+    input.className = 'portal-input saved';
+    setTimeout(() => { if (input) input.className = 'portal-input'; }, 1800);
     toast(`Saved — calls to ${fmt(did)} now ring ${fmt(newVal)}`);
-  } catch (err) {
-    toast(err.message, 'err');
-  } finally {
+    // Success — button stays disabled until user types again
     setButtonLoading(saveBtn, false);
     if (saveBtn) saveBtn.disabled = true;
+  } catch (err) {
+    // Error — re-enable so the user can retry
+    setButtonLoading(saveBtn, false);
+    if (saveBtn) saveBtn.disabled = false;
+    input.className = 'portal-input dirty';
+    toast(err.message, 'err');
   }
 }
 
@@ -5458,41 +5882,152 @@ function renderApiDidsTable() {
   const wrap = document.getElementById('apidids-table-wrap');
 
   if (apiDidsList.length === 0) {
-    wrap.innerHTML = '<div class="state-msg"><strong>No API DIDs yet</strong>Add API DIDs from the Customers page.</div>';
+    wrap.innerHTML = `
+      <div class="portal-empty">
+        <div class="portal-empty-icon">&lt;&gt;</div>
+        <strong>No API numbers yet</strong>
+        You don't have any API DIDs assigned to your account.
+      </div>`;
     return;
   }
 
-  const rows = apiDidsList.map(d => {
-    const enabledBadge = d.enabled
-      ? '<span class="badge badge-active">Enabled</span>'
-      : '<span class="badge badge-disabled">Disabled</span>';
+  wrap.innerHTML = '<div class="portal-cards-grid">' +
+    apiDidsList.map(d => renderApiDidPortalCard(d)).join('') + '</div>';
+}
 
-    return `
-    <tr style="cursor:default">
-      <td style="font-variant-numeric:tabular-nums;font-weight:600">${fmt(d.did)}<br><span style="font-size:.72rem;color:var(--muted);font-family:monospace">${escHtml(d.did)}</span></td>
-      <td>${escHtml(d.customer_name || '--')}</td>
-      <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.82rem;color:var(--muted)">${escHtml(d.voice_url || '--')}</td>
-      <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.82rem;color:var(--muted)">${escHtml(d.status_callback || '--')}</td>
-      <td>${enabledBadge}</td>
-    </tr>`;
-  }).join('');
+function renderApiDidPortalCard(d) {
+  const encDid  = encodeURIComponent(d.did);
+  const safeDid = escHtml(d.did);
+  const idDid   = encDid.replace(/%/g, '_');
 
-  wrap.innerHTML = `
-  <div class="table-wrap">
-    <table>
-      <thead>
-        <tr>
-          <th>DID</th><th>Customer</th><th>Voice URL</th><th>Status Callback</th><th>Status</th>
-        </tr>
-      </thead>
-      <tbody>${rows}</tbody>
-    </table>
-  </div>`;
+  const statusBadge = d.enabled
+    ? '<span class="badge badge-active">Active</span>'
+    : '<span class="badge badge-disabled">Disabled</span>';
+
+  return `
+<div class="portal-card" id="apidid-card-${idDid}">
+  <div class="portal-card-hd">
+    <div>
+      <div class="portal-did">${fmt(d.did)}</div>
+      <div class="portal-did-raw">${safeDid}</div>
+    </div>
+    <div style="display:flex;align-items:flex-start;gap:8px;flex-shrink:0">
+      ${statusBadge}
+    </div>
+  </div>
+
+  <!-- Voice URL -->
+  <div class="portal-action-area">
+    <div class="portal-action-label">Voice Webhook URL</div>
+    <div class="portal-action-row">
+      <input
+        class="portal-input"
+        id="apidid-voice-${idDid}"
+        type="url"
+        value="${escHtml(d.voice_url || '')}"
+        placeholder="https://your-app.com/voice"
+        data-did="${safeDid}"
+        data-field="voice"
+        data-original="${escHtml(d.voice_url || '')}"
+        oninput="onApiDidInput(this, '${idDid}')"
+        onkeydown="if(event.key==='Enter'){saveApiDidField('${safeDid}','${idDid}','voice')}"
+      />
+      <button
+        class="btn-portal-save"
+        id="apidid-save-voice-${idDid}"
+        onclick="saveApiDidField('${safeDid}','${idDid}','voice')"
+        disabled
+      >Save</button>
+    </div>
+    <div class="portal-note"><span class="portal-note-icon">i</span> Called when a call arrives on this number</div>
+  </div>
+
+  <!-- Status Callback URL -->
+  <div class="portal-action-area" style="margin-top:14px;padding-top:14px">
+    <div class="portal-action-label">Status Callback URL <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0;font-size:.75rem">(optional)</span></div>
+    <div class="portal-action-row">
+      <input
+        class="portal-input"
+        id="apidid-cb-${idDid}"
+        type="url"
+        value="${escHtml(d.status_callback || '')}"
+        placeholder="https://your-app.com/status"
+        data-did="${safeDid}"
+        data-field="callback"
+        data-original="${escHtml(d.status_callback || '')}"
+        oninput="onApiDidInput(this, '${idDid}')"
+        onkeydown="if(event.key==='Enter'){saveApiDidField('${safeDid}','${idDid}','callback')}"
+      />
+      <button
+        class="btn-portal-save"
+        id="apidid-save-cb-${idDid}"
+        onclick="saveApiDidField('${safeDid}','${idDid}','callback')"
+        disabled
+      >Save</button>
+    </div>
+    <div class="portal-note"><span class="portal-note-icon">i</span> Receives call lifecycle events (answered, completed, etc.)</div>
+  </div>
+</div>`;
 }
 
 function toggleExpandApiDid(did) {
   expandedApiDid = expandedApiDid === did ? null : did;
   renderApiDidsTable();
+}
+
+// Portal card handlers for API DID fields
+function onApiDidInput(inputEl, idDid) {
+  const field    = inputEl.dataset.field;
+  const original = inputEl.dataset.original;
+  const val      = inputEl.value.trim();
+  const isDirty  = val !== original;
+
+  inputEl.className = 'portal-input' + (isDirty ? ' dirty' : '');
+
+  const btnId = field === 'voice' ? `apidid-save-voice-${idDid}` : `apidid-save-cb-${idDid}`;
+  const saveBtn = document.getElementById(btnId);
+  if (saveBtn) saveBtn.disabled = !isDirty;
+}
+
+async function saveApiDidField(did, idDid, field) {
+  const inputEl = document.getElementById(field === 'voice' ? `apidid-voice-${idDid}` : `apidid-cb-${idDid}`);
+  const saveBtn = document.getElementById(field === 'voice' ? `apidid-save-voice-${idDid}` : `apidid-save-cb-${idDid}`);
+  if (!inputEl) return;
+
+  const val = inputEl.value.trim();
+
+  // Voice URL is required; status callback is optional (can be cleared)
+  if (field === 'voice' && !val) { toast('Voice URL cannot be empty', 'err'); return; }
+
+  setButtonLoading(saveBtn, true);
+  try {
+    const body = field === 'voice'
+      ? { voice_url: val }
+      : { status_callback: val || null };
+
+    const updated = await api('PUT', `/api-dids/${encodeURIComponent(did)}`, body);
+    const entry = apiDidsList.find(d => d.did === did);
+    if (entry) Object.assign(entry, updated);
+
+    inputEl.dataset.original = val;
+    inputEl.className = 'portal-input saved';
+    if (saveBtn) saveBtn.disabled = true;
+    setTimeout(() => { if (inputEl) inputEl.className = 'portal-input'; }, 1800);
+    toast(field === 'voice' ? 'Voice URL saved' : 'Status callback URL saved');
+  } catch (err) {
+    inputEl.className = 'portal-input dirty'; // keep dirty styling so user knows to retry
+    if (saveBtn) {
+      setButtonLoading(saveBtn, false);
+      saveBtn.disabled = false; // allow retry on error
+    }
+    toast(err.message, 'err');
+    return; // skip the finally re-disable
+  }
+  // On success — re-disable button (data-original was already updated)
+  if (saveBtn) {
+    setButtonLoading(saveBtn, false);
+    saveBtn.disabled = true;
+  }
 }
 
 async function saveApiDid(did) {
@@ -5613,90 +6148,120 @@ function renderTrunksList() {
   const list = document.getElementById('trunks-list');
 
   if (trunksList.length === 0) {
-    list.innerHTML = '<div class="state-msg"><strong>No SIP trunks yet</strong>Create trunks from the Customers page.</div>';
+    list.innerHTML = `
+      <div class="portal-empty">
+        <div class="portal-empty-icon">=</div>
+        <strong>No SIP trunks yet</strong>
+        You don't have any SIP trunks on your account. Contact support to get started.
+      </div>`;
     return;
   }
 
-  list.innerHTML = '<div style="display:flex;flex-direction:column;gap:12px">' +
-    trunksList.map(t => renderTrunkCard(t)).join('') + '</div>';
+  list.innerHTML = '<div class="portal-cards-grid">' +
+    trunksList.map(t => renderTrunkPortalCard(t)).join('') + '</div>';
 }
 
-function renderTrunkCard(t) {
+function renderTrunkPortalCard(t) {
   const isExpanded = expandedTrunk === t.id;
   const detail     = trunkDetails[t.id] || {};
-  const enabledBadge = t.enabled
+  const stats      = detail.stats;
+
+  const statusBadge = t.enabled
     ? '<span class="badge badge-active">Active</span>'
     : '<span class="badge badge-disabled">Disabled</span>';
 
-  let expandHtml = '';
-  if (isExpanded) {
-    // Stats section
-    const stats = detail.stats;
-    const statsHtml = stats ? `
-      <div class="trunk-stats-row">
-        <div class="trunk-stat"><div class="trunk-stat-label">Channels</div><div class="trunk-stat-value">${stats.current_channels} / ${stats.max_channels}</div></div>
-        <div class="trunk-stat"><div class="trunk-stat-label">Utilization</div><div class="trunk-stat-value">${stats.channel_utilization}</div></div>
-        <div class="trunk-stat"><div class="trunk-stat-label">Last Hour Calls</div><div class="trunk-stat-value">${stats.last_hour?.total_calls ?? '--'}</div></div>
-        <div class="trunk-stat"><div class="trunk-stat-label">ASR</div><div class="trunk-stat-value">${stats.last_hour?.asr ?? '--'}</div></div>
-        <div class="trunk-stat"><div class="trunk-stat-label">Avg Duration</div><div class="trunk-stat-value">${stats.last_hour?.avg_duration_sec != null ? stats.last_hour.avg_duration_sec.toFixed(1) + 's' : '--'}</div></div>
-        <div class="trunk-stat"><div class="trunk-stat-label">Cost (1hr)</div><div class="trunk-stat-value">${stats.last_hour?.total_cost != null ? fmtMoney(stats.last_hour.total_cost) : '--'}</div></div>
-      </div>` : '<div style="color:var(--muted);font-size:.82rem;margin-top:8px">Loading stats...</div>';
+  // Utilisation percentage — use stats if available, fall back to 0
+  const currentChannels = stats?.current_channels ?? t.current_channels ?? 0;
+  const maxChannels     = stats?.max_channels      ?? t.max_channels      ?? 1;
+  const utilPct         = maxChannels > 0 ? Math.min(100, Math.round((currentChannels / maxChannels) * 100)) : 0;
+  const utilClass       = utilPct >= 80 ? 'high' : utilPct >= 50 ? 'medium' : 'low';
+  const utilLabel       = stats?.channel_utilization ?? (utilPct + '%');
 
-    // IPs section (read-only — no remove buttons)
-    const ips = detail.ips || [];
-    const ipRowsHtml = ips.length === 0
-      ? '<div style="color:var(--muted);font-size:.82rem">No IPs configured</div>'
-      : '<div class="ip-list">' + ips.map(ip => `
-          <div class="ip-row">
-            <span class="ip-addr">${escHtml(ip.ip_address)}</span>
-            <span class="ip-desc">${escHtml(ip.description || '')}</span>
+  // Summary stats row — always visible
+  const summaryStats = `
+    <div class="portal-trunk-stats">
+      <div class="portal-stat-block">
+        <div class="portal-stat-label">Channels</div>
+        <div class="portal-stat-value">${currentChannels}<span style="font-size:.85rem;font-weight:500;color:var(--muted)"> / ${maxChannels}</span></div>
+        <div class="portal-util-bar"><div class="portal-util-fill ${utilClass}" style="width:${utilPct}%"></div></div>
+        <div class="portal-stat-sub">${utilLabel} utilization</div>
+      </div>
+      <div class="portal-stat-block">
+        <div class="portal-stat-label">CPS Limit</div>
+        <div class="portal-stat-value">${t.cps_limit != null ? t.cps_limit : '--'}</div>
+        <div class="portal-stat-sub">calls/second</div>
+      </div>
+      <div class="portal-stat-block">
+        <div class="portal-stat-label">Last Hour Calls</div>
+        <div class="portal-stat-value">${stats?.last_hour?.total_calls != null ? stats.last_hour.total_calls.toLocaleString() : isExpanded && !stats ? '...' : '--'}</div>
+        <div class="portal-stat-sub">${stats?.last_hour?.asr != null ? 'ASR ' + stats.last_hour.asr : ''}</div>
+      </div>
+      <div class="portal-stat-block">
+        <div class="portal-stat-label">Avg Duration</div>
+        <div class="portal-stat-value">${stats?.last_hour?.avg_duration_sec != null ? stats.last_hour.avg_duration_sec.toFixed(1) + 's' : isExpanded && !stats ? '...' : '--'}</div>
+        <div class="portal-stat-sub">per call</div>
+      </div>
+    </div>`;
+
+  // Expanded section — IPs, DIDs
+  let expandBody = '';
+  if (isExpanded) {
+    const ips  = detail.ips  || [];
+    const dids = detail.dids || [];
+
+    const ipsHtml = ips.length === 0
+      ? '<div style="color:var(--muted);font-size:.82rem">No authorized IPs configured — contact support to add IPs.</div>'
+      : '<div class="portal-ip-list">' + ips.map(ip => `
+          <div class="portal-ip-chip">
+            ${escHtml(ip.ip_address)}
+            ${ip.description ? `<span class="portal-ip-desc">${escHtml(ip.description)}</span>` : ''}
           </div>`).join('') + '</div>';
 
-    // DIDs section (read-only)
-    const dids = detail.dids || [];
     const didsHtml = dids.length === 0
       ? '<div style="color:var(--muted);font-size:.82rem">No DIDs assigned</div>'
-      : '<div style="display:flex;flex-wrap:wrap">' + dids.map(d => `
-          <span class="did-chip">${fmt(d.did)}</span>`).join('') + '</div>';
+      : '<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:6px">' +
+          dids.map(d => `<span class="did-chip">${fmt(d.did)}</span>`).join('') +
+        '</div>';
 
-    expandHtml = `
-      <div class="trunk-expand open">
-        ${statsHtml}
-
-        <div class="sub-section-title" style="margin-top:18px">Authorized IPs</div>
-        ${ipRowsHtml}
-
-        <div class="sub-section-title">Assigned DIDs</div>
-        ${didsHtml}
-
-        <div class="sub-section-title">Call Paths &amp; Capacity</div>
-        <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap">
-          <div style="font-size:.85rem;color:var(--text)">
-            Current: <strong>${t.max_channels}</strong> call paths
-            ${t.package_name ? ` (${escHtml(t.package_name)})` : ''}
+    expandBody = `
+      <div class="portal-expand-body open" id="trunk-expand-body-${t.id}">
+        <div class="portal-card-section">
+          <div class="portal-section-label">Authorized IPs <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.72rem;color:var(--muted)">(contact support to modify)</span></div>
+          ${ipsHtml}
+        </div>
+        <div class="portal-card-section">
+          <div class="portal-section-label">Assigned DIDs</div>
+          ${didsHtml}
+        </div>
+        <div class="portal-card-section">
+          <div class="portal-section-label">Call Path Package</div>
+          <div style="font-size:.88rem;color:var(--text)">
+            <strong>${maxChannels}</strong> concurrent call paths
+            ${t.package_name ? `<span style="color:var(--muted);font-size:.8rem"> (${escHtml(t.package_name)})</span>` : ''}
           </div>
-          <div style="font-size:.82rem;color:var(--muted)">CPS Limit: ${t.cps_limit}</div>
+          <div class="portal-note" style="margin-top:6px"><span class="portal-note-icon">i</span> Contact support to upgrade your call path package</div>
         </div>
       </div>`;
   }
 
+  const expandToggle = `
+    <div class="portal-expand-toggle" onclick="toggleExpandTrunk(${t.id})">
+      <span>${isExpanded ? '&#x25B4; Less details' : '&#x25BE; More details — IPs, DIDs, capacity'}</span>
+    </div>`;
+
   return `
-<div class="card trunk-card" id="trunk-card-${t.id}">
-  <div class="trunk-header" onclick="toggleExpandTrunk(${t.id})" style="cursor:pointer">
+<div class="portal-card" id="trunk-card-${t.id}">
+  <div class="portal-card-hd">
     <div>
-      <div class="trunk-name">${escHtml(t.trunk_name)}</div>
-      <div class="trunk-meta">${escHtml(t.customer_name || '')} &mdash; ${escHtml(t.auth_type)} auth</div>
+      <div class="portal-did" style="font-size:1.15rem">${escHtml(t.trunk_name)}</div>
+      <div class="portal-did-raw">${escHtml(t.auth_type)} auth &nbsp;&middot;&nbsp; ${t.ip_count || 0} IPs &nbsp;&middot;&nbsp; ${t.did_count || 0} DIDs</div>
     </div>
-    ${enabledBadge}
-    <div style="display:flex;gap:16px;margin-left:auto;flex-shrink:0">
-      <div class="trunk-stat"><div class="trunk-stat-label">Max Ch.</div><div class="trunk-stat-value">${t.max_channels}</div></div>
-      <div class="trunk-stat"><div class="trunk-stat-label">CPS</div><div class="trunk-stat-value">${t.cps_limit}</div></div>
-      <div class="trunk-stat"><div class="trunk-stat-label">IPs</div><div class="trunk-stat-value">${t.ip_count || 0}</div></div>
-      <div class="trunk-stat"><div class="trunk-stat-label">DIDs</div><div class="trunk-stat-value">${t.did_count || 0}</div></div>
-    </div>
-    <span style="color:var(--muted);font-size:1rem;margin-left:4px">${isExpanded ? '&#x25B4;' : '&#x25BE;'}</span>
+    <div style="flex-shrink:0">${statusBadge}</div>
   </div>
-  ${expandHtml}
+
+  ${summaryStats}
+  ${expandToggle}
+  ${expandBody}
 </div>`;
 }
 
@@ -5722,8 +6287,6 @@ async function toggleExpandTrunk(id) {
       dids:  dids.status  === 'fulfilled' ? dids.value  : []
     };
     renderTrunksList();
-    // Populate call path dropdown after render
-    loadCallPathDropdown(id);
   } catch (err) {
     toast(err.message, 'err');
   }
