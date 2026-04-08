@@ -4675,7 +4675,11 @@ async function api(method, path, body) {
     let detail = `HTTP ${res.status}`;
     try {
       const b = await res.json();
-      detail = b.detail || JSON.stringify(b);
+      if (Array.isArray(b.detail)) {
+        detail = b.detail.map(e => e.msg || JSON.stringify(e)).join('; ');
+      } else {
+        detail = (typeof b.detail === 'string' ? b.detail : null) || JSON.stringify(b);
+      }
     } catch (_) {}
     throw new Error(detail);
   }
