@@ -1632,6 +1632,187 @@
     }
 
     /* =========================================================
+       CDR PAGE
+    ========================================================= */
+
+    .cdr-filter-bar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: flex-end;
+      padding: 16px 20px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      margin-bottom: 16px;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+
+    .cdr-filter-group {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+
+    .cdr-rated-label {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      font-size: .85rem;
+      color: var(--muted);
+      cursor: pointer;
+      user-select: none;
+      white-space: nowrap;
+      padding-bottom: 9px;
+    }
+
+    .cdr-rated-label input[type=checkbox] {
+      width: 15px;
+      height: 15px;
+      accent-color: var(--accent);
+      cursor: pointer;
+    }
+
+    .cdr-stats-bar {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+
+    .cdr-stat-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px 16px;
+    }
+
+    .cdr-stat-label {
+      font-size: .65rem;
+      font-weight: 700;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: .7px;
+      margin-bottom: 7px;
+    }
+
+    .cdr-stat-value {
+      font-size: 1.35rem;
+      font-weight: 800;
+      color: var(--text);
+      font-variant-numeric: tabular-nums;
+      line-height: 1.1;
+    }
+
+    .cdr-tab-bar {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 14px;
+      padding-bottom: 0;
+    }
+
+    .cdr-tab {
+      font-size: .85rem;
+      font-weight: 600;
+      color: var(--muted);
+      background: none;
+      border: none;
+      border-bottom: 2px solid transparent;
+      padding: 8px 16px;
+      cursor: pointer;
+      transition: color .15s, border-color .15s;
+      margin-bottom: -1px;
+    }
+
+    .cdr-tab:hover { color: var(--text); }
+
+    .cdr-tab.active {
+      color: var(--accent);
+      border-bottom-color: var(--accent);
+    }
+
+    .cdr-tab-group-sel {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-left: auto;
+      padding-right: 4px;
+    }
+
+    .cdr-summary-toggle {
+      margin-bottom: 0;
+    }
+
+    .badge-inbound {
+      background: rgba(59,130,246,.15);
+      color: #93c5fd;
+      border: 1px solid rgba(59,130,246,.3);
+    }
+
+    .badge-outbound {
+      background: rgba(251,191,36,.15);
+      color: #fbbf24;
+      border: 1px solid rgba(251,191,36,.3);
+    }
+
+    .badge-rated {
+      background: rgba(34,197,94,.12);
+      color: #4ade80;
+      border: 1px solid rgba(34,197,94,.25);
+    }
+
+    .badge-unrated {
+      background: rgba(245,158,11,.12);
+      color: #fcd34d;
+      border: 1px solid rgba(245,158,11,.3);
+    }
+
+    .cdr-hang-ok   { color: #4ade80; }
+    .cdr-hang-fail { color: #f87171; }
+
+    .cdr-billed    { color: #4ade80; font-variant-numeric: tabular-nums; }
+    .cdr-cost      { color: #f87171; font-variant-numeric: tabular-nums; }
+    .cdr-margin-pos { color: #4ade80; font-variant-numeric: tabular-nums; }
+    .cdr-margin-neg { color: #f87171; font-variant-numeric: tabular-nums; }
+
+    .cdr-expand-inner {
+      padding: 18px 20px 20px;
+      background: rgba(10,12,18,.65);
+      border-top: 1px solid var(--border);
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 14px 22px;
+    }
+
+    .cdr-expand-inner .detail-value {
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      font-size: .82rem;
+    }
+
+    .cdr-uuid {
+      grid-column: 1 / -1;
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      font-size: .78rem;
+      color: var(--muted);
+    }
+
+    .cdr-pagination {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 4px 4px;
+    }
+
+    .cdr-count-label {
+      font-size: .82rem;
+      color: var(--muted);
+    }
+
+    /* =========================================================
        API DOCS PAGE
     ========================================================= */
 
@@ -2613,6 +2794,9 @@
     <a class="nav-item" data-page="trunks" onclick="navigate('trunks')">
       <span class="nav-icon">=</span> SIP Trunks
     </a>
+    <a class="nav-item" data-page="cdrs" onclick="navigate('cdrs')">
+      <span class="nav-icon">&#9776;</span> CDRs
+    </a>
     <a class="nav-item" data-page="tiers" onclick="navigate('tiers')">
       <span class="nav-icon">*</span> CPS Tiers
     </a>
@@ -3561,6 +3745,123 @@
       </div><!-- /.docs-layout -->
     </div><!-- /#page-docs -->
 
+    <!-- ===================== CDRs ===================== -->
+    <div id="page-cdrs" class="page" style="display:none">
+      <div class="page-hd">
+        <div>
+          <div class="page-title">Call Detail <span>Records</span></div>
+          <div class="page-subtitle">Complete call history with billing, routing, and margin data</div>
+        </div>
+        <button class="btn btn-ghost" onclick="exportCsv()">&#8595; Export CSV</button>
+      </div>
+
+      <!-- FILTER BAR -->
+      <div class="cdr-filter-bar" id="cdr-filter-bar">
+        <div class="cdr-filter-group">
+          <label class="form-label">Customer</label>
+          <select class="form-control cdr-filter-input" id="cdr-customer-sel">
+            <option value="">All Customers</option>
+          </select>
+        </div>
+        <div class="cdr-filter-group">
+          <label class="form-label">Product</label>
+          <select class="form-control cdr-filter-input" id="cdr-product-sel">
+            <option value="">All</option>
+            <option value="rcf">RCF</option>
+            <option value="api">API</option>
+            <option value="trunk">Trunk</option>
+          </select>
+        </div>
+        <div class="cdr-filter-group">
+          <label class="form-label">Direction</label>
+          <select class="form-control cdr-filter-input" id="cdr-direction-sel">
+            <option value="">All</option>
+            <option value="inbound">Inbound</option>
+            <option value="outbound">Outbound</option>
+          </select>
+        </div>
+        <div class="cdr-filter-group">
+          <label class="form-label">Start</label>
+          <input class="form-control cdr-filter-input" type="datetime-local" id="cdr-start-date" />
+        </div>
+        <div class="cdr-filter-group">
+          <label class="form-label">End</label>
+          <input class="form-control cdr-filter-input" type="datetime-local" id="cdr-end-date" />
+        </div>
+        <div class="cdr-filter-group">
+          <label class="form-label">Destination Prefix</label>
+          <input class="form-control cdr-filter-input" type="text" id="cdr-dest-prefix" placeholder="e.g. 1212" style="width:120px" />
+        </div>
+        <div class="cdr-filter-group" style="justify-content:flex-end;align-self:flex-end">
+          <label class="cdr-rated-label">
+            <input type="checkbox" id="cdr-rated-only" />
+            Rated only
+          </label>
+        </div>
+        <div class="cdr-filter-group" style="align-self:flex-end;gap:8px;display:flex;flex-direction:row">
+          <button class="btn btn-primary" id="cdr-search-btn" onclick="searchCdrs()">Search</button>
+        </div>
+      </div>
+
+      <!-- STATS BAR -->
+      <div id="cdr-stats-bar" style="display:none" class="cdr-stats-bar"></div>
+
+      <!-- SUMMARY TOGGLE -->
+      <div class="cdr-summary-toggle" id="cdr-summary-toggle" style="display:none">
+        <div class="cdr-tab-bar">
+          <button class="cdr-tab active" id="tab-records" onclick="switchCdrTab('records')">Records</button>
+          <button class="cdr-tab" id="tab-summary" onclick="switchCdrTab('summary')">Summary</button>
+          <div class="cdr-tab-group-sel" id="cdr-group-sel-wrap" style="display:none">
+            <label class="form-label" style="margin-bottom:0">Group by</label>
+            <select class="form-control" id="cdr-group-by" onchange="loadCdrSummary()" style="padding:5px 8px;font-size:.82rem;width:auto">
+              <option value="day">Day</option>
+              <option value="hour">Hour</option>
+              <option value="destination">Destination</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- RECORDS VIEW -->
+      <div id="cdr-records-view">
+        <div id="cdr-table-wrap" class="table-wrap" style="display:none">
+          <table id="cdr-table">
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Dir</th>
+                <th>From</th>
+                <th>To</th>
+                <th>Customer</th>
+                <th>Product</th>
+                <th>Duration</th>
+                <th>Billed</th>
+                <th>Cost</th>
+                <th>Margin</th>
+                <th>Hangup</th>
+                <th>Carrier</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="cdr-tbody"></tbody>
+          </table>
+        </div>
+        <div id="cdr-state" class="state-msg" style="display:none"></div>
+        <div id="cdr-pagination" style="display:none" class="cdr-pagination">
+          <span id="cdr-count-label" class="cdr-count-label"></span>
+          <button class="btn btn-ghost btn-sm" id="cdr-load-more-btn" onclick="loadMoreCdrs()">Load More</button>
+        </div>
+      </div>
+
+      <!-- SUMMARY VIEW -->
+      <div id="cdr-summary-view" style="display:none">
+        <div id="cdr-summary-wrap" class="table-wrap">
+          <div class="state-msg"><span class="spinner"></span></div>
+        </div>
+      </div>
+
+    </div><!-- /#page-cdrs -->
+
   </div><!-- /page-container -->
 </div><!-- /main-wrapper -->
 
@@ -3785,6 +4086,7 @@ const PAGE_TITLES = {
   rcf:       'RCF Numbers',
   'api-dids':'API DIDs',
   trunks:    'SIP Trunks',
+  cdrs:      'Call Detail Records',
   tiers:     'CPS Tiers',
   rates:     'Rates & Margins',
   ivr:       'IVR Builder',
@@ -3838,6 +4140,7 @@ function navigate(page) {
     case 'rcf':       loadRCF();       break;
     case 'api-dids':  loadApiDids();   break;
     case 'trunks':    loadTrunks();    break;
+    case 'cdrs':      loadCdrsPage();  break;
     case 'tiers':     loadTiers();     break;
     case 'rates':     loadRatesPage(); break;
     case 'ivr':       loadIvrPage();   break;
@@ -6451,6 +6754,533 @@ async function ivrDeleteFlow(id, btn) {
 
 function ivrCloseLoadModal() {
   document.getElementById('ivr-load-modal').classList.remove('open');
+}
+
+/* =========================================================
+   CDR PAGE
+========================================================= */
+
+let cdrsList = [];
+let cdrsOffset = 0;
+let cdrsTotalCount = 0;
+const CDR_LIMIT = 50;
+
+// Tracks which CDR row UUID is currently expanded
+let cdrExpandedUuid = null;
+
+function formatDuration(seconds) {
+  if (seconds == null || isNaN(seconds)) return '--';
+  const s = Math.floor(seconds);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  const mm = String(m).padStart(2, '0');
+  const ss = String(sec).padStart(2, '0');
+  if (h > 0) return `${h}:${mm}:${ss}`;
+  return `${mm}:${ss}`;
+}
+
+function formatTotalDuration(seconds) {
+  if (seconds == null || isNaN(seconds)) return '0:00:00';
+  const s = Math.floor(seconds);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  return `${h}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`;
+}
+
+function fmtCdrTime(isoStr) {
+  if (!isoStr) return '--';
+  try {
+    const d = new Date(isoStr);
+    return d.toLocaleString(undefined, { month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+  } catch (_) {
+    return isoStr;
+  }
+}
+
+function fmtCdrTimeFull(isoStr) {
+  if (!isoStr) return '--';
+  try {
+    return new Date(isoStr).toISOString().replace('T', ' ').replace('Z', ' UTC');
+  } catch (_) {
+    return isoStr;
+  }
+}
+
+function fmtRate4(val) {
+  if (val == null) return '--';
+  return '$' + Number(val).toFixed(4);
+}
+
+async function loadCdrsPage() {
+  // Populate customer dropdown
+  try {
+    const customers = await api('GET', '/customers');
+    const sel = document.getElementById('cdr-customer-sel');
+    if (sel) {
+      // Keep the "All" option and populate the rest
+      sel.innerHTML = '<option value="">All Customers</option>';
+      (Array.isArray(customers) ? customers : (customers.customers || [])).forEach(c => {
+        const opt = document.createElement('option');
+        opt.value = c.id;
+        opt.textContent = c.name || c.company_name || `Customer ${c.id}`;
+        sel.appendChild(opt);
+      });
+    }
+  } catch (_) {}
+
+  // Default date range: last 24 hours
+  const now = new Date();
+  const past = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+  const toLocal = (d) => {
+    // Format as YYYY-MM-DDTHH:MM for datetime-local input
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  };
+  const startEl = document.getElementById('cdr-start-date');
+  const endEl   = document.getElementById('cdr-end-date');
+  if (startEl && !startEl.value) startEl.value = toLocal(past);
+  if (endEl   && !endEl.value)   endEl.value   = toLocal(now);
+
+  // Auto-search on first load
+  await searchCdrs();
+}
+
+function buildCdrQueryParams(offset) {
+  const params = new URLSearchParams();
+  const custId = document.getElementById('cdr-customer-sel')?.value;
+  const product = document.getElementById('cdr-product-sel')?.value;
+  const direction = document.getElementById('cdr-direction-sel')?.value;
+  const startDate = document.getElementById('cdr-start-date')?.value;
+  const endDate   = document.getElementById('cdr-end-date')?.value;
+  const destPrefix = document.getElementById('cdr-dest-prefix')?.value?.trim();
+  const ratedOnly = document.getElementById('cdr-rated-only')?.checked;
+
+  if (custId)     params.set('customer_id',   custId);
+  if (product)    params.set('product_type',  product);
+  if (direction)  params.set('direction',     direction);
+  if (startDate)  params.set('start_date',    new Date(startDate).toISOString());
+  if (endDate)    params.set('end_date',       new Date(endDate).toISOString());
+  if (destPrefix) params.set('destination',   destPrefix);
+  if (ratedOnly)  params.set('rated_only',    'true');
+  params.set('limit',  CDR_LIMIT);
+  params.set('offset', offset);
+  return params;
+}
+
+async function searchCdrs() {
+  const btn = document.getElementById('cdr-search-btn');
+  setButtonLoading(btn, true);
+
+  cdrsList = [];
+  cdrsOffset = 0;
+  cdrsTotalCount = 0;
+  cdrExpandedUuid = null;
+
+  const stateEl   = document.getElementById('cdr-state');
+  const tableWrap = document.getElementById('cdr-table-wrap');
+  const pagination = document.getElementById('cdr-pagination');
+  const statsBar  = document.getElementById('cdr-stats-bar');
+  const toggleEl  = document.getElementById('cdr-summary-toggle');
+
+  if (stateEl)   { stateEl.style.display = 'block'; stateEl.innerHTML = '<span class="spinner"></span>'; }
+  if (tableWrap) tableWrap.style.display = 'none';
+  if (pagination) pagination.style.display = 'none';
+  if (statsBar)  statsBar.style.display = 'none';
+  if (toggleEl)  toggleEl.style.display = 'none';
+
+  try {
+    const params = buildCdrQueryParams(0);
+    const data = await api('GET', `/cdrs?${params.toString()}`);
+    cdrsList = data.cdrs || [];
+    cdrsTotalCount = data.count ?? cdrsList.length;
+    cdrsOffset = cdrsList.length;
+
+    renderCdrStats(cdrsList);
+    renderCdrTable(cdrsList, false);
+
+    if (toggleEl) toggleEl.style.display = '';
+    // Switch to records tab and reset summary
+    switchCdrTab('records');
+    document.getElementById('cdr-summary-view').style.display = 'none';
+
+  } catch (err) {
+    if (stateEl) { stateEl.style.display = 'block'; stateEl.innerHTML = `<strong>Error loading CDRs</strong>${escHtml(err.message)}`; }
+    if (tableWrap) tableWrap.style.display = 'none';
+  } finally {
+    setButtonLoading(btn, false);
+  }
+}
+
+function renderCdrStats(cdrs) {
+  const statsBar = document.getElementById('cdr-stats-bar');
+  if (!statsBar) return;
+
+  if (!cdrs.length) {
+    statsBar.style.display = 'none';
+    return;
+  }
+
+  const totalCalls    = cdrsTotalCount;
+  const answered      = cdrs.filter(c => c.answer_time).length;
+  const asr           = totalCalls > 0 ? (answered / cdrs.length * 100) : 0;
+  const totalDurSec   = cdrs.reduce((s, c) => s + (c.duration_seconds || 0), 0);
+  const totalBilled   = cdrs.reduce((s, c) => s + (c.total_cost || 0), 0);
+  const totalCost     = cdrs.reduce((s, c) => s + (c.carrier_cost || 0), 0);
+  const totalMargin   = totalBilled - totalCost;
+  const avgMarginPct  = totalBilled > 0 ? (totalMargin / totalBilled * 100) : null;
+
+  const asrClass = asr > 50 ? 'color:#4ade80' : asr >= 30 ? 'color:#fbbf24' : 'color:#f87171';
+  const marginClass = totalMargin >= 0 ? 'color:#4ade80' : 'color:#f87171';
+  const avgMpClass = avgMarginPct == null ? '' : avgMarginPct < 0 ? 'color:#f87171' : avgMarginPct < 15 ? 'color:#f87171' : avgMarginPct < 30 ? 'color:#fbbf24' : 'color:#4ade80';
+
+  statsBar.innerHTML = `
+    <div class="cdr-stat-card">
+      <div class="cdr-stat-label">Total Calls</div>
+      <div class="cdr-stat-value">${totalCalls.toLocaleString()}</div>
+    </div>
+    <div class="cdr-stat-card">
+      <div class="cdr-stat-label">Answered</div>
+      <div class="cdr-stat-value">${answered.toLocaleString()}</div>
+    </div>
+    <div class="cdr-stat-card">
+      <div class="cdr-stat-label">ASR</div>
+      <div class="cdr-stat-value" style="${asrClass}">${asr.toFixed(1)}%</div>
+    </div>
+    <div class="cdr-stat-card">
+      <div class="cdr-stat-label">Total Duration</div>
+      <div class="cdr-stat-value" style="font-size:1.1rem">${formatTotalDuration(totalDurSec)}</div>
+    </div>
+    <div class="cdr-stat-card">
+      <div class="cdr-stat-label">Total Billed</div>
+      <div class="cdr-stat-value" style="color:#4ade80">${fmtRate4(totalBilled)}</div>
+    </div>
+    <div class="cdr-stat-card">
+      <div class="cdr-stat-label">Total Cost</div>
+      <div class="cdr-stat-value" style="color:#f87171">${fmtRate4(totalCost)}</div>
+    </div>
+    <div class="cdr-stat-card">
+      <div class="cdr-stat-label">Total Margin</div>
+      <div class="cdr-stat-value" style="${marginClass}">${fmtRate4(totalMargin)}</div>
+    </div>
+    <div class="cdr-stat-card">
+      <div class="cdr-stat-label">Avg Margin %</div>
+      <div class="cdr-stat-value" style="${avgMpClass}">${avgMarginPct != null ? avgMarginPct.toFixed(1) + '%' : '--'}</div>
+    </div>
+  `;
+  statsBar.style.display = 'grid';
+}
+
+function renderCdrTable(cdrs, append) {
+  const tbody     = document.getElementById('cdr-tbody');
+  const tableWrap = document.getElementById('cdr-table-wrap');
+  const stateEl   = document.getElementById('cdr-state');
+  const pagination = document.getElementById('cdr-pagination');
+  const countLabel = document.getElementById('cdr-count-label');
+  const loadMoreBtn = document.getElementById('cdr-load-more-btn');
+
+  if (!tbody) return;
+
+  if (!cdrs.length && !append) {
+    if (stateEl)   { stateEl.style.display = 'block'; stateEl.innerHTML = '<strong>No records found</strong>Adjust your filters and search again.'; }
+    if (tableWrap) tableWrap.style.display = 'none';
+    if (pagination) pagination.style.display = 'none';
+    return;
+  }
+
+  if (!append) tbody.innerHTML = '';
+  if (stateEl) stateEl.style.display = 'none';
+  if (tableWrap) tableWrap.style.display = '';
+
+  cdrs.forEach(cdr => {
+    // Main data row
+    const tr = document.createElement('tr');
+    tr.dataset.uuid = cdr.uuid;
+    tr.onclick = () => expandCdr(cdr.uuid);
+
+    const dirClass   = cdr.direction === 'inbound' ? 'badge-inbound' : 'badge-outbound';
+    const prodClass  = cdr.product_type === 'rcf' ? 'badge-rcf' : cdr.product_type === 'api' ? 'badge-api' : 'badge-trunk';
+    const hangClass  = cdr.hangup_cause === 'NORMAL_CLEARING' ? 'cdr-hang-ok' : 'cdr-hang-fail';
+    const marginCls  = (cdr.margin || 0) >= 0 ? 'cdr-margin-pos' : 'cdr-margin-neg';
+    const ratedClass = cdr.rated_at ? 'badge-rated' : 'badge-unrated';
+    const ratedLabel = cdr.rated_at ? 'Rated' : 'Unrated';
+    const costCls    = (cdr.carrier_cost || 0) > 0 ? 'cdr-cost' : '';
+
+    tr.innerHTML = `
+      <td style="white-space:nowrap;font-size:.8rem">${fmtCdrTime(cdr.start_time)}</td>
+      <td><span class="badge ${dirClass}">${escHtml(cdr.direction || '--')}</span></td>
+      <td style="font-size:.82rem;white-space:nowrap">${escHtml(fmt(cdr.caller_id) || cdr.caller_id || '--')}</td>
+      <td style="font-size:.82rem;white-space:nowrap">${escHtml(fmt(cdr.destination) || cdr.destination || '--')}</td>
+      <td style="font-size:.82rem">${escHtml(cdr.customer_id != null ? String(cdr.customer_id) : '--')}</td>
+      <td><span class="badge ${prodClass}">${escHtml(cdr.product_type || '--')}</span></td>
+      <td style="font-variant-numeric:tabular-nums;white-space:nowrap">${formatDuration(cdr.duration_seconds)}</td>
+      <td class="cdr-billed">${fmtRate4(cdr.total_cost)}</td>
+      <td class="${costCls}">${cdr.carrier_cost > 0 ? fmtRate4(cdr.carrier_cost) : '<span style="color:var(--muted)">--</span>'}</td>
+      <td class="${marginCls}">${cdr.margin != null ? fmtRate4(cdr.margin) : '<span style="color:var(--muted)">--</span>'}</td>
+      <td class="${hangClass}" style="font-size:.8rem;white-space:nowrap">${escHtml(cdr.hangup_cause || '--')}</td>
+      <td style="font-size:.8rem;color:var(--muted)">${escHtml(cdr.carrier_used || '--')}</td>
+      <td><span class="badge ${ratedClass}">${ratedLabel}</span></td>
+    `;
+    tbody.appendChild(tr);
+
+    // Expansion row (hidden initially)
+    const expTr = document.createElement('tr');
+    expTr.className = 'expand-row';
+    expTr.id = `cdr-expand-${cdr.uuid}`;
+    expTr.style.display = 'none';
+    const expTd = document.createElement('td');
+    expTd.colSpan = 13;
+    expTd.innerHTML = buildCdrExpandHtml(cdr);
+    expTr.appendChild(expTd);
+    tbody.appendChild(expTr);
+  });
+
+  // Pagination
+  if (pagination) {
+    const showing = Math.min(cdrsList.length, cdrsTotalCount);
+    if (countLabel) countLabel.textContent = `Showing ${showing.toLocaleString()} of ${cdrsTotalCount.toLocaleString()} records`;
+    const hasMore = cdrsList.length < cdrsTotalCount;
+    if (loadMoreBtn) loadMoreBtn.style.display = hasMore ? '' : 'none';
+    pagination.style.display = '';
+  }
+}
+
+function buildCdrExpandHtml(cdr) {
+  const fraudInfo = cdr.fraud_score != null
+    ? `${cdr.fraud_score}${cdr.fraud_flags ? ' — ' + escHtml(cdr.fraud_flags) : ''}`
+    : '--';
+
+  const rateBtn = !cdr.rated_at
+    ? `<button class="btn btn-success btn-sm" onclick="rateCdr('${escHtml(cdr.uuid)}', event)">Rate CDR</button>`
+    : '';
+
+  return `<div class="cdr-expand-inner">
+    <div class="cdr-uuid detail-field" style="grid-column:1/-1">
+      <span class="detail-label">UUID</span>
+      <span class="detail-value" style="word-break:break-all">${escHtml(cdr.uuid)}</span>
+    </div>
+    <div class="detail-field">
+      <span class="detail-label">Start Time</span>
+      <span class="detail-value">${escHtml(fmtCdrTimeFull(cdr.start_time))}</span>
+    </div>
+    <div class="detail-field">
+      <span class="detail-label">Answer Time</span>
+      <span class="detail-value">${escHtml(fmtCdrTimeFull(cdr.answer_time))}</span>
+    </div>
+    <div class="detail-field">
+      <span class="detail-label">End Time</span>
+      <span class="detail-value">${escHtml(fmtCdrTimeFull(cdr.end_time))}</span>
+    </div>
+    <div class="detail-field">
+      <span class="detail-label">Duration (s)</span>
+      <span class="detail-value">${cdr.duration_seconds != null ? cdr.duration_seconds + 's' : '--'}</span>
+    </div>
+    <div class="detail-field">
+      <span class="detail-label">Billable (s)</span>
+      <span class="detail-value">${cdr.billable_seconds != null ? cdr.billable_seconds + 's' : '--'}</span>
+    </div>
+    <div class="detail-field">
+      <span class="detail-label">Rate / Min</span>
+      <span class="detail-value">${fmtRate4(cdr.rate_per_min)}</span>
+    </div>
+    <div class="detail-field">
+      <span class="detail-label">Carrier Cost / Min</span>
+      <span class="detail-value">${cdr.carrier_cost_per_min != null ? fmtRate4(cdr.carrier_cost_per_min) : '--'}</span>
+    </div>
+    <div class="detail-field">
+      <span class="detail-label">SIP Code</span>
+      <span class="detail-value">${cdr.sip_code != null ? escHtml(String(cdr.sip_code)) : '--'}</span>
+    </div>
+    <div class="detail-field">
+      <span class="detail-label">Traffic Grade</span>
+      <span class="detail-value">${escHtml(cdr.traffic_grade || '--')}</span>
+    </div>
+    <div class="detail-field">
+      <span class="detail-label">Fraud Score / Flags</span>
+      <span class="detail-value">${fraudInfo}</span>
+    </div>
+    <div class="detail-field">
+      <span class="detail-label">Trunk ID</span>
+      <span class="detail-value">${cdr.trunk_id != null ? escHtml(String(cdr.trunk_id)) : '--'}</span>
+    </div>
+    ${rateBtn ? `<div class="expand-actions">${rateBtn}</div>` : ''}
+  </div>`;
+}
+
+function expandCdr(uuid) {
+  // If already expanded — collapse
+  if (cdrExpandedUuid === uuid) {
+    const expRow = document.getElementById(`cdr-expand-${uuid}`);
+    if (expRow) expRow.style.display = 'none';
+    cdrExpandedUuid = null;
+    return;
+  }
+
+  // Collapse previously expanded row
+  if (cdrExpandedUuid) {
+    const prev = document.getElementById(`cdr-expand-${cdrExpandedUuid}`);
+    if (prev) prev.style.display = 'none';
+  }
+
+  cdrExpandedUuid = uuid;
+  const expRow = document.getElementById(`cdr-expand-${uuid}`);
+  if (expRow) expRow.style.display = '';
+}
+
+async function rateCdr(uuid, evt) {
+  if (evt) evt.stopPropagation();
+  const btn = evt?.target;
+  if (btn) { btn.textContent = 'Rating...'; btn.disabled = true; }
+  try {
+    await api('POST', `/cdrs/${encodeURIComponent(uuid)}/rate`);
+    toast('CDR rated successfully', 'ok');
+
+    // Update the record in our local list and re-render just that row
+    const idx = cdrsList.findIndex(c => c.uuid === uuid);
+    if (idx !== -1) {
+      cdrsList[idx].rated_at = new Date().toISOString();
+      // Rebuild the expanded row
+      const expRow = document.getElementById(`cdr-expand-${uuid}`);
+      if (expRow) expRow.querySelector('td').innerHTML = buildCdrExpandHtml(cdrsList[idx]);
+
+      // Update status badge in data row
+      const dataRow = document.querySelector(`[data-uuid="${uuid}"]`);
+      if (dataRow) {
+        const lastTd = dataRow.querySelector('td:last-child');
+        if (lastTd) lastTd.innerHTML = '<span class="badge badge-rated">Rated</span>';
+      }
+    }
+  } catch (err) {
+    toast('Rating failed: ' + err.message, 'err');
+    if (btn) { btn.textContent = 'Rate CDR'; btn.disabled = false; }
+  }
+}
+
+async function loadMoreCdrs() {
+  const btn = document.getElementById('cdr-load-more-btn');
+  setButtonLoading(btn, true);
+  try {
+    const params = buildCdrQueryParams(cdrsOffset);
+    const data = await api('GET', `/cdrs?${params.toString()}`);
+    const newCdrs = data.cdrs || [];
+    cdrsTotalCount = data.count ?? cdrsTotalCount;
+    cdrsList = [...cdrsList, ...newCdrs];
+    cdrsOffset = cdrsList.length;
+    renderCdrTable(newCdrs, true);
+  } catch (err) {
+    toast('Load more failed: ' + err.message, 'err');
+  } finally {
+    setButtonLoading(btn, false);
+  }
+}
+
+function exportCsv() {
+  if (!cdrsList.length) return toast('No CDRs to export', 'err');
+  const headers = ['UUID','Time','Direction','From','To','Customer','Product','Duration(s)','Billed','Cost','Margin','Hangup','Carrier','Rated'];
+  const rows = cdrsList.map(c => [
+    c.uuid, c.start_time, c.direction, c.caller_id, c.destination,
+    c.customer_id, c.product_type, c.duration_seconds,
+    c.total_cost, c.carrier_cost != null ? c.carrier_cost : '', c.margin != null ? c.margin : '',
+    c.hangup_cause, c.carrier_used, c.rated_at ? 'Yes' : 'No'
+  ]);
+  // Escape values that may contain commas or quotes
+  const escape = (v) => {
+    const s = String(v == null ? '' : v);
+    if (s.includes(',') || s.includes('"') || s.includes('\n')) return `"${s.replace(/"/g, '""')}"`;
+    return s;
+  };
+  const csv = [headers, ...rows].map(r => r.map(escape).join(',')).join('\n');
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `cdrs_${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+  toast('CDR export downloaded', 'ok');
+}
+
+function switchCdrTab(tab) {
+  const recordsView = document.getElementById('cdr-records-view');
+  const summaryView = document.getElementById('cdr-summary-view');
+  const tabRec = document.getElementById('tab-records');
+  const tabSum = document.getElementById('tab-summary');
+  const groupSelWrap = document.getElementById('cdr-group-sel-wrap');
+
+  if (tab === 'records') {
+    if (recordsView) recordsView.style.display = '';
+    if (summaryView) summaryView.style.display = 'none';
+    if (tabRec) tabRec.classList.add('active');
+    if (tabSum) tabSum.classList.remove('active');
+    if (groupSelWrap) groupSelWrap.style.display = 'none';
+  } else {
+    if (recordsView) recordsView.style.display = 'none';
+    if (summaryView) summaryView.style.display = '';
+    if (tabRec) tabRec.classList.remove('active');
+    if (tabSum) tabSum.classList.add('active');
+    if (groupSelWrap) groupSelWrap.style.display = 'flex';
+    loadCdrSummary();
+  }
+}
+
+async function loadCdrSummary() {
+  const wrap = document.getElementById('cdr-summary-wrap');
+  if (!wrap) return;
+  wrap.innerHTML = '<div class="state-msg"><span class="spinner"></span></div>';
+
+  const params = new URLSearchParams();
+  const custId = document.getElementById('cdr-customer-sel')?.value;
+  const groupBy = document.getElementById('cdr-group-by')?.value || 'day';
+  if (custId) params.set('customer_id', custId);
+  params.set('group_by', groupBy);
+
+  try {
+    const data = await api('GET', `/cdrs/summary?${params.toString()}`);
+    const rows = data.summary || [];
+
+    if (!rows.length) {
+      wrap.innerHTML = '<div class="state-msg"><strong>No summary data</strong>Run a search first.</div>';
+      return;
+    }
+
+    const dateLabel = groupBy === 'hour' ? 'Hour' : groupBy === 'destination' ? 'Destination' : 'Date';
+
+    wrap.innerHTML = `<table>
+      <thead>
+        <tr>
+          <th>${escHtml(dateLabel)}</th>
+          <th>Product</th>
+          <th>Direction</th>
+          <th>Total Calls</th>
+          <th>Answered</th>
+          <th>ASR</th>
+          <th>Duration</th>
+          <th>Total Cost</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rows.map(r => {
+          const asr = r.total_calls > 0 ? (r.answered_calls / r.total_calls * 100).toFixed(1) : '0.0';
+          const asrColor = parseFloat(asr) > 50 ? '#4ade80' : parseFloat(asr) >= 30 ? '#fbbf24' : '#f87171';
+          const prodClass = r.product_type === 'rcf' ? 'badge-rcf' : r.product_type === 'api' ? 'badge-api' : r.product_type === 'trunk' ? 'badge-trunk' : '';
+          const dirClass  = r.direction === 'inbound' ? 'badge-inbound' : r.direction === 'outbound' ? 'badge-outbound' : '';
+          return `<tr>
+            <td style="font-variant-numeric:tabular-nums;white-space:nowrap">${escHtml(r.date || r.hour || r.destination || '--')}</td>
+            <td>${r.product_type ? `<span class="badge ${prodClass}">${escHtml(r.product_type)}</span>` : '--'}</td>
+            <td>${r.direction ? `<span class="badge ${dirClass}">${escHtml(r.direction)}</span>` : '--'}</td>
+            <td style="font-variant-numeric:tabular-nums">${(r.total_calls || 0).toLocaleString()}</td>
+            <td style="font-variant-numeric:tabular-nums">${(r.answered_calls || 0).toLocaleString()}</td>
+            <td style="color:${asrColor};font-variant-numeric:tabular-nums">${asr}%</td>
+            <td style="font-variant-numeric:tabular-nums">${formatTotalDuration(r.total_duration_sec)}</td>
+            <td class="cdr-billed">${fmtRate4(r.total_cost)}</td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table>`;
+  } catch (err) {
+    wrap.innerHTML = `<div class="state-msg"><strong>Error loading summary</strong>${escHtml(err.message)}</div>`;
+  }
 }
 
 /* =========================================================
