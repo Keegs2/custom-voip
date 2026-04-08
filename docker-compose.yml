@@ -158,12 +158,15 @@ services:
           memory: 256M
     restart: unless-stopped
 
-  # Kamailio SBC - Front-end security (optional for initial testing)
+  # Kamailio SBC - Front-end signaling security and rate limiting
+  # Entry point for all external SIP traffic (Bandwidth -> Kamailio -> FreeSWITCH)
   kamailio:
     build: ./docker/kamailio
     container_name: voip-kamailio
     depends_on:
       - freeswitch
+    environment:
+      - EXTERNAL_SIP_IP=${EXTERNAL_SIP_IP:-34.74.71.32}
     ports:
       - "5060:5060/udp"
       - "5060:5060/tcp"
@@ -186,8 +189,6 @@ services:
         soft: 65536
         hard: 65536
     restart: unless-stopped
-    profiles:
-      - with-sbc  # Only start with: docker compose --profile with-sbc up
 
   # Webhook test server
   webhook-test:

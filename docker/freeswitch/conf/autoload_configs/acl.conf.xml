@@ -59,10 +59,17 @@
       <!-- Loopback for testing -->
       <node type="allow" cidr="127.0.0.0/8"/>
 
-      <!--
-        PRODUCTION: Add your carrier IPs here:
+      <!-- Bandwidth.com signaling IPs (production) -->
+      <node type="allow" cidr="67.231.2.12/32"/>
+      <node type="allow" cidr="216.82.238.134/32"/>
 
-        Example: Bandwidth.com ranges
+      <!-- Docker internal network (Kamailio SBC forwards SIP from here) -->
+      <node type="allow" cidr="172.28.0.0/16"/>
+
+      <!--
+        Additional carrier IPs can be added here:
+
+        Example: Bandwidth.com broader ranges
         <node type="allow" cidr="65.202.0.0/19"/>
         <node type="allow" cidr="67.231.0.0/20"/>
 
@@ -71,15 +78,7 @@
 
         Example: Telnyx
         <node type="allow" cidr="192.76.120.0/22"/>
-
-        Example: Twilio (if using as carrier)
-        <node type="allow" cidr="54.172.60.0/23"/>
-        <node type="allow" cidr="54.244.51.0/24"/>
       -->
-
-      <!-- Placeholder: REMOVE IN PRODUCTION -->
-      <!-- Allowing all carriers temporarily for testing -->
-      <!-- <node type="allow" cidr="0.0.0.0/0"/> -->
     </list>
 
     <!-- ============================================ -->
