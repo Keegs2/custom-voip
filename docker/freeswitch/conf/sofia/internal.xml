@@ -240,6 +240,25 @@
     <!-- Hold music (will be overridden by dialplan if needed) -->
     <param name="hold-music" value="silence_stream://-1"/>
 
+    <!-- ============================================ -->
+    <!-- HOMER SIP CAPTURE (HEP)                     -->
+    <!-- ============================================ -->
+    <!--
+      Send copies of all SIP messages to Homer via HEP protocol.
+      This gives Homer visibility into FreeSWITCH's side of each call,
+      complementing the HEP feed from Kamailio (capture-id 100).
+      Together they produce complete SIP ladder diagrams.
+
+      capture-server: Homer HEP endpoint via Docker host gateway
+        (Homer's port 9060 is published on the host; 172.28.0.1
+        is the Docker gateway reachable from inside containers)
+      sip-capture: Enable the capture agent on this profile
+      capture-id: Node identifier in Homer (200 = FreeSWITCH,
+        distinct from Kamailio's 100)
+    -->
+    <param name="capture-server" value="udp:172.28.0.1:9060;hep=3;capture_id=200"/>
+    <param name="sip-capture" value="yes"/>
+
   </settings>
 
   <!-- ============================================ -->

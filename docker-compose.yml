@@ -188,25 +188,67 @@ services:
         hard: 65536
     restart: unless-stopped
 
-  # Homer SIP Monitoring — all-in-one container
-  # Includes: PostgreSQL, heplify-server (HEP capture), and web UI
+  # Homer 7 SIP Monitoring — proper 3-service stack
   # Default login: admin / sipcapture
-  homer:
-    image: sipcapture/homer-docker:latest
-    container_name: voip-homer
-    ports:
-      - "9080:80"         # Web UI
-      - "9060:9060/udp"   # HEP UDP
-      - "9060:9060/tcp"   # HEP TCP
+  homer-db:
+    image: postgres:14-alpine
+    container_name: voip-homer-db
+    environment:
+      POSTGRES_PASSWORD: homerSeven
+      POSTGRES_USER: root
     volumes:
-      - homer_db_data:/var/lib/postgresql/16/main
+      - homer_db_data:/var/lib/postgresql/data
+      - ./docker/homer/init-user-db.sh:/docker-entrypoint-initdb.d/init-user-db.sh
     networks:
       - voip-network
-    deploy:
-      resources:
-        limits:
-          cpus: '1'
-          memory: 1G
+    healthcheck:
+      test: ["CMD-SHELL", "psql -h localhost -U root -c '\\l'"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+  heplify-server:
+    image: ghcr.io/sipcapture/heplify-server
+    container_name: voip-heplify-server
+    ports:
+      - "9060:9060"
+      - "9060:9060/udp"
+      - "9061:9061/tcp"
+    environment:
+      - "HEPLIFYSERVER_HEPADDR=0.0.0.0:9060"
+      - "HEPLIFYSERVER_HEPTCPADDR=0.0.0.0:9061"
+      - "HEPLIFYSERVER_DBSHEMA=homer7"
+      - "HEPLIFYSERVER_DBDRIVER=postgres"
+      - "HEPLIFYSERVER_DBADDR=homer-db:5432"
+      - "HEPLIFYSERVER_DBUSER=root"
+      - "HEPLIFYSERVER_DBPASS=homerSeven"
+      - "HEPLIFYSERVER_LOGLVL=info"
+      - "HEPLIFYSERVER_LOGSTD=true"
+    depends_on:
+      homer-db:
+        condition: service_healthy
+    networks:
+      - voip-network
+    restart: unless-stopped
+
+  homer-webapp:
+    image: ghcr.io/sipcapture/homer-app
+    container_name: voip-homer-webapp
+    ports:
+      - "9080:80"
+    environment:
+      - "DB_HOST=homer-db"
+      - "DB_USER=root"
+      - "DB_PASS=homerSeven"
+      - "HOMER_LOGLEVEL=info"
+    volumes:
+      - ./docker/homer/bootstrap:/app/bootstrap
+    depends_on:
+      homer-db:
+        condition: service_healthy
+    networks:
+      - voip-network
     restart: unless-stopped
 
   # Webhook test server
