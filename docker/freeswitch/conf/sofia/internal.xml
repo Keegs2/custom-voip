@@ -146,9 +146,9 @@
     <!-- ACL-based authentication (traffic from Kamailio is trusted) -->
     <param name="apply-inbound-acl" value="trusted"/>
 
-    <!-- Enable SIP digest auth for REGISTER and INVITE from local test clients -->
-    <!-- This allows Zoiper softphones to register while still accepting trusted traffic -->
-    <param name="auth-calls" value="true"/>
+    <!-- Auth disabled — Kamailio SBC handles security -->
+    <!-- Zoiper local testing still works via ACL trust -->
+    <param name="auth-calls" value="false"/>
     <param name="auth-all-packets" value="false"/>
 
     <!-- Accept registrations for local testing -->
