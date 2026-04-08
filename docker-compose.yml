@@ -240,7 +240,7 @@ services:
     restart: unless-stopped
 
   homer-ui:
-    image: sipcapture/homer-app:latest
+    image: sipcapture/homer-webapp:latest
     container_name: voip-homer-ui
     ports:
       - "9080:80"
