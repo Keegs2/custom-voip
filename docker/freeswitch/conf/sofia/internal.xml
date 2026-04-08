@@ -309,8 +309,7 @@
       <!-- Enable/disable -->
       <param name="enabled" value="true"/>
 
-      <!-- Gateway identifier for routing -->
-      <param name="extension-in-contact" value="true"/>
+      <!-- extension-in-contact REMOVED — caused corrupted Contact header -->
     </gateway>
 
     <!--
