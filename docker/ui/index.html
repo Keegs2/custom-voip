@@ -9173,15 +9173,21 @@ function readCarrierFormValues(prefix) {
   if (chk('pt-api'))   productTypes.push('api');
   if (chk('pt-trunk')) productTypes.push('trunk');
 
+  // Generate gateway_name from display_name if not editing
+  const displayName = val('display-name');
+  const gatewayName = val('gateway-name') || displayName.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+
   const payload = {
-    display_name:      val('display-name'),
+    gateway_name:      gatewayName,
+    display_name:      displayName,
     description:       val('description'),
-    host:              val('host'),
+    sip_proxy:         val('host'),
     port:              numVal('port') ?? 5060,
     transport:         val('transport') || 'udp',
     auth_type:         val('auth-type') || 'ip',
-    username:          val('username'),
-    codec_prefs:       val('codec-prefs'),
+    username:          val('username') || null,
+    password:          val('password') || null,
+    codec_prefs:       val('codec-prefs') || 'PCMU,PCMA',
     max_channels:      numVal('max-channels'),
     cps_limit:         numVal('cps-limit'),
     product_types:     productTypes,
