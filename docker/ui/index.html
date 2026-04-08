@@ -1037,6 +1037,229 @@
     }
 
     /* =========================================================
+       DASHBOARD WELCOME PAGE
+    ========================================================= */
+
+    .dash-welcome {
+      text-align: center;
+      padding: 48px 0 44px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 40px;
+    }
+
+    .dash-welcome-title {
+      font-size: 2.2rem;
+      font-weight: 800;
+      letter-spacing: -.5px;
+      color: var(--text);
+      text-shadow: 0 0 40px rgba(59,130,246,0.25);
+      margin-bottom: 12px;
+    }
+
+    .dash-welcome-sub {
+      font-size: 1rem;
+      color: var(--muted);
+      max-width: 560px;
+      margin: 0 auto;
+      line-height: 1.65;
+    }
+
+    /* Primary nav cards — 3 columns */
+    .dash-nav-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+
+    /* Utility cards — also 3 columns but shorter */
+    .dash-util-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+      margin-bottom: 40px;
+    }
+
+    .dash-nav-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 28px 24px 24px;
+      cursor: pointer;
+      position: relative;
+      overflow: hidden;
+      min-height: 200px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      transition: border-color .2s, box-shadow .2s, transform .15s;
+      user-select: none;
+    }
+
+    .dash-nav-card:hover {
+      border-color: var(--accent);
+      box-shadow: 0 0 20px rgba(59,130,246,0.15);
+      transform: translateY(-2px);
+    }
+
+    .dash-nav-card:active {
+      transform: translateY(0);
+    }
+
+    .dash-util-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px 22px;
+      cursor: pointer;
+      position: relative;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      transition: border-color .2s, box-shadow .2s, transform .15s;
+      user-select: none;
+    }
+
+    .dash-util-card:hover {
+      border-color: var(--accent);
+      box-shadow: 0 0 20px rgba(59,130,246,0.15);
+      transform: translateY(-2px);
+    }
+
+    .dash-util-card:active {
+      transform: translateY(0);
+    }
+
+    .dash-card-icon {
+      font-size: 2.2rem;
+      line-height: 1;
+      font-weight: 400;
+    }
+
+    .dash-card-icon-blue   { color: #60a5fa; }
+    .dash-card-icon-green  { color: #4ade80; }
+    .dash-card-icon-purple { color: #c084fc; }
+    .dash-card-icon-amber  { color: #fbbf24; }
+    .dash-card-icon-cyan   { color: #22d3ee; }
+    .dash-card-icon-emerald{ color: #34d399; }
+    .dash-card-icon-muted  { color: var(--muted); }
+
+    .dash-card-name {
+      font-size: 1.05rem;
+      font-weight: 700;
+      color: var(--text);
+      letter-spacing: -.1px;
+    }
+
+    .dash-card-desc {
+      font-size: .82rem;
+      color: var(--muted);
+      line-height: 1.55;
+      flex: 1;
+    }
+
+    .dash-card-badge {
+      position: absolute;
+      top: 14px;
+      right: 14px;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      font-size: .68rem;
+      font-weight: 700;
+      color: var(--muted);
+      padding: 3px 9px;
+      white-space: nowrap;
+      letter-spacing: .3px;
+    }
+
+    .dash-util-card .dash-card-icon {
+      font-size: 1.4rem;
+    }
+
+    .dash-util-card .dash-card-name {
+      font-size: .95rem;
+    }
+
+    .dash-util-card .dash-card-desc {
+      font-size: .79rem;
+    }
+
+    /* Platform status bar */
+    .dash-status-section {
+      margin-bottom: 36px;
+    }
+
+    .dash-status-label {
+      font-size: .68rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .9px;
+      color: var(--muted);
+      margin-bottom: 14px;
+    }
+
+    .dash-status-pills {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .dash-status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 9px 16px;
+      border-radius: 999px;
+      font-size: .83rem;
+      font-weight: 600;
+      border: 1px solid transparent;
+      transition: box-shadow .2s;
+    }
+
+    .dash-status-pill.healthy {
+      background: rgba(34,197,94,0.1);
+      border-color: rgba(34,197,94,0.25);
+      color: #4ade80;
+      box-shadow: 0 0 12px rgba(34,197,94,0.08);
+    }
+
+    .dash-status-pill.unhealthy {
+      background: rgba(239,68,68,0.1);
+      border-color: rgba(239,68,68,0.25);
+      color: #f87171;
+      box-shadow: 0 0 12px rgba(239,68,68,0.1);
+    }
+
+    .dash-status-pill.loading {
+      background: rgba(113,128,150,0.08);
+      border-color: var(--border);
+      color: var(--muted);
+    }
+
+    .dash-pill-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .dash-status-pill.healthy  .dash-pill-dot { background: #22c55e; box-shadow: 0 0 6px rgba(34,197,94,0.7); }
+    .dash-status-pill.unhealthy .dash-pill-dot { background: #ef4444; box-shadow: 0 0 6px rgba(239,68,68,0.7); }
+    .dash-status-pill.loading  .dash-pill-dot { background: var(--muted); }
+
+    .dash-footer {
+      text-align: center;
+      font-size: .75rem;
+      color: var(--muted);
+      opacity: .6;
+      padding-top: 8px;
+      padding-bottom: 4px;
+    }
+
+    /* =========================================================
        MOBILE
     ========================================================= */
 
@@ -1067,6 +1290,16 @@
 
       table { font-size: .8rem; }
       th, td { padding: 9px 10px; }
+
+      .dash-welcome { padding: 32px 0 28px; }
+      .dash-welcome-title { font-size: 1.6rem; }
+      .dash-nav-grid  { grid-template-columns: 1fr 1fr; }
+      .dash-util-grid { grid-template-columns: 1fr 1fr; }
+    }
+
+    @media (max-width: 520px) {
+      .dash-nav-grid  { grid-template-columns: 1fr; }
+      .dash-util-grid { grid-template-columns: 1fr; }
     }
 
     @media (max-width: 420px) {
@@ -2418,52 +2651,96 @@
 
     <!-- ===================== DASHBOARD ===================== -->
     <div id="page-dashboard" class="page" style="display:none">
-      <div class="page-hd">
-        <div>
-          <div class="page-title">Dashboard</div>
-          <div class="page-subtitle">Platform overview and health</div>
+
+      <!-- Welcome hero -->
+      <div class="dash-welcome">
+        <div class="dash-welcome-title">Custom VoIP Platform</div>
+        <div class="dash-welcome-sub">Manage your voice services, configure call routing, and monitor platform health.</div>
+      </div>
+
+      <!-- Primary navigation cards — 2 rows of 3 -->
+      <div class="dash-nav-grid">
+
+        <div class="dash-nav-card" onclick="navigate('customers')">
+          <span class="dash-card-badge" id="badge-customers">...</span>
+          <div class="dash-card-icon dash-card-icon-blue">@</div>
+          <div class="dash-card-name">Customers</div>
+          <div class="dash-card-desc">Manage customer accounts, balances, and credit limits.</div>
+        </div>
+
+        <div class="dash-nav-card" onclick="navigate('rcf')">
+          <span class="dash-card-badge" id="badge-rcf">...</span>
+          <div class="dash-card-icon dash-card-icon-green">~</div>
+          <div class="dash-card-name">RCF Numbers</div>
+          <div class="dash-card-desc">Configure call forwarding — route any DID to any destination instantly.</div>
+        </div>
+
+        <div class="dash-nav-card" onclick="navigate('api-dids')">
+          <span class="dash-card-badge" id="badge-api-dids">...</span>
+          <div class="dash-card-icon dash-card-icon-purple">&lt;&gt;</div>
+          <div class="dash-card-name">API DIDs</div>
+          <div class="dash-card-desc">Webhook-driven voice. Assign DIDs to your programmable voice applications.</div>
+        </div>
+
+        <div class="dash-nav-card" onclick="navigate('trunks')">
+          <span class="dash-card-badge" id="badge-trunks">...</span>
+          <div class="dash-card-icon dash-card-icon-amber">=</div>
+          <div class="dash-card-name">SIP Trunks</div>
+          <div class="dash-card-desc">Connect PBX systems with IP-authenticated SIP trunks and call paths.</div>
+        </div>
+
+        <div class="dash-nav-card" onclick="navigate('ivr')">
+          <span class="dash-card-badge" id="badge-ivr">...</span>
+          <div class="dash-card-icon dash-card-icon-cyan">&#9654;&#9475;</div>
+          <div class="dash-card-name">IVR Builder</div>
+          <div class="dash-card-desc">Visually design call flows with drag-and-drop — no code required.</div>
+        </div>
+
+        <div class="dash-nav-card" onclick="navigate('rates')">
+          <span class="dash-card-badge" id="badge-rates">...</span>
+          <div class="dash-card-icon dash-card-icon-emerald">$</div>
+          <div class="dash-card-name">Rates &amp; Margins</div>
+          <div class="dash-card-desc">Set per-minute rates, track carrier costs, and monitor margins.</div>
+        </div>
+
+      </div>
+
+      <!-- Utility cards -->
+      <div class="dash-util-grid">
+
+        <div class="dash-util-card" onclick="navigate('tiers')">
+          <div class="dash-card-icon dash-card-icon-muted">*</div>
+          <div class="dash-card-name">CPS Tiers</div>
+          <div class="dash-card-desc">View and manage CPS tier packages for trunks and API calling.</div>
+        </div>
+
+        <div class="dash-util-card" onclick="navigate('sipp')">
+          <div class="dash-card-icon dash-card-icon-muted">&#9654;</div>
+          <div class="dash-card-name">SIPp Testing</div>
+          <div class="dash-card-desc">Run SIP load tests to measure platform capacity and performance.</div>
+        </div>
+
+        <div class="dash-util-card" onclick="navigate('docs')">
+          <div class="dash-card-icon dash-card-icon-muted">?</div>
+          <div class="dash-card-name">API Docs</div>
+          <div class="dash-card-desc">Complete API reference for integrating with the platform.</div>
+        </div>
+
+      </div>
+
+      <!-- Platform status -->
+      <div class="dash-status-section">
+        <div class="dash-status-label">Platform Status</div>
+        <div class="dash-status-pills" id="dash-status-pills">
+          <span class="dash-status-pill loading"><span class="dash-pill-dot"></span>API</span>
+          <span class="dash-status-pill loading"><span class="dash-pill-dot"></span>Database</span>
+          <span class="dash-status-pill loading"><span class="dash-pill-dot"></span>Redis</span>
         </div>
       </div>
 
-      <div class="stats-grid" id="dash-stats">
-        <div class="stat-card">
-          <div class="stat-label">Total Customers</div>
-          <div class="stat-value" id="stat-customers"><span class="spinner"></span></div>
-          <div class="stat-icon">@</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">Active RCF Numbers</div>
-          <div class="stat-value" id="stat-rcf"><span class="spinner"></span></div>
-          <div class="stat-icon">~</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">Active Trunks</div>
-          <div class="stat-value" id="stat-trunks"><span class="spinner"></span></div>
-          <div class="stat-icon">=</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">API DIDs</div>
-          <div class="stat-value" id="stat-api-dids"><span class="spinner"></span></div>
-          <div class="stat-icon">&lt;&gt;</div>
-        </div>
-      </div>
+      <!-- Footer -->
+      <div class="dash-footer">Platform v1.0.0</div>
 
-      <div class="section-grid">
-        <div class="card">
-          <div class="card-title">System Health</div>
-          <div id="health-grid"><div class="state-msg" style="padding:20px"><span class="spinner"></span></div></div>
-        </div>
-        <div class="card">
-          <div class="card-title">Quick Navigation</div>
-          <div style="display:flex;flex-direction:column;gap:8px;margin-top:4px">
-            <button class="btn btn-ghost" style="justify-content:flex-start" onclick="navigate('customers')">@ Manage Customers</button>
-            <button class="btn btn-ghost" style="justify-content:flex-start" onclick="navigate('rcf')">~ RCF Forwarding Numbers</button>
-            <button class="btn btn-ghost" style="justify-content:flex-start" onclick="navigate('api-dids')">&lt;&gt; API DID Webhooks</button>
-            <button class="btn btn-ghost" style="justify-content:flex-start" onclick="navigate('trunks')">=  SIP Trunk Management</button>
-            <button class="btn btn-ghost" style="justify-content:flex-start" onclick="navigate('tiers')">* CPS Tier Configuration</button>
-          </div>
-        </div>
-      </div>
     </div>
 
     <!-- ===================== CUSTOMERS ===================== -->
@@ -3590,65 +3867,92 @@ function closeSidebar() {
 ========================================================= */
 
 async function loadDashboard() {
-  // Fetch counts in parallel
-  try {
-    const [customers, rcf, trunks, apiDids] = await Promise.allSettled([
-      api('GET', '/customers'),
-      api('GET', '/rcf'),
-      api('GET', '/trunks'),
-      api('GET', '/api-dids')
-    ]);
+  // Fetch all counts and health in parallel; failures are handled gracefully
+  const [customers, rcf, apiDids, trunks, health, ivr, rates] = await Promise.allSettled([
+    api('GET', '/customers'),
+    api('GET', '/rcf'),
+    api('GET', '/api-dids'),
+    api('GET', '/trunks'),
+    api('GET', '/health/detailed'),
+    api('GET', '/ivr'),
+    api('GET', '/rates'),
+  ]);
 
-    const val = (r, fallback = '--') => r.status === 'fulfilled' ? r.value.length : fallback;
+  // Helper: extract array length or return null
+  const count = (result) =>
+    result.status === 'fulfilled' && Array.isArray(result.value)
+      ? result.value.length
+      : null;
 
-    document.getElementById('stat-customers').textContent = val(customers);
-    document.getElementById('stat-rcf').textContent      = val(rcf);
-    document.getElementById('stat-trunks').textContent   = val(trunks);
-    document.getElementById('stat-api-dids').textContent = val(apiDids);
-  } catch (_) {}
+  // Update count badges — show "N customers" style text, or hide if unknown
+  const setBadge = (id, n, singular, plural) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    if (n === null) {
+      el.style.display = 'none';
+    } else {
+      el.textContent = `${n} ${n === 1 ? singular : plural}`;
+      el.style.display = '';
+    }
+  };
 
-  // Health
-  try {
-    const health = await api('GET', '/health/detailed');
-    renderHealth(health);
-  } catch (err) {
-    document.getElementById('health-grid').innerHTML =
-      `<div class="state-msg" style="padding:20px"><strong>Health unavailable</strong>${escHtml(err.message)}</div>`;
-  }
+  setBadge('badge-customers', count(customers), 'customer',   'customers');
+  setBadge('badge-rcf',       count(rcf),       'number',     'numbers');
+  setBadge('badge-api-dids',  count(apiDids),   'DID',        'DIDs');
+  setBadge('badge-trunks',    count(trunks),    'trunk',      'trunks');
+  setBadge('badge-ivr',       count(ivr),       'flow',       'flows');
+  setBadge('badge-rates',     count(rates),     'rate',       'rates');
+
+  // Render status pills
+  renderDashboardStatus(health.status === 'fulfilled' ? health.value : null);
 }
 
-function renderHealth(health) {
-  const grid = document.getElementById('health-grid');
-  if (!health || typeof health !== 'object') {
-    grid.innerHTML = '<div class="state-msg" style="padding:20px">No health data available</div>';
-    return;
-  }
+function renderDashboardStatus(health) {
+  const container = document.getElementById('dash-status-pills');
+  if (!container) return;
 
-  // Flatten: show individual components instead of the nested object
-  const entries = [];
-  for (const [key, val] of Object.entries(health)) {
-    if (key === 'components' && val && typeof val === 'object') {
-      for (const [cKey, cVal] of Object.entries(val)) {
-        entries.push([cKey, cVal]);
+  // Determine whether a named component is healthy
+  const isHealthy = (val) =>
+    val === true || val === 'ok' || val === 'healthy' || val === 'up';
+
+  // Extract top-level components from the health response.
+  // The response may look like: { status: 'ok', components: { api: 'ok', db: 'ok', redis: 'ok' } }
+  // or it may be a flat object. We look for known keys in both places.
+  const lookupComponent = (name, aliases = []) => {
+    if (!health || typeof health !== 'object') return null;
+
+    const candidates = [name, ...aliases];
+    // Check components sub-object first
+    const comps = health.components;
+    if (comps && typeof comps === 'object') {
+      for (const key of candidates) {
+        if (key in comps) return isHealthy(comps[key]);
       }
-    } else {
-      entries.push([key, val]);
     }
-  }
+    // Fall back to top-level keys
+    for (const key of candidates) {
+      if (key in health) return isHealthy(health[key]);
+    }
+    // If overall status is known, surface that for the API pill
+    if (name === 'api' && 'status' in health) return isHealthy(health.status);
+    return null;
+  };
 
-  const rows = entries.map(([key, val]) => {
-    const ok = val === 'ok' || val === true || val === 'healthy' || val === 'up';
-    const dotClass = ok ? 'ok' : 'err';
-    const statusText = typeof val === 'string' ? val : (ok ? 'ok' : 'degraded');
+  const pillData = [
+    { label: 'API',      healthy: lookupComponent('api',      ['api_server', 'server']) },
+    { label: 'Database', healthy: lookupComponent('database', ['db', 'postgres', 'sql']) },
+    { label: 'Redis',    healthy: lookupComponent('redis',    ['cache', 'redis_cache']) },
+  ];
+
+  container.innerHTML = pillData.map(({ label, healthy }) => {
+    const stateClass = healthy === null ? 'loading' : (healthy ? 'healthy' : 'unhealthy');
+    const statusText = healthy === null ? 'Checking...' : (healthy ? 'Healthy' : 'Degraded');
     return `
-      <div class="health-row">
-        <span class="health-name">${escHtml(key)}</span>
-        <span class="health-status-text">${escHtml(statusText)}</span>
-        <span class="health-dot ${dotClass}"></span>
-      </div>`;
-  });
-
-  grid.innerHTML = `<div class="health-grid">${rows.join('')}</div>`;
+      <span class="dash-status-pill ${stateClass}">
+        <span class="dash-pill-dot"></span>
+        ${escHtml(label)}: ${escHtml(statusText)}
+      </span>`;
+  }).join('');
 }
 
 /* =========================================================
