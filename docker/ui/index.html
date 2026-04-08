@@ -8555,9 +8555,12 @@ async function testAllCarriers() {
 
 function loadHomerTab() {
   // Load Homer UI into iframe on first tab activation
+  // Homer runs on port 9080 on the same host
   const iframe = document.getElementById('homer-iframe');
-  if (iframe && iframe.src === 'about:blank') {
-    iframe.src = '/homer/';
+  if (iframe && (iframe.src === 'about:blank' || !iframe.src.includes('9080'))) {
+    // Use the same hostname but port 9080 where Homer is exposed
+    const homerUrl = window.location.protocol + '//' + window.location.hostname + ':9080';
+    iframe.src = homerUrl;
   }
 }
 
