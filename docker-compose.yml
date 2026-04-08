@@ -188,79 +188,25 @@ services:
         hard: 65536
     restart: unless-stopped
 
-  # Homer SIP Capture Server (heplify-server)
-  # Receives HEP packets from Kamailio and stores SIP traces in PostgreSQL
-  # Default login: admin / admin
-  homer-db:
-    image: postgres:16-alpine
-    container_name: voip-homer-db
-    environment:
-      POSTGRES_DB: homer
-      POSTGRES_USER: homer
-      POSTGRES_PASSWORD: homer_secret
-    volumes:
-      - homer_db_data:/var/lib/postgresql/data
-    networks:
-      - voip-network
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U homer -d homer"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-    deploy:
-      resources:
-        limits:
-          cpus: '0.5'
-          memory: 512M
-    restart: unless-stopped
-
-  homer-server:
-    image: sipcapture/heplify-server:latest
-    container_name: voip-homer-server
+  # Homer SIP Monitoring — all-in-one container
+  # Includes: PostgreSQL, heplify-server (HEP capture), and web UI
+  # Default login: admin / sipcapture
+  homer:
+    image: sipcapture/homer-docker:latest
+    container_name: voip-homer
     ports:
+      - "9080:80"         # Web UI
       - "9060:9060/udp"   # HEP UDP
       - "9060:9060/tcp"   # HEP TCP
-    environment:
-      - HEPLIFYSERVER_HEPADDR=0.0.0.0:9060
-      - HEPLIFYSERVER_DBSHEMA=homer7
-      - HEPLIFYSERVER_DBDRIVER=postgres
-      - HEPLIFYSERVER_DBADDR=homer-db:5432
-      - HEPLIFYSERVER_DBUSER=homer
-      - HEPLIFYSERVER_DBPASS=homer_secret
-      - HEPLIFYSERVER_DBDATATABLE=homer_data
-      - HEPLIFYSERVER_DBCONFTABLE=homer_config
-      - HEPLIFYSERVER_DBDROPDAYS=14
-      - HEPLIFYSERVER_LOGLVL=info
-      - HEPLIFYSERVER_LOGSTD=true
-    depends_on:
-      homer-db:
-        condition: service_healthy
-    networks:
-      - voip-network
-    restart: unless-stopped
-
-  homer-ui:
-    image: sipcapture/homer-webapp:latest
-    container_name: voip-homer-ui
-    ports:
-      - "9080:80"
-    environment:
-      - DB_HOST=homer-db
-      - DB_USER=homer
-      - DB_PASS=homer_secret
-      - DB_PORT=5432
-    depends_on:
-      homer-db:
-        condition: service_healthy
-      homer-server:
-        condition: service_started
+    volumes:
+      - homer_db_data:/var/lib/postgresql/16/main
     networks:
       - voip-network
     deploy:
       resources:
         limits:
-          cpus: '0.5'
-          memory: 256M
+          cpus: '1'
+          memory: 1G
     restart: unless-stopped
 
   # Webhook test server
