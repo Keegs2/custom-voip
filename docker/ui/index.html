@@ -1877,34 +1877,48 @@
       margin: 0 auto;
     }
 
-    /* Drop zone between nodes */
+    /* Drop zone between nodes — generous hit area */
     .ivr-drop-zone {
-      height: 6px;
-      margin: 0 auto;
+      min-height: 36px;
+      margin: 4px auto;
       width: calc(100% - 24px);
-      border-radius: 3px;
+      border-radius: 6px;
       background: transparent;
-      transition: background .15s, height .15s;
+      border: 2px dashed transparent;
+      transition: all .15s;
       position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
     }
 
     .ivr-drop-zone::before {
-      content: '';
-      position: absolute;
-      inset: 0;
-      border-radius: 3px;
-      background: var(--border);
-      opacity: 0;
-      transition: opacity .15s;
+      content: 'Drop verb here';
+      font-size: 11px;
+      color: transparent;
+      transition: color .15s;
     }
 
     .ivr-drop-zone.drag-over {
-      height: 14px;
-      background: rgba(59,130,246,.18);
-      box-shadow: 0 0 12px rgba(59,130,246,.35);
+      min-height: 48px;
+      background: rgba(59,130,246,.12);
+      border-color: rgba(59,130,246,.5);
+      box-shadow: 0 0 15px rgba(59,130,246,.25);
     }
 
-    .ivr-drop-zone.drag-over::before { opacity: 0; }
+    .ivr-drop-zone.drag-over::before {
+      color: rgba(59,130,246,.7);
+    }
+
+    /* Show dashed border hint when ANY drag is active */
+    .ivr-canvas-wrap.dragging .ivr-drop-zone {
+      border-color: rgba(59,130,246,.2);
+      background: rgba(59,130,246,.04);
+    }
+
+    .ivr-canvas-wrap.dragging .ivr-drop-zone::before {
+      color: var(--muted);
+    }
 
     /* Connector line */
     .ivr-connector {
@@ -3300,7 +3314,7 @@
     <div class="ivr-palette">
       <div class="ivr-palette-label">Verb Palette</div>
       <div class="palette-verb" data-verb="say" draggable="true"
-           ondragstart="ivrPaletteDragStart(event,'say')">
+           ondragstart="ivrPaletteDragStart(event,'say')" ondragend="ivrDragDeactivate()">
         <span class="palette-verb-icon">A</span>
         <div class="palette-verb-body">
           <span class="palette-verb-name">Say</span>
@@ -3308,7 +3322,7 @@
         </div>
       </div>
       <div class="palette-verb" data-verb="play" draggable="true"
-           ondragstart="ivrPaletteDragStart(event,'play')">
+           ondragstart="ivrPaletteDragStart(event,'play')" ondragend="ivrDragDeactivate()">
         <span class="palette-verb-icon">&#9834;</span>
         <div class="palette-verb-body">
           <span class="palette-verb-name">Play</span>
@@ -3316,7 +3330,7 @@
         </div>
       </div>
       <div class="palette-verb" data-verb="gather" draggable="true"
-           ondragstart="ivrPaletteDragStart(event,'gather')">
+           ondragstart="ivrPaletteDragStart(event,'gather')" ondragend="ivrDragDeactivate()">
         <span class="palette-verb-icon">#</span>
         <div class="palette-verb-body">
           <span class="palette-verb-name">Gather</span>
@@ -3324,7 +3338,7 @@
         </div>
       </div>
       <div class="palette-verb" data-verb="dial" draggable="true"
-           ondragstart="ivrPaletteDragStart(event,'dial')">
+           ondragstart="ivrPaletteDragStart(event,'dial')" ondragend="ivrDragDeactivate()">
         <span class="palette-verb-icon">&#9742;</span>
         <div class="palette-verb-body">
           <span class="palette-verb-name">Dial</span>
@@ -3332,7 +3346,7 @@
         </div>
       </div>
       <div class="palette-verb" data-verb="hangup" draggable="true"
-           ondragstart="ivrPaletteDragStart(event,'hangup')">
+           ondragstart="ivrPaletteDragStart(event,'hangup')" ondragend="ivrDragDeactivate()">
         <span class="palette-verb-icon">X</span>
         <div class="palette-verb-body">
           <span class="palette-verb-name">Hangup</span>
@@ -3340,7 +3354,7 @@
         </div>
       </div>
       <div class="palette-verb" data-verb="pause" draggable="true"
-           ondragstart="ivrPaletteDragStart(event,'pause')">
+           ondragstart="ivrPaletteDragStart(event,'pause')" ondragend="ivrDragDeactivate()">
         <span class="palette-verb-icon">&#9646;&#9646;</span>
         <div class="palette-verb-body">
           <span class="palette-verb-name">Pause</span>
@@ -5834,11 +5848,22 @@ function ivrUpdateConfig(nodeId, key, value) {
 
 // --------------- Drag and Drop ---------------
 
+function ivrDragActivate() {
+  const canvas = document.querySelector('.ivr-canvas-wrap');
+  if (canvas) canvas.classList.add('dragging');
+}
+
+function ivrDragDeactivate() {
+  const canvas = document.querySelector('.ivr-canvas-wrap');
+  if (canvas) canvas.classList.remove('dragging');
+}
+
 function ivrPaletteDragStart(event, verb) {
   ivrDragVerb = verb;
   ivrDragNodeId = null;
   event.dataTransfer.setData('text/plain', 'verb:' + verb);
   event.dataTransfer.effectAllowed = 'copy';
+  ivrDragActivate();
 }
 
 function ivrNodeDragStart(event, nodeId) {
@@ -5846,11 +5871,13 @@ function ivrNodeDragStart(event, nodeId) {
   ivrDragVerb = null;
   event.dataTransfer.setData('text/plain', 'node:' + nodeId);
   event.dataTransfer.effectAllowed = 'move';
+  ivrDragActivate();
 }
 
 function ivrNodeDragEnd(event) {
   ivrDragNodeId = null;
   ivrDragVerb = null;
+  ivrDragDeactivate();
 }
 
 function ivrDropZoneDragOver(event) {
@@ -5866,6 +5893,7 @@ function ivrDropZoneDragLeave(event) {
 function ivrDropZoneDrop(event) {
   event.preventDefault();
   this.classList.remove('drag-over');
+  ivrDragDeactivate();
 
   const path     = this.dataset.path;
   const position = parseInt(this.dataset.position, 10);
