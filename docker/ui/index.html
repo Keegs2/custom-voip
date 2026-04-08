@@ -3350,7 +3350,11 @@
   </div>
 
   <div class="sidebar-nav">
-    <div class="nav-section-label">Products</div>
+    <a class="nav-item nav-item-admin" data-page="admin" onclick="navigate('admin')" style="margin-top:8px;margin-bottom:4px">
+      <span class="nav-icon">&#9881;</span> Administration
+    </a>
+
+    <div class="nav-section-label" style="margin-top:8px">Products</div>
     <a class="nav-item" data-page="rcf" onclick="navigate('rcf')">
       <span class="nav-icon">~</span> RCF
     </a>
@@ -3362,11 +3366,6 @@
     </a>
     <a class="nav-item" data-page="ivr" onclick="navigate('ivr')">
       <span class="nav-icon">&#9654;&#9475;</span> IVR Builder
-    </a>
-
-    <div class="nav-section-label">Tools</div>
-    <a class="nav-item" data-page="sipp" onclick="navigate('sipp')">
-      <span class="nav-icon">&#9654;</span> SIPp Testing
     </a>
     <a class="nav-item" data-page="docs" onclick="navigate('docs')">
       <span class="nav-icon">?</span> API Docs
@@ -3388,8 +3387,68 @@
   <!-- PAGE CONTAINER -->
   <div id="page-container">
 
-    <!-- ===================== DASHBOARD ===================== -->
+    <!-- ===================== HOMEPAGE ===================== -->
     <div id="page-dashboard" class="page" style="display:none">
+
+      <!-- Welcome header -->
+      <div class="dash-welcome">
+        <div class="dash-welcome-title">Custom <span style="color:var(--accent)">VoIP</span> Platform</div>
+        <div class="dash-welcome-sub">Unified voice infrastructure — remote call forwarding, programmable calling, SIP trunks, and platform administration.</div>
+      </div>
+
+      <!-- Platform health -->
+      <div class="dash-status-section">
+        <div class="dash-status-label">Platform Health</div>
+        <div class="dash-status-pills" id="dash-home-status-pills">
+          <span class="dash-status-pill loading"><span class="dash-pill-dot"></span>API</span>
+          <span class="dash-status-pill loading"><span class="dash-pill-dot"></span>Database</span>
+          <span class="dash-status-pill loading"><span class="dash-pill-dot"></span>Redis</span>
+        </div>
+      </div>
+
+      <!-- Navigation cards — Row 1 -->
+      <div class="dash-nav-grid">
+        <div class="dash-nav-card" onclick="navigate('admin')" style="border-color:rgba(59,130,246,.3)">
+          <div class="dash-card-icon dash-card-icon-blue">&#9881;</div>
+          <div class="dash-card-name">Administration</div>
+          <div class="dash-card-desc">Manage customers, billing, rates, and platform configuration.</div>
+        </div>
+        <div class="dash-nav-card" onclick="navigate('rcf')">
+          <div class="dash-card-icon dash-card-icon-green">~</div>
+          <div class="dash-card-name">RCF</div>
+          <div class="dash-card-desc">Remote Call Forwarding — route DIDs to any destination.</div>
+        </div>
+        <div class="dash-nav-card" onclick="navigate('api-dids')">
+          <div class="dash-card-icon dash-card-icon-purple">&lt;&gt;</div>
+          <div class="dash-card-name">API Calling</div>
+          <div class="dash-card-desc">Programmable voice with webhook-driven call control.</div>
+        </div>
+        <div class="dash-nav-card" onclick="navigate('trunks')">
+          <div class="dash-card-icon dash-card-icon-emerald">=</div>
+          <div class="dash-card-name">SIP Trunks</div>
+          <div class="dash-card-desc">Connect PBX systems with IP-authenticated trunks.</div>
+        </div>
+      </div>
+
+      <!-- Navigation cards — Row 2 -->
+      <div class="dash-util-grid">
+        <div class="dash-util-card" onclick="navigate('ivr')">
+          <div class="dash-card-icon dash-card-icon-amber">&#9654;&#9475;</div>
+          <div class="dash-card-name">IVR Builder</div>
+          <div class="dash-card-desc">Design call flows visually with drag-and-drop.</div>
+        </div>
+        <div class="dash-util-card" onclick="navigate('docs')">
+          <div class="dash-card-icon dash-card-icon-cyan">?</div>
+          <div class="dash-card-name">API Docs</div>
+          <div class="dash-card-desc">Complete API reference and integration guide.</div>
+        </div>
+      </div>
+
+      <div class="dash-footer">Custom VoIP Platform</div>
+    </div>
+
+    <!-- ===================== ADMIN ===================== -->
+    <div id="page-admin" class="page" style="display:none">
 
       <!-- Platform health bar — always visible -->
       <div class="dash-health-bar">
@@ -3407,6 +3466,7 @@
         <button class="dash-tab-btn" id="dash-tab-btn-cdrs"      onclick="switchDashTab('cdrs')">CDRs</button>
         <button class="dash-tab-btn" id="dash-tab-btn-rates"     onclick="switchDashTab('rates')">Rates</button>
         <button class="dash-tab-btn" id="dash-tab-btn-tiers"     onclick="switchDashTab('tiers')">Tiers</button>
+        <button class="dash-tab-btn" id="dash-tab-btn-sipp"      onclick="switchDashTab('sipp')">SIPp Testing</button>
       </div>
 
       <!-- Tab: Customers -->
@@ -3677,6 +3737,66 @@
         </div>
       </div>
 
+      <!-- Tab: SIPp Testing -->
+      <div class="dash-tab-pane" id="dash-tab-sipp">
+        <div class="page-hd">
+          <div>
+            <div class="page-title">SIPp <span>Testing</span></div>
+            <div class="page-subtitle">Load test the platform with configurable SIP call scenarios</div>
+          </div>
+        </div>
+
+        <!-- PRESETS -->
+        <div class="section-heading" style="margin-bottom:14px">Test Presets</div>
+        <div id="sipp-preset-grid" class="preset-grid">
+          <div class="state-msg" style="grid-column:1/-1;padding:32px"><span class="spinner"></span></div>
+        </div>
+
+        <!-- CUSTOM TEST -->
+        <div class="collapsible-header" id="sipp-custom-header" onclick="toggleSippCustom()">
+          <span class="collapsible-title">Custom Test Configuration</span>
+          <span class="collapsible-chevron">&#x25BC;</span>
+        </div>
+        <div class="collapsible-body" id="sipp-custom-body">
+          <div class="form-grid" style="grid-template-columns:repeat(auto-fill,minmax(200px,1fr))">
+            <div class="form-group">
+              <label class="form-label">Target Number</label>
+              <input class="form-control" id="sipp-target" type="text" value="9196" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">CPS Rate</label>
+              <input class="form-control" id="sipp-rate" type="number" value="100" min="1" max="500" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Total Calls</label>
+              <input class="form-control" id="sipp-calls" type="number" value="1000" min="1" max="10000" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Timeout (s)</label>
+              <input class="form-control" id="sipp-timeout" type="number" value="60" min="5" max="120" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Call Duration (ms, 0 = immediate hangup)</label>
+              <input class="form-control" id="sipp-duration" type="number" value="0" min="0" max="30000" />
+            </div>
+          </div>
+          <div class="form-footer">
+            <button class="btn btn-primary" id="sipp-custom-run-btn" onclick="runCustomSippTest()">Run Custom Test</button>
+          </div>
+        </div>
+
+        <!-- RESULTS -->
+        <div class="section-heading" style="margin-top:28px;margin-bottom:14px">Results</div>
+        <div class="sipp-results-area" id="sipp-results-area">
+          <div class="card">
+            <div class="state-msg" style="padding:32px 16px">
+              <strong>No tests run yet</strong>
+              Select a preset above or configure a custom test to begin.
+            </div>
+          </div>
+        </div>
+      </div>
+
     </div>
 
     <!-- ===================== RCF ===================== -->
@@ -3730,66 +3850,6 @@
       </div>
     </div>
 
-
-    <!-- ===================== SIPP TESTING ===================== -->
-    <div id="page-sipp" class="page" style="display:none">
-      <div class="page-hd">
-        <div>
-          <div class="page-title">SIPp <span>Testing</span></div>
-          <div class="page-subtitle">Load test the platform with configurable SIP call scenarios</div>
-        </div>
-      </div>
-
-      <!-- PRESETS -->
-      <div class="section-heading" style="margin-bottom:14px">Test Presets</div>
-      <div id="sipp-preset-grid" class="preset-grid">
-        <div class="state-msg" style="grid-column:1/-1;padding:32px"><span class="spinner"></span></div>
-      </div>
-
-      <!-- CUSTOM TEST -->
-      <div class="collapsible-header" id="sipp-custom-header" onclick="toggleSippCustom()">
-        <span class="collapsible-title">Custom Test Configuration</span>
-        <span class="collapsible-chevron">&#x25BC;</span>
-      </div>
-      <div class="collapsible-body" id="sipp-custom-body">
-        <div class="form-grid" style="grid-template-columns:repeat(auto-fill,minmax(200px,1fr))">
-          <div class="form-group">
-            <label class="form-label">Target Number</label>
-            <input class="form-control" id="sipp-target" type="text" value="9196" />
-          </div>
-          <div class="form-group">
-            <label class="form-label">CPS Rate</label>
-            <input class="form-control" id="sipp-rate" type="number" value="100" min="1" max="500" />
-          </div>
-          <div class="form-group">
-            <label class="form-label">Total Calls</label>
-            <input class="form-control" id="sipp-calls" type="number" value="1000" min="1" max="10000" />
-          </div>
-          <div class="form-group">
-            <label class="form-label">Timeout (s)</label>
-            <input class="form-control" id="sipp-timeout" type="number" value="60" min="5" max="120" />
-          </div>
-          <div class="form-group">
-            <label class="form-label">Call Duration (ms, 0 = immediate hangup)</label>
-            <input class="form-control" id="sipp-duration" type="number" value="0" min="0" max="30000" />
-          </div>
-        </div>
-        <div class="form-footer">
-          <button class="btn btn-primary" id="sipp-custom-run-btn" onclick="runCustomSippTest()">Run Custom Test</button>
-        </div>
-      </div>
-
-      <!-- RESULTS -->
-      <div class="section-heading" style="margin-top:28px;margin-bottom:14px">Results</div>
-      <div class="sipp-results-area" id="sipp-results-area">
-        <div class="card">
-          <div class="state-msg" style="padding:32px 16px">
-            <strong>No tests run yet</strong>
-            Select a preset above or configure a custom test to begin.
-          </div>
-        </div>
-      </div>
-    </div>
 
     <!-- ===================== API DOCS ===================== -->
     <div id="page-docs" class="page" style="display:none">
@@ -4463,30 +4523,31 @@ function toggleCreateSection(id) {
 ========================================================= */
 
 const PAGE_TITLES = {
-  dashboard: 'Dashboard',
-  customers: 'Dashboard',
-  cdrs:      'Dashboard',
-  tiers:     'Dashboard',
-  rates:     'Dashboard',
+  dashboard: 'Home',
+  admin:     'Administration',
+  customers: 'Administration',
+  cdrs:      'Administration',
+  tiers:     'Administration',
+  rates:     'Administration',
+  sipp:      'Administration',
   rcf:       'RCF',
   'api-dids':'API Calling',
   trunks:    'SIP Trunks',
   ivr:       'IVR Builder',
-  sipp:      'SIPp Testing',
   docs:      'API Docs'
 };
 
-// Admin tabs that live inside the dashboard
-const DASH_TAB_PAGES = new Set(['customers', 'cdrs', 'rates', 'tiers']);
+// Admin tabs that live inside the admin page
+const ADMIN_TAB_PAGES = new Set(['customers', 'cdrs', 'rates', 'tiers', 'sipp']);
 
 let currentPage = null;
 
 function navigate(page) {
-  // Redirect admin sub-pages into dashboard with the right tab active
-  if (DASH_TAB_PAGES.has(page)) {
+  // Redirect admin sub-pages into the admin page with the right tab active
+  if (ADMIN_TAB_PAGES.has(page)) {
     const tab = page;
-    // Navigate to dashboard first (only calls loadDashboard if not already there)
-    _navigateTo('dashboard');
+    // Navigate to admin first (only calls loadAdmin if not already there)
+    _navigateTo('admin');
     switchDashTab(tab);
     // Update hash to the logical destination so deep links work
     if (location.hash !== '#' + tab) {
@@ -4504,7 +4565,8 @@ function _navigateTo(page) {
   // Close mobile sidebar
   closeSidebar();
 
-  // Update nav items — dashboard is never highlighted (no sidebar item for it)
+  // Update nav items
+  // dashboard has no sidebar item, admin does — highlight 'admin' for the admin page
   document.querySelectorAll('.nav-item').forEach(el => {
     el.classList.toggle('active', el.dataset.page === page);
   });
@@ -4538,23 +4600,23 @@ function _navigateTo(page) {
   // Load page data
   switch (page) {
     case 'dashboard':
-      // Reset tab-loaded flags so returning to dashboard always re-fetches health
-      // but keeps tabs lazy (only reload if the tab is actually switched to)
-      loadDashboard();
+      loadHomepage();
+      break;
+    case 'admin':
+      loadAdmin();
       break;
     case 'rcf':       loadRCF();       break;
     case 'api-dids':  loadApiDids();   break;
     case 'trunks':    loadTrunks();    break;
     case 'ivr':       loadIvrPage();   break;
-    case 'sipp':      loadSippPage();  break;
     case 'docs':      /* static page, no data fetch needed */ break;
   }
 }
 
 window.addEventListener('hashchange', () => {
   const hash = (location.hash || '').replace('#', '') || 'dashboard';
-  // If it's a dash tab, we don't need to reset currentPage for the dashboard itself
-  if (DASH_TAB_PAGES.has(hash)) {
+  // If it's an admin sub-tab, we don't need to reset currentPage for the admin page itself
+  if (ADMIN_TAB_PAGES.has(hash)) {
     navigate(hash);
   } else {
     currentPage = null; // force reload
@@ -4573,10 +4635,30 @@ function closeSidebar() {
 }
 
 /* =========================================================
-   DASHBOARD
+   HOMEPAGE
 ========================================================= */
 
-async function loadDashboard() {
+async function loadHomepage() {
+  // Load platform health status for the homepage pills
+  const healthResult = await Promise.allSettled([
+    api('GET', '/health/detailed'),
+  ]);
+  renderHomepageStatus(
+    healthResult[0].status === 'fulfilled' ? healthResult[0].value : null
+  );
+}
+
+function renderHomepageStatus(health) {
+  const container = document.getElementById('dash-home-status-pills');
+  if (!container) return;
+  renderStatusPills(container, health);
+}
+
+/* =========================================================
+   ADMIN PAGE
+========================================================= */
+
+async function loadAdmin() {
   // Load platform health status
   const healthResult = await Promise.allSettled([
     api('GET', '/health/detailed'),
@@ -4599,7 +4681,7 @@ async function loadDashboard() {
 const dashTabLoaded = {};
 
 function switchDashTab(tab) {
-  const tabs = ['customers', 'cdrs', 'rates', 'tiers'];
+  const tabs = ['customers', 'cdrs', 'rates', 'tiers', 'sipp'];
   if (!tabs.includes(tab)) tab = 'customers';
 
   // Update tab button styles
@@ -4622,12 +4704,13 @@ function switchDashTab(tab) {
       case 'cdrs':      loadCdrsPage();   break;
       case 'rates':     loadRatesPage();  break;
       case 'tiers':     loadTiers();      break;
+      case 'sipp':      loadSippPage();   break;
     }
   }
 }
 
-function renderDashboardStatus(health) {
-  const container = document.getElementById('dash-status-pills');
+// Shared helper — renders health pills into any container element
+function renderStatusPills(container, health) {
   if (!container) return;
 
   // Determine whether a named component is healthy
@@ -4672,6 +4755,10 @@ function renderDashboardStatus(health) {
         ${escHtml(label)}: ${escHtml(statusText)}
       </span>`;
   }).join('');
+}
+
+function renderDashboardStatus(health) {
+  renderStatusPills(document.getElementById('dash-status-pills'), health);
 }
 
 /* =========================================================
