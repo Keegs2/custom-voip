@@ -26,14 +26,28 @@
     <!-- RTP binding -->
     <param name="rtp-ip" value="$${local_ip_v4}"/>
 
-    <!-- External IP for SDP (set to public IP in production) -->
-    <!-- In Docker: use host IP or configure ext-rtp-ip via env var -->
-    <param name="ext-rtp-ip" value="auto-nat"/>
-    <param name="ext-sip-ip" value="auto-nat"/>
+    <!-- External IP for SDP and SIP headers -->
+    <!--
+      CRITICAL: FreeSWITCH inside Docker sees its local IP as 172.28.x.x.
+      auto-nat fails in Docker (resolves to the container IP, not the host's
+      public IP). When FreeSWITCH originates the B-leg INVITE through Kamailio
+      to Bandwidth, the Via, Contact, and SDP must show the public IP.
 
-    <!-- Force external IP if behind NAT (uncomment and set in production) -->
-    <!-- <param name="ext-rtp-ip" value="$${external_ip}"/> -->
-    <!-- <param name="ext-sip-ip" value="$${external_ip}"/> -->
+      ext-rtp-ip: Controls the IP in SDP c= and m= lines (where RTP goes).
+      ext-sip-ip: Controls the IP in Via, Contact headers for outbound requests.
+
+      Both are set to $${external_sip_ip} which is populated from the
+      EXTERNAL_SIP_IP environment variable (defaults to auto-nat).
+      In production docker-compose.yml, EXTERNAL_SIP_IP=34.74.71.32.
+
+      This reduces (but does not eliminate) the cleanup Kamailio must do.
+      Kamailio still scrubs as defense-in-depth because:
+      - Gateway Contact still uses the profile's sip-ip (local Docker IP)
+        for the "gw+gateway_name@" format regardless of ext-sip-ip
+      - Other modules may inject Docker IPs
+    -->
+    <param name="ext-rtp-ip" value="$${external_rtp_ip}"/>
+    <param name="ext-sip-ip" value="$${external_sip_ip}"/>
 
     <!-- ============================================ -->
     <!-- TLS CONFIGURATION                           -->
