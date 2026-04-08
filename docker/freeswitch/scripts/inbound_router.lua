@@ -391,14 +391,14 @@ if product_type == "rcf" then
         ))
     else
         -- PSTN/CARRIER ROUTING via Kamailio proxy (no gateway syntax)
-        -- Using sofia/internal/dest@proxy produces clean SIP headers:
-        --   - No sip:gw+carrier@... Contact corruption
-        --   - Via/Contact use ext-sip-ip (public IP) properly
-        --   - X-Carrier header tells Kamailio which Bandwidth IP to use
+        -- Using sofia/external/dest@proxy ensures the outbound INVITE uses
+        -- ext-sip-ip (public IP 34.74.71.32) in Via, Contact, and SDP.
+        -- The internal profile does NOT apply ext-sip-ip to outbound calls.
+        -- X-Carrier header tells Kamailio which Bandwidth IP to use.
         set_var("carrier_used", "carrier_" .. carrier)
 
         dial_string = string.format(
-            "{ignore_early_media=false,call_timeout=%d,sip_h_X-Carrier=%s}sofia/internal/%s@172.28.0.1:5060",
+            "{ignore_early_media=false,call_timeout=%d,sip_h_X-Carrier=%s}sofia/external/%s@172.28.0.1:5060",
             ring_timeout, carrier, forward_to
         )
 
@@ -436,7 +436,7 @@ if product_type == "rcf" then
         set_var("carrier_used", "carrier_backup")
 
         local failover_dial = string.format(
-            "{ignore_early_media=false,call_timeout=%d,sip_h_X-Carrier=backup}sofia/internal/%s@172.28.0.1:5060",
+            "{ignore_early_media=false,call_timeout=%d,sip_h_X-Carrier=backup}sofia/external/%s@172.28.0.1:5060",
             ring_timeout, forward_to
         )
         if not pass_caller_id then

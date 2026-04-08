@@ -334,11 +334,12 @@ if not outbound_caller_id or outbound_caller_id == "" then
 end
 
 -- Build dial string with proper parameters
--- Use sofia/internal/dest@proxy instead of sofia/gateway/carrier/dest to produce
--- clean SIP headers (no sip:gw+ Contact corruption). X-Carrier tells Kamailio
--- which Bandwidth IP to route to.
+-- Use sofia/external/dest@proxy to ensure the outbound INVITE uses ext-sip-ip
+-- (public IP 34.74.71.32) in Via, Contact, and SDP headers.
+-- The internal profile does NOT apply ext-sip-ip to outbound calls.
+-- X-Carrier tells Kamailio which Bandwidth IP to route to.
 local dial_string = string.format(
-    "{origination_caller_id_number=%s,call_timeout=60,ignore_early_media=false,sip_h_X-Carrier=standard}sofia/internal/%s@172.28.0.1:5060",
+    "{origination_caller_id_number=%s,call_timeout=60,ignore_early_media=false,sip_h_X-Carrier=standard}sofia/external/%s@172.28.0.1:5060",
     outbound_caller_id,
     normalized_dest:gsub("^%+", "")  -- Remove + for carrier (carrier-dependent)
 )
@@ -372,7 +373,7 @@ if bridge_result ~= "SUCCESS" then
         freeswitch.consoleLog("INFO", "[" .. uuid .. "] Trying failover carrier\n")
 
         dial_string = string.format(
-            "{origination_caller_id_number=%s,call_timeout=60,sip_h_X-Carrier=backup}sofia/internal/%s@172.28.0.1:5060",
+            "{origination_caller_id_number=%s,call_timeout=60,sip_h_X-Carrier=backup}sofia/external/%s@172.28.0.1:5060",
             outbound_caller_id,
             normalized_dest:gsub("^%+", "")
         )

@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  External SIP Profile - Carrier-Facing Outbound Calls
+  This profile handles all outbound calls to carriers via Kamailio.
+
+  Why a separate profile?
+  The internal profile does NOT apply ext-sip-ip and ext-rtp-ip to
+  outbound calls. Per FreeSWITCH design:
+    - Internal profile: uses sip-ip (Docker 172.28.x.x) for Contact/Via on outbound
+    - External profile: uses ext-sip-ip (public IP) for Contact/Via on outbound
+
+  By bridging with sofia/external/dest@proxy instead of sofia/internal/dest@proxy,
+  the outbound INVITE will have the public IP (34.74.71.32) in:
+    - Contact header (ext-sip-ip)
+    - Via header (ext-sip-ip)
+    - SDP c=/m= lines (ext-rtp-ip)
+
+  Architecture:
+    Kamailio -> FreeSWITCH internal profile (:5080) - receives inbound calls
+    FreeSWITCH external profile (:5090) -> Kamailio -> Bandwidth - sends outbound calls
+
+  References:
+    - https://developer.signalwire.com/freeswitch/FreeSWITCH-Explained/Configuration/Sofia-SIP-Stack/External-Profile_13173235/
+    - https://developer.signalwire.com/freeswitch/FreeSWITCH-Explained/Configuration/Sofia-SIP-Stack/Outbound_profile_13174013/
+-->
+<profile name="external">
+  <settings>
+    <!-- ============================================ -->
+    <!-- NETWORK CONFIGURATION                       -->
+    <!-- ============================================ -->
+
+    <!-- Listen on port 5090 for outbound calls -->
+    <param name="sip-ip" value="$${local_ip_v4}"/>
+    <param name="sip-port" value="5090"/>
+    <param name="rtp-ip" value="$${local_ip_v4}"/>
+
+    <!-- CRITICAL: External profile uses ext-sip-ip and ext-rtp-ip -->
+    <!-- These control the IP in outbound Via, Contact, and SDP -->
+    <param name="ext-rtp-ip" value="$${external_rtp_ip}"/>
+    <param name="ext-sip-ip" value="$${external_sip_ip}"/>
+
+    <!-- ============================================ -->
+    <!-- DIALPLAN CONFIGURATION                      -->
+    <!-- ============================================ -->
+
+    <!-- Context for any inbound on this profile (shouldn't happen) -->
+    <param name="context" value="public"/>
+    <param name="dialplan" value="XML"/>
+
+    <!-- ============================================ -->
+    <!-- CODEC CONFIGURATION                         -->
+    <!-- ============================================ -->
+
+    <param name="inbound-codec-prefs" value="PCMU,PCMA"/>
+    <param name="outbound-codec-prefs" value="PCMU,PCMA"/>
+    <param name="inbound-codec-negotiation" value="greedy"/>
+
+    <!-- ============================================ -->
+    <!-- AUTHENTICATION / SECURITY                   -->
+    <!-- ============================================ -->
+
+    <!-- No auth needed on external profile (carrier traffic) -->
+    <param name="auth-calls" value="false"/>
+    <param name="auth-all-packets" value="false"/>
+
+    <!-- ============================================ -->
+    <!-- NAT HANDLING                                -->
+    <!-- ============================================ -->
+
+    <!-- NAT detection disabled — ext-sip-ip/ext-rtp-ip handle addressing -->
+    <param name="aggressive-nat-detection" value="false"/>
+    <param name="NDLB-force-rport" value="false"/>
+
+    <!-- ============================================ -->
+    <!-- SIP OPTIONS / FEATURES                      -->
+    <!-- ============================================ -->
+
+    <!-- Disable compact headers (Kamailio needs full-form) -->
+    <param name="enable-compact-headers" value="false"/>
+
+    <!-- No registration tracking needed -->
+    <param name="manage-presence" value="false"/>
+    <param name="track-calls" value="false"/>
+
+    <!-- High volume settings -->
+    <param name="max-proceeding" value="5000"/>
+    <param name="reuse-connections" value="true"/>
+
+    <!-- ============================================ -->
+    <!-- DTMF CONFIGURATION                          -->
+    <!-- ============================================ -->
+
+    <param name="dtmf-type" value="rfc2833"/>
+
+    <!-- ============================================ -->
+    <!-- MEDIA HANDLING                              -->
+    <!-- ============================================ -->
+
+    <!-- User-Agent -->
+    <param name="user-agent-string" value="VoicePlatform/1.0"/>
+
+    <!-- RTP timeout -->
+    <param name="rtp-timeout-sec" value="60"/>
+    <param name="rtp-hold-timeout-sec" value="1800"/>
+
+    <!-- ============================================ -->
+    <!-- HOMER SIP CAPTURE (HEP)                     -->
+    <!-- ============================================ -->
+    <!--
+      Send copies of all SIP messages to Homer via HEP protocol.
+      capture-id 201 distinguishes this from the internal profile (200)
+      and Kamailio (100) in Homer's SIP ladder diagrams.
+    -->
+    <param name="capture-server" value="udp:172.28.0.1:9060;hep=3;capture_id=201"/>
+    <param name="sip-capture" value="yes"/>
+
+  </settings>
+
+  <gateways>
+    <!-- No gateways needed — we bridge with sofia/external/dest@proxy -->
+  </gateways>
+
+  <domains>
+    <domain name="all" alias="false" parse="false"/>
+  </domains>
+</profile>

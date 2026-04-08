@@ -95,7 +95,9 @@ services:
       - "5080:5080/udp"
       - "5080:5080/tcp"
       - "5081:5081/tcp"
-      - "8022:8021/tcp"  # Use 8022 on host to avoid conflict
+      - "5090:5090/udp"   # External profile - carrier-facing outbound calls
+      - "5090:5090/tcp"   # External profile - carrier-facing outbound calls
+      - "8022:8021/tcp"   # Use 8022 on host to avoid conflict
       # RTP ports - use host networking in production
       - "16384-16484:16384-16484/udp"
     volumes:

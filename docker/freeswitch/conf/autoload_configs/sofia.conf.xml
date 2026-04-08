@@ -44,14 +44,15 @@
   <!-- SIP PROFILES                                -->
   <!-- ============================================ -->
   <profiles>
-    <!-- Internal profile - receives traffic from Kamailio SBC -->
+    <!-- Internal profile - receives traffic from Kamailio SBC (port 5080) -->
     <X-PRE-PROCESS cmd="include" data="../sofia/internal.xml"/>
+
+    <!-- External profile - carrier-facing outbound calls (port 5090) -->
+    <!-- Uses ext-sip-ip/ext-rtp-ip for proper public IP in Via/Contact/SDP -->
+    <X-PRE-PROCESS cmd="include" data="../sofia/external.xml"/>
 
     <!--
       Additional profiles can be added here:
-
-      External profile for direct carrier connections:
-      <X-PRE-PROCESS cmd="include" data="../sip_profiles/external.xml"/>
 
       WebRTC profile for browser clients:
       <X-PRE-PROCESS cmd="include" data="../sip_profiles/webrtc.xml"/>

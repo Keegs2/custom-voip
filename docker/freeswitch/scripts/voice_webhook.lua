@@ -762,12 +762,12 @@ local function execute_dial(verb)
                 dial_timeout, clean_target, domain
             ))
         else
-            -- External number - route via Kamailio proxy (no gateway syntax)
-            -- Using sofia/internal/dest@proxy produces clean SIP headers
+            -- External number - route via Kamailio proxy using external profile
+            -- sofia/external/ ensures ext-sip-ip (public IP) is used in Via/Contact/SDP
             -- X-Carrier tells Kamailio which Bandwidth IP to route to
             local dial_number = clean_target:gsub("^%+", "")
             table.insert(dial_strings, string.format(
-                "{call_timeout=%d,ignore_early_media=false,sip_h_X-Carrier=premium}sofia/internal/%s@172.28.0.1:5060",
+                "{call_timeout=%d,ignore_early_media=false,sip_h_X-Carrier=premium}sofia/external/%s@172.28.0.1:5060",
                 dial_timeout, dial_number
             ))
         end

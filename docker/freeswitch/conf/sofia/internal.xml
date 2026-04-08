@@ -9,8 +9,9 @@
 
   Design Notes:
   - Traffic comes from Kamailio (trusted) on port 5080
-  - Outbound calls use sofia/internal/dest@proxy (NOT gateway syntax)
-    to produce clean SIP headers without sip:gw+ Contact corruption
+  - Outbound carrier calls use the EXTERNAL profile (sofia/external/dest@proxy)
+    which correctly applies ext-sip-ip to Via/Contact/SDP on outbound INVITEs.
+    The internal profile does NOT apply ext-sip-ip to outbound calls.
   - Carrier selection is communicated via X-Carrier header to Kamailio
   - NAT handling done at Kamailio layer
   - For local testing: Zoiper can register on port 5080 with digest auth
@@ -42,10 +43,10 @@
       EXTERNAL_SIP_IP environment variable (defaults to auto-nat).
       In production docker-compose.yml, EXTERNAL_SIP_IP=34.74.71.32.
 
-      Since outbound calls now use sofia/internal/ bridging (not gateway
-      syntax), ext-sip-ip correctly controls both Via and Contact headers.
-      Kamailio still scrubs as defense-in-depth in case any module or
-      edge case injects Docker IPs.
+      Outbound carrier calls now use the EXTERNAL profile (sofia/external/)
+      which correctly applies ext-sip-ip to Via, Contact, and SDP headers.
+      The internal profile's ext-sip-ip is still set for any inbound
+      response scenarios. Kamailio still scrubs as defense-in-depth.
     -->
     <param name="ext-rtp-ip" value="$${external_rtp_ip}"/>
     <param name="ext-sip-ip" value="$${external_sip_ip}"/>
@@ -285,15 +286,17 @@
   <!--
     IMPORTANT: Carrier gateways are NO LONGER USED for outbound bridging.
 
-    All Lua scripts and the ESL client now use sofia/internal/dest@proxy
+    All Lua scripts and the ESL client now use sofia/external/dest@proxy
     instead of sofia/gateway/carrier/dest. This eliminates the corrupted
     Contact header (sip:gw+carrier_standard@...) and orphaned Via
     parameter fragments that the gateway bridge syntax produced.
 
     How outbound routing works now:
-      1. FreeSWITCH bridges with: sofia/internal/+17742184477@172.28.0.1:5060
+      1. FreeSWITCH bridges with: sofia/external/+17742184477@172.28.0.1:5060
          - Produces a standard INVITE with clean Via/Contact headers
          - Via and Contact use ext-sip-ip (public IP 34.74.71.32)
+         - The EXTERNAL profile is used because the internal profile does
+           NOT apply ext-sip-ip to outbound calls
       2. X-Carrier header tells Kamailio which Bandwidth IP to route to:
          - X-Carrier: standard -> Bandwidth Dallas 67.231.2.12
          - X-Carrier: premium  -> Bandwidth LA 216.82.238.134
@@ -311,7 +314,7 @@
       Signaling: Dallas proxy 67.231.2.12:5060
       Mapped to X-Carrier: standard
     -->
-    <!-- DISABLED: Outbound calls now use sofia/internal/dest@proxy with X-Carrier header
+    <!-- DISABLED: Outbound calls now use sofia/external/dest@proxy with X-Carrier header
     <gateway name="carrier_standard">
       <param name="proxy" value="172.28.0.1"/>
       <param name="port" value="5060"/>
@@ -329,7 +332,7 @@
       Signaling: Los Angeles proxy 216.82.238.134:5060
       Mapped to X-Carrier: premium
     -->
-    <!-- DISABLED: Outbound calls now use sofia/internal/dest@proxy with X-Carrier header
+    <!-- DISABLED: Outbound calls now use sofia/external/dest@proxy with X-Carrier header
     <gateway name="carrier_premium">
       <param name="proxy" value="172.28.0.1"/>
       <param name="port" value="5060"/>
@@ -346,7 +349,7 @@
       Failover gateway for both trunks. Dallas proxy 67.231.2.12:5060
       Mapped to X-Carrier: backup
     -->
-    <!-- DISABLED: Outbound calls now use sofia/internal/dest@proxy with X-Carrier header
+    <!-- DISABLED: Outbound calls now use sofia/external/dest@proxy with X-Carrier header
     <gateway name="carrier_backup">
       <param name="proxy" value="172.28.0.1"/>
       <param name="port" value="5060"/>

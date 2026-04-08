@@ -79,9 +79,10 @@ async def originate_call(
 ) -> bool:
     """Originate an outbound call."""
     # Build originate command
-    # Format: originate {vars}sofia/internal/destination@proxy &lua(script.lua)
-    # Uses direct addressing through Kamailio proxy instead of gateway syntax
-    # to produce clean SIP headers (no sip:gw+ Contact corruption)
+    # Format: originate {vars}sofia/external/destination@proxy &lua(script.lua)
+    # Uses external profile through Kamailio proxy to ensure ext-sip-ip (public IP)
+    # appears in Via, Contact, and SDP headers on outbound INVITEs.
+    # The internal profile does NOT apply ext-sip-ip to outbound calls.
     # Determine carrier for X-Carrier header (Kamailio routes to correct Bandwidth IP)
     carrier = "premium" if traffic_grade == "premium" else "standard"
 
@@ -103,10 +104,10 @@ async def originate_call(
     if os.getenv("TEST_MODE") == "true":
         command = f"originate {{{vars_str}}}loopback/{to}/default &lua(outbound_api.lua)"
     else:
-        # Use sofia/internal/dest@proxy instead of sofia/gateway to produce clean
-        # SIP headers (no sip:gw+ Contact corruption). X-Carrier header tells
-        # Kamailio which Bandwidth IP to route to.
-        command = f"originate {{{vars_str}}}sofia/internal/{to}@172.28.0.1:5060 &lua(outbound_api.lua)"
+        # Use sofia/external/dest@proxy to ensure the outbound INVITE uses
+        # ext-sip-ip (public IP) in Via, Contact, and SDP headers.
+        # X-Carrier header tells Kamailio which Bandwidth IP to route to.
+        command = f"originate {{{vars_str}}}sofia/external/{to}@172.28.0.1:5060 &lua(outbound_api.lua)"
 
     logger.info(f"Originating call: {uuid} to {to}")
     response = await _send_esl_command(command)
