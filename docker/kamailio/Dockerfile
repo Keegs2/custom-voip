@@ -83,4 +83,4 @@ USER kamailio
 # -DD = don't daemonize, dump core on crash
 # -E = log to stderr
 # -e = set log color
-CMD ["/usr/sbin/kamailio", "-DD", "-E", "-f", "/etc/kamailio/kamailio.cfg"]
+CMD ["/usr/sbin/kamailio", "-DD", "-E", "-f", "/etc/kamailio/kamailio.cfg", "-M", "512", "-m", "16"]
