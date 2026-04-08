@@ -64,8 +64,35 @@
     <param name="auth-all-packets" value="false"/>
 
     <!-- ============================================ -->
-    <!-- NAT HANDLING                                -->
+    <!-- NAT HANDLING / CONTACT IP SELECTION         -->
     <!-- ============================================ -->
+
+    <!--
+      CRITICAL: local-network-acl controls whether mod_sofia uses sip-ip
+      or ext-sip-ip for the Contact header on outbound INVITEs.
+
+      If the destination IP is in the local-network-acl, mod_sofia uses
+      sip-ip (172.28.0.10 Docker IP) for Contact. If NOT in the ACL,
+      it uses ext-sip-ip (public IP).
+
+      Problem: The default local-network-acl includes RFC1918 ranges,
+      so traffic to 172.28.0.1 (Kamailio Docker gateway) gets sip-ip
+      in the Contact, producing "sip:mod_sofia@172.28.0.10:5090" which
+      corrupts the outbound INVITE.
+
+      Fix: Set to loopback.auto so only 127.0.0.0/8 is "local."
+      All other destinations (including Docker 172.28.x.x) are treated
+      as external, forcing ext-sip-ip into the Contact header.
+    -->
+    <param name="local-network-acl" value="loopback.auto"/>
+
+    <!--
+      Belt-and-suspenders: apply-nat-acl forces NAT handling (use of
+      ext-sip-ip/ext-rtp-ip) for any destination matching RFC1918
+      addresses. Since 172.28.0.1 is RFC1918, this ensures the public
+      IP is used even if other ACL logic changes.
+    -->
+    <param name="apply-nat-acl" value="rfc1918.auto"/>
 
     <!-- NAT detection disabled — ext-sip-ip/ext-rtp-ip handle addressing -->
     <param name="aggressive-nat-detection" value="false"/>
