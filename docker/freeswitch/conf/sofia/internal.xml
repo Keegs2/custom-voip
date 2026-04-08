@@ -126,8 +126,11 @@
     <!-- Disable presence (not needed for B2BUA) -->
     <param name="manage-presence" value="false"/>
 
-    <!-- Compact SIP headers to reduce bandwidth -->
-    <param name="enable-compact-headers" value="true"/>
+    <!-- Compact SIP headers disabled: Kamailio's header parser (remove_hf, etc.) -->
+    <!-- cannot properly manipulate compact header forms (v:, f:, t:, m:, k:, u:). -->
+    <!-- Full-form headers (Via:, From:, To:, Contact:, etc.) are required for -->
+    <!-- correct header removal/rewriting in the SBC layer. -->
+    <param name="enable-compact-headers" value="false"/>
 
     <!-- Maximum concurrent sessions in PROCEEDING state -->
     <!-- Prevents resource exhaustion from incomplete calls -->
