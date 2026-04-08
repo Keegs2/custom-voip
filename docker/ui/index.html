@@ -2770,21 +2770,26 @@
 
 <!-- SIDEBAR -->
 <nav id="sidebar">
-  <div class="sidebar-brand">
+  <div class="sidebar-brand" onclick="navigate('dashboard')" style="cursor:pointer">
     <div class="brand-title">Custom <span>VoIP</span></div>
-    <div class="brand-sub">Admin Dashboard</div>
   </div>
 
   <div class="sidebar-nav">
-    <div class="nav-section-label">Overview</div>
-    <a class="nav-item" data-page="dashboard" onclick="navigate('dashboard')">
-      <span class="nav-icon">#</span> Dashboard
-    </a>
-
-    <div class="nav-section-label">Management</div>
+    <div class="nav-section-label">Admin</div>
     <a class="nav-item" data-page="customers" onclick="navigate('customers')">
       <span class="nav-icon">@</span> Customers
     </a>
+    <a class="nav-item" data-page="cdrs" onclick="navigate('cdrs')">
+      <span class="nav-icon">&#9776;</span> CDRs
+    </a>
+    <a class="nav-item" data-page="rates" onclick="navigate('rates')">
+      <span class="nav-icon">$</span> Rates &amp; Margins
+    </a>
+    <a class="nav-item" data-page="tiers" onclick="navigate('tiers')">
+      <span class="nav-icon">*</span> CPS Tiers
+    </a>
+
+    <div class="nav-section-label">Services</div>
     <a class="nav-item" data-page="rcf" onclick="navigate('rcf')">
       <span class="nav-icon">~</span> RCF Numbers
     </a>
@@ -2794,25 +2799,14 @@
     <a class="nav-item" data-page="trunks" onclick="navigate('trunks')">
       <span class="nav-icon">=</span> SIP Trunks
     </a>
-    <a class="nav-item" data-page="cdrs" onclick="navigate('cdrs')">
-      <span class="nav-icon">&#9776;</span> CDRs
-    </a>
-    <a class="nav-item" data-page="tiers" onclick="navigate('tiers')">
-      <span class="nav-icon">*</span> CPS Tiers
-    </a>
-    <a class="nav-item" data-page="rates" onclick="navigate('rates')">
-      <span class="nav-icon">$</span> Rates &amp; Margins
-    </a>
     <a class="nav-item" data-page="ivr" onclick="navigate('ivr')">
       <span class="nav-icon">&#9654;&#9475;</span> IVR Builder
     </a>
 
-    <div class="nav-section-label">Testing</div>
+    <div class="nav-section-label">Tools</div>
     <a class="nav-item" data-page="sipp" onclick="navigate('sipp')">
       <span class="nav-icon">&#9654;</span> SIPp Testing
     </a>
-
-    <div class="nav-section-label">Resources</div>
     <a class="nav-item" data-page="docs" onclick="navigate('docs')">
       <span class="nav-icon">?</span> API Docs
     </a>
