@@ -247,27 +247,26 @@
   <!-- ============================================ -->
   <gateways>
     <!--
+      Bandwidth Trunk Configuration 4 - GraniteTelecommunicationsLLC_O3
       Low-CPS trunk for RCF and SIP Trunk customers. Standard carrier rates.
 
       Used for: All RCF (Remote Call Forwarding) and SIP Trunk product calls.
       API Calling customers use carrier_premium instead.
 
-      CONFIGURE THESE WITH YOUR CARRIER CREDENTIALS:
-      - Replace proxy with carrier SIP proxy address
-      - Set realm to carrier's authentication realm
-      - Set username/password for SIP auth (or remove for IP auth)
-      - Add carrier's IP to ACL if using IP auth
+      Auth: IP-based (Bandwidth has whitelisted 34.74.71.32)
+      Signaling: Dallas proxy 67.231.2.12:5060
     -->
     <gateway name="carrier_standard">
-      <!-- Carrier SIP proxy -->
-      <param name="proxy" value="sip.carrier-standard.example.com"/>
-      <param name="realm" value="carrier-standard.example.com"/>
+      <!-- Bandwidth Dallas signaling proxy -->
+      <param name="proxy" value="67.231.2.12"/>
+      <param name="port" value="5060"/>
+      <param name="realm" value="67.231.2.12"/>
 
-      <!-- Authentication (comment out for IP-based auth) -->
-      <param name="username" value="voiceplatform"/>
-      <param name="password" value="CHANGE_ME_IN_PRODUCTION"/>
+      <!-- IP-based auth: Bandwidth has whitelisted 34.74.71.32, no credentials needed -->
+      <!-- <param name="username" value="not-used-ip-auth"/> -->
+      <!-- <param name="password" value="not-used-ip-auth"/> -->
 
-      <!-- Registration settings -->
+      <!-- Registration settings (IP auth = no registration) -->
       <param name="register" value="false"/>
       <param name="register-transport" value="udp"/>
 
@@ -281,7 +280,7 @@
       <!-- Channel limits (set based on carrier contract) -->
       <!-- <param name="channels" value="100"/> -->
 
-      <!-- Codec prefs for this gateway -->
+      <!-- Codec prefs for this gateway (G.711 only per Bandwidth trunk config) -->
       <param name="codec-prefs" value="PCMU,PCMA"/>
 
       <!-- Enable/disable -->
@@ -292,47 +291,77 @@
     </gateway>
 
     <!--
+      Bandwidth Trunk Configuration 4 - GraniteTelecommunicationsLLC_O3
       High-CPS trunk for API Calling customers. Individually negotiated rates.
 
       Used for: All API Calling product calls (outbound API, inbound API DID,
       webhook-driven calls). Supports higher CPS than carrier_standard.
+
+      Auth: IP-based (Bandwidth has whitelisted 34.74.71.32)
+      Signaling: Los Angeles proxy 216.82.238.134:5060
+
+      NOTE: Currently shares the same Bandwidth trunk (Config 4) as carrier_standard.
+      Using the LA signaling IP gives geographic redundancy. These will later be
+      separated into two different Bandwidth trunks with different rate negotiations.
     -->
     <gateway name="carrier_premium">
-      <param name="proxy" value="sip.carrier-premium.example.com"/>
-      <param name="realm" value="carrier-premium.example.com"/>
+      <!-- Bandwidth Los Angeles signaling proxy -->
+      <param name="proxy" value="216.82.238.134"/>
+      <param name="port" value="5060"/>
+      <param name="realm" value="216.82.238.134"/>
 
-      <param name="username" value="voiceplatform"/>
-      <param name="password" value="CHANGE_ME_IN_PRODUCTION"/>
+      <!-- IP-based auth: Bandwidth has whitelisted 34.74.71.32, no credentials needed -->
+      <!-- <param name="username" value="not-used-ip-auth"/> -->
+      <!-- <param name="password" value="not-used-ip-auth"/> -->
 
+      <!-- Registration settings (IP auth = no registration) -->
       <param name="register" value="false"/>
+
+      <!-- Caller ID handling -->
       <param name="caller-id-in-from" value="true"/>
+
+      <!-- Retry/timeout settings -->
       <param name="retry-seconds" value="30"/>
       <param name="expire-seconds" value="3600"/>
 
-      <param name="codec-prefs" value="PCMU,PCMA,G722"/>
+      <!-- Codec prefs for this gateway (G.711 only per Bandwidth trunk config) -->
+      <param name="codec-prefs" value="PCMU,PCMA"/>
 
+      <!-- Enable/disable -->
       <param name="enabled" value="true"/>
     </gateway>
 
     <!--
-      Failover gateway for both trunks. Used when primary fails.
+      Bandwidth Trunk Configuration 4 - GraniteTelecommunicationsLLC_O3
+      Failover gateway for both trunks. Uses the same Dallas pipe as carrier_standard.
 
       Used for: Automatic failover when carrier_standard or carrier_premium
       is unavailable. All product types (RCF, API, Trunk) fail over here.
+
+      Auth: IP-based (Bandwidth has whitelisted 34.74.71.32)
+      Signaling: Dallas proxy 67.231.2.12:5060 (same as carrier_standard)
     -->
     <gateway name="carrier_backup">
-      <param name="proxy" value="sip.carrier-backup.example.com"/>
-      <param name="realm" value="carrier-backup.example.com"/>
+      <!-- Bandwidth Dallas signaling proxy (same pipe as carrier_standard) -->
+      <param name="proxy" value="67.231.2.12"/>
+      <param name="port" value="5060"/>
+      <param name="realm" value="67.231.2.12"/>
 
-      <param name="username" value="voiceplatform"/>
-      <param name="password" value="CHANGE_ME_IN_PRODUCTION"/>
+      <!-- IP-based auth: Bandwidth has whitelisted 34.74.71.32, no credentials needed -->
+      <!-- <param name="username" value="not-used-ip-auth"/> -->
+      <!-- <param name="password" value="not-used-ip-auth"/> -->
 
+      <!-- Registration settings (IP auth = no registration) -->
       <param name="register" value="false"/>
+
+      <!-- Caller ID handling -->
       <param name="caller-id-in-from" value="true"/>
 
+      <!-- Codec prefs for this gateway (G.711 only per Bandwidth trunk config) -->
       <param name="codec-prefs" value="PCMU,PCMA"/>
 
-      <param name="enabled" value="false"/>
+      <!-- Enable/disable -->
+      <param name="enabled" value="true"/>
     </gateway>
 
     <!--
