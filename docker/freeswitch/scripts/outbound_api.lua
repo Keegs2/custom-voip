@@ -234,11 +234,13 @@ if webhook_url ~= "" then
 
 else
     -- Simple bridge to destination
+    -- Use sofia/internal/dest@proxy instead of sofia/gateway/carrier/dest to produce
+    -- clean SIP headers (no sip:gw+ Contact corruption). X-Carrier tells Kamailio
+    -- which Bandwidth IP to route to.
     local dial_string = string.format(
-        "{origination_caller_id_number=%s,call_timeout=%d,ignore_early_media=false}sofia/gateway/%s/%s",
+        "{origination_caller_id_number=%s,call_timeout=%d,ignore_early_media=false,sip_h_X-Carrier=premium}sofia/internal/%s@172.28.0.1:5060",
         from_did ~= "" and from_did or "anonymous",
         call_timeout,
-        gateway,
         normalized_dest:gsub("^%+", "")
     )
 
@@ -270,7 +272,7 @@ else
             ))
 
             dial_string = string.format(
-                "{origination_caller_id_number=%s,call_timeout=%d}sofia/gateway/carrier_backup/%s",
+                "{origination_caller_id_number=%s,call_timeout=%d,sip_h_X-Carrier=backup}sofia/internal/%s@172.28.0.1:5060",
                 from_did ~= "" and from_did or "anonymous",
                 call_timeout,
                 normalized_dest:gsub("^%+", "")

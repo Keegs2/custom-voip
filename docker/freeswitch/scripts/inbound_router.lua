@@ -345,10 +345,10 @@ if product_type == "rcf" then
     -- Remote Call Forwarding - Bridge to destination
     -- RCF product always routes via carrier_standard (low-CPS trunk, standard rates)
     -- traffic_grade is used as a secondary factor for priority within the same trunk
-    local gateway = "carrier_standard"
+    local carrier = "standard"
     freeswitch.consoleLog("INFO", string.format(
-        "[inbound_router] Routing via %s (product: rcf, traffic_grade: %s)\n",
-        gateway, traffic_grade
+        "[inbound_router] Routing via carrier_%s (product: rcf, traffic_grade: %s)\n",
+        carrier, traffic_grade
     ))
 
     local is_local_test = get_var("is_local_test", "false")
@@ -390,18 +390,21 @@ if product_type == "rcf" then
             uuid, normalized_did, forward_to, domain
         ))
     else
-        -- PSTN/CARRIER ROUTING
-        -- Forward to external number via carrier gateway
-        set_var("carrier_used", gateway)
+        -- PSTN/CARRIER ROUTING via Kamailio proxy (no gateway syntax)
+        -- Using sofia/internal/dest@proxy produces clean SIP headers:
+        --   - No sip:gw+carrier@... Contact corruption
+        --   - Via/Contact use ext-sip-ip (public IP) properly
+        --   - X-Carrier header tells Kamailio which Bandwidth IP to use
+        set_var("carrier_used", "carrier_" .. carrier)
 
         dial_string = string.format(
-            "{ignore_early_media=false,call_timeout=%d}sofia/gateway/%s/%s",
-            ring_timeout, gateway, forward_to
+            "{ignore_early_media=false,call_timeout=%d,sip_h_X-Carrier=%s}sofia/internal/%s@172.28.0.1:5060",
+            ring_timeout, carrier, forward_to
         )
 
         freeswitch.consoleLog("INFO", string.format(
-            "[%s] RCF Bridge (PSTN): %s -> %s via %s\n",
-            uuid, normalized_did, forward_to, gateway
+            "[%s] RCF Bridge (PSTN): %s -> %s via proxy (carrier=%s)\n",
+            uuid, normalized_did, forward_to, carrier
         ))
     end
 
@@ -424,7 +427,7 @@ if product_type == "rcf" then
     local bridge_result = get_var("bridge_result", "")
     local last_bridge_hangup = get_var("last_bridge_hangup_cause", "")
 
-    -- If PSTN bridge failed, try carrier_backup as failover
+    -- If PSTN bridge failed, try backup carrier as failover
     if not is_local_forward and bridge_result ~= "SUCCESS" then
         freeswitch.consoleLog("INFO", string.format(
             "[inbound_router] Primary bridge failed for RCF (cause=%s), trying carrier_backup (product: rcf)\n",
@@ -433,7 +436,7 @@ if product_type == "rcf" then
         set_var("carrier_used", "carrier_backup")
 
         local failover_dial = string.format(
-            "{ignore_early_media=false,call_timeout=%d}sofia/gateway/carrier_backup/%s",
+            "{ignore_early_media=false,call_timeout=%d,sip_h_X-Carrier=backup}sofia/internal/%s@172.28.0.1:5060",
             ring_timeout, forward_to
         )
         if not pass_caller_id then

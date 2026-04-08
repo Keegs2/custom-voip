@@ -79,8 +79,11 @@ async def originate_call(
 ) -> bool:
     """Originate an outbound call."""
     # Build originate command
-    # Format: originate {vars}sofia/gateway/carrier/destination &lua(script.lua)
-    gateway = "carrier_premium" if traffic_grade == "premium" else "carrier_standard"
+    # Format: originate {vars}sofia/internal/destination@proxy &lua(script.lua)
+    # Uses direct addressing through Kamailio proxy instead of gateway syntax
+    # to produce clean SIP headers (no sip:gw+ Contact corruption)
+    # Determine carrier for X-Carrier header (Kamailio routes to correct Bandwidth IP)
+    carrier = "premium" if traffic_grade == "premium" else "standard"
 
     vars_str = ",".join([
         f"origination_uuid={uuid}",
@@ -92,14 +95,18 @@ async def originate_call(
         f"outbound_api=true",
         f"webhook_url={webhook_url}",
         f"ignore_early_media=true",
-        f"originate_timeout={timeout}"
+        f"originate_timeout={timeout}",
+        f"sip_h_X-Carrier={carrier}"
     ])
 
     # For testing without carrier, use loopback
     if os.getenv("TEST_MODE") == "true":
         command = f"originate {{{vars_str}}}loopback/{to}/default &lua(outbound_api.lua)"
     else:
-        command = f"originate {{{vars_str}}}sofia/gateway/{gateway}/{to} &lua(outbound_api.lua)"
+        # Use sofia/internal/dest@proxy instead of sofia/gateway to produce clean
+        # SIP headers (no sip:gw+ Contact corruption). X-Carrier header tells
+        # Kamailio which Bandwidth IP to route to.
+        command = f"originate {{{vars_str}}}sofia/internal/{to}@172.28.0.1:5060 &lua(outbound_api.lua)"
 
     logger.info(f"Originating call: {uuid} to {to}")
     response = await _send_esl_command(command)

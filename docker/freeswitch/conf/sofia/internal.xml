@@ -9,7 +9,9 @@
 
   Design Notes:
   - Traffic comes from Kamailio (trusted) on port 5080
-  - Outbound to carriers via gateways
+  - Outbound calls use sofia/internal/dest@proxy (NOT gateway syntax)
+    to produce clean SIP headers without sip:gw+ Contact corruption
+  - Carrier selection is communicated via X-Carrier header to Kamailio
   - NAT handling done at Kamailio layer
   - For local testing: Zoiper can register on port 5080 with digest auth
 -->
@@ -40,11 +42,10 @@
       EXTERNAL_SIP_IP environment variable (defaults to auto-nat).
       In production docker-compose.yml, EXTERNAL_SIP_IP=34.74.71.32.
 
-      This reduces (but does not eliminate) the cleanup Kamailio must do.
-      Kamailio still scrubs as defense-in-depth because:
-      - Gateway Contact still uses the profile's sip-ip (local Docker IP)
-        for the "gw+gateway_name@" format regardless of ext-sip-ip
-      - Other modules may inject Docker IPs
+      Since outbound calls now use sofia/internal/ bridging (not gateway
+      syntax), ext-sip-ip correctly controls both Via and Contact headers.
+      Kamailio still scrubs as defense-in-depth in case any module or
+      edge case injects Docker IPs.
     -->
     <param name="ext-rtp-ip" value="$${external_rtp_ip}"/>
     <param name="ext-sip-ip" value="$${external_sip_ip}"/>
@@ -279,128 +280,83 @@
   </settings>
 
   <!-- ============================================ -->
-  <!-- CARRIER GATEWAYS                            -->
+  <!-- CARRIER GATEWAYS (DEPRECATED)               -->
   <!-- ============================================ -->
+  <!--
+    IMPORTANT: Carrier gateways are NO LONGER USED for outbound bridging.
+
+    All Lua scripts and the ESL client now use sofia/internal/dest@proxy
+    instead of sofia/gateway/carrier/dest. This eliminates the corrupted
+    Contact header (sip:gw+carrier_standard@...) and orphaned Via
+    parameter fragments that the gateway bridge syntax produced.
+
+    How outbound routing works now:
+      1. FreeSWITCH bridges with: sofia/internal/+17742184477@172.28.0.1:5060
+         - Produces a standard INVITE with clean Via/Contact headers
+         - Via and Contact use ext-sip-ip (public IP 34.74.71.32)
+      2. X-Carrier header tells Kamailio which Bandwidth IP to route to:
+         - X-Carrier: standard -> Bandwidth Dallas 67.231.2.12
+         - X-Carrier: premium  -> Bandwidth LA 216.82.238.134
+         - X-Carrier: backup   -> Bandwidth Dallas 67.231.2.12 (failover)
+      3. Kamailio's route[TO_CARRIER] reads X-Carrier, sets $rd/$du,
+         does topology hiding, and relays to Bandwidth.
+
+    The gateway definitions below are kept disabled for reference only.
+    They document the carrier trunk configurations and Bandwidth signaling IPs.
+  -->
   <gateways>
     <!--
       Bandwidth Trunk Configuration 4 - GraniteTelecommunicationsLLC_O3
       Low-CPS trunk for RCF and SIP Trunk customers. Standard carrier rates.
-
-      Used for: All RCF (Remote Call Forwarding) and SIP Trunk product calls.
-      API Calling customers use carrier_premium instead.
-
-      Auth: IP-based (Bandwidth has whitelisted 34.74.71.32)
       Signaling: Dallas proxy 67.231.2.12:5060
+      Mapped to X-Carrier: standard
     -->
+    <!-- DISABLED: Outbound calls now use sofia/internal/dest@proxy with X-Carrier header
     <gateway name="carrier_standard">
-      <!-- Route through Kamailio SBC on Docker gateway (host network) -->
-      <!-- Kamailio then forwards to Bandwidth Dallas 67.231.2.12 -->
       <param name="proxy" value="172.28.0.1"/>
       <param name="port" value="5060"/>
       <param name="realm" value="172.28.0.1"/>
-
-      <!-- IP-based auth: Bandwidth has whitelisted 34.74.71.32, no credentials needed -->
-      <!-- <param name="username" value="not-used-ip-auth"/> -->
-      <!-- <param name="password" value="not-used-ip-auth"/> -->
-
-      <!-- Registration settings (IP auth = no registration) -->
       <param name="register" value="false"/>
-      <param name="register-transport" value="udp"/>
-
-      <!-- Caller ID handling -->
       <param name="caller-id-in-from" value="true"/>
-
-      <!-- Retry/timeout settings -->
-      <param name="retry-seconds" value="30"/>
-      <param name="expire-seconds" value="3600"/>
-
-      <!-- Channel limits (set based on carrier contract) -->
-      <!-- <param name="channels" value="100"/> -->
-
-      <!-- Codec prefs for this gateway (G.711 only per Bandwidth trunk config) -->
       <param name="codec-prefs" value="PCMU,PCMA"/>
-
-      <!-- Enable/disable -->
       <param name="enabled" value="true"/>
-
-      <!-- extension-in-contact REMOVED — caused corrupted Contact header -->
     </gateway>
+    -->
 
     <!--
       Bandwidth Trunk Configuration 4 - GraniteTelecommunicationsLLC_O3
       High-CPS trunk for API Calling customers. Individually negotiated rates.
-
-      Used for: All API Calling product calls (outbound API, inbound API DID,
-      webhook-driven calls). Supports higher CPS than carrier_standard.
-
-      Auth: IP-based (Bandwidth has whitelisted 34.74.71.32)
       Signaling: Los Angeles proxy 216.82.238.134:5060
-
-      NOTE: Currently shares the same Bandwidth trunk (Config 4) as carrier_standard.
-      Using the LA signaling IP gives geographic redundancy. These will later be
-      separated into two different Bandwidth trunks with different rate negotiations.
+      Mapped to X-Carrier: premium
     -->
+    <!-- DISABLED: Outbound calls now use sofia/internal/dest@proxy with X-Carrier header
     <gateway name="carrier_premium">
-      <!-- Route through Kamailio SBC on Docker gateway (host network) -->
-      <!-- Kamailio then forwards to Bandwidth LA 216.82.238.134 -->
       <param name="proxy" value="172.28.0.1"/>
       <param name="port" value="5060"/>
       <param name="realm" value="172.28.0.1"/>
-
-      <!-- IP-based auth: Bandwidth has whitelisted 34.74.71.32, no credentials needed -->
-      <!-- <param name="username" value="not-used-ip-auth"/> -->
-      <!-- <param name="password" value="not-used-ip-auth"/> -->
-
-      <!-- Registration settings (IP auth = no registration) -->
       <param name="register" value="false"/>
-
-      <!-- Caller ID handling -->
       <param name="caller-id-in-from" value="true"/>
-
-      <!-- Retry/timeout settings -->
-      <param name="retry-seconds" value="30"/>
-      <param name="expire-seconds" value="3600"/>
-
-      <!-- Codec prefs for this gateway (G.711 only per Bandwidth trunk config) -->
       <param name="codec-prefs" value="PCMU,PCMA"/>
-
-      <!-- Enable/disable -->
       <param name="enabled" value="true"/>
     </gateway>
+    -->
 
     <!--
       Bandwidth Trunk Configuration 4 - GraniteTelecommunicationsLLC_O3
-      Failover gateway for both trunks. Uses the same Dallas pipe as carrier_standard.
-
-      Used for: Automatic failover when carrier_standard or carrier_premium
-      is unavailable. All product types (RCF, API, Trunk) fail over here.
-
-      Auth: IP-based (Bandwidth has whitelisted 34.74.71.32)
-      Signaling: Dallas proxy 67.231.2.12:5060 (same as carrier_standard)
+      Failover gateway for both trunks. Dallas proxy 67.231.2.12:5060
+      Mapped to X-Carrier: backup
     -->
+    <!-- DISABLED: Outbound calls now use sofia/internal/dest@proxy with X-Carrier header
     <gateway name="carrier_backup">
-      <!-- Route through Kamailio SBC on Docker gateway (host network) -->
-      <!-- Kamailio then forwards to Bandwidth Dallas 67.231.2.12 -->
       <param name="proxy" value="172.28.0.1"/>
       <param name="port" value="5060"/>
       <param name="realm" value="172.28.0.1"/>
-
-      <!-- IP-based auth: Bandwidth has whitelisted 34.74.71.32, no credentials needed -->
-      <!-- <param name="username" value="not-used-ip-auth"/> -->
-      <!-- <param name="password" value="not-used-ip-auth"/> -->
-
-      <!-- Registration settings (IP auth = no registration) -->
       <param name="register" value="false"/>
-
-      <!-- Caller ID handling -->
       <param name="caller-id-in-from" value="true"/>
-
-      <!-- Codec prefs for this gateway (G.711 only per Bandwidth trunk config) -->
       <param name="codec-prefs" value="PCMU,PCMA"/>
-
-      <!-- Enable/disable -->
       <param name="enabled" value="true"/>
     </gateway>
+    -->
 
     <!--
       Test Gateway (Loopback for testing)

@@ -356,11 +356,14 @@
         <action application="set" data="is_emergency=true"/>
         <action application="set" data="emergency_callback=${caller_id_number}"/>
 
-        <!-- Route to emergency carrier (configure in production!) -->
-        <action application="bridge" data="sofia/gateway/carrier_standard/911"/>
+        <!-- Route to emergency carrier via Kamailio proxy (no gateway syntax) -->
+        <!-- X-Carrier header tells Kamailio which Bandwidth IP to use -->
+        <action application="set" data="sip_h_X-Carrier=standard"/>
+        <action application="bridge" data="sofia/internal/911@172.28.0.1:5060"/>
 
         <!-- If bridge fails, try backup -->
-        <action application="bridge" data="sofia/gateway/carrier_premium/911"/>
+        <action application="set" data="sip_h_X-Carrier=premium"/>
+        <action application="bridge" data="sofia/internal/911@172.28.0.1:5060"/>
 
         <!-- Absolute last resort -->
         <action application="log" data="CRIT 911 ROUTING FAILED"/>
