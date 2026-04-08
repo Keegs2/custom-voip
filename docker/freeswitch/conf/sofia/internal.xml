@@ -257,10 +257,11 @@
       Signaling: Dallas proxy 67.231.2.12:5060
     -->
     <gateway name="carrier_standard">
-      <!-- Bandwidth Dallas signaling proxy -->
-      <param name="proxy" value="67.231.2.12"/>
+      <!-- Route through Kamailio SBC on Docker gateway (host network) -->
+      <!-- Kamailio then forwards to Bandwidth Dallas 67.231.2.12 -->
+      <param name="proxy" value="172.28.0.1"/>
       <param name="port" value="5060"/>
-      <param name="realm" value="67.231.2.12"/>
+      <param name="realm" value="172.28.0.1"/>
 
       <!-- IP-based auth: Bandwidth has whitelisted 34.74.71.32, no credentials needed -->
       <!-- <param name="username" value="not-used-ip-auth"/> -->
@@ -305,10 +306,11 @@
       separated into two different Bandwidth trunks with different rate negotiations.
     -->
     <gateway name="carrier_premium">
-      <!-- Bandwidth Los Angeles signaling proxy -->
-      <param name="proxy" value="216.82.238.134"/>
+      <!-- Route through Kamailio SBC on Docker gateway (host network) -->
+      <!-- Kamailio then forwards to Bandwidth LA 216.82.238.134 -->
+      <param name="proxy" value="172.28.0.1"/>
       <param name="port" value="5060"/>
-      <param name="realm" value="216.82.238.134"/>
+      <param name="realm" value="172.28.0.1"/>
 
       <!-- IP-based auth: Bandwidth has whitelisted 34.74.71.32, no credentials needed -->
       <!-- <param name="username" value="not-used-ip-auth"/> -->
@@ -342,10 +344,11 @@
       Signaling: Dallas proxy 67.231.2.12:5060 (same as carrier_standard)
     -->
     <gateway name="carrier_backup">
-      <!-- Bandwidth Dallas signaling proxy (same pipe as carrier_standard) -->
-      <param name="proxy" value="67.231.2.12"/>
+      <!-- Route through Kamailio SBC on Docker gateway (host network) -->
+      <!-- Kamailio then forwards to Bandwidth Dallas 67.231.2.12 -->
+      <param name="proxy" value="172.28.0.1"/>
       <param name="port" value="5060"/>
-      <param name="realm" value="67.231.2.12"/>
+      <param name="realm" value="172.28.0.1"/>
 
       <!-- IP-based auth: Bandwidth has whitelisted 34.74.71.32, no credentials needed -->
       <!-- <param name="username" value="not-used-ip-auth"/> -->

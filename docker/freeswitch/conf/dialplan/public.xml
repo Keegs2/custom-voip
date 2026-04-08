@@ -299,9 +299,11 @@
         <action application="lua" data="inbound_router.lua"/>
 
         <!-- Fallback if Lua script doesn't handle the call -->
-        <!-- This should rarely happen if the script is working correctly -->
-        <action application="log" data="WARNING Lua router did not handle call, rejecting"/>
-        <action application="respond" data="404 Not Found"/>
+        <!-- If lua_routed=true, the DID was found but the bridge failed -->
+        <!-- Return 503 (not 404) so the caller knows the DID exists but service is unavailable -->
+        <action application="log" data="WARNING Lua router returned without completing call for ${destination_number} (lua_routed=${lua_routed})"/>
+        <action application="set" data="proto_specific_hangup_cause=sip:503"/>
+        <action application="respond" data="503 Service Unavailable"/>
       </condition>
     </extension>
 

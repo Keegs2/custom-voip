@@ -412,32 +412,54 @@ if product_type == "rcf" then
 
     -- Set bridge failure handling for failover
     set_var("continue_on_fail", "true")
+    -- Mark that the DID was found and Lua is handling routing
+    -- This prevents the dialplan fallback 404 from masking bridge failures
+    set_var("lua_routed", "true")
 
     pcall(function()
         session:execute("bridge", dial_string)
     end)
 
+    -- Check if bridge succeeded
+    local bridge_result = get_var("bridge_result", "")
+    local last_bridge_hangup = get_var("last_bridge_hangup_cause", "")
+
     -- If PSTN bridge failed, try carrier_backup as failover
-    if not is_local_forward then
-        local bridge_result = get_var("bridge_result", "")
-        if bridge_result ~= "SUCCESS" then
-            freeswitch.consoleLog("INFO", string.format(
-                "[inbound_router] Primary bridge failed for RCF, trying carrier_backup (product: rcf)\n"
-            ))
-            set_var("carrier_used", "carrier_backup")
+    if not is_local_forward and bridge_result ~= "SUCCESS" then
+        freeswitch.consoleLog("INFO", string.format(
+            "[inbound_router] Primary bridge failed for RCF (cause=%s), trying carrier_backup (product: rcf)\n",
+            last_bridge_hangup
+        ))
+        set_var("carrier_used", "carrier_backup")
 
-            local failover_dial = string.format(
-                "{ignore_early_media=false,call_timeout=%d}sofia/gateway/carrier_backup/%s",
-                ring_timeout, forward_to
-            )
-            if not pass_caller_id then
-                failover_dial = "{origination_caller_id_number=" .. normalized_did .. "}" .. failover_dial
-            end
-
-            pcall(function()
-                session:execute("bridge", failover_dial)
-            end)
+        local failover_dial = string.format(
+            "{ignore_early_media=false,call_timeout=%d}sofia/gateway/carrier_backup/%s",
+            ring_timeout, forward_to
+        )
+        if not pass_caller_id then
+            failover_dial = "{origination_caller_id_number=" .. normalized_did .. "}" .. failover_dial
         end
+
+        pcall(function()
+            session:execute("bridge", failover_dial)
+        end)
+
+        -- Re-check after failover attempt
+        bridge_result = get_var("bridge_result", "")
+        last_bridge_hangup = get_var("last_bridge_hangup_cause", "")
+    end
+
+    -- If all bridge attempts failed, hangup with NORMAL_TEMPORARY_FAILURE (SIP 503)
+    -- instead of falling through to the dialplan's 404 which would mask the real issue.
+    -- The DID WAS found -- the carrier bridge just couldn't complete.
+    if bridge_result ~= "SUCCESS" then
+        freeswitch.consoleLog("WARNING", string.format(
+            "[%s] All bridges failed for RCF DID %s -> %s (last_cause=%s)\n",
+            uuid, normalized_did, forward_to, last_bridge_hangup
+        ))
+        hangup("NORMAL_TEMPORARY_FAILURE",
+            "[" .. uuid .. "] RCF bridge failed, returning 503 (DID was found, carrier unreachable)")
+        return
     end
 
 elseif product_type == "api" then
