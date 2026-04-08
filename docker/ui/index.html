@@ -3313,6 +3313,7 @@
         <button class="dash-tab-btn" id="dash-tab-btn-tiers"     onclick="switchDashTab('tiers')">Tiers</button>
         <button class="dash-tab-btn" id="dash-tab-btn-sipp"      onclick="switchDashTab('sipp')">SIPp Testing</button>
         <button class="dash-tab-btn" id="dash-tab-btn-carriers"  onclick="switchDashTab('carriers')">Carriers</button>
+        <button class="dash-tab-btn" id="dash-tab-btn-homer"    onclick="switchDashTab('homer')">Homer</button>
       </div>
 
       <!-- Tab: Customers -->
@@ -3671,6 +3672,20 @@
         </div>
       </div>
 
+      <!-- Tab: Homer SIP Monitoring -->
+      <div class="dash-tab-pane" id="dash-tab-homer">
+        <div class="page-hd" style="display:flex;align-items:center;justify-content:space-between">
+          <div>
+            <div class="page-title">Homer <span style="color:var(--accent)">SIP Monitoring</span></div>
+            <div class="page-subtitle">Search SIP messages, view call flows, and analyze signaling</div>
+          </div>
+          <a class="btn btn-ghost" href="/homer/" target="_blank">Open in New Tab</a>
+        </div>
+        <div style="border-radius:8px;overflow:hidden;border:1px solid var(--border);margin-top:16px">
+          <iframe id="homer-iframe" src="about:blank" style="width:100%;height:calc(100vh - 220px);border:none;background:#1a1d27"></iframe>
+        </div>
+      </div>
+
     </div>
 
     <!-- ===================== RCF ===================== -->
@@ -3982,7 +3997,7 @@ const PAGE_TITLES = {
 };
 
 // Admin tabs that live inside the admin page
-const ADMIN_TAB_PAGES = new Set(['customers', 'cdrs', 'rates', 'tiers', 'sipp', 'carriers']);
+const ADMIN_TAB_PAGES = new Set(['customers', 'cdrs', 'rates', 'tiers', 'sipp', 'carriers', 'homer']);
 
 let currentPage = null;
 
@@ -4116,7 +4131,7 @@ async function loadAdmin() {
 const dashTabLoaded = {};
 
 function switchDashTab(tab) {
-  const tabs = ['customers', 'cdrs', 'rates', 'tiers', 'sipp', 'carriers'];
+  const tabs = ['customers', 'cdrs', 'rates', 'tiers', 'sipp', 'carriers', 'homer'];
   if (!tabs.includes(tab)) tab = 'customers';
 
   // Update tab button styles
@@ -4141,6 +4156,7 @@ function switchDashTab(tab) {
       case 'tiers':     loadTiers();        break;
       case 'sipp':      loadSippPage();     break;
       case 'carriers':  loadCarriersTab();  break;
+      case 'homer':     loadHomerTab();     break;
     }
   }
 }
@@ -8531,6 +8547,18 @@ async function testAllCarriers() {
   }
   await Promise.allSettled(enabled.map(c => testCarrier(c.id)));
   setButtonLoading(btn, false);
+}
+
+/* =========================================================
+   HOMER
+========================================================= */
+
+function loadHomerTab() {
+  // Load Homer UI into iframe on first tab activation
+  const iframe = document.getElementById('homer-iframe');
+  if (iframe && iframe.src === 'about:blank') {
+    iframe.src = '/homer/';
+  }
 }
 
 /* =========================================================
