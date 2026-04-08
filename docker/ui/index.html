@@ -3104,47 +3104,10 @@
           <div class="page-title">RCF <span>Numbers</span></div>
           <div class="page-subtitle">Remote Call Forwarding — change where a number rings</div>
         </div>
-        <button class="btn btn-primary" onclick="toggleCreateSection('rcf-create')">+ New Number</button>
       </div>
 
-      <div class="create-section" id="rcf-create">
-        <div class="card" style="margin-bottom:0">
-          <div class="card-title">Add forwarding number</div>
-          <div class="form-grid">
-            <div class="form-group">
-              <label class="form-label">Customer</label>
-              <select class="form-control" id="rcf-new-customer">
-                <option value="">Select customer...</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label class="form-label">DID (inbound number)</label>
-              <input class="form-control" id="rcf-new-did" type="tel" placeholder="+12125551234" />
-            </div>
-            <div class="form-group">
-              <label class="form-label">Forward to</label>
-              <input class="form-control" id="rcf-new-forward" type="tel" placeholder="+18005559999 or 1001" />
-            </div>
-            <div class="form-group">
-              <label class="form-label">Ring timeout (seconds)</label>
-              <input class="form-control" id="rcf-new-timeout" type="number" value="30" min="5" max="120" />
-            </div>
-            <div class="form-group">
-              <label class="form-label">Pass Caller ID</label>
-              <div class="toggle-wrap" style="margin-top:8px">
-                <label class="toggle">
-                  <input type="checkbox" id="rcf-new-pass-cid" checked />
-                  <span class="toggle-slider"></span>
-                </label>
-                <span style="font-size:.85rem;color:var(--muted)">Enabled</span>
-              </div>
-            </div>
-          </div>
-          <div class="form-footer">
-            <button class="btn btn-ghost" onclick="toggleCreateSection('rcf-create')">Cancel</button>
-            <button class="btn btn-primary" id="rcf-create-btn" onclick="createRCF()">Save Number</button>
-          </div>
-        </div>
+      <div style="background:rgba(59,130,246,.07);border:1px solid rgba(59,130,246,.2);border-radius:8px;padding:10px 16px;font-size:.85rem;color:#93c5fd;margin-bottom:20px">
+        RCF number configuration is managed from the <a onclick="navigate('customers')" style="color:#60a5fa;cursor:pointer;text-decoration:underline">Customers page</a>.
       </div>
 
       <div class="section-heading" id="rcf-list-heading" style="display:none">Active numbers</div>
@@ -3160,37 +3123,10 @@
           <div class="page-title">API <span>DIDs</span></div>
           <div class="page-subtitle">Webhook-driven inbound call routing</div>
         </div>
-        <button class="btn btn-primary" onclick="toggleCreateSection('apidid-create')">+ New API DID</button>
       </div>
 
-      <div class="create-section" id="apidid-create">
-        <div class="card" style="margin-bottom:0">
-          <div class="card-title">Create API DID</div>
-          <div class="form-grid">
-            <div class="form-group">
-              <label class="form-label">Customer</label>
-              <select class="form-control" id="apidid-customer">
-                <option value="">Select customer...</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label class="form-label">DID</label>
-              <input class="form-control" id="apidid-did" type="tel" placeholder="+12125551234" />
-            </div>
-            <div class="form-group" style="grid-column:1/-1">
-              <label class="form-label">Voice URL (required)</label>
-              <input class="form-control" id="apidid-voice-url" type="url" placeholder="https://example.com/voice" />
-            </div>
-            <div class="form-group" style="grid-column:1/-1">
-              <label class="form-label">Status Callback (optional)</label>
-              <input class="form-control" id="apidid-status-cb" type="url" placeholder="https://example.com/status" />
-            </div>
-          </div>
-          <div class="form-footer">
-            <button class="btn btn-ghost" onclick="toggleCreateSection('apidid-create')">Cancel</button>
-            <button class="btn btn-primary" id="apidid-create-btn" onclick="createApiDid()">Create DID</button>
-          </div>
-        </div>
+      <div style="background:rgba(59,130,246,.07);border:1px solid rgba(59,130,246,.2);border-radius:8px;padding:10px 16px;font-size:.85rem;color:#93c5fd;margin-bottom:20px">
+        API DID configuration is managed from the <a onclick="navigate('customers')" style="color:#60a5fa;cursor:pointer;text-decoration:underline">Customers page</a>.
       </div>
 
       <div id="apidids-table-wrap">
@@ -3205,45 +3141,10 @@
           <div class="page-title">SIP <span>Trunks</span></div>
           <div class="page-subtitle">SIP trunk accounts and IP authentication</div>
         </div>
-        <button class="btn btn-primary" onclick="toggleCreateSection('trunk-create')">+ New Trunk</button>
       </div>
 
-      <div class="create-section" id="trunk-create">
-        <div class="card" style="margin-bottom:0">
-          <div class="card-title">Create SIP Trunk</div>
-          <div class="form-grid">
-            <div class="form-group">
-              <label class="form-label">Customer</label>
-              <select class="form-control" id="trunk-customer">
-                <option value="">Select customer...</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label class="form-label">Trunk Name</label>
-              <input class="form-control" id="trunk-name" type="text" placeholder="acme-primary" />
-            </div>
-            <div class="form-group">
-              <label class="form-label">Max Channels</label>
-              <input class="form-control" id="trunk-max-channels" type="number" value="10" min="1" />
-            </div>
-            <div class="form-group">
-              <label class="form-label">CPS Limit</label>
-              <input class="form-control" id="trunk-cps" type="number" value="10" min="1" />
-            </div>
-            <div class="form-group">
-              <label class="form-label">Auth Type</label>
-              <select class="form-control" id="trunk-auth-type">
-                <option value="ip">IP Auth</option>
-                <option value="credential">Credential</option>
-                <option value="both">Both</option>
-              </select>
-            </div>
-          </div>
-          <div class="form-footer">
-            <button class="btn btn-ghost" onclick="toggleCreateSection('trunk-create')">Cancel</button>
-            <button class="btn btn-primary" id="trunk-create-btn" onclick="createTrunk()">Create Trunk</button>
-          </div>
-        </div>
+      <div style="background:rgba(59,130,246,.07);border:1px solid rgba(59,130,246,.2);border-radius:8px;padding:10px 16px;font-size:.85rem;color:#93c5fd;margin-bottom:20px">
+        Trunk configuration is managed from the <a onclick="navigate('customers')" style="color:#60a5fa;cursor:pointer;text-decoration:underline">Customers page</a>.
       </div>
 
       <div id="trunks-list">
@@ -4399,6 +4300,9 @@ function renderCustomersTable() {
     return;
   }
 
+  // Collect trunk IDs that need call-path dropdowns populated after DOM render
+  const pendingCallPathDropdowns = [];
+
   const rows = customersList.map(c => {
     const isExpanded = expandedCustomer === c.id;
     const acctBadge = `<span class="badge badge-${escHtml(c.account_type)}">${escHtml(c.account_type)}</span>`;
@@ -4533,27 +4437,49 @@ function renderCustomersTable() {
                         type="tel"
                         value="${escHtml(r.forward_to)}"
                         placeholder="+18005559999"
-                        onchange="quickUpdateRcfForward('${safeDid}', this)"
+                        onchange="custQuickUpdateRcfForward('${safeDid}', this, ${c.id})"
                         onkeydown="if(event.key==='Enter'){this.blur()}"
                         onclick="event.stopPropagation()"
                       />
                     </td>
                     <td>${statusBadge}</td>
+                    <td>
+                      <button class="btn btn-ghost btn-xs" onclick="event.stopPropagation();custToggleRcfEnabled('${safeDid}', ${!r.enabled}, ${c.id})">${r.enabled ? 'Disable' : 'Enable'}</button>
+                      <button class="btn btn-danger btn-xs" style="margin-left:4px" onclick="event.stopPropagation();custDeleteRcf('${safeDid}', ${c.id})">Delete</button>
+                    </td>
                   </tr>`;
               }).join('');
               rcfBodyHtml = `
                 <table class="cust-svc-table">
-                  <thead><tr><th>DID</th><th>Forward To</th><th>Status</th></tr></thead>
+                  <thead><tr><th>DID</th><th>Forward To</th><th>Status</th><th></th></tr></thead>
                   <tbody>${rcfRows}</tbody>
                 </table>`;
             }
             sections.push(`
               <div class="cust-service-section">
-                <div class="cust-svc-label">
-                  RCF Numbers
-                  <a class="svc-manage-link" onclick="event.stopPropagation();navigate('rcf')">+ Add / Manage</a>
-                </div>
+                <div class="cust-svc-label">RCF Numbers</div>
                 ${rcfBodyHtml}
+                <div style="margin-top:12px;padding:10px 12px;background:var(--surface-raised);border:1px solid var(--border);border-radius:8px">
+                  <div style="font-size:.65rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.7px;margin-bottom:8px">Add RCF Number</div>
+                  <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+                    <div style="display:flex;flex-direction:column;gap:4px">
+                      <label style="font-size:.65rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.6px">DID</label>
+                      <input class="form-control" id="cust-rcf-new-did-${c.id}" type="tel" placeholder="+12125551234" style="padding:5px 9px;font-size:.83rem;width:160px" onclick="event.stopPropagation()" />
+                    </div>
+                    <div style="display:flex;flex-direction:column;gap:4px">
+                      <label style="font-size:.65rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.6px">Forward To</label>
+                      <input class="form-control" id="cust-rcf-new-fwd-${c.id}" type="tel" placeholder="+18005559999" style="padding:5px 9px;font-size:.83rem;width:160px" onclick="event.stopPropagation()" />
+                    </div>
+                    <div style="display:flex;flex-direction:column;gap:4px">
+                      <label style="font-size:.65rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.6px">Pass CID</label>
+                      <div style="display:flex;align-items:center;gap:6px;padding:7px 0">
+                        <input type="checkbox" id="cust-rcf-new-cid-${c.id}" checked onclick="event.stopPropagation()" style="accent-color:var(--accent);width:14px;height:14px" />
+                        <span style="font-size:.82rem;color:var(--muted)">Yes</span>
+                      </div>
+                    </div>
+                    <button class="btn btn-primary btn-sm" onclick="event.stopPropagation();custCreateRcf(${c.id})">Create</button>
+                  </div>
+                </div>
               </div>`);
           }
 
@@ -4573,28 +4499,55 @@ function renderCustomersTable() {
                 const statusBadge = d.enabled
                   ? '<span class="badge badge-active" style="font-size:.6rem">Active</span>'
                   : '<span class="badge badge-disabled" style="font-size:.6rem">Off</span>';
-                const voiceUrl = d.voice_url || '--';
+                const encDid = encodeURIComponent(d.did);
+                const safeDid = escHtml(d.did);
                 return `
                   <tr>
                     <td style="font-family:monospace;font-size:.8rem;white-space:nowrap">${fmt(d.did)}</td>
-                    <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)">${escHtml(voiceUrl)}</td>
+                    <td>
+                      <input class="cust-fwd-input"
+                        id="cust-api-url-${encDid}"
+                        type="url"
+                        value="${escHtml(d.voice_url || '')}"
+                        placeholder="https://example.com/voice"
+                        style="width:220px"
+                        onchange="custSaveApiDidUrl('${safeDid}', this, ${c.id})"
+                        onkeydown="if(event.key==='Enter'){this.blur()}"
+                        onclick="event.stopPropagation()"
+                      />
+                    </td>
                     <td>${statusBadge}</td>
+                    <td>
+                      <button class="btn btn-ghost btn-xs" onclick="event.stopPropagation();custToggleApiDid('${safeDid}', ${!d.enabled}, ${c.id})">${d.enabled ? 'Disable' : 'Enable'}</button>
+                      <button class="btn btn-danger btn-xs" style="margin-left:4px" onclick="event.stopPropagation();custDeleteApiDid('${safeDid}', ${c.id})">Delete</button>
+                    </td>
                   </tr>`;
               }).join('');
               apiBodyHtml = `
                 <table class="cust-svc-table">
-                  <thead><tr><th>DID</th><th>Voice URL</th><th>Status</th></tr></thead>
+                  <thead><tr><th>DID</th><th>Voice URL</th><th>Status</th><th></th></tr></thead>
                   <tbody>${apiRows}</tbody>
                 </table>`;
             }
             sections.push(`
               <div class="cust-service-section">
-                <div class="cust-svc-label">
-                  API Configuration
-                  <a class="svc-manage-link" onclick="event.stopPropagation();navigate('api-dids')">Manage API DIDs</a>
-                </div>
+                <div class="cust-svc-label">API Configuration</div>
                 ${apiTierInfo}
                 ${apiBodyHtml}
+                <div style="margin-top:12px;padding:10px 12px;background:var(--surface-raised);border:1px solid var(--border);border-radius:8px">
+                  <div style="font-size:.65rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.7px;margin-bottom:8px">Add API DID</div>
+                  <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+                    <div style="display:flex;flex-direction:column;gap:4px">
+                      <label style="font-size:.65rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.6px">DID</label>
+                      <input class="form-control" id="cust-api-new-did-${c.id}" type="tel" placeholder="+12125551234" style="padding:5px 9px;font-size:.83rem;width:150px" onclick="event.stopPropagation()" />
+                    </div>
+                    <div style="display:flex;flex-direction:column;gap:4px">
+                      <label style="font-size:.65rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.6px">Voice URL</label>
+                      <input class="form-control" id="cust-api-new-url-${c.id}" type="url" placeholder="https://example.com/voice" style="padding:5px 9px;font-size:.83rem;width:220px" onclick="event.stopPropagation()" />
+                    </div>
+                    <button class="btn btn-primary btn-sm" onclick="event.stopPropagation();custCreateApiDid(${c.id})">Create</button>
+                  </div>
+                </div>
               </div>`);
           }
 
@@ -4607,34 +4560,114 @@ function renderCustomersTable() {
             } else if (trunkList.length === 0) {
               trunkBodyHtml = `<div style="font-size:.8rem;color:var(--muted)">No trunks configured.</div>`;
             } else {
-              const trunkRows = trunkList.map(t => {
+              trunkBodyHtml = trunkList.map(t => {
                 const statusBadge = t.enabled
                   ? '<span class="badge badge-active" style="font-size:.6rem">Active</span>'
                   : '<span class="badge badge-disabled" style="font-size:.6rem">Off</span>';
-                const channels = `${t.current_channels != null ? t.current_channels : '?'}/${t.max_channels}`;
+                const channels = `${t.current_channels != null ? t.current_channels : '0'}/${t.max_channels}`;
+
+                // IPs sub-section
+                const ips = t.ips || [];
+                const ipRowsHtml = ips.length === 0
+                  ? '<div style="font-size:.78rem;color:var(--muted);padding:4px 0">No IPs configured</div>'
+                  : '<div class="ip-list" style="margin-top:6px">' + ips.map(ip => `
+                      <div class="ip-row" style="font-size:.78rem">
+                        <span class="ip-addr">${escHtml(ip.ip_address)}</span>
+                        <span class="ip-desc">${escHtml(ip.description || '')}</span>
+                        <button class="btn btn-danger btn-xs" onclick="event.stopPropagation();custDeleteTrunkIp(${t.id}, ${ip.id}, ${c.id})">Remove</button>
+                      </div>`).join('') + '</div>';
+
+                // DIDs sub-section
+                const dids = t.dids || [];
+                const didsHtml = dids.length === 0
+                  ? '<div style="font-size:.78rem;color:var(--muted);padding:4px 0">No DIDs assigned</div>'
+                  : '<div style="display:flex;flex-wrap:wrap;margin-top:4px">' + dids.map(d => `
+                      <span class="did-chip" style="font-size:.75rem">${fmt(d.did)}</span>`).join('') + '</div>';
+
+                // Call path select options — populated after render via loadCustCallPathDropdown
                 return `
-                  <tr>
-                    <td style="font-weight:600">${escHtml(t.trunk_name)}</td>
-                    <td style="font-variant-numeric:tabular-nums">${escHtml(channels)}</td>
-                    <td style="font-variant-numeric:tabular-nums">${t.cps_limit != null ? t.cps_limit : '--'}</td>
-                    <td style="font-variant-numeric:tabular-nums">${t.ip_count != null ? t.ip_count : '--'}</td>
-                    <td>${statusBadge}</td>
-                  </tr>`;
+                  <div style="background:var(--surface-raised);border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin-bottom:10px">
+                    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">
+                      <div style="font-size:.9rem;font-weight:700;color:var(--text);flex:1">${escHtml(t.trunk_name)}</div>
+                      ${statusBadge}
+                      <span style="font-size:.75rem;color:var(--muted)">${escHtml(t.auth_type)} auth</span>
+                    </div>
+                    <div style="display:flex;gap:18px;flex-wrap:wrap;font-size:.78rem;color:var(--muted);margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid var(--border)">
+                      <span>Channels: <strong style="color:var(--text)">${escHtml(channels)}</strong></span>
+                      <span>CPS: <strong style="color:var(--text)">${t.cps_limit != null ? t.cps_limit : '--'}</strong></span>
+                      <span>IPs: <strong style="color:var(--text)">${ips.length}</strong></span>
+                      <span>DIDs: <strong style="color:var(--text)">${dids.length}</strong></span>
+                    </div>
+
+                    <div style="font-size:.63rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.7px;margin-bottom:6px">Call Paths</div>
+                    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+                      <span style="font-size:.82rem;color:var(--text)">Current: <strong>${t.max_channels}</strong> paths${t.package_name ? ' ('+escHtml(t.package_name)+')' : ''}</span>
+                      <span style="font-size:.78rem;color:var(--muted)">CPS: ${t.cps_limit}</span>
+                    </div>
+                    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px">
+                      <select class="form-control" id="cust-callpath-${t.id}" style="max-width:220px;padding:4px 8px;font-size:.82rem" onclick="event.stopPropagation()">
+                        <option value="">-- Select package --</option>
+                      </select>
+                      <button class="btn btn-primary btn-xs" onclick="event.stopPropagation();custAssignCallPaths(${t.id}, ${c.id})">Apply</button>
+                    </div>
+                    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+                      <label style="font-size:.78rem;color:var(--muted)">Override:</label>
+                      <input class="form-control" id="cust-trunk-ch-${t.id}" type="number" min="1" max="1000" value="${t.max_channels}" style="max-width:80px;padding:4px 8px;font-size:.82rem" onclick="event.stopPropagation()" />
+                      <label style="font-size:.78rem;color:var(--muted)">ch</label>
+                      <input class="form-control" id="cust-trunk-cps-${t.id}" type="number" min="1" max="100" value="${t.cps_limit}" style="max-width:70px;padding:4px 8px;font-size:.82rem" onclick="event.stopPropagation()" />
+                      <label style="font-size:.78rem;color:var(--muted)">CPS</label>
+                      <button class="btn btn-ghost btn-xs" onclick="event.stopPropagation();custUpdateTrunkCapacity(${t.id}, ${c.id})">Save</button>
+                    </div>
+
+                    <div style="font-size:.63rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.7px;margin-bottom:6px">Authorized IPs</div>
+                    ${ipRowsHtml}
+                    <div style="display:flex;gap:6px;margin-top:8px;align-items:center;flex-wrap:wrap">
+                      <input class="form-control" id="cust-trunk-new-ip-${t.id}" placeholder="192.0.2.1" style="max-width:150px;padding:4px 8px;font-size:.82rem;font-family:monospace" onclick="event.stopPropagation()" />
+                      <input class="form-control" id="cust-trunk-new-ip-desc-${t.id}" placeholder="Description" style="max-width:160px;padding:4px 8px;font-size:.82rem" onclick="event.stopPropagation()" />
+                      <button class="btn btn-ghost btn-xs" onclick="event.stopPropagation();custAddTrunkIp(${t.id}, ${c.id})">Add IP</button>
+                    </div>
+
+                    <div style="font-size:.63rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.7px;margin-top:10px;margin-bottom:6px">Assigned DIDs</div>
+                    ${didsHtml}
+                    <div style="display:flex;gap:6px;margin-top:8px;align-items:center;flex-wrap:wrap">
+                      <input class="form-control" id="cust-trunk-new-did-${t.id}" placeholder="+12125551234" style="max-width:180px;padding:4px 8px;font-size:.82rem;font-family:monospace" onclick="event.stopPropagation()" />
+                      <button class="btn btn-ghost btn-xs" onclick="event.stopPropagation();custAddTrunkDid(${t.id}, ${c.id})">Assign DID</button>
+                    </div>
+
+                    <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border)">
+                      <button class="btn btn-ghost btn-xs" onclick="event.stopPropagation();custToggleTrunkEnabled(${t.id}, ${!t.enabled}, ${c.id})">${t.enabled ? 'Disable' : 'Enable'} Trunk</button>
+                    </div>
+                  </div>`;
               }).join('');
-              trunkBodyHtml = `
-                <table class="cust-svc-table">
-                  <thead><tr><th>Trunk</th><th>Channels</th><th>CPS</th><th>IPs</th><th>Status</th></tr></thead>
-                  <tbody>${trunkRows}</tbody>
-                </table>`;
             }
             sections.push(`
               <div class="cust-service-section">
-                <div class="cust-svc-label">
-                  Trunk Configuration
-                  <a class="svc-manage-link" onclick="event.stopPropagation();navigate('trunks')">Manage Trunks</a>
-                </div>
+                <div class="cust-svc-label">Trunk Configuration</div>
                 ${trunkBodyHtml}
+                <div style="margin-top:4px;padding:10px 12px;background:var(--surface-raised);border:1px solid var(--border);border-radius:8px">
+                  <div style="font-size:.65rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.7px;margin-bottom:8px">Create New Trunk</div>
+                  <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+                    <div style="display:flex;flex-direction:column;gap:4px">
+                      <label style="font-size:.65rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.6px">Trunk Name</label>
+                      <input class="form-control" id="cust-new-trunk-name-${c.id}" type="text" placeholder="acme-primary" style="padding:5px 9px;font-size:.83rem;width:140px" onclick="event.stopPropagation()" />
+                    </div>
+                    <div style="display:flex;flex-direction:column;gap:4px">
+                      <label style="font-size:.65rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.6px">Auth Type</label>
+                      <select class="form-control" id="cust-new-trunk-auth-${c.id}" style="padding:5px 9px;font-size:.83rem;width:130px" onclick="event.stopPropagation()">
+                        <option value="ip">IP Auth</option>
+                        <option value="credential">Credential</option>
+                        <option value="both">Both</option>
+                      </select>
+                    </div>
+                    <button class="btn btn-primary btn-sm" onclick="event.stopPropagation();custCreateTrunk(${c.id})">Create Trunk</button>
+                  </div>
+                </div>
               </div>`);
+
+            // Queue call path dropdown population (runs after DOM is updated)
+            if (trunkList && trunkList.length > 0) {
+              trunkList.forEach(t => pendingCallPathDropdowns.push(t.id));
+            }
           }
 
           if (sections.length) {
@@ -4691,6 +4724,13 @@ function renderCustomersTable() {
       <tbody>${rows}</tbody>
     </table>
   </div>`;
+
+  // Now that DOM is updated, populate call path dropdowns for any expanded trunk sections
+  if (pendingCallPathDropdowns.length > 0) {
+    setTimeout(() => {
+      pendingCallPathDropdowns.forEach(trunkId => custLoadCallPathDropdown(trunkId));
+    }, 0);
+  }
 }
 
 function toggleExpandCustomer(id) {
@@ -4736,19 +4776,42 @@ async function loadCustomerServices(id, accountType) {
     const apiDidsResult  = needsApi   ? results[idx++] : null;
     const trunksResult   = needsTrunk ? results[idx++] : null;
 
+    // For each trunk, also fetch IPs and DIDs
+    let trunksWithDetails = trunksResult && trunksResult.status === 'fulfilled' ? trunksResult.value : null;
+    if (trunksWithDetails && trunksWithDetails.length > 0) {
+      const detailFetches = trunksWithDetails.map(t => Promise.allSettled([
+        api('GET', `/trunks/${t.id}/ips`),
+        api('GET', `/trunks/${t.id}/dids`)
+      ]));
+      const detailResults = await Promise.all(detailFetches);
+      trunksWithDetails = trunksWithDetails.map((t, i) => ({
+        ...t,
+        ips:  detailResults[i][0].status === 'fulfilled' ? detailResults[i][0].value : [],
+        dids: detailResults[i][1].status === 'fulfilled' ? detailResults[i][1].value : []
+      }));
+    }
+
     customerServices[id] = {
       loading:  false,
       error:    null,
       tier:     tierResult.status     === 'fulfilled' ? tierResult.value     : null,
       rcf:      rcfResult   && rcfResult.status   === 'fulfilled' ? rcfResult.value   : null,
       apiDids:  apiDidsResult && apiDidsResult.status === 'fulfilled' ? apiDidsResult.value : null,
-      trunks:   trunksResult  && trunksResult.status  === 'fulfilled' ? trunksResult.value  : null,
+      trunks:   trunksWithDetails,
     };
   } catch (err) {
     customerServices[id] = { loading: false, error: err.message, tier: null, rcf: null, apiDids: null, trunks: null };
   }
 
   renderCustomersTable();
+}
+
+// Helper to invalidate and reload services for a customer
+async function reloadCustomerServices(customerId) {
+  const customer = customersList.find(c => c.id === customerId);
+  if (!customer) return;
+  delete customerServices[customerId];
+  await loadCustomerServices(customerId, customer.account_type);
 }
 
 // Called from the inline "Edit Forward" input inside the customer detail view.
@@ -4851,6 +4914,304 @@ async function addCredit(id) {
   }
 }
 
+/* =========================================================
+   CUSTOMER PAGE — INLINE CRUD HELPERS
+   (RCF, API DIDs, Trunk management from the customer detail view)
+========================================================= */
+
+// ----- RCF -----
+
+async function custQuickUpdateRcfForward(did, inputEl, customerId) {
+  const newForward = inputEl.value.trim();
+  if (!newForward) { toast('Destination cannot be empty', 'err'); return; }
+  inputEl.disabled = true;
+  try {
+    await api('PUT', '/rcf/' + encodeURIComponent(did), { forward_to: newForward });
+    const svc = customerServices[customerId];
+    if (svc && svc.rcf) {
+      const entry = svc.rcf.find(r => r.did === did);
+      if (entry) entry.forward_to = newForward;
+    }
+    inputEl.className = 'cust-fwd-input saved';
+    setTimeout(() => { if (inputEl) inputEl.className = 'cust-fwd-input'; }, 1800);
+    toast(`Forward updated for ${fmt(did)}`);
+  } catch (err) {
+    inputEl.className = 'cust-fwd-input';
+    toast(err.message, 'err');
+  } finally {
+    inputEl.disabled = false;
+  }
+}
+
+async function custToggleRcfEnabled(did, newState, customerId) {
+  try {
+    await api('PUT', '/rcf/' + encodeURIComponent(did), { enabled: newState });
+    const svc = customerServices[customerId];
+    if (svc && svc.rcf) {
+      const entry = svc.rcf.find(r => r.did === did);
+      if (entry) entry.enabled = newState;
+    }
+    renderCustomersTable();
+    toast(newState ? 'RCF number enabled' : 'RCF number disabled');
+  } catch (err) {
+    toast(err.message, 'err');
+  }
+}
+
+async function custDeleteRcf(did, customerId) {
+  if (!confirm(`Delete ${fmt(did)}?\n\nThis cannot be undone.`)) return;
+  try {
+    await api('DELETE', '/rcf/' + encodeURIComponent(did));
+    const svc = customerServices[customerId];
+    if (svc && svc.rcf) {
+      svc.rcf = svc.rcf.filter(r => r.did !== did);
+    }
+    renderCustomersTable();
+    toast(`${fmt(did)} deleted`);
+  } catch (err) {
+    toast(err.message, 'err');
+  }
+}
+
+async function custCreateRcf(customerId) {
+  const didEl  = document.getElementById(`cust-rcf-new-did-${customerId}`);
+  const fwdEl  = document.getElementById(`cust-rcf-new-fwd-${customerId}`);
+  const cidEl  = document.getElementById(`cust-rcf-new-cid-${customerId}`);
+  const did    = didEl?.value.trim();
+  const fwd    = fwdEl?.value.trim();
+  const passCid = cidEl?.checked ?? true;
+
+  if (!did) { toast('DID is required', 'err'); return; }
+  if (!fwd) { toast('Forward-to is required', 'err'); return; }
+
+  try {
+    await api('POST', '/rcf', {
+      customer_id: customerId,
+      did,
+      forward_to: fwd,
+      pass_caller_id: passCid,
+      ring_timeout: 30
+    });
+    if (didEl) didEl.value = '';
+    if (fwdEl) fwdEl.value = '';
+    toast(`RCF number ${fmt(did)} created`);
+    await reloadCustomerServices(customerId);
+  } catch (err) {
+    toast(err.message, 'err');
+  }
+}
+
+// ----- API DIDs -----
+
+async function custSaveApiDidUrl(did, inputEl, customerId) {
+  const voiceUrl = inputEl.value.trim();
+  if (!voiceUrl) { toast('Voice URL is required', 'err'); return; }
+  inputEl.disabled = true;
+  try {
+    await api('PUT', `/api-dids/${encodeURIComponent(did)}`, { voice_url: voiceUrl });
+    const svc = customerServices[customerId];
+    if (svc && svc.apiDids) {
+      const entry = svc.apiDids.find(d => d.did === did);
+      if (entry) entry.voice_url = voiceUrl;
+    }
+    inputEl.className = 'cust-fwd-input saved';
+    setTimeout(() => { if (inputEl) inputEl.className = 'cust-fwd-input'; }, 1800);
+    toast('Voice URL updated');
+  } catch (err) {
+    inputEl.className = 'cust-fwd-input';
+    toast(err.message, 'err');
+  } finally {
+    inputEl.disabled = false;
+  }
+}
+
+async function custToggleApiDid(did, newState, customerId) {
+  try {
+    await api('PUT', `/api-dids/${encodeURIComponent(did)}`, { enabled: newState });
+    const svc = customerServices[customerId];
+    if (svc && svc.apiDids) {
+      const entry = svc.apiDids.find(d => d.did === did);
+      if (entry) entry.enabled = newState;
+    }
+    renderCustomersTable();
+    toast(newState ? 'DID enabled' : 'DID disabled');
+  } catch (err) {
+    toast(err.message, 'err');
+  }
+}
+
+async function custDeleteApiDid(did, customerId) {
+  if (!confirm(`Delete API DID ${fmt(did)}?\n\nThis cannot be undone.`)) return;
+  try {
+    await api('DELETE', `/api-dids/${encodeURIComponent(did)}`);
+    const svc = customerServices[customerId];
+    if (svc && svc.apiDids) {
+      svc.apiDids = svc.apiDids.filter(d => d.did !== did);
+    }
+    renderCustomersTable();
+    toast(`${fmt(did)} deleted`);
+  } catch (err) {
+    toast(err.message, 'err');
+  }
+}
+
+async function custCreateApiDid(customerId) {
+  const didEl = document.getElementById(`cust-api-new-did-${customerId}`);
+  const urlEl = document.getElementById(`cust-api-new-url-${customerId}`);
+  const did   = didEl?.value.trim();
+  const url   = urlEl?.value.trim();
+
+  if (!did) { toast('DID is required', 'err'); return; }
+  if (!url) { toast('Voice URL is required', 'err'); return; }
+
+  try {
+    await api('POST', '/api-dids', {
+      customer_id: customerId,
+      did,
+      voice_url: url
+    });
+    if (didEl) didEl.value = '';
+    if (urlEl) urlEl.value = '';
+    toast(`API DID ${fmt(did)} created`);
+    await reloadCustomerServices(customerId);
+  } catch (err) {
+    toast(err.message, 'err');
+  }
+}
+
+// ----- Trunks -----
+
+async function custLoadCallPathDropdown(trunkId) {
+  const sel = document.getElementById(`cust-callpath-${trunkId}`);
+  if (!sel) return;
+  if (!callPathPackagesCache) {
+    try {
+      callPathPackagesCache = await api('GET', '/trunks/call-paths');
+    } catch (e) {
+      callPathPackagesCache = [];
+    }
+  }
+  // Only append if not already populated
+  if (sel.options.length <= 1) {
+    (callPathPackagesCache || []).forEach(p => {
+      const opt = document.createElement('option');
+      opt.value = p.id;
+      opt.textContent = `${p.call_paths} paths — $${parseFloat(p.monthly_fee).toFixed(2)}/mo`;
+      sel.appendChild(opt);
+    });
+  }
+}
+
+async function custAssignCallPaths(trunkId, customerId) {
+  const sel = document.getElementById(`cust-callpath-${trunkId}`);
+  const packageId = sel?.value;
+  if (!packageId) { toast('Select a call path package', 'err'); return; }
+  try {
+    await api('PUT', `/trunks/${trunkId}/call-paths`, { package_id: parseInt(packageId) });
+    toast('Call path package assigned');
+    await reloadCustomerServices(customerId);
+  } catch (err) {
+    toast(err.message, 'err');
+  }
+}
+
+async function custUpdateTrunkCapacity(trunkId, customerId) {
+  const channels = document.getElementById(`cust-trunk-ch-${trunkId}`)?.value;
+  const cps      = document.getElementById(`cust-trunk-cps-${trunkId}`)?.value;
+  if (!channels || !cps) { toast('Enter channels and CPS values', 'err'); return; }
+  try {
+    await api('PUT', `/trunks/${trunkId}`, {
+      max_channels: parseInt(channels),
+      cps_limit:    parseInt(cps)
+    });
+    toast('Trunk capacity updated');
+    await reloadCustomerServices(customerId);
+  } catch (err) {
+    toast(err.message, 'err');
+  }
+}
+
+async function custAddTrunkIp(trunkId, customerId) {
+  const ipInput   = document.getElementById(`cust-trunk-new-ip-${trunkId}`);
+  const descInput = document.getElementById(`cust-trunk-new-ip-desc-${trunkId}`);
+  const ip        = ipInput?.value?.trim();
+  const desc      = descInput?.value?.trim();
+  if (!ip) { toast('IP address is required', 'err'); return; }
+  try {
+    await api('POST', `/trunks/${trunkId}/ips`, { ip_address: ip, description: desc || null });
+    if (ipInput) ipInput.value = '';
+    if (descInput) descInput.value = '';
+    toast(`IP ${ip} added`);
+    await reloadCustomerServices(customerId);
+  } catch (err) {
+    toast(err.message, 'err');
+  }
+}
+
+async function custDeleteTrunkIp(trunkId, ipId, customerId) {
+  if (!confirm('Remove this IP?')) return;
+  try {
+    await api('DELETE', `/trunks/${trunkId}/ips/${ipId}`);
+    toast('IP removed');
+    await reloadCustomerServices(customerId);
+  } catch (err) {
+    toast(err.message, 'err');
+  }
+}
+
+async function custAddTrunkDid(trunkId, customerId) {
+  const input = document.getElementById(`cust-trunk-new-did-${trunkId}`);
+  const did   = input?.value?.trim();
+  if (!did) { toast('DID is required', 'err'); return; }
+  try {
+    await api('POST', `/trunks/${trunkId}/dids`, { did });
+    if (input) input.value = '';
+    toast(`DID ${fmt(did)} assigned`);
+    await reloadCustomerServices(customerId);
+  } catch (err) {
+    toast(err.message, 'err');
+  }
+}
+
+async function custToggleTrunkEnabled(trunkId, newState, customerId) {
+  try {
+    await api('PUT', `/trunks/${trunkId}`, { enabled: newState });
+    const svc = customerServices[customerId];
+    if (svc && svc.trunks) {
+      const t = svc.trunks.find(x => x.id === trunkId);
+      if (t) t.enabled = newState;
+    }
+    renderCustomersTable();
+    toast(newState ? 'Trunk enabled' : 'Trunk disabled');
+  } catch (err) {
+    toast(err.message, 'err');
+  }
+}
+
+async function custCreateTrunk(customerId) {
+  const nameEl = document.getElementById(`cust-new-trunk-name-${customerId}`);
+  const authEl = document.getElementById(`cust-new-trunk-auth-${customerId}`);
+  const name   = nameEl?.value.trim();
+  const auth   = authEl?.value || 'ip';
+
+  if (!name) { toast('Trunk name is required', 'err'); return; }
+
+  try {
+    await api('POST', '/trunks', {
+      customer_id: customerId,
+      trunk_name: name,
+      max_channels: 10,
+      cps_limit: 5,
+      auth_type: auth
+    });
+    if (nameEl) nameEl.value = '';
+    toast(`Trunk "${name}" created`);
+    await reloadCustomerServices(customerId);
+  } catch (err) {
+    toast(err.message, 'err');
+  }
+}
+
 async function createCustomer() {
   const name   = document.getElementById('cust-name').value.trim();
   const type   = document.getElementById('cust-acct-type').value;
@@ -4912,7 +5273,7 @@ function renderRCFList() {
 
   if (rcfList.length === 0) {
     heading.style.display = 'none';
-    container.innerHTML = '<div class="state-msg"><strong>No forwarding numbers yet</strong>Click "+ New Number" above to add one.</div>';
+    container.innerHTML = '<div class="state-msg"><strong>No forwarding numbers yet</strong>Add RCF numbers from the Customers page.</div>';
     return;
   }
 
@@ -4922,16 +5283,9 @@ function renderRCFList() {
 }
 
 function renderRCFCard(r) {
-  const pending    = pendingEdits[r.did];
-  const fwdValue   = pending !== undefined ? pending : r.forward_to;
-  const isDirty    = pending !== undefined && pending !== r.forward_to;
-  const inputClass = isDirty ? 'dirty' : '';
-
   const badgeHtml = r.enabled
     ? '<span class="badge badge-active">Active</span>'
     : '<span class="badge badge-disabled">Disabled</span>';
-
-  const safeDid = r.did.replace(/"/g, '&quot;');
 
   return `
 <div class="card rcf-card" id="rcf-card-${encodeURIComponent(r.did)}">
@@ -4943,42 +5297,18 @@ function renderRCFCard(r) {
 
   <div class="rcf-forward-area">
     <div class="forward-label">Forwards to</div>
-    <div class="forward-row">
-      <input
-        class="forward-input ${inputClass}"
-        id="rcf-fwd-${encodeURIComponent(r.did)}"
-        type="tel"
-        value="${escHtml(fwdValue)}"
-        placeholder="+18005559999 or 1001"
-        data-did="${safeDid}"
-        data-original="${escHtml(r.forward_to)}"
-        oninput="onRCFForwardInput(this)"
-        onkeydown="if(event.key==='Enter') saveRCFForward(this.dataset.did)"
-      />
-      <button
-        class="btn btn-primary"
-        id="rcf-save-btn-${encodeURIComponent(r.did)}"
-        onclick="saveRCFForward('${safeDid}')"
-        ${!isDirty ? 'disabled' : ''}
-      >Save</button>
-    </div>
+    <div style="font-size:1rem;font-weight:600;color:var(--text);padding:8px 0">${fmt(r.forward_to) || escHtml(r.forward_to)}</div>
     <div style="font-size:.76rem;color:var(--muted)">
-      Currently: <strong>${fmt(r.forward_to)}</strong>
-      &nbsp;&middot;&nbsp;Ring timeout: ${r.ring_timeout != null ? r.ring_timeout + 's' : '30s'}
+      Ring timeout: ${r.ring_timeout != null ? r.ring_timeout + 's' : '30s'}
+      &nbsp;&middot;&nbsp; Pass Caller ID: ${r.pass_caller_id ? 'Yes' : 'No'}
     </div>
-  </div>
-
-  <div class="rcf-actions">
-    <button class="btn btn-ghost btn-sm" onclick="toggleRCFEnabled('${safeDid}', ${!r.enabled})">
-      ${r.enabled ? 'Disable' : 'Enable'}
-    </button>
-    <button class="btn btn-danger btn-sm" onclick="confirmRCFDelete('${safeDid}')">Delete</button>
   </div>
 </div>`;
 }
 
 function populateRCFCustomerDropdown() {
   const sel = document.getElementById('rcf-new-customer');
+  if (!sel) return;
   if (rcfCustomers.length === 0) {
     sel.innerHTML = '<option value="">No customers found</option>';
     return;
@@ -5079,10 +5409,13 @@ async function createRCF() {
     const list = await api('GET', '/rcf');
     rcfList = list;
     renderRCFList();
-    document.getElementById('rcf-new-did').value     = '';
-    document.getElementById('rcf-new-forward').value = '';
-    document.getElementById('rcf-new-timeout').value = '30';
-    document.getElementById('rcf-create').classList.remove('open');
+    const _rcfDidEl = document.getElementById('rcf-new-did');
+    const _rcfFwdEl = document.getElementById('rcf-new-forward');
+    const _rcfToEl  = document.getElementById('rcf-new-timeout');
+    if (_rcfDidEl) _rcfDidEl.value = '';
+    if (_rcfFwdEl) _rcfFwdEl.value = '';
+    if (_rcfToEl)  _rcfToEl.value  = '30';
+    document.getElementById('rcf-create')?.classList.remove('open');
     toast(`${fmt(did)} created`);
   } catch (err) {
     toast(err.message, 'err');
@@ -5116,6 +5449,7 @@ async function loadApiDids() {
 
 function populateApiDidCustomerDropdown(custs) {
   const sel = document.getElementById('apidid-customer');
+  if (!sel) return;
   sel.innerHTML = '<option value="">Select customer...</option>' +
     custs.map(c => `<option value="${c.id}">${escHtml(c.name)}</option>`).join('');
 }
@@ -5124,45 +5458,23 @@ function renderApiDidsTable() {
   const wrap = document.getElementById('apidids-table-wrap');
 
   if (apiDidsList.length === 0) {
-    wrap.innerHTML = '<div class="state-msg"><strong>No API DIDs yet</strong>Click "+ New API DID" to add one.</div>';
+    wrap.innerHTML = '<div class="state-msg"><strong>No API DIDs yet</strong>Add API DIDs from the Customers page.</div>';
     return;
   }
 
   const rows = apiDidsList.map(d => {
-    const isExpanded = expandedApiDid === d.did;
     const enabledBadge = d.enabled
       ? '<span class="badge badge-active">Enabled</span>'
       : '<span class="badge badge-disabled">Disabled</span>';
 
-    let expandHtml = '';
-    if (isExpanded) {
-      expandHtml = `
-      <tr class="expand-row">
-        <td colspan="6">
-          <div class="expand-inner">
-            <div class="form-group" style="grid-column:1/-1"><label class="form-label">Voice URL</label>
-              <input class="form-control inline-input" id="apidid-edit-voice-${escHtml(d.did)}" value="${escHtml(d.voice_url || '')}" style="max-width:500px" /></div>
-            <div class="form-group" style="grid-column:1/-1"><label class="form-label">Status Callback</label>
-              <input class="form-control inline-input" id="apidid-edit-cb-${escHtml(d.did)}" value="${escHtml(d.status_callback || '')}" style="max-width:500px" /></div>
-            <div class="expand-actions">
-              <button class="btn btn-primary btn-sm" onclick="saveApiDid('${escHtml(d.did)}')">Save</button>
-              <button class="btn btn-ghost btn-sm" onclick="toggleApiDidEnabled('${escHtml(d.did)}', ${!d.enabled})">${d.enabled ? 'Disable' : 'Enable'}</button>
-              <button class="btn btn-danger btn-sm" onclick="confirmDeleteApiDid('${escHtml(d.did)}')">Delete</button>
-            </div>
-          </div>
-        </td>
-      </tr>`;
-    }
-
     return `
-    <tr onclick="toggleExpandApiDid('${escHtml(d.did)}')">
+    <tr style="cursor:default">
       <td style="font-variant-numeric:tabular-nums;font-weight:600">${fmt(d.did)}<br><span style="font-size:.72rem;color:var(--muted);font-family:monospace">${escHtml(d.did)}</span></td>
       <td>${escHtml(d.customer_name || '--')}</td>
       <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.82rem;color:var(--muted)">${escHtml(d.voice_url || '--')}</td>
       <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.82rem;color:var(--muted)">${escHtml(d.status_callback || '--')}</td>
       <td>${enabledBadge}</td>
-    </tr>
-    ${expandHtml}`;
+    </tr>`;
   }).join('');
 
   wrap.innerHTML = `
@@ -5254,10 +5566,10 @@ async function createApiDid() {
     // Re-fetch to get customer_name
     apiDidsList = await api('GET', '/api-dids');
     renderApiDidsTable();
-    document.getElementById('apidid-did').value        = '';
-    document.getElementById('apidid-voice-url').value  = '';
-    document.getElementById('apidid-status-cb').value  = '';
-    document.getElementById('apidid-create').classList.remove('open');
+    document.getElementById('apidid-did')?.setAttribute('value', '');
+    document.getElementById('apidid-voice-url')?.setAttribute('value', '');
+    document.getElementById('apidid-status-cb')?.setAttribute('value', '');
+    document.getElementById('apidid-create')?.classList.remove('open');
     toast(`API DID ${fmt(did)} created`);
   } catch (err) {
     toast(err.message, 'err');
@@ -5292,6 +5604,7 @@ async function loadTrunks() {
 
 function populateTrunkCustomerDropdown(custs) {
   const sel = document.getElementById('trunk-customer');
+  if (!sel) return;
   sel.innerHTML = '<option value="">Select customer...</option>' +
     custs.map(c => `<option value="${c.id}">${escHtml(c.name)}</option>`).join('');
 }
@@ -5300,7 +5613,7 @@ function renderTrunksList() {
   const list = document.getElementById('trunks-list');
 
   if (trunksList.length === 0) {
-    list.innerHTML = '<div class="state-msg"><strong>No SIP trunks yet</strong>Click "+ New Trunk" to add one.</div>';
+    list.innerHTML = '<div class="state-msg"><strong>No SIP trunks yet</strong>Create trunks from the Customers page.</div>';
     return;
   }
 
@@ -5329,7 +5642,7 @@ function renderTrunkCard(t) {
         <div class="trunk-stat"><div class="trunk-stat-label">Cost (1hr)</div><div class="trunk-stat-value">${stats.last_hour?.total_cost != null ? fmtMoney(stats.last_hour.total_cost) : '--'}</div></div>
       </div>` : '<div style="color:var(--muted);font-size:.82rem;margin-top:8px">Loading stats...</div>';
 
-    // IPs section
+    // IPs section (read-only — no remove buttons)
     const ips = detail.ips || [];
     const ipRowsHtml = ips.length === 0
       ? '<div style="color:var(--muted);font-size:.82rem">No IPs configured</div>'
@@ -5337,10 +5650,9 @@ function renderTrunkCard(t) {
           <div class="ip-row">
             <span class="ip-addr">${escHtml(ip.ip_address)}</span>
             <span class="ip-desc">${escHtml(ip.description || '')}</span>
-            <button class="btn btn-danger btn-xs" onclick="event.stopPropagation();deleteTrunkIp(${t.id}, ${ip.id})">Remove</button>
           </div>`).join('') + '</div>';
 
-    // DIDs section
+    // DIDs section (read-only)
     const dids = detail.dids || [];
     const didsHtml = dids.length === 0
       ? '<div style="color:var(--muted);font-size:.82rem">No DIDs assigned</div>'
@@ -5353,44 +5665,17 @@ function renderTrunkCard(t) {
 
         <div class="sub-section-title" style="margin-top:18px">Authorized IPs</div>
         ${ipRowsHtml}
-        <div style="display:flex;gap:8px;margin-top:10px;align-items:center;flex-wrap:wrap">
-          <input class="form-control" id="trunk-new-ip-${t.id}" placeholder="192.0.2.1" style="max-width:180px;padding:6px 10px;font-size:.85rem;font-family:monospace" onclick="event.stopPropagation()" />
-          <input class="form-control" id="trunk-new-ip-desc-${t.id}" placeholder="Description (optional)" style="max-width:220px;padding:6px 10px;font-size:.85rem" onclick="event.stopPropagation()" />
-          <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();addTrunkIp(${t.id})">Add IP</button>
-        </div>
 
         <div class="sub-section-title">Assigned DIDs</div>
         ${didsHtml}
-        <div style="display:flex;gap:8px;margin-top:10px;align-items:center;flex-wrap:wrap">
-          <input class="form-control" id="trunk-new-did-${t.id}" placeholder="+12125551234" style="max-width:220px;padding:6px 10px;font-size:.85rem;font-family:monospace" onclick="event.stopPropagation()" />
-          <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();addTrunkDid(${t.id})">Assign DID</button>
-        </div>
 
         <div class="sub-section-title">Call Paths &amp; Capacity</div>
-        <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+        <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap">
           <div style="font-size:.85rem;color:var(--text)">
             Current: <strong>${t.max_channels}</strong> call paths
             ${t.package_name ? ` (${escHtml(t.package_name)})` : ''}
           </div>
           <div style="font-size:.82rem;color:var(--muted)">CPS Limit: ${t.cps_limit}</div>
-        </div>
-        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-          <select class="form-control" id="trunk-callpath-${t.id}" style="max-width:260px;padding:6px 10px;font-size:.85rem" onclick="event.stopPropagation()">
-            <option value="">-- Change Call Path Package --</option>
-          </select>
-          <button class="btn btn-primary btn-sm" onclick="event.stopPropagation();assignCallPaths(${t.id})">Apply</button>
-        </div>
-        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px">
-          <label style="font-size:.82rem;color:var(--muted)">Manual override:</label>
-          <input class="form-control" id="trunk-channels-${t.id}" type="number" min="1" max="1000" value="${t.max_channels}" style="max-width:100px;padding:6px 10px;font-size:.85rem" onclick="event.stopPropagation()" />
-          <label style="font-size:.82rem;color:var(--muted)">channels</label>
-          <input class="form-control" id="trunk-cps-${t.id}" type="number" min="1" max="100" value="${t.cps_limit}" style="max-width:80px;padding:6px 10px;font-size:.85rem" onclick="event.stopPropagation()" />
-          <label style="font-size:.82rem;color:var(--muted)">CPS</label>
-          <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();updateTrunkCapacity(${t.id})">Save</button>
-        </div>
-
-        <div class="rcf-actions" style="margin-top:14px">
-          <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();toggleTrunkEnabled(${t.id}, ${!t.enabled})">${t.enabled ? 'Disable' : 'Enable'}</button>
         </div>
       </div>`;
   }
@@ -5473,7 +5758,7 @@ async function assignCallPaths(trunkId) {
     toast('Call path package assigned', 'ok');
     // Refresh trunk data
     expandedTrunk = null;
-    await loadTrunksPage();
+    await loadTrunks();
     expandedTrunk = trunkId;
     await toggleExpandTrunk(trunkId);
   } catch (err) {
@@ -5592,8 +5877,9 @@ async function createTrunk() {
     // Re-fetch to get customer_name and counts
     trunksList = await api('GET', '/trunks');
     renderTrunksList();
-    document.getElementById('trunk-name').value = '';
-    document.getElementById('trunk-create').classList.remove('open');
+    const _tnEl = document.getElementById('trunk-name');
+    if (_tnEl) _tnEl.value = '';
+    document.getElementById('trunk-create')?.classList.remove('open');
     toast(`Trunk "${trunkName}" created`);
   } catch (err) {
     toast(err.message, 'err');
