@@ -160,22 +160,20 @@ services:
 
   # Kamailio SBC - Front-end signaling security and rate limiting
   # Entry point for all external SIP traffic (Bandwidth -> Kamailio -> FreeSWITCH)
+  # Uses host networking so it sees real source IPs (not Docker NAT)
   kamailio:
     build: ./docker/kamailio
     container_name: voip-kamailio
     depends_on:
       - freeswitch
+    network_mode: host
     environment:
       - EXTERNAL_SIP_IP=${EXTERNAL_SIP_IP:-34.74.71.32}
-    ports:
-      - "5060:5060/udp"
-      - "5060:5060/tcp"
-      - "5061:5061/tcp"
+    extra_hosts:
+      - "freeswitch:172.28.0.7"
     volumes:
       - ./docker/kamailio/kamailio.cfg:/etc/kamailio/kamailio.cfg:ro
       - ./docker/kamailio/dispatcher.list:/etc/kamailio/dispatcher.list:ro
-    networks:
-      - voip-network
     deploy:
       resources:
         limits:

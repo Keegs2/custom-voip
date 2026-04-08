@@ -39,7 +39,8 @@
 
 # Primary FreeSWITCH instance (Docker service name)
 # Weight: 100, MaxLoad: 2000 concurrent calls
-1 sip:freeswitch:5080 0 0 weight=100;maxload=2000;duid=fs-primary
+# With host networking, reach FreeSWITCH via its published port on localhost
+1 sip:127.0.0.1:5080 0 0 weight=100;maxload=2000;duid=fs-primary
 
 # Add additional FreeSWITCH instances here for horizontal scaling:
 # 1 sip:freeswitch-2:5080 0 0 weight=100;maxload=2000;duid=fs-secondary
