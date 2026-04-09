@@ -17,8 +17,8 @@ local M = {}
 -- Without this, require("redis") matches /usr/local/freeswitch/scripts/ (a directory)
 -- because mod_lua adds script-directory as a searcher, causing:
 --   "cannot read /usr/local/freeswitch/scripts/: Is a directory"
-package.path = "/usr/local/share/lua/5.3/?.lua;/usr/local/share/lua/5.3/?/init.lua;/usr/share/lua/5.3/?.lua;/usr/share/lua/5.3/?/init.lua;" .. package.path
-package.cpath = "/usr/local/lib/lua/5.3/?.so;/usr/local/lib/lua/5.3/?/?.so;/usr/lib/lua/5.3/?.so;/usr/lib/lua/5.3/?/?.so;" .. package.cpath
+package.path = "/usr/local/share/lua/5.3/?.lua;/usr/local/share/lua/5.3/?/init.lua;/usr/share/lua/5.3/?.lua;/usr/share/lua/5.3/?/init.lua;" .. (package.path or "")
+package.cpath = "/usr/local/lib/lua/5.3/?.so;/usr/local/lib/lua/5.3/?/?.so;/usr/lib/lua/5.3/?.so;/usr/lib/lua/5.3/?/?.so;" .. (package.cpath or "")
 
 -- Try to load redis library
 local redis

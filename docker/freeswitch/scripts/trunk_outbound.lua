@@ -25,8 +25,8 @@
 -- Load libraries using loadfile (bypasses FreeSWITCH's broken module-directory handling)
 -- This is the same pattern used in inbound_router.lua and is more reliable than require()
 -- Prepend luarocks paths so redis-lua is found before mod_lua's script-directory searcher
-package.path = "/usr/local/share/lua/5.3/?.lua;/usr/local/share/lua/5.3/?/init.lua;/usr/share/lua/5.3/?.lua;/usr/share/lua/5.3/?/init.lua;" .. package.path .. ";/usr/local/freeswitch/scripts/lib/?.lua"
-package.cpath = "/usr/local/lib/lua/5.3/?.so;/usr/local/lib/lua/5.3/?/?.so;/usr/lib/lua/5.3/?.so;/usr/lib/lua/5.3/?/?.so;" .. package.cpath
+package.path = "/usr/local/share/lua/5.3/?.lua;/usr/local/share/lua/5.3/?/init.lua;/usr/share/lua/5.3/?.lua;/usr/share/lua/5.3/?/init.lua;/usr/local/freeswitch/scripts/lib/?.lua;" .. (package.path or "")
+package.cpath = "/usr/local/lib/lua/5.3/?.so;/usr/local/lib/lua/5.3/?/?.so;/usr/lib/lua/5.3/?.so;/usr/lib/lua/5.3/?/?.so;" .. (package.cpath or "")
 
 local function load_module(name)
     local path = "/usr/local/freeswitch/scripts/lib/" .. name .. ".lua"
@@ -295,7 +295,18 @@ end
 -- STEP 5: Check CPS (Calls Per Second) Limit with Tier Support
 -- ============================================
 if redis_cps and customer_id and customer_id > 0 then
-    local cps_result = redis_cps.check_cps_with_tier(customer_id, "trunk")
+    local cps_ok, cps_result = pcall(function()
+        return redis_cps.check_cps_with_tier(customer_id, "trunk")
+    end)
+
+    if not cps_ok then
+        -- pcall caught an exception (e.g. Redis down) -- fail open
+        freeswitch.consoleLog("WARNING", string.format(
+            "[%s] CPS check exception (failing OPEN): %s\n",
+            uuid, tostring(cps_result)
+        ))
+        cps_result = { allowed = true, current_cps = 0, limit = 0, tier = "unknown", tier_name = "Unknown" }
+    end
 
     if not cps_result.allowed then
         freeswitch.consoleLog("WARNING", string.format(
@@ -350,21 +361,29 @@ end
 -- STEP 6: Acquire Channel
 -- ============================================
 if redis then
-    local channel_ok, current_channels, max_ch = redis.acquire_channel(trunk_id, max_channels, uuid)
+    local acq_ok, channel_ok, current_channels, max_ch = pcall(function()
+        return redis.acquire_channel(trunk_id, max_channels, uuid)
+    end)
 
-    if not channel_ok then
+    if not acq_ok then
+        -- pcall exception -- fail open, allow the call
+        freeswitch.consoleLog("WARNING", string.format(
+            "[%s] Channel acquire exception (failing OPEN): %s\n",
+            uuid, tostring(channel_ok)
+        ))
+    elseif not channel_ok then
         freeswitch.consoleLog("WARNING", string.format(
             "[%s] Channel limit exceeded: trunk=%s current=%d max=%d\n",
-            uuid, trunk_id, current_channels, max_ch
+            uuid, trunk_id, current_channels or 0, max_ch or max_channels
         ))
         set_var("blocked_reason", "CHANNEL_LIMIT_EXCEEDED")
         hangup("USER_BUSY")  -- 486 equivalent
         return
+    else
+        freeswitch.consoleLog("DEBUG", string.format(
+            "[%s] Channel acquired: %d/%d\n", uuid, current_channels or 0, max_ch or max_channels
+        ))
     end
-
-    freeswitch.consoleLog("DEBUG", string.format(
-        "[%s] Channel acquired: %d/%d\n", uuid, current_channels, max_ch
-    ))
 
     -- Set hangup hook to release channel
     set_var("api_hangup_hook", "lua channel_release.lua")
@@ -377,21 +396,37 @@ if redis and customer_id > 0 then
     local cpm_limit = tonumber(get_var("cpm_limit", "60"))
     local daily_limit = tonumber(get_var("daily_limit", "500"))
 
-    local velocity_ok, velocity_reason = redis.velocity_check(
-        customer_id, cpm_limit, 0, daily_limit, 0.01
-    )
+    -- Wrap in pcall to guarantee fail-open if Redis is unreachable
+    local vel_ok, velocity_ok, velocity_reason = pcall(function()
+        return redis.velocity_check(customer_id, cpm_limit, 0, daily_limit, 0.01)
+    end)
 
-    if not velocity_ok then
-        freeswitch.consoleLog("WARNING", string.format(
-            "[%s] Velocity check FAILED: customer=%d reason=%s\n",
-            uuid, customer_id, velocity_reason
-        ))
-        set_var("blocked_reason", velocity_reason)
-        if redis then
-            redis.release_channel(trunk_id, uuid)
+    if vel_ok and velocity_ok == false then
+        -- Only reject for actual limit violations, NOT for Redis errors
+        if velocity_reason and velocity_reason ~= "REDIS_ERROR"
+           and velocity_reason ~= "REDIS_CONNECTION_FAILED" then
+            freeswitch.consoleLog("WARNING", string.format(
+                "[%s] Velocity check FAILED: customer=%d reason=%s\n",
+                uuid, customer_id, velocity_reason
+            ))
+            set_var("blocked_reason", velocity_reason)
+            if redis then
+                redis.release_channel(trunk_id, uuid)
+            end
+            hangup("CALL_REJECTED")
+            return
+        else
+            freeswitch.consoleLog("WARNING", string.format(
+                "[%s] Velocity check Redis unavailable (reason=%s), failing OPEN\n",
+                uuid, tostring(velocity_reason)
+            ))
         end
-        hangup("CALL_REJECTED")
-        return
+    elseif not vel_ok then
+        -- pcall caught an exception -- fail open
+        freeswitch.consoleLog("WARNING", string.format(
+            "[%s] Velocity check exception (failing OPEN): %s\n",
+            uuid, tostring(velocity_ok)
+        ))
     end
 end
 

@@ -24,8 +24,8 @@ local M = {}
 -- Without this, require("redis") matches /usr/local/freeswitch/scripts/ (a directory)
 -- because mod_lua adds script-directory as a searcher, causing:
 --   "cannot read /usr/local/freeswitch/scripts/: Is a directory"
-package.path = "/usr/local/share/lua/5.3/?.lua;/usr/local/share/lua/5.3/?/init.lua;/usr/share/lua/5.3/?.lua;/usr/share/lua/5.3/?/init.lua;" .. package.path
-package.cpath = "/usr/local/lib/lua/5.3/?.so;/usr/local/lib/lua/5.3/?/?.so;/usr/lib/lua/5.3/?.so;/usr/lib/lua/5.3/?/?.so;" .. package.cpath
+package.path = "/usr/local/share/lua/5.3/?.lua;/usr/local/share/lua/5.3/?/init.lua;/usr/share/lua/5.3/?.lua;/usr/share/lua/5.3/?/init.lua;" .. (package.path or "")
+package.cpath = "/usr/local/lib/lua/5.3/?.so;/usr/local/lib/lua/5.3/?/?.so;/usr/lib/lua/5.3/?.so;/usr/lib/lua/5.3/?/?.so;" .. (package.cpath or "")
 
 -- Try to load redis library
 local redis
@@ -95,7 +95,9 @@ function M.get_connection()
             return redis_conn
         end
 
-        freeswitch.consoleLog("WARN", "[redis_cps] Connection lost, reconnecting...\n")
+        if freeswitch and freeswitch.consoleLog then
+            freeswitch.consoleLog("WARN", "[redis_cps] Connection lost, reconnecting...\n")
+        end
         redis_conn = nil
     end
 
@@ -114,24 +116,30 @@ function M.get_connection()
         if ok and result then
             redis_conn = result
             conn_last_checked = now
-            freeswitch.consoleLog("INFO", string.format(
-                "[redis_cps] Connected to %s:%d (attempt %d)\n",
-                host, port, attempt
-            ))
+            if freeswitch and freeswitch.consoleLog then
+                freeswitch.consoleLog("INFO", string.format(
+                    "[redis_cps] Connected to %s:%d (attempt %d)\n",
+                    host, port, attempt
+                ))
+            end
             return redis_conn
         end
 
-        freeswitch.consoleLog("WARN", string.format(
-            "[redis_cps] Connection attempt %d failed: %s\n",
-            attempt, tostring(result)
-        ))
+        if freeswitch and freeswitch.consoleLog then
+            freeswitch.consoleLog("WARN", string.format(
+                "[redis_cps] Connection attempt %d failed: %s\n",
+                attempt, tostring(result)
+            ))
+        end
 
         if attempt < MAX_RETRY_ATTEMPTS then
             os.execute("sleep 0.1")
         end
     end
 
-    freeswitch.consoleLog("ERR", "[redis_cps] Failed to connect after " .. MAX_RETRY_ATTEMPTS .. " attempts\n")
+    if freeswitch and freeswitch.consoleLog then
+        freeswitch.consoleLog("ERR", "[redis_cps] Failed to connect after " .. MAX_RETRY_ATTEMPTS .. " attempts\n")
+    end
     return nil
 end
 
@@ -148,7 +156,9 @@ local function redis_command(cmd, ...)
     end)
 
     if not ok then
-        freeswitch.consoleLog("ERR", "[redis_cps] Command error: " .. tostring(result) .. "\n")
+        if freeswitch and freeswitch.consoleLog then
+            freeswitch.consoleLog("ERR", "[redis_cps] Command error: " .. tostring(result) .. "\n")
+        end
         redis_conn = nil
         return nil, tostring(result)
     end
@@ -169,7 +179,9 @@ local function redis_eval(script, numkeys, ...)
     end)
 
     if not ok then
-        freeswitch.consoleLog("ERR", "[redis_cps] EVAL error: " .. tostring(result) .. "\n")
+        if freeswitch and freeswitch.consoleLog then
+            freeswitch.consoleLog("ERR", "[redis_cps] EVAL error: " .. tostring(result) .. "\n")
+        end
         redis_conn = nil
         return nil, tostring(result)
     end
@@ -314,7 +326,9 @@ function M.cps_check(id, cps_limit, prefix)
     )
 
     if not result then
-        freeswitch.consoleLog("ERR", "[redis_cps] CPS check error: " .. tostring(err) .. "\n")
+        if freeswitch and freeswitch.consoleLog then
+            freeswitch.consoleLog("ERR", "[redis_cps] CPS check error: " .. tostring(err) .. "\n")
+        end
         -- Fail open on Redis error
         return true, 0, cps_limit, "unknown"
     end

@@ -24,26 +24,29 @@
 -- Load libraries
 -- Set up package paths for Lua 5.3 and our custom modules
 -- Prepend luarocks paths so redis-lua is found before mod_lua's script-directory searcher
-package.path = "/usr/local/share/lua/5.3/?.lua;/usr/local/share/lua/5.3/?/init.lua;/usr/share/lua/5.3/?.lua;/usr/share/lua/5.3/?/init.lua;" .. package.path .. ";/usr/local/freeswitch/scripts/lib/?.lua"
-package.cpath = "/usr/local/lib/lua/5.3/?.so;/usr/local/lib/lua/5.3/?/?.so;/usr/lib/lua/5.3/?.so;/usr/lib/lua/5.3/?/?.so;" .. package.cpath
+package.path = "/usr/local/share/lua/5.3/?.lua;/usr/local/share/lua/5.3/?/init.lua;/usr/share/lua/5.3/?.lua;/usr/share/lua/5.3/?/init.lua;/usr/local/freeswitch/scripts/lib/?.lua;" .. (package.path or "")
+package.cpath = "/usr/local/lib/lua/5.3/?.so;/usr/local/lib/lua/5.3/?/?.so;/usr/lib/lua/5.3/?.so;/usr/lib/lua/5.3/?/?.so;" .. (package.cpath or "")
 
-local ok_redis, redis = pcall(require, "redis_client")
-if not ok_redis then
-    freeswitch.consoleLog("ERR", "[api_outbound] Failed to load redis_client: " .. tostring(redis) .. "\n")
-    redis = nil
+-- Load modules using loadfile to bypass FreeSWITCH's broken module-directory handling
+-- The require() function fails because mod_lua adds script-directory as a searcher
+local function load_module(name)
+    local path = "/usr/local/freeswitch/scripts/lib/" .. name .. ".lua"
+    local func, err = loadfile(path)
+    if not func then
+        freeswitch.consoleLog("ERR", "[api_outbound] Failed to load " .. name .. ": " .. tostring(err) .. "\n")
+        return nil
+    end
+    local ok, result = pcall(func)
+    if not ok then
+        freeswitch.consoleLog("ERR", "[api_outbound] Failed to execute " .. name .. ": " .. tostring(result) .. "\n")
+        return nil
+    end
+    return result
 end
 
-local ok_cps, redis_cps = pcall(require, "redis_cps")
-if not ok_cps then
-    freeswitch.consoleLog("ERR", "[api_outbound] Failed to load redis_cps: " .. tostring(redis_cps) .. "\n")
-    redis_cps = nil
-end
-
-local ok_db, db = pcall(require, "db_client")
-if not ok_db then
-    freeswitch.consoleLog("ERR", "[api_outbound] Failed to load db_client: " .. tostring(db) .. "\n")
-    db = nil
-end
+local redis = load_module("redis_client")
+local redis_cps = load_module("redis_cps")
+local db = load_module("db_client")
 
 -- Ensure session exists
 if not session then

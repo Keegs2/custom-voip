@@ -14,9 +14,18 @@ do
         loader, err = package.loadlib("/usr/lib/lua/5.3/luasql/postgres.so", "luaopen_luasql_postgres")
     end
     if loader then
-        luasql = loader()
+        local ok, result = pcall(loader)
+        if ok then
+            luasql = result
+        else
+            if freeswitch and freeswitch.consoleLog then
+                freeswitch.consoleLog("ERR", "luasql.postgres loader failed: " .. tostring(result) .. "\n")
+            end
+        end
     else
-        error("Failed to load luasql.postgres: " .. tostring(err))
+        if freeswitch and freeswitch.consoleLog then
+            freeswitch.consoleLog("ERR", "Failed to load luasql.postgres: " .. tostring(err) .. "\n")
+        end
     end
 end
 
@@ -111,6 +120,11 @@ end
 
 -- Get database connection (with reconnection logic)
 function M.get_connection()
+    -- If luasql library isn't available, return nil
+    if not luasql then
+        return nil
+    end
+
     local now = os.time()
 
     -- Check if existing connection is still valid
@@ -274,7 +288,7 @@ function M.lookup_trunk_by_ip(ip)
         FROM trunk_auth_ips i
         JOIN sip_trunks t ON i.trunk_id = t.id
         JOIN customers c ON t.customer_id = c.id
-        WHERE i.ip_address = %s AND t.enabled = true AND c.status = 'active'
+        WHERE host(i.ip_address) = %s AND t.enabled = true AND c.status = 'active'
         LIMIT 1
     ]], sql_string(clean_ip))
 
