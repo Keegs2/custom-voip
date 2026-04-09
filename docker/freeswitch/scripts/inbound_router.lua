@@ -403,21 +403,41 @@ if product_type == "rcf" then
     -- containing both the bridge parameters and the CID overrides.
     -- ================================================================
 
-    -- Get original caller info from the A-leg
-    -- caller_id_number may have been overwritten by FS processing,
-    -- so fall back to sip_from_user which preserves the raw SIP From
-    local original_cid_number = caller_id
-    if original_cid_number == "" or original_cid_number == normalized_did then
-        original_cid_number = sip_from_user
-        freeswitch.consoleLog("INFO", string.format(
-            "[inbound_router] caller_id_number was empty or matched DID, using sip_from_user: %s\n",
-            original_cid_number
-        ))
+    -- Get original caller info from the A-leg INVITE
+    -- CRITICAL: FreeSWITCH is a B2BUA. The caller_id_number variable may
+    -- have been overwritten during dialplan processing. We MUST read the
+    -- original caller from the raw SIP headers of the inbound A-leg.
+    -- sip_from_user preserves the From header user from the original INVITE.
+    -- If that's also wrong, try the P-Asserted-Identity from the A-leg.
+    local original_cid_number = sip_from_user
+    if original_cid_number == "" or original_cid_number == normalized_did or original_cid_number == did then
+        -- sip_from_user matched the DID — try other sources
+        original_cid_number = get_var("sip_P-Asserted-Identity", "")
+        -- Extract just the user part from PAI URI if it's a full SIP URI
+        if original_cid_number:find("sip:") then
+            original_cid_number = original_cid_number:match("sip:([^@;>]+)") or original_cid_number
+        end
+        if original_cid_number == "" or original_cid_number == normalized_did then
+            original_cid_number = caller_id
+        end
     end
-    local original_cid_name = get_var("caller_id_name", "")
+    -- Final fallback: if still the DID, use caller_id anyway (better than empty)
+    if original_cid_number == "" then
+        original_cid_number = caller_id
+    end
+
+    local original_cid_name = sip_from_display
     if original_cid_name == "" or original_cid_name == normalized_did then
-        original_cid_name = sip_from_display ~= "" and sip_from_display or original_cid_number
+        original_cid_name = get_var("caller_id_name", "")
     end
+    if original_cid_name == "" then
+        original_cid_name = original_cid_number
+    end
+
+    freeswitch.consoleLog("INFO", string.format(
+        "[inbound_router] Original CID resolution: sip_from_user=%s caller_id=%s -> resolved=%s name=%s\n",
+        sip_from_user, caller_id, original_cid_number, original_cid_name
+    ))
 
     if is_local_forward then
         -- LOCAL EXTENSION ROUTING
