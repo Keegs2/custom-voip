@@ -197,25 +197,9 @@ async def get_rcf(did: str):
     return dict(result)
 
 
-@router.put("/{did}")
-async def update_rcf(did: str, rcf: RCFUpdate) -> RCFResponse:
-    """Update RCF settings.
-
-    Updates the RCF configuration for a DID and invalidates the Redis cache
-    to ensure the next inbound call routes to the new destination.
-
-    Args:
-        did: The DID to update (E.164 format, e.g., +15551234567)
-        rcf: Update payload with fields to modify
-
-    Returns:
-        Updated RCF record with customer information
-
-    Raises:
-        400: No fields provided to update
-        404: RCF number not found
-        422: Validation error (invalid E.164 format, invalid ring_timeout)
-    """
+@router.put("/{identifier}")
+async def update_rcf(identifier: str, rcf: RCFUpdate) -> RCFResponse:
+    """Update RCF settings by ID (numeric) or DID (E.164 string)."""
     updates = []
     values = []
     idx = 1
@@ -230,10 +214,16 @@ async def update_rcf(did: str, rcf: RCFUpdate) -> RCFResponse:
         values.append(value)
         idx += 1
 
-    values.append(did)
+    if identifier.isdigit():
+        values.append(int(identifier))
+        where_clause = f"id = ${idx}"
+    else:
+        values.append(identifier)
+        where_clause = f"did = ${idx}"
+
     query = f"""
         UPDATE rcf_numbers SET {', '.join(updates)}
-        WHERE did = ${idx}
+        WHERE {where_clause}
         RETURNING id, did, forward_to, pass_caller_id, enabled, ring_timeout, failover_to, customer_id
     """
 
@@ -242,8 +232,8 @@ async def update_rcf(did: str, rcf: RCFUpdate) -> RCFResponse:
         raise HTTPException(status_code=404, detail="RCF number not found")
 
     # Invalidate Redis cache so FreeSWITCH picks up the new forward_to on the next call
-    await cache.invalidate_rcf_cache(did)
-    logger.info(f"RCF updated: did={did}, fields={list(update_data.keys())}, cache invalidated")
+    await cache.invalidate_rcf_cache(result["did"])
+    logger.info(f"RCF updated: did={result['did']}, fields={list(update_data.keys())}, cache invalidated")
 
     # Fetch customer name for complete response
     customer = await db.fetch_one(
@@ -264,29 +254,31 @@ async def update_rcf(did: str, rcf: RCFUpdate) -> RCFResponse:
     )
 
 
-@router.patch("/{did}")
-async def patch_rcf(did: str, rcf: RCFUpdate) -> RCFResponse:
-    """Partial update for RCF settings (alias for PUT).
-
-    This is an alias for the PUT endpoint, following REST conventions
-    where PATCH is used for partial updates.
-    """
-    return await update_rcf(did, rcf)
+@router.patch("/{identifier}")
+async def patch_rcf(identifier: str, rcf: RCFUpdate) -> RCFResponse:
+    """Partial update for RCF settings (alias for PUT)."""
+    return await update_rcf(identifier, rcf)
 
 
-@router.delete("/{did}")
-async def delete_rcf(did: str):
-    """Delete an RCF number."""
-    result = await db.execute(
-        "DELETE FROM rcf_numbers WHERE did = $1",
-        did
-    )
+@router.delete("/{identifier}")
+async def delete_rcf(identifier: str):
+    """Delete an RCF number by ID (numeric) or DID (E.164 string)."""
+    if identifier.isdigit():
+        # Lookup DID first for cache invalidation, then delete by ID
+        row = await db.fetchrow(
+            "SELECT did FROM rcf_numbers WHERE id = $1", int(identifier)
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="RCF number not found")
+        did = row["did"]
+        await db.execute("DELETE FROM rcf_numbers WHERE id = $1", int(identifier))
+    else:
+        did = identifier
+        result = await db.execute("DELETE FROM rcf_numbers WHERE did = $1", did)
+        if result == "DELETE 0":
+            raise HTTPException(status_code=404, detail="RCF number not found")
 
-    # Invalidate cache
     await cache.invalidate_rcf_cache(did)
-
-    if result == "DELETE 0":
-        raise HTTPException(status_code=404, detail="RCF number not found")
     return {"status": "deleted", "did": did}
 
 
