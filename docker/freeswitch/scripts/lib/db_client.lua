@@ -321,6 +321,35 @@ function M.lookup_trunk_did(did)
     return row
 end
 
+-- Lookup customer PBX IPs for a trunk (for inbound routing to customer)
+function M.get_trunk_endpoint_ips(trunk_id)
+    local id = tonumber(trunk_id)
+    if not id then return nil end
+
+    local sql = string.format([[
+        SELECT ip_address::text as ip, description
+        FROM trunk_auth_ips
+        WHERE trunk_id = %d
+        ORDER BY id ASC
+    ]], id)
+
+    local cursor, err = execute_query(sql)
+    if not cursor then
+        freeswitch.consoleLog("ERR", "Trunk endpoint IP lookup failed: " .. tostring(err) .. "\n")
+        return nil
+    end
+
+    local ips = {}
+    local row = cursor:fetch({}, "a")
+    while row do
+        table.insert(ips, row.ip)
+        row = cursor:fetch({}, "a")
+    end
+    cursor:close()
+
+    return #ips > 0 and ips or nil
+end
+
 -- Insert CDR (async via background job in production)
 function M.insert_cdr(cdr)
     -- Validate required fields

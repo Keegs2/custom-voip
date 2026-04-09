@@ -632,30 +632,66 @@ elseif product_type == "api" then
     end
 
 elseif product_type == "trunk" then
-    -- SIP Trunk inbound - route to customer's PBX
-    -- Trunk product always routes via carrier_standard (low-CPS trunk, standard rates)
+    -- SIP Trunk inbound — route call to customer's PBX
+    -- Look up the customer's authorized IP(s) and bridge to their PBX
     freeswitch.consoleLog("INFO", string.format(
-        "[inbound_router] Routing via carrier_standard (product: trunk, trunk_id: %s)\n",
-        tostring(trunk_id)
-    ))
-    freeswitch.consoleLog("INFO", string.format(
-        "[%s] Trunk inbound: trunk_id=%s\n",
-        uuid, tostring(trunk_id)
+        "[%s] Trunk inbound: trunk_id=%s did=%s\n",
+        uuid, tostring(trunk_id), normalized_did
     ))
 
-    -- For MVP, play a message since we don't have customer endpoint config
-    local test_mode = os.getenv("TEST_MODE")
-    if test_mode == "true" then
-        pcall(function()
-            session:answer()
-            session:execute("playback", "ivr/ivr-welcome.wav")
-            session:sleep(1000)
-            session:hangup("NORMAL_CLEARING")
-        end)
+    -- Get customer PBX endpoint IPs
+    local endpoint_ips = nil
+    if db then
+        endpoint_ips = db.get_trunk_endpoint_ips(trunk_id)
+    end
+
+    if not endpoint_ips or #endpoint_ips == 0 then
+        freeswitch.consoleLog("ERR", string.format(
+            "[%s] No endpoint IPs found for trunk %s\n", uuid, tostring(trunk_id)
+        ))
+        hangup("NO_ROUTE_DESTINATION", "[" .. uuid .. "] No PBX endpoint configured for trunk")
     else
-        -- In production, would look up customer endpoint and bridge
-        -- session:execute("bridge", "sofia/gateway/customer_" .. trunk_id .. "/" .. normalized_did)
-        hangup("NO_ROUTE_DESTINATION", "[" .. uuid .. "] Trunk routing not configured")
+        -- Media anchoring and ringback (same as RCF)
+        set_var("proxy_media", "true")
+        set_var("ringback", "%(2000,4000,440,480)")
+        set_var("transfer_ringback", "%(2000,4000,440,480)")
+        set_var("hangup_after_bridge", "true")
+        set_var("continue_on_fail", "true")
+
+        -- Caller ID: pass the original caller through to the PBX
+        local original_caller = get_var("sip_from_user", caller_id)
+        set_var("effective_caller_id_number", original_caller)
+
+        -- Build dial string to customer PBX — try each IP with failover
+        -- Route directly to PBX IP via external profile (bypasses Kamailio)
+        local dial_strings = {}
+        for _, ip in ipairs(endpoint_ips) do
+            table.insert(dial_strings, string.format(
+                "sofia/external/%s@%s:5060",
+                normalized_did, ip
+            ))
+        end
+
+        local dial_string = table.concat(dial_strings, "|")
+
+        freeswitch.consoleLog("INFO", string.format(
+            "[%s] Trunk inbound bridge: %s\n", uuid, dial_string
+        ))
+
+        -- Mark as lua-routed
+        set_var("lua_routed", "true")
+
+        pcall(function()
+            session:execute("bridge", dial_string)
+        end)
+
+        -- Check bridge result
+        local hangup_cause = get_var("bridge_hangup_cause", get_var("hangup_cause", ""))
+        if hangup_cause ~= "" and hangup_cause ~= "NORMAL_CLEARING" and hangup_cause ~= "SUCCESS" then
+            freeswitch.consoleLog("WARNING", string.format(
+                "[%s] Trunk inbound bridge failed: %s\n", uuid, hangup_cause
+            ))
+        end
     end
 end
 
