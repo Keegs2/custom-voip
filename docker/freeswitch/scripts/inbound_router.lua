@@ -399,6 +399,11 @@ local function get_domain()
     return domain
 end
 
+freeswitch.consoleLog("INFO", string.format(
+    "[%s] STEP 4: product_type=%s trunk_id=%s db=%s\n",
+    uuid, tostring(product_type), tostring(trunk_id), tostring(db ~= nil)
+))
+
 if product_type == "rcf" then
     -- Remote Call Forwarding - Bridge to destination
     -- RCF product always routes via carrier_standard (low-CPS trunk, standard rates)
