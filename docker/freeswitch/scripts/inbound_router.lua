@@ -672,10 +672,22 @@ elseif product_type == "trunk" then
     ))
 
     -- Get customer PBX endpoint IPs
+    freeswitch.consoleLog("ERR", ">>> Looking up endpoint IPs for trunk " .. tostring(trunk_id) .. " <<<\n")
     local endpoint_ips = nil
     if db then
-        endpoint_ips = db.get_trunk_endpoint_ips(trunk_id)
+        local lookup_ok, lookup_result = pcall(function()
+            return db.get_trunk_endpoint_ips(trunk_id)
+        end)
+        if lookup_ok then
+            endpoint_ips = lookup_result
+        else
+            freeswitch.consoleLog("ERR", ">>> DB lookup CRASHED: " .. tostring(lookup_result) .. " <<<\n")
+        end
+    else
+        freeswitch.consoleLog("ERR", ">>> DB module is nil! <<<\n")
     end
+
+    freeswitch.consoleLog("ERR", ">>> endpoint_ips=" .. tostring(endpoint_ips) .. " count=" .. tostring(endpoint_ips and #endpoint_ips or 0) .. " <<<\n")
 
     if not endpoint_ips or #endpoint_ips == 0 then
         freeswitch.consoleLog("ERR", string.format(
