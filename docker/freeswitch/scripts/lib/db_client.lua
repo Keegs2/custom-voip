@@ -327,7 +327,7 @@ function M.get_trunk_endpoint_ips(trunk_id)
     if not id then return nil end
 
     local sql = string.format([[
-        SELECT ip_address::text as ip, description
+        SELECT host(ip_address) as ip, description
         FROM trunk_auth_ips
         WHERE trunk_id = %d
         ORDER BY id ASC
