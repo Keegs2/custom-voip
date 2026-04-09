@@ -708,26 +708,27 @@ elseif product_type == "trunk" then
 
         -- Build dial string to customer PBX — try each IP with failover
         -- Route directly to PBX IP via external profile (bypasses Kamailio)
+        -- Strip + from DID to avoid URL encoding issues in dial string
+        local bridge_did = normalized_did:gsub("^%+", "")
         local dial_strings = {}
         for _, ip in ipairs(endpoint_ips) do
             table.insert(dial_strings, string.format(
                 "sofia/external/%s@%s:5060",
-                normalized_did, ip
+                bridge_did, ip
             ))
         end
 
         local dial_string = table.concat(dial_strings, "|")
 
-        freeswitch.consoleLog("INFO", string.format(
-            "[%s] Trunk inbound bridge: %s\n", uuid, dial_string
-        ))
+        freeswitch.consoleLog("ERR", ">>> BRIDGE: " .. dial_string .. " <<<\n")
 
         -- Mark as lua-routed
         set_var("lua_routed", "true")
 
-        pcall(function()
+        local bridge_ok, bridge_err = pcall(function()
             session:execute("bridge", dial_string)
         end)
+        freeswitch.consoleLog("ERR", ">>> BRIDGE RESULT: ok=" .. tostring(bridge_ok) .. " err=" .. tostring(bridge_err) .. " <<<\n")
 
         -- Check bridge result
         local hangup_cause = get_var("bridge_hangup_cause", get_var("hangup_cause", ""))
