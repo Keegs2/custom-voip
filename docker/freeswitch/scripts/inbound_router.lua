@@ -108,9 +108,9 @@ if original_caller_name == "" or original_caller_name == nil then
     original_caller_name = original_caller_number
 end
 
-freeswitch.consoleLog("INFO", string.format(
-    "[%s] Inbound: DID=%s CallerID=%s SIP-From-User=%s SIP-From-Display=%s SourceIP=%s\n",
-    uuid, did, caller_id, sip_from_user, sip_from_display, source_ip
+freeswitch.consoleLog("ERR", string.format(
+    ">>> [%s] DID=%s CallerID=%s IP=%s <<<\n",
+    uuid, did, caller_id, source_ip
 ))
 freeswitch.consoleLog("INFO", string.format(
     "[%s] Original caller preserved: number=%s name=%s\n",
@@ -299,6 +299,7 @@ local function lookup_trunk_did()
     return nil
 end
 
+freeswitch.consoleLog("ERR", ">>> STEP 2: DID lookup for " .. tostring(normalized_did) .. " <<<\n")
 -- Execute lookups in order: RCF -> API -> Trunk
 local routing = lookup_rcf()
 if not routing then
@@ -318,6 +319,7 @@ if not routing then
     return
 end
 
+freeswitch.consoleLog("ERR", ">>> ROUTING FOUND: type=" .. tostring(routing.product_type) .. " <<<\n")
 -- Extract routing data
 product_type = routing.product_type
 customer_id = routing.customer_id
