@@ -333,9 +333,9 @@ voice_url = routing.voice_url
 fallback_url = routing.fallback_url
 trunk_id = routing.trunk_id
 
-freeswitch.consoleLog("INFO", string.format(
-    "[%s] Routing: type=%s customer=%s grade=%s\n",
-    uuid, product_type, tostring(customer_id), traffic_grade
+freeswitch.consoleLog("ERR", string.format(
+    ">>> EXTRACTED: type=%s customer=%s trunk=%s grade=%s <<<\n",
+    tostring(product_type), tostring(customer_id), tostring(trunk_id), tostring(traffic_grade)
 ))
 
 -- Set channel variables for CDR and downstream processing
@@ -406,6 +406,8 @@ local function get_domain()
     end
     return domain
 end
+
+freeswitch.consoleLog("ERR", ">>> STEP 4: Routing product_type=" .. tostring(product_type) .. " <<<\n")
 
 if product_type == "rcf" then
     -- Remote Call Forwarding - Bridge to destination
@@ -661,10 +663,11 @@ elseif product_type == "api" then
     end
 
 elseif product_type == "trunk" then
+    freeswitch.consoleLog("ERR", ">>> TRUNK INBOUND SECTION REACHED <<<\n")
     -- SIP Trunk inbound — route call to customer's PBX
     -- Look up the customer's authorized IP(s) and bridge to their PBX
-    freeswitch.consoleLog("INFO", string.format(
-        "[%s] Trunk inbound: trunk_id=%s did=%s\n",
+    freeswitch.consoleLog("ERR", string.format(
+        ">>> Trunk inbound: trunk_id=%s did=%s <<<\n",
         uuid, tostring(trunk_id), normalized_did
     ))
 
