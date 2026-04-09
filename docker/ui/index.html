@@ -8554,15 +8554,30 @@ async function testAllCarriers() {
 ========================================================= */
 
 function loadHomerTab() {
-  // Load Homer UI into iframe on first tab activation
-  // Homer runs on port 9080 on the same host
+  // Homer runs on port 9080 on the GCE VM (34.74.71.32)
+  // The GCP LB (34.144.237.167) only exposes port 80, so we
+  // access Homer directly on the VM IP via IAP or firewall rule.
   const iframe = document.getElementById('homer-iframe');
   if (iframe && (iframe.src === 'about:blank' || !iframe.src.includes('9080'))) {
-    // Use the same hostname but port 9080 where Homer is exposed
-    const homerUrl = window.location.protocol + '//' + window.location.hostname + ':9080';
-    iframe.src = homerUrl;
+    iframe.src = 'http://34.74.71.32:9080';
   }
 }
+
+// If the Homer iframe can't load (firewall/network), show a message
+document.addEventListener('DOMContentLoaded', function() {
+  const iframe = document.getElementById('homer-iframe');
+  if (iframe) {
+    iframe.onerror = function() {
+      iframe.style.display = 'none';
+      iframe.parentElement.innerHTML = '<div class="state-msg" style="padding:40px;text-align:center">' +
+        '<p style="font-size:1.1rem;margin-bottom:8px">Homer is not reachable from your browser</p>' +
+        '<p style="color:var(--muted)">Access Homer directly via IAP tunnel:</p>' +
+        '<code style="display:block;margin-top:8px;padding:8px;background:var(--bg);border-radius:4px">gcloud compute start-iap-tunnel poc-custom-voip 9080 --local-host-port=localhost:9080</code>' +
+        '<p style="color:var(--muted);margin-top:8px">Then open <a href="http://localhost:9080" target="_blank" style="color:var(--accent)">http://localhost:9080</a></p>' +
+        '</div>';
+    };
+  }
+});
 
 /* =========================================================
    BOOT

@@ -11,7 +11,7 @@ export function AppLayout() {
         style={{ marginLeft: 'clamp(0px, 240px, 240px)' }}
       >
         {/* Inner wrapper: max-width + generous padding */}
-        <div className="max-w-[1400px] mx-auto px-8 py-8 pb-20">
+        <div className="max-w-[1400px] mx-auto px-6 md:px-10 py-8 pb-20">
           <Outlet />
         </div>
       </main>
