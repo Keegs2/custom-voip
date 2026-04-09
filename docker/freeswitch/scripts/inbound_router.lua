@@ -1,3 +1,4 @@
+freeswitch.consoleLog("INFO", ">>> inbound_router.lua STARTING <<<\n")
 -- Inbound Call Router - High Performance Implementation
 -- Handles RCF, API DID, and Trunk DID routing with caching
 --
@@ -37,11 +38,11 @@ local function load_module(name)
     return result
 end
 
-freeswitch.consoleLog("INFO", "=== INBOUND ROUTER: Loading modules ===\n")
+freeswitch.consoleLog("INFO", ">>> Loading redis_client <<<\n")
 local redis = load_module("redis_client")
-freeswitch.consoleLog("INFO", "=== redis module: " .. tostring(redis ~= nil) .. " ===\n")
+freeswitch.consoleLog("INFO", ">>> redis=" .. tostring(redis ~= nil) .. " Loading db_client <<<\n")
 local db = load_module("db_client")
-freeswitch.consoleLog("INFO", "=== db module: " .. tostring(db ~= nil) .. " ===\n")
+freeswitch.consoleLog("INFO", ">>> db=" .. tostring(db ~= nil) .. " Modules loaded <<<\n")
 
 -- Ensure session exists
 if not session then
@@ -346,8 +347,7 @@ end
 -- ============================================
 -- STEP 3: Velocity/Rate Limiting
 -- ============================================
-if false and redis and customer_id then
-    -- TEMPORARILY DISABLED: Redis connection issues blocking calls
+if redis and customer_id then
     -- Wrap entire velocity check in pcall to guarantee fail-open behavior.
     -- If Redis is unreachable or any error occurs, the call MUST proceed.
     -- Only a definitive velocity limit breach (CPM_EXCEEDED, DAILY_LIMIT_EXCEEDED)
@@ -402,11 +402,6 @@ local function get_domain()
     end
     return domain
 end
-
-freeswitch.consoleLog("INFO", string.format(
-    "[%s] STEP 4: product_type=%s trunk_id=%s db=%s\n",
-    uuid, tostring(product_type), tostring(trunk_id), tostring(db ~= nil)
-))
 
 if product_type == "rcf" then
     -- Remote Call Forwarding - Bridge to destination
