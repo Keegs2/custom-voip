@@ -262,8 +262,15 @@
       This extension fires BEFORE the inbound handler so trunk
       outbound calls don't accidentally match as inbound DIDs.
     -->
+    <!-- Debug: Log all X-Trunk header variants to find the right variable name -->
+    <extension name="trunk_header_debug" continue="true">
+      <condition field="destination_number" expression="^(.*)$">
+        <action application="log" data="DEBUG TRUNK-HEADER-CHECK: X-Trunk-ID=[${sip_h_X-Trunk-ID}] X_Trunk_ID=[${sip_h_X_Trunk_ID}] X-Trunk-Id=[${sip_h_X-Trunk-Id}]"/>
+      </condition>
+    </extension>
+
     <extension name="trunk_outbound_from_kamailio">
-      <condition field="${sip_h_X-Trunk-ID}" expression="^\d+$">
+      <condition field="${sip_h_X-Trunk-ID}" expression="^\s*\d+\s*$">
         <action application="log" data="INFO Trunk Outbound (Kamailio-auth): trunk=${sip_h_X-Trunk-ID} customer=${sip_h_X-Customer-ID} to ${destination_number}"/>
 
         <!-- Copy SIP headers to channel variables for Lua script access -->
