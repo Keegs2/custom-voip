@@ -1,15 +1,6 @@
 import { useNavigate } from 'react-router-dom';
 import { cn } from '../utils/cn';
 
-interface NavCard {
-  title: string;
-  description: string;
-  path: string;
-  accent: string;
-  glow: string;
-  icon: React.ReactNode;
-}
-
 /* ─── SVG Icons (Heroicons outline, 28×28) ──────────────── */
 
 const IconAdmin = () => (
@@ -49,15 +40,23 @@ const IconDocs = () => (
   </svg>
 );
 
-const NAV_CARDS: NavCard[] = [
-  {
-    title: 'Administration',
-    description: 'Manage customers, billing, rates, and platform configuration.',
-    path: '/admin',
-    accent: '#3b82f6',
-    glow: 'rgba(59, 130, 246, 0.18)',
-    icon: <IconAdmin />,
-  },
+/* ─── Types ──────────────────────────────────────────────── */
+
+interface NavCard {
+  title: string;
+  description: string;
+  path: string;
+  accent: string;
+  glow: string;
+  icon: React.ReactNode;
+  badge?: string;
+  muted?: boolean;
+  compact?: boolean;
+}
+
+/* ─── Card Definitions ───────────────────────────────────── */
+
+const PRIMARY_CARDS: NavCard[] = [
   {
     title: 'RCF',
     description: 'Remote Call Forwarding — route DIDs to any destination instantly.',
@@ -67,14 +66,6 @@ const NAV_CARDS: NavCard[] = [
     icon: <IconRCF />,
   },
   {
-    title: 'API Calling',
-    description: 'Programmable voice with webhook-driven call control.',
-    path: '/api-dids',
-    accent: '#a855f7',
-    glow: 'rgba(168, 85, 247, 0.18)',
-    icon: <IconAPI />,
-  },
-  {
     title: 'SIP Trunks',
     description: 'Connect PBX systems with IP-authenticated trunks.',
     path: '/trunks',
@@ -82,13 +73,40 @@ const NAV_CARDS: NavCard[] = [
     glow: 'rgba(245, 158, 11, 0.18)',
     icon: <IconTrunk />,
   },
+];
+
+const COMING_SOON_CARDS: NavCard[] = [
+  {
+    title: 'API Calling',
+    description: 'Programmable voice with webhook-driven call control — coming soon.',
+    path: '/api-dids',
+    accent: '#a855f7',
+    glow: 'rgba(168, 85, 247, 0.18)',
+    icon: <IconAPI />,
+    badge: 'Phase 2',
+    muted: true,
+  },
   {
     title: 'IVR Builder',
-    description: 'Design call flows visually with drag-and-drop.',
+    description: 'Design call flows visually with drag-and-drop — coming soon.',
     path: '/ivr',
     accent: '#06b6d4',
     glow: 'rgba(6, 182, 212, 0.18)',
     icon: <IconIVR />,
+    badge: 'Phase 2',
+    muted: true,
+  },
+];
+
+const UTILITY_CARDS: NavCard[] = [
+  {
+    title: 'Administration',
+    description: 'Manage customers, billing, rates, and platform configuration.',
+    path: '/admin',
+    accent: '#3b82f6',
+    glow: 'rgba(59, 130, 246, 0.18)',
+    icon: <IconAdmin />,
+    compact: true,
   },
   {
     title: 'API Docs',
@@ -97,95 +115,84 @@ const NAV_CARDS: NavCard[] = [
     accent: '#94a3b8',
     glow: 'rgba(148, 163, 184, 0.12)',
     icon: <IconDocs />,
+    compact: true,
   },
 ];
 
-export function DashboardPage() {
-  const navigate = useNavigate();
+/* ─── Section Label ──────────────────────────────────────── */
 
+function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
     <div
       style={{
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        flex: 1,
-        minHeight: 'calc(100vh - 112px)',
-        width: '100%',
+        fontSize: '0.65rem',
+        fontWeight: 700,
+        letterSpacing: '0.12em',
+        textTransform: 'uppercase',
+        color: '#4a5568',
+        marginBottom: 14,
       }}
     >
-      {/* Hero — big bold headline, zentra-style */}
-      <div className="text-center animate-fade-in-up" style={{ marginBottom: 48 }}>
-        <h1
-          style={{
-            fontSize: 'clamp(2.8rem, 5vw, 4.5rem)',
-            fontWeight: 800,
-            letterSpacing: '-0.025em',
-            lineHeight: 1.1,
-            marginBottom: 12,
-          }}
-        >
-          <span style={{ color: '#e2e8f0' }}>Custom </span>
-          <span
-            style={{
-              backgroundImage: 'linear-gradient(135deg, #3b82f6 0%, #60a5fa 50%, #93c5fd 100%)',
-              WebkitBackgroundClip: 'text',
-              WebkitTextFillColor: 'transparent',
-              backgroundClip: 'text',
-            }}
-          >
-            VoIP
-          </span>
-        </h1>
-        <p style={{ fontSize: '1.125rem', color: '#718096', fontWeight: 500, letterSpacing: '0.02em' }}>
-          Enterprise Voice Platform
-        </p>
-      </div>
-
-      {/* Card grid — fixed widths via flex for exact control */}
-      <div
-        style={{
-          display: 'flex',
-          flexWrap: 'wrap',
-          justifyContent: 'center',
-          gap: 24,
-          width: '100%',
-          maxWidth: 1060,
-        }}
-      >
-        {NAV_CARDS.map((card, i) => (
-          <DashCard
-            key={card.path}
-            card={card}
-            onClick={() => navigate(card.path)}
-            delay={i * 0.08}
-          />
-        ))}
-      </div>
+      {children}
     </div>
   );
 }
+
+/* ─── Phase 2 Badge ──────────────────────────────────────── */
+
+function Phase2Badge({ accent }: { accent: string }) {
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        top: 16,
+        right: 16,
+        fontSize: '0.6rem',
+        fontWeight: 700,
+        letterSpacing: '0.08em',
+        textTransform: 'uppercase',
+        color: accent,
+        background: `${accent}18`,
+        border: `1px solid ${accent}35`,
+        borderRadius: 999,
+        padding: '3px 9px',
+        zIndex: 2,
+        lineHeight: 1.5,
+      }}
+    >
+      Phase 2
+    </div>
+  );
+}
+
+/* ─── DashCard ───────────────────────────────────────────── */
 
 interface DashCardProps {
   card: NavCard;
   onClick: () => void;
   delay: number;
+  /** Override flex-basis for the card */
+  flexBasis?: string;
+  /** Override minHeight for the card */
+  minHeight?: number;
 }
 
-function DashCard({ card, onClick, delay }: DashCardProps) {
+function DashCard({ card, onClick, delay, flexBasis = '420px', minHeight = 220 }: DashCardProps) {
+  const padding = card.compact ? 22 : 32;
+
   return (
     <button
       type="button"
       onClick={onClick}
       style={{
         animationDelay: `${delay}s`,
-        // Flex basis: 3 cards per row with 24px gaps → (1060 - 48) / 3 ≈ 337
-        flex: '0 1 320px',
-        minHeight: 220,
+        flex: `0 1 ${flexBasis}`,
+        minHeight,
+        opacity: card.muted ? 0.72 : 1,
+        position: 'relative',
       }}
       className={cn(
-        'group relative text-left',
+        'group text-left',
         'rounded-2xl overflow-hidden',
         'cursor-pointer select-none',
         'animate-fade-in-up',
@@ -196,12 +203,17 @@ function DashCard({ card, onClick, delay }: DashCardProps) {
       onMouseEnter={(e) => {
         const el = e.currentTarget;
         el.style.boxShadow = `0 0 0 1px ${card.accent}50, 0 25px 60px -15px ${card.glow}, 0 10px 24px -8px rgba(0,0,0,0.5)`;
+        if (card.muted) el.style.opacity = '1';
       }}
       onMouseLeave={(e) => {
         e.currentTarget.style.boxShadow = '';
+        if (card.muted) e.currentTarget.style.opacity = '0.72';
       }}
     >
-      {/* Background layer — gradient like zentra */}
+      {/* Badge */}
+      {card.badge && <Phase2Badge accent={card.accent} />}
+
+      {/* Background layer */}
       <div
         style={{
           position: 'absolute',
@@ -256,18 +268,18 @@ function DashCard({ card, onClick, delay }: DashCardProps) {
         className="group-hover:!opacity-100"
       />
 
-      {/* Content — p-8 like zentra feature cards */}
-      <div style={{ position: 'relative', zIndex: 1, padding: 32 }}>
-        {/* Icon container — zentra style with gradient bg + border */}
+      {/* Content */}
+      <div style={{ position: 'relative', zIndex: 1, padding }}>
+        {/* Icon */}
         <div
           style={{
-            width: 52,
-            height: 52,
+            width: card.compact ? 44 : 52,
+            height: card.compact ? 44 : 52,
             borderRadius: 14,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            marginBottom: 24,
+            marginBottom: card.compact ? 16 : 24,
             color: card.accent,
             background: `linear-gradient(135deg, ${card.accent}20 0%, ${card.accent}10 100%)`,
             border: `1px solid ${card.accent}30`,
@@ -281,7 +293,7 @@ function DashCard({ card, onClick, delay }: DashCardProps) {
         {/* Title */}
         <h3
           style={{
-            fontSize: '1.125rem',
+            fontSize: card.compact ? '1rem' : '1.125rem',
             fontWeight: 700,
             color: '#e2e8f0',
             letterSpacing: '-0.01em',
@@ -297,13 +309,13 @@ function DashCard({ card, onClick, delay }: DashCardProps) {
             fontSize: '0.875rem',
             color: '#718096',
             lineHeight: 1.65,
-            marginBottom: 24,
+            marginBottom: card.compact ? 16 : 24,
           }}
         >
           {card.description}
         </p>
 
-        {/* Footer — arrow link */}
+        {/* Footer arrow */}
         <div
           style={{ display: 'flex', alignItems: 'center', gap: 6 }}
           className="transition-all duration-200 group-hover:gap-3"
@@ -319,7 +331,7 @@ function DashCard({ card, onClick, delay }: DashCardProps) {
             }}
             className="group-hover:!opacity-100"
           >
-            Open
+            {card.muted ? 'Preview' : 'Open'}
           </span>
           <svg
             style={{ width: 14, height: 14, color: card.accent, opacity: 0.5, transition: 'all 0.2s' }}
@@ -334,5 +346,127 @@ function DashCard({ card, onClick, delay }: DashCardProps) {
         </div>
       </div>
     </button>
+  );
+}
+
+/* ─── Row wrapper ────────────────────────────────────────── */
+
+function CardRow({ children, style }: { children: React.ReactNode; style?: React.CSSProperties }) {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        gap: 24,
+        width: '100%',
+        maxWidth: 1060,
+        ...style,
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+/* ─── Page ───────────────────────────────────────────────── */
+
+export function DashboardPage() {
+  const navigate = useNavigate();
+
+  return (
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        width: '100%',
+        paddingTop: 52,
+        paddingBottom: 64,
+        paddingLeft: 24,
+        paddingRight: 24,
+        boxSizing: 'border-box',
+      }}
+    >
+      {/* ── Page Header ── */}
+      <div
+        className="text-center animate-fade-in-up"
+        style={{ marginBottom: 48, width: '100%', maxWidth: 1060 }}
+      >
+        <h1
+          style={{
+            fontSize: 'clamp(2.8rem, 5vw, 4.5rem)',
+            fontWeight: 800,
+            letterSpacing: '-0.025em',
+            lineHeight: 1.1,
+            marginBottom: 12,
+          }}
+        >
+          <span style={{ color: '#e2e8f0' }}>Custom </span>
+          <span
+            style={{
+              backgroundImage: 'linear-gradient(135deg, #3b82f6 0%, #60a5fa 50%, #93c5fd 100%)',
+              WebkitBackgroundClip: 'text',
+              WebkitTextFillColor: 'transparent',
+              backgroundClip: 'text',
+            }}
+          >
+            VoIP
+          </span>
+        </h1>
+        <p style={{ fontSize: '1.125rem', color: '#718096', fontWeight: 500, letterSpacing: '0.02em' }}>
+          Enterprise Voice Platform
+        </p>
+      </div>
+
+      {/* ── Row 1: Primary Products ── */}
+      <div style={{ width: '100%', maxWidth: 1060 }}>
+        <SectionLabel>Products</SectionLabel>
+        <CardRow>
+          {PRIMARY_CARDS.map((card, i) => (
+            <DashCard
+              key={card.path}
+              card={card}
+              onClick={() => navigate(card.path)}
+              delay={i * 0.08}
+              flexBasis="calc(50% - 12px)"
+              minHeight={240}
+            />
+          ))}
+        </CardRow>
+      </div>
+
+      {/* ── Row 2: Coming Soon ── */}
+      <div style={{ width: '100%', maxWidth: 1060, marginTop: 32 }}>
+        <SectionLabel>Coming Soon</SectionLabel>
+        <CardRow>
+          {COMING_SOON_CARDS.map((card, i) => (
+            <DashCard
+              key={card.path}
+              card={card}
+              onClick={() => navigate(card.path)}
+              delay={0.16 + i * 0.08}
+              flexBasis="calc(50% - 12px)"
+              minHeight={200}
+            />
+          ))}
+        </CardRow>
+      </div>
+
+      {/* ── Row 3: Utilities ── */}
+      <div style={{ width: '100%', maxWidth: 1060, marginTop: 32 }}>
+        <SectionLabel>Tools</SectionLabel>
+        <CardRow>
+          {UTILITY_CARDS.map((card, i) => (
+            <DashCard
+              key={card.path}
+              card={card}
+              onClick={() => navigate(card.path)}
+              delay={0.32 + i * 0.08}
+              flexBasis="calc(50% - 12px)"
+              minHeight={150}
+            />
+          ))}
+        </CardRow>
+      </div>
+    </div>
   );
 }
