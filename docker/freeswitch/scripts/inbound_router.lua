@@ -1,4 +1,4 @@
-freeswitch.consoleLog("INFO", ">>> inbound_router.lua STARTING <<<\n")
+freeswitch.consoleLog("ERR", ">>> inbound_router.lua STARTING <<<\n")
 -- Inbound Call Router - High Performance Implementation
 -- Handles RCF, API DID, and Trunk DID routing with caching
 --
@@ -38,11 +38,11 @@ local function load_module(name)
     return result
 end
 
-freeswitch.consoleLog("INFO", ">>> Loading redis_client <<<\n")
+freeswitch.consoleLog("ERR", ">>> Loading redis_client <<<\n")
 local redis = load_module("redis_client")
-freeswitch.consoleLog("INFO", ">>> redis=" .. tostring(redis ~= nil) .. " Loading db_client <<<\n")
+freeswitch.consoleLog("ERR", ">>> redis=" .. tostring(redis ~= nil) .. " Loading db_client <<<\n")
 local db = load_module("db_client")
-freeswitch.consoleLog("INFO", ">>> db=" .. tostring(db ~= nil) .. " Modules loaded <<<\n")
+freeswitch.consoleLog("ERR", ">>> db=" .. tostring(db ~= nil) .. " Modules loaded <<<\n")
 
 -- Ensure session exists
 if not session then
