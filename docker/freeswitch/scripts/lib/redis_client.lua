@@ -140,8 +140,9 @@ local function redis_eval(script, numkeys, ...)
         return nil, "REDIS_CONNECTION_FAILED"
     end
 
+    local args = {...}
     local ok, result = pcall(function()
-        return r:eval(script, numkeys, ...)
+        return r:eval(script, numkeys, table.unpack(args))
     end)
 
     if not ok then
