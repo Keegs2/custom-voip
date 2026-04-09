@@ -128,7 +128,7 @@ function DialFields({ node, dispatch }: { node: BuilderNode; dispatch: React.Dis
           type="tel"
           className={inputClass}
           value={node.config.number ?? ''}
-          placeholder="+12125551234"
+          placeholder="+1XXXXXXXXXX"
           onChange={(e) => dispatch({ type: 'UPDATE_CONFIG', nodeId: node.id, key: 'number', value: e.target.value })}
         />
       </LabeledField>
@@ -137,7 +137,7 @@ function DialFields({ node, dispatch }: { node: BuilderNode; dispatch: React.Dis
           type="tel"
           className={inputClass}
           value={node.config.callerId ?? ''}
-          placeholder="+12125550000"
+          placeholder="+1XXXXXXXXXX"
           onChange={(e) => dispatch({ type: 'UPDATE_CONFIG', nodeId: node.id, key: 'callerId', value: e.target.value })}
         />
       </LabeledField>

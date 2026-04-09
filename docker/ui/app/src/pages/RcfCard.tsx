@@ -172,7 +172,7 @@ export function RcfCard({ entry, pendingValue, onPendingChange }: RcfCardProps) 
             id={`rcf-fwd-${entry.id}`}
             type="tel"
             value={pendingValue}
-            placeholder="+18005559999"
+            placeholder="+1XXXXXXXXXX"
             onChange={(e) => onPendingChange(entry.did, e.target.value)}
             onKeyDown={handleKeyDown}
             disabled={mutation.isPending}

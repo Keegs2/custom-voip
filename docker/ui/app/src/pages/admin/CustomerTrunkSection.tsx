@@ -376,7 +376,7 @@ function TrunkCard({ trunk, customerId }: TrunkCardProps) {
           value={newDid}
           onChange={(e) => setNewDid(e.target.value)}
           onClick={(e) => e.stopPropagation()}
-          placeholder="+12125551234"
+          placeholder="+1XXXXXXXXXX"
           className="text-[0.82rem] font-mono px-2 py-[4px] rounded-md max-w-[180px] border border-[#2a2f45] bg-[#0d0f15] text-[#e2e8f0] outline-none focus:border-[#3b82f6] placeholder:text-[#718096]"
         />
         <Button

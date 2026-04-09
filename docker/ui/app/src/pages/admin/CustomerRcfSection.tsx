@@ -57,7 +57,7 @@ function RcfForwardInput({
       onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
       onClick={(e) => e.stopPropagation()}
       disabled={mutation.isPending}
-      placeholder="+18005559999"
+      placeholder="+1XXXXXXXXXX"
       className={[
         'text-[0.82rem] px-2 py-[4px] rounded-md w-full max-w-[180px]',
         'border bg-[#0d0f15] text-[#e2e8f0] outline-none',
@@ -251,7 +251,7 @@ export function CustomerRcfSection({ customerId }: CustomerRcfSectionProps) {
               value={newDid}
               onChange={(e) => setNewDid(e.target.value)}
               onClick={(e) => e.stopPropagation()}
-              placeholder="+12125551234"
+              placeholder="+1XXXXXXXXXX"
               className="text-[0.83rem] px-2 py-[5px] rounded-lg w-[160px] border border-[#2a2f45] bg-[#0d0f15] text-[#e2e8f0] outline-none focus:border-[#3b82f6] placeholder:text-[#718096]"
             />
           </div>
@@ -264,7 +264,7 @@ export function CustomerRcfSection({ customerId }: CustomerRcfSectionProps) {
               value={newFwd}
               onChange={(e) => setNewFwd(e.target.value)}
               onClick={(e) => e.stopPropagation()}
-              placeholder="+18005559999"
+              placeholder="+1XXXXXXXXXX"
               className="text-[0.83rem] px-2 py-[5px] rounded-lg w-[160px] border border-[#2a2f45] bg-[#0d0f15] text-[#e2e8f0] outline-none focus:border-[#3b82f6] placeholder:text-[#718096]"
             />
           </div>

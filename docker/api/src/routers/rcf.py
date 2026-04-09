@@ -13,18 +13,26 @@ logger = logging.getLogger(__name__)
 # E.164 pattern: + followed by 1-15 digits
 E164_PATTERN = re.compile(r'^\+[1-9]\d{1,14}$')
 
+# NANP 10-digit (e.g., 5087282017) or 11-digit with leading 1 (e.g., 15087282017)
+NANP_PATTERN = re.compile(r'^1?[2-9]\d{9}$')
+
 # Local extension pattern: 3-6 digits (typical PBX extensions like 1001, 1002, etc.)
 LOCAL_EXTENSION_PATTERN = re.compile(r'^\d{3,6}$')
 
 
 def validate_e164(phone: str) -> str:
-    """Validate E.164 phone number format (strict - DIDs only)."""
-    if not E164_PATTERN.match(phone):
-        raise ValueError(
-            f"Invalid E.164 format: '{phone}'. "
-            "Must be + followed by 1-15 digits (e.g., +15551234567)"
-        )
-    return phone
+    """Validate and normalize phone number to E.164 format (DIDs only).
+    Accepts E.164 (+15087282017), 11-digit (15087282017), or 10-digit (5087282017).
+    """
+    if E164_PATTERN.match(phone):
+        return phone
+    if NANP_PATTERN.match(phone):
+        digits = phone if phone.startswith('1') and len(phone) == 11 else '1' + phone
+        return '+' + digits
+    raise ValueError(
+        f"Invalid phone number: '{phone}'. "
+        "Accepted formats: +15087282017, 15087282017, or 5087282017"
+    )
 
 
 def validate_forward_destination(dest: str) -> str:
@@ -47,13 +55,18 @@ def validate_forward_destination(dest: str) -> str:
     if E164_PATTERN.match(dest):
         return dest
 
+    # Accept NANP 10/11-digit and normalize to E.164
+    if NANP_PATTERN.match(dest):
+        digits = dest if dest.startswith('1') and len(dest) == 11 else '1' + dest
+        return '+' + digits
+
     # Accept local extensions (3-6 digits, e.g., 1001, 1002)
     if LOCAL_EXTENSION_PATTERN.match(dest):
         return dest
 
     raise ValueError(
         f"Invalid destination: '{dest}'. "
-        "Must be E.164 format (+15551234567) or local extension (1001-999999)"
+        "Accepted formats: +15087282017, 15087282017, 5087282017, or extension (1001)"
     )
 
 
