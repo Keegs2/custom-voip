@@ -1,55 +1,10 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState } from 'react';
 
 export function TroubleshootingPage() {
-  const [ready, setReady] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const [error, setError] = useState(false);
 
   // Homer is reverse-proxied through our nginx at /homer/ so it's same-origin.
   const homerUrl = '/homer/';
-
-  // Auto-login to Homer using default admin credentials, then load the iframe.
-  // Homer 7 uses /api/v3/auth as the login endpoint.
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loginAndLoad() {
-      try {
-        const res = await fetch('/api/v3/auth', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ username: 'admin', password: 'sipcapture' }),
-        });
-
-        if (!res.ok) {
-          throw new Error(`Homer login failed: ${res.status}`);
-        }
-
-        const data = await res.json();
-        const token = data?.token;
-
-        if (!token) {
-          throw new Error('No token in Homer login response');
-        }
-
-        // Store the token in localStorage where Homer's Angular app expects it
-        localStorage.setItem('token', token);
-
-        if (!cancelled) {
-          setReady(true);
-        }
-      } catch (err) {
-        if (!cancelled) {
-          // If login fails, still show the iframe (user can login manually)
-          console.warn('Homer auto-login failed:', err);
-          setReady(true);
-        }
-      }
-    }
-
-    loginAndLoad();
-    return () => { cancelled = true; };
-  }, []);
 
   if (error) {
     return (
@@ -72,43 +27,35 @@ export function TroubleshootingPage() {
           Homer is not reachable
         </p>
         <p style={{ fontSize: '0.85rem', color: '#718096', maxWidth: 440, lineHeight: 1.6 }}>
-          {error}
+          Make sure the Homer container is running and port 9080 is accessible.
         </p>
       </div>
     );
   }
 
-  if (!ready) {
-    return (
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          height: 'calc(100vh - 96px)',
-          color: '#718096',
-          fontSize: '0.9rem',
-        }}
-      >
-        Connecting to Homer...
-      </div>
-    );
-  }
-
+  // Break out of the AppLayout's max-width + padding container
+  // to make Homer fill the full available width
   return (
-    <iframe
-      ref={iframeRef}
-      src={homerUrl}
-      title="Homer SIP Capture"
-      onError={() => setError('Could not load Homer. Make sure the container is running.')}
+    <div
       style={{
-        width: '100%',
-        height: 'calc(100vh - 96px)',
-        border: '1px solid rgba(42,47,69,0.6)',
-        borderRadius: 12,
-        background: '#1a1d27',
-        display: 'block',
+        // Negate the parent's px-6/md:px-10 padding and max-width centering
+        margin: '-32px -40px -80px -24px',
+        height: 'calc(100vh)',
+        position: 'relative',
       }}
-    />
+    >
+      <iframe
+        src={homerUrl}
+        title="Homer SIP Capture"
+        onError={() => setError(true)}
+        style={{
+          width: '100%',
+          height: '100%',
+          border: 'none',
+          background: '#fff',
+          display: 'block',
+        }}
+      />
+    </div>
   );
 }
