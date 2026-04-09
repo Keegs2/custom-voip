@@ -29,6 +29,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     kamailio-presence-modules \
     # XML operations
     kamailio-xml-modules \
+    # PostgreSQL database support (for trunk IP auth, sqlops queries)
+    kamailio-postgres-modules \
     # Outbound module for NAT
     kamailio-outbound-modules \
     # Websocket (if WebRTC needed later)

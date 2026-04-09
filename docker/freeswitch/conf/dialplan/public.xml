@@ -252,12 +252,41 @@
     <!-- TRUNK OUTBOUND (From Customer PBX)         -->
     <!-- ============================================ -->
     <!--
-      Calls from authenticated SIP trunk customers
-      trunk_id is set by IP-based auth lookup in Lua
+      Calls from authenticated SIP trunk customers.
+      Kamailio authenticates the customer by source IP and sets:
+        X-Trunk-ID: trunk database ID
+        X-Customer-ID: customer database ID
+        X-Max-Channels: max concurrent channels for this trunk
+      FreeSWITCH exposes these as ${sip_h_X-Trunk-ID}, etc.
+
+      This extension fires BEFORE the inbound handler so trunk
+      outbound calls don't accidentally match as inbound DIDs.
     -->
+    <extension name="trunk_outbound_from_kamailio">
+      <condition field="${sip_h_X-Trunk-ID}" expression="^\d+$">
+        <action application="log" data="INFO Trunk Outbound (Kamailio-auth): trunk=${sip_h_X-Trunk-ID} customer=${sip_h_X-Customer-ID} to ${destination_number}"/>
+
+        <!-- Copy SIP headers to channel variables for Lua script access -->
+        <action application="set" data="trunk_id=${sip_h_X-Trunk-ID}"/>
+        <action application="set" data="customer_id=${sip_h_X-Customer-ID}"/>
+        <action application="set" data="max_channels=${sip_h_X-Max-Channels}"/>
+        <action application="set" data="direction=outbound"/>
+        <action application="set" data="product_type=trunk"/>
+        <action application="set" data="call_start_time=${strftime(%Y-%m-%d %H:%M:%S)}"/>
+
+        <!-- Execute Lua script for trunk call handling -->
+        <action application="lua" data="trunk_outbound.lua"/>
+
+        <!-- Fallback if Lua doesn't handle -->
+        <action application="log" data="ERR Trunk script did not complete call"/>
+        <action application="hangup" data="NORMAL_TEMPORARY_FAILURE"/>
+      </condition>
+    </extension>
+
+    <!-- Legacy trunk outbound: trunk_id set by prior dialplan logic (not Kamailio) -->
     <extension name="trunk_outbound">
       <condition field="${trunk_id}" expression="^\d+$">
-        <action application="log" data="INFO Trunk Outbound: trunk=${trunk_id} to ${destination_number}"/>
+        <action application="log" data="INFO Trunk Outbound (legacy): trunk=${trunk_id} to ${destination_number}"/>
         <action application="set" data="direction=outbound"/>
         <action application="set" data="product_type=trunk"/>
         <action application="set" data="call_start_time=${strftime(%Y-%m-%d %H:%M:%S)}"/>
