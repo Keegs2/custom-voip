@@ -343,7 +343,8 @@ end
 -- ============================================
 -- STEP 3: Velocity/Rate Limiting
 -- ============================================
-if redis and customer_id then
+if false and redis and customer_id then
+    -- TEMPORARILY DISABLED: Redis connection issues blocking calls
     -- Wrap entire velocity check in pcall to guarantee fail-open behavior.
     -- If Redis is unreachable or any error occurs, the call MUST proceed.
     -- Only a definitive velocity limit breach (CPM_EXCEEDED, DAILY_LIMIT_EXCEEDED)
