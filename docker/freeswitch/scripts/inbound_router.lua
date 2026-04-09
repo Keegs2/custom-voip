@@ -118,6 +118,18 @@ if did == "" then
     return
 end
 
+-- Convert E.164 or 11-digit number to 10-digit format for carrier delivery
+local function to_10digit(number)
+    if not number or number == "" then return number end
+    local digits = number:gsub("[^%d]", "")
+    if #digits == 11 and digits:sub(1, 1) == "1" then
+        return digits:sub(2)
+    elseif #digits == 10 then
+        return digits
+    end
+    return digits
+end
+
 -- Normalize DID to E.164 format
 local function normalize_did(number)
     -- Remove any non-digit characters except +
@@ -418,25 +430,27 @@ if product_type == "rcf" then
     -- ================================================================
 
     -- Set outbound caller ID for carrier authorization (SIP From header).
-    -- Bandwidth requires the RCF DID in the From header for termination auth.
-    session:setVariable("outbound_caller_id_number", normalized_did)
-    session:setVariable("outbound_caller_id_name", normalized_did)
+    -- Bandwidth requires the RCF DID in 10-digit format for termination auth.
+    local outbound_did = to_10digit(normalized_did)
+    session:setVariable("outbound_caller_id_number", outbound_did)
+    session:setVariable("outbound_caller_id_name", outbound_did)
 
+    local outbound_original_cid = to_10digit(original_caller_number)
     if pass_caller_id then
         -- Preserve original caller ID so the called party sees who is calling
-        session:setVariable("effective_caller_id_number", original_caller_number)
+        session:setVariable("effective_caller_id_number", outbound_original_cid)
         session:setVariable("effective_caller_id_name", original_caller_name)
     else
         -- Override: called party sees the RCF DID, not the original caller
-        session:setVariable("effective_caller_id_number", normalized_did)
-        session:setVariable("effective_caller_id_name", normalized_did)
+        session:setVariable("effective_caller_id_number", outbound_did)
+        session:setVariable("effective_caller_id_name", outbound_did)
     end
 
     -- Diversion header indicates the call was forwarded and from which number
-    session:setVariable("sip_h_Diversion", "<sip:" .. normalized_did .. "@34.74.71.32>;reason=unconditional")
+    session:setVariable("sip_h_Diversion", "<sip:" .. outbound_did .. "@34.74.71.32>;reason=unconditional")
 
     -- X-Original-CID: Kamailio reads this to build P-Asserted-Identity
-    session:setVariable("sip_h_X-Original-CID", original_caller_number)
+    session:setVariable("sip_h_X-Original-CID", outbound_original_cid)
 
     freeswitch.consoleLog("INFO", string.format(
         "[inbound_router] CID setup (FusionPBX-style): outbound_cid=%s effective_cid=%s original=%s pass=%s\n",
