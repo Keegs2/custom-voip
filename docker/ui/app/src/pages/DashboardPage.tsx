@@ -7,11 +7,10 @@ interface NavCard {
   path: string;
   accent: string;
   glow: string;
-  gradient: string;
   icon: React.ReactNode;
 }
 
-/* ─── SVG Icons (crisp at any size) ─────────────────────── */
+/* ─── SVG Icons (Heroicons outline, 28×28) ──────────────── */
 
 const IconAdmin = () => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-7 h-7">
@@ -56,8 +55,7 @@ const NAV_CARDS: NavCard[] = [
     description: 'Manage customers, billing, rates, and platform configuration.',
     path: '/admin',
     accent: '#3b82f6',
-    glow: 'rgba(59, 130, 246, 0.15)',
-    gradient: 'linear-gradient(135deg, rgba(59, 130, 246, 0.12) 0%, rgba(59, 130, 246, 0.03) 100%)',
+    glow: 'rgba(59, 130, 246, 0.18)',
     icon: <IconAdmin />,
   },
   {
@@ -65,8 +63,7 @@ const NAV_CARDS: NavCard[] = [
     description: 'Remote Call Forwarding — route DIDs to any destination instantly.',
     path: '/rcf',
     accent: '#22c55e',
-    glow: 'rgba(34, 197, 94, 0.15)',
-    gradient: 'linear-gradient(135deg, rgba(34, 197, 94, 0.12) 0%, rgba(34, 197, 94, 0.03) 100%)',
+    glow: 'rgba(34, 197, 94, 0.18)',
     icon: <IconRCF />,
   },
   {
@@ -74,8 +71,7 @@ const NAV_CARDS: NavCard[] = [
     description: 'Programmable voice with webhook-driven call control.',
     path: '/api-dids',
     accent: '#a855f7',
-    glow: 'rgba(168, 85, 247, 0.15)',
-    gradient: 'linear-gradient(135deg, rgba(168, 85, 247, 0.12) 0%, rgba(168, 85, 247, 0.03) 100%)',
+    glow: 'rgba(168, 85, 247, 0.18)',
     icon: <IconAPI />,
   },
   {
@@ -83,8 +79,7 @@ const NAV_CARDS: NavCard[] = [
     description: 'Connect PBX systems with IP-authenticated trunks.',
     path: '/trunks',
     accent: '#f59e0b',
-    glow: 'rgba(245, 158, 11, 0.15)',
-    gradient: 'linear-gradient(135deg, rgba(245, 158, 11, 0.12) 0%, rgba(245, 158, 11, 0.03) 100%)',
+    glow: 'rgba(245, 158, 11, 0.18)',
     icon: <IconTrunk />,
   },
   {
@@ -92,8 +87,7 @@ const NAV_CARDS: NavCard[] = [
     description: 'Design call flows visually with drag-and-drop.',
     path: '/ivr',
     accent: '#06b6d4',
-    glow: 'rgba(6, 182, 212, 0.15)',
-    gradient: 'linear-gradient(135deg, rgba(6, 182, 212, 0.12) 0%, rgba(6, 182, 212, 0.03) 100%)',
+    glow: 'rgba(6, 182, 212, 0.18)',
     icon: <IconIVR />,
   },
   {
@@ -102,7 +96,6 @@ const NAV_CARDS: NavCard[] = [
     path: '/docs',
     accent: '#94a3b8',
     glow: 'rgba(148, 163, 184, 0.12)',
-    gradient: 'linear-gradient(135deg, rgba(148, 163, 184, 0.08) 0%, rgba(148, 163, 184, 0.02) 100%)',
     icon: <IconDocs />,
   },
 ];
@@ -111,38 +104,63 @@ export function DashboardPage() {
   const navigate = useNavigate();
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-[calc(100vh-64px)] -mt-8">
-      {/* Hero section — centered, zentra-style big typography */}
-      <div className="text-center mb-16 animate-fade-in-up">
-        <h1 className="text-5xl md:text-6xl lg:text-7xl font-extrabold tracking-tight leading-none mb-4">
-          <span className="text-[#e2e8f0]">Custom </span>
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        minHeight: 'calc(100vh - 112px)', // 100vh minus AppLayout top+bottom padding (py-8 = 32px + pb-20 = 80px)
+        width: '100%',
+      }}
+    >
+      {/* Hero — big bold headline, zentra-style */}
+      <div className="text-center animate-fade-in-up" style={{ marginBottom: 48 }}>
+        <h1
+          style={{
+            fontSize: 'clamp(2.8rem, 5vw, 4.5rem)',
+            fontWeight: 800,
+            letterSpacing: '-0.025em',
+            lineHeight: 1.1,
+            marginBottom: 12,
+          }}
+        >
+          <span style={{ color: '#e2e8f0' }}>Custom </span>
           <span
-            className="bg-clip-text text-transparent"
             style={{
               backgroundImage: 'linear-gradient(135deg, #3b82f6 0%, #60a5fa 50%, #93c5fd 100%)',
-              backgroundSize: '200% auto',
+              WebkitBackgroundClip: 'text',
+              WebkitTextFillColor: 'transparent',
+              backgroundClip: 'text',
             }}
           >
             VoIP
           </span>
         </h1>
-        <p className="text-lg md:text-xl text-[#718096] font-medium tracking-wide">
+        <p style={{ fontSize: '1.125rem', color: '#718096', fontWeight: 500, letterSpacing: '0.02em' }}>
           Enterprise Voice Platform
         </p>
       </div>
 
-      {/* Navigation card grid — 2 cols on md, 3 cols on lg */}
-      <div className="w-full max-w-5xl mx-auto">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 md:gap-6">
-          {NAV_CARDS.map((card, i) => (
-            <DashCard
-              key={card.path}
-              card={card}
-              onClick={() => navigate(card.path)}
-              delay={i * 0.08}
-            />
-          ))}
-        </div>
+      {/* Card grid — fixed widths via flex for exact control */}
+      <div
+        style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          justifyContent: 'center',
+          gap: 24,
+          width: '100%',
+          maxWidth: 1060,
+        }}
+      >
+        {NAV_CARDS.map((card, i) => (
+          <DashCard
+            key={card.path}
+            card={card}
+            onClick={() => navigate(card.path)}
+            delay={i * 0.08}
+          />
+        ))}
       </div>
     </div>
   );
@@ -159,11 +177,15 @@ function DashCard({ card, onClick, delay }: DashCardProps) {
     <button
       type="button"
       onClick={onClick}
-      style={{ animationDelay: `${delay}s` }}
+      style={{
+        animationDelay: `${delay}s`,
+        // Flex basis: 3 cards per row with 24px gaps → (1060 - 48) / 3 ≈ 337
+        flex: '0 1 320px',
+        minHeight: 220,
+      }}
       className={cn(
-        'group relative text-left w-full',
+        'group relative text-left',
         'rounded-2xl overflow-hidden',
-        'p-7 pb-6',
         'cursor-pointer select-none',
         'animate-fade-in-up',
         'transition-all duration-300 ease-out',
@@ -172,68 +194,135 @@ function DashCard({ card, onClick, delay }: DashCardProps) {
       )}
       onMouseEnter={(e) => {
         const el = e.currentTarget;
-        el.style.boxShadow = `0 0 0 1px ${card.accent}40, 0 20px 50px -12px ${card.glow}, 0 8px 20px -8px rgba(0,0,0,0.5)`;
-        el.style.borderColor = `${card.accent}50`;
-        el.style.background = card.gradient;
+        el.style.boxShadow = `0 0 0 1px ${card.accent}50, 0 25px 60px -15px ${card.glow}, 0 10px 24px -8px rgba(0,0,0,0.5)`;
       }}
       onMouseLeave={(e) => {
-        const el = e.currentTarget;
-        el.style.boxShadow = '';
-        el.style.borderColor = '';
-        el.style.background = '';
+        e.currentTarget.style.boxShadow = '';
       }}
     >
-      {/* Base background + border */}
+      {/* Background layer — gradient like zentra */}
       <div
-        className="absolute inset-0 rounded-2xl border border-[#2a2f45]/60 bg-[#13151d] transition-colors duration-300 group-hover:border-transparent"
-        style={{ zIndex: 0 }}
+        style={{
+          position: 'absolute',
+          inset: 0,
+          borderRadius: 16,
+          background: 'linear-gradient(135deg, rgba(30, 33, 48, 0.9) 0%, rgba(19, 21, 29, 0.95) 100%)',
+          border: '1px solid rgba(42, 47, 69, 0.6)',
+          transition: 'border-color 0.3s',
+        }}
+        className="group-hover:!border-transparent"
       />
 
-      {/* Top accent line */}
+      {/* Hover gradient overlay */}
       <div
-        className="absolute top-0 left-6 right-6 h-[2px] opacity-60 group-hover:opacity-100 transition-opacity duration-300"
-        style={{ background: `linear-gradient(90deg, transparent, ${card.accent}, transparent)` }}
+        style={{
+          position: 'absolute',
+          inset: 0,
+          borderRadius: 16,
+          background: `linear-gradient(135deg, ${card.accent}18 0%, ${card.accent}05 100%)`,
+          opacity: 0,
+          transition: 'opacity 0.3s',
+        }}
+        className="group-hover:!opacity-100"
       />
 
-      {/* Content */}
-      <div className="relative z-10">
-        {/* Icon circle */}
+      {/* Hover border */}
+      <div
+        style={{
+          position: 'absolute',
+          inset: 0,
+          borderRadius: 16,
+          border: `1px solid ${card.accent}40`,
+          opacity: 0,
+          transition: 'opacity 0.3s',
+          pointerEvents: 'none',
+        }}
+        className="group-hover:!opacity-100"
+      />
+
+      {/* Top accent gradient line */}
+      <div
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 32,
+          right: 32,
+          height: 2,
+          background: `linear-gradient(90deg, transparent, ${card.accent}, transparent)`,
+          opacity: 0.5,
+          transition: 'opacity 0.3s',
+        }}
+        className="group-hover:!opacity-100"
+      />
+
+      {/* Content — p-8 like zentra feature cards */}
+      <div style={{ position: 'relative', zIndex: 1, padding: 32 }}>
+        {/* Icon container — zentra style with gradient bg + border */}
         <div
-          className="w-12 h-12 rounded-xl flex items-center justify-center mb-5 transition-all duration-300 group-hover:scale-110 group-hover:shadow-lg"
           style={{
-            background: `${card.accent}15`,
+            width: 52,
+            height: 52,
+            borderRadius: 14,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            marginBottom: 24,
             color: card.accent,
-            boxShadow: `0 0 0 1px ${card.accent}20`,
+            background: `linear-gradient(135deg, ${card.accent}20 0%, ${card.accent}10 100%)`,
+            border: `1px solid ${card.accent}30`,
+            transition: 'transform 0.3s, box-shadow 0.3s',
           }}
-          onMouseEnter={() => {}}
+          className="group-hover:scale-110"
         >
           {card.icon}
         </div>
 
         {/* Title */}
         <h3
-          className="text-lg font-bold text-[#e2e8f0] tracking-tight mb-2 transition-colors duration-200"
-          style={{}}
+          style={{
+            fontSize: '1.125rem',
+            fontWeight: 700,
+            color: '#e2e8f0',
+            letterSpacing: '-0.01em',
+            marginBottom: 8,
+          }}
         >
           {card.title}
         </h3>
 
         {/* Description */}
-        <p className="text-sm text-[#718096] leading-relaxed mb-6">
+        <p
+          style={{
+            fontSize: '0.875rem',
+            color: '#718096',
+            lineHeight: 1.65,
+            marginBottom: 24,
+          }}
+        >
           {card.description}
         </p>
 
-        {/* Footer arrow */}
-        <div className="flex items-center gap-1.5 transition-all duration-200 group-hover:gap-3">
+        {/* Footer — arrow link */}
+        <div
+          style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+          className="transition-all duration-200 group-hover:gap-3"
+        >
           <span
-            className="text-xs font-semibold tracking-wide opacity-70 group-hover:opacity-100 transition-opacity duration-200"
-            style={{ color: card.accent }}
+            style={{
+              fontSize: '0.8rem',
+              fontWeight: 600,
+              letterSpacing: '0.02em',
+              color: card.accent,
+              opacity: 0.7,
+              transition: 'opacity 0.2s',
+            }}
+            className="group-hover:!opacity-100"
           >
             Open
           </span>
           <svg
-            className="w-3.5 h-3.5 opacity-50 group-hover:opacity-100 transition-all duration-200 group-hover:translate-x-0.5"
-            style={{ color: card.accent }}
+            style={{ width: 14, height: 14, color: card.accent, opacity: 0.5, transition: 'all 0.2s' }}
+            className="group-hover:!opacity-100 group-hover:translate-x-0.5"
             fill="none"
             viewBox="0 0 24 24"
             stroke="currentColor"
