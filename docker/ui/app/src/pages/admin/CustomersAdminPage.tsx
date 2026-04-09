@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { listCustomers, createCustomer } from '../../api/customers';
+import { listCustomers, createCustomer, deleteCustomer } from '../../api/customers';
 import { Button } from '../../components/ui/Button';
 import { Spinner } from '../../components/ui/Spinner';
 import { Pagination } from '../../components/ui/Pagination';
@@ -67,6 +67,22 @@ export function CustomersAdminPage() {
     },
     onError: (err: Error) => toastErr(err.message),
   });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: number) => deleteCustomer(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['customers'] });
+      setExpandedCustomerId(null);
+      setEditingCustomerId(null);
+      toastOk('Customer deleted');
+    },
+    onError: (err: Error) => toastErr(err.message),
+  });
+
+  function handleDeleteCustomer(id: number, name: string) {
+    if (!confirm(`Delete customer "${name}" and ALL associated records (RCF, trunks, DIDs)?\n\nThis cannot be undone.`)) return;
+    deleteMutation.mutate(id);
+  }
 
   function handleSearch(e: React.FormEvent) {
     e.preventDefault();
@@ -345,6 +361,7 @@ export function CustomersAdminPage() {
                       onStartEdit={handleStartEdit}
                       onCancelEdit={handleCancelEdit}
                       onSaved={handleSaved}
+                      onDelete={handleDeleteCustomer}
                       colSpan={COL_COUNT}
                     />
                   ))

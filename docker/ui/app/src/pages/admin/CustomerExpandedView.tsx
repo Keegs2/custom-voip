@@ -13,6 +13,7 @@ import type { Customer } from '../../types/customer';
 interface CustomerExpandedViewProps {
   customer: Customer;
   onEdit: () => void;
+  onDelete: () => void;
 }
 
 interface AddCreditResponse {
@@ -48,7 +49,7 @@ function DetailField({ label, value }: { label: string; value: React.ReactNode }
   );
 }
 
-export function CustomerExpandedView({ customer, onEdit }: CustomerExpandedViewProps) {
+export function CustomerExpandedView({ customer, onEdit, onDelete }: CustomerExpandedViewProps) {
   const qc = useQueryClient();
   const { toastOk, toastErr } = useToast();
   const [creditAmount, setCreditAmount] = useState('');
@@ -243,6 +244,20 @@ export function CustomerExpandedView({ customer, onEdit }: CustomerExpandedViewP
             Add Credit
           </Button>
         </form>
+
+        {/* Delete — pushed to right */}
+        <div style={{ marginLeft: 'auto' }}>
+          <Button
+            variant="danger"
+            size="sm"
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete();
+            }}
+          >
+            Delete Customer
+          </Button>
+        </div>
       </div>
 
       {/* Service sections — lazy loaded based on account type */}

@@ -11,6 +11,7 @@ interface CustomerRowProps {
   onStartEdit: (id: number) => void;
   onCancelEdit: () => void;
   onSaved: () => void;
+  onDelete: (id: number, name: string) => void;
   colSpan: number;
 }
 
@@ -36,6 +37,7 @@ export function CustomerRow({
   onStartEdit,
   onCancelEdit,
   onSaved,
+  onDelete,
   colSpan,
 }: CustomerRowProps) {
   return (
@@ -182,6 +184,7 @@ export function CustomerRow({
                 <CustomerExpandedView
                   customer={customer}
                   onEdit={() => onStartEdit(customer.id)}
+                  onDelete={() => onDelete(customer.id, customer.name)}
                 />
               )}
             </div>
