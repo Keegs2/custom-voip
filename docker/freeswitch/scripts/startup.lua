@@ -4,6 +4,11 @@
 -- This script runs once when FreeSWITCH starts.
 -- It sets up global variables and optionally tests service connectivity.
 
+-- Fix package paths early so require() finds luarocks-installed libraries
+-- before mod_lua's custom searcher tries the scripts directory as a file.
+package.path = "/usr/local/share/lua/5.3/?.lua;/usr/local/share/lua/5.3/?/init.lua;/usr/share/lua/5.3/?.lua;/usr/share/lua/5.3/?/init.lua;" .. package.path
+package.cpath = "/usr/local/lib/lua/5.3/?.so;/usr/local/lib/lua/5.3/?/?.so;/usr/lib/lua/5.3/?.so;/usr/lib/lua/5.3/?/?.so;" .. package.cpath
+
 freeswitch.consoleLog("INFO", "\n")
 freeswitch.consoleLog("INFO", "============================================\n")
 freeswitch.consoleLog("INFO", "  Voice Platform - FreeSWITCH Starting     \n")
@@ -14,8 +19,10 @@ freeswitch.consoleLog("INFO", "============================================\n")
 -- ============================================
 
 -- Redis Configuration
-REDIS_HOST = os.getenv("REDIS_HOST") or "redis"
-REDIS_PORT = tonumber(os.getenv("REDIS_PORT") or 6379)
+-- Default to 127.0.0.1 because FreeSWITCH runs with network_mode: host
+-- and Redis is exposed on the host at port 6380 (mapped from container 6379)
+REDIS_HOST = os.getenv("REDIS_HOST") or "127.0.0.1"
+REDIS_PORT = tonumber(os.getenv("REDIS_PORT") or 6380)
 
 -- PostgreSQL Configuration (via PgBouncer for connection pooling)
 PG_HOST = os.getenv("DB_HOST") or "postgres"

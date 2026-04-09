@@ -24,8 +24,9 @@
 
 -- Load libraries using loadfile (bypasses FreeSWITCH's broken module-directory handling)
 -- This is the same pattern used in inbound_router.lua and is more reliable than require()
-package.path = package.path .. ";/usr/local/freeswitch/scripts/lib/?.lua;/usr/local/share/lua/5.3/?.lua;/usr/share/lua/5.3/?.lua"
-package.cpath = package.cpath .. ";/usr/local/lib/lua/5.3/?.so;/usr/local/lib/lua/5.3/?/?.so;/usr/lib/lua/5.3/?.so;/usr/lib/lua/5.3/?/?.so"
+-- Prepend luarocks paths so redis-lua is found before mod_lua's script-directory searcher
+package.path = "/usr/local/share/lua/5.3/?.lua;/usr/local/share/lua/5.3/?/init.lua;/usr/share/lua/5.3/?.lua;/usr/share/lua/5.3/?/init.lua;" .. package.path .. ";/usr/local/freeswitch/scripts/lib/?.lua"
+package.cpath = "/usr/local/lib/lua/5.3/?.so;/usr/local/lib/lua/5.3/?/?.so;/usr/lib/lua/5.3/?.so;/usr/lib/lua/5.3/?/?.so;" .. package.cpath
 
 local function load_module(name)
     local path = "/usr/local/freeswitch/scripts/lib/" .. name .. ".lua"

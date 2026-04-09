@@ -12,6 +12,14 @@
 
 local M = {}
 
+-- Fix package paths BEFORE require("redis") so luarocks-installed redis-lua
+-- is found before mod_lua's custom searcher tries the scripts directory.
+-- Without this, require("redis") matches /usr/local/freeswitch/scripts/ (a directory)
+-- because mod_lua adds script-directory as a searcher, causing:
+--   "cannot read /usr/local/freeswitch/scripts/: Is a directory"
+package.path = "/usr/local/share/lua/5.3/?.lua;/usr/local/share/lua/5.3/?/init.lua;/usr/share/lua/5.3/?.lua;/usr/share/lua/5.3/?/init.lua;" .. package.path
+package.cpath = "/usr/local/lib/lua/5.3/?.so;/usr/local/lib/lua/5.3/?/?.so;/usr/lib/lua/5.3/?.so;/usr/lib/lua/5.3/?/?.so;" .. package.cpath
+
 -- Try to load redis library
 local redis
 local ok, result = pcall(function()
@@ -69,8 +77,10 @@ function M.get_connection()
     end
 
     -- Get connection parameters
-    local host = REDIS_HOST or os.getenv("REDIS_HOST") or "redis"
-    local port = tonumber(REDIS_PORT or os.getenv("REDIS_PORT") or 6379)
+    -- Default to 127.0.0.1 because FreeSWITCH runs with network_mode: host
+    -- and Redis is exposed on the host at port 6380 (mapped from container 6379)
+    local host = REDIS_HOST or os.getenv("REDIS_HOST") or "127.0.0.1"
+    local port = tonumber(REDIS_PORT or os.getenv("REDIS_PORT") or 6380)
 
     -- Try to connect with retries
     for attempt = 1, MAX_RETRY_ATTEMPTS do

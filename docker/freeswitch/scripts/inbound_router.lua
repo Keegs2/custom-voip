@@ -16,8 +16,9 @@
 
 -- Load libraries
 -- Set up package paths for Lua 5.3 and our custom modules
-package.path = package.path .. ";/usr/local/freeswitch/scripts/lib/?.lua;/usr/local/share/lua/5.3/?.lua;/usr/share/lua/5.3/?.lua"
-package.cpath = package.cpath .. ";/usr/local/lib/lua/5.3/?.so;/usr/local/lib/lua/5.3/?/?.so;/usr/lib/lua/5.3/?.so;/usr/lib/lua/5.3/?/?.so"
+-- Prepend luarocks paths so redis-lua is found before mod_lua's script-directory searcher
+package.path = "/usr/local/share/lua/5.3/?.lua;/usr/local/share/lua/5.3/?/init.lua;/usr/share/lua/5.3/?.lua;/usr/share/lua/5.3/?/init.lua;" .. package.path .. ";/usr/local/freeswitch/scripts/lib/?.lua"
+package.cpath = "/usr/local/lib/lua/5.3/?.so;/usr/local/lib/lua/5.3/?/?.so;/usr/lib/lua/5.3/?.so;/usr/lib/lua/5.3/?/?.so;" .. package.cpath
 
 -- Load modules using loadfile to bypass FreeSWITCH's broken module-directory handling
 -- The require() function fails because mod_lua adds script-directory as a searcher
@@ -343,18 +344,38 @@ end
 -- STEP 3: Velocity/Rate Limiting
 -- ============================================
 if redis and customer_id then
-    local velocity_ok, velocity_reason = redis.velocity_check(
-        customer_id, cpm_limit, 0, daily_limit, 0.01
-    )
+    -- Wrap entire velocity check in pcall to guarantee fail-open behavior.
+    -- If Redis is unreachable or any error occurs, the call MUST proceed.
+    -- Only a definitive velocity limit breach (CPM_EXCEEDED, DAILY_LIMIT_EXCEEDED)
+    -- should reject the call.
+    local vel_ok, velocity_ok, velocity_reason = pcall(function()
+        return redis.velocity_check(customer_id, cpm_limit, 0, daily_limit, 0.01)
+    end)
 
-    if not velocity_ok then
+    if vel_ok and velocity_ok == false then
+        -- velocity_check returned false explicitly -- a real rate limit hit
+        -- Only reject for actual limit violations, NOT for Redis errors
+        if velocity_reason and velocity_reason ~= "REDIS_ERROR"
+           and velocity_reason ~= "REDIS_CONNECTION_FAILED" then
+            freeswitch.consoleLog("WARNING", string.format(
+                "[%s] Velocity check FAILED: customer=%s reason=%s\n",
+                uuid, tostring(customer_id), tostring(velocity_reason)
+            ))
+            set_var("blocked_reason", velocity_reason)
+            hangup("CALL_REJECTED")
+            return
+        else
+            freeswitch.consoleLog("WARNING", string.format(
+                "[%s] Velocity check Redis unavailable (reason=%s), failing OPEN\n",
+                uuid, tostring(velocity_reason)
+            ))
+        end
+    elseif not vel_ok then
+        -- pcall caught an exception -- fail open
         freeswitch.consoleLog("WARNING", string.format(
-            "[%s] Velocity check FAILED: customer=%d reason=%s\n",
-            uuid, customer_id, velocity_reason
+            "[%s] Velocity check exception (failing OPEN): %s\n",
+            uuid, tostring(velocity_ok)
         ))
-        set_var("blocked_reason", velocity_reason)
-        hangup("CALL_REJECTED")
-        return
     end
 end
 
