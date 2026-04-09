@@ -330,23 +330,31 @@ async def get_trunk_stats(trunk_id: int):
             if json_start >= 0:
                 data = json.loads(response[json_start:])
                 rows = data.get("rows", [])
+                # Get trunk DIDs once for matching
+                trunk_dids = await db.fetch_all(
+                    "SELECT did FROM trunk_dids WHERE trunk_id = $1",
+                    trunk_id
+                )
+                did_list = [d["did"].replace("+", "") for d in (trunk_dids or [])]
+
                 for row in rows:
-                    # Check if this channel belongs to this trunk
-                    # trunk_id is set as a channel variable by the Lua scripts
-                    if str(row.get("callstate", "")) not in ("HANGUP", "DOWN"):
-                        # Check presence_data or accountcode for trunk association
-                        cid_name = row.get("cid_name", "")
-                        dest = row.get("dest", "")
-                        # Get trunk DIDs for this trunk
-                        trunk_dids = await db.fetch_all(
-                            "SELECT did FROM trunk_dids WHERE trunk_id = $1",
-                            trunk_id
-                        )
-                        did_list = [d["did"].replace("+", "") for d in (trunk_dids or [])]
-                        # Match if destination or caller matches a trunk DID
-                        clean_dest = dest.replace("+", "")
-                        if clean_dest in did_list or any(d in dest for d in did_list):
+                    if str(row.get("callstate", "")) in ("HANGUP", "DOWN"):
+                        continue
+                    # Check all fields that might contain the trunk DID
+                    fields_to_check = [
+                        row.get("name", ""),
+                        row.get("cid_name", ""),
+                        row.get("cid_num", ""),
+                        row.get("initial_cid_name", ""),
+                        row.get("initial_cid_num", ""),
+                        row.get("dest", ""),
+                        row.get("initial_dest", ""),
+                    ]
+                    for field in fields_to_check:
+                        clean = field.replace("+", "")
+                        if any(d in clean for d in did_list):
                             current_channels += 1
+                            break
     except Exception as e:
         logger.warning(f"ESL channel count failed: {e}")
 
