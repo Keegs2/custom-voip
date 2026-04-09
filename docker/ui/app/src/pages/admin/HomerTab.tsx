@@ -4,8 +4,9 @@ import { Button } from '../../components/ui/Button';
 export function HomerTab() {
   const [iframeError, setIframeError] = useState(false);
 
-  // Homer runs on port 9080 on the same host as the app
-  const homerUrl = `http://${window.location.hostname}:9080`;
+  // Homer is reverse-proxied through our nginx at /homer/ so it's same-origin.
+  // This avoids X-Frame-Options and CSP iframe blocking.
+  const homerUrl = '/homer/';
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>

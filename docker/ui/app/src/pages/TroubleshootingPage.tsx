@@ -3,10 +3,9 @@ import { useState } from 'react';
 export function TroubleshootingPage() {
   const [iframeError, setIframeError] = useState(false);
 
-  // Homer runs on port 9080 on the VM's direct IP.
-  // The app may be accessed via a load balancer on a different IP,
-  // so we hardcode the VM IP where Homer is actually reachable.
-  const homerUrl = 'http://34.74.71.32:9080';
+  // Homer is reverse-proxied through our nginx at /homer/ so it's same-origin.
+  // This avoids X-Frame-Options and CSP iframe blocking.
+  const homerUrl = '/homer/';
 
   if (iframeError) {
     return (
