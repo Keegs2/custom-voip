@@ -408,9 +408,22 @@ if product_type == "rcf" then
         ))
     end
 
-    -- Pass caller ID if configured
-    if not pass_caller_id then
-        dial_string = "{origination_caller_id_number=" .. normalized_did .. "}" .. dial_string
+    -- Set outbound caller ID based on pass_caller_id setting:
+    -- pass_caller_id = true:  Use original caller's number (passthrough)
+    -- pass_caller_id = false: Use the RCF DID as caller ID
+    -- NOTE: Bandwidth may require the From to be a number on our account.
+    -- If Bandwidth rejects passthrough CID, set pass_caller_id=false on the RCF entry.
+    if pass_caller_id then
+        -- Passthrough: keep original caller ID (already set by FreeSWITCH from A-leg)
+        freeswitch.consoleLog("INFO", string.format(
+            "[inbound_router] CID passthrough enabled: using original caller %s\n", caller_id
+        ))
+    else
+        -- Override: use the RCF DID as caller ID
+        dial_string = "{origination_caller_id_number=" .. normalized_did .. ",origination_caller_id_name=" .. normalized_did .. "}" .. dial_string
+        freeswitch.consoleLog("INFO", string.format(
+            "[inbound_router] CID override: using RCF DID %s instead of %s\n", normalized_did, caller_id
+        ))
     end
 
     -- Set bridge failure handling for failover
@@ -440,7 +453,7 @@ if product_type == "rcf" then
             ring_timeout, forward_to
         )
         if not pass_caller_id then
-            failover_dial = "{origination_caller_id_number=" .. normalized_did .. "}" .. failover_dial
+            failover_dial = "{origination_caller_id_number=" .. normalized_did .. ",origination_caller_id_name=" .. normalized_did .. "}" .. failover_dial
         end
 
         pcall(function()
