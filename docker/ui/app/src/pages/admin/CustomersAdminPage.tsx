@@ -276,7 +276,7 @@ export function CustomersAdminPage() {
                 </tr>
               </Thead>
               <tbody>
-                {data.items.length === 0 ? (
+                {(data.items ?? []).length === 0 ? (
                   <tr>
                     <td
                       colSpan={COL_COUNT}
@@ -286,7 +286,7 @@ export function CustomersAdminPage() {
                     </td>
                   </tr>
                 ) : (
-                  data.items.map((customer) => (
+                  (data.items ?? []).map((customer) => (
                     <CustomerRow
                       key={customer.id}
                       customer={customer}
@@ -305,8 +305,8 @@ export function CustomersAdminPage() {
           </TableWrap>
 
           <Pagination
-            shown={data.items.length + offset}
-            total={data.total}
+            shown={(data.items ?? []).length + offset}
+            total={data.total ?? 0}
             onLoadMore={() => setOffset((o) => o + PAGE_SIZE)}
           />
         </>

@@ -41,7 +41,9 @@ export interface CdrSearchParams {
 }
 
 export interface CdrSearchResult {
+  /** Normalised list of CDR records (from either `items` or `cdrs` field). */
   items: Cdr[];
+  /** Total matching records (from either `total` or `count` field). */
   total: number;
   limit: number;
   offset: number;

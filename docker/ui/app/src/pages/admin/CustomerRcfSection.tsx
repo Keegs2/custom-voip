@@ -137,7 +137,7 @@ export function CustomerRcfSection({ customerId }: CustomerRcfSectionProps) {
     deleteMutation.mutate(entry.id);
   }
 
-  const entries = Array.isArray(data) ? data : data?.items ?? [];
+  const entries = data?.items ?? [];
 
   return (
     <div className="pt-4 border-t border-[#2a2f45]">

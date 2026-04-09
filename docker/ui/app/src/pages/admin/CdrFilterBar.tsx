@@ -109,7 +109,7 @@ export function CdrFilterBar({
           onChange={(e) => set('customer_id', e.target.value)}
         >
           <option value="">All Customers</option>
-          {customersData?.items.map((c) => (
+          {(customersData?.items ?? []).map((c) => (
             <option key={c.id} value={String(c.id)}>
               {c.name}
             </option>

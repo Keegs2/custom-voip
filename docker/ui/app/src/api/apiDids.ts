@@ -1,19 +1,21 @@
 import { apiRequest } from './client';
 import type { ApiDid, ApiDidCreate, ApiDidUpdate } from '../types/apiDid';
 
-export interface ApiDidsListResponse {
-  items: ApiDid[];
-  total: number;
-  limit: number;
-  offset: number;
-}
-
 export interface ApiDidsListParams {
   customer_id?: number;
   search?: string;
   enabled?: boolean;
   limit?: number;
   offset?: number;
+}
+
+/**
+ * GET /api-dids returns a plain ApiDid[] array.
+ * Normalised to a consistent shape for consumers.
+ */
+export interface ApiDidsListResponse {
+  items: ApiDid[];
+  total: number;
 }
 
 export async function listApiDids(params: ApiDidsListParams = {}): Promise<ApiDidsListResponse> {
@@ -25,7 +27,14 @@ export async function listApiDids(params: ApiDidsListParams = {}): Promise<ApiDi
   if (params.offset !== undefined) query.set('offset', String(params.offset));
 
   const qs = query.toString();
-  return apiRequest('GET', `/api-dids${qs ? `?${qs}` : ''}`);
+  const raw = await apiRequest<ApiDid[] | ApiDidsListResponse>('GET', `/api-dids${qs ? `?${qs}` : ''}`);
+  if (Array.isArray(raw)) {
+    return { items: raw, total: raw.length };
+  }
+  return {
+    items: (raw as ApiDidsListResponse).items ?? [],
+    total: (raw as ApiDidsListResponse).total ?? (raw as ApiDidsListResponse).items?.length ?? 0,
+  };
 }
 
 export async function getApiDid(id: number): Promise<ApiDid> {

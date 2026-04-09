@@ -1,19 +1,21 @@
 import { apiRequest } from './client';
 import type { Trunk, TrunkCreate, TrunkIp, TrunkDid, TrunkStats, CallPathPackage } from '../types/trunk';
 
-export interface TrunksListResponse {
-  items: Trunk[];
-  total: number;
-  limit: number;
-  offset: number;
-}
-
 export interface TrunksListParams {
   customer_id?: number;
   search?: string;
   enabled?: boolean;
   limit?: number;
   offset?: number;
+}
+
+/**
+ * GET /trunks returns a plain Trunk[] array.
+ * Normalised to a consistent shape for consumers.
+ */
+export interface TrunksListResponse {
+  items: Trunk[];
+  total: number;
 }
 
 export async function listTrunks(params: TrunksListParams = {}): Promise<TrunksListResponse> {
@@ -25,7 +27,14 @@ export async function listTrunks(params: TrunksListParams = {}): Promise<TrunksL
   if (params.offset !== undefined) query.set('offset', String(params.offset));
 
   const qs = query.toString();
-  return apiRequest('GET', `/trunks${qs ? `?${qs}` : ''}`);
+  const raw = await apiRequest<Trunk[] | TrunksListResponse>('GET', `/trunks${qs ? `?${qs}` : ''}`);
+  if (Array.isArray(raw)) {
+    return { items: raw, total: raw.length };
+  }
+  return {
+    items: (raw as TrunksListResponse).items ?? [],
+    total: (raw as TrunksListResponse).total ?? (raw as TrunksListResponse).items?.length ?? 0,
+  };
 }
 
 export async function getTrunk(id: number): Promise<Trunk> {

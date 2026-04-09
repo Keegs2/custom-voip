@@ -1,19 +1,21 @@
 import { apiRequest } from './client';
 import type { RcfEntry, RcfCreate, RcfUpdate } from '../types/rcf';
 
-export interface RcfListResponse {
-  items: RcfEntry[];
-  total: number;
-  limit: number;
-  offset: number;
-}
-
 export interface RcfListParams {
   customer_id?: number;
   search?: string;
   enabled?: boolean;
   limit?: number;
   offset?: number;
+}
+
+/**
+ * GET /rcf returns a plain RcfEntry[] array.
+ * Normalised to a consistent shape for consumers.
+ */
+export interface RcfListResponse {
+  items: RcfEntry[];
+  total: number;
 }
 
 export async function listRcf(params: RcfListParams = {}): Promise<RcfListResponse> {
@@ -25,7 +27,14 @@ export async function listRcf(params: RcfListParams = {}): Promise<RcfListRespon
   if (params.offset !== undefined) query.set('offset', String(params.offset));
 
   const qs = query.toString();
-  return apiRequest('GET', `/rcf${qs ? `?${qs}` : ''}`);
+  const raw = await apiRequest<RcfEntry[] | RcfListResponse>('GET', `/rcf${qs ? `?${qs}` : ''}`);
+  if (Array.isArray(raw)) {
+    return { items: raw, total: raw.length };
+  }
+  return {
+    items: (raw as RcfListResponse).items ?? [],
+    total: (raw as RcfListResponse).total ?? (raw as RcfListResponse).items?.length ?? 0,
+  };
 }
 
 export async function getRcfEntry(id: number): Promise<RcfEntry> {

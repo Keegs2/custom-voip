@@ -412,9 +412,11 @@ export function CustomerTrunkSection({ customerId }: CustomerTrunkSectionProps) 
     queryKey: ['customerTrunks', customerId],
     queryFn: async () => {
       const list = await listTrunks({ customer_id: customerId, limit: 50 });
+      // list is normalised to { items, total } — items is always an array
+      const trunkItems = list.items ?? [];
       // For each trunk, fetch IPs and DIDs in parallel
       const withDetails = await Promise.all(
-        list.items.map(async (trunk) => {
+        trunkItems.map(async (trunk) => {
           const [ips, dids] = await Promise.allSettled([
             getTrunkIps(trunk.id),
             getTrunkDids(trunk.id),

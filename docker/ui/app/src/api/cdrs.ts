@@ -2,6 +2,16 @@ import { apiRequest } from './client';
 import type { Cdr, CdrSearchParams, CdrSearchResult } from '../types/cdr';
 import type { CdrSummaryResponse } from '../types/rate';
 
+/** Raw API shape — may use `cdrs`/`count` OR `items`/`total` depending on version. */
+interface CdrRawResult {
+  cdrs?: Cdr[];
+  items?: Cdr[];
+  count?: number;
+  total?: number;
+  limit?: number;
+  offset?: number;
+}
+
 export async function searchCdrs(params: CdrSearchParams = {}): Promise<CdrSearchResult> {
   const query = new URLSearchParams();
   if (params.customer_id !== undefined) query.set('customer_id', String(params.customer_id));
@@ -16,7 +26,18 @@ export async function searchCdrs(params: CdrSearchParams = {}): Promise<CdrSearc
   if (params.offset !== undefined) query.set('offset', String(params.offset));
 
   const qs = query.toString();
-  return apiRequest('GET', `/cdrs${qs ? `?${qs}` : ''}`);
+  const raw = await apiRequest<CdrRawResult>('GET', `/cdrs${qs ? `?${qs}` : ''}`);
+
+  // Normalise field names: API returns either `cdrs`/`count` or `items`/`total`
+  const items = raw.items ?? raw.cdrs ?? [];
+  const total = raw.total ?? raw.count ?? items.length;
+
+  return {
+    items,
+    total,
+    limit: raw.limit ?? params.limit ?? 50,
+    offset: raw.offset ?? params.offset ?? 0,
+  };
 }
 
 export async function getCdr(uuid: string): Promise<Cdr> {

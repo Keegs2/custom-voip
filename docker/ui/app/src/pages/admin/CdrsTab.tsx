@@ -54,13 +54,14 @@ export function CdrsTab() {
   // Merge new page results into the accumulated list
   const allCdrs = useMemo(() => {
     if (!data) return accumulatedCdrs;
+    const pageItems = data.items ?? [];
     if (offset === 0) {
       // Fresh search — replace everything
-      return data.items;
+      return pageItems;
     }
     // Load-more — append uniquely by uuid
     const uuids = new Set(accumulatedCdrs.map((c) => c.uuid));
-    const newItems = data.items.filter((c) => !uuids.has(c.uuid));
+    const newItems = pageItems.filter((c) => !uuids.has(c.uuid));
     return [...accumulatedCdrs, ...newItems];
   }, [data, offset, accumulatedCdrs]);
 
@@ -69,8 +70,8 @@ export function CdrsTab() {
   if (data && offset !== prevOffset) {
     setPrevOffset(offset);
     setAccumulatedCdrs(allCdrs);
-  } else if (data && offset === 0 && accumulatedCdrs !== data.items) {
-    setAccumulatedCdrs(data.items);
+  } else if (data && offset === 0 && accumulatedCdrs !== (data.items ?? [])) {
+    setAccumulatedCdrs(data.items ?? []);
   }
 
   // Customer name map for the table
@@ -82,7 +83,7 @@ export function CdrsTab() {
 
   const customerNames = useMemo<Record<number, string>>(() => {
     const map: Record<number, string> = {};
-    for (const c of (Array.isArray(customersData) ? customersData : customersData?.items ?? [])) {
+    for (const c of (customersData?.items ?? [])) {
       map[c.id] = c.name;
     }
     return map;

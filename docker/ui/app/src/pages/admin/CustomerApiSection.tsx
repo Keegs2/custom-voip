@@ -137,7 +137,7 @@ export function CustomerApiSection({ customerId }: CustomerApiSectionProps) {
     deleteMutation.mutate(did.id);
   }
 
-  const entries = Array.isArray(data) ? data : data?.items ?? [];
+  const entries = data?.items ?? [];
   const tier = tierData?.tier;
 
   return (

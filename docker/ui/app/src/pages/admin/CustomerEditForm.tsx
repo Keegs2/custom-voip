@@ -41,7 +41,7 @@ export function CustomerEditForm({ customer, onCancel, onSaved }: CustomerEditFo
     enabled: showApiTier,
   });
 
-  const apiTiers = (tiersData ?? []).filter(
+  const apiTiers = (Array.isArray(tiersData) ? tiersData : []).filter(
     (t) => t.tier_type === 'api' || t.tier_type === 'all',
   );
 
