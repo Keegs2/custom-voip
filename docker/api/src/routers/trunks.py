@@ -337,8 +337,12 @@ async def get_trunk_stats(trunk_id: int):
                 )
                 did_list = [d["did"].replace("+", "") for d in (trunk_dids or [])]
 
+                seen_calls = set()
                 for row in rows:
                     if str(row.get("callstate", "")) in ("HANGUP", "DOWN"):
+                        continue
+                    call_uuid = row.get("call_uuid", row.get("uuid", ""))
+                    if call_uuid in seen_calls:
                         continue
                     # Check all fields that might contain the trunk DID
                     fields_to_check = [
@@ -354,6 +358,7 @@ async def get_trunk_stats(trunk_id: int):
                         clean = field.replace("+", "")
                         if any(d in clean for d in did_list):
                             current_channels += 1
+                            seen_calls.add(call_uuid)
                             break
     except Exception as e:
         logger.warning(f"ESL channel count failed: {e}")
