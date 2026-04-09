@@ -1,9 +1,10 @@
 import { useState, useCallback } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import type { Trunk, TrunkIp, TrunkDid } from '../types/trunk';
-import { getTrunkIps, getTrunkDids, getTrunkStats } from '../api/trunks';
+import { getTrunkIps, getTrunkDids, getTrunkStats, addTrunkIp, deleteTrunkIp } from '../api/trunks';
 import { Badge } from '../components/ui/Badge';
 import { Spinner } from '../components/ui/Spinner';
+import { useToast } from '../components/ui/ToastContext';
 import { fmt } from '../utils/format';
 
 /**
@@ -389,6 +390,7 @@ interface ExpandedSectionProps {
 }
 
 function ExpandedSection({
+  trunkId,
   maxChannels,
   packageName,
   ips,
@@ -396,6 +398,44 @@ function ExpandedSection({
   ipsLoading,
   didsLoading,
 }: ExpandedSectionProps) {
+  const qc = useQueryClient();
+  const { toastOk, toastErr } = useToast();
+  const [newIp, setNewIp] = useState('');
+  const [newDesc, setNewDesc] = useState('');
+
+  const addIpMutation = useMutation({
+    mutationFn: () => addTrunkIp(trunkId, newIp.trim(), newDesc.trim() || undefined),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['trunk-ips', trunkId] });
+      qc.invalidateQueries({ queryKey: ['trunks'] });
+      setNewIp('');
+      setNewDesc('');
+      toastOk('Authorized IP added');
+    },
+    onError: (err: Error) => toastErr(err.message),
+  });
+
+  const deleteIpMutation = useMutation({
+    mutationFn: (ipId: number) => deleteTrunkIp(trunkId, ipId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['trunk-ips', trunkId] });
+      qc.invalidateQueries({ queryKey: ['trunks'] });
+      toastOk('IP removed');
+    },
+    onError: (err: Error) => toastErr(err.message),
+  });
+
+  function handleAddIp(e: React.FormEvent) {
+    e.preventDefault();
+    if (!newIp.trim()) { toastErr('IP address is required'); return; }
+    addIpMutation.mutate();
+  }
+
+  function handleDeleteIp(ip: TrunkIp) {
+    if (!confirm(`Remove ${ip.ip_address} from authorized IPs?`)) return;
+    deleteIpMutation.mutate(ip.id);
+  }
+
   return (
     <div
       style={{
@@ -407,10 +447,10 @@ function ExpandedSection({
         background: 'rgba(15,17,23,0.4)',
       }}
     >
-      {/* Authorized IPs */}
+      {/* Authorized Customer PBX IPs */}
       <section>
         <SectionLabel>
-          Authorized IPs{' '}
+          Authorized PBX IPs{' '}
           <span
             style={{
               fontWeight: 400,
@@ -420,7 +460,7 @@ function ExpandedSection({
               color: '#718096',
             }}
           >
-            (contact support to modify)
+            (customer IPs allowed to send calls)
           </span>
         </SectionLabel>
 
@@ -432,17 +472,80 @@ function ExpandedSection({
 
         {!ipsLoading && ips !== null && ips.length === 0 && (
           <p style={{ fontSize: '0.82rem', color: '#718096' }}>
-            No authorized IPs configured — contact support to add IPs.
+            No authorized IPs — add the customer's PBX IP to enable trunk calls.
           </p>
         )}
 
         {!ipsLoading && ips !== null && ips.length > 0 && (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 6 }}>
             {ips.map((ip) => (
-              <IpChip key={ip.id} ip={ip} />
+              <IpChip key={ip.id} ip={ip} onDelete={() => handleDeleteIp(ip)} />
             ))}
           </div>
         )}
+
+        {/* Add IP form */}
+        <form
+          onSubmit={handleAddIp}
+          style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: 8,
+            alignItems: 'center',
+            marginTop: 10,
+          }}
+        >
+          <input
+            type="text"
+            value={newIp}
+            onChange={(e) => setNewIp(e.target.value)}
+            placeholder="203.0.113.50"
+            style={{
+              fontSize: '0.8rem',
+              fontFamily: 'monospace',
+              padding: '5px 10px',
+              borderRadius: 6,
+              border: '1px solid rgba(42,47,69,0.6)',
+              background: '#0d0f15',
+              color: '#e2e8f0',
+              outline: 'none',
+              width: 160,
+            }}
+          />
+          <input
+            type="text"
+            value={newDesc}
+            onChange={(e) => setNewDesc(e.target.value)}
+            placeholder="Description (optional)"
+            style={{
+              fontSize: '0.8rem',
+              padding: '5px 10px',
+              borderRadius: 6,
+              border: '1px solid rgba(42,47,69,0.6)',
+              background: '#0d0f15',
+              color: '#e2e8f0',
+              outline: 'none',
+              width: 180,
+            }}
+          />
+          <button
+            type="submit"
+            disabled={addIpMutation.isPending}
+            style={{
+              fontSize: '0.75rem',
+              fontWeight: 600,
+              padding: '5px 14px',
+              borderRadius: 6,
+              border: '1px solid rgba(245,158,11,0.3)',
+              background: 'rgba(245,158,11,0.1)',
+              color: '#fbbf24',
+              cursor: 'pointer',
+              opacity: addIpMutation.isPending ? 0.5 : 1,
+            }}
+          >
+            {addIpMutation.isPending ? 'Adding…' : 'Add IP'}
+          </button>
+        </form>
       </section>
 
       {/* Assigned DIDs */}
@@ -548,9 +651,10 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
 
 interface IpChipProps {
   ip: TrunkIp;
+  onDelete: () => void;
 }
 
-function IpChip({ ip }: IpChipProps) {
+function IpChip({ ip, onDelete }: IpChipProps) {
   return (
     <div
       style={{
@@ -572,6 +676,25 @@ function IpChip({ ip }: IpChipProps) {
           {ip.description}
         </span>
       )}
+      <button
+        type="button"
+        onClick={onDelete}
+        title="Remove this IP"
+        style={{
+          background: 'none',
+          border: 'none',
+          color: '#718096',
+          cursor: 'pointer',
+          padding: '0 2px',
+          fontSize: '1rem',
+          lineHeight: 1,
+          transition: 'color 0.15s',
+        }}
+        onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = '#f87171'; }}
+        onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = '#718096'; }}
+      >
+        &times;
+      </button>
     </div>
   );
 }
