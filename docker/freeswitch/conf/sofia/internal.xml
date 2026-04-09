@@ -254,7 +254,7 @@
     <!-- User-Agent header -->
     <param name="user-agent-string" value="VoicePlatform/1.0"/>
 
-    <!-- 100rel (PRACK) for early media -- set to false for carrier compatibility.
+    <!-- 100rel (PRACK) for early media: set to false for carrier compatibility.
          Many PSTN carriers (including Bandwidth) do not support PRACK.
          Requiring PRACK can prevent 180/183 early media from flowing.
          FreeSWITCH will still pass through early media without 100rel. -->
@@ -286,7 +286,7 @@
       capture-id: Node identifier in Homer (200 = FreeSWITCH,
         distinct from Kamailio's 100)
     -->
-    <param name="capture-server" value="udp:172.28.0.1:9060;hep=3;capture_id=200"/>
+    <param name="capture-server" value="udp:127.0.0.1:9060;hep=3;capture_id=200"/>
     <param name="sip-capture" value="yes"/>
 
   </settings>

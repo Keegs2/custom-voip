@@ -517,7 +517,7 @@ if product_type == "rcf" then
         -- Both were set via setVariable above (FusionPBX pattern).
         dial_string = string.format(
             "{ignore_early_media=false,call_timeout=%d,sip_h_X-Carrier=%s" ..
-            "}sofia/external/%s@172.28.0.1:5060",
+            "}sofia/external/%s@127.0.0.1:5060",
             ring_timeout,
             carrier,
             forward_to
@@ -559,7 +559,7 @@ if product_type == "rcf" then
         -- Only the X-Carrier header changes for the failover carrier.
         local failover_dial = string.format(
             "{ignore_early_media=false,call_timeout=%d,sip_h_X-Carrier=backup" ..
-            "}sofia/external/%s@172.28.0.1:5060",
+            "}sofia/external/%s@127.0.0.1:5060",
             ring_timeout,
             forward_to
         )

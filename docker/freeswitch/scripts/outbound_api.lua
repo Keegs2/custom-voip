@@ -239,7 +239,7 @@ else
     -- The internal profile does NOT apply ext-sip-ip to outbound calls.
     -- X-Carrier tells Kamailio which Bandwidth IP to route to.
     local dial_string = string.format(
-        "{origination_caller_id_number=%s,call_timeout=%d,ignore_early_media=false,sip_h_X-Carrier=premium}sofia/external/%s@172.28.0.1:5060",
+        "{origination_caller_id_number=%s,call_timeout=%d,ignore_early_media=false,sip_h_X-Carrier=premium}sofia/external/%s@127.0.0.1:5060",
         from_did ~= "" and from_did or "anonymous",
         call_timeout,
         normalized_dest:gsub("^%+", "")
@@ -273,7 +273,7 @@ else
             ))
 
             dial_string = string.format(
-                "{origination_caller_id_number=%s,call_timeout=%d,sip_h_X-Carrier=backup}sofia/external/%s@172.28.0.1:5060",
+                "{origination_caller_id_number=%s,call_timeout=%d,sip_h_X-Carrier=backup}sofia/external/%s@127.0.0.1:5060",
                 from_did ~= "" and from_did or "anonymous",
                 call_timeout,
                 normalized_dest:gsub("^%+", "")

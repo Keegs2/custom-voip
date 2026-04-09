@@ -360,11 +360,11 @@
         <!-- External profile ensures public IP in Via/Contact/SDP headers -->
         <!-- X-Carrier header tells Kamailio which Bandwidth IP to use -->
         <action application="set" data="sip_h_X-Carrier=standard"/>
-        <action application="bridge" data="sofia/external/911@172.28.0.1:5060"/>
+        <action application="bridge" data="sofia/external/911@127.0.0.1:5060"/>
 
         <!-- If bridge fails, try backup -->
         <action application="set" data="sip_h_X-Carrier=premium"/>
-        <action application="bridge" data="sofia/external/911@172.28.0.1:5060"/>
+        <action application="bridge" data="sofia/external/911@127.0.0.1:5060"/>
 
         <!-- Absolute last resort -->
         <action application="log" data="CRIT 911 ROUTING FAILED"/>
