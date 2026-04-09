@@ -451,8 +451,8 @@ if product_type == "rcf" then
                 "origination_caller_id_number=%s," ..
                 "origination_caller_id_name=%s," ..
                 "sip_h_X-Original-CID=%s," ..
-                "sip_h_Remote-Party-ID=<sip:%s@34.74.71.32>\\;party=calling\\;privacy=off\\;screen=yes," ..
-                "sip_h_Diversion=<sip:%s@34.74.71.32>\\;reason=unconditional" ..
+                "sip_h_Remote-Party-ID=<sip:%s@34.74.71.32>;party=calling;privacy=off;screen=yes," ..
+                "sip_h_Diversion=<sip:%s@34.74.71.32>;reason=unconditional" ..
                 "}sofia/external/%s@172.28.0.1:5060",
                 ring_timeout,             -- call_timeout
                 carrier,                  -- X-Carrier: standard/premium/backup
@@ -478,7 +478,7 @@ if product_type == "rcf" then
                 "origination_caller_id_number=%s," ..
                 "origination_caller_id_name=%s," ..
                 "sip_h_X-Original-CID=%s," ..
-                "sip_h_Diversion=<sip:%s@34.74.71.32>\\;reason=unconditional" ..
+                "sip_h_Diversion=<sip:%s@34.74.71.32>;reason=unconditional" ..
                 "}sofia/external/%s@172.28.0.1:5060",
                 ring_timeout,             -- call_timeout
                 carrier,                  -- X-Carrier
@@ -531,8 +531,8 @@ if product_type == "rcf" then
                 "origination_caller_id_number=%s," ..
                 "origination_caller_id_name=%s," ..
                 "sip_h_X-Original-CID=%s," ..
-                "sip_h_Remote-Party-ID=<sip:%s@34.74.71.32>\\;party=calling\\;privacy=off\\;screen=yes," ..
-                "sip_h_Diversion=<sip:%s@34.74.71.32>\\;reason=unconditional" ..
+                "sip_h_Remote-Party-ID=<sip:%s@34.74.71.32>;party=calling;privacy=off;screen=yes," ..
+                "sip_h_Diversion=<sip:%s@34.74.71.32>;reason=unconditional" ..
                 "}sofia/external/%s@172.28.0.1:5060",
                 ring_timeout,
                 normalized_did,           -- origination_caller_id_number: RCF DID (From)
@@ -549,7 +549,7 @@ if product_type == "rcf" then
                 "origination_caller_id_number=%s," ..
                 "origination_caller_id_name=%s," ..
                 "sip_h_X-Original-CID=%s," ..
-                "sip_h_Diversion=<sip:%s@34.74.71.32>\\;reason=unconditional" ..
+                "sip_h_Diversion=<sip:%s@34.74.71.32>;reason=unconditional" ..
                 "}sofia/external/%s@172.28.0.1:5060",
                 ring_timeout,
                 normalized_did,           -- origination_caller_id_number: RCF DID
