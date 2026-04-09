@@ -110,7 +110,8 @@ export function DashboardPage() {
         flexDirection: 'column',
         alignItems: 'center',
         justifyContent: 'center',
-        minHeight: 'calc(100vh - 112px)', // 100vh minus AppLayout top+bottom padding (py-8 = 32px + pb-20 = 80px)
+        flex: 1,
+        minHeight: 'calc(100vh - 112px)',
         width: '100%',
       }}
     >
