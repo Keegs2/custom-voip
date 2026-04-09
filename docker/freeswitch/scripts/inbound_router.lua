@@ -80,11 +80,13 @@ end
 local uuid = get_var("uuid", "unknown")
 local did = get_var("destination_number", "")
 local caller_id = get_var("caller_id_number", "")
+local sip_from_user = get_var("sip_from_user", "")
+local sip_from_display = get_var("sip_from_display", "")
 local source_ip = get_var("sip_received_ip", get_var("network_addr", ""))
 
 freeswitch.consoleLog("INFO", string.format(
-    "[%s] Inbound: DID=%s CallerID=%s SourceIP=%s\n",
-    uuid, did, caller_id, source_ip
+    "[%s] Inbound: DID=%s CallerID=%s SIP-From-User=%s SIP-From-Display=%s SourceIP=%s\n",
+    uuid, did, caller_id, sip_from_user, sip_from_display, source_ip
 ))
 
 -- Validate DID
@@ -402,8 +404,20 @@ if product_type == "rcf" then
     -- ================================================================
 
     -- Get original caller info from the A-leg
+    -- caller_id_number may have been overwritten by FS processing,
+    -- so fall back to sip_from_user which preserves the raw SIP From
     local original_cid_number = caller_id
-    local original_cid_name = get_var("caller_id_name", caller_id)
+    if original_cid_number == "" or original_cid_number == normalized_did then
+        original_cid_number = sip_from_user
+        freeswitch.consoleLog("INFO", string.format(
+            "[inbound_router] caller_id_number was empty or matched DID, using sip_from_user: %s\n",
+            original_cid_number
+        ))
+    end
+    local original_cid_name = get_var("caller_id_name", "")
+    if original_cid_name == "" or original_cid_name == normalized_did then
+        original_cid_name = sip_from_display ~= "" and sip_from_display or original_cid_number
+    end
 
     if is_local_forward then
         -- LOCAL EXTENSION ROUTING
