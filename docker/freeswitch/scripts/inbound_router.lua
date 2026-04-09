@@ -37,8 +37,11 @@ local function load_module(name)
     return result
 end
 
+freeswitch.consoleLog("INFO", "=== INBOUND ROUTER: Loading modules ===\n")
 local redis = load_module("redis_client")
+freeswitch.consoleLog("INFO", "=== redis module: " .. tostring(redis ~= nil) .. " ===\n")
 local db = load_module("db_client")
+freeswitch.consoleLog("INFO", "=== db module: " .. tostring(db ~= nil) .. " ===\n")
 
 -- Ensure session exists
 if not session then
