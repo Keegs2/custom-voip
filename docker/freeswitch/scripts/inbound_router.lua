@@ -706,35 +706,25 @@ elseif product_type == "trunk" then
         local original_caller = get_var("sip_from_user", caller_id)
         set_var("effective_caller_id_number", original_caller)
 
-        -- Build dial string to customer PBX — try each IP with failover
-        -- Route directly to PBX IP via external profile (bypasses Kamailio)
-        -- Strip + from DID to avoid URL encoding issues in dial string
+        -- Build dial string to customer PBX through Kamailio SBC
+        -- Same pattern as RCF: FS -> Kamailio (127.0.0.1:5060) -> PBX
+        -- X-PBX-Dest header tells Kamailio where to relay the call
         local bridge_did = normalized_did:gsub("^%+", "")
-        local dial_strings = {}
-        for _, ip in ipairs(endpoint_ips) do
-            table.insert(dial_strings, string.format(
-                "sofia/external/%s@%s:5060",
-                bridge_did, ip
-            ))
-        end
+        local pbx_ip = endpoint_ips[1]
 
-        local dial_string = table.concat(dial_strings, "|")
+        set_var("sip_h_X-PBX-Dest", pbx_ip)
 
-        freeswitch.consoleLog("ERR", ">>> BRIDGE: " .. dial_string .. " <<<\n")
+        local dial_string = string.format(
+            "{ignore_early_media=false,call_timeout=60}sofia/external/%s@127.0.0.1:5060",
+            bridge_did
+        )
 
-        -- Check session is alive
-        local session_ready = session:ready()
-        freeswitch.consoleLog("ERR", ">>> SESSION READY: " .. tostring(session_ready) .. " <<<\n")
+        freeswitch.consoleLog("ERR", ">>> BRIDGE (via SBC): " .. dial_string .. " X-PBX-Dest=" .. pbx_ip .. " <<<\n")
 
-        if not session_ready then
-            freeswitch.consoleLog("ERR", ">>> SESSION DEAD BEFORE BRIDGE <<<\n")
-        else
-            -- Answer first to establish the media path, then bridge
-            session:answer()
-            freeswitch.consoleLog("ERR", ">>> SESSION ANSWERED, BRIDGING <<<\n")
-            session:execute("bridge", dial_string)
-            freeswitch.consoleLog("ERR", ">>> BRIDGE COMPLETE, cause=" .. tostring(session:getVariable("bridge_hangup_cause")) .. " <<<\n")
-        end
+        -- Mark as lua-routed
+        set_var("lua_routed", "true")
+
+        session:execute("bridge", dial_string)
 
         -- Check bridge result
         local hangup_cause = get_var("bridge_hangup_cause", get_var("hangup_cause", ""))
