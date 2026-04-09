@@ -722,13 +722,19 @@ elseif product_type == "trunk" then
 
         freeswitch.consoleLog("ERR", ">>> BRIDGE: " .. dial_string .. " <<<\n")
 
-        -- Mark as lua-routed
-        set_var("lua_routed", "true")
+        -- Check session is alive
+        local session_ready = session:ready()
+        freeswitch.consoleLog("ERR", ">>> SESSION READY: " .. tostring(session_ready) .. " <<<\n")
 
-        local bridge_ok, bridge_err = pcall(function()
+        if not session_ready then
+            freeswitch.consoleLog("ERR", ">>> SESSION DEAD BEFORE BRIDGE <<<\n")
+        else
+            -- Answer first to establish the media path, then bridge
+            session:answer()
+            freeswitch.consoleLog("ERR", ">>> SESSION ANSWERED, BRIDGING <<<\n")
             session:execute("bridge", dial_string)
-        end)
-        freeswitch.consoleLog("ERR", ">>> BRIDGE RESULT: ok=" .. tostring(bridge_ok) .. " err=" .. tostring(bridge_err) .. " <<<\n")
+            freeswitch.consoleLog("ERR", ">>> BRIDGE COMPLETE, cause=" .. tostring(session:getVariable("bridge_hangup_cause")) .. " <<<\n")
+        end
 
         -- Check bridge result
         local hangup_cause = get_var("bridge_hangup_cause", get_var("hangup_cause", ""))
