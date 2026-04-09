@@ -99,7 +99,7 @@ export function CdrsTab() {
   const shownCount = allCdrs.length;
 
   return (
-    <div>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       <CdrFilterBar
         filters={draftFilters}
         onChange={setDraftFilters}
@@ -127,9 +127,18 @@ export function CdrsTab() {
           )}
 
           {isError && (
-            <p className="text-red-400 text-sm py-4">
+            <div
+              style={{
+                padding: '16px 20px',
+                borderRadius: 12,
+                background: 'rgba(239,68,68,0.08)',
+                border: '1px solid rgba(239,68,68,0.2)',
+                color: '#f87171',
+                fontSize: '0.875rem',
+              }}
+            >
               Failed to load CDRs. Check your filters and try again.
-            </p>
+            </div>
           )}
 
           {!isLoading && !isError && data && (

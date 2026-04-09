@@ -175,14 +175,39 @@ export function RatesTable({ rates }: RatesTableProps) {
 
   if (rates.length === 0) {
     return (
-      <div className="text-center py-12 text-[#718096] text-sm">
-        <p className="font-semibold text-[#e2e8f0] mb-1">No rates found</p>
+      <div
+        style={{
+          textAlign: 'center',
+          padding: '48px 24px',
+          background: 'linear-gradient(135deg, rgba(30,33,48,0.9) 0%, rgba(19,21,29,0.95) 100%)',
+          border: '1px solid rgba(42,47,69,0.6)',
+          borderRadius: 16,
+          color: '#718096',
+          fontSize: '0.875rem',
+        }}
+      >
+        <p style={{ fontWeight: 600, color: '#e2e8f0', marginBottom: 6 }}>No rates found</p>
         <p>Add your first rate using the form above.</p>
       </div>
     );
   }
 
-  const inlineInput = 'text-[0.82rem] px-2 py-1 rounded-md border border-[#2a2f45] bg-[#0f1117] text-[#e2e8f0] outline-none focus:border-[#3b82f6] w-full';
+  const inlineInputStyle: React.CSSProperties = {
+    fontSize: '0.82rem',
+    padding: '6px 10px',
+    borderRadius: 7,
+    border: '1px solid rgba(42,47,69,0.8)',
+    background: 'rgba(13,15,21,0.9)',
+    color: '#e2e8f0',
+    outline: 'none',
+    width: '100%',
+    transition: 'border-color 0.15s, box-shadow 0.15s',
+  };
+
+  const inlineInputNarrowStyle: React.CSSProperties = {
+    ...inlineInputStyle,
+    width: 90,
+  };
 
   return (
     <TableWrap>
@@ -206,7 +231,11 @@ export function RatesTable({ rates }: RatesTableProps) {
 
             if (isEditing) {
               return (
-                <tr key={rate.id} className={cn('transition-colors', rowTint)}>
+                <tr
+                  key={rate.id}
+                  className={cn('transition-colors', rowTint)}
+                  style={{ background: 'rgba(59,130,246,0.06)' }}
+                >
                   <Td>
                     <span className="tabular-nums font-semibold text-[#e2e8f0]">
                       {rate.prefix}
@@ -214,30 +243,54 @@ export function RatesTable({ rates }: RatesTableProps) {
                   </Td>
                   <Td>
                     <input
-                      className={inlineInput}
+                      style={inlineInputStyle}
                       value={editState.description}
                       onChange={(e) => setEditState((s) => ({ ...s, description: e.target.value }))}
                       placeholder="Description"
+                      onFocus={(e) => {
+                        e.currentTarget.style.borderColor = '#3b82f6';
+                        e.currentTarget.style.boxShadow = '0 0 0 3px rgba(59,130,246,0.12)';
+                      }}
+                      onBlur={(e) => {
+                        e.currentTarget.style.borderColor = 'rgba(42,47,69,0.8)';
+                        e.currentTarget.style.boxShadow = 'none';
+                      }}
                     />
                   </Td>
                   <Td>
                     <input
-                      className={inlineInput + ' w-[90px]'}
+                      style={inlineInputNarrowStyle}
                       type="number"
                       step="0.0001"
                       min="0"
                       value={editState.rate_per_min}
                       onChange={(e) => setEditState((s) => ({ ...s, rate_per_min: e.target.value }))}
+                      onFocus={(e) => {
+                        e.currentTarget.style.borderColor = '#3b82f6';
+                        e.currentTarget.style.boxShadow = '0 0 0 3px rgba(59,130,246,0.12)';
+                      }}
+                      onBlur={(e) => {
+                        e.currentTarget.style.borderColor = 'rgba(42,47,69,0.8)';
+                        e.currentTarget.style.boxShadow = 'none';
+                      }}
                     />
                   </Td>
                   <Td>
                     <input
-                      className={inlineInput + ' w-[90px]'}
+                      style={inlineInputNarrowStyle}
                       type="number"
                       step="0.0001"
                       min="0"
                       value={editState.cost_per_min}
                       onChange={(e) => setEditState((s) => ({ ...s, cost_per_min: e.target.value }))}
+                      onFocus={(e) => {
+                        e.currentTarget.style.borderColor = '#3b82f6';
+                        e.currentTarget.style.boxShadow = '0 0 0 3px rgba(59,130,246,0.12)';
+                      }}
+                      onBlur={(e) => {
+                        e.currentTarget.style.borderColor = 'rgba(42,47,69,0.8)';
+                        e.currentTarget.style.boxShadow = 'none';
+                      }}
                     />
                   </Td>
                   <Td>
@@ -277,7 +330,14 @@ export function RatesTable({ rates }: RatesTableProps) {
             return (
               <tr
                 key={rate.id}
-                className={cn('hover:bg-white/[0.015] transition-colors', rowTint)}
+                className={cn('transition-colors', rowTint)}
+                style={{ transition: 'background 0.15s' }}
+                onMouseEnter={(e) => {
+                  (e.currentTarget as HTMLTableRowElement).style.background = 'rgba(255,255,255,0.018)';
+                }}
+                onMouseLeave={(e) => {
+                  (e.currentTarget as HTMLTableRowElement).style.background = '';
+                }}
               >
                 <Td>
                   <span className="tabular-nums font-semibold text-[#e2e8f0]">{rate.prefix}</span>

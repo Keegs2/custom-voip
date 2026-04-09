@@ -38,14 +38,23 @@ export function RatesTab() {
 
   if (ratesError) {
     return (
-      <p className="text-red-400 text-sm py-4">
+      <div
+        style={{
+          padding: '16px 20px',
+          borderRadius: 12,
+          background: 'rgba(239,68,68,0.08)',
+          border: '1px solid rgba(239,68,68,0.2)',
+          color: '#f87171',
+          fontSize: '0.875rem',
+        }}
+      >
         Failed to load rates. Please try again.
-      </p>
+      </div>
     );
   }
 
   return (
-    <div className="space-y-6">
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
       {/* Stats cards + warning banner */}
       {margins && <RatesStatsGrid margins={margins} />}
 

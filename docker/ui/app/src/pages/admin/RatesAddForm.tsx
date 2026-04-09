@@ -5,15 +5,37 @@ import { Button } from '../../components/ui/Button';
 import { useToast } from '../../components/ui/Toast';
 import { cn } from '../../utils/cn';
 
-const controlBase = [
-  'text-[0.88rem] px-3 py-[8px] rounded-lg w-full',
-  'border border-[#2a2f45] bg-[#1e2130] text-[#e2e8f0]',
-  'outline-none transition-[border-color,box-shadow] duration-150',
-  'focus:border-[#3b82f6] focus:shadow-[0_0_0_3px_rgba(59,130,246,0.28)]',
-  'placeholder:text-[#718096]',
-].join(' ');
+const labelStyle: React.CSSProperties = {
+  fontSize: '0.65rem',
+  fontWeight: 700,
+  color: '#4a5568',
+  textTransform: 'uppercase',
+  letterSpacing: '0.08em',
+  marginBottom: 6,
+  display: 'block',
+};
 
-const labelClass = 'text-[0.65rem] font-bold text-[#4a5568] uppercase tracking-[0.8px]';
+const inputStyle: React.CSSProperties = {
+  fontSize: '0.875rem',
+  padding: '8px 12px',
+  borderRadius: 8,
+  width: '100%',
+  border: '1px solid rgba(42,47,69,0.8)',
+  background: 'rgba(13,15,21,0.8)',
+  color: '#e2e8f0',
+  outline: 'none',
+  transition: 'border-color 0.15s, box-shadow 0.15s',
+};
+
+function handleFocus(e: React.FocusEvent<HTMLInputElement>) {
+  e.currentTarget.style.borderColor = '#3b82f6';
+  e.currentTarget.style.boxShadow = '0 0 0 3px rgba(59,130,246,0.15)';
+}
+
+function handleBlur(e: React.FocusEvent<HTMLInputElement>) {
+  e.currentTarget.style.borderColor = 'rgba(42,47,69,0.8)';
+  e.currentTarget.style.boxShadow = 'none';
+}
 
 interface FormState {
   prefix: string;
@@ -70,7 +92,7 @@ export function RatesAddForm() {
         connection_fee: parseFloat(form.connection_fee) || 0,
         increment: parseInt(form.increment, 10) || 6,
       }),
-    onSuccess: (_, ) => {
+    onSuccess: () => {
       toastOk(`Rate ${form.prefix} added`);
       setForm(defaultForm);
       setIsOpen(false);
@@ -98,7 +120,7 @@ export function RatesAddForm() {
   }
 
   return (
-    <div className="mb-5">
+    <div>
       <Button variant="primary" size="sm" onClick={toggleOpen}>
         {isOpen ? '— Cancel' : '+ Add Rate'}
       </Button>
@@ -110,73 +132,117 @@ export function RatesAddForm() {
             background: 'linear-gradient(135deg, rgba(30,33,48,0.9) 0%, rgba(19,21,29,0.95) 100%)',
             border: '1px solid rgba(42,47,69,0.6)',
             borderRadius: 16,
-            padding: '24px',
-            boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
+            padding: '28px 28px 24px',
+            boxShadow: '0 4px 24px rgba(0,0,0,0.3)',
+            position: 'relative',
+            overflow: 'hidden',
           }}
         >
-          <h3 className="text-[0.88rem] font-bold text-[#e2e8f0] mb-4">New Rate</h3>
+          {/* Top accent line */}
+          <div
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 32,
+              right: 32,
+              height: 2,
+              background: 'linear-gradient(90deg, transparent, #3b82f6, transparent)',
+              opacity: 0.6,
+            }}
+          />
+
+          <div
+            style={{
+              fontSize: '0.65rem',
+              fontWeight: 700,
+              color: '#3b82f6',
+              textTransform: 'uppercase',
+              letterSpacing: '0.1em',
+              marginBottom: 20,
+            }}
+          >
+            New Rate
+          </div>
 
           <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
             {/* Prefix */}
-            <div className="flex flex-col gap-[5px]">
-              <label className={labelClass}>
-                Prefix <span className="text-red-400 ml-0.5">*</span>
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              <label style={labelStyle}>
+                Prefix <span style={{ color: '#f87171', marginLeft: 2 }}>*</span>
               </label>
               <input
-                className={controlBase}
+                style={inputStyle}
                 placeholder="e.g. 1800"
                 value={form.prefix}
                 onChange={(e) => set('prefix', e.target.value)}
+                onFocus={handleFocus}
+                onBlur={handleBlur}
               />
             </div>
 
             {/* Description */}
-            <div className="flex flex-col gap-[5px] lg:col-span-2">
-              <label className={labelClass}>Description</label>
+            <div style={{ display: 'flex', flexDirection: 'column' }} className="lg:col-span-2">
+              <label style={labelStyle}>Description</label>
               <input
-                className={controlBase}
+                style={inputStyle}
                 placeholder="e.g. US Toll-Free"
                 value={form.description}
                 onChange={(e) => set('description', e.target.value)}
+                onFocus={handleFocus}
+                onBlur={handleBlur}
               />
             </div>
 
             {/* Sell rate */}
-            <div className="flex flex-col gap-[5px]">
-              <label className={labelClass}>
-                Sell Rate / Min <span className="text-red-400 ml-0.5">*</span>
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              <label style={labelStyle}>
+                Sell Rate / Min <span style={{ color: '#f87171', marginLeft: 2 }}>*</span>
               </label>
               <input
-                className={controlBase}
+                style={inputStyle}
                 type="number"
                 step="0.0001"
                 min="0"
                 placeholder="0.0100"
                 value={form.rate_per_min}
                 onChange={(e) => set('rate_per_min', e.target.value)}
+                onFocus={handleFocus}
+                onBlur={handleBlur}
               />
             </div>
 
             {/* Cost rate */}
-            <div className="flex flex-col gap-[5px]">
-              <label className={labelClass}>
-                Cost Rate / Min <span className="text-red-400 ml-0.5">*</span>
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              <label style={labelStyle}>
+                Cost Rate / Min <span style={{ color: '#f87171', marginLeft: 2 }}>*</span>
               </label>
               <input
-                className={controlBase}
+                style={inputStyle}
                 type="number"
                 step="0.0001"
                 min="0"
                 placeholder="0.0060"
                 value={form.cost_per_min}
                 onChange={(e) => set('cost_per_min', e.target.value)}
+                onFocus={handleFocus}
+                onBlur={handleBlur}
               />
             </div>
 
             {/* Margin preview */}
-            <div className="flex flex-col gap-[5px] justify-end">
-              <label className={labelClass}>Margin Preview</label>
-              <div className="py-[9px] px-3 text-[0.88rem] font-semibold min-h-[38px]">
+            <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
+              <label style={labelStyle}>Margin Preview</label>
+              <div
+                style={{
+                  padding: '9px 12px',
+                  fontSize: '0.88rem',
+                  fontWeight: 600,
+                  minHeight: 38,
+                  background: 'rgba(255,255,255,0.03)',
+                  border: '1px solid rgba(42,47,69,0.5)',
+                  borderRadius: 8,
+                }}
+              >
                 {marginValue != null ? (
                   <span className={cn(marginPreviewClass)}>
                     {marginValue >= 0 ? '+' : ''}${marginValue.toFixed(4)}{' '}
@@ -185,39 +251,52 @@ export function RatesAddForm() {
                       : ''}
                   </span>
                 ) : (
-                  <span className="text-[#718096]">—</span>
+                  <span style={{ color: '#4a5568' }}>—</span>
                 )}
               </div>
             </div>
 
             {/* Connection fee */}
-            <div className="flex flex-col gap-[5px]">
-              <label className={labelClass}>Connection Fee</label>
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              <label style={labelStyle}>Connection Fee</label>
               <input
-                className={controlBase}
+                style={inputStyle}
                 type="number"
                 step="0.001"
                 min="0"
                 value={form.connection_fee}
                 onChange={(e) => set('connection_fee', e.target.value)}
+                onFocus={handleFocus}
+                onBlur={handleBlur}
               />
             </div>
 
             {/* Increment */}
-            <div className="flex flex-col gap-[5px]">
-              <label className={labelClass}>Increment (s)</label>
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              <label style={labelStyle}>Increment (s)</label>
               <input
-                className={controlBase}
+                style={inputStyle}
                 type="number"
                 step="1"
                 min="1"
                 value={form.increment}
                 onChange={(e) => set('increment', e.target.value)}
+                onFocus={handleFocus}
+                onBlur={handleBlur}
               />
             </div>
           </div>
 
-          <div className="mt-5 flex items-center gap-3">
+          <div
+            style={{
+              marginTop: 20,
+              paddingTop: 20,
+              borderTop: '1px solid rgba(42,47,69,0.6)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 12,
+            }}
+          >
             <Button
               variant="primary"
               size="sm"

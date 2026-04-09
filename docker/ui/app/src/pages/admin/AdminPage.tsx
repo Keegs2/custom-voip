@@ -106,7 +106,7 @@ export function AdminPage() {
               role="tab"
               aria-selected={isActive}
               style={{
-                padding: '10px 18px',
+                padding: '12px 20px',
                 fontSize: '0.875rem',
                 fontWeight: isActive ? 600 : 500,
                 whiteSpace: 'nowrap',
@@ -116,6 +116,7 @@ export function AdminPage() {
                 color: isActive ? ADMIN_ACCENT : '#718096',
                 transition: 'color 0.15s, border-color 0.15s',
                 position: 'relative',
+                letterSpacing: isActive ? '0.005em' : undefined,
               }}
               onMouseEnter={(e) => {
                 if (!isActive) {

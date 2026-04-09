@@ -58,8 +58,18 @@ export function CdrTable({ cdrs, customerNames }: CdrTableProps) {
 
   if (cdrs.length === 0) {
     return (
-      <div className="text-center py-12 text-[#718096] text-sm">
-        <p className="font-semibold text-[#e2e8f0] mb-1">No records found</p>
+      <div
+        style={{
+          textAlign: 'center',
+          padding: '48px 24px',
+          background: 'linear-gradient(135deg, rgba(30,33,48,0.9) 0%, rgba(19,21,29,0.95) 100%)',
+          border: '1px solid rgba(42,47,69,0.6)',
+          borderRadius: 16,
+          color: '#718096',
+          fontSize: '0.875rem',
+        }}
+      >
+        <p style={{ fontWeight: 600, color: '#e2e8f0', marginBottom: 6 }}>No records found</p>
         <p>Adjust your filters and search again.</p>
       </div>
     );
@@ -97,12 +107,21 @@ export function CdrTable({ cdrs, customerNames }: CdrTableProps) {
               <tr
                 key={cdr.uuid}
                 onClick={() => toggleExpand(cdr.uuid)}
-                className={cn(
-                  'cursor-pointer transition-colors',
-                  isExpanded
-                    ? 'bg-[#1e2435]'
-                    : 'hover:bg-white/[0.015]',
-                )}
+                style={{
+                  cursor: 'pointer',
+                  transition: 'background 0.15s',
+                  background: isExpanded ? 'rgba(59,130,246,0.06)' : 'transparent',
+                }}
+                onMouseEnter={(e) => {
+                  if (!isExpanded) {
+                    (e.currentTarget as HTMLTableRowElement).style.background = 'rgba(255,255,255,0.018)';
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (!isExpanded) {
+                    (e.currentTarget as HTMLTableRowElement).style.background = 'transparent';
+                  }
+                }}
               >
                 <Td>
                   <span className="font-mono text-[0.78rem] text-[#718096] whitespace-nowrap">

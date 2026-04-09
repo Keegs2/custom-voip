@@ -13,6 +13,15 @@ interface CustomerEditFormProps {
   onSaved: () => void;
 }
 
+const sectionLabelStyle: React.CSSProperties = {
+  fontSize: '0.62rem',
+  fontWeight: 700,
+  color: '#3b82f6',
+  textTransform: 'uppercase',
+  letterSpacing: '0.1em',
+  marginBottom: 16,
+};
+
 export function CustomerEditForm({ customer, onCancel, onSaved }: CustomerEditFormProps) {
   const qc = useQueryClient();
   const { toastOk, toastErr } = useToast();
@@ -90,12 +99,11 @@ export function CustomerEditForm({ customer, onCancel, onSaved }: CustomerEditFo
     <form
       onSubmit={handleSubmit}
       onClick={(e) => e.stopPropagation()}
-      className="p-4"
+      style={{ padding: '28px 28px 24px' }}
     >
-      <div className="text-[0.63rem] font-bold text-[#718096] uppercase tracking-[0.9px] mb-3">
-        General
-      </div>
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
+      {/* General section */}
+      <div style={sectionLabelStyle}>General</div>
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
         <FormField
           label="Name"
           value={name}
@@ -149,11 +157,15 @@ export function CustomerEditForm({ customer, onCancel, onSaved }: CustomerEditFo
 
       {/* API Tier section */}
       {showApiTier && (
-        <div className="mt-4 pt-4 border-t border-[#2a2f45]">
-          <div className="text-[0.63rem] font-bold text-[#718096] uppercase tracking-[0.9px] mb-3">
-            CPS Tier
-          </div>
-          <div className="grid grid-cols-2 gap-3">
+        <div
+          style={{
+            marginTop: 24,
+            paddingTop: 24,
+            borderTop: '1px solid rgba(42,47,69,0.6)',
+          }}
+        >
+          <div style={sectionLabelStyle}>CPS Tier</div>
+          <div className="grid grid-cols-2 gap-4">
             <FormField
               label="API Tier"
               as="select"
@@ -176,7 +188,16 @@ export function CustomerEditForm({ customer, onCancel, onSaved }: CustomerEditFo
         </div>
       )}
 
-      <div className="flex items-center gap-2 mt-4 pt-3 border-t border-[#2a2f45]">
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          marginTop: 24,
+          paddingTop: 20,
+          borderTop: '1px solid rgba(42,47,69,0.6)',
+        }}
+      >
         <Button
           type="submit"
           variant="primary"

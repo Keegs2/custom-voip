@@ -102,16 +102,47 @@ export function CustomersAdminPage() {
   }
 
   return (
-    <div>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       {/* Toolbar */}
-      <div className="flex items-center gap-3 mb-5 flex-wrap">
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 12,
+          flexWrap: 'wrap',
+          background: 'linear-gradient(135deg, rgba(30,33,48,0.9) 0%, rgba(19,21,29,0.95) 100%)',
+          border: '1px solid rgba(42,47,69,0.6)',
+          borderRadius: 12,
+          padding: '14px 20px',
+        }}
+      >
         <form onSubmit={handleSearch} className="flex items-center gap-2 flex-1 min-w-[200px]">
           <input
             type="search"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search customers…"
-            className="text-sm px-3 py-2 h-9 rounded-lg border border-[#2a2f45] bg-[#1e2130] text-[#e2e8f0] outline-none focus:border-[#3b82f6] focus:shadow-[0_0_0_3px_rgba(59,130,246,0.2)] placeholder:text-[#4a5568] max-w-xs w-full transition-all duration-150"
+            style={{
+              fontSize: '0.875rem',
+              padding: '8px 12px',
+              height: 36,
+              borderRadius: 8,
+              border: '1px solid rgba(42,47,69,0.8)',
+              background: 'rgba(13,15,21,0.8)',
+              color: '#e2e8f0',
+              outline: 'none',
+              transition: 'border-color 0.15s, box-shadow 0.15s',
+              maxWidth: 300,
+              width: '100%',
+            }}
+            onFocus={(e) => {
+              e.currentTarget.style.borderColor = '#3b82f6';
+              e.currentTarget.style.boxShadow = '0 0 0 3px rgba(59,130,246,0.15)';
+            }}
+            onBlur={(e) => {
+              e.currentTarget.style.borderColor = 'rgba(42,47,69,0.8)';
+              e.currentTarget.style.boxShadow = 'none';
+            }}
           />
           <Button type="submit" variant="ghost" size="sm">
             Search
@@ -131,15 +162,37 @@ export function CustomersAdminPage() {
         <form
           onSubmit={handleCreateSubmit}
           style={{
-            marginBottom: 20,
             background: 'linear-gradient(135deg, rgba(30,33,48,0.9) 0%, rgba(19,21,29,0.95) 100%)',
             border: '1px solid rgba(42,47,69,0.6)',
             borderRadius: 16,
-            padding: '24px',
-            boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
+            padding: '28px 28px 24px',
+            boxShadow: '0 4px 24px rgba(0,0,0,0.3)',
+            position: 'relative',
+            overflow: 'hidden',
           }}
         >
-          <div className="text-[0.65rem] font-bold text-[#4a5568] uppercase tracking-[1px] mb-4">
+          {/* Top accent line */}
+          <div
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 32,
+              right: 32,
+              height: 2,
+              background: 'linear-gradient(90deg, transparent, #3b82f6, transparent)',
+              opacity: 0.6,
+            }}
+          />
+          <div
+            style={{
+              fontSize: '0.65rem',
+              fontWeight: 700,
+              color: '#3b82f6',
+              textTransform: 'uppercase',
+              letterSpacing: '0.1em',
+              marginBottom: 20,
+            }}
+          >
             New Customer
           </div>
           <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
@@ -201,7 +254,15 @@ export function CustomersAdminPage() {
               onChange={(e) => updateCreateForm('cpm_limit', (e.target as HTMLInputElement).value)}
             />
           </div>
-          <div className="flex gap-2 mt-4 pt-4 border-t border-[#2a2f45]">
+          <div
+            style={{
+              display: 'flex',
+              gap: 8,
+              marginTop: 20,
+              paddingTop: 20,
+              borderTop: '1px solid rgba(42,47,69,0.6)',
+            }}
+          >
             <Button type="submit" variant="primary" size="sm" loading={createMutation.isPending}>
               Create Customer
             </Button>
@@ -228,7 +289,18 @@ export function CustomersAdminPage() {
       )}
 
       {isError && (
-        <p className="text-red-400 text-sm py-4">Failed to load customers.</p>
+        <div
+          style={{
+            padding: '16px 20px',
+            borderRadius: 12,
+            background: 'rgba(239,68,68,0.08)',
+            border: '1px solid rgba(239,68,68,0.2)',
+            color: '#f87171',
+            fontSize: '0.875rem',
+          }}
+        >
+          Failed to load customers.
+        </div>
       )}
 
       {/* Table */}
@@ -252,7 +324,12 @@ export function CustomersAdminPage() {
                   <tr>
                     <td
                       colSpan={COL_COUNT}
-                      className="px-4 py-12 text-center text-[#718096] text-sm"
+                      style={{
+                        padding: '48px 16px',
+                        textAlign: 'center',
+                        color: '#718096',
+                        fontSize: '0.875rem',
+                      }}
                     >
                       No customers found.
                     </td>

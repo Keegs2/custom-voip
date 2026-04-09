@@ -21,11 +21,29 @@ interface AddCreditResponse {
 
 function DetailField({ label, value }: { label: string; value: React.ReactNode }) {
   return (
-    <div className="flex flex-col gap-1">
-      <div className="text-[0.62rem] font-bold text-[#4a5568] uppercase tracking-[0.8px]">
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 6,
+        padding: '14px 16px',
+        background: 'rgba(255,255,255,0.025)',
+        border: '1px solid rgba(42,47,69,0.5)',
+        borderRadius: 10,
+      }}
+    >
+      <div
+        style={{
+          fontSize: '0.6rem',
+          fontWeight: 700,
+          color: '#4a5568',
+          textTransform: 'uppercase',
+          letterSpacing: '0.09em',
+        }}
+      >
         {label}
       </div>
-      <div className="text-sm text-[#e2e8f0] font-medium">{value}</div>
+      <div style={{ fontSize: '0.9rem', color: '#e2e8f0', fontWeight: 600 }}>{value}</div>
     </div>
   );
 }
@@ -73,15 +91,22 @@ export function CustomerExpandedView({ customer, onEdit }: CustomerExpandedViewP
 
   return (
     <div
-      className="p-5"
       onClick={(e) => e.stopPropagation()}
+      style={{ padding: '24px 28px 28px' }}
     >
-      {/* Detail fields row */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-4 mb-4">
+      {/* Detail fields grid */}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))',
+          gap: 10,
+          marginBottom: 20,
+        }}
+      >
         <DetailField
           label="Balance"
           value={
-            <span className={customer.balance < 0 ? 'text-red-400' : undefined}>
+            <span style={{ color: customer.balance < 0 ? '#f87171' : '#4ade80' }}>
               ${customer.balance.toFixed(2)}
             </span>
           }
@@ -98,7 +123,7 @@ export function CustomerExpandedView({ customer, onEdit }: CustomerExpandedViewP
         <DetailField
           label="Fraud Score"
           value={
-            <span className={customer.fraud_score > 70 ? 'text-red-400' : undefined}>
+            <span style={{ color: customer.fraud_score > 70 ? '#f87171' : '#e2e8f0' }}>
               {customer.fraud_score ?? 0}
             </span>
           }
@@ -106,22 +131,63 @@ export function CustomerExpandedView({ customer, onEdit }: CustomerExpandedViewP
         <DetailField label="Customer ID" value={`#${customer.id}`} />
       </div>
 
-      {/* CPS Tier info */}
+      {/* CPS Tier */}
       {tierLoading && (
-        <div className="flex items-center gap-1.5 text-[#718096] text-[0.8rem] mb-3">
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            color: '#718096',
+            fontSize: '0.8rem',
+            marginBottom: 16,
+          }}
+        >
           <Spinner size="xs" /> Loading tier…
         </div>
       )}
       {!tierLoading && tier && (
-        <div className="text-[0.82rem] text-[#718096] mb-3">
-          CPS Tier:{' '}
-          <strong className="text-[#e2e8f0]">{tier.name}</strong>
-          {' '}&mdash; {tier.cps_limit} CPS
+        <div
+          style={{
+            fontSize: '0.82rem',
+            color: '#718096',
+            marginBottom: 16,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+          }}
+        >
+          <span
+            style={{
+              fontSize: '0.6rem',
+              fontWeight: 700,
+              textTransform: 'uppercase',
+              letterSpacing: '0.09em',
+              color: '#4a5568',
+            }}
+          >
+            CPS Tier:
+          </span>
+          <span style={{ color: '#e2e8f0', fontWeight: 600 }}>{tier.name}</span>
+          <span style={{ color: '#4a5568' }}>—</span>
+          <span style={{ color: '#718096' }}>{tier.cps_limit} CPS</span>
         </div>
       )}
 
       {/* Actions bar */}
-      <div className="flex items-center gap-3 flex-wrap mb-4 pt-2 border-t border-[#2a2f45]">
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 12,
+          flexWrap: 'wrap',
+          paddingTop: 16,
+          paddingBottom: 20,
+          borderTop: '1px solid rgba(42,47,69,0.5)',
+          borderBottom: '1px solid rgba(42,47,69,0.5)',
+          marginBottom: 24,
+        }}
+      >
         <Button
           variant="primary"
           size="sm"
@@ -130,14 +196,14 @@ export function CustomerExpandedView({ customer, onEdit }: CustomerExpandedViewP
             onEdit();
           }}
         >
-          Edit
+          Edit Customer
         </Button>
 
         {/* Add Credit */}
         <form
           onSubmit={handleAddCredit}
           onClick={(e) => e.stopPropagation()}
-          className="flex items-center gap-2"
+          style={{ display: 'flex', alignItems: 'center', gap: 8 }}
         >
           <input
             type="number"
@@ -147,7 +213,25 @@ export function CustomerExpandedView({ customer, onEdit }: CustomerExpandedViewP
             placeholder="Amount"
             step="0.01"
             min="0.01"
-            className="text-[0.82rem] px-2 py-[5px] rounded-lg w-[110px] border border-[#2a2f45] bg-[#0d0f15] text-[#e2e8f0] outline-none focus:border-[#3b82f6] placeholder:text-[#718096]"
+            style={{
+              fontSize: '0.82rem',
+              padding: '7px 12px',
+              borderRadius: 8,
+              width: 120,
+              border: '1px solid rgba(42,47,69,0.8)',
+              background: 'rgba(13,15,21,0.9)',
+              color: '#e2e8f0',
+              outline: 'none',
+              transition: 'border-color 0.15s, box-shadow 0.15s',
+            }}
+            onFocus={(e) => {
+              e.currentTarget.style.borderColor = '#22c55e';
+              e.currentTarget.style.boxShadow = '0 0 0 3px rgba(34,197,94,0.12)';
+            }}
+            onBlur={(e) => {
+              e.currentTarget.style.borderColor = 'rgba(42,47,69,0.8)';
+              e.currentTarget.style.boxShadow = 'none';
+            }}
           />
           <Button
             type="submit"
@@ -162,7 +246,7 @@ export function CustomerExpandedView({ customer, onEdit }: CustomerExpandedViewP
       </div>
 
       {/* Service sections — lazy loaded based on account type */}
-      <div className="flex flex-col gap-0">
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
         {showRcf && <CustomerRcfSection customerId={customer.id} />}
         {showApi && <CustomerApiSection customerId={customer.id} />}
         {showTrunk && <CustomerTrunkSection customerId={customer.id} />}
