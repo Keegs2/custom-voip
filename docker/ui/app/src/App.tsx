@@ -27,8 +27,6 @@ export function App() {
           <Route path="api-dids" element={<ApiDidsPage />} />
           <Route path="trunks"   element={<TrunksPage />} />
           <Route path="docs"     element={<DocsPage />} />
-          <Route path="troubleshooting" element={<TroubleshootingPage />} />
-
           {/* Admin nested routes */}
           <Route path="admin" element={<AdminPage />}>
             <Route index            element={<Navigate to="customers" replace />} />
@@ -42,8 +40,9 @@ export function App() {
           </Route>
         </Route>
 
-        {/* IVR Builder — full-screen canvas, outside AppLayout */}
+        {/* Full-screen pages — outside AppLayout (no max-width/padding) */}
         <Route path="ivr" element={<IvrBuilderPage />} />
+        <Route path="troubleshooting" element={<TroubleshootingPage />} />
 
         {/* Catch-all redirect to home */}
         <Route path="*" element={<Navigate to="/" replace />} />
