@@ -308,6 +308,8 @@ async def list_trunk_dids(trunk_id: int):
 @router.get("/{trunk_id}/stats")
 async def get_trunk_stats(trunk_id: int):
     """Get real-time stats for a trunk."""
+    from services.esl_client import _send_esl_command
+
     # Get trunk info
     trunk = await db.fetch_one(
         "SELECT id, max_channels, cps_limit FROM sip_trunks WHERE id = $1",
@@ -316,9 +318,37 @@ async def get_trunk_stats(trunk_id: int):
     if not trunk:
         raise HTTPException(status_code=404, detail="Trunk not found")
 
-    # Get current channel count from Redis
-    client = await cache.get_client()
-    current_channels = await client.scard(f"trunk:{trunk_id}:calls")
+    # Get current channel count from FreeSWITCH ESL
+    # Count channels where trunk_id matches (set by Lua scripts)
+    current_channels = 0
+    try:
+        response = await _send_esl_command("show channels as json")
+        if response:
+            import json
+            # Parse the JSON from ESL response (skip headers)
+            json_start = response.find("{")
+            if json_start >= 0:
+                data = json.loads(response[json_start:])
+                rows = data.get("rows", [])
+                for row in rows:
+                    # Check if this channel belongs to this trunk
+                    # trunk_id is set as a channel variable by the Lua scripts
+                    if str(row.get("callstate", "")) not in ("HANGUP", "DOWN"):
+                        # Check presence_data or accountcode for trunk association
+                        cid_name = row.get("cid_name", "")
+                        dest = row.get("dest", "")
+                        # Get trunk DIDs for this trunk
+                        trunk_dids = await db.fetch_all(
+                            "SELECT did FROM trunk_dids WHERE trunk_id = $1",
+                            trunk_id
+                        )
+                        did_list = [d["did"].replace("+", "") for d in (trunk_dids or [])]
+                        # Match if destination or caller matches a trunk DID
+                        clean_dest = dest.replace("+", "")
+                        if clean_dest in did_list or any(d in dest for d in did_list):
+                            current_channels += 1
+    except Exception as e:
+        logger.warning(f"ESL channel count failed: {e}")
 
     # Get recent CDR stats
     stats = await db.fetch_one(

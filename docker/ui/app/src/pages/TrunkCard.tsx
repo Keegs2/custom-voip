@@ -38,12 +38,12 @@ export function TrunkCard({ trunk }: TrunkCardProps) {
     setExpanded((prev) => !prev);
   }, []);
 
-  // Stats — fetched lazily when the card first expands
+  // Stats — always fetch, poll every 5 seconds for live channel count
   const statsQuery = useQuery<ExtendedTrunkStats>({
     queryKey: ['trunk-stats', trunk.id],
     queryFn: () => getTrunkStats(trunk.id) as Promise<ExtendedTrunkStats>,
-    enabled: expanded,
-    staleTime: 30_000,
+    staleTime: 3_000,
+    refetchInterval: 5_000,
   });
 
   // IPs — fetched lazily when the card expands
