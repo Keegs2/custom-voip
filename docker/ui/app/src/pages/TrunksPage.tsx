@@ -10,7 +10,7 @@ export function TrunksPage() {
     queryFn: () => listTrunks({ limit: 200 }),
   });
 
-  const entries = data?.items ?? [];
+  const entries = Array.isArray(data) ? data : data?.items ?? [];
 
   return (
     <div>

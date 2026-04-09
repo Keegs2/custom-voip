@@ -82,7 +82,7 @@ export function CdrsTab() {
 
   const customerNames = useMemo<Record<number, string>>(() => {
     const map: Record<number, string> = {};
-    for (const c of customersData?.items ?? []) {
+    for (const c of (Array.isArray(customersData) ? customersData : customersData?.items ?? [])) {
       map[c.id] = c.name;
     }
     return map;

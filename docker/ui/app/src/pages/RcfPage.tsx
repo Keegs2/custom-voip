@@ -18,7 +18,7 @@ export function RcfPage() {
 
   // Merge server data with pending edits: on first load (or after invalidation)
   // seed any DID that has no pending edit with its server value.
-  const entries: RcfEntry[] = useMemo(() => data?.items ?? [], [data]);
+  const entries: RcfEntry[] = useMemo(() => (Array.isArray(data) ? data : data?.items ?? []), [data]);
 
   function handlePendingChange(did: string, value: string) {
     setPendingEdits((prev) => ({ ...prev, [did]: value }));

@@ -10,7 +10,7 @@ export function ApiDidsPage() {
     queryFn: () => listApiDids({ limit: 200 }),
   });
 
-  const entries = data?.items ?? [];
+  const entries = Array.isArray(data) ? data : data?.items ?? [];
 
   return (
     <div>

@@ -53,7 +53,7 @@ export function RatesTab() {
       <RatesAddForm />
 
       {/* Sortable rates table */}
-      <RatesTable rates={ratesData?.items ?? []} />
+      <RatesTable rates={Array.isArray(ratesData) ? ratesData : ratesData?.rates ?? ratesData?.items ?? []} />
 
       {/* Margin analysis cards */}
       {margins && <MarginAnalysis margins={margins} />}

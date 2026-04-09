@@ -28,10 +28,13 @@ export interface RateUpdate {
 }
 
 export interface RatesResponse {
-  items: Rate[];
-  total: number;
-  limit: number;
-  offset: number;
+  rates: Rate[];
+  items?: Rate[];
+  count?: number;
+  total?: number;
+  limit?: number;
+  offset?: number;
+  summary?: { avg_margin_pct?: number; min_margin_pct?: number; negative_margin_count?: number };
 }
 
 export interface MarginRateEntry {
