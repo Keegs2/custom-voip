@@ -139,7 +139,7 @@ services:
     environment:
       - DATABASE_URL=postgresql://api:api_secret@postgres:5432/voip
       - REDIS_URL=redis://redis:6379
-      - FREESWITCH_ESL_HOST=freeswitch
+      - FREESWITCH_ESL_HOST=10.142.0.100
       - FREESWITCH_ESL_PORT=8021
       - FREESWITCH_ESL_PASSWORD=ClueCon
       - TEST_MODE=true
