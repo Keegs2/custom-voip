@@ -373,13 +373,45 @@ if product_type == "rcf" then
 
     local dial_string
 
+    -- ================================================================
+    -- Caller ID and SIP header setup for RCF call forwarding
+    -- ================================================================
+    -- SIP header semantics for carrier termination (Bandwidth):
+    --   From:                 Must be the RCF DID (Bandwidth owns this number
+    --                         and requires it in From for termination auth)
+    --   P-Asserted-Identity:  Original caller's number (carrier uses this for
+    --                         caller ID presentation to the called party)
+    --   Remote-Party-ID:      Original caller (backup CID mechanism, widely
+    --                         supported by terminating carriers)
+    --   Diversion:            RCF DID with reason=unconditional (indicates
+    --                         the call was forwarded and from where)
+    --
+    -- FreeSWITCH variable mapping:
+    --   origination_caller_id_number -> controls SIP From user AND caller ID
+    --                                   (set to RCF DID for Bandwidth auth)
+    --   origination_caller_id_name   -> controls SIP From display name
+    --   sip_h_X-Original-CID        -> custom header; Kamailio reads this to
+    --                                   build P-Asserted-Identity for CID display
+    --   sip_h_Remote-Party-ID       -> explicit CID presentation header
+    --   sip_h_Diversion             -> call forwarding indicator
+    --
+    -- IMPORTANT: All variables MUST be in a single {} block in the dial string.
+    -- FreeSWITCH treats the first {} as global vars and subsequent {} as per-leg
+    -- vars -- having two {} blocks does NOT merge them. We build a single block
+    -- containing both the bridge parameters and the CID overrides.
+    -- ================================================================
+
+    -- Get original caller info from the A-leg
+    local original_cid_number = caller_id
+    local original_cid_name = get_var("caller_id_name", caller_id)
+
     if is_local_forward then
         -- LOCAL EXTENSION ROUTING
         -- Forward to a registered user (e.g., 1001, 1002, 1003)
         local domain = get_domain()
         set_var("carrier_used", "local")
 
-        -- Build dial string for local user
+        -- Build dial string for local user (CID handling is simpler for local)
         dial_string = string.format(
             "{ignore_early_media=false,call_timeout=%d}user/%s@%s",
             ring_timeout, forward_to, domain
@@ -397,32 +429,75 @@ if product_type == "rcf" then
         -- X-Carrier header tells Kamailio which Bandwidth IP to use.
         set_var("carrier_used", "carrier_" .. carrier)
 
-        dial_string = string.format(
-            "{ignore_early_media=false,call_timeout=%d,sip_h_X-Carrier=%s}sofia/external/%s@172.28.0.1:5060",
-            ring_timeout, carrier, forward_to
-        )
+        if pass_caller_id then
+            -- Passthrough mode: present original caller's number to the end user
+            -- but use RCF DID in the From header for carrier authorization.
+            --
+            -- SIP headers produced (after Kamailio processing):
+            --   From: "orig_name" <sip:RCF_DID@public_ip>    (Bandwidth auth)
+            --   P-Asserted-Identity: <sip:orig_caller@ip>     (CID display)
+            --   Remote-Party-ID: <sip:orig_caller@ip>         (backup CID)
+            --   Diversion: <sip:RCF_DID@ip>;reason=unconditional
+            --
+            -- NOTE: origination_caller_id_number controls the From header
+            -- user part in FreeSWITCH. We set it to the RCF DID so that
+            -- Bandwidth sees the DID in From. The original caller's number
+            -- is passed via X-Original-CID (Kamailio builds PAI from it)
+            -- and Remote-Party-ID (direct CID presentation header).
+
+            dial_string = string.format(
+                "{ignore_early_media=false,call_timeout=%d," ..
+                "sip_h_X-Carrier=%s," ..
+                "origination_caller_id_number=%s," ..
+                "origination_caller_id_name=%s," ..
+                "sip_h_X-Original-CID=%s," ..
+                "sip_h_Remote-Party-ID=<sip:%s@34.74.71.32>\\;party=calling\\;privacy=off\\;screen=yes," ..
+                "sip_h_Diversion=<sip:%s@34.74.71.32>\\;reason=unconditional" ..
+                "}sofia/external/%s@172.28.0.1:5060",
+                ring_timeout,             -- call_timeout
+                carrier,                  -- X-Carrier: standard/premium/backup
+                normalized_did,           -- origination_caller_id_number: RCF DID (From header)
+                original_cid_name,        -- origination_caller_id_name: original caller name (From display)
+                original_cid_number,      -- X-Original-CID: original caller (Kamailio builds PAI)
+                original_cid_number,      -- Remote-Party-ID: original caller
+                normalized_did,           -- Diversion: the RCF DID that was called
+                forward_to                -- destination number
+            )
+
+            freeswitch.consoleLog("INFO", string.format(
+                "[inbound_router] RCF CID passthrough: From=%s, PAI/CID=%s, Diversion=%s\n",
+                normalized_did, original_cid_number, normalized_did
+            ))
+        else
+            -- Override mode: use the RCF DID for everything (no original caller shown).
+            -- Both From and caller ID are the RCF DID.
+
+            dial_string = string.format(
+                "{ignore_early_media=false,call_timeout=%d," ..
+                "sip_h_X-Carrier=%s," ..
+                "origination_caller_id_number=%s," ..
+                "origination_caller_id_name=%s," ..
+                "sip_h_X-Original-CID=%s," ..
+                "sip_h_Diversion=<sip:%s@34.74.71.32>\\;reason=unconditional" ..
+                "}sofia/external/%s@172.28.0.1:5060",
+                ring_timeout,             -- call_timeout
+                carrier,                  -- X-Carrier
+                normalized_did,           -- origination_caller_id_number: RCF DID (From header)
+                normalized_did,           -- origination_caller_id_name: RCF DID
+                normalized_did,           -- X-Original-CID: RCF DID (same, no passthrough)
+                normalized_did,           -- Diversion: RCF DID
+                forward_to                -- destination number
+            )
+
+            freeswitch.consoleLog("INFO", string.format(
+                "[inbound_router] RCF CID override: using RCF DID %s for all headers (original was %s)\n",
+                normalized_did, original_cid_number
+            ))
+        end
 
         freeswitch.consoleLog("INFO", string.format(
             "[%s] RCF Bridge (PSTN): %s -> %s via proxy (carrier=%s)\n",
             uuid, normalized_did, forward_to, carrier
-        ))
-    end
-
-    -- Set outbound caller ID based on pass_caller_id setting:
-    -- pass_caller_id = true:  Use original caller's number (passthrough)
-    -- pass_caller_id = false: Use the RCF DID as caller ID
-    -- NOTE: Bandwidth may require the From to be a number on our account.
-    -- If Bandwidth rejects passthrough CID, set pass_caller_id=false on the RCF entry.
-    if pass_caller_id then
-        -- Passthrough: keep original caller ID (already set by FreeSWITCH from A-leg)
-        freeswitch.consoleLog("INFO", string.format(
-            "[inbound_router] CID passthrough enabled: using original caller %s\n", caller_id
-        ))
-    else
-        -- Override: use the RCF DID as caller ID
-        dial_string = "{origination_caller_id_number=" .. normalized_did .. ",origination_caller_id_name=" .. normalized_did .. "}" .. dial_string
-        freeswitch.consoleLog("INFO", string.format(
-            "[inbound_router] CID override: using RCF DID %s instead of %s\n", normalized_did, caller_id
         ))
     end
 
@@ -448,12 +523,41 @@ if product_type == "rcf" then
         ))
         set_var("carrier_used", "carrier_backup")
 
-        local failover_dial = string.format(
-            "{ignore_early_media=false,call_timeout=%d,sip_h_X-Carrier=backup}sofia/external/%s@172.28.0.1:5060",
-            ring_timeout, forward_to
-        )
-        if not pass_caller_id then
-            failover_dial = "{origination_caller_id_number=" .. normalized_did .. ",origination_caller_id_name=" .. normalized_did .. "}" .. failover_dial
+        local failover_dial
+        if pass_caller_id then
+            failover_dial = string.format(
+                "{ignore_early_media=false,call_timeout=%d," ..
+                "sip_h_X-Carrier=backup," ..
+                "origination_caller_id_number=%s," ..
+                "origination_caller_id_name=%s," ..
+                "sip_h_X-Original-CID=%s," ..
+                "sip_h_Remote-Party-ID=<sip:%s@34.74.71.32>\\;party=calling\\;privacy=off\\;screen=yes," ..
+                "sip_h_Diversion=<sip:%s@34.74.71.32>\\;reason=unconditional" ..
+                "}sofia/external/%s@172.28.0.1:5060",
+                ring_timeout,
+                normalized_did,           -- origination_caller_id_number: RCF DID (From)
+                original_cid_name,        -- origination_caller_id_name: original caller name
+                original_cid_number,      -- X-Original-CID: original caller (PAI)
+                original_cid_number,      -- Remote-Party-ID: original caller
+                normalized_did,           -- Diversion: RCF DID
+                forward_to                -- destination
+            )
+        else
+            failover_dial = string.format(
+                "{ignore_early_media=false,call_timeout=%d," ..
+                "sip_h_X-Carrier=backup," ..
+                "origination_caller_id_number=%s," ..
+                "origination_caller_id_name=%s," ..
+                "sip_h_X-Original-CID=%s," ..
+                "sip_h_Diversion=<sip:%s@34.74.71.32>\\;reason=unconditional" ..
+                "}sofia/external/%s@172.28.0.1:5060",
+                ring_timeout,
+                normalized_did,           -- origination_caller_id_number: RCF DID
+                normalized_did,           -- origination_caller_id_name: RCF DID
+                normalized_did,           -- X-Original-CID: RCF DID
+                normalized_did,           -- Diversion: RCF DID
+                forward_to                -- destination
+            )
         end
 
         pcall(function()
