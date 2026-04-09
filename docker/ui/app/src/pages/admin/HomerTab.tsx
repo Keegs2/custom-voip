@@ -30,7 +30,7 @@ export function HomerTab() {
 
       {/* Iframe or fallback */}
       {iframeError ? (
-        <div className="flex flex-col items-center justify-center gap-4 py-20 border border-[#2a2f45] rounded-[10px] text-center">
+        <div className="flex flex-col items-center justify-center gap-4 py-20 border border-[#2a2f45] rounded-xl text-center">
           <p className="font-semibold text-[#e2e8f0]">Homer is not reachable</p>
           <p className="text-[0.82rem] text-[#718096] max-w-sm">
             The Homer SIP capture interface at{' '}
@@ -56,7 +56,7 @@ export function HomerTab() {
             height: 'calc(100vh - 220px)',
             border: 'none',
             background: '#1a1d27',
-            borderRadius: '10px',
+            borderRadius: '12px',
           }}
         />
       )}

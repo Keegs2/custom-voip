@@ -27,22 +27,18 @@ export function SippPresetGrid({ isRunning, onRun }: SippPresetGridProps) {
 
   if (isLoading) {
     return (
-      <div className="flex items-center gap-2 text-[#718096] py-8">
+      <div className="flex items-center gap-2.5 text-[#718096] py-8">
         <Spinner /> Loading presets…
       </div>
     );
   }
 
   if (isError) {
-    return (
-      <p className="text-red-400 text-sm py-4">Failed to load SIPp presets.</p>
-    );
+    return <p className="text-red-400 text-sm py-4">Failed to load SIPp presets.</p>;
   }
 
   if (!presets || presets.length === 0) {
-    return (
-      <p className="text-[#718096] text-sm py-4">No presets available.</p>
-    );
+    return <p className="text-[#718096] text-sm py-4">No presets available.</p>;
   }
 
   return (
@@ -53,25 +49,24 @@ export function SippPresetGrid({ isRunning, onRun }: SippPresetGridProps) {
         return (
           <div
             key={preset.id}
-            className="bg-[#1e2130] border border-[#2a2f45] rounded-[10px] p-5 flex flex-col gap-3 hover:border-[#363c57] transition-[border-color] duration-200"
+            className="bg-[#1e2130] border border-[#2a2f45] rounded-xl p-5 flex flex-col gap-4 hover:border-[#363c57] transition-all duration-200"
           >
             <div>
-              <div className="text-[0.95rem] font-bold text-[#e2e8f0]">{preset.name}</div>
+              <div className="text-sm font-bold text-[#e2e8f0]">{preset.name}</div>
               {preset.description && (
-                <p className="text-[0.78rem] text-[#718096] mt-1">{preset.description}</p>
+                <p className="text-xs text-[#718096] mt-1 leading-relaxed">{preset.description}</p>
               )}
             </div>
 
-            {/* Default params */}
-            <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-[0.78rem]">
+            {/* Default params grid */}
+            <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs bg-[#0f1117] rounded-lg p-3">
               <ParamRow label="Target" value={String(d.target ?? '--')} />
               <ParamRow label="Rate" value={`${d.rate ?? '--'} CPS`} />
               <ParamRow label="Calls" value={String(d.calls ?? '--')} />
               <ParamRow label="Timeout" value={`${d.timeout ?? '--'}s`} />
-              <ParamRow label="Duration" value={`${d.duration ?? 0}ms`} />
             </div>
 
-            <div className="mt-auto pt-1">
+            <div className="mt-auto">
               <Button
                 size="sm"
                 disabled={isRunning}
@@ -88,7 +83,7 @@ export function SippPresetGrid({ isRunning, onRun }: SippPresetGridProps) {
                   )
                 }
               >
-                Run
+                {isRunning ? 'Running…' : 'Run Test'}
               </Button>
             </div>
           </div>
@@ -101,7 +96,7 @@ export function SippPresetGrid({ isRunning, onRun }: SippPresetGridProps) {
 function ParamRow({ label, value }: { label: string; value: string }) {
   return (
     <>
-      <span className="text-[#718096]">{label}</span>
+      <span className="text-[#4a5568]">{label}</span>
       <span className="font-semibold text-[#e2e8f0] tabular-nums">{value}</span>
     </>
   );

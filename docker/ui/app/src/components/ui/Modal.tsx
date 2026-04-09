@@ -50,9 +50,9 @@ export function Modal({ open, onClose, title, children, footer, maxWidth = 'max-
       {/* Panel */}
       <div
         className={cn(
-          'relative w-full rounded-[10px]',
+          'relative w-full rounded-xl',
           'bg-[#1a1d27] border border-[#2a2f45]',
-          'shadow-[0_8px_32px_rgba(0,0,0,.55)]',
+          'shadow-[0_12px_40px_rgba(0,0,0,.6)]',
           'flex flex-col max-h-[90vh]',
           maxWidth,
         )}

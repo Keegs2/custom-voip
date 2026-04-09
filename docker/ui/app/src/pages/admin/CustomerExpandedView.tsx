@@ -21,11 +21,11 @@ interface AddCreditResponse {
 
 function DetailField({ label, value }: { label: string; value: React.ReactNode }) {
   return (
-    <div className="flex flex-col gap-[3px]">
-      <div className="text-[0.65rem] font-bold text-[#718096] uppercase tracking-[0.6px]">
+    <div className="flex flex-col gap-1">
+      <div className="text-[0.62rem] font-bold text-[#4a5568] uppercase tracking-[0.8px]">
         {label}
       </div>
-      <div className="text-[0.88rem] text-[#e2e8f0] font-medium">{value}</div>
+      <div className="text-sm text-[#e2e8f0] font-medium">{value}</div>
     </div>
   );
 }
@@ -73,7 +73,7 @@ export function CustomerExpandedView({ customer, onEdit }: CustomerExpandedViewP
 
   return (
     <div
-      className="p-4"
+      className="p-5"
       onClick={(e) => e.stopPropagation()}
     >
       {/* Detail fields row */}

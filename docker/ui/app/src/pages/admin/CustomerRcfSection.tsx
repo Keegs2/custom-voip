@@ -142,7 +142,7 @@ export function CustomerRcfSection({ customerId }: CustomerRcfSectionProps) {
   return (
     <div className="pt-4 border-t border-[#2a2f45]">
       <div className="flex items-center justify-between mb-3">
-        <span className="text-[0.63rem] font-bold text-[#718096] uppercase tracking-[0.9px]">
+        <span className="text-[0.65rem] font-bold text-[#4a5568] uppercase tracking-[0.8px]">
           RCF Numbers
         </span>
         <button

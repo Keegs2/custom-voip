@@ -15,35 +15,35 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 
 const variantClasses: Record<ButtonVariant, string> = {
   primary: [
-    'bg-[#3b82f6] text-white',
-    'shadow-[0_0_12px_rgba(59,130,246,0.25)]',
-    'hover:bg-[#2563eb] hover:shadow-[0_0_20px_rgba(59,130,246,0.45)]',
-    'disabled:opacity-35 disabled:cursor-not-allowed disabled:shadow-none',
+    'bg-[#3b82f6] text-white border border-transparent',
+    'shadow-[0_0_12px_rgba(59,130,246,0.2)]',
+    'hover:bg-[#2563eb] hover:shadow-[0_0_20px_rgba(59,130,246,0.35)] hover:scale-[1.02]',
+    'disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none disabled:hover:scale-100',
   ].join(' '),
 
   ghost: [
     'bg-transparent text-[#718096] border border-[#2a2f45]',
-    'hover:bg-white/[0.04] hover:text-[#e2e8f0] hover:border-[#3d4460]',
-    'disabled:opacity-35 disabled:cursor-not-allowed',
+    'hover:bg-white/[0.05] hover:text-[#e2e8f0] hover:border-[#363c57]',
+    'disabled:opacity-40 disabled:cursor-not-allowed',
   ].join(' '),
 
   danger: [
-    'bg-[#7f1d1d] text-[#fca5a5] border border-red-500/30',
-    'hover:bg-[#991b1b] hover:shadow-[0_0_14px_rgba(239,68,68,0.18)]',
-    'disabled:opacity-35 disabled:cursor-not-allowed disabled:shadow-none',
+    'bg-[#7f1d1d] text-[#fca5a5] border border-red-500/25',
+    'hover:bg-[#991b1b] hover:shadow-[0_0_14px_rgba(239,68,68,0.2)] hover:scale-[1.02]',
+    'disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none disabled:hover:scale-100',
   ].join(' '),
 
   success: [
     'bg-[#065f46] text-[#6ee7b7] border border-emerald-300/20',
-    'hover:brightness-110',
-    'disabled:opacity-35 disabled:cursor-not-allowed',
+    'hover:bg-emerald-800/60 hover:scale-[1.02]',
+    'disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:scale-100',
   ].join(' '),
 };
 
 const sizeClasses: Record<ButtonSize, string> = {
-  default: 'text-[0.88rem] font-semibold px-4 py-[9px] rounded-lg',
-  sm: 'text-[0.78rem] font-semibold px-[10px] py-[5px] rounded-lg',
-  xs: 'text-[0.72rem] font-semibold px-2 py-[3px] rounded-md',
+  default: 'text-sm font-semibold px-4 py-2 rounded-lg h-9',
+  sm:      'text-xs font-semibold px-3 py-1.5 rounded-lg h-7',
+  xs:      'text-xs font-semibold px-2 py-1 rounded-md h-6',
 };
 
 export function Button({
@@ -63,9 +63,10 @@ export function Button({
       type="button"
       disabled={isDisabled}
       className={cn(
-        'inline-flex items-center gap-1.5 whitespace-nowrap leading-none',
-        'transition-[background,box-shadow,opacity] duration-150',
+        'inline-flex items-center justify-center gap-1.5 whitespace-nowrap leading-none',
+        'transition-all duration-150',
         'active:scale-[0.97] active:transition-none',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3b82f6]/50',
         'disabled:active:scale-100',
         variantClasses[variant],
         sizeClasses[size],

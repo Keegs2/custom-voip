@@ -16,7 +16,6 @@ export function SippTab() {
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [runningTimeout, setRunningTimeout] = useState(60);
 
-  // Presets used to look up preset names for history labels
   const { data: presets } = useQuery({
     queryKey: ['sipp', 'presets'],
     queryFn: listSippPresets,
@@ -27,7 +26,6 @@ export function SippTab() {
     async (config: Partial<SippRunConfig>, presetId?: number) => {
       if (isRunning) return;
 
-      // Build the full config with required fields
       const fullConfig: SippRunConfig = {
         remote_host: config.remote_host ?? '9196',
         call_rate: config.call_rate ?? 100,
@@ -42,10 +40,8 @@ export function SippTab() {
 
       try {
         const response = await runSipp(fullConfig);
-
         setLatestResult(response);
 
-        // Stamp with timestamp and preset name for history
         const presetName = presetId
           ? (presets?.find((p) => p.id === presetId)?.name ?? String(presetId))
           : undefined;
@@ -56,10 +52,7 @@ export function SippTab() {
           _presetName: presetName,
         };
 
-        setHistory((prev) => {
-          const next = [entry, ...prev];
-          return next.slice(0, 5);
-        });
+        setHistory((prev) => [entry, ...prev].slice(0, 5));
 
         const verdict = response.verdict ?? 'DONE';
         if (verdict === 'PASS') {
@@ -94,18 +87,21 @@ export function SippTab() {
 
   return (
     <div className="space-y-6">
+      {/* Preset grid section */}
       <div>
-        <h2 className="text-[1rem] font-bold text-[#e2e8f0] mb-1">SIPp Load Test Presets</h2>
-        <p className="text-[0.78rem] text-[#718096] mb-4">
-          Select a preset to run a pre-configured SIP load test against the platform.
-        </p>
+        <div className="mb-4">
+          <h2 className="text-base font-bold text-[#e2e8f0]">SIPp Load Test Presets</h2>
+          <p className="text-sm text-[#718096] mt-0.5">
+            Select a preset to run a pre-configured SIP load test against the platform.
+          </p>
+        </div>
         <SippPresetGrid isRunning={isRunning} onRun={handlePresetRun} />
       </div>
 
-      {/* Custom test collapsible */}
+      {/* Custom test */}
       <SippCustomForm isRunning={isRunning} onRun={handleCustomRun} />
 
-      {/* Results area */}
+      {/* Results */}
       <SippResults
         response={latestResult}
         isRunning={isRunning}

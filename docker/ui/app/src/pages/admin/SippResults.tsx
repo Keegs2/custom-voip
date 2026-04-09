@@ -55,12 +55,10 @@ export function SippResults({ response, isRunning, runningTimeout = 60 }: SippRe
     return (
       <div
         className={cn(
-          'rounded-[10px] border border-blue-500/30 bg-[#1a1d27] p-10 text-center',
+          'rounded-xl border border-blue-500/30 bg-[#1a1d27] p-10 text-center',
           'shadow-[0_0_24px_rgba(59,130,246,0.12)]',
-          'animate-[sipp-pulse_1.8s_ease-in-out_infinite]',
         )}
         style={{
-          // Inline animation for the pulsing glow since Tailwind doesn't have this keyframe
           animation: 'sipp-pulse 1.8s ease-in-out infinite',
         }}
       >
@@ -97,7 +95,7 @@ export function SippResults({ response, isRunning, runningTimeout = 60 }: SippRe
   return (
     <div
       className={cn(
-        'rounded-[10px] border bg-[#1a1d27]',
+        'rounded-xl border bg-[#1a1d27]',
         verdict === 'PASS'
           ? 'border-green-500/30 shadow-[0_0_20px_rgba(74,222,128,0.08)]'
           : verdict === 'WARN'
@@ -133,7 +131,7 @@ export function SippResults({ response, isRunning, runningTimeout = 60 }: SippRe
       <div className="p-5 space-y-5">
         {/* Key Metrics — 6 stat cards */}
         <div>
-          <p className="text-[0.68rem] font-bold text-[#718096] uppercase tracking-[0.7px] mb-3">
+          <p className="text-[0.65rem] font-bold text-[#4a5568] uppercase tracking-[0.8px] mb-3">
             Key Metrics
           </p>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
@@ -170,7 +168,7 @@ export function SippResults({ response, isRunning, runningTimeout = 60 }: SippRe
 
         {/* SIP Message Breakdown */}
         <div>
-          <p className="text-[0.68rem] font-bold text-[#718096] uppercase tracking-[0.7px] mb-3">
+          <p className="text-[0.65rem] font-bold text-[#4a5568] uppercase tracking-[0.8px] mb-3">
             SIP Message Breakdown
           </p>
           <TableWrap>
@@ -235,11 +233,11 @@ interface StatMiniProps {
 
 function StatMini({ label, value, valueClass }: StatMiniProps) {
   return (
-    <div className="bg-[#1e2130] border border-[#2a2f45] rounded-[8px] p-3">
-      <p className="text-[0.65rem] font-bold text-[#718096] uppercase tracking-[0.5px] mb-1.5">
+    <div className="bg-[#1e2130] border border-[#2a2f45] rounded-lg p-3">
+      <p className="text-[0.62rem] font-bold text-[#4a5568] uppercase tracking-[0.8px] mb-1.5">
         {label}
       </p>
-      <p className={cn('text-[1.3rem] font-extrabold tabular-nums leading-none text-[#e2e8f0]', valueClass)}>
+      <p className={cn('text-xl font-extrabold tabular-nums leading-none text-[#e2e8f0]', valueClass)}>
         {value}
       </p>
     </div>

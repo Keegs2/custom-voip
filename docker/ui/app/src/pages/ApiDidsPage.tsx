@@ -1,8 +1,8 @@
 import { useQuery } from '@tanstack/react-query';
-import { Badge } from '../components/ui/Badge';
 import { Spinner } from '../components/ui/Spinner';
 import { listApiDids } from '../api/apiDids';
 import { ApiDidCard } from './ApiDidCard';
+import { PortalHeader } from './RcfPage';
 
 export function ApiDidsPage() {
   const { data, isLoading, isError } = useQuery({
@@ -14,47 +14,35 @@ export function ApiDidsPage() {
 
   return (
     <div>
-      {/* Portal header */}
-      <div className="mb-7 pb-5 border-b border-[#2a2f45]">
-        <div className="flex items-center gap-3 flex-wrap">
-          <h1 className="text-[1.45rem] font-bold tracking-[-0.3px] text-[#e2e8f0] leading-tight flex items-center gap-2">
-            <span className="text-[#a855f7] font-mono text-[1.1rem]" aria-hidden="true">
-              {'<>'}
-            </span>
-            Your API Numbers
-          </h1>
-          <Badge variant="api">Customer Portal</Badge>
-        </div>
-        <p className="text-[0.82rem] text-[#718096] mt-1">
-          Configure webhook URLs for your voice applications.
-        </p>
-      </div>
+      <PortalHeader
+        icon="<>"
+        title="Your API Numbers"
+        subtitle="Configure webhook URLs for your voice applications."
+        badgeVariant="api"
+      />
 
-      {/* Loading state */}
       {isLoading && (
-        <div className="flex items-center gap-2 text-[#718096] text-sm py-8">
+        <div className="flex items-center gap-2.5 text-[#718096] text-sm py-12">
           <Spinner size="sm" />
           <span>Loading your API numbers…</span>
         </div>
       )}
 
-      {/* Error state */}
       {isError && (
-        <div className="py-8 text-[0.85rem] text-red-400">
+        <div className="py-10 px-1 text-sm text-red-400">
           Unable to load API DIDs. Please try refreshing the page.
         </div>
       )}
 
-      {/* Empty state */}
       {!isLoading && !isError && entries.length === 0 && (
-        <div className="py-8 text-[0.85rem] text-[#718096]">
-          No API numbers found for your account.
+        <div className="flex flex-col items-center justify-center py-16 gap-2 text-center">
+          <p className="text-[#718096] text-sm">No API numbers found for your account.</p>
+          <p className="text-[#4a5568] text-xs">Contact support to provision API-enabled numbers.</p>
         </div>
       )}
 
-      {/* Cards grid */}
       {entries.length > 0 && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4 md:gap-5">
           {entries.map((did) => (
             <ApiDidCard key={did.id} did={did} />
           ))}

@@ -30,7 +30,7 @@ export function SippHistory({ history }: SippHistoryProps) {
 
   return (
     <div>
-      <p className="text-[0.68rem] font-bold text-[#718096] uppercase tracking-[0.7px] mb-3">
+      <p className="text-[0.65rem] font-bold text-[#4a5568] uppercase tracking-[0.8px] mb-3">
         Test History (last 5)
       </p>
       <TableWrap>

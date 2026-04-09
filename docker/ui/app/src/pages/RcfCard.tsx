@@ -76,11 +76,11 @@ export function RcfCard({ entry, pendingValue, onPendingChange }: RcfCardProps) 
   return (
     <div
       className={cn(
-        'bg-[#1a1d27] border rounded-[14px] p-5',
-        'shadow-[0_1px_4px_rgba(0,0,0,.4),0_1px_2px_rgba(0,0,0,.3)]',
-        'transition-[border-color,box-shadow] duration-300',
+        'bg-[#1a1d27] border rounded-xl p-5',
+        'shadow-[0_1px_3px_rgba(0,0,0,.4)]',
+        'transition-all duration-300',
         savedFlash
-          ? 'border-[#22c55e] shadow-[0_0_0_2px_rgba(34,197,94,0.25)]'
+          ? 'border-emerald-500/60 shadow-[0_0_0_3px_rgba(34,197,94,0.15)]'
           : 'border-[#2a2f45]',
       )}
     >

@@ -56,12 +56,12 @@ export function ToastProvider({ children }: { children: ReactNode }) {
           <div
             key={toast.id}
             className={[
-              'pointer-events-auto flex items-center gap-3 px-4 py-3 rounded-[8px]',
-              'text-sm font-semibold shadow-[0_8px_32px_rgba(0,0,0,.55)]',
-              'border animate-fade-in',
+              'pointer-events-auto flex items-center gap-3 px-4 py-3 rounded-xl',
+              'text-sm font-semibold shadow-[0_8px_32px_rgba(0,0,0,.6)]',
+              'border min-w-[280px] max-w-[400px]',
               toast.variant === 'ok'
-                ? 'bg-[#065f46] text-[#6ee7b7] border-emerald-300/20'
-                : 'bg-[#7f1d1d] text-[#fca5a5] border-red-500/30',
+                ? 'bg-[#065f46] text-[#6ee7b7] border-emerald-400/20 shadow-[0_0_20px_rgba(34,197,94,0.1)]'
+                : 'bg-[#7f1d1d] text-[#fca5a5] border-red-500/25 shadow-[0_0_20px_rgba(239,68,68,0.1)]',
             ].join(' ')}
             role="alert"
           >

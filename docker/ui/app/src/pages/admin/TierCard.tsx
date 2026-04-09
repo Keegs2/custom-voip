@@ -92,9 +92,9 @@ export function TierCard({ tier, tierType, fullWidth = false }: TierCardProps) {
   return (
     <div
       className={cn(
-        'bg-[#1e2130] border border-[#2a2f45] rounded-[10px] p-5',
+        'bg-[#1e2130] border border-[#2a2f45] rounded-xl p-5',
         'flex flex-col gap-4',
-        'transition-[border-color] duration-200 hover:border-[#363c57]',
+        'transition-all duration-200 hover:border-[#363c57]',
         isApiStandard && 'border-blue-500/30 shadow-[0_0_16px_rgba(59,130,246,0.08)]',
         fullWidth && 'col-span-full',
       )}

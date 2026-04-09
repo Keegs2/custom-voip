@@ -43,15 +43,11 @@ export function CustomersAdminPage() {
   const [expandedCustomerId, setExpandedCustomerId] = useState<number | null>(null);
   const [editingCustomerId, setEditingCustomerId] = useState<number | null>(null);
 
-  // ----- Data fetching -----
-
   const { data, isLoading, isError } = useQuery({
     queryKey: ['customers', { search: committedSearch, offset }],
     queryFn: () =>
       listCustomers({ search: committedSearch, limit: PAGE_SIZE, offset }),
   });
-
-  // ----- Mutations -----
 
   const createMutation = useMutation({
     mutationFn: () =>
@@ -72,8 +68,6 @@ export function CustomersAdminPage() {
     onError: (err: Error) => toastErr(err.message),
   });
 
-  // ----- Handlers -----
-
   function handleSearch(e: React.FormEvent) {
     e.preventDefault();
     setOffset(0);
@@ -82,7 +76,6 @@ export function CustomersAdminPage() {
 
   function handleToggleExpand(id: number) {
     if (expandedCustomerId === id) {
-      // Collapse: also exit edit mode
       setExpandedCustomerId(null);
       setEditingCustomerId(null);
     } else {
@@ -91,17 +84,9 @@ export function CustomersAdminPage() {
     }
   }
 
-  function handleStartEdit(id: number) {
-    setEditingCustomerId(id);
-  }
-
-  function handleCancelEdit() {
-    setEditingCustomerId(null);
-  }
-
-  function handleSaved() {
-    setEditingCustomerId(null);
-  }
+  function handleStartEdit(id: number) { setEditingCustomerId(id); }
+  function handleCancelEdit() { setEditingCustomerId(null); }
+  function handleSaved() { setEditingCustomerId(null); }
 
   function handleCreateSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -112,10 +97,7 @@ export function CustomersAdminPage() {
     createMutation.mutate();
   }
 
-  function updateCreateForm<K extends keyof CreateFormState>(
-    key: K,
-    value: CreateFormState[K],
-  ) {
+  function updateCreateForm<K extends keyof CreateFormState>(key: K, value: CreateFormState[K]) {
     setCreateForm((prev) => ({ ...prev, [key]: value }));
   }
 
@@ -129,7 +111,7 @@ export function CustomersAdminPage() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search customers…"
-            className="text-[0.88rem] px-3 py-[7px] rounded-lg border border-[#2a2f45] bg-[#1e2130] text-[#e2e8f0] outline-none focus:border-[#3b82f6] placeholder:text-[#718096] max-w-xs w-full"
+            className="text-sm px-3 py-2 h-9 rounded-lg border border-[#2a2f45] bg-[#1e2130] text-[#e2e8f0] outline-none focus:border-[#3b82f6] focus:shadow-[0_0_0_3px_rgba(59,130,246,0.2)] placeholder:text-[#4a5568] max-w-xs w-full transition-all duration-150"
           />
           <Button type="submit" variant="ghost" size="sm">
             Search
@@ -148,12 +130,12 @@ export function CustomersAdminPage() {
       {showCreateForm && (
         <form
           onSubmit={handleCreateSubmit}
-          className="mb-5 p-4 bg-[#1e2130] border border-[#2a2f45] rounded-[10px]"
+          className="mb-5 p-5 bg-[#1e2130] border border-[#2a2f45] rounded-xl"
         >
-          <div className="text-[0.63rem] font-bold text-[#718096] uppercase tracking-[0.9px] mb-3">
+          <div className="text-[0.65rem] font-bold text-[#4a5568] uppercase tracking-[1px] mb-4">
             New Customer
           </div>
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
+          <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
             <FormField
               label="Name"
               value={createForm.name}
@@ -168,10 +150,7 @@ export function CustomersAdminPage() {
               as="select"
               value={createForm.account_type}
               onChange={(e) =>
-                updateCreateForm(
-                  'account_type',
-                  (e.target as HTMLSelectElement).value as AccountType,
-                )
+                updateCreateForm('account_type', (e.target as HTMLSelectElement).value as AccountType)
               }
             >
               <option value="rcf">RCF</option>
@@ -184,10 +163,7 @@ export function CustomersAdminPage() {
               as="select"
               value={createForm.traffic_grade}
               onChange={(e) =>
-                updateCreateForm(
-                  'traffic_grade',
-                  (e.target as HTMLSelectElement).value as TrafficGrade,
-                )
+                updateCreateForm('traffic_grade', (e.target as HTMLSelectElement).value as TrafficGrade)
               }
             >
               <option value="standard">Standard</option>
@@ -200,9 +176,7 @@ export function CustomersAdminPage() {
               min="0"
               step="0.01"
               value={createForm.credit_limit}
-              onChange={(e) =>
-                updateCreateForm('credit_limit', (e.target as HTMLInputElement).value)
-              }
+              onChange={(e) => updateCreateForm('credit_limit', (e.target as HTMLInputElement).value)}
             />
             <FormField
               label="Daily Limit ($)"
@@ -210,27 +184,18 @@ export function CustomersAdminPage() {
               min="0"
               step="0.01"
               value={createForm.daily_limit}
-              onChange={(e) =>
-                updateCreateForm('daily_limit', (e.target as HTMLInputElement).value)
-              }
+              onChange={(e) => updateCreateForm('daily_limit', (e.target as HTMLInputElement).value)}
             />
             <FormField
               label="CPM Limit"
               type="number"
               min="0"
               value={createForm.cpm_limit}
-              onChange={(e) =>
-                updateCreateForm('cpm_limit', (e.target as HTMLInputElement).value)
-              }
+              onChange={(e) => updateCreateForm('cpm_limit', (e.target as HTMLInputElement).value)}
             />
           </div>
-          <div className="flex gap-2 mt-3 pt-3 border-t border-[#2a2f45]">
-            <Button
-              type="submit"
-              variant="primary"
-              size="sm"
-              loading={createMutation.isPending}
-            >
+          <div className="flex gap-2 mt-4 pt-4 border-t border-[#2a2f45]">
+            <Button type="submit" variant="primary" size="sm" loading={createMutation.isPending}>
               Create Customer
             </Button>
             <Button
@@ -250,7 +215,7 @@ export function CustomersAdminPage() {
 
       {/* Loading / error states */}
       {isLoading && (
-        <div className="flex items-center gap-2 text-[#718096] py-8">
+        <div className="flex items-center gap-2.5 text-[#718096] py-12">
           <Spinner /> Loading customers…
         </div>
       )}
@@ -280,7 +245,7 @@ export function CustomersAdminPage() {
                   <tr>
                     <td
                       colSpan={COL_COUNT}
-                      className="px-[14px] py-8 text-center text-[#718096] text-sm"
+                      className="px-4 py-12 text-center text-[#718096] text-sm"
                     >
                       No customers found.
                     </td>

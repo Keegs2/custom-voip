@@ -24,18 +24,12 @@ const CDR_TABS = [
 export function CdrsTab() {
   const { toastOk, toastErr } = useToast();
 
-  // Filter state — only committed filters drive the query
   const [draftFilters, setDraftFilters] = useState<CdrFilters>(defaultCdrFilters);
   const [committedFilters, setCommittedFilters] = useState<CdrFilters>(defaultCdrFilters);
-
-  // Pagination: accumulate records across load-more calls
   const [offset, setOffset] = useState(0);
   const [accumulatedCdrs, setAccumulatedCdrs] = useState<Cdr[]>([]);
-
-  // Inner tab: Records vs Summary
   const [activeTab, setActiveTab] = useState('records');
 
-  // Build search params from committed filters
   const searchParams = useMemo(
     () => filtersToParams(committedFilters, PAGE_SIZE, offset),
     [committedFilters, offset],
@@ -47,25 +41,18 @@ export function CdrsTab() {
       const result = await searchCdrs(searchParams);
       return result;
     },
-    // Keep previous data visible while loading the next page
     placeholderData: (prev) => prev,
   });
 
-  // Merge new page results into the accumulated list
   const allCdrs = useMemo(() => {
     if (!data) return accumulatedCdrs;
     const pageItems = data.items ?? [];
-    if (offset === 0) {
-      // Fresh search — replace everything
-      return pageItems;
-    }
-    // Load-more — append uniquely by uuid
+    if (offset === 0) return pageItems;
     const uuids = new Set(accumulatedCdrs.map((c) => c.uuid));
     const newItems = pageItems.filter((c) => !uuids.has(c.uuid));
     return [...accumulatedCdrs, ...newItems];
   }, [data, offset, accumulatedCdrs]);
 
-  // Keep accumulated list in sync when new data arrives
   const [prevOffset, setPrevOffset] = useState(0);
   if (data && offset !== prevOffset) {
     setPrevOffset(offset);
@@ -74,7 +61,6 @@ export function CdrsTab() {
     setAccumulatedCdrs(data.items ?? []);
   }
 
-  // Customer name map for the table
   const { data: customersData } = useQuery({
     queryKey: ['customers-all'],
     queryFn: () => listCustomers({ limit: 500 }),
@@ -122,23 +108,20 @@ export function CdrsTab() {
         searching={isLoading}
       />
 
-      {/* Stats bar — show after first successful search */}
       {allCdrs.length > 0 && (
         <CdrStatsBar cdrs={allCdrs} total={total} />
       )}
 
-      {/* Inner tab switcher */}
       <TabBar
         tabs={CDR_TABS}
         activeTab={activeTab}
         onTabChange={setActiveTab}
       />
 
-      {/* Records tab */}
       {activeTab === 'records' && (
         <>
           {isLoading && offset === 0 && (
-            <div className="flex items-center gap-2 text-[#718096] py-10">
+            <div className="flex items-center gap-2.5 text-[#718096] py-12">
               <Spinner /> Searching CDRs…
             </div>
           )}
@@ -163,7 +146,6 @@ export function CdrsTab() {
         </>
       )}
 
-      {/* Summary tab */}
       {activeTab === 'summary' && (
         <CdrSummaryView customerId={committedFilters.customer_id} />
       )}

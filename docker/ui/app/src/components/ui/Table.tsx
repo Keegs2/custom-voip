@@ -21,7 +21,8 @@ export function TableWrap({ children, className }: TableProps) {
   return (
     <div
       className={cn(
-        'overflow-x-auto rounded-[10px] border border-[#2a2f45]',
+        'overflow-x-auto rounded-xl border border-[#2a2f45]',
+        'shadow-[0_1px_3px_rgba(0,0,0,.3)]',
         className,
       )}
     >
@@ -33,7 +34,7 @@ export function TableWrap({ children, className }: TableProps) {
 export function Table({ children, className }: TableProps) {
   return (
     <table
-      className={cn('w-full border-collapse text-[0.88rem]', className)}
+      className={cn('w-full border-collapse text-sm', className)}
     >
       {children}
     </table>
@@ -52,8 +53,8 @@ export function Th({ children, className }: ThProps) {
   return (
     <th
       className={cn(
-        'text-left px-[14px] py-[11px] text-[0.68rem] font-bold uppercase tracking-[0.7px]',
-        'text-[#718096] whitespace-nowrap border-b border-[#2a2f45]',
+        'text-left px-4 py-3 text-[0.65rem] font-bold uppercase tracking-[0.8px]',
+        'text-[#4a5568] whitespace-nowrap border-b border-[#2a2f45]',
         className,
       )}
     >
@@ -67,8 +68,8 @@ export function Td({ children, className, colSpan }: TdProps) {
     <td
       colSpan={colSpan}
       className={cn(
-        'px-[14px] py-3 border-b border-[#2a2f45]/50 align-middle',
-        'last-of-type:border-b-0',
+        'px-4 py-3 border-b border-[#2a2f45]/50 align-middle text-sm',
+        'last:border-b-0',
         className,
       )}
     >

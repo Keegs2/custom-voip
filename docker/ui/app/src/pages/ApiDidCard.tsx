@@ -95,9 +95,9 @@ export function ApiDidCard({ did }: ApiDidCardProps) {
   return (
     <div
       className={cn(
-        'bg-[#1a1d27] border border-[#2a2f45] rounded-[14px] p-5',
-        'shadow-[0_1px_4px_rgba(0,0,0,.4),0_1px_2px_rgba(0,0,0,.3)]',
-        'transition-[border-color] duration-200 hover:border-[#363c57]',
+        'bg-[#1a1d27] border border-[#2a2f45] rounded-xl p-5',
+        'shadow-[0_1px_3px_rgba(0,0,0,.4)]',
+        'transition-all duration-200 hover:border-[#363c57]',
       )}
     >
       {/* Header: DID + status badge */}

@@ -141,7 +141,7 @@ export function CarrierCard({ carrier: initialCarrier }: CarrierCardProps) {
   }
 
   return (
-    <div className="bg-[#1a1d27] border border-[#2a2f45] rounded-[10px] p-5 hover:border-[#363c57] transition-[border-color] duration-200">
+    <div className="bg-[#1a1d27] border border-[#2a2f45] rounded-xl p-5 hover:border-[#363c57] transition-all duration-200">
       {/* Header */}
       <div className="mb-4">
         <div className="text-[1rem] font-bold text-[#e2e8f0]">

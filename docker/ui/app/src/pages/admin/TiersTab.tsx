@@ -2,71 +2,69 @@ import { useQuery } from '@tanstack/react-query';
 import { listTrunkTiers, listApiTiers } from '../../api/tiers';
 import { listCallPaths } from '../../api/trunks';
 import { Spinner } from '../../components/ui/Spinner';
+import { Badge } from '../../components/ui/Badge';
 import { TableWrap, Table, Thead, Th, Td } from '../../components/ui/Table';
 import { TierCard } from './TierCard';
 
+interface SectionCardProps {
+  title: string;
+  description: string;
+  badge?: React.ReactNode;
+  children: React.ReactNode;
+}
+
+function SectionCard({ title, description, badge, children }: SectionCardProps) {
+  return (
+    <div className="bg-[#1a1d27] border border-[#2a2f45] rounded-xl p-5 md:p-6">
+      <div className="flex items-start justify-between gap-3 mb-5 flex-wrap">
+        <div>
+          <h2 className="text-base font-bold text-[#e2e8f0]">{title}</h2>
+          <p className="text-sm text-[#718096] mt-0.5">{description}</p>
+        </div>
+        {badge && <div className="flex-shrink-0">{badge}</div>}
+      </div>
+      {children}
+    </div>
+  );
+}
+
 export function TiersTab() {
-  const {
-    data: trunkTiers,
-    isLoading: trunkLoading,
-    isError: trunkError,
-  } = useQuery({
+  const { data: trunkTiers, isLoading: trunkLoading, isError: trunkError } = useQuery({
     queryKey: ['tiers', 'trunk'],
     queryFn: listTrunkTiers,
   });
 
-  const {
-    data: apiTiers,
-    isLoading: apiLoading,
-    isError: apiError,
-  } = useQuery({
+  const { data: apiTiers, isLoading: apiLoading, isError: apiError } = useQuery({
     queryKey: ['tiers', 'api'],
     queryFn: listApiTiers,
   });
 
-  const {
-    data: callPaths,
-    isLoading: callPathsLoading,
-    isError: callPathsError,
-  } = useQuery({
+  const { data: callPaths, isLoading: callPathsLoading, isError: callPathsError } = useQuery({
     queryKey: ['trunks', 'call-paths'],
     queryFn: listCallPaths,
   });
 
-  const isLoading = trunkLoading || apiLoading;
-
   return (
-    <div className="space-y-6">
-      {/* Trunk Tiers section */}
-      <div className="bg-[#1a1d27] border border-[#2a2f45] rounded-[10px] p-[20px_22px]">
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <h2 className="text-[1rem] font-bold text-[#e2e8f0]">SIP Trunk Tiers</h2>
-            <p className="text-[0.78rem] text-[#718096] mt-0.5">
-              Standard SIP trunk access. CPS and call paths are configured independently.
-            </p>
-          </div>
-          <span className="inline-flex items-center text-[0.68rem] font-bold px-[9px] py-[2px] rounded-full tracking-[0.5px] uppercase bg-amber-500/[0.10] text-amber-300 border border-amber-500/30">
-            5 CPS Standard
-          </span>
-        </div>
-
-        {isLoading && (
-          <div className="flex items-center gap-2 text-[#718096] py-6">
+    <div className="space-y-5">
+      {/* Trunk Tiers */}
+      <SectionCard
+        title="SIP Trunk Tiers"
+        description="Standard SIP trunk access. CPS and call paths are configured independently."
+        badge={<Badge variant="warn">5 CPS Standard</Badge>}
+      >
+        {trunkLoading && (
+          <div className="flex items-center gap-2.5 text-[#718096] py-6">
             <Spinner /> Loading tiers…
           </div>
         )}
-
         {trunkError && (
           <p className="text-red-400 text-sm py-4">Failed to load trunk tiers.</p>
         )}
-
         {!trunkLoading && !trunkError && (
           <>
             {(trunkTiers?.length ?? 0) === 0 ? (
               <p className="text-[#718096] text-sm py-4">No trunk tiers configured.</p>
             ) : trunkTiers!.length === 1 ? (
-              /* Single trunk tier: full-width card */
               <div className="grid grid-cols-1">
                 <TierCard tier={trunkTiers![0]} tierType="trunk" fullWidth />
               </div>
@@ -79,32 +77,22 @@ export function TiersTab() {
             )}
           </>
         )}
-      </div>
+      </SectionCard>
 
-      {/* API Calling Tiers section */}
-      <div className="bg-[#1a1d27] border border-[#2a2f45] rounded-[10px] p-[20px_22px]">
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <h2 className="text-[1rem] font-bold text-[#e2e8f0]">API Calling Tiers</h2>
-            <p className="text-[0.78rem] text-[#718096] mt-0.5">
-              Higher CPS limits with per-call billing for programmatic call control.
-            </p>
-          </div>
-          <span className="inline-flex items-center text-[0.68rem] font-bold px-[9px] py-[2px] rounded-full tracking-[0.5px] uppercase bg-green-500/[0.12] text-green-400 border border-green-500/25">
-            Up to 15 CPS
-          </span>
-        </div>
-
+      {/* API Calling Tiers */}
+      <SectionCard
+        title="API Calling Tiers"
+        description="Higher CPS limits with per-call billing for programmatic call control."
+        badge={<Badge variant="active">Up to 15 CPS</Badge>}
+      >
         {apiLoading && (
-          <div className="flex items-center gap-2 text-[#718096] py-6">
+          <div className="flex items-center gap-2.5 text-[#718096] py-6">
             <Spinner /> Loading tiers…
           </div>
         )}
-
         {apiError && (
           <p className="text-red-400 text-sm py-4">Failed to load API tiers.</p>
         )}
-
         {!apiLoading && !apiError && (
           <>
             {(apiTiers?.length ?? 0) === 0 ? (
@@ -118,28 +106,21 @@ export function TiersTab() {
             )}
           </>
         )}
-      </div>
+      </SectionCard>
 
-      {/* Call Path Packages section */}
-      <div className="bg-[#1a1d27] border border-[#2a2f45] rounded-[10px] p-[20px_22px]">
-        <div className="mb-4">
-          <h2 className="text-[1rem] font-bold text-[#e2e8f0]">Call Path Packages</h2>
-          <p className="text-[0.78rem] text-[#718096] mt-0.5">
-            Call paths are purchased per-trunk and control concurrent call capacity.
-            CPS and call paths are independent.
-          </p>
-        </div>
-
+      {/* Call Path Packages */}
+      <SectionCard
+        title="Call Path Packages"
+        description="Call paths are purchased per-trunk and control concurrent call capacity. CPS and call paths are independent."
+      >
         {callPathsLoading && (
-          <div className="flex items-center gap-2 text-[#718096] py-6">
+          <div className="flex items-center gap-2.5 text-[#718096] py-6">
             <Spinner /> Loading packages…
           </div>
         )}
-
         {callPathsError && (
           <p className="text-red-400 text-sm py-4">Failed to load call path packages.</p>
         )}
-
         {!callPathsLoading && !callPathsError && (
           <>
             {(callPaths?.length ?? 0) === 0 ? (
@@ -162,14 +143,12 @@ export function TiersTab() {
                             {p.name || '--'}
                           </span>
                           {p.description && (
-                            <span className="text-[#718096] text-[0.78rem] ml-2">
+                            <span className="text-[#718096] text-xs ml-2">
                               {p.description}
                             </span>
                           )}
                         </Td>
-                        <Td className="tabular-nums">
-                          {p.call_paths ?? p.paths ?? '--'}
-                        </Td>
+                        <Td className="tabular-nums">{p.call_paths ?? p.paths ?? '--'}</Td>
                         <Td className="tabular-nums">
                           {p.monthly_fee != null
                             ? `$${Number(p.monthly_fee).toFixed(2)}/mo`
@@ -183,7 +162,7 @@ export function TiersTab() {
             )}
           </>
         )}
-      </div>
+      </SectionCard>
     </div>
   );
 }

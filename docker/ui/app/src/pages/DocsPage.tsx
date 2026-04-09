@@ -12,8 +12,7 @@ export function DocsPage() {
   return (
     <div className="flex flex-col h-full">
       <PageHeader
-        title="API"
-        titleAccent="Documentation"
+        title={<>API <span className="text-[#3b82f6]">Documentation</span></>}
         subtitle="Interactive REST API reference — explore and test all platform endpoints"
         actions={
           <div className="flex items-center gap-1 bg-[#1e2130] border border-[#2a2f45] rounded-lg p-1">
@@ -32,7 +31,7 @@ export function DocsPage() {
       />
 
       {/* Full-height iframe */}
-      <div className="flex-1 rounded-[10px] border border-[#2a2f45] overflow-hidden">
+      <div className="flex-1 rounded-xl border border-[#2a2f45] overflow-hidden">
         <iframe
           key={activeView}
           src={iframeSrc}

@@ -29,7 +29,7 @@ export function SippCustomForm({ isRunning, onRun }: SippCustomFormProps) {
   }
 
   return (
-    <div className="border border-[#2a2f45] rounded-[10px] overflow-hidden">
+    <div className="border border-[#2a2f45] rounded-xl overflow-hidden">
       {/* Collapsible header */}
       <button
         type="button"

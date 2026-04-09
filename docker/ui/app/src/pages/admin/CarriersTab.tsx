@@ -16,18 +16,11 @@ export function CarriersTab() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [testingAll, setTestingAll] = useState(false);
 
-  const {
-    data: carriers,
-    isLoading,
-    isError,
-  } = useQuery({
+  const { data: carriers, isLoading, isError } = useQuery({
     queryKey: ['carriers'],
     queryFn: listCarriers,
   });
 
-  // ----------------------------------------------------------------
-  // Create carrier
-  // ----------------------------------------------------------------
   const createMutation = useMutation({
     mutationFn: (data: CarrierCreate) => createCarrier(data),
     onSuccess: () => {
@@ -40,9 +33,6 @@ export function CarriersTab() {
     },
   });
 
-  // ----------------------------------------------------------------
-  // Test all enabled carriers
-  // ----------------------------------------------------------------
   const handleTestAll = useCallback(async () => {
     const enabled = (carriers ?? []).filter((c) => c.enabled);
     if (enabled.length === 0) {
@@ -60,55 +50,43 @@ export function CarriersTab() {
 
   return (
     <div>
-      {/* Header row */}
-      <div className="flex items-center justify-between gap-3 mb-6">
+      {/* Section header */}
+      <div className="flex items-center justify-between gap-4 mb-6 flex-wrap">
         <div>
-          <h2 className="text-[1rem] font-bold text-[#e2e8f0]">Carrier Gateways</h2>
-          <p className="text-[0.78rem] text-[#718096] mt-0.5">
+          <h2 className="text-base font-bold text-[#e2e8f0]">Carrier Gateways</h2>
+          <p className="text-sm text-[#718096] mt-0.5">
             Configure SIP trunk connections to upstream carriers
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button
-            variant="ghost"
-            size="sm"
-            loading={testingAll}
-            onClick={handleTestAll}
-          >
+          <Button variant="ghost" size="sm" loading={testingAll} onClick={handleTestAll}>
             Test All
           </Button>
-          <Button
-            size="sm"
-            onClick={() => setShowAddModal(true)}
-          >
+          <Button size="sm" onClick={() => setShowAddModal(true)}>
             + Add Carrier
           </Button>
         </div>
       </div>
 
-      {/* Loading */}
       {isLoading && (
-        <div className="flex items-center gap-2 text-[#718096] py-10">
+        <div className="flex items-center gap-2.5 text-[#718096] py-12">
           <Spinner /> Loading carriers…
         </div>
       )}
 
-      {/* Error */}
       {isError && (
         <p className="text-red-400 text-sm py-4">
           Failed to load carriers. Please try again.
         </p>
       )}
 
-      {/* Empty */}
       {!isLoading && !isError && (carriers?.length ?? 0) === 0 && (
-        <div className="text-center py-16 text-[#718096]">
-          <p className="font-semibold mb-1">No carriers configured</p>
-          <p className="text-[0.82rem]">Add your first carrier connection to get started.</p>
+        <div className="flex flex-col items-center justify-center text-center py-16 gap-1 text-[#718096]">
+          <p className="font-semibold text-sm">No carriers configured</p>
+          <p className="text-xs text-[#4a5568]">Add your first carrier connection to get started.</p>
         </div>
       )}
 
-      {/* Carrier cards grid */}
       {!isLoading && !isError && (carriers?.length ?? 0) > 0 && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
           {carriers!.map((carrier) => (
@@ -117,7 +95,6 @@ export function CarriersTab() {
         </div>
       )}
 
-      {/* Add carrier modal */}
       <Modal
         open={showAddModal}
         onClose={() => setShowAddModal(false)}

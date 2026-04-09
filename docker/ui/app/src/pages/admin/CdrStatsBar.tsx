@@ -23,11 +23,11 @@ interface StatPillProps {
 
 function StatPill({ label, value, valueClass }: StatPillProps) {
   return (
-    <div className="flex flex-col items-center bg-[#1e2130] border border-[#2a2f45] rounded-lg px-4 py-3 min-w-[100px]">
-      <span className="text-[0.65rem] font-bold uppercase tracking-[0.7px] text-[#718096] mb-1 whitespace-nowrap">
+    <div className="flex flex-col items-center bg-[#1e2130] border border-[#2a2f45] rounded-xl px-4 py-3 min-w-[100px]">
+      <span className="text-[0.62rem] font-bold uppercase tracking-[0.8px] text-[#4a5568] mb-1.5 whitespace-nowrap">
         {label}
       </span>
-      <span className={cn('text-[1.05rem] font-bold tabular-nums leading-none', valueClass ?? 'text-[#e2e8f0]')}>
+      <span className={cn('text-base font-bold tabular-nums leading-none', valueClass ?? 'text-[#e2e8f0]')}>
         {value}
       </span>
     </div>
@@ -71,7 +71,7 @@ export function CdrStatsBar({ cdrs, total }: CdrStatsBarProps) {
           : 'text-red-400';
 
   return (
-    <div className="flex flex-wrap gap-2 mb-5">
+    <div className="flex flex-wrap gap-2.5 mb-5">
       <StatPill label="Total Calls" value={total.toLocaleString()} />
       <StatPill label="Answered" value={stats.answered.toLocaleString()} />
       <StatPill label="ASR" value={`${stats.asr.toFixed(1)}%`} valueClass={asrClass} />

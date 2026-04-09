@@ -13,7 +13,7 @@ const controlBase = [
   'placeholder:text-[#718096]',
 ].join(' ');
 
-const labelClass = 'text-[0.68rem] font-bold text-[#718096] uppercase tracking-[0.7px]';
+const labelClass = 'text-[0.65rem] font-bold text-[#4a5568] uppercase tracking-[0.8px]';
 
 interface FormState {
   prefix: string;
@@ -104,7 +104,7 @@ export function RatesAddForm() {
       </Button>
 
       {isOpen && (
-        <div className="mt-4 bg-[#1a1d27] border border-[#2a2f45] rounded-[10px] p-5">
+        <div className="mt-4 bg-[#1a1d27] border border-[#2a2f45] rounded-xl p-5">
           <h3 className="text-[0.88rem] font-bold text-[#e2e8f0] mb-4">New Rate</h3>
 
           <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">

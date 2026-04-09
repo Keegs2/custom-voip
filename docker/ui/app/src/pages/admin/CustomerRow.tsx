@@ -50,10 +50,10 @@ export function CustomerRow({
         ].join(' ')}
         onClick={() => onToggleExpand(customer.id)}
       >
-        <td className="px-[14px] py-3 border-b border-[#2a2f45]/50 align-middle">
+        <td className="px-4 py-3 border-b border-[#2a2f45]/50 align-middle text-sm">
           <span className="text-[#718096] font-mono text-xs">#{customer.id}</span>
         </td>
-        <td className="px-[14px] py-3 border-b border-[#2a2f45]/50 align-middle">
+        <td className="px-4 py-3 border-b border-[#2a2f45]/50 align-middle text-sm">
           <div className="flex items-center gap-2">
             <span
               className={[
@@ -64,21 +64,21 @@ export function CustomerRow({
             <span className="text-[#e2e8f0] font-medium">{customer.name}</span>
           </div>
         </td>
-        <td className="px-[14px] py-3 border-b border-[#2a2f45]/50 align-middle">
+        <td className="px-4 py-3 border-b border-[#2a2f45]/50 align-middle text-sm">
           {accountTypeBadge(customer.account_type)}
         </td>
-        <td className="px-[14px] py-3 border-b border-[#2a2f45]/50 align-middle">
+        <td className="px-4 py-3 border-b border-[#2a2f45]/50 align-middle text-sm">
           <span className={customer.balance < 0 ? 'text-red-400' : 'text-[#e2e8f0]'}>
             ${customer.balance.toFixed(2)}
           </span>
         </td>
-        <td className="px-[14px] py-3 border-b border-[#2a2f45]/50 align-middle">
+        <td className="px-4 py-3 border-b border-[#2a2f45]/50 align-middle text-sm">
           {statusBadge(customer.status)}
         </td>
-        <td className="px-[14px] py-3 border-b border-[#2a2f45]/50 align-middle">
+        <td className="px-4 py-3 border-b border-[#2a2f45]/50 align-middle text-sm">
           {gradeBadge(customer.traffic_grade)}
         </td>
-        <td className="px-[14px] py-3 border-b border-[#2a2f45]/50 align-middle text-[#718096] text-[0.82rem]">
+        <td className="px-4 py-3 border-b border-[#2a2f45]/50 align-middle text-sm text-[#718096] text-[0.82rem]">
           {customer.created_at
             ? new Date(customer.created_at).toLocaleDateString()
             : '--'}
