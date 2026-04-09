@@ -38,9 +38,9 @@ local function load_module(name)
     return result
 end
 
-freeswitch.consoleLog("ERR", ">>> Loading redis_client <<<\n")
-local redis = load_module("redis_client")
-freeswitch.consoleLog("ERR", ">>> redis=" .. tostring(redis ~= nil) .. " Loading db_client <<<\n")
+-- Redis disabled temporarily — connection fails inside mod_lua
+local redis = nil
+freeswitch.consoleLog("ERR", ">>> redis=SKIPPED Loading db_client <<<\n")
 local db = load_module("db_client")
 freeswitch.consoleLog("ERR", ">>> db=" .. tostring(db ~= nil) .. " Modules loaded <<<\n")
 
@@ -347,7 +347,9 @@ end
 -- ============================================
 -- STEP 3: Velocity/Rate Limiting
 -- ============================================
-if redis and customer_id then
+-- TEMPORARILY DISABLED: Redis velocity check — Redis unreachable from mod_lua
+-- Will re-enable once Redis connectivity is fixed
+if false then -- redis and customer_id
     -- Wrap entire velocity check in pcall to guarantee fail-open behavior.
     -- If Redis is unreachable or any error occurs, the call MUST proceed.
     -- Only a definitive velocity limit breach (CPM_EXCEEDED, DAILY_LIMIT_EXCEEDED)
