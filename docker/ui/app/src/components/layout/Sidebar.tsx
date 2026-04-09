@@ -420,6 +420,75 @@ export function Sidebar() {
             )}
           </NavLink>
 
+          <NavLink
+            to="/troubleshooting"
+            onClick={closeMobile}
+            className="block no-underline"
+            style={({ isActive }) => ({
+              display: 'flex',
+              alignItems: 'center',
+              gap: 10,
+              padding: '9px 14px',
+              borderRadius: 10,
+              fontSize: '0.875rem',
+              fontWeight: isActive ? 600 : 500,
+              letterSpacing: '-0.01em',
+              cursor: 'pointer',
+              userSelect: 'none',
+              transition: 'background 0.15s, color 0.15s, box-shadow 0.15s',
+              textDecoration: 'none',
+              marginTop: 4,
+              color: isActive ? '#f1f5f9' : '#64748b',
+              background: isActive
+                ? 'linear-gradient(135deg, rgba(245,158,11,0.18) 0%, rgba(245,158,11,0.08) 100%)'
+                : 'transparent',
+              boxShadow: isActive
+                ? '0 0 0 1px rgba(245,158,11,0.30), 0 2px 12px -4px rgba(245,158,11,0.30)'
+                : 'none',
+            })}
+          >
+            {({ isActive }) => (
+              <>
+                <span
+                  style={{
+                    width: 30,
+                    height: 30,
+                    borderRadius: 8,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    flexShrink: 0,
+                    background: isActive
+                      ? 'linear-gradient(135deg, rgba(245,158,11,0.30) 0%, rgba(245,158,11,0.18) 100%)'
+                      : 'rgba(255,255,255,0.04)',
+                    border: isActive
+                      ? '1px solid rgba(245,158,11,0.40)'
+                      : '1px solid rgba(255,255,255,0.06)',
+                    color: isActive ? '#fbbf24' : '#475569',
+                    transition: 'background 0.15s, border-color 0.15s, color 0.15s',
+                  }}
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} style={{ width: 18, height: 18 }}>
+                    <path d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </span>
+                <span style={{ flex: 1 }}>Troubleshooting</span>
+                {isActive && (
+                  <span
+                    style={{
+                      width: 5,
+                      height: 5,
+                      borderRadius: '50%',
+                      background: '#f59e0b',
+                      flexShrink: 0,
+                      boxShadow: '0 0 6px #f59e0b',
+                    }}
+                  />
+                )}
+              </>
+            )}
+          </NavLink>
+
           <div
             style={{
               padding: '10px 14px 0',

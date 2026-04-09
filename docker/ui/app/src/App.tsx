@@ -6,6 +6,7 @@ import { ApiDidsPage } from './pages/ApiDidsPage';
 import { TrunksPage } from './pages/TrunksPage';
 import { IvrBuilderPage } from './pages/IvrBuilderPage';
 import { DocsPage } from './pages/DocsPage';
+import { TroubleshootingPage } from './pages/TroubleshootingPage';
 import { AdminPage } from './pages/admin/AdminPage';
 import { CustomersAdminPage } from './pages/admin/CustomersAdminPage';
 import { CdrsAdminPage } from './pages/admin/CdrsAdminPage';
@@ -26,6 +27,7 @@ export function App() {
           <Route path="api-dids" element={<ApiDidsPage />} />
           <Route path="trunks"   element={<TrunksPage />} />
           <Route path="docs"     element={<DocsPage />} />
+          <Route path="troubleshooting" element={<TroubleshootingPage />} />
 
           {/* Admin nested routes */}
           <Route path="admin" element={<AdminPage />}>
