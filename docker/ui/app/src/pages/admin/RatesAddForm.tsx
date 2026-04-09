@@ -104,7 +104,16 @@ export function RatesAddForm() {
       </Button>
 
       {isOpen && (
-        <div className="mt-4 bg-[#1a1d27] border border-[#2a2f45] rounded-xl p-5">
+        <div
+          style={{
+            marginTop: 16,
+            background: 'linear-gradient(135deg, rgba(30,33,48,0.9) 0%, rgba(19,21,29,0.95) 100%)',
+            border: '1px solid rgba(42,47,69,0.6)',
+            borderRadius: 16,
+            padding: '24px',
+            boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
+          }}
+        >
           <h3 className="text-[0.88rem] font-bold text-[#e2e8f0] mb-4">New Rate</h3>
 
           <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">

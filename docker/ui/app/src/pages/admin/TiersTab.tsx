@@ -15,13 +15,42 @@ interface SectionCardProps {
 
 function SectionCard({ title, description, badge, children }: SectionCardProps) {
   return (
-    <div className="bg-[#1a1d27] border border-[#2a2f45] rounded-xl p-5 md:p-6">
-      <div className="flex items-start justify-between gap-3 mb-5 flex-wrap">
+    <div
+      style={{
+        background: 'linear-gradient(135deg, rgba(30,33,48,0.9) 0%, rgba(19,21,29,0.95) 100%)',
+        border: '1px solid rgba(42,47,69,0.6)',
+        borderRadius: 16,
+        padding: '24px',
+        boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'flex-start',
+          justifyContent: 'space-between',
+          gap: 12,
+          marginBottom: 24,
+          flexWrap: 'wrap',
+        }}
+      >
         <div>
-          <h2 className="text-base font-bold text-[#e2e8f0]">{title}</h2>
-          <p className="text-sm text-[#718096] mt-0.5">{description}</p>
+          <h2
+            style={{
+              fontSize: '1rem',
+              fontWeight: 700,
+              color: '#e2e8f0',
+              margin: 0,
+              letterSpacing: '-0.01em',
+            }}
+          >
+            {title}
+          </h2>
+          <p style={{ fontSize: '0.875rem', color: '#718096', marginTop: 4, lineHeight: 1.5 }}>
+            {description}
+          </p>
         </div>
-        {badge && <div className="flex-shrink-0">{badge}</div>}
+        {badge && <div style={{ flexShrink: 0 }}>{badge}</div>}
       </div>
       {children}
     </div>
@@ -45,7 +74,7 @@ export function TiersTab() {
   });
 
   return (
-    <div className="space-y-5">
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       {/* Trunk Tiers */}
       <SectionCard
         title="SIP Trunk Tiers"

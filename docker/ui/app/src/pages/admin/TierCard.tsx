@@ -60,6 +60,21 @@ const MAX_CPS: Record<string, number> = {
   api: 15,
 };
 
+// Accent colors per tier type
+const TIER_ACCENTS: Record<string, { color: string; bar: string }> = {
+  trunk: { color: '#f59e0b', bar: '#f59e0b' },
+  api_standard: { color: '#3b82f6', bar: '#3b82f6' },
+  api_premium: { color: '#a855f7', bar: '#a855f7' },
+  api_default: { color: '#8b5cf6', bar: '#8b5cf6' },
+};
+
+function getTierAccent(tierType: TierType, tierName: string): { color: string; bar: string } {
+  if (tierType === 'trunk') return TIER_ACCENTS['trunk'];
+  if (tierName.includes('standard')) return TIER_ACCENTS['api_standard'];
+  if (tierName.includes('premium')) return TIER_ACCENTS['api_premium'];
+  return TIER_ACCENTS['api_default'];
+}
+
 export function TierCard({ tier, tierType, fullWidth = false }: TierCardProps) {
   const maxCps = MAX_CPS[tierType] ?? 15;
   const fillPct = Math.min(100, Math.round((tier.cps_limit / maxCps) * 100));
@@ -72,64 +87,112 @@ export function TierCard({ tier, tierType, fullWidth = false }: TierCardProps) {
   const monthlyFeeLabel =
     tier.monthly_fee === 0 ? 'Free' : `$${Number(tier.monthly_fee).toFixed(2)}/mo`;
 
-  // Accent colour by type
-  const nameColorClass =
-    tierType === 'trunk'
-      ? 'text-amber-300'
-      : tier.name.includes('premium')
-        ? 'text-blue-300'
-        : tier.name.includes('basic')
-          ? 'text-slate-300'
-          : 'text-violet-300';
-
-  const barColorClass =
-    tierType === 'trunk'
-      ? 'bg-amber-400'
-      : isApiStandard
-        ? 'bg-blue-400'
-        : 'bg-violet-400';
+  const accent = getTierAccent(tierType, tier.name);
 
   return (
     <div
-      className={cn(
-        'bg-[#1e2130] border border-[#2a2f45] rounded-xl p-5',
-        'flex flex-col gap-4',
-        'transition-all duration-200 hover:border-[#363c57]',
-        isApiStandard && 'border-blue-500/30 shadow-[0_0_16px_rgba(59,130,246,0.08)]',
-        fullWidth && 'col-span-full',
-      )}
+      style={{
+        background: 'linear-gradient(135deg, rgba(30,33,48,0.9) 0%, rgba(19,21,29,0.95) 100%)',
+        border: `1px solid ${isApiStandard ? 'rgba(59,130,246,0.35)' : 'rgba(42,47,69,0.6)'}`,
+        borderRadius: 16,
+        padding: '24px',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 20,
+        boxShadow: isApiStandard
+          ? '0 0 20px rgba(59,130,246,0.1), 0 4px 20px rgba(0,0,0,0.3)'
+          : '0 4px 20px rgba(0,0,0,0.3)',
+        transition: 'border-color 0.3s, box-shadow 0.3s',
+        position: 'relative',
+        overflow: 'hidden',
+      }}
+      className={cn(fullWidth && 'col-span-full')}
+      onMouseEnter={(e) => {
+        (e.currentTarget as HTMLDivElement).style.borderColor = `${accent.color}40`;
+        (e.currentTarget as HTMLDivElement).style.boxShadow = `0 0 0 1px ${accent.color}20, 0 8px 30px rgba(0,0,0,0.4)`;
+      }}
+      onMouseLeave={(e) => {
+        (e.currentTarget as HTMLDivElement).style.borderColor = isApiStandard
+          ? 'rgba(59,130,246,0.35)'
+          : 'rgba(42,47,69,0.6)';
+        (e.currentTarget as HTMLDivElement).style.boxShadow = isApiStandard
+          ? '0 0 20px rgba(59,130,246,0.1), 0 4px 20px rgba(0,0,0,0.3)'
+          : '0 4px 20px rgba(0,0,0,0.3)';
+      }}
     >
+      {/* Top accent line */}
+      <div
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 32,
+          right: 32,
+          height: 2,
+          background: `linear-gradient(90deg, transparent, ${accent.color}80, transparent)`,
+          opacity: 0.5,
+        }}
+      />
+
       {/* Name */}
       <div>
-        <div className={cn('text-[1.05rem] font-bold', nameColorClass)}>
+        <div
+          style={{
+            fontSize: '1.05rem',
+            fontWeight: 700,
+            color: accent.color,
+            letterSpacing: '-0.01em',
+          }}
+        >
           {displayName(tier.name)}
         </div>
         {tier.description && (
-          <p className="text-[0.78rem] text-[#718096] mt-1">{tier.description}</p>
+          <p style={{ fontSize: '0.78rem', color: '#718096', marginTop: 6, lineHeight: 1.5 }}>
+            {tier.description}
+          </p>
         )}
       </div>
 
       {/* CPS + progress bar */}
       <div>
-        <div className="flex items-baseline gap-1 mb-2">
-          <span className="text-[1.8rem] font-extrabold text-[#e2e8f0] tabular-nums leading-none">
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 4, marginBottom: 10 }}>
+          <span
+            style={{
+              fontSize: '1.8rem',
+              fontWeight: 800,
+              color: '#e2e8f0',
+              fontVariantNumeric: 'tabular-nums',
+              lineHeight: 1,
+            }}
+          >
             {tier.cps_limit}
           </span>
-          <span className="text-[0.78rem] font-semibold text-[#718096]">CPS</span>
+          <span style={{ fontSize: '0.78rem', fontWeight: 600, color: '#718096' }}>CPS</span>
         </div>
-        <div className="h-1.5 rounded-full bg-[#2a2f45] overflow-hidden">
+        <div
+          style={{
+            height: 6,
+            borderRadius: 4,
+            background: 'rgba(42,47,69,0.8)',
+            overflow: 'hidden',
+          }}
+        >
           <div
-            className={cn('h-full rounded-full transition-all duration-500', barColorClass)}
-            style={{ width: `${fillPct}%` }}
+            style={{
+              height: '100%',
+              width: `${fillPct}%`,
+              borderRadius: 4,
+              backgroundColor: accent.bar,
+              transition: 'width 0.5s ease',
+            }}
           />
         </div>
       </div>
 
       {/* Pricing */}
-      <div className="text-[0.9rem] font-semibold text-[#e2e8f0]">
+      <div style={{ fontSize: '0.9rem', fontWeight: 600, color: '#e2e8f0' }}>
         {monthlyFeeLabel}
         {!isNaN(perCallFee) && perCallFee > 0 && (
-          <span className="text-[#718096] font-normal ml-1">
+          <span style={{ color: '#718096', fontWeight: 400, marginLeft: 6 }}>
             &middot; ${perCallFee.toFixed(4)}/call
           </span>
         )}
@@ -137,13 +200,19 @@ export function TierCard({ tier, tierType, fullWidth = false }: TierCardProps) {
 
       {/* Features */}
       {featureItems.length > 0 && (
-        <ul className="space-y-1">
+        <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
           {featureItems.map((item) => (
             <li
               key={item}
-              className="flex items-start gap-1.5 text-[0.8rem] text-[#a0aec0]"
+              style={{
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: 8,
+                fontSize: '0.8rem',
+                color: '#a0aec0',
+              }}
             >
-              <span className="text-[#3b82f6] mt-0.5 flex-shrink-0">&#x2713;</span>
+              <span style={{ color: '#3b82f6', marginTop: 2, flexShrink: 0 }}>&#x2713;</span>
               {item}
             </li>
           ))}
@@ -152,7 +221,15 @@ export function TierCard({ tier, tierType, fullWidth = false }: TierCardProps) {
 
       {/* Trunk upgrade note */}
       {isTrunkMaxed && (
-        <p className="text-[0.73rem] text-[#718096] border-t border-[#2a2f45] pt-3 mt-auto">
+        <p
+          style={{
+            fontSize: '0.73rem',
+            color: '#718096',
+            borderTop: '1px solid rgba(42,47,69,0.6)',
+            paddingTop: 12,
+            marginTop: 'auto',
+          }}
+        >
           Trunk CPS is fixed at 5. Purchase additional call paths for more concurrent capacity.
         </p>
       )}

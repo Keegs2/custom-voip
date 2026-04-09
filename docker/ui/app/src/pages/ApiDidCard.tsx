@@ -6,7 +6,6 @@ import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { useToast } from '../components/ui/Toast';
 import { fmt } from '../utils/format';
-import { cn } from '../utils/cn';
 
 interface ApiDidCardProps {
   did: ApiDid;
@@ -92,25 +91,71 @@ export function ApiDidCard({ did }: ApiDidCardProps) {
     callbackMutation.mutate(callbackField.value.trim());
   }, [callbackField.value, callbackMutation]);
 
+  const accent = '#a855f7';
+
   return (
     <div
-      className={cn(
-        'bg-[#1a1d27] border border-[#2a2f45] rounded-xl p-5',
-        'shadow-[0_1px_3px_rgba(0,0,0,.4)]',
-        'transition-all duration-200 hover:border-[#363c57]',
-      )}
+      style={{
+        background: 'linear-gradient(135deg, rgba(30,33,48,0.9) 0%, rgba(19,21,29,0.95) 100%)',
+        border: '1px solid rgba(42,47,69,0.6)',
+        borderRadius: 16,
+        padding: '24px',
+        boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
+        transition: 'border-color 0.3s, box-shadow 0.3s',
+        position: 'relative',
+        overflow: 'hidden',
+      }}
     >
+      {/* Top accent line */}
+      <div
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 32,
+          right: 32,
+          height: 2,
+          background: `linear-gradient(90deg, transparent, ${accent}80, transparent)`,
+          opacity: 0.35,
+        }}
+      />
+
       {/* Header: DID + status badge */}
-      <div className="flex items-start justify-between gap-3 mb-4">
-        <div className="min-w-0">
-          <div className="text-[1.2rem] font-bold text-[#e2e8f0] leading-snug truncate">
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'flex-start',
+          justifyContent: 'space-between',
+          gap: 12,
+          marginBottom: 20,
+        }}
+      >
+        <div style={{ minWidth: 0 }}>
+          <div
+            style={{
+              fontSize: '1.2rem',
+              fontWeight: 700,
+              color: '#e2e8f0',
+              lineHeight: 1.3,
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              letterSpacing: '-0.01em',
+            }}
+          >
             {fmt(did.did)}
           </div>
-          <div className="text-[0.72rem] font-mono text-[#718096] mt-0.5">
+          <div
+            style={{
+              fontSize: '0.72rem',
+              fontFamily: 'monospace',
+              color: '#718096',
+              marginTop: 3,
+            }}
+          >
             {did.did}
           </div>
         </div>
-        <div className="flex-shrink-0 mt-0.5">
+        <div style={{ flexShrink: 0, marginTop: 2 }}>
           <Badge variant={did.enabled ? 'active' : 'disabled'}>
             {did.enabled ? 'Active' : 'Disabled'}
           </Badge>
@@ -132,7 +177,13 @@ export function ApiDidCard({ did }: ApiDidCardProps) {
       />
 
       {/* Status Callback URL field */}
-      <div className="mt-3.5 pt-3.5 border-t border-[#2a2f45]">
+      <div
+        style={{
+          marginTop: 16,
+          paddingTop: 16,
+          borderTop: '1px solid rgba(42,47,69,0.5)',
+        }}
+      >
         <UrlField
           id={`apidid-cb-${did.id}`}
           label="Status Callback URL"
@@ -186,11 +237,28 @@ function UrlField({
     <div>
       <label
         htmlFor={id}
-        className="block text-[0.7rem] font-bold text-[#718096] uppercase tracking-[0.7px] mb-1.5"
+        style={{
+          display: 'block',
+          fontSize: '0.7rem',
+          fontWeight: 700,
+          color: '#718096',
+          textTransform: 'uppercase',
+          letterSpacing: '0.07em',
+          marginBottom: 8,
+        }}
       >
         {label}
         {labelSuffix && (
-          <span className="ml-1.5 text-[#718096]/70 normal-case font-normal tracking-normal text-[0.68rem]">
+          <span
+            style={{
+              marginLeft: 6,
+              color: 'rgba(113,128,150,0.7)',
+              fontWeight: 400,
+              textTransform: 'none',
+              letterSpacing: 'normal',
+              fontSize: '0.68rem',
+            }}
+          >
             ({labelSuffix})
           </span>
         )}
@@ -205,19 +273,30 @@ function UrlField({
           disabled={isSaving}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={handleKeyDown}
-          className={cn(
-            'flex-1 min-w-0',
-            'text-[0.88rem] px-3 py-[8px] rounded-lg',
-            'border bg-[#1e2130] text-[#e2e8f0]',
-            'outline-none transition-[border-color,box-shadow] duration-150',
-            'placeholder:text-[#718096] placeholder:text-[0.82rem]',
-            'disabled:opacity-50 disabled:cursor-not-allowed',
-            savedFlash
-              ? 'border-[#22c55e] shadow-[0_0_0_3px_rgba(34,197,94,0.2)]'
+          style={{
+            flex: 1,
+            minWidth: 0,
+            fontSize: '0.88rem',
+            padding: '8px 12px',
+            borderRadius: 8,
+            border: `1px solid ${
+              savedFlash
+                ? '#22c55e'
+                : isDirty
+                ? '#3b82f6'
+                : 'rgba(42,47,69,0.8)'
+            }`,
+            background: 'rgba(19,21,29,0.8)',
+            color: '#e2e8f0',
+            outline: 'none',
+            transition: 'border-color 0.15s, box-shadow 0.15s',
+            boxShadow: savedFlash
+              ? '0 0 0 3px rgba(34,197,94,0.2)'
               : isDirty
-              ? 'border-[#3b82f6] shadow-[0_0_0_3px_rgba(59,130,246,0.2)]'
-              : 'border-[#2a2f45] focus:border-[#3b82f6] focus:shadow-[0_0_0_3px_rgba(59,130,246,0.28)]',
-          )}
+              ? '0 0 0 3px rgba(59,130,246,0.2)'
+              : 'none',
+            opacity: isSaving ? 0.5 : 1,
+          }}
         />
 
         <Button
@@ -231,13 +310,29 @@ function UrlField({
         </Button>
       </div>
 
-      <div className="mt-1.5 flex items-center gap-1.5 text-[0.72rem] text-[#718096]">
+      <div
+        style={{
+          marginTop: 8,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          fontSize: '0.72rem',
+          color: '#718096',
+        }}
+      >
         <span
-          className={cn(
-            'inline-flex items-center justify-center',
-            'w-3.5 h-3.5 rounded-full border border-[#718096]/50',
-            'text-[0.55rem] font-bold flex-shrink-0',
-          )}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: 14,
+            height: 14,
+            borderRadius: '50%',
+            border: '1px solid rgba(113,128,150,0.5)',
+            fontSize: '0.55rem',
+            fontWeight: 700,
+            flexShrink: 0,
+          }}
         >
           i
         </span>

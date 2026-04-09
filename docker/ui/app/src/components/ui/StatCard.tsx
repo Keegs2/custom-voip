@@ -1,5 +1,3 @@
-import { cn } from '../../utils/cn';
-
 interface StatCardProps {
   label: string;
   value: React.ReactNode;
@@ -11,22 +9,63 @@ interface StatCardProps {
 export function StatCard({ label, value, icon, className }: StatCardProps) {
   return (
     <div
-      className={cn(
-        'relative bg-[#1a1d27] border border-[#2a2f45] rounded-xl p-5 overflow-hidden',
-        'shadow-[0_1px_3px_rgba(0,0,0,.4)]',
-        'transition-[border-color] duration-200 hover:border-[#363c57]',
-        className,
-      )}
+      className={className}
+      style={{
+        position: 'relative',
+        background: 'linear-gradient(135deg, rgba(30,33,48,0.9) 0%, rgba(19,21,29,0.95) 100%)',
+        border: '1px solid rgba(42,47,69,0.6)',
+        borderRadius: 16,
+        padding: '20px 24px',
+        overflow: 'hidden',
+        boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
+        transition: 'border-color 0.2s, box-shadow 0.2s',
+      }}
+      onMouseEnter={(e) => {
+        (e.currentTarget as HTMLDivElement).style.borderColor = 'rgba(54,60,87,0.8)';
+        (e.currentTarget as HTMLDivElement).style.boxShadow = '0 6px 24px rgba(0,0,0,0.4)';
+      }}
+      onMouseLeave={(e) => {
+        (e.currentTarget as HTMLDivElement).style.borderColor = 'rgba(42,47,69,0.6)';
+        (e.currentTarget as HTMLDivElement).style.boxShadow = '0 4px 20px rgba(0,0,0,0.3)';
+      }}
     >
       {icon && (
-        <span className="absolute top-4 right-4 text-2xl opacity-[0.15] leading-none select-none pointer-events-none">
+        <span
+          style={{
+            position: 'absolute',
+            top: 16,
+            right: 16,
+            fontSize: '1.5rem',
+            opacity: 0.1,
+            lineHeight: 1,
+            userSelect: 'none',
+            pointerEvents: 'none',
+          }}
+        >
           {icon}
         </span>
       )}
-      <p className="text-[0.68rem] font-bold text-[#4a5568] uppercase tracking-[1px] mb-2">
+      <p
+        style={{
+          fontSize: '0.68rem',
+          fontWeight: 700,
+          color: '#4a5568',
+          textTransform: 'uppercase',
+          letterSpacing: '0.1em',
+          marginBottom: 10,
+        }}
+      >
         {label}
       </p>
-      <p className="text-[1.9rem] font-extrabold text-[#e2e8f0] tabular-nums leading-none">
+      <p
+        style={{
+          fontSize: '1.9rem',
+          fontWeight: 800,
+          color: '#e2e8f0',
+          fontVariantNumeric: 'tabular-nums',
+          lineHeight: 1,
+        }}
+      >
         {value}
       </p>
     </div>

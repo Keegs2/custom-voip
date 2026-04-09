@@ -71,7 +71,11 @@ export function CdrExpandedRow({ cdr, colSpan, onRated }: CdrExpandedRowProps) {
     <tr>
       <td
         colSpan={colSpan}
-        className="bg-[#15171f] border-b border-[#2a2f45]/50 px-5 py-4"
+        style={{
+          background: 'rgba(15,17,23,0.85)',
+          borderBottom: '1px solid rgba(42,47,69,0.4)',
+          padding: '16px 24px',
+        }}
       >
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-x-6 gap-y-3">
           {/* UUID spans full width */}

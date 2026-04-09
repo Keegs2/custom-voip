@@ -53,13 +53,17 @@ export function filtersToParams(filters: CdrFilters, limit: number, offset: numb
   return params;
 }
 
-const controlBase = [
-  'text-sm px-3 py-2 h-9 rounded-lg',
-  'border border-[#2a2f45] bg-[#1e2130] text-[#e2e8f0]',
-  'outline-none transition-all duration-150',
-  'focus:border-[#3b82f6] focus:shadow-[0_0_0_3px_rgba(59,130,246,0.2)]',
-  'placeholder:text-[#4a5568]',
-].join(' ');
+const controlStyle: React.CSSProperties = {
+  fontSize: '0.875rem',
+  padding: '8px 12px',
+  height: 36,
+  borderRadius: 8,
+  border: '1px solid rgba(42,47,69,0.8)',
+  background: 'rgba(19,21,29,0.8)',
+  color: '#e2e8f0',
+  outline: 'none',
+  transition: 'border-color 0.15s, box-shadow 0.15s',
+};
 
 interface CdrFilterBarProps {
   filters: CdrFilters;
@@ -85,19 +89,41 @@ export function CdrFilterBar({ filters, onChange, onSearch, onExport, searching 
     onSearch();
   }
 
-  const labelBase = 'text-[0.65rem] font-bold text-[#4a5568] uppercase tracking-[0.8px] mb-1.5 block';
+  const labelStyle: React.CSSProperties = {
+    fontSize: '0.65rem',
+    fontWeight: 700,
+    color: '#4a5568',
+    textTransform: 'uppercase',
+    letterSpacing: '0.08em',
+    marginBottom: 6,
+    display: 'block',
+  };
 
   return (
     <form
       onSubmit={handleSubmit}
-      className="bg-[#1a1d27] border border-[#2a2f45] rounded-xl p-5 mb-5"
+      style={{
+        background: 'linear-gradient(135deg, rgba(30,33,48,0.9) 0%, rgba(19,21,29,0.95) 100%)',
+        border: '1px solid rgba(42,47,69,0.6)',
+        borderRadius: 16,
+        padding: '20px 24px',
+        marginBottom: 20,
+        boxShadow: '0 4px 20px rgba(0,0,0,0.25)',
+      }}
     >
-      <div className="flex flex-wrap gap-3 items-end">
+      <div
+        style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          gap: 12,
+          alignItems: 'flex-end',
+        }}
+      >
         {/* Customer */}
-        <div className="flex flex-col min-w-[160px]">
-          <label className={labelBase}>Customer</label>
+        <div style={{ display: 'flex', flexDirection: 'column', minWidth: 160 }}>
+          <label style={labelStyle}>Customer</label>
           <select
-            className={controlBase + ' cursor-pointer'}
+            style={{ ...controlStyle, cursor: 'pointer' }}
             value={filters.customer_id}
             onChange={(e) => set('customer_id', e.target.value)}
           >
@@ -109,10 +135,10 @@ export function CdrFilterBar({ filters, onChange, onSearch, onExport, searching 
         </div>
 
         {/* Product type */}
-        <div className="flex flex-col min-w-[110px]">
-          <label className={labelBase}>Product</label>
+        <div style={{ display: 'flex', flexDirection: 'column', minWidth: 110 }}>
+          <label style={labelStyle}>Product</label>
           <select
-            className={controlBase + ' cursor-pointer'}
+            style={{ ...controlStyle, cursor: 'pointer' }}
             value={filters.product_type}
             onChange={(e) => set('product_type', e.target.value)}
           >
@@ -124,10 +150,10 @@ export function CdrFilterBar({ filters, onChange, onSearch, onExport, searching 
         </div>
 
         {/* Direction */}
-        <div className="flex flex-col min-w-[110px]">
-          <label className={labelBase}>Direction</label>
+        <div style={{ display: 'flex', flexDirection: 'column', minWidth: 110 }}>
+          <label style={labelStyle}>Direction</label>
           <select
-            className={controlBase + ' cursor-pointer'}
+            style={{ ...controlStyle, cursor: 'pointer' }}
             value={filters.direction}
             onChange={(e) => set('direction', e.target.value)}
           >
@@ -138,33 +164,33 @@ export function CdrFilterBar({ filters, onChange, onSearch, onExport, searching 
         </div>
 
         {/* Start date */}
-        <div className="flex flex-col">
-          <label className={labelBase}>Start</label>
+        <div style={{ display: 'flex', flexDirection: 'column' }}>
+          <label style={labelStyle}>Start</label>
           <input
             type="datetime-local"
-            className={controlBase}
+            style={controlStyle}
             value={filters.start_from}
             onChange={(e) => set('start_from', e.target.value)}
           />
         </div>
 
         {/* End date */}
-        <div className="flex flex-col">
-          <label className={labelBase}>End</label>
+        <div style={{ display: 'flex', flexDirection: 'column' }}>
+          <label style={labelStyle}>End</label>
           <input
             type="datetime-local"
-            className={controlBase}
+            style={controlStyle}
             value={filters.start_to}
             onChange={(e) => set('start_to', e.target.value)}
           />
         </div>
 
         {/* Destination prefix */}
-        <div className="flex flex-col min-w-[130px]">
-          <label className={labelBase}>Destination Prefix</label>
+        <div style={{ display: 'flex', flexDirection: 'column', minWidth: 130 }}>
+          <label style={labelStyle}>Destination Prefix</label>
           <input
             type="text"
-            className={controlBase}
+            style={controlStyle}
             placeholder="e.g. 1800"
             value={filters.destination}
             onChange={(e) => set('destination', e.target.value)}
@@ -172,11 +198,23 @@ export function CdrFilterBar({ filters, onChange, onSearch, onExport, searching 
         </div>
 
         {/* Rated only */}
-        <div className="flex flex-col justify-end">
-          <label className="flex items-center gap-2 cursor-pointer text-sm text-[#718096] whitespace-nowrap select-none h-9">
+        <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
+          <label
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              cursor: 'pointer',
+              fontSize: '0.875rem',
+              color: '#718096',
+              whiteSpace: 'nowrap',
+              userSelect: 'none',
+              height: 36,
+            }}
+          >
             <input
               type="checkbox"
-              className="w-4 h-4 rounded accent-[#3b82f6] cursor-pointer"
+              style={{ width: 16, height: 16, borderRadius: 4, accentColor: '#3b82f6', cursor: 'pointer' }}
               checked={filters.rated_only}
               onChange={(e) => set('rated_only', e.target.checked)}
             />
@@ -185,7 +223,7 @@ export function CdrFilterBar({ filters, onChange, onSearch, onExport, searching 
         </div>
 
         {/* Actions — pushed to end */}
-        <div className="flex gap-2 items-end ml-auto">
+        <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', marginLeft: 'auto' }}>
           <Button type="submit" variant="primary" size="sm" loading={searching}>
             Search
           </Button>

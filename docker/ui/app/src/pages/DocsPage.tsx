@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { PageHeader } from '../components/layout/PageHeader';
-import { cn } from '../utils/cn';
 
 type DocView = 'swagger' | 'redoc';
 
@@ -12,10 +11,20 @@ export function DocsPage() {
   return (
     <div className="flex flex-col h-full">
       <PageHeader
-        title={<>API <span className="text-[#3b82f6]">Documentation</span></>}
+        title={<>API <span style={{ color: '#3b82f6' }}>Documentation</span></>}
         subtitle="Interactive REST API reference — explore and test all platform endpoints"
         actions={
-          <div className="flex items-center gap-1 bg-[#1e2130] border border-[#2a2f45] rounded-lg p-1">
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 4,
+              background: 'rgba(19,21,29,0.9)',
+              border: '1px solid rgba(42,47,69,0.6)',
+              borderRadius: 10,
+              padding: 4,
+            }}
+          >
             <ViewToggleButton
               label="Swagger UI"
               active={activeView === 'swagger'}
@@ -31,7 +40,15 @@ export function DocsPage() {
       />
 
       {/* Full-height iframe */}
-      <div className="flex-1 rounded-xl border border-[#2a2f45] overflow-hidden">
+      <div
+        style={{
+          flex: 1,
+          borderRadius: 16,
+          border: '1px solid rgba(42,47,69,0.6)',
+          overflow: 'hidden',
+          boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
+        }}
+      >
         <iframe
           key={activeView}
           src={iframeSrc}
@@ -59,13 +76,21 @@ function ViewToggleButton({ label, active, onClick }: ViewToggleButtonProps) {
     <button
       type="button"
       onClick={onClick}
-      className={cn(
-        'px-3 py-1.5 rounded-md text-[0.82rem] font-semibold whitespace-nowrap',
-        'transition-[background,color] duration-150',
-        active
-          ? 'bg-[#3b82f6] text-white shadow-[0_0_10px_rgba(59,130,246,0.3)]'
-          : 'text-[#718096] hover:text-[#e2e8f0]',
-      )}
+      style={{
+        padding: '6px 14px',
+        borderRadius: 7,
+        fontSize: '0.82rem',
+        fontWeight: 600,
+        whiteSpace: 'nowrap',
+        transition: 'background 0.15s, color 0.15s',
+        background: active
+          ? '#3b82f6'
+          : 'transparent',
+        color: active ? '#ffffff' : '#718096',
+        boxShadow: active ? '0 0 10px rgba(59,130,246,0.3)' : 'none',
+        cursor: 'pointer',
+        border: 'none',
+      }}
     >
       {label}
     </button>

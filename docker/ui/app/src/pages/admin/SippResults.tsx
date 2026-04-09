@@ -46,6 +46,12 @@ function fmtNum(val: number | null | undefined): string {
   return String(val);
 }
 
+const VERDICT_STYLES: Record<string, { border: string; glow: string }> = {
+  PASS: { border: 'rgba(74,222,128,0.3)', glow: 'rgba(74,222,128,0.08)' },
+  WARN: { border: 'rgba(245,158,11,0.3)', glow: 'rgba(245,158,11,0.08)' },
+  FAIL: { border: 'rgba(239,68,68,0.3)', glow: 'rgba(239,68,68,0.08)' },
+};
+
 export function SippResults({ response, isRunning, runningTimeout = 60 }: SippResultsProps) {
   if (!response && !isRunning) {
     return null;
@@ -54,11 +60,13 @@ export function SippResults({ response, isRunning, runningTimeout = 60 }: SippRe
   if (isRunning) {
     return (
       <div
-        className={cn(
-          'rounded-xl border border-blue-500/30 bg-[#1a1d27] p-10 text-center',
-          'shadow-[0_0_24px_rgba(59,130,246,0.12)]',
-        )}
         style={{
+          borderRadius: 16,
+          border: '1px solid rgba(59,130,246,0.3)',
+          background: 'linear-gradient(135deg, rgba(30,33,48,0.9) 0%, rgba(19,21,29,0.95) 100%)',
+          padding: '40px',
+          textAlign: 'center',
+          boxShadow: '0 0 24px rgba(59,130,246,0.12)',
           animation: 'sipp-pulse 1.8s ease-in-out infinite',
         }}
       >
@@ -69,7 +77,7 @@ export function SippResults({ response, isRunning, runningTimeout = 60 }: SippRe
           }
         `}</style>
         <Spinner size="lg" className="text-blue-400 mx-auto mb-4" />
-        <p className="text-[#718096] text-[0.88rem]">
+        <p style={{ color: '#718096', fontSize: '0.88rem' }}>
           Test running — this may take up to {runningTimeout} seconds…
         </p>
       </div>
@@ -79,6 +87,7 @@ export function SippResults({ response, isRunning, runningTimeout = 60 }: SippRe
   if (!response) return null;
 
   const verdict = response.verdict ?? 'FAIL';
+  const verdictStyle = VERDICT_STYLES[verdict] ?? VERDICT_STYLES['FAIL'];
   // Merge both possible result shapes
   const r = response.results as WireResults;
 
@@ -90,48 +99,73 @@ export function SippResults({ response, isRunning, runningTimeout = 60 }: SippRe
   const elapsedSeconds = r.elapsed_seconds ?? null;
 
   const failedColor =
-    (failed ?? 0) > 0 ? 'text-red-400' : 'text-[#718096]';
+    (failed ?? 0) > 0 ? '#f87171' : '#718096';
 
   return (
     <div
-      className={cn(
-        'rounded-xl border bg-[#1a1d27]',
-        verdict === 'PASS'
-          ? 'border-green-500/30 shadow-[0_0_20px_rgba(74,222,128,0.08)]'
-          : verdict === 'WARN'
-            ? 'border-amber-500/30 shadow-[0_0_20px_rgba(245,158,11,0.08)]'
-            : 'border-red-500/30 shadow-[0_0_20px_rgba(239,68,68,0.08)]',
-      )}
+      style={{
+        borderRadius: 16,
+        border: `1px solid ${verdictStyle.border}`,
+        background: 'linear-gradient(135deg, rgba(30,33,48,0.9) 0%, rgba(19,21,29,0.95) 100%)',
+        boxShadow: `0 0 20px ${verdictStyle.glow}, 0 4px 20px rgba(0,0,0,0.3)`,
+        overflow: 'hidden',
+      }}
     >
       {/* Header: verdict + config summary */}
-      <div className="flex flex-wrap items-center gap-3 px-5 py-4 border-b border-[#2a2f45]">
+      <div
+        style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          alignItems: 'center',
+          gap: 12,
+          padding: '16px 24px',
+          borderBottom: '1px solid rgba(42,47,69,0.6)',
+        }}
+      >
         <Badge variant={verdictBadgeVariant(verdict)}>{verdict}</Badge>
-        <div className="flex flex-wrap gap-x-4 gap-y-1 text-[0.82rem] text-[#718096]">
+        <div
+          style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: '4px 16px',
+            fontSize: '0.82rem',
+            color: '#718096',
+          }}
+        >
           <span>
             Target:{' '}
-            <strong className="text-[#e2e8f0]">
+            <strong style={{ color: '#e2e8f0' }}>
               {response.config?.remote_host ?? '--'}
             </strong>
           </span>
           <span>
             Rate:{' '}
-            <strong className="text-[#e2e8f0]">
+            <strong style={{ color: '#e2e8f0' }}>
               {response.config?.call_rate ?? '--'} CPS
             </strong>
           </span>
           <span>
             Calls:{' '}
-            <strong className="text-[#e2e8f0]">
+            <strong style={{ color: '#e2e8f0' }}>
               {response.config?.call_limit ?? '--'}
             </strong>
           </span>
         </div>
       </div>
 
-      <div className="p-5 space-y-5">
+      <div style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 20 }}>
         {/* Key Metrics — 6 stat cards */}
         <div>
-          <p className="text-[0.65rem] font-bold text-[#4a5568] uppercase tracking-[0.8px] mb-3">
+          <p
+            style={{
+              fontSize: '0.65rem',
+              fontWeight: 700,
+              color: '#4a5568',
+              textTransform: 'uppercase',
+              letterSpacing: '0.08em',
+              marginBottom: 12,
+            }}
+          >
             Key Metrics
           </p>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
@@ -139,12 +173,12 @@ export function SippResults({ response, isRunning, runningTimeout = 60 }: SippRe
             <StatMini
               label="Successful"
               value={fmtNum(successful)}
-              valueClass="text-green-400"
+              accent="#4ade80"
             />
             <StatMini
               label="Failed"
               value={fmtNum(failed)}
-              valueClass={failedColor}
+              accent={failedColor}
             />
             <StatMini
               label="Effective CPS"
@@ -153,7 +187,7 @@ export function SippResults({ response, isRunning, runningTimeout = 60 }: SippRe
             <StatMini
               label="Retransmissions"
               value={fmtNum(retransmissions)}
-              valueClass={(retransmissions ?? 0) > 0 ? 'text-amber-300' : undefined}
+              accent={(retransmissions ?? 0) > 0 ? '#fcd34d' : undefined}
             />
             <StatMini
               label="Elapsed Time"
@@ -168,7 +202,16 @@ export function SippResults({ response, isRunning, runningTimeout = 60 }: SippRe
 
         {/* SIP Message Breakdown */}
         <div>
-          <p className="text-[0.65rem] font-bold text-[#4a5568] uppercase tracking-[0.8px] mb-3">
+          <p
+            style={{
+              fontSize: '0.65rem',
+              fontWeight: 700,
+              color: '#4a5568',
+              textTransform: 'uppercase',
+              letterSpacing: '0.08em',
+              marginBottom: 12,
+            }}
+          >
             SIP Message Breakdown
           </p>
           <TableWrap>
@@ -228,16 +271,40 @@ export function SippResults({ response, isRunning, runningTimeout = 60 }: SippRe
 interface StatMiniProps {
   label: string;
   value: React.ReactNode;
-  valueClass?: string;
+  accent?: string;
 }
 
-function StatMini({ label, value, valueClass }: StatMiniProps) {
+function StatMini({ label, value, accent }: StatMiniProps) {
   return (
-    <div className="bg-[#1e2130] border border-[#2a2f45] rounded-lg p-3">
-      <p className="text-[0.62rem] font-bold text-[#4a5568] uppercase tracking-[0.8px] mb-1.5">
+    <div
+      style={{
+        background: 'rgba(19,21,29,0.8)',
+        border: '1px solid rgba(42,47,69,0.6)',
+        borderRadius: 10,
+        padding: '12px',
+      }}
+    >
+      <p
+        style={{
+          fontSize: '0.62rem',
+          fontWeight: 700,
+          color: '#4a5568',
+          textTransform: 'uppercase',
+          letterSpacing: '0.08em',
+          marginBottom: 8,
+        }}
+      >
         {label}
       </p>
-      <p className={cn('text-xl font-extrabold tabular-nums leading-none text-[#e2e8f0]', valueClass)}>
+      <p
+        style={{
+          fontSize: '1.25rem',
+          fontWeight: 800,
+          fontVariantNumeric: 'tabular-nums',
+          lineHeight: 1,
+          color: accent ?? '#e2e8f0',
+        }}
+      >
         {value}
       </p>
     </div>

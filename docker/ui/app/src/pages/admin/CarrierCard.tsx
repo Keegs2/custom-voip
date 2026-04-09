@@ -141,18 +141,51 @@ export function CarrierCard({ carrier: initialCarrier }: CarrierCardProps) {
   }
 
   return (
-    <div className="bg-[#1a1d27] border border-[#2a2f45] rounded-xl p-5 hover:border-[#363c57] transition-all duration-200">
+    <div
+      style={{
+        background: 'linear-gradient(135deg, rgba(30,33,48,0.9) 0%, rgba(19,21,29,0.95) 100%)',
+        border: '1px solid rgba(42,47,69,0.6)',
+        borderRadius: 16,
+        padding: '24px',
+        boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
+        transition: 'border-color 0.3s, box-shadow 0.3s',
+        position: 'relative',
+        overflow: 'hidden',
+      }}
+      onMouseEnter={(e) => {
+        (e.currentTarget as HTMLDivElement).style.borderColor = 'rgba(59,130,246,0.3)';
+        (e.currentTarget as HTMLDivElement).style.boxShadow = '0 0 0 1px rgba(59,130,246,0.15), 0 8px 30px rgba(0,0,0,0.4)';
+      }}
+      onMouseLeave={(e) => {
+        (e.currentTarget as HTMLDivElement).style.borderColor = 'rgba(42,47,69,0.6)';
+        (e.currentTarget as HTMLDivElement).style.boxShadow = '0 4px 20px rgba(0,0,0,0.3)';
+      }}
+    >
       {/* Header */}
-      <div className="mb-4">
-        <div className="text-[1rem] font-bold text-[#e2e8f0]">
+      <div style={{ marginBottom: 20 }}>
+        <div
+          style={{
+            fontSize: '1rem',
+            fontWeight: 700,
+            color: '#e2e8f0',
+            letterSpacing: '-0.01em',
+          }}
+        >
           {initialCarrier.display_name || initialCarrier.gateway_name}
         </div>
-        <div className="font-mono text-[0.75rem] text-[#718096] mt-0.5">
+        <div
+          style={{
+            fontFamily: 'monospace',
+            fontSize: '0.75rem',
+            color: '#718096',
+            marginTop: 3,
+          }}
+        >
           {initialCarrier.gateway_name}
         </div>
 
         {/* Badges */}
-        <div className="flex flex-wrap gap-1.5 mt-3">
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 12 }}>
           <Badge variant={initialCarrier.enabled ? 'active' : 'disabled'}>
             {initialCarrier.enabled ? 'Enabled' : 'Disabled'}
           </Badge>
@@ -172,11 +205,23 @@ export function CarrierCard({ carrier: initialCarrier }: CarrierCardProps) {
 
       {/* Connection details monospace block */}
       {!isEditing && (
-        <pre className="font-mono text-[0.75rem] bg-[#0f1117] border border-[#2a2f45] rounded-lg px-4 py-3 mb-4 overflow-x-auto leading-[1.7]">
+        <pre
+          style={{
+            fontFamily: 'monospace',
+            fontSize: '0.75rem',
+            background: 'rgba(15,17,23,0.8)',
+            border: '1px solid rgba(42,47,69,0.6)',
+            borderRadius: 10,
+            padding: '12px 16px',
+            marginBottom: 16,
+            overflowX: 'auto',
+            lineHeight: 1.7,
+          }}
+        >
           {connLines.map(([key, val]) => (
-            <span key={key} className="block">
-              <span className="text-[#718096]">{key.padEnd(12, ' ')}</span>
-              <span className="text-[#93c5fd]">{val}</span>
+            <span key={key} style={{ display: 'block' }}>
+              <span style={{ color: '#718096' }}>{String(key).padEnd(12, ' ')}</span>
+              <span style={{ color: '#93c5fd' }}>{val}</span>
             </span>
           ))}
         </pre>
@@ -184,7 +229,13 @@ export function CarrierCard({ carrier: initialCarrier }: CarrierCardProps) {
 
       {/* Edit form */}
       {isEditing && (
-        <div className="border-t border-[#2a2f45] pt-4 mb-4">
+        <div
+          style={{
+            borderTop: '1px solid rgba(42,47,69,0.6)',
+            paddingTop: 16,
+            marginBottom: 16,
+          }}
+        >
           <CarrierForm
             carrier={initialCarrier}
             submitLabel="Save Changes"
@@ -198,7 +249,7 @@ export function CarrierCard({ carrier: initialCarrier }: CarrierCardProps) {
 
       {/* Actions bar */}
       {!isEditing && (
-        <div className="flex flex-wrap items-center gap-2">
+        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
           <Button
             size="sm"
             variant="ghost"
@@ -222,7 +273,7 @@ export function CarrierCard({ carrier: initialCarrier }: CarrierCardProps) {
             </span>
           )}
 
-          <span className="flex-1" />
+          <span style={{ flex: 1 }} />
 
           <Button
             size="sm"

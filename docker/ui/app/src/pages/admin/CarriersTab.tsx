@@ -51,10 +51,29 @@ export function CarriersTab() {
   return (
     <div>
       {/* Section header */}
-      <div className="flex items-center justify-between gap-4 mb-6 flex-wrap">
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 16,
+          marginBottom: 24,
+          flexWrap: 'wrap',
+        }}
+      >
         <div>
-          <h2 className="text-base font-bold text-[#e2e8f0]">Carrier Gateways</h2>
-          <p className="text-sm text-[#718096] mt-0.5">
+          <h2
+            style={{
+              fontSize: '1rem',
+              fontWeight: 700,
+              color: '#e2e8f0',
+              margin: 0,
+              letterSpacing: '-0.01em',
+            }}
+          >
+            Carrier Gateways
+          </h2>
+          <p style={{ fontSize: '0.875rem', color: '#718096', marginTop: 4 }}>
             Configure SIP trunk connections to upstream carriers
           </p>
         </div>
@@ -75,15 +94,41 @@ export function CarriersTab() {
       )}
 
       {isError && (
-        <p className="text-red-400 text-sm py-4">
+        <div
+          style={{
+            padding: '12px 16px',
+            borderRadius: 10,
+            background: 'rgba(239,68,68,0.08)',
+            border: '1px solid rgba(239,68,68,0.2)',
+            color: '#f87171',
+            fontSize: '0.875rem',
+          }}
+        >
           Failed to load carriers. Please try again.
-        </p>
+        </div>
       )}
 
       {!isLoading && !isError && (carriers?.length ?? 0) === 0 && (
-        <div className="flex flex-col items-center justify-center text-center py-16 gap-1 text-[#718096]">
-          <p className="font-semibold text-sm">No carriers configured</p>
-          <p className="text-xs text-[#4a5568]">Add your first carrier connection to get started.</p>
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            textAlign: 'center',
+            padding: '64px 16px',
+            gap: 6,
+            background: 'linear-gradient(135deg, rgba(30,33,48,0.6) 0%, rgba(19,21,29,0.7) 100%)',
+            border: '1px solid rgba(42,47,69,0.4)',
+            borderRadius: 16,
+          }}
+        >
+          <p style={{ fontWeight: 600, fontSize: '0.875rem', color: '#718096' }}>
+            No carriers configured
+          </p>
+          <p style={{ fontSize: '0.75rem', color: '#4a5568' }}>
+            Add your first carrier connection to get started.
+          </p>
         </div>
       )}
 

@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { Button } from '../../components/ui/Button';
 import { FormField } from '../../components/ui/FormField';
-import { cn } from '../../utils/cn';
 import type { SippRunConfig } from '../../types/sipp';
 
 interface SippCustomFormProps {
@@ -29,23 +28,48 @@ export function SippCustomForm({ isRunning, onRun }: SippCustomFormProps) {
   }
 
   return (
-    <div className="border border-[#2a2f45] rounded-xl overflow-hidden">
+    <div
+      style={{
+        border: '1px solid rgba(42,47,69,0.6)',
+        borderRadius: 16,
+        overflow: 'hidden',
+        background: 'linear-gradient(135deg, rgba(30,33,48,0.9) 0%, rgba(19,21,29,0.95) 100%)',
+        boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
+      }}
+    >
       {/* Collapsible header */}
       <button
         type="button"
         onClick={() => setOpen((p) => !p)}
-        className={cn(
-          'w-full flex items-center justify-between px-5 py-3.5',
-          'bg-[#1e2130] text-[0.9rem] font-semibold text-[#e2e8f0]',
-          'hover:bg-white/[0.03] transition-colors duration-150',
-        )}
+        style={{
+          width: '100%',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '16px 24px',
+          background: 'rgba(19,21,29,0.5)',
+          fontSize: '0.9rem',
+          fontWeight: 600,
+          color: '#e2e8f0',
+          cursor: 'pointer',
+          border: 'none',
+          transition: 'background 0.15s',
+        }}
+        onMouseEnter={(e) => {
+          (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.03)';
+        }}
+        onMouseLeave={(e) => {
+          (e.currentTarget as HTMLButtonElement).style.background = 'rgba(19,21,29,0.5)';
+        }}
       >
         <span>Custom Test</span>
         <span
-          className={cn(
-            'text-[#718096] transition-transform duration-200 text-sm',
-            open && 'rotate-180',
-          )}
+          style={{
+            color: '#718096',
+            fontSize: '0.875rem',
+            transform: open ? 'rotate(180deg)' : 'none',
+            transition: 'transform 0.2s',
+          }}
         >
           &#x25BC;
         </span>
@@ -53,7 +77,12 @@ export function SippCustomForm({ isRunning, onRun }: SippCustomFormProps) {
 
       {/* Collapsible body */}
       {open && (
-        <div className="bg-[#1a1d27] px-5 py-5 border-t border-[#2a2f45]">
+        <div
+          style={{
+            padding: '20px 24px',
+            borderTop: '1px solid rgba(42,47,69,0.6)',
+          }}
+        >
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-5">
             <FormField
               label="Target (host:port or extension)"

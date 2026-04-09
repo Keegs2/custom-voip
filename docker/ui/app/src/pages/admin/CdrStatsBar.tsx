@@ -1,5 +1,4 @@
 import { useMemo } from 'react';
-import { cn } from '../../utils/cn';
 import type { Cdr } from '../../types/cdr';
 
 /** Formats total seconds as HH:MM:SS */
@@ -18,16 +17,45 @@ function fmtMoney4(val: number): string {
 interface StatPillProps {
   label: string;
   value: string;
-  valueClass?: string;
+  accent?: string;
 }
 
-function StatPill({ label, value, valueClass }: StatPillProps) {
+function StatPill({ label, value, accent }: StatPillProps) {
   return (
-    <div className="flex flex-col items-center bg-[#1e2130] border border-[#2a2f45] rounded-xl px-4 py-3 min-w-[100px]">
-      <span className="text-[0.62rem] font-bold uppercase tracking-[0.8px] text-[#4a5568] mb-1.5 whitespace-nowrap">
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        background: 'linear-gradient(135deg, rgba(30,33,48,0.8) 0%, rgba(19,21,29,0.9) 100%)',
+        border: '1px solid rgba(42,47,69,0.6)',
+        borderRadius: 12,
+        padding: '10px 16px',
+        minWidth: 90,
+      }}
+    >
+      <span
+        style={{
+          fontSize: '0.62rem',
+          fontWeight: 700,
+          textTransform: 'uppercase',
+          letterSpacing: '0.08em',
+          color: '#4a5568',
+          marginBottom: 6,
+          whiteSpace: 'nowrap',
+        }}
+      >
         {label}
       </span>
-      <span className={cn('text-base font-bold tabular-nums leading-none', valueClass ?? 'text-[#e2e8f0]')}>
+      <span
+        style={{
+          fontSize: '1rem',
+          fontWeight: 700,
+          fontVariantNumeric: 'tabular-nums',
+          lineHeight: 1,
+          color: accent ?? '#e2e8f0',
+        }}
+      >
         {value}
       </span>
     </div>
@@ -52,41 +80,48 @@ export function CdrStatsBar({ cdrs, total }: CdrStatsBarProps) {
     return { answered, asr, totalDurSec, totalBilled, totalCost, totalMargin, avgMarginPct };
   }, [cdrs, total]);
 
-  const asrClass =
+  const asrAccent =
     stats.asr > 50
-      ? 'text-green-400'
+      ? '#4ade80'
       : stats.asr >= 30
-        ? 'text-amber-400'
-        : 'text-red-400';
+        ? '#fbbf24'
+        : '#f87171';
 
-  const marginClass = stats.totalMargin >= 0 ? 'text-green-400' : 'text-red-400';
+  const marginAccent = stats.totalMargin >= 0 ? '#4ade80' : '#f87171';
 
-  const avgMpClass =
+  const avgMpAccent =
     stats.avgMarginPct == null
-      ? 'text-[#718096]'
+      ? undefined
       : stats.avgMarginPct >= 30
-        ? 'text-green-400'
+        ? '#4ade80'
         : stats.avgMarginPct >= 15
-          ? 'text-amber-400'
-          : 'text-red-400';
+          ? '#fbbf24'
+          : '#f87171';
 
   return (
-    <div className="flex flex-wrap gap-2.5 mb-5">
+    <div
+      style={{
+        display: 'flex',
+        flexWrap: 'wrap',
+        gap: 8,
+        marginBottom: 20,
+      }}
+    >
       <StatPill label="Total Calls" value={total.toLocaleString()} />
       <StatPill label="Answered" value={stats.answered.toLocaleString()} />
-      <StatPill label="ASR" value={`${stats.asr.toFixed(1)}%`} valueClass={asrClass} />
+      <StatPill label="ASR" value={`${stats.asr.toFixed(1)}%`} accent={asrAccent} />
       <StatPill label="Duration" value={formatTotalDuration(stats.totalDurSec)} />
       <StatPill
         label="Total Billed"
         value={fmtMoney4(stats.totalBilled)}
-        valueClass="text-green-400"
+        accent="#4ade80"
       />
-      <StatPill label="Total Cost" value={fmtMoney4(stats.totalCost)} valueClass="text-red-400" />
-      <StatPill label="Total Margin" value={fmtMoney4(stats.totalMargin)} valueClass={marginClass} />
+      <StatPill label="Total Cost" value={fmtMoney4(stats.totalCost)} accent="#f87171" />
+      <StatPill label="Total Margin" value={fmtMoney4(stats.totalMargin)} accent={marginAccent} />
       <StatPill
         label="Avg Margin %"
         value={stats.avgMarginPct != null ? `${stats.avgMarginPct.toFixed(1)}%` : '--'}
-        valueClass={avgMpClass}
+        accent={avgMpAccent}
       />
     </div>
   );

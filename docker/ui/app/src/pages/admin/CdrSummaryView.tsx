@@ -60,12 +60,29 @@ export function CdrSummaryView({ customerId }: CdrSummaryViewProps) {
             key={g}
             type="button"
             onClick={() => setGroupBy(g)}
-            className={[
-              'px-3 py-1 text-[0.78rem] font-semibold rounded-md border transition-colors duration-150',
-              groupBy === g
-                ? 'bg-[#3b82f6]/[0.12] text-[#3b82f6] border-[#3b82f6]/30'
-                : 'bg-transparent text-[#718096] border-[#2a2f45] hover:text-[#e2e8f0] hover:border-[#3d4460]',
-            ].join(' ')}
+            style={{
+              padding: '4px 14px',
+              fontSize: '0.78rem',
+              fontWeight: 600,
+              borderRadius: 8,
+              border: `1px solid ${groupBy === g ? 'rgba(59,130,246,0.4)' : 'rgba(42,47,69,0.6)'}`,
+              background: groupBy === g ? 'rgba(59,130,246,0.12)' : 'transparent',
+              color: groupBy === g ? '#3b82f6' : '#718096',
+              cursor: 'pointer',
+              transition: 'all 0.15s',
+            }}
+            onMouseEnter={(e) => {
+              if (groupBy !== g) {
+                (e.currentTarget as HTMLButtonElement).style.color = '#e2e8f0';
+                (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(54,60,87,0.8)';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (groupBy !== g) {
+                (e.currentTarget as HTMLButtonElement).style.color = '#718096';
+                (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(42,47,69,0.6)';
+              }
+            }}
           >
             {g.charAt(0).toUpperCase() + g.slice(1)}
           </button>

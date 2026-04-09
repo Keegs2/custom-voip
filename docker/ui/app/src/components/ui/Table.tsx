@@ -21,10 +21,14 @@ export function TableWrap({ children, className }: TableProps) {
   return (
     <div
       className={cn(
-        'overflow-x-auto rounded-xl border border-[#2a2f45]',
-        'shadow-[0_1px_3px_rgba(0,0,0,.3)]',
+        'overflow-x-auto rounded-xl',
         className,
       )}
+      style={{
+        border: '1px solid rgba(42,47,69,0.6)',
+        boxShadow: '0 4px 16px rgba(0,0,0,0.25)',
+        borderRadius: 12,
+      }}
     >
       {children}
     </div>
@@ -43,7 +47,12 @@ export function Table({ children, className }: TableProps) {
 
 export function Thead({ children, className }: TableProps) {
   return (
-    <thead className={cn('bg-[#1e2130]', className)}>
+    <thead
+      className={cn(className)}
+      style={{
+        background: 'rgba(19,21,29,0.9)',
+      }}
+    >
       {children}
     </thead>
   );
@@ -54,9 +63,13 @@ export function Th({ children, className }: ThProps) {
     <th
       className={cn(
         'text-left px-4 py-3 text-[0.65rem] font-bold uppercase tracking-[0.8px]',
-        'text-[#4a5568] whitespace-nowrap border-b border-[#2a2f45]',
+        'whitespace-nowrap',
         className,
       )}
+      style={{
+        color: '#4a5568',
+        borderBottom: '1px solid rgba(42,47,69,0.6)',
+      }}
     >
       {children}
     </th>
@@ -68,10 +81,13 @@ export function Td({ children, className, colSpan }: TdProps) {
     <td
       colSpan={colSpan}
       className={cn(
-        'px-4 py-3 border-b border-[#2a2f45]/50 align-middle text-sm',
+        'px-4 py-3 align-middle text-sm',
         'last:border-b-0',
         className,
       )}
+      style={{
+        borderBottom: '1px solid rgba(42,47,69,0.35)',
+      }}
     >
       {children}
     </td>

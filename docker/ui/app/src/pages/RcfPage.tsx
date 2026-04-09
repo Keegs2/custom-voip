@@ -42,20 +42,47 @@ export function RcfPage() {
       )}
 
       {isError && (
-        <div className="py-10 px-1 text-sm text-red-400">
+        <div
+          style={{
+            padding: '12px 16px',
+            borderRadius: 10,
+            background: 'rgba(239,68,68,0.08)',
+            border: '1px solid rgba(239,68,68,0.2)',
+            color: '#f87171',
+            fontSize: '0.875rem',
+            marginTop: 8,
+          }}
+        >
           Unable to load RCF numbers. Please try refreshing the page.
         </div>
       )}
 
       {!isLoading && !isError && entries.length === 0 && (
-        <div className="flex flex-col items-center justify-center py-16 gap-2 text-center">
-          <p className="text-[#718096] text-sm">No RCF numbers found for your account.</p>
-          <p className="text-[#4a5568] text-xs">Contact support to provision numbers.</p>
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '64px 16px',
+            gap: 8,
+            textAlign: 'center',
+            background: 'linear-gradient(135deg, rgba(30,33,48,0.6) 0%, rgba(19,21,29,0.7) 100%)',
+            border: '1px solid rgba(42,47,69,0.4)',
+            borderRadius: 16,
+          }}
+        >
+          <p style={{ color: '#718096', fontSize: '0.875rem', fontWeight: 500 }}>
+            No RCF numbers found for your account.
+          </p>
+          <p style={{ color: '#4a5568', fontSize: '0.75rem' }}>
+            Contact support to provision numbers.
+          </p>
         </div>
       )}
 
       {entries.length > 0 && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4 md:gap-5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-5">
           {entries.map((entry) => (
             <RcfCard
               key={entry.id}
@@ -77,19 +104,77 @@ interface PortalHeaderProps {
   badgeVariant?: 'rcf' | 'api' | 'trunk';
 }
 
+const ACCENT_BY_VARIANT: Record<string, string> = {
+  rcf: '#22c55e',
+  api: '#a855f7',
+  trunk: '#f59e0b',
+};
+
 export function PortalHeader({ icon, title, subtitle, badgeVariant = 'rcf' }: PortalHeaderProps) {
+  const accent = ACCENT_BY_VARIANT[badgeVariant] ?? '#3b82f6';
+
   return (
-    <div className="mb-6 md:mb-8 pb-5 border-b border-[#2a2f45]">
-      <div className="flex items-center gap-3 flex-wrap">
-        <h1 className="text-2xl font-bold tracking-tight text-[#e2e8f0] leading-tight flex items-center gap-2">
-          <span className="text-[#3b82f6] font-mono text-xl" aria-hidden="true">
-            {icon}
-          </span>
-          {title}
-        </h1>
-        <Badge variant={badgeVariant}>Customer Portal</Badge>
+    <div
+      style={{
+        marginBottom: 40,
+        paddingBottom: 32,
+        borderBottom: '1px solid rgba(42,47,69,0.6)',
+      }}
+    >
+      <div className="flex items-center gap-3 flex-wrap" style={{ marginBottom: 8 }}>
+        {/* Icon badge */}
+        <div
+          style={{
+            width: 44,
+            height: 44,
+            borderRadius: 12,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: `linear-gradient(135deg, ${accent}20 0%, ${accent}10 100%)`,
+            border: `1px solid ${accent}30`,
+            color: accent,
+            fontSize: '1.1rem',
+            fontFamily: 'monospace',
+            fontWeight: 700,
+            flexShrink: 0,
+          }}
+          aria-hidden="true"
+        >
+          {icon}
+        </div>
+
+        <div>
+          <h1
+            style={{
+              fontSize: '1.75rem',
+              fontWeight: 800,
+              letterSpacing: '-0.025em',
+              color: '#e2e8f0',
+              lineHeight: 1.15,
+              margin: 0,
+            }}
+          >
+            {title}
+          </h1>
+        </div>
+
+        <div style={{ marginLeft: 4 }}>
+          <Badge variant={badgeVariant}>Customer Portal</Badge>
+        </div>
       </div>
-      <p className="text-sm text-[#718096] mt-1.5">{subtitle}</p>
+
+      <p
+        style={{
+          fontSize: '0.9rem',
+          color: '#718096',
+          marginTop: 4,
+          lineHeight: 1.6,
+          maxWidth: 560,
+        }}
+      >
+        {subtitle}
+      </p>
     </div>
   );
 }

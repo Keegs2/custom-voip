@@ -140,7 +140,7 @@ export function CustomerRcfSection({ customerId }: CustomerRcfSectionProps) {
   const entries = data?.items ?? [];
 
   return (
-    <div className="pt-4 border-t border-[#2a2f45]">
+    <div style={{ paddingTop: 16, borderTop: '1px solid rgba(42,47,69,0.5)' }}>
       <div className="flex items-center justify-between mb-3">
         <span className="text-[0.65rem] font-bold text-[#4a5568] uppercase tracking-[0.8px]">
           RCF Numbers
@@ -230,7 +230,13 @@ export function CustomerRcfSection({ customerId }: CustomerRcfSectionProps) {
       <form
         onSubmit={handleCreate}
         onClick={(e) => e.stopPropagation()}
-        className="mt-3 p-3 bg-[#1e2130] border border-[#2a2f45] rounded-lg"
+        style={{
+          marginTop: 12,
+          padding: '12px',
+          background: 'rgba(19,21,29,0.7)',
+          border: '1px solid rgba(42,47,69,0.6)',
+          borderRadius: 10,
+        }}
       >
         <div className="text-[0.65rem] font-bold text-[#718096] uppercase tracking-[0.7px] mb-2">
           Add RCF Number

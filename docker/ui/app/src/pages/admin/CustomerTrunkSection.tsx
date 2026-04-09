@@ -137,7 +137,15 @@ function TrunkCard({ trunk, customerId }: TrunkCardProps) {
   const showAuthIps = trunk.auth_type === 'ip' || trunk.auth_type === 'both';
 
   return (
-    <div className="bg-[#1e2130] border border-[#2a2f45] rounded-lg p-3 mb-3">
+    <div
+      style={{
+        background: 'linear-gradient(135deg, rgba(25,28,40,0.9) 0%, rgba(15,17,23,0.95) 100%)',
+        border: '1px solid rgba(42,47,69,0.6)',
+        borderRadius: 12,
+        padding: 12,
+        marginBottom: 12,
+      }}
+    >
       {/* Trunk header */}
       <div className="flex items-center gap-2 flex-wrap mb-3">
         <div className="flex-1 text-[0.9rem] font-bold text-[#e2e8f0]">
@@ -170,7 +178,17 @@ function TrunkCard({ trunk, customerId }: TrunkCardProps) {
       <div className="text-[0.63rem] font-bold text-[#3b82f6] uppercase tracking-[0.7px] mb-2">
         Customer Connection Details
       </div>
-      <div className="bg-[#0d0f15] border border-[#2a2f45] rounded-md p-3 mb-3 font-mono text-[0.82rem]">
+      <div
+        style={{
+          background: 'rgba(10,12,18,0.9)',
+          border: '1px solid rgba(42,47,69,0.5)',
+          borderRadius: 8,
+          padding: 12,
+          marginBottom: 12,
+          fontFamily: 'monospace',
+          fontSize: '0.82rem',
+        }}
+      >
         <div className="flex gap-2 mb-1.5">
           <span className="text-[#718096] min-w-[110px]">SIP Server:</span>
           <span className="text-[#e2e8f0]">{SIP_SERVER}</span>
@@ -460,7 +478,7 @@ export function CustomerTrunkSection({ customerId }: CustomerTrunkSectionProps) 
   const trunks = trunksData ?? [];
 
   return (
-    <div className="pt-4 border-t border-[#2a2f45]">
+    <div style={{ paddingTop: 16, borderTop: '1px solid rgba(42,47,69,0.5)' }}>
       <div className="flex items-center justify-between mb-3">
         <span className="text-[0.63rem] font-bold text-[#718096] uppercase tracking-[0.9px]">
           Trunk Configuration
@@ -497,7 +515,13 @@ export function CustomerTrunkSection({ customerId }: CustomerTrunkSectionProps) 
       <form
         onSubmit={handleCreateTrunk}
         onClick={(e) => e.stopPropagation()}
-        className="mt-1 p-3 bg-[#1e2130] border border-[#2a2f45] rounded-lg"
+        style={{
+          marginTop: 4,
+          padding: '12px',
+          background: 'rgba(19,21,29,0.7)',
+          border: '1px solid rgba(42,47,69,0.6)',
+          borderRadius: 10,
+        }}
       >
         <div className="text-[0.65rem] font-bold text-[#718096] uppercase tracking-[0.7px] mb-2">
           Create New Trunk

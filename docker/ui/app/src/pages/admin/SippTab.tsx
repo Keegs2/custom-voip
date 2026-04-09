@@ -86,12 +86,28 @@ export function SippTab() {
   );
 
   return (
-    <div className="space-y-6">
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
       {/* Preset grid section */}
       <div>
-        <div className="mb-4">
-          <h2 className="text-base font-bold text-[#e2e8f0]">SIPp Load Test Presets</h2>
-          <p className="text-sm text-[#718096] mt-0.5">
+        <div
+          style={{
+            marginBottom: 16,
+            paddingBottom: 16,
+            borderBottom: '1px solid rgba(42,47,69,0.4)',
+          }}
+        >
+          <h2
+            style={{
+              fontSize: '1rem',
+              fontWeight: 700,
+              color: '#e2e8f0',
+              margin: 0,
+              letterSpacing: '-0.01em',
+            }}
+          >
+            SIPp Load Test Presets
+          </h2>
+          <p style={{ fontSize: '0.875rem', color: '#718096', marginTop: 4 }}>
             Select a preset to run a pre-configured SIP load test against the platform.
           </p>
         </div>

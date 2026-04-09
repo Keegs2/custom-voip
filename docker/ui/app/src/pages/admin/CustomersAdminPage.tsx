@@ -130,7 +130,14 @@ export function CustomersAdminPage() {
       {showCreateForm && (
         <form
           onSubmit={handleCreateSubmit}
-          className="mb-5 p-5 bg-[#1e2130] border border-[#2a2f45] rounded-xl"
+          style={{
+            marginBottom: 20,
+            background: 'linear-gradient(135deg, rgba(30,33,48,0.9) 0%, rgba(19,21,29,0.95) 100%)',
+            border: '1px solid rgba(42,47,69,0.6)',
+            borderRadius: 16,
+            padding: '24px',
+            boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
+          }}
         >
           <div className="text-[0.65rem] font-bold text-[#4a5568] uppercase tracking-[1px] mb-4">
             New Customer

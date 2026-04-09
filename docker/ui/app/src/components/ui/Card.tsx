@@ -1,5 +1,3 @@
-import { cn } from '../../utils/cn';
-
 interface CardProps {
   children: React.ReactNode;
   className?: string;
@@ -15,14 +13,23 @@ interface CardTitleProps {
 export function Card({ children, className, compact = false }: CardProps) {
   return (
     <div
-      className={cn(
-        'bg-[#1a1d27] border border-[#2a2f45]/50 rounded-xl',
-        'shadow-[0_1px_4px_rgba(0,0,0,.4)]',
-        'transition-all duration-200',
-        'hover:border-[#363c57] hover:shadow-[0_4px_16px_rgba(0,0,0,.35)]',
-        compact ? 'p-4' : 'p-5 md:p-6',
-        className,
-      )}
+      className={className}
+      style={{
+        background: 'linear-gradient(135deg, rgba(30,33,48,0.9) 0%, rgba(19,21,29,0.95) 100%)',
+        border: '1px solid rgba(42,47,69,0.6)',
+        borderRadius: 16,
+        padding: compact ? 16 : 24,
+        boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
+        transition: 'border-color 0.2s, box-shadow 0.2s',
+      }}
+      onMouseEnter={(e) => {
+        (e.currentTarget as HTMLDivElement).style.borderColor = 'rgba(54,60,87,0.8)';
+        (e.currentTarget as HTMLDivElement).style.boxShadow = '0 6px 24px rgba(0,0,0,0.4)';
+      }}
+      onMouseLeave={(e) => {
+        (e.currentTarget as HTMLDivElement).style.borderColor = 'rgba(42,47,69,0.6)';
+        (e.currentTarget as HTMLDivElement).style.boxShadow = '0 4px 20px rgba(0,0,0,0.3)';
+      }}
     >
       {children}
     </div>
@@ -31,7 +38,16 @@ export function Card({ children, className, compact = false }: CardProps) {
 
 export function CardTitle({ children, className }: CardTitleProps) {
   return (
-    <h3 className={cn('text-[0.95rem] font-semibold text-[#e2e8f0] mb-3', className)}>
+    <h3
+      className={className}
+      style={{
+        fontSize: '0.95rem',
+        fontWeight: 700,
+        color: '#e2e8f0',
+        marginBottom: 16,
+        letterSpacing: '-0.01em',
+      }}
+    >
       {children}
     </h3>
   );
