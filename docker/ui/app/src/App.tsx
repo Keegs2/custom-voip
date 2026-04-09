@@ -1,0 +1,51 @@
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { AppLayout } from './components/layout/AppLayout';
+import { DashboardPage } from './pages/DashboardPage';
+import { RcfPage } from './pages/RcfPage';
+import { ApiDidsPage } from './pages/ApiDidsPage';
+import { TrunksPage } from './pages/TrunksPage';
+import { IvrBuilderPage } from './pages/IvrBuilderPage';
+import { DocsPage } from './pages/DocsPage';
+import { AdminPage } from './pages/admin/AdminPage';
+import { CustomersAdminPage } from './pages/admin/CustomersAdminPage';
+import { CdrsAdminPage } from './pages/admin/CdrsAdminPage';
+import { RatesAdminPage } from './pages/admin/RatesAdminPage';
+import { TiersAdminPage } from './pages/admin/TiersAdminPage';
+import { CarriersAdminPage } from './pages/admin/CarriersAdminPage';
+import { SippAdminPage } from './pages/admin/SippAdminPage';
+import { HomerAdminPage } from './pages/admin/HomerAdminPage';
+
+export function App() {
+  return (
+    <BrowserRouter>
+      <Routes>
+        {/* Routes wrapped in the sidebar layout */}
+        <Route element={<AppLayout />}>
+          <Route index element={<DashboardPage />} />
+          <Route path="rcf"      element={<RcfPage />} />
+          <Route path="api-dids" element={<ApiDidsPage />} />
+          <Route path="trunks"   element={<TrunksPage />} />
+          <Route path="docs"     element={<DocsPage />} />
+
+          {/* Admin nested routes */}
+          <Route path="admin" element={<AdminPage />}>
+            <Route index            element={<Navigate to="customers" replace />} />
+            <Route path="customers" element={<CustomersAdminPage />} />
+            <Route path="cdrs"      element={<CdrsAdminPage />} />
+            <Route path="rates"     element={<RatesAdminPage />} />
+            <Route path="tiers"     element={<TiersAdminPage />} />
+            <Route path="carriers"  element={<CarriersAdminPage />} />
+            <Route path="sipp"      element={<SippAdminPage />} />
+            <Route path="homer"     element={<HomerAdminPage />} />
+          </Route>
+        </Route>
+
+        {/* IVR Builder — full-screen canvas, outside AppLayout */}
+        <Route path="ivr" element={<IvrBuilderPage />} />
+
+        {/* Catch-all redirect to home */}
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </BrowserRouter>
+  );
+}

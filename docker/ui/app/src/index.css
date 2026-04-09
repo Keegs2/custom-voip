@@ -1,0 +1,146 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg: #0f1117;
+  --color-sidebar-bg: #0d0f15;
+  --color-surface: #1a1d27;
+  --color-surface-raised: #1e2130;
+  --color-border: #2a2f45;
+  --color-border-hover: #363c57;
+  --color-border-focus: #3b82f6;
+  --color-text: #e2e8f0;
+  --color-muted: #718096;
+  --color-accent: #3b82f6;
+  --color-accent-hover: #2563eb;
+  --color-accent-glow: rgba(59, 130, 246, 0.28);
+  --color-danger: #7f1d1d;
+  --color-danger-hover: #991b1b;
+  --color-danger-text: #fca5a5;
+  --color-danger-glow: rgba(239, 68, 68, 0.18);
+  --color-success-bg: #065f46;
+  --color-success-text: #6ee7b7;
+  --color-success: #22c55e;
+  --color-warn: #f59e0b;
+
+  --radius: 10px;
+  --shadow: 0 1px 4px rgba(0,0,0,.4), 0 1px 2px rgba(0,0,0,.3);
+  --shadow-lg: 0 8px 32px rgba(0,0,0,.55);
+  --sidebar-w: 240px;
+}
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: #0f1117;
+  color: #e2e8f0;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#root {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #1a1d27;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #2a2f45;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #3d4460;
+}
+
+/* Form control base styles used across the app */
+.form-control {
+  font-size: 0.92rem;
+  padding: 9px 12px;
+  border: 1.5px solid #2a2f45;
+  border-radius: 8px;
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+  background: #1e2130;
+  color: #e2e8f0;
+  width: 100%;
+}
+
+.form-control:focus {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.28);
+}
+
+.form-control option {
+  background: #1e2130;
+  color: #e2e8f0;
+}
+
+select.form-control {
+  cursor: pointer;
+}
+
+/* Toggle switch */
+.toggle {
+  position: relative;
+  width: 40px;
+  height: 22px;
+  flex-shrink: 0;
+}
+
+.toggle input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.toggle-slider {
+  position: absolute;
+  inset: 0;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  border: 1px solid #2a2f45;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.toggle-slider::before {
+  content: '';
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  left: 2px;
+  top: 2px;
+  border-radius: 50%;
+  background: #718096;
+  transition: transform 0.2s, background 0.2s;
+}
+
+.toggle input:checked + .toggle-slider {
+  background: rgba(59, 130, 246, 0.25);
+  border-color: #3b82f6;
+}
+
+.toggle input:checked + .toggle-slider::before {
+  transform: translateX(18px);
+  background: #3b82f6;
+}
