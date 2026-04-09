@@ -1,80 +1,71 @@
-import { useQuery } from '@tanstack/react-query';
-import { Spinner } from '../components/ui/Spinner';
-import { listApiDids } from '../api/apiDids';
-import { ApiDidCard } from './ApiDidCard';
 import { PortalHeader } from './RcfPage';
 
 export function ApiDidsPage() {
-  const { data, isLoading, isError } = useQuery({
-    queryKey: ['api-dids'],
-    queryFn: () => listApiDids({ limit: 200 }),
-  });
-
-  const entries = data?.items ?? [];
-
   return (
     <div>
       <PortalHeader
         icon="<>"
-        title="Your API Numbers"
-        subtitle="Configure webhook URLs for your voice applications."
+        title="API Calling"
+        subtitle="Programmable voice with webhook-driven call control."
         badgeVariant="api"
       />
 
-      {isLoading && (
-        <div className="flex items-center gap-2.5 text-[#718096] text-sm py-12">
-          <Spinner size="sm" />
-          <span>Loading your API numbers…</span>
-        </div>
-      )}
-
-      {isError && (
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '80px 24px',
+          textAlign: 'center',
+          background: 'linear-gradient(135deg, rgba(30,33,48,0.6) 0%, rgba(19,21,29,0.7) 100%)',
+          border: '1px solid rgba(42,47,69,0.4)',
+          borderRadius: 16,
+        }}
+      >
+        {/* Icon */}
         <div
           style={{
-            padding: '12px 16px',
-            borderRadius: 10,
-            background: 'rgba(239,68,68,0.08)',
-            border: '1px solid rgba(239,68,68,0.2)',
-            color: '#f87171',
-            fontSize: '0.875rem',
-            marginTop: 8,
-          }}
-        >
-          Unable to load API DIDs. Please try refreshing the page.
-        </div>
-      )}
-
-      {!isLoading && !isError && entries.length === 0 && (
-        <div
-          style={{
+            width: 64,
+            height: 64,
+            borderRadius: 16,
             display: 'flex',
-            flexDirection: 'column',
             alignItems: 'center',
             justifyContent: 'center',
-            padding: '64px 16px',
-            gap: 8,
-            textAlign: 'center',
-            background: 'linear-gradient(135deg, rgba(30,33,48,0.6) 0%, rgba(19,21,29,0.7) 100%)',
-            border: '1px solid rgba(42,47,69,0.4)',
-            borderRadius: 16,
+            marginBottom: 24,
+            background: 'linear-gradient(135deg, rgba(168,85,247,0.15) 0%, rgba(168,85,247,0.05) 100%)',
+            border: '1px solid rgba(168,85,247,0.25)',
+            color: '#a855f7',
           }}
         >
-          <p style={{ color: '#718096', fontSize: '0.875rem', fontWeight: 500 }}>
-            No API numbers found for your account.
-          </p>
-          <p style={{ color: '#4a5568', fontSize: '0.75rem' }}>
-            Contact support to provision API-enabled numbers.
-          </p>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} style={{ width: 32, height: 32 }}>
+            <path d="M17.25 6.75 22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3-4.5 16.5" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
         </div>
-      )}
 
-      {entries.length > 0 && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-5">
-          {entries.map((did) => (
-            <ApiDidCard key={did.id} did={did} />
-          ))}
+        <h2 style={{ fontSize: '1.25rem', fontWeight: 700, color: '#e2e8f0', marginBottom: 8 }}>
+          Coming in Phase 2
+        </h2>
+        <p style={{ fontSize: '0.9rem', color: '#718096', maxWidth: 420, lineHeight: 1.6 }}>
+          Programmable voice APIs with webhook-driven call control, real-time event callbacks,
+          and full DTMF/recording support are under active development.
+        </p>
+        <div
+          style={{
+            marginTop: 24,
+            padding: '8px 16px',
+            borderRadius: 8,
+            background: 'rgba(168,85,247,0.08)',
+            border: '1px solid rgba(168,85,247,0.2)',
+            color: '#c084fc',
+            fontSize: '0.8rem',
+            fontWeight: 600,
+            letterSpacing: '0.02em',
+          }}
+        >
+          Under Construction
         </div>
-      )}
+      </div>
     </div>
   );
 }
