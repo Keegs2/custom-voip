@@ -70,15 +70,15 @@ export function DashboardPage() {
       {/* Page heading */}
       <div className="mb-8 pb-5 border-b border-[#2a2f45]">
         <h1 className="text-[1.45rem] font-bold tracking-[-0.3px] text-[#e2e8f0] leading-tight">
-          RevUp <span className="text-[#3b82f6]">Platform</span>
+          Custom <span className="text-[#3b82f6]">VoIP</span> Platform
         </h1>
         <p className="text-[0.82rem] text-[#718096] mt-1">
           Select a module to get started
         </p>
       </div>
 
-      {/* 3×2 navigation card grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      {/* 3×2 navigation card grid — constrained width, responsive columns */}
+      <div className="max-w-7xl mx-auto grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         {NAV_CARDS.map((card) => (
           <DashCard
             key={card.path}
