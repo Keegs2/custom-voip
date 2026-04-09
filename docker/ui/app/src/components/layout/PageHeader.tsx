@@ -14,16 +14,16 @@ export function PageHeader({ title, subtitle, actions, className }: PageHeaderPr
     <div
       className={cn(
         'flex items-start justify-between gap-4 flex-wrap',
-        'mb-6 md:mb-8 pb-5 border-b border-[#2a2f45]',
+        'mb-8 pb-5 border-b border-[#2a2f45]/70',
         className,
       )}
     >
       <div className="min-w-0">
-        <h1 className="text-2xl font-bold tracking-tight text-[#e2e8f0] leading-tight">
+        <h1 className="text-xl font-semibold tracking-tight text-[#e2e8f0] leading-tight">
           {title}
         </h1>
         {subtitle && (
-          <p className="text-sm text-[#718096] mt-1.5">{subtitle}</p>
+          <p className="text-sm text-[#718096] mt-1">{subtitle}</p>
         )}
       </div>
       {actions && (

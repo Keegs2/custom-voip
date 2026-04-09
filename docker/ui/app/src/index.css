@@ -57,8 +57,8 @@ body {
 
 /* ─── Scrollbar styling ──────────────────────────────────── */
 ::-webkit-scrollbar {
-  width: 5px;
-  height: 5px;
+  width: 4px;
+  height: 4px;
 }
 
 ::-webkit-scrollbar-track {
@@ -76,8 +76,51 @@ body {
 
 /* ─── Focus ring ─────────────────────────────────────────── */
 :focus-visible {
-  outline: 2px solid rgba(59, 130, 246, 0.7);
+  outline: 2px solid rgba(59, 130, 246, 0.6);
   outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* ─── Smooth card animations ─────────────────────────────── */
+@keyframes fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in-up {
+  animation: fade-in-up 0.5s ease-out both;
+}
+
+.animation-delay-100 {
+  animation-delay: 0.1s;
+}
+
+.animation-delay-200 {
+  animation-delay: 0.2s;
+}
+
+.animation-delay-300 {
+  animation-delay: 0.3s;
+}
+
+.animation-delay-400 {
+  animation-delay: 0.4s;
+}
+
+.animation-delay-500 {
+  animation-delay: 0.5s;
+}
+
+/* ─── Selection highlight ─────────────────────────────────── */
+::selection {
+  background: rgba(59, 130, 246, 0.28);
+  color: #e2e8f0;
 }
 
 /* ─── Form control base styles ───────────────────────────── */

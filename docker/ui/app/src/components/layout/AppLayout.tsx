@@ -10,8 +10,8 @@ export function AppLayout() {
         className="min-h-screen"
         style={{ marginLeft: 'clamp(0px, 240px, 240px)' }}
       >
-        {/* Inner wrapper: max-width + responsive padding */}
-        <div className="max-w-[1400px] mx-auto px-6 py-6 md:px-8 md:py-8 pb-16">
+        {/* Inner wrapper: max-width + generous padding */}
+        <div className="max-w-[1400px] mx-auto px-8 py-8 pb-20">
           <Outlet />
         </div>
       </main>

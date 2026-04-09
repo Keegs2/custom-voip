@@ -7,6 +7,7 @@ interface NavCard {
   path: string;
   accentColor: string;
   iconColor: string;
+  glowColor: string;
   icon: string;
 }
 
@@ -17,15 +18,17 @@ const NAV_CARDS: NavCard[] = [
     path: '/admin',
     accentColor: '#3b82f6',
     iconColor: '#60a5fa',
-    icon: '\u2699',
+    glowColor: 'rgba(59, 130, 246, 0.12)',
+    icon: '⚙',
   },
   {
     title: 'RCF',
-    description: 'Remote Call Forwarding — route DIDs to any destination.',
+    description: 'Remote Call Forwarding — route DIDs to any destination instantly.',
     path: '/rcf',
     accentColor: '#22c55e',
     iconColor: '#4ade80',
-    icon: '\u21CB',
+    glowColor: 'rgba(34, 197, 94, 0.12)',
+    icon: '⇋',
   },
   {
     title: 'API Calling',
@@ -33,7 +36,8 @@ const NAV_CARDS: NavCard[] = [
     path: '/api-dids',
     accentColor: '#a855f7',
     iconColor: '#c084fc',
-    icon: '\u2761',
+    glowColor: 'rgba(168, 85, 247, 0.12)',
+    icon: '❡',
   },
   {
     title: 'SIP Trunks',
@@ -41,7 +45,8 @@ const NAV_CARDS: NavCard[] = [
     path: '/trunks',
     accentColor: '#f59e0b',
     iconColor: '#fbbf24',
-    icon: '\u21C4',
+    glowColor: 'rgba(245, 158, 11, 0.12)',
+    icon: '⇄',
   },
   {
     title: 'IVR Builder',
@@ -49,7 +54,8 @@ const NAV_CARDS: NavCard[] = [
     path: '/ivr',
     accentColor: '#06b6d4',
     iconColor: '#22d3ee',
-    icon: '\u25B6',
+    glowColor: 'rgba(6, 182, 212, 0.12)',
+    icon: '▶',
   },
   {
     title: 'API Docs',
@@ -57,7 +63,8 @@ const NAV_CARDS: NavCard[] = [
     path: '/docs',
     accentColor: '#64748b',
     iconColor: '#94a3b8',
-    icon: '\u2753',
+    glowColor: 'rgba(100, 116, 139, 0.12)',
+    icon: '?',
   },
 ];
 
@@ -65,24 +72,32 @@ export function DashboardPage() {
   const navigate = useNavigate();
 
   return (
-    <div>
-      {/* Page heading */}
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold tracking-tight text-[#e2e8f0] leading-tight">
-          Custom <span className="text-[#3b82f6]">VoIP</span> Platform
+    <div className="max-w-5xl mx-auto">
+      {/* Welcome section — centered */}
+      <div className="text-center mb-12 animate-fade-in-up">
+        <h1 className="text-2xl font-bold tracking-tight text-[#e2e8f0] leading-tight mb-2">
+          Custom{' '}
+          <span
+            className="text-[#3b82f6]"
+            style={{ textShadow: '0 0 24px rgba(59, 130, 246, 0.55)' }}
+          >
+            VoIP
+          </span>{' '}
+          Platform
         </h1>
-        <p className="text-sm text-[#718096] mt-1.5">
-          Select a module to get started
+        <p className="text-sm text-[#718096] leading-relaxed">
+          Select a module below to get started
         </p>
       </div>
 
       {/* Navigation card grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-5">
-        {NAV_CARDS.map((card) => (
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {NAV_CARDS.map((card, i) => (
           <DashCard
             key={card.path}
             card={card}
             onClick={() => navigate(card.path)}
+            style={{ animationDelay: `${i * 0.07}s` }}
           />
         ))}
       </div>
@@ -93,57 +108,87 @@ export function DashboardPage() {
 interface DashCardProps {
   card: NavCard;
   onClick: () => void;
+  style?: React.CSSProperties;
 }
 
-function DashCard({ card, onClick }: DashCardProps) {
+function DashCard({ card, onClick, style }: DashCardProps) {
   return (
     <button
       type="button"
       onClick={onClick}
+      style={
+        {
+          '--glow': card.glowColor,
+          '--accent': card.accentColor,
+          ...style,
+        } as React.CSSProperties
+      }
       className={cn(
         'group text-left w-full',
         'relative flex flex-col',
-        'bg-[#1a1d27] border border-[#2a2f45]/80 rounded-xl',
-        'border-t-2',
-        'p-5',
-        'min-h-[140px]',
+        'bg-[#1a1d27] rounded-2xl',
+        'border border-[#2a2f45]/50',
+        'border-t-[2px]',
+        'p-6',
+        'min-h-[172px]',
         'cursor-pointer select-none',
-        'shadow-[0_1px_3px_rgba(0,0,0,.4)]',
-        'transition-all duration-200',
-        'hover:-translate-y-0.5 hover:shadow-[0_6px_20px_rgba(0,0,0,.3)] hover:border-[#363c57]',
-        'active:translate-y-0 active:transition-none',
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3b82f6]/50',
+        // Staggered entrance
+        'animate-fade-in-up',
+        // Hover: lift + glow + border brightens
+        'transition-all duration-300 ease-out',
+        'hover:-translate-y-1',
+        'hover:border-[color:var(--accent)]/50',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent)]/50',
       )}
-      style={{ borderTopColor: card.accentColor }}
+      // hover shadow applied inline because Tailwind arbitrary shadow with dynamic color isn't supported
+      onMouseEnter={(e) => {
+        (e.currentTarget as HTMLButtonElement).style.boxShadow =
+          `0 8px 30px ${card.glowColor}, 0 2px 8px rgba(0,0,0,0.4)`;
+      }}
+      onMouseLeave={(e) => {
+        (e.currentTarget as HTMLButtonElement).style.boxShadow = '';
+      }}
     >
-      {/* Icon + title row */}
-      <div className="flex items-center gap-2.5 mb-3">
-        <span
-          className="text-2xl leading-none font-normal flex-shrink-0"
-          style={{ color: card.iconColor }}
-          aria-hidden="true"
-        >
-          {card.icon}
-        </span>
-        <span className="text-[0.95rem] font-bold text-[#e2e8f0] tracking-tight">
-          {card.title}
-        </span>
+      {/* Colored top accent border via inline style on the element itself */}
+      <div
+        className="absolute top-0 left-0 right-0 h-[2px] rounded-t-2xl"
+        style={{ background: card.accentColor }}
+      />
+
+      {/* Icon */}
+      <div
+        className="text-3xl leading-none font-normal mb-4 flex-shrink-0 transition-transform duration-300 group-hover:scale-110"
+        style={{ color: card.iconColor }}
+        aria-hidden="true"
+      >
+        {card.icon}
       </div>
 
+      {/* Title */}
+      <span className="text-base font-semibold text-[#e2e8f0] tracking-tight leading-snug mb-2">
+        {card.title}
+      </span>
+
       {/* Description */}
-      <p className="text-[0.82rem] text-[#718096] leading-relaxed flex-1">
+      <p className="text-sm text-[#718096] leading-relaxed flex-1">
         {card.description}
       </p>
 
-      {/* "Open ›" link — bottom-right */}
-      <div className="flex justify-end mt-3 pt-3 border-t border-[#2a2f45]/60">
+      {/* Separator + Open link */}
+      <div className="mt-4 pt-4 border-t border-[#2a2f45]/60 flex justify-end">
         <span
           className={cn(
-            'text-xs font-semibold',
-            'text-[#3b82f6]/70 tracking-wide',
-            'transition-all duration-150',
-            'group-hover:text-[#3b82f6] group-hover:translate-x-0.5',
+            'text-xs font-semibold tracking-wide',
+            'transition-all duration-200',
+            'group-hover:translate-x-0.5',
           )}
+          style={{ color: card.accentColor, opacity: 0.75 }}
+          onMouseEnter={(e) => {
+            (e.currentTarget as HTMLSpanElement).style.opacity = '1';
+          }}
+          onMouseLeave={(e) => {
+            (e.currentTarget as HTMLSpanElement).style.opacity = '0.75';
+          }}
         >
           Open &rsaquo;
         </span>

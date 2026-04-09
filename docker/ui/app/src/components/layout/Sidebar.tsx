@@ -6,14 +6,15 @@ interface NavItem {
   label: string;
   icon: string;
   to: string;
+  color: string;
 }
 
 const productNavItems: NavItem[] = [
-  { label: 'RCF',         icon: '📞', to: '/rcf' },
-  { label: 'API Calling', icon: '🔗', to: '/api-dids' },
-  { label: 'SIP Trunks', icon: '🏗️', to: '/trunks' },
-  { label: 'IVR Builder', icon: '🎛️', to: '/ivr' },
-  { label: 'API Docs',   icon: '📖', to: '/docs' },
+  { label: 'RCF',         icon: '📞', to: '/rcf',      color: '#4ade80' },
+  { label: 'API Calling', icon: '🔗', to: '/api-dids', color: '#c084fc' },
+  { label: 'SIP Trunks', icon: '🏗️', to: '/trunks',   color: '#fbbf24' },
+  { label: 'IVR Builder', icon: '🎛️', to: '/ivr',      color: '#22d3ee' },
+  { label: 'API Docs',   icon: '📖', to: '/docs',     color: '#94a3b8' },
 ];
 
 interface SidebarNavItemProps {
@@ -28,12 +29,12 @@ function SidebarNavItem({ item, onNavigate }: SidebarNavItemProps) {
       onClick={onNavigate}
       className={({ isActive }) =>
         cn(
-          'group flex items-center gap-3 px-4 py-2.5 mx-2 cursor-pointer select-none',
+          'group flex items-center gap-3 px-3 py-2.5 cursor-pointer select-none',
           'text-sm font-medium rounded-lg no-underline',
-          'transition-all duration-150',
+          'transition-all duration-200',
           isActive
-            ? 'text-[#e2e8f0] bg-[rgba(59,130,246,0.12)] shadow-[inset_3px_0_0_#3b82f6]'
-            : 'text-[#718096] hover:text-[#cbd5e0] hover:bg-white/[0.04]',
+            ? 'text-[#e2e8f0] bg-[rgba(59,130,246,0.1)] shadow-[inset_3px_0_0_#3b82f6]'
+            : 'text-[#718096] hover:text-[#cbd5e0] hover:bg-white/[0.05]',
         )
       }
     >
@@ -68,7 +69,12 @@ export function Sidebar() {
         >
           ☰
         </button>
-        <span className="text-sm font-bold text-[#e2e8f0]">Custom VoIP</span>
+        <span
+          className="text-sm font-extrabold text-[#e2e8f0] tracking-tight"
+          style={{ textShadow: '0 0 20px rgba(59, 130, 246, 0.5)' }}
+        >
+          Custom <span className="text-[#3b82f6]">VoIP</span>
+        </span>
       </div>
 
       {/* Mobile overlay */}
@@ -84,7 +90,7 @@ export function Sidebar() {
       <aside
         className={cn(
           'fixed top-0 left-0 bottom-0 w-[240px] z-[100]',
-          'bg-[#0d0f15] border-r border-[#2a2f45]',
+          'bg-[#0d0f15] border-r border-[#2a2f45]/80',
           'flex flex-col transition-transform duration-[250ms] ease-in-out',
           'md:translate-x-0',
           mobileOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0',
@@ -93,26 +99,29 @@ export function Sidebar() {
       >
         {/* Brand */}
         <div
-          className="px-5 pt-5 pb-4 border-b border-[#2a2f45] cursor-pointer select-none"
+          className="px-3 pt-6 pb-5 cursor-pointer select-none"
           onClick={handleBrandClick}
           role="button"
           tabIndex={0}
           onKeyDown={(e) => e.key === 'Enter' && handleBrandClick()}
         >
           <div
-            className="text-lg font-extrabold tracking-tight text-[#e2e8f0]"
-            style={{ textShadow: '0 0 28px rgba(59, 130, 246, 0.45)' }}
+            className="text-xl font-extrabold tracking-tight text-[#e2e8f0] px-3"
+            style={{ textShadow: '0 0 32px rgba(59, 130, 246, 0.5)' }}
           >
             Custom <span className="text-[#3b82f6]">VoIP</span>
           </div>
-          <div className="text-xs text-[#4a5568] mt-0.5 tracking-wide font-medium">
+          <div className="text-[0.7rem] text-[#4a5568] mt-1 px-3 tracking-widest font-semibold uppercase">
             Voice Platform
           </div>
         </div>
 
+        {/* Divider */}
+        <div className="mx-3 h-px bg-[#2a2f45]/60" />
+
         {/* Nav */}
-        <nav className="flex-1 py-4 overflow-y-auto">
-          <div className="text-[0.65rem] font-bold text-[#4a5568] uppercase tracking-[1.2px] px-6 mb-2">
+        <nav className="flex-1 px-3 py-5 overflow-y-auto">
+          <div className="text-[0.6rem] font-bold text-[#4a5568] uppercase tracking-[1.5px] px-3 mb-3">
             Products
           </div>
           <div className="flex flex-col gap-0.5">
@@ -123,23 +132,26 @@ export function Sidebar() {
         </nav>
 
         {/* Footer */}
-        <div className="px-2 py-3 border-t border-[#2a2f45]">
+        <div className="mt-auto px-3 py-4 border-t border-[#2a2f45]/60">
           <NavLink
             to="/admin"
             onClick={closeMobile}
             className={({ isActive }) =>
               cn(
-                'flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium no-underline',
-                'transition-all duration-150',
+                'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium no-underline',
+                'transition-all duration-200',
                 isActive
-                  ? 'text-[#e2e8f0] bg-[rgba(59,130,246,0.12)] shadow-[inset_3px_0_0_#3b82f6]'
-                  : 'text-[#718096] hover:text-[#cbd5e0] hover:bg-white/[0.04]',
+                  ? 'text-[#e2e8f0] bg-[rgba(59,130,246,0.1)] shadow-[inset_3px_0_0_#3b82f6]'
+                  : 'text-[#718096] hover:text-[#cbd5e0] hover:bg-white/[0.05]',
               )
             }
           >
             <span className="text-base w-5 text-center flex-shrink-0 leading-none">⚙️</span>
             <span>Administration</span>
           </NavLink>
+          <div className="px-3 pt-3 text-[0.65rem] text-[#4a5568] font-medium">
+            v1.0 &middot; Voice Platform
+          </div>
         </div>
       </aside>
     </>

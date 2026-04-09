@@ -23,18 +23,18 @@ export function AdminPage() {
   return (
     <div>
       {/* Page header */}
-      <div className="mb-6 md:mb-8 pb-5 border-b border-[#2a2f45]">
-        <h1 className="text-2xl font-bold tracking-tight text-[#e2e8f0]">
+      <div className="mb-6 pb-5 border-b border-[#2a2f45]/70">
+        <h1 className="text-xl font-semibold tracking-tight text-[#e2e8f0]">
           Administration
         </h1>
-        <p className="text-sm text-[#718096] mt-1.5">
+        <p className="text-sm text-[#718096] mt-1">
           Manage customers, billing, carriers, and platform configuration
         </p>
       </div>
 
       {/* Tab nav */}
       <nav
-        className="flex gap-0.5 border-b border-[#2a2f45] mb-6 overflow-x-auto"
+        className="flex gap-0 border-b border-[#2a2f45]/70 mb-8 overflow-x-auto"
         role="tablist"
         aria-label="Admin sections"
       >

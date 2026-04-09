@@ -16,9 +16,10 @@ export function Card({ children, className, compact = false }: CardProps) {
   return (
     <div
       className={cn(
-        'bg-[#1a1d27] border border-[#2a2f45] rounded-xl',
-        'shadow-[0_1px_3px_rgba(0,0,0,.4)]',
-        'transition-[border-color] duration-200 hover:border-[#363c57]',
+        'bg-[#1a1d27] border border-[#2a2f45]/50 rounded-xl',
+        'shadow-[0_1px_4px_rgba(0,0,0,.4)]',
+        'transition-all duration-200',
+        'hover:border-[#363c57] hover:shadow-[0_4px_16px_rgba(0,0,0,.35)]',
         compact ? 'p-4' : 'p-5 md:p-6',
         className,
       )}
@@ -30,7 +31,7 @@ export function Card({ children, className, compact = false }: CardProps) {
 
 export function CardTitle({ children, className }: CardTitleProps) {
   return (
-    <h3 className={cn('text-[0.95rem] font-bold text-[#e2e8f0] mb-3', className)}>
+    <h3 className={cn('text-[0.95rem] font-semibold text-[#e2e8f0] mb-3', className)}>
       {children}
     </h3>
   );
