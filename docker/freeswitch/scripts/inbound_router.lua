@@ -80,13 +80,36 @@ end
 local uuid = get_var("uuid", "unknown")
 local did = get_var("destination_number", "")
 local caller_id = get_var("caller_id_number", "")
+local caller_id_name = get_var("caller_id_name", "")
 local sip_from_user = get_var("sip_from_user", "")
 local sip_from_display = get_var("sip_from_display", "")
 local source_ip = get_var("sip_received_ip", get_var("network_addr", ""))
 
+-- Save original caller ID IMMEDIATELY -- FreeSWITCH may overwrite these during processing.
+-- FusionPBX pattern: capture caller_id early, before any DID normalization or transfers.
+-- sip_from_user is the most reliable source of the original caller's number because
+-- it comes directly from the From header of the inbound INVITE and is not modified
+-- by dialplan processing. Fall back to caller_id_number if sip_from_user is empty
+-- or matches the DID (which means the carrier put the DID in From, not the caller).
+local original_caller_number = caller_id
+if sip_from_user ~= "" and sip_from_user ~= did then
+    original_caller_number = sip_from_user
+end
+local original_caller_name = caller_id_name
+if (original_caller_name == "" or original_caller_name == nil) and sip_from_display ~= "" then
+    original_caller_name = sip_from_display
+end
+if original_caller_name == "" or original_caller_name == nil then
+    original_caller_name = original_caller_number
+end
+
 freeswitch.consoleLog("INFO", string.format(
     "[%s] Inbound: DID=%s CallerID=%s SIP-From-User=%s SIP-From-Display=%s SourceIP=%s\n",
     uuid, did, caller_id, sip_from_user, sip_from_display, source_ip
+))
+freeswitch.consoleLog("INFO", string.format(
+    "[%s] Original caller preserved: number=%s name=%s\n",
+    uuid, original_caller_number, original_caller_name
 ))
 
 -- Validate DID
@@ -376,67 +399,51 @@ if product_type == "rcf" then
     local dial_string
 
     -- ================================================================
-    -- Caller ID and SIP header setup for RCF call forwarding
+    -- Caller ID handling: FusionPBX-style approach
     -- ================================================================
-    -- SIP header semantics for carrier termination (Bandwidth):
-    --   From:                 Must be the RCF DID (Bandwidth owns this number
-    --                         and requires it in From for termination auth)
-    --   P-Asserted-Identity:  Original caller's number (carrier uses this for
-    --                         caller ID presentation to the called party)
-    --   Remote-Party-ID:      Original caller (backup CID mechanism, widely
-    --                         supported by terminating carriers)
-    --   Diversion:            RCF DID with reason=unconditional (indicates
-    --                         the call was forwarded and from where)
+    -- FusionPBX uses channel variables (setVariable) instead of dial-string
+    -- overrides. This is cleaner and more reliable because:
+    --   1. outbound_caller_id_number -> SIP From header (carrier auth)
+    --   2. effective_caller_id_number -> caller ID presentation to called party
+    --   3. These are DIFFERENT from origination_caller_id_number
     --
-    -- FreeSWITCH variable mapping:
-    --   origination_caller_id_number -> controls SIP From user AND caller ID
-    --                                   (set to RCF DID for Bandwidth auth)
-    --   origination_caller_id_name   -> controls SIP From display name
-    --   sip_h_X-Original-CID        -> custom header; Kamailio reads this to
-    --                                   build P-Asserted-Identity for CID display
-    --   sip_h_Remote-Party-ID       -> explicit CID presentation header
-    --   sip_h_Diversion             -> call forwarding indicator
+    -- By using setVariable on the session, the variables apply to the bridge
+    -- without needing to pack everything into the dial string {} block.
     --
-    -- IMPORTANT: All variables MUST be in a single {} block in the dial string.
-    -- FreeSWITCH treats the first {} as global vars and subsequent {} as per-leg
-    -- vars -- having two {} blocks does NOT merge them. We build a single block
-    -- containing both the bridge parameters and the CID overrides.
+    -- SIP headers produced (after Kamailio processing):
+    --   From: <sip:RCF_DID@public_ip>           (via outbound_caller_id_number)
+    --   P-Asserted-Identity: <sip:orig@ip>       (via X-Original-CID -> Kamailio)
+    --   Remote-Party-ID: <sip:orig@ip>           (via sip_h_Remote-Party-ID)
+    --   Diversion: <sip:RCF_DID@ip>;reason=unconditional
     -- ================================================================
 
-    -- Get original caller info from the A-leg INVITE
-    -- CRITICAL: FreeSWITCH is a B2BUA. The caller_id_number variable may
-    -- have been overwritten during dialplan processing. We MUST read the
-    -- original caller from the raw SIP headers of the inbound A-leg.
-    -- sip_from_user preserves the From header user from the original INVITE.
-    -- If that's also wrong, try the P-Asserted-Identity from the A-leg.
-    local original_cid_number = sip_from_user
-    if original_cid_number == "" or original_cid_number == normalized_did or original_cid_number == did then
-        -- sip_from_user matched the DID — try other sources
-        original_cid_number = get_var("sip_P-Asserted-Identity", "")
-        -- Extract just the user part from PAI URI if it's a full SIP URI
-        if original_cid_number:find("sip:") then
-            original_cid_number = original_cid_number:match("sip:([^@;>]+)") or original_cid_number
-        end
-        if original_cid_number == "" or original_cid_number == normalized_did then
-            original_cid_number = caller_id
-        end
-    end
-    -- Final fallback: if still the DID, use caller_id anyway (better than empty)
-    if original_cid_number == "" then
-        original_cid_number = caller_id
+    -- Set outbound caller ID for carrier authorization (SIP From header).
+    -- Bandwidth requires the RCF DID in the From header for termination auth.
+    session:setVariable("outbound_caller_id_number", normalized_did)
+    session:setVariable("outbound_caller_id_name", normalized_did)
+
+    if pass_caller_id then
+        -- Preserve original caller ID so the called party sees who is calling
+        session:setVariable("effective_caller_id_number", original_caller_number)
+        session:setVariable("effective_caller_id_name", original_caller_name)
+    else
+        -- Override: called party sees the RCF DID, not the original caller
+        session:setVariable("effective_caller_id_number", normalized_did)
+        session:setVariable("effective_caller_id_name", normalized_did)
     end
 
-    local original_cid_name = sip_from_display
-    if original_cid_name == "" or original_cid_name == normalized_did then
-        original_cid_name = get_var("caller_id_name", "")
-    end
-    if original_cid_name == "" then
-        original_cid_name = original_cid_number
-    end
+    -- Diversion header indicates the call was forwarded and from which number
+    session:setVariable("sip_h_Diversion", "<sip:" .. normalized_did .. "@34.74.71.32>;reason=unconditional")
+
+    -- X-Original-CID: Kamailio reads this to build P-Asserted-Identity
+    session:setVariable("sip_h_X-Original-CID", original_caller_number)
 
     freeswitch.consoleLog("INFO", string.format(
-        "[inbound_router] Original CID resolution: sip_from_user=%s caller_id=%s -> resolved=%s name=%s\n",
-        sip_from_user, caller_id, original_cid_number, original_cid_name
+        "[inbound_router] CID setup (FusionPBX-style): outbound_cid=%s effective_cid=%s original=%s pass=%s\n",
+        normalized_did,
+        pass_caller_id and original_caller_number or normalized_did,
+        original_caller_number,
+        tostring(pass_caller_id)
     ))
 
     if is_local_forward then
@@ -463,75 +470,28 @@ if product_type == "rcf" then
         -- X-Carrier header tells Kamailio which Bandwidth IP to use.
         set_var("carrier_used", "carrier_" .. carrier)
 
+        -- Remote-Party-ID: backup CID presentation mechanism for carriers
+        -- that don't support P-Asserted-Identity
         if pass_caller_id then
-            -- Passthrough mode: present original caller's number to the end user
-            -- but use RCF DID in the From header for carrier authorization.
-            --
-            -- SIP headers produced (after Kamailio processing):
-            --   From: "orig_name" <sip:RCF_DID@public_ip>    (Bandwidth auth)
-            --   P-Asserted-Identity: <sip:orig_caller@ip>     (CID display)
-            --   Remote-Party-ID: <sip:orig_caller@ip>         (backup CID)
-            --   Diversion: <sip:RCF_DID@ip>;reason=unconditional
-            --
-            -- NOTE: origination_caller_id_number controls the From header
-            -- user part in FreeSWITCH. We set it to the RCF DID so that
-            -- Bandwidth sees the DID in From. The original caller's number
-            -- is passed via X-Original-CID (Kamailio builds PAI from it)
-            -- and Remote-Party-ID (direct CID presentation header).
-
-            dial_string = string.format(
-                "{ignore_early_media=false,call_timeout=%d," ..
-                "sip_h_X-Carrier=%s," ..
-                "origination_caller_id_number=%s," ..
-                "origination_caller_id_name=%s," ..
-                "sip_h_X-Original-CID=%s," ..
-                "sip_h_Remote-Party-ID=<sip:%s@34.74.71.32>;party=calling;privacy=off;screen=yes," ..
-                "sip_h_Diversion=<sip:%s@34.74.71.32>;reason=unconditional" ..
-                "}sofia/external/%s@172.28.0.1:5060",
-                ring_timeout,             -- call_timeout
-                carrier,                  -- X-Carrier: standard/premium/backup
-                normalized_did,           -- origination_caller_id_number: RCF DID (From header)
-                original_cid_name,        -- origination_caller_id_name: original caller name (From display)
-                original_cid_number,      -- X-Original-CID: original caller (Kamailio builds PAI)
-                original_cid_number,      -- Remote-Party-ID: original caller
-                normalized_did,           -- Diversion: the RCF DID that was called
-                forward_to                -- destination number
-            )
-
-            freeswitch.consoleLog("INFO", string.format(
-                "[inbound_router] RCF CID passthrough: From=%s, PAI/CID=%s, Diversion=%s\n",
-                normalized_did, original_cid_number, normalized_did
-            ))
-        else
-            -- Override mode: use the RCF DID for everything (no original caller shown).
-            -- Both From and caller ID are the RCF DID.
-
-            dial_string = string.format(
-                "{ignore_early_media=false,call_timeout=%d," ..
-                "sip_h_X-Carrier=%s," ..
-                "origination_caller_id_number=%s," ..
-                "origination_caller_id_name=%s," ..
-                "sip_h_X-Original-CID=%s," ..
-                "sip_h_Diversion=<sip:%s@34.74.71.32>;reason=unconditional" ..
-                "}sofia/external/%s@172.28.0.1:5060",
-                ring_timeout,             -- call_timeout
-                carrier,                  -- X-Carrier
-                normalized_did,           -- origination_caller_id_number: RCF DID (From header)
-                normalized_did,           -- origination_caller_id_name: RCF DID
-                normalized_did,           -- X-Original-CID: RCF DID (same, no passthrough)
-                normalized_did,           -- Diversion: RCF DID
-                forward_to                -- destination number
-            )
-
-            freeswitch.consoleLog("INFO", string.format(
-                "[inbound_router] RCF CID override: using RCF DID %s for all headers (original was %s)\n",
-                normalized_did, original_cid_number
-            ))
+            session:setVariable("sip_h_Remote-Party-ID",
+                "<sip:" .. original_caller_number .. "@34.74.71.32>;party=calling;privacy=off;screen=yes")
         end
 
+        -- Simplified bridge string -- no origination_caller_id_number override needed.
+        -- FreeSWITCH uses outbound_caller_id_* for the SIP From header
+        -- and effective_caller_id_* for caller ID presentation to the called party.
+        -- Both were set via setVariable above (FusionPBX pattern).
+        dial_string = string.format(
+            "{ignore_early_media=false,call_timeout=%d,sip_h_X-Carrier=%s" ..
+            "}sofia/external/%s@172.28.0.1:5060",
+            ring_timeout,
+            carrier,
+            forward_to
+        )
+
         freeswitch.consoleLog("INFO", string.format(
-            "[%s] RCF Bridge (PSTN): %s -> %s via proxy (carrier=%s)\n",
-            uuid, normalized_did, forward_to, carrier
+            "[%s] RCF Bridge (PSTN): %s -> %s via proxy (carrier=%s, pass_cid=%s)\n",
+            uuid, normalized_did, forward_to, carrier, tostring(pass_caller_id)
         ))
     end
 
@@ -557,42 +517,16 @@ if product_type == "rcf" then
         ))
         set_var("carrier_used", "carrier_backup")
 
-        local failover_dial
-        if pass_caller_id then
-            failover_dial = string.format(
-                "{ignore_early_media=false,call_timeout=%d," ..
-                "sip_h_X-Carrier=backup," ..
-                "origination_caller_id_number=%s," ..
-                "origination_caller_id_name=%s," ..
-                "sip_h_X-Original-CID=%s," ..
-                "sip_h_Remote-Party-ID=<sip:%s@34.74.71.32>;party=calling;privacy=off;screen=yes," ..
-                "sip_h_Diversion=<sip:%s@34.74.71.32>;reason=unconditional" ..
-                "}sofia/external/%s@172.28.0.1:5060",
-                ring_timeout,
-                normalized_did,           -- origination_caller_id_number: RCF DID (From)
-                original_cid_name,        -- origination_caller_id_name: original caller name
-                original_cid_number,      -- X-Original-CID: original caller (PAI)
-                original_cid_number,      -- Remote-Party-ID: original caller
-                normalized_did,           -- Diversion: RCF DID
-                forward_to                -- destination
-            )
-        else
-            failover_dial = string.format(
-                "{ignore_early_media=false,call_timeout=%d," ..
-                "sip_h_X-Carrier=backup," ..
-                "origination_caller_id_number=%s," ..
-                "origination_caller_id_name=%s," ..
-                "sip_h_X-Original-CID=%s," ..
-                "sip_h_Diversion=<sip:%s@34.74.71.32>;reason=unconditional" ..
-                "}sofia/external/%s@172.28.0.1:5060",
-                ring_timeout,
-                normalized_did,           -- origination_caller_id_number: RCF DID
-                normalized_did,           -- origination_caller_id_name: RCF DID
-                normalized_did,           -- X-Original-CID: RCF DID
-                normalized_did,           -- Diversion: RCF DID
-                forward_to                -- destination
-            )
-        end
+        -- Channel variables (outbound_caller_id_*, effective_caller_id_*,
+        -- sip_h_Diversion, sip_h_X-Original-CID, sip_h_Remote-Party-ID)
+        -- persist on the session from the primary bridge attempt above.
+        -- Only the X-Carrier header changes for the failover carrier.
+        local failover_dial = string.format(
+            "{ignore_early_media=false,call_timeout=%d,sip_h_X-Carrier=backup" ..
+            "}sofia/external/%s@172.28.0.1:5060",
+            ring_timeout,
+            forward_to
+        )
 
         pcall(function()
             session:execute("bridge", failover_dial)
