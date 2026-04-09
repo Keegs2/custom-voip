@@ -10,8 +10,8 @@ from typing import Optional, Dict
 logger = logging.getLogger(__name__)
 
 # ESL connection settings
-# FS runs with host networking — API container reaches it via Docker gateway
-ESL_HOST = os.getenv("FREESWITCH_ESL_HOST", "172.28.0.1")
+# FS runs with host networking — API container reaches it via host's VPC IP
+ESL_HOST = os.getenv("FREESWITCH_ESL_HOST", "10.142.0.100")
 ESL_PORT = int(os.getenv("FREESWITCH_ESL_PORT", "8021"))
 ESL_PASSWORD = os.getenv("FREESWITCH_ESL_PASSWORD", "ClueCon")
 
