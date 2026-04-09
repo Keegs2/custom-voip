@@ -301,10 +301,12 @@ ENV LUA_CPATH="/usr/local/lib/lua/5.3/?.so;/usr/lib/lua/5.3/?.so;;"
 EXPOSE 5060/udp 5060/tcp
 EXPOSE 5080/udp 5080/tcp
 EXPOSE 5081/tcp
+EXPOSE 5090/udp 5090/tcp
 # Event Socket
 EXPOSE 8021/tcp
-# RTP media (wide range for high volume)
-EXPOSE 16384-32768/udp
+# RTP media (must match rtp-start-port/rtp-end-port in switch.conf.xml
+# and the port mapping in docker-compose.yml)
+EXPOSE 16384-18383/udp
 
 # Health check using fs_cli
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
@@ -312,4 +314,8 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
 
 # Start FreeSWITCH in foreground with custom config directory
 # Must specify all of: -conf, -log, -db together
-CMD ["/usr/local/freeswitch/bin/freeswitch", "-nonat", "-nc", "-nf", "-conf", "/usr/local/freeswitch/conf", "-log", "/var/log/freeswitch", "-db", "/var/lib/freeswitch/db", "-scripts", "/usr/local/freeswitch/scripts"]
+# CRITICAL: Do NOT use -nonat here. The -nonat flag disables ext-rtp-ip and
+# ext-sip-ip processing, causing SDP to contain Docker internal IPs (172.28.x.x)
+# instead of the public IP. Bandwidth would send RTP to an unreachable address.
+# NAT traversal via ext-rtp-ip/ext-sip-ip is essential in Docker environments.
+CMD ["/usr/local/freeswitch/bin/freeswitch", "-nc", "-nf", "-conf", "/usr/local/freeswitch/conf", "-log", "/var/log/freeswitch", "-db", "/var/lib/freeswitch/db", "-scripts", "/usr/local/freeswitch/scripts"]

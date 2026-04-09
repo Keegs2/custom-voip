@@ -38,9 +38,10 @@
   <!-- ============================================ -->
   <!-- RTP PORT RANGE                              -->
   <!-- ============================================ -->
-  <!-- Wide range for high-volume: 10,000+ concurrent calls -->
+  <!-- RTP port range must match Docker port mapping in docker-compose.yml -->
+  <!-- 2000 ports = ~500 concurrent B2BUA calls. For higher scale, use host networking. -->
   <X-PRE-PROCESS cmd="set" data="rtp_start_port=16384"/>
-  <X-PRE-PROCESS cmd="set" data="rtp_end_port=32768"/>
+  <X-PRE-PROCESS cmd="set" data="rtp_end_port=18383"/>
 
   <!-- ============================================ -->
   <!-- EXTERNAL IP (for NAT traversal)            -->

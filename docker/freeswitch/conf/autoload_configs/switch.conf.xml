@@ -42,10 +42,12 @@
     <!-- ============================================ -->
     <!-- RTP MEDIA SETTINGS                          -->
     <!-- ============================================ -->
-    <!-- Wide RTP port range for high concurrency -->
-    <!-- 10,000 calls * 2 ports (RTP+RTCP) = 20,000 ports minimum -->
+    <!-- RTP port range MUST match the Docker port mapping in docker-compose.yml -->
+    <!-- With bridge networking, Docker creates iptables rules per port, so the -->
+    <!-- range must be kept reasonable. 2000 ports = ~500 concurrent B2BUA calls. -->
+    <!-- For higher scale (10,000+ calls), switch to host networking. -->
     <param name="rtp-start-port" value="16384"/>
-    <param name="rtp-end-port" value="32768"/>
+    <param name="rtp-end-port" value="18383"/>
 
     <!-- RTP timeout - hang up if no media received -->
     <param name="rtp-timeout-sec" value="60"/>

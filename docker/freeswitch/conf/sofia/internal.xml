@@ -92,8 +92,14 @@
     <!-- Greedy codec negotiation - prefer our list over remote -->
     <param name="inbound-codec-negotiation" value="greedy"/>
 
-    <!-- Late codec negotiation for transcoding scenarios -->
-    <param name="inbound-late-negotiation" value="true"/>
+    <!-- Late codec negotiation DISABLED for B2BUA/RCF call forwarding.
+         With proxy_media=true (set in Lua), FreeSWITCH needs to answer
+         the A-leg codec negotiation immediately so it can set up the
+         media path and generate ringback. Late negotiation delays the
+         SDP answer which prevents early media/ringback from flowing.
+         For RCF (our primary use case), codecs are PCMU/PCMA on both
+         sides so late negotiation provides no benefit. -->
+    <param name="inbound-late-negotiation" value="false"/>
 
     <!-- ============================================ -->
     <!-- DTMF CONFIGURATION                          -->
@@ -234,10 +240,12 @@
     <param name="media-option" value="bypass-media-after-att-xfer"/>
     <param name="disable-hold" value="false"/>
 
-    <!-- SRTP settings (enable for secure media) -->
-    <!-- For carriers that support SRTP -->
-    <param name="rtp-secure-media" value="optional"/>
-    <param name="rtp-secure-media-prefer-avp" value="true"/>
+    <!-- SRTP disabled for carrier interconnect (Bandwidth uses RTP, not SRTP).
+         Setting rtp-secure-media to "optional" can cause SRTP negotiation
+         in SDP (m=audio ... RTP/SAVP) which confuses PSTN carriers.
+         For WebRTC or TLS-capable endpoints, enable per-call via channel variable. -->
+    <param name="rtp-secure-media" value="false"/>
+    <param name="rtp-secure-media-prefer-avp" value="false"/>
 
     <!-- ============================================ -->
     <!-- SIP OPTIONS / FEATURES                      -->
@@ -246,8 +254,11 @@
     <!-- User-Agent header -->
     <param name="user-agent-string" value="VoicePlatform/1.0"/>
 
-    <!-- Enable 100rel (PRACK) for early media -->
-    <param name="enable-100rel" value="true"/>
+    <!-- 100rel (PRACK) for early media -- set to false for carrier compatibility.
+         Many PSTN carriers (including Bandwidth) do not support PRACK.
+         Requiring PRACK can prevent 180/183 early media from flowing.
+         FreeSWITCH will still pass through early media without 100rel. -->
+    <param name="enable-100rel" value="false"/>
 
     <!-- Pass caller ID through -->
     <param name="caller-id-type" value="pid"/>

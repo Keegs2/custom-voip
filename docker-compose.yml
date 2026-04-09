@@ -88,8 +88,12 @@ services:
       - REDIS_PORT=6379
       - API_HOST=api
       - API_PORT=8000
-      - EXTERNAL_RTP_IP=${EXTERNAL_RTP_IP:-auto-nat}
-      - EXTERNAL_SIP_IP=${EXTERNAL_SIP_IP:-auto-nat}
+      # CRITICAL: These MUST be the VM's public IP, NOT auto-nat.
+      # auto-nat inside Docker resolves to the container's IP (172.28.x.x),
+      # NOT the host's public IP. SDP c= lines and SIP Contact/Via headers
+      # must contain the public IP so Bandwidth can send RTP and SIP to us.
+      - EXTERNAL_RTP_IP=${EXTERNAL_RTP_IP:-34.74.71.32}
+      - EXTERNAL_SIP_IP=${EXTERNAL_SIP_IP:-34.74.71.32}
       - TEST_MODE=${TEST_MODE:-true}
     ports:
       - "5080:5080/udp"
@@ -98,8 +102,12 @@ services:
       - "5090:5090/udp"   # External profile - carrier-facing outbound calls
       - "5090:5090/tcp"   # External profile - carrier-facing outbound calls
       - "8022:8021/tcp"   # Use 8022 on host to avoid conflict
-      # RTP ports - use host networking in production
-      - "16384-16484:16384-16484/udp"
+      # RTP ports: MUST match rtp-start-port / rtp-end-port in switch.conf.xml
+      # Each concurrent call needs 2 UDP ports per leg (RTP + RTCP).
+      # FreeSWITCH as B2BUA has 2 legs per call = 4 ports per call.
+      # 2000 ports = ~500 concurrent B2BUA calls.
+      # For higher scale, switch FreeSWITCH to network_mode: host.
+      - "16384-18383:16384-18383/udp"
     volumes:
       # drachtio image uses /usr/local/freeswitch/conf
       # Note: not read-only because entrypoint script needs to modify config

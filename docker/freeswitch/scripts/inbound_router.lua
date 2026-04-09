@@ -408,6 +408,26 @@ if product_type == "rcf" then
     set_var("forward_to", forward_to)
     set_var("call_timeout", tostring(ring_timeout))
 
+    -- ================================================================
+    -- Media anchoring and early media (ringback) configuration
+    -- ================================================================
+    -- FreeSWITCH MUST stay in the RTP media path for both legs (B2BUA mode).
+    -- proxy_media=true keeps FS in the media path while allowing codec
+    -- passthrough (no transcoding unless needed). This is critical because:
+    --   1. FS needs to relay RTP between Bandwidth (A-leg) and Bandwidth (B-leg)
+    --   2. Without media anchoring, RTP would need to flow directly between
+    --      the two Bandwidth endpoints, which they won't do (no direct path)
+    --   3. SDP in both directions must contain FS's public IP (ext-rtp-ip)
+    --
+    -- ringback: Generates local ringback tone on the A-leg while waiting for
+    -- the B-leg to answer. This ensures the caller hears ringing even if
+    -- Bandwidth doesn't send 183 Session Progress with SDP (early media).
+    -- If the B-leg DOES send early media (183+SDP), ignore_early_media=false
+    -- in the bridge string means FS will pass that through instead.
+    set_var("proxy_media", "true")
+    set_var("ringback", "%(2000,4000,440,480)")
+    set_var("transfer_ringback", "%(2000,4000,440,480)")
+
     local dial_string
 
     -- ================================================================
@@ -509,6 +529,8 @@ if product_type == "rcf" then
         ))
     end
 
+    -- Ensure clean call teardown when bridge ends
+    set_var("hangup_after_bridge", "true")
     -- Set bridge failure handling for failover
     set_var("continue_on_fail", "true")
     -- Mark that the DID was found and Lua is handling routing
