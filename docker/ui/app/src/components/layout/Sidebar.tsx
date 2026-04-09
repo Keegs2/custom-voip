@@ -50,8 +50,8 @@ const IconAdmin = () => (
 
 const productNavItems: NavItem[] = [
   { label: 'RCF',         icon: <IconRCF />,   to: '/rcf',      color: '#4ade80' },
-  { label: 'API Calling', icon: <IconAPI />,   to: '/api-dids', color: '#c084fc' },
   { label: 'SIP Trunks', icon: <IconTrunk />, to: '/trunks',   color: '#fbbf24' },
+  { label: 'API Calling', icon: <IconAPI />,   to: '/api-dids', color: '#c084fc' },
   { label: 'IVR Builder', icon: <IconIVR />,   to: '/ivr',      color: '#22d3ee' },
   { label: 'API Docs',   icon: <IconDocs />,  to: '/docs',     color: '#94a3b8' },
 ];
