@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useState, useId } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getCustomer, deleteCustomer } from '../../api/customers';
 import { getCustomerTier } from '../../api/tiers';
 import { apiRequest } from '../../api/client';
+import { getCustomerRecentCdrs, getCustomerCdrDailySummary } from '../../api/cdrs';
 import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
 import { Spinner } from '../../components/ui/Spinner';
@@ -13,6 +14,8 @@ import { CustomerRcfSection } from './CustomerRcfSection';
 import { CustomerApiSection } from './CustomerApiSection';
 import { CustomerTrunkSection } from './CustomerTrunkSection';
 import type { Customer } from '../../types/customer';
+import type { Cdr } from '../../types/cdr';
+import type { CdrSummaryRow } from '../../types/rate';
 
 interface AddCreditResponse {
   balance: number;
@@ -113,6 +116,588 @@ function SectionCard({ children, accent = '#3b82f6' }: SectionCardProps) {
   );
 }
 
+// ---- Usage & Analytics ----
+
+interface UsageSummary {
+  totalCalls: number;
+  answeredCalls: number;
+  asr: number;
+  totalMinutes: number;
+  avgDurationSec: number;
+  totalCost: number;
+}
+
+function computeSummary(rows: CdrSummaryRow[]): UsageSummary {
+  let totalCalls = 0;
+  let answeredCalls = 0;
+  let totalDurationSec = 0;
+  let totalCost = 0;
+
+  for (const row of rows) {
+    totalCalls += row.total_calls;
+    answeredCalls += row.answered_calls;
+    totalDurationSec += row.total_duration_sec;
+    totalCost += row.total_cost ?? 0;
+  }
+
+  const asr = totalCalls > 0 ? Math.round((answeredCalls / totalCalls) * 100) : 0;
+  const avgDurationSec = answeredCalls > 0 ? totalDurationSec / answeredCalls : 0;
+
+  return {
+    totalCalls,
+    answeredCalls,
+    asr,
+    totalMinutes: Math.round(totalDurationSec / 60),
+    avgDurationSec,
+    totalCost,
+  };
+}
+
+function fmtDuration(sec: number): string {
+  const m = Math.floor(sec / 60);
+  const s = Math.round(sec % 60);
+  return m > 0 ? `${m}m ${s}s` : `${s}s`;
+}
+
+// ---- Bar chart (pure SVG, no library) ----
+
+interface DailyBarChartProps {
+  rows: CdrSummaryRow[];
+  accent: string;
+}
+
+function DailyBarChart({ rows, accent }: DailyBarChartProps) {
+  const gradientId = useId();
+
+  // Aggregate rows by date (multiple product_type rows per day possible)
+  const byDate = new Map<string, number>();
+  for (const row of rows) {
+    const dateKey = row.date ?? '';
+    if (!dateKey) continue;
+    byDate.set(dateKey, (byDate.get(dateKey) ?? 0) + row.total_calls);
+  }
+
+  // Build last-30-days slots so we always render a full 30-bar range
+  const slots: Array<{ date: string; label: string; calls: number }> = [];
+  for (let i = 29; i >= 0; i--) {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    const key = d.toISOString().slice(0, 10); // YYYY-MM-DD
+    const label = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    slots.push({ date: key, label, calls: byDate.get(key) ?? 0 });
+  }
+
+  const maxCalls = Math.max(...slots.map((s) => s.calls), 1);
+
+  const SVG_H = 140;
+  const AXIS_H = 24; // reserved at bottom for labels
+  const BAR_AREA_H = SVG_H - AXIS_H - 8; // 8px top padding
+  const GAP_RATIO = 0.3; // gap between bars relative to bar width
+
+  // Horizontal grid line values
+  const gridLines = [0.25, 0.5, 0.75, 1.0].map((f) => ({
+    y: 8 + BAR_AREA_H * (1 - f),
+    value: Math.round(maxCalls * f),
+  }));
+
+  // Show x-axis labels only every 5 days so they don't crowd
+  const LABEL_EVERY = 5;
+
+  return (
+    <div style={{ width: '100%', position: 'relative' }}>
+      <svg
+        viewBox={`0 0 100 ${SVG_H}`}
+        preserveAspectRatio="none"
+        style={{ width: '100%', height: SVG_H, display: 'block', overflow: 'visible' }}
+        aria-label="Daily call volume chart"
+      >
+        <defs>
+          <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={accent} stopOpacity="0.9" />
+            <stop offset="100%" stopColor={accent} stopOpacity="0.35" />
+          </linearGradient>
+        </defs>
+
+        {/* Horizontal grid lines */}
+        {gridLines.map(({ y }) => (
+          <line
+            key={y}
+            x1="0"
+            y1={y}
+            x2="100"
+            y2={y}
+            stroke="rgba(255,255,255,0.04)"
+            strokeWidth="0.3"
+            vectorEffect="non-scaling-stroke"
+          />
+        ))}
+
+        {/* Bars */}
+        {slots.map((slot, i) => {
+          const totalW = 100 / slots.length;
+          const barW = totalW * (1 - GAP_RATIO);
+          const x = i * totalW + totalW * (GAP_RATIO / 2);
+          const barH = (slot.calls / maxCalls) * BAR_AREA_H;
+          const y = 8 + BAR_AREA_H - barH;
+
+          return (
+            <rect
+              key={slot.date}
+              x={x}
+              y={y}
+              width={barW}
+              height={barH}
+              fill={`url(#${gradientId})`}
+              rx="0.4"
+            >
+              <title>{slot.label}: {slot.calls} call{slot.calls !== 1 ? 's' : ''}</title>
+            </rect>
+          );
+        })}
+
+        {/* X-axis labels — rendered at fixed SVG coords, so they DON'T scale */}
+        {slots.map((slot, i) => {
+          if (i % LABEL_EVERY !== 0) return null;
+          const totalW = 100 / slots.length;
+          const cx = i * totalW + totalW / 2;
+          return (
+            <text
+              key={slot.date + '-label'}
+              x={cx}
+              y={SVG_H - 4}
+              textAnchor="middle"
+              fontSize="3.2"
+              fill="#4a5568"
+              fontFamily="system-ui, sans-serif"
+            >
+              {slot.label}
+            </text>
+          );
+        })}
+      </svg>
+
+      {/* Y-axis label overlays — positioned absolute so text size is stable */}
+      <div
+        style={{
+          position: 'absolute',
+          top: 6,
+          left: 0,
+          pointerEvents: 'none',
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'space-between',
+          height: BAR_AREA_H + 2,
+        }}
+      >
+        {[...gridLines].reverse().map(({ y: _y, value }) => (
+          <span
+            key={value}
+            style={{
+              fontSize: '0.6rem',
+              color: '#3a4255',
+              fontVariantNumeric: 'tabular-nums',
+              lineHeight: 1,
+            }}
+          >
+            {value}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ---- Recent calls table ----
+
+interface RecentCallsTableProps {
+  cdrs: Cdr[];
+}
+
+function RecentCallsTable({ cdrs }: RecentCallsTableProps) {
+  if (cdrs.length === 0) {
+    return (
+      <div
+        style={{
+          padding: '32px 0',
+          textAlign: 'center',
+          color: '#4a5568',
+          fontSize: '0.82rem',
+        }}
+      >
+        No call records yet. CDRs will appear here after calls are processed.
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ overflowX: 'auto' }}>
+      <table
+        style={{
+          width: '100%',
+          borderCollapse: 'collapse',
+          fontSize: '0.78rem',
+          color: '#cbd5e0',
+        }}
+      >
+        <thead>
+          <tr>
+            {['Date / Time', 'Dir', 'From', 'To', 'Duration', 'Status', 'Hangup Cause'].map((h) => (
+              <th
+                key={h}
+                style={{
+                  padding: '8px 12px',
+                  textAlign: 'left',
+                  fontSize: '0.6rem',
+                  fontWeight: 700,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.08em',
+                  color: '#4a5568',
+                  borderBottom: '1px solid rgba(42,47,69,0.5)',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {h}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {cdrs.map((cdr, idx) => {
+            const answered = cdr.answer_time != null;
+            const startDt = new Date(cdr.start_time);
+            const dateStr = startDt.toLocaleDateString(undefined, {
+              month: 'short',
+              day: 'numeric',
+            });
+            const timeStr = startDt.toLocaleTimeString(undefined, {
+              hour: '2-digit',
+              minute: '2-digit',
+              second: '2-digit',
+              hour12: false,
+            });
+
+            return (
+              <tr
+                key={cdr.uuid}
+                style={{
+                  borderBottom: '1px solid rgba(42,47,69,0.25)',
+                  background: idx % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.012)',
+                }}
+              >
+                {/* Date/Time */}
+                <td style={{ padding: '7px 12px', whiteSpace: 'nowrap' }}>
+                  <div style={{ color: '#a0aec0', fontVariantNumeric: 'tabular-nums' }}>
+                    {dateStr}
+                  </div>
+                  <div
+                    style={{
+                      color: '#4a5568',
+                      fontSize: '0.7rem',
+                      fontVariantNumeric: 'tabular-nums',
+                    }}
+                  >
+                    {timeStr}
+                  </div>
+                </td>
+
+                {/* Direction */}
+                <td style={{ padding: '7px 12px' }}>
+                  <span
+                    style={{
+                      display: 'inline-block',
+                      fontSize: '0.6rem',
+                      fontWeight: 700,
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.06em',
+                      padding: '2px 7px',
+                      borderRadius: 4,
+                      background:
+                        cdr.direction === 'inbound'
+                          ? 'rgba(59,130,246,0.15)'
+                          : 'rgba(168,85,247,0.15)',
+                      color:
+                        cdr.direction === 'inbound' ? '#60a5fa' : '#c084fc',
+                      border:
+                        cdr.direction === 'inbound'
+                          ? '1px solid rgba(59,130,246,0.25)'
+                          : '1px solid rgba(168,85,247,0.25)',
+                    }}
+                  >
+                    {cdr.direction === 'inbound' ? 'In' : 'Out'}
+                  </span>
+                </td>
+
+                {/* From */}
+                <td
+                  style={{
+                    padding: '7px 12px',
+                    fontFamily: 'monospace',
+                    color: '#94a3b8',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {cdr.caller_id || '—'}
+                </td>
+
+                {/* To */}
+                <td
+                  style={{
+                    padding: '7px 12px',
+                    fontFamily: 'monospace',
+                    color: '#94a3b8',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {cdr.destination}
+                </td>
+
+                {/* Duration */}
+                <td
+                  style={{
+                    padding: '7px 12px',
+                    fontVariantNumeric: 'tabular-nums',
+                    color: '#718096',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {cdr.duration_seconds > 0 ? fmtDuration(cdr.duration_seconds) : '—'}
+                </td>
+
+                {/* Status */}
+                <td style={{ padding: '7px 12px' }}>
+                  <span
+                    style={{
+                      display: 'inline-block',
+                      fontSize: '0.6rem',
+                      fontWeight: 700,
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.06em',
+                      padding: '2px 7px',
+                      borderRadius: 4,
+                      background: answered
+                        ? 'rgba(34,197,94,0.12)'
+                        : 'rgba(239,68,68,0.12)',
+                      color: answered ? '#4ade80' : '#f87171',
+                      border: answered
+                        ? '1px solid rgba(34,197,94,0.2)'
+                        : '1px solid rgba(239,68,68,0.2)',
+                    }}
+                  >
+                    {answered ? 'Answered' : 'No Answer'}
+                  </span>
+                </td>
+
+                {/* Hangup Cause */}
+                <td
+                  style={{
+                    padding: '7px 12px',
+                    color: '#4a5568',
+                    fontFamily: 'monospace',
+                    fontSize: '0.72rem',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {cdr.hangup_cause ?? '—'}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// ---- Usage summary stat cards ----
+
+interface UsageSummaryCardsProps {
+  summary: UsageSummary;
+  accent: string;
+}
+
+function UsageSummaryCards({ summary, accent }: UsageSummaryCardsProps) {
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
+      <StatCard
+        label="Total Calls (30d)"
+        accent={accent}
+        value={summary.totalCalls.toLocaleString()}
+      />
+      <StatCard
+        label="Answered / ASR"
+        accent={accent}
+        value={
+          <span>
+            {summary.answeredCalls.toLocaleString()}{' '}
+            <span style={{ fontSize: '0.78rem', color: '#718096' }}>
+              ({summary.asr}%)
+            </span>
+          </span>
+        }
+      />
+      <StatCard
+        label="Total Minutes"
+        accent={accent}
+        value={summary.totalMinutes.toLocaleString()}
+      />
+      <StatCard
+        label="Avg Duration"
+        accent={accent}
+        value={summary.avgDurationSec > 0 ? fmtDuration(summary.avgDurationSec) : '—'}
+      />
+      <StatCard
+        label="Total Cost"
+        accent={accent}
+        value={`$${summary.totalCost.toFixed(2)}`}
+      />
+    </div>
+  );
+}
+
+// ---- Main usage section ----
+
+interface CustomerUsageSectionProps {
+  customerId: number;
+  accent: string;
+}
+
+function CustomerUsageSection({ customerId, accent }: CustomerUsageSectionProps) {
+  const thirtyDaysAgo = new Date();
+  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+  const {
+    data: recentData,
+    isLoading: recentLoading,
+    isError: recentError,
+  } = useQuery({
+    queryKey: ['customerCdrs', customerId, 'recent'],
+    queryFn: () => getCustomerRecentCdrs(customerId, 20, thirtyDaysAgo),
+    staleTime: 60_000,
+  });
+
+  const {
+    data: summaryData,
+    isLoading: summaryLoading,
+    isError: summaryError,
+  } = useQuery({
+    queryKey: ['customerCdrs', customerId, 'daily'],
+    queryFn: () => getCustomerCdrDailySummary(customerId),
+    staleTime: 60_000,
+  });
+
+  const isLoading = recentLoading || summaryLoading;
+  const isError = recentError || summaryError;
+
+  const summaryRows = summaryData?.summary ?? [];
+  const recentCdrs = recentData?.items ?? [];
+  const computedSummary = computeSummary(summaryRows);
+
+  const sectionLabelStyle: React.CSSProperties = {
+    fontSize: '0.6rem',
+    fontWeight: 700,
+    color: accent,
+    textTransform: 'uppercase',
+    letterSpacing: '0.1em',
+    marginBottom: 20,
+  };
+
+  const subLabelStyle: React.CSSProperties = {
+    fontSize: '0.6rem',
+    fontWeight: 700,
+    color: '#4a5568',
+    textTransform: 'uppercase',
+    letterSpacing: '0.1em',
+    marginBottom: 14,
+  };
+
+  return (
+    <SectionCard accent={accent}>
+      <div style={sectionLabelStyle}>Usage &amp; Analytics</div>
+
+      {isLoading && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            color: '#718096',
+            fontSize: '0.82rem',
+            padding: '32px 0',
+          }}
+        >
+          <Spinner size="xs" /> Loading analytics…
+        </div>
+      )}
+
+      {!isLoading && isError && (
+        <div
+          style={{
+            padding: '12px 16px',
+            borderRadius: 10,
+            background: 'rgba(239,68,68,0.08)',
+            border: '1px solid rgba(239,68,68,0.18)',
+            color: '#f87171',
+            fontSize: '0.8rem',
+          }}
+        >
+          Unable to load usage data. The CDR service may be unavailable.
+        </div>
+      )}
+
+      {!isLoading && !isError && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
+
+          {/* Summary stat cards */}
+          <UsageSummaryCards summary={computedSummary} accent={accent} />
+
+          {/* Daily volume chart */}
+          <div>
+            <div style={subLabelStyle}>Daily Call Volume — Last 30 Days</div>
+            <div
+              style={{
+                background: 'rgba(10,12,18,0.7)',
+                border: '1px solid rgba(42,47,69,0.35)',
+                borderRadius: 10,
+                padding: '16px 16px 6px',
+              }}
+            >
+              {summaryRows.length === 0 ? (
+                <div
+                  style={{
+                    padding: '32px 0',
+                    textAlign: 'center',
+                    color: '#4a5568',
+                    fontSize: '0.82rem',
+                  }}
+                >
+                  No call records yet. CDRs will appear here after calls are processed.
+                </div>
+              ) : (
+                <DailyBarChart rows={summaryRows} accent={accent} />
+              )}
+            </div>
+          </div>
+
+          {/* Recent calls table */}
+          <div>
+            <div style={subLabelStyle}>Recent Calls</div>
+            <div
+              style={{
+                background: 'rgba(10,12,18,0.5)',
+                border: '1px solid rgba(42,47,69,0.35)',
+                borderRadius: 10,
+                overflow: 'hidden',
+              }}
+            >
+              <RecentCallsTable cdrs={recentCdrs} />
+            </div>
+          </div>
+        </div>
+      )}
+    </SectionCard>
+  );
+}
+
 // ---- Account detail view ----
 
 interface AccountDetailViewProps {
@@ -161,6 +746,14 @@ function AccountDetailView({ customer, onEdit, onDelete }: AccountDetailViewProp
   const showRcf = customer.account_type === 'rcf' || customer.account_type === 'hybrid';
   const showApi = customer.account_type === 'api' || customer.account_type === 'hybrid';
   const showTrunk = customer.account_type === 'trunk' || customer.account_type === 'hybrid';
+
+  const accountTypeAccentMap: Record<string, string> = {
+    rcf: '#22c55e',
+    api: '#a855f7',
+    trunk: '#f59e0b',
+    hybrid: '#3b82f6',
+  };
+  const headerAccent = accountTypeAccentMap[customer.account_type] ?? '#3b82f6';
 
   const tier = tierData?.tier;
 
@@ -322,6 +915,9 @@ function AccountDetailView({ customer, onEdit, onDelete }: AccountDetailViewProp
           </div>
         </div>
       </SectionCard>
+
+      {/* Usage & Analytics */}
+      <CustomerUsageSection customerId={customer.id} accent={headerAccent} />
 
       {/* Service sections */}
       {showRcf && (

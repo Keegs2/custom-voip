@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  mod_json_cdr Configuration
+  Posts JSON CDR data to the FastAPI server after every completed call.
+
+  Network path: FreeSWITCH (host networking) -> localhost:8088 -> API container (port 8000 internal)
+  The API container publishes port 8000 on host port 8088 (see docker-compose.yml).
+
+  NOTE: The API must expose a POST /v1/cdrs/ingest endpoint that accepts the
+  mod_json_cdr JSON payload. That endpoint is responsible for extracting the
+  channel variables and mapping them into the cdrs table schema.
+-->
+<configuration name="json_cdr.conf" description="JSON CDR">
+  <settings>
+
+    <!-- ============================================ -->
+    <!-- HTTP POST Target                            -->
+    <!-- ============================================ -->
+
+    <!-- Primary CDR receiver — FastAPI on the host-published port.
+         FreeSWITCH runs with network_mode: host, so 127.0.0.1:8088
+         reaches the API container's port 8000 via Docker port mapping. -->
+    <param name="url" value="http://127.0.0.1:8088/v1/cdrs/ingest"/>
+
+    <!-- HTTP timeout in seconds. Keep short so a slow/dead API server
+         does not block FreeSWITCH channel teardown. 5s is generous for
+         a local loopback POST. -->
+    <param name="timeout" value="5"/>
+
+    <!-- Disable SSL certificate verification (not needed for localhost). -->
+    <param name="ssl-cert-check" value="false"/>
+
+    <!-- ============================================ -->
+    <!-- Logging and Fallback                        -->
+    <!-- ============================================ -->
+
+    <!-- When the HTTP POST fails, also write the CDR to disk so no
+         data is lost. A recovery process can replay these later. -->
+    <param name="log-http-and-disk" value="true"/>
+
+    <!-- Directory for fallback JSON CDR files when HTTP POST fails.
+         This path is inside the container (freeswitch_logs volume). -->
+    <param name="log-dir" value="/var/log/freeswitch/json_cdr"/>
+
+    <!-- Log errors to the FreeSWITCH console when HTTP POST fails,
+         so operators see failures in real time. -->
+    <param name="err-log-dir" value="/var/log/freeswitch/json_cdr/errors"/>
+
+    <!-- ============================================ -->
+    <!-- Leg Selection                               -->
+    <!-- ============================================ -->
+
+    <!-- Only generate CDRs for the A-leg. The B-leg CDR is redundant
+         for billing because the A-leg already contains the full call
+         duration, hangup cause, and all custom channel variables set
+         by the Lua routing scripts. Skipping B-leg CDRs halves the
+         CDR volume and avoids double-counting in billing. -->
+    <param name="prefix-a-leg" value="true"/>
+    <param name="cdr-leg" value="a"/>
+
+    <!-- ============================================ -->
+    <!-- JSON Encoding                               -->
+    <!-- ============================================ -->
+
+    <!-- URL-encode values in the JSON output to prevent injection
+         of special characters (e.g., quotes in caller ID names)
+         that could break JSON parsing on the API side. -->
+    <param name="encode-values" value="true"/>
+
+    <!-- Pretty-print JSON for disk-logged CDRs (easier to debug).
+         The HTTP-posted version is compact regardless. -->
+    <param name="indent" value="1"/>
+
+    <!-- ============================================ -->
+    <!-- Channel Variables to Include                -->
+    <!-- ============================================ -->
+
+    <!-- By default mod_json_cdr includes ALL channel variables in the
+         "variables" object of the JSON payload. This is the safest
+         approach because our Lua scripts set many custom variables
+         (customer_id, product_type, trunk_id, etc.) and we do not
+         want to miss any.
+
+         If you need to restrict to specific variables only (to reduce
+         payload size), uncomment the lines below and set
+         "channel-vars" to the explicit list. For now, we include
+         everything and let the API server pick what it needs.
+    -->
+
+    <!--
+    <param name="channel-vars" value="customer_id,product_type,trunk_id,direction,traffic_grade,carrier_used,fraud_score,blocked_reason,forward_to,call_reference,api_tier,per_call_fee,carrier_gateway,hangup_cause,sip_term_status,bridge_hangup_cause,billsec,duration,uuid,caller_id_number,caller_id_name,destination_number,sip_received_ip,sip_from_user,freeswitch_hostname"/>
+    -->
+
+    <!-- ============================================ -->
+    <!-- HTTP Request Settings                       -->
+    <!-- ============================================ -->
+
+    <!-- Content-Type header for the POST request. -->
+    <param name="encode" value="true"/>
+
+    <!-- Disable base64 encoding of the JSON body — send plain JSON. -->
+    <param name="log-b-leg" value="false"/>
+
+    <!-- Number of retries if the HTTP POST fails. -->
+    <param name="retries" value="2"/>
+
+    <!-- Delay between retries in seconds. -->
+    <param name="delay" value="2"/>
+
+  </settings>
+</configuration>

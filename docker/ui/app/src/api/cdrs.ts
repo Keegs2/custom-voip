@@ -61,3 +61,61 @@ export async function getCdrSummary(params: CdrSummaryParams = {}): Promise<CdrS
   const qs = query.toString();
   return apiRequest('GET', `/cdrs/summary${qs ? `?${qs}` : ''}`);
 }
+
+/**
+ * Fetch recent CDRs for a specific customer, scoped to a date range.
+ * The API uses `start_date` / `end_date` query params (ISO 8601 strings).
+ */
+export async function getCustomerRecentCdrs(
+  customerId: number,
+  limit = 20,
+  startDate?: Date,
+): Promise<CdrSearchResult> {
+  const query = new URLSearchParams();
+  query.set('customer_id', String(customerId));
+  query.set('limit', String(limit));
+  if (startDate) {
+    query.set('start_date', startDate.toISOString());
+    query.set('end_date', new Date().toISOString());
+  }
+
+  interface RawResult {
+    cdrs?: Cdr[];
+    items?: Cdr[];
+    count?: number;
+    total?: number;
+    limit?: number;
+    offset?: number;
+  }
+
+  const raw = await apiRequest<RawResult>('GET', `/cdrs?${query.toString()}`);
+  const items = raw.items ?? raw.cdrs ?? [];
+  const total = raw.total ?? raw.count ?? items.length;
+
+  return {
+    items,
+    total,
+    limit: raw.limit ?? limit,
+    offset: raw.offset ?? 0,
+  };
+}
+
+/**
+ * Fetch 30-day daily CDR summary for a customer.
+ * Returns day-grouped rows that drive the bar chart and aggregate stats.
+ */
+export async function getCustomerCdrDailySummary(
+  customerId: number,
+): Promise<CdrSummaryResponse> {
+  const end = new Date();
+  const start = new Date(end);
+  start.setDate(start.getDate() - 30);
+
+  const query = new URLSearchParams();
+  query.set('customer_id', String(customerId));
+  query.set('group_by', 'day');
+  query.set('start_date', start.toISOString());
+  query.set('end_date', end.toISOString());
+
+  return apiRequest<CdrSummaryResponse>('GET', `/cdrs/summary?${query.toString()}`);
+}
