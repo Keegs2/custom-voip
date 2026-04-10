@@ -29,11 +29,13 @@ export function App() {
           <Route path="api-dids" element={<ApiDidsPage />} />
           <Route path="trunks"   element={<TrunksPage />} />
           <Route path="docs"     element={<DocsPage />} />
+          {/* Customer account page — outside AdminPage wrapper for clean layout */}
+          <Route path="admin/customers/:customerId" element={<CustomerAccountPage />} />
+
           {/* Admin nested routes */}
           <Route path="admin" element={<AdminPage />}>
             <Route index            element={<Navigate to="customers" replace />} />
             <Route path="customers" element={<CustomersAdminPage />} />
-            <Route path="customers/:customerId" element={<CustomerAccountPage />} />
             <Route path="trunks"    element={<TrunksAdminPage />} />
             <Route path="cdrs"      element={<CdrsAdminPage />} />
             <Route path="rates"     element={<RatesAdminPage />} />
