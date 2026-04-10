@@ -65,7 +65,7 @@
     <!-- URL-encode values in the JSON output to prevent injection
          of special characters (e.g., quotes in caller ID names)
          that could break JSON parsing on the API side. -->
-    <param name="encode-values" value="true"/>
+    <param name="encode-values" value="false"/>
 
     <!-- Pretty-print JSON for disk-logged CDRs (easier to debug).
          The HTTP-posted version is compact regardless. -->

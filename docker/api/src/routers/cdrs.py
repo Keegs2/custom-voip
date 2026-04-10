@@ -92,9 +92,29 @@ async def ingest_cdr(request: Request):
     Docker network.
     """
     try:
-        body = await request.json()
-    except Exception:
-        logger.warning("CDR ingest: failed to parse JSON body")
+        content_type = request.headers.get("content-type", "")
+        if "application/json" in content_type:
+            body = await request.json()
+        elif "x-www-form-urlencoded" in content_type:
+            # mod_json_cdr with encode-values sends URL-encoded form with a 'cdr' field
+            import json
+            from urllib.parse import unquote
+            form = await request.form()
+            cdr_raw = form.get("cdr", "")
+            if not cdr_raw:
+                # Some versions send the JSON as the entire body without a field name
+                raw_body = await request.body()
+                cdr_raw = unquote(raw_body.decode("utf-8", errors="replace"))
+            else:
+                cdr_raw = str(cdr_raw)
+            body = json.loads(cdr_raw)
+        else:
+            # Try raw body as JSON (mod_json_cdr may send without content-type)
+            import json
+            raw_body = await request.body()
+            body = json.loads(raw_body.decode("utf-8", errors="replace"))
+    except Exception as e:
+        logger.warning("CDR ingest: failed to parse body: %s", e)
         return {"status": "error", "detail": "invalid JSON"}
 
     try:
