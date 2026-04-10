@@ -168,14 +168,16 @@ export function TiersTab() {
                     {callPaths!.map((p) => (
                       <tr key={p.id} className="hover:bg-white/[0.02] transition-colors">
                         <Td>
-                          <span className="font-semibold text-[#e2e8f0]">
-                            {p.name || '--'}
-                          </span>
-                          {p.description && (
-                            <span className="text-[#718096] text-xs ml-2">
-                              {p.description}
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                            <span className="font-semibold text-[#e2e8f0]">
+                              {p.name || '--'}
                             </span>
-                          )}
+                            {p.description && (
+                              <span className="text-[#718096] text-xs">
+                                {p.description}
+                              </span>
+                            )}
+                          </div>
                         </Td>
                         <Td className="tabular-nums">{p.call_paths ?? p.paths ?? '--'}</Td>
                         <Td className="tabular-nums">
