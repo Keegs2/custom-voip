@@ -46,7 +46,7 @@ export async function createTrunk(data: TrunkCreate): Promise<Trunk> {
 }
 
 export async function updateTrunk(id: number, data: Partial<TrunkCreate>): Promise<Trunk> {
-  return apiRequest('PATCH', `/trunks/${id}`, data);
+  return apiRequest('PUT', `/trunks/${id}`, data);
 }
 
 export async function deleteTrunk(id: number): Promise<void> {
