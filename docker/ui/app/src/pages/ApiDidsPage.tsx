@@ -8,7 +8,7 @@ export function ApiDidsPage() {
     <div>
       <PortalHeader
         icon={<IconAPI size={24} />}
-        title="API Calling"
+        title={user?.customer_name ? `${user.customer_name}'s API Calling` : 'API Calling'}
         subtitle="Programmable voice with webhook-driven call control."
         badgeVariant="api"
         userEmail={user?.email}
