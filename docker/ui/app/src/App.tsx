@@ -9,6 +9,7 @@ import { DocsPage } from './pages/DocsPage';
 import { TroubleshootingPage } from './pages/TroubleshootingPage';
 import { AdminPage } from './pages/admin/AdminPage';
 import { CustomersAdminPage } from './pages/admin/CustomersAdminPage';
+import { CustomerAccountPage } from './pages/admin/CustomerAccountPage';
 import { CdrsAdminPage } from './pages/admin/CdrsAdminPage';
 import { RatesAdminPage } from './pages/admin/RatesAdminPage';
 import { TiersAdminPage } from './pages/admin/TiersAdminPage';
@@ -32,6 +33,7 @@ export function App() {
           <Route path="admin" element={<AdminPage />}>
             <Route index            element={<Navigate to="customers" replace />} />
             <Route path="customers" element={<CustomersAdminPage />} />
+            <Route path="customers/:customerId" element={<CustomerAccountPage />} />
             <Route path="trunks"    element={<TrunksAdminPage />} />
             <Route path="cdrs"      element={<CdrsAdminPage />} />
             <Route path="rates"     element={<RatesAdminPage />} />

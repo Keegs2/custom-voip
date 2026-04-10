@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { listCustomers, createCustomer, deleteCustomer } from '../../api/customers';
+import { listCustomers, createCustomer } from '../../api/customers';
 import { Button } from '../../components/ui/Button';
 import { Spinner } from '../../components/ui/Spinner';
 import { Pagination } from '../../components/ui/Pagination';
@@ -40,8 +40,6 @@ export function CustomersAdminPage() {
   const [committedSearch, setCommittedSearch] = useState('');
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [createForm, setCreateForm] = useState<CreateFormState>(INITIAL_CREATE);
-  const [expandedCustomerId, setExpandedCustomerId] = useState<number | null>(null);
-  const [editingCustomerId, setEditingCustomerId] = useState<number | null>(null);
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ['customers', { search: committedSearch, offset }],
@@ -68,41 +66,11 @@ export function CustomersAdminPage() {
     onError: (err: Error) => toastErr(err.message),
   });
 
-  const deleteMutation = useMutation({
-    mutationFn: (id: number) => deleteCustomer(id),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['customers'] });
-      setExpandedCustomerId(null);
-      setEditingCustomerId(null);
-      toastOk('Customer deleted');
-    },
-    onError: (err: Error) => toastErr(err.message),
-  });
-
-  function handleDeleteCustomer(id: number, name: string) {
-    if (!confirm(`Delete customer "${name}" and ALL associated records (RCF, trunks, DIDs)?\n\nThis cannot be undone.`)) return;
-    deleteMutation.mutate(id);
-  }
-
   function handleSearch(e: React.FormEvent) {
     e.preventDefault();
     setOffset(0);
     setCommittedSearch(search);
   }
-
-  function handleToggleExpand(id: number) {
-    if (expandedCustomerId === id) {
-      setExpandedCustomerId(null);
-      setEditingCustomerId(null);
-    } else {
-      setExpandedCustomerId(id);
-      setEditingCustomerId(null);
-    }
-  }
-
-  function handleStartEdit(id: number) { setEditingCustomerId(id); }
-  function handleCancelEdit() { setEditingCustomerId(null); }
-  function handleSaved() { setEditingCustomerId(null); }
 
   function handleCreateSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -354,18 +322,7 @@ export function CustomersAdminPage() {
                   </tr>
                 ) : (
                   (data.items ?? []).map((customer) => (
-                    <CustomerRow
-                      key={customer.id}
-                      customer={customer}
-                      isExpanded={expandedCustomerId === customer.id}
-                      isEditing={editingCustomerId === customer.id}
-                      onToggleExpand={handleToggleExpand}
-                      onStartEdit={handleStartEdit}
-                      onCancelEdit={handleCancelEdit}
-                      onSaved={handleSaved}
-                      onDelete={handleDeleteCustomer}
-                      colSpan={COL_COUNT}
-                    />
+                    <CustomerRow key={customer.id} customer={customer} />
                   ))
                 )}
               </tbody>
