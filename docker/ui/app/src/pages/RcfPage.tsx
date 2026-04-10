@@ -7,11 +7,14 @@ import type { RcfEntry } from '../types/rcf';
 import { RcfCard } from './RcfCard';
 import { useAuth } from '../contexts/AuthContext';
 import { IconRCF } from '../components/icons/ProductIcons';
+import { AdminCustomerSelector } from '../components/AdminCustomerSelector';
 
 export function RcfPage() {
-  const { user } = useAuth();
-  // For non-admin users, scope the query to their customer — admins see everything
-  const customerId = user?.customer_id ?? undefined;
+  const { user, isAdmin } = useAuth();
+  const [adminSelectedCustomer, setAdminSelectedCustomer] = useState<number | undefined>(undefined);
+
+  // Non-admins: locked to their customer. Admins: use selector (undefined = all)
+  const customerId = isAdmin ? adminSelectedCustomer : (user?.customer_id ?? undefined);
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ['rcf', customerId],
@@ -35,10 +38,16 @@ export function RcfPage() {
     <div>
       <PortalHeader
         icon={<IconRCF size={24} />}
-        title={user?.customer_name ? `${user.customer_name}'s Numbers` : 'Your Numbers'}
+        title={user?.customer_name ? `${user.customer_name}'s Numbers` : 'RCF Numbers'}
         subtitle="Change where your calls forward to. Updates take effect within seconds."
         badgeVariant="rcf"
         userEmail={user?.email}
+      />
+
+      <AdminCustomerSelector
+        selectedCustomerId={adminSelectedCustomer}
+        onSelect={setAdminSelectedCustomer}
+        accent="#22c55e"
       />
 
       {isLoading && (

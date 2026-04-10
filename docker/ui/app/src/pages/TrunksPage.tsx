@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Spinner } from '../components/ui/Spinner';
 import { listTrunks } from '../api/trunks';
@@ -5,11 +6,13 @@ import { TrunkCard } from './TrunkCard';
 import { PortalHeader } from './RcfPage';
 import { useAuth } from '../contexts/AuthContext';
 import { IconTrunk } from '../components/icons/ProductIcons';
+import { AdminCustomerSelector } from '../components/AdminCustomerSelector';
 
 export function TrunksPage() {
-  const { user } = useAuth();
-  // For non-admin users, scope the query to their customer — admins see everything
-  const customerId = user?.customer_id ?? undefined;
+  const { user, isAdmin } = useAuth();
+  const [adminSelectedCustomer, setAdminSelectedCustomer] = useState<number | undefined>(undefined);
+
+  const customerId = isAdmin ? adminSelectedCustomer : (user?.customer_id ?? undefined);
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ['trunks', customerId],
@@ -22,10 +25,16 @@ export function TrunksPage() {
     <div>
       <PortalHeader
         icon={<IconTrunk size={24} />}
-        title={user?.customer_name ? `${user.customer_name}'s SIP Trunks` : 'Your SIP Trunks'}
+        title={user?.customer_name ? `${user.customer_name}'s SIP Trunks` : 'SIP Trunks'}
         subtitle="Monitor your trunk performance and capacity. Contact support to adjust channel limits or authorized IPs."
         badgeVariant="trunk"
         userEmail={user?.email}
+      />
+
+      <AdminCustomerSelector
+        selectedCustomerId={adminSelectedCustomer}
+        onSelect={setAdminSelectedCustomer}
+        accent="#f59e0b"
       />
 
       {isLoading && (
