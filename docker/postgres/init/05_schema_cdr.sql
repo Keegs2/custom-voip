@@ -3,7 +3,7 @@
 
 CREATE TABLE cdrs (
     id BIGSERIAL,
-    uuid UUID NOT NULL,
+    uuid VARCHAR(64) NOT NULL,
     customer_id INT NOT NULL,
     product_type VARCHAR(10) NOT NULL,
     trunk_id INT,
@@ -147,7 +147,7 @@ AS $$
 $$;
 
 -- Function for rating a CDR
-CREATE OR REPLACE FUNCTION rate_cdr(p_uuid UUID)
+CREATE OR REPLACE FUNCTION rate_cdr(p_uuid VARCHAR(64))
 RETURNS DECIMAL
 LANGUAGE plpgsql
 AS $$
