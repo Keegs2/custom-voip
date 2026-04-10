@@ -4,6 +4,7 @@ import { listTrunks } from '../api/trunks';
 import { TrunkCard } from './TrunkCard';
 import { PortalHeader } from './RcfPage';
 import { useAuth } from '../contexts/AuthContext';
+import { IconTrunk } from '../components/icons/ProductIcons';
 
 export function TrunksPage() {
   const { user } = useAuth();
@@ -20,7 +21,7 @@ export function TrunksPage() {
   return (
     <div>
       <PortalHeader
-        icon="="
+        icon={<IconTrunk size={24} />}
         title="Your SIP Trunks"
         subtitle="Monitor your trunk performance and capacity. Contact support to adjust channel limits or authorized IPs."
         badgeVariant="trunk"

@@ -6,6 +6,7 @@ import { listRcf } from '../api/rcf';
 import type { RcfEntry } from '../types/rcf';
 import { RcfCard } from './RcfCard';
 import { useAuth } from '../contexts/AuthContext';
+import { IconRCF } from '../components/icons/ProductIcons';
 
 export function RcfPage() {
   const { user } = useAuth();
@@ -33,7 +34,7 @@ export function RcfPage() {
   return (
     <div>
       <PortalHeader
-        icon="~"
+        icon={<IconRCF size={24} />}
         title="Your Numbers"
         subtitle="Change where your calls forward to. Updates take effect within seconds."
         badgeVariant="rcf"
@@ -104,7 +105,7 @@ export function RcfPage() {
 }
 
 interface PortalHeaderProps {
-  icon: string;
+  icon: React.ReactNode;
   title: string;
   subtitle: string;
   badgeVariant?: 'rcf' | 'api' | 'trunk';
@@ -142,9 +143,6 @@ export function PortalHeader({ icon, title, subtitle, badgeVariant = 'rcf', user
           background: `linear-gradient(135deg, ${accent}20 0%, ${accent}10 100%)`,
           border: `1px solid ${accent}30`,
           color: accent,
-          fontSize: '1.1rem',
-          fontFamily: 'monospace',
-          fontWeight: 700,
           marginBottom: 14,
         }}
         aria-hidden="true"

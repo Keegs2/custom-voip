@@ -1,12 +1,13 @@
 import { PortalHeader } from './RcfPage';
 import { useAuth } from '../contexts/AuthContext';
+import { IconAPI } from '../components/icons/ProductIcons';
 
 export function ApiDidsPage() {
   const { user } = useAuth();
   return (
     <div>
       <PortalHeader
-        icon="<>"
+        icon={<IconAPI size={24} />}
         title="API Calling"
         subtitle="Programmable voice with webhook-driven call control."
         badgeVariant="api"

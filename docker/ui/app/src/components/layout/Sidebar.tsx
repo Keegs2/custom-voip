@@ -12,42 +12,10 @@ interface NavItem {
 
 /* ─── SVG Icons (Heroicons outline, 18×18) ──────────────── */
 
-const IconRCF = () => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} style={{ width: 18, height: 18 }}>
-    <path d="M7.5 21 3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5" strokeLinecap="round" strokeLinejoin="round" />
-  </svg>
-);
-
-const IconAPI = () => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} style={{ width: 18, height: 18 }}>
-    <path d="M17.25 6.75 22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3-4.5 16.5" strokeLinecap="round" strokeLinejoin="round" />
-  </svg>
-);
-
-const IconTrunk = () => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} style={{ width: 18, height: 18 }}>
-    <path d="M5.25 14.25h13.5m-13.5 0a3 3 0 0 1-3-3m3 3a3 3 0 1 0 0 6h13.5a3 3 0 1 0 0-6m-16.5-3a3 3 0 0 1 3-3h13.5a3 3 0 0 1 3 3m-19.5 0a4.5 4.5 0 0 1 .9-2.7L5.737 5.1a3.375 3.375 0 0 1 2.7-1.35h7.126c1.062 0 2.062.5 2.7 1.35l2.587 3.45a4.5 4.5 0 0 1 .9 2.7m0 0a3 3 0 0 1-3 3m0 3h.008v.008h-.008v-.008Zm0-6h.008v.008h-.008v-.008Zm-3 6h.008v.008h-.008v-.008Zm0-6h.008v.008h-.008v-.008Z" strokeLinecap="round" strokeLinejoin="round" />
-  </svg>
-);
-
-const IconIVR = () => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} style={{ width: 18, height: 18 }}>
-    <path d="M3.75 6A2.25 2.25 0 0 1 6 3.75h2.25A2.25 2.25 0 0 1 10.5 6v2.25a2.25 2.25 0 0 1-2.25 2.25H6a2.25 2.25 0 0 1-2.25-2.25V6ZM3.75 15.75A2.25 2.25 0 0 1 6 13.5h2.25a2.25 2.25 0 0 1 2.25 2.25V18a2.25 2.25 0 0 1-2.25 2.25H6A2.25 2.25 0 0 1 3.75 18v-2.25ZM13.5 6a2.25 2.25 0 0 1 2.25-2.25H18A2.25 2.25 0 0 1 20.25 6v2.25A2.25 2.25 0 0 1 18 10.5h-2.25a2.25 2.25 0 0 1-2.25-2.25V6ZM13.5 15.75a2.25 2.25 0 0 1 2.25-2.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-2.25a2.25 2.25 0 0 1-2.25-2.25v-2.25Z" strokeLinecap="round" strokeLinejoin="round" />
-  </svg>
-);
-
-const IconDocs = () => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} style={{ width: 18, height: 18 }}>
-    <path d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25" strokeLinecap="round" strokeLinejoin="round" />
-  </svg>
-);
-
-const IconAdmin = () => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} style={{ width: 18, height: 18 }}>
-    <path d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7 7 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a7 7 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a7 7 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a7 7 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.28Z" strokeLinecap="round" strokeLinejoin="round" />
-    <path d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" strokeLinecap="round" strokeLinejoin="round" />
-  </svg>
-);
+import {
+  IconRCF, IconTrunk, IconAPI, IconIVR, IconDocs,
+  IconAdmin, IconSignal, IconTroubleshoot,
+} from '../icons/ProductIcons';
 
 const IconSignOut = () => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} style={{ width: 14, height: 14 }}>
@@ -63,11 +31,11 @@ interface NavItemDef extends NavItem {
 }
 
 const allProductNavItems: NavItemDef[] = [
-  { label: 'RCF',         icon: <IconRCF />,   to: '/rcf',      color: '#4ade80', accountTypes: ['rcf', 'hybrid'] },
-  { label: 'SIP Trunks', icon: <IconTrunk />, to: '/trunks',   color: '#fbbf24', accountTypes: ['trunk', 'hybrid'] },
-  { label: 'API Calling', icon: <IconAPI />,   to: '/api-dids', color: '#c084fc', adminOnly: true },
-  { label: 'IVR Builder', icon: <IconIVR />,   to: '/ivr',      color: '#22d3ee', adminOnly: true },
-  { label: 'API Docs',   icon: <IconDocs />,  to: '/docs',     color: '#94a3b8' },
+  { label: 'RCF',         icon: <IconRCF size={18} />,   to: '/rcf',      color: '#4ade80', accountTypes: ['rcf', 'hybrid'] },
+  { label: 'SIP Trunks', icon: <IconTrunk size={18} />, to: '/trunks',   color: '#fbbf24', accountTypes: ['trunk', 'hybrid'] },
+  { label: 'API Calling', icon: <IconAPI size={18} />,   to: '/api-dids', color: '#c084fc', adminOnly: true },
+  { label: 'IVR Builder', icon: <IconIVR size={18} />,   to: '/ivr',      color: '#22d3ee', adminOnly: true },
+  { label: 'API Docs',   icon: <IconDocs size={18} />,  to: '/docs',     color: '#94a3b8' },
 ];
 
 interface SidebarNavItemProps {
@@ -508,12 +476,7 @@ export function Sidebar() {
                     transition: 'background 0.15s, border-color 0.15s, color 0.15s',
                   }}
                 >
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} style={{ width: 18, height: 18 }}>
-                    <path d="M1.5 8.5A15 15 0 0 1 22.5 8.5" strokeLinecap="round" strokeLinejoin="round" />
-                    <path d="M5.5 12.5a10 10 0 0 1 13 0" strokeLinecap="round" strokeLinejoin="round" />
-                    <path d="M9.5 16.5a5 5 0 0 1 5 0" strokeLinecap="round" strokeLinejoin="round" />
-                    <circle cx="12" cy="20" r="1" fill="currentColor" />
-                  </svg>
+                  <IconSignal size={18} />
                 </span>
                 <span style={{ flex: 1 }}>Call Quality</span>
                 {isActive && (
@@ -581,9 +544,7 @@ export function Sidebar() {
                     transition: 'background 0.15s, border-color 0.15s, color 0.15s',
                   }}
                 >
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} style={{ width: 18, height: 18 }}>
-                    <path d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
+                  <IconTroubleshoot size={18} />
                 </span>
                 <span style={{ flex: 1 }}>Troubleshooting</span>
                 {isActive && (
