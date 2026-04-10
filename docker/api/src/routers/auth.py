@@ -64,7 +64,11 @@ class UserOut(BaseModel):
 async def login(body: LoginRequest):
     """Authenticate a user and return a JWT access token."""
     row = await db.fetch_one(
-        "SELECT id, email, password_hash, role, customer_id, name, status FROM users WHERE email = $1",
+        """SELECT u.id, u.email, u.password_hash, u.role, u.customer_id, u.name, u.status,
+                  c.name AS customer_name, c.account_type
+           FROM users u
+           LEFT JOIN customers c ON u.customer_id = c.id
+           WHERE u.email = $1""",
         body.email,
     )
     if not row:
@@ -101,6 +105,8 @@ async def login(body: LoginRequest):
             "name": user["name"],
             "role": user["role"],
             "customer_id": user["customer_id"],
+            "customer_name": user.get("customer_name"),
+            "account_type": user.get("account_type"),
         },
     }
 
@@ -113,8 +119,12 @@ async def login(body: LoginRequest):
 async def get_me(user: dict = Depends(get_current_user)):
     """Return fresh user info from the database (not cached JWT claims)."""
     row = await db.fetch_one(
-        """SELECT id, email, name, role, customer_id, status, created_at, last_login
-           FROM users WHERE id = $1""",
+        """SELECT u.id, u.email, u.name, u.role, u.customer_id, u.status,
+                  u.created_at, u.last_login, c.name AS customer_name,
+                  c.account_type
+           FROM users u
+           LEFT JOIN customers c ON u.customer_id = c.id
+           WHERE u.id = $1""",
         int(user["sub"]),
     )
     if not row:
@@ -149,7 +159,8 @@ async def list_users(admin: dict = Depends(require_admin)):
     """List all users with their associated customer name (admin only)."""
     rows = await db.fetch_all(
         """SELECT u.id, u.email, u.name, u.role, u.customer_id, u.status,
-                  u.created_at, u.last_login, c.name AS customer_name
+                  u.created_at, u.last_login, c.name AS customer_name,
+                  c.account_type
            FROM users u
            LEFT JOIN customers c ON u.customer_id = c.id
            ORDER BY u.created_at DESC"""

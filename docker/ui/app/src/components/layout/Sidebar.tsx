@@ -55,11 +55,18 @@ const IconSignOut = () => (
   </svg>
 );
 
-const productNavItems: NavItem[] = [
-  { label: 'RCF',         icon: <IconRCF />,   to: '/rcf',      color: '#4ade80' },
-  { label: 'SIP Trunks', icon: <IconTrunk />, to: '/trunks',   color: '#fbbf24' },
-  { label: 'API Calling', icon: <IconAPI />,   to: '/api-dids', color: '#c084fc' },
-  { label: 'IVR Builder', icon: <IconIVR />,   to: '/ivr',      color: '#22d3ee' },
+interface NavItemDef extends NavItem {
+  /** Which account_types can see this item. undefined = everyone */
+  accountTypes?: string[];
+  /** Only admins can see this item */
+  adminOnly?: boolean;
+}
+
+const allProductNavItems: NavItemDef[] = [
+  { label: 'RCF',         icon: <IconRCF />,   to: '/rcf',      color: '#4ade80', accountTypes: ['rcf', 'hybrid'] },
+  { label: 'SIP Trunks', icon: <IconTrunk />, to: '/trunks',   color: '#fbbf24', accountTypes: ['trunk', 'hybrid'] },
+  { label: 'API Calling', icon: <IconAPI />,   to: '/api-dids', color: '#c084fc', accountTypes: ['api', 'hybrid'], adminOnly: true },
+  { label: 'IVR Builder', icon: <IconIVR />,   to: '/ivr',      color: '#22d3ee', adminOnly: true },
   { label: 'API Docs',   icon: <IconDocs />,  to: '/docs',     color: '#94a3b8' },
 ];
 
@@ -158,6 +165,20 @@ export function Sidebar() {
   // Display name: prefer user.name, fall back to email prefix
   const displayName = user?.name || user?.email?.split('@')[0] || '';
   const displayEmail = user?.email ?? '';
+
+  // Filter nav items based on role and account_type
+  const productNavItems = allProductNavItems.filter((item) => {
+    // Admins see everything
+    if (isAdmin) return true;
+    // Admin-only items hidden for non-admins
+    if (item.adminOnly) return false;
+    // If item has accountTypes restriction, check the user's account_type
+    if (item.accountTypes && user?.account_type) {
+      return item.accountTypes.includes(user.account_type);
+    }
+    // No restriction — show to all
+    return !item.accountTypes;
+  });
   // Customer users see their customer name as a context label
   const contextLabel = user?.customer_name ?? null;
 
@@ -437,7 +458,8 @@ export function Sidebar() {
             </NavLink>
           )}
 
-          <NavLink
+          {/* Call Quality — admins and support only */}
+          {(isAdmin || user?.role === 'readonly') && <NavLink
             to="/call-quality"
             onClick={closeMobile}
             className="block no-underline"
@@ -507,9 +529,10 @@ export function Sidebar() {
                 )}
               </>
             )}
-          </NavLink>
+          </NavLink>}
 
-          <NavLink
+          {/* Troubleshooting — admins and support only */}
+          {(isAdmin || user?.role === 'readonly') && <NavLink
             to="/troubleshooting"
             onClick={closeMobile}
             className="block no-underline"
@@ -576,7 +599,7 @@ export function Sidebar() {
                 )}
               </>
             )}
-          </NavLink>
+          </NavLink>}
         </div>
 
         {/* Divider before user profile */}
