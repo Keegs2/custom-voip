@@ -13,9 +13,11 @@ interface AdminCustomerSelectorProps {
   onSelect: (customerId: number | undefined) => void;
   /** Optional accent color for the border highlight */
   accent?: string;
+  /** Only show customers with these account types. If omitted, show all. */
+  accountTypes?: string[];
 }
 
-export function AdminCustomerSelector({ selectedCustomerId, onSelect, accent = '#3b82f6' }: AdminCustomerSelectorProps) {
+export function AdminCustomerSelector({ selectedCustomerId, onSelect, accent = '#3b82f6', accountTypes }: AdminCustomerSelectorProps) {
   const { isAdmin } = useAuth();
 
   const { data } = useQuery({
@@ -27,7 +29,10 @@ export function AdminCustomerSelector({ selectedCustomerId, onSelect, accent = '
 
   if (!isAdmin) return null;
 
-  const customers = data?.items ?? [];
+  const allCustomers = data?.items ?? [];
+  const customers = accountTypes
+    ? allCustomers.filter((c) => accountTypes.includes(c.account_type))
+    : allCustomers;
 
   return (
     <div

@@ -48,6 +48,7 @@ export function RcfPage() {
         selectedCustomerId={adminSelectedCustomer}
         onSelect={setAdminSelectedCustomer}
         accent="#22c55e"
+        accountTypes={['rcf', 'hybrid']}
       />
 
       {isLoading && (

@@ -35,6 +35,7 @@ export function TrunksPage() {
         selectedCustomerId={adminSelectedCustomer}
         onSelect={setAdminSelectedCustomer}
         accent="#f59e0b"
+        accountTypes={['trunk', 'hybrid']}
       />
 
       {isLoading && (
