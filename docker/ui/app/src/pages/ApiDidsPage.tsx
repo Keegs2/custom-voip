@@ -2,9 +2,7 @@ import { PortalHeader } from './RcfPage';
 import { useAuth } from '../contexts/AuthContext';
 
 export function ApiDidsPage() {
-  // useAuth called here so customer_id is readily available when this feature
-  // is implemented in Phase 2. The user object is not yet consumed.
-  useAuth();
+  const { user } = useAuth();
   return (
     <div>
       <PortalHeader
@@ -12,6 +10,7 @@ export function ApiDidsPage() {
         title="API Calling"
         subtitle="Programmable voice with webhook-driven call control."
         badgeVariant="api"
+        userEmail={user?.email}
       />
 
       <div

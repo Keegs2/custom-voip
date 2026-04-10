@@ -24,6 +24,7 @@ export function TrunksPage() {
         title="Your SIP Trunks"
         subtitle="Monitor your trunk performance and capacity. Contact support to adjust channel limits or authorized IPs."
         badgeVariant="trunk"
+        userEmail={user?.email}
       />
 
       {isLoading && (

@@ -37,6 +37,7 @@ export function RcfPage() {
         title="Your Numbers"
         subtitle="Change where your calls forward to. Updates take effect within seconds."
         badgeVariant="rcf"
+        userEmail={user?.email}
       />
 
       {isLoading && (
@@ -107,6 +108,7 @@ interface PortalHeaderProps {
   title: string;
   subtitle: string;
   badgeVariant?: 'rcf' | 'api' | 'trunk';
+  userEmail?: string | null;
 }
 
 const ACCENT_BY_VARIANT: Record<string, string> = {
@@ -115,67 +117,82 @@ const ACCENT_BY_VARIANT: Record<string, string> = {
   trunk: '#f59e0b',
 };
 
-export function PortalHeader({ icon, title, subtitle, badgeVariant = 'rcf' }: PortalHeaderProps) {
+export function PortalHeader({ icon, title, subtitle, badgeVariant = 'rcf', userEmail }: PortalHeaderProps) {
   const accent = ACCENT_BY_VARIANT[badgeVariant] ?? '#3b82f6';
 
   return (
     <div
       style={{
-        marginBottom: 40,
-        paddingBottom: 32,
+        marginBottom: 36,
+        paddingTop: 8,
+        paddingBottom: 28,
         borderBottom: '1px solid rgba(42,47,69,0.6)',
+        textAlign: 'center',
       }}
     >
-      <div className="flex items-center gap-3 flex-wrap" style={{ marginBottom: 8 }}>
-        {/* Icon badge */}
+      {/* Icon badge — centered */}
+      <div
+        style={{
+          width: 48,
+          height: 48,
+          borderRadius: 14,
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: `linear-gradient(135deg, ${accent}20 0%, ${accent}10 100%)`,
+          border: `1px solid ${accent}30`,
+          color: accent,
+          fontSize: '1.1rem',
+          fontFamily: 'monospace',
+          fontWeight: 700,
+          marginBottom: 14,
+        }}
+        aria-hidden="true"
+      >
+        {icon}
+      </div>
+
+      {/* Title + badge */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, marginBottom: 6 }}>
+        <h1
+          style={{
+            fontSize: '1.5rem',
+            fontWeight: 800,
+            letterSpacing: '-0.02em',
+            color: '#e2e8f0',
+            lineHeight: 1.15,
+            margin: 0,
+          }}
+        >
+          {title}
+        </h1>
+        <Badge variant={badgeVariant}>Customer Portal</Badge>
+      </div>
+
+      {/* User email — personal context */}
+      {userEmail && (
         <div
           style={{
-            width: 44,
-            height: 44,
-            borderRadius: 12,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            background: `linear-gradient(135deg, ${accent}20 0%, ${accent}10 100%)`,
-            border: `1px solid ${accent}30`,
+            fontSize: '0.78rem',
             color: accent,
-            fontSize: '1.1rem',
-            fontFamily: 'monospace',
-            fontWeight: 700,
-            flexShrink: 0,
+            fontWeight: 600,
+            letterSpacing: '0.01em',
+            marginBottom: 6,
           }}
-          aria-hidden="true"
         >
-          {icon}
+          {userEmail}
         </div>
-
-        <div>
-          <h1
-            style={{
-              fontSize: '1.75rem',
-              fontWeight: 800,
-              letterSpacing: '-0.025em',
-              color: '#e2e8f0',
-              lineHeight: 1.15,
-              margin: 0,
-            }}
-          >
-            {title}
-          </h1>
-        </div>
-
-        <div style={{ marginLeft: 4 }}>
-          <Badge variant={badgeVariant}>Customer Portal</Badge>
-        </div>
-      </div>
+      )}
 
       <p
         style={{
-          fontSize: '0.9rem',
+          fontSize: '0.85rem',
           color: '#718096',
-          marginTop: 4,
+          marginTop: 2,
           lineHeight: 1.6,
-          maxWidth: 560,
+          maxWidth: 480,
+          marginLeft: 'auto',
+          marginRight: 'auto',
         }}
       >
         {subtitle}
