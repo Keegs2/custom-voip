@@ -15,6 +15,7 @@ import { TiersAdminPage } from './pages/admin/TiersAdminPage';
 import { CarriersAdminPage } from './pages/admin/CarriersAdminPage';
 import { SippAdminPage } from './pages/admin/SippAdminPage';
 import { HomerAdminPage } from './pages/admin/HomerAdminPage';
+import { TrunksAdminPage } from './pages/admin/TrunksAdminPage';
 
 export function App() {
   return (
@@ -31,6 +32,7 @@ export function App() {
           <Route path="admin" element={<AdminPage />}>
             <Route index            element={<Navigate to="customers" replace />} />
             <Route path="customers" element={<CustomersAdminPage />} />
+            <Route path="trunks"    element={<TrunksAdminPage />} />
             <Route path="cdrs"      element={<CdrsAdminPage />} />
             <Route path="rates"     element={<RatesAdminPage />} />
             <Route path="tiers"     element={<TiersAdminPage />} />

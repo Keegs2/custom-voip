@@ -7,6 +7,7 @@ interface AdminTab {
 
 const adminTabs: AdminTab[] = [
   { label: 'Customers', to: '/admin/customers' },
+  { label: 'Trunks',    to: '/admin/trunks' },
   { label: 'CDRs',      to: '/admin/cdrs' },
   { label: 'Rates',     to: '/admin/rates' },
   { label: 'Tiers',     to: '/admin/tiers' },

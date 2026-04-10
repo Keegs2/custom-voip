@@ -69,6 +69,14 @@ export async function getTrunkDids(trunkId: number): Promise<TrunkDid[]> {
   return apiRequest('GET', `/trunks/${trunkId}/dids`);
 }
 
+export async function addTrunkDid(trunkId: number, did: string): Promise<TrunkDid> {
+  return apiRequest('POST', `/trunks/${trunkId}/dids`, { did });
+}
+
+export async function deleteTrunkDid(trunkId: number, didId: number): Promise<void> {
+  return apiRequest('DELETE', `/trunks/${trunkId}/dids/${didId}`);
+}
+
 export async function getTrunkStats(trunkId: number): Promise<TrunkStats> {
   return apiRequest('GET', `/trunks/${trunkId}/stats`);
 }
