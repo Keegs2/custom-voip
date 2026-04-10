@@ -138,8 +138,8 @@ export async function getCustomerStatsCdrs(
   const query = new URLSearchParams();
   query.set('customer_id', String(customerId));
   query.set('limit', String(limit));
-  query.set('start_from', start.toISOString());
-  query.set('start_to', end.toISOString());
+  query.set('start_date', start.toISOString());
+  query.set('end_date', end.toISOString());
 
   interface RawResult {
     cdrs?: Cdr[];
