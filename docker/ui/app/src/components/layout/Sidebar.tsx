@@ -65,7 +65,7 @@ interface NavItemDef extends NavItem {
 const allProductNavItems: NavItemDef[] = [
   { label: 'RCF',         icon: <IconRCF />,   to: '/rcf',      color: '#4ade80', accountTypes: ['rcf', 'hybrid'] },
   { label: 'SIP Trunks', icon: <IconTrunk />, to: '/trunks',   color: '#fbbf24', accountTypes: ['trunk', 'hybrid'] },
-  { label: 'API Calling', icon: <IconAPI />,   to: '/api-dids', color: '#c084fc', accountTypes: ['api', 'hybrid'], adminOnly: true },
+  { label: 'API Calling', icon: <IconAPI />,   to: '/api-dids', color: '#c084fc', adminOnly: true },
   { label: 'IVR Builder', icon: <IconIVR />,   to: '/ivr',      color: '#22d3ee', adminOnly: true },
   { label: 'API Docs',   icon: <IconDocs />,  to: '/docs',     color: '#94a3b8' },
 ];
@@ -167,10 +167,11 @@ export function Sidebar() {
   const displayEmail = user?.email ?? '';
 
   // Filter nav items based on role and account_type
+  const isSupport = user?.role === 'readonly';
   const productNavItems = allProductNavItems.filter((item) => {
-    // Admins see everything
-    if (isAdmin) return true;
-    // Admin-only items hidden for non-admins
+    // Admins and support see all products
+    if (isAdmin || isSupport) return true;
+    // Admin-only items hidden for regular customer users
     if (item.adminOnly) return false;
     // If item has accountTypes restriction, check the user's account_type
     if (item.accountTypes && user?.account_type) {
