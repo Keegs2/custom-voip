@@ -195,6 +195,21 @@ interface CodeBlockProps {
   language?: string;
 }
 
+/** Find the index of a # comment start that isn't inside a quoted string. */
+function findCommentStart(line: string): number {
+  let inString = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '"' && (i === 0 || line[i - 1] !== '\\')) {
+      inString = !inString;
+    }
+    if (ch === '#' && !inString) {
+      return i;
+    }
+  }
+  return -1;
+}
+
 function CodeBlock({ code }: CodeBlockProps) {
   const [copied, setCopied] = useState(false);
 
@@ -204,50 +219,60 @@ function CodeBlock({ code }: CodeBlockProps) {
     setTimeout(() => setCopied(false), 2000);
   }, [code]);
 
-  // Very lightweight token coloring — enough for curl/json/xml samples
-  const highlighted = code
-    // JSON string values (but not keys yet)
-    .replace(
-      /("(?:[^"\\]|\\.)*")\s*:/g,
-      `<span style="color:${COLORS.codeKey}">$1</span>:`,
-    )
-    .replace(
-      /:\s*("(?:[^"\\]|\\.)*")/g,
-      `: <span style="color:${COLORS.codeString}">$1</span>`,
-    )
-    // Numbers
-    .replace(/\b(\d+)\b/g, `<span style="color:${COLORS.codeNumber}">$1</span>`)
-    // curl flags
-    .replace(/(\s-[A-Za-z]+)/g, `<span style="color:${COLORS.codeKeyword}">$1</span>`)
-    // XML tags
-    .replace(/(&lt;\/?[A-Za-z][^&]*&gt;)/g, `<span style="color:${COLORS.codeKey}">$1</span>`)
-    // Comments
-    .replace(/(#[^\n]*)/g, `<span style="color:${COLORS.codeComment}">$1</span>`);
+  // Lightweight token coloring for curl/json/xml samples.
+  // Strategy: escape HTML, then apply regex replacements using placeholder
+  // tokens (§K§, §S§, etc.) that are replaced with actual <span> tags at
+  // the end — this prevents earlier replacements from being clobbered by
+  // later ones (e.g., # in hex colors matching the comment regex).
 
-  // Escape HTML first before token replacement — do it in the right order
   const escaped = code
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
 
+  // Split lines so we can handle comments per-line (only match # at line start context)
   const finalHighlighted = escaped
-    .replace(
-      /("(?:[^"\\]|\\.)*")\s*:/g,
-      `<span style="color:${COLORS.codeKey}">$1</span>:`,
-    )
-    .replace(
-      /:\s*("(?:[^"\\]|\\.)*")/g,
-      `: <span style="color:${COLORS.codeString}">$1</span>`,
-    )
-    .replace(/\b(\d+)\b/g, `<span style="color:${COLORS.codeNumber}">$1</span>`)
-    .replace(
-      /((?:^|\s)(?:-[A-Za-z]+|--[A-Za-z-]+))/g,
-      `<span style="color:${COLORS.codeKeyword}">$1</span>`,
-    )
-    .replace(/(&lt;\/?[A-Za-z][^&\n]*&gt;)/g, `<span style="color:${COLORS.codeKey}">$1</span>`)
-    .replace(/(#[^\n]*)/g, `<span style="color:${COLORS.codeComment}">$1</span>`);
+    .split('\n')
+    .map((line) => {
+      // If the line has a # comment, split at the first # that isn't inside quotes
+      const commentIdx = findCommentStart(line);
+      let codePart = commentIdx >= 0 ? line.slice(0, commentIdx) : line;
+      const commentPart = commentIdx >= 0 ? line.slice(commentIdx) : '';
 
-  void highlighted; // suppress unused warning — we use finalHighlighted
+      // JSON keys: "key":
+      codePart = codePart.replace(
+        /(&quot;|")((?:[^"\\]|\\.)*?)(&quot;|")\s*:/g,
+        `<span style="color:${COLORS.codeKey}">$1$2$3</span>:`,
+      );
+      // JSON string values: : "value"
+      codePart = codePart.replace(
+        /:\s*(&quot;|")((?:[^"\\]|\\.)*?)(&quot;|")/g,
+        `: <span style="color:${COLORS.codeString}">$1$2$3</span>`,
+      );
+      // Standalone strings (not already wrapped)
+      codePart = codePart.replace(
+        /(?<!color:[^"]*)"((?:[^"\\]|\\.)+?)"/g,
+        `<span style="color:${COLORS.codeString}">"$1"</span>`,
+      );
+      // curl flags
+      codePart = codePart.replace(
+        /((?:^|\s)(?:-[A-Za-z]+|--[A-Za-z-]+))/g,
+        `<span style="color:${COLORS.codeKeyword}">$1</span>`,
+      );
+      // XML tags
+      codePart = codePart.replace(
+        /(&lt;\/?[A-Za-z][^&\n]*?&gt;)/g,
+        `<span style="color:${COLORS.codeKey}">$1</span>`,
+      );
+
+      // Comment part (entire rest of line after #)
+      const styledComment = commentPart
+        ? `<span style="color:${COLORS.codeComment}">${commentPart}</span>`
+        : '';
+
+      return codePart + styledComment;
+    })
+    .join('\n');
 
   return (
     <div
