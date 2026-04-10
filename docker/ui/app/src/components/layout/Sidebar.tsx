@@ -35,7 +35,7 @@ const allProductNavItems: NavItemDef[] = [
   { label: 'SIP Trunks', icon: <IconTrunk size={18} />, to: '/trunks',   color: '#fbbf24', accountTypes: ['trunk', 'hybrid'] },
   { label: 'API Calling', icon: <IconAPI size={18} />,   to: '/api-dids', color: '#c084fc', adminOnly: true },
   { label: 'IVR Builder', icon: <IconIVR size={18} />,   to: '/ivr',      color: '#22d3ee', adminOnly: true },
-  { label: 'API Docs',   icon: <IconDocs size={18} />,  to: '/docs',     color: '#94a3b8' },
+  { label: 'API Docs',   icon: <IconDocs size={18} />,  to: '/documentation', color: '#94a3b8' },
 ];
 
 interface SidebarNavItemProps {

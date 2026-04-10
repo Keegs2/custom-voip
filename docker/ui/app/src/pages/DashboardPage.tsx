@@ -94,7 +94,7 @@ const UTILITY_CARDS: NavCard[] = [
   {
     title: 'API Docs',
     description: 'Complete API reference and integration guide.',
-    path: '/docs',
+    path: '/documentation',
     accent: '#94a3b8',
     glow: 'rgba(148, 163, 184, 0.12)',
     icon: <IconDocs size={28} />,

@@ -44,7 +44,7 @@ export function App() {
             <Route path="rcf"        element={<RcfPage />} />
             <Route path="api-dids"   element={<ApiDidsPage />} />
             <Route path="trunks"     element={<TrunksPage />} />
-            <Route path="docs"       element={<DocsPage />} />
+            <Route path="documentation" element={<DocsPage />} />
             <Route path="call-quality" element={<CallQualityPage />} />
 
             {/* Customer account page — outside AdminPage wrapper for clean layout */}
