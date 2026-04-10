@@ -305,7 +305,15 @@ async def query_cdrs(
         SELECT uuid, customer_id, product_type, trunk_id, direction,
                caller_id, destination, start_time, answer_time, end_time,
                duration_ms, billable_ms, rate_per_min, total_cost,
-               hangup_cause, carrier_used, traffic_grade, rated_at
+               hangup_cause, sip_code, carrier_used, traffic_grade, rated_at,
+               mos, quality_pct, jitter_min_ms, jitter_max_ms, jitter_avg_ms,
+               packet_loss_count, packet_total_count, packet_loss_pct,
+               flaw_total, r_factor, read_codec, write_codec,
+               rtp_audio_in_raw_bytes, rtp_audio_in_media_bytes,
+               rtp_audio_out_raw_bytes, rtp_audio_out_media_bytes,
+               rtp_audio_in_packet_count, rtp_audio_out_packet_count,
+               rtp_audio_in_jitter_burst_rate, rtp_audio_in_jitter_loss_rate,
+               rtp_audio_in_mean_interval
         FROM cdrs
         WHERE start_time >= $1 AND start_time <= $2
     """
