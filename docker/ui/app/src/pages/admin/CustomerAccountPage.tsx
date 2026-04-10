@@ -169,7 +169,7 @@ interface DailyBarChartProps {
 function DailyBarChart({ rows, accent }: DailyBarChartProps) {
   const gradientId = useId();
 
-  // Aggregate rows by date (multiple product_type rows per day possible)
+  // Aggregate rows by date
   const byDate = new Map<string, number>();
   for (const row of rows) {
     const dateKey = row.date ?? '';
@@ -177,132 +177,140 @@ function DailyBarChart({ rows, accent }: DailyBarChartProps) {
     byDate.set(dateKey, (byDate.get(dateKey) ?? 0) + row.total_calls);
   }
 
-  // Build last-30-days slots so we always render a full 30-bar range
+  // Build last-30-days slots
   const slots: Array<{ date: string; label: string; calls: number }> = [];
   for (let i = 29; i >= 0; i--) {
     const d = new Date();
     d.setDate(d.getDate() - i);
-    const key = d.toISOString().slice(0, 10); // YYYY-MM-DD
+    const key = d.toISOString().slice(0, 10);
     const label = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
     slots.push({ date: key, label, calls: byDate.get(key) ?? 0 });
   }
 
   const maxCalls = Math.max(...slots.map((s) => s.calls), 1);
 
-  const SVG_H = 140;
-  const AXIS_H = 24; // reserved at bottom for labels
-  const BAR_AREA_H = SVG_H - AXIS_H - 8; // 8px top padding
-  const GAP_RATIO = 0.3; // gap between bars relative to bar width
+  // Chart dimensions
+  const W = 900;
+  const H = 200;
+  const PAD_L = 40;
+  const PAD_R = 16;
+  const PAD_T = 16;
+  const PAD_B = 32;
+  const chartW = W - PAD_L - PAD_R;
+  const chartH = H - PAD_T - PAD_B;
 
-  // Horizontal grid line values
-  const gridLines = [0.25, 0.5, 0.75, 1.0].map((f) => ({
-    y: 8 + BAR_AREA_H * (1 - f),
-    value: Math.round(maxCalls * f),
+  // Build SVG path points
+  const points = slots.map((s, i) => ({
+    x: PAD_L + (i / (slots.length - 1)) * chartW,
+    y: PAD_T + chartH - (s.calls / maxCalls) * chartH,
   }));
 
-  // Show x-axis labels only every 5 days so they don't crowd
+  // Smooth line path using cubic bezier
+  function smoothPath(pts: { x: number; y: number }[]): string {
+    if (pts.length < 2) return '';
+    let d = `M ${pts[0].x} ${pts[0].y}`;
+    for (let i = 0; i < pts.length - 1; i++) {
+      const p0 = pts[Math.max(i - 1, 0)];
+      const p1 = pts[i];
+      const p2 = pts[i + 1];
+      const p3 = pts[Math.min(i + 2, pts.length - 1)];
+      const tension = 0.3;
+      const cp1x = p1.x + (p2.x - p0.x) * tension;
+      const cp1y = p1.y + (p2.y - p0.y) * tension;
+      const cp2x = p2.x - (p3.x - p1.x) * tension;
+      const cp2y = p2.y - (p3.y - p1.y) * tension;
+      d += ` C ${cp1x} ${cp1y}, ${cp2x} ${cp2y}, ${p2.x} ${p2.y}`;
+    }
+    return d;
+  }
+
+  const linePath = smoothPath(points);
+  // Area path: line path + close to bottom
+  const areaPath = linePath +
+    ` L ${points[points.length - 1].x} ${PAD_T + chartH}` +
+    ` L ${points[0].x} ${PAD_T + chartH} Z`;
+
+  // Grid lines
+  const gridCount = 4;
+  const gridLines = Array.from({ length: gridCount + 1 }, (_, i) => {
+    const frac = i / gridCount;
+    return {
+      y: PAD_T + chartH - frac * chartH,
+      value: Math.round(maxCalls * frac),
+    };
+  });
+
+  // X-axis labels (every 5 days)
   const LABEL_EVERY = 5;
 
   return (
-    <div style={{ width: '100%', position: 'relative' }}>
+    <div style={{ width: '100%', overflowX: 'auto' }}>
       <svg
-        viewBox={`0 0 100 ${SVG_H}`}
-        preserveAspectRatio="none"
-        style={{ width: '100%', height: SVG_H, display: 'block', overflow: 'visible' }}
+        viewBox={`0 0 ${W} ${H}`}
+        style={{ width: '100%', height: 'auto', minHeight: 180, display: 'block' }}
         aria-label="Daily call volume chart"
       >
         <defs>
           <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor={accent} stopOpacity="0.9" />
-            <stop offset="100%" stopColor={accent} stopOpacity="0.35" />
+            <stop offset="0%" stopColor={accent} stopOpacity={0.4} />
+            <stop offset="100%" stopColor={accent} stopOpacity={0.03} />
           </linearGradient>
         </defs>
 
         {/* Horizontal grid lines */}
-        {gridLines.map(({ y }) => (
-          <line
-            key={y}
-            x1="0"
-            y1={y}
-            x2="100"
-            y2={y}
-            stroke="rgba(255,255,255,0.04)"
-            strokeWidth="0.3"
-            vectorEffect="non-scaling-stroke"
-          />
+        {gridLines.map(({ y, value }) => (
+          <g key={value}>
+            <line
+              x1={PAD_L} y1={y} x2={W - PAD_R} y2={y}
+              stroke="rgba(255,255,255,0.06)" strokeWidth={1}
+            />
+            <text
+              x={PAD_L - 8} y={y + 4}
+              textAnchor="end" fontSize={10} fill="#4a5568"
+              fontFamily="system-ui, -apple-system, sans-serif"
+            >
+              {value}
+            </text>
+          </g>
         ))}
 
-        {/* Bars */}
-        {slots.map((slot, i) => {
-          const totalW = 100 / slots.length;
-          const barW = totalW * (1 - GAP_RATIO);
-          const x = i * totalW + totalW * (GAP_RATIO / 2);
-          const barH = (slot.calls / maxCalls) * BAR_AREA_H;
-          const y = 8 + BAR_AREA_H - barH;
+        {/* Area fill */}
+        <path d={areaPath} fill={`url(#${gradientId})`} />
 
-          return (
-            <rect
-              key={slot.date}
-              x={x}
-              y={y}
-              width={barW}
-              height={barH}
-              fill={`url(#${gradientId})`}
-              rx="0.4"
-            >
-              <title>{slot.label}: {slot.calls} call{slot.calls !== 1 ? 's' : ''}</title>
-            </rect>
-          );
-        })}
+        {/* Line */}
+        <path
+          d={linePath}
+          fill="none"
+          stroke={accent}
+          strokeWidth={2.5}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
 
-        {/* X-axis labels — rendered at fixed SVG coords, so they DON'T scale */}
+        {/* Data points */}
+        {points.map((p, i) => (
+          <g key={slots[i].date}>
+            <circle cx={p.x} cy={p.y} r={3} fill="#0f1117" stroke={accent} strokeWidth={1.5} />
+            <title>{slots[i].label}: {slots[i].calls} calls</title>
+          </g>
+        ))}
+
+        {/* X-axis labels */}
         {slots.map((slot, i) => {
           if (i % LABEL_EVERY !== 0) return null;
-          const totalW = 100 / slots.length;
-          const cx = i * totalW + totalW / 2;
+          const x = PAD_L + (i / (slots.length - 1)) * chartW;
           return (
             <text
-              key={slot.date + '-label'}
-              x={cx}
-              y={SVG_H - 4}
-              textAnchor="middle"
-              fontSize="3.2"
-              fill="#4a5568"
-              fontFamily="system-ui, sans-serif"
+              key={slot.date}
+              x={x} y={H - 8}
+              textAnchor="middle" fontSize={10} fill="#4a5568"
+              fontFamily="system-ui, -apple-system, sans-serif"
             >
               {slot.label}
             </text>
           );
         })}
       </svg>
-
-      {/* Y-axis label overlays — positioned absolute so text size is stable */}
-      <div
-        style={{
-          position: 'absolute',
-          top: 6,
-          left: 0,
-          pointerEvents: 'none',
-          display: 'flex',
-          flexDirection: 'column',
-          justifyContent: 'space-between',
-          height: BAR_AREA_H + 2,
-        }}
-      >
-        {[...gridLines].reverse().map(({ y: _y, value }) => (
-          <span
-            key={value}
-            style={{
-              fontSize: '0.6rem',
-              color: '#3a4255',
-              fontVariantNumeric: 'tabular-nums',
-              lineHeight: 1,
-            }}
-          >
-            {value}
-          </span>
-        ))}
-      </div>
     </div>
   );
 }
