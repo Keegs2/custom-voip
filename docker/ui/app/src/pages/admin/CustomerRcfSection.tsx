@@ -24,6 +24,33 @@ const darkInput: React.CSSProperties = {
   transition: 'border-color 150ms, box-shadow 150ms',
 };
 
+// Shared tiny button styles for inline Save/Cancel actions
+const inlineSaveBtn: React.CSSProperties = {
+  fontSize: '0.65rem',
+  fontWeight: 600,
+  padding: '4px 10px',
+  borderRadius: 4,
+  border: 'none',
+  background: '#22c55e',
+  color: '#fff',
+  cursor: 'pointer',
+  flexShrink: 0,
+  lineHeight: 1,
+};
+
+const inlineCancelBtn: React.CSSProperties = {
+  fontSize: '0.65rem',
+  fontWeight: 500,
+  padding: '4px 8px',
+  borderRadius: 4,
+  border: 'none',
+  background: 'transparent',
+  color: '#718096',
+  cursor: 'pointer',
+  flexShrink: 0,
+  lineHeight: 1,
+};
+
 // Inline editable name/label field for a single RCF row
 function RcfNameInput({
   entry,
@@ -34,67 +61,113 @@ function RcfNameInput({
 }) {
   const qc = useQueryClient();
   const { toastErr } = useToast();
+  const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(entry.name ?? '');
-  const [focused, setFocused] = useState(false);
 
-  // Keep local value in sync when the entry prop changes from a refetch
+  // Keep local value in sync when the entry prop changes from a refetch (only when not editing)
   const [prevName, setPrevName] = useState(entry.name);
   if (entry.name !== prevName) {
     setPrevName(entry.name);
-    setValue(entry.name ?? '');
+    if (!editing) setValue(entry.name ?? '');
   }
 
   const mutation = useMutation({
     mutationFn: (name: string | null) => updateRcfEntry(entry.id, { name }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['customerRcf', customerId] });
+      setEditing(false);
     },
     onError: (err: Error) => toastErr(err.message),
   });
 
-  function handleBlur() {
-    setFocused(false);
+  function handleSave() {
     const trimmed = value.trim();
     const newName = trimmed === '' ? null : trimmed;
     const currentName = entry.name ?? null;
-    if (newName !== currentName) {
-      mutation.mutate(newName);
-    }
+    if (newName === currentName) { setEditing(false); return; }
+    mutation.mutate(newName);
   }
 
+  function handleCancel() {
+    setValue(entry.name ?? '');
+    setEditing(false);
+  }
+
+  if (editing) {
+    return (
+      <div
+        style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap', marginBottom: 3 }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <input
+          type="text"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') { e.preventDefault(); handleSave(); }
+            if (e.key === 'Escape') handleCancel();
+            e.stopPropagation();
+          }}
+          onBlur={handleCancel}
+          disabled={mutation.isPending}
+          autoFocus
+          placeholder="Add label..."
+          style={{
+            flex: 1,
+            minWidth: 60,
+            fontSize: '0.85rem',
+            fontWeight: 600,
+            color: '#e2e8f0',
+            background: 'rgba(13,15,23,0.8)',
+            border: '1px solid rgba(59,130,246,0.55)',
+            borderRadius: 6,
+            outline: 'none',
+            padding: '2px 7px',
+            fontFamily: 'inherit',
+            opacity: mutation.isPending ? 0.5 : 1,
+            boxShadow: '0 0 0 3px rgba(59,130,246,0.12)',
+            letterSpacing: '-0.01em',
+          }}
+        />
+        <button
+          type="button"
+          onMouseDown={(e) => { e.preventDefault(); handleSave(); }}
+          disabled={mutation.isPending}
+          style={{ ...inlineSaveBtn, opacity: mutation.isPending ? 0.6 : 1 }}
+        >
+          {mutation.isPending ? '…' : 'Save'}
+        </button>
+        <button
+          type="button"
+          onMouseDown={(e) => { e.preventDefault(); handleCancel(); }}
+          style={inlineCancelBtn}
+        >
+          Cancel
+        </button>
+      </div>
+    );
+  }
+
+  // View mode — click to enter edit mode
   return (
-    <input
-      type="text"
-      value={value}
-      onChange={(e) => setValue(e.target.value)}
-      onFocus={() => setFocused(true)}
-      onBlur={handleBlur}
-      onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
-      onClick={(e) => e.stopPropagation()}
-      disabled={mutation.isPending}
-      placeholder="Add label..."
+    <div
+      onClick={(e) => { e.stopPropagation(); setEditing(true); }}
+      title="Click to set a label"
       style={{
         fontSize: value.trim() ? '0.85rem' : '0.78rem',
         fontWeight: value.trim() ? 600 : 400,
         color: value.trim() ? '#e2e8f0' : '#4a5568',
         fontStyle: value.trim() ? 'normal' : 'italic',
-        background: focused ? 'rgba(13,15,23,0.8)' : 'transparent',
-        border: focused
-          ? '1px solid rgba(59,130,246,0.55)'
-          : '1px solid transparent',
-        borderRadius: 6,
-        outline: 'none',
-        padding: focused ? '2px 7px' : '2px 0',
-        fontFamily: 'inherit',
-        width: '100%',
-        cursor: focused ? 'text' : 'pointer',
-        transition: 'border-color 150ms, background 150ms, padding 100ms',
-        opacity: mutation.isPending ? 0.5 : 1,
-        boxShadow: focused ? '0 0 0 3px rgba(59,130,246,0.12)' : 'none',
         letterSpacing: value.trim() ? '-0.01em' : 'normal',
+        padding: '2px 0',
+        cursor: 'pointer',
         marginBottom: 3,
+        borderBottom: '1px dashed rgba(59,130,246,0.2)',
+        width: '100%',
       }}
-    />
+    >
+      {value.trim() || 'Add label...'}
+    </div>
   );
 }
 
@@ -108,9 +181,16 @@ function RcfForwardInput({
 }) {
   const qc = useQueryClient();
   const { toastOk, toastErr } = useToast();
+  const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(entry.forward_to);
   const [saved, setSaved] = useState(false);
-  const [focused, setFocused] = useState(false);
+
+  // Sync when entry refreshes (not while editing)
+  const [prevFwd, setPrevFwd] = useState(entry.forward_to);
+  if (entry.forward_to !== prevFwd) {
+    setPrevFwd(entry.forward_to);
+    if (!editing) setValue(entry.forward_to);
+  }
 
   const mutation = useMutation({
     mutationFn: (fwd: string) => updateRcfEntry(entry.id, { forward_to: fwd }),
@@ -119,55 +199,92 @@ function RcfForwardInput({
       setSaved(true);
       setTimeout(() => setSaved(false), 1800);
       toastOk(`Forward updated for ${entry.did}`);
+      setEditing(false);
     },
     onError: (err: Error) => toastErr(err.message),
   });
 
-  function handleBlur() {
-    setFocused(false);
+  function handleSave() {
     const trimmed = value.trim();
     if (!trimmed) {
       toastErr('Destination cannot be empty');
-      setValue(entry.forward_to);
       return;
     }
-    if (trimmed !== entry.forward_to) {
-      mutation.mutate(trimmed);
-    }
+    if (trimmed === entry.forward_to) { setEditing(false); return; }
+    mutation.mutate(trimmed);
   }
 
-  const borderColor = saved
-    ? 'rgba(34,197,94,0.55)'
-    : focused
-    ? 'rgba(59,130,246,0.7)'
-    : 'rgba(42,47,69,0.7)';
+  function handleCancel() {
+    setValue(entry.forward_to);
+    setEditing(false);
+  }
 
-  const boxShadow = focused
-    ? '0 0 0 3px rgba(59,130,246,0.15)'
-    : saved
-    ? '0 0 0 3px rgba(34,197,94,0.12)'
-    : 'none';
+  if (editing) {
+    return (
+      <div
+        style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <input
+          type="tel"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') { e.preventDefault(); handleSave(); }
+            if (e.key === 'Escape') handleCancel();
+            e.stopPropagation();
+          }}
+          onBlur={handleCancel}
+          disabled={mutation.isPending}
+          autoFocus
+          placeholder="+1XXXXXXXXXX"
+          style={{
+            ...darkInput,
+            width: 140,
+            borderColor: 'rgba(59,130,246,0.7)',
+            boxShadow: '0 0 0 3px rgba(59,130,246,0.15)',
+            opacity: mutation.isPending ? 0.5 : 1,
+          }}
+        />
+        <button
+          type="button"
+          onMouseDown={(e) => { e.preventDefault(); handleSave(); }}
+          disabled={mutation.isPending}
+          style={{ ...inlineSaveBtn, opacity: mutation.isPending ? 0.6 : 1 }}
+        >
+          {mutation.isPending ? '…' : 'Save'}
+        </button>
+        <button
+          type="button"
+          onMouseDown={(e) => { e.preventDefault(); handleCancel(); }}
+          style={inlineCancelBtn}
+        >
+          Cancel
+        </button>
+      </div>
+    );
+  }
 
+  // View mode — click to enter edit mode
   return (
-    <input
-      type="tel"
-      value={value}
-      onChange={(e) => setValue(e.target.value)}
-      onFocus={() => setFocused(true)}
-      onBlur={handleBlur}
-      onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
-      onClick={(e) => e.stopPropagation()}
-      disabled={mutation.isPending}
-      placeholder="+1XXXXXXXXXX"
+    <div
+      onClick={(e) => { e.stopPropagation(); setEditing(true); }}
+      title="Click to edit forward destination"
       style={{
         ...darkInput,
+        display: 'inline-flex',
+        alignItems: 'center',
         width: 160,
         color: saved ? '#4ade80' : '#e2e8f0',
-        borderColor,
-        boxShadow,
-        opacity: mutation.isPending ? 0.5 : 1,
+        borderColor: saved ? 'rgba(34,197,94,0.55)' : 'rgba(42,47,69,0.7)',
+        boxShadow: saved ? '0 0 0 3px rgba(34,197,94,0.12)' : 'none',
+        cursor: 'pointer',
+        userSelect: 'none',
+        fontFamily: 'monospace',
       }}
-    />
+    >
+      {entry.forward_to}
+    </div>
   );
 }
 

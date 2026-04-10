@@ -25,6 +25,33 @@ async function updateRcfForwardTo(did: string, payload: RcfUpdatePayload): Promi
   return apiRequest('PUT', `/rcf/${encodeURIComponent(did)}`, payload);
 }
 
+// Shared tiny button styles for inline Save/Cancel actions
+const inlineSaveBtn: React.CSSProperties = {
+  fontSize: '0.65rem',
+  fontWeight: 600,
+  padding: '4px 10px',
+  borderRadius: 4,
+  border: 'none',
+  background: '#22c55e',
+  color: '#fff',
+  cursor: 'pointer',
+  flexShrink: 0,
+  lineHeight: 1,
+};
+
+const inlineCancelBtn: React.CSSProperties = {
+  fontSize: '0.65rem',
+  fontWeight: 500,
+  padding: '4px 8px',
+  borderRadius: 4,
+  border: 'none',
+  background: 'transparent',
+  color: '#718096',
+  cursor: 'pointer',
+  flexShrink: 0,
+  lineHeight: 1,
+};
+
 // Inline-editable name label for the portal RCF card
 function RcfNameField({
   entry,
@@ -36,32 +63,36 @@ function RcfNameField({
   const queryClient = useQueryClient();
   const { toastErr } = useToast();
 
+  const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(entry.name ?? '');
-  const [focused, setFocused] = useState(false);
 
-  // Sync when external data changes
+  // Sync when external data changes (only when not actively editing)
   const [prevName, setPrevName] = useState(entry.name);
   if (entry.name !== prevName) {
     setPrevName(entry.name);
-    setValue(entry.name ?? '');
+    if (!editing) setValue(entry.name ?? '');
   }
 
   const mutation = useMutation({
     mutationFn: (name: string | null) => updateRcfEntry(entry.id, { name }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['rcf'] });
+      setEditing(false);
     },
     onError: (err: Error) => toastErr(err.message),
   });
 
-  function handleBlur() {
-    setFocused(false);
+  function handleSave() {
     const trimmed = value.trim();
     const newName = trimmed === '' ? null : trimmed;
     const currentName = entry.name ?? null;
-    if (newName !== currentName) {
-      mutation.mutate(newName);
-    }
+    if (newName === currentName) { setEditing(false); return; }
+    mutation.mutate(newName);
+  }
+
+  function handleCancel() {
+    setValue(entry.name ?? '');
+    setEditing(false);
   }
 
   // Display-only when readonly
@@ -83,16 +114,62 @@ function RcfNameField({
     );
   }
 
+  if (editing) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6, flexWrap: 'wrap' }}>
+        <input
+          type="text"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') { e.preventDefault(); handleSave(); }
+            if (e.key === 'Escape') handleCancel();
+          }}
+          onBlur={handleCancel}
+          disabled={mutation.isPending}
+          autoFocus
+          placeholder="Add label..."
+          style={{
+            flex: 1,
+            minWidth: 80,
+            fontSize: '1rem',
+            fontWeight: 700,
+            color: '#e2e8f0',
+            letterSpacing: '-0.01em',
+            lineHeight: 1.3,
+            background: 'rgba(19,21,29,0.8)',
+            border: '1px solid rgba(59,130,246,0.55)',
+            borderRadius: 6,
+            outline: 'none',
+            padding: '3px 8px',
+            fontFamily: 'inherit',
+            opacity: mutation.isPending ? 0.5 : 1,
+            boxShadow: '0 0 0 3px rgba(59,130,246,0.12)',
+          }}
+        />
+        <button
+          type="button"
+          onMouseDown={(e) => { e.preventDefault(); handleSave(); }}
+          disabled={mutation.isPending}
+          style={{ ...inlineSaveBtn, opacity: mutation.isPending ? 0.6 : 1 }}
+        >
+          {mutation.isPending ? '…' : 'Save'}
+        </button>
+        <button
+          type="button"
+          onMouseDown={(e) => { e.preventDefault(); handleCancel(); }}
+          style={inlineCancelBtn}
+        >
+          Cancel
+        </button>
+      </div>
+    );
+  }
+
+  // View mode — click to enter edit mode
   return (
-    <input
-      type="text"
-      value={value}
-      onChange={(e) => setValue(e.target.value)}
-      onFocus={() => setFocused(true)}
-      onBlur={handleBlur}
-      onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
-      disabled={mutation.isPending}
-      placeholder="Add label..."
+    <div
+      onClick={() => setEditing(true)}
       title="Click to set a name for this number"
       style={{
         display: 'block',
@@ -103,21 +180,14 @@ function RcfNameField({
         fontStyle: value.trim() ? 'normal' : 'italic',
         letterSpacing: value.trim() ? '-0.01em' : 'normal',
         lineHeight: 1.3,
-        background: focused ? 'rgba(19,21,29,0.8)' : 'transparent',
-        border: focused
-          ? '1px solid rgba(59,130,246,0.55)'
-          : '1px solid transparent',
-        borderRadius: 6,
-        outline: 'none',
-        padding: focused ? '3px 8px' : '3px 0',
-        fontFamily: 'inherit',
-        cursor: focused ? 'text' : 'pointer',
-        transition: 'border-color 150ms, background 150ms, padding 100ms',
-        opacity: mutation.isPending ? 0.5 : 1,
-        boxShadow: focused ? '0 0 0 3px rgba(59,130,246,0.12)' : 'none',
+        padding: '3px 0',
+        cursor: 'pointer',
         marginBottom: 6,
+        borderBottom: '1px dashed rgba(59,130,246,0.25)',
       }}
-    />
+    >
+      {value.trim() || 'Add label...'}
+    </div>
   );
 }
 

@@ -32,6 +32,33 @@ interface TrunkCardProps {
   trunk: Trunk;
 }
 
+// Shared tiny button styles for inline Save/Cancel actions
+const inlineSaveBtn: React.CSSProperties = {
+  fontSize: '0.65rem',
+  fontWeight: 600,
+  padding: '4px 10px',
+  borderRadius: 4,
+  border: 'none',
+  background: '#22c55e',
+  color: '#fff',
+  cursor: 'pointer',
+  flexShrink: 0,
+  lineHeight: 1,
+};
+
+const inlineCancelBtn: React.CSSProperties = {
+  fontSize: '0.65rem',
+  fontWeight: 500,
+  padding: '4px 8px',
+  borderRadius: 4,
+  border: 'none',
+  background: 'transparent',
+  color: '#718096',
+  cursor: 'pointer',
+  flexShrink: 0,
+  lineHeight: 1,
+};
+
 // Inline-editable trunk name — looks like static text when unfocused
 function TrunkNameField({
   trunk,
@@ -43,35 +70,41 @@ function TrunkNameField({
   const qc = useQueryClient();
   const { toastErr } = useToast();
 
+  const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(trunk.trunk_name);
-  const [focused, setFocused] = useState(false);
 
-  // Sync when the trunk prop refreshes from the server
+  // Sync when the trunk prop refreshes from the server (only when not actively editing)
   const [prevName, setPrevName] = useState(trunk.trunk_name);
   if (trunk.trunk_name !== prevName) {
     setPrevName(trunk.trunk_name);
-    setValue(trunk.trunk_name);
+    if (!editing) setValue(trunk.trunk_name);
   }
 
   const mutation = useMutation({
     mutationFn: (name: string) => updateTrunk(trunk.id, { trunk_name: name }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['trunks'] });
+      setEditing(false);
     },
     onError: (err: Error) => toastErr(err.message),
   });
 
-  function handleBlur() {
-    setFocused(false);
+  function handleSave() {
     const trimmed = value.trim();
     if (!trimmed) {
-      // Don't allow an empty trunk name — revert
-      setValue(trunk.trunk_name);
+      handleCancel();
       return;
     }
-    if (trimmed !== trunk.trunk_name) {
-      mutation.mutate(trimmed);
+    if (trimmed === trunk.trunk_name) {
+      setEditing(false);
+      return;
     }
+    mutation.mutate(trimmed);
+  }
+
+  function handleCancel() {
+    setValue(trunk.trunk_name);
+    setEditing(false);
   }
 
   const sharedStyle: React.CSSProperties = {
@@ -99,46 +132,79 @@ function TrunkNameField({
 
   const [hovered, setHovered] = useState(false);
 
+  if (editing) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+        <input
+          type="text"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') { e.preventDefault(); handleSave(); }
+            if (e.key === 'Escape') handleCancel();
+            e.stopPropagation();
+          }}
+          onBlur={handleCancel}
+          onClick={(e) => e.stopPropagation()}
+          disabled={mutation.isPending}
+          autoFocus
+          style={{
+            ...sharedStyle,
+            display: 'block',
+            flex: 1,
+            minWidth: 80,
+            background: 'rgba(19,21,29,0.8)',
+            border: '1px solid rgba(245,158,11,0.5)',
+            borderRadius: 6,
+            outline: 'none',
+            padding: '2px 8px',
+            fontFamily: 'inherit',
+            opacity: mutation.isPending ? 0.5 : 1,
+            boxShadow: '0 0 0 3px rgba(245,158,11,0.12)',
+          }}
+        />
+        <button
+          type="button"
+          onMouseDown={(e) => { e.preventDefault(); handleSave(); }}
+          disabled={mutation.isPending}
+          style={{ ...inlineSaveBtn, opacity: mutation.isPending ? 0.6 : 1 }}
+        >
+          {mutation.isPending ? '…' : 'Save'}
+        </button>
+        <button
+          type="button"
+          onMouseDown={(e) => { e.preventDefault(); handleCancel(); }}
+          style={inlineCancelBtn}
+        >
+          Cancel
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       style={{ position: 'relative' }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <input
-          type="text"
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          onFocus={() => setFocused(true)}
-          onBlur={handleBlur}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
-            e.stopPropagation();
-          }}
-          onClick={(e) => e.stopPropagation()}
-          disabled={mutation.isPending}
-          title="Click to rename this trunk"
+      <div
+        style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}
+        onClick={(e) => { e.stopPropagation(); setEditing(true); }}
+        title="Click to rename this trunk"
+      >
+        <div
           style={{
             ...sharedStyle,
-            display: 'block',
-            flex: 1,
-            background: focused ? 'rgba(19,21,29,0.8)' : 'transparent',
-            border: focused
-              ? '1px solid rgba(245,158,11,0.5)'
-              : '1px solid transparent',
-            borderRadius: 6,
-            outline: 'none',
-            padding: focused ? '2px 8px' : '2px 0',
-            fontFamily: 'inherit',
-            cursor: focused ? 'text' : 'pointer',
-            transition: 'border-color 150ms, background 150ms, padding 100ms',
-            opacity: mutation.isPending ? 0.5 : 1,
-            boxShadow: focused ? '0 0 0 3px rgba(245,158,11,0.12)' : 'none',
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
           }}
-        />
+        >
+          {trunk.trunk_name}
+        </div>
         {/* Pencil icon — visible on hover */}
-        {!focused && hovered && (
+        {hovered && (
           <svg
             viewBox="0 0 24 24"
             fill="none"
@@ -151,7 +217,7 @@ function TrunkNameField({
         )}
       </div>
       {/* Hint text — shown on hover when not editing */}
-      {!focused && hovered && (
+      {hovered && (
         <div
           style={{
             fontSize: '0.6rem',
