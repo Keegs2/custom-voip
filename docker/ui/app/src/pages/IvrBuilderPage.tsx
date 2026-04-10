@@ -293,19 +293,37 @@ export function IvrBuilderPage() {
             className="flex-1 overflow-y-auto p-6 flex flex-col items-center"
             role="main"
             aria-label="IVR flow canvas"
+            style={{ background: '#0f1117' }}
           >
             {/* START sentinel */}
             <div
-              className="flex items-center justify-center w-20 h-8 rounded-full bg-[#1e2130] border border-[#2a2f45] mb-0"
+              className="flex items-center justify-center gap-1.5 px-4 h-8 rounded-full mb-0"
+              style={{
+                background: 'rgba(6,182,212,0.08)',
+                border: '1px solid rgba(6,182,212,0.25)',
+                boxShadow: '0 0 10px rgba(6,182,212,0.08)',
+              }}
               aria-label="Flow start"
             >
-              <span className="text-[0.65rem] font-bold uppercase tracking-widest text-[#4a5568]">
+              <div
+                className="w-1.5 h-1.5 rounded-full"
+                style={{ backgroundColor: '#06b6d4', boxShadow: '0 0 4px rgba(6,182,212,0.6)' }}
+                aria-hidden="true"
+              />
+              <span
+                className="text-[0.6rem] font-bold uppercase tracking-[1.5px]"
+                style={{ color: '#06b6d4' }}
+              >
                 START
               </span>
             </div>
 
             {/* Connector from START to first node */}
-            <div className="w-[2px] min-h-[12px] bg-[#2a2f45]" aria-hidden="true" />
+            <div
+              className="w-[2px] min-h-[12px]"
+              style={{ background: 'linear-gradient(to bottom, rgba(6,182,212,0.3), rgba(42,47,69,0.6))' }}
+              aria-hidden="true"
+            />
 
             {/* Node tree */}
             <div className="w-full max-w-[600px]" onClick={(e) => e.stopPropagation()}>

@@ -29,17 +29,18 @@ export function IvrDropZone({ path, position }: IvrDropZoneProps) {
       role="region"
       aria-label={`Drop zone at position ${position}`}
       className={cn(
-        'relative mx-auto w-full max-w-[560px] rounded-lg transition-all duration-150',
+        'relative mx-auto w-full max-w-[560px] rounded-xl transition-all duration-150',
         'border-2 border-dashed',
         isOver
-          ? 'min-h-[48px] border-[#3b82f6] bg-[#3b82f6]/10 shadow-[0_0_12px_rgba(59,130,246,0.25)]'
+          ? 'min-h-[52px] border-[#06b6d4] bg-[rgba(6,182,212,0.07)] shadow-[0_0_16px_rgba(6,182,212,0.2)]'
           : 'min-h-[36px] border-transparent',
       )}
     >
       {isOver && (
-        <div className="absolute inset-0 flex items-center justify-center">
-          <span className="text-[#3b82f6] text-xs font-semibold select-none pointer-events-none">
-            Drop verb here
+        <div className="absolute inset-0 flex items-center justify-center gap-1.5">
+          <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: '#06b6d4' }} aria-hidden="true" />
+          <span className="text-[#06b6d4] text-xs font-semibold select-none pointer-events-none tracking-wide">
+            Drop here
           </span>
         </div>
       )}

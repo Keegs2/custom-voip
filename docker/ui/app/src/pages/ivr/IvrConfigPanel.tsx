@@ -27,7 +27,7 @@ interface LabeledFieldProps {
 function LabeledField({ label, children, hint }: LabeledFieldProps) {
   return (
     <div className="flex flex-col gap-1.5 mb-4">
-      <label className="text-[0.72rem] font-semibold uppercase tracking-[0.6px] text-[#718096]">
+      <label className="text-[0.68rem] font-bold uppercase tracking-[0.8px] text-[#718096]">
         {label}
       </label>
       {children}
@@ -39,9 +39,9 @@ function LabeledField({ label, children, hint }: LabeledFieldProps) {
 }
 
 const inputClass = cn(
-  'w-full px-3 py-2 rounded-lg text-sm text-[#e2e8f0] bg-[#1e2130]',
-  'border border-[#2a2f45] outline-none transition-[border-color,box-shadow] duration-150',
-  'focus:border-[#3b82f6] focus:shadow-[0_0_0_3px_rgba(59,130,246,0.18)]',
+  'w-full px-3 py-2 rounded-lg text-sm text-[#e2e8f0] bg-[#0d0f15]',
+  'border border-[rgba(42,47,69,0.6)] outline-none transition-[border-color,box-shadow] duration-150',
+  'focus:border-[#06b6d4] focus:shadow-[0_0_0_3px_rgba(6,182,212,0.12)]',
   'placeholder:text-[#3d4460]',
 );
 
@@ -174,19 +174,39 @@ function PauseFields({ node, dispatch }: { node: BuilderNode; dispatch: React.Di
 // Main panel
 // ---------------------------------------------------------------------------
 
+const asidePanelStyle = {
+  width: '300px',
+  flexShrink: 0,
+  background: 'linear-gradient(180deg, #13151d 0%, #0f1117 100%)',
+  borderLeft: '1px solid rgba(42,47,69,0.6)',
+} as const;
+
 export function IvrConfigPanel({ node, dispatch }: IvrConfigPanelProps) {
   if (!node) {
     return (
       <aside
-        className="flex flex-col bg-[#1a1d27] border-l border-[#2a2f45] overflow-y-auto"
-        style={{ width: '300px', flexShrink: 0 }}
+        className="flex flex-col overflow-y-auto"
+        style={asidePanelStyle}
         aria-label="Node configuration panel"
       >
         <div className="flex items-center justify-center h-full p-6 text-center">
           <div>
-            <div className="text-2xl mb-3 opacity-30" aria-hidden="true">⚙</div>
-            <p className="text-[#4a5568] text-sm">
-              Select a node on the canvas to configure it.
+            <div
+              className="w-10 h-10 rounded-xl flex items-center justify-center mx-auto mb-4"
+              style={{
+                background: 'rgba(42,47,69,0.35)',
+                border: '1px solid rgba(42,47,69,0.5)',
+              }}
+              aria-hidden="true"
+            >
+              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.5} style={{ width: 20, height: 20, color: '#4a5568' }}>
+                <path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" strokeLinecap="round" strokeLinejoin="round" />
+                <path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </div>
+            <p className="text-[#4a5568] text-sm font-medium">No node selected</p>
+            <p className="text-[#3d4460] text-xs mt-1 leading-relaxed">
+              Click a node on the canvas to configure it.
             </p>
           </div>
         </div>
@@ -199,23 +219,26 @@ export function IvrConfigPanel({ node, dispatch }: IvrConfigPanelProps) {
 
   return (
     <aside
-      className="flex flex-col bg-[#1a1d27] border-l border-[#2a2f45] overflow-y-auto"
-      style={{ width: '300px', flexShrink: 0 }}
+      className="flex flex-col overflow-y-auto"
+      style={asidePanelStyle}
       aria-label="Node configuration panel"
     >
       {/* Panel header */}
-      <div className="flex items-center gap-2 px-4 pt-4 pb-3 border-b border-[#2a2f45]">
+      <div
+        className="flex items-center gap-2.5 px-5 pt-5 pb-4"
+        style={{ borderBottom: '1px solid rgba(42,47,69,0.5)' }}
+      >
         <div
           className="w-[3px] h-5 rounded-full flex-shrink-0"
-          style={{ backgroundColor: accentColor }}
+          style={{ backgroundColor: accentColor, boxShadow: `0 0 6px ${accentColor}60` }}
           aria-hidden="true"
         />
-        <h2 className={cn('text-xs font-bold uppercase tracking-[0.8px]', textClass)}>
-          {node.type} — Configuration
+        <h2 className={cn('text-[0.7rem] font-bold uppercase tracking-[1px]', textClass)}>
+          {node.type} — Config
         </h2>
         <button
           type="button"
-          className="ml-auto text-[#4a5568] hover:text-[#e2e8f0] transition-colors text-sm leading-none"
+          className="ml-auto w-6 h-6 flex items-center justify-center rounded-md text-[#4a5568] hover:text-[#e2e8f0] hover:bg-[rgba(42,47,69,0.4)] transition-all duration-150 text-sm leading-none"
           aria-label="Deselect node"
           onClick={() => dispatch({ type: 'SELECT_NODE', nodeId: null })}
         >
@@ -224,7 +247,7 @@ export function IvrConfigPanel({ node, dispatch }: IvrConfigPanelProps) {
       </div>
 
       {/* Form fields */}
-      <div className="flex-1 px-4 pt-4 pb-2">
+      <div className="flex-1 px-5 pt-5 pb-2">
         {node.type === 'say'    && <SayFields    node={node} dispatch={dispatch} />}
         {node.type === 'play'   && <PlayFields   node={node} dispatch={dispatch} />}
         {node.type === 'gather' && <GatherFields node={node} dispatch={dispatch} />}
@@ -238,13 +261,16 @@ export function IvrConfigPanel({ node, dispatch }: IvrConfigPanelProps) {
       </div>
 
       {/* Delete button */}
-      <div className="px-4 pb-4 pt-2 border-t border-[#2a2f45]">
+      <div
+        className="px-5 pb-5 pt-3"
+        style={{ borderTop: '1px solid rgba(42,47,69,0.5)' }}
+      >
         <button
           type="button"
           className={cn(
-            'w-full px-4 py-2 rounded-lg text-sm font-semibold',
-            'bg-[#7f1d1d] text-[#fca5a5] border border-red-500/30',
-            'hover:bg-[#991b1b] hover:shadow-[0_0_14px_rgba(239,68,68,0.18)]',
+            'w-full px-4 py-2.5 rounded-lg text-sm font-semibold',
+            'bg-[rgba(127,29,29,0.5)] text-[#fca5a5] border border-red-500/25',
+            'hover:bg-[rgba(153,27,27,0.7)] hover:shadow-[0_0_14px_rgba(239,68,68,0.15)]',
             'transition-all duration-150',
           )}
           onClick={() => dispatch({ type: 'REMOVE_NODE', nodeId: node.id })}

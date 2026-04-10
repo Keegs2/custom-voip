@@ -47,11 +47,11 @@ function PaletteCard({ verb, label, description }: PaletteCardProps) {
     <div
       ref={setNodeRef}
       className={cn(
-        'relative flex items-center gap-2.5 px-3 py-2.5',
-        'bg-[#1a1d27] border border-[#2a2f45] rounded-lg overflow-hidden',
-        'cursor-grab select-none transition-all duration-100',
-        'hover:border-[#3d4460] hover:bg-[#1e2130]',
-        isDragging && 'opacity-30 cursor-grabbing',
+        'relative flex items-center gap-3 px-3 py-3',
+        'bg-[#13151d] border border-[rgba(42,47,69,0.6)] rounded-xl overflow-hidden',
+        'cursor-grab select-none transition-all duration-150',
+        'hover:border-[rgba(42,47,69,0.9)] hover:bg-[#1a1d27] hover:shadow-[0_2px_12px_rgba(0,0,0,0.3)]',
+        isDragging && 'opacity-25 cursor-grabbing scale-95',
       )}
       {...listeners}
       {...attributes}
@@ -59,7 +59,7 @@ function PaletteCard({ verb, label, description }: PaletteCardProps) {
     >
       {/* Accent left bar */}
       <div
-        className="absolute left-0 inset-y-0 w-[3px]"
+        className="absolute left-0 inset-y-0 w-[3px] rounded-l-xl"
         style={{ backgroundColor: accentColor }}
         aria-hidden="true"
       />
@@ -67,11 +67,11 @@ function PaletteCard({ verb, label, description }: PaletteCardProps) {
       {/* Icon */}
       <div
         className={cn(
-          'flex-shrink-0 w-7 h-7 rounded-md flex items-center justify-center',
+          'flex-shrink-0 w-8 h-8 rounded-lg flex items-center justify-center',
           'text-sm font-bold ml-1',
           textClass,
         )}
-        style={{ backgroundColor: `${accentColor}22` }}
+        style={{ backgroundColor: `${accentColor}18`, border: `1px solid ${accentColor}30` }}
         aria-hidden="true"
       >
         {icon}
@@ -79,8 +79,8 @@ function PaletteCard({ verb, label, description }: PaletteCardProps) {
 
       {/* Labels */}
       <div className="min-w-0">
-        <div className={cn('text-xs font-bold', textClass)}>{label}</div>
-        <div className="text-[0.68rem] text-[#4a5568] leading-tight truncate">{description}</div>
+        <div className={cn('text-xs font-bold tracking-wide', textClass)}>{label}</div>
+        <div className="text-[0.68rem] text-[#4a5568] leading-tight truncate mt-0.5">{description}</div>
       </div>
     </div>
   );
@@ -93,19 +93,34 @@ function PaletteCard({ verb, label, description }: PaletteCardProps) {
 export function IvrPalette() {
   return (
     <aside
-      className="flex flex-col bg-[#0d0f15] border-r border-[#2a2f45] overflow-y-auto"
-      style={{ width: '200px', flexShrink: 0 }}
+      className="flex flex-col overflow-y-auto"
+      style={{
+        width: '220px',
+        flexShrink: 0,
+        background: 'linear-gradient(180deg, #0f1117 0%, #0d0f15 100%)',
+        borderRight: '1px solid rgba(42,47,69,0.6)',
+      }}
       aria-label="IVR verb palette"
     >
       {/* Header */}
-      <div className="px-3 pt-3 pb-2">
-        <h2 className="text-[0.68rem] font-bold uppercase tracking-[0.8px] text-[#4a5568]">
-          Verbs
-        </h2>
+      <div
+        className="px-4 pt-5 pb-3"
+        style={{ borderBottom: '1px solid rgba(42,47,69,0.4)' }}
+      >
+        <div className="flex items-center gap-2">
+          <div
+            className="w-1.5 h-1.5 rounded-full"
+            style={{ backgroundColor: '#06b6d4', boxShadow: '0 0 5px rgba(6,182,212,0.5)' }}
+            aria-hidden="true"
+          />
+          <h2 className="text-[0.65rem] font-bold uppercase tracking-[1.2px] text-[#4a5568]">
+            Verbs
+          </h2>
+        </div>
       </div>
 
       {/* Cards */}
-      <div className="flex flex-col gap-1.5 px-2 pb-4">
+      <div className="flex flex-col gap-2 px-3 py-3">
         {PALETTE_ITEMS.map(({ verb, label, description }) => (
           <PaletteCard
             key={verb}
@@ -117,8 +132,11 @@ export function IvrPalette() {
       </div>
 
       {/* Usage hint */}
-      <div className="mt-auto px-3 pb-4">
-        <p className="text-[0.65rem] text-[#3d4460] leading-relaxed">
+      <div className="mt-auto px-4 pb-5 pt-2">
+        <p
+          className="text-[0.65rem] leading-relaxed"
+          style={{ color: 'rgba(74,85,104,0.7)' }}
+        >
           Drag any verb onto the canvas to add it to the flow.
         </p>
       </div>

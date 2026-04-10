@@ -56,47 +56,73 @@ export function IvrTopbar({
   }, [state.customerId]);
 
   const selectClass = cn(
-    'text-sm bg-[#1e2130] border border-[#2a2f45] text-[#e2e8f0] rounded-lg px-3 py-1.5',
+    'text-sm bg-[#0d0f15] border border-[rgba(42,47,69,0.6)] text-[#e2e8f0] rounded-lg px-3 py-2',
     'outline-none transition-[border-color,box-shadow] duration-150',
-    'focus:border-[#3b82f6] focus:shadow-[0_0_0_3px_rgba(59,130,246,0.18)]',
+    'focus:border-[#06b6d4] focus:shadow-[0_0_0_3px_rgba(6,182,212,0.15)]',
     'cursor-pointer',
+  );
+
+  const ghostButtonClass = cn(
+    'text-xs px-3 py-2 rounded-lg border border-[rgba(42,47,69,0.7)] text-[#718096]',
+    'hover:text-[#e2e8f0] hover:border-[rgba(42,47,69,1)] hover:bg-[rgba(42,47,69,0.25)]',
+    'transition-all duration-150 font-semibold flex-shrink-0',
   );
 
   return (
     <div
-      className="flex items-center gap-3 px-4 bg-[#0d0f15] border-b border-[#2a2f45] flex-shrink-0"
-      style={{ height: '56px' }}
       role="toolbar"
       aria-label="IVR Builder controls"
+      className="flex items-center gap-3 flex-shrink-0"
+      style={{
+        padding: '14px 24px',
+        background: 'linear-gradient(135deg, rgba(30,33,48,0.95) 0%, rgba(19,21,29,0.98) 100%)',
+        borderBottom: '1px solid rgba(42,47,69,0.6)',
+        boxShadow: '0 1px 0 rgba(0,0,0,0.3)',
+      }}
     >
       {/* Back button */}
       <button
         type="button"
         onClick={onBack}
-        className="text-[#718096] hover:text-[#e2e8f0] transition-colors text-sm flex items-center gap-1 flex-shrink-0"
         aria-label="Go back"
+        className={cn(
+          'flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold flex-shrink-0',
+          'text-[#718096] border border-[rgba(42,47,69,0.7)]',
+          'hover:text-[#e2e8f0] hover:border-[rgba(42,47,69,1)] hover:bg-[rgba(42,47,69,0.25)]',
+          'transition-all duration-150',
+        )}
       >
-        ← Back
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={2} style={{ width: 13, height: 13 }} aria-hidden="true">
+          <path d="M10 3L5 8l5 5" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+        Back
       </button>
 
       {/* Divider */}
-      <div className="w-px h-6 bg-[#2a2f45] flex-shrink-0" aria-hidden="true" />
+      <div className="w-px h-6 bg-[rgba(42,47,69,0.8)] flex-shrink-0" aria-hidden="true" />
 
-      {/* Flow name */}
-      <input
-        type="text"
-        value={state.name}
-        onChange={(e) => dispatch({ type: 'SET_NAME', name: e.target.value })}
-        placeholder="Flow name..."
-        aria-label="Flow name"
-        className={cn(
-          'text-sm font-semibold bg-transparent border-none outline-none text-[#e2e8f0]',
-          'placeholder:text-[#3d4460] w-[160px] focus:ring-0',
-        )}
-      />
+      {/* IVR accent dot + Flow name */}
+      <div className="flex items-center gap-2 flex-shrink-0">
+        <div
+          className="w-2 h-2 rounded-full flex-shrink-0"
+          style={{ backgroundColor: '#06b6d4', boxShadow: '0 0 6px rgba(6,182,212,0.5)' }}
+          aria-hidden="true"
+        />
+        <input
+          type="text"
+          value={state.name}
+          onChange={(e) => dispatch({ type: 'SET_NAME', name: e.target.value })}
+          placeholder="Untitled Flow"
+          aria-label="Flow name"
+          className={cn(
+            'text-[0.9rem] font-bold bg-transparent border-none outline-none',
+            'text-[#e2e8f0] placeholder:text-[#3d4460] w-[180px] focus:ring-0',
+          )}
+        />
+      </div>
 
       {/* Divider */}
-      <div className="w-px h-6 bg-[#2a2f45] flex-shrink-0" aria-hidden="true" />
+      <div className="w-px h-6 bg-[rgba(42,47,69,0.8)] flex-shrink-0" aria-hidden="true" />
 
       {/* Customer dropdown */}
       <select
@@ -132,35 +158,27 @@ export function IvrTopbar({
 
       {/* Right-side actions */}
       <div className="ml-auto flex items-center gap-2">
-        <button
-          type="button"
-          onClick={onNew}
-          className="text-xs px-3 py-1.5 rounded-lg border border-[#2a2f45] text-[#718096] hover:text-[#e2e8f0] hover:border-[#3d4460] transition-colors font-semibold"
-        >
+        <button type="button" onClick={onNew} className={ghostButtonClass}>
           New
         </button>
-        <button
-          type="button"
-          onClick={onLoad}
-          className="text-xs px-3 py-1.5 rounded-lg border border-[#2a2f45] text-[#718096] hover:text-[#e2e8f0] hover:border-[#3d4460] transition-colors font-semibold"
-        >
+        <button type="button" onClick={onLoad} className={ghostButtonClass}>
           Load
         </button>
-        <button
-          type="button"
-          onClick={onPreviewXml}
-          className="text-xs px-3 py-1.5 rounded-lg border border-[#2a2f45] text-[#718096] hover:text-[#e2e8f0] hover:border-[#3d4460] transition-colors font-semibold"
-        >
+        <button type="button" onClick={onPreviewXml} className={ghostButtonClass}>
           Preview XML
         </button>
+
+        {/* Divider before primary action */}
+        <div className="w-px h-5 bg-[rgba(42,47,69,0.8)] mx-1 flex-shrink-0" aria-hidden="true" />
+
         <button
           type="button"
           disabled={isSaving}
           onClick={onSave}
           className={cn(
-            'text-xs px-4 py-1.5 rounded-lg font-semibold transition-all duration-150',
-            'bg-[#3b82f6] text-white shadow-[0_0_10px_rgba(59,130,246,0.22)]',
-            'hover:bg-[#2563eb] hover:shadow-[0_0_18px_rgba(59,130,246,0.4)]',
+            'text-xs px-4 py-2 rounded-lg font-semibold transition-all duration-150 flex-shrink-0',
+            'bg-[#06b6d4] text-[#0a1628] shadow-[0_0_14px_rgba(6,182,212,0.28)]',
+            'hover:bg-[#0891b2] hover:shadow-[0_0_22px_rgba(6,182,212,0.45)]',
             'disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none',
           )}
         >

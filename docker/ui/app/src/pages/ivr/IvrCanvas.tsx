@@ -36,10 +36,32 @@ export function IvrCanvas({ nodes, path, selectedNodeId, dispatch }: IvrCanvasPr
     return (
       <>
         <IvrDropZone path={path} position={0} />
-        <div className="flex flex-col items-center justify-center py-8 text-center opacity-60">
-          <p className="text-[#4a5568] text-sm font-medium">Flow is empty</p>
-          <p className="text-[#4a5568] text-xs mt-1">
-            Drag a verb from the left panel and drop it above to begin.
+        <div
+          className="flex flex-col items-center justify-center py-10 text-center mx-auto"
+          style={{
+            maxWidth: 400,
+            background: 'linear-gradient(135deg, rgba(30,33,48,0.4) 0%, rgba(19,21,29,0.5) 100%)',
+            border: '1px dashed rgba(42,47,69,0.5)',
+            borderRadius: 16,
+            padding: '32px 24px',
+            marginTop: 8,
+          }}
+        >
+          <div
+            className="w-10 h-10 rounded-xl flex items-center justify-center mx-auto mb-4"
+            style={{
+              background: 'rgba(6,182,212,0.08)',
+              border: '1px solid rgba(6,182,212,0.2)',
+            }}
+            aria-hidden="true"
+          >
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.5} style={{ width: 20, height: 20, color: '#06b6d4' }}>
+              <path d="M10 3v14M3 10h14" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </div>
+          <p className="text-[#718096] text-sm font-semibold">Flow is empty</p>
+          <p className="text-[#4a5568] text-xs mt-2 leading-relaxed">
+            Drag a verb from the left panel and drop it above to begin building your call flow.
           </p>
         </div>
       </>
