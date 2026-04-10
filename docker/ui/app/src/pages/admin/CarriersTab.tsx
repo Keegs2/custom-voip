@@ -50,15 +50,19 @@ export function CarriersTab() {
 
   return (
     <div>
-      {/* Section header */}
+      {/* Section header / toolbar */}
       <div
         style={{
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
           gap: 16,
-          marginBottom: 24,
+          marginBottom: 20,
           flexWrap: 'wrap',
+          background: 'linear-gradient(135deg, rgba(30,33,48,0.9) 0%, rgba(19,21,29,0.95) 100%)',
+          border: '1px solid rgba(42,47,69,0.6)',
+          borderRadius: 12,
+          padding: '20px 24px',
         }}
       >
         <div>
@@ -77,7 +81,7 @@ export function CarriersTab() {
             Configure SIP trunk connections to upstream carriers
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <Button variant="ghost" size="sm" loading={testingAll} onClick={handleTestAll}>
             Test All
           </Button>

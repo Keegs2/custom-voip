@@ -95,7 +95,7 @@ export function CdrFilterBar({ filters, onChange, onSearch, onExport, searching 
     color: '#4a5568',
     textTransform: 'uppercase',
     letterSpacing: '0.08em',
-    marginBottom: 6,
+    marginBottom: 8,
     display: 'block',
   };
 
@@ -106,7 +106,7 @@ export function CdrFilterBar({ filters, onChange, onSearch, onExport, searching 
         background: 'linear-gradient(135deg, rgba(30,33,48,0.9) 0%, rgba(19,21,29,0.95) 100%)',
         border: '1px solid rgba(42,47,69,0.6)',
         borderRadius: 16,
-        padding: '20px 24px',
+        padding: '24px 28px',
         marginBottom: 20,
         boxShadow: '0 4px 20px rgba(0,0,0,0.25)',
       }}
@@ -115,12 +115,12 @@ export function CdrFilterBar({ filters, onChange, onSearch, onExport, searching 
         style={{
           display: 'flex',
           flexWrap: 'wrap',
-          gap: 12,
+          gap: 16,
           alignItems: 'flex-end',
         }}
       >
         {/* Customer */}
-        <div style={{ display: 'flex', flexDirection: 'column', minWidth: 160 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', minWidth: 180 }}>
           <label style={labelStyle}>Customer</label>
           <select
             style={{ ...controlStyle, cursor: 'pointer' }}
@@ -186,7 +186,7 @@ export function CdrFilterBar({ filters, onChange, onSearch, onExport, searching 
         </div>
 
         {/* Destination prefix */}
-        <div style={{ display: 'flex', flexDirection: 'column', minWidth: 130 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', minWidth: 150 }}>
           <label style={labelStyle}>Destination Prefix</label>
           <input
             type="text"
@@ -223,7 +223,7 @@ export function CdrFilterBar({ filters, onChange, onSearch, onExport, searching 
         </div>
 
         {/* Actions — pushed to end */}
-        <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', marginLeft: 'auto' }}>
+        <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', marginLeft: 'auto', paddingLeft: 8 }}>
           <Button type="submit" variant="primary" size="sm" loading={searching}>
             Search
           </Button>

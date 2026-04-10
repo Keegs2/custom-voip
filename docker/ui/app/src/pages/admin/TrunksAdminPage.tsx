@@ -970,15 +970,16 @@ export function TrunksAdminPage() {
         style={{
           display: 'flex',
           alignItems: 'center',
-          gap: 12,
+          gap: 16,
           flexWrap: 'wrap',
           background: 'linear-gradient(135deg, rgba(30,33,48,0.9) 0%, rgba(19,21,29,0.95) 100%)',
           border: '1px solid rgba(42,47,69,0.6)',
           borderRadius: 12,
-          padding: '14px 20px',
+          padding: '20px 24px',
+          marginBottom: 4,
         }}
       >
-        <form onSubmit={handleSearch} style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 200 }}>
+        <form onSubmit={handleSearch} style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1, minWidth: 280 }}>
           <input
             type="search"
             value={search}
@@ -986,15 +987,15 @@ export function TrunksAdminPage() {
             placeholder="Search trunks…"
             style={{
               fontSize: '0.875rem',
-              padding: '8px 12px',
-              height: 36,
+              padding: '8px 14px',
+              height: 38,
               borderRadius: 8,
               border: '1px solid rgba(42,47,69,0.8)',
               background: 'rgba(13,15,21,0.8)',
               color: '#e2e8f0',
               outline: 'none',
               transition: 'border-color 0.15s, box-shadow 0.15s',
-              maxWidth: 300,
+              minWidth: 260,
               width: '100%',
             }}
             onFocus={(e) => {
@@ -1006,14 +1007,14 @@ export function TrunksAdminPage() {
               e.currentTarget.style.boxShadow = 'none';
             }}
           />
-          <Button type="submit" variant="ghost" size="sm">
+          <Button type="submit" variant="ghost" size="sm" style={{ flexShrink: 0 }}>
             Search
           </Button>
         </form>
 
         {/* Summary badge */}
         {data && (
-          <span style={{ color: '#4a5568', fontSize: '0.8rem', fontVariantNumeric: 'tabular-nums' }}>
+          <span style={{ color: '#4a5568', fontSize: '0.8rem', fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>
             {trunks.length} trunk{trunks.length !== 1 ? 's' : ''}
           </span>
         )}
@@ -1022,7 +1023,7 @@ export function TrunksAdminPage() {
           variant="primary"
           size="sm"
           onClick={() => setShowCreateForm((v) => !v)}
-          style={{ background: ACCENT, borderColor: 'transparent' }}
+          style={{ background: ACCENT, borderColor: 'transparent', flexShrink: 0, marginLeft: 4 }}
         >
           {showCreateForm ? 'Cancel' : '+ New Trunk'}
         </Button>

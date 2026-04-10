@@ -91,9 +91,11 @@ export function SippTab() {
       <div>
         <div
           style={{
-            marginBottom: 16,
-            paddingBottom: 16,
-            borderBottom: '1px solid rgba(42,47,69,0.4)',
+            marginBottom: 20,
+            padding: '20px 24px',
+            background: 'linear-gradient(135deg, rgba(30,33,48,0.9) 0%, rgba(19,21,29,0.95) 100%)',
+            border: '1px solid rgba(42,47,69,0.6)',
+            borderRadius: 12,
           }}
         >
           <h2
@@ -107,7 +109,7 @@ export function SippTab() {
           >
             SIPp Load Test Presets
           </h2>
-          <p style={{ fontSize: '0.875rem', color: '#718096', marginTop: 4 }}>
+          <p style={{ fontSize: '0.875rem', color: '#718096', marginTop: 6 }}>
             Select a preset to run a pre-configured SIP load test against the platform.
           </p>
         </div>

@@ -121,9 +121,25 @@ export function RatesAddForm() {
 
   return (
     <div>
-      <Button variant="primary" size="sm" onClick={toggleOpen}>
-        {isOpen ? '— Cancel' : '+ Add Rate'}
-      </Button>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 16,
+          background: 'linear-gradient(135deg, rgba(30,33,48,0.9) 0%, rgba(19,21,29,0.95) 100%)',
+          border: '1px solid rgba(42,47,69,0.6)',
+          borderRadius: 12,
+          padding: '16px 24px',
+          marginBottom: isOpen ? 0 : 4,
+        }}
+      >
+        <span style={{ fontSize: '0.875rem', color: '#718096', flex: 1 }}>
+          Add a new rate prefix to the billing table.
+        </span>
+        <Button variant="primary" size="sm" onClick={toggleOpen} style={{ flexShrink: 0 }}>
+          {isOpen ? '— Cancel' : '+ Add Rate'}
+        </Button>
+      </div>
 
       {isOpen && (
         <div
