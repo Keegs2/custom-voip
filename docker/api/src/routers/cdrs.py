@@ -24,6 +24,45 @@ def _safe_int(value, default=None):
         return default
 
 
+def _safe_float(value, default=None):
+    """Convert a string value to float, returning default on failure."""
+    if value is None:
+        return default
+    try:
+        return float(value)
+    except (ValueError, TypeError):
+        return default
+
+
+def _safe_bigint(value, default=None):
+    """Convert a string value to a big int, returning default on failure."""
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except (ValueError, TypeError):
+        return default
+
+
+def _compute_r_factor(mos: float | None) -> float | None:
+    """Compute R-factor from MOS using piecewise linear approximation.
+
+    - MOS >= 4.5 -> R = 93
+    - MOS >= 4.0 -> R = 80 + (MOS - 4.0) * 26
+    - MOS >= 3.0 -> R = 60 + (MOS - 3.0) * 20
+    - MOS <  3.0 -> R = MOS * 20
+    """
+    if mos is None:
+        return None
+    if mos >= 4.5:
+        return 93.0
+    if mos >= 4.0:
+        return 80.0 + (mos - 4.0) * 26.0
+    if mos >= 3.0:
+        return 60.0 + (mos - 3.0) * 20.0
+    return mos * 20.0
+
+
 def _epoch_to_timestamp(epoch_str):
     """Convert a Unix epoch string to a timezone-aware datetime.
 
@@ -113,6 +152,35 @@ async def ingest_cdr(request: Request):
         # rate-lookup caching.  e.g. "+17743260301" -> "+17743"
         destination_prefix = destination[:6] if destination else None
 
+        # ---- RTP quality metrics ------------------------------------------
+        mos = _safe_float(variables.get("rtp_audio_in_mos"))
+        quality_pct = _safe_float(variables.get("rtp_audio_in_quality_percentage"))
+        jitter_min_ms = _safe_float(variables.get("rtp_audio_in_jitter_min_variance"))
+        jitter_max_ms = _safe_float(variables.get("rtp_audio_in_jitter_max_variance"))
+        rtp_mean_interval = _safe_float(variables.get("rtp_audio_in_mean_interval"))
+        jitter_avg_ms = rtp_mean_interval  # mean interval as avg jitter proxy
+        packet_loss_count = _safe_int(variables.get("rtp_audio_in_skip_packet_count"))
+        packet_total_count = _safe_int(variables.get("rtp_audio_in_media_packet_count"))
+
+        # Compute packet loss percentage
+        packet_loss_pct = None
+        if packet_loss_count is not None and packet_total_count and packet_total_count > 0:
+            packet_loss_pct = round((packet_loss_count / packet_total_count) * 100, 2)
+
+        flaw_total = _safe_int(variables.get("rtp_audio_in_flaw_total"))
+        r_factor = _compute_r_factor(mos)
+
+        rtp_audio_in_raw_bytes = _safe_bigint(variables.get("rtp_audio_in_raw_bytes"))
+        rtp_audio_in_media_bytes = _safe_bigint(variables.get("rtp_audio_in_media_bytes"))
+        rtp_audio_out_raw_bytes = _safe_bigint(variables.get("rtp_audio_out_raw_bytes"))
+        rtp_audio_out_media_bytes = _safe_bigint(variables.get("rtp_audio_out_media_bytes"))
+        rtp_audio_in_packet_count = _safe_int(variables.get("rtp_audio_in_packet_count"))
+        rtp_audio_out_packet_count = _safe_int(variables.get("rtp_audio_out_packet_count"))
+        rtp_jitter_burst_rate = _safe_float(variables.get("rtp_audio_in_jitter_burst_rate"))
+        rtp_jitter_loss_rate = _safe_float(variables.get("rtp_audio_in_jitter_loss_rate"))
+        read_codec = variables.get("read_codec")
+        write_codec = variables.get("write_codec")
+
         # ---- Insert with duplicate guard ----------------------------------
         # The cdrs table uses a composite PK (id, start_time) for TimescaleDB
         # hypertable partitioning, so ON CONFLICT on uuid is not available.
@@ -125,7 +193,16 @@ async def ingest_cdr(request: Request):
                 start_time, answer_time, end_time,
                 duration_ms, billable_ms,
                 hangup_cause, sip_code, carrier_used, traffic_grade,
-                freeswitch_node
+                freeswitch_node,
+                mos, quality_pct, jitter_min_ms, jitter_max_ms, jitter_avg_ms,
+                packet_loss_count, packet_total_count, packet_loss_pct,
+                flaw_total, r_factor,
+                rtp_audio_in_raw_bytes, rtp_audio_in_media_bytes,
+                rtp_audio_out_raw_bytes, rtp_audio_out_media_bytes,
+                rtp_audio_in_packet_count, rtp_audio_out_packet_count,
+                rtp_audio_in_jitter_burst_rate, rtp_audio_in_jitter_loss_rate,
+                rtp_audio_in_mean_interval,
+                read_codec, write_codec
             )
             SELECT
                 $1, $2, $3, $4, $5,
@@ -133,7 +210,16 @@ async def ingest_cdr(request: Request):
                 $9, $10, $11,
                 $12, $13,
                 $14, $15, $16, $17,
-                $18
+                $18,
+                $19, $20, $21, $22, $23,
+                $24, $25, $26,
+                $27, $28,
+                $29, $30,
+                $31, $32,
+                $33, $34,
+                $35, $36,
+                $37,
+                $38, $39
             WHERE NOT EXISTS (
                 SELECT 1 FROM cdrs WHERE uuid = $1
             )
@@ -156,6 +242,27 @@ async def ingest_cdr(request: Request):
             carrier_used,
             traffic_grade,
             freeswitch_node,
+            mos,
+            quality_pct,
+            jitter_min_ms,
+            jitter_max_ms,
+            jitter_avg_ms,
+            packet_loss_count,
+            packet_total_count,
+            packet_loss_pct,
+            flaw_total,
+            r_factor,
+            rtp_audio_in_raw_bytes,
+            rtp_audio_in_media_bytes,
+            rtp_audio_out_raw_bytes,
+            rtp_audio_out_media_bytes,
+            rtp_audio_in_packet_count,
+            rtp_audio_out_packet_count,
+            rtp_jitter_burst_rate,
+            rtp_jitter_loss_rate,
+            rtp_mean_interval,
+            read_codec,
+            write_codec,
         )
 
         if result and "INSERT 0 0" in result:
@@ -312,14 +419,25 @@ async def cdr_summary(
 
 @router.get("/{cdr_uuid}")
 async def get_cdr(cdr_uuid: str):
-    """Get a single CDR by UUID."""
+    """Get a single CDR by UUID including all RTP quality metrics."""
     result = await db.fetch_one(
         """
         SELECT uuid, customer_id, product_type, trunk_id, direction,
-               caller_id, destination, start_time, answer_time, end_time,
+               caller_id, destination, destination_prefix,
+               start_time, answer_time, end_time,
                duration_ms, billable_ms, rate_per_min, total_cost,
+               carrier_cost, margin,
                hangup_cause, sip_code, carrier_used, traffic_grade,
-               fraud_score, fraud_flags, rated_at
+               fraud_score, fraud_flags, rated_at, freeswitch_node,
+               mos, quality_pct, jitter_min_ms, jitter_max_ms, jitter_avg_ms,
+               packet_loss_count, packet_total_count, packet_loss_pct,
+               flaw_total, r_factor,
+               rtp_audio_in_raw_bytes, rtp_audio_in_media_bytes,
+               rtp_audio_out_raw_bytes, rtp_audio_out_media_bytes,
+               rtp_audio_in_packet_count, rtp_audio_out_packet_count,
+               rtp_audio_in_jitter_burst_rate, rtp_audio_in_jitter_loss_rate,
+               rtp_audio_in_mean_interval,
+               read_codec, write_codec
         FROM cdrs WHERE uuid = $1
         """,
         cdr_uuid
@@ -330,6 +448,14 @@ async def get_cdr(cdr_uuid: str):
     cdr = dict(result)
     cdr["duration_seconds"] = (cdr.pop("duration_ms") or 0) / 1000
     cdr["billable_seconds"] = (cdr.pop("billable_ms") or 0) / 1000
+    # Convert Decimal types to float for JSON serialization
+    for key in ("mos", "quality_pct", "jitter_min_ms", "jitter_max_ms",
+                "jitter_avg_ms", "packet_loss_pct", "r_factor",
+                "rtp_audio_in_jitter_burst_rate", "rtp_audio_in_jitter_loss_rate",
+                "rtp_audio_in_mean_interval", "rate_per_min", "total_cost",
+                "carrier_cost", "margin"):
+        if cdr.get(key) is not None:
+            cdr[key] = float(cdr[key])
     return cdr
 
 

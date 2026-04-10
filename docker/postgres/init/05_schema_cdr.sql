@@ -41,6 +41,29 @@ CREATE TABLE cdrs (
     -- For debugging
     freeswitch_node VARCHAR(50),
 
+    -- RTP quality metrics
+    mos NUMERIC(3,2),
+    quality_pct NUMERIC(5,2),
+    jitter_min_ms NUMERIC(8,3),
+    jitter_max_ms NUMERIC(8,3),
+    jitter_avg_ms NUMERIC(8,3),
+    packet_loss_count INTEGER,
+    packet_total_count INTEGER,
+    packet_loss_pct NUMERIC(5,2),
+    flaw_total INTEGER,
+    r_factor NUMERIC(5,2),
+    rtp_audio_in_raw_bytes BIGINT,
+    rtp_audio_in_media_bytes BIGINT,
+    rtp_audio_out_raw_bytes BIGINT,
+    rtp_audio_out_media_bytes BIGINT,
+    rtp_audio_in_packet_count INTEGER,
+    rtp_audio_out_packet_count INTEGER,
+    rtp_audio_in_jitter_burst_rate NUMERIC(8,4),
+    rtp_audio_in_jitter_loss_rate NUMERIC(8,4),
+    rtp_audio_in_mean_interval NUMERIC(8,3),
+    read_codec VARCHAR(20),
+    write_codec VARCHAR(20),
+
     PRIMARY KEY (id, start_time)
 );
 

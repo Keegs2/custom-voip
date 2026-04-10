@@ -13,9 +13,12 @@ import { CustomerEditForm } from './CustomerEditForm';
 import { CustomerRcfSection } from './CustomerRcfSection';
 import { CustomerApiSection } from './CustomerApiSection';
 import { CustomerTrunkSection } from './CustomerTrunkSection';
+import { CustomerStatisticsTab } from './CustomerStatisticsTab';
 import type { Customer } from '../../types/customer';
 import type { Cdr } from '../../types/cdr';
 import type { CdrSummaryRow } from '../../types/rate';
+
+type AccountTab = 'overview' | 'statistics';
 
 interface AddCreditResponse {
   balance: number;
@@ -958,6 +961,7 @@ export function CustomerAccountPage() {
   const { toastOk, toastErr } = useToast();
 
   const [isEditing, setIsEditing] = useState(false);
+  const [activeTab, setActiveTab] = useState<AccountTab>('overview');
 
   const customerId = parseInt(customerIdParam ?? '', 10);
 
@@ -1200,8 +1204,8 @@ export function CustomerAccountPage() {
         </div>
       </div>
 
-      {/* Edit form or detail view */}
-      {isEditing ? (
+      {/* Edit form (shown above tabs when editing) */}
+      {isEditing && (
         <SectionCard accent="#3b82f6">
           <div
             style={{
@@ -1221,12 +1225,69 @@ export function CustomerAccountPage() {
             onSaved={handleSaved}
           />
         </SectionCard>
-      ) : (
+      )}
+
+      {/* Tab bar */}
+      {!isEditing && (
+        <div
+          style={{
+            display: 'flex',
+            gap: 2,
+            borderBottom: '1px solid rgba(42,47,69,0.5)',
+            paddingBottom: 0,
+          }}
+        >
+          {(
+            [
+              { id: 'overview', label: 'Overview' },
+              { id: 'statistics', label: 'Statistics' },
+            ] as { id: AccountTab; label: string }[]
+          ).map((tab) => {
+            const isActive = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  borderBottom: isActive
+                    ? `2px solid ${headerAccent}`
+                    : '2px solid transparent',
+                  padding: '8px 18px',
+                  fontSize: '0.8rem',
+                  fontWeight: isActive ? 700 : 500,
+                  color: isActive ? '#e2e8f0' : '#718096',
+                  cursor: 'pointer',
+                  marginBottom: -1,
+                  transition: 'color 0.15s, border-color 0.15s',
+                  letterSpacing: '0.01em',
+                }}
+                onMouseEnter={(e) => {
+                  if (!isActive) e.currentTarget.style.color = '#a0aec0';
+                }}
+                onMouseLeave={(e) => {
+                  if (!isActive) e.currentTarget.style.color = '#718096';
+                }}
+              >
+                {tab.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Tab content */}
+      {!isEditing && activeTab === 'overview' && (
         <AccountDetailView
           customer={customer}
           onEdit={() => setIsEditing(true)}
           onDelete={handleDelete}
         />
+      )}
+
+      {!isEditing && activeTab === 'statistics' && (
+        <CustomerStatisticsTab customerId={customer.id} accent={headerAccent} />
       )}
     </div>
   );

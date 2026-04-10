@@ -24,6 +24,8 @@ export async function searchCdrs(params: CdrSearchParams = {}): Promise<CdrSearc
   if (params.hangup_cause) query.set('hangup_cause', params.hangup_cause);
   if (params.limit !== undefined) query.set('limit', String(params.limit));
   if (params.offset !== undefined) query.set('offset', String(params.offset));
+  if (params.sort_by) query.set('sort_by', params.sort_by);
+  if (params.sort_dir) query.set('sort_dir', params.sort_dir);
 
   const qs = query.toString();
   const raw = await apiRequest<CdrRawResult>('GET', `/cdrs${qs ? `?${qs}` : ''}`);
@@ -118,4 +120,44 @@ export async function getCustomerCdrDailySummary(
   query.set('end_date', end.toISOString());
 
   return apiRequest<CdrSummaryResponse>('GET', `/cdrs/summary?${query.toString()}`);
+}
+
+/**
+ * Fetch up to 500 CDRs for the statistics tab, including quality/RTP fields.
+ * Uses a 30-day window and returns all answered calls so quality trends
+ * can be computed client-side from the MOS/jitter/packet-loss fields.
+ */
+export async function getCustomerStatsCdrs(
+  customerId: number,
+  limit = 500,
+): Promise<CdrSearchResult> {
+  const end = new Date();
+  const start = new Date(end);
+  start.setDate(start.getDate() - 30);
+
+  const query = new URLSearchParams();
+  query.set('customer_id', String(customerId));
+  query.set('limit', String(limit));
+  query.set('start_from', start.toISOString());
+  query.set('start_to', end.toISOString());
+
+  interface RawResult {
+    cdrs?: Cdr[];
+    items?: Cdr[];
+    count?: number;
+    total?: number;
+    limit?: number;
+    offset?: number;
+  }
+
+  const raw = await apiRequest<RawResult>('GET', `/cdrs?${query.toString()}`);
+  const items = raw.items ?? raw.cdrs ?? [];
+  const total = raw.total ?? raw.count ?? items.length;
+
+  return {
+    items,
+    total,
+    limit: raw.limit ?? limit,
+    offset: raw.offset ?? 0,
+  };
 }
