@@ -128,11 +128,11 @@ CREATE TABLE call_path_packages (
 );
 
 INSERT INTO call_path_packages (name, call_paths, monthly_fee, description, sort_order) VALUES
-('paths_10', 10, 25.00, '10 concurrent call paths', 1),
-('paths_25', 25, 50.00, '25 concurrent call paths', 2),
-('paths_50', 50, 90.00, '50 concurrent call paths', 3),
-('paths_100', 100, 160.00, '100 concurrent call paths', 4),
-('paths_200', 200, 280.00, '200 concurrent call paths', 5);
+('10 Call Paths', 10, 25.00, 'Ideal for small offices', 1),
+('25 Call Paths', 25, 50.00, 'For growing teams', 2),
+('50 Call Paths', 50, 90.00, 'Mid-size business', 3),
+('100 Call Paths', 100, 160.00, 'Large enterprise', 4),
+('200 Call Paths', 200, 280.00, 'High-volume operations', 5);
 
 -- Add call_path_package_id to sip_trunks
 ALTER TABLE sip_trunks ADD COLUMN IF NOT EXISTS call_path_package_id INTEGER REFERENCES call_path_packages(id);
