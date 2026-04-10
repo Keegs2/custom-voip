@@ -13,7 +13,6 @@ const adminTabs: AdminTab[] = [
   { label: 'Rates',           to: '/admin/rates' },
   { label: 'Tiers',           to: '/admin/tiers' },
   { label: 'SIPp Test',       to: '/admin/sipp' },
-  { label: 'Homer',           to: '/admin/homer' },
 ];
 
 const ADMIN_ACCENT = '#3b82f6';
@@ -23,7 +22,7 @@ export function AdminPage() {
   const isAdminRoot = location.pathname === '/admin' || location.pathname === '/admin/';
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', paddingTop: 8 }}>
 
       {/* ── Premium header card ── */}
       <div

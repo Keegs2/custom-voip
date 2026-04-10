@@ -14,7 +14,7 @@ import { RatesAdminPage } from './pages/admin/RatesAdminPage';
 import { TiersAdminPage } from './pages/admin/TiersAdminPage';
 import { CarriersAdminPage } from './pages/admin/CarriersAdminPage';
 import { SippAdminPage } from './pages/admin/SippAdminPage';
-import { HomerAdminPage } from './pages/admin/HomerAdminPage';
+// Homer moved to standalone Troubleshooting page
 import { TrunksAdminPage } from './pages/admin/TrunksAdminPage';
 
 export function App() {
@@ -38,7 +38,6 @@ export function App() {
             <Route path="tiers"     element={<TiersAdminPage />} />
             <Route path="carriers"  element={<CarriersAdminPage />} />
             <Route path="sipp"      element={<SippAdminPage />} />
-            <Route path="homer"     element={<HomerAdminPage />} />
           </Route>
         </Route>
 

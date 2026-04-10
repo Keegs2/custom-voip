@@ -62,12 +62,16 @@ export function Th({ children, className }: ThProps) {
   return (
     <th
       className={cn(
-        'text-left px-4 py-3 text-[0.65rem] font-bold uppercase tracking-[0.8px]',
-        'whitespace-nowrap',
+        'text-left whitespace-nowrap',
         className,
       )}
       style={{
-        color: '#4a5568',
+        padding: '14px 20px',
+        fontSize: '0.68rem',
+        fontWeight: 700,
+        textTransform: 'uppercase',
+        letterSpacing: '0.08em',
+        color: '#64748b',
         borderBottom: '1px solid rgba(42,47,69,0.6)',
       }}
     >
@@ -81,11 +85,11 @@ export function Td({ children, className, colSpan }: TdProps) {
     <td
       colSpan={colSpan}
       className={cn(
-        'px-4 py-3 align-middle text-sm',
-        'last:border-b-0',
+        'align-middle text-sm',
         className,
       )}
       style={{
+        padding: '14px 20px',
         borderBottom: '1px solid rgba(42,47,69,0.35)',
       }}
     >

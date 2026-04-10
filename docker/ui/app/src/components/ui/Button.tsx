@@ -41,9 +41,9 @@ const variantClasses: Record<ButtonVariant, string> = {
 };
 
 const sizeClasses: Record<ButtonSize, string> = {
-  default: 'text-sm font-semibold px-4 py-2 rounded-lg h-9',
-  sm:      'text-xs font-semibold px-3 py-1.5 rounded-lg h-7',
-  xs:      'text-xs font-semibold px-2 py-1 rounded-md h-6',
+  default: 'text-sm font-semibold px-5 py-2.5 rounded-lg h-10',
+  sm:      'text-xs font-semibold px-4 py-2 rounded-lg h-8',
+  xs:      'text-xs font-semibold px-2.5 py-1 rounded-md h-6',
 };
 
 export function Button({
