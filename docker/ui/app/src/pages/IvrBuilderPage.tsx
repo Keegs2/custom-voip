@@ -23,6 +23,7 @@ import {
 } from '@dnd-kit/core';
 
 import { useToast } from '../components/ui/ToastContext';
+import { Sidebar } from '../components/layout/Sidebar';
 import { createIvrFlow, updateIvrFlow } from '../api/ivr';
 
 import { useIvrFlow } from './ivr/useIvrFlow';
@@ -258,9 +259,11 @@ export function IvrBuilderPage() {
       onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}
     >
-      {/* Full-screen fixed layout — bypasses AppLayout */}
+      {/* Layout with sidebar */}
+      <Sidebar />
       <div
-        className="fixed inset-0 z-50 flex flex-col bg-[#0f1117]"
+        className="flex flex-col bg-[#0f1117]"
+        style={{ marginLeft: 240, height: '100vh' }}
         onClick={() => {
           // Clicking the blank canvas deselects any selected node
           if (selectedNode) {
