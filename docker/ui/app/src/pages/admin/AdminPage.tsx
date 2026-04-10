@@ -24,36 +24,26 @@ export function AdminPage() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', paddingTop: 8 }}>
 
-      {/* ── Premium header card ── */}
+      {/* ── Compact header ── */}
       <div
         style={{
-          background: 'linear-gradient(135deg, rgba(30,33,48,0.9) 0%, rgba(19,21,29,0.95) 100%)',
-          border: '1px solid rgba(42,47,69,0.6)',
-          borderRadius: 16,
-          boxShadow:
-            '0 4px 24px rgba(0,0,0,0.35), 0 1px 4px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.04)',
-          padding: '32px 40px',
           display: 'flex',
-          flexDirection: 'column',
           alignItems: 'center',
-          textAlign: 'center',
-          marginBottom: 24,
+          gap: 14,
+          marginBottom: 20,
         }}
       >
-        {/* Gear icon badge — centered above title */}
         <div
           style={{
-            width: 52,
-            height: 52,
-            borderRadius: 14,
+            width: 38,
+            height: 38,
+            borderRadius: 10,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            background: `linear-gradient(135deg, ${ADMIN_ACCENT}25 0%, ${ADMIN_ACCENT}10 100%)`,
-            border: `1px solid ${ADMIN_ACCENT}35`,
+            background: `linear-gradient(135deg, ${ADMIN_ACCENT}20 0%, ${ADMIN_ACCENT}08 100%)`,
+            border: `1px solid ${ADMIN_ACCENT}30`,
             color: ADMIN_ACCENT,
-            boxShadow: `0 0 18px ${ADMIN_ACCENT}18`,
-            marginBottom: 16,
             flexShrink: 0,
           }}
           aria-hidden="true"
@@ -63,7 +53,7 @@ export function AdminPage() {
             fill="none"
             stroke="currentColor"
             strokeWidth={1.5}
-            style={{ width: 24, height: 24 }}
+            style={{ width: 18, height: 18 }}
           >
             <path
               d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7 7 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a7 7 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a7 7 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a7 7 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.28Z"
@@ -78,30 +68,23 @@ export function AdminPage() {
           </svg>
         </div>
 
-        <h1
-          style={{
-            fontSize: '1.625rem',
-            fontWeight: 800,
-            letterSpacing: '-0.02em',
-            color: '#e2e8f0',
-            lineHeight: 1.15,
-            margin: '0 0 10px',
-          }}
-        >
-          Administration
-        </h1>
-
-        <p
-          style={{
-            fontSize: '0.9rem',
-            color: '#718096',
-            lineHeight: 1.6,
-            margin: 0,
-            maxWidth: 480,
-          }}
-        >
-          Manage customers, billing, carriers, and platform configuration
-        </p>
+        <div>
+          <h1
+            style={{
+              fontSize: '1.25rem',
+              fontWeight: 700,
+              letterSpacing: '-0.01em',
+              color: '#e2e8f0',
+              lineHeight: 1.2,
+              margin: 0,
+            }}
+          >
+            Administration
+          </h1>
+          <p style={{ fontSize: '0.78rem', color: '#718096', margin: '2px 0 0' }}>
+            Platform management
+          </p>
+        </div>
       </div>
 
       {/* ── Tab navigation bar ── */}
