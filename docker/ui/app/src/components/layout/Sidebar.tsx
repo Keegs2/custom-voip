@@ -421,6 +421,78 @@ export function Sidebar() {
           </NavLink>
 
           <NavLink
+            to="/call-quality"
+            onClick={closeMobile}
+            className="block no-underline"
+            style={({ isActive }) => ({
+              display: 'flex',
+              alignItems: 'center',
+              gap: 10,
+              padding: '9px 14px',
+              borderRadius: 10,
+              fontSize: '0.875rem',
+              fontWeight: isActive ? 600 : 500,
+              letterSpacing: '-0.01em',
+              cursor: 'pointer',
+              userSelect: 'none',
+              transition: 'background 0.15s, color 0.15s, box-shadow 0.15s',
+              textDecoration: 'none',
+              marginTop: 4,
+              color: isActive ? '#f1f5f9' : '#64748b',
+              background: isActive
+                ? 'linear-gradient(135deg, rgba(34,197,94,0.18) 0%, rgba(34,197,94,0.08) 100%)'
+                : 'transparent',
+              boxShadow: isActive
+                ? '0 0 0 1px rgba(34,197,94,0.30), 0 2px 12px -4px rgba(34,197,94,0.30)'
+                : 'none',
+            })}
+          >
+            {({ isActive }) => (
+              <>
+                <span
+                  style={{
+                    width: 30,
+                    height: 30,
+                    borderRadius: 8,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    flexShrink: 0,
+                    background: isActive
+                      ? 'linear-gradient(135deg, rgba(34,197,94,0.30) 0%, rgba(34,197,94,0.18) 100%)'
+                      : 'rgba(255,255,255,0.04)',
+                    border: isActive
+                      ? '1px solid rgba(34,197,94,0.40)'
+                      : '1px solid rgba(255,255,255,0.06)',
+                    color: isActive ? '#22c55e' : '#475569',
+                    transition: 'background 0.15s, border-color 0.15s, color 0.15s',
+                  }}
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} style={{ width: 18, height: 18 }}>
+                    <path d="M1.5 8.5A15 15 0 0 1 22.5 8.5" strokeLinecap="round" strokeLinejoin="round" />
+                    <path d="M5.5 12.5a10 10 0 0 1 13 0" strokeLinecap="round" strokeLinejoin="round" />
+                    <path d="M9.5 16.5a5 5 0 0 1 5 0" strokeLinecap="round" strokeLinejoin="round" />
+                    <circle cx="12" cy="20" r="1" fill="currentColor" />
+                  </svg>
+                </span>
+                <span style={{ flex: 1 }}>Call Quality</span>
+                {isActive && (
+                  <span
+                    style={{
+                      width: 5,
+                      height: 5,
+                      borderRadius: '50%',
+                      background: '#22c55e',
+                      flexShrink: 0,
+                      boxShadow: '0 0 6px #22c55e',
+                    }}
+                  />
+                )}
+              </>
+            )}
+          </NavLink>
+
+          <NavLink
             to="/troubleshooting"
             onClick={closeMobile}
             className="block no-underline"

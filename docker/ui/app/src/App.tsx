@@ -17,6 +17,7 @@ import { CarriersAdminPage } from './pages/admin/CarriersAdminPage';
 import { SippAdminPage } from './pages/admin/SippAdminPage';
 // Homer moved to standalone Troubleshooting page
 import { TrunksAdminPage } from './pages/admin/TrunksAdminPage';
+import { CallQualityPage } from './pages/CallQualityPage';
 
 export function App() {
   return (
@@ -28,7 +29,8 @@ export function App() {
           <Route path="rcf"      element={<RcfPage />} />
           <Route path="api-dids" element={<ApiDidsPage />} />
           <Route path="trunks"   element={<TrunksPage />} />
-          <Route path="docs"     element={<DocsPage />} />
+          <Route path="docs"        element={<DocsPage />} />
+          <Route path="call-quality" element={<CallQualityPage />} />
           {/* Customer account page — outside AdminPage wrapper for clean layout */}
           <Route path="admin/customers/:customerId" element={<CustomerAccountPage />} />
 

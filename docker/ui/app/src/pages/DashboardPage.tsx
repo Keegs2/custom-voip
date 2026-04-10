@@ -40,6 +40,15 @@ const IconTroubleshoot = () => (
   </svg>
 );
 
+const IconSignal = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-7 h-7">
+    <path d="M1.5 8.5A15 15 0 0 1 22.5 8.5" strokeLinecap="round" strokeLinejoin="round" />
+    <path d="M5.5 12.5a10 10 0 0 1 13 0" strokeLinecap="round" strokeLinejoin="round" />
+    <path d="M9.5 16.5a5 5 0 0 1 5 0" strokeLinecap="round" strokeLinejoin="round" />
+    <circle cx="12" cy="20" r="1" fill="currentColor" />
+  </svg>
+);
+
 const IconDocs = () => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-7 h-7">
     <path d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25" strokeLinecap="round" strokeLinejoin="round" />
@@ -112,6 +121,15 @@ const UTILITY_CARDS: NavCard[] = [
     accent: '#3b82f6',
     glow: 'rgba(59, 130, 246, 0.18)',
     icon: <IconAdmin />,
+    compact: true,
+  },
+  {
+    title: 'Call Quality',
+    description: 'Platform-wide SIP call quality analysis, RTP diagnostics, and MOS trends.',
+    path: '/call-quality',
+    accent: '#22c55e',
+    glow: 'rgba(34, 197, 94, 0.15)',
+    icon: <IconSignal />,
     compact: true,
   },
   {
