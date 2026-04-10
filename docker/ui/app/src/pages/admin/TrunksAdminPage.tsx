@@ -587,6 +587,71 @@ interface TrunkRowProps {
   onDelete: (trunk: Trunk) => void;
 }
 
+function InlineTrunkName({ trunkId, name }: { trunkId: number; name: string }) {
+  const qc = useQueryClient();
+  const { toastErr } = useToast();
+  const [value, setValue] = useState(name);
+  const [focused, setFocused] = useState(false);
+  const [hovered, setHovered] = useState(false);
+
+  const [prev, setPrev] = useState(name);
+  if (name !== prev) { setPrev(name); setValue(name); }
+
+  const mutation = useMutation({
+    mutationFn: (n: string) => updateTrunk(trunkId, { trunk_name: n }),
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: ['admin-trunks'] }); },
+    onError: (err: Error) => toastErr(err.message),
+  });
+
+  function handleBlur() {
+    setFocused(false);
+    const trimmed = value.trim();
+    if (!trimmed) { setValue(name); return; }
+    if (trimmed !== name) mutation.mutate(trimmed);
+  }
+
+  return (
+    <span
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}
+    >
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onFocus={() => setFocused(true)}
+        onBlur={handleBlur}
+        onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); e.stopPropagation(); }}
+        onClick={(e) => e.stopPropagation()}
+        disabled={mutation.isPending}
+        title="Click to rename"
+        style={{
+          color: '#e2e8f0',
+          fontWeight: 600,
+          fontSize: '0.875rem',
+          background: focused ? 'rgba(19,21,29,0.8)' : 'transparent',
+          border: focused ? '1px solid rgba(245,158,11,0.5)' : '1px solid transparent',
+          borderRadius: 5,
+          outline: 'none',
+          padding: focused ? '2px 6px' : '2px 0',
+          fontFamily: 'inherit',
+          cursor: focused ? 'text' : 'pointer',
+          transition: 'border-color 150ms, background 150ms',
+          opacity: mutation.isPending ? 0.5 : 1,
+          boxShadow: focused ? '0 0 0 3px rgba(245,158,11,0.12)' : 'none',
+          width: Math.max(value.length * 8.5 + 20, 80),
+        }}
+      />
+      {!focused && hovered && (
+        <svg viewBox="0 0 24 24" fill="none" stroke="#f59e0b" strokeWidth={1.5} style={{ width: 12, height: 12, opacity: 0.5, flexShrink: 0 }}>
+          <path d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      )}
+    </span>
+  );
+}
+
 function TrunkRow({ trunk, isExpanded, onToggleExpand, onToggleEnabled, onDelete }: TrunkRowProps) {
   return (
     <>
@@ -629,9 +694,7 @@ function TrunkRow({ trunk, isExpanded, onToggleExpand, onToggleEnabled, onDelete
                 transition: 'background 0.2s, box-shadow 0.2s',
               }}
             />
-            <span style={{ color: '#e2e8f0', fontWeight: 600, fontSize: '0.875rem' }}>
-              {trunk.trunk_name}
-            </span>
+            <InlineTrunkName trunkId={trunk.id} name={trunk.trunk_name} />
           </div>
         </td>
 
