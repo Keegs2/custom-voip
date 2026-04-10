@@ -97,39 +97,74 @@ function TrunkNameField({
     );
   }
 
+  const [hovered, setHovered] = useState(false);
+
   return (
-    <input
-      type="text"
-      value={value}
-      onChange={(e) => setValue(e.target.value)}
-      onFocus={() => setFocused(true)}
-      onBlur={handleBlur}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
-        // Prevent the card expand toggle from firing on space/enter
-        e.stopPropagation();
-      }}
-      onClick={(e) => e.stopPropagation()}
-      disabled={mutation.isPending}
-      title="Click to rename this trunk"
-      style={{
-        ...sharedStyle,
-        display: 'block',
-        width: '100%',
-        background: focused ? 'rgba(19,21,29,0.8)' : 'transparent',
-        border: focused
-          ? '1px solid rgba(245,158,11,0.5)'
-          : '1px solid transparent',
-        borderRadius: 6,
-        outline: 'none',
-        padding: focused ? '2px 8px' : '2px 0',
-        fontFamily: 'inherit',
-        cursor: focused ? 'text' : 'pointer',
-        transition: 'border-color 150ms, background 150ms, padding 100ms',
-        opacity: mutation.isPending ? 0.5 : 1,
-        boxShadow: focused ? '0 0 0 3px rgba(245,158,11,0.12)' : 'none',
-      }}
-    />
+    <div
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{ position: 'relative' }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <input
+          type="text"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onFocus={() => setFocused(true)}
+          onBlur={handleBlur}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+            e.stopPropagation();
+          }}
+          onClick={(e) => e.stopPropagation()}
+          disabled={mutation.isPending}
+          title="Click to rename this trunk"
+          style={{
+            ...sharedStyle,
+            display: 'block',
+            flex: 1,
+            background: focused ? 'rgba(19,21,29,0.8)' : 'transparent',
+            border: focused
+              ? '1px solid rgba(245,158,11,0.5)'
+              : '1px solid transparent',
+            borderRadius: 6,
+            outline: 'none',
+            padding: focused ? '2px 8px' : '2px 0',
+            fontFamily: 'inherit',
+            cursor: focused ? 'text' : 'pointer',
+            transition: 'border-color 150ms, background 150ms, padding 100ms',
+            opacity: mutation.isPending ? 0.5 : 1,
+            boxShadow: focused ? '0 0 0 3px rgba(245,158,11,0.12)' : 'none',
+          }}
+        />
+        {/* Pencil icon — visible on hover */}
+        {!focused && hovered && (
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="#f59e0b"
+            strokeWidth={1.5}
+            style={{ width: 14, height: 14, opacity: 0.6, flexShrink: 0 }}
+          >
+            <path d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        )}
+      </div>
+      {/* Hint text — shown on hover when not editing */}
+      {!focused && hovered && (
+        <div
+          style={{
+            fontSize: '0.6rem',
+            color: '#f59e0b',
+            opacity: 0.5,
+            marginTop: 2,
+            letterSpacing: '0.03em',
+          }}
+        >
+          Click to rename
+        </div>
+      )}
+    </div>
   );
 }
 
