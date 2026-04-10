@@ -1260,41 +1260,53 @@ export function CallQualityPage() {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
 
       {/* Page header */}
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16 }}>
+      <div
+        style={{
+          paddingTop: 8,
+          paddingBottom: 28,
+          borderBottom: '1px solid rgba(42,47,69,0.6)',
+          textAlign: 'center',
+        }}
+      >
+        {/* Icon badge — centered */}
         <div
           style={{
             width: 48,
             height: 48,
             borderRadius: 14,
-            background: 'linear-gradient(135deg, rgba(34,197,94,0.25) 0%, rgba(34,197,94,0.10) 100%)',
-            border: '1px solid rgba(34,197,94,0.35)',
-            display: 'flex',
+            background: 'linear-gradient(135deg, rgba(34,197,94,0.20) 0%, rgba(34,197,94,0.10) 100%)',
+            border: '1px solid rgba(34,197,94,0.30)',
+            display: 'inline-flex',
             alignItems: 'center',
             justifyContent: 'center',
             color: '#22c55e',
-            flexShrink: 0,
-            boxShadow: '0 0 20px rgba(34,197,94,0.15)',
+            marginBottom: 14,
           }}
+          aria-hidden="true"
         >
           <SignalIcon />
         </div>
-        <div>
+
+        {/* Title */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 6 }}>
           <h1
             style={{
-              fontSize: '1.6rem',
+              fontSize: '1.5rem',
               fontWeight: 800,
               color: '#e2e8f0',
-              letterSpacing: '-0.025em',
+              letterSpacing: '-0.02em',
               margin: 0,
               lineHeight: 1.15,
             }}
           >
             Call Quality
           </h1>
-          <p style={{ fontSize: '0.82rem', color: '#4a5568', margin: '4px 0 0', letterSpacing: '0.01em' }}>
-            SIP call analysis, quality metrics, and RTP diagnostics
-          </p>
         </div>
+
+        {/* Subtitle */}
+        <p style={{ fontSize: '0.82rem', color: '#4a5568', margin: 0, marginLeft: 'auto', marginRight: 'auto', letterSpacing: '0.01em' }}>
+          SIP call analysis, quality metrics, and RTP diagnostics
+        </p>
       </div>
 
       {/* Filter bar */}

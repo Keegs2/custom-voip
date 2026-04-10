@@ -24,27 +24,29 @@ export function AdminPage() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', paddingTop: 8 }}>
 
-      {/* ── Compact header ── */}
+      {/* ── Centered header ── */}
       <div
         style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 14,
-          marginBottom: 20,
+          marginBottom: 28,
+          paddingTop: 8,
+          paddingBottom: 28,
+          borderBottom: '1px solid rgba(42,47,69,0.6)',
+          textAlign: 'center',
         }}
       >
+        {/* Icon badge — centered */}
         <div
           style={{
-            width: 38,
-            height: 38,
-            borderRadius: 10,
-            display: 'flex',
+            width: 48,
+            height: 48,
+            borderRadius: 14,
+            display: 'inline-flex',
             alignItems: 'center',
             justifyContent: 'center',
-            background: `linear-gradient(135deg, ${ADMIN_ACCENT}20 0%, ${ADMIN_ACCENT}08 100%)`,
+            background: `linear-gradient(135deg, ${ADMIN_ACCENT}20 0%, ${ADMIN_ACCENT}10 100%)`,
             border: `1px solid ${ADMIN_ACCENT}30`,
             color: ADMIN_ACCENT,
-            flexShrink: 0,
+            marginBottom: 14,
           }}
           aria-hidden="true"
         >
@@ -53,7 +55,7 @@ export function AdminPage() {
             fill="none"
             stroke="currentColor"
             strokeWidth={1.5}
-            style={{ width: 18, height: 18 }}
+            style={{ width: 22, height: 22 }}
           >
             <path
               d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7 7 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a7 7 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a7 7 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a7 7 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.28Z"
@@ -68,23 +70,26 @@ export function AdminPage() {
           </svg>
         </div>
 
-        <div>
+        {/* Title */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 6 }}>
           <h1
             style={{
-              fontSize: '1.25rem',
-              fontWeight: 700,
-              letterSpacing: '-0.01em',
+              fontSize: '1.5rem',
+              fontWeight: 800,
+              letterSpacing: '-0.02em',
               color: '#e2e8f0',
-              lineHeight: 1.2,
+              lineHeight: 1.15,
               margin: 0,
             }}
           >
             Administration
           </h1>
-          <p style={{ fontSize: '0.78rem', color: '#718096', margin: '2px 0 0' }}>
-            Platform management
-          </p>
         </div>
+
+        {/* Subtitle */}
+        <p style={{ fontSize: '0.82rem', color: '#718096', margin: 0, marginLeft: 'auto', marginRight: 'auto' }}>
+          Platform management and configuration
+        </p>
       </div>
 
       {/* ── Tab navigation bar ── */}
