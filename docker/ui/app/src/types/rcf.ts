@@ -3,6 +3,7 @@ export interface RcfEntry {
   did: string;
   customer_id: number;
   customer_name?: string;
+  name?: string | null;
   forward_to: string;
   enabled: boolean;
   pass_caller_id: boolean;
@@ -13,6 +14,7 @@ export interface RcfEntry {
 
 export interface RcfCreate {
   did: string;
+  name?: string;
   customer_id: number;
   forward_to: string;
   enabled?: boolean;
@@ -22,6 +24,7 @@ export interface RcfCreate {
 }
 
 export interface RcfUpdate {
+  name?: string | null;
   forward_to?: string;
   enabled?: boolean;
   pass_caller_id?: boolean;

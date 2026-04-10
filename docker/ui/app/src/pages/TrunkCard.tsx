@@ -1,10 +1,11 @@
 import { useState, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import type { Trunk, TrunkIp, TrunkDid } from '../types/trunk';
-import { getTrunkIps, getTrunkDids, getTrunkStats, addTrunkIp, deleteTrunkIp } from '../api/trunks';
+import { getTrunkIps, getTrunkDids, getTrunkStats, addTrunkIp, deleteTrunkIp, updateTrunk } from '../api/trunks';
 import { Badge } from '../components/ui/Badge';
 import { Spinner } from '../components/ui/Spinner';
 import { useToast } from '../components/ui/ToastContext';
+import { useAuth } from '../contexts/AuthContext';
 import { fmt } from '../utils/format';
 
 /**
@@ -31,8 +32,111 @@ interface TrunkCardProps {
   trunk: Trunk;
 }
 
+// Inline-editable trunk name — looks like static text when unfocused
+function TrunkNameField({
+  trunk,
+  canEdit,
+}: {
+  trunk: Trunk;
+  canEdit: boolean;
+}) {
+  const qc = useQueryClient();
+  const { toastErr } = useToast();
+
+  const [value, setValue] = useState(trunk.trunk_name);
+  const [focused, setFocused] = useState(false);
+
+  // Sync when the trunk prop refreshes from the server
+  const [prevName, setPrevName] = useState(trunk.trunk_name);
+  if (trunk.trunk_name !== prevName) {
+    setPrevName(trunk.trunk_name);
+    setValue(trunk.trunk_name);
+  }
+
+  const mutation = useMutation({
+    mutationFn: (name: string) => updateTrunk(trunk.id, { trunk_name: name }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['trunks'] });
+    },
+    onError: (err: Error) => toastErr(err.message),
+  });
+
+  function handleBlur() {
+    setFocused(false);
+    const trimmed = value.trim();
+    if (!trimmed) {
+      // Don't allow an empty trunk name — revert
+      setValue(trunk.trunk_name);
+      return;
+    }
+    if (trimmed !== trunk.trunk_name) {
+      mutation.mutate(trimmed);
+    }
+  }
+
+  const sharedStyle: React.CSSProperties = {
+    fontSize: '1.1rem',
+    fontWeight: 700,
+    letterSpacing: '-0.01em',
+    lineHeight: 1.3,
+    color: '#e2e8f0',
+  };
+
+  if (!canEdit) {
+    return (
+      <div
+        style={{
+          ...sharedStyle,
+          whiteSpace: 'nowrap',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+        }}
+      >
+        {trunk.trunk_name}
+      </div>
+    );
+  }
+
+  return (
+    <input
+      type="text"
+      value={value}
+      onChange={(e) => setValue(e.target.value)}
+      onFocus={() => setFocused(true)}
+      onBlur={handleBlur}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+        // Prevent the card expand toggle from firing on space/enter
+        e.stopPropagation();
+      }}
+      onClick={(e) => e.stopPropagation()}
+      disabled={mutation.isPending}
+      title="Click to rename this trunk"
+      style={{
+        ...sharedStyle,
+        display: 'block',
+        width: '100%',
+        background: focused ? 'rgba(19,21,29,0.8)' : 'transparent',
+        border: focused
+          ? '1px solid rgba(245,158,11,0.5)'
+          : '1px solid transparent',
+        borderRadius: 6,
+        outline: 'none',
+        padding: focused ? '2px 8px' : '2px 0',
+        fontFamily: 'inherit',
+        cursor: focused ? 'text' : 'pointer',
+        transition: 'border-color 150ms, background 150ms, padding 100ms',
+        opacity: mutation.isPending ? 0.5 : 1,
+        boxShadow: focused ? '0 0 0 3px rgba(245,158,11,0.12)' : 'none',
+      }}
+    />
+  );
+}
+
 export function TrunkCard({ trunk }: TrunkCardProps) {
   const [expanded, setExpanded] = useState(false);
+  const { user } = useAuth();
+  const canEdit = user?.role !== 'readonly';
 
   const toggleExpanded = useCallback(() => {
     setExpanded((prev) => !prev);
@@ -120,21 +224,8 @@ export function TrunkCard({ trunk }: TrunkCardProps) {
           padding: '24px 24px 16px',
         }}
       >
-        <div style={{ minWidth: 0 }}>
-          <div
-            style={{
-              fontSize: '1.1rem',
-              fontWeight: 700,
-              color: '#e2e8f0',
-              lineHeight: 1.3,
-              whiteSpace: 'nowrap',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              letterSpacing: '-0.01em',
-            }}
-          >
-            {trunk.trunk_name}
-          </div>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <TrunkNameField trunk={trunk} canEdit={canEdit} />
           <div
             style={{
               fontSize: '0.72rem',

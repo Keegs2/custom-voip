@@ -2,10 +2,12 @@ import { useState, useCallback } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import type { RcfEntry } from '../types/rcf';
 import { apiRequest } from '../api/client';
+import { updateRcfEntry } from '../api/rcf';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { Spinner } from '../components/ui/Spinner';
 import { useToast } from '../components/ui/Toast';
+import { useAuth } from '../contexts/AuthContext';
 import { fmt } from '../utils/format';
 
 interface RcfCardProps {
@@ -23,9 +25,107 @@ async function updateRcfForwardTo(did: string, payload: RcfUpdatePayload): Promi
   return apiRequest('PUT', `/rcf/${encodeURIComponent(did)}`, payload);
 }
 
+// Inline-editable name label for the portal RCF card
+function RcfNameField({
+  entry,
+  canEdit,
+}: {
+  entry: RcfEntry;
+  canEdit: boolean;
+}) {
+  const queryClient = useQueryClient();
+  const { toastErr } = useToast();
+
+  const [value, setValue] = useState(entry.name ?? '');
+  const [focused, setFocused] = useState(false);
+
+  // Sync when external data changes
+  const [prevName, setPrevName] = useState(entry.name);
+  if (entry.name !== prevName) {
+    setPrevName(entry.name);
+    setValue(entry.name ?? '');
+  }
+
+  const mutation = useMutation({
+    mutationFn: (name: string | null) => updateRcfEntry(entry.id, { name }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['rcf'] });
+    },
+    onError: (err: Error) => toastErr(err.message),
+  });
+
+  function handleBlur() {
+    setFocused(false);
+    const trimmed = value.trim();
+    const newName = trimmed === '' ? null : trimmed;
+    const currentName = entry.name ?? null;
+    if (newName !== currentName) {
+      mutation.mutate(newName);
+    }
+  }
+
+  // Display-only when readonly
+  if (!canEdit) {
+    if (!entry.name) return null;
+    return (
+      <div
+        style={{
+          fontSize: '1rem',
+          fontWeight: 700,
+          color: '#e2e8f0',
+          letterSpacing: '-0.01em',
+          marginBottom: 6,
+          lineHeight: 1.3,
+        }}
+      >
+        {entry.name}
+      </div>
+    );
+  }
+
+  return (
+    <input
+      type="text"
+      value={value}
+      onChange={(e) => setValue(e.target.value)}
+      onFocus={() => setFocused(true)}
+      onBlur={handleBlur}
+      onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
+      disabled={mutation.isPending}
+      placeholder="Add label..."
+      title="Click to set a name for this number"
+      style={{
+        display: 'block',
+        width: '100%',
+        fontSize: value.trim() ? '1rem' : '0.85rem',
+        fontWeight: value.trim() ? 700 : 400,
+        color: value.trim() ? '#e2e8f0' : '#4a5568',
+        fontStyle: value.trim() ? 'normal' : 'italic',
+        letterSpacing: value.trim() ? '-0.01em' : 'normal',
+        lineHeight: 1.3,
+        background: focused ? 'rgba(19,21,29,0.8)' : 'transparent',
+        border: focused
+          ? '1px solid rgba(59,130,246,0.55)'
+          : '1px solid transparent',
+        borderRadius: 6,
+        outline: 'none',
+        padding: focused ? '3px 8px' : '3px 0',
+        fontFamily: 'inherit',
+        cursor: focused ? 'text' : 'pointer',
+        transition: 'border-color 150ms, background 150ms, padding 100ms',
+        opacity: mutation.isPending ? 0.5 : 1,
+        boxShadow: focused ? '0 0 0 3px rgba(59,130,246,0.12)' : 'none',
+        marginBottom: 6,
+      }}
+    />
+  );
+}
+
 export function RcfCard({ entry, pendingValue, onPendingChange }: RcfCardProps) {
   const queryClient = useQueryClient();
   const { toastOk, toastErr } = useToast();
+  const { user } = useAuth();
+  const canEdit = user?.role !== 'readonly';
 
   // Track whether the save just succeeded for the green flash animation
   const [savedFlash, setSavedFlash] = useState(false);
@@ -117,7 +217,9 @@ export function RcfCard({ entry, pendingValue, onPendingChange }: RcfCardProps) 
           marginBottom: 20,
         }}
       >
-        <div style={{ minWidth: 0 }}>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          {/* Editable name label — prominent when set, subtle placeholder when empty */}
+          <RcfNameField entry={entry} canEdit={canEdit} />
           <div
             style={{
               fontSize: '1.2rem',

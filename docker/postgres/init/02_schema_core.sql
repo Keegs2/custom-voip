@@ -25,6 +25,7 @@ CREATE INDEX idx_customers_id_status ON customers(id, status);
 CREATE TABLE rcf_numbers (
     id SERIAL PRIMARY KEY,
     did VARCHAR(20) NOT NULL,
+    name VARCHAR(100),
     customer_id INT NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
     forward_to VARCHAR(20) NOT NULL,
     pass_caller_id BOOLEAN DEFAULT true,

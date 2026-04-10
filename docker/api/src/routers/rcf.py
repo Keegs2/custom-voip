@@ -73,6 +73,7 @@ def validate_forward_destination(dest: str) -> str:
 class RCFCreate(BaseModel):
     customer_id: int
     did: str
+    name: Optional[str] = None
     forward_to: str
     pass_caller_id: bool = True
     ring_timeout: int = 30
@@ -107,6 +108,7 @@ class RCFCreate(BaseModel):
 
 
 class RCFUpdate(BaseModel):
+    name: Optional[str] = None
     forward_to: Optional[str] = None
     pass_caller_id: Optional[bool] = None
     ring_timeout: Optional[int] = None
@@ -141,6 +143,7 @@ class RCFResponse(BaseModel):
     """Response model for RCF operations."""
     id: int
     did: str
+    name: Optional[str] = None
     forward_to: str
     pass_caller_id: bool
     enabled: bool
@@ -166,11 +169,11 @@ async def create_rcf(rcf: RCFCreate):
     try:
         result = await db.fetch_one(
             """
-            INSERT INTO rcf_numbers (customer_id, did, forward_to, pass_caller_id, ring_timeout, failover_to)
-            VALUES ($1, $2, $3, $4, $5, $6)
-            RETURNING id, did, forward_to, pass_caller_id, enabled, created_at
+            INSERT INTO rcf_numbers (customer_id, did, name, forward_to, pass_caller_id, ring_timeout, failover_to)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            RETURNING id, did, name, forward_to, pass_caller_id, enabled, created_at
             """,
-            rcf.customer_id, rcf.did, rcf.forward_to, rcf.pass_caller_id,
+            rcf.customer_id, rcf.did, rcf.name, rcf.forward_to, rcf.pass_caller_id,
             rcf.ring_timeout, rcf.failover_to
         )
         return dict(result)
@@ -224,7 +227,7 @@ async def update_rcf(identifier: str, rcf: RCFUpdate) -> RCFResponse:
     query = f"""
         UPDATE rcf_numbers SET {', '.join(updates)}
         WHERE {where_clause}
-        RETURNING id, did, forward_to, pass_caller_id, enabled, ring_timeout, failover_to, customer_id
+        RETURNING id, did, name, forward_to, pass_caller_id, enabled, ring_timeout, failover_to, customer_id
     """
 
     result = await db.fetch_one(query, *values)
@@ -244,6 +247,7 @@ async def update_rcf(identifier: str, rcf: RCFUpdate) -> RCFResponse:
     return RCFResponse(
         id=result["id"],
         did=result["did"],
+        name=result["name"],
         forward_to=result["forward_to"],
         pass_caller_id=result["pass_caller_id"],
         enabled=result["enabled"],
@@ -286,7 +290,7 @@ async def delete_rcf(identifier: str):
 async def list_rcf(customer_id: Optional[int] = None, enabled: Optional[bool] = None):
     """List RCF numbers with optional filters."""
     query = """
-        SELECT r.id, r.did, r.forward_to, r.enabled, r.customer_id,
+        SELECT r.id, r.did, r.name, r.forward_to, r.enabled, r.customer_id,
                c.name as customer_name
         FROM rcf_numbers r
         JOIN customers c ON r.customer_id = c.id

@@ -24,6 +24,80 @@ const darkInput: React.CSSProperties = {
   transition: 'border-color 150ms, box-shadow 150ms',
 };
 
+// Inline editable name/label field for a single RCF row
+function RcfNameInput({
+  entry,
+  customerId,
+}: {
+  entry: RcfEntry;
+  customerId: number;
+}) {
+  const qc = useQueryClient();
+  const { toastErr } = useToast();
+  const [value, setValue] = useState(entry.name ?? '');
+  const [focused, setFocused] = useState(false);
+
+  // Keep local value in sync when the entry prop changes from a refetch
+  const [prevName, setPrevName] = useState(entry.name);
+  if (entry.name !== prevName) {
+    setPrevName(entry.name);
+    setValue(entry.name ?? '');
+  }
+
+  const mutation = useMutation({
+    mutationFn: (name: string | null) => updateRcfEntry(entry.id, { name }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['customerRcf', customerId] });
+    },
+    onError: (err: Error) => toastErr(err.message),
+  });
+
+  function handleBlur() {
+    setFocused(false);
+    const trimmed = value.trim();
+    const newName = trimmed === '' ? null : trimmed;
+    const currentName = entry.name ?? null;
+    if (newName !== currentName) {
+      mutation.mutate(newName);
+    }
+  }
+
+  return (
+    <input
+      type="text"
+      value={value}
+      onChange={(e) => setValue(e.target.value)}
+      onFocus={() => setFocused(true)}
+      onBlur={handleBlur}
+      onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
+      onClick={(e) => e.stopPropagation()}
+      disabled={mutation.isPending}
+      placeholder="Add label..."
+      style={{
+        fontSize: value.trim() ? '0.85rem' : '0.78rem',
+        fontWeight: value.trim() ? 600 : 400,
+        color: value.trim() ? '#e2e8f0' : '#4a5568',
+        fontStyle: value.trim() ? 'normal' : 'italic',
+        background: focused ? 'rgba(13,15,23,0.8)' : 'transparent',
+        border: focused
+          ? '1px solid rgba(59,130,246,0.55)'
+          : '1px solid transparent',
+        borderRadius: 6,
+        outline: 'none',
+        padding: focused ? '2px 7px' : '2px 0',
+        fontFamily: 'inherit',
+        width: '100%',
+        cursor: focused ? 'text' : 'pointer',
+        transition: 'border-color 150ms, background 150ms, padding 100ms',
+        opacity: mutation.isPending ? 0.5 : 1,
+        boxShadow: focused ? '0 0 0 3px rgba(59,130,246,0.12)' : 'none',
+        letterSpacing: value.trim() ? '-0.01em' : 'normal',
+        marginBottom: 3,
+      }}
+    />
+  );
+}
+
 // Inline editable forward-to field for a single RCF row
 function RcfForwardInput({
   entry,
@@ -124,20 +198,10 @@ function RcfEntryRow({
         flexWrap: 'wrap',
       }}
     >
-      {/* Left: DID number */}
-      <div style={{ minWidth: 0, flex: '0 0 auto' }}>
-        <div
-          style={{
-            fontSize: '0.6rem',
-            fontWeight: 700,
-            color: '#4a5568',
-            textTransform: 'uppercase',
-            letterSpacing: '0.7px',
-            marginBottom: 3,
-          }}
-        >
-          DID
-        </div>
+      {/* Left: name label + DID number */}
+      <div style={{ minWidth: 130, flex: '0 0 auto' }}>
+        {/* Editable name above DID */}
+        <RcfNameInput entry={entry} customerId={customerId} />
         <div
           style={{
             fontFamily: 'monospace',
