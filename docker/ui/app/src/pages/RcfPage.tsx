@@ -1,6 +1,5 @@
 import { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Badge } from '../components/ui/Badge';
 import { Spinner } from '../components/ui/Spinner';
 import { listRcf } from '../api/rcf';
 import type { RcfEntry } from '../types/rcf';
@@ -160,22 +159,19 @@ export function PortalHeader({ icon, title, subtitle, badgeVariant = 'rcf', user
         {icon}
       </div>
 
-      {/* Title + badge */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, marginBottom: 6 }}>
-        <h1
-          style={{
-            fontSize: '1.5rem',
-            fontWeight: 800,
-            letterSpacing: '-0.02em',
-            color: '#e2e8f0',
-            lineHeight: 1.15,
-            margin: 0,
-          }}
-        >
-          {title}
-        </h1>
-        <Badge variant={badgeVariant}>Customer Portal</Badge>
-      </div>
+      {/* Title */}
+      <h1
+        style={{
+          fontSize: '1.5rem',
+          fontWeight: 800,
+          letterSpacing: '-0.02em',
+          color: '#e2e8f0',
+          lineHeight: 1.15,
+          margin: '0 0 6px',
+        }}
+      >
+        {title}
+      </h1>
 
       {/* User email — personal context */}
       {userEmail && (

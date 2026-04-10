@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { PageHeader } from '../components/layout/PageHeader';
 import { useAuth } from '../contexts/AuthContext';
+import { PortalHeader } from './RcfPage';
+import { IconDocs } from '../components/icons/ProductIcons';
 
 /* ─── Types ──────────────────────────────────────────────── */
 
@@ -1381,46 +1382,50 @@ export function DocsPage() {
 
   return (
     <div className="flex flex-col h-full">
-      <PageHeader
-        title={
-          <>
-            API{' '}
-            <span style={{ color: COLORS.accent }}>Documentation</span>
-          </>
-        }
+      <PortalHeader
+        icon={<IconDocs size={24} />}
+        title="API Documentation"
         subtitle={
           isAdmin && docMode === 'fullref'
             ? 'Full internal API reference — all platform endpoints'
             : 'Integration guide and API reference for building on the platform'
         }
-        actions={
-          isAdmin ? (
-            // Admin gets a mode toggle
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 4,
-                background: 'rgba(19,21,29,0.9)',
-                border: `1px solid ${COLORS.border}`,
-                borderRadius: 10,
-                padding: 4,
-              }}
-            >
-              <ToggleButton
-                label="Customer Docs"
-                active={docMode === 'customer'}
-                onClick={() => setDocMode('customer')}
-              />
-              <ToggleButton
-                label="Full API Reference"
-                active={docMode === 'fullref'}
-                onClick={() => setDocMode('fullref')}
-              />
-            </div>
-          ) : undefined
-        }
+        badgeVariant="api"
       />
+
+      {/* Admin mode toggle */}
+      {isAdmin && (
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'center',
+            marginBottom: 24,
+          }}
+        >
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 4,
+              background: 'rgba(19,21,29,0.9)',
+              border: `1px solid ${COLORS.border}`,
+              borderRadius: 10,
+              padding: 4,
+            }}
+          >
+            <ToggleButton
+              label="Customer Docs"
+              active={docMode === 'customer'}
+              onClick={() => setDocMode('customer')}
+            />
+            <ToggleButton
+              label="Full API Reference"
+              active={docMode === 'fullref'}
+              onClick={() => setDocMode('fullref')}
+            />
+          </div>
+        </div>
+      )}
 
       {docMode === 'customer' ? <CustomerDocs /> : <FullRefPanel />}
     </div>
