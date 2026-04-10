@@ -195,19 +195,83 @@ interface CodeBlockProps {
   language?: string;
 }
 
-/** Find the index of a # comment start that isn't inside a quoted string. */
-function findCommentStart(line: string): number {
+/**
+ * Tokenize a line of code into colored spans.
+ * Works on raw text (no HTML escaping needed since we use React elements).
+ */
+type Token = { text: string; color?: string };
+
+function tokenizeLine(line: string): Token[] {
+  const tokens: Token[] = [];
+  let i = 0;
   let inString = false;
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i];
-    if (ch === '"' && (i === 0 || line[i - 1] !== '\\')) {
-      inString = !inString;
-    }
-    if (ch === '#' && !inString) {
-      return i;
+  let current = '';
+  let currentColor: string | undefined;
+
+  function flush() {
+    if (current) {
+      tokens.push({ text: current, color: currentColor });
+      current = '';
+      currentColor = undefined;
     }
   }
-  return -1;
+
+  while (i < line.length) {
+    const ch = line[i];
+
+    // Comment (# outside string)
+    if (ch === '#' && !inString) {
+      flush();
+      tokens.push({ text: line.slice(i), color: COLORS.codeComment });
+      return tokens;
+    }
+
+    // String start/end
+    if (ch === '"' && (i === 0 || line[i - 1] !== '\\')) {
+      if (!inString) {
+        flush();
+        inString = true;
+        // Look ahead to find closing quote
+        let j = i + 1;
+        while (j < line.length && !(line[j] === '"' && line[j - 1] !== '\\')) j++;
+        const str = line.slice(i, j + 1);
+        // Check if this is a key (followed by :) or value
+        const afterStr = line.slice(j + 1).trimStart();
+        const isKey = afterStr.startsWith(':');
+        tokens.push({ text: str, color: isKey ? COLORS.codeKey : COLORS.codeString });
+        i = j + 1;
+        inString = false;
+        continue;
+      }
+    }
+
+    // XML/HTML tags: <Tag> or </Tag>
+    if (ch === '<' && !inString) {
+      const match = line.slice(i).match(/^<\/?[A-Za-z][^>]*>/);
+      if (match) {
+        flush();
+        tokens.push({ text: match[0], color: COLORS.codeKey });
+        i += match[0].length;
+        continue;
+      }
+    }
+
+    // curl flags: -X, -H, --header
+    if ((ch === '-') && !inString && (i === 0 || line[i - 1] === ' ')) {
+      const match = line.slice(i).match(/^(?:-[A-Za-z]+|--[A-Za-z-]+)/);
+      if (match) {
+        flush();
+        tokens.push({ text: match[0], color: COLORS.codeKeyword });
+        i += match[0].length;
+        continue;
+      }
+    }
+
+    current += ch;
+    i++;
+  }
+  flush();
+  return tokens;
 }
 
 function CodeBlock({ code }: CodeBlockProps) {
@@ -219,60 +283,21 @@ function CodeBlock({ code }: CodeBlockProps) {
     setTimeout(() => setCopied(false), 2000);
   }, [code]);
 
-  // Lightweight token coloring for curl/json/xml samples.
-  // Strategy: escape HTML, then apply regex replacements using placeholder
-  // tokens (§K§, §S§, etc.) that are replaced with actual <span> tags at
-  // the end — this prevents earlier replacements from being clobbered by
-  // later ones (e.g., # in hex colors matching the comment regex).
-
-  const escaped = code
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
-
-  // Split lines so we can handle comments per-line (only match # at line start context)
-  const finalHighlighted = escaped
-    .split('\n')
-    .map((line) => {
-      // If the line has a # comment, split at the first # that isn't inside quotes
-      const commentIdx = findCommentStart(line);
-      let codePart = commentIdx >= 0 ? line.slice(0, commentIdx) : line;
-      const commentPart = commentIdx >= 0 ? line.slice(commentIdx) : '';
-
-      // JSON keys: "key":
-      codePart = codePart.replace(
-        /(&quot;|")((?:[^"\\]|\\.)*?)(&quot;|")\s*:/g,
-        `<span style="color:${COLORS.codeKey}">$1$2$3</span>:`,
-      );
-      // JSON string values: : "value"
-      codePart = codePart.replace(
-        /:\s*(&quot;|")((?:[^"\\]|\\.)*?)(&quot;|")/g,
-        `: <span style="color:${COLORS.codeString}">$1$2$3</span>`,
-      );
-      // Standalone strings (not already wrapped)
-      codePart = codePart.replace(
-        /(?<!color:[^"]*)"((?:[^"\\]|\\.)+?)"/g,
-        `<span style="color:${COLORS.codeString}">"$1"</span>`,
-      );
-      // curl flags
-      codePart = codePart.replace(
-        /((?:^|\s)(?:-[A-Za-z]+|--[A-Za-z-]+))/g,
-        `<span style="color:${COLORS.codeKeyword}">$1</span>`,
-      );
-      // XML tags
-      codePart = codePart.replace(
-        /(&lt;\/?[A-Za-z][^&\n]*?&gt;)/g,
-        `<span style="color:${COLORS.codeKey}">$1</span>`,
-      );
-
-      // Comment part (entire rest of line after #)
-      const styledComment = commentPart
-        ? `<span style="color:${COLORS.codeComment}">${commentPart}</span>`
-        : '';
-
-      return codePart + styledComment;
-    })
-    .join('\n');
+  // Build React elements per line — no dangerouslySetInnerHTML
+  const lines = code.split('\n');
+  const rendered = lines.map((line, li) => {
+    const tokens = tokenizeLine(line);
+    return (
+      <span key={li}>
+        {tokens.map((t, ti) =>
+          t.color
+            ? <span key={ti} style={{ color: t.color }}>{t.text}</span>
+            : <span key={ti}>{t.text}</span>
+        )}
+        {li < lines.length - 1 ? '\n' : ''}
+      </span>
+    );
+  });
 
   return (
     <div
@@ -321,8 +346,7 @@ function CodeBlock({ code }: CodeBlockProps) {
           overflowX: 'auto',
           whiteSpace: 'pre',
         }}
-        dangerouslySetInnerHTML={{ __html: finalHighlighted }}
-      />
+      >{rendered}</pre>
     </div>
   );
 }
