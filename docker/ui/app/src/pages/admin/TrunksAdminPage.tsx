@@ -31,6 +31,7 @@ const CELL_STYLE: React.CSSProperties = {
   padding: '13px 16px',
   borderBottom: '1px solid rgba(42,47,69,0.45)',
   verticalAlign: 'middle',
+  whiteSpace: 'nowrap',
 };
 
 // ─── Types ───────────────────────────────────────────────────────────────────
