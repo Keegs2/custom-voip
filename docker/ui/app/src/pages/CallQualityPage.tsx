@@ -15,6 +15,7 @@ import { searchCdrs, getCdr } from '../api/cdrs';
 import { listCustomers } from '../api/customers';
 import { listTrunks } from '../api/trunks';
 import { Spinner } from '../components/ui/Spinner';
+import { IconSignal } from '../components/icons/ProductIcons';
 import type { Cdr, CallDirection, ProductType } from '../types/cdr';
 import type { Customer } from '../types/customer';
 import type { Trunk } from '../types/trunk';
@@ -1284,7 +1285,7 @@ export function CallQualityPage() {
           }}
           aria-hidden="true"
         >
-          <SignalIcon />
+          <IconSignal size={24} />
         </div>
 
         {/* Title */}
@@ -1675,16 +1676,6 @@ export function CallQualityPage() {
 // SVG Icons
 // ---------------------------------------------------------------------------
 
-function SignalIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round" style={{ width: 22, height: 22 }}>
-      <path d="M1.5 8.5A15 15 0 0 1 22.5 8.5" />
-      <path d="M5.5 12.5a10 10 0 0 1 13 0" />
-      <path d="M9.5 16.5a5 5 0 0 1 5 0" />
-      <circle cx="12" cy="20" r="1" fill="currentColor" />
-    </svg>
-  );
-}
 
 function SearchIcon() {
   return (
