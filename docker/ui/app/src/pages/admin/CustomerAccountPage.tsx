@@ -847,7 +847,29 @@ function AccountDetailView({ customer, onEdit, onDelete }: AccountDetailViewProp
         </div>
       )}
 
-      {/* Actions bar */}
+      {/* Service sections */}
+      {showRcf && (
+        <SectionCard accent="#22c55e">
+          <CustomerRcfSection customerId={customer.id} />
+        </SectionCard>
+      )}
+
+      {showApi && (
+        <SectionCard accent="#a855f7">
+          <CustomerApiSection customerId={customer.id} />
+        </SectionCard>
+      )}
+
+      {showTrunk && (
+        <SectionCard accent="#f59e0b">
+          <CustomerTrunkSection customerId={customer.id} />
+        </SectionCard>
+      )}
+
+      {/* Usage & Analytics */}
+      <CustomerUsageSection customerId={customer.id} accent={headerAccent} />
+
+      {/* Account Actions — at the bottom */}
       <SectionCard accent="#3b82f6">
         <div
           style={{
@@ -923,28 +945,6 @@ function AccountDetailView({ customer, onEdit, onDelete }: AccountDetailViewProp
           </div>
         </div>
       </SectionCard>
-
-      {/* Usage & Analytics */}
-      <CustomerUsageSection customerId={customer.id} accent={headerAccent} />
-
-      {/* Service sections */}
-      {showRcf && (
-        <SectionCard accent="#22c55e">
-          <CustomerRcfSection customerId={customer.id} />
-        </SectionCard>
-      )}
-
-      {showApi && (
-        <SectionCard accent="#a855f7">
-          <CustomerApiSection customerId={customer.id} />
-        </SectionCard>
-      )}
-
-      {showTrunk && (
-        <SectionCard accent="#f59e0b">
-          <CustomerTrunkSection customerId={customer.id} />
-        </SectionCard>
-      )}
     </div>
   );
 }
