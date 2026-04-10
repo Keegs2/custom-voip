@@ -11,7 +11,8 @@ import logging
 
 from db.database import init_db, close_db
 from db.redis_client import init_redis, close_redis
-from routers import rcf, calls, trunks, cdrs, customers, health, tiers, api_dids, rates, ivr, carriers
+from routers import rcf, calls, trunks, cdrs, customers, health, tiers, api_dids, rates, ivr, carriers, auth
+from middleware.auth import JWTAuthMiddleware
 
 # Configure logging
 logging.basicConfig(
@@ -61,6 +62,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# JWT Authentication (runs after CORS so preflight still works)
+app.add_middleware(JWTAuthMiddleware)
+
 
 # Request timing middleware
 @app.middleware("http")
@@ -74,6 +78,8 @@ async def add_timing_header(request: Request, call_next):
 
 
 # Include routers
+app.include_router(auth.router, prefix="/auth", tags=["Auth"])
+app.include_router(auth.router, prefix="/v1/auth", tags=["Auth"])
 app.include_router(health.router, tags=["Health"])
 app.include_router(customers.router, prefix="/v1/customers", tags=["Customers"])
 app.include_router(rcf.router, prefix="/v1/rcf", tags=["RCF"])

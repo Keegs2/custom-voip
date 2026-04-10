@@ -1,5 +1,9 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { AuthProvider } from './contexts/AuthContext';
+import { RequireAuth } from './components/auth/RequireAuth';
+import { RequireAdmin } from './components/auth/RequireAdmin';
 import { AppLayout } from './components/layout/AppLayout';
+import { LoginPage } from './pages/LoginPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { RcfPage } from './pages/RcfPage';
 import { ApiDidsPage } from './pages/ApiDidsPage';
@@ -22,38 +26,79 @@ import { CallQualityPage } from './pages/CallQualityPage';
 export function App() {
   return (
     <BrowserRouter>
-      <Routes>
-        {/* Routes wrapped in the sidebar layout */}
-        <Route element={<AppLayout />}>
-          <Route index element={<DashboardPage />} />
-          <Route path="rcf"      element={<RcfPage />} />
-          <Route path="api-dids" element={<ApiDidsPage />} />
-          <Route path="trunks"   element={<TrunksPage />} />
-          <Route path="docs"        element={<DocsPage />} />
-          <Route path="call-quality" element={<CallQualityPage />} />
-          {/* Customer account page — outside AdminPage wrapper for clean layout */}
-          <Route path="admin/customers/:customerId" element={<CustomerAccountPage />} />
+      {/* AuthProvider is inside BrowserRouter so it can call useNavigate */}
+      <AuthProvider>
+        <Routes>
+          {/* Public route — no auth required */}
+          <Route path="login" element={<LoginPage />} />
 
-          {/* Admin nested routes */}
-          <Route path="admin" element={<AdminPage />}>
-            <Route index            element={<Navigate to="customers" replace />} />
-            <Route path="customers" element={<CustomersAdminPage />} />
-            <Route path="trunks"    element={<TrunksAdminPage />} />
-            <Route path="cdrs"      element={<CdrsAdminPage />} />
-            <Route path="rates"     element={<RatesAdminPage />} />
-            <Route path="tiers"     element={<TiersAdminPage />} />
-            <Route path="carriers"  element={<CarriersAdminPage />} />
-            <Route path="sipp"      element={<SippAdminPage />} />
+          {/* Routes wrapped in the sidebar layout — all require authentication */}
+          <Route
+            element={
+              <RequireAuth>
+                <AppLayout />
+              </RequireAuth>
+            }
+          >
+            <Route index element={<DashboardPage />} />
+            <Route path="rcf"        element={<RcfPage />} />
+            <Route path="api-dids"   element={<ApiDidsPage />} />
+            <Route path="trunks"     element={<TrunksPage />} />
+            <Route path="docs"       element={<DocsPage />} />
+            <Route path="call-quality" element={<CallQualityPage />} />
+
+            {/* Customer account page — outside AdminPage wrapper for clean layout */}
+            <Route
+              path="admin/customers/:customerId"
+              element={
+                <RequireAdmin>
+                  <CustomerAccountPage />
+                </RequireAdmin>
+              }
+            />
+
+            {/* Admin nested routes */}
+            <Route
+              path="admin"
+              element={
+                <RequireAdmin>
+                  <AdminPage />
+                </RequireAdmin>
+              }
+            >
+              <Route index             element={<Navigate to="customers" replace />} />
+              <Route path="customers"  element={<CustomersAdminPage />} />
+              <Route path="trunks"     element={<TrunksAdminPage />} />
+              <Route path="cdrs"       element={<CdrsAdminPage />} />
+              <Route path="rates"      element={<RatesAdminPage />} />
+              <Route path="tiers"      element={<TiersAdminPage />} />
+              <Route path="carriers"   element={<CarriersAdminPage />} />
+              <Route path="sipp"       element={<SippAdminPage />} />
+            </Route>
           </Route>
-        </Route>
 
-        {/* Full-screen pages — outside AppLayout (no max-width/padding) */}
-        <Route path="ivr" element={<IvrBuilderPage />} />
-        <Route path="troubleshooting" element={<TroubleshootingPage />} />
+          {/* Full-screen pages — outside AppLayout (no max-width/padding) */}
+          <Route
+            path="ivr"
+            element={
+              <RequireAuth>
+                <IvrBuilderPage />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="troubleshooting"
+            element={
+              <RequireAuth>
+                <TroubleshootingPage />
+              </RequireAuth>
+            }
+          />
 
-        {/* Catch-all redirect to home */}
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
+          {/* Catch-all redirect to home */}
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </AuthProvider>
     </BrowserRouter>
   );
 }

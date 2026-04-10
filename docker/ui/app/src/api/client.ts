@@ -53,9 +53,15 @@ function extractErrorMessage(body: unknown): string {
   return JSON.stringify(body);
 }
 
+const AUTH_TOKEN_KEY = 'auth_token';
+
 /**
  * Core fetch wrapper used by all API modules.
- * Automatically sets Content-Type for JSON bodies and throws ApiError on failure.
+ * Automatically injects the JWT Bearer token from localStorage and sets
+ * Content-Type for JSON bodies. Throws ApiError on failure.
+ *
+ * On 401 responses the token is cleared from localStorage and the user is
+ * redirected to /login so they can re-authenticate.
  */
 export async function apiRequest<T>(
   method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
@@ -72,11 +78,27 @@ export async function apiRequest<T>(
     headers['Content-Type'] = 'application/json';
   }
 
+  // Inject Bearer token when present. The login endpoint itself does not
+  // require a token, so omitting it there is fine — the header just won't be set.
+  const token = localStorage.getItem(AUTH_TOKEN_KEY);
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
   const response = await fetch(url, {
     method,
     headers,
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
+
+  // 401 means the token is missing, expired, or invalid. Clear it and bounce
+  // the user to the login page. The replace() avoids polluting browser history.
+  if (response.status === 401) {
+    localStorage.removeItem(AUTH_TOKEN_KEY);
+    window.location.replace('/login');
+    // Throw so any in-flight promise chains stop cleanly.
+    throw new ApiError(401, 'Session expired. Please log in again.');
+  }
 
   if (!response.ok) {
     let errorBody: unknown;

@@ -3,11 +3,16 @@ import { Spinner } from '../components/ui/Spinner';
 import { listTrunks } from '../api/trunks';
 import { TrunkCard } from './TrunkCard';
 import { PortalHeader } from './RcfPage';
+import { useAuth } from '../contexts/AuthContext';
 
 export function TrunksPage() {
+  const { user } = useAuth();
+  // For non-admin users, scope the query to their customer — admins see everything
+  const customerId = user?.customer_id ?? undefined;
+
   const { data, isLoading, isError } = useQuery({
-    queryKey: ['trunks'],
-    queryFn: () => listTrunks({ limit: 200 }),
+    queryKey: ['trunks', customerId],
+    queryFn: () => listTrunks({ limit: 200, customer_id: customerId }),
   });
 
   const entries = data?.items ?? [];

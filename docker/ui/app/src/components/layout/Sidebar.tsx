@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { cn } from '../../utils/cn';
+import { useAuth } from '../../contexts/AuthContext';
 
 interface NavItem {
   label: string;
@@ -45,6 +46,12 @@ const IconAdmin = () => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} style={{ width: 18, height: 18 }}>
     <path d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7 7 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a7 7 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a7 7 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a7 7 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.28Z" strokeLinecap="round" strokeLinejoin="round" />
     <path d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+
+const IconSignOut = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} style={{ width: 14, height: 14 }}>
+    <path d="M15.75 9V5.25A2.25 2.25 0 0 0 13.5 3h-6a2.25 2.25 0 0 0-2.25 2.25v13.5A2.25 2.25 0 0 0 7.5 21h6a2.25 2.25 0 0 0 2.25-2.25V15m3 0 3-3m0 0-3-3m3 3H9" strokeLinecap="round" strokeLinejoin="round" />
   </svg>
 );
 
@@ -139,6 +146,7 @@ function SidebarNavItem({ item, onNavigate }: SidebarNavItemProps) {
 export function Sidebar() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const navigate = useNavigate();
+  const { user, isAdmin, logout } = useAuth();
 
   const handleBrandClick = () => {
     navigate('/');
@@ -146,6 +154,12 @@ export function Sidebar() {
   };
 
   const closeMobile = () => setMobileOpen(false);
+
+  // Display name: prefer user.name, fall back to email prefix
+  const displayName = user?.name || user?.email?.split('@')[0] || '';
+  const displayEmail = user?.email ?? '';
+  // Customer users see their customer name as a context label
+  const contextLabel = user?.customer_name ?? null;
 
   return (
     <>
@@ -352,73 +366,76 @@ export function Sidebar() {
           }}
         />
 
-        {/* Footer */}
-        <div style={{ padding: '14px 12px 18px' }}>
-          <NavLink
-            to="/admin"
-            onClick={closeMobile}
-            className="block no-underline"
-            style={({ isActive }) => ({
-              display: 'flex',
-              alignItems: 'center',
-              gap: 10,
-              padding: '9px 14px',
-              borderRadius: 10,
-              fontSize: '0.875rem',
-              fontWeight: isActive ? 600 : 500,
-              letterSpacing: '-0.01em',
-              cursor: 'pointer',
-              userSelect: 'none',
-              transition: 'background 0.15s, color 0.15s, box-shadow 0.15s',
-              textDecoration: 'none',
-              color: isActive ? '#f1f5f9' : '#64748b',
-              background: isActive
-                ? 'linear-gradient(135deg, rgba(59,130,246,0.18) 0%, rgba(59,130,246,0.08) 100%)'
-                : 'transparent',
-              boxShadow: isActive
-                ? '0 0 0 1px rgba(59,130,246,0.30), 0 2px 12px -4px rgba(59,130,246,0.30)'
-                : 'none',
-            })}
-          >
-            {({ isActive }) => (
-              <>
-                <span
-                  style={{
-                    width: 30,
-                    height: 30,
-                    borderRadius: 8,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    flexShrink: 0,
-                    background: isActive
-                      ? 'linear-gradient(135deg, rgba(59,130,246,0.30) 0%, rgba(59,130,246,0.18) 100%)'
-                      : 'rgba(255,255,255,0.04)',
-                    border: isActive
-                      ? '1px solid rgba(59,130,246,0.40)'
-                      : '1px solid rgba(255,255,255,0.06)',
-                    color: isActive ? '#60a5fa' : '#475569',
-                    transition: 'background 0.15s, border-color 0.15s, color 0.15s',
-                  }}
-                >
-                  <IconAdmin />
-                </span>
-                <span style={{ flex: 1 }}>Administration</span>
-                {isActive && (
+        {/* Footer nav links */}
+        <div style={{ padding: '14px 12px 0' }}>
+          {/* Administration — only visible to admins */}
+          {isAdmin && (
+            <NavLink
+              to="/admin"
+              onClick={closeMobile}
+              className="block no-underline"
+              style={({ isActive }) => ({
+                display: 'flex',
+                alignItems: 'center',
+                gap: 10,
+                padding: '9px 14px',
+                borderRadius: 10,
+                fontSize: '0.875rem',
+                fontWeight: isActive ? 600 : 500,
+                letterSpacing: '-0.01em',
+                cursor: 'pointer',
+                userSelect: 'none',
+                transition: 'background 0.15s, color 0.15s, box-shadow 0.15s',
+                textDecoration: 'none',
+                color: isActive ? '#f1f5f9' : '#64748b',
+                background: isActive
+                  ? 'linear-gradient(135deg, rgba(59,130,246,0.18) 0%, rgba(59,130,246,0.08) 100%)'
+                  : 'transparent',
+                boxShadow: isActive
+                  ? '0 0 0 1px rgba(59,130,246,0.30), 0 2px 12px -4px rgba(59,130,246,0.30)'
+                  : 'none',
+              })}
+            >
+              {({ isActive }) => (
+                <>
                   <span
                     style={{
-                      width: 5,
-                      height: 5,
-                      borderRadius: '50%',
-                      background: '#3b82f6',
+                      width: 30,
+                      height: 30,
+                      borderRadius: 8,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
                       flexShrink: 0,
-                      boxShadow: '0 0 6px #3b82f6',
+                      background: isActive
+                        ? 'linear-gradient(135deg, rgba(59,130,246,0.30) 0%, rgba(59,130,246,0.18) 100%)'
+                        : 'rgba(255,255,255,0.04)',
+                      border: isActive
+                        ? '1px solid rgba(59,130,246,0.40)'
+                        : '1px solid rgba(255,255,255,0.06)',
+                      color: isActive ? '#60a5fa' : '#475569',
+                      transition: 'background 0.15s, border-color 0.15s, color 0.15s',
                     }}
-                  />
-                )}
-              </>
-            )}
-          </NavLink>
+                  >
+                    <IconAdmin />
+                  </span>
+                  <span style={{ flex: 1 }}>Administration</span>
+                  {isActive && (
+                    <span
+                      style={{
+                        width: 5,
+                        height: 5,
+                        borderRadius: '50%',
+                        background: '#3b82f6',
+                        flexShrink: 0,
+                        boxShadow: '0 0 6px #3b82f6',
+                      }}
+                    />
+                  )}
+                </>
+              )}
+            </NavLink>
+          )}
 
           <NavLink
             to="/call-quality"
@@ -437,7 +454,7 @@ export function Sidebar() {
               userSelect: 'none',
               transition: 'background 0.15s, color 0.15s, box-shadow 0.15s',
               textDecoration: 'none',
-              marginTop: 4,
+              marginTop: isAdmin ? 4 : 0,
               color: isActive ? '#f1f5f9' : '#64748b',
               background: isActive
                 ? 'linear-gradient(135deg, rgba(34,197,94,0.18) 0%, rgba(34,197,94,0.08) 100%)'
@@ -560,17 +577,131 @@ export function Sidebar() {
               </>
             )}
           </NavLink>
+        </div>
 
+        {/* Divider before user profile */}
+        <div
+          style={{
+            margin: '12px 16px 0',
+            height: 1,
+            background: 'linear-gradient(90deg, transparent, rgba(42, 47, 69, 0.6) 20%, rgba(42, 47, 69, 0.6) 80%, transparent)',
+          }}
+        />
+
+        {/* User profile section */}
+        <div style={{ padding: '12px 16px 18px' }}>
           <div
             style={{
-              padding: '10px 14px 0',
-              fontSize: '0.625rem',
-              color: '#1e293b',
-              fontWeight: 600,
-              letterSpacing: '0.04em',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 10,
+              padding: '8px 10px',
+              borderRadius: 10,
+              background: 'rgba(255,255,255,0.02)',
+              border: '1px solid rgba(42,47,69,0.4)',
             }}
           >
-            v1.0 &middot; Voice Platform
+            {/* Avatar circle */}
+            <div
+              style={{
+                width: 30,
+                height: 30,
+                borderRadius: '50%',
+                background: 'linear-gradient(135deg, rgba(59,130,246,0.30) 0%, rgba(59,130,246,0.15) 100%)',
+                border: '1px solid rgba(59,130,246,0.3)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0,
+                fontSize: '0.7rem',
+                fontWeight: 700,
+                color: '#60a5fa',
+                letterSpacing: '0.02em',
+                textTransform: 'uppercase',
+              }}
+              aria-hidden="true"
+            >
+              {displayName.charAt(0) || '?'}
+            </div>
+
+            {/* Name + email */}
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div
+                style={{
+                  fontSize: '0.8rem',
+                  fontWeight: 600,
+                  color: '#94a3b8',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                  lineHeight: 1.3,
+                }}
+              >
+                {displayName}
+              </div>
+              {contextLabel ? (
+                <div
+                  style={{
+                    fontSize: '0.65rem',
+                    color: '#334155',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                    marginTop: 1,
+                  }}
+                >
+                  {contextLabel}
+                </div>
+              ) : (
+                <div
+                  style={{
+                    fontSize: '0.65rem',
+                    color: '#334155',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                    marginTop: 1,
+                  }}
+                >
+                  {displayEmail}
+                </div>
+              )}
+            </div>
+
+            {/* Sign out button */}
+            <button
+              type="button"
+              onClick={logout}
+              title="Sign out"
+              aria-label="Sign out"
+              style={{
+                flexShrink: 0,
+                width: 26,
+                height: 26,
+                borderRadius: 7,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                background: 'transparent',
+                border: '1px solid rgba(42,47,69,0.5)',
+                color: '#475569',
+                cursor: 'pointer',
+                transition: 'color 0.15s, background 0.15s, border-color 0.15s',
+                padding: 0,
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.color = '#f87171';
+                e.currentTarget.style.background = 'rgba(239,68,68,0.08)';
+                e.currentTarget.style.borderColor = 'rgba(239,68,68,0.25)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.color = '#475569';
+                e.currentTarget.style.background = 'transparent';
+                e.currentTarget.style.borderColor = 'rgba(42,47,69,0.5)';
+              }}
+            >
+              <IconSignOut />
+            </button>
           </div>
         </div>
       </aside>

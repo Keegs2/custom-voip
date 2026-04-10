@@ -5,11 +5,16 @@ import { Spinner } from '../components/ui/Spinner';
 import { listRcf } from '../api/rcf';
 import type { RcfEntry } from '../types/rcf';
 import { RcfCard } from './RcfCard';
+import { useAuth } from '../contexts/AuthContext';
 
 export function RcfPage() {
+  const { user } = useAuth();
+  // For non-admin users, scope the query to their customer — admins see everything
+  const customerId = user?.customer_id ?? undefined;
+
   const { data, isLoading, isError } = useQuery({
-    queryKey: ['rcf'],
-    queryFn: () => listRcf({ limit: 200 }),
+    queryKey: ['rcf', customerId],
+    queryFn: () => listRcf({ limit: 200, customer_id: customerId }),
   });
 
   const [pendingEdits, setPendingEdits] = useState<Record<string, string>>({});
