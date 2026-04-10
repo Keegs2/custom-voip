@@ -133,24 +133,24 @@ export function CustomersAdminPage() {
           marginBottom: 4,
         }}
       >
-        <form onSubmit={handleSearch} style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1, minWidth: 280 }}>
+        <form onSubmit={handleSearch} style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1 }}>
           <input
             type="search"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search customers…"
             style={{
-              fontSize: '0.875rem',
+              fontSize: '0.85rem',
               padding: '8px 14px',
-              height: 38,
+              height: 36,
               borderRadius: 8,
               border: '1px solid rgba(42,47,69,0.8)',
               background: 'rgba(13,15,21,0.8)',
               color: '#e2e8f0',
               outline: 'none',
               transition: 'border-color 0.15s, box-shadow 0.15s',
-              minWidth: 260,
-              width: '100%',
+              flex: 1,
+              maxWidth: 400,
             }}
             onFocus={(e) => {
               e.currentTarget.style.borderColor = '#3b82f6';
