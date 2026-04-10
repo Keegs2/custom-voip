@@ -594,6 +594,7 @@ export function CustomerTrunkSection({ customerId }: CustomerTrunkSectionProps) 
 
   const [newTrunkName, setNewTrunkName] = useState('');
   const [newTrunkAuth, setNewTrunkAuth] = useState<TrunkAuthType>('ip');
+  const [selectedTrunkId, setSelectedTrunkId] = useState<number | null>(null);
 
   // Fetch trunks list
   const { data: trunksData, isLoading, isError } = useQuery({
@@ -692,8 +693,33 @@ export function CustomerTrunkSection({ customerId }: CustomerTrunkSectionProps) 
         <p style={{ color: '#718096', fontSize: '0.8rem', margin: 0 }}>No trunks configured.</p>
       )}
 
-      {!isLoading &&
-        trunks.map((trunk) => (
+      {/* Trunk selector dropdown */}
+      {!isLoading && trunks.length > 0 && (
+        <div style={{ marginBottom: 20 }}>
+          <select
+            value={selectedTrunkId ?? ''}
+            onChange={(e) => setSelectedTrunkId(e.target.value ? Number(e.target.value) : null)}
+            style={{
+              ...styles.select,
+              minWidth: 280,
+              fontSize: '0.85rem',
+              padding: '9px 14px',
+            }}
+          >
+            <option value="">Select a trunk ({trunks.length} configured)</option>
+            {trunks.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.trunk_name} — {t.auth_type} auth · {t.ips.length} IPs · {t.dids.length} DIDs
+                {t.enabled ? '' : ' (disabled)'}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      {/* Selected trunk detail */}
+      {!isLoading && selectedTrunkId != null &&
+        trunks.filter((t) => t.id === selectedTrunkId).map((trunk) => (
           <TrunkCard key={trunk.id} trunk={trunk} customerId={customerId} />
         ))}
 
