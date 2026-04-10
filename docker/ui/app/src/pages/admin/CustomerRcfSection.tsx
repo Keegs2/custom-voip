@@ -12,6 +12,18 @@ interface CustomerRcfSectionProps {
   customerId: number;
 }
 
+const darkInput: React.CSSProperties = {
+  fontSize: '0.82rem',
+  padding: '5px 10px',
+  borderRadius: 8,
+  border: '1px solid rgba(42,47,69,0.7)',
+  background: '#0d0f15',
+  color: '#e2e8f0',
+  outline: 'none',
+  fontFamily: 'inherit',
+  transition: 'border-color 150ms, box-shadow 150ms',
+};
+
 // Inline editable forward-to field for a single RCF row
 function RcfForwardInput({
   entry,
@@ -24,6 +36,7 @@ function RcfForwardInput({
   const { toastOk, toastErr } = useToast();
   const [value, setValue] = useState(entry.forward_to);
   const [saved, setSaved] = useState(false);
+  const [focused, setFocused] = useState(false);
 
   const mutation = useMutation({
     mutationFn: (fwd: string) => updateRcfEntry(entry.id, { forward_to: fwd }),
@@ -37,6 +50,7 @@ function RcfForwardInput({
   });
 
   function handleBlur() {
+    setFocused(false);
     const trimmed = value.trim();
     if (!trimmed) {
       toastErr('Destination cannot be empty');
@@ -48,27 +62,181 @@ function RcfForwardInput({
     }
   }
 
+  const borderColor = saved
+    ? 'rgba(34,197,94,0.55)'
+    : focused
+    ? 'rgba(59,130,246,0.7)'
+    : 'rgba(42,47,69,0.7)';
+
+  const boxShadow = focused
+    ? '0 0 0 3px rgba(59,130,246,0.15)'
+    : saved
+    ? '0 0 0 3px rgba(34,197,94,0.12)'
+    : 'none';
+
   return (
     <input
       type="tel"
       value={value}
       onChange={(e) => setValue(e.target.value)}
+      onFocus={() => setFocused(true)}
       onBlur={handleBlur}
       onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
       onClick={(e) => e.stopPropagation()}
       disabled={mutation.isPending}
       placeholder="+1XXXXXXXXXX"
-      className={[
-        'text-[0.82rem] px-2 py-[4px] rounded-md w-full max-w-[180px]',
-        'border bg-[#0d0f15] text-[#e2e8f0] outline-none',
-        'transition-[border-color,box-shadow] duration-150',
-        'focus:border-[#3b82f6] focus:shadow-[0_0_0_3px_rgba(59,130,246,0.2)]',
-        'placeholder:text-[#718096] disabled:opacity-50',
-        saved
-          ? 'border-green-500/50 text-green-400'
-          : 'border-[#2a2f45]',
-      ].join(' ')}
+      style={{
+        ...darkInput,
+        width: 160,
+        color: saved ? '#4ade80' : '#e2e8f0',
+        borderColor,
+        boxShadow,
+        opacity: mutation.isPending ? 0.5 : 1,
+      }}
     />
+  );
+}
+
+// A single RCF entry rendered as a card row
+function RcfEntryRow({
+  entry,
+  customerId,
+  onToggle,
+  onDelete,
+  togglePending,
+}: {
+  entry: RcfEntry;
+  customerId: number;
+  onToggle: () => void;
+  onDelete: () => void;
+  togglePending: boolean;
+}) {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 16,
+        padding: '14px 16px',
+        background: 'rgba(13,15,23,0.7)',
+        border: '1px solid rgba(42,47,69,0.55)',
+        borderRadius: 10,
+        flexWrap: 'wrap',
+      }}
+    >
+      {/* Left: DID number */}
+      <div style={{ minWidth: 0, flex: '0 0 auto' }}>
+        <div
+          style={{
+            fontSize: '0.6rem',
+            fontWeight: 700,
+            color: '#4a5568',
+            textTransform: 'uppercase',
+            letterSpacing: '0.7px',
+            marginBottom: 3,
+          }}
+        >
+          DID
+        </div>
+        <div
+          style={{
+            fontFamily: 'monospace',
+            fontSize: '0.92rem',
+            color: '#22c55e',
+            fontWeight: 600,
+            letterSpacing: '0.3px',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {entry.did}
+        </div>
+        {entry.ring_timeout != null && (
+          <div
+            style={{
+              fontSize: '0.6rem',
+              color: '#4a5568',
+              marginTop: 2,
+              letterSpacing: '0.3px',
+            }}
+          >
+            {entry.ring_timeout}s timeout
+          </div>
+        )}
+      </div>
+
+      {/* Divider */}
+      <div
+        style={{
+          width: 1,
+          alignSelf: 'stretch',
+          background: 'rgba(42,47,69,0.5)',
+          flexShrink: 0,
+        }}
+      />
+
+      {/* Middle: Forward To */}
+      <div style={{ flex: '1 1 auto', minWidth: 0 }}>
+        <div
+          style={{
+            fontSize: '0.6rem',
+            fontWeight: 700,
+            color: '#4a5568',
+            textTransform: 'uppercase',
+            letterSpacing: '0.7px',
+            marginBottom: 5,
+          }}
+        >
+          Forward To
+        </div>
+        <RcfForwardInput entry={entry} customerId={customerId} />
+      </div>
+
+      {/* Right: Status + actions */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          flexShrink: 0,
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <Badge variant={entry.enabled ? 'active' : 'disabled'}>
+          {entry.enabled ? 'Active' : 'Off'}
+        </Badge>
+
+        <div
+          style={{
+            width: 1,
+            height: 20,
+            background: 'rgba(42,47,69,0.5)',
+          }}
+        />
+
+        <Button
+          variant="ghost"
+          size="xs"
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggle();
+          }}
+          disabled={togglePending}
+        >
+          {entry.enabled ? 'Disable' : 'Enable'}
+        </Button>
+
+        <Button
+          variant="danger"
+          size="xs"
+          onClick={(e) => {
+            e.stopPropagation();
+            onDelete();
+          }}
+        >
+          Delete
+        </Button>
+      </div>
+    </div>
   );
 }
 
@@ -80,6 +248,9 @@ export function CustomerRcfSection({ customerId }: CustomerRcfSectionProps) {
   const [newDid, setNewDid] = useState('');
   const [newFwd, setNewFwd] = useState('');
   const [passCid, setPassCid] = useState(true);
+
+  const [didFocused, setDidFocused] = useState(false);
+  const [fwdFocused, setFwdFocused] = useState(false);
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ['customerRcf', customerId],
@@ -138,92 +309,121 @@ export function CustomerRcfSection({ customerId }: CustomerRcfSectionProps) {
   }
 
   const entries = data?.items ?? [];
+  const count = entries.length;
 
   return (
     <div style={{ paddingTop: 16, borderTop: '1px solid rgba(42,47,69,0.5)' }}>
-      <div className="flex items-center justify-between mb-3">
-        <span className="text-[0.65rem] font-bold text-[#4a5568] uppercase tracking-[0.8px]">
-          RCF Numbers
-        </span>
+
+      {/* Section header */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          marginBottom: 12,
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span
+            style={{
+              fontSize: '0.65rem',
+              fontWeight: 700,
+              color: '#4a5568',
+              textTransform: 'uppercase',
+              letterSpacing: '0.8px',
+            }}
+          >
+            RCF Numbers
+          </span>
+          {!isLoading && !isError && (
+            <span
+              style={{
+                fontSize: '0.62rem',
+                fontWeight: 700,
+                color: '#22c55e',
+                background: 'rgba(34,197,94,0.12)',
+                border: '1px solid rgba(34,197,94,0.25)',
+                borderRadius: 20,
+                padding: '1px 7px',
+                letterSpacing: '0.3px',
+                lineHeight: 1.6,
+              }}
+            >
+              {count === 1 ? '1 number' : `${count} numbers`}
+            </span>
+          )}
+        </div>
+
         <button
           type="button"
           onClick={(e) => { e.stopPropagation(); navigate('/rcf'); }}
-          className="text-[0.72rem] text-[#3b82f6] hover:underline"
+          style={{
+            fontSize: '0.72rem',
+            color: '#3b82f6',
+            background: 'none',
+            border: 'none',
+            cursor: 'pointer',
+            padding: 0,
+            textDecoration: 'none',
+          }}
+          onMouseEnter={(e) => (e.currentTarget.style.textDecoration = 'underline')}
+          onMouseLeave={(e) => (e.currentTarget.style.textDecoration = 'none')}
         >
           Manage RCF Numbers
         </button>
       </div>
 
+      {/* Loading state */}
       {isLoading && (
-        <div className="flex items-center gap-2 text-[#718096] text-[0.8rem] py-2">
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            color: '#718096',
+            fontSize: '0.8rem',
+            padding: '8px 0',
+          }}
+        >
           <Spinner size="xs" /> Loading…
         </div>
       )}
 
+      {/* Error state */}
       {isError && (
-        <p className="text-red-400 text-[0.8rem]">Could not load RCF numbers.</p>
+        <p style={{ color: '#f87171', fontSize: '0.8rem', margin: 0 }}>
+          Could not load RCF numbers.
+        </p>
       )}
 
+      {/* Empty state */}
       {!isLoading && !isError && entries.length === 0 && (
-        <p className="text-[#718096] text-[0.8rem]">No RCF numbers yet.</p>
+        <p
+          style={{
+            color: '#4a5568',
+            fontSize: '0.8rem',
+            margin: '0 0 4px',
+            fontStyle: 'italic',
+          }}
+        >
+          No RCF numbers yet.
+        </p>
       )}
 
+      {/* RCF entry cards */}
       {!isLoading && entries.length > 0 && (
-        <table className="w-full text-[0.8rem] border-collapse">
-          <thead>
-            <tr>
-              {['DID', 'Forward To', 'Status', ''].map((h) => (
-                <th
-                  key={h}
-                  className="text-left px-2 py-[5px] text-[0.65rem] font-bold uppercase tracking-[0.6px] text-[#718096] border-b border-[#2a2f45]"
-                >
-                  {h}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {entries.map((entry) => (
-              <tr key={entry.id} className="border-b border-[#2a2f45]/40 last:border-0">
-                <td className="px-2 py-[6px] font-mono whitespace-nowrap text-[#e2e8f0]">
-                  {entry.did}
-                </td>
-                <td className="px-2 py-[6px]">
-                  <RcfForwardInput entry={entry} customerId={customerId} />
-                </td>
-                <td className="px-2 py-[6px]">
-                  <Badge variant={entry.enabled ? 'active' : 'disabled'}>
-                    {entry.enabled ? 'Active' : 'Off'}
-                  </Badge>
-                </td>
-                <td className="px-2 py-[6px]">
-                  <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                    <Button
-                      variant="ghost"
-                      size="xs"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        toggleMutation.mutate({ id: entry.id, enabled: !entry.enabled });
-                      }}
-                    >
-                      {entry.enabled ? 'Disable' : 'Enable'}
-                    </Button>
-                    <Button
-                      variant="danger"
-                      size="xs"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleDelete(entry);
-                      }}
-                    >
-                      Delete
-                    </Button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>
+          {entries.map((entry) => (
+            <RcfEntryRow
+              key={entry.id}
+              entry={entry}
+              customerId={customerId}
+              onToggle={() => toggleMutation.mutate({ id: entry.id, enabled: !entry.enabled })}
+              onDelete={() => handleDelete(entry)}
+              togglePending={toggleMutation.isPending}
+            />
+          ))}
+        </div>
       )}
 
       {/* Add RCF Number form */}
@@ -231,58 +431,155 @@ export function CustomerRcfSection({ customerId }: CustomerRcfSectionProps) {
         onSubmit={handleCreate}
         onClick={(e) => e.stopPropagation()}
         style={{
-          marginTop: 12,
-          padding: '12px',
-          background: 'rgba(19,21,29,0.7)',
-          border: '1px solid rgba(42,47,69,0.6)',
+          marginTop: entries.length > 0 ? 4 : 8,
+          padding: '14px 16px',
+          background: 'rgba(13,15,23,0.7)',
+          border: '1px solid rgba(42,47,69,0.55)',
           borderRadius: 10,
         }}
       >
-        <div className="text-[0.65rem] font-bold text-[#718096] uppercase tracking-[0.7px] mb-2">
+        {/* Form header */}
+        <div
+          style={{
+            fontSize: '0.62rem',
+            fontWeight: 700,
+            color: '#22c55e',
+            textTransform: 'uppercase',
+            letterSpacing: '0.8px',
+            marginBottom: 12,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+          }}
+        >
+          <span
+            style={{
+              display: 'inline-block',
+              width: 14,
+              height: 14,
+              borderRadius: '50%',
+              background: 'rgba(34,197,94,0.15)',
+              border: '1px solid rgba(34,197,94,0.4)',
+              lineHeight: '13px',
+              textAlign: 'center',
+              fontSize: '0.7rem',
+              color: '#22c55e',
+            }}
+          >
+            +
+          </span>
           Add RCF Number
         </div>
-        <div className="flex flex-wrap gap-2 items-end">
-          <div className="flex flex-col gap-1">
-            <label className="text-[0.65rem] font-bold text-[#718096] uppercase tracking-[0.6px]">
+
+        {/* Form fields */}
+        <div
+          style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: 12,
+            alignItems: 'flex-end',
+          }}
+        >
+          {/* DID field */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+            <label
+              style={{
+                fontSize: '0.6rem',
+                fontWeight: 700,
+                color: '#4a5568',
+                textTransform: 'uppercase',
+                letterSpacing: '0.7px',
+              }}
+            >
               DID
             </label>
             <input
               type="tel"
               value={newDid}
               onChange={(e) => setNewDid(e.target.value)}
+              onFocus={() => setDidFocused(true)}
+              onBlur={() => setDidFocused(false)}
               onClick={(e) => e.stopPropagation()}
               placeholder="+1XXXXXXXXXX"
-              className="text-[0.83rem] px-2 py-[5px] rounded-lg w-[160px] border border-[#2a2f45] bg-[#0d0f15] text-[#e2e8f0] outline-none focus:border-[#3b82f6] placeholder:text-[#718096]"
+              style={{
+                ...darkInput,
+                width: 155,
+                borderColor: didFocused ? 'rgba(59,130,246,0.7)' : 'rgba(42,47,69,0.7)',
+                boxShadow: didFocused ? '0 0 0 3px rgba(59,130,246,0.15)' : 'none',
+                fontFamily: 'monospace',
+              }}
             />
           </div>
-          <div className="flex flex-col gap-1">
-            <label className="text-[0.65rem] font-bold text-[#718096] uppercase tracking-[0.6px]">
+
+          {/* Forward To field */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+            <label
+              style={{
+                fontSize: '0.6rem',
+                fontWeight: 700,
+                color: '#4a5568',
+                textTransform: 'uppercase',
+                letterSpacing: '0.7px',
+              }}
+            >
               Forward To
             </label>
             <input
               type="tel"
               value={newFwd}
               onChange={(e) => setNewFwd(e.target.value)}
+              onFocus={() => setFwdFocused(true)}
+              onBlur={() => setFwdFocused(false)}
               onClick={(e) => e.stopPropagation()}
               placeholder="+1XXXXXXXXXX"
-              className="text-[0.83rem] px-2 py-[5px] rounded-lg w-[160px] border border-[#2a2f45] bg-[#0d0f15] text-[#e2e8f0] outline-none focus:border-[#3b82f6] placeholder:text-[#718096]"
+              style={{
+                ...darkInput,
+                width: 155,
+                borderColor: fwdFocused ? 'rgba(59,130,246,0.7)' : 'rgba(42,47,69,0.7)',
+                boxShadow: fwdFocused ? '0 0 0 3px rgba(59,130,246,0.15)' : 'none',
+                fontFamily: 'monospace',
+              }}
             />
           </div>
-          <div className="flex flex-col gap-1">
-            <label className="text-[0.65rem] font-bold text-[#718096] uppercase tracking-[0.6px]">
+
+          {/* Pass CID */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+            <label
+              style={{
+                fontSize: '0.6rem',
+                fontWeight: 700,
+                color: '#4a5568',
+                textTransform: 'uppercase',
+                letterSpacing: '0.7px',
+              }}
+            >
               Pass CID
             </label>
-            <div className="flex items-center gap-1.5 py-[6px]">
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '5px 0',
+              }}
+            >
               <input
                 type="checkbox"
                 checked={passCid}
                 onChange={(e) => setPassCid(e.target.checked)}
                 onClick={(e) => e.stopPropagation()}
-                className="accent-[#3b82f6] w-[14px] h-[14px]"
+                style={{
+                  accentColor: '#22c55e',
+                  width: 14,
+                  height: 14,
+                  cursor: 'pointer',
+                }}
               />
-              <span className="text-[0.82rem] text-[#718096]">Yes</span>
+              <span style={{ fontSize: '0.8rem', color: '#718096' }}>Yes</span>
             </div>
           </div>
+
+          {/* Submit */}
           <Button
             type="submit"
             variant="primary"
