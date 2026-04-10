@@ -41,9 +41,15 @@ const variantClasses: Record<ButtonVariant, string> = {
 };
 
 const sizeClasses: Record<ButtonSize, string> = {
-  default: 'text-[0.82rem] font-semibold px-4 py-2 rounded-lg h-9',
-  sm:      'text-[0.75rem] font-semibold px-3.5 py-1.5 rounded-lg h-[34px]',
-  xs:      'text-[0.7rem] font-semibold px-2.5 py-1 rounded-md h-6',
+  default: 'text-[0.8rem] font-semibold rounded-md',
+  sm:      'text-[0.72rem] font-semibold rounded-md',
+  xs:      'text-[0.65rem] font-bold uppercase tracking-wide rounded-md',
+};
+
+const sizeStyles: Record<ButtonSize, React.CSSProperties> = {
+  default: { padding: '7px 16px', minHeight: 34 },
+  sm:      { padding: '5px 12px', minHeight: 30 },
+  xs:      { padding: '4px 10px', minHeight: 24 },
 };
 
 export function Button({
@@ -72,6 +78,7 @@ export function Button({
         sizeClasses[size],
         className,
       )}
+      style={{ ...sizeStyles[size], ...props.style }}
       {...props}
     >
       {loading ? (
