@@ -1953,7 +1953,7 @@ export function DocumentsPage() {
                     key={doc.id}
                     doc={doc}
                     folders={folders}
-                    onDownload={() => downloadDocument(doc.id)}
+                    onDownload={() => downloadDocument(doc.id, doc.original_filename)}
                     onEdit={() => setEditingDoc(doc)}
                     onMove={(folderId) => void handleDocMove(doc.id, folderId)}
                     onDelete={() => void handleDocDelete(doc.id)}
@@ -1982,7 +1982,7 @@ export function DocumentsPage() {
                     key={doc.id}
                     doc={doc}
                     folders={folders}
-                    onDownload={() => downloadDocument(doc.id)}
+                    onDownload={() => downloadDocument(doc.id, doc.original_filename)}
                     onEdit={() => setEditingDoc(doc)}
                     onMove={(folderId) => void handleDocMove(doc.id, folderId)}
                     onDelete={() => void handleDocDelete(doc.id)}

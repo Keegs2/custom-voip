@@ -119,18 +119,21 @@ export async function uploadDocument(
  * Trigger a file download for the given document ID.
  * Opens the download URL in the same tab so the browser handles the save dialog.
  */
-export function downloadDocument(id: number): void {
+export function downloadDocument(id: number, originalFilename?: string): void {
   const token = localStorage.getItem('auth_token');
-  // Build a temporary link so we can inject the auth header via a blob fetch
   void (async () => {
     const response = await fetch(`/api/documents/${id}/download`, {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
     });
     if (!response.ok) return;
     const blob = await response.blob();
-    const disposition = response.headers.get('Content-Disposition') ?? '';
-    const match = /filename[^;=\n]*=(['"]?)([^'";\n]+)\1/.exec(disposition);
-    const filename = match ? match[2] : `document-${id}`;
+    // Use provided original filename, fall back to Content-Disposition header, then generic name
+    let filename = originalFilename;
+    if (!filename) {
+      const disposition = response.headers.get('Content-Disposition') ?? '';
+      const match = /filename[^;=\n]*=(['"]?)([^'";\n]+)\1/.exec(disposition);
+      filename = match ? match[2] : `document-${id}`;
+    }
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
