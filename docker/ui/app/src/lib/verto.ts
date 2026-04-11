@@ -482,6 +482,14 @@ export class VertoClient {
 
   private scheduleReconnect(): void {
     this.cancelReconnect();
+
+    // Max 5 reconnect attempts to prevent infinite loops
+    if (this.reconnectAttempt >= 5) {
+      console.warn('[Verto] Max reconnect attempts reached, giving up');
+      this.onError?.(new Error('Max reconnect attempts reached'));
+      return;
+    }
+
     const delay = RECONNECT_DELAYS_MS[Math.min(this.reconnectAttempt, RECONNECT_DELAYS_MS.length - 1)];
     this.reconnectAttempt++;
 
@@ -490,6 +498,7 @@ export class VertoClient {
       try {
         await this.connect();
         await this.login();
+        this.reconnectAttempt = 0; // Reset on success
       } catch {
         this.scheduleReconnect();
       }
