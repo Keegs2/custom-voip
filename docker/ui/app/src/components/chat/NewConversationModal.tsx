@@ -3,6 +3,11 @@ import { X, Check, UserPlus, Users, MessageSquare, Search } from 'lucide-react';
 import { apiRequest } from '../../api/client';
 import { createConversation } from '../../api/chat';
 import type { Conversation, DirectoryUser } from '../../types/chat';
+
+interface NewConversationModalProps {
+  onClose: () => void;
+  onCreated: (conv: Conversation) => void;
+}
 import { useAuth } from '../../contexts/AuthContext';
 
 /** Format an E.164 number for human display. "+17743260301" → "+1 (774) 326-0301" */
