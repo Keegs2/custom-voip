@@ -44,6 +44,7 @@ export interface ConferenceSchedule {
 
 export interface CreateConferencePayload {
   name: string;
+  customer_id?: number;
   max_members?: number;
   recording_enabled?: boolean;
   video_enabled?: boolean;

@@ -43,6 +43,9 @@ import { Sidebar } from '../components/layout/Sidebar';
 import { SoftphoneWidget } from '../components/softphone/SoftphoneWidget';
 import { ConferenceRoom } from '../components/conference/ConferenceRoom';
 import { useSoftphone } from '../contexts/SoftphoneContext';
+import { useAuth } from '../contexts/AuthContext';
+import { listCustomers } from '../api/customers';
+import type { Customer } from '../types/customer';
 import {
   listConferences,
   createConference,
@@ -223,6 +226,9 @@ interface CreateRoomModalProps {
 }
 
 function CreateRoomModal({ onClose, onCreate }: CreateRoomModalProps) {
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
+
   const [name, setName] = useState('');
   const [maxMembers, setMaxMembers] = useState(25);
   const [pin, setPin] = useState('');
@@ -232,9 +238,36 @@ function CreateRoomModal({ onClose, onCreate }: CreateRoomModalProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Admin-only: customer selector state
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [customersLoading, setCustomersLoading] = useState(false);
+  const [selectedCustomerId, setSelectedCustomerId] = useState<number | ''>('');
+
+  // Fetch customer list when the modal opens for an admin
+  useEffect(() => {
+    if (!isAdmin) return;
+    setCustomersLoading(true);
+    listCustomers({ limit: 500, status: 'active' })
+      .then(({ items }) => {
+        setCustomers(items);
+        // Pre-select the first customer so the dropdown isn't blank
+        if (items.length > 0) setSelectedCustomerId(items[0].id);
+      })
+      .catch(() => {
+        setError('Failed to load customer list');
+      })
+      .finally(() => {
+        setCustomersLoading(false);
+      });
+  }, [isAdmin]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) { setError('Name is required'); return; }
+    if (isAdmin && selectedCustomerId === '') {
+      setError('Please select a customer');
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -245,6 +278,7 @@ function CreateRoomModal({ onClose, onCreate }: CreateRoomModalProps) {
         moderator_pin: modPin.trim() || null,
         video_enabled: videoEnabled,
         recording_enabled: recordingEnabled,
+        ...(isAdmin && selectedCustomerId !== '' ? { customer_id: selectedCustomerId as number } : {}),
       };
       const conf = await createConference(payload);
       onCreate(conf);
@@ -331,6 +365,53 @@ function CreateRoomModal({ onClose, onCreate }: CreateRoomModalProps) {
             <div style={{ padding: '10px 14px', background: 'rgba(239,68,68,0.10)', border: '1px solid rgba(239,68,68,0.25)', borderRadius: 8, color: '#ef4444', fontSize: '0.8rem' }}>
               {error}
             </div>
+          )}
+
+          {/* Admin-only: customer selector */}
+          {isAdmin && (
+            <FormField label="Customer" required>
+              {customersLoading ? (
+                <div style={{ ...inputStyle, color: '#475569', display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div
+                    style={{
+                      width: 14,
+                      height: 14,
+                      border: '2px solid rgba(59,130,246,0.15)',
+                      borderTopColor: '#3b82f6',
+                      borderRadius: '50%',
+                      animation: 'spin 0.8s linear infinite',
+                      flexShrink: 0,
+                    }}
+                  />
+                  Loading customers...
+                </div>
+              ) : (
+                <select
+                  value={selectedCustomerId}
+                  onChange={(e) => setSelectedCustomerId(e.target.value === '' ? '' : Number(e.target.value))}
+                  style={{
+                    ...inputStyle,
+                    // Native selects need explicit appearance reset in dark themes
+                    appearance: 'none',
+                    backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E")`,
+                    backgroundRepeat: 'no-repeat',
+                    backgroundPosition: 'right 10px center',
+                    paddingRight: 30,
+                    cursor: 'pointer',
+                  }}
+                >
+                  {customers.length === 0 ? (
+                    <option value="">No active customers found</option>
+                  ) : (
+                    customers.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))
+                  )}
+                </select>
+              )}
+            </FormField>
           )}
 
           <FormField label="Room Name" required>

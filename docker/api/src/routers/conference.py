@@ -28,6 +28,7 @@ router = APIRouter()
 
 class ConferenceCreate(BaseModel):
     name: str
+    customer_id: Optional[int] = None  # Required for admin users (no implicit customer)
     pin: Optional[str] = None
     moderator_pin: Optional[str] = None
     max_members: int = 50
@@ -219,11 +220,14 @@ async def create_conference(
     user_id = int(user["sub"])
     customer_id = user.get("customer_id")
 
+    # Admin users must specify customer_id explicitly
     if customer_id is None:
-        raise HTTPException(
-            status_code=400,
-            detail="Admin users must act within a customer context to create conferences",
-        )
+        if body.customer_id is None:
+            raise HTTPException(
+                status_code=400,
+                detail="Admin users must specify customer_id when creating conferences",
+            )
+        customer_id = body.customer_id
 
     # Auto-assign room_number: max existing + 1, base 100
     max_row = await db.fetch_one(
