@@ -38,6 +38,8 @@ import {
   Edit2,
   Check,
   X,
+  UserPlus,
+  User,
 } from 'lucide-react';
 import { Sidebar } from '../components/layout/Sidebar';
 import { SoftphoneWidget } from '../components/softphone/SoftphoneWidget';
@@ -57,14 +59,20 @@ import {
   listSchedules,
   createSchedule,
   deleteSchedule,
+  inviteParticipants,
+  removeParticipant,
+  listParticipants,
 } from '../api/conference';
+import { getDirectory } from '../api/extensions';
 import type {
   Conference,
   ConferenceLiveStatus,
+  ConferenceParticipant,
   ConferenceSchedule,
   CreateConferencePayload,
   CreateSchedulePayload,
 } from '../types/conference';
+import type { Extension } from '../types/softphone';
 
 /* ─── Keyframes ──────────────────────────────────────────── */
 
@@ -622,6 +630,397 @@ function ScheduleModal({ conferenceId, onClose, onCreated }: ScheduleModalProps)
   );
 }
 
+/* ─── Invite participants modal ──────────────────────────── */
+
+interface InviteParticipantsModalProps {
+  conferenceId: number;
+  /** User IDs already in the conference — excluded from the picker */
+  existingUserIds: Set<number>;
+  onClose: () => void;
+  onInvited: () => void;
+}
+
+function InviteParticipantsModal({
+  conferenceId,
+  existingUserIds,
+  onClose,
+  onInvited,
+}: InviteParticipantsModalProps) {
+  const [directory, setDirectory] = useState<Extension[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [role, setRole] = useState<'participant' | 'moderator'>('participant');
+
+  // Fetch directory on mount
+  useEffect(() => {
+    setLoading(true);
+    getDirectory()
+      .then((exts) => {
+        // Only show extensions that have a linked user and are not already participants
+        setDirectory(
+          exts.filter(
+            (e) => e.user_id !== null && !existingUserIds.has(e.user_id),
+          ),
+        );
+      })
+      .catch(() => setError('Failed to load user directory'))
+      .finally(() => setLoading(false));
+  }, [existingUserIds]);
+
+  const filtered = directory.filter((e) => {
+    const term = search.toLowerCase();
+    if (!term) return true;
+    return (
+      e.display_name.toLowerCase().includes(term) ||
+      e.extension.toLowerCase().includes(term) ||
+      (e.user_name ?? '').toLowerCase().includes(term)
+    );
+  });
+
+  const toggle = (userId: number) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(userId)) {
+        next.delete(userId);
+      } else {
+        next.add(userId);
+      }
+      return next;
+    });
+  };
+
+  const handleInvite = async () => {
+    if (selected.size === 0) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      await inviteParticipants(conferenceId, [...selected], role);
+      onInvited();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to invite participants');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const spinnerStyle: React.CSSProperties = {
+    width: 20,
+    height: 20,
+    border: '2px solid rgba(59,130,246,0.15)',
+    borderTopColor: '#3b82f6',
+    borderRadius: '50%',
+    animation: 'spin 0.8s linear infinite',
+  };
+
+  return (
+    <div
+      style={{
+        position: 'fixed',
+        inset: 0,
+        background: 'rgba(0,0,0,0.65)',
+        backdropFilter: 'blur(6px)',
+        zIndex: 500,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 24,
+      }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div
+        style={{
+          width: '100%',
+          maxWidth: 480,
+          maxHeight: '80vh',
+          background: '#131520',
+          borderRadius: 16,
+          border: '1px solid rgba(255,255,255,0.08)',
+          boxShadow: '0 24px 64px rgba(0,0,0,0.6)',
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden',
+        }}
+      >
+        {/* Header */}
+        <div
+          style={{
+            padding: '18px 20px 14px',
+            borderBottom: '1px solid rgba(255,255,255,0.06)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexShrink: 0,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+            <div
+              style={{
+                width: 34,
+                height: 34,
+                borderRadius: 9,
+                background: 'linear-gradient(135deg, rgba(59,130,246,0.20) 0%, rgba(59,130,246,0.10) 100%)',
+                border: '1px solid rgba(59,130,246,0.28)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: '#60a5fa',
+              }}
+            >
+              <UserPlus size={16} />
+            </div>
+            <div>
+              <div style={{ fontSize: '0.9rem', fontWeight: 700, color: '#e2e8f0' }}>
+                Invite Participants
+              </div>
+              <div style={{ fontSize: '0.72rem', color: '#475569' }}>
+                {selected.size === 0
+                  ? 'Select people to invite'
+                  : `${selected.size} selected`}
+              </div>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            style={{ background: 'none', border: 'none', color: '#475569', cursor: 'pointer', padding: 4 }}
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        {/* Search + role selector */}
+        <div
+          style={{
+            padding: '12px 16px',
+            borderBottom: '1px solid rgba(255,255,255,0.05)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 10,
+            flexShrink: 0,
+          }}
+        >
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search by name or extension..."
+            autoFocus
+            style={{
+              ...inputStyle,
+              padding: '7px 11px',
+            }}
+          />
+          {/* Role toggle */}
+          <div style={{ display: 'flex', gap: 6 }}>
+            {(['participant', 'moderator'] as const).map((r) => (
+              <button
+                key={r}
+                type="button"
+                onClick={() => setRole(r)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 5,
+                  padding: '5px 12px',
+                  borderRadius: 6,
+                  border: role === r
+                    ? '1px solid rgba(59,130,246,0.40)'
+                    : '1px solid rgba(255,255,255,0.07)',
+                  background: role === r
+                    ? 'rgba(59,130,246,0.12)'
+                    : 'rgba(255,255,255,0.03)',
+                  color: role === r ? '#93c5fd' : '#64748b',
+                  fontSize: '0.75rem',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  transition: 'all 0.15s',
+                  textTransform: 'capitalize',
+                }}
+              >
+                {r === 'moderator' ? <Shield size={12} /> : <User size={12} />}
+                {r}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* User list */}
+        <div style={{ flex: 1, overflowY: 'auto', padding: '8px 8px' }}>
+          {error && (
+            <div
+              style={{
+                margin: '6px 8px',
+                padding: '8px 12px',
+                background: 'rgba(239,68,68,0.10)',
+                border: '1px solid rgba(239,68,68,0.25)',
+                borderRadius: 8,
+                color: '#ef4444',
+                fontSize: '0.78rem',
+              }}
+            >
+              {error}
+            </div>
+          )}
+
+          {loading ? (
+            <div style={{ display: 'flex', justifyContent: 'center', padding: 32 }}>
+              <div style={spinnerStyle} />
+            </div>
+          ) : filtered.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '28px 16px', color: '#334155', fontSize: '0.83rem' }}>
+              {search ? 'No users match your search.' : 'All users are already participants.'}
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              {filtered.map((ext) => {
+                const userId = ext.user_id as number;
+                const isChecked = selected.has(userId);
+                const presenceColor =
+                  ext.presence_status === 'available' ? '#22c55e'
+                  : ext.presence_status === 'busy' ? '#ef4444'
+                  : ext.presence_status === 'away' ? '#f59e0b'
+                  : '#334155';
+
+                return (
+                  <button
+                    key={ext.id}
+                    type="button"
+                    onClick={() => toggle(userId)}
+                    style={{
+                      width: '100%',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 11,
+                      padding: '9px 12px',
+                      borderRadius: 9,
+                      background: isChecked
+                        ? 'rgba(59,130,246,0.09)'
+                        : 'transparent',
+                      border: isChecked
+                        ? '1px solid rgba(59,130,246,0.25)'
+                        : '1px solid transparent',
+                      cursor: 'pointer',
+                      textAlign: 'left',
+                      transition: 'all 0.12s',
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!isChecked) e.currentTarget.style.background = 'rgba(255,255,255,0.03)';
+                    }}
+                    onMouseLeave={(e) => {
+                      if (!isChecked) e.currentTarget.style.background = 'transparent';
+                    }}
+                  >
+                    {/* Avatar with presence dot */}
+                    <div style={{ position: 'relative', flexShrink: 0 }}>
+                      <div
+                        style={{
+                          width: 34,
+                          height: 34,
+                          borderRadius: '50%',
+                          background: 'linear-gradient(135deg, rgba(59,130,246,0.22) 0%, rgba(99,102,241,0.22) 100%)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontSize: '0.88rem',
+                          fontWeight: 700,
+                          color: '#818cf8',
+                        }}
+                      >
+                        {ext.display_name.charAt(0).toUpperCase()}
+                      </div>
+                      <div
+                        style={{
+                          position: 'absolute',
+                          bottom: 0,
+                          right: 0,
+                          width: 9,
+                          height: 9,
+                          borderRadius: '50%',
+                          background: presenceColor,
+                          border: '1.5px solid #131520',
+                        }}
+                      />
+                    </div>
+
+                    {/* Name + extension */}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div
+                        style={{
+                          fontSize: '0.845rem',
+                          fontWeight: 600,
+                          color: '#e2e8f0',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {ext.display_name}
+                      </div>
+                      <div style={{ fontSize: '0.72rem', color: '#475569' }}>
+                        Ext {ext.extension}
+                      </div>
+                    </div>
+
+                    {/* Checkbox */}
+                    <div
+                      style={{
+                        width: 18,
+                        height: 18,
+                        borderRadius: 5,
+                        border: isChecked
+                          ? '1.5px solid #3b82f6'
+                          : '1.5px solid rgba(255,255,255,0.15)',
+                        background: isChecked ? '#3b82f6' : 'transparent',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        flexShrink: 0,
+                        transition: 'all 0.12s',
+                      }}
+                    >
+                      {isChecked && <Check size={11} color="#fff" strokeWidth={3} />}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div
+          style={{
+            padding: '12px 16px',
+            borderTop: '1px solid rgba(255,255,255,0.06)',
+            display: 'flex',
+            gap: 8,
+            justifyContent: 'flex-end',
+            flexShrink: 0,
+          }}
+        >
+          <button type="button" onClick={onClose} style={secondaryBtn}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={() => void handleInvite()}
+            disabled={selected.size === 0 || submitting}
+            style={{
+              ...primaryBtn,
+              opacity: selected.size === 0 || submitting ? 0.55 : 1,
+            }}
+          >
+            <UserPlus size={14} />
+            {submitting ? 'Inviting...' : `Invite${selected.size > 0 ? ` (${selected.size})` : ''}`}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ─── Shared form UI primitives ──────────────────────────── */
 
 function FormField({ label, required, children }: { label: string; required?: boolean; children: React.ReactNode }) {
@@ -745,6 +1144,10 @@ function DetailPanel({ conf, onJoin, onRefresh, onDelete }: DetailPanelProps) {
   const [liveStatus, setLiveStatus] = useState<ConferenceLiveStatus | null>(null);
   const [schedules, setSchedules] = useState<ConferenceSchedule[]>([]);
   const [showScheduleModal, setShowScheduleModal] = useState(false);
+  const [showInviteModal, setShowInviteModal] = useState(false);
+  const [participants, setParticipants] = useState<ConferenceParticipant[]>(conf.participants ?? []);
+  const [participantsLoading, setParticipantsLoading] = useState(false);
+  const [participantError, setParticipantError] = useState<string | null>(null);
   const [editingSettings, setEditingSettings] = useState(false);
   const [settingsName, setSettingsName] = useState(conf.name);
   const [settingsMaxMembers, setSettingsMaxMembers] = useState(conf.max_members);
@@ -792,6 +1195,35 @@ function DetailPanel({ conf, onJoin, onRefresh, onDelete }: DetailPanelProps) {
   useEffect(() => {
     if (activeTab === 'schedule') void loadSchedules();
   }, [activeTab, loadSchedules]);
+
+  /* ── Participants load ──────────────────────────────────── */
+
+  const loadParticipants = useCallback(async () => {
+    setParticipantsLoading(true);
+    setParticipantError(null);
+    try {
+      const list = await listParticipants(conf.id);
+      setParticipants(list);
+    } catch {
+      setParticipantError('Failed to load participants');
+    } finally {
+      setParticipantsLoading(false);
+    }
+  }, [conf.id]);
+
+  useEffect(() => {
+    if (activeTab === 'participants') void loadParticipants();
+  }, [activeTab, loadParticipants]);
+
+  const handleRemoveParticipant = async (userId: number) => {
+    try {
+      await removeParticipant(conf.id, userId);
+      // Optimistic removal — then sync from server
+      setParticipants((prev) => prev.filter((p) => p.user_id !== userId));
+    } catch {
+      setParticipantError('Failed to remove participant');
+    }
+  };
 
   /* ── Settings save ──────────────────────────────────────── */
 
@@ -1278,70 +1710,210 @@ function DetailPanel({ conf, onJoin, onRefresh, onDelete }: DetailPanelProps) {
 
         {/* ── Participants tab ──────────────────────────────── */}
         {activeTab === 'participants' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#334155', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 4 }}>
-              Invited members
-            </div>
-            {(conf.participants ?? []).length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '36px 24px', color: '#334155', fontSize: '0.85rem' }}>
-                No participants configured.
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            {/* Section header with Invite button */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ fontSize: '0.85rem', fontWeight: 600, color: '#64748b' }}>
+                Invited members
               </div>
-            ) : (
-              (conf.participants ?? []).map((p) => (
+              <button
+                type="button"
+                onClick={() => setShowInviteModal(true)}
+                style={{ ...primaryBtn, fontSize: '0.8rem', padding: '7px 14px' }}
+              >
+                <UserPlus size={13} />
+                Invite
+              </button>
+            </div>
+
+            {participantError && (
+              <div
+                style={{
+                  padding: '8px 12px',
+                  background: 'rgba(239,68,68,0.08)',
+                  border: '1px solid rgba(239,68,68,0.20)',
+                  borderRadius: 8,
+                  color: '#f87171',
+                  fontSize: '0.78rem',
+                }}
+              >
+                {participantError}
+              </div>
+            )}
+
+            {participantsLoading ? (
+              <div style={{ display: 'flex', justifyContent: 'center', padding: 32 }}>
                 <div
-                  key={p.user_id}
                   style={{
+                    width: 22,
+                    height: 22,
+                    border: '2px solid rgba(59,130,246,0.15)',
+                    borderTopColor: '#3b82f6',
+                    borderRadius: '50%',
+                    animation: 'spin 0.8s linear infinite',
+                  }}
+                />
+              </div>
+            ) : participants.length === 0 ? (
+              <div
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 12,
+                  padding: '36px 24px',
+                }}
+              >
+                <div
+                  style={{
+                    width: 52,
+                    height: 52,
+                    borderRadius: 14,
+                    background: 'rgba(255,255,255,0.03)',
+                    border: '1px solid rgba(255,255,255,0.07)',
                     display: 'flex',
                     alignItems: 'center',
-                    gap: 12,
-                    padding: '10px 14px',
-                    borderRadius: 10,
-                    background: 'rgba(255,255,255,0.02)',
-                    border: '1px solid rgba(255,255,255,0.05)',
+                    justifyContent: 'center',
+                    color: '#334155',
                   }}
                 >
-                  <div
-                    style={{
-                      width: 34,
-                      height: 34,
-                      borderRadius: '50%',
-                      background: 'linear-gradient(135deg, rgba(59,130,246,0.20) 0%, rgba(99,102,241,0.20) 100%)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      fontSize: '0.85rem',
-                      fontWeight: 700,
-                      color: '#818cf8',
-                      flexShrink: 0,
-                    }}
-                  >
-                    {(p.user_name ?? '?').charAt(0).toUpperCase()}
+                  <Users size={22} strokeWidth={1.5} />
+                </div>
+                <div style={{ textAlign: 'center' }}>
+                  <div style={{ fontSize: '0.875rem', fontWeight: 600, color: '#475569', marginBottom: 4 }}>
+                    No participants yet
                   </div>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: '0.875rem', fontWeight: 600, color: '#e2e8f0' }}>{p.user_name ?? p.user_email ?? 'Unknown'}</div>
-                    <div style={{ fontSize: '0.73rem', color: '#475569' }}>Ext {p.extension}</div>
-                  </div>
-                  <div
-                    style={{
-                      padding: '2px 8px',
-                      borderRadius: 5,
-                      background: p.role === 'moderator'
-                        ? 'rgba(59,130,246,0.12)'
-                        : 'rgba(255,255,255,0.04)',
-                      border: p.role === 'moderator'
-                        ? '1px solid rgba(59,130,246,0.25)'
-                        : '1px solid rgba(255,255,255,0.07)',
-                      fontSize: '0.68rem',
-                      fontWeight: 700,
-                      color: p.role === 'moderator' ? '#60a5fa' : '#475569',
-                      textTransform: 'uppercase',
-                      letterSpacing: '0.05em',
-                    }}
-                  >
-                    {p.role}
+                  <div style={{ fontSize: '0.78rem', color: '#334155' }}>
+                    Invite people to give them quick access to this room.
                   </div>
                 </div>
-              ))
+                <button
+                  type="button"
+                  onClick={() => setShowInviteModal(true)}
+                  style={{ ...primaryBtn, fontSize: '0.8rem', padding: '7px 14px' }}
+                >
+                  <UserPlus size={13} />
+                  Invite Someone
+                </button>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {participants.map((p) => (
+                  <div
+                    key={p.user_id}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 12,
+                      padding: '10px 14px',
+                      borderRadius: 10,
+                      background: 'rgba(255,255,255,0.02)',
+                      border: '1px solid rgba(255,255,255,0.05)',
+                      transition: 'background 0.12s',
+                    }}
+                  >
+                    {/* Avatar */}
+                    <div
+                      style={{
+                        width: 34,
+                        height: 34,
+                        borderRadius: '50%',
+                        background: 'linear-gradient(135deg, rgba(59,130,246,0.20) 0%, rgba(99,102,241,0.20) 100%)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontSize: '0.85rem',
+                        fontWeight: 700,
+                        color: '#818cf8',
+                        flexShrink: 0,
+                      }}
+                    >
+                      {(p.user_name ?? '?').charAt(0).toUpperCase()}
+                    </div>
+
+                    {/* Name + extension */}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div
+                        style={{
+                          fontSize: '0.875rem',
+                          fontWeight: 600,
+                          color: '#e2e8f0',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {p.user_name ?? p.user_email ?? 'Unknown'}
+                      </div>
+                      <div style={{ fontSize: '0.73rem', color: '#475569' }}>
+                        {p.extension ? `Ext ${p.extension}` : p.user_email ?? ''}
+                      </div>
+                    </div>
+
+                    {/* Role badge */}
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 4,
+                        padding: '2px 8px',
+                        borderRadius: 5,
+                        background: p.role === 'moderator'
+                          ? 'rgba(59,130,246,0.12)'
+                          : 'rgba(255,255,255,0.04)',
+                        border: p.role === 'moderator'
+                          ? '1px solid rgba(59,130,246,0.25)'
+                          : '1px solid rgba(255,255,255,0.07)',
+                        fontSize: '0.68rem',
+                        fontWeight: 700,
+                        color: p.role === 'moderator' ? '#60a5fa' : '#475569',
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.05em',
+                        flexShrink: 0,
+                      }}
+                    >
+                      {p.role === 'moderator'
+                        ? <Shield size={10} />
+                        : <User size={10} />}
+                      {p.role}
+                    </div>
+
+                    {/* Remove button */}
+                    <button
+                      type="button"
+                      title="Remove participant"
+                      onClick={() => void handleRemoveParticipant(p.user_id)}
+                      style={{
+                        width: 28,
+                        height: 28,
+                        borderRadius: 7,
+                        background: 'rgba(239,68,68,0.06)',
+                        border: '1px solid rgba(239,68,68,0.15)',
+                        color: '#64748b',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        flexShrink: 0,
+                        transition: 'all 0.12s',
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.background = 'rgba(239,68,68,0.14)';
+                        e.currentTarget.style.color = '#ef4444';
+                        e.currentTarget.style.borderColor = 'rgba(239,68,68,0.35)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.background = 'rgba(239,68,68,0.06)';
+                        e.currentTarget.style.color = '#64748b';
+                        e.currentTarget.style.borderColor = 'rgba(239,68,68,0.15)';
+                      }}
+                    >
+                      <X size={13} />
+                    </button>
+                  </div>
+                ))}
+              </div>
             )}
           </div>
         )}
@@ -1492,6 +2064,19 @@ function DetailPanel({ conf, onJoin, onRefresh, onDelete }: DetailPanelProps) {
           onCreated={async () => {
             setShowScheduleModal(false);
             await loadSchedules();
+          }}
+        />
+      )}
+
+      {/* Invite participants modal */}
+      {showInviteModal && (
+        <InviteParticipantsModal
+          conferenceId={conf.id}
+          existingUserIds={new Set(participants.map((p) => p.user_id))}
+          onClose={() => setShowInviteModal(false)}
+          onInvited={() => {
+            setShowInviteModal(false);
+            void loadParticipants();
           }}
         />
       )}

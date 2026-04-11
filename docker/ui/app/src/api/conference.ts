@@ -81,3 +81,28 @@ export function startRecording(conferenceId: number): Promise<void> {
 export function stopRecording(conferenceId: number): Promise<void> {
   return apiRequest<void>('POST', `/conferences/${conferenceId}/record/stop`);
 }
+
+/** Invite one or more users to a conference as participants or moderators */
+export function inviteParticipants(
+  conferenceId: number,
+  userIds: number[],
+  role: 'participant' | 'moderator' = 'participant',
+): Promise<void> {
+  return apiRequest<void>('POST', `/conferences/${conferenceId}/participants`, {
+    user_ids: userIds,
+    role,
+  });
+}
+
+/** Remove a participant from a conference room */
+export function removeParticipant(conferenceId: number, userId: number): Promise<void> {
+  return apiRequest<void>('DELETE', `/conferences/${conferenceId}/participants/${userId}`);
+}
+
+/** Fetch the current participant list for a conference */
+export function listParticipants(conferenceId: number): Promise<import('../types/conference').ConferenceParticipant[]> {
+  return apiRequest<import('../types/conference').ConferenceParticipant[]>(
+    'GET',
+    `/conferences/${conferenceId}/participants`,
+  );
+}
