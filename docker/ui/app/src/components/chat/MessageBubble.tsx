@@ -93,8 +93,8 @@ export function MessageBubble({ message, isOwn, isGrouped, isGroup, isLastInGrou
         paddingRight: isOwn ? 4 : 0,
       }}
     >
-      {/* Avatar — shown on the last message in a consecutive group, aligned at bottom */}
-      <div style={{ width: 32, flexShrink: 0, alignSelf: 'flex-end' }}>
+      {/* Avatar — shown on the last message in a consecutive group, centered vertically */}
+      <div style={{ width: 32, flexShrink: 0, alignSelf: 'center' }}>
         {isLastInGroup && !isOwn && (
           <div
             aria-label={message.sender_name}
@@ -104,7 +104,8 @@ export function MessageBubble({ message, isOwn, isGrouped, isGroup, isLastInGrou
               height: 32,
               borderRadius: '50%',
               background: `${avatarColor}22`,
-              border: `1px solid ${avatarColor}40`,
+              border: `2px solid ${avatarColor}55`,
+              boxShadow: `0 0 0 1px ${avatarColor}22`,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
