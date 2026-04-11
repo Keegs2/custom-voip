@@ -18,7 +18,7 @@ export async function createConversation(
 ): Promise<Conversation> {
   return apiRequest<Conversation>('POST', '/chat/conversations', {
     type,
-    participant_ids: participantIds,
+    participant_user_ids: participantIds,
     name: name ?? null,
   });
 }
