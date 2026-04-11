@@ -574,11 +574,37 @@ export class VertoClient {
       }
       case 'verto.bye': {
         const dp = params['dialogParams'] as VertoDialogParams | undefined;
+
+        // Apply the same three-step callID resolution used in handleRemoteAnswer —
+        // mod_verto conferences may omit dialogParams.callID here too.
+        let byeCallId: string | undefined;
+        let byeCallIdSource: string;
+
         if (dp?.callID) {
-          console.log(`[Verto] verto.bye received — callId=${dp.callID}`);
-          this.cleanupSession(dp.callID);
-          this.updateCallState(dp.callID, 'ended');
-          setTimeout(() => this.sessions.delete(dp.callID), 500);
+          byeCallId = dp.callID;
+          byeCallIdSource = 'dialogParams.callID';
+        } else if (typeof params['callID'] === 'string' && params['callID']) {
+          byeCallId = params['callID'];
+          byeCallIdSource = 'params.callID (top-level)';
+        } else {
+          const pendingEntries = Array.from(this.sessions.entries()).filter(
+            ([, s]) => s.call.direction === 'outbound' && (s.call.state === 'dialing' || s.call.state === 'ringing' || s.call.state === 'active'),
+          );
+          if (pendingEntries.length === 1) {
+            byeCallId = pendingEntries[0][0];
+            byeCallIdSource = 'single outbound session (conference fallback)';
+          } else {
+            byeCallIdSource = 'unresolvable';
+          }
+        }
+
+        if (byeCallId) {
+          console.log(`[Verto] verto.bye received — callId=${byeCallId} (resolved via ${byeCallIdSource})`);
+          this.cleanupSession(byeCallId);
+          this.updateCallState(byeCallId, 'ended');
+          setTimeout(() => this.sessions.delete(byeCallId!), 500);
+        } else {
+          console.warn(`[Verto] verto.bye received without resolvable callID (strategy: ${byeCallIdSource})`);
         }
         break;
       }
@@ -649,21 +675,52 @@ export class VertoClient {
     const dp = params['dialogParams'] as VertoDialogParams | undefined;
     const remoteSdp = params['sdp'] as string | undefined;
 
-    if (!dp?.callID) {
-      console.warn(`[Verto] ${eventName} received without callID`);
+    // Resolve the callID using a three-step fallback. mod_verto's conference
+    // application sometimes sends verto.media / verto.answer without populating
+    // dialogParams.callID, so we need alternative ways to identify the session.
+    let callId: string | undefined;
+    let callIdSource: string;
+
+    if (dp?.callID) {
+      // Step 1 (normal path): callID is in dialogParams
+      callId = dp.callID;
+      callIdSource = 'dialogParams.callID';
+    } else if (typeof params['callID'] === 'string' && params['callID']) {
+      // Step 2: FreeSWITCH placed it at the top level of params
+      callId = params['callID'];
+      callIdSource = 'params.callID (top-level)';
+    } else {
+      // Step 3: No callID anywhere in the message. If there is exactly one
+      // outbound session that is still pending (dialing or ringing), this
+      // event must belong to it — a Verto client has at most one active call.
+      const pendingEntries = Array.from(this.sessions.entries()).filter(
+        ([, s]) => s.call.direction === 'outbound' && (s.call.state === 'dialing' || s.call.state === 'ringing'),
+      );
+      if (pendingEntries.length === 1) {
+        callId = pendingEntries[0][0];
+        callIdSource = 'single pending outbound session (conference fallback)';
+      } else {
+        callIdSource = 'unresolvable';
+      }
+    }
+
+    if (!callId) {
+      console.warn(`[Verto] ${eventName} received without callID (resolution strategy: ${callIdSource})`);
       return;
     }
 
-    const session = this.sessions.get(dp.callID);
+    console.log(`[Verto] ${eventName} callID resolved via ${callIdSource} → ${callId}`);
+
+    const session = this.sessions.get(callId);
     if (!session) {
-      console.warn(`[Verto] ${eventName} for unknown callId=${dp.callID} (session not found)`);
+      console.warn(`[Verto] ${eventName} for unknown callId=${callId} (session not found)`);
       return;
     }
 
     const { peerConnection: pc } = session;
 
     console.log(
-      `[Verto] ${eventName} received — callId=${dp.callID}` +
+      `[Verto] ${eventName} received — callId=${callId}` +
       ` signalingState=${pc.signalingState}` +
       ` iceConnectionState=${pc.iceConnectionState}` +
       ` hasSDP=${Boolean(remoteSdp)}`,
@@ -685,13 +742,13 @@ export class VertoClient {
       // Normal path: we have our offer pending, apply the answer
       try {
         await pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp: remoteSdp }));
-        console.log(`[Verto] setRemoteDescription succeeded for callId=${dp.callID}`);
-        this.updateCallState(dp.callID, 'active');
+        console.log(`[Verto] setRemoteDescription succeeded for callId=${callId}`);
+        this.updateCallState(callId, 'active');
         session.call.startTime = new Date();
       } catch (err) {
-        console.error(`[Verto] setRemoteDescription failed for callId=${dp.callID}:`, err);
+        console.error(`[Verto] setRemoteDescription failed for callId=${callId}:`, err);
         // SDP negotiation failed — tear down the call so the UI doesn't hang
-        this.hangupCall(dp.callID);
+        this.hangupCall(callId);
         throw err;
       }
     } else if (pc.signalingState === 'stable') {
@@ -699,13 +756,13 @@ export class VertoClient {
       // The SDP is already applied — just ensure the call is marked active.
       console.log(`[Verto] ${eventName} received in 'stable' state — SDP already applied, ensuring active state`);
       if (session.call.state !== 'active') {
-        this.updateCallState(dp.callID, 'active');
+        this.updateCallState(callId, 'active');
         session.call.startTime = new Date();
       }
     } else {
       console.warn(
         `[Verto] ${eventName} received in unexpected signalingState=${pc.signalingState}` +
-        ` for callId=${dp.callID} — skipping setRemoteDescription`,
+        ` for callId=${callId} — skipping setRemoteDescription`,
       );
     }
   }
