@@ -23,6 +23,7 @@ import { CarriersAdminPage } from './pages/admin/CarriersAdminPage';
 import { SippAdminPage } from './pages/admin/SippAdminPage';
 // Homer moved to standalone Troubleshooting page
 import { TrunksAdminPage } from './pages/admin/TrunksAdminPage';
+import { DIDSearchPage } from './pages/admin/DIDSearchPage';
 import { CallQualityPage } from './pages/CallQualityPage';
 import { VoicemailPage } from './pages/VoicemailPage';
 import { ChatPage } from './pages/ChatPage';
@@ -56,6 +57,16 @@ export function App() {
             <Route path="call-quality" element={<CallQualityPage />} />
             <Route path="voicemail"  element={<VoicemailPage />} />
             <Route path="chat"       element={<ChatPage />} />
+
+            {/* DID Search — admin-only, standalone (not nested inside AdminPage tabs) */}
+            <Route
+              path="admin/did-search"
+              element={
+                <RequireAdmin>
+                  <DIDSearchPage />
+                </RequireAdmin>
+              }
+            />
 
             {/* Customer account page — outside AdminPage wrapper for clean layout */}
             <Route

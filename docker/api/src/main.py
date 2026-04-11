@@ -14,7 +14,7 @@ from db.database import init_db, close_db
 from db.redis_client import init_redis, close_redis
 from routers import (
     rcf, calls, trunks, cdrs, customers, health, tiers, api_dids, rates,
-    ivr, carriers, auth, extensions, presence, voicemail, webrtc,
+    ivr, carriers, auth, extensions, presence, voicemail, webrtc, search,
 )
 from routers.chat import router as chat_router
 from middleware.auth import JWTAuthMiddleware
@@ -119,6 +119,7 @@ app.include_router(presence.router, prefix="/v1/presence", tags=["Presence"])
 app.include_router(voicemail.router, prefix="/v1/voicemail", tags=["Voicemail"])
 app.include_router(webrtc.router, prefix="/v1/webrtc", tags=["WebRTC"])
 app.include_router(chat_router, prefix="/v1/chat", tags=["Chat"])
+app.include_router(search.router, prefix="/v1/search", tags=["Search"])
 
 # Backward-compatible routes (no /v1/ prefix) for testing
 app.include_router(customers.router, prefix="/customers", tags=["Customers"])
@@ -136,6 +137,7 @@ app.include_router(presence.router, prefix="/presence", tags=["Presence"])
 app.include_router(voicemail.router, prefix="/voicemail", tags=["Voicemail"])
 app.include_router(webrtc.router, prefix="/webrtc", tags=["WebRTC"])
 app.include_router(chat_router, prefix="/chat", tags=["Chat"])
+app.include_router(search.router, prefix="/search", tags=["Search"])
 
 
 @app.get("/")

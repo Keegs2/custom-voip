@@ -719,6 +719,81 @@ export function Sidebar() {
             )}
           </NavLink>}
 
+          {/* DID Lookup — admins only */}
+          {isAdmin && (
+            <NavLink
+              to="/admin/did-search"
+              onClick={closeMobile}
+              className="block no-underline"
+              style={({ isActive }) => ({
+                display: 'flex',
+                alignItems: 'center',
+                gap: 10,
+                padding: '9px 14px',
+                borderRadius: 10,
+                fontSize: '0.875rem',
+                fontWeight: isActive ? 600 : 500,
+                letterSpacing: '-0.01em',
+                cursor: 'pointer',
+                userSelect: 'none',
+                transition: 'background 0.15s, color 0.15s, box-shadow 0.15s',
+                textDecoration: 'none',
+                marginTop: 4,
+                color: isActive ? '#f1f5f9' : '#64748b',
+                background: isActive
+                  ? 'linear-gradient(135deg, rgba(59,130,246,0.18) 0%, rgba(59,130,246,0.08) 100%)'
+                  : 'transparent',
+                boxShadow: isActive
+                  ? '0 0 0 1px rgba(59,130,246,0.30), 0 2px 12px -4px rgba(59,130,246,0.30)'
+                  : 'none',
+              })}
+            >
+              {({ isActive }) => (
+                <>
+                  <span
+                    style={{
+                      width: 30,
+                      height: 30,
+                      borderRadius: 8,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      flexShrink: 0,
+                      background: isActive
+                        ? 'linear-gradient(135deg, rgba(59,130,246,0.30) 0%, rgba(59,130,246,0.18) 100%)'
+                        : 'rgba(255,255,255,0.04)',
+                      border: isActive
+                        ? '1px solid rgba(59,130,246,0.40)'
+                        : '1px solid rgba(255,255,255,0.06)',
+                      color: isActive ? '#60a5fa' : '#475569',
+                      transition: 'background 0.15s, border-color 0.15s, color 0.15s',
+                    }}
+                  >
+                    {/* Magnifying glass + phone composite icon */}
+                    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.7} style={{ width: 16, height: 16 }}>
+                      <circle cx="8.5" cy="8.5" r="5" />
+                      <path d="m13 13 3.5 3.5" strokeLinecap="round" />
+                      <path d="M6.5 7.5c.5-.8 1.3-1 2-1" strokeLinecap="round" />
+                    </svg>
+                  </span>
+                  <span style={{ flex: 1 }}>DID Lookup</span>
+                  {isActive && (
+                    <span
+                      style={{
+                        width: 5,
+                        height: 5,
+                        borderRadius: '50%',
+                        background: '#3b82f6',
+                        flexShrink: 0,
+                        boxShadow: '0 0 6px #3b82f6',
+                      }}
+                    />
+                  )}
+                </>
+              )}
+            </NavLink>
+          )}
+
           {/* Troubleshooting — admins and support only */}
           {(isAdmin || user?.role === 'readonly') && <NavLink
             to="/troubleshooting"
