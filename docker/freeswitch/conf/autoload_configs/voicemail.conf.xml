@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  mod_voicemail Configuration - UCaaS Voicemail System
+  Provides voicemail storage, retrieval, and MWI notifications.
+
+  Storage:
+  - Local filesystem at /var/lib/freeswitch/voicemail/
+  - Messages stored as WAV files, one directory per mailbox
+  - In production, consider shared storage (NFS/S3) for HA
+
+  Feature Codes (defined in dialplan):
+  - *97: Check voicemail (own mailbox)
+  - Unanswered calls to extensions auto-forward to voicemail after 30s
+
+  MWI (Message Waiting Indicator):
+  - Enabled: SIP phones show voicemail lamp/indicator
+  - Requires SUBSCRIBE/NOTIFY support on the SIP phone
+-->
+<configuration name="voicemail.conf" description="Voicemail Configuration">
+  <settings>
+    <!-- No global settings needed; profile-level config below -->
+  </settings>
+
+  <profiles>
+    <profile name="default">
+      <param name="file-extension" value="wav"/>
+      <param name="terminator-key" value="#"/>
+      <param name="max-login-attempts" value="3"/>
+      <param name="digit-timeout" value="10000"/>
+      <param name="min-record-len" value="3"/>
+
+      <!-- Message limits -->
+      <param name="max-record-len" value="300"/>
+      <param name="max-retries" value="3"/>
+
+      <!-- Greeting and notification settings -->
+      <param name="tone-spec" value="%(1000, 0, 640)"/>
+      <param name="callback-dialplan" value="XML"/>
+      <param name="callback-context" value="default"/>
+
+      <!-- Playback: announce message count on login -->
+      <param name="play-new-messages-key" value="1"/>
+      <param name="play-saved-messages-key" value="2"/>
+
+      <!-- Operator extension for pressing 0 during greeting -->
+      <param name="operator-extension" value="operator"/>
+      <param name="operator-key" value="0"/>
+
+      <!-- MWI (Message Waiting Indicator) -->
+      <!-- Sends SIP NOTIFY to registered phones when new messages arrive -->
+      <param name="notify-mailto" value=""/>
+
+      <!-- Storage location -->
+      <param name="storage-dir" value="/var/lib/freeswitch/voicemail/"/>
+
+      <!-- Recording settings -->
+      <param name="record-silence-threshold" value="200"/>
+      <param name="record-silence-hits" value="2"/>
+
+      <!-- Email notifications disabled for local testing -->
+      <!-- In production, configure SMTP for voicemail-to-email -->
+      <param name="email-from" value=""/>
+
+    </profile>
+  </profiles>
+</configuration>

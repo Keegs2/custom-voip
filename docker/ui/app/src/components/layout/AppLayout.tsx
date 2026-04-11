@@ -1,5 +1,6 @@
 import { Outlet } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
+import { SoftphoneWidget } from '../softphone/SoftphoneWidget';
 
 export function AppLayout() {
   return (
@@ -18,6 +19,9 @@ export function AppLayout() {
           <Outlet />
         </div>
       </main>
+
+      {/* Softphone overlay — always present when authenticated and extension exists */}
+      <SoftphoneWidget />
     </div>
   );
 }

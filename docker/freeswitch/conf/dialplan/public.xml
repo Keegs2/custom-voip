@@ -34,17 +34,67 @@
   <context name="default">
 
     <!-- Local extension dialing (1001, 1002, 1003, etc.) -->
+    <!-- On no answer after 30 seconds, transfer to voicemail deposit -->
     <extension name="local_extension">
       <condition field="destination_number" expression="^(10[0-9]{2})$">
         <action application="log" data="INFO Local extension call: ${caller_id_number} -> $1"/>
         <action application="set" data="hangup_after_bridge=true"/>
         <action application="set" data="call_timeout=30"/>
         <action application="set" data="continue_on_fail=true"/>
+        <!-- Set the dialed extension for voicemail fallback -->
+        <action application="set" data="dialed_extension=$1"/>
         <!-- Ring the called extension -->
         <action application="bridge" data="user/$1@$${domain}"/>
-        <!-- If no answer or not registered -->
-        <action application="log" data="INFO Extension $1 unavailable"/>
-        <action application="hangup" data="USER_NOT_REGISTERED"/>
+        <!-- If no answer, busy, or not registered: send to voicemail -->
+        <action application="log" data="INFO Extension $1 unavailable, sending to voicemail"/>
+        <action application="answer"/>
+        <action application="sleep" data="1000"/>
+        <action application="voicemail" data="default $${domain} ${dialed_extension}"/>
+      </condition>
+    </extension>
+
+    <!-- ============================================ -->
+    <!-- VOICEMAIL CHECK (*97)                       -->
+    <!-- ============================================ -->
+    <!-- Registered users dial *97 to check their own voicemail -->
+    <extension name="voicemail_check">
+      <condition field="destination_number" expression="^\*97$">
+        <action application="log" data="INFO Voicemail check: ${caller_id_number}"/>
+        <action application="answer"/>
+        <action application="sleep" data="1000"/>
+        <action application="voicemail" data="check default $${domain} ${caller_id_number}"/>
+      </condition>
+    </extension>
+
+    <!-- ============================================ -->
+    <!-- CONFERENCE ROOMS (*88XX)                    -->
+    <!-- ============================================ -->
+    <!-- Dial *8801 to join conference room 01, *8802 for room 02, etc. -->
+    <extension name="conference_room">
+      <condition field="destination_number" expression="^\*88(\d{2})$">
+        <action application="log" data="INFO Conference join: ${caller_id_number} -> room $1"/>
+        <action application="answer"/>
+        <action application="conference" data="room_$1@default"/>
+      </condition>
+    </extension>
+
+    <!-- ============================================ -->
+    <!-- VALET PARKING (*58XX park, *59XX retrieve)  -->
+    <!-- ============================================ -->
+    <!-- Dial *5801 to park a call in slot 01, *5901 to retrieve it -->
+    <extension name="valet_park">
+      <condition field="destination_number" expression="^\*58(\d{2})$">
+        <action application="log" data="INFO Valet park: ${caller_id_number} -> slot $1"/>
+        <action application="answer"/>
+        <action application="valet_park" data="valet_lot $1"/>
+      </condition>
+    </extension>
+
+    <extension name="valet_unpark">
+      <condition field="destination_number" expression="^\*59(\d{2})$">
+        <action application="log" data="INFO Valet retrieve: ${caller_id_number} -> slot $1"/>
+        <action application="answer"/>
+        <action application="valet_park" data="valet_lot $1"/>
       </condition>
     </extension>
 
@@ -188,11 +238,14 @@
         <action application="set" data="hangup_after_bridge=true"/>
         <action application="set" data="call_timeout=30"/>
         <action application="set" data="continue_on_fail=true"/>
+        <action application="set" data="dialed_extension=$1"/>
         <!-- Ring the called extension -->
         <action application="bridge" data="user/$1@$${domain}"/>
-        <!-- If no answer or not registered -->
-        <action application="log" data="INFO Extension $1 unavailable or not registered"/>
-        <action application="hangup" data="USER_NOT_REGISTERED"/>
+        <!-- If no answer, busy, or not registered: send to voicemail -->
+        <action application="log" data="INFO Extension $1 unavailable, sending to voicemail"/>
+        <action application="answer"/>
+        <action application="sleep" data="1000"/>
+        <action application="voicemail" data="default $${domain} ${dialed_extension}"/>
       </condition>
     </extension>
 

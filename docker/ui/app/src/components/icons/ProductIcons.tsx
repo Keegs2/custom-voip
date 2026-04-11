@@ -12,6 +12,7 @@ import {
   Settings,
   BarChart3,
   Wrench,
+  Voicemail,
 } from 'lucide-react';
 
 interface IconProps {
@@ -56,4 +57,9 @@ export function IconSignal({ size = 18 }: IconProps) {
 /** Troubleshooting — wrench */
 export function IconTroubleshoot({ size = 18 }: IconProps) {
   return <Wrench size={size} strokeWidth={1.6} />;
+}
+
+/** Voicemail */
+export function IconVoicemail({ size = 18 }: IconProps) {
+  return <Voicemail size={size} strokeWidth={1.6} />;
 }

@@ -2,6 +2,9 @@ import { useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { cn } from '../../utils/cn';
 import { useAuth } from '../../contexts/AuthContext';
+import { useSoftphone } from '../../contexts/SoftphoneContext';
+import { PresenceIndicator } from '../softphone/PresenceIndicator';
+import type { PresenceStatus } from '../../types/softphone';
 
 interface NavItem {
   label: string;
@@ -14,8 +17,16 @@ interface NavItem {
 
 import {
   IconRCF, IconTrunk, IconAPI, IconIVR, IconDocs,
-  IconAdmin, IconSignal, IconTroubleshoot,
+  IconAdmin, IconSignal, IconTroubleshoot, IconVoicemail,
 } from '../icons/ProductIcons';
+
+const PRESENCE_OPTIONS: { value: PresenceStatus; label: string; color: string }[] = [
+  { value: 'available', label: 'Available',      color: '#22c55e' },
+  { value: 'away',      label: 'Away',           color: '#f59e0b' },
+  { value: 'busy',      label: 'Busy',           color: '#ef4444' },
+  { value: 'dnd',       label: 'Do Not Disturb', color: '#ef4444' },
+  { value: 'offline',   label: 'Appear Offline', color: '#64748b' },
+];
 
 const IconSignOut = () => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} style={{ width: 14, height: 14 }}>
@@ -120,8 +131,10 @@ function SidebarNavItem({ item, onNavigate }: SidebarNavItemProps) {
 
 export function Sidebar() {
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [showPresenceMenu, setShowPresenceMenu] = useState(false);
   const navigate = useNavigate();
   const { user, isAdmin, logout } = useAuth();
+  const { presence, setPresence, unreadVoicemailCount, credentials } = useSoftphone();
 
   const handleBrandClick = () => {
     navigate('/');
@@ -345,6 +358,113 @@ export function Sidebar() {
               <SidebarNavItem key={item.to} item={item} onNavigate={closeMobile} />
             ))}
           </div>
+
+          {/* Voicemail — only shown to users with an extension */}
+          {credentials && (
+            <>
+              <div
+                style={{
+                  fontSize: '0.6rem',
+                  fontWeight: 700,
+                  color: '#334155',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.12em',
+                  padding: '0 14px',
+                  marginTop: 16,
+                  marginBottom: 8,
+                }}
+              >
+                Communications
+              </div>
+              <NavLink
+                to="/voicemail"
+                onClick={closeMobile}
+                className="block no-underline"
+                style={({ isActive }) => ({
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 10,
+                  padding: '9px 14px',
+                  borderRadius: 10,
+                  fontSize: '0.875rem',
+                  fontWeight: isActive ? 600 : 500,
+                  letterSpacing: '-0.01em',
+                  cursor: 'pointer',
+                  userSelect: 'none',
+                  transition: 'background 0.15s, color 0.15s, box-shadow 0.15s',
+                  textDecoration: 'none',
+                  color: isActive ? '#f1f5f9' : '#64748b',
+                  background: isActive
+                    ? 'linear-gradient(135deg, rgba(99,102,241,0.18) 0%, rgba(99,102,241,0.08) 100%)'
+                    : 'transparent',
+                  boxShadow: isActive
+                    ? '0 0 0 1px rgba(99,102,241,0.30), 0 2px 12px -4px rgba(99,102,241,0.30)'
+                    : 'none',
+                })}
+              >
+                {({ isActive }) => (
+                  <>
+                    <span
+                      style={{
+                        width: 30,
+                        height: 30,
+                        borderRadius: 8,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        flexShrink: 0,
+                        background: isActive
+                          ? 'linear-gradient(135deg, rgba(99,102,241,0.30) 0%, rgba(99,102,241,0.18) 100%)'
+                          : 'rgba(255,255,255,0.04)',
+                        border: isActive
+                          ? '1px solid rgba(99,102,241,0.40)'
+                          : '1px solid rgba(255,255,255,0.06)',
+                        color: isActive ? '#818cf8' : '#475569',
+                        transition: 'background 0.15s, border-color 0.15s, color 0.15s',
+                      }}
+                    >
+                      <IconVoicemail size={16} />
+                    </span>
+                    <span style={{ flex: 1 }}>Voicemail</span>
+                    {/* Unread badge */}
+                    {unreadVoicemailCount > 0 && (
+                      <span
+                        style={{
+                          minWidth: 18,
+                          height: 18,
+                          borderRadius: 9,
+                          background: '#ef4444',
+                          color: '#fff',
+                          fontSize: '0.6rem',
+                          fontWeight: 700,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          padding: '0 4px',
+                          flexShrink: 0,
+                          letterSpacing: '0.02em',
+                        }}
+                      >
+                        {unreadVoicemailCount > 99 ? '99+' : unreadVoicemailCount}
+                      </span>
+                    )}
+                    {isActive && unreadVoicemailCount === 0 && (
+                      <span
+                        style={{
+                          width: 5,
+                          height: 5,
+                          borderRadius: '50%',
+                          background: '#818cf8',
+                          flexShrink: 0,
+                          boxShadow: '0 0 6px #818cf8',
+                        }}
+                      />
+                    )}
+                  </>
+                )}
+              </NavLink>
+            </>
+          )}
         </nav>
 
         {/* Divider before footer */}
@@ -584,29 +704,105 @@ export function Sidebar() {
               borderRadius: 10,
               background: 'rgba(255,255,255,0.02)',
               border: '1px solid rgba(42,47,69,0.4)',
+              position: 'relative',
             }}
           >
-            {/* Avatar circle */}
-            <div
-              style={{
-                width: 30,
-                height: 30,
-                borderRadius: '50%',
-                background: 'linear-gradient(135deg, rgba(59,130,246,0.30) 0%, rgba(59,130,246,0.15) 100%)',
-                border: '1px solid rgba(59,130,246,0.3)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                flexShrink: 0,
-                fontSize: '0.7rem',
-                fontWeight: 700,
-                color: '#60a5fa',
-                letterSpacing: '0.02em',
-                textTransform: 'uppercase',
-              }}
-              aria-hidden="true"
-            >
-              {displayName.charAt(0) || '?'}
+            {/* Avatar circle with presence indicator overlay */}
+            <div style={{ position: 'relative', flexShrink: 0 }}>
+              <div
+                style={{
+                  width: 30,
+                  height: 30,
+                  borderRadius: '50%',
+                  background: 'linear-gradient(135deg, rgba(59,130,246,0.30) 0%, rgba(59,130,246,0.15) 100%)',
+                  border: '1px solid rgba(59,130,246,0.3)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '0.7rem',
+                  fontWeight: 700,
+                  color: '#60a5fa',
+                  letterSpacing: '0.02em',
+                  textTransform: 'uppercase',
+                }}
+                aria-hidden="true"
+              >
+                {displayName.charAt(0) || '?'}
+              </div>
+              {/* Presence dot — clickable when extension is active */}
+              {credentials ? (
+                <button
+                  type="button"
+                  onClick={() => setShowPresenceMenu((v) => !v)}
+                  aria-label="Change presence status"
+                  aria-haspopup="listbox"
+                  aria-expanded={showPresenceMenu}
+                  style={{
+                    position: 'absolute',
+                    bottom: -1,
+                    right: -1,
+                    background: 'transparent',
+                    border: 'none',
+                    padding: 0,
+                    cursor: 'pointer',
+                    display: 'flex',
+                  }}
+                >
+                  <PresenceIndicator status={presence} size={9} />
+                </button>
+              ) : null}
+
+              {/* Presence dropdown */}
+              {showPresenceMenu && credentials && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    bottom: 36,
+                    left: 0,
+                    background: '#1e2435',
+                    border: '1px solid rgba(255,255,255,0.10)',
+                    borderRadius: 10,
+                    boxShadow: '0 -8px 24px rgba(0,0,0,0.6)',
+                    zIndex: 200,
+                    minWidth: 164,
+                    overflow: 'hidden',
+                  }}
+                  role="listbox"
+                  aria-label="Presence status"
+                >
+                  {PRESENCE_OPTIONS.map((opt) => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      role="option"
+                      aria-selected={presence === opt.value}
+                      onClick={() => {
+                        void setPresence(opt.value);
+                        setShowPresenceMenu(false);
+                      }}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 8,
+                        width: '100%',
+                        padding: '8px 12px',
+                        background: presence === opt.value ? 'rgba(255,255,255,0.06)' : 'transparent',
+                        border: 'none',
+                        color: '#e2e8f0',
+                        fontSize: '0.8rem',
+                        cursor: 'pointer',
+                        textAlign: 'left',
+                        transition: 'background 0.12s',
+                      }}
+                      onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.08)'; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.background = presence === opt.value ? 'rgba(255,255,255,0.06)' : 'transparent'; }}
+                    >
+                      <span style={{ width: 8, height: 8, borderRadius: '50%', background: opt.color, flexShrink: 0 }} />
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* Name + email */}

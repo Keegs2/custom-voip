@@ -163,7 +163,13 @@ RUN sed -i 's|#applications/mod_commands|applications/mod_commands|' build/modul
     # Conferencing
     sed -i 's|#applications/mod_conference|applications/mod_conference|' build/modules.conf.in && \
     # DSP for DTMF/fax
-    sed -i 's|#applications/mod_spandsp|applications/mod_spandsp|' build/modules.conf.in
+    sed -i 's|#applications/mod_spandsp|applications/mod_spandsp|' build/modules.conf.in && \
+    # UCaaS Tier 1: WebRTC, voicemail, call center, parking, monitoring
+    sed -i 's|#endpoints/mod_verto|endpoints/mod_verto|' build/modules.conf.in && \
+    sed -i 's|#applications/mod_voicemail|applications/mod_voicemail|' build/modules.conf.in && \
+    sed -i 's|#applications/mod_callcenter|applications/mod_callcenter|' build/modules.conf.in && \
+    sed -i 's|#applications/mod_valet_parking|applications/mod_valet_parking|' build/modules.conf.in && \
+    sed -i 's|#applications/mod_spy|applications/mod_spy|' build/modules.conf.in
 
 # Bootstrap and configure FreeSWITCH
 RUN ./bootstrap.sh -j
@@ -250,12 +256,17 @@ COPY --from=builder /usr/lib/*sofia* /usr/lib/
 COPY --from=builder /usr/lib/*spandsp* /usr/lib/
 COPY --from=builder /usr/lib/*ks* /usr/lib/
 COPY --from=builder /usr/lib/*signalwire* /usr/lib/
-# Also copy from arch-specific lib dir (amd64 builds install here)
-RUN mkdir -p /usr/lib/x86_64-linux-gnu
-COPY --from=builder /usr/lib/x86_64-linux-gnu/*sofia* /usr/lib/x86_64-linux-gnu/
-COPY --from=builder /usr/lib/x86_64-linux-gnu/*spandsp* /usr/lib/x86_64-linux-gnu/
-COPY --from=builder /usr/lib/x86_64-linux-gnu/*ks* /usr/lib/x86_64-linux-gnu/
-COPY --from=builder /usr/lib/x86_64-linux-gnu/*signalwire* /usr/lib/x86_64-linux-gnu/
+# Arch-specific libs: copy from whatever arch dir exists in the builder
+# This handles both x86_64-linux-gnu and aarch64-linux-gnu
+RUN --mount=from=builder,source=/usr/lib,target=/tmp/builder-usr-lib \
+    ARCH_DIR=$(basename $(ls -d /tmp/builder-usr-lib/*-linux-gnu 2>/dev/null | head -1) 2>/dev/null) && \
+    if [ -n "$ARCH_DIR" ] && [ -d "/tmp/builder-usr-lib/$ARCH_DIR" ]; then \
+      mkdir -p /usr/lib/$ARCH_DIR && \
+      cp -a /tmp/builder-usr-lib/$ARCH_DIR/*sofia* /usr/lib/$ARCH_DIR/ 2>/dev/null; \
+      cp -a /tmp/builder-usr-lib/$ARCH_DIR/*spandsp* /usr/lib/$ARCH_DIR/ 2>/dev/null; \
+      cp -a /tmp/builder-usr-lib/$ARCH_DIR/*ks* /usr/lib/$ARCH_DIR/ 2>/dev/null; \
+      cp -a /tmp/builder-usr-lib/$ARCH_DIR/*signalwire* /usr/lib/$ARCH_DIR/ 2>/dev/null; \
+    fi; true
 
 # Copy Lua libraries from luarocks
 COPY --from=builder /usr/local/lib/lua /usr/local/lib/lua
@@ -269,6 +280,7 @@ RUN mkdir -p /var/log/freeswitch/cdr-csv \
     && mkdir -p /var/lib/freeswitch/recordings \
     && mkdir -p /var/lib/freeswitch/storage \
     && mkdir -p /var/lib/freeswitch/db \
+    && mkdir -p /var/lib/freeswitch/voicemail \
     && mkdir -p /usr/local/freeswitch/scripts/lib \
     && mkdir -p /usr/local/freeswitch/conf/tls \
     && mkdir -p /etc/freeswitch
@@ -290,6 +302,7 @@ RUN openssl req -x509 -newkey rsa:2048 \
     -days 365 -nodes \
     -subj "/C=US/ST=State/L=City/O=VoicePlatform/OU=FreeSWITCH/CN=fs.voiceplatform.local" && \
     cat /usr/local/freeswitch/conf/tls/agent.crt /usr/local/freeswitch/conf/tls/agent.key > /usr/local/freeswitch/conf/tls/agent.pem && \
+    cp /usr/local/freeswitch/conf/tls/agent.pem /usr/local/freeswitch/conf/tls/wss.pem && \
     chmod 600 /usr/local/freeswitch/conf/tls/*.key /usr/local/freeswitch/conf/tls/*.pem
 
 # Set Lua path environment variables for mod_lua to find libraries
@@ -302,6 +315,8 @@ EXPOSE 5060/udp 5060/tcp
 EXPOSE 5080/udp 5080/tcp
 EXPOSE 5081/tcp
 EXPOSE 5090/udp 5090/tcp
+# WebRTC (mod_verto WSS)
+EXPOSE 8082/tcp
 # Event Socket
 EXPOSE 8021/tcp
 # RTP media (must match rtp-start-port/rtp-end-port in switch.conf.xml

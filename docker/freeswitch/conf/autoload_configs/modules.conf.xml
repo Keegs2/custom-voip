@@ -156,10 +156,10 @@
     <!-- <load module="mod_odbc_query"/> -->
 
     <!-- ============================================ -->
-    <!-- VOICEMAIL (if needed)                       -->
+    <!-- VOICEMAIL                                   -->
     <!-- ============================================ -->
 
-    <!-- <load module="mod_voicemail"/> -->
+    <load module="mod_voicemail"/>
 
     <!-- ============================================ -->
     <!-- RECORDING                                   -->
@@ -182,7 +182,10 @@
     <!-- <load module="mod_av"/> -->
 
     <!-- WebRTC (Verto) -->
-    <!-- <load module="mod_verto"/> -->
+    <load module="mod_verto"/>
+
+    <!-- Call Parking -->
+    <load module="mod_valet_parking"/>
 
     <!-- ============================================ -->
     <!-- MONITORING                                  -->

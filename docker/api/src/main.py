@@ -4,14 +4,18 @@ Optimized for high-volume voice operations with async throughout
 """
 import orjson
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, ORJSONResponse
 from starlette.middleware.cors import CORSMiddleware
+import asyncio
 import logging
 
 from db.database import init_db, close_db
 from db.redis_client import init_redis, close_redis
-from routers import rcf, calls, trunks, cdrs, customers, health, tiers, api_dids, rates, ivr, carriers, auth
+from routers import (
+    rcf, calls, trunks, cdrs, customers, health, tiers, api_dids, rates,
+    ivr, carriers, auth, extensions, presence, voicemail, webrtc,
+)
 from middleware.auth import JWTAuthMiddleware
 
 # Configure logging
@@ -35,10 +39,19 @@ async def lifespan(app: FastAPI):
     await init_redis()
     logger.info("Redis connection initialized")
 
+    # Start background presence subscriber for WebSocket fanout
+    presence_task = asyncio.create_task(_presence_subscriber())
+    logger.info("Presence WebSocket subscriber started")
+
     yield
 
     # Cleanup
     logger.info("Shutting down...")
+    presence_task.cancel()
+    try:
+        await presence_task
+    except asyncio.CancelledError:
+        pass
     await close_db()
     await close_redis()
 
@@ -91,6 +104,10 @@ app.include_router(api_dids.router, prefix="/v1/api-dids", tags=["API DIDs"])
 app.include_router(rates.router, prefix="/v1/rates", tags=["Rates"])
 app.include_router(ivr.router, prefix="/v1/ivr", tags=["IVR Builder"])
 app.include_router(carriers.router, prefix="/v1/carriers", tags=["Carriers"])
+app.include_router(extensions.router, prefix="/v1/extensions", tags=["Extensions"])
+app.include_router(presence.router, prefix="/v1/presence", tags=["Presence"])
+app.include_router(voicemail.router, prefix="/v1/voicemail", tags=["Voicemail"])
+app.include_router(webrtc.router, prefix="/v1/webrtc", tags=["WebRTC"])
 
 # Backward-compatible routes (no /v1/ prefix) for testing
 app.include_router(customers.router, prefix="/customers", tags=["Customers"])
@@ -103,11 +120,134 @@ app.include_router(api_dids.router, prefix="/api-dids", tags=["API DIDs"])
 app.include_router(rates.router, prefix="/rates", tags=["Rates"])
 app.include_router(ivr.router, prefix="/ivr", tags=["IVR Builder"])
 app.include_router(carriers.router, prefix="/carriers", tags=["Carriers"])
+app.include_router(extensions.router, prefix="/extensions", tags=["Extensions"])
+app.include_router(presence.router, prefix="/presence", tags=["Presence"])
+app.include_router(voicemail.router, prefix="/voicemail", tags=["Voicemail"])
+app.include_router(webrtc.router, prefix="/webrtc", tags=["WebRTC"])
 
 
 @app.get("/")
 async def root():
     return {"message": "Voice Platform API", "version": "1.0.0"}
+
+
+# ---------------------------------------------------------------------------
+# WebSocket: Real-time presence updates
+# ---------------------------------------------------------------------------
+
+class PresenceConnectionManager:
+    """Manages WebSocket connections for presence pub/sub fanout.
+
+    Each connection is tagged with the user's customer_id so updates
+    are only sent to users within the same customer scope. Admin
+    connections (customer_id=None) receive all updates.
+    """
+
+    def __init__(self):
+        # Map of websocket -> {"customer_id": int|None, "user_id": int}
+        self.active: dict[WebSocket, dict] = {}
+
+    async def connect(self, websocket: WebSocket, user_info: dict):
+        await websocket.accept()
+        self.active[websocket] = user_info
+
+    def disconnect(self, websocket: WebSocket):
+        self.active.pop(websocket, None)
+
+    async def broadcast(self, message: dict):
+        """Send a presence update to all connections that should see it."""
+        source_customer_id = message.get("customer_id")
+        payload = orjson.dumps(message)
+
+        stale: list[WebSocket] = []
+        for ws, info in self.active.items():
+            # Admin (customer_id=None) sees everything;
+            # otherwise must match the source customer
+            if info["customer_id"] is not None and info["customer_id"] != source_customer_id:
+                continue
+            try:
+                await ws.send_bytes(payload)
+            except Exception:
+                stale.append(ws)
+
+        for ws in stale:
+            self.disconnect(ws)
+
+
+presence_manager = PresenceConnectionManager()
+
+
+async def _presence_subscriber():
+    """Background task: subscribe to Redis presence channel and fan out."""
+    from db.redis_client import get_client
+
+    while True:
+        try:
+            rc = await get_client()
+            pubsub = rc.pubsub()
+            await pubsub.subscribe("presence:updates")
+
+            async for msg in pubsub.listen():
+                if msg["type"] != "message":
+                    continue
+                try:
+                    data = orjson.loads(msg["data"])
+                    await presence_manager.broadcast(data)
+                except Exception:
+                    logging.getLogger(__name__).debug(
+                        "Failed to broadcast presence message", exc_info=True
+                    )
+
+        except asyncio.CancelledError:
+            break
+        except Exception:
+            logging.getLogger(__name__).warning(
+                "Presence subscriber reconnecting in 2s", exc_info=True
+            )
+            await asyncio.sleep(2)
+
+
+@app.websocket("/ws/presence")
+async def presence_websocket(websocket: WebSocket):
+    """Real-time presence updates over WebSocket.
+
+    Authentication: pass the JWT as a query parameter:
+        ws://host/ws/presence?token=<jwt>
+
+    After connecting, the server pushes presence change events as JSON:
+        {"user_id": 1, "status": "busy", "status_message": "In a meeting", ...}
+    """
+    from auth.security import decode_access_token
+    from jose import JWTError
+
+    token = websocket.query_params.get("token")
+    if not token:
+        await websocket.close(code=4001, reason="Missing token query parameter")
+        return
+
+    try:
+        claims = decode_access_token(token)
+    except JWTError:
+        await websocket.close(code=4003, reason="Invalid or expired token")
+        return
+
+    user_info = {
+        "user_id": int(claims["sub"]),
+        "customer_id": claims.get("customer_id"),  # None for admins
+    }
+    # Admins have customer_id=None which means "see everything"
+    if claims.get("role") == "admin":
+        user_info["customer_id"] = None
+
+    await presence_manager.connect(websocket, user_info)
+    try:
+        # Keep connection alive; client can send pings or text (ignored)
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    finally:
+        presence_manager.disconnect(websocket)
 
 
 # ---------------------------------------------------------------------------

@@ -37,6 +37,11 @@
             <params>
               <param name="password" value="test1234"/>
               <param name="vm-password" value="1001"/>
+              <param name="vm-enabled" value="true"/>
+              <param name="vm-email-all-messages" value="false"/>
+              <param name="vm-attach-file" value="true"/>
+              <param name="vm-mailto" value=""/>
+              <param name="vm-notify-mailto" value=""/>
             </params>
             <variables>
               <variable name="toll_allow" value="domestic,international,local"/>
@@ -58,6 +63,11 @@
             <params>
               <param name="password" value="test1234"/>
               <param name="vm-password" value="1002"/>
+              <param name="vm-enabled" value="true"/>
+              <param name="vm-email-all-messages" value="false"/>
+              <param name="vm-attach-file" value="true"/>
+              <param name="vm-mailto" value=""/>
+              <param name="vm-notify-mailto" value=""/>
             </params>
             <variables>
               <variable name="toll_allow" value="domestic,international,local"/>
@@ -79,6 +89,11 @@
             <params>
               <param name="password" value="test1234"/>
               <param name="vm-password" value="1003"/>
+              <param name="vm-enabled" value="true"/>
+              <param name="vm-email-all-messages" value="false"/>
+              <param name="vm-attach-file" value="true"/>
+              <param name="vm-mailto" value=""/>
+              <param name="vm-notify-mailto" value=""/>
             </params>
             <variables>
               <variable name="toll_allow" value="domestic,international,local"/>

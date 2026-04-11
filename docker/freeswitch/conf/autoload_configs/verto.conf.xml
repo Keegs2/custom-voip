@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  mod_verto Configuration - WebRTC Gateway
+  Provides WebSocket-based signaling for browser-based softphones.
+
+  Architecture:
+  - WSS on port 8082 (secure WebSocket over TLS)
+  - Uses self-signed certs from Dockerfile TLS generation
+  - Same user directory as SIP (extensions 1001-1003)
+  - Same default context as internal SIP profile
+
+  Security:
+  - All connections require digest authentication against the directory
+  - TLS is mandatory (WSS only, no plain WS)
+  - ICE candidates restricted via ACL
+
+  Codec Notes:
+  - Opus is the primary codec for WebRTC (required by browsers)
+  - PCMU/PCMA as fallback for interop with SIP endpoints
+-->
+<configuration name="verto.conf" description="Verto WebRTC Configuration">
+  <settings>
+    <!-- Enable debug logging during development -->
+    <param name="debug" value="0"/>
+  </settings>
+
+  <profiles>
+    <profile name="default-v4">
+      <!--
+        WSS bind address.
+        Format: IP:port for secure WebSocket.
+        The ~~ prefix denotes a secure (TLS) listener in mod_verto.
+      -->
+      <param name="bind-local" value="$${local_ip_v4}:8082" secure="true"/>
+
+      <!-- TLS certificate configuration -->
+      <!-- Combined PEM file: certificate + private key concatenated -->
+      <param name="secure-combined" value="/usr/local/freeswitch/conf/tls/wss.pem"/>
+      <!-- Chain file (same as cert for self-signed) -->
+      <param name="secure-chain" value="/usr/local/freeswitch/conf/tls/agent.crt"/>
+
+      <!-- Force all registrations to this domain for consistent directory lookups -->
+      <param name="force-register-domain" value="$${domain}"/>
+
+      <!-- Require user authentication from the directory -->
+      <param name="userauth" value="true"/>
+
+      <!-- Dialplan context: same as internal SIP profile for extension dialing -->
+      <param name="context" value="default"/>
+      <param name="dialplan" value="XML"/>
+
+      <!-- Timer for media handling -->
+      <param name="timer-name" value="soft"/>
+
+      <!-- RTP IP configuration -->
+      <!-- For local testing, bind RTP to local IP -->
+      <param name="rtp-ip" value="$${local_ip_v4}"/>
+      <!-- External RTP IP: same as local for dev; set to public IP in production -->
+      <param name="ext-rtp-ip" value="$${local_ip_v4}"/>
+
+      <!-- Codec preferences: opus first (WebRTC native), then G.711 for interop -->
+      <param name="outbound-codec-string" value="opus,PCMU,PCMA"/>
+      <param name="inbound-codec-string" value="opus,PCMU,PCMA"/>
+
+      <!-- ICE candidate ACL: controls which IP addresses are advertised as ICE candidates -->
+      <!-- rfc1918.auto includes all private ranges (10/8, 172.16/12, 192.168/16) -->
+      <!-- Suitable for local/LAN testing; in production use wan_v4.auto or specific IPs -->
+      <param name="apply-candidate-acl" value="rfc1918.auto"/>
+      <param name="apply-candidate-acl" value="wan_v4.auto"/>
+
+      <!-- Enable SRTP for WebRTC media (mandatory per WebRTC spec) -->
+      <param name="rtp-secure-media" value="true"/>
+
+    </profile>
+  </profiles>
+</configuration>
