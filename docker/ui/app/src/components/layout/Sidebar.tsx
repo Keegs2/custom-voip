@@ -797,6 +797,82 @@ export function Sidebar() {
             </NavLink>
           )}
 
+          {/* User Lookup — admins only */}
+          {isAdmin && (
+            <NavLink
+              to="/admin/user"
+              onClick={closeMobile}
+              className="block no-underline"
+              style={({ isActive }) => ({
+                display: 'flex',
+                alignItems: 'center',
+                gap: 10,
+                padding: '9px 14px',
+                borderRadius: 10,
+                fontSize: '0.875rem',
+                fontWeight: isActive ? 600 : 500,
+                letterSpacing: '-0.01em',
+                cursor: 'pointer',
+                userSelect: 'none',
+                transition: 'background 0.15s, color 0.15s, box-shadow 0.15s',
+                textDecoration: 'none',
+                marginTop: 4,
+                color: isActive ? '#f1f5f9' : '#64748b',
+                background: isActive
+                  ? 'linear-gradient(135deg, rgba(168,85,247,0.18) 0%, rgba(168,85,247,0.08) 100%)'
+                  : 'transparent',
+                boxShadow: isActive
+                  ? '0 0 0 1px rgba(168,85,247,0.30), 0 2px 12px -4px rgba(168,85,247,0.30)'
+                  : 'none',
+              })}
+            >
+              {({ isActive }) => (
+                <>
+                  <span
+                    style={{
+                      width: 30,
+                      height: 30,
+                      borderRadius: 8,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      flexShrink: 0,
+                      background: isActive
+                        ? 'linear-gradient(135deg, rgba(168,85,247,0.30) 0%, rgba(168,85,247,0.18) 100%)'
+                        : 'rgba(255,255,255,0.04)',
+                      border: isActive
+                        ? '1px solid rgba(168,85,247,0.40)'
+                        : '1px solid rgba(255,255,255,0.06)',
+                      color: isActive ? '#c084fc' : '#475569',
+                      transition: 'background 0.15s, border-color 0.15s, color 0.15s',
+                    }}
+                  >
+                    {/* Person + magnifying glass icon */}
+                    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.7} style={{ width: 16, height: 16 }}>
+                      <circle cx="8" cy="6" r="3.5" />
+                      <path d="M2 17c0-3 2.5-5 6-5" strokeLinecap="round" />
+                      <circle cx="14.5" cy="14.5" r="3" />
+                      <path d="m17.5 17.5 1.5 1.5" strokeLinecap="round" />
+                    </svg>
+                  </span>
+                  <span style={{ flex: 1 }}>User Lookup</span>
+                  {isActive && (
+                    <span
+                      style={{
+                        width: 5,
+                        height: 5,
+                        borderRadius: '50%',
+                        background: '#a855f7',
+                        flexShrink: 0,
+                        boxShadow: '0 0 6px #a855f7',
+                      }}
+                    />
+                  )}
+                </>
+              )}
+            </NavLink>
+          )}
+
           {/* Troubleshooting — admins and support only */}
           {(isAdmin || user?.role === 'readonly') && <NavLink
             to="/troubleshooting"

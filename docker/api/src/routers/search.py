@@ -1,4 +1,5 @@
-"""Global DID Search — admin support tool for finding any DID across all products."""
+"""Admin search tools — DID search, user search, and User 360 diagnostic view."""
+import asyncio
 import re
 import orjson
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -199,4 +200,273 @@ async def did_call_history(
         "did": canonical,
         "calls": [dict(r) for r in rows],
         "count": len(rows),
+    }
+
+
+# ---------------------------------------------------------------------------
+# User Search — find users by name, email, or extension number
+# ---------------------------------------------------------------------------
+
+@router.get("/user")
+async def search_users(
+    q: str = Query(..., min_length=1, description="Search by name, email, or extension"),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    admin: dict = Depends(require_admin),
+):
+    """Search users by name, email, or extension number.
+
+    Returns basic user info with extension and customer context for each match.
+    """
+    like_pattern = f"%{q}%"
+
+    search_sql = """
+    WITH matched AS (
+        SELECT DISTINCT ON (u.id)
+            u.id,
+            u.name,
+            u.email,
+            u.customer_id,
+            c.name                  AS customer_name,
+            e.extension,
+            e.assigned_did,
+            ps.status               AS presence_status
+        FROM users u
+        LEFT JOIN customers c       ON c.id = u.customer_id
+        LEFT JOIN extensions e      ON e.user_id = u.id AND e.status = 'active'
+        LEFT JOIN presence_status ps ON ps.user_id = u.id
+        WHERE u.name ILIKE $1
+           OR u.email ILIKE $1
+           OR e.extension = $2
+    )
+    SELECT *, COUNT(*) OVER() AS _total
+    FROM matched
+    ORDER BY name
+    LIMIT $3 OFFSET $4
+    """
+
+    # For extension search, pass the raw query (exact match on extension).
+    # For name/email, the ILIKE handles partial matching.
+    rows = await db.fetch_all(search_sql, like_pattern, q, limit, offset)
+
+    total = int(rows[0]["_total"]) if rows else 0
+
+    results = []
+    for r in rows:
+        results.append({
+            "id": r["id"],
+            "name": r["name"],
+            "email": r["email"],
+            "customer_id": r["customer_id"],
+            "customer_name": r["customer_name"],
+            "extension": r["extension"],
+            "assigned_did": r["assigned_did"],
+            "presence_status": r["presence_status"],
+        })
+
+    return {"results": results, "total": total}
+
+
+# ---------------------------------------------------------------------------
+# User 360 View — comprehensive diagnostic dashboard for a single user
+# ---------------------------------------------------------------------------
+
+@router.get("/user/{user_id}/360")
+async def user_360_view(
+    user_id: int,
+    admin: dict = Depends(require_admin),
+):
+    """Return everything about a user in one request for admin troubleshooting.
+
+    Runs all queries in parallel via asyncio.gather for performance.
+    Includes: user info, extension, presence, voicemail counts, chat counts,
+    recent calls, and registered devices.
+    """
+
+    # -- 1. User info (with customer join) ------------------------------------
+    async def fetch_user():
+        return await db.fetch_one("""
+            SELECT
+                u.id,
+                u.name,
+                u.email,
+                u.role,
+                u.customer_id,
+                c.name          AS customer_name,
+                c.account_type,
+                c.ucaas_enabled,
+                u.status,
+                u.created_at,
+                u.last_login
+            FROM users u
+            LEFT JOIN customers c ON c.id = u.customer_id
+            WHERE u.id = $1
+        """, user_id)
+
+    # -- 2. Extension ---------------------------------------------------------
+    async def fetch_extension():
+        return await db.fetch_one("""
+            SELECT
+                id,
+                extension,
+                assigned_did,
+                display_name,
+                voicemail_enabled,
+                dnd,
+                forward_on_busy,
+                forward_on_no_answer,
+                forward_timeout,
+                status
+            FROM extensions
+            WHERE user_id = $1 AND status = 'active'
+        """, user_id)
+
+    # -- 3. Presence ----------------------------------------------------------
+    async def fetch_presence():
+        return await db.fetch_one("""
+            SELECT status, status_message, updated_at
+            FROM presence_status
+            WHERE user_id = $1
+        """, user_id)
+
+    # -- 4. Voicemail counts --------------------------------------------------
+    async def fetch_voicemail(ext_id_future):
+        ext = await ext_id_future
+        if not ext:
+            return {"total": 0, "unread": 0}
+        ext_id = ext["id"]
+        row = await db.fetch_one("""
+            SELECT
+                COUNT(*)                             AS total,
+                COUNT(*) FILTER (WHERE NOT is_read)  AS unread
+            FROM voicemails
+            WHERE extension_id = $1
+        """, ext_id)
+        return {"total": int(row["total"]), "unread": int(row["unread"])} if row else {"total": 0, "unread": 0}
+
+    # -- 5. Chat counts -------------------------------------------------------
+    async def fetch_chat():
+        row = await db.fetch_one("""
+            SELECT
+                COUNT(DISTINCT cp.conversation_id)  AS total_conversations,
+                COALESCE(SUM(
+                    CASE WHEN cm.id > COALESCE(cp.last_read_message_id, 0)
+                         THEN 1 ELSE 0
+                    END
+                ), 0)                               AS unread_messages
+            FROM chat_participants cp
+            LEFT JOIN chat_messages cm
+                ON cm.conversation_id = cp.conversation_id
+               AND cm.sender_id != cp.user_id
+               AND cm.deleted_at IS NULL
+            WHERE cp.user_id = $1
+        """, user_id)
+        return {
+            "total_conversations": int(row["total_conversations"]) if row else 0,
+            "unread_messages": int(row["unread_messages"]) if row else 0,
+        }
+
+    # -- 6. Recent calls (needs extension + DID) ------------------------------
+    async def fetch_recent_calls(ext_future):
+        ext = await ext_future
+        if not ext:
+            return []
+        # Match on extension number OR assigned DID
+        identifiers = [ext["extension"]]
+        if ext.get("assigned_did"):
+            identifiers.append(ext["assigned_did"])
+
+        rows = await db.fetch_all("""
+            SELECT
+                uuid,
+                direction,
+                caller_id,
+                destination,
+                duration_ms,
+                hangup_cause,
+                start_time,
+                answer_time
+            FROM cdrs
+            WHERE caller_id = ANY($1) OR destination = ANY($1)
+            ORDER BY start_time DESC
+            LIMIT 20
+        """, identifiers)
+        return [dict(r) for r in rows]
+
+    # -- 7. Devices -----------------------------------------------------------
+    async def fetch_devices():
+        rows = await db.fetch_all("""
+            SELECT
+                id,
+                device_type,
+                device_name,
+                user_agent,
+                registered_at,
+                last_seen,
+                status
+            FROM user_devices
+            WHERE user_id = $1
+            ORDER BY last_seen DESC NULLS LAST
+        """, user_id)
+        return [dict(r) for r in rows]
+
+    # -- Run independent queries in parallel ----------------------------------
+    # Extension is fetched first since voicemail and calls depend on it.
+    # We use an asyncio.Event-like pattern with a shared future.
+    ext_task = asyncio.ensure_future(fetch_extension())
+
+    user_row, _, presence_row, voicemail_data, chat_data, recent_calls, devices = (
+        await asyncio.gather(
+            fetch_user(),
+            ext_task,             # also awaited here to propagate exceptions
+            fetch_presence(),
+            fetch_voicemail(ext_task),
+            fetch_chat(),
+            fetch_recent_calls(ext_task),
+            fetch_devices(),
+        )
+    )
+
+    # -- Validate the user exists ---------------------------------------------
+    if not user_row:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    ext_row = ext_task.result()
+
+    # -- Assemble response ----------------------------------------------------
+    return {
+        "user": {
+            "id": user_row["id"],
+            "name": user_row["name"],
+            "email": user_row["email"],
+            "role": user_row["role"],
+            "customer_id": user_row["customer_id"],
+            "customer_name": user_row["customer_name"],
+            "account_type": user_row["account_type"],
+            "ucaas_enabled": user_row["ucaas_enabled"],
+            "status": user_row["status"],
+            "created_at": user_row["created_at"],
+            "last_login": user_row["last_login"],
+        },
+        "extension": {
+            "id": ext_row["id"],
+            "extension": ext_row["extension"],
+            "assigned_did": ext_row["assigned_did"],
+            "display_name": ext_row["display_name"],
+            "voicemail_enabled": ext_row["voicemail_enabled"],
+            "dnd": ext_row["dnd"],
+            "forward_on_busy": ext_row["forward_on_busy"],
+            "forward_on_no_answer": ext_row["forward_on_no_answer"],
+            "forward_timeout": ext_row["forward_timeout"],
+            "status": ext_row["status"],
+        } if ext_row else None,
+        "presence": {
+            "status": presence_row["status"],
+            "status_message": presence_row["status_message"],
+            "updated_at": presence_row["updated_at"],
+        } if presence_row else None,
+        "voicemail": voicemail_data,
+        "chat": chat_data,
+        "recent_calls": recent_calls,
+        "devices": devices,
     }

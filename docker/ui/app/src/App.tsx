@@ -24,6 +24,7 @@ import { SippAdminPage } from './pages/admin/SippAdminPage';
 // Homer moved to standalone Troubleshooting page
 import { TrunksAdminPage } from './pages/admin/TrunksAdminPage';
 import { DIDSearchPage } from './pages/admin/DIDSearchPage';
+import { UserDetailPage } from './pages/admin/UserDetailPage';
 import { CallQualityPage } from './pages/CallQualityPage';
 import { VoicemailPage } from './pages/VoicemailPage';
 import { ChatPage } from './pages/ChatPage';
@@ -63,6 +64,24 @@ export function App() {
               element={
                 <RequireAdmin>
                   <DIDSearchPage />
+                </RequireAdmin>
+              }
+            />
+
+            {/* User 360 View — admin-only support tool */}
+            <Route
+              path="admin/user/:userId"
+              element={
+                <RequireAdmin>
+                  <UserDetailPage />
+                </RequireAdmin>
+              }
+            />
+            <Route
+              path="admin/user"
+              element={
+                <RequireAdmin>
+                  <UserDetailPage />
                 </RequireAdmin>
               }
             />
