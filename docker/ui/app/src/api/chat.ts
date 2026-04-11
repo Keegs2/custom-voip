@@ -81,7 +81,7 @@ export async function deleteMessage(conversationId: number, messageId: number): 
  * Mark all messages in a conversation as read for the current user.
  */
 export async function markConversationRead(conversationId: number): Promise<void> {
-  return apiRequest<void>('POST', `/chat/conversations/${conversationId}/read`);
+  return apiRequest<void>('PUT', `/chat/conversations/${conversationId}/read`);
 }
 
 /**

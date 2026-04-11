@@ -86,8 +86,12 @@ async def _verify_participant(conversation_id: int, user_id: int) -> dict:
     return dict(row)
 
 
-async def _verify_conversation_customer(conversation_id: int, customer_id: int) -> dict:
-    """Verify the conversation belongs to the user's customer. Returns row."""
+async def _verify_conversation_customer(conversation_id: int, customer_id: int, user_id: int) -> dict:
+    """Verify the conversation belongs to the user's customer. Returns row.
+
+    For admin users (customer_id is None), customer_id check is skipped and
+    access is granted based on participant membership instead.
+    """
     row = await db.fetch_one(
         "SELECT id, customer_id, type, name, created_by, created_at, updated_at "
         "FROM chat_conversations WHERE id = $1",
@@ -95,7 +99,10 @@ async def _verify_conversation_customer(conversation_id: int, customer_id: int) 
     )
     if not row:
         raise HTTPException(status_code=404, detail="Conversation not found")
-    if row["customer_id"] != customer_id:
+    if customer_id is None:
+        # Admin: verify via participant membership instead of customer_id
+        await _verify_participant(conversation_id, user_id)
+    elif row["customer_id"] != customer_id:
         raise HTTPException(status_code=404, detail="Conversation not found")
     return dict(row)
 
@@ -121,8 +128,13 @@ async def list_conversations(user: dict = Depends(get_current_user)):
     user_id = int(user["sub"])
     customer_id = user.get("customer_id")
 
+    # Build query: admins see all conversations they participate in (no
+    # customer_id filter); regular users are additionally scoped to their tenant.
+    customer_filter = "AND c.customer_id = $2" if customer_id is not None else ""
+    query_params = [user_id, customer_id] if customer_id is not None else [user_id]
+
     rows = await db.fetch_all(
-        """
+        f"""
         SELECT
             c.id,
             c.type,
@@ -170,11 +182,10 @@ async def list_conversations(user: dict = Depends(get_current_user)):
               AND m.id > COALESCE(cp.last_read_message_id, 0)
         ) unread ON true
         WHERE cp.user_id = $1
-          AND c.customer_id = $2
+          {customer_filter}
         ORDER BY c.updated_at DESC
         """,
-        user_id,
-        customer_id,
+        *query_params,
     )
     results = []
     for r in rows:
@@ -196,10 +207,21 @@ async def create_conversation(body: CreateConversation, user: dict = Depends(get
     user_id = int(user["sub"])
     customer_id = user.get("customer_id")
 
-    if customer_id is None:
-        raise HTTPException(status_code=400, detail="Admin accounts cannot create conversations; customer_id required")
-
     participant_ids = list(set(body.participant_user_ids))
+
+    # Admin users (customer_id is None): derive customer_id from the first
+    # participant so the conversation gets a valid tenant association.
+    if customer_id is None:
+        first_participant = await db.fetch_one(
+            "SELECT customer_id FROM users WHERE id = $1",
+            participant_ids[0],
+        )
+        if not first_participant or first_participant["customer_id"] is None:
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot derive customer_id: first participant has no customer",
+            )
+        customer_id = first_participant["customer_id"]
 
     # For direct conversations, enforce exactly one other participant
     if body.type == "direct":
@@ -284,8 +306,10 @@ async def get_conversation(conversation_id: int, user: dict = Depends(get_curren
     user_id = int(user["sub"])
     customer_id = user.get("customer_id")
 
-    conv = await _verify_conversation_customer(conversation_id, customer_id)
-    await _verify_participant(conversation_id, user_id)
+    conv = await _verify_conversation_customer(conversation_id, customer_id, user_id)
+    # For non-admin users, still verify participant membership explicitly
+    if customer_id is not None:
+        await _verify_participant(conversation_id, user_id)
 
     # Fetch participants with user info
     participants = await db.fetch_all(
@@ -310,7 +334,7 @@ async def delete_conversation(conversation_id: int, user: dict = Depends(get_cur
     user_id = int(user["sub"])
     customer_id = user.get("customer_id")
 
-    await _verify_conversation_customer(conversation_id, customer_id)
+    await _verify_conversation_customer(conversation_id, customer_id, user_id)
     part = await _verify_participant(conversation_id, user_id)
 
     if part["role"] != "owner":
@@ -339,8 +363,9 @@ async def list_messages(
     user_id = int(user["sub"])
     customer_id = user.get("customer_id")
 
-    await _verify_conversation_customer(conversation_id, customer_id)
-    await _verify_participant(conversation_id, user_id)
+    await _verify_conversation_customer(conversation_id, customer_id, user_id)
+    if customer_id is not None:
+        await _verify_participant(conversation_id, user_id)
 
     query = """
         SELECT m.id, m.conversation_id, m.sender_id, m.content,
@@ -384,8 +409,9 @@ async def send_message(
     user_id = int(user["sub"])
     customer_id = user.get("customer_id")
 
-    await _verify_conversation_customer(conversation_id, customer_id)
-    await _verify_participant(conversation_id, user_id)
+    await _verify_conversation_customer(conversation_id, customer_id, user_id)
+    if customer_id is not None:
+        await _verify_participant(conversation_id, user_id)
 
     now = datetime.now(timezone.utc)
 
@@ -443,8 +469,9 @@ async def edit_message(
     user_id = int(user["sub"])
     customer_id = user.get("customer_id")
 
-    await _verify_conversation_customer(conversation_id, customer_id)
-    await _verify_participant(conversation_id, user_id)
+    await _verify_conversation_customer(conversation_id, customer_id, user_id)
+    if customer_id is not None:
+        await _verify_participant(conversation_id, user_id)
 
     msg = await db.fetch_one(
         "SELECT id, sender_id, deleted_at FROM chat_messages WHERE id = $1 AND conversation_id = $2",
@@ -494,7 +521,7 @@ async def delete_message(
     user_id = int(user["sub"])
     customer_id = user.get("customer_id")
 
-    await _verify_conversation_customer(conversation_id, customer_id)
+    await _verify_conversation_customer(conversation_id, customer_id, user_id)
     part = await _verify_participant(conversation_id, user_id)
 
     msg = await db.fetch_one(
@@ -540,8 +567,9 @@ async def mark_read(conversation_id: int, user: dict = Depends(get_current_user)
     user_id = int(user["sub"])
     customer_id = user.get("customer_id")
 
-    await _verify_conversation_customer(conversation_id, customer_id)
-    await _verify_participant(conversation_id, user_id)
+    await _verify_conversation_customer(conversation_id, customer_id, user_id)
+    if customer_id is not None:
+        await _verify_participant(conversation_id, user_id)
 
     now = datetime.now(timezone.utc)
 
@@ -591,8 +619,9 @@ async def typing_indicator(conversation_id: int, user: dict = Depends(get_curren
     user_id = int(user["sub"])
     customer_id = user.get("customer_id")
 
-    await _verify_conversation_customer(conversation_id, customer_id)
-    await _verify_participant(conversation_id, user_id)
+    await _verify_conversation_customer(conversation_id, customer_id, user_id)
+    if customer_id is not None:
+        await _verify_participant(conversation_id, user_id)
 
     try:
         rc = await get_client()
@@ -671,16 +700,17 @@ async def upload_file(
     user_id = int(user["sub"])
     customer_id = user.get("customer_id")
 
-    if customer_id is None:
-        raise HTTPException(status_code=400, detail="customer_id required")
+    conv = await _verify_conversation_customer(conversation_id, customer_id, user_id)
+    if customer_id is not None:
+        await _verify_participant(conversation_id, user_id)
 
-    await _verify_conversation_customer(conversation_id, customer_id)
-    await _verify_participant(conversation_id, user_id)
+    # For storage path, use the conversation's customer_id (always non-null)
+    storage_customer_id = conv["customer_id"]
 
     # Build storage path
     file_uuid = uuid.uuid4().hex
     safe_filename = file.filename or "upload"
-    storage_dir = os.path.join(UPLOAD_ROOT, str(customer_id))
+    storage_dir = os.path.join(UPLOAD_ROOT, str(storage_customer_id))
     os.makedirs(storage_dir, exist_ok=True)
     stored_name = f"{file_uuid}_{safe_filename}"
     storage_path = os.path.join(storage_dir, stored_name)
