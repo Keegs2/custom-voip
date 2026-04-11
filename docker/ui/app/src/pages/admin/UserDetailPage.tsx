@@ -744,7 +744,7 @@ interface StatusGridProps {
 }
 
 function StatusGrid({ data }: StatusGridProps) {
-  const { recent_calls, voicemail, chat, devices, extension, user } = data;
+  const { recent_calls, voicemail, chat, devices, extension } = data;
 
   // Derive call stats
   const now = Date.now();
