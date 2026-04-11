@@ -2,6 +2,11 @@
 <!--
   Conference Video Layouts - Required for video-mode="mux" in conference.conf.xml
 
+  CRITICAL: This file MUST be wrapped in a <configuration> element to be loaded
+  by FreeSWITCH's autoload_configs mechanism. Without this wrapper, the layouts
+  are silently ignored and video-layout-name="group:grid" resolves to nothing,
+  causing conference video initialization to fail.
+
   These layouts define how participant video streams are composited onto the
   shared canvas. The "group:grid" layout-name in the video conference profile
   auto-selects the best layout based on participant count.
@@ -15,87 +20,83 @@
   Reserved coordinates:
     floor="true": marks the active speaker's slot (highlighted)
     overlap="true": allows overlap for PiP-style layouts
-
-  To re-enable video conferencing:
-    1. Ensure this file is loaded (check: conference_layouts list in fs_cli)
-    2. Change @default back to @video in public.xml conference extensions
-    3. Verify VP8 codec negotiation works end-to-end with Verto clients
-    4. Test with 2+ participants to validate mux compositing
 -->
-<layout-settings>
-  <layouts>
+<configuration name="conference_layouts.conf" description="Conference Video Layouts">
+  <layout-settings>
+    <layouts>
 
-    <!-- Single participant: full canvas -->
-    <layout name="1up_top" auto-3d-position="true">
-      <image x="0" y="0" scale="720" reservation_id="presenter" />
-    </layout>
+      <!-- Single participant: full canvas -->
+      <layout name="1up_top" auto-3d-position="true">
+        <image x="0" y="0" scale="720" reservation_id="presenter" />
+      </layout>
 
-    <!-- Two participants: side by side -->
-    <layout name="2up" auto-3d-position="true">
-      <image x="0" y="90" scale="360" />
-      <image x="360" y="90" scale="360" />
-    </layout>
+      <!-- Two participants: side by side -->
+      <layout name="2up" auto-3d-position="true">
+        <image x="0" y="90" scale="360" />
+        <image x="360" y="90" scale="360" />
+      </layout>
 
-    <!-- Three participants: one on top, two on bottom -->
-    <layout name="3up" auto-3d-position="true">
-      <image x="180" y="0" scale="360" />
-      <image x="0" y="180" scale="360" />
-      <image x="360" y="180" scale="360" />
-    </layout>
+      <!-- Three participants: one on top, two on bottom -->
+      <layout name="3up" auto-3d-position="true">
+        <image x="180" y="0" scale="360" />
+        <image x="0" y="180" scale="360" />
+        <image x="360" y="180" scale="360" />
+      </layout>
 
-    <!-- Four participants: 2x2 grid -->
-    <layout name="4up" auto-3d-position="true">
-      <image x="0" y="0" scale="360" />
-      <image x="360" y="0" scale="360" />
-      <image x="0" y="180" scale="360" />
-      <image x="360" y="180" scale="360" />
-    </layout>
+      <!-- Four participants: 2x2 grid -->
+      <layout name="4up" auto-3d-position="true">
+        <image x="0" y="0" scale="360" />
+        <image x="360" y="0" scale="360" />
+        <image x="0" y="180" scale="360" />
+        <image x="360" y="180" scale="360" />
+      </layout>
 
-    <!-- Six participants: 3x2 grid -->
-    <layout name="6up" auto-3d-position="true">
-      <image x="0" y="0" scale="240" />
-      <image x="240" y="0" scale="240" />
-      <image x="480" y="0" scale="240" />
-      <image x="0" y="180" scale="240" />
-      <image x="240" y="180" scale="240" />
-      <image x="480" y="180" scale="240" />
-    </layout>
+      <!-- Six participants: 3x2 grid -->
+      <layout name="6up" auto-3d-position="true">
+        <image x="0" y="0" scale="240" />
+        <image x="240" y="0" scale="240" />
+        <image x="480" y="0" scale="240" />
+        <image x="0" y="180" scale="240" />
+        <image x="240" y="180" scale="240" />
+        <image x="480" y="180" scale="240" />
+      </layout>
 
-    <!-- Nine participants: 3x3 grid -->
-    <layout name="9up" auto-3d-position="true">
-      <image x="0" y="0" scale="240" />
-      <image x="240" y="0" scale="240" />
-      <image x="480" y="0" scale="240" />
-      <image x="0" y="120" scale="240" />
-      <image x="240" y="120" scale="240" />
-      <image x="480" y="120" scale="240" />
-      <image x="0" y="240" scale="240" />
-      <image x="240" y="240" scale="240" />
-      <image x="480" y="240" scale="240" />
-    </layout>
+      <!-- Nine participants: 3x3 grid -->
+      <layout name="9up" auto-3d-position="true">
+        <image x="0" y="0" scale="240" />
+        <image x="240" y="0" scale="240" />
+        <image x="480" y="0" scale="240" />
+        <image x="0" y="120" scale="240" />
+        <image x="240" y="120" scale="240" />
+        <image x="480" y="120" scale="240" />
+        <image x="0" y="240" scale="240" />
+        <image x="240" y="240" scale="240" />
+        <image x="480" y="240" scale="240" />
+      </layout>
 
-    <!-- Presenter + gallery: large active speaker with 4 small thumbnails -->
-    <layout name="presenter" auto-3d-position="true">
-      <image x="0" y="0" scale="540" reservation_id="presenter" floor="true" />
-      <image x="540" y="0" scale="180" />
-      <image x="540" y="90" scale="180" />
-      <image x="540" y="180" scale="180" />
-      <image x="540" y="270" scale="180" />
-    </layout>
+      <!-- Presenter + gallery: large active speaker with 4 small thumbnails -->
+      <layout name="presenter" auto-3d-position="true">
+        <image x="0" y="0" scale="540" reservation_id="presenter" floor="true" />
+        <image x="540" y="0" scale="180" />
+        <image x="540" y="90" scale="180" />
+        <image x="540" y="180" scale="180" />
+        <image x="540" y="270" scale="180" />
+      </layout>
 
-  </layouts>
+    </layouts>
 
-  <!-- Layout group: auto-selects layout based on participant count -->
-  <!-- This is referenced by video-layout-name="group:grid" in conference.conf.xml -->
-  <groups>
-    <group name="grid">
-      <layout name="1up_top" body-only="true" />
-      <layout name="2up" body-only="true" />
-      <layout name="3up" body-only="true" />
-      <layout name="4up" body-only="true" />
-      <layout name="6up" body-only="true" />
-      <layout name="9up" body-only="true" />
-    </group>
-  </groups>
+    <!-- Layout group: auto-selects layout based on participant count -->
+    <!-- This is referenced by video-layout-name="group:grid" in conference.conf.xml -->
+    <groups>
+      <group name="grid">
+        <layout name="1up_top" body-only="true" />
+        <layout name="2up" body-only="true" />
+        <layout name="3up" body-only="true" />
+        <layout name="4up" body-only="true" />
+        <layout name="6up" body-only="true" />
+        <layout name="9up" body-only="true" />
+      </group>
+    </groups>
 
-</layout-settings>
+  </layout-settings>
+</configuration>

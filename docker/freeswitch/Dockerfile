@@ -164,6 +164,10 @@ RUN sed -i 's|#applications/mod_commands|applications/mod_commands|' build/modul
     sed -i 's|#applications/mod_conference|applications/mod_conference|' build/modules.conf.in && \
     # DSP for DTMF/fax
     sed -i 's|#applications/mod_spandsp|applications/mod_spandsp|' build/modules.conf.in && \
+    # Video support: mod_av provides VP8/H264 codec support via ffmpeg/libav
+    # Required for conference video-mode=mux (server-side compositing)
+    # mod_av is under formats/ in the FreeSWITCH source tree
+    sed -i 's|#formats/mod_av|formats/mod_av|' build/modules.conf.in && \
     # UCaaS Tier 1: WebRTC, voicemail, call center, parking, monitoring
     sed -i 's|#endpoints/mod_verto|endpoints/mod_verto|' build/modules.conf.in && \
     sed -i 's|#endpoints/mod_rtc|endpoints/mod_rtc|' build/modules.conf.in && \

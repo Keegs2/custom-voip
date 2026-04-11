@@ -337,7 +337,16 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
     const client = clientRef.current;
     if (!client) throw new Error('Softphone not connected');
 
-    const call = await client.makeCall(destination, options);
+    let call: ActiveCall;
+    try {
+      call = await client.makeCall(destination, options);
+    } catch (err) {
+      // The VertoClient already cleaned up the session internally.
+      // Make sure the UI doesn't show a stuck call.
+      setActiveCall(null);
+      throw err;
+    }
+
     setActiveCall(call);
     setIsExpanded(true);
   }, []);

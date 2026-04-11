@@ -178,8 +178,10 @@
     <!-- SIP REFER handling -->
     <!-- <load module="mod_sofia" data="refer"/> --> <!-- Built into mod_sofia -->
 
-    <!-- Video transcoding (requires GPU) -->
-    <!-- <load module="mod_av"/> -->
+    <!-- Video support: VP8/H264 codec via ffmpeg/libav -->
+    <!-- Required for conference video-mode=mux (server-side compositing) -->
+    <!-- Does NOT require GPU — CPU-based VP8 encode/decode via libvpx/libavcodec -->
+    <load module="mod_av"/>
 
     <!-- WebRTC (Verto signaling + RTC endpoint) -->
     <load module="mod_rtc"/>

@@ -98,10 +98,10 @@
         These are completely separate conferences.
 
       Video:
-        Currently using "default" (audio-only) profile. The "video" profile
-        requires conference_layouts.conf.xml with layout definitions for mux
-        mode. Switch to @video once layouts are configured and VP8 canvas
-        is validated with Verto/WebRTC clients.
+        Using the "video" profile with VP8 mux compositing. The conference
+        app handles answering the Verto channel internally. Do NOT add an
+        explicit answer app before the conference app, as it blocks forever
+        on Verto/WebRTC channels waiting for ICE that never completes.
 
       PIN protection:
         If a PIN is provided in the dial string, the conference application's
@@ -125,37 +125,29 @@
         <action application="log" data="INFO Conference tenant: conf_domain=${conf_domain} conf_customer_id=${conf_customer_id}"/>
 
         <!--
-          Verto/WebRTC media setup — CRITICAL for conference calls.
+          Verto/WebRTC video conference — DO NOT use explicit answer before conference.
 
-          Problem: When a Verto client dials a conference, the answer app sends
-          an SDP answer back to the browser. If the Verto profile advertises VP8
-          but the conference is audio-only, the SDP answer can include a rejected
-          video m-line (port 0) or mismatched video parameters. Some WebRTC stacks
-          fail setRemoteDescription() on this malformed answer, leaving the call
-          stuck in EARLY state forever (ICE never starts).
+          The conference application handles answering the channel internally. For
+          Verto/WebRTC channels, the explicit answer app sends verto.media with an
+          SDP answer and then BLOCKS waiting for ICE completion. If the conference
+          video canvas is not yet initialized (first participant), the SDP answer
+          may be incomplete or the video negotiation may fail, causing answer to
+          block forever (channel stuck in EARLY state).
 
-          Fix: Force audio-only codec negotiation before answer so the SDP answer
-          contains only an audio m-line with opus. Also set media_webrtc=true so
-          FreeSWITCH applies WebRTC-specific SDP munging (a]candidates, fingerprint,
-          etc.) and rtp_secure_media=true to ensure DTLS-SRTP (mandatory for WebRTC).
+          The conference app answers the channel as part of adding the member. It
+          handles the full SDP negotiation including video m-lines correctly because
+          it knows the conference's codec requirements at answer time. This avoids
+          the blocking answer problem entirely.
+
+          video-mode=mux in the @video profile composites all participant video
+          streams into a single canvas using VP8. Requires:
+          - mod_av loaded (VP8 decode/encode for canvas compositing)
+          - conference_layouts.conf.xml properly formatted and loaded
+          - VP8 in the Verto profile codec string (already configured)
         -->
-        <action application="set" data="media_webrtc=true"/>
-        <action application="set" data="rtp_secure_media=true"/>
-        <!-- Strip video from codec negotiation: audio-only conference must not
-             include VP8 in the SDP answer or the WebRTC stack may choke -->
-        <action application="export" data="nolocal:absolute_codec_string=opus,PCMU,PCMA"/>
-        <action application="set" data="rtp_has_video=false"/>
 
-        <!-- Answer the call - for Verto/WebRTC this sends verto.answer with SDP
-             back to the browser. The browser calls setRemoteDescription() and ICE
-             begins. Channel transitions EARLY -> ACTIVE once ICE completes. -->
-        <action application="answer"/>
-        <action application="sleep" data="500"/>
-
-        <!-- Join audio conference with PIN protection -->
-        <!-- Using default (audio-only) profile: video mux requires conference_layouts.conf.xml -->
-        <!-- TODO: Switch back to @video once video layouts and VP8 canvas are validated -->
-        <action application="conference" data="room_${conf_customer_id}_$1+$2@default"/>
+        <!-- Join video conference with PIN protection -->
+        <action application="conference" data="room_${conf_customer_id}_$1+$2@video"/>
       </condition>
     </extension>
 
@@ -171,23 +163,13 @@
         <action application="log" data="INFO Conference tenant: conf_domain=${conf_domain} conf_customer_id=${conf_customer_id}"/>
 
         <!--
-          Verto/WebRTC media setup — see conference_room_pin for full explanation.
-          Force audio-only negotiation so the SDP answer is clean for WebRTC clients.
+          Verto/WebRTC video conference — see conference_room_pin for full explanation.
+          DO NOT use explicit answer before conference. The conference app handles
+          answering internally, which avoids the Verto answer blocking issue.
         -->
-        <action application="set" data="media_webrtc=true"/>
-        <action application="set" data="rtp_secure_media=true"/>
-        <action application="export" data="nolocal:absolute_codec_string=opus,PCMU,PCMA"/>
-        <action application="set" data="rtp_has_video=false"/>
 
-        <!-- Answer the call - for Verto/WebRTC this sends verto.answer with SDP
-             back to the browser. Channel transitions EARLY -> ACTIVE once ICE completes. -->
-        <action application="answer"/>
-        <action application="sleep" data="500"/>
-
-        <!-- Join audio conference (no PIN) -->
-        <!-- Using default (audio-only) profile: video mux requires conference_layouts.conf.xml -->
-        <!-- TODO: Switch back to @video once video layouts and VP8 canvas are validated -->
-        <action application="conference" data="room_${conf_customer_id}_$1@default"/>
+        <!-- Join video conference (no PIN) -->
+        <action application="conference" data="room_${conf_customer_id}_$1@video"/>
       </condition>
     </extension>
 

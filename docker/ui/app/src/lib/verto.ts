@@ -95,7 +95,8 @@ export type StreamChangeHandler = (
 ) => void;
 
 /* ─── RPC timeout (ms) ───────────────────────────────────── */
-const RPC_TIMEOUT_MS = 15_000;
+// verto.invite needs extra time for ICE gathering + FS processing
+const RPC_TIMEOUT_MS = 30_000;
 
 /* ─── Reconnect back-off ─────────────────────────────────── */
 const RECONNECT_DELAYS_MS = [1_000, 2_000, 5_000, 10_000, 30_000];
@@ -184,6 +185,7 @@ export class VertoClient {
   /* ─── Authentication ───────────────────────────────────── */
 
   async login(): Promise<boolean> {
+    console.log(`[Verto] login → ${this.config.login}`);
     try {
       await this.sendRpc('login', {
         login: this.config.login,
@@ -191,9 +193,11 @@ export class VertoClient {
         sessid: this.sessId,
       });
       this.isLoggedIn = true;
+      console.log(`[Verto] login succeeded for ${this.config.login}`);
       this.onRegistered();
       return true;
     } catch (err) {
+      console.error(`[Verto] login failed for ${this.config.login}:`, err);
       this.onError(err instanceof Error ? err : new Error(String(err)));
       return false;
     }
@@ -210,12 +214,24 @@ export class VertoClient {
     const callId = generateUUID();
     const isVideo = options?.video === true;
 
-    const localStream = await this.acquireMedia(isVideo);
+    console.log(`[Verto] makeCall → ${destination} (video=${isVideo}, callId=${callId})`);
+
+    const localStream = await this.acquireMedia(isVideo).catch((err: unknown) => {
+      console.error('[Verto] Failed to acquire local media:', err);
+      throw err;
+    });
 
     const pc = this.createPeerConnection(callId);
     const remoteStream = new MediaStream();
     pc.ontrack = (ev) => {
-      ev.streams[0]?.getTracks().forEach((track) => remoteStream.addTrack(track));
+      const stream = ev.streams[0];
+      if (stream) {
+        stream.getTracks().forEach((track) => remoteStream.addTrack(track));
+      } else {
+        // Some browsers don't include streams; add the track directly
+        remoteStream.addTrack(ev.track);
+      }
+      console.log(`[Verto] ontrack: kind=${ev.track.kind} streamTracks=${remoteStream.getTracks().length}`);
       this.playRemoteAudio(callId, remoteStream);
       this.onStreamChange(callId, 'remote', remoteStream);
     };
@@ -230,6 +246,10 @@ export class VertoClient {
 
     // Wait for ICE gathering to complete before sending the SDP
     const sdp = await this.gatherIceCandidates(pc);
+
+    const audioLines = sdp.match(/^m=audio.*/m)?.[0] ?? 'none';
+    const videoLines = sdp.match(/^m=video.*/m)?.[0] ?? 'none';
+    console.log(`[Verto] SDP offer ready — audio: ${audioLines} | video: ${videoLines}`);
 
     const call: ActiveCall = {
       id: callId,
@@ -260,16 +280,27 @@ export class VertoClient {
 
     const [callerNumber, callerName] = this.parseLogin();
 
-    await this.sendRpc('verto.invite', {
-      dialogParams: {
-        callID: callId,
-        destination_number: destination,
-        caller_id_number: callerNumber,
-        caller_id_name: callerName,
-        login: this.config.login,
-      } satisfies VertoDialogParams,
-      sdp,
-    });
+    try {
+      console.log(`[Verto] Sending verto.invite for callId=${callId}`);
+      await this.sendRpc('verto.invite', {
+        dialogParams: {
+          callID: callId,
+          destination_number: destination,
+          caller_id_number: callerNumber,
+          caller_id_name: callerName,
+          login: this.config.login,
+        } satisfies VertoDialogParams,
+        sdp,
+      });
+      console.log(`[Verto] verto.invite acknowledged by FS for callId=${callId}`);
+    } catch (err) {
+      // FS rejected the invite or the RPC timed out — clean up and propagate
+      console.error(`[Verto] verto.invite failed for callId=${callId}:`, err);
+      this.cleanupSession(callId);
+      this.sessions.delete(callId);
+      this.onCallStateChange(callId, 'ended');
+      throw err;
+    }
 
     this.updateCallState(callId, 'ringing');
     return call;
@@ -521,6 +552,12 @@ export class VertoClient {
   private handleServerEvent(msg: JsonRpcRequest): void {
     const params = msg.params ?? {};
 
+    // Log all server-pushed events so we can trace the call lifecycle
+    if (msg.method !== 'verto.event') {
+      const callID = (params['dialogParams'] as VertoDialogParams | undefined)?.callID ?? 'n/a';
+      console.log(`[Verto] ← server event: ${msg.method} (callId=${callID})`);
+    }
+
     switch (msg.method) {
       case 'verto.invite': {
         // Incoming call from FreeSWITCH
@@ -529,8 +566,8 @@ export class VertoClient {
       }
       case 'verto.answer': {
         // Remote party answered our outbound call
-        this.handleRemoteAnswer(params).catch((err) => {
-          console.error('[Verto] Failed to process verto.answer SDP:', err);
+        this.handleRemoteAnswer(params, 'verto.answer').catch((err) => {
+          console.error('[Verto] Failed to process verto.answer:', err);
           this.onError(err instanceof Error ? err : new Error(String(err)));
         });
         break;
@@ -538,6 +575,7 @@ export class VertoClient {
       case 'verto.bye': {
         const dp = params['dialogParams'] as VertoDialogParams | undefined;
         if (dp?.callID) {
+          console.log(`[Verto] verto.bye received — callId=${dp.callID}`);
           this.cleanupSession(dp.callID);
           this.updateCallState(dp.callID, 'ended');
           setTimeout(() => this.sessions.delete(dp.callID), 500);
@@ -545,9 +583,11 @@ export class VertoClient {
         break;
       }
       case 'verto.media': {
-        // Early media — update SDP if a new one is provided
-        this.handleRemoteAnswer(params).catch((err) => {
-          console.error('[Verto] Failed to process verto.media SDP:', err);
+        // Early media from FS — carries an SDP answer so we can set up the media path
+        // before the far end formally answers. For conferences, this is the primary
+        // path: FS sends verto.media with the SDP answer, then verto.answer to confirm.
+        this.handleRemoteAnswer(params, 'verto.media').catch((err) => {
+          console.error('[Verto] Failed to process verto.media:', err);
           this.onError(err instanceof Error ? err : new Error(String(err)));
         });
         break;
@@ -605,22 +645,68 @@ export class VertoClient {
     this.onIncomingCall(call);
   }
 
-  private async handleRemoteAnswer(params: Record<string, unknown>): Promise<void> {
+  private async handleRemoteAnswer(params: Record<string, unknown>, eventName: string): Promise<void> {
     const dp = params['dialogParams'] as VertoDialogParams | undefined;
     const remoteSdp = params['sdp'] as string | undefined;
 
-    if (!dp?.callID || !remoteSdp) return;
+    if (!dp?.callID) {
+      console.warn(`[Verto] ${eventName} received without callID`);
+      return;
+    }
 
     const session = this.sessions.get(dp.callID);
-    if (!session) return;
+    if (!session) {
+      console.warn(`[Verto] ${eventName} for unknown callId=${dp.callID} (session not found)`);
+      return;
+    }
 
     const { peerConnection: pc } = session;
 
-    // Only apply if we're in the right signaling state
+    console.log(
+      `[Verto] ${eventName} received — callId=${dp.callID}` +
+      ` signalingState=${pc.signalingState}` +
+      ` iceConnectionState=${pc.iceConnectionState}` +
+      ` hasSDP=${Boolean(remoteSdp)}`,
+    );
+
+    if (!remoteSdp) {
+      // Some early-media notifications carry no SDP (just a state change signal).
+      // Treat this as a ringing confirmation — the actual SDP answer comes later.
+      console.log(`[Verto] ${eventName} has no SDP — treating as ringing confirmation`);
+      return;
+    }
+
+    // Log the remote SDP m-lines so we can see what FS is sending back
+    const remoteAudio = remoteSdp.match(/^m=audio.*/m)?.[0] ?? 'none';
+    const remoteVideo = remoteSdp.match(/^m=video.*/m)?.[0] ?? 'none';
+    console.log(`[Verto] Remote SDP — audio: ${remoteAudio} | video: ${remoteVideo}`);
+
     if (pc.signalingState === 'have-local-offer') {
-      await pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp: remoteSdp }));
-      this.updateCallState(dp.callID, 'active');
-      session.call.startTime = new Date();
+      // Normal path: we have our offer pending, apply the answer
+      try {
+        await pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp: remoteSdp }));
+        console.log(`[Verto] setRemoteDescription succeeded for callId=${dp.callID}`);
+        this.updateCallState(dp.callID, 'active');
+        session.call.startTime = new Date();
+      } catch (err) {
+        console.error(`[Verto] setRemoteDescription failed for callId=${dp.callID}:`, err);
+        // SDP negotiation failed — tear down the call so the UI doesn't hang
+        this.hangupCall(dp.callID);
+        throw err;
+      }
+    } else if (pc.signalingState === 'stable') {
+      // verto.answer sometimes arrives after verto.media already moved us to 'stable'.
+      // The SDP is already applied — just ensure the call is marked active.
+      console.log(`[Verto] ${eventName} received in 'stable' state — SDP already applied, ensuring active state`);
+      if (session.call.state !== 'active') {
+        this.updateCallState(dp.callID, 'active');
+        session.call.startTime = new Date();
+      }
+    } else {
+      console.warn(
+        `[Verto] ${eventName} received in unexpected signalingState=${pc.signalingState}` +
+        ` for callId=${dp.callID} — skipping setRemoteDescription`,
+      );
     }
   }
 
@@ -716,34 +802,55 @@ export class VertoClient {
     });
 
     pc.oniceconnectionstatechange = () => {
+      console.log(`[Verto] ICE state → ${pc.iceConnectionState} (callId=${callId})`);
       const session = this.sessions.get(callId);
       if (!session) return;
 
       switch (pc.iceConnectionState) {
         case 'connected':
         case 'completed':
+          // ICE succeeded — if signaling already completed (stable) but the call
+          // state wasn't flipped to active yet (e.g. setRemoteDescription raced
+          // ahead of the state update), flip it now as a safety net.
           if (session.call.state !== 'active') {
+            console.log(`[Verto] ICE connected — promoting callId=${callId} to active`);
             this.updateCallState(callId, 'active');
+            if (!session.call.startTime) session.call.startTime = new Date();
           }
           break;
         case 'failed':
+          console.error(`[Verto] ICE failed for callId=${callId}`);
           this.onError(new Error(`ICE connection failed for call ${callId}`));
           this.hangupCall(callId);
           break;
         case 'disconnected':
           // May recover — wait for 'failed' before tearing down
+          console.warn(`[Verto] ICE disconnected for callId=${callId} — waiting for recovery`);
           break;
         default:
           break;
       }
     };
 
+    pc.onsignalingstatechange = () => {
+      console.log(`[Verto] Signaling state → ${pc.signalingState} (callId=${callId})`);
+    };
+
+    // Note: onicegatheringstatechange property is NOT set here because
+    // gatherIceCandidates() adds its own listener via addEventListener.
+    // Using addEventListener from both places avoids handler overwriting.
+    pc.addEventListener('icegatheringstatechange', () => {
+      console.log(`[Verto] ICE gathering → ${pc.iceGatheringState} (callId=${callId})`);
+    });
+
     return pc;
   }
 
   /**
    * Wait for ICE gathering to complete, then return the full SDP.
-   * Uses a promise with a 5s timeout fallback so we don't hang forever.
+   * Uses an event listener (not the property assignment) so it does not
+   * overwrite the diagnostic handler set in createPeerConnection.
+   * Falls back after 5 s so we never hang indefinitely.
    */
   private gatherIceCandidates(pc: RTCPeerConnection): Promise<string> {
     return new Promise((resolve) => {
@@ -753,15 +860,19 @@ export class VertoClient {
       }
 
       const timeout = setTimeout(() => {
+        console.warn('[Verto] ICE gathering timed out — using partial SDP');
         resolve(pc.localDescription?.sdp ?? '');
       }, 5_000);
 
-      pc.onicegatheringstatechange = () => {
+      const onStateChange = () => {
         if (pc.iceGatheringState === 'complete') {
           clearTimeout(timeout);
+          pc.removeEventListener('icegatheringstatechange', onStateChange);
           resolve(pc.localDescription!.sdp);
         }
       };
+
+      pc.addEventListener('icegatheringstatechange', onStateChange);
     });
   }
 

@@ -1613,8 +1613,17 @@ export function ConferencePage() {
   /* ── Join handler ────────────────────────────────────────── */
 
   const handleJoin = useCallback(async (conf: Conference) => {
+    // Ensure the conference is selected BEFORE dialing so that when the call
+    // transitions to 'active', isInConference is true and the overlay renders.
+    setSelectedId(conf.id);
+
     const dialCode = `*88${conf.room_number}`;
-    await makeCall(dialCode, { video: conf.video_enabled });
+    // Always dial audio-only to conferences. mod_conference does not negotiate
+    // video in SDP — sending a video offer causes FS to reject or ignore the
+    // video m-line (port=0), which can confuse some browsers' RTCPeerConnection
+    // state machines and stall the call. The conference UI handles video
+    // separately via the ConferenceRoom component when the feature is enabled.
+    await makeCall(dialCode, { video: false });
   }, [makeCall]);
 
   /* ── Created / deleted ───────────────────────────────────── */

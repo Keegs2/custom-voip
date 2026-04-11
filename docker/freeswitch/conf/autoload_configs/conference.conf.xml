@@ -83,7 +83,18 @@
       <param name="exit-sound" value="tone_stream://%(500,0,300,200,100,50,25)"/>
       <param name="max-members" value="50"/>
       <param name="comfort-noise" value="true"/>
-      <!-- Video settings -->
+      <!--
+        Video settings for VP8 mux compositing.
+        The conference composites all participant video streams into a single
+        canvas and sends it to each participant. Requires mod_av for VP8
+        encode/decode.
+
+        IMPORTANT: The conference app answers the Verto channel internally.
+        Do NOT add an explicit answer app in the dialplan before conference,
+        as it blocks forever on Verto/WebRTC channels (answer waits for ICE
+        completion, which requires the SDP answer, creating a deadlock when
+        the conference hasn't initialized the video canvas yet).
+      -->
       <param name="video-mode" value="mux"/>
       <param name="video-layout-name" value="group:grid"/>
       <param name="video-canvas-size" value="1920x1080"/>
@@ -91,6 +102,8 @@
       <param name="video-layout-bgcolor" value="#000000"/>
       <param name="video-codec-bandwidth" value="2mb"/>
       <param name="video-fps" value="30"/>
+      <!-- Auto-floor: automatically assign floor to active speaker for video focus -->
+      <param name="video-auto-floor" value="true"/>
     </profile>
   </profiles>
 </configuration>
