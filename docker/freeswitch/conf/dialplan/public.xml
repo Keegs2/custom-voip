@@ -119,15 +119,42 @@
       </condition>
     </extension>
 
-    <!-- Allow calling any DID (for testing outbound through RCF) -->
-    <!-- This transfers to public context which has Lua-based routing -->
+    <!-- ============================================ -->
+    <!-- OUTBOUND PSTN via Kamailio SBC / Bandwidth  -->
+    <!-- ============================================ -->
+    <!--
+      Verto/WebRTC users dial PSTN numbers. We normalize to E.164,
+      bridge through the external profile (public IP in SDP/Via/Contact)
+      to Kamailio SBC on 127.0.0.1:5060. X-Carrier header selects
+      the Bandwidth trunk: standard (Dallas) or premium (LA) failover.
+    -->
     <extension name="default_outbound">
-      <condition field="destination_number" expression="^(\+?1?\d{10,15})$">
-        <action application="log" data="INFO Outbound from registered user: ${caller_id_number} -> $1"/>
+      <!-- Match 10-digit, 11-digit (1+10), or +1 prefixed numbers -->
+      <condition field="destination_number" expression="^(\+?1?)(\d{10})$">
+        <action application="log" data="INFO PSTN outbound: ${caller_id_number} -> +1$2 (raw: $0)"/>
+
+        <!-- Normalize destination to E.164 -->
+        <action application="set" data="e164_dest=+1$2"/>
+
+        <!-- Call control settings -->
+        <action application="set" data="hangup_after_bridge=true"/>
+        <action application="set" data="continue_on_fail=true"/>
         <action application="set" data="direction=outbound"/>
-        <action application="set" data="is_local_test=true"/>
-        <!-- Transfer to public context where Lua handles routing -->
-        <action application="transfer" data="$1 XML public"/>
+        <action application="set" data="call_start_time=${strftime(%Y-%m-%d %H:%M:%S)}"/>
+
+        <!-- Primary: Bandwidth Dallas via Kamailio -->
+        <action application="set" data="sip_h_X-Carrier=standard"/>
+        <action application="bridge" data="sofia/external/${e164_dest}@127.0.0.1:5060"/>
+
+        <!-- Failover: Bandwidth LA via Kamailio -->
+        <action application="log" data="WARNING PSTN primary failed (${bridge_hangup_cause}), trying premium carrier"/>
+        <action application="set" data="sip_h_X-Carrier=premium"/>
+        <action application="bridge" data="sofia/external/${e164_dest}@127.0.0.1:5060"/>
+
+        <!-- Both carriers failed -->
+        <action application="log" data="ERR PSTN outbound failed on all carriers: ${caller_id_number} -> ${e164_dest} cause=${bridge_hangup_cause}"/>
+        <action application="playback" data="ivr/ivr-call_cannot_be_completed_as_dialed.wav"/>
+        <action application="hangup" data="NORMAL_TEMPORARY_FAILURE"/>
       </condition>
     </extension>
 

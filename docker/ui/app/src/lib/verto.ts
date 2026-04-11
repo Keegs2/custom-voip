@@ -55,6 +55,7 @@ interface VertoDialogParams {
   caller_id_name?: string;
   remote_caller_id_number?: string;
   remote_caller_id_name?: string;
+  login?: string;
 }
 
 interface VertoCallSession {
@@ -227,6 +228,7 @@ export class VertoClient {
         destination_number: destination,
         caller_id_number: callerNumber,
         caller_id_name: callerName,
+        login: this.config.login,
       } satisfies VertoDialogParams,
       sdp,
     });
@@ -252,7 +254,7 @@ export class VertoClient {
     const sdp = await this.gatherIceCandidates(pc);
 
     await this.sendRpc('verto.answer', {
-      dialogParams: { callID: callId } satisfies VertoDialogParams,
+      dialogParams: { callID: callId, login: this.config.login } satisfies VertoDialogParams,
       sdp,
     });
 
@@ -268,7 +270,7 @@ export class VertoClient {
 
     // Fire and forget — we still clean up locally regardless of ws state
     void this.sendRpc('verto.bye', {
-      dialogParams: { callID: callId } satisfies VertoDialogParams,
+      dialogParams: { callID: callId, login: this.config.login } satisfies VertoDialogParams,
     }).catch(() => undefined);
 
     this.cleanupSession(callId);
@@ -283,7 +285,7 @@ export class VertoClient {
     const session = this.sessions.get(callId);
     if (!session) return;
     void this.sendRpc('verto.modify', {
-      dialogParams: { callID: callId } satisfies VertoDialogParams,
+      dialogParams: { callID: callId, login: this.config.login } satisfies VertoDialogParams,
       action: 'hold',
     }).catch(() => undefined);
     session.call.held = true;
@@ -294,7 +296,7 @@ export class VertoClient {
     const session = this.sessions.get(callId);
     if (!session) return;
     void this.sendRpc('verto.modify', {
-      dialogParams: { callID: callId } satisfies VertoDialogParams,
+      dialogParams: { callID: callId, login: this.config.login } satisfies VertoDialogParams,
       action: 'unhold',
     }).catch(() => undefined);
     session.call.held = false;
@@ -336,7 +338,7 @@ export class VertoClient {
 
     // Out-of-band DTMF via verto.info
     void this.sendRpc('verto.info', {
-      dialogParams: { callID: callId } satisfies VertoDialogParams,
+      dialogParams: { callID: callId, login: this.config.login } satisfies VertoDialogParams,
       dtmf: digit,
     }).catch(() => undefined);
   }
@@ -529,7 +531,12 @@ export class VertoClient {
 
       this.pendingRpcs.set(id, { resolve, reject, timeoutHandle });
 
-      const message: JsonRpcRequest = { jsonrpc: '2.0', method, params, id };
+      // mod_verto requires sessid at the top-level params for all verto.* methods
+      const enrichedParams = method.startsWith('verto.')
+        ? { sessid: this.sessId, ...params }
+        : params;
+
+      const message: JsonRpcRequest = { jsonrpc: '2.0', method, params: enrichedParams, id };
       this.ws.send(JSON.stringify(message));
     });
   }
