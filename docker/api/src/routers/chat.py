@@ -209,19 +209,41 @@ async def create_conversation(body: CreateConversation, user: dict = Depends(get
 
     participant_ids = list(set(body.participant_user_ids))
 
-    # Admin users (customer_id is None): derive customer_id from the first
-    # participant so the conversation gets a valid tenant association.
-    if customer_id is None:
-        first_participant = await db.fetch_one(
-            "SELECT customer_id FROM users WHERE id = $1",
-            participant_ids[0],
-        )
-        if not first_participant or first_participant["customer_id"] is None:
+    # Validate all participants exist and belong to the same customer.
+    # This prevents cross-tenant conversation creation.
+    participant_rows = await db.fetch_all(
+        "SELECT id, customer_id FROM users WHERE id = ANY($1)",
+        participant_ids,
+    )
+    participant_customers = {r["id"]: r["customer_id"] for r in participant_rows}
+
+    for pid in participant_ids:
+        if pid not in participant_customers:
+            raise HTTPException(status_code=400, detail=f"User {pid} not found")
+
+    if customer_id is not None:
+        # Non-admin: all participants must belong to the caller's customer
+        for pid in participant_ids:
+            if participant_customers[pid] != customer_id:
+                raise HTTPException(
+                    status_code=403,
+                    detail="Cannot create conversation with users from other organizations",
+                )
+    else:
+        # Admin: derive customer_id from first participant, verify all share it
+        first_cust = participant_customers.get(participant_ids[0])
+        if not first_cust:
             raise HTTPException(
                 status_code=400,
                 detail="Cannot derive customer_id: first participant has no customer",
             )
-        customer_id = first_participant["customer_id"]
+        for pid in participant_ids:
+            if participant_customers[pid] != first_cust:
+                raise HTTPException(
+                    status_code=400,
+                    detail="All participants must belong to the same organization",
+                )
+        customer_id = first_cust
 
     # For direct conversations, enforce exactly one other participant
     if body.type == "direct":
