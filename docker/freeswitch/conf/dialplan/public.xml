@@ -124,7 +124,31 @@
         <action application="set" data="conf_customer_id=${conf_customer_id:-0}"/>
         <action application="log" data="INFO Conference tenant: conf_domain=${conf_domain} conf_customer_id=${conf_customer_id}"/>
 
-        <!-- Answer the call - for Verto/WebRTC this completes SDP negotiation -->
+        <!--
+          Verto/WebRTC media setup — CRITICAL for conference calls.
+
+          Problem: When a Verto client dials a conference, the answer app sends
+          an SDP answer back to the browser. If the Verto profile advertises VP8
+          but the conference is audio-only, the SDP answer can include a rejected
+          video m-line (port 0) or mismatched video parameters. Some WebRTC stacks
+          fail setRemoteDescription() on this malformed answer, leaving the call
+          stuck in EARLY state forever (ICE never starts).
+
+          Fix: Force audio-only codec negotiation before answer so the SDP answer
+          contains only an audio m-line with opus. Also set media_webrtc=true so
+          FreeSWITCH applies WebRTC-specific SDP munging (a]candidates, fingerprint,
+          etc.) and rtp_secure_media=true to ensure DTLS-SRTP (mandatory for WebRTC).
+        -->
+        <action application="set" data="media_webrtc=true"/>
+        <action application="set" data="rtp_secure_media=true"/>
+        <!-- Strip video from codec negotiation: audio-only conference must not
+             include VP8 in the SDP answer or the WebRTC stack may choke -->
+        <action application="export" data="nolocal:absolute_codec_string=opus,PCMU,PCMA"/>
+        <action application="set" data="rtp_has_video=false"/>
+
+        <!-- Answer the call - for Verto/WebRTC this sends verto.answer with SDP
+             back to the browser. The browser calls setRemoteDescription() and ICE
+             begins. Channel transitions EARLY -> ACTIVE once ICE completes. -->
         <action application="answer"/>
         <action application="sleep" data="500"/>
 
@@ -146,7 +170,17 @@
         <action application="set" data="conf_customer_id=${conf_customer_id:-0}"/>
         <action application="log" data="INFO Conference tenant: conf_domain=${conf_domain} conf_customer_id=${conf_customer_id}"/>
 
-        <!-- Answer the call - for Verto/WebRTC this completes SDP negotiation -->
+        <!--
+          Verto/WebRTC media setup — see conference_room_pin for full explanation.
+          Force audio-only negotiation so the SDP answer is clean for WebRTC clients.
+        -->
+        <action application="set" data="media_webrtc=true"/>
+        <action application="set" data="rtp_secure_media=true"/>
+        <action application="export" data="nolocal:absolute_codec_string=opus,PCMU,PCMA"/>
+        <action application="set" data="rtp_has_video=false"/>
+
+        <!-- Answer the call - for Verto/WebRTC this sends verto.answer with SDP
+             back to the browser. Channel transitions EARLY -> ACTIVE once ICE completes. -->
         <action application="answer"/>
         <action application="sleep" data="500"/>
 

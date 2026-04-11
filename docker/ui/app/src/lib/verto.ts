@@ -529,7 +529,10 @@ export class VertoClient {
       }
       case 'verto.answer': {
         // Remote party answered our outbound call
-        void this.handleRemoteAnswer(params);
+        this.handleRemoteAnswer(params).catch((err) => {
+          console.error('[Verto] Failed to process verto.answer SDP:', err);
+          this.onError(err instanceof Error ? err : new Error(String(err)));
+        });
         break;
       }
       case 'verto.bye': {
@@ -543,7 +546,10 @@ export class VertoClient {
       }
       case 'verto.media': {
         // Early media — update SDP if a new one is provided
-        void this.handleRemoteAnswer(params);
+        this.handleRemoteAnswer(params).catch((err) => {
+          console.error('[Verto] Failed to process verto.media SDP:', err);
+          this.onError(err instanceof Error ? err : new Error(String(err)));
+        });
         break;
       }
       case 'verto.event': {
