@@ -90,7 +90,7 @@ function VideoTile({ member, isModerator, onKick, onMute }: VideoTileProps) {
             boxShadow: '0 4px 16px rgba(59,130,246,0.4)',
           }}
         >
-          {member.name.charAt(0).toUpperCase()}
+          {(member.name || '?').charAt(0).toUpperCase()}
         </div>
       </div>
 
@@ -123,7 +123,7 @@ function VideoTile({ member, isModerator, onKick, onMute }: VideoTileProps) {
         }}
       >
         <span style={{ flex: 1, fontSize: '0.78rem', fontWeight: 600, color: '#e2e8f0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {member.name}
+          {member.name || 'Unknown'}
         </span>
         {member.muted && (
           <MicOff size={12} color="#ef4444" />
@@ -437,12 +437,12 @@ function ParticipantSidebar({ members, isModerator, onKick: _onKick, onMute, onC
                   transition: 'border-color 0.2s',
                 }}
               >
-                {m.name.charAt(0).toUpperCase()}
+                {(m.name || '?').charAt(0).toUpperCase()}
               </div>
 
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: '0.8rem', fontWeight: 600, color: '#e2e8f0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {m.name}
+                  {m.name || 'Unknown'}
                 </div>
                 {m.talking && (
                   <div style={{ fontSize: '0.68rem', color: '#22c55e', fontWeight: 500 }}>
