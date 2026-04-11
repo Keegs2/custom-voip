@@ -181,7 +181,8 @@
     <!-- Video transcoding (requires GPU) -->
     <!-- <load module="mod_av"/> -->
 
-    <!-- WebRTC (Verto) -->
+    <!-- WebRTC (Verto signaling + RTC endpoint) -->
+    <load module="mod_rtc"/>
     <load module="mod_verto"/>
 
     <!-- Call Parking -->

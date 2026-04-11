@@ -166,6 +166,7 @@ RUN sed -i 's|#applications/mod_commands|applications/mod_commands|' build/modul
     sed -i 's|#applications/mod_spandsp|applications/mod_spandsp|' build/modules.conf.in && \
     # UCaaS Tier 1: WebRTC, voicemail, call center, parking, monitoring
     sed -i 's|#endpoints/mod_verto|endpoints/mod_verto|' build/modules.conf.in && \
+    sed -i 's|#endpoints/mod_rtc|endpoints/mod_rtc|' build/modules.conf.in && \
     sed -i 's|#applications/mod_voicemail|applications/mod_voicemail|' build/modules.conf.in && \
     sed -i 's|#applications/mod_callcenter|applications/mod_callcenter|' build/modules.conf.in && \
     sed -i 's|#applications/mod_valet_parking|applications/mod_valet_parking|' build/modules.conf.in && \
