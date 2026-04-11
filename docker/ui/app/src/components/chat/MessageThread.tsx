@@ -148,7 +148,8 @@ export function MessageThread({ conversation }: MessageThreadProps) {
 
     void listMessages(conversation.id).then((msgs) => {
       if (cancelled) return;
-      setMessages(msgs);
+      // API returns newest-first; reverse so oldest is at top, newest at bottom
+      setMessages(msgs.reverse());
       setHasMore(msgs.length >= 50);
       setIsLoading(false);
       void markRead(conversation.id);
@@ -219,7 +220,7 @@ export function MessageThread({ conversation }: MessageThreadProps) {
       setIsLoadingOlder(true);
 
       void listMessages(conversation.id, firstId).then((older) => {
-        setMessages((prev) => [...older, ...prev]);
+        setMessages((prev) => [...older.reverse(), ...prev]);
         setHasMore(older.length >= 50);
         setIsLoadingOlder(false);
       }).catch(() => {
