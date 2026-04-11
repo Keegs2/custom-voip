@@ -3,6 +3,7 @@ import { NavLink, useNavigate } from 'react-router-dom';
 import { cn } from '../../utils/cn';
 import { useAuth } from '../../contexts/AuthContext';
 import { useSoftphone } from '../../contexts/SoftphoneContext';
+import { useChat } from '../../contexts/ChatContext';
 import { PresenceIndicator } from '../softphone/PresenceIndicator';
 import type { PresenceStatus } from '../../types/softphone';
 
@@ -135,6 +136,7 @@ export function Sidebar() {
   const navigate = useNavigate();
   const { user, isAdmin, logout } = useAuth();
   const { presence, setPresence, unreadVoicemailCount, credentials } = useSoftphone();
+  const { totalUnread: unreadChatCount } = useChat();
 
   const handleBrandClick = () => {
     navigate('/');
@@ -376,6 +378,100 @@ export function Sidebar() {
               >
                 Communications
               </div>
+
+              {/* Chat */}
+              <NavLink
+                to="/chat"
+                onClick={closeMobile}
+                className="block no-underline"
+                style={({ isActive }) => ({
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 10,
+                  padding: '9px 14px',
+                  borderRadius: 10,
+                  fontSize: '0.875rem',
+                  fontWeight: isActive ? 600 : 500,
+                  letterSpacing: '-0.01em',
+                  cursor: 'pointer',
+                  userSelect: 'none',
+                  transition: 'background 0.15s, color 0.15s, box-shadow 0.15s',
+                  textDecoration: 'none',
+                  color: isActive ? '#f1f5f9' : '#64748b',
+                  background: isActive
+                    ? 'linear-gradient(135deg, rgba(59,130,246,0.18) 0%, rgba(59,130,246,0.08) 100%)'
+                    : 'transparent',
+                  boxShadow: isActive
+                    ? '0 0 0 1px rgba(59,130,246,0.30), 0 2px 12px -4px rgba(59,130,246,0.30)'
+                    : 'none',
+                })}
+              >
+                {({ isActive }) => (
+                  <>
+                    <span
+                      style={{
+                        width: 30,
+                        height: 30,
+                        borderRadius: 8,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        flexShrink: 0,
+                        background: isActive
+                          ? 'linear-gradient(135deg, rgba(59,130,246,0.30) 0%, rgba(59,130,246,0.18) 100%)'
+                          : 'rgba(255,255,255,0.04)',
+                        border: isActive
+                          ? '1px solid rgba(59,130,246,0.40)'
+                          : '1px solid rgba(255,255,255,0.06)',
+                        color: isActive ? '#60a5fa' : '#475569',
+                        transition: 'background 0.15s, border-color 0.15s, color 0.15s',
+                      }}
+                    >
+                      {/* Chat bubble icon */}
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} style={{ width: 16, height: 16 }}>
+                        <path d="M8.625 12a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H8.25m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H12m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 0 1-2.555-.337A5.972 5.972 0 0 1 5.41 20.97a5.969 5.969 0 0 1-.474-.065 4.48 4.48 0 0 0 .978-2.025c.09-.457-.133-.901-.467-1.226C3.93 16.178 3 14.189 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25Z" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    </span>
+                    <span style={{ flex: 1 }}>Chat</span>
+                    {/* Unread badge */}
+                    {unreadChatCount > 0 && (
+                      <span
+                        style={{
+                          minWidth: 18,
+                          height: 18,
+                          borderRadius: 9,
+                          background: '#3b82f6',
+                          color: '#fff',
+                          fontSize: '0.6rem',
+                          fontWeight: 700,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          padding: '0 4px',
+                          flexShrink: 0,
+                          letterSpacing: '0.02em',
+                        }}
+                      >
+                        {unreadChatCount > 99 ? '99+' : unreadChatCount}
+                      </span>
+                    )}
+                    {isActive && unreadChatCount === 0 && (
+                      <span
+                        style={{
+                          width: 5,
+                          height: 5,
+                          borderRadius: '50%',
+                          background: '#3b82f6',
+                          flexShrink: 0,
+                          boxShadow: '0 0 6px #3b82f6',
+                        }}
+                      />
+                    )}
+                  </>
+                )}
+              </NavLink>
+
+              {/* Voicemail */}
               <NavLink
                 to="/voicemail"
                 onClick={closeMobile}

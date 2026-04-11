@@ -16,6 +16,7 @@ from routers import (
     rcf, calls, trunks, cdrs, customers, health, tiers, api_dids, rates,
     ivr, carriers, auth, extensions, presence, voicemail, webrtc,
 )
+from routers.chat import router as chat_router
 from middleware.auth import JWTAuthMiddleware
 
 # Configure logging
@@ -43,13 +44,22 @@ async def lifespan(app: FastAPI):
     presence_task = asyncio.create_task(_presence_subscriber())
     logger.info("Presence WebSocket subscriber started")
 
+    # Start background chat subscriber for WebSocket fanout
+    chat_task = asyncio.create_task(_chat_subscriber())
+    logger.info("Chat WebSocket subscriber started")
+
     yield
 
     # Cleanup
     logger.info("Shutting down...")
     presence_task.cancel()
+    chat_task.cancel()
     try:
         await presence_task
+    except asyncio.CancelledError:
+        pass
+    try:
+        await chat_task
     except asyncio.CancelledError:
         pass
     await close_db()
@@ -108,6 +118,7 @@ app.include_router(extensions.router, prefix="/v1/extensions", tags=["Extensions
 app.include_router(presence.router, prefix="/v1/presence", tags=["Presence"])
 app.include_router(voicemail.router, prefix="/v1/voicemail", tags=["Voicemail"])
 app.include_router(webrtc.router, prefix="/v1/webrtc", tags=["WebRTC"])
+app.include_router(chat_router, prefix="/v1/chat", tags=["Chat"])
 
 # Backward-compatible routes (no /v1/ prefix) for testing
 app.include_router(customers.router, prefix="/customers", tags=["Customers"])
@@ -124,6 +135,7 @@ app.include_router(extensions.router, prefix="/extensions", tags=["Extensions"])
 app.include_router(presence.router, prefix="/presence", tags=["Presence"])
 app.include_router(voicemail.router, prefix="/voicemail", tags=["Voicemail"])
 app.include_router(webrtc.router, prefix="/webrtc", tags=["WebRTC"])
+app.include_router(chat_router, prefix="/chat", tags=["Chat"])
 
 
 @app.get("/")
@@ -248,6 +260,138 @@ async def presence_websocket(websocket: WebSocket):
         pass
     finally:
         presence_manager.disconnect(websocket)
+
+
+# ---------------------------------------------------------------------------
+# WebSocket: Real-time chat messaging
+# ---------------------------------------------------------------------------
+
+class ChatConnectionManager:
+    """Manages WebSocket connections for chat message fanout.
+
+    A user can have multiple active connections (e.g. multiple browser tabs).
+    Messages are sent to all connections belonging to a participant of the
+    conversation.
+    """
+
+    def __init__(self):
+        # Map of user_id -> set of (websocket, customer_id)
+        self.connections: dict[int, set[tuple[WebSocket, int | None]]] = {}
+        # Reverse map for fast disconnect
+        self._ws_to_user: dict[WebSocket, int] = {}
+
+    async def connect(self, websocket: WebSocket, user_id: int, customer_id: int | None):
+        await websocket.accept()
+        if user_id not in self.connections:
+            self.connections[user_id] = set()
+        self.connections[user_id].add((websocket, customer_id))
+        self._ws_to_user[websocket] = user_id
+
+    def disconnect(self, websocket: WebSocket):
+        user_id = self._ws_to_user.pop(websocket, None)
+        if user_id is not None and user_id in self.connections:
+            self.connections[user_id] = {
+                (ws, cid) for ws, cid in self.connections[user_id] if ws is not websocket
+            }
+            if not self.connections[user_id]:
+                del self.connections[user_id]
+
+    async def broadcast_to_user(self, user_id: int, data: bytes):
+        """Send raw bytes to all connections of a user."""
+        conns = self.connections.get(user_id)
+        if not conns:
+            return
+        stale: list[WebSocket] = []
+        for ws, _cid in conns:
+            try:
+                await ws.send_bytes(data)
+            except Exception:
+                stale.append(ws)
+        for ws in stale:
+            self.disconnect(ws)
+
+
+chat_manager = ChatConnectionManager()
+
+
+async def _chat_subscriber():
+    """Background task: subscribe to Redis chat channels and fan out to
+    connected WebSocket clients."""
+    from db.redis_client import get_client
+
+    while True:
+        try:
+            rc = await get_client()
+            pubsub = rc.pubsub()
+            await pubsub.subscribe("chat:events", "chat:typing")
+
+            async for msg in pubsub.listen():
+                if msg["type"] != "message":
+                    continue
+                try:
+                    data = orjson.loads(msg["data"])
+
+                    # Both channels include participant_user_ids for targeting
+                    participant_ids = data.get("participant_user_ids", [])
+                    payload = orjson.dumps(data)
+
+                    for uid in participant_ids:
+                        await chat_manager.broadcast_to_user(uid, payload)
+
+                except Exception:
+                    logging.getLogger(__name__).debug(
+                        "Failed to broadcast chat message", exc_info=True
+                    )
+
+        except asyncio.CancelledError:
+            break
+        except Exception:
+            logging.getLogger(__name__).warning(
+                "Chat subscriber reconnecting in 2s", exc_info=True
+            )
+            await asyncio.sleep(2)
+
+
+@app.websocket("/ws/chat")
+async def chat_websocket(websocket: WebSocket):
+    """Real-time chat updates over WebSocket.
+
+    Authentication: pass the JWT as a query parameter:
+        ws://host/ws/chat?token=<jwt>
+
+    After connecting, the server pushes chat events as JSON:
+        {"type": "new_message", "conversation_id": 1, "message": {...}, ...}
+        {"type": "typing", "conversation_id": 1, "user_id": 5, ...}
+        {"type": "read_receipt", ...}
+        {"type": "message_edited", ...}
+        {"type": "message_deleted", ...}
+    """
+    from auth.security import decode_access_token
+    from jose import JWTError
+
+    token = websocket.query_params.get("token")
+    if not token:
+        await websocket.close(code=4001, reason="Missing token query parameter")
+        return
+
+    try:
+        claims = decode_access_token(token)
+    except JWTError:
+        await websocket.close(code=4003, reason="Invalid or expired token")
+        return
+
+    user_id = int(claims["sub"])
+    customer_id = claims.get("customer_id")
+
+    await chat_manager.connect(websocket, user_id, customer_id)
+    try:
+        # Keep connection alive; client can send pings or text (ignored)
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    finally:
+        chat_manager.disconnect(websocket)
 
 
 # ---------------------------------------------------------------------------

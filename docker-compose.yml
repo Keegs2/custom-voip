@@ -149,6 +149,7 @@ services:
       - "8088:8000"  # Use 8088 on host to avoid conflict with other services
     volumes:
       - ./docker/api/src:/app:ro
+      - chat_uploads:/data/chat-uploads
     networks:
       - voip-network
     deploy:
@@ -316,4 +317,6 @@ volumes:
   freeswitch_logs:
     driver: local
   homer_db_data:
+    driver: local
+  chat_uploads:
     driver: local

@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
 import { SoftphoneProvider } from './contexts/SoftphoneContext';
+import { ChatProvider } from './contexts/ChatContext';
 import { RequireAuth } from './components/auth/RequireAuth';
 import { RequireAdmin } from './components/auth/RequireAdmin';
 import { AppLayout } from './components/layout/AppLayout';
@@ -24,6 +25,7 @@ import { SippAdminPage } from './pages/admin/SippAdminPage';
 import { TrunksAdminPage } from './pages/admin/TrunksAdminPage';
 import { CallQualityPage } from './pages/CallQualityPage';
 import { VoicemailPage } from './pages/VoicemailPage';
+import { ChatPage } from './pages/ChatPage';
 
 export function App() {
   return (
@@ -32,6 +34,8 @@ export function App() {
       <AuthProvider>
         {/* SoftphoneProvider is inside AuthProvider so it can read auth state */}
         <SoftphoneProvider>
+        {/* ChatProvider is inside SoftphoneProvider — both depend on auth */}
+        <ChatProvider>
         <Routes>
           {/* Public route — no auth required */}
           <Route path="login" element={<LoginPage />} />
@@ -51,6 +55,7 @@ export function App() {
             <Route path="documentation" element={<DocsPage />} />
             <Route path="call-quality" element={<CallQualityPage />} />
             <Route path="voicemail"  element={<VoicemailPage />} />
+            <Route path="chat"       element={<ChatPage />} />
 
             {/* Customer account page — outside AdminPage wrapper for clean layout */}
             <Route
@@ -103,6 +108,7 @@ export function App() {
           {/* Catch-all redirect to home */}
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
+        </ChatProvider>
         </SoftphoneProvider>
       </AuthProvider>
     </BrowserRouter>
