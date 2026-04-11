@@ -44,10 +44,24 @@ interface VideoTileProps {
   isModerator: boolean;
   onKick: (id: number) => void;
   onMute: (id: number) => void;
+  /** When provided, render a live video feed instead of the avatar placeholder. */
+  videoStream?: MediaStream | null;
+  /** Mirror the video horizontally (for local self-view). */
+  mirrorVideo?: boolean;
 }
 
-function VideoTile({ member, isModerator, onKick, onMute }: VideoTileProps) {
+function VideoTile({ member, isModerator, onKick, onMute, videoStream, mirrorVideo }: VideoTileProps) {
   const isTalking = member.talking;
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    const el = videoRef.current;
+    if (!el) return;
+    el.srcObject = videoStream ?? null;
+    if (videoStream) {
+      void el.play().catch(() => undefined);
+    }
+  }, [videoStream]);
 
   return (
     <div
@@ -66,12 +80,34 @@ function VideoTile({ member, isModerator, onKick, onMute }: VideoTileProps) {
         transition: 'border-color 0.2s, box-shadow 0.2s',
       }}
     >
-      {/* Placeholder background — gradient avatar */}
+      {/*
+       * Live video feed — rendered unconditionally so the ref is always
+       * attached. Visibility is controlled by the display style so the
+       * element stays mounted and the srcObject assignment in the effect
+       * above is always valid.
+       */}
+      <video
+        ref={videoRef}
+        autoPlay
+        muted
+        playsInline
+        style={{
+          position: 'absolute',
+          inset: 0,
+          width: '100%',
+          height: '100%',
+          objectFit: 'cover',
+          transform: mirrorVideo ? 'scaleX(-1)' : 'none',
+          display: videoStream ? 'block' : 'none',
+        }}
+      />
+
+      {/* Avatar placeholder — shown only when there is no video stream */}
       <div
         style={{
           width: '100%',
           height: '100%',
-          display: 'flex',
+          display: videoStream ? 'none' : 'flex',
           alignItems: 'center',
           justifyContent: 'center',
           background: `linear-gradient(135deg, rgba(59,130,246,0.12) 0%, rgba(99,102,241,0.10) 100%)`,
@@ -808,21 +844,53 @@ export function ConferenceRoom({
                 margin: '0 auto',
               }}
             >
-              {members.map((m) => (
-                <div key={m.id} className="tile-container" style={{ position: 'relative' }}>
-                  <VideoTile
-                    member={m}
-                    isModerator={isModerator}
-                    onKick={handleKick}
-                    onMute={handleMute}
-                  />
-                </div>
-              ))}
+              {members.map((m, index) => {
+                /*
+                 * Stream selection per tile:
+                 *
+                 * When a remoteVideoStream exists (2+ participants, FreeSWITCH
+                 * is relaying the mixed/active-speaker feed), every tile shows
+                 * that stream — the MCU decides whose video appears.
+                 *
+                 * When there is no remote stream (solo participant), only the
+                 * first tile (index 0, the local user) gets the local camera
+                 * feed so they can see themselves in the main grid instead of
+                 * a blank avatar.
+                 */
+                const tileStream = remoteVideoStream
+                  ? remoteVideoStream
+                  : index === 0
+                  ? (cameraOn ? selfViewStream : null)
+                  : null;
+
+                // Mirror only when showing the local camera (no remote stream, first tile).
+                const mirror = !remoteVideoStream && index === 0;
+
+                return (
+                  <div key={m.id} className="tile-container" style={{ position: 'relative' }}>
+                    <VideoTile
+                      member={m}
+                      isModerator={isModerator}
+                      onKick={handleKick}
+                      onMute={handleMute}
+                      videoStream={tileStream}
+                      mirrorVideo={mirror}
+                    />
+                  </div>
+                );
+              })}
             </div>
           )}
 
-          {/* Self-view PiP — shown when video is enabled */}
-          {activeCall.isVideo && (
+          {/*
+           * Self-view PiP — shown only when there are 2+ participants.
+           * With a single participant the local camera feed is already
+           * displayed in the main tile (index 0), so the PiP would be
+           * a redundant duplicate. With 2+ participants the main tile
+           * switches to the remote/MCU stream and the PiP re-appears
+           * so the user can still monitor their own feed.
+           */}
+          {activeCall.isVideo && memberCount >= 2 && (
             <SelfView stream={cameraOn ? selfViewStream : null} />
           )}
         </div>
