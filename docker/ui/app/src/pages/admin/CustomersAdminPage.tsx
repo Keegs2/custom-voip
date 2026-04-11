@@ -203,6 +203,7 @@ export function CustomersAdminPage() {
               <option value="api">API</option>
               <option value="trunk">Trunk</option>
               <option value="hybrid">Hybrid</option>
+              <option value="ucaas">UCaaS</option>
             </FormField>
             <FormField
               label="Traffic Grade"

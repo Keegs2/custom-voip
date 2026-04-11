@@ -760,6 +760,7 @@ function AccountDetailView({ customer, onEdit, onDelete }: AccountDetailViewProp
     api: '#a855f7',
     trunk: '#f59e0b',
     hybrid: '#3b82f6',
+    ucaas: '#0ea5e9',
   };
   const headerAccent = accountTypeAccentMap[customer.account_type] ?? '#3b82f6';
 

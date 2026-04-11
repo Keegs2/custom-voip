@@ -124,3 +124,11 @@ GRANT USAGE, SELECT ON voicemails_id_seq TO freeswitch;
 -- FreeSWITCH can update device registration status
 GRANT SELECT, UPDATE, INSERT ON user_devices TO freeswitch;
 GRANT USAGE, SELECT ON user_devices_id_seq TO freeswitch;
+
+-- ---------------------------------------------------------------------------
+-- Seed test UCaaS extensions for customer_id=5
+-- ---------------------------------------------------------------------------
+INSERT INTO extensions (extension, customer_id, display_name) VALUES
+('2001', 5, 'UCaaS User 1'),
+('2002', 5, 'UCaaS User 2')
+ON CONFLICT (extension) DO NOTHING;

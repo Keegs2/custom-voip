@@ -9,7 +9,7 @@ router = APIRouter()
 
 class CustomerCreate(BaseModel):
     name: str
-    account_type: str = "rcf"  # rcf, api, trunk, hybrid
+    account_type: str = "rcf"  # rcf, api, trunk, hybrid, ucaas
     credit_limit: float = 0
     traffic_grade: str = "standard"
     daily_limit: float = 500

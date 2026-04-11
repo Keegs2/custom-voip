@@ -46,7 +46,7 @@ const allProductNavItems: NavItemDef[] = [
   { label: 'RCF',         icon: <IconRCF size={18} />,   to: '/rcf',      color: '#4ade80', accountTypes: ['rcf', 'hybrid'] },
   { label: 'SIP Trunks', icon: <IconTrunk size={18} />, to: '/trunks',   color: '#fbbf24', accountTypes: ['trunk', 'hybrid'] },
   { label: 'API Calling', icon: <IconAPI size={18} />,   to: '/api-dids', color: '#c084fc', adminOnly: true },
-  { label: 'IVR Builder', icon: <IconIVR size={18} />,   to: '/ivr',      color: '#22d3ee', adminOnly: true },
+  { label: 'IVR Builder', icon: <IconIVR size={18} />,   to: '/ivr',      color: '#22d3ee', accountTypes: ['ucaas', 'hybrid'] },
   { label: 'API Docs',   icon: <IconDocs size={18} />,  to: '/documentation', color: '#94a3b8' },
 ];
 

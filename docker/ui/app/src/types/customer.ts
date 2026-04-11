@@ -1,4 +1,4 @@
-export type AccountType = 'rcf' | 'api' | 'trunk' | 'hybrid';
+export type AccountType = 'rcf' | 'api' | 'trunk' | 'hybrid' | 'ucaas';
 export type CustomerStatus = 'active' | 'suspended' | 'closed';
 export type TrafficGrade = 'standard' | 'premium' | 'economy';
 

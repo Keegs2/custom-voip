@@ -8,7 +8,7 @@ export interface User {
   created_at: string;
   last_login: string | null;
   customer_name: string | null;
-  account_type: 'rcf' | 'api' | 'trunk' | 'hybrid' | null;
+  account_type: 'rcf' | 'api' | 'trunk' | 'hybrid' | 'ucaas' | null;
 }
 
 export interface LoginResponse {

@@ -9,6 +9,7 @@ type BadgeVariant =
   | 'api'
   | 'trunk'
   | 'hybrid'
+  | 'ucaas'
   | 'inbound'
   | 'outbound'
   | 'premium'
@@ -33,6 +34,7 @@ const variantClasses: Record<BadgeVariant, string> = {
   api:       'bg-violet-500/[0.12] text-violet-300 border border-violet-500/25',
   trunk:     'bg-emerald-500/[0.10] text-emerald-300 border border-emerald-500/20',
   hybrid:    'bg-amber-500/[0.10] text-amber-300 border border-amber-500/25',
+  ucaas:     'bg-sky-500/[0.12] text-sky-300 border border-sky-500/25',
   inbound:   'bg-blue-500/[0.12] text-blue-300 border border-blue-500/25',
   outbound:  'bg-amber-500/[0.10] text-amber-300 border border-amber-500/25',
   premium:   'bg-blue-500/[0.12] text-blue-300 border border-blue-500/25',

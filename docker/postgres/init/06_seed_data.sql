@@ -27,14 +27,16 @@ INSERT INTO customers (id, name, account_type, balance, credit_limit, status, tr
 (1, 'Test RCF Customer', 'rcf', 100.00, 50.00, 'active', 'standard', 500, 60),
 (2, 'Test API Customer', 'api', 500.00, 100.00, 'active', 'premium', 1000, 120),
 (3, 'Test Trunk Customer', 'trunk', 1000.00, 200.00, 'active', 'standard', 2000, 60),
-(4, 'Test Hybrid Customer', 'hybrid', 250.00, 100.00, 'active', 'economy', 500, 30);
+(4, 'Test Hybrid Customer', 'hybrid', 250.00, 100.00, 'active', 'economy', 500, 30),
+(5, 'Test UCaaS Customer', 'ucaas', 0.00, 0.00, 'active', 'standard', 500, 60);
 
 -- Assign rate tables
 INSERT INTO customer_rate_assignments (customer_id, inbound_rate_table_id, outbound_rate_table_id) VALUES
 (1, 1, 1),
 (2, 1, 1),
 (3, 1, 1),
-(4, 1, 1);
+(4, 1, 1),
+(5, 1, 1);
 
 -- Single test RCF number for POC demo
 INSERT INTO rcf_numbers (did, customer_id, forward_to, pass_caller_id, ring_timeout) VALUES

@@ -5,7 +5,7 @@
 CREATE TABLE customers (
     id SERIAL PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
-    account_type VARCHAR(20) NOT NULL CHECK (account_type IN ('rcf', 'api', 'trunk', 'hybrid')),
+    account_type VARCHAR(20) NOT NULL CHECK (account_type IN ('rcf', 'api', 'trunk', 'hybrid', 'ucaas')),
     balance DECIMAL(12,4) DEFAULT 0,
     credit_limit DECIMAL(12,4) DEFAULT 0,
     status VARCHAR(20) DEFAULT 'active' CHECK (status IN ('active', 'suspended', 'closed')),
