@@ -89,12 +89,12 @@
     <!-- This is referenced by video-layout-name="group:grid" in conference.conf.xml -->
     <groups>
       <group name="grid">
-        <layout name="1up_top" body-only="true" />
-        <layout name="2up" body-only="true" />
-        <layout name="3up" body-only="true" />
-        <layout name="4up" body-only="true" />
-        <layout name="6up" body-only="true" />
-        <layout name="9up" body-only="true" />
+        <layout name="1up_top">1</layout>
+        <layout name="2up">2</layout>
+        <layout name="3up">3</layout>
+        <layout name="4up">4</layout>
+        <layout name="6up">6</layout>
+        <layout name="9up">9</layout>
       </group>
     </groups>
 
