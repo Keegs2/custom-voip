@@ -40,8 +40,15 @@ export function NewConversationModal({ onClose, onCreated }: NewConversationModa
   /* ─── Load directory ─────────────────────────────────────── */
 
   useEffect(() => {
-    void apiRequest<DirectoryUser[]>('GET', '/extensions/directory')
-      .then((users) => {
+    void apiRequest<Record<string, unknown>[]>('GET', '/extensions/directory?include_presence=true')
+      .then((raw) => {
+        // Map API shape to DirectoryUser: API returns {id, extension, display_name, user_name, ...}
+        const users: DirectoryUser[] = raw.map((r) => ({
+          user_id: r.id as number,
+          name: (r.display_name || r.user_name || r.extension || 'Unknown') as string,
+          email: (r.email || '') as string,
+          extension_number: r.extension as string | undefined,
+        }));
         // Exclude the current user from the list
         setDirectory(users.filter((u) => u.user_id !== user?.id));
         setIsLoadingDir(false);
