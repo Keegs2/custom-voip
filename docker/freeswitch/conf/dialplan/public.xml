@@ -106,9 +106,10 @@
         built-in PIN check is used via the +flags{pin} syntax.
         The PIN is passed inline: conference room_X_XX+PIN@video
     -->
-    <!-- Conference with PIN: *88{room}{pin} where room=2 digits, pin=2-4 digits -->
+    <!-- Conference with PIN: *88{room}{pin} where room=2-4 digits, pin=2-4 digits -->
+    <!-- PIN variant must be before the no-PIN variant so it matches first -->
     <extension name="conference_room_pin">
-      <condition field="destination_number" expression="^\*88(\d{2})(\d{2,4})$">
+      <condition field="destination_number" expression="^\*88(\d{2,4})P(\d{2,4})$">
         <action application="log" data="INFO Conference join with PIN: ${caller_id_number} -> room $1 (pin provided)"/>
         <action application="answer"/>
         <!-- Multi-tenant: namespace conference by customer -->
@@ -123,9 +124,9 @@
       </condition>
     </extension>
 
-    <!-- Conference without PIN: *88{room} where room=2 digits -->
+    <!-- Conference without PIN: *88{room} where room=2-4 digits -->
     <extension name="conference_room">
-      <condition field="destination_number" expression="^\*88(\d{2})$">
+      <condition field="destination_number" expression="^\*88(\d{2,4})$">
         <action application="log" data="INFO Conference join: ${caller_id_number} -> room $1"/>
         <action application="answer"/>
         <!-- Multi-tenant: namespace conference by customer -->
