@@ -31,7 +31,9 @@
         Format: IP:port for secure WebSocket.
         The ~~ prefix denotes a secure (TLS) listener in mod_verto.
       -->
-      <param name="bind-local" value="$${local_ip_v4}:8082" secure="true"/>
+      <!-- Plain WS on 8082 (for HTTP sites) + WSS on 8083 (for HTTPS sites) -->
+      <param name="bind-local" value="$${local_ip_v4}:8082"/>
+      <param name="bind-local" value="$${local_ip_v4}:8083" secure="true"/>
 
       <!-- TLS certificate configuration -->
       <!-- Combined PEM file: certificate + private key concatenated -->

@@ -142,7 +142,7 @@ services:
       - FREESWITCH_ESL_HOST=10.142.0.100
       - FREESWITCH_ESL_PORT=8021
       - FREESWITCH_ESL_PASSWORD=ClueCon
-      - VERTO_WS_URL=${VERTO_WS_URL:-wss://34.74.71.32:8082}
+      - VERTO_WS_URL=${VERTO_WS_URL:-ws://34.74.71.32:8082}
       - SIP_DOMAIN=${SIP_DOMAIN:-voiceplatform.local}
       - TEST_MODE=true
     ports:
