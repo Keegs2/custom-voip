@@ -152,9 +152,9 @@ export function Sidebar() {
   // UCaaS access: admins (no account_type) always get it; ucaas customers always get it;
   // api/trunk/hybrid customers only when ucaas_enabled is true; rcf never.
   const hasUcaas =
-    !user?.account_type ||
-    user.account_type === 'ucaas' ||
-    (user.account_type !== 'rcf' && user.ucaas_enabled === true);
+    user?.role === 'admin' ||
+    user?.account_type === 'ucaas' ||
+    (user?.account_type !== 'rcf' && user?.ucaas_enabled === true);
 
   // Filter nav items based on role and account_type
   const isSupport = user?.role === 'readonly';

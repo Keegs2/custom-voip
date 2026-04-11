@@ -81,12 +81,12 @@ export function SoftphoneWidget() {
   const [showPresenceMenu, setShowPresenceMenu] = useState(false);
 
   // Only UCaaS-enabled accounts get the softphone.
-  // Admins (null account_type) always get it; ucaas customers always get it;
+  // Admins by role always get it; ucaas customers always get it;
   // api/trunk/hybrid only when ucaas_enabled is true; rcf never.
   const hasUcaas =
-    !user?.account_type ||
-    user.account_type === 'ucaas' ||
-    (user.account_type !== 'rcf' && user.ucaas_enabled === true);
+    user?.role === 'admin' ||
+    user?.account_type === 'ucaas' ||
+    (user?.account_type !== 'rcf' && user?.ucaas_enabled === true);
   if (!hasUcaas) return null;
 
   // If no credentials, don't render the widget at all
