@@ -1,8 +1,11 @@
 # Multi-stage build: React app with Vite → nginx serve
 
-# Stage 1: Extract and patch Homer's index.html so it loads assets from /homer/
-# instead of / — this is the only file that needs rewriting; all other asset
-# requests go straight to the homer-webapp container without any sub_filter.
+# Stage 1: Extract Homer's entire dist and patch index.html.
+# We copy ALL static assets (JS chunks, CSS, fonts, i18n, etc.) into the UI
+# container so nginx serves them directly as static files — no proxy hop for
+# Homer's frontend assets. Only /api/v3/ calls are still proxied to homer-webapp.
+# This eliminates the GCP LB caching/MIME issue: static files served by nginx
+# always get the correct Content-Type regardless of what the LB does.
 FROM ghcr.io/sipcapture/homer-app AS homer-source
 RUN sed -i 's|// PREFIX: "/dist/homer-ui/",|PREFIX: "/homer/",|g' /usr/local/homer/dist/index.html
 
@@ -20,7 +23,8 @@ RUN rm /etc/nginx/conf.d/default.conf
 COPY nginx-maps.conf /etc/nginx/conf.d/00-maps.conf
 COPY nginx.conf /etc/nginx/conf.d/rcf-ui.conf
 COPY --from=build /app/dist /usr/share/nginx/html
-# Bake in the patched Homer index.html so nginx serves it as a static file
-# for GET /homer/ — no sub_filter needed, immune to GCP LB gzip/caching.
-COPY --from=homer-source /usr/local/homer/dist/index.html /usr/share/nginx/html/homer-index.html
+# Copy Homer's entire dist into homer/ so all assets are served as static files.
+# index.html is already patched with PREFIX: "/homer/" so base href resolves to
+# /homer/ — matching exactly where we place the files on disk.
+COPY --from=homer-source /usr/local/homer/dist /usr/share/nginx/html/homer
 EXPOSE 80
