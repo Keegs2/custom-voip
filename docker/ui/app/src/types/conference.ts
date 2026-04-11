@@ -10,13 +10,17 @@ export interface Conference {
   video_enabled: boolean;
   status: string;
   created_at: string;
-  participants: ConferenceParticipant[];
+  // Only present when fetched via GET /conferences/{id} (detail endpoint).
+  // The list endpoint (GET /conferences) does not include this field.
+  participants?: ConferenceParticipant[];
 }
 
 export interface ConferenceParticipant {
   user_id: number;
-  name: string;
-  extension: string;
+  // API returns this as user_name (joined from the users table)
+  user_name: string | null;
+  user_email: string | null;
+  extension: string | null;
   role: 'moderator' | 'participant';
 }
 

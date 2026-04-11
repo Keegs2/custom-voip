@@ -1282,12 +1282,12 @@ function DetailPanel({ conf, onJoin, onRefresh, onDelete }: DetailPanelProps) {
             <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#334155', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 4 }}>
               Invited members
             </div>
-            {conf.participants.length === 0 ? (
+            {(conf.participants ?? []).length === 0 ? (
               <div style={{ textAlign: 'center', padding: '36px 24px', color: '#334155', fontSize: '0.85rem' }}>
                 No participants configured.
               </div>
             ) : (
-              conf.participants.map((p) => (
+              (conf.participants ?? []).map((p) => (
                 <div
                   key={p.user_id}
                   style={{
@@ -1315,10 +1315,10 @@ function DetailPanel({ conf, onJoin, onRefresh, onDelete }: DetailPanelProps) {
                       flexShrink: 0,
                     }}
                   >
-                    {p.name.charAt(0).toUpperCase()}
+                    {(p.user_name ?? '?').charAt(0).toUpperCase()}
                   </div>
                   <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: '0.875rem', fontWeight: 600, color: '#e2e8f0' }}>{p.name}</div>
+                    <div style={{ fontSize: '0.875rem', fontWeight: 600, color: '#e2e8f0' }}>{p.user_name ?? p.user_email ?? 'Unknown'}</div>
                     <div style={{ fontSize: '0.73rem', color: '#475569' }}>Ext {p.extension}</div>
                   </div>
                   <div
