@@ -124,7 +124,7 @@ export function MessageBubble({ message, isOwn, isGrouped, isGroup }: MessageBub
           display: 'flex',
           flexDirection: 'column',
           alignItems: isOwn ? 'flex-end' : 'flex-start',
-          maxWidth: '70%',
+          flex: 1,
           minWidth: 0,
         }}
       >
