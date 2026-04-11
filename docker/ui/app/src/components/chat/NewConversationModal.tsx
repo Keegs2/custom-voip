@@ -328,7 +328,7 @@ export function NewConversationModal({ onClose, onCreated }: NewConversationModa
                       flexShrink: 0,
                     }}
                   >
-                    {u.name.charAt(0).toUpperCase()}
+                    {(u.name || '?').charAt(0).toUpperCase()}
                   </span>
                   {u.name}
                   <span style={{ opacity: 0.6, marginLeft: 2 }}>
@@ -440,7 +440,7 @@ export function NewConversationModal({ onClose, onCreated }: NewConversationModa
                         userSelect: 'none',
                       }}
                     >
-                      {u.name.charAt(0).toUpperCase()}
+                      {(u.name || '?').charAt(0).toUpperCase()}
                     </div>
 
                     {/* Info */}

@@ -97,8 +97,8 @@ export async function sendTypingIndicator(conversationId: number): Promise<void>
  */
 export async function getUnreadCount(): Promise<number> {
   try {
-    const result = await apiRequest<{ unread_count: number }>('GET', '/chat/unread-count');
-    return result.unread_count;
+    const result = await apiRequest<{ total_unread: number }>('GET', '/chat/unread');
+    return result.total_unread ?? 0;
   } catch {
     return 0;
   }
