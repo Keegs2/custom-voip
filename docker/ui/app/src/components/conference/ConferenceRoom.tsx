@@ -334,7 +334,7 @@ interface ParticipantSidebarProps {
   onClose: () => void;
 }
 
-function ParticipantSidebar({ members, isModerator, onKick, onMute, onClose }: ParticipantSidebarProps) {
+function ParticipantSidebar({ members, isModerator, onKick: _onKick, onMute, onClose }: ParticipantSidebarProps) {
   return (
     <div
       style={{

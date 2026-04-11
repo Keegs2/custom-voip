@@ -286,7 +286,7 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
           setConnectionState('error');
         }
       };
-      const handleStreamChange: StreamChangeHandler = (callId, kind, stream) => {
+      const handleStreamChange: StreamChangeHandler = (_callId, kind, stream) => {
         if (cancelled) return;
         // Only update stream state if this is the active call
         if (kind === 'local') setLocalVideoStream(stream);

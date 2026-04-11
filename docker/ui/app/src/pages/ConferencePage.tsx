@@ -28,7 +28,6 @@ import {
   Calendar,
   Plus,
   Play,
-  Square,
   PhoneOff,
   ChevronRight,
   Hash,
