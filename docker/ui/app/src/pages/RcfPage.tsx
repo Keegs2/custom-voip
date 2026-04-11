@@ -1,5 +1,5 @@
-import { useState, useMemo, useRef, useEffect } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Spinner } from '../components/ui/Spinner';
 import { Badge } from '../components/ui/Badge';
 import { listRcf } from '../api/rcf';
@@ -9,6 +9,14 @@ import { useAuth } from '../contexts/AuthContext';
 import { IconRCF } from '../components/icons/ProductIcons';
 import { AdminCustomerSelector } from '../components/AdminCustomerSelector';
 import { fmt } from '../utils/format';
+import { apiRequest } from '../api/client';
+import { useToast } from '../components/ui/Toast';
+
+// ─── API helpers ─────────────────────────────────────────────────────────────
+
+async function updateRcfForwardTo(did: string, forward_to: string): Promise<RcfEntry> {
+  return apiRequest('PUT', `/rcf/${encodeURIComponent(did)}`, { forward_to });
+}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -87,23 +95,65 @@ interface TableRowProps {
   entry: RcfEntry;
   isAdmin: boolean;
   isOdd: boolean;
+  canEdit: boolean;
+  pendingValue: string;
+  onPendingChange: (did: string, value: string) => void;
 }
 
-function TableRow({ entry, isAdmin, isOdd }: TableRowProps) {
+function TableRow({ entry, isAdmin, isOdd, canEdit, pendingValue, onPendingChange }: TableRowProps) {
+  const queryClient = useQueryClient();
+  const { toastOk, toastErr } = useToast();
+
+  // Each row manages whether it is in inline-edit mode for forward_to
+  const [editing, setEditing] = useState(false);
+  const [savedFlash, setSavedFlash] = useState(false);
+
+  const isDirty = pendingValue !== entry.forward_to && pendingValue !== '';
+
+  const mutation = useMutation({
+    mutationFn: (newValue: string) => updateRcfForwardTo(entry.did, newValue.trim()),
+    onSuccess: (_data, newValue) => {
+      void queryClient.invalidateQueries({ queryKey: ['rcf'] });
+      onPendingChange(entry.did, newValue.trim());
+      setEditing(false);
+      setSavedFlash(true);
+      setTimeout(() => setSavedFlash(false), 1800);
+      toastOk(`Saved — calls to ${fmt(entry.did)} now ring ${fmt(newValue.trim())}`);
+    },
+    onError: (error: Error) => {
+      toastErr(error.message ?? 'Failed to save');
+    },
+  });
+
+  const handleSave = useCallback(() => {
+    const trimmed = pendingValue.trim();
+    if (!trimmed) { toastErr('Destination cannot be empty'); return; }
+    mutation.mutate(trimmed);
+  }, [pendingValue, mutation, toastErr]);
+
+  const handleCancel = useCallback(() => {
+    onPendingChange(entry.did, entry.forward_to);
+    setEditing(false);
+  }, [entry.did, entry.forward_to, onPendingChange]);
+
   return (
     <tr
       style={{
-        background: isOdd ? 'rgba(255,255,255,0.012)' : 'transparent',
-        transition: 'background 0.1s',
+        background: savedFlash
+          ? 'rgba(34,197,94,0.06)'
+          : isOdd ? 'rgba(255,255,255,0.012)' : 'transparent',
+        transition: 'background 0.3s',
         borderBottom: '1px solid rgba(255,255,255,0.03)',
       }}
       onMouseEnter={(e) => {
-        (e.currentTarget as HTMLTableRowElement).style.background = 'rgba(34,197,94,0.04)';
+        if (!savedFlash)
+          (e.currentTarget as HTMLTableRowElement).style.background = 'rgba(34,197,94,0.04)';
       }}
       onMouseLeave={(e) => {
-        (e.currentTarget as HTMLTableRowElement).style.background = isOdd
-          ? 'rgba(255,255,255,0.012)'
-          : 'transparent';
+        if (!savedFlash)
+          (e.currentTarget as HTMLTableRowElement).style.background = isOdd
+            ? 'rgba(255,255,255,0.012)'
+            : 'transparent';
       }}
     >
       {/* DID */}
@@ -133,18 +183,92 @@ function TableRow({ entry, isAdmin, isOdd }: TableRowProps) {
         </span>
       </td>
 
-      {/* Forward To */}
-      <td style={{ padding: '12px 16px' }}>
-        <span
-          style={{
-            fontSize: '0.82rem',
-            color: '#22c55e',
-            fontFamily: 'monospace',
-            fontWeight: 600,
-          }}
-        >
-          {fmt(entry.forward_to)}
-        </span>
+      {/* Forward To — static for readonly, inline-editable for canEdit */}
+      <td style={{ padding: '8px 16px' }}>
+        {canEdit && editing ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <input
+              type="tel"
+              value={pendingValue}
+              autoFocus
+              placeholder="+1XXXXXXXXXX"
+              disabled={mutation.isPending}
+              onChange={(e) => onPendingChange(entry.did, e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') { e.preventDefault(); handleSave(); }
+                if (e.key === 'Escape') handleCancel();
+              }}
+              style={{
+                width: 150,
+                fontSize: '0.82rem',
+                padding: '5px 9px',
+                borderRadius: 6,
+                border: `1px solid ${isDirty ? '#3b82f6' : 'rgba(42,47,69,0.8)'}`,
+                background: 'rgba(19,21,29,0.8)',
+                color: '#e2e8f0',
+                fontFamily: 'monospace',
+                outline: 'none',
+                boxShadow: isDirty ? '0 0 0 2px rgba(59,130,246,0.2)' : 'none',
+                opacity: mutation.isPending ? 0.5 : 1,
+                transition: 'border-color 0.15s, box-shadow 0.15s',
+              }}
+            />
+            <button
+              type="button"
+              disabled={!isDirty || mutation.isPending}
+              onMouseDown={(e) => { e.preventDefault(); handleSave(); }}
+              style={{
+                fontSize: '0.65rem',
+                fontWeight: 600,
+                padding: '4px 10px',
+                borderRadius: 4,
+                border: 'none',
+                background: isDirty && !mutation.isPending ? '#22c55e' : 'rgba(34,197,94,0.3)',
+                color: '#fff',
+                cursor: isDirty && !mutation.isPending ? 'pointer' : 'not-allowed',
+                flexShrink: 0,
+                lineHeight: 1,
+              }}
+            >
+              {mutation.isPending ? '…' : 'Save'}
+            </button>
+            <button
+              type="button"
+              onMouseDown={(e) => { e.preventDefault(); handleCancel(); }}
+              style={{
+                fontSize: '0.65rem',
+                fontWeight: 500,
+                padding: '4px 8px',
+                borderRadius: 4,
+                border: 'none',
+                background: 'transparent',
+                color: '#718096',
+                cursor: 'pointer',
+                flexShrink: 0,
+                lineHeight: 1,
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+        ) : (
+          <span
+            onClick={() => { if (canEdit) setEditing(true); }}
+            title={canEdit ? 'Click to edit' : undefined}
+            style={{
+              fontSize: '0.82rem',
+              color: savedFlash ? '#4ade80' : '#22c55e',
+              fontFamily: 'monospace',
+              fontWeight: 600,
+              cursor: canEdit ? 'pointer' : 'default',
+              borderBottom: canEdit ? '1px dashed rgba(34,197,94,0.35)' : 'none',
+              paddingBottom: canEdit ? 1 : 0,
+              transition: 'color 0.3s',
+            }}
+          >
+            {fmt(entry.forward_to)}
+          </span>
+        )}
       </td>
 
       {/* Status */}
@@ -386,11 +510,19 @@ export function RcfPage() {
     [filteredEntries, sortField, sortDir],
   );
 
+  // Derive role-based constraints
+  const role = user?.role ?? 'user';
+  // Admin and support (readonly) are always locked to the table view
+  const isTableOnly = role === 'admin' || role === 'readonly';
+  // Readonly users cannot edit forward_to
+  const canEdit = role !== 'readonly';
+
   // Determine effective view mode (auto-switch based on total count)
   const effectiveViewMode: ViewMode = useMemo(() => {
+    if (isTableOnly) return 'table';
     if (viewMode !== null) return viewMode;
     return serverTotal > TABLE_VIEW_THRESHOLD ? 'table' : 'card';
-  }, [viewMode, serverTotal]);
+  }, [isTableOnly, viewMode, serverTotal]);
 
   // Total pages uses server total (pagination is server-side)
   const totalPages = Math.max(1, Math.ceil(serverTotal / pageSize));
@@ -534,66 +666,68 @@ export function RcfPage() {
             </span>
           )}
 
-          {/* View mode toggle */}
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 2,
-              background: 'rgba(255,255,255,0.03)',
-              border: '1px solid rgba(255,255,255,0.07)',
-              borderRadius: 8,
-              padding: 3,
-              flexShrink: 0,
-            }}
-          >
-            {([
-              { mode: 'card' as ViewMode, label: 'Cards', icon: (
-                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.8} style={{ width: 14, height: 14 }}>
-                  <rect x="1" y="1" width="6" height="6" rx="1.5" />
-                  <rect x="9" y="1" width="6" height="6" rx="1.5" />
-                  <rect x="1" y="9" width="6" height="6" rx="1.5" />
-                  <rect x="9" y="9" width="6" height="6" rx="1.5" />
-                </svg>
-              )},
-              { mode: 'table' as ViewMode, label: 'Table', icon: (
-                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.8} style={{ width: 14, height: 14 }}>
-                  <path d="M1 4h14M1 8h14M1 12h14M5 1v14M11 1v14" strokeLinecap="round" />
-                </svg>
-              )},
-            ] as const).map(({ mode, label, icon }) => {
-              const isActive = effectiveViewMode === mode;
-              return (
-                <button
-                  key={mode}
-                  type="button"
-                  onClick={() => setViewMode(mode)}
-                  title={label}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 5,
-                    padding: '5px 10px',
-                    borderRadius: 6,
-                    fontSize: '0.72rem',
-                    fontWeight: isActive ? 600 : 500,
-                    cursor: 'pointer',
-                    border: 'none',
-                    background: isActive
-                      ? 'linear-gradient(135deg, rgba(34,197,94,0.18) 0%, rgba(34,197,94,0.08) 100%)'
-                      : 'transparent',
-                    color: isActive ? '#22c55e' : '#64748b',
-                    transition: 'background 0.12s, color 0.12s',
-                    whiteSpace: 'nowrap',
-                    fontFamily: 'inherit',
-                  }}
-                >
-                  {icon}
-                  {label}
-                </button>
-              );
-            })}
-          </div>
+          {/* View mode toggle — hidden for admin/support who are locked to table */}
+          {!isTableOnly && (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 2,
+                background: 'rgba(255,255,255,0.03)',
+                border: '1px solid rgba(255,255,255,0.07)',
+                borderRadius: 8,
+                padding: 3,
+                flexShrink: 0,
+              }}
+            >
+              {([
+                { mode: 'card' as ViewMode, label: 'Cards', icon: (
+                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.8} style={{ width: 14, height: 14 }}>
+                    <rect x="1" y="1" width="6" height="6" rx="1.5" />
+                    <rect x="9" y="1" width="6" height="6" rx="1.5" />
+                    <rect x="1" y="9" width="6" height="6" rx="1.5" />
+                    <rect x="9" y="9" width="6" height="6" rx="1.5" />
+                  </svg>
+                )},
+                { mode: 'table' as ViewMode, label: 'Table', icon: (
+                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.8} style={{ width: 14, height: 14 }}>
+                    <path d="M1 4h14M1 8h14M1 12h14M5 1v14M11 1v14" strokeLinecap="round" />
+                  </svg>
+                )},
+              ] as const).map(({ mode, label, icon }) => {
+                const isActive = effectiveViewMode === mode;
+                return (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => setViewMode(mode)}
+                    title={label}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 5,
+                      padding: '5px 10px',
+                      borderRadius: 6,
+                      fontSize: '0.72rem',
+                      fontWeight: isActive ? 600 : 500,
+                      cursor: 'pointer',
+                      border: 'none',
+                      background: isActive
+                        ? 'linear-gradient(135deg, rgba(34,197,94,0.18) 0%, rgba(34,197,94,0.08) 100%)'
+                        : 'transparent',
+                      color: isActive ? '#22c55e' : '#64748b',
+                      transition: 'background 0.12s, color 0.12s',
+                      whiteSpace: 'nowrap',
+                      fontFamily: 'inherit',
+                    }}
+                  >
+                    {icon}
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 
@@ -708,7 +842,15 @@ export function RcfPage() {
             </thead>
             <tbody>
               {sortedEntries.map((entry, i) => (
-                <TableRow key={entry.id} entry={entry} isAdmin={isAdmin} isOdd={i % 2 === 1} />
+                <TableRow
+                  key={entry.id}
+                  entry={entry}
+                  isAdmin={isAdmin}
+                  isOdd={i % 2 === 1}
+                  canEdit={canEdit}
+                  pendingValue={resolveValue(entry)}
+                  onPendingChange={handlePendingChange}
+                />
               ))}
             </tbody>
           </table>
