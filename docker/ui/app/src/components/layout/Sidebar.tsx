@@ -20,6 +20,7 @@ import {
   IconRCF, IconTrunk, IconAPI, IconIVR, IconDocs,
   IconAdmin, IconSignal, IconTroubleshoot, IconVoicemail,
 } from '../icons/ProductIcons';
+import { FolderOpen } from 'lucide-react';
 
 const PRESENCE_OPTIONS: { value: PresenceStatus; label: string; color: string }[] = [
   { value: 'available', label: 'Available',      color: '#22c55e' },
@@ -543,6 +544,73 @@ export function Sidebar() {
                           background: '#4ade80',
                           flexShrink: 0,
                           boxShadow: '0 0 6px #4ade80',
+                        }}
+                      />
+                    )}
+                  </>
+                )}
+              </NavLink>
+
+              {/* Documents — visible to all UCaaS users */}
+              <NavLink
+                to="/documents"
+                onClick={closeMobile}
+                className="block no-underline"
+                style={({ isActive }) => ({
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 10,
+                  padding: '9px 14px',
+                  borderRadius: 10,
+                  fontSize: '0.875rem',
+                  fontWeight: isActive ? 600 : 500,
+                  letterSpacing: '-0.01em',
+                  cursor: 'pointer',
+                  userSelect: 'none',
+                  transition: 'background 0.15s, color 0.15s, box-shadow 0.15s',
+                  textDecoration: 'none',
+                  color: isActive ? '#f1f5f9' : '#64748b',
+                  background: isActive
+                    ? 'linear-gradient(135deg, rgba(251,191,36,0.14) 0%, rgba(251,191,36,0.07) 100%)'
+                    : 'transparent',
+                  boxShadow: isActive
+                    ? '0 0 0 1px rgba(251,191,36,0.25), 0 2px 12px -4px rgba(251,191,36,0.25)'
+                    : 'none',
+                })}
+              >
+                {({ isActive }) => (
+                  <>
+                    <span
+                      style={{
+                        width: 30,
+                        height: 30,
+                        borderRadius: 8,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        flexShrink: 0,
+                        background: isActive
+                          ? 'linear-gradient(135deg, rgba(251,191,36,0.28) 0%, rgba(251,191,36,0.16) 100%)'
+                          : 'rgba(255,255,255,0.04)',
+                        border: isActive
+                          ? '1px solid rgba(251,191,36,0.38)'
+                          : '1px solid rgba(255,255,255,0.06)',
+                        color: isActive ? '#fbbf24' : '#475569',
+                        transition: 'background 0.15s, border-color 0.15s, color 0.15s',
+                      }}
+                    >
+                      <FolderOpen size={15} strokeWidth={1.8} />
+                    </span>
+                    <span style={{ flex: 1 }}>Documents</span>
+                    {isActive && (
+                      <span
+                        style={{
+                          width: 5,
+                          height: 5,
+                          borderRadius: '50%',
+                          background: '#fbbf24',
+                          flexShrink: 0,
+                          boxShadow: '0 0 6px #fbbf24',
                         }}
                       />
                     )}

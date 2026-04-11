@@ -153,6 +153,7 @@ services:
     volumes:
       - ./docker/api/src:/app:ro
       - chat_uploads:/data/chat-uploads
+      - shared_documents:/data/shared-documents
     networks:
       - voip-network
     deploy:
@@ -322,4 +323,6 @@ volumes:
   homer_db_data:
     driver: local
   chat_uploads:
+    driver: local
+  shared_documents:
     driver: local
