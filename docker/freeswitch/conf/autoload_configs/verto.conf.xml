@@ -71,10 +71,21 @@
       <param name="outbound-codec-string" value="opus,VP8,PCMU,PCMA"/>
       <param name="inbound-codec-string" value="opus,VP8,PCMU,PCMA"/>
 
-      <!-- ICE candidate ACL: controls which IP addresses are advertised as ICE candidates -->
-      <!-- rfc1918.auto includes all private ranges (10/8, 172.16/12, 192.168/16) -->
-      <!-- Suitable for local/LAN testing; in production use wan_v4.auto or specific IPs -->
-      <param name="apply-candidate-acl" value="rfc1918.auto"/>
+      <!--
+        ICE candidate ACL: controls which IPs are advertised as ICE candidates.
+
+        FreeSWITCH gathers candidate IPs from two sources:
+          1. Local network interfaces (on GCE: 10.142.0.100 — unreachable from browsers)
+          2. ext-rtp-ip value (34.74.71.32 — the GCE public IP, set via $${external_rtp_ip})
+
+        Each candidate is tested against these ACLs. If ANY ACL permits it, it's offered.
+
+        CRITICAL for GCE 1:1 NAT:
+        - Do NOT include rfc1918.auto — it would allow 10.142.0.100 as a candidate,
+          which browsers on the public internet cannot reach.
+        - wan_v4.auto allows public (non-RFC1918) IPs, so 34.74.71.32 passes through.
+        - Result: only the public IP is offered as an ICE candidate.
+      -->
       <param name="apply-candidate-acl" value="wan_v4.auto"/>
 
       <!-- Enable SRTP for WebRTC media (mandatory per WebRTC spec) -->
