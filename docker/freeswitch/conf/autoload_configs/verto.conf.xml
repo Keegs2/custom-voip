@@ -57,8 +57,8 @@
       <!-- RTP IP configuration -->
       <!-- For local testing, bind RTP to local IP -->
       <param name="rtp-ip" value="$${local_ip_v4}"/>
-      <!-- External RTP IP: same as local for dev; set to public IP in production -->
-      <param name="ext-rtp-ip" value="$${local_ip_v4}"/>
+      <!-- External RTP IP: must be public IP so remote WebRTC clients can reach us -->
+      <param name="ext-rtp-ip" value="$${external_rtp_ip}"/>
 
       <!-- Codec preferences: opus first (WebRTC native), then G.711 for interop -->
       <param name="outbound-codec-string" value="opus,PCMU,PCMA"/>
