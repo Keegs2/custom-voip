@@ -18,6 +18,7 @@ from routers import (
     freeswitch,
 )
 from routers.chat import router as chat_router
+from routers.conference import router as conference_router
 from middleware.auth import JWTAuthMiddleware
 
 # Configure logging
@@ -120,6 +121,7 @@ app.include_router(presence.router, prefix="/v1/presence", tags=["Presence"])
 app.include_router(voicemail.router, prefix="/v1/voicemail", tags=["Voicemail"])
 app.include_router(webrtc.router, prefix="/v1/webrtc", tags=["WebRTC"])
 app.include_router(chat_router, prefix="/v1/chat", tags=["Chat"])
+app.include_router(conference_router, prefix="/v1/conferences", tags=["Conferences"])
 app.include_router(search.router, prefix="/v1/search", tags=["Search"])
 
 # FreeSWITCH mod_xml_curl directory endpoint (no auth, called over loopback)
@@ -141,6 +143,7 @@ app.include_router(presence.router, prefix="/presence", tags=["Presence"])
 app.include_router(voicemail.router, prefix="/voicemail", tags=["Voicemail"])
 app.include_router(webrtc.router, prefix="/webrtc", tags=["WebRTC"])
 app.include_router(chat_router, prefix="/chat", tags=["Chat"])
+app.include_router(conference_router, prefix="/conferences", tags=["Conferences"])
 app.include_router(search.router, prefix="/search", tags=["Search"])
 
 

@@ -7,7 +7,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { VertoClient } from '../lib/verto';
+import { VertoClient, type StreamChangeHandler } from '../lib/verto';
 import { getWebRTCCredentials } from '../api/webrtc';
 import { updatePresence } from '../api/presence';
 import { getUnreadCount } from '../api/voicemail';
@@ -47,8 +47,15 @@ interface SoftphoneContextValue {
   /** Selected audio output device ID */
   selectedSpeakerId: string | null;
 
+  /* ── Video streams (null when audio-only call or no active call) ── */
+  localVideoStream: MediaStream | null;
+  remoteVideoStream: MediaStream | null;
+
   /* ── Actions ── */
-  makeCall: (destination: string) => Promise<void>;
+  makeCall: (destination: string, options?: { video?: boolean }) => Promise<void>;
+  startScreenShare: () => Promise<void>;
+  stopScreenShare: () => Promise<void>;
+  setCameraEnabled: (enabled: boolean) => void;
   answerCall: () => Promise<void>;
   rejectCall: () => void;
   hangupCall: () => void;
@@ -83,6 +90,8 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
   const [audioOutputDevices, setAudioOutputDevices] = useState<MediaDeviceInfo[]>([]);
   const [selectedMicId, setSelectedMicId] = useState<string | null>(null);
   const [selectedSpeakerId, setSelectedSpeakerId] = useState<string | null>(null);
+  const [localVideoStream, setLocalVideoStream] = useState<MediaStream | null>(null);
+  const [remoteVideoStream, setRemoteVideoStream] = useState<MediaStream | null>(null);
 
   // Duration timer handle
   const durationTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -182,6 +191,8 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
       // Clear active call after a short delay so the UI can show 'ended' briefly
       setTimeout(() => {
         setActiveCall((prev) => (prev?.id === callId ? null : prev));
+        setLocalVideoStream(null);
+        setRemoteVideoStream(null);
       }, 1500);
     }
   }, [startDurationTimer, stopDurationTimer, stopRingtone]);
@@ -275,6 +286,13 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
           setConnectionState('error');
         }
       };
+      const handleStreamChange: StreamChangeHandler = (callId, kind, stream) => {
+        if (cancelled) return;
+        // Only update stream state if this is the active call
+        if (kind === 'local') setLocalVideoStream(stream);
+        else setRemoteVideoStream(stream);
+      };
+      client.onStreamChange = handleStreamChange;
 
       clientRef.current = client;
 
@@ -312,14 +330,37 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
 
   /* ─── Action implementations ─────────────────────────────── */
 
-  const makeCall = useCallback(async (destination: string): Promise<void> => {
+  const makeCall = useCallback(async (
+    destination: string,
+    options?: { video?: boolean },
+  ): Promise<void> => {
     const client = clientRef.current;
     if (!client) throw new Error('Softphone not connected');
 
-    const call = await client.makeCall(destination);
+    const call = await client.makeCall(destination, options);
     setActiveCall(call);
     setIsExpanded(true);
   }, []);
+
+  const startScreenShare = useCallback(async (): Promise<void> => {
+    const call = activeCall;
+    if (!call) return;
+    await clientRef.current?.startScreenShare(call.id);
+    setActiveCall((prev) => (prev ? { ...prev, isScreenSharing: true } : prev));
+  }, [activeCall]);
+
+  const stopScreenShare = useCallback(async (): Promise<void> => {
+    const call = activeCall;
+    if (!call) return;
+    await clientRef.current?.stopScreenShare(call.id);
+    setActiveCall((prev) => (prev ? { ...prev, isScreenSharing: false } : prev));
+  }, [activeCall]);
+
+  const setCameraEnabled = useCallback((enabled: boolean): void => {
+    const call = activeCall;
+    if (!call) return;
+    clientRef.current?.setCameraEnabled(call.id, enabled);
+  }, [activeCall]);
 
   const answerCall = useCallback(async (): Promise<void> => {
     const client = clientRef.current;
@@ -431,6 +472,8 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
     audioOutputDevices,
     selectedMicId,
     selectedSpeakerId,
+    localVideoStream,
+    remoteVideoStream,
     makeCall,
     answerCall,
     rejectCall,
@@ -445,6 +488,9 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
     selectMic,
     selectSpeaker,
     refreshVoicemailCount,
+    startScreenShare,
+    stopScreenShare,
+    setCameraEnabled,
   };
 
   return (

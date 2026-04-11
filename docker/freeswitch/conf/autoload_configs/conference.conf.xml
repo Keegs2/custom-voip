@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  mod_conference Configuration - Multi-Tenant Conference Rooms
+
+  Profiles:
+  - "default": Audio-only conferences (lower resource usage)
+  - "video": Video-enabled conferences with VP8 mux compositing
+
+  Caller Controls:
+  - 0: Mute/unmute self
+  - *: Deaf + mute (privacy mode)
+  - 1/2/3: Decrease/reset/increase talk volume
+  - 4/5/6: Decrease/reset/increase listen volume
+  - 7/8/9: Decrease/reset/increase energy threshold
+  - #: Hang up
+
+  Multi-Tenant Isolation:
+  Conference rooms are namespaced by customer_id in the dialplan
+  (e.g., room_5_01@video), ensuring complete tenant isolation.
+
+  PIN Protection:
+  PIN entry is handled in the dialplan via conference flags,
+  not in this configuration file. See public.xml conference extension.
+-->
+<configuration name="conference.conf" description="Conference Configuration">
+  <advertise />
+
+  <caller-controls>
+    <group name="default">
+      <control action="mute" digits="0"/>
+      <control action="deaf mute" digits="*"/>
+      <control action="energy up" digits="9"/>
+      <control action="energy equ" digits="8"/>
+      <control action="energy dn" digits="7"/>
+      <control action="vol talk up" digits="3"/>
+      <control action="vol talk zero" digits="2"/>
+      <control action="vol talk dn" digits="1"/>
+      <control action="vol listen up" digits="6"/>
+      <control action="vol listen zero" digits="5"/>
+      <control action="vol listen dn" digits="4"/>
+      <control action="hangup" digits="#"/>
+    </group>
+  </caller-controls>
+
+  <profiles>
+    <!-- Audio-only conference profile -->
+    <profile name="default">
+      <param name="domain" value="$${domain}"/>
+      <param name="rate" value="48000"/>
+      <param name="interval" value="20"/>
+      <param name="energy-level" value="100"/>
+      <param name="caller-controls" value="default"/>
+      <param name="muted-sound" value="conference/conf-muted.wav"/>
+      <param name="unmuted-sound" value="conference/conf-unmuted.wav"/>
+      <param name="alone-sound" value="conference/conf-alone.wav"/>
+      <param name="enter-sound" value="tone_stream://%(200,0,500,600,700)"/>
+      <param name="exit-sound" value="tone_stream://%(500,0,300,200,100,50,25)"/>
+      <param name="max-members" value="50"/>
+      <param name="comfort-noise" value="true"/>
+    </profile>
+
+    <!--
+      Video-enabled conference profile
+      Uses VP8 mux mode: FreeSWITCH composites all video streams into a
+      single canvas and sends it to each participant. This is CPU-intensive
+      but provides the best experience for WebRTC clients.
+
+      video-mode options:
+        - mux: Server-side compositing (requires CPU, best UX)
+        - passthrough: Forward active speaker's video only (low CPU)
+        - transcode: Full transcoding between codecs (requires mod_av)
+
+      video-layout-name: "group:grid" auto-selects the best grid layout
+      based on the number of participants (1up, 2up, 3up, 4up, etc.)
+    -->
+    <profile name="video">
+      <param name="domain" value="$${domain}"/>
+      <param name="rate" value="48000"/>
+      <param name="interval" value="20"/>
+      <param name="energy-level" value="100"/>
+      <param name="caller-controls" value="default"/>
+      <param name="enter-sound" value="tone_stream://%(200,0,500,600,700)"/>
+      <param name="exit-sound" value="tone_stream://%(500,0,300,200,100,50,25)"/>
+      <param name="max-members" value="50"/>
+      <param name="comfort-noise" value="true"/>
+      <!-- Video settings -->
+      <param name="video-mode" value="mux"/>
+      <param name="video-layout-name" value="group:grid"/>
+      <param name="video-canvas-size" value="1920x1080"/>
+      <param name="video-canvas-bgcolor" value="#333333"/>
+      <param name="video-layout-bgcolor" value="#000000"/>
+      <param name="video-codec-bandwidth" value="2mb"/>
+      <param name="video-fps" value="30"/>
+    </profile>
+  </profiles>
+</configuration>

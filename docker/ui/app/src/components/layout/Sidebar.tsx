@@ -480,6 +480,76 @@ export function Sidebar() {
                 )}
               </NavLink>
 
+              {/* Conferences — visible to all UCaaS users */}
+              <NavLink
+                to="/conference"
+                onClick={closeMobile}
+                className="block no-underline"
+                style={({ isActive }) => ({
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 10,
+                  padding: '9px 14px',
+                  borderRadius: 10,
+                  fontSize: '0.875rem',
+                  fontWeight: isActive ? 600 : 500,
+                  letterSpacing: '-0.01em',
+                  cursor: 'pointer',
+                  userSelect: 'none',
+                  transition: 'background 0.15s, color 0.15s, box-shadow 0.15s',
+                  textDecoration: 'none',
+                  color: isActive ? '#f1f5f9' : '#64748b',
+                  background: isActive
+                    ? 'linear-gradient(135deg, rgba(34,197,94,0.14) 0%, rgba(34,197,94,0.07) 100%)'
+                    : 'transparent',
+                  boxShadow: isActive
+                    ? '0 0 0 1px rgba(34,197,94,0.25), 0 2px 12px -4px rgba(34,197,94,0.25)'
+                    : 'none',
+                })}
+              >
+                {({ isActive }) => (
+                  <>
+                    <span
+                      style={{
+                        width: 30,
+                        height: 30,
+                        borderRadius: 8,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        flexShrink: 0,
+                        background: isActive
+                          ? 'linear-gradient(135deg, rgba(34,197,94,0.28) 0%, rgba(34,197,94,0.16) 100%)'
+                          : 'rgba(255,255,255,0.04)',
+                        border: isActive
+                          ? '1px solid rgba(34,197,94,0.38)'
+                          : '1px solid rgba(255,255,255,0.06)',
+                        color: isActive ? '#4ade80' : '#475569',
+                        transition: 'background 0.15s, border-color 0.15s, color 0.15s',
+                      }}
+                    >
+                      {/* Video camera icon */}
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} style={{ width: 16, height: 16 }}>
+                        <path d="m15.75 10.5 4.72-4.72a.75.75 0 0 1 1.28.53v11.38a.75.75 0 0 1-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 0 0 2.25-2.25v-9a2.25 2.25 0 0 0-2.25-2.25h-9A2.25 2.25 0 0 0 2.25 7.5v9a2.25 2.25 0 0 0 2.25 2.25Z" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    </span>
+                    <span style={{ flex: 1 }}>Conferences</span>
+                    {isActive && (
+                      <span
+                        style={{
+                          width: 5,
+                          height: 5,
+                          borderRadius: '50%',
+                          background: '#4ade80',
+                          flexShrink: 0,
+                          boxShadow: '0 0 6px #4ade80',
+                        }}
+                      />
+                    )}
+                  </>
+                )}
+              </NavLink>
+
               {/* Voicemail — requires a phone extension in addition to UCaaS access */}
               {credentials && (
                 <NavLink

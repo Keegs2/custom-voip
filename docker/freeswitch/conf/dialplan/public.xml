@@ -82,12 +82,57 @@
     <!-- ============================================ -->
     <!-- CONFERENCE ROOMS (*88XX)                    -->
     <!-- ============================================ -->
-    <!-- Dial *8801 to join conference room 01, *8802 for room 02, etc. -->
+    <!--
+      Multi-tenant, PIN-protected, video-enabled conference rooms.
+
+      Dial patterns:
+        *8801     - Join conference room 01 (video, no PIN)
+        *880199   - Join conference room 01 with PIN 99
+        *88XXYYYY - Room XX with PIN YYYY (2-4 digit PIN)
+
+      Multi-tenant isolation:
+        Each customer's conferences are namespaced by customer_id extracted
+        from ${customer_domain} (set by mod_xml_curl during Verto registration).
+        Customer A's *8801 -> room_5_01@video
+        Customer B's *8801 -> room_3_01@video
+        These are completely separate conferences.
+
+      Video:
+        Uses the "video" profile from conference.conf.xml which enables
+        VP8 mux compositing at 1920x1080 / 30fps.
+
+      PIN protection:
+        If a PIN is provided in the dial string, the conference application's
+        built-in PIN check is used via the +flags{pin} syntax.
+        The PIN is passed inline: conference room_X_XX+PIN@video
+    -->
+    <!-- Conference with PIN: *88{room}{pin} where room=2 digits, pin=2-4 digits -->
+    <extension name="conference_room_pin">
+      <condition field="destination_number" expression="^\*88(\d{2})(\d{2,4})$">
+        <action application="log" data="INFO Conference join with PIN: ${caller_id_number} -> room $1 (pin provided)"/>
+        <action application="answer"/>
+        <!-- Multi-tenant: namespace conference by customer -->
+        <!-- ${customer_domain} is set by mod_xml_curl during registration -->
+        <!-- Extract customer_id: customer_5.voiceplatform.local -> 5 -->
+        <action application="set" data="conf_customer_id=${regex(${customer_domain}|customer_(\d+)\.|%1)}"/>
+        <!-- Fallback for legacy test extensions without customer_domain -->
+        <action application="set" data="conf_customer_id=${cond(${conf_customer_id} == '' ? 0 : ${conf_customer_id})}"/>
+        <!-- Join video conference with PIN protection -->
+        <!-- The +PIN syntax sets the conference PIN inline -->
+        <action application="conference" data="room_${conf_customer_id}_$1+$2@video"/>
+      </condition>
+    </extension>
+
+    <!-- Conference without PIN: *88{room} where room=2 digits -->
     <extension name="conference_room">
       <condition field="destination_number" expression="^\*88(\d{2})$">
         <action application="log" data="INFO Conference join: ${caller_id_number} -> room $1"/>
         <action application="answer"/>
-        <action application="conference" data="room_$1@default"/>
+        <!-- Multi-tenant: namespace conference by customer -->
+        <action application="set" data="conf_customer_id=${regex(${customer_domain}|customer_(\d+)\.|%1)}"/>
+        <action application="set" data="conf_customer_id=${cond(${conf_customer_id} == '' ? 0 : ${conf_customer_id})}"/>
+        <!-- Join video conference (no PIN) -->
+        <action application="conference" data="room_${conf_customer_id}_$1@video"/>
       </condition>
     </extension>
 

@@ -28,6 +28,7 @@ import { UserDetailPage } from './pages/admin/UserDetailPage';
 import { CallQualityPage } from './pages/CallQualityPage';
 import { VoicemailPage } from './pages/VoicemailPage';
 import { ChatPage } from './pages/ChatPage';
+import { ConferencePage } from './pages/ConferencePage';
 
 export function App() {
   return (
@@ -138,6 +139,14 @@ export function App() {
             element={
               <RequireAuth>
                 <ChatPage />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="conference"
+            element={
+              <RequireAuth>
+                <ConferencePage />
               </RequireAuth>
             }
           />

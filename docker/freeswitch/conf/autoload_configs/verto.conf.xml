@@ -15,7 +15,8 @@
   - ICE candidates restricted via ACL
 
   Codec Notes:
-  - Opus is the primary codec for WebRTC (required by browsers)
+  - Opus is the primary codec for WebRTC audio (required by browsers)
+  - VP8 is the primary codec for WebRTC video (universally supported)
   - PCMU/PCMA as fallback for interop with SIP endpoints
 -->
 <configuration name="verto.conf" description="Verto WebRTC Configuration">
@@ -65,9 +66,10 @@
       <!-- External RTP IP: must be public IP so remote WebRTC clients can reach us -->
       <param name="ext-rtp-ip" value="$${external_rtp_ip}"/>
 
-      <!-- Codec preferences: opus first (WebRTC native), then G.711 for interop -->
-      <param name="outbound-codec-string" value="opus,PCMU,PCMA"/>
-      <param name="inbound-codec-string" value="opus,PCMU,PCMA"/>
+      <!-- Codec preferences: opus first (WebRTC native), VP8 for video, then G.711 for interop -->
+      <!-- VP8 is universally supported by all browsers for WebRTC video -->
+      <param name="outbound-codec-string" value="opus,VP8,PCMU,PCMA"/>
+      <param name="inbound-codec-string" value="opus,VP8,PCMU,PCMA"/>
 
       <!-- ICE candidate ACL: controls which IP addresses are advertised as ICE candidates -->
       <!-- rfc1918.auto includes all private ranges (10/8, 172.16/12, 192.168/16) -->

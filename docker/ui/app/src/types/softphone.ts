@@ -28,6 +28,10 @@ export interface ActiveCall {
   duration: number;
   muted: boolean;
   held: boolean;
+  /** True when this call was initiated with video enabled */
+  isVideo: boolean;
+  /** True when the local video track is a screen capture (not camera) */
+  isScreenSharing: boolean;
 }
 
 export interface Extension {

@@ -63,6 +63,11 @@ interface VertoCallSession {
   peerConnection: RTCPeerConnection;
   localStream: MediaStream | null;
   remoteStream: MediaStream;
+  /**
+   * The original camera stream, held separately so we can revert to it after
+   * screen share stops. Null for audio-only calls.
+   */
+  cameraStream: MediaStream | null;
 }
 
 export interface VertoConfig {
@@ -79,6 +84,15 @@ export type IncomingCallHandler = (call: ActiveCall) => void;
 export type CallStateChangeHandler = (callId: string, state: CallState) => void;
 export type RegistrationHandler = () => void;
 export type ErrorHandler = (error: Error) => void;
+
+/* ─── Stream event callback ──────────────────────────────── */
+
+/** Fired when local or remote streams change (e.g. screen share started) */
+export type StreamChangeHandler = (
+  callId: string,
+  kind: 'local' | 'remote',
+  stream: MediaStream | null,
+) => void;
 
 /* ─── RPC timeout (ms) ───────────────────────────────────── */
 const RPC_TIMEOUT_MS = 15_000;
@@ -106,6 +120,8 @@ export class VertoClient {
   onRegistered: RegistrationHandler = () => undefined;
   onUnregistered: RegistrationHandler = () => undefined;
   onError: ErrorHandler = () => undefined;
+  /** Fires when local/remote streams are updated — use this to wire up <video> elements */
+  onStreamChange: StreamChangeHandler = () => undefined;
 
   private config: VertoConfig;
   private ws: WebSocket | null = null;
@@ -185,22 +201,31 @@ export class VertoClient {
 
   /* ─── Outbound call ────────────────────────────────────── */
 
-  async makeCall(destination: string): Promise<ActiveCall> {
+  async makeCall(
+    destination: string,
+    options?: { video?: boolean },
+  ): Promise<ActiveCall> {
     if (!this.isLoggedIn) throw new Error('Not logged in to Verto');
 
     const callId = generateUUID();
-    const localStream = await this.acquireMedia();
+    const isVideo = options?.video === true;
+
+    const localStream = await this.acquireMedia(isVideo);
 
     const pc = this.createPeerConnection(callId);
     const remoteStream = new MediaStream();
     pc.ontrack = (ev) => {
       ev.streams[0]?.getTracks().forEach((track) => remoteStream.addTrack(track));
-      this.playRemoteStream(callId, remoteStream);
+      this.playRemoteAudio(callId, remoteStream);
+      this.onStreamChange(callId, 'remote', remoteStream);
     };
 
     localStream.getTracks().forEach((track) => pc.addTrack(track, localStream));
 
-    const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: false });
+    const offer = await pc.createOffer({
+      offerToReceiveAudio: true,
+      offerToReceiveVideo: isVideo,
+    });
     await pc.setLocalDescription(offer);
 
     // Wait for ICE gathering to complete before sending the SDP
@@ -216,9 +241,22 @@ export class VertoClient {
       duration: 0,
       muted: false,
       held: false,
+      isVideo,
+      isScreenSharing: false,
     };
 
-    this.sessions.set(callId, { call, peerConnection: pc, localStream, remoteStream });
+    this.sessions.set(callId, {
+      call,
+      peerConnection: pc,
+      localStream,
+      remoteStream,
+      cameraStream: isVideo ? localStream : null,
+    });
+
+    // Notify listener so the UI can attach the local stream to a <video> element
+    if (isVideo) {
+      this.onStreamChange(callId, 'local', localStream);
+    }
 
     const [callerNumber, callerName] = this.parseLogin();
 
@@ -243,8 +281,16 @@ export class VertoClient {
     const session = this.sessions.get(callId);
     if (!session) throw new Error(`No session for call ${callId}`);
 
-    const localStream = await this.acquireMedia();
+    // For incoming calls, answer with audio only unless the offer included video
+    const hasRemoteVideo = session.peerConnection
+      .getTransceivers()
+      .some((t) => t.receiver.track.kind === 'video');
+
+    const localStream = await this.acquireMedia(hasRemoteVideo);
     session.localStream = localStream;
+    if (hasRemoteVideo) {
+      session.cameraStream = localStream;
+    }
 
     const pc = session.peerConnection;
     localStream.getTracks().forEach((track) => pc.addTrack(track, localStream));
@@ -260,6 +306,10 @@ export class VertoClient {
 
     this.updateCallState(callId, 'active');
     session.call.startTime = new Date();
+
+    if (hasRemoteVideo) {
+      this.onStreamChange(callId, 'local', localStream);
+    }
   }
 
   /* ─── Hangup ───────────────────────────────────────────── */
@@ -319,6 +369,84 @@ export class VertoClient {
     session.call.muted = false;
   }
 
+  /* ─── Camera on / off ──────────────────────────────────── */
+
+  setCameraEnabled(callId: string, enabled: boolean): void {
+    const session = this.sessions.get(callId);
+    if (!session?.localStream) return;
+    session.localStream.getVideoTracks().forEach((t) => { t.enabled = enabled; });
+  }
+
+  /* ─── Screen sharing ───────────────────────────────────── */
+
+  /**
+   * Replace the video sender's track with a screen capture track.
+   * When the user stops sharing via the browser's native stop button,
+   * we automatically revert to the camera via the track's `onended` handler.
+   */
+  async startScreenShare(callId: string): Promise<void> {
+    const session = this.sessions.get(callId);
+    if (!session) throw new Error(`No session for call ${callId}`);
+
+    const displayStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+    const screenTrack = displayStream.getVideoTracks()[0];
+    if (!screenTrack) throw new Error('No video track in display media stream');
+
+    const pc = session.peerConnection;
+    const sender = pc.getSenders().find((s) => s.track?.kind === 'video');
+
+    if (sender) {
+      await sender.replaceTrack(screenTrack);
+    } else {
+      // No video sender yet (audio-only call upgraded to screen share)
+      pc.addTrack(screenTrack, displayStream);
+    }
+
+    // When the user clicks "Stop sharing" in the browser UI, revert to camera
+    screenTrack.onended = () => {
+      void this.stopScreenShare(callId);
+    };
+
+    session.call.isScreenSharing = true;
+    // Notify UI with the display stream so it can show a preview
+    this.onStreamChange(callId, 'local', displayStream);
+  }
+
+  /**
+   * Revert the video sender's track back to the original camera track.
+   */
+  async stopScreenShare(callId: string): Promise<void> {
+    const session = this.sessions.get(callId);
+    if (!session) return;
+
+    const cameraStream = session.cameraStream;
+    const cameraTrack = cameraStream?.getVideoTracks()[0] ?? null;
+
+    const pc = session.peerConnection;
+    const sender = pc.getSenders().find((s) => s.track?.kind === 'video');
+
+    if (sender) {
+      if (cameraTrack) {
+        await sender.replaceTrack(cameraTrack);
+      } else {
+        // No camera to revert to — acquire a fresh one
+        try {
+          const freshCamera = await this.acquireMedia(true);
+          session.cameraStream = freshCamera;
+          const freshTrack = freshCamera.getVideoTracks()[0];
+          if (freshTrack) await sender.replaceTrack(freshTrack);
+        } catch {
+          // Camera unavailable — leave video sender with null track
+          await sender.replaceTrack(null);
+        }
+      }
+    }
+
+    session.call.isScreenSharing = false;
+    // Notify UI to revert to the camera stream preview
+    this.onStreamChange(callId, 'local', session.cameraStream ?? session.localStream);
+  }
+
   /* ─── DTMF ─────────────────────────────────────────────── */
 
   sendDTMF(callId: string, digit: string): void {
@@ -341,6 +469,16 @@ export class VertoClient {
       dialogParams: { callID: callId, login: this.config.login } satisfies VertoDialogParams,
       dtmf: digit,
     }).catch(() => undefined);
+  }
+
+  /* ─── Stream accessors ─────────────────────────────────── */
+
+  getLocalStream(callId: string): MediaStream | null {
+    return this.sessions.get(callId)?.localStream ?? null;
+  }
+
+  getRemoteStream(callId: string): MediaStream | null {
+    return this.sessions.get(callId)?.remoteStream ?? null;
   }
 
   /* ─── Active call accessor ─────────────────────────────── */
@@ -427,10 +565,14 @@ export class VertoClient {
     const remoteStream = new MediaStream();
     pc.ontrack = (ev) => {
       ev.streams[0]?.getTracks().forEach((track) => remoteStream.addTrack(track));
-      this.playRemoteStream(dp.callID, remoteStream);
+      this.playRemoteAudio(dp.callID, remoteStream);
+      this.onStreamChange(dp.callID, 'remote', remoteStream);
     };
 
     await pc.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp: remoteSdp }));
+
+    // Detect whether the remote party offered video
+    const offersVideo = remoteSdp.includes('m=video');
 
     const call: ActiveCall = {
       id: dp.callID,
@@ -442,9 +584,18 @@ export class VertoClient {
       duration: 0,
       muted: false,
       held: false,
+      isVideo: offersVideo,
+      isScreenSharing: false,
     };
 
-    this.sessions.set(dp.callID, { call, peerConnection: pc, localStream: null, remoteStream });
+    this.sessions.set(dp.callID, {
+      call,
+      peerConnection: pc,
+      localStream: null,
+      remoteStream,
+      cameraStream: null,
+    });
+
     this.onIncomingCall(call);
   }
 
@@ -608,7 +759,25 @@ export class VertoClient {
     });
   }
 
-  private async acquireMedia(): Promise<MediaStream> {
+  /**
+   * Acquire local media. When video is true, requests camera + mic with
+   * HD constraints suitable for video calls.
+   */
+  private async acquireMedia(video: boolean): Promise<MediaStream> {
+    if (video) {
+      return navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+        video: {
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+          frameRate: { ideal: 30 },
+        },
+      });
+    }
     return navigator.mediaDevices.getUserMedia({
       audio: {
         echoCancellation: true,
@@ -621,7 +790,8 @@ export class VertoClient {
 
   private remoteAudioElements = new Map<string, HTMLAudioElement>();
 
-  private playRemoteStream(callId: string, stream: MediaStream): void {
+  /** Play remote audio for a call. Video rendering is handled by the UI via onStreamChange. */
+  private playRemoteAudio(callId: string, stream: MediaStream): void {
     // Reuse existing element for this call if it exists
     let audio = this.remoteAudioElements.get(callId);
     if (!audio) {
@@ -638,6 +808,10 @@ export class VertoClient {
     if (!session) return;
 
     session.localStream?.getTracks().forEach((t) => t.stop());
+    // Also stop any separately held camera stream (e.g. during screen share)
+    if (session.cameraStream && session.cameraStream !== session.localStream) {
+      session.cameraStream.getTracks().forEach((t) => t.stop());
+    }
     session.peerConnection.close();
 
     const audio = this.remoteAudioElements.get(callId);
