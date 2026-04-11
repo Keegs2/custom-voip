@@ -187,32 +187,31 @@
     <param name="log-auth-failures" value="true"/>
 
     <!-- ============================================ -->
-    <!-- DOMAIN NORMALIZATION                        -->
+    <!-- DOMAIN NORMALIZATION (Multi-Tenant)         -->
     <!-- ============================================ -->
     <!--
-      CRITICAL FIX: Force all registrations to use consistent domain
+      Multi-tenant UCaaS: Do NOT force a single registration domain.
 
-      Problem: Clients register with different domains based on how they connect:
-        - Zoiper Mac -> 1001@127.0.0.1 (localhost)
-        - Zoiper iPhone -> 1003@192.168.1.158 (Mac's IP)
-        - Production -> user@voiceplatform.local
+      Each customer registers under their own domain:
+        customer_{id}.voiceplatform.local
+      e.g., 100@customer_5.voiceplatform.local
 
-      When dialplan uses user/1001@$${domain}, it expands to user/1001@voiceplatform.local
-      but sofia_contact looks up 1001@voiceplatform.local which doesn't match 1001@127.0.0.1
-      Result: 480 Temporarily Unavailable
+      FreeSWITCH resolves users via mod_xml_curl, which queries the API
+      with the domain from the SIP request. The API extracts customer_id
+      from the domain and returns the correct extension record.
 
-      Solution: Force all registrations to be stored under $${domain}
-      This makes sofia_contact work correctly regardless of client's domain
+      Legacy test extensions (1001-1003) still register against
+      voiceplatform.local and are served by the static directory XML.
+
+      PREVIOUS BEHAVIOR (single-tenant):
+        force-register-domain = $${domain}
+        force-register-db-domain = $${domain}
+        force-subscription-domain = $${domain}
+
+      This has been removed so each customer's registrations are stored
+      under their own domain, enabling overlapping extension numbers
+      (Customer A ext 100 != Customer B ext 100).
     -->
-
-    <!-- Force registration domain: Store all registrations under this domain -->
-    <param name="force-register-domain" value="$${domain}"/>
-
-    <!-- Force database domain: Ensures sofia_contact lookups work correctly -->
-    <param name="force-register-db-domain" value="$${domain}"/>
-
-    <!-- Force subscription domain: Ensures presence/BLF works consistently -->
-    <param name="force-subscription-domain" value="$${domain}"/>
 
     <!-- ============================================ -->
     <!-- NAT HANDLING                                -->

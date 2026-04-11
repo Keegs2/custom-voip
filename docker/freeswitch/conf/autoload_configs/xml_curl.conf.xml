@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  mod_xml_curl Configuration - Dynamic Directory Provisioning
+  Fetches user directory entries from the API on demand for multi-tenant
+  UCaaS extension namespacing.
+
+  How it works:
+  - When FreeSWITCH needs to authenticate a user (REGISTER, INVITE) or
+    resolve a user/ dial string, it POSTs to the API gateway URL.
+  - The API looks up the extension in PostgreSQL scoped by the customer
+    domain extracted from the SIP request (customer_{id}.voiceplatform.local).
+  - The API returns FreeSWITCH-compatible XML with user params/variables.
+  - If the user is not found, the API returns an empty <section/> and
+    FreeSWITCH falls back to the static directory (default.xml).
+
+  Domain convention:
+    customer_{customer_id}.voiceplatform.local
+    e.g., customer_5.voiceplatform.local for customer ID 5
+
+  Performance:
+  - The API caches directory lookups in Redis (30s TTL) to avoid hitting
+    PostgreSQL on every REGISTER refresh (which happens every 60-120s).
+  - gateway-timeout is set to 3s so a slow/dead API does not block call setup.
+  - If the API is unreachable, FS falls back to static XML directory.
+
+  Security:
+  - The API endpoint requires no authentication (called over loopback from FS).
+  - The endpoint only serves directory XML; it does not accept writes.
+-->
+<configuration name="xml_curl.conf" description="cURL XML Gateway">
+  <bindings>
+    <binding name="directory">
+      <param name="gateway-url" value="http://127.0.0.1:8088/freeswitch/directory"/>
+      <param name="bindings" value="directory"/>
+      <param name="method" value="POST"/>
+      <!-- Timeout in milliseconds: 3 seconds to avoid blocking call setup -->
+      <param name="timeout" value="3"/>
+      <!-- Disable SSL verification (loopback connection, no TLS needed) -->
+      <param name="disable-100-continue" value="true"/>
+    </binding>
+  </bindings>
+</configuration>

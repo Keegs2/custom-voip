@@ -41,8 +41,13 @@
       <!-- Chain file (same as cert for self-signed) -->
       <param name="secure-chain" value="/usr/local/freeswitch/conf/tls/agent.crt"/>
 
-      <!-- Force all registrations to this domain for consistent directory lookups -->
-      <param name="force-register-domain" value="$${domain}"/>
+      <!--
+        Multi-tenant: Do NOT force a single registration domain.
+        Each customer registers under their own domain
+        (customer_{id}.voiceplatform.local) so FreeSWITCH can resolve
+        extensions per-customer via mod_xml_curl directory lookups.
+        Previously this was: force-register-domain=$${domain}
+      -->
 
       <!-- Require user authentication from the directory -->
       <param name="userauth" value="true"/>

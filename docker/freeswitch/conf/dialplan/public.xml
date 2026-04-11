@@ -33,23 +33,35 @@
   -->
   <context name="default">
 
-    <!-- Local extension dialing (1001, 1002, 1003, etc.) -->
-    <!-- On no answer after 30 seconds, transfer to voicemail deposit -->
+    <!-- ============================================ -->
+    <!-- MULTI-TENANT LOCAL EXTENSION DIALING         -->
+    <!-- ============================================ -->
+    <!--
+      When a registered UCaaS user dials another extension, we must route
+      within their customer namespace.  The variable ${customer_domain} is
+      set during registration by mod_xml_curl (e.g., customer_5.voiceplatform.local).
+      If not set, we fall back to $${domain} for legacy test extensions.
+    -->
+
+    <!-- Local extension dialing: short codes 2-6 digits (multi-tenant) -->
+    <!-- Matches any 2-6 digit extension within the caller's customer domain -->
     <extension name="local_extension">
-      <condition field="destination_number" expression="^(10[0-9]{2})$">
-        <action application="log" data="INFO Local extension call: ${caller_id_number} -> $1"/>
+      <condition field="destination_number" expression="^(\d{2,6})$">
+        <action application="log" data="INFO Local extension call: ${caller_id_number} -> $1 (domain=${customer_domain:-$${domain}})"/>
         <action application="set" data="hangup_after_bridge=true"/>
         <action application="set" data="call_timeout=30"/>
         <action application="set" data="continue_on_fail=true"/>
         <!-- Set the dialed extension for voicemail fallback -->
         <action application="set" data="dialed_extension=$1"/>
-        <!-- Ring the called extension -->
-        <action application="bridge" data="user/$1@$${domain}"/>
+        <!-- Resolve the target domain: customer_domain from registration, or legacy fallback -->
+        <action application="set" data="target_domain=${customer_domain:-$${domain}}"/>
+        <!-- Ring the called extension in the caller's customer domain -->
+        <action application="bridge" data="user/$1@${target_domain}"/>
         <!-- If no answer, busy, or not registered: send to voicemail -->
         <action application="log" data="INFO Extension $1 unavailable, sending to voicemail"/>
         <action application="answer"/>
         <action application="sleep" data="1000"/>
-        <action application="voicemail" data="default $${domain} ${dialed_extension}"/>
+        <action application="voicemail" data="default ${target_domain} ${dialed_extension}"/>
       </condition>
     </extension>
 
@@ -59,10 +71,11 @@
     <!-- Registered users dial *97 to check their own voicemail -->
     <extension name="voicemail_check">
       <condition field="destination_number" expression="^\*97$">
-        <action application="log" data="INFO Voicemail check: ${caller_id_number}"/>
+        <action application="log" data="INFO Voicemail check: ${caller_id_number} (domain=${customer_domain:-$${domain}})"/>
+        <action application="set" data="target_domain=${customer_domain:-$${domain}}"/>
         <action application="answer"/>
         <action application="sleep" data="1000"/>
-        <action application="voicemail" data="check default $${domain} ${caller_id_number}"/>
+        <action application="voicemail" data="check default ${target_domain} ${caller_id_number}"/>
       </condition>
     </extension>
 
@@ -259,27 +272,30 @@
     <!-- LOCAL EXTENSION DIALING (Registered Users) -->
     <!-- ============================================ -->
     <!--
-      Allows registered Zoiper/Linphone clients to call each other
-      Extensions 1001, 1002, 1003 pattern: 10XX
+      Allows registered users to call each other by extension.
+      Multi-tenant: uses the caller's customer_domain so extensions
+      are resolved within the correct customer namespace.
+      Falls back to $${domain} for legacy test extensions (1001-1003).
 
       SECURITY: This only works for registered users because:
-      - External carriers don't send 4-digit numbers
+      - External carriers don't send short-digit numbers
       - The bridge uses user/ which requires registration lookup
     -->
-    <extension name="local_extension">
-      <condition field="destination_number" expression="^(10[0-9]{2})$">
-        <action application="log" data="INFO Local extension call: ${caller_id_number} -> $1"/>
+    <extension name="local_extension_public">
+      <condition field="destination_number" expression="^(\d{2,6})$">
+        <action application="log" data="INFO Local extension call (public): ${caller_id_number} -> $1 (domain=${customer_domain:-$${domain}})"/>
         <action application="set" data="hangup_after_bridge=true"/>
         <action application="set" data="call_timeout=30"/>
         <action application="set" data="continue_on_fail=true"/>
         <action application="set" data="dialed_extension=$1"/>
-        <!-- Ring the called extension -->
-        <action application="bridge" data="user/$1@$${domain}"/>
+        <action application="set" data="target_domain=${customer_domain:-$${domain}}"/>
+        <!-- Ring the called extension in the caller's customer domain -->
+        <action application="bridge" data="user/$1@${target_domain}"/>
         <!-- If no answer, busy, or not registered: send to voicemail -->
         <action application="log" data="INFO Extension $1 unavailable, sending to voicemail"/>
         <action application="answer"/>
         <action application="sleep" data="1000"/>
-        <action application="voicemail" data="default $${domain} ${dialed_extension}"/>
+        <action application="voicemail" data="default ${target_domain} ${dialed_extension}"/>
       </condition>
     </extension>
 

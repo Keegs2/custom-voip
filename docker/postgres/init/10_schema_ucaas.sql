@@ -20,16 +20,10 @@ CREATE TABLE IF NOT EXISTS extensions (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Extension numbers are globally unique across all customers.
--- (The composite index is kept for backward-compatibility but the real
--- uniqueness constraint is on extension alone.)
+-- Extension numbers are unique per-customer (not globally).
+-- This allows Customer A and Customer B to both have extension "100".
 CREATE UNIQUE INDEX IF NOT EXISTS idx_extensions_customer_ext
     ON extensions(customer_id, extension);
-
--- Global uniqueness — no two customers may share the same extension number.
--- This also allows ON CONFLICT (extension) upserts.
-CREATE UNIQUE INDEX IF NOT EXISTS idx_extensions_ext_unique
-    ON extensions(extension);
 
 -- Fast lookup by user_id (resolve "which extension does this user own?")
 CREATE INDEX IF NOT EXISTS idx_extensions_user ON extensions(user_id)
@@ -131,4 +125,4 @@ GRANT USAGE, SELECT ON user_devices_id_seq TO freeswitch;
 INSERT INTO extensions (extension, customer_id, display_name) VALUES
 ('2001', 5, 'UCaaS User 1'),
 ('2002', 5, 'UCaaS User 2')
-ON CONFLICT (extension) DO NOTHING;
+ON CONFLICT (customer_id, extension) DO NOTHING;

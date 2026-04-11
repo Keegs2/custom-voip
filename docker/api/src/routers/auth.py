@@ -2,12 +2,15 @@
 from fastapi import APIRouter, HTTPException, Depends, Request
 from pydantic import BaseModel, field_validator
 import re
+import logging
 from typing import Optional
 from datetime import datetime, timezone
 
 from db import database as db
 from auth.security import verify_password, hash_password, create_access_token
 from auth.dependencies import get_current_user, require_admin
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -54,6 +57,65 @@ class UserOut(BaseModel):
     status: str
     created_at: Optional[datetime]
     last_login: Optional[datetime]
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+async def _has_ucaas_access(customer_id: int) -> bool:
+    """Check whether a customer has UCaaS access (account_type='ucaas' or ucaas_enabled=true)."""
+    if customer_id is None:
+        return False
+    cust = await db.fetch_one(
+        "SELECT account_type, ucaas_enabled FROM customers WHERE id = $1",
+        customer_id,
+    )
+    if not cust:
+        return False
+    return (
+        cust["account_type"] == "ucaas"
+        or bool(cust.get("ucaas_enabled"))
+    )
+
+
+async def _provision_extension(user_id: int, customer_id: int, display_name: str) -> dict | None:
+    """Auto-provision the next available extension for a user within a customer.
+
+    Uses INSERT ... ON CONFLICT to handle race conditions where two users are
+    provisioned simultaneously and receive the same next extension number.
+    Retries up to 5 times with incrementing extension numbers on conflict.
+
+    Returns the extension row dict, or None if provisioning failed.
+    """
+    for attempt in range(5):
+        # Find the next available extension number for this customer (base 100)
+        next_ext_row = await db.fetch_one(
+            "SELECT COALESCE(MAX(CAST(extension AS INTEGER)), 99) + 1 AS next_ext "
+            "FROM extensions WHERE customer_id = $1",
+            customer_id,
+        )
+        next_ext = str(next_ext_row["next_ext"] + attempt)  # offset by attempt on retry
+
+        row = await db.fetch_one(
+            """INSERT INTO extensions (extension, user_id, customer_id, display_name, voicemail_enabled, status)
+               VALUES ($1, $2, $3, $4, true, 'active')
+               ON CONFLICT (customer_id, extension) DO NOTHING
+               RETURNING id, extension, user_id, customer_id, display_name, status, created_at""",
+            next_ext, user_id, customer_id, display_name,
+        )
+        if row:
+            logger.info(
+                "Auto-provisioned extension %s for user %d (customer %d)",
+                next_ext, user_id, customer_id,
+            )
+            return dict(row)
+
+    logger.warning(
+        "Failed to auto-provision extension for user %d (customer %d) after 5 attempts",
+        user_id, customer_id,
+    )
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -150,7 +212,12 @@ async def get_me(user: dict = Depends(get_current_user)):
 
 @router.post("/register")
 async def register_user(body: RegisterRequest, admin: dict = Depends(require_admin)):
-    """Create a new user (admin only)."""
+    """Create a new user (admin only).
+
+    If the user's customer has UCaaS access (account_type='ucaas' or
+    ucaas_enabled=true), an extension is automatically provisioned and
+    returned in the response under the ``extension`` key.
+    """
     # Check for duplicate email
     existing = await db.fetch_one("SELECT id FROM users WHERE email = $1", body.email)
     if existing:
@@ -167,7 +234,16 @@ async def register_user(body: RegisterRequest, admin: dict = Depends(require_adm
            RETURNING id, email, name, role, customer_id, status, created_at, last_login""",
         body.email, hashed, body.name, body.role, body.customer_id,
     )
-    return dict(row)
+    result = dict(row)
+
+    # Auto-provision extension for UCaaS-enabled customers
+    if body.customer_id and await _has_ucaas_access(body.customer_id):
+        ext = await _provision_extension(result["id"], body.customer_id, body.name)
+        result["extension"] = ext
+    else:
+        result["extension"] = None
+
+    return result
 
 
 @router.get("/users")

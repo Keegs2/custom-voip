@@ -4,6 +4,7 @@ Extensions map users to phone extensions within a customer account.
 Includes directory listing with presence status for BLF/contacts.
 """
 import re
+import logging
 from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel, field_validator
 from typing import Optional
@@ -14,6 +15,8 @@ _E164_RE = re.compile(r"^\+[1-9]\d{6,14}$")
 
 from db import database as db
 from auth.dependencies import get_current_user, require_admin, get_customer_filter
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -111,6 +114,10 @@ class ExtensionUpdate(BaseModel):
         if v is not None and v not in ("active", "disabled"):
             raise ValueError("Status must be 'active' or 'disabled'")
         return v
+
+
+class AutoProvisionRequest(BaseModel):
+    customer_id: int
 
 
 # ---------------------------------------------------------------------------
@@ -318,6 +325,97 @@ async def create_extension(
         body.forward_timeout,
     )
     return dict(row)
+
+
+@router.post("/auto-provision", status_code=201)
+async def auto_provision_extensions(
+    body: AutoProvisionRequest,
+    admin: dict = Depends(require_admin),
+):
+    """Bulk auto-provision extensions for a customer (admin only).
+
+    Finds all users belonging to the specified customer who do not yet have
+    an extension and creates one for each.  Extension numbers are assigned
+    sequentially starting from the customer's current max + 1 (base 100).
+
+    Returns the list of newly provisioned extensions.
+    """
+    # Verify customer exists and has UCaaS access
+    cust = await db.fetch_one(
+        "SELECT id, account_type, ucaas_enabled FROM customers WHERE id = $1",
+        body.customer_id,
+    )
+    if not cust:
+        raise HTTPException(status_code=404, detail="Customer not found")
+
+    has_ucaas = (
+        cust["account_type"] == "ucaas"
+        or bool(cust.get("ucaas_enabled"))
+    )
+    if not has_ucaas:
+        raise HTTPException(
+            status_code=400,
+            detail="Customer does not have UCaaS access. Enable ucaas_enabled or set account_type to ucaas first.",
+        )
+
+    # Find users without extensions
+    users_without_ext = await db.fetch_all(
+        """SELECT u.id, u.name
+           FROM users u
+           LEFT JOIN extensions e ON e.user_id = u.id AND e.customer_id = u.customer_id
+           WHERE u.customer_id = $1 AND e.id IS NULL
+           ORDER BY u.id""",
+        body.customer_id,
+    )
+
+    if not users_without_ext:
+        return {"provisioned": [], "count": 0, "message": "All users already have extensions"}
+
+    # Get the current max extension for this customer
+    max_row = await db.fetch_one(
+        "SELECT COALESCE(MAX(CAST(extension AS INTEGER)), 99) AS max_ext "
+        "FROM extensions WHERE customer_id = $1",
+        body.customer_id,
+    )
+    next_ext_num = max_row["max_ext"] + 1
+
+    provisioned = []
+    for user_row in users_without_ext:
+        ext_str = str(next_ext_num)
+        # Use ON CONFLICT to gracefully handle races
+        row = await db.fetch_one(
+            """INSERT INTO extensions (extension, user_id, customer_id, display_name, voicemail_enabled, status)
+               VALUES ($1, $2, $3, $4, true, 'active')
+               ON CONFLICT (customer_id, extension) DO NOTHING
+               RETURNING id, extension, user_id, customer_id, display_name, status, created_at""",
+            ext_str, user_row["id"], body.customer_id, user_row["name"],
+        )
+        if row:
+            provisioned.append(dict(row))
+            next_ext_num += 1
+        else:
+            # Conflict — skip ahead and retry this user
+            next_ext_num += 1
+            row = await db.fetch_one(
+                """INSERT INTO extensions (extension, user_id, customer_id, display_name, voicemail_enabled, status)
+                   VALUES ($1, $2, $3, $4, true, 'active')
+                   ON CONFLICT (customer_id, extension) DO NOTHING
+                   RETURNING id, extension, user_id, customer_id, display_name, status, created_at""",
+                str(next_ext_num), user_row["id"], body.customer_id, user_row["name"],
+            )
+            if row:
+                provisioned.append(dict(row))
+                next_ext_num += 1
+
+    logger.info(
+        "Auto-provisioned %d extensions for customer %d",
+        len(provisioned), body.customer_id,
+    )
+
+    return {
+        "provisioned": provisioned,
+        "count": len(provisioned),
+    }
 
 
 @router.put("/{extension_id}")

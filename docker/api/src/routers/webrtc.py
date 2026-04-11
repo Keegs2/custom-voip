@@ -53,16 +53,43 @@ async def get_webrtc_credentials(user: dict = Depends(get_current_user)):
     - password: the extension's voicemail PIN (used as SIP password in dev;
       production should use a dedicated SIP credential store)
     - ice_servers: STUN and optional TURN servers for NAT traversal
+
+    Status codes:
+    - 200: credentials returned successfully
+    - 403: customer does not have UCaaS access at all (hide everything)
+    - 404: user has no active extension (chat-only user; show chat, not softphone)
     """
     user_id = int(user["sub"])
+    customer_id = user.get("customer_id")
+    is_admin = user.get("role") == "admin"
 
-    # Look up the user's active extension and verify UCaaS access
+    # --- Step 1: Check UCaaS access at the customer level FIRST ---
+    # This determines whether the customer has UCaaS at all.
+    # 403 = no UCaaS, frontend hides the entire Communications sidebar.
+    if not is_admin and customer_id is not None:
+        cust = await db.fetch_one(
+            "SELECT account_type, ucaas_enabled FROM customers WHERE id = $1",
+            customer_id,
+        )
+        if not cust:
+            raise HTTPException(status_code=403, detail="UCaaS features are not enabled for this account")
+
+        has_ucaas = (
+            cust["account_type"] == "ucaas"
+            or (cust["account_type"] in ("api", "trunk", "hybrid") and cust.get("ucaas_enabled"))
+        )
+        if not has_ucaas:
+            raise HTTPException(
+                status_code=403,
+                detail="UCaaS features are not enabled for this account",
+            )
+
+    # --- Step 2: Look up the user's active extension ---
+    # 404 = user has UCaaS but no extension yet (chat-only user).
     row = await db.fetch_one(
         """SELECT e.extension, e.voicemail_pin, e.customer_id,
-                  e.display_name, e.status,
-                  c.account_type, c.ucaas_enabled
+                  e.display_name, e.status
            FROM extensions e
-           JOIN customers c ON e.customer_id = c.id
            WHERE e.user_id = $1 AND e.status = 'active'""",
         user_id,
     )
@@ -74,20 +101,11 @@ async def get_webrtc_credentials(user: dict = Depends(get_current_user)):
 
     ext = dict(row)
 
-    # Explicit UCaaS gate: admins by role, ucaas accounts, or api/trunk/hybrid with ucaas_enabled
-    account_type = ext.get("account_type")
-    is_admin = user.get("role") == "admin"
-    has_ucaas = (
-        is_admin
-        or account_type == "ucaas"
-        or (account_type in ("api", "trunk", "hybrid") and ext.get("ucaas_enabled"))
-    )
-    if not has_ucaas:
-        raise HTTPException(
-            status_code=403,
-            detail="UCaaS features are not enabled for this account",
-        )
-    login = f"{ext['extension']}@{SIP_DOMAIN}"
+    # Multi-tenant domain: customer_{id}.voiceplatform.local
+    # This ensures FreeSWITCH resolves the extension within the correct
+    # customer namespace via mod_xml_curl directory lookups.
+    customer_domain = f"customer_{ext['customer_id']}.{SIP_DOMAIN}"
+    login = f"{ext['extension']}@{customer_domain}"
 
     return {
         "ws_url": VERTO_WS_URL,
@@ -95,5 +113,6 @@ async def get_webrtc_credentials(user: dict = Depends(get_current_user)):
         "password": ext["voicemail_pin"],
         "display_name": ext["display_name"] or ext["extension"],
         "extension": ext["extension"],
+        "customer_domain": customer_domain,
         "ice_servers": _build_ice_servers(),
     }

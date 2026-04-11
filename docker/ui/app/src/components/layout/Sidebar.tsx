@@ -368,9 +368,10 @@ export function Sidebar() {
             ))}
           </div>
 
-          {/* Communications (Chat, Voicemail) — shown to users with an extension,
-              but NEVER to RCF customers. RCF is intentionally minimal. */}
-          {credentials && hasUcaas && (
+          {/* Communications (Chat, Voicemail) — Chat requires UCaaS access only;
+              Voicemail additionally requires a phone extension.
+              Never shown to RCF customers. */}
+          {hasUcaas && (
             <>
               <div
                 style={{
@@ -387,7 +388,7 @@ export function Sidebar() {
                 Communications
               </div>
 
-              {/* Chat */}
+              {/* Chat — visible to all UCaaS users; does not require an extension */}
               <NavLink
                 to="/chat"
                 onClick={closeMobile}
@@ -479,94 +480,96 @@ export function Sidebar() {
                 )}
               </NavLink>
 
-              {/* Voicemail */}
-              <NavLink
-                to="/voicemail"
-                onClick={closeMobile}
-                className="block no-underline"
-                style={({ isActive }) => ({
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 10,
-                  padding: '9px 14px',
-                  borderRadius: 10,
-                  fontSize: '0.875rem',
-                  fontWeight: isActive ? 600 : 500,
-                  letterSpacing: '-0.01em',
-                  cursor: 'pointer',
-                  userSelect: 'none',
-                  transition: 'background 0.15s, color 0.15s, box-shadow 0.15s',
-                  textDecoration: 'none',
-                  color: isActive ? '#f1f5f9' : '#64748b',
-                  background: isActive
-                    ? 'linear-gradient(135deg, rgba(99,102,241,0.18) 0%, rgba(99,102,241,0.08) 100%)'
-                    : 'transparent',
-                  boxShadow: isActive
-                    ? '0 0 0 1px rgba(99,102,241,0.30), 0 2px 12px -4px rgba(99,102,241,0.30)'
-                    : 'none',
-                })}
-              >
-                {({ isActive }) => (
-                  <>
-                    <span
-                      style={{
-                        width: 30,
-                        height: 30,
-                        borderRadius: 8,
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        flexShrink: 0,
-                        background: isActive
-                          ? 'linear-gradient(135deg, rgba(99,102,241,0.30) 0%, rgba(99,102,241,0.18) 100%)'
-                          : 'rgba(255,255,255,0.04)',
-                        border: isActive
-                          ? '1px solid rgba(99,102,241,0.40)'
-                          : '1px solid rgba(255,255,255,0.06)',
-                        color: isActive ? '#818cf8' : '#475569',
-                        transition: 'background 0.15s, border-color 0.15s, color 0.15s',
-                      }}
-                    >
-                      <IconVoicemail size={16} />
-                    </span>
-                    <span style={{ flex: 1 }}>Voicemail</span>
-                    {/* Unread badge */}
-                    {unreadVoicemailCount > 0 && (
+              {/* Voicemail — requires a phone extension in addition to UCaaS access */}
+              {credentials && (
+                <NavLink
+                  to="/voicemail"
+                  onClick={closeMobile}
+                  className="block no-underline"
+                  style={({ isActive }) => ({
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 10,
+                    padding: '9px 14px',
+                    borderRadius: 10,
+                    fontSize: '0.875rem',
+                    fontWeight: isActive ? 600 : 500,
+                    letterSpacing: '-0.01em',
+                    cursor: 'pointer',
+                    userSelect: 'none',
+                    transition: 'background 0.15s, color 0.15s, box-shadow 0.15s',
+                    textDecoration: 'none',
+                    color: isActive ? '#f1f5f9' : '#64748b',
+                    background: isActive
+                      ? 'linear-gradient(135deg, rgba(99,102,241,0.18) 0%, rgba(99,102,241,0.08) 100%)'
+                      : 'transparent',
+                    boxShadow: isActive
+                      ? '0 0 0 1px rgba(99,102,241,0.30), 0 2px 12px -4px rgba(99,102,241,0.30)'
+                      : 'none',
+                  })}
+                >
+                  {({ isActive }) => (
+                    <>
                       <span
                         style={{
-                          minWidth: 18,
-                          height: 18,
-                          borderRadius: 9,
-                          background: '#ef4444',
-                          color: '#fff',
-                          fontSize: '0.6rem',
-                          fontWeight: 700,
+                          width: 30,
+                          height: 30,
+                          borderRadius: 8,
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: 'center',
-                          padding: '0 4px',
                           flexShrink: 0,
-                          letterSpacing: '0.02em',
+                          background: isActive
+                            ? 'linear-gradient(135deg, rgba(99,102,241,0.30) 0%, rgba(99,102,241,0.18) 100%)'
+                            : 'rgba(255,255,255,0.04)',
+                          border: isActive
+                            ? '1px solid rgba(99,102,241,0.40)'
+                            : '1px solid rgba(255,255,255,0.06)',
+                          color: isActive ? '#818cf8' : '#475569',
+                          transition: 'background 0.15s, border-color 0.15s, color 0.15s',
                         }}
                       >
-                        {unreadVoicemailCount > 99 ? '99+' : unreadVoicemailCount}
+                        <IconVoicemail size={16} />
                       </span>
-                    )}
-                    {isActive && unreadVoicemailCount === 0 && (
-                      <span
-                        style={{
-                          width: 5,
-                          height: 5,
-                          borderRadius: '50%',
-                          background: '#818cf8',
-                          flexShrink: 0,
-                          boxShadow: '0 0 6px #818cf8',
-                        }}
-                      />
-                    )}
-                  </>
-                )}
-              </NavLink>
+                      <span style={{ flex: 1 }}>Voicemail</span>
+                      {/* Unread badge */}
+                      {unreadVoicemailCount > 0 && (
+                        <span
+                          style={{
+                            minWidth: 18,
+                            height: 18,
+                            borderRadius: 9,
+                            background: '#ef4444',
+                            color: '#fff',
+                            fontSize: '0.6rem',
+                            fontWeight: 700,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            padding: '0 4px',
+                            flexShrink: 0,
+                            letterSpacing: '0.02em',
+                          }}
+                        >
+                          {unreadVoicemailCount > 99 ? '99+' : unreadVoicemailCount}
+                        </span>
+                      )}
+                      {isActive && unreadVoicemailCount === 0 && (
+                        <span
+                          style={{
+                            width: 5,
+                            height: 5,
+                            borderRadius: '50%',
+                            background: '#818cf8',
+                            flexShrink: 0,
+                            boxShadow: '0 0 6px #818cf8',
+                          }}
+                        />
+                      )}
+                    </>
+                  )}
+                </NavLink>
+              )}
             </>
           )}
         </nav>
@@ -908,8 +911,8 @@ export function Sidebar() {
               >
                 {displayName.charAt(0) || '?'}
               </div>
-              {/* Presence dot — clickable when extension is active (UCaaS only) */}
-              {credentials && hasUcaas ? (
+              {/* Presence dot — clickable for all UCaaS users (presence is user-level, not extension-level) */}
+              {hasUcaas ? (
                 <button
                   type="button"
                   onClick={() => setShowPresenceMenu((v) => !v)}
@@ -932,7 +935,7 @@ export function Sidebar() {
               ) : null}
 
               {/* Presence dropdown */}
-              {showPresenceMenu && credentials && hasUcaas && (
+              {showPresenceMenu && hasUcaas && (
                 <div
                   style={{
                     position: 'absolute',

@@ -38,6 +38,10 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
         if path in EXEMPT_PATHS:
             return await call_next(request)
 
+        # Exempt FreeSWITCH endpoints (called without auth over Docker loopback)
+        if path.startswith("/freeswitch/"):
+            return await call_next(request)
+
         # Exempt FreeSWITCH ingest endpoints (called without auth over Docker network)
         if path.endswith("/cdrs/ingest") or path.endswith("/voicemail/ingest"):
             return await call_next(request)
