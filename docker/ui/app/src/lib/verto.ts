@@ -1,7 +1,7 @@
 /** Generate a UUID that works in both secure and insecure contexts */
 function generateUUID(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return generateUUID();
+    return crypto.randomUUID();
   }
   // Fallback for non-secure contexts (HTTP)
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
