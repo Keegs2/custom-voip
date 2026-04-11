@@ -42,6 +42,8 @@
               <param name="vm-attach-file" value="true"/>
               <param name="vm-mailto" value=""/>
               <param name="vm-notify-mailto" value=""/>
+              <param name="jsonrpc-allowed-methods" value="verto"/>
+              <param name="jsonrpc-allowed-event-channels" value="demo,conference,presence"/>
             </params>
             <variables>
               <variable name="toll_allow" value="domestic,international,local"/>
@@ -68,6 +70,8 @@
               <param name="vm-attach-file" value="true"/>
               <param name="vm-mailto" value=""/>
               <param name="vm-notify-mailto" value=""/>
+              <param name="jsonrpc-allowed-methods" value="verto"/>
+              <param name="jsonrpc-allowed-event-channels" value="demo,conference,presence"/>
             </params>
             <variables>
               <variable name="toll_allow" value="domestic,international,local"/>
@@ -94,6 +98,8 @@
               <param name="vm-attach-file" value="true"/>
               <param name="vm-mailto" value=""/>
               <param name="vm-notify-mailto" value=""/>
+              <param name="jsonrpc-allowed-methods" value="verto"/>
+              <param name="jsonrpc-allowed-event-channels" value="demo,conference,presence"/>
             </params>
             <variables>
               <variable name="toll_allow" value="domestic,international,local"/>
