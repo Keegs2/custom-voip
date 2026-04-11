@@ -85,41 +85,43 @@ export function MessageBubble({ message, isOwn, isGrouped, isGroup, isLastInGrou
     <div
       style={{
         display: 'flex',
-        flexDirection: isOwn ? 'row-reverse' : 'row',
-        alignItems: 'flex-end',
-        gap: 8,
+        flexDirection: 'column',
+        alignItems: isOwn ? 'flex-end' : 'flex-start',
         marginTop: isGrouped ? 2 : 12,
-        paddingLeft: isOwn ? 0 : 4,
+        paddingLeft: isOwn ? 0 : 44,
         paddingRight: isOwn ? 4 : 0,
+        position: 'relative',
       }}
     >
-      {/* Avatar — shown on the last message in a consecutive group, centered vertically */}
-      <div style={{ width: 32, flexShrink: 0, alignSelf: 'center' }}>
-        {isLastInGroup && !isOwn && (
-          <div
-            aria-label={message.sender_name}
-            title={message.sender_name}
-            style={{
-              width: 32,
-              height: 32,
-              borderRadius: '50%',
-              background: 'rgba(255,255,255,0.06)',
-              border: '2px solid rgba(255,255,255,0.18)',
-              boxShadow: '0 0 0 1px rgba(255,255,255,0.06)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: '0.75rem',
-              fontWeight: 700,
-              color: avatarColor,
-              flexShrink: 0,
-              userSelect: 'none',
-            }}
-          >
-            {getInitial(message.sender_name)}
-          </div>
-        )}
-      </div>
+      {/* Avatar — positioned absolutely, centered on the bubble */}
+      {isLastInGroup && !isOwn && (
+        <div
+          aria-label={message.sender_name}
+          title={message.sender_name}
+          style={{
+            position: 'absolute',
+            left: 4,
+            top: '50%',
+            transform: 'translateY(-50%)',
+            width: 32,
+            height: 32,
+            borderRadius: '50%',
+            background: 'rgba(255,255,255,0.06)',
+            border: '2px solid rgba(255,255,255,0.18)',
+            boxShadow: '0 0 0 1px rgba(255,255,255,0.06)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: '0.75rem',
+            fontWeight: 700,
+            color: avatarColor,
+            userSelect: 'none',
+            zIndex: 1,
+          }}
+        >
+          {getInitial(message.sender_name)}
+        </div>
+      )}
 
       {/* Message content column */}
       <div
