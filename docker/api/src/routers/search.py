@@ -1,5 +1,6 @@
 """Global DID Search — admin support tool for finding any DID across all products."""
 import re
+import orjson
 from fastapi import APIRouter, Depends, HTTPException, Query
 from db import database as db
 from auth.dependencies import require_admin
@@ -142,7 +143,7 @@ async def search_did(
             "customer_id": r["customer_id"],
             "customer_name": r["customer_name"],
             "status": r["status"],
-            "details": dict(r["details"]) if r["details"] else {},
+            "details": r["details"] if isinstance(r["details"], dict) else (orjson.loads(r["details"]) if r["details"] else {}),
         })
 
     return {"results": results, "total": total}
