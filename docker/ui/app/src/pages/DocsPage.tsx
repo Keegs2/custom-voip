@@ -1,281 +1,145 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { useAuth } from '../contexts/AuthContext';
+import { useState, useCallback } from 'react';
+import {
+  ChevronDown,
+  Copy,
+  Check,
+  Key,
+  Phone,
+  Network,
+  Code,
+  Terminal,
+} from 'lucide-react';
 import { PortalHeader } from './RcfPage';
 import { IconDocs } from '../components/icons/ProductIcons';
 
-/* ─── Types ──────────────────────────────────────────────── */
-
-type DocMode = 'customer' | 'fullref';
-type SwaggerView = 'swagger' | 'redoc';
-
-interface NavSection {
-  id: string;
-  label: string;
-  icon: React.ReactNode;
-}
-
-/* ─── Nav sections ───────────────────────────────────────── */
-
-const NAV_SECTIONS: NavSection[] = [
-  {
-    id: 'getting-started',
-    label: 'Getting Started',
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} style={{ width: 14, height: 14 }}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 13.5 10.5 6.75 14.25 10.5 20.25 3.75M20.25 3.75H15m5.25 0V9" />
-      </svg>
-    ),
-  },
-  {
-    id: 'authentication',
-    label: 'Authentication',
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} style={{ width: 14, height: 14 }}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 5.25a3 3 0 0 1 3 3m3 0a6 6 0 0 1-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 0 1 18.75 8.25Z" />
-      </svg>
-    ),
-  },
-  {
-    id: 'originate',
-    label: 'Making Calls',
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} style={{ width: 14, height: 14 }}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 0 0 2.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 0 1-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 0 0-1.091-.852H4.5A2.25 2.25 0 0 0 2.25 4.5v2.25Z" />
-      </svg>
-    ),
-  },
-  {
-    id: 'numbers',
-    label: 'Managing Numbers',
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} style={{ width: 14, height: 14 }}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 9h16.5m-16.5 6.75h16.5" />
-      </svg>
-    ),
-  },
-  {
-    id: 'webhooks',
-    label: 'Webhooks',
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} style={{ width: 14, height: 14 }}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244" />
-      </svg>
-    ),
-  },
-  {
-    id: 'verbs',
-    label: 'Call Control Verbs',
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} style={{ width: 14, height: 14 }}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M17.25 6.75 22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3-4.5 16.5" />
-      </svg>
-    ),
-  },
-  {
-    id: 'errors',
-    label: 'Error Codes',
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} style={{ width: 14, height: 14 }}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" />
-      </svg>
-    ),
-  },
-];
-
 /* ─── Design tokens ──────────────────────────────────────── */
 
-const COLORS = {
+const C = {
   bg: '#13151d',
   surface: '#1a1d27',
   surfaceAlt: '#1e2130',
   border: 'rgba(42,47,69,0.6)',
   borderSubtle: 'rgba(42,47,69,0.35)',
   text: '#e2e8f0',
-  textMuted: '#718096',
+  textMuted: '#94a3b8',
   textFaint: '#4a5568',
   accent: '#3b82f6',
-  accentGlow: 'rgba(59,130,246,0.15)',
   green: '#22c55e',
   purple: '#a855f7',
   amber: '#f59e0b',
   red: '#ef4444',
-  codeBg: '#0d0f15',
-  codeString: '#4ade80',
-  codeKey: '#60a5fa',
-  codeComment: '#4a5568',
-  codeKeyword: '#c084fc',
-  codeNumber: '#fb923c',
+  codeBg: '#0d1117',
+  codeKey: '#79c0ff',
+  codeStr: '#a5d6ff',
+  codeComment: '#6e7681',
+  codeKeyword: '#ff7b72',
+  codeNumber: '#f0883e',
+  codePunct: '#8b949e',
 };
 
-/* ─── Utility components ─────────────────────────────────── */
+/* ─── Tokenizer ──────────────────────────────────────────── */
 
-function SectionAnchor({ id }: { id: string }) {
-  return (
-    <div
-      id={id}
-      style={{
-        position: 'relative',
-        // Offset so the sticky header doesn't cover the heading when scrolled to
-        scrollMarginTop: 32,
-      }}
-    />
-  );
-}
-
-interface SectionCardProps {
-  id: string;
-  accent: string;
-  icon: React.ReactNode;
-  title: string;
-  children: React.ReactNode;
-}
-
-function SectionCard({ id, accent, icon, title, children }: SectionCardProps) {
-  return (
-    <div style={{ position: 'relative' }}>
-      <SectionAnchor id={id} />
-      <div
-        style={{
-          background: `linear-gradient(135deg, ${COLORS.surface} 0%, ${COLORS.surfaceAlt} 100%)`,
-          border: `1px solid ${COLORS.border}`,
-          borderRadius: 16,
-          overflow: 'hidden',
-          marginBottom: 32,
-        }}
-      >
-        {/* Top accent line */}
-        <div
-          style={{
-            height: 2,
-            background: `linear-gradient(90deg, transparent, ${accent}, transparent)`,
-            opacity: 0.6,
-          }}
-        />
-
-        <div style={{ padding: '32px 36px' }}>
-          {/* Section header */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 28 }}>
-            <div
-              style={{
-                width: 36,
-                height: 36,
-                borderRadius: 10,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                background: `linear-gradient(135deg, ${accent}20 0%, ${accent}08 100%)`,
-                border: `1px solid ${accent}30`,
-                color: accent,
-                flexShrink: 0,
-              }}
-            >
-              {icon}
-            </div>
-            <h2
-              style={{
-                fontSize: '1.15rem',
-                fontWeight: 700,
-                color: COLORS.text,
-                letterSpacing: '-0.01em',
-                margin: 0,
-              }}
-            >
-              {title}
-            </h2>
-          </div>
-
-          {children}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-interface CodeBlockProps {
-  code: string;
-  language?: string;
-}
-
-/**
- * Tokenize a line of code into colored spans.
- * Works on raw text (no HTML escaping needed since we use React elements).
- */
 type Token = { text: string; color?: string };
 
 function tokenizeLine(line: string): Token[] {
   const tokens: Token[] = [];
   let i = 0;
-  let inString = false;
-  let current = '';
-  let currentColor: string | undefined;
 
-  function flush() {
-    if (current) {
-      tokens.push({ text: current, color: currentColor });
-      current = '';
-      currentColor = undefined;
-    }
+  function push(text: string, color?: string) {
+    if (text) tokens.push({ text, color });
   }
 
   while (i < line.length) {
     const ch = line[i];
 
-    // Comment (# outside string)
-    if (ch === '#' && !inString) {
-      flush();
-      tokens.push({ text: line.slice(i), color: COLORS.codeComment });
+    // Comment
+    if ((ch === '#' || (ch === '/' && line[i + 1] === '/')) && tokens.every(t => !t.color || t.color !== C.codeStr)) {
+      push(line.slice(i), C.codeComment);
       return tokens;
     }
 
-    // String start/end
-    if (ch === '"' && (i === 0 || line[i - 1] !== '\\')) {
-      if (!inString) {
-        flush();
-        inString = true;
-        // Look ahead to find closing quote
-        let j = i + 1;
-        while (j < line.length && !(line[j] === '"' && line[j - 1] !== '\\')) j++;
-        const str = line.slice(i, j + 1);
-        // Check if this is a key (followed by :) or value
-        const afterStr = line.slice(j + 1).trimStart();
-        const isKey = afterStr.startsWith(':');
-        tokens.push({ text: str, color: isKey ? COLORS.codeKey : COLORS.codeString });
-        i = j + 1;
-        inString = false;
-        continue;
+    // String
+    if (ch === '"' || ch === "'") {
+      let j = i + 1;
+      while (j < line.length && line[j] !== ch) {
+        if (line[j] === '\\') j++;
+        j++;
       }
+      const str = line.slice(i, j + 1);
+      const after = line.slice(j + 1).trimStart();
+      const isKey = after.startsWith(':');
+      push(str, isKey ? C.codeKey : C.codeStr);
+      i = j + 1;
+      continue;
     }
 
-    // XML/HTML tags: <Tag> or </Tag>
-    if (ch === '<' && !inString) {
+    // XML/HTML tag
+    if (ch === '<') {
       const match = line.slice(i).match(/^<\/?[A-Za-z][^>]*>/);
       if (match) {
-        flush();
-        tokens.push({ text: match[0], color: COLORS.codeKey });
+        push(match[0], C.codeKeyword);
         i += match[0].length;
         continue;
       }
     }
 
-    // curl flags: -X, -H, --header
-    if ((ch === '-') && !inString && (i === 0 || line[i - 1] === ' ')) {
-      const match = line.slice(i).match(/^(?:-[A-Za-z]+|--[A-Za-z-]+)/);
+    // curl flags
+    if (ch === '-' && (i === 0 || line[i - 1] === ' ')) {
+      const match = line.slice(i).match(/^(?:--?[A-Za-z][A-Za-z-]*)/);
       if (match) {
-        flush();
-        tokens.push({ text: match[0], color: COLORS.codeKeyword });
+        push(match[0], C.codeKeyword);
         i += match[0].length;
         continue;
       }
     }
 
-    current += ch;
+    // Numbers (standalone)
+    if (/[0-9]/.test(ch) && (i === 0 || /[\s,:[{(]/.test(line[i - 1]))) {
+      const match = line.slice(i).match(/^[0-9]+\.?[0-9]*/);
+      if (match) {
+        push(match[0], C.codeNumber);
+        i += match[0].length;
+        continue;
+      }
+    }
+
+    // Keywords: true, false, null
+    if (/[a-z]/.test(ch)) {
+      const match = line.slice(i).match(/^(true|false|null|undefined)\b/);
+      if (match) {
+        push(match[0], C.codeNumber);
+        i += match[0].length;
+        continue;
+      }
+    }
+
+    // HTTP methods
+    if (/[A-Z]/.test(ch)) {
+      const match = line.slice(i).match(/^(GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD)\b/);
+      if (match) {
+        push(match[0], '#ff7b72');
+        i += match[0].length;
+        continue;
+      }
+    }
+
+    // Punctuation
+    if ('{}[](),;'.includes(ch)) {
+      push(ch, C.codePunct);
+      i++;
+      continue;
+    }
+
+    push(ch);
     i++;
   }
-  flush();
+
   return tokens;
 }
 
-function CodeBlock({ code }: CodeBlockProps) {
+/* ─── CodeBlock ──────────────────────────────────────────── */
+
+function CodeBlock({ code, label }: { code: string; label?: string }) {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = useCallback(() => {
@@ -284,21 +148,7 @@ function CodeBlock({ code }: CodeBlockProps) {
     setTimeout(() => setCopied(false), 2000);
   }, [code]);
 
-  // Build React elements per line — no dangerouslySetInnerHTML
   const lines = code.split('\n');
-  const rendered = lines.map((line, li) => {
-    const tokens = tokenizeLine(line);
-    return (
-      <span key={li}>
-        {tokens.map((t, ti) =>
-          t.color
-            ? <span key={ti} style={{ color: t.color }}>{t.text}</span>
-            : <span key={ti}>{t.text}</span>
-        )}
-        {li < lines.length - 1 ? '\n' : ''}
-      </span>
-    );
-  });
 
   return (
     <div
@@ -306,79 +156,114 @@ function CodeBlock({ code }: CodeBlockProps) {
         position: 'relative',
         borderRadius: 10,
         overflow: 'hidden',
-        border: `1px solid rgba(42,47,69,0.8)`,
-        marginTop: 12,
-        marginBottom: 4,
+        border: `1px solid rgba(48,54,82,0.8)`,
+        marginTop: 10,
+        marginBottom: 6,
       }}
     >
-      {/* Copy button */}
-      <button
-        type="button"
-        onClick={handleCopy}
+      {/* Top bar */}
+      <div
         style={{
-          position: 'absolute',
-          top: 10,
-          right: 10,
-          padding: '4px 10px',
-          borderRadius: 6,
-          fontSize: '0.7rem',
-          fontWeight: 600,
-          background: copied ? 'rgba(34,197,94,0.15)' : 'rgba(42,47,69,0.6)',
-          color: copied ? COLORS.green : COLORS.textMuted,
-          border: `1px solid ${copied ? 'rgba(34,197,94,0.3)' : 'rgba(42,47,69,0.8)'}`,
-          cursor: 'pointer',
-          transition: 'all 0.15s',
-          zIndex: 2,
-          letterSpacing: '0.04em',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '7px 14px',
+          background: 'rgba(22,27,34,0.95)',
+          borderBottom: `1px solid rgba(48,54,82,0.6)`,
         }}
       >
-        {copied ? 'Copied!' : 'Copy'}
-      </button>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <div style={{ width: 10, height: 10, borderRadius: '50%', background: '#ff5f57' }} />
+          <div style={{ width: 10, height: 10, borderRadius: '50%', background: '#febc2e' }} />
+          <div style={{ width: 10, height: 10, borderRadius: '50%', background: '#28c840' }} />
+        </div>
+        {label && (
+          <span style={{ fontSize: '0.68rem', color: C.codeComment, letterSpacing: '0.04em', fontFamily: 'monospace' }}>
+            {label}
+          </span>
+        )}
+        <button
+          type="button"
+          onClick={handleCopy}
+          title="Copy to clipboard"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 5,
+            padding: '3px 9px',
+            borderRadius: 5,
+            fontSize: '0.7rem',
+            fontWeight: 600,
+            background: copied ? 'rgba(34,197,94,0.12)' : 'rgba(48,54,82,0.5)',
+            color: copied ? C.green : C.textMuted,
+            border: `1px solid ${copied ? 'rgba(34,197,94,0.25)' : 'rgba(48,54,82,0.8)'}`,
+            cursor: 'pointer',
+            transition: 'all 0.15s',
+            letterSpacing: '0.04em',
+          }}
+        >
+          {copied ? <Check size={11} /> : <Copy size={11} />}
+          {copied ? 'Copied' : 'Copy'}
+        </button>
+      </div>
 
       <pre
         style={{
           margin: 0,
-          padding: '20px 24px',
-          background: COLORS.codeBg,
+          padding: '18px 22px',
+          background: C.codeBg,
           fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace",
-          fontSize: '0.8rem',
-          lineHeight: 1.75,
-          color: '#cbd5e1',
+          fontSize: '0.79rem',
+          lineHeight: 1.8,
+          color: '#c9d1d9',
           overflowX: 'auto',
           whiteSpace: 'pre',
         }}
-      >{rendered}</pre>
+      >
+        {lines.map((line, li) => {
+          const toks = tokenizeLine(line);
+          return (
+            <span key={li}>
+              {toks.map((t, ti) =>
+                t.color
+                  ? <span key={ti} style={{ color: t.color }}>{t.text}</span>
+                  : <span key={ti}>{t.text}</span>
+              )}
+              {li < lines.length - 1 ? '\n' : ''}
+            </span>
+          );
+        })}
+      </pre>
     </div>
   );
 }
 
-interface HttpBadgeProps {
-  method: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
-}
+/* ─── Shared sub-components ──────────────────────────────── */
 
-function HttpBadge({ method }: HttpBadgeProps) {
-  const colors: Record<string, { bg: string; color: string }> = {
-    GET: { bg: 'rgba(34,197,94,0.12)', color: '#4ade80' },
-    POST: { bg: 'rgba(59,130,246,0.12)', color: '#60a5fa' },
-    PUT: { bg: 'rgba(245,158,11,0.12)', color: '#fbbf24' },
-    DELETE: { bg: 'rgba(239,68,68,0.12)', color: '#f87171' },
-    PATCH: { bg: 'rgba(168,85,247,0.12)', color: '#c084fc' },
+function HttpBadge({ method }: { method: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH' }) {
+  const palette: Record<string, { bg: string; fg: string }> = {
+    GET:    { bg: 'rgba(34,197,94,0.1)',   fg: '#4ade80' },
+    POST:   { bg: 'rgba(59,130,246,0.12)', fg: '#60a5fa' },
+    PUT:    { bg: 'rgba(245,158,11,0.12)', fg: '#fbbf24' },
+    DELETE: { bg: 'rgba(239,68,68,0.12)',  fg: '#f87171' },
+    PATCH:  { bg: 'rgba(168,85,247,0.12)', fg: '#c084fc' },
   };
-  const { bg, color } = colors[method] ?? colors.GET;
+  const { bg, fg } = palette[method] ?? palette.GET;
   return (
     <span
       style={{
         display: 'inline-block',
+        minWidth: 56,
         padding: '2px 9px',
-        borderRadius: 5,
-        fontSize: '0.7rem',
+        borderRadius: 4,
+        fontSize: '0.67rem',
         fontWeight: 800,
         letterSpacing: '0.07em',
         background: bg,
-        color,
-        marginRight: 10,
+        color: fg,
         fontFamily: 'monospace',
-        verticalAlign: 'middle',
+        textAlign: 'center',
+        flexShrink: 0,
       }}
     >
       {method}
@@ -386,26 +271,34 @@ function HttpBadge({ method }: HttpBadgeProps) {
   );
 }
 
-function EndpointRow({ method, path, description }: { method: HttpBadgeProps['method']; path: string; description: string }) {
+function Endpoint({
+  method,
+  path,
+  description,
+}: {
+  method: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
+  path: string;
+  description: string;
+}) {
   return (
     <div
       style={{
         display: 'flex',
         alignItems: 'flex-start',
         gap: 12,
-        padding: '14px 18px',
+        padding: '12px 16px',
         borderRadius: 8,
-        background: 'rgba(13,15,21,0.5)',
-        border: `1px solid ${COLORS.borderSubtle}`,
-        marginBottom: 10,
+        background: 'rgba(13,17,23,0.6)',
+        border: `1px solid ${C.borderSubtle}`,
+        marginBottom: 8,
       }}
     >
       <HttpBadge method={method} />
       <div style={{ flex: 1, minWidth: 0 }}>
         <code
           style={{
-            fontSize: '0.82rem',
-            color: '#93c5fd',
+            fontSize: '0.81rem',
+            color: '#79c0ff',
             fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
             display: 'block',
             marginBottom: 3,
@@ -413,7 +306,7 @@ function EndpointRow({ method, path, description }: { method: HttpBadgeProps['me
         >
           {path}
         </code>
-        <p style={{ margin: 0, fontSize: '0.82rem', color: COLORS.textMuted, lineHeight: 1.5 }}>
+        <p style={{ margin: 0, fontSize: '0.82rem', color: C.textMuted, lineHeight: 1.5 }}>
           {description}
         </p>
       </div>
@@ -421,24 +314,24 @@ function EndpointRow({ method, path, description }: { method: HttpBadgeProps['me
   );
 }
 
-function ProseP({ children }: { children: React.ReactNode }) {
+function P({ children }: { children: React.ReactNode }) {
   return (
-    <p style={{ margin: '0 0 14px', fontSize: '0.875rem', color: COLORS.textMuted, lineHeight: 1.7 }}>
+    <p style={{ margin: '0 0 14px', fontSize: '0.875rem', color: C.textMuted, lineHeight: 1.75 }}>
       {children}
     </p>
   );
 }
 
-function SubHeading({ children }: { children: React.ReactNode }) {
+function H3({ children }: { children: React.ReactNode }) {
   return (
     <h3
       style={{
-        margin: '28px 0 12px',
-        fontSize: '0.8rem',
+        margin: '28px 0 10px',
+        fontSize: '0.72rem',
         fontWeight: 700,
-        letterSpacing: '0.08em',
+        letterSpacing: '0.1em',
         textTransform: 'uppercase',
-        color: COLORS.textFaint,
+        color: C.textFaint,
       }}
     >
       {children}
@@ -446,17 +339,17 @@ function SubHeading({ children }: { children: React.ReactNode }) {
   );
 }
 
-function InlineCode({ children }: { children: React.ReactNode }) {
+function IC({ children }: { children: React.ReactNode }) {
   return (
     <code
       style={{
-        background: 'rgba(13,15,21,0.7)',
-        border: `1px solid ${COLORS.borderSubtle}`,
+        background: 'rgba(13,17,23,0.7)',
+        border: `1px solid ${C.borderSubtle}`,
         borderRadius: 4,
         padding: '1px 6px',
         fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
         fontSize: '0.78rem',
-        color: '#93c5fd',
+        color: '#79c0ff',
       }}
     >
       {children}
@@ -464,38 +357,39 @@ function InlineCode({ children }: { children: React.ReactNode }) {
   );
 }
 
-interface TableRow {
-  col1: string;
-  col2: string;
-  col3?: string;
-  accent?: string;
+interface ParamRow {
+  name: string;
+  type: string;
+  required: boolean;
+  description: string;
 }
 
-function SimpleTable({ headers, rows }: { headers: string[]; rows: TableRow[] }) {
+function ParamTable({ rows }: { rows: ParamRow[] }) {
   return (
     <div
       style={{
         borderRadius: 8,
         overflow: 'hidden',
-        border: `1px solid ${COLORS.borderSubtle}`,
-        marginBottom: 4,
+        border: `1px solid ${C.borderSubtle}`,
+        marginBottom: 16,
       }}
     >
-      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' }}>
         <thead>
-          <tr style={{ background: 'rgba(13,15,21,0.6)' }}>
-            {headers.map((h) => (
+          <tr style={{ background: 'rgba(13,17,23,0.7)' }}>
+            {['Parameter', 'Type', 'Required', 'Description'].map(h => (
               <th
                 key={h}
                 style={{
-                  padding: '10px 16px',
+                  padding: '9px 14px',
                   textAlign: 'left',
-                  color: COLORS.textFaint,
+                  color: C.textFaint,
                   fontWeight: 700,
                   letterSpacing: '0.06em',
-                  fontSize: '0.7rem',
+                  fontSize: '0.67rem',
                   textTransform: 'uppercase',
-                  borderBottom: `1px solid ${COLORS.borderSubtle}`,
+                  borderBottom: `1px solid ${C.borderSubtle}`,
+                  whiteSpace: 'nowrap',
                 }}
               >
                 {h}
@@ -507,40 +401,36 @@ function SimpleTable({ headers, rows }: { headers: string[]; rows: TableRow[] })
           {rows.map((row, i) => (
             <tr
               key={i}
-              style={{ background: i % 2 === 0 ? 'transparent' : 'rgba(13,15,21,0.25)' }}
+              style={{ background: i % 2 === 0 ? 'transparent' : 'rgba(13,17,23,0.25)' }}
             >
-              <td
-                style={{
-                  padding: '10px 16px',
-                  fontFamily: 'monospace',
-                  fontSize: '0.78rem',
-                  color: row.accent ?? '#60a5fa',
-                  borderBottom: `1px solid ${COLORS.borderSubtle}`,
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                {row.col1}
+              <td style={{ padding: '9px 14px', borderBottom: `1px solid ${C.borderSubtle}`, whiteSpace: 'nowrap' }}>
+                <code style={{ color: '#79c0ff', fontFamily: 'monospace', fontSize: '0.78rem' }}>
+                  {row.name}
+                </code>
               </td>
-              <td
-                style={{
-                  padding: '10px 16px',
-                  color: COLORS.textMuted,
-                  borderBottom: `1px solid ${COLORS.borderSubtle}`,
-                }}
-              >
-                {row.col2}
+              <td style={{ padding: '9px 14px', borderBottom: `1px solid ${C.borderSubtle}`, whiteSpace: 'nowrap' }}>
+                <span style={{ color: '#f0883e', fontFamily: 'monospace', fontSize: '0.78rem' }}>
+                  {row.type}
+                </span>
               </td>
-              {row.col3 !== undefined && (
-                <td
+              <td style={{ padding: '9px 14px', borderBottom: `1px solid ${C.borderSubtle}` }}>
+                <span
                   style={{
-                    padding: '10px 16px',
-                    color: COLORS.textMuted,
-                    borderBottom: `1px solid ${COLORS.borderSubtle}`,
+                    fontSize: '0.68rem',
+                    fontWeight: 700,
+                    letterSpacing: '0.05em',
+                    color: row.required ? '#f87171' : C.textFaint,
+                    background: row.required ? 'rgba(239,68,68,0.08)' : 'rgba(74,85,104,0.12)',
+                    padding: '1px 7px',
+                    borderRadius: 4,
                   }}
                 >
-                  {row.col3}
-                </td>
-              )}
+                  {row.required ? 'required' : 'optional'}
+                </span>
+              </td>
+              <td style={{ padding: '9px 14px', borderBottom: `1px solid ${C.borderSubtle}`, color: C.textMuted, lineHeight: 1.5 }}>
+                {row.description}
+              </td>
             </tr>
           ))}
         </tbody>
@@ -549,885 +439,1074 @@ function SimpleTable({ headers, rows }: { headers: string[]; rows: TableRow[] })
   );
 }
 
-/* ─── Doc section contents ───────────────────────────────── */
-
-function GettingStartedSection() {
-  return (
-    <SectionCard
-      id="getting-started"
-      accent={COLORS.accent}
-      title="Getting Started"
-      icon={
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} style={{ width: 18, height: 18 }}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 13.5 10.5 6.75 14.25 10.5 20.25 3.75M20.25 3.75H15m5.25 0V9" />
-        </svg>
-      }
-    >
-      <ProseP>
-        Welcome to the Voice Platform API. This API lets you originate outbound calls, manage your
-        phone numbers, and build programmable voice applications using webhook-driven call control.
-        Every request is authenticated with an API key and communicates over HTTPS.
-      </ProseP>
-
-      <SubHeading>Base URL</SubHeading>
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 12,
-          padding: '12px 18px',
-          borderRadius: 8,
-          background: 'rgba(13,15,21,0.5)',
-          border: `1px solid ${COLORS.borderSubtle}`,
-          marginBottom: 20,
-        }}
-      >
-        <svg viewBox="0 0 24 24" fill="none" stroke={COLORS.accent} strokeWidth={1.8} style={{ width: 16, height: 16, flexShrink: 0 }}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M12 21a9.004 9.004 0 0 0 8.716-6.747M12 21a9.004 9.004 0 0 1-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 0 1 7.843 4.582M12 3a8.997 8.997 0 0 0-7.843 4.582m15.686 0A11.953 11.953 0 0 1 12 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0 1 21 12c0 .778-.099 1.533-.284 2.253M3 12a8.96 8.96 0 0 0 .284 2.253" />
-        </svg>
-        <code
-          style={{
-            fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
-            fontSize: '0.875rem',
-            color: '#93c5fd',
-          }}
-        >
-          https://&#123;platform-host&#125;/api
-        </code>
-      </div>
-
-      <SubHeading>Quick Example</SubHeading>
-      <ProseP>
-        Every API request must include your API key in the <InlineCode>Authorization</InlineCode> header.
-        Here is a minimal call to verify your credentials are working:
-      </ProseP>
-      <CodeBlock
-        language="bash"
-        code={`curl -X GET https://{platform-host}/api/api-dids \\
-  -H "Authorization: Bearer YOUR_API_KEY" \\
-  -H "Content-Type: application/json"`}
-      />
-    </SectionCard>
-  );
+interface TierRow {
+  tier: string;
+  cps: string;
+  perCall: string;
+  monthly: string;
+  highlight?: boolean;
 }
 
-function AuthenticationSection() {
+function TierTable({ rows }: { rows: TierRow[] }) {
   return (
-    <SectionCard
-      id="authentication"
-      accent={COLORS.purple}
-      title="Authentication"
-      icon={
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} style={{ width: 18, height: 18 }}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 5.25a3 3 0 0 1 3 3m3 0a6 6 0 0 1-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 0 1 18.75 8.25Z" />
-        </svg>
-      }
+    <div
+      style={{
+        borderRadius: 8,
+        overflow: 'hidden',
+        border: `1px solid ${C.borderSubtle}`,
+        marginBottom: 16,
+      }}
     >
-      <ProseP>
-        The API uses Bearer token authentication. Your API key is a long-lived token that you include
-        in every request header. Keep it secure — treat it like a password.
-      </ProseP>
-
-      <SubHeading>Obtaining Credentials</SubHeading>
-      <ProseP>
-        API credentials are provisioned by your platform administrator. Contact your account manager
-        or open a support ticket to request an API key. Once issued, keys do not expire automatically
-        but can be revoked at any time by an administrator.
-      </ProseP>
-
-      <SubHeading>Using your API Key</SubHeading>
-      <ProseP>
-        Include the key as a Bearer token in the <InlineCode>Authorization</InlineCode> header of
-        every request:
-      </ProseP>
-      <CodeBlock
-        language="bash"
-        code={`# Replace YOUR_API_KEY with the key issued to you
-curl -X GET https://{platform-host}/api/api-dids \\
-  -H "Authorization: Bearer YOUR_API_KEY"`}
-      />
-
-      <SubHeading>Authentication Errors</SubHeading>
-      <SimpleTable
-        headers={['Status', 'Meaning']}
-        rows={[
-          { col1: '401 Unauthorized', col2: 'Missing or invalid API key', accent: COLORS.red },
-          { col1: '403 Forbidden', col2: 'Key is valid but lacks permission for this resource', accent: COLORS.amber },
-        ]}
-      />
-    </SectionCard>
-  );
-}
-
-function OriginateSection() {
-  return (
-    <SectionCard
-      id="originate"
-      accent={COLORS.green}
-      title="Making Calls (Originate)"
-      icon={
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} style={{ width: 18, height: 18 }}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 0 0 2.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 0 1-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 0 0-1.091-.852H4.5A2.25 2.25 0 0 0 2.25 4.5v2.25Z" />
-        </svg>
-      }
-    >
-      <ProseP>
-        Use the originate endpoint to programmatically start an outbound call. The platform dials the
-        destination number and — once answered — fetches TwiML instructions from your <InlineCode>voice_url</InlineCode>.
-      </ProseP>
-
-      <EndpointRow
-        method="POST"
-        path="/api/calls/originate"
-        description="Initiate an outbound call from one of your API-enabled numbers"
-      />
-
-      <SubHeading>Request Body</SubHeading>
-      <CodeBlock
-        language="json"
-        code={`{
-  "to": "+15551234567",     # E.164 destination number
-  "from": "+15559876543",   # Your API-enabled DID
-  "voice_url": "https://yourserver.com/call-handler"  # Webhook URL
-}`}
-      />
-
-      <SubHeading>Request Fields</SubHeading>
-      <SimpleTable
-        headers={['Field', 'Type', 'Description']}
-        rows={[
-          { col1: 'to', col2: 'string', col3: 'Destination number in E.164 format (e.g. +15551234567)' },
-          { col1: 'from', col2: 'string', col3: 'Your platform DID in E.164 format — must be API-enabled' },
-          { col1: 'voice_url', col2: 'string', col3: 'URL the platform will POST to when the call is answered' },
-        ]}
-      />
-
-      <SubHeading>Response</SubHeading>
-      <CodeBlock
-        language="json"
-        code={`{
-  "call_id": "c8f3a912-4b1e-4d72-a2c9-71e08fbc3a41",
-  "status": "initiated",
-  "to": "+15551234567",
-  "from": "+15559876543",
-  "created_at": "2026-04-09T14:30:00Z"
-}`}
-      />
-
-      <SubHeading>Full Example</SubHeading>
-      <CodeBlock
-        language="bash"
-        code={`curl -X POST https://{platform-host}/api/calls/originate \\
-  -H "Authorization: Bearer YOUR_API_KEY" \\
-  -H "Content-Type: application/json" \\
-  -d '{
-    "to": "+15551234567",
-    "from": "+15559876543",
-    "voice_url": "https://yourserver.com/call-handler"
-  }'`}
-      />
-    </SectionCard>
-  );
-}
-
-function NumbersSection() {
-  return (
-    <SectionCard
-      id="numbers"
-      accent={COLORS.amber}
-      title="Managing Numbers"
-      icon={
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} style={{ width: 18, height: 18 }}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 9h16.5m-16.5 6.75h16.5" />
-        </svg>
-      }
-    >
-      <ProseP>
-        API-enabled DIDs are phone numbers that have been provisioned for programmatic use.
-        You can list your numbers and update the webhook URL for any of them.
-      </ProseP>
-
-      <EndpointRow
-        method="GET"
-        path="/api/api-dids"
-        description="List all API-enabled numbers assigned to your account"
-      />
-      <EndpointRow
-        method="PUT"
-        path="/api/api-dids/{id}"
-        description="Update configuration for a specific number (e.g. change its voice URL)"
-      />
-
-      <SubHeading>List Numbers — Response</SubHeading>
-      <CodeBlock
-        language="json"
-        code={`[
-  {
-    "id": 42,
-    "did": "+15559876543",
-    "voice_url": "https://yourserver.com/call-handler",
-    "enabled": true,
-    "description": "Main sales line"
-  }
-]`}
-      />
-
-      <SubHeading>Update a Number — Request Body</SubHeading>
-      <CodeBlock
-        language="json"
-        code={`{
-  "voice_url": "https://yourserver.com/new-handler",
-  "description": "Updated sales line"
-}`}
-      />
-
-      <SubHeading>Examples</SubHeading>
-      <CodeBlock
-        language="bash"
-        code={`# List your numbers
-curl -X GET https://{platform-host}/api/api-dids \\
-  -H "Authorization: Bearer YOUR_API_KEY"
-
-# Update voice URL for number with id 42
-curl -X PUT https://{platform-host}/api/api-dids/42 \\
-  -H "Authorization: Bearer YOUR_API_KEY" \\
-  -H "Content-Type: application/json" \\
-  -d '{"voice_url": "https://yourserver.com/new-handler"}'`}
-      />
-    </SectionCard>
-  );
-}
-
-function WebhooksSection() {
-  return (
-    <SectionCard
-      id="webhooks"
-      accent="#06b6d4"
-      title="Webhooks"
-      icon={
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} style={{ width: 18, height: 18 }}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244" />
-        </svg>
-      }
-    >
-      <ProseP>
-        When an inbound call arrives on one of your API-enabled numbers (or when an outbound call
-        is answered), the platform sends an HTTP POST to your configured <InlineCode>voice_url</InlineCode>.
-        Your server must respond with TwiML-style XML that instructs the platform on how to handle the call.
-      </ProseP>
-
-      <SubHeading>Webhook Request (POST to your server)</SubHeading>
-      <ProseP>
-        The platform sends the following JSON body when it POSTs to your webhook:
-      </ProseP>
-      <CodeBlock
-        language="json"
-        code={`{
-  "call_id": "c8f3a912-4b1e-4d72-a2c9-71e08fbc3a41",
-  "call_status": "ringing",
-  "direction": "inbound",
-  "to": "+15559876543",
-  "from": "+15551234567",
-  "timestamp": "2026-04-09T14:30:00Z"
-}`}
-      />
-
-      <SubHeading>Required Response</SubHeading>
-      <ProseP>
-        Your server must respond with HTTP 200 and a <InlineCode>Content-Type: application/xml</InlineCode> body
-        containing valid call control XML. The platform will execute the verbs in order.
-      </ProseP>
-      <CodeBlock
-        language="xml"
-        code={`<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-  <Say voice="alice">Hello! Please hold while we connect your call.</Say>
-  <Dial>+15559990000</Dial>
-</Response>`}
-      />
-
-      <SubHeading>Example Webhook Handler (Node.js / Express)</SubHeading>
-      <CodeBlock
-        language="javascript"
-        code={`import express from 'express';
-const app = express();
-app.use(express.json());
-
-app.post('/call-handler', (req, res) => {
-  const { from, to, call_id } = req.body;
-  console.log(\`Call \${call_id} from \${from} to \${to}\`);
-
-  res.set('Content-Type', 'application/xml');
-  res.send(\`<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-  <Say voice="alice">Thanks for calling. Connecting you now.</Say>
-  <Dial>\${process.env.FORWARD_NUMBER}</Dial>
-</Response>\`);
-});
-
-app.listen(3000);`}
-      />
-
-      <SubHeading>Webhook Reliability Tips</SubHeading>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 4 }}>
-        {[
-          'Respond within 10 seconds — the platform will hang up if your webhook times out.',
-          'Return HTTP 200. Non-2xx responses will trigger a retry with exponential backoff.',
-          'Your endpoint must be publicly reachable over HTTPS with a valid TLS certificate.',
-          'Validate the call_id to prevent replay attacks.',
-        ].map((tip, i) => (
-          <div key={i} style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
-            <div
-              style={{
-                width: 18,
-                height: 18,
-                borderRadius: '50%',
-                background: 'rgba(6,182,212,0.12)',
-                border: '1px solid rgba(6,182,212,0.25)',
-                color: '#22d3ee',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontSize: '0.65rem',
-                fontWeight: 700,
-                flexShrink: 0,
-                marginTop: 1,
-              }}
-            >
-              {i + 1}
-            </div>
-            <p style={{ margin: 0, fontSize: '0.82rem', color: COLORS.textMuted, lineHeight: 1.6 }}>
-              {tip}
-            </p>
-          </div>
-        ))}
-      </div>
-    </SectionCard>
-  );
-}
-
-function VerbsSection() {
-  const verbs = [
-    {
-      name: 'Say',
-      accent: '#60a5fa',
-      description: 'Convert text to speech and play it to the caller.',
-      attrs: [
-        { name: 'voice', desc: 'Voice name — alice, man, woman (default: alice)' },
-        { name: 'language', desc: 'BCP-47 language tag (default: en-US)' },
-        { name: 'loop', desc: 'Number of times to repeat (default: 1)' },
-      ],
-      example: `<Say voice="alice" language="en-US">
-  Welcome to our service. Press 1 for sales.
-</Say>`,
-    },
-    {
-      name: 'Play',
-      accent: '#4ade80',
-      description: 'Play an audio file (MP3 or WAV) from a URL.',
-      attrs: [
-        { name: 'loop', desc: 'Number of times to repeat (default: 1)' },
-      ],
-      example: `<Play loop="1">https://yourserver.com/hold-music.mp3</Play>`,
-    },
-    {
-      name: 'Gather',
-      accent: '#c084fc',
-      description: 'Collect DTMF digits from the caller and POST them to an action URL.',
-      attrs: [
-        { name: 'action', desc: 'URL to POST gathered digits to' },
-        { name: 'numDigits', desc: 'Stop gathering after this many digits' },
-        { name: 'timeout', desc: 'Seconds to wait for input before continuing (default: 5)' },
-        { name: 'finishOnKey', desc: 'Digit that finalizes input (default: #)' },
-      ],
-      example: `<Gather action="https://yourserver.com/menu" numDigits="1" timeout="5">
-  <Say>Press 1 for sales, 2 for support.</Say>
-</Gather>`,
-    },
-    {
-      name: 'Dial',
-      accent: '#fbbf24',
-      description: 'Forward the call to another phone number or SIP URI.',
-      attrs: [
-        { name: 'callerId', desc: 'Override the caller ID shown to the destination' },
-        { name: 'timeout', desc: 'Seconds to wait for answer (default: 30)' },
-        { name: 'action', desc: 'URL to call when the dialed call ends' },
-      ],
-      example: `<Dial callerId="+15559876543" timeout="30">
-  +15550001234
-</Dial>`,
-    },
-    {
-      name: 'Hangup',
-      accent: '#f87171',
-      description: 'End the call immediately.',
-      attrs: [],
-      example: `<Hangup />`,
-    },
-    {
-      name: 'Pause',
-      accent: '#94a3b8',
-      description: 'Wait silently for a specified number of seconds.',
-      attrs: [
-        { name: 'length', desc: 'Duration in seconds (default: 1)' },
-      ],
-      example: `<Pause length="2" />`,
-    },
-  ];
-
-  return (
-    <SectionCard
-      id="verbs"
-      accent={COLORS.purple}
-      title="Call Control Verbs"
-      icon={
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} style={{ width: 18, height: 18 }}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M17.25 6.75 22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3-4.5 16.5" />
-        </svg>
-      }
-    >
-      <ProseP>
-        Your webhook responses contain XML verbs inside a <InlineCode>&lt;Response&gt;</InlineCode> root
-        element. The platform executes each verb sequentially. Verbs can be nested where noted.
-      </ProseP>
-
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-        {verbs.map((verb) => (
-          <div
-            key={verb.name}
-            style={{
-              borderRadius: 10,
-              border: `1px solid ${COLORS.borderSubtle}`,
-              overflow: 'hidden',
-            }}
-          >
-            {/* Verb header */}
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 10,
-                padding: '12px 18px',
-                background: 'rgba(13,15,21,0.5)',
-                borderBottom: `1px solid ${COLORS.borderSubtle}`,
-              }}
-            >
-              <span
+      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' }}>
+        <thead>
+          <tr style={{ background: 'rgba(13,17,23,0.7)' }}>
+            {['Tier', 'Max CPS', 'Per-Call Fee', 'Monthly'].map(h => (
+              <th
+                key={h}
                 style={{
-                  fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
-                  fontSize: '0.85rem',
+                  padding: '9px 14px',
+                  textAlign: 'left',
+                  color: C.textFaint,
                   fontWeight: 700,
-                  color: verb.accent,
-                  background: `${verb.accent}12`,
-                  border: `1px solid ${verb.accent}30`,
-                  borderRadius: 6,
-                  padding: '2px 10px',
+                  letterSpacing: '0.06em',
+                  fontSize: '0.67rem',
+                  textTransform: 'uppercase',
+                  borderBottom: `1px solid ${C.borderSubtle}`,
                 }}
               >
-                &lt;{verb.name}&gt;
-              </span>
-              <span style={{ fontSize: '0.82rem', color: COLORS.textMuted }}>
-                {verb.description}
-              </span>
-            </div>
-
-            <div style={{ padding: '16px 18px' }}>
-              {verb.attrs.length > 0 && (
-                <>
-                  <p
+                {h}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, i) => (
+            <tr
+              key={i}
+              style={{
+                background: row.highlight
+                  ? 'rgba(168,85,247,0.06)'
+                  : i % 2 === 0 ? 'transparent' : 'rgba(13,17,23,0.25)',
+              }}
+            >
+              <td style={{ padding: '10px 14px', borderBottom: `1px solid ${C.borderSubtle}` }}>
+                <span
+                  style={{
+                    color: row.highlight ? C.purple : C.text,
+                    fontWeight: row.highlight ? 700 : 400,
+                  }}
+                >
+                  {row.tier}
+                </span>
+                {row.highlight && (
+                  <span
                     style={{
-                      margin: '0 0 10px',
-                      fontSize: '0.72rem',
+                      marginLeft: 8,
+                      fontSize: '0.65rem',
                       fontWeight: 700,
-                      letterSpacing: '0.08em',
-                      textTransform: 'uppercase',
-                      color: COLORS.textFaint,
+                      color: C.purple,
+                      background: 'rgba(168,85,247,0.12)',
+                      padding: '1px 6px',
+                      borderRadius: 4,
+                      letterSpacing: '0.06em',
                     }}
                   >
-                    Attributes
-                  </p>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 16 }}>
-                    {verb.attrs.map((attr) => (
-                      <div key={attr.name} style={{ display: 'flex', gap: 12, alignItems: 'baseline' }}>
-                        <InlineCode>{attr.name}</InlineCode>
-                        <span style={{ fontSize: '0.8rem', color: COLORS.textMuted }}>
-                          {attr.desc}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </>
-              )}
-              <CodeBlock language="xml" code={verb.example} />
-            </div>
-          </div>
-        ))}
-      </div>
-    </SectionCard>
+                    POPULAR
+                  </span>
+                )}
+              </td>
+              <td style={{ padding: '10px 14px', borderBottom: `1px solid ${C.borderSubtle}`, color: C.text, fontFamily: 'monospace' }}>
+                {row.cps}
+              </td>
+              <td style={{ padding: '10px 14px', borderBottom: `1px solid ${C.borderSubtle}`, color: C.textMuted }}>
+                {row.perCall}
+              </td>
+              <td style={{ padding: '10px 14px', borderBottom: `1px solid ${C.borderSubtle}`, color: C.textMuted }}>
+                {row.monthly}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
-function ErrorCodesSection() {
+/* ─── Request/Response pair ──────────────────────────────── */
+
+function ReqRes({ request, response }: { request: string; response: string }) {
   return (
-    <SectionCard
-      id="errors"
-      accent={COLORS.red}
-      title="Error Codes"
-      icon={
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} style={{ width: 18, height: 18 }}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" />
-        </svg>
-      }
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 4 }}>
+      <div>
+        <div style={{ fontSize: '0.68rem', fontWeight: 700, letterSpacing: '0.08em', color: C.textFaint, textTransform: 'uppercase', marginBottom: 4 }}>
+          Request
+        </div>
+        <CodeBlock code={request} />
+      </div>
+      <div>
+        <div style={{ fontSize: '0.68rem', fontWeight: 700, letterSpacing: '0.08em', color: C.textFaint, textTransform: 'uppercase', marginBottom: 4 }}>
+          Response
+        </div>
+        <CodeBlock code={response} />
+      </div>
+    </div>
+  );
+}
+
+/* ─── Collapsible accordion section ─────────────────────── */
+
+interface AccordionSectionProps {
+  id: string;
+  accent: string;
+  icon: React.ReactNode;
+  title: string;
+  subtitle: string;
+  children: React.ReactNode;
+  defaultOpen?: boolean;
+}
+
+function AccordionSection({
+  accent,
+  icon,
+  title,
+  subtitle,
+  children,
+  defaultOpen = false,
+}: AccordionSectionProps) {
+  const [open, setOpen] = useState(defaultOpen);
+
+  return (
+    <div
+      style={{
+        border: `1px solid ${open ? accent + '40' : C.border}`,
+        borderRadius: 14,
+        overflow: 'hidden',
+        marginBottom: 20,
+        transition: 'border-color 0.2s',
+        background: `linear-gradient(135deg, ${C.surface} 0%, ${C.surfaceAlt} 100%)`,
+      }}
     >
-      <SubHeading>HTTP Status Codes</SubHeading>
-      <SimpleTable
-        headers={['Code', 'Meaning', 'Common Cause']}
-        rows={[
-          { col1: '200 OK', col2: 'Request succeeded', col3: '', accent: COLORS.green },
-          { col1: '400 Bad Request', col2: 'Invalid request body or parameters', col3: 'Missing required field, bad E.164 format', accent: COLORS.amber },
-          { col1: '401 Unauthorized', col2: 'Authentication failed', col3: 'Missing or expired API key', accent: COLORS.red },
-          { col1: '403 Forbidden', col2: 'Permission denied', col3: 'Your key cannot access this resource', accent: COLORS.red },
-          { col1: '404 Not Found', col2: 'Resource does not exist', col3: 'Wrong DID id, call not found', accent: COLORS.amber },
-          { col1: '429 Too Many Requests', col2: 'Rate limit exceeded', col3: 'Slow down — retry after the Retry-After header', accent: COLORS.amber },
-          { col1: '500 Internal Error', col2: 'Platform error', col3: 'Transient — retry with exponential backoff', accent: COLORS.red },
-        ]}
-      />
+      {/* Header bar */}
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        style={{
+          width: '100%',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 16,
+          padding: '20px 28px',
+          background: open
+            ? `linear-gradient(90deg, ${accent}0d 0%, transparent 60%)`
+            : 'transparent',
+          border: 'none',
+          borderBottom: open ? `1px solid ${accent}25` : '1px solid transparent',
+          cursor: 'pointer',
+          textAlign: 'left',
+          transition: 'background 0.2s',
+        }}
+      >
+        {/* Icon badge */}
+        <div
+          style={{
+            width: 40,
+            height: 40,
+            borderRadius: 10,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: `linear-gradient(135deg, ${accent}20 0%, ${accent}08 100%)`,
+            border: `1px solid ${accent}35`,
+            color: accent,
+            flexShrink: 0,
+          }}
+        >
+          {icon}
+        </div>
 
-      <SubHeading>SIP Error Codes</SubHeading>
-      <SimpleTable
-        headers={['SIP Code', 'Meaning']}
-        rows={[
-          { col1: '403', col2: 'Forbidden — caller not authorized on this trunk', accent: COLORS.red },
-          { col1: '404', col2: 'Not Found — dialed number does not exist', accent: COLORS.amber },
-          { col1: '408', col2: 'Request Timeout — far-end did not respond in time', accent: COLORS.amber },
-          { col1: '480', col2: 'Temporarily Unavailable — called party is offline', accent: COLORS.amber },
-          { col1: '486', col2: 'Busy Here — called party is busy', accent: COLORS.amber },
-          { col1: '503', col2: 'Service Unavailable — carrier congestion', accent: COLORS.red },
-        ]}
-      />
-
-      <SubHeading>Troubleshooting Tips</SubHeading>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 8 }}>
-        {[
-          { title: 'Check your Authorization header', body: 'Ensure the header is spelled correctly and the token has no extra whitespace or line breaks.' },
-          { title: 'Use E.164 number format', body: 'All phone numbers must start with + followed by country code and subscriber number, e.g. +15551234567.' },
-          { title: 'Verify your webhook is reachable', body: 'The platform cannot reach localhost. Use a publicly accessible HTTPS URL with a valid TLS certificate.' },
-          { title: 'Webhook must respond within 10 seconds', body: 'Long-running processing should be deferred — respond immediately with XML and do async work separately.' },
-          { title: 'Handle 429 with backoff', body: 'If rate-limited, wait the number of seconds in the Retry-After response header before retrying.' },
-        ].map((item) => (
+        {/* Title + subtitle */}
+        <div style={{ flex: 1, minWidth: 0 }}>
           <div
-            key={item.title}
+            style={{
+              fontSize: '1.05rem',
+              fontWeight: 700,
+              color: C.text,
+              letterSpacing: '-0.01em',
+              marginBottom: 2,
+            }}
+          >
+            {title}
+          </div>
+          <div style={{ fontSize: '0.82rem', color: C.textMuted, lineHeight: 1.4 }}>
+            {subtitle}
+          </div>
+        </div>
+
+        {/* Chevron */}
+        <div
+          style={{
+            color: accent,
+            flexShrink: 0,
+            transform: open ? 'rotate(0deg)' : 'rotate(-90deg)',
+            transition: 'transform 0.2s',
+          }}
+        >
+          <ChevronDown size={20} />
+        </div>
+      </button>
+
+      {/* Collapsible body */}
+      {open && (
+        <div style={{ padding: '28px 32px' }}>
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ─── Callout box ────────────────────────────────────────── */
+
+function Callout({
+  accent,
+  children,
+}: {
+  accent: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        gap: 12,
+        padding: '14px 18px',
+        borderRadius: 8,
+        background: `${accent}0a`,
+        border: `1px solid ${accent}25`,
+        marginBottom: 16,
+        fontSize: '0.84rem',
+        color: C.textMuted,
+        lineHeight: 1.65,
+      }}
+    >
+      <div style={{ color: accent, flexShrink: 0, marginTop: 1 }}>
+        <Terminal size={14} />
+      </div>
+      <div>{children}</div>
+    </div>
+  );
+}
+
+/* ─── Auth section (always visible) ─────────────────────── */
+
+function AuthSection() {
+  return (
+    <div
+      style={{
+        background: `linear-gradient(135deg, ${C.surface} 0%, ${C.surfaceAlt} 100%)`,
+        border: `1px solid ${C.border}`,
+        borderRadius: 14,
+        overflow: 'hidden',
+        marginBottom: 28,
+      }}
+    >
+      {/* Top accent */}
+      <div
+        style={{
+          height: 2,
+          background: `linear-gradient(90deg, transparent, ${C.accent}, transparent)`,
+          opacity: 0.5,
+        }}
+      />
+
+      <div style={{ padding: '28px 32px' }}>
+        {/* Header */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 24 }}>
+          <div
+            style={{
+              width: 38,
+              height: 38,
+              borderRadius: 10,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              background: `linear-gradient(135deg, ${C.accent}20 0%, ${C.accent}08 100%)`,
+              border: `1px solid ${C.accent}30`,
+              color: C.accent,
+              flexShrink: 0,
+            }}
+          >
+            <Key size={18} />
+          </div>
+          <div>
+            <h2
+              style={{
+                fontSize: '1rem',
+                fontWeight: 700,
+                color: C.text,
+                margin: 0,
+                letterSpacing: '-0.01em',
+              }}
+            >
+              Authentication
+            </h2>
+            <p style={{ margin: 0, fontSize: '0.8rem', color: C.textMuted }}>
+              JWT Bearer token — required on every request
+            </p>
+          </div>
+        </div>
+
+        {/* Base URL + auth method */}
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: '1fr 1fr',
+            gap: 12,
+            marginBottom: 24,
+          }}
+        >
+          {[
+            { label: 'Base URL', value: '/api/v1' },
+            { label: 'Auth Header', value: 'Authorization: Bearer <token>' },
+          ].map(({ label, value }) => (
+            <div
+              key={label}
+              style={{
+                padding: '14px 18px',
+                borderRadius: 8,
+                background: 'rgba(13,17,23,0.55)',
+                border: `1px solid ${C.borderSubtle}`,
+              }}
+            >
+              <div style={{ fontSize: '0.67rem', fontWeight: 700, color: C.textFaint, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 6 }}>
+                {label}
+              </div>
+              <code style={{ fontFamily: 'monospace', fontSize: '0.82rem', color: '#79c0ff' }}>
+                {value}
+              </code>
+            </div>
+          ))}
+        </div>
+
+        <P>
+          All endpoints are protected by JWT authentication. To obtain a token, <IC>POST</IC> your credentials to <IC>/api/v1/auth/login</IC>. The token returned must be included in the <IC>Authorization</IC> header of every subsequent request. Tokens expire after 24 hours.
+        </P>
+
+        <H3>Step 1 — Obtain a token</H3>
+        <ReqRes
+          request={`curl -X POST https://{host}/api/v1/auth/login \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "username": "your@email.com",
+    "password": "your-password"
+  }'`}
+          response={`{
+  "access_token": "eyJhbGciOiJIUzI1NiIsIn...",
+  "token_type": "bearer",
+  "expires_in": 86400
+}`}
+        />
+
+        <H3>Step 2 — Authenticate requests</H3>
+        <CodeBlock
+          label="All subsequent requests"
+          code={`curl -X GET https://{host}/api/v1/rcf \\
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsIn..." \\
+  -H "Content-Type: application/json"`}
+        />
+
+        <Callout accent={C.accent}>
+          Store your token securely. Never log it, commit it to version control, or expose it in client-side JavaScript. If compromised, contact your platform administrator to revoke and reissue credentials.
+        </Callout>
+      </div>
+    </div>
+  );
+}
+
+/* ─── Section 1: RCF ─────────────────────────────────────── */
+
+function RcfSection() {
+  return (
+    <AccordionSection
+      id="rcf"
+      accent={C.green}
+      icon={<Phone size={18} />}
+      title="RCF — Remote Call Forwarding"
+      subtitle="Manage phone number forwarding. Create, update, and delete RCF numbers that route incoming calls to any destination."
+      defaultOpen
+    >
+      <P>
+        RCF numbers are DIDs (Direct Inward Dial numbers) that forward all incoming calls to a configurable destination — another phone number, SIP address, or extension. Use the RCF API to provision numbers, change forwarding targets in real time, set ring timeouts, and configure failover behavior without portal access.
+      </P>
+
+      <Callout accent={C.green}>
+        All phone numbers must be in E.164 format: a leading <IC>+</IC>, country code, then subscriber number. US example: <IC>+15087282017</IC>. Extensions are expressed as short numeric strings (e.g. <IC>1001</IC>).
+      </Callout>
+
+      <H3>Endpoints</H3>
+
+      <Endpoint method="POST"   path="/api/v1/rcf"       description="Create a new RCF number and configure its forwarding destination." />
+      <Endpoint method="GET"    path="/api/v1/rcf"       description="List all RCF numbers. Filter by customer_id or enabled status." />
+      <Endpoint method="GET"    path="/api/v1/rcf/{did}" description="Retrieve a single RCF record by its E.164 DID." />
+      <Endpoint method="PUT"    path="/api/v1/rcf/{did}" description="Update forwarding destination, name, ring timeout, failover, or enabled state." />
+      <Endpoint method="DELETE" path="/api/v1/rcf/{did}" description="Permanently delete an RCF number and stop all forwarding." />
+
+      {/* Create */}
+      <H3>Create RCF — POST /api/v1/rcf</H3>
+      <ParamTable
+        rows={[
+          { name: 'customer_id',    type: 'integer', required: true,  description: 'Your account customer ID.' },
+          { name: 'did',            type: 'string',  required: true,  description: 'The inbound DID in E.164 format (+1XXXXXXXXXX).' },
+          { name: 'forward_to',     type: 'string',  required: true,  description: 'Destination in E.164 format or numeric extension.' },
+          { name: 'name',           type: 'string',  required: false, description: 'Friendly label for this RCF entry.' },
+          { name: 'pass_caller_id', type: 'boolean', required: false, description: 'If true, the original caller\'s number is passed through. If false, the RCF DID is shown as the caller ID. Default: true.' },
+          { name: 'ring_timeout',   type: 'integer', required: false, description: 'Seconds to ring before failing over. Range: 5–120. Default: 30.' },
+          { name: 'failover_to',    type: 'string',  required: false, description: 'If set, calls route here when ring_timeout expires (E.164 or extension).' },
+        ]}
+      />
+
+      <div style={{ fontSize: '0.72rem', fontWeight: 700, letterSpacing: '0.08em', color: C.textFaint, textTransform: 'uppercase', marginBottom: 6 }}>
+        Example — Create RCF number
+      </div>
+      <ReqRes
+        request={`curl -X POST https://{host}/api/v1/rcf \\
+  -H "Authorization: Bearer {token}" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "customer_id": 1042,
+    "did": "+15087282017",
+    "forward_to": "+16175550100",
+    "name": "Boston Sales Line",
+    "pass_caller_id": true,
+    "ring_timeout": 25,
+    "failover_to": "+18005550199"
+  }'`}
+        response={`{
+  "id": 8841,
+  "did": "+15087282017",
+  "forward_to": "+16175550100",
+  "name": "Boston Sales Line",
+  "pass_caller_id": true,
+  "ring_timeout": 25,
+  "failover_to": "+18005550199",
+  "enabled": true,
+  "customer_id": 1042,
+  "created_at": "2026-04-10T14:22:01Z"
+}`}
+      />
+
+      {/* List */}
+      <H3>List RCF Numbers — GET /api/v1/rcf</H3>
+      <P>
+        Returns all RCF numbers. Use query parameters to filter results.
+      </P>
+      <ParamTable
+        rows={[
+          { name: 'customer_id', type: 'integer', required: false, description: 'Filter to a specific customer.' },
+          { name: 'enabled',     type: 'boolean', required: false, description: 'Filter by active/inactive status.' },
+        ]}
+      />
+      <CodeBlock
+        label="GET /api/v1/rcf?customer_id=1042"
+        code={`curl -X GET "https://{host}/api/v1/rcf?customer_id=1042&enabled=true" \\
+  -H "Authorization: Bearer {token}"`}
+      />
+
+      {/* Update */}
+      <H3>Update RCF — PUT /api/v1/rcf/{'{did}'}</H3>
+      <P>
+        Change where <IC>+15087282017</IC> forwards to, or adjust any configuration. Only fields included in the request body are updated.
+      </P>
+      <ParamTable
+        rows={[
+          { name: 'forward_to',     type: 'string',  required: false, description: 'New forwarding destination (E.164 or extension).' },
+          { name: 'name',           type: 'string',  required: false, description: 'Updated friendly label.' },
+          { name: 'ring_timeout',   type: 'integer', required: false, description: 'Ring timeout in seconds (5–120).' },
+          { name: 'failover_to',    type: 'string',  required: false, description: 'Updated failover destination.' },
+          { name: 'enabled',        type: 'boolean', required: false, description: 'Enable or disable this RCF number.' },
+          { name: 'pass_caller_id', type: 'boolean', required: false, description: 'Toggle caller ID pass-through.' },
+        ]}
+      />
+
+      <div style={{ fontSize: '0.72rem', fontWeight: 700, letterSpacing: '0.08em', color: C.textFaint, textTransform: 'uppercase', marginBottom: 6 }}>
+        Example — Change where +15087282017 forwards to
+      </div>
+      <ReqRes
+        request={`curl -X PUT https://{host}/api/v1/rcf/%2B15087282017 \\
+  -H "Authorization: Bearer {token}" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "forward_to": "+16175559999",
+    "ring_timeout": 40
+  }'`}
+        response={`{
+  "id": 8841,
+  "did": "+15087282017",
+  "forward_to": "+16175559999",
+  "name": "Boston Sales Line",
+  "pass_caller_id": true,
+  "ring_timeout": 40,
+  "failover_to": "+18005550199",
+  "enabled": true,
+  "updated_at": "2026-04-10T16:05:33Z"
+}`}
+      />
+
+      <Callout accent={C.green}>
+        URL-encode the DID when using it as a path parameter. The <IC>+</IC> character must be encoded as <IC>%2B</IC>. Example: <IC>/api/v1/rcf/%2B15087282017</IC>
+      </Callout>
+
+      {/* Behavior notes */}
+      <H3>Behavior Notes</H3>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 4 }}>
+        {[
+          {
+            title: 'Failover',
+            body: 'If ring_timeout expires and failover_to is set, the call is immediately rerouted to that destination. If failover_to is not set, the call goes to the default voicemail treatment.',
+          },
+          {
+            title: 'pass_caller_id',
+            body: 'When true, the original PSTN caller ID is preserved end-to-end. When false, the called party sees the RCF DID as the incoming caller ID — useful for call tracking numbers.',
+          },
+          {
+            title: 'Ring Timeout',
+            body: 'Valid range is 5–120 seconds. Setting below 5 or above 120 returns a 422 validation error. The default is 30 seconds if not specified at creation.',
+          },
+          {
+            title: 'E.164 Format',
+            body: 'All number fields require E.164 format. US numbers: +1 followed by 10 digits. International: + followed by country code and subscriber number. No spaces or dashes.',
+          },
+        ].map(({ title, body }) => (
+          <div
+            key={title}
             style={{
               padding: '14px 16px',
               borderRadius: 8,
-              background: 'rgba(13,15,21,0.4)',
-              border: `1px solid ${COLORS.borderSubtle}`,
+              background: 'rgba(34,197,94,0.04)',
+              border: `1px solid rgba(34,197,94,0.15)`,
             }}
           >
-            <p style={{ margin: '0 0 4px', fontSize: '0.82rem', fontWeight: 700, color: COLORS.text }}>
-              {item.title}
-            </p>
-            <p style={{ margin: 0, fontSize: '0.8rem', color: COLORS.textMuted, lineHeight: 1.6 }}>
-              {item.body}
-            </p>
+            <div style={{ fontSize: '0.78rem', fontWeight: 700, color: C.green, marginBottom: 6 }}>
+              {title}
+            </div>
+            <div style={{ fontSize: '0.81rem', color: C.textMuted, lineHeight: 1.6 }}>
+              {body}
+            </div>
           </div>
         ))}
       </div>
-    </SectionCard>
+    </AccordionSection>
   );
 }
 
-/* ─── Sidebar nav ────────────────────────────────────────── */
+/* ─── Section 2: SIP Trunking ────────────────────────────── */
 
-interface SidebarNavProps {
-  activeSection: string;
-  onNavigate: (id: string) => void;
-}
-
-function SidebarNav({ activeSection, onNavigate }: SidebarNavProps) {
+function SipTrunkingSection() {
   return (
-    <nav
-      style={{
-        width: 220,
-        flexShrink: 0,
-        position: 'sticky',
-        top: 24,
-        alignSelf: 'flex-start',
-        maxHeight: 'calc(100vh - 200px)',
-        overflowY: 'auto',
-      }}
+    <AccordionSection
+      id="sip"
+      accent={C.amber}
+      icon={<Network size={18} />}
+      title="SIP Trunking"
+      subtitle="Manage SIP trunks for connecting your PBX to the PSTN. Configure capacity, IP authentication, and DIDs."
     >
-      <div
-        style={{
-          background: `linear-gradient(135deg, ${COLORS.surface} 0%, ${COLORS.surfaceAlt} 100%)`,
-          border: `1px solid ${COLORS.border}`,
-          borderRadius: 12,
-          padding: '8px 6px',
-        }}
-      >
-        <p
-          style={{
-            margin: '6px 10px 10px',
-            fontSize: '0.65rem',
-            fontWeight: 700,
-            letterSpacing: '0.1em',
-            textTransform: 'uppercase',
-            color: COLORS.textFaint,
-          }}
-        >
-          Contents
-        </p>
-        {NAV_SECTIONS.map((section) => {
-          const isActive = activeSection === section.id;
-          return (
-            <button
-              key={section.id}
-              type="button"
-              onClick={() => onNavigate(section.id)}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-                width: '100%',
-                padding: '8px 10px',
-                borderRadius: 7,
-                background: isActive ? 'rgba(59,130,246,0.12)' : 'transparent',
-                color: isActive ? '#93c5fd' : COLORS.textMuted,
-                fontSize: '0.8rem',
-                fontWeight: isActive ? 600 : 400,
-                cursor: 'pointer',
-                border: 'none',
-                textAlign: 'left',
-                transition: 'all 0.15s',
-                borderLeft: isActive ? `2px solid ${COLORS.accent}` : '2px solid transparent',
-              }}
-            >
-              <span style={{ opacity: isActive ? 1 : 0.5, flexShrink: 0 }}>{section.icon}</span>
-              {section.label}
-            </button>
-          );
-        })}
+      <P>
+        SIP trunks provide the gateway between your IP PBX, softswitch, or contact center platform and the public telephone network. Use the Trunks API to provision capacity, authorize your PBX IP addresses, assign DIDs, and monitor real-time utilization — all without a support ticket.
+      </P>
+
+      <Callout accent={C.amber}>
+        Trunk <IC>auth_type</IC> controls how your PBX authenticates inbound registrations: <IC>ip</IC> (source IP whitelist only), <IC>credential</IC> (SIP username/password), or <IC>both</IC> (IP must be whitelisted AND credentials must match).
+      </Callout>
+
+      {/* Core trunk endpoints */}
+      <H3>Trunk Endpoints</H3>
+
+      <Endpoint method="POST" path="/api/v1/trunks"          description="Create a new SIP trunk for a customer." />
+      <Endpoint method="GET"  path="/api/v1/trunks"          description="List all SIP trunks. Filter by customer_id." />
+      <Endpoint method="GET"  path="/api/v1/trunks/{id}"     description="Get full configuration details for a single trunk." />
+      <Endpoint method="PUT"  path="/api/v1/trunks/{id}"     description="Update trunk name, channel capacity, CPS limit, or enabled state." />
+      <Endpoint method="GET"  path="/api/v1/trunks/{id}/stats" description="Real-time trunk statistics: active channels, utilization %, ASR, ACD." />
+
+      <H3>Create Trunk — POST /api/v1/trunks</H3>
+      <ParamTable
+        rows={[
+          { name: 'customer_id', type: 'integer', required: true,  description: 'Customer account this trunk belongs to.' },
+          { name: 'trunk_name',  type: 'string',  required: true,  description: 'Friendly identifier for the trunk (e.g. "HQ PBX - Primary").' },
+          { name: 'max_channels',type: 'integer', required: true,  description: 'Maximum simultaneous calls allowed on this trunk.' },
+          { name: 'cps_limit',   type: 'integer', required: true,  description: 'Max call attempts per second (CPS). Excess attempts receive 503.' },
+          { name: 'auth_type',   type: 'string',  required: true,  description: 'One of: ip | credential | both.' },
+        ]}
+      />
+
+      <div style={{ fontSize: '0.72rem', fontWeight: 700, letterSpacing: '0.08em', color: C.textFaint, textTransform: 'uppercase', marginBottom: 6 }}>
+        Example — Set up a trunk with 100 channels and IP auth
       </div>
-    </nav>
+      <ReqRes
+        request={`curl -X POST https://{host}/api/v1/trunks \\
+  -H "Authorization: Bearer {token}" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "customer_id": 1042,
+    "trunk_name": "HQ PBX - Primary",
+    "max_channels": 100,
+    "cps_limit": 10,
+    "auth_type": "ip"
+  }'`}
+        response={`{
+  "id": 221,
+  "trunk_name": "HQ PBX - Primary",
+  "customer_id": 1042,
+  "max_channels": 100,
+  "cps_limit": 10,
+  "auth_type": "ip",
+  "enabled": true,
+  "sip_domain": "hq-pbx.sip.platform.net",
+  "created_at": "2026-04-10T14:30:00Z"
+}`}
+      />
+
+      {/* Real-time stats */}
+      <H3>Real-Time Stats — GET /api/v1/trunks/{'{id}'}/stats</H3>
+      <CodeBlock
+        label="Response"
+        code={`{
+  "trunk_id": 221,
+  "active_channels": 34,
+  "max_channels": 100,
+  "utilization_pct": 34.0,
+  "calls_per_second": 2,
+  "asr_pct": 96.4,
+  "acd_seconds": 187,
+  "as_of": "2026-04-10T16:00:01Z"
+}`}
+      />
+
+      {/* IP Auth */}
+      <H3>IP Authentication</H3>
+      <P>
+        When <IC>auth_type</IC> is <IC>ip</IC> or <IC>both</IC>, only SIP INVITE requests from whitelisted IP addresses are accepted. Add the public IP of your PBX after creating the trunk.
+      </P>
+
+      <Endpoint method="POST"   path="/api/v1/trunks/{id}/ips"          description="Whitelist an IP address for this trunk." />
+      <Endpoint method="GET"    path="/api/v1/trunks/{id}/ips"          description="List all authorized IP addresses." />
+      <Endpoint method="DELETE" path="/api/v1/trunks/{id}/ips/{ip_id}"  description="Remove an IP address from the whitelist." />
+
+      <ParamTable
+        rows={[
+          { name: 'ip_address',  type: 'string', required: true,  description: 'IPv4 or IPv6 address of the PBX (e.g. 203.0.113.10).' },
+          { name: 'description', type: 'string', required: false, description: 'Label for this IP (e.g. "Primary WAN" or "Backup link").' },
+        ]}
+      />
+      <ReqRes
+        request={`curl -X POST https://{host}/api/v1/trunks/221/ips \\
+  -H "Authorization: Bearer {token}" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "ip_address": "203.0.113.10",
+    "description": "Primary WAN"
+  }'`}
+        response={`{
+  "id": 55,
+  "trunk_id": 221,
+  "ip_address": "203.0.113.10",
+  "description": "Primary WAN",
+  "created_at": "2026-04-10T14:35:00Z"
+}`}
+      />
+
+      {/* DID Management */}
+      <H3>DID Management</H3>
+      <P>
+        Assign DIDs to a trunk so that inbound calls to those numbers are delivered via that trunk's SIP connection.
+      </P>
+
+      <Endpoint method="POST" path="/api/v1/trunks/{id}/dids" description="Assign a DID to this trunk." />
+      <Endpoint method="GET"  path="/api/v1/trunks/{id}/dids" description="List all DIDs assigned to this trunk." />
+
+      <ReqRes
+        request={`curl -X POST https://{host}/api/v1/trunks/221/dids \\
+  -H "Authorization: Bearer {token}" \\
+  -H "Content-Type: application/json" \\
+  -d '{ "did": "+16175550199" }'`}
+        response={`{
+  "trunk_id": 221,
+  "did": "+16175550199",
+  "assigned_at": "2026-04-10T14:40:00Z"
+}`}
+      />
+
+      {/* Call Path Packages */}
+      <H3>Call Path Packages</H3>
+      <P>
+        Call path packages define the maximum number of concurrent calls (channels) and associated rate card. Browse available packages and assign one to a trunk to change its capacity tier.
+      </P>
+
+      <Endpoint method="GET" path="/api/v1/trunks/call-paths"         description="List all available call path packages and pricing." />
+      <Endpoint method="PUT" path="/api/v1/trunks/{id}/call-paths"    description="Assign a call path package to this trunk." />
+
+      <ParamTable
+        rows={[
+          { name: 'package_id', type: 'integer', required: true, description: 'ID of the call path package to assign (from GET /call-paths).' },
+        ]}
+      />
+
+      {/* Behavior notes */}
+      <H3>Capacity & Rate Limiting</H3>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+        {[
+          {
+            title: 'Channel Capacity',
+            body: 'max_channels is a hard limit. When the trunk is at capacity, new INVITEs are rejected with SIP 503. Use the /stats endpoint to monitor utilization and scale proactively.',
+          },
+          {
+            title: 'CPS Rate Limiting',
+            body: 'cps_limit throttles call attempt bursts. If your PBX sends more than the configured CPS, excess attempts receive SIP 429. Recommended starting point: 1 CPS per 10 channels.',
+          },
+          {
+            title: 'Auth Type: ip',
+            body: 'Only requests from whitelisted IPs are accepted. Best for static PBX installations. No SIP credentials are required or checked.',
+          },
+          {
+            title: 'Auth Type: both',
+            body: 'IP must be whitelisted AND valid SIP credentials must be provided. Most secure — recommended for trunks serving multiple locations.',
+          },
+        ].map(({ title, body }) => (
+          <div
+            key={title}
+            style={{
+              padding: '14px 16px',
+              borderRadius: 8,
+              background: 'rgba(245,158,11,0.04)',
+              border: `1px solid rgba(245,158,11,0.15)`,
+            }}
+          >
+            <div style={{ fontSize: '0.78rem', fontWeight: 700, color: C.amber, marginBottom: 6 }}>
+              {title}
+            </div>
+            <div style={{ fontSize: '0.81rem', color: C.textMuted, lineHeight: 1.6 }}>
+              {body}
+            </div>
+          </div>
+        ))}
+      </div>
+    </AccordionSection>
   );
 }
 
-/* ─── View toggle button ─────────────────────────────────── */
+/* ─── Section 3: API Calling ─────────────────────────────── */
 
-interface ToggleButtonProps {
-  label: string;
-  active: boolean;
-  onClick: () => void;
-}
-
-function ToggleButton({ label, active, onClick }: ToggleButtonProps) {
+function ApiCallingSection() {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      style={{
-        padding: '6px 14px',
-        borderRadius: 7,
-        fontSize: '0.82rem',
-        fontWeight: 600,
-        whiteSpace: 'nowrap',
-        transition: 'background 0.15s, color 0.15s',
-        background: active ? COLORS.accent : 'transparent',
-        color: active ? '#ffffff' : COLORS.textMuted,
-        boxShadow: active ? '0 0 10px rgba(59,130,246,0.3)' : 'none',
-        cursor: 'pointer',
-        border: 'none',
-      }}
+    <AccordionSection
+      id="api-calling"
+      accent={C.purple}
+      icon={<Code size={18} />}
+      title="API Calling — Programmable Voice"
+      subtitle="Build voice applications with programmable DIDs and call origination. Receive webhooks for inbound calls and initiate outbound calls via API."
     >
-      {label}
-    </button>
-  );
-}
+      <P>
+        Programmable Voice lets you attach a webhook URL to any DID so that every inbound call fetches XML/TwiML instructions from your server — enabling dynamic call routing, IVR menus, recording, conferencing, and more. You can also originate outbound calls programmatically and modify live calls in flight.
+      </P>
 
-/* ─── Full-ref iframe panel (admin only) ─────────────────── */
+      <Callout accent={C.purple}>
+        Your <IC>voice_url</IC> must return valid TwiML XML within 10 seconds. The platform will retry with a <IC>GET</IC> if the initial <IC>POST</IC> fails. If both attempts fail, the call receives a platform error treatment.
+      </Callout>
 
-function FullRefPanel() {
-  const [swaggerView, setSwaggerView] = useState<SwaggerView>('swagger');
+      {/* DID Management */}
+      <H3>API DID Management</H3>
+      <P>
+        API DIDs are phone numbers with a webhook attached. When a call arrives, your <IC>voice_url</IC> is fetched and the returned TwiML is executed to handle the call.
+      </P>
 
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      {/* Sub-toggle: Swagger vs ReDoc */}
-      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 4,
-            background: 'rgba(19,21,29,0.9)',
-            border: `1px solid ${COLORS.border}`,
-            borderRadius: 10,
-            padding: 4,
-          }}
-        >
-          <ToggleButton
-            label="Swagger UI"
-            active={swaggerView === 'swagger'}
-            onClick={() => setSwaggerView('swagger')}
+      <Endpoint method="POST"   path="/api/v1/api-dids"       description="Create an API DID and attach a voice webhook URL." />
+      <Endpoint method="GET"    path="/api/v1/api-dids"       description="List all API DIDs for your account." />
+      <Endpoint method="GET"    path="/api/v1/api-dids/{did}" description="Get configuration for a single API DID." />
+      <Endpoint method="PUT"    path="/api/v1/api-dids/{did}" description="Update voice_url, status_callback, or enabled state." />
+      <Endpoint method="DELETE" path="/api/v1/api-dids/{did}" description="Remove API DID and stop webhook delivery." />
+
+      <H3>Create API DID — POST /api/v1/api-dids</H3>
+      <ParamTable
+        rows={[
+          { name: 'customer_id',      type: 'integer', required: true,  description: 'Customer account this DID belongs to.' },
+          { name: 'did',              type: 'string',  required: true,  description: 'Phone number in E.164 format (+1XXXXXXXXXX).' },
+          { name: 'voice_url',        type: 'string',  required: true,  description: 'HTTPS URL that returns TwiML for inbound call handling.' },
+          { name: 'status_callback',  type: 'string',  required: false, description: 'HTTPS URL to receive call lifecycle status events (ringing, answered, completed, failed).' },
+        ]}
+      />
+
+      <ReqRes
+        request={`curl -X POST https://{host}/api/v1/api-dids \\
+  -H "Authorization: Bearer {token}" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "customer_id": 1042,
+    "did": "+16175550300",
+    "voice_url": "https://yourapp.com/voice/inbound",
+    "status_callback": "https://yourapp.com/voice/status"
+  }'`}
+        response={`{
+  "id": 77,
+  "did": "+16175550300",
+  "customer_id": 1042,
+  "voice_url": "https://yourapp.com/voice/inbound",
+  "status_callback": "https://yourapp.com/voice/status",
+  "enabled": true,
+  "created_at": "2026-04-10T15:00:00Z"
+}`}
+      />
+
+      {/* Inbound webhook */}
+      <H3>Inbound Call Webhook</H3>
+      <P>
+        When a call arrives on your API DID, the platform sends a <IC>POST</IC> to your <IC>voice_url</IC> with these parameters. Your server must respond with TwiML.
+      </P>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
+        <div>
+          <div style={{ fontSize: '0.72rem', fontWeight: 700, letterSpacing: '0.08em', color: C.textFaint, textTransform: 'uppercase', marginBottom: 6 }}>
+            Webhook POST body
+          </div>
+          <CodeBlock
+            code={`CallSid=CA123abc...
+From=%2B16175550100
+To=%2B16175550300
+CallStatus=ringing
+Direction=inbound`}
           />
-          <ToggleButton
-            label="ReDoc"
-            active={swaggerView === 'redoc'}
-            onClick={() => setSwaggerView('redoc')}
+        </div>
+        <div>
+          <div style={{ fontSize: '0.72rem', fontWeight: 700, letterSpacing: '0.08em', color: C.textFaint, textTransform: 'uppercase', marginBottom: 6 }}>
+            Your TwiML response
+          </div>
+          <CodeBlock
+            code={`<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Say voice="alice">
+    Welcome. Connecting you now.
+  </Say>
+  <Dial timeout="30">
+    +16175551234
+  </Dial>
+</Response>`}
           />
         </div>
       </div>
 
+      {/* Call Origination */}
+      <H3>Call Origination</H3>
+      <P>
+        Initiate outbound calls programmatically. The platform dials the <IC>to</IC> number, and when answered, fetches your <IC>webhook_url</IC> for call instructions.
+      </P>
+
+      <Endpoint method="POST" path="/api/v1/calls"                   description="Initiate an outbound call." />
+      <Endpoint method="GET"  path="/api/v1/calls/{call_id}"         description="Get current status and metadata for a call." />
+      <Endpoint method="POST" path="/api/v1/calls/{call_id}/update"  description="Modify a live call: hangup, transfer, or hold." />
+
+      <H3>Originate Call — POST /api/v1/calls</H3>
+      <ParamTable
+        rows={[
+          { name: 'from_did',    type: 'string',  required: true,  description: 'Your API DID to call from (E.164). Must be in your account.' },
+          { name: 'to',         type: 'string',  required: true,  description: 'Destination number in E.164 format.' },
+          { name: 'webhook_url', type: 'string',  required: false, description: 'URL to fetch TwiML when the call is answered. Falls back to voice_url on the from_did.' },
+          { name: 'timeout',     type: 'integer', required: false, description: 'Seconds to ring before giving up. Default: 30, max: 120.' },
+          { name: 'caller_id',   type: 'string',  required: false, description: 'Override the caller ID shown to the destination. Must be a verified number in your account.' },
+        ]}
+      />
+
+      <div style={{ fontSize: '0.72rem', fontWeight: 700, letterSpacing: '0.08em', color: C.textFaint, textTransform: 'uppercase', marginBottom: 6 }}>
+        Example — Make an outbound call and get status updates
+      </div>
+      <ReqRes
+        request={`curl -X POST https://{host}/api/v1/calls \\
+  -H "Authorization: Bearer {token}" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "from_did": "+16175550300",
+    "to": "+18005551234",
+    "webhook_url": "https://yourapp.com/voice/answered",
+    "timeout": 45,
+    "caller_id": "+16175550300"
+  }'`}
+        response={`{
+  "call_id": "CA7f3d2a1b4e5c6d8f",
+  "status": "queued",
+  "from": "+16175550300",
+  "to": "+18005551234",
+  "direction": "outbound",
+  "created_at": "2026-04-10T16:10:00Z"
+}`}
+      />
+
+      <H3>Get Call Status — GET /api/v1/calls/{'{call_id}'}</H3>
+      <CodeBlock
+        label="Response"
+        code={`{
+  "call_id": "CA7f3d2a1b4e5c6d8f",
+  "status": "in-progress",
+  "from": "+16175550300",
+  "to": "+18005551234",
+  "duration": 47,
+  "direction": "outbound",
+  "answered_at": "2026-04-10T16:10:08Z",
+  "ended_at": null
+}`}
+      />
+
+      <H3>Modify Live Call — POST /api/v1/calls/{'{call_id}'}/update</H3>
+      <ParamTable
+        rows={[
+          { name: 'action', type: 'string', required: true,  description: 'One of: hangup | transfer | hold' },
+          { name: 'target', type: 'string', required: false, description: 'Required for transfer action: E.164 number or SIP URI to transfer to.' },
+        ]}
+      />
+      <ReqRes
+        request={`curl -X POST https://{host}/api/v1/calls/CA7f3d2a1b4e5c6d8f/update \\
+  -H "Authorization: Bearer {token}" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "action": "transfer",
+    "target": "+16175559000"
+  }'`}
+        response={`{
+  "call_id": "CA7f3d2a1b4e5c6d8f",
+  "action": "transfer",
+  "target": "+16175559000",
+  "status": "transferring"
+}`}
+      />
+
+      {/* Status callbacks */}
+      <H3>Status Callback Events</H3>
+      <P>
+        When a <IC>status_callback</IC> URL is configured, the platform sends a <IC>POST</IC> for each lifecycle event. Your server must respond with HTTP 200.
+      </P>
+
       <div
         style={{
-          borderRadius: 16,
-          border: `1px solid ${COLORS.border}`,
+          borderRadius: 8,
           overflow: 'hidden',
-          boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
+          border: `1px solid ${C.borderSubtle}`,
+          marginBottom: 16,
         }}
       >
-        <iframe
-          key={swaggerView}
-          src={swaggerView === 'swagger' ? '/docs' : '/redoc'}
-          title={swaggerView === 'swagger' ? 'Swagger UI' : 'ReDoc API Documentation'}
-          style={{
-            width: '100%',
-            height: 'calc(100vh - 220px)',
-            border: 'none',
-            background: '#1a1d27',
-          }}
-        />
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.81rem' }}>
+          <thead>
+            <tr style={{ background: 'rgba(13,17,23,0.7)' }}>
+              {['Event', 'Description'].map(h => (
+                <th
+                  key={h}
+                  style={{
+                    padding: '9px 14px',
+                    textAlign: 'left',
+                    color: C.textFaint,
+                    fontWeight: 700,
+                    fontSize: '0.67rem',
+                    letterSpacing: '0.08em',
+                    textTransform: 'uppercase',
+                    borderBottom: `1px solid ${C.borderSubtle}`,
+                  }}
+                >
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {[
+              { event: 'queued',      desc: 'Call has been accepted and is waiting to be dialed.' },
+              { event: 'ringing',     desc: 'The destination is ringing.' },
+              { event: 'answered',    desc: 'The call was answered. Webhook fetched for call instructions.' },
+              { event: 'completed',   desc: 'Call ended normally. duration field is populated.' },
+              { event: 'no-answer',   desc: 'Destination rang until timeout without being answered.' },
+              { event: 'busy',        desc: 'Destination returned a busy signal (SIP 486).' },
+              { event: 'failed',      desc: 'Call could not be completed due to a platform or network error.' },
+            ].map((row, i) => (
+              <tr key={row.event} style={{ background: i % 2 === 0 ? 'transparent' : 'rgba(13,17,23,0.25)' }}>
+                <td style={{ padding: '9px 14px', borderBottom: `1px solid ${C.borderSubtle}` }}>
+                  <code style={{ color: '#c084fc', fontFamily: 'monospace', fontSize: '0.78rem' }}>
+                    {row.event}
+                  </code>
+                </td>
+                <td style={{ padding: '9px 14px', borderBottom: `1px solid ${C.borderSubtle}`, color: C.textMuted }}>
+                  {row.desc}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
-    </div>
+
+      {/* CPS Tiers */}
+      <H3>CPS Tiers</H3>
+      <P>
+        Outbound call origination is rate-limited by your CPS tier. If you exceed your tier's CPS limit, the API returns <IC>429 Too Many Requests</IC>. Upgrade your tier to support higher origination volume.
+      </P>
+
+      <TierTable
+        rows={[
+          { tier: 'Basic',    cps: '5',  perCall: '$0.010', monthly: 'Included' },
+          { tier: 'Standard', cps: '8',  perCall: '$0.008', monthly: '$299',    highlight: true },
+          { tier: 'Premium',  cps: '15', perCall: '$0.005', monthly: '$799' },
+        ]}
+      />
+
+      <Callout accent={C.purple}>
+        Receiving a <IC>429</IC> response means you have hit your CPS ceiling for that second. Implement exponential backoff with jitter — wait 1s, 2s, 4s between retries. To permanently increase throughput, contact your account manager to upgrade your CPS tier.
+      </Callout>
+    </AccordionSection>
   );
 }
 
-/* ─── Customer docs main content ─────────────────────────── */
-
-function CustomerDocs() {
-  const [activeSection, setActiveSection] = useState<string>('getting-started');
-  const contentRef = useRef<HTMLDivElement>(null);
-  const ticking = useRef(false);
-
-  // Scrollspy: update active section based on scroll position
-  useEffect(() => {
-    const container = contentRef.current?.closest('.docs-scroll-container') ?? window;
-
-    const handleScroll = () => {
-      if (ticking.current) return;
-      ticking.current = true;
-      requestAnimationFrame(() => {
-        ticking.current = false;
-        const ids = NAV_SECTIONS.map((s) => s.id);
-        let currentId = ids[0];
-        for (const id of ids) {
-          const el = document.getElementById(id);
-          if (el) {
-            const rect = el.getBoundingClientRect();
-            if (rect.top <= 120) {
-              currentId = id;
-            }
-          }
-        }
-        setActiveSection(currentId);
-      });
-    };
-
-    container.addEventListener('scroll', handleScroll, { passive: true });
-    return () => container.removeEventListener('scroll', handleScroll);
-  }, []);
-
-  const scrollToSection = useCallback((id: string) => {
-    const el = document.getElementById(id);
-    if (el) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      setActiveSection(id);
-    }
-  }, []);
-
-  return (
-    <div style={{ display: 'flex', gap: 32, alignItems: 'flex-start' }}>
-      <SidebarNav activeSection={activeSection} onNavigate={scrollToSection} />
-
-      <div ref={contentRef} style={{ flex: 1, minWidth: 0 }}>
-        <GettingStartedSection />
-        <AuthenticationSection />
-        <OriginateSection />
-        <NumbersSection />
-        <WebhooksSection />
-        <VerbsSection />
-        <ErrorCodesSection />
-
-        {/* Footer */}
-        <div
-          style={{
-            padding: '24px 0',
-            borderTop: `1px solid ${COLORS.borderSubtle}`,
-            textAlign: 'center',
-          }}
-        >
-          <p style={{ margin: 0, fontSize: '0.8rem', color: COLORS.textFaint }}>
-            Need help? Contact your platform administrator or open a support ticket.
-          </p>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* ─── Page ───────────────────────────────────────────────── */
+/* ─── Page root ──────────────────────────────────────────── */
 
 export function DocsPage() {
-  const { isAdmin } = useAuth();
-  const [docMode, setDocMode] = useState<DocMode>('customer');
-
   return (
     <div className="flex flex-col h-full">
       <PortalHeader
         icon={<IconDocs size={24} />}
         title="API Documentation"
-        subtitle={
-          isAdmin && docMode === 'fullref'
-            ? 'Full internal API reference — all platform endpoints'
-            : 'Integration guide and API reference for building on the platform'
-        }
+        subtitle="Integrate with the Custom VoIP platform via REST API"
         badgeVariant="api"
       />
 
-      {/* Admin mode toggle */}
-      {isAdmin && (
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'center',
-            marginBottom: 24,
-          }}
-        >
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 4,
-              background: 'rgba(19,21,29,0.9)',
-              border: `1px solid ${COLORS.border}`,
-              borderRadius: 10,
-              padding: 4,
-            }}
-          >
-            <ToggleButton
-              label="Customer Docs"
-              active={docMode === 'customer'}
-              onClick={() => setDocMode('customer')}
-            />
-            <ToggleButton
-              label="Full API Reference"
-              active={docMode === 'fullref'}
-              onClick={() => setDocMode('fullref')}
-            />
-          </div>
-        </div>
-      )}
+      <div
+        style={{
+          flex: 1,
+          overflowY: 'auto',
+          padding: '28px 32px 60px',
+          background: C.bg,
+        }}
+      >
+        <div style={{ maxWidth: 1080, margin: '0 auto' }}>
 
-      {docMode === 'customer' ? <CustomerDocs /> : <FullRefPanel />}
+          {/* Page intro */}
+          <div style={{ marginBottom: 28 }}>
+            <h1
+              style={{
+                fontSize: '1.6rem',
+                fontWeight: 800,
+                color: C.text,
+                margin: '0 0 8px',
+                letterSpacing: '-0.02em',
+              }}
+            >
+              API Documentation
+            </h1>
+            <p style={{ margin: 0, fontSize: '0.92rem', color: C.textMuted, lineHeight: 1.6 }}>
+              Full self-service reference for RCF, SIP Trunking, and Programmable Voice. All endpoints require JWT authentication.
+            </p>
+          </div>
+
+          {/* Always-visible auth section */}
+          <AuthSection />
+
+          {/* Collapsible product sections */}
+          <RcfSection />
+          <SipTrunkingSection />
+          <ApiCallingSection />
+
+        </div>
+      </div>
     </div>
   );
 }
