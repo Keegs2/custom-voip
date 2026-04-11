@@ -17,7 +17,7 @@ export interface VoicemailListResult {
 /**
  * List voicemail messages for the current user's extension.
  */
-export async function listVoicemails(params: VoicemailListParams = {}): Promise<VoicemailListResult> {
+export async function listVoicemails(params: VoicemailListParams = {}): Promise<VoicemailListResult | VoicemailMessage[]> {
   const query = new URLSearchParams();
   if (params.extension_id !== undefined) query.set('extension_id', String(params.extension_id));
   if (params.unread_only) query.set('unread_only', 'true');

@@ -196,8 +196,11 @@ export function VoicemailPage() {
     setError(null);
     try {
       const result = await listVoicemails({ limit: 100 });
-      setMessages(result.items);
-      setTotalUnread(result.unread_count);
+      // API returns a bare array, not { items, unread_count }
+      const items = Array.isArray(result) ? result : (result.items ?? []);
+      setMessages(items);
+      const unread = Array.isArray(result) ? items.filter((m) => !m.is_read).length : (result.unread_count ?? 0);
+      setTotalUnread(unread);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load voicemails');
     } finally {
