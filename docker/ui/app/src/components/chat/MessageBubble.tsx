@@ -49,7 +49,6 @@ export function MessageBubble({ message, isOwn, isGrouped, isGroup, isLastInGrou
   const avatarColor = nameColor(message.sender_name);
 
   const bubbleStyles: React.CSSProperties = {
-    maxWidth: '70%',
     padding: '9px 13px',
     borderRadius: isOwn
       ? isGrouped ? '14px 4px 4px 14px' : '14px 4px 14px 14px'
@@ -93,13 +92,14 @@ export function MessageBubble({ message, isOwn, isGrouped, isGroup, isLastInGrou
         position: 'relative',
       }}
     >
-      {/* Message content column */}
+      {/* Message content column — width:100% lets the child bubble measure maxWidth:70%
+          against the full padded row width rather than its own shrink-wrapped content */}
       <div
         style={{
           display: 'flex',
           flexDirection: 'column',
           alignItems: isOwn ? 'flex-end' : 'flex-start',
-          flex: 1,
+          width: '100%',
           minWidth: 0,
         }}
       >
@@ -119,8 +119,10 @@ export function MessageBubble({ message, isOwn, isGrouped, isGroup, isLastInGrou
           </span>
         )}
 
-        {/* Bubble wrapper — position:relative so the avatar anchors to this height only */}
-        <div style={{ position: 'relative' }}>
+        {/* Bubble wrapper — position:relative so the avatar anchors to this height only.
+            alignSelf + width:fit-content keeps the wrapper tight around the bubble so the
+            absolute-positioned avatar centers on the bubble, not the full column width. */}
+        <div style={{ position: 'relative', alignSelf: isOwn ? 'flex-end' : 'flex-start', maxWidth: '70%' }}>
           {/* Avatar — shown on the last message before sender changes, left of bubble */}
           {!isOwn && isLastInGroup && (
             <div
