@@ -743,7 +743,7 @@ function AccountDetailView({ customer, onEdit, onDelete }: AccountDetailViewProp
 
   const ucaasMutation = useMutation({
     mutationFn: (enabled: boolean) =>
-      apiRequest<Customer>('PATCH', `/customers/${customer.id}`, { ucaas_enabled: enabled }),
+      apiRequest<Customer>('PUT', `/customers/${customer.id}`, { ucaas_enabled: enabled }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['customer', customer.id] });
       qc.invalidateQueries({ queryKey: ['customers'] });
