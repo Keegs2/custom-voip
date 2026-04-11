@@ -4,7 +4,7 @@
 
   Profiles:
   - "default": Audio-only conferences (lower resource usage)
-  - "video": Video-enabled conferences with VP8 mux compositing
+  - "video": Video-enabled conferences (passthrough mode, active speaker)
 
   Caller Controls:
   - 0: Mute/unmute self
@@ -61,17 +61,25 @@
 
     <!--
       Video-enabled conference profile
-      Uses VP8 mux mode: FreeSWITCH composites all video streams into a
-      single canvas and sends it to each participant. This is CPU-intensive
-      but provides the best experience for WebRTC clients.
+      Uses passthrough mode: each participant receives the active speaker's
+      video stream directly. No server-side compositing, no canvas, no
+      layout resolution needed. Low CPU, works reliably.
 
       video-mode options:
-        - mux: Server-side compositing (requires CPU, best UX)
-        - passthrough: Forward active speaker's video only (low CPU)
-        - transcode: Full transcoding between codecs (requires mod_av)
+        - mux: Server-side compositing (requires working mod_av + layout resolution)
+        - passthrough: Forward active speaker's video only (low CPU, reliable)
+        - transcode: Full transcoding between codecs
 
-      video-layout-name: "group:grid" auto-selects the best grid layout
-      based on the number of participants (1up, 2up, 3up, 4up, etc.)
+      NOTE: mux mode with group:grid layouts is defined below in <layout-settings>
+      but disabled for now. The layout group resolution fails on this FreeSWITCH
+      build (mod_conference cannot resolve "group:grid" even with correct XML).
+      Re-enable mux mode once mod_av video compositing is confirmed working.
+
+      IMPORTANT: The conference app answers the Verto channel internally.
+      Do NOT add an explicit answer app in the dialplan before conference,
+      as it blocks forever on Verto/WebRTC channels (answer waits for ICE
+      completion, which requires the SDP answer, creating a deadlock when
+      the conference hasn't initialized the video canvas yet).
     -->
     <profile name="video">
       <param name="domain" value="$${domain}"/>
@@ -83,23 +91,8 @@
       <param name="exit-sound" value="tone_stream://%(500,0,300,200,100,50,25)"/>
       <param name="max-members" value="50"/>
       <param name="comfort-noise" value="true"/>
-      <!--
-        Video settings for VP8 mux compositing.
-        The conference composites all participant video streams into a single
-        canvas and sends it to each participant. Requires mod_av for VP8
-        encode/decode.
-
-        IMPORTANT: The conference app answers the Verto channel internally.
-        Do NOT add an explicit answer app in the dialplan before conference,
-        as it blocks forever on Verto/WebRTC channels (answer waits for ICE
-        completion, which requires the SDP answer, creating a deadlock when
-        the conference hasn't initialized the video canvas yet).
-      -->
-      <param name="video-mode" value="mux"/>
-      <param name="video-layout-name" value="group:grid"/>
-      <param name="video-canvas-size" value="1920x1080"/>
-      <param name="video-canvas-bgcolor" value="#333333"/>
-      <param name="video-layout-bgcolor" value="#000000"/>
+      <!-- Video: passthrough mode (active speaker's video forwarded to all) -->
+      <param name="video-mode" value="passthrough"/>
       <param name="video-codec-bandwidth" value="2mb"/>
       <param name="video-fps" value="30"/>
       <!-- Auto-floor: automatically assign floor to active speaker for video focus -->
@@ -108,28 +101,26 @@
   </profiles>
 
   <!--
-    Video Layouts - Required for video-mode="mux" conferences
+    Video Layouts - Retained for future video-mode="mux" support
+
+    NOT CURRENTLY USED. The video profile uses passthrough mode, which does
+    not require layout definitions. These are kept here so that switching
+    back to mux mode only requires changing the profile params above:
+      video-mode=mux, video-layout-name=group:grid, video-canvas-size=1920x1080,
+      video-canvas-bgcolor=#333333, video-layout-bgcolor=#000000
 
     These layouts define how participant video streams are composited onto the
-    shared canvas. The "group:grid" layout-name in the video conference profile
-    auto-selects the best layout based on participant count.
+    shared canvas. The "group:grid" layout-name auto-selects the best grid
+    layout based on the number of participants.
 
     IMPORTANT: Layout definitions MUST live inside conference.conf, not in a
     separate conference_layouts.conf file. mod_conference parses layouts and
-    groups in a single pass within the same configuration section. If layouts
-    are in a separate <configuration> element, the group parser cannot find
-    the layout names and reports "invalid group member" errors.
+    groups in a single pass within the same configuration section.
 
     Canvas coordinate system:
       x, y: top-left corner of the participant's rectangle (0,0 = top-left of canvas)
       scale: fraction of canvas width (e.g., 360 on a 720-wide canvas = 0.5)
-      All values are relative to the canvas size defined in the video profile
-      (currently 1920x1080).
-
-    Reserved attributes:
-      floor="true": marks the active speaker's slot (highlighted)
-      overlap="true": allows overlap for PiP-style layouts
-      reservation_id: reserves a slot for a specific role (e.g., presenter)
+      All values are relative to the canvas size (1920x1080 when mux is enabled).
   -->
   <layout-settings>
     <layouts>
