@@ -55,7 +55,7 @@ import {
   deleteDocument,
   getDocumentStats,
 } from '../api/documents';
-import { useAuth } from '../contexts/AuthContext';
+// Auth enforced by RequireAuth route wrapper
 import type {
   DocumentFolder,
   SharedDocument,
@@ -1357,8 +1357,6 @@ function EmptyDocState({ onUpload }: { onUpload: () => void }) {
 const PAGE_SIZE = 40;
 
 export function DocumentsPage() {
-  const { user } = useAuth();
-
   /* — Folder state — */
   const [folders, setFolders] = useState<DocumentFolder[]>([]);
   const [selectedFolderId, setSelectedFolderId] = useState<number | null>(null);
