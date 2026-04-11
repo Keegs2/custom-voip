@@ -13,6 +13,7 @@ import { CustomerEditForm } from './CustomerEditForm';
 import { CustomerRcfSection } from './CustomerRcfSection';
 import { CustomerApiSection } from './CustomerApiSection';
 import { CustomerTrunkSection } from './CustomerTrunkSection';
+import { CustomerUcaasSection } from './CustomerUcaasSection';
 import type { Customer } from '../../types/customer';
 import type { Cdr } from '../../types/cdr';
 import type { CdrSummaryRow } from '../../types/rate';
@@ -765,6 +766,7 @@ function AccountDetailView({ customer, onEdit, onDelete }: AccountDetailViewProp
   const showRcf = customer.account_type === 'rcf' || customer.account_type === 'hybrid';
   const showApi = customer.account_type === 'api' || customer.account_type === 'hybrid';
   const showTrunk = customer.account_type === 'trunk' || customer.account_type === 'hybrid';
+  const showUcaas = customer.account_type === 'ucaas' || customer.ucaas_enabled === true;
 
   const accountTypeAccentMap: Record<string, string> = {
     rcf: '#22c55e',
@@ -875,6 +877,12 @@ function AccountDetailView({ customer, onEdit, onDelete }: AccountDetailViewProp
       {showTrunk && (
         <SectionCard accent="#f59e0b">
           <CustomerTrunkSection customerId={customer.id} />
+        </SectionCard>
+      )}
+
+      {showUcaas && (
+        <SectionCard accent="#0ea5e9">
+          <CustomerUcaasSection customerId={customer.id} />
         </SectionCard>
       )}
 
@@ -1146,6 +1154,7 @@ export function CustomerAccountPage() {
     api: '#a855f7',
     trunk: '#f59e0b',
     hybrid: '#3b82f6',
+    ucaas: '#0ea5e9',
   };
   const headerAccent = accountTypeAccent[customer.account_type] ?? '#3b82f6';
 
