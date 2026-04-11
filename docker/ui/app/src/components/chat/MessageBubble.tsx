@@ -93,36 +93,6 @@ export function MessageBubble({ message, isOwn, isGrouped, isGroup, isLastInGrou
         position: 'relative',
       }}
     >
-      {/* Avatar — positioned absolutely, centered on the bubble */}
-      {isLastInGroup && !isOwn && (
-        <div
-          aria-label={message.sender_name}
-          title={message.sender_name}
-          style={{
-            position: 'absolute',
-            left: 4,
-            top: '50%',
-            transform: 'translateY(-50%)',
-            width: 32,
-            height: 32,
-            borderRadius: '50%',
-            background: 'rgba(255,255,255,0.06)',
-            border: '2px solid rgba(255,255,255,0.18)',
-            boxShadow: '0 0 0 1px rgba(255,255,255,0.06)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            fontSize: '0.75rem',
-            fontWeight: 700,
-            color: avatarColor,
-            userSelect: 'none',
-            zIndex: 1,
-          }}
-        >
-          {getInitial(message.sender_name)}
-        </div>
-      )}
-
       {/* Message content column */}
       <div
         style={{
@@ -149,16 +119,45 @@ export function MessageBubble({ message, isOwn, isGrouped, isGroup, isLastInGrou
           </span>
         )}
 
-        {/* Bubble */}
-        <div
-          title={formatTimestamp(message.created_at, true)}
-          style={bubbleStyles}
-        >
-          {isDeleted ? (
-            'This message was deleted'
-          ) : (
-            message.content ?? <span style={{ opacity: 0.5 }}>[no content]</span>
+        {/* Bubble wrapper — position:relative so the avatar anchors to this height only */}
+        <div style={{ position: 'relative' }}>
+          {/* Avatar — shown on the last message before sender changes, left of bubble */}
+          {!isOwn && isLastInGroup && (
+            <div
+              style={{
+                position: 'absolute',
+                top: '50%',
+                transform: 'translateY(-50%)',
+                left: -40,            /* 32px avatar + 8px gap = 40px */
+                width: 32,
+                height: 32,
+                borderRadius: '50%',
+                background: 'rgba(255,255,255,0.06)',
+                border: '2px solid rgba(255,255,255,0.18)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '0.75rem',
+                fontWeight: 700,
+                color: avatarColor,
+                flexShrink: 0,
+                userSelect: 'none',
+              }}
+            >
+              {getInitial(message.sender_name)}
+            </div>
           )}
+
+          <div
+            title={formatTimestamp(message.created_at, true)}
+            style={bubbleStyles}
+          >
+            {isDeleted ? (
+              'This message was deleted'
+            ) : (
+              message.content ?? <span style={{ opacity: 0.5 }}>[no content]</span>
+            )}
+          </div>
         </div>
 
         {/* Metadata row: time + edited */}
