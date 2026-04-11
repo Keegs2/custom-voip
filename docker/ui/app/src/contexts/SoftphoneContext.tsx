@@ -50,6 +50,12 @@ interface SoftphoneContextValue {
   /* ── Video streams (null when audio-only call or no active call) ── */
   localVideoStream: MediaStream | null;
   remoteVideoStream: MediaStream | null;
+  /**
+   * Synchronous fallback to read the local stream directly from the VertoClient
+   * session. Use this when localVideoStream in state is null but the call is
+   * already active (e.g. ConferenceRoom mounts after onStreamChange fired).
+   */
+  getLocalStream: (callId: string) => MediaStream | null;
 
   /* ── Actions ── */
   makeCall: (destination: string, options?: { video?: boolean }) => Promise<void>;
@@ -469,6 +475,10 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
     setSelectedSpeakerId(deviceId);
   }, []);
 
+  const getLocalStream = useCallback((callId: string): MediaStream | null => {
+    return clientRef.current?.getLocalStream(callId) ?? null;
+  }, []);
+
   const value: SoftphoneContextValue = {
     connectionState,
     activeCall,
@@ -483,6 +493,7 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
     selectedSpeakerId,
     localVideoStream,
     remoteVideoStream,
+    getLocalStream,
     makeCall,
     answerCall,
     rejectCall,

@@ -19,6 +19,8 @@ import {
   getConferenceLiveStatus,
   kickMember,
   muteMember,
+  startRecording,
+  stopRecording,
 } from '../../api/conference';
 import type { ConferenceLiveStatus, LiveMember } from '../../types/conference';
 
@@ -202,8 +204,14 @@ function SelfView({ stream }: { stream: MediaStream | null }) {
   const videoRef = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
-    if (videoRef.current && stream) {
-      videoRef.current.srcObject = stream;
+    const el = videoRef.current;
+    if (!el) return;
+    // Always assign — even null — so the element clears when the stream stops.
+    el.srcObject = stream;
+    if (stream) {
+      // play() may already be running due to autoPlay; ignore the benign
+      // "play() was interrupted" DOMException if the srcObject swap races it.
+      void el.play().catch(() => undefined);
     }
   }, [stream]);
 
@@ -223,15 +231,27 @@ function SelfView({ stream }: { stream: MediaStream | null }) {
         zIndex: 10,
       }}
     >
-      {stream ? (
-        <video
-          ref={videoRef}
-          autoPlay
-          muted
-          playsInline
-          style={{ width: '100%', height: '100%', objectFit: 'cover', transform: 'scaleX(-1)' }}
-        />
-      ) : (
+      {/*
+       * Render the <video> unconditionally so videoRef is always attached.
+       * When stream is null the element is invisible but stays mounted,
+       * which means the ref is ready the moment a stream arrives and the
+       * useEffect above can assign srcObject without waiting for a re-render
+       * cycle to mount a new element.
+       */}
+      <video
+        ref={videoRef}
+        autoPlay
+        muted
+        playsInline
+        style={{
+          width: '100%',
+          height: '100%',
+          objectFit: 'cover',
+          transform: 'scaleX(-1)',
+          display: stream ? 'block' : 'none',
+        }}
+      />
+      {!stream && (
         <div
           style={{
             width: '100%',
@@ -509,6 +529,8 @@ export function ConferenceRoom({
     muteCall,
     unmuteCall,
     localVideoStream,
+    remoteVideoStream,
+    getLocalStream,
     startScreenShare,
     stopScreenShare,
     setCameraEnabled,
@@ -519,6 +541,38 @@ export function ConferenceRoom({
   const [cameraOn, setCameraOn] = useState(true);
   const [isRecording, setIsRecording] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  /** Ref for the hidden <audio> element that plays remote audio/video. */
+  const remoteAudioRef = useRef<HTMLAudioElement>(null);
+
+  /*
+   * ── Self-view stream resolution ─────────────────────────
+   *
+   * localVideoStream from context is set via onStreamChange, which fires
+   * during makeCall — potentially before ConferenceRoom mounts. If the
+   * context state is already populated we use it directly. If it is null
+   * (race: component mounted before the state update propagated), we read
+   * the stream synchronously from the VertoClient session via getLocalStream.
+   */
+  const selfViewStream = activeCall
+    ? (localVideoStream ?? getLocalStream(activeCall.id))
+    : null;
+
+  /*
+   * ── Remote audio binding ─────────────────────────────────
+   *
+   * A detached new Audio() element cannot reliably autoplay without a prior
+   * user gesture (NotAllowedError). Instead we render a hidden <audio> inside
+   * this component — which is already inside the user-gesture context from
+   * the "Join Conference" click — and bind remoteVideoStream to it here.
+   */
+  useEffect(() => {
+    const el = remoteAudioRef.current;
+    if (!el) return;
+    el.srcObject = remoteVideoStream;
+    if (remoteVideoStream) {
+      void el.play().catch(() => undefined);
+    }
+  }, [remoteVideoStream]);
 
   /* ── Poll live status every 3 seconds ─────────────────── */
 
@@ -539,6 +593,22 @@ export function ConferenceRoom({
       if (pollRef.current) clearInterval(pollRef.current);
     };
   }, [fetchLiveStatus]);
+
+  /* ── Recording ─────────────────────────────────────────── */
+
+  const toggleRecording = useCallback(async () => {
+    try {
+      if (isRecording) {
+        await stopRecording(conferenceId);
+        setIsRecording(false);
+      } else {
+        await startRecording(conferenceId);
+        setIsRecording(true);
+      }
+    } catch {
+      // Ignore — moderator action; next live-status poll will sync the flag
+    }
+  }, [isRecording, conferenceId]);
 
   /* ── Handlers ──────────────────────────────────────────── */
 
@@ -601,6 +671,15 @@ export function ConferenceRoom({
       }}
     >
       <style>{GLOBAL_STYLES}</style>
+
+      {/*
+       * Hidden audio element for remote audio playback.
+       * Binding happens in the remoteVideoStream useEffect above.
+       * Living inside this component — which mounts on user "Join" click —
+       * means the browser considers it within a user-gesture context and
+       * will not throw NotAllowedError on play().
+       */}
+      <audio ref={remoteAudioRef} autoPlay playsInline style={{ display: 'none' }} />
 
       {/* Top bar */}
       <div
@@ -744,7 +823,7 @@ export function ConferenceRoom({
 
           {/* Self-view PiP — shown when video is enabled */}
           {activeCall.isVideo && (
-            <SelfView stream={cameraOn ? (localVideoStream ?? null) : null} />
+            <SelfView stream={cameraOn ? selfViewStream : null} />
           )}
         </div>
 
@@ -807,7 +886,7 @@ export function ConferenceRoom({
         {/* Recording indicator/toggle (moderator only) */}
         {isModerator && (
           <CtrlBtn
-            onClick={() => setIsRecording((v) => !v)}
+            onClick={() => void toggleRecording()}
             label={isRecording ? 'Stop Rec' : 'Record'}
             active={isRecording}
           >

@@ -962,19 +962,21 @@ export class VertoClient {
     });
   }
 
-  private remoteAudioElements = new Map<string, HTMLAudioElement>();
-
-  /** Play remote audio for a call. Video rendering is handled by the UI via onStreamChange. */
-  private playRemoteAudio(callId: string, stream: MediaStream): void {
-    // Reuse existing element for this call if it exists
-    let audio = this.remoteAudioElements.get(callId);
-    if (!audio) {
-      audio = new Audio();
-      audio.autoplay = true;
-      this.remoteAudioElements.set(callId, audio);
-    }
-    audio.srcObject = stream;
-    void audio.play().catch(() => undefined);
+  /**
+   * Remote audio/video playback is handled entirely by the React layer via
+   * onStreamChange → remoteVideoStream. A detached Audio() element cannot
+   * reliably autoplay without a prior user gesture (NotAllowedError). The
+   * ConferenceRoom and Softphone widget bind remoteVideoStream to DOM
+   * <audio>/<video> elements that are already in a user-gesture context.
+   *
+   * This method is intentionally a no-op; callers are retained for clarity
+   * but the actual work now happens in the UI layer.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  private playRemoteAudio(_callId: string, _stream: MediaStream): void {
+    // No-op: React components bind remoteVideoStream to <audio muted={false}>
+    // elements inside ConferenceRoom / the softphone widget, which inherit
+    // the user-gesture context from the Join / Answer click.
   }
 
   private cleanupSession(callId: string): void {
@@ -987,13 +989,8 @@ export class VertoClient {
       session.cameraStream.getTracks().forEach((t) => t.stop());
     }
     session.peerConnection.close();
-
-    const audio = this.remoteAudioElements.get(callId);
-    if (audio) {
-      audio.srcObject = null;
-      audio.pause();
-      this.remoteAudioElements.delete(callId);
-    }
+    // Remote audio cleanup is handled by the React component unmounting its
+    // <audio> element (srcObject cleared when remoteVideoStream → null).
   }
 
   private cleanupAllSessions(): void {

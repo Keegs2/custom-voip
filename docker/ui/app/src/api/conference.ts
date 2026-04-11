@@ -71,3 +71,13 @@ export function createSchedule(
 export function deleteSchedule(conferenceId: number, scheduleId: number): Promise<void> {
   return apiRequest<void>('DELETE', `/conferences/${conferenceId}/schedule/${scheduleId}`);
 }
+
+/** Start recording a live conference */
+export function startRecording(conferenceId: number): Promise<void> {
+  return apiRequest<void>('POST', `/conferences/${conferenceId}/record/start`);
+}
+
+/** Stop recording a live conference */
+export function stopRecording(conferenceId: number): Promise<void> {
+  return apiRequest<void>('POST', `/conferences/${conferenceId}/record/stop`);
+}
