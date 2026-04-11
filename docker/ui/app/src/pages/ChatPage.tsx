@@ -1,11 +1,24 @@
 import { useCallback, useEffect, useState } from 'react';
+import { MessageSquareText, MessageSquarePlus, Plus } from 'lucide-react';
 import { useChat } from '../contexts/ChatContext';
 import { ConversationList } from '../components/chat/ConversationList';
 import { MessageThread } from '../components/chat/MessageThread';
 import { NewConversationModal } from '../components/chat/NewConversationModal';
+import { Sidebar } from '../components/layout/Sidebar';
+import { SoftphoneWidget } from '../components/softphone/SoftphoneWidget';
 import type { Conversation } from '../types/chat';
 
-/* ─── Empty state ────────────────────────────────────────── */
+/* ─── Keyframe injection (once per mount) ─────────────────── */
+
+const GLOBAL_STYLES = `
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes chatPulse {
+    0%, 100% { opacity: 0.7; transform: scale(1); }
+    50%       { opacity: 1;   transform: scale(1.06); }
+  }
+`;
+
+/* ─── Empty state — no conversation selected ──────────────── */
 
 function EmptyState({ onNewChat }: { onNewChat: () => void }) {
   return (
@@ -16,36 +29,44 @@ function EmptyState({ onNewChat }: { onNewChat: () => void }) {
         alignItems: 'center',
         justifyContent: 'center',
         height: '100%',
-        gap: 16,
-        color: '#334155',
-        padding: 40,
+        gap: 20,
+        padding: 48,
+        background: '#0f1117',
       }}
     >
-      {/* Chat bubble icon */}
+      {/* Pulsing icon */}
       <div
         style={{
-          width: 64,
-          height: 64,
-          borderRadius: 18,
-          background: 'linear-gradient(135deg, rgba(59,130,246,0.14) 0%, rgba(129,140,248,0.10) 100%)',
-          border: '1px solid rgba(59,130,246,0.18)',
+          width: 80,
+          height: 80,
+          borderRadius: 22,
+          background: 'linear-gradient(135deg, rgba(59,130,246,0.16) 0%, rgba(129,140,248,0.10) 100%)',
+          border: '1px solid rgba(59,130,246,0.20)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
           color: '#3b82f6',
+          animation: 'chatPulse 3s ease-in-out infinite',
+          boxShadow: '0 0 40px rgba(59,130,246,0.12)',
         }}
       >
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} style={{ width: 30, height: 30 }}>
-          <path d="M8.625 12a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H8.25m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H12m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 0 1-2.555-.337A5.972 5.972 0 0 1 5.41 20.97a5.969 5.969 0 0 1-.474-.065 4.48 4.48 0 0 0 .978-2.025c.09-.457-.133-.901-.467-1.226C3.93 16.178 3 14.189 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25Z" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
+        <MessageSquareText size={36} strokeWidth={1.5} />
       </div>
 
-      <div style={{ textAlign: 'center' }}>
-        <div style={{ fontSize: '1rem', fontWeight: 700, color: '#475569', marginBottom: 6, letterSpacing: '-0.02em' }}>
+      <div style={{ textAlign: 'center', maxWidth: 300 }}>
+        <div
+          style={{
+            fontSize: '1.1rem',
+            fontWeight: 700,
+            color: '#94a3b8',
+            marginBottom: 8,
+            letterSpacing: '-0.02em',
+          }}
+        >
           No conversation selected
         </div>
-        <div style={{ fontSize: '0.85rem', color: '#334155', lineHeight: 1.6 }}>
-          Choose a conversation from the list, or start a new one.
+        <div style={{ fontSize: '0.85rem', color: '#475569', lineHeight: 1.65 }}>
+          Pick a conversation from the list on the left, or start a fresh one.
         </div>
       </div>
 
@@ -53,7 +74,10 @@ function EmptyState({ onNewChat }: { onNewChat: () => void }) {
         type="button"
         onClick={onNewChat}
         style={{
-          padding: '9px 20px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          padding: '10px 22px',
           borderRadius: 10,
           background: 'linear-gradient(135deg, #2563eb 0%, #3b82f6 100%)',
           border: 'none',
@@ -61,13 +85,96 @@ function EmptyState({ onNewChat }: { onNewChat: () => void }) {
           fontSize: '0.875rem',
           fontWeight: 600,
           cursor: 'pointer',
-          boxShadow: '0 2px 12px rgba(59,130,246,0.30)',
-          transition: 'opacity 0.15s',
+          boxShadow: '0 2px 14px rgba(59,130,246,0.35)',
+          transition: 'opacity 0.15s, transform 0.12s',
         }}
-        onMouseEnter={(e) => { e.currentTarget.style.opacity = '0.88'; }}
-        onMouseLeave={(e) => { e.currentTarget.style.opacity = '1'; }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.opacity = '0.88';
+          e.currentTarget.style.transform = 'translateY(-1px)';
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.opacity = '1';
+          e.currentTarget.style.transform = 'translateY(0)';
+        }}
       >
+        <Plus size={15} strokeWidth={2.5} />
         New Conversation
+      </button>
+    </div>
+  );
+}
+
+/* ─── Empty state — no conversations at all ───────────────── */
+
+function NoConversationsState({ onNewChat }: { onNewChat: () => void }) {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        height: '100%',
+        gap: 20,
+        padding: 48,
+        background: '#0f1117',
+      }}
+    >
+      <div
+        style={{
+          width: 80,
+          height: 80,
+          borderRadius: 22,
+          background: 'linear-gradient(135deg, rgba(59,130,246,0.14) 0%, rgba(129,140,248,0.08) 100%)',
+          border: '1px solid rgba(59,130,246,0.18)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          color: '#3b82f6',
+          boxShadow: '0 0 40px rgba(59,130,246,0.10)',
+        }}
+      >
+        <MessageSquarePlus size={36} strokeWidth={1.5} />
+      </div>
+
+      <div style={{ textAlign: 'center', maxWidth: 280 }}>
+        <div style={{ fontSize: '1.1rem', fontWeight: 700, color: '#94a3b8', marginBottom: 8, letterSpacing: '-0.02em' }}>
+          No conversations yet
+        </div>
+        <div style={{ fontSize: '0.85rem', color: '#475569', lineHeight: 1.65 }}>
+          Start a direct message with a colleague or create a group chat.
+        </div>
+      </div>
+
+      <button
+        type="button"
+        onClick={onNewChat}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          padding: '10px 22px',
+          borderRadius: 10,
+          background: 'linear-gradient(135deg, #2563eb 0%, #3b82f6 100%)',
+          border: 'none',
+          color: '#fff',
+          fontSize: '0.875rem',
+          fontWeight: 600,
+          cursor: 'pointer',
+          boxShadow: '0 2px 14px rgba(59,130,246,0.35)',
+          transition: 'opacity 0.15s, transform 0.12s',
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.opacity = '0.88';
+          e.currentTarget.style.transform = 'translateY(-1px)';
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.opacity = '1';
+          e.currentTarget.style.transform = 'translateY(0)';
+        }}
+      >
+        <Plus size={15} strokeWidth={2.5} />
+        Start a Conversation
       </button>
     </div>
   );
@@ -81,13 +188,12 @@ export function ChatPage() {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [showModal, setShowModal] = useState(false);
 
-  // Derive selected conversation from the list (kept in sync with context)
   const selectedConversation: Conversation | null =
     selectedId !== null
       ? (conversations.find((c) => c.id === selectedId) ?? null)
       : null;
 
-  // Auto-select first conversation on initial load if none is selected
+  // Auto-select first conversation on initial load
   useEffect(() => {
     if (selectedId === null && conversations.length > 0) {
       setSelectedId(conversations[0].id);
@@ -108,35 +214,41 @@ export function ChatPage() {
   );
 
   return (
-    <>
-      {/* Keyframe for spinners — injected once */}
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+    <div
+      style={{
+        display: 'flex',
+        height: '100vh',
+        width: '100vw',
+        overflow: 'hidden',
+        background: '#0f1117',
+      }}
+    >
+      {/* Global keyframes */}
+      <style>{GLOBAL_STYLES}</style>
 
-      {/* Full-height two-pane layout
-          AppLayout adds py-8 (32px top) + pb-20 (80px bottom) + 1px border rows.
-          We subtract those to get a chat panel that fills the viewport without
-          causing the outer page to scroll. */}
+      {/* Fixed sidebar — same as AppLayout */}
+      <Sidebar />
+
+      {/* Chat shell — fills the space to the right of the sidebar */}
       <div
         style={{
+          marginLeft: 240,
+          flex: 1,
           display: 'flex',
-          height: 'calc(100vh - 144px)',
-          minHeight: 400,
-          background: '#0f1117',
-          borderRadius: 12,
-          border: '1px solid rgba(255,255,255,0.06)',
           overflow: 'hidden',
+          height: '100vh',
         }}
       >
-        {/* Left pane — conversation list */}
+        {/* Left pane — conversation list (320px) */}
         <div
           style={{
-            width: 280,
+            width: 320,
             flexShrink: 0,
             borderRight: '1px solid rgba(255,255,255,0.06)',
             display: 'flex',
             flexDirection: 'column',
             minHeight: 0,
-            background: 'rgba(255,255,255,0.015)',
+            background: '#131520',
           }}
         >
           <ConversationList
@@ -149,14 +261,28 @@ export function ChatPage() {
         </div>
 
         {/* Right pane — message thread or empty state */}
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, minWidth: 0 }}>
+        <div
+          style={{
+            flex: 1,
+            display: 'flex',
+            flexDirection: 'column',
+            minHeight: 0,
+            minWidth: 0,
+            background: '#0f1117',
+          }}
+        >
           {selectedConversation ? (
             <MessageThread conversation={selectedConversation} />
+          ) : !isLoading && conversations.length === 0 ? (
+            <NoConversationsState onNewChat={() => setShowModal(true)} />
           ) : (
             <EmptyState onNewChat={() => setShowModal(true)} />
           )}
         </div>
       </div>
+
+      {/* Softphone overlay */}
+      <SoftphoneWidget />
 
       {/* New conversation modal */}
       {showModal && (
@@ -165,6 +291,6 @@ export function ChatPage() {
           onCreated={handleCreated}
         />
       )}
-    </>
+    </div>
   );
 }

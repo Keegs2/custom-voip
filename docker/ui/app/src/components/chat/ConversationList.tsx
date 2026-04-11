@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { MessageSquare, Search, Plus, Users } from 'lucide-react';
 import type { Conversation } from '../../types/chat';
 import { useAuth } from '../../contexts/AuthContext';
 
@@ -27,7 +28,7 @@ function formatRelativeTime(iso: string): string {
   return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
 }
 
-/** Derive a stable hue for the avatar background */
+/** Derive a stable hue for avatar background — consistent across the app */
 function nameColor(name: string): string {
   let hash = 0;
   for (let i = 0; i < name.length; i++) {
@@ -49,7 +50,6 @@ interface ConvRowProps {
 function ConvRow({ conversation, isSelected, currentUserId, onSelect }: ConvRowProps) {
   const isGroup = conversation.type === 'group';
 
-  // For direct chats, display the other participant's name
   const displayName = isGroup
     ? (conversation.name ?? 'Group')
     : (conversation.participants.find((p) => p.user_id !== currentUserId)?.name ?? 'Direct Message');
@@ -74,63 +74,88 @@ function ConvRow({ conversation, isSelected, currentUserId, onSelect }: ConvRowP
         display: 'flex',
         alignItems: 'center',
         gap: 10,
-        padding: '10px 12px',
+        padding: '9px 10px',
         borderRadius: 10,
         background: isSelected
-          ? 'linear-gradient(135deg, rgba(59,130,246,0.14) 0%, rgba(129,140,248,0.08) 100%)'
+          ? 'linear-gradient(135deg, rgba(59,130,246,0.16) 0%, rgba(129,140,248,0.09) 100%)'
           : 'transparent',
         border: isSelected
-          ? '1px solid rgba(59,130,246,0.22)'
+          ? '1px solid rgba(59,130,246,0.24)'
           : '1px solid transparent',
-        boxShadow: isSelected ? '0 0 0 1px rgba(59,130,246,0.15)' : 'none',
+        boxShadow: isSelected ? '0 1px 8px rgba(59,130,246,0.12)' : 'none',
         cursor: 'pointer',
         textAlign: 'left',
         width: '100%',
-        transition: 'background 0.12s, border-color 0.12s',
+        transition: 'background 0.12s, border-color 0.12s, box-shadow 0.12s',
       }}
       onMouseEnter={(e) => {
         if (!isSelected) {
           e.currentTarget.style.background = 'rgba(255,255,255,0.04)';
+          e.currentTarget.style.borderColor = 'rgba(255,255,255,0.05)';
         }
       }}
       onMouseLeave={(e) => {
         if (!isSelected) {
           e.currentTarget.style.background = 'transparent';
+          e.currentTarget.style.borderColor = 'transparent';
         }
       }}
     >
-      {/* Avatar */}
+      {/* Avatar with optional group icon overlay */}
       <div style={{ position: 'relative', flexShrink: 0 }}>
         <div
           style={{
-            width: 38,
-            height: 38,
-            borderRadius: isGroup ? 10 : '50%',
-            background: `${avatarColor}22`,
-            border: `1px solid ${avatarColor}40`,
+            width: 40,
+            height: 40,
+            borderRadius: isGroup ? 11 : '50%',
+            background: `${avatarColor}1e`,
+            border: `1.5px solid ${avatarColor}38`,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            fontSize: '0.85rem',
+            fontSize: '0.9rem',
             fontWeight: 700,
             color: avatarColor,
             userSelect: 'none',
+            flexShrink: 0,
           }}
         >
-          {initial}
+          {isGroup ? (
+            <Users size={17} strokeWidth={2} style={{ color: avatarColor }} />
+          ) : (
+            initial
+          )}
         </div>
-        {/* Unread dot on avatar */}
+
+        {/* Unread notification dot on avatar corner */}
         {unread > 0 && (
           <div
             style={{
               position: 'absolute',
               top: -2,
               right: -2,
+              width: 11,
+              height: 11,
+              borderRadius: '50%',
+              background: '#3b82f6',
+              border: '2px solid #131520',
+              boxShadow: '0 0 6px rgba(59,130,246,0.60)',
+            }}
+          />
+        )}
+
+        {/* Online presence dot — shown on DMs only when no unread (avoid overlap) */}
+        {!isGroup && unread === 0 && (
+          <div
+            style={{
+              position: 'absolute',
+              bottom: 0,
+              right: 0,
               width: 10,
               height: 10,
               borderRadius: '50%',
-              background: '#3b82f6',
-              border: '2px solid #0c0e16',
+              background: '#22c55e',
+              border: '2px solid #131520',
             }}
           />
         )}
@@ -138,12 +163,12 @@ function ConvRow({ conversation, isSelected, currentUserId, onSelect }: ConvRowP
 
       {/* Text content */}
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 4 }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 4 }}>
           <span
             style={{
-              fontSize: '0.85rem',
+              fontSize: '0.875rem',
               fontWeight: unread > 0 ? 700 : 500,
-              color: unread > 0 ? '#f1f5f9' : '#94a3b8',
+              color: unread > 0 ? '#f1f5f9' : '#cbd5e1',
               overflow: 'hidden',
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',
@@ -155,20 +180,22 @@ function ConvRow({ conversation, isSelected, currentUserId, onSelect }: ConvRowP
           </span>
           <span
             style={{
-              fontSize: '0.65rem',
-              color: '#334155',
+              fontSize: '0.68rem',
+              color: unread > 0 ? '#60a5fa' : '#475569',
               flexShrink: 0,
               fontVariantNumeric: 'tabular-nums',
+              fontWeight: unread > 0 ? 600 : 400,
             }}
           >
             {formatRelativeTime(timestamp)}
           </span>
         </div>
+
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 4, marginTop: 2 }}>
           <span
             style={{
-              fontSize: '0.75rem',
-              color: unread > 0 ? '#64748b' : '#334155',
+              fontSize: '0.775rem',
+              color: unread > 0 ? '#64748b' : '#3d4f63',
               overflow: 'hidden',
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',
@@ -177,23 +204,25 @@ function ConvRow({ conversation, isSelected, currentUserId, onSelect }: ConvRowP
           >
             {previewText}
           </span>
+
           {/* Unread count badge */}
           {unread > 0 && (
             <span
               style={{
-                minWidth: 18,
-                height: 18,
-                borderRadius: 9,
-                background: '#3b82f6',
+                minWidth: 19,
+                height: 19,
+                borderRadius: 10,
+                background: 'linear-gradient(135deg, #2563eb 0%, #3b82f6 100%)',
                 color: '#fff',
-                fontSize: '0.6rem',
+                fontSize: '0.62rem',
                 fontWeight: 700,
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                padding: '0 4px',
+                padding: '0 5px',
                 flexShrink: 0,
                 letterSpacing: '0.02em',
+                boxShadow: '0 1px 6px rgba(59,130,246,0.45)',
               }}
             >
               {unread > 99 ? '99+' : unread}
@@ -207,18 +236,6 @@ function ConvRow({ conversation, isSelected, currentUserId, onSelect }: ConvRowP
 
 /* ─── Main component ─────────────────────────────────────── */
 
-const IconSearch = () => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} style={{ width: 14, height: 14 }}>
-    <path d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" strokeLinecap="round" strokeLinejoin="round" />
-  </svg>
-);
-
-const IconPlus = () => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} style={{ width: 14, height: 14 }}>
-    <path d="M12 4.5v15m7.5-7.5h-15" strokeLinecap="round" strokeLinejoin="round" />
-  </svg>
-);
-
 export function ConversationList({
   conversations,
   selectedId,
@@ -228,6 +245,7 @@ export function ConversationList({
 }: ConversationListProps) {
   const { user } = useAuth();
   const [search, setSearch] = useState('');
+  const [searchFocused, setSearchFocused] = useState(false);
 
   const currentUserId = user?.id;
 
@@ -250,66 +268,119 @@ export function ConversationList({
         minHeight: 0,
       }}
     >
-      {/* Header */}
-      <div style={{ padding: '16px 12px 10px', flexShrink: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-          <span
-            style={{
-              fontSize: '0.7rem',
-              fontWeight: 700,
-              color: '#475569',
-              textTransform: 'uppercase',
-              letterSpacing: '0.1em',
-            }}
-          >
-            Messages
-          </span>
+      {/* Header bar */}
+      <div
+        style={{
+          padding: '18px 14px 12px',
+          flexShrink: 0,
+          borderBottom: '1px solid rgba(255,255,255,0.05)',
+        }}
+      >
+        {/* Title row */}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            marginBottom: 12,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div
+              style={{
+                width: 28,
+                height: 28,
+                borderRadius: 8,
+                background: 'linear-gradient(135deg, rgba(59,130,246,0.20) 0%, rgba(129,140,248,0.12) 100%)',
+                border: '1px solid rgba(59,130,246,0.22)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: '#60a5fa',
+                flexShrink: 0,
+              }}
+            >
+              <MessageSquare size={14} strokeWidth={2} />
+            </div>
+            <span
+              style={{
+                fontSize: '0.85rem',
+                fontWeight: 700,
+                color: '#94a3b8',
+                letterSpacing: '0.02em',
+              }}
+            >
+              Messages
+            </span>
+          </div>
+
+          {/* New conversation button — filled circle with plus */}
           <button
             type="button"
             onClick={onNewChat}
             title="New conversation"
             aria-label="New conversation"
             style={{
-              width: 26,
-              height: 26,
-              borderRadius: 7,
+              width: 30,
+              height: 30,
+              borderRadius: '50%',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              background: 'rgba(59,130,246,0.12)',
-              border: '1px solid rgba(59,130,246,0.25)',
-              color: '#60a5fa',
+              background: 'linear-gradient(135deg, #2563eb 0%, #3b82f6 100%)',
+              border: 'none',
+              color: '#fff',
               cursor: 'pointer',
-              transition: 'background 0.15s',
+              transition: 'opacity 0.15s, transform 0.12s, box-shadow 0.15s',
+              boxShadow: '0 2px 10px rgba(59,130,246,0.40)',
               flexShrink: 0,
             }}
-            onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(59,130,246,0.22)'; }}
-            onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(59,130,246,0.12)'; }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.opacity = '0.88';
+              e.currentTarget.style.transform = 'scale(1.08)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.opacity = '1';
+              e.currentTarget.style.transform = 'scale(1)';
+            }}
+            onMouseDown={(e) => {
+              e.currentTarget.style.transform = 'scale(0.94)';
+            }}
+            onMouseUp={(e) => {
+              e.currentTarget.style.transform = 'scale(1.08)';
+            }}
           >
-            <IconPlus />
+            <Plus size={15} strokeWidth={2.5} />
           </button>
         </div>
 
-        {/* Search */}
+        {/* Search input */}
         <div
           style={{
             display: 'flex',
             alignItems: 'center',
             gap: 8,
-            background: 'rgba(255,255,255,0.04)',
-            border: '1px solid rgba(255,255,255,0.07)',
-            borderRadius: 8,
-            padding: '6px 10px',
+            background: searchFocused ? 'rgba(255,255,255,0.06)' : 'rgba(255,255,255,0.04)',
+            border: searchFocused
+              ? '1px solid rgba(59,130,246,0.30)'
+              : '1px solid rgba(255,255,255,0.06)',
+            borderRadius: 9,
+            padding: '7px 11px',
+            transition: 'border-color 0.15s, background 0.15s',
           }}
         >
-          <span style={{ color: '#334155', flexShrink: 0 }}>
-            <IconSearch />
-          </span>
+          <Search
+            size={13}
+            strokeWidth={2}
+            style={{ color: searchFocused ? '#60a5fa' : '#475569', flexShrink: 0, transition: 'color 0.15s' }}
+          />
           <input
             type="search"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search"
+            onFocus={() => setSearchFocused(true)}
+            onBlur={() => setSearchFocused(false)}
+            placeholder="Search conversations"
             aria-label="Search conversations"
             style={{
               flex: 1,
@@ -324,12 +395,12 @@ export function ConversationList({
         </div>
       </div>
 
-      {/* List */}
+      {/* Conversation list */}
       <div
         style={{
           flex: 1,
           overflowY: 'auto',
-          padding: '0 6px 12px',
+          padding: '8px 8px 16px',
           display: 'flex',
           flexDirection: 'column',
           gap: 2,
@@ -338,7 +409,7 @@ export function ConversationList({
         }}
       >
         {isLoading && (
-          <div style={{ display: 'flex', justifyContent: 'center', padding: 24 }}>
+          <div style={{ display: 'flex', justifyContent: 'center', padding: 32 }}>
             <div
               style={{
                 width: 22,
@@ -355,14 +426,16 @@ export function ConversationList({
         {!isLoading && filtered.length === 0 && (
           <div
             style={{
-              padding: '32px 12px',
+              padding: '36px 16px',
               textAlign: 'center',
               fontSize: '0.8rem',
               color: '#334155',
-              lineHeight: 1.6,
+              lineHeight: 1.7,
             }}
           >
-            {search ? 'No conversations match your search.' : 'No conversations yet.\nStart one with the + button.'}
+            {search
+              ? `No conversations match "${search}".`
+              : 'No conversations yet. Hit the + button to start one.'}
           </div>
         )}
 

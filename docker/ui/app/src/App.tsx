@@ -56,7 +56,6 @@ export function App() {
             <Route path="documentation" element={<DocsPage />} />
             <Route path="call-quality" element={<CallQualityPage />} />
             <Route path="voicemail"  element={<VoicemailPage />} />
-            <Route path="chat"       element={<ChatPage />} />
 
             {/* DID Search — admin-only, standalone (not nested inside AdminPage tabs) */}
             <Route
@@ -112,6 +111,14 @@ export function App() {
             element={
               <RequireAuth>
                 <TroubleshootingPage />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="chat"
+            element={
+              <RequireAuth>
+                <ChatPage />
               </RequireAuth>
             }
           />

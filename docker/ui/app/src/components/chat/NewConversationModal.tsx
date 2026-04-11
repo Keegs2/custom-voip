@@ -1,25 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { X, Check, UserPlus, Users, MessageSquare, Search } from 'lucide-react';
 import { apiRequest } from '../../api/client';
 import { createConversation } from '../../api/chat';
 import type { Conversation, DirectoryUser } from '../../types/chat';
 import { useAuth } from '../../contexts/AuthContext';
-
-interface NewConversationModalProps {
-  onClose: () => void;
-  onCreated: (conversation: Conversation) => void;
-}
-
-const IconX = () => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} style={{ width: 14, height: 14 }}>
-    <path d="M6 18 18 6M6 6l12 12" strokeLinecap="round" strokeLinejoin="round" />
-  </svg>
-);
-
-const IconCheck = () => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} style={{ width: 12, height: 12 }}>
-    <path d="m4.5 12.75 6 6 9-13.5" strokeLinecap="round" strokeLinejoin="round" />
-  </svg>
-);
 
 /** Format an E.164 number for human display. "+17743260301" → "+1 (774) 326-0301" */
 function formatPhoneNumber(did: string): string {
@@ -196,12 +180,30 @@ export function NewConversationModal({ onClose, onCreated }: NewConversationModa
             flexShrink: 0,
           }}
         >
-          <div>
-            <div style={{ fontSize: '1rem', fontWeight: 700, color: '#f1f5f9', letterSpacing: '-0.02em' }}>
-              New Conversation
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div
+              style={{
+                width: 36,
+                height: 36,
+                borderRadius: 10,
+                background: 'linear-gradient(135deg, rgba(59,130,246,0.20) 0%, rgba(129,140,248,0.12) 100%)',
+                border: '1px solid rgba(59,130,246,0.24)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: '#60a5fa',
+                flexShrink: 0,
+              }}
+            >
+              <UserPlus size={17} strokeWidth={2} />
             </div>
-            <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: 2 }}>
-              Start a direct message or group chat
+            <div>
+              <div style={{ fontSize: '1rem', fontWeight: 700, color: '#f1f5f9', letterSpacing: '-0.02em' }}>
+                New Conversation
+              </div>
+              <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: 2 }}>
+                Start a direct message or group chat
+              </div>
             </div>
           </div>
           <button
@@ -224,7 +226,7 @@ export function NewConversationModal({ onClose, onCreated }: NewConversationModa
             onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.08)'; e.currentTarget.style.color = '#f1f5f9'; }}
             onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; e.currentTarget.style.color = '#64748b'; }}
           >
-            <IconX />
+            <X size={14} strokeWidth={2} />
           </button>
         </div>
 
@@ -248,7 +250,7 @@ export function NewConversationModal({ onClose, onCreated }: NewConversationModa
                 onClick={() => handleTypeSwitch(t)}
                 style={{
                   flex: 1,
-                  padding: '7px 0',
+                  padding: '8px 0',
                   borderRadius: 7,
                   border: 'none',
                   cursor: 'pointer',
@@ -260,9 +262,23 @@ export function NewConversationModal({ onClose, onCreated }: NewConversationModa
                     : 'transparent',
                   color: convType === t ? '#f1f5f9' : '#64748b',
                   boxShadow: convType === t ? '0 0 0 1px rgba(59,130,246,0.25)' : 'none',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 6,
                 }}
               >
-                {t === 'direct' ? 'Direct Message' : 'Group Chat'}
+                {t === 'direct' ? (
+                  <>
+                    <MessageSquare size={14} strokeWidth={2} />
+                    Direct Message
+                  </>
+                ) : (
+                  <>
+                    <Users size={14} strokeWidth={2} />
+                    Group Chat
+                  </>
+                )}
               </button>
             ))}
           </div>
@@ -341,8 +357,8 @@ export function NewConversationModal({ onClose, onCreated }: NewConversationModa
                     {(u.name || '?').charAt(0).toUpperCase()}
                   </span>
                   {u.name}
-                  <span style={{ opacity: 0.6, marginLeft: 2 }}>
-                    <IconX />
+                  <span style={{ opacity: 0.6, marginLeft: 2, display: 'flex', alignItems: 'center' }}>
+                    <X size={11} strokeWidth={2.5} />
                   </span>
                 </button>
               ))}
@@ -357,27 +373,41 @@ export function NewConversationModal({ onClose, onCreated }: NewConversationModa
             >
               {convType === 'direct' ? 'Select Person' : 'Add Members'}
             </label>
-            <input
-              id="user-search"
-              ref={searchRef}
-              type="search"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search by name, email, or extension..."
+            <div
               style={{
-                width: '100%',
-                padding: '9px 12px',
-                borderRadius: 9,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
                 background: 'rgba(255,255,255,0.04)',
                 border: '1px solid rgba(255,255,255,0.09)',
-                color: '#f1f5f9',
-                fontSize: '0.875rem',
-                outline: 'none',
-                fontFamily: 'inherit',
-                boxSizing: 'border-box',
+                borderRadius: 9,
+                padding: '0 12px',
                 marginBottom: 8,
+                boxSizing: 'border-box',
+                width: '100%',
               }}
-            />
+            >
+              <Search size={14} strokeWidth={2} style={{ color: '#475569', flexShrink: 0 }} />
+              <input
+                id="user-search"
+                ref={searchRef}
+                type="search"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search by name, email, or extension..."
+                style={{
+                  flex: 1,
+                  padding: '9px 0',
+                  background: 'transparent',
+                  border: 'none',
+                  color: '#f1f5f9',
+                  fontSize: '0.875rem',
+                  outline: 'none',
+                  fontFamily: 'inherit',
+                  width: '100%',
+                }}
+              />
+            </div>
 
             {/* Directory list */}
             <div
@@ -485,7 +515,7 @@ export function NewConversationModal({ onClose, onCreated }: NewConversationModa
                           color: '#fff',
                         }}
                       >
-                        <IconCheck />
+                        <Check size={11} strokeWidth={2.5} />
                       </div>
                     )}
                   </button>
