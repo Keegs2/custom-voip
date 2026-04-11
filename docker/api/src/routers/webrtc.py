@@ -77,7 +77,8 @@ async def get_webrtc_credentials(user: dict = Depends(get_current_user)):
     # Explicit UCaaS gate: only ucaas accounts or api/trunk/hybrid with ucaas_enabled
     account_type = ext.get("account_type")
     has_ucaas = (
-        account_type == "ucaas"
+        account_type is None  # Admin users always have access
+        or account_type == "ucaas"
         or (account_type in ("api", "trunk", "hybrid") and ext.get("ucaas_enabled"))
     )
     if not has_ucaas:
