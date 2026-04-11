@@ -7,8 +7,8 @@ ALTER TABLE customers ADD CONSTRAINT customers_account_type_check
     CHECK (account_type IN ('rcf', 'api', 'trunk', 'hybrid', 'ucaas'));
 
 -- Insert test UCaaS customer (id=5)
-INSERT INTO customers (id, name, account_type, balance, credit_limit, status, traffic_grade, daily_limit, cpm_limit) VALUES
-(5, 'Test UCaaS Customer', 'ucaas', 0.00, 0.00, 'active', 'standard', 500, 60)
+INSERT INTO customers (id, name, account_type, balance, credit_limit, status, traffic_grade, daily_limit, cpm_limit, ucaas_enabled) VALUES
+(5, 'Test UCaaS Customer', 'ucaas', 0.00, 0.00, 'active', 'standard', 500, 60, true)
 ON CONFLICT (id) DO NOTHING;
 
 -- Assign rate table for UCaaS customer

@@ -80,8 +80,14 @@ export function SoftphoneWidget() {
   const [activeTab, setActiveTab] = useState<WidgetTab>('dialpad');
   const [showPresenceMenu, setShowPresenceMenu] = useState(false);
 
-  // RCF customers never get the softphone — product is intentionally minimal
-  if (user?.account_type === 'rcf') return null;
+  // Only UCaaS-enabled accounts get the softphone.
+  // Admins (null account_type) always get it; ucaas customers always get it;
+  // api/trunk/hybrid only when ucaas_enabled is true; rcf never.
+  const hasUcaas =
+    !user?.account_type ||
+    user.account_type === 'ucaas' ||
+    (user.account_type !== 'rcf' && user.ucaas_enabled === true);
+  if (!hasUcaas) return null;
 
   // If no credentials, don't render the widget at all
   if (!credentials && connectionState === 'disconnected') {

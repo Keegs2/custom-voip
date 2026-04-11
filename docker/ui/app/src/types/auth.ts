@@ -9,6 +9,7 @@ export interface User {
   last_login: string | null;
   customer_name: string | null;
   account_type: 'rcf' | 'api' | 'trunk' | 'hybrid' | 'ucaas' | null;
+  ucaas_enabled: boolean | null;
 }
 
 export interface LoginResponse {

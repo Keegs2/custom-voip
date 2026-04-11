@@ -741,6 +741,17 @@ function AccountDetailView({ customer, onEdit, onDelete }: AccountDetailViewProp
     onError: (err: Error) => toastErr(err.message),
   });
 
+  const ucaasMutation = useMutation({
+    mutationFn: (enabled: boolean) =>
+      apiRequest<Customer>('PATCH', `/customers/${customer.id}`, { ucaas_enabled: enabled }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['customer', customer.id] });
+      qc.invalidateQueries({ queryKey: ['customers'] });
+      toastOk(`UCaaS add-on ${!customer.ucaas_enabled ? 'enabled' : 'disabled'}`);
+    },
+    onError: (err: Error) => toastErr(err.message),
+  });
+
   function handleAddCredit(e: React.FormEvent) {
     e.preventDefault();
     const amount = parseFloat(creditAmount);
@@ -895,6 +906,81 @@ function AccountDetailView({ customer, onEdit, onDelete }: AccountDetailViewProp
           <Button variant="primary" size="sm" onClick={onEdit}>
             Edit Customer
           </Button>
+
+          {/* UCaaS add-on toggle — only for api/trunk/hybrid */}
+          {(customer.account_type === 'api' || customer.account_type === 'trunk' || customer.account_type === 'hybrid') && (
+            <button
+              type="button"
+              disabled={ucaasMutation.isPending}
+              onClick={() => ucaasMutation.mutate(!customer.ucaas_enabled)}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 7,
+                fontSize: '0.8rem',
+                fontWeight: 600,
+                padding: '6px 14px',
+                borderRadius: 8,
+                cursor: ucaasMutation.isPending ? 'wait' : 'pointer',
+                border: `1px solid ${customer.ucaas_enabled ? 'rgba(14,165,233,0.35)' : 'rgba(100,116,139,0.30)'}`,
+                background: customer.ucaas_enabled
+                  ? 'rgba(14,165,233,0.10)'
+                  : 'rgba(100,116,139,0.08)',
+                color: customer.ucaas_enabled ? '#38bdf8' : '#64748b',
+                transition: 'background 0.15s, border-color 0.15s, color 0.15s',
+                opacity: ucaasMutation.isPending ? 0.6 : 1,
+              }}
+              onMouseEnter={(e) => {
+                if (!ucaasMutation.isPending) {
+                  e.currentTarget.style.background = customer.ucaas_enabled
+                    ? 'rgba(239,68,68,0.10)'
+                    : 'rgba(14,165,233,0.10)';
+                  e.currentTarget.style.borderColor = customer.ucaas_enabled
+                    ? 'rgba(239,68,68,0.35)'
+                    : 'rgba(14,165,233,0.35)';
+                  e.currentTarget.style.color = customer.ucaas_enabled ? '#f87171' : '#38bdf8';
+                }
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = customer.ucaas_enabled
+                  ? 'rgba(14,165,233,0.10)'
+                  : 'rgba(100,116,139,0.08)';
+                e.currentTarget.style.borderColor = customer.ucaas_enabled
+                  ? 'rgba(14,165,233,0.35)'
+                  : 'rgba(100,116,139,0.30)';
+                e.currentTarget.style.color = customer.ucaas_enabled ? '#38bdf8' : '#64748b';
+              }}
+            >
+              {/* Toggle track */}
+              <span
+                style={{
+                  position: 'relative',
+                  display: 'inline-block',
+                  width: 28,
+                  height: 16,
+                  borderRadius: 8,
+                  background: customer.ucaas_enabled ? '#0ea5e9' : 'rgba(100,116,139,0.35)',
+                  transition: 'background 0.2s',
+                  flexShrink: 0,
+                }}
+              >
+                <span
+                  style={{
+                    position: 'absolute',
+                    top: 2,
+                    left: customer.ucaas_enabled ? 14 : 2,
+                    width: 12,
+                    height: 12,
+                    borderRadius: '50%',
+                    background: '#fff',
+                    transition: 'left 0.2s',
+                    boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
+                  }}
+                />
+              </span>
+              UCaaS {customer.ucaas_enabled ? 'Enabled' : 'Disabled'}
+            </button>
+          )}
 
           {/* Add Credit form */}
           <form
@@ -1186,6 +1272,40 @@ export function CustomerAccountPage() {
               <Badge variant={customer.traffic_grade}>
                 {customer.traffic_grade}
               </Badge>
+              {/* UCaaS add-on indicator for api/trunk/hybrid customers */}
+              {(customer.account_type === 'api' || customer.account_type === 'trunk' || customer.account_type === 'hybrid') && (
+                <span
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 5,
+                    fontSize: '0.65rem',
+                    fontWeight: 700,
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.07em',
+                    padding: '3px 8px',
+                    borderRadius: 6,
+                    background: customer.ucaas_enabled
+                      ? 'rgba(14,165,233,0.12)'
+                      : 'rgba(100,116,139,0.10)',
+                    border: customer.ucaas_enabled
+                      ? '1px solid rgba(14,165,233,0.30)'
+                      : '1px solid rgba(100,116,139,0.20)',
+                    color: customer.ucaas_enabled ? '#38bdf8' : '#475569',
+                  }}
+                >
+                  <span
+                    style={{
+                      width: 5,
+                      height: 5,
+                      borderRadius: '50%',
+                      background: customer.ucaas_enabled ? '#0ea5e9' : '#475569',
+                      flexShrink: 0,
+                    }}
+                  />
+                  UCaaS {customer.ucaas_enabled ? 'Enabled' : 'Disabled'}
+                </span>
+              )}
               <span
                 style={{
                   fontFamily: 'monospace',

@@ -56,11 +56,13 @@ async def get_webrtc_credentials(user: dict = Depends(get_current_user)):
     """
     user_id = int(user["sub"])
 
-    # Look up the user's active extension
+    # Look up the user's active extension and verify UCaaS access
     row = await db.fetch_one(
         """SELECT e.extension, e.voicemail_pin, e.customer_id,
-                  e.display_name, e.status
+                  e.display_name, e.status,
+                  c.account_type, c.ucaas_enabled
            FROM extensions e
+           JOIN customers c ON e.customer_id = c.id
            WHERE e.user_id = $1 AND e.status = 'active'""",
         user_id,
     )
@@ -71,6 +73,18 @@ async def get_webrtc_credentials(user: dict = Depends(get_current_user)):
         )
 
     ext = dict(row)
+
+    # Explicit UCaaS gate: only ucaas accounts or api/trunk/hybrid with ucaas_enabled
+    account_type = ext.get("account_type")
+    has_ucaas = (
+        account_type == "ucaas"
+        or (account_type in ("api", "trunk", "hybrid") and ext.get("ucaas_enabled"))
+    )
+    if not has_ucaas:
+        raise HTTPException(
+            status_code=403,
+            detail="UCaaS features are not enabled for this account",
+        )
     login = f"{ext['extension']}@{SIP_DOMAIN}"
 
     return {

@@ -20,6 +20,7 @@ interface CreateFormState {
   credit_limit: string;
   daily_limit: string;
   cpm_limit: string;
+  ucaas_enabled: boolean;
 }
 
 const INITIAL_CREATE: CreateFormState = {
@@ -29,6 +30,7 @@ const INITIAL_CREATE: CreateFormState = {
   credit_limit: '0',
   daily_limit: '500',
   cpm_limit: '60',
+  ucaas_enabled: false,
 };
 
 export function CustomersAdminPage() {
@@ -56,6 +58,10 @@ export function CustomersAdminPage() {
         credit_limit: parseFloat(createForm.credit_limit) || 0,
         daily_limit: parseFloat(createForm.daily_limit) || 0,
         cpm_limit: parseInt(createForm.cpm_limit, 10) || 0,
+        // Only send ucaas_enabled for account types where it's meaningful
+        ...(createForm.account_type !== 'rcf' && createForm.account_type !== 'ucaas'
+          ? { ucaas_enabled: createForm.ucaas_enabled }
+          : {}),
       }),
     onSuccess: (created) => {
       qc.invalidateQueries({ queryKey: ['customers'] });
@@ -195,9 +201,14 @@ export function CustomersAdminPage() {
               label="Account Type"
               as="select"
               value={createForm.account_type}
-              onChange={(e) =>
-                updateCreateForm('account_type', (e.target as HTMLSelectElement).value as AccountType)
-              }
+              onChange={(e) => {
+                const newType = (e.target as HTMLSelectElement).value as AccountType;
+                updateCreateForm('account_type', newType);
+                // Reset ucaas_enabled when switching to a type where it doesn't apply
+                if (newType === 'rcf' || newType === 'ucaas') {
+                  updateCreateForm('ucaas_enabled', false);
+                }
+              }}
             >
               <option value="rcf">RCF</option>
               <option value="api">API</option>
@@ -241,6 +252,57 @@ export function CustomersAdminPage() {
               onChange={(e) => updateCreateForm('cpm_limit', (e.target as HTMLInputElement).value)}
             />
           </div>
+          {/* UCaaS add-on toggle — only relevant for api/trunk/hybrid */}
+          {(createForm.account_type === 'api' || createForm.account_type === 'trunk' || createForm.account_type === 'hybrid') && (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 10,
+                marginTop: 16,
+                padding: '12px 16px',
+                background: createForm.ucaas_enabled ? 'rgba(14,165,233,0.06)' : 'rgba(255,255,255,0.02)',
+                border: `1px solid ${createForm.ucaas_enabled ? 'rgba(14,165,233,0.25)' : 'rgba(42,47,69,0.5)'}`,
+                borderRadius: 10,
+                transition: 'background 0.15s, border-color 0.15s',
+                cursor: 'pointer',
+                userSelect: 'none',
+              }}
+              onClick={() => updateCreateForm('ucaas_enabled', !createForm.ucaas_enabled)}
+            >
+              <input
+                id="create-ucaas-enabled"
+                type="checkbox"
+                checked={createForm.ucaas_enabled}
+                onChange={(e) => updateCreateForm('ucaas_enabled', e.target.checked)}
+                onClick={(e) => e.stopPropagation()}
+                style={{ width: 15, height: 15, accentColor: '#0ea5e9', cursor: 'pointer', flexShrink: 0 }}
+              />
+              <label
+                htmlFor="create-ucaas-enabled"
+                style={{
+                  fontSize: '0.82rem',
+                  fontWeight: 600,
+                  color: createForm.ucaas_enabled ? '#38bdf8' : '#64748b',
+                  cursor: 'pointer',
+                  transition: 'color 0.15s',
+                }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                UCaaS Enabled
+              </label>
+              <span
+                style={{
+                  fontSize: '0.72rem',
+                  color: '#4a5568',
+                  marginLeft: 4,
+                }}
+              >
+                Grants softphone, chat, and voicemail access
+              </span>
+            </div>
+          )}
+
           <div
             style={{
               display: 'flex',

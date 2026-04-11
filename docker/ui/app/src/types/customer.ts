@@ -14,6 +14,7 @@ export interface Customer {
   cpm_limit: number | null;
   fraud_score: number;
   created_at: string;
+  ucaas_enabled: boolean | null;
 }
 
 export interface CustomerCreate {
@@ -24,6 +25,7 @@ export interface CustomerCreate {
   traffic_grade?: TrafficGrade;
   daily_limit?: number | null;
   cpm_limit?: number | null;
+  ucaas_enabled?: boolean | null;
 }
 
 export interface CustomerUpdate {
@@ -34,4 +36,5 @@ export interface CustomerUpdate {
   traffic_grade?: TrafficGrade;
   daily_limit?: number | null;
   cpm_limit?: number | null;
+  ucaas_enabled?: boolean | null;
 }

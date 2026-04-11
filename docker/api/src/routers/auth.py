@@ -65,7 +65,7 @@ async def login(body: LoginRequest):
     """Authenticate a user and return a JWT access token."""
     row = await db.fetch_one(
         """SELECT u.id, u.email, u.password_hash, u.role, u.customer_id, u.name, u.status,
-                  c.name AS customer_name, c.account_type
+                  c.name AS customer_name, c.account_type, c.ucaas_enabled
            FROM users u
            LEFT JOIN customers c ON u.customer_id = c.id
            WHERE u.email = $1""",
@@ -96,6 +96,13 @@ async def login(body: LoginRequest):
         "customer_id": user["customer_id"],
     })
 
+    # Compute effective UCaaS access from account_type + ucaas_enabled flag
+    account_type = user.get("account_type")
+    has_ucaas = (
+        account_type == "ucaas"
+        or (account_type in ("api", "trunk", "hybrid") and user.get("ucaas_enabled"))
+    )
+
     return {
         "access_token": token,
         "token_type": "bearer",
@@ -106,7 +113,9 @@ async def login(body: LoginRequest):
             "role": user["role"],
             "customer_id": user["customer_id"],
             "customer_name": user.get("customer_name"),
-            "account_type": user.get("account_type"),
+            "account_type": account_type,
+            "ucaas_enabled": bool(user.get("ucaas_enabled")),
+            "has_ucaas": has_ucaas,
         },
     }
 
@@ -121,7 +130,7 @@ async def get_me(user: dict = Depends(get_current_user)):
     row = await db.fetch_one(
         """SELECT u.id, u.email, u.name, u.role, u.customer_id, u.status,
                   u.created_at, u.last_login, c.name AS customer_name,
-                  c.account_type
+                  c.account_type, c.ucaas_enabled
            FROM users u
            LEFT JOIN customers c ON u.customer_id = c.id
            WHERE u.id = $1""",
@@ -129,7 +138,14 @@ async def get_me(user: dict = Depends(get_current_user)):
     )
     if not row:
         raise HTTPException(status_code=404, detail="User not found")
-    return dict(row)
+    result = dict(row)
+    # Compute effective UCaaS access from account_type + ucaas_enabled flag
+    account_type = result.get("account_type")
+    result["has_ucaas"] = (
+        account_type == "ucaas"
+        or (account_type in ("api", "trunk", "hybrid") and result.get("ucaas_enabled"))
+    )
+    return result
 
 
 @router.post("/register")
@@ -160,12 +176,21 @@ async def list_users(admin: dict = Depends(require_admin)):
     rows = await db.fetch_all(
         """SELECT u.id, u.email, u.name, u.role, u.customer_id, u.status,
                   u.created_at, u.last_login, c.name AS customer_name,
-                  c.account_type
+                  c.account_type, c.ucaas_enabled
            FROM users u
            LEFT JOIN customers c ON u.customer_id = c.id
            ORDER BY u.created_at DESC"""
     )
-    return [dict(r) for r in rows]
+    results = []
+    for r in rows:
+        d = dict(r)
+        account_type = d.get("account_type")
+        d["has_ucaas"] = (
+            account_type == "ucaas"
+            or (account_type in ("api", "trunk", "hybrid") and d.get("ucaas_enabled"))
+        )
+        results.append(d)
+    return results
 
 
 @router.put("/users/{user_id}")

@@ -13,6 +13,7 @@ CREATE TABLE customers (
     fraud_score SMALLINT DEFAULT 0 CHECK (fraud_score BETWEEN 0 AND 100),
     daily_limit DECIMAL(12,4) DEFAULT 500,
     cpm_limit INT DEFAULT 60,  -- calls per minute limit
+    ucaas_enabled BOOLEAN DEFAULT false,  -- UCaaS add-on for api/trunk/hybrid customers
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );

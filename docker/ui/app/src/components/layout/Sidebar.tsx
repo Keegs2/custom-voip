@@ -149,6 +149,13 @@ export function Sidebar() {
   const displayName = user?.name || user?.email?.split('@')[0] || '';
   const displayEmail = user?.email ?? '';
 
+  // UCaaS access: admins (no account_type) always get it; ucaas customers always get it;
+  // api/trunk/hybrid customers only when ucaas_enabled is true; rcf never.
+  const hasUcaas =
+    !user?.account_type ||
+    user.account_type === 'ucaas' ||
+    (user.account_type !== 'rcf' && user.ucaas_enabled === true);
+
   // Filter nav items based on role and account_type
   const isSupport = user?.role === 'readonly';
   const productNavItems = allProductNavItems.filter((item) => {
@@ -363,7 +370,7 @@ export function Sidebar() {
 
           {/* Communications (Chat, Voicemail) — shown to users with an extension,
               but NEVER to RCF customers. RCF is intentionally minimal. */}
-          {credentials && user?.account_type !== 'rcf' && (
+          {credentials && hasUcaas && (
             <>
               <div
                 style={{
@@ -826,8 +833,8 @@ export function Sidebar() {
               >
                 {displayName.charAt(0) || '?'}
               </div>
-              {/* Presence dot — clickable when extension is active (not for RCF) */}
-              {credentials && user?.account_type !== 'rcf' ? (
+              {/* Presence dot — clickable when extension is active (UCaaS only) */}
+              {credentials && hasUcaas ? (
                 <button
                   type="button"
                   onClick={() => setShowPresenceMenu((v) => !v)}
@@ -850,7 +857,7 @@ export function Sidebar() {
               ) : null}
 
               {/* Presence dropdown */}
-              {showPresenceMenu && credentials && user?.account_type !== 'rcf' && (
+              {showPresenceMenu && credentials && hasUcaas && (
                 <div
                   style={{
                     position: 'absolute',

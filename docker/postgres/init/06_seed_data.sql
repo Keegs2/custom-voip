@@ -23,12 +23,12 @@ INSERT INTO rates (rate_table_id, prefix, description, rate_per_min, cost_per_mi
 (1, '52', 'Mexico', 0.0180, 0.010000, 6);
 
 -- Test customers
-INSERT INTO customers (id, name, account_type, balance, credit_limit, status, traffic_grade, daily_limit, cpm_limit) VALUES
-(1, 'Test RCF Customer', 'rcf', 100.00, 50.00, 'active', 'standard', 500, 60),
-(2, 'Test API Customer', 'api', 500.00, 100.00, 'active', 'premium', 1000, 120),
-(3, 'Test Trunk Customer', 'trunk', 1000.00, 200.00, 'active', 'standard', 2000, 60),
-(4, 'Test Hybrid Customer', 'hybrid', 250.00, 100.00, 'active', 'economy', 500, 30),
-(5, 'Test UCaaS Customer', 'ucaas', 0.00, 0.00, 'active', 'standard', 500, 60);
+INSERT INTO customers (id, name, account_type, balance, credit_limit, status, traffic_grade, daily_limit, cpm_limit, ucaas_enabled) VALUES
+(1, 'Test RCF Customer', 'rcf', 100.00, 50.00, 'active', 'standard', 500, 60, false),
+(2, 'Test API Customer', 'api', 500.00, 100.00, 'active', 'premium', 1000, 120, false),
+(3, 'Test Trunk Customer', 'trunk', 1000.00, 200.00, 'active', 'standard', 2000, 60, false),
+(4, 'Test Hybrid Customer', 'hybrid', 250.00, 100.00, 'active', 'economy', 500, 30, false),
+(5, 'Test UCaaS Customer', 'ucaas', 0.00, 0.00, 'active', 'standard', 500, 60, true);
 
 -- Assign rate tables
 INSERT INTO customer_rate_assignments (customer_id, inbound_rate_table_id, outbound_rate_table_id) VALUES
