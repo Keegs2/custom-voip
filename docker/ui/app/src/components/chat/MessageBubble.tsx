@@ -7,6 +7,8 @@ interface MessageBubbleProps {
   isGrouped: boolean;
   /** Whether this is a group conversation — only show sender name in groups */
   isGroup: boolean;
+  /** When true, this is the last message before a different sender — show avatar here */
+  isLastInGroup?: boolean;
 }
 
 /* ─── Helpers ────────────────────────────────────────────── */
@@ -41,7 +43,7 @@ function nameColor(name: string): string {
 
 /* ─── Component ──────────────────────────────────────────── */
 
-export function MessageBubble({ message, isOwn, isGrouped, isGroup }: MessageBubbleProps) {
+export function MessageBubble({ message, isOwn, isGrouped, isGroup, isLastInGroup = false }: MessageBubbleProps) {
   const isDeleted = Boolean(message.deleted_at);
   const isEdited = Boolean(message.edited_at) && !isDeleted;
   const avatarColor = nameColor(message.sender_name);
@@ -91,9 +93,9 @@ export function MessageBubble({ message, isOwn, isGrouped, isGroup }: MessageBub
         paddingRight: isOwn ? 4 : 0,
       }}
     >
-      {/* Avatar — only shown on first message in a group */}
+      {/* Avatar — shown on the last message in a consecutive group, aligned at bottom */}
       <div style={{ width: 32, flexShrink: 0, alignSelf: 'flex-end' }}>
-        {!isGrouped && !isOwn && (
+        {isLastInGroup && !isOwn && (
           <div
             aria-label={message.sender_name}
             title={message.sender_name}

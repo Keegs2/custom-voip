@@ -488,6 +488,15 @@ export function MessageThread({ conversation }: MessageThreadProps) {
               !prev.deleted_at &&
               !msg.deleted_at;
 
+            // Check if this is the last message from this sender before a different sender or date break
+            const next = messages[idx + 1];
+            const isLastInGroup =
+              !next ||
+              next.sender_id !== msg.sender_id ||
+              !!next.deleted_at ||
+              !!msg.deleted_at ||
+              (next && !isSameDay(msg.created_at, next.created_at));
+
             return (
               <div key={msg.id}>
                 {showDateSeparator && (
@@ -524,6 +533,7 @@ export function MessageThread({ conversation }: MessageThreadProps) {
                   isOwn={isOwn}
                   isGrouped={isGrouped}
                   isGroup={isGroup}
+                  isLastInGroup={isLastInGroup}
                 />
               </div>
             );
