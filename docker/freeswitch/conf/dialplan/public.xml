@@ -142,6 +142,12 @@
         <action application="set" data="direction=outbound"/>
         <action application="set" data="call_start_time=${strftime(%Y-%m-%d %H:%M:%S)}"/>
 
+        <!-- Set caller ID to a valid DID so Bandwidth accepts the call.
+             Extension numbers like "1001" are rejected by the carrier because
+             they are not provisioned DIDs. Use the platform's trunk DID. -->
+        <action application="set" data="effective_caller_id_number=+17743260301"/>
+        <action application="set" data="effective_caller_id_name=Custom VoIP"/>
+
         <!-- Primary: Bandwidth Dallas via Kamailio -->
         <action application="set" data="sip_h_X-Carrier=standard"/>
         <action application="bridge" data="sofia/external/${e164_dest}@127.0.0.1:5060"/>
