@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useSoftphone } from '../../contexts/SoftphoneContext';
+import { useAuth } from '../../contexts/AuthContext';
 import { PresenceIndicator } from './PresenceIndicator';
 import { DialPad } from './DialPad';
 import { ActiveCallView } from './ActiveCall';
@@ -74,9 +75,13 @@ export function SoftphoneWidget() {
     setExpanded,
     setPresence,
   } = useSoftphone();
+  const { user } = useAuth();
 
   const [activeTab, setActiveTab] = useState<WidgetTab>('dialpad');
   const [showPresenceMenu, setShowPresenceMenu] = useState(false);
+
+  // RCF customers never get the softphone — product is intentionally minimal
+  if (user?.account_type === 'rcf') return null;
 
   // If no credentials, don't render the widget at all
   if (!credentials && connectionState === 'disconnected') {

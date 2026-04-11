@@ -361,8 +361,9 @@ export function Sidebar() {
             ))}
           </div>
 
-          {/* Voicemail — only shown to users with an extension */}
-          {credentials && (
+          {/* Communications (Chat, Voicemail) — shown to users with an extension,
+              but NEVER to RCF customers. RCF is intentionally minimal. */}
+          {credentials && user?.account_type !== 'rcf' && (
             <>
               <div
                 style={{
@@ -825,8 +826,8 @@ export function Sidebar() {
               >
                 {displayName.charAt(0) || '?'}
               </div>
-              {/* Presence dot — clickable when extension is active */}
-              {credentials ? (
+              {/* Presence dot — clickable when extension is active (not for RCF) */}
+              {credentials && user?.account_type !== 'rcf' ? (
                 <button
                   type="button"
                   onClick={() => setShowPresenceMenu((v) => !v)}
@@ -849,7 +850,7 @@ export function Sidebar() {
               ) : null}
 
               {/* Presence dropdown */}
-              {showPresenceMenu && credentials && (
+              {showPresenceMenu && credentials && user?.account_type !== 'rcf' && (
                 <div
                   style={{
                     position: 'absolute',
