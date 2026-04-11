@@ -41,6 +41,7 @@ export interface Extension {
   status: string;
   presence_status?: PresenceStatus;
   user_name?: string;
+  assigned_did?: string;  // E.164 format, e.g. "+17743260301"
 }
 
 export interface WebRTCCredentials {

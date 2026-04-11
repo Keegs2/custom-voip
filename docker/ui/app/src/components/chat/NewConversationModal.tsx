@@ -21,6 +21,13 @@ const IconCheck = () => (
   </svg>
 );
 
+/** Format an E.164 number for human display. "+17743260301" → "+1 (774) 326-0301" */
+function formatPhoneNumber(did: string): string {
+  const match = did.match(/^\+1(\d{3})(\d{3})(\d{4})$/);
+  if (match) return `+1 (${match[1]}) ${match[2]}-${match[3]}`;
+  return did; // Return as-is if not a US number
+}
+
 type ConvType = 'direct' | 'group';
 
 export function NewConversationModal({ onClose, onCreated }: NewConversationModalProps) {
@@ -42,12 +49,13 @@ export function NewConversationModal({ onClose, onCreated }: NewConversationModa
   useEffect(() => {
     void apiRequest<Record<string, unknown>[]>('GET', '/extensions/directory?include_presence=true')
       .then((raw) => {
-        // Map API shape to DirectoryUser: API returns {id, extension, display_name, user_name, ...}
+        // Map API shape to DirectoryUser: API returns {id, extension, display_name, user_name, assigned_did, ...}
         const users: DirectoryUser[] = raw.map((r) => ({
           user_id: r.id as number,
           name: (r.display_name || r.user_name || r.extension || 'Unknown') as string,
           email: (r.email || '') as string,
           extension_number: r.extension as string | undefined,
+          assigned_did: (r.assigned_did || undefined) as string | undefined,
         }));
         // Exclude the current user from the list
         setDirectory(users.filter((u) => u.user_id !== user?.id));
@@ -69,7 +77,9 @@ export function NewConversationModal({ onClose, onCreated }: NewConversationModa
           u.name.toLowerCase().includes(q) ||
           u.email.toLowerCase().includes(q) ||
           u.extension_number?.includes(q) ||
-          u.department?.toLowerCase().includes(q)
+          u.department?.toLowerCase().includes(q) ||
+          // Allow searching by DID: raw E.164 or formatted digits (strip non-digits for comparison)
+          (u.assigned_did != null && u.assigned_did.replace(/\D/g, '').includes(q.replace(/\D/g, '')))
         );
       })
     : directory;
@@ -449,8 +459,13 @@ export function NewConversationModal({ onClose, onCreated }: NewConversationModa
                         {u.name}
                       </div>
                       <div style={{ fontSize: '0.7rem', color: '#64748b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {u.email}
-                        {u.extension_number && ` · ext. ${u.extension_number}`}
+                        {u.extension_number
+                          ? u.assigned_did
+                            ? `ext. ${u.extension_number} · ${formatPhoneNumber(u.assigned_did)}`
+                            : `ext. ${u.extension_number}`
+                          : u.assigned_did
+                            ? formatPhoneNumber(u.assigned_did)
+                            : u.email}
                         {u.department && ` · ${u.department}`}
                       </div>
                     </div>

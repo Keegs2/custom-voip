@@ -60,5 +60,6 @@ export interface DirectoryUser {
   name: string;
   email: string;
   extension_number?: string;
+  assigned_did?: string;
   department?: string;
 }

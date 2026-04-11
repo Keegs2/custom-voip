@@ -142,11 +142,12 @@
         <action application="set" data="direction=outbound"/>
         <action application="set" data="call_start_time=${strftime(%Y-%m-%d %H:%M:%S)}"/>
 
-        <!-- Set caller ID to a valid DID so Bandwidth accepts the call.
+        <!-- Look up the user's assigned DID for outbound caller ID.
              Extension numbers like "1001" are rejected by the carrier because
-             they are not provisioned DIDs. Use the platform's trunk DID. -->
-        <action application="set" data="effective_caller_id_number=+17743260301"/>
-        <action application="set" data="effective_caller_id_name=Custom VoIP"/>
+             they are not provisioned DIDs. The Lua script queries the extensions
+             table for the user's assigned_did and falls back to the platform
+             default DID (+17743260301) if none is assigned. -->
+        <action application="lua" data="lookup_user_did.lua"/>
 
         <!-- Primary: Bandwidth Dallas via Kamailio -->
         <action application="set" data="sip_h_X-Carrier=standard"/>

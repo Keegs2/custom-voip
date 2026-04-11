@@ -299,14 +299,37 @@ local function lookup_trunk_did()
     return nil
 end
 
+-- Try UCaaS Extension DID lookup
+-- If the DID is assigned to a user extension, route the call to that extension
+local function lookup_extension_did()
+    if not db then return nil end
+
+    local ext_did = db.lookup_extension_did(normalized_did)
+    if ext_did then
+        freeswitch.consoleLog("DEBUG", "[" .. uuid .. "] UCaaS Extension DID hit: ext=" .. tostring(ext_did.extension) .. "\n")
+        return {
+            product_type = "ucaas",
+            customer_id = tonumber(ext_did.customer_id),
+            extension = ext_did.extension,
+            display_name = ext_did.display_name
+        }
+    end
+
+    return nil
+end
+
 freeswitch.consoleLog("ERR", ">>> STEP 2: DID lookup for " .. tostring(normalized_did) .. " <<<\n")
--- Execute lookups in order: RCF -> API -> Trunk
+-- Execute lookups in order: RCF -> API -> Trunk -> UCaaS Extension
+-- Revenue-generating products (RCF, API, Trunk) take priority over UCaaS extensions
 local routing = lookup_rcf()
 if not routing then
     routing = lookup_api_did()
 end
 if not routing then
     routing = lookup_trunk_did()
+end
+if not routing then
+    routing = lookup_extension_did()
 end
 
 -- No match found
@@ -660,6 +683,62 @@ elseif product_type == "api" then
     else
         freeswitch.consoleLog("ERR", "[" .. uuid .. "] API DID without voice_url\n")
         hangup("NORMAL_TEMPORARY_FAILURE")
+    end
+
+elseif product_type == "ucaas" then
+    -- UCaaS Extension DID - Route inbound call to user's extension
+    local ext = routing.extension
+    local display = routing.display_name or ("Extension " .. ext)
+    local domain = get_domain()
+
+    freeswitch.consoleLog("INFO", string.format(
+        "[%s] UCaaS inbound: DID %s -> ext %s (%s) @ %s\n",
+        uuid, normalized_did, ext, display, domain
+    ))
+
+    -- Media anchoring and ringback (same pattern as RCF local)
+    set_var("proxy_media", "true")
+    set_var("ringback", "%(2000,4000,440,480)")
+    set_var("transfer_ringback", "%(2000,4000,440,480)")
+    set_var("hangup_after_bridge", "true")
+    set_var("continue_on_fail", "true")
+
+    -- Preserve original caller ID for the called extension to see
+    set_var("effective_caller_id_number", original_caller_number)
+    set_var("effective_caller_id_name", original_caller_name)
+
+    -- Mark as lua-routed so the dialplan fallback doesn't return 404
+    set_var("lua_routed", "true")
+
+    local dial_string = string.format(
+        "{ignore_early_media=false,call_timeout=30}user/%s@%s",
+        ext, domain
+    )
+
+    freeswitch.consoleLog("INFO", string.format(
+        "[%s] UCaaS Bridge: %s -> user/%s@%s\n",
+        uuid, normalized_did, ext, domain
+    ))
+
+    pcall(function()
+        session:execute("bridge", dial_string)
+    end)
+
+    -- Check bridge result
+    local bridge_result = get_var("bridge_result", "")
+    local last_bridge_hangup = get_var("last_bridge_hangup_cause", "")
+
+    if bridge_result ~= "SUCCESS" then
+        -- Extension unavailable (not registered, busy, etc.) - send to voicemail
+        freeswitch.consoleLog("INFO", string.format(
+            "[%s] UCaaS bridge failed (cause=%s), sending to voicemail for ext %s\n",
+            uuid, last_bridge_hangup, ext
+        ))
+        pcall(function()
+            session:answer()
+            session:sleep(1000)
+            session:execute("voicemail", "default " .. domain .. " " .. ext)
+        end)
     end
 
 elseif product_type == "trunk" then

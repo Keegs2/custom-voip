@@ -565,6 +565,65 @@ function M.get_available_tiers(tier_type)
     return tiers
 end
 
+-- Lookup UCaaS extension by assigned DID (for inbound routing to user extension)
+function M.lookup_extension_did(did)
+    -- Validate and sanitize input
+    local clean_did = validate_did(did)
+    if not clean_did then
+        freeswitch.consoleLog("WARN", "Invalid DID format for extension DID lookup: " .. tostring(did) .. "\n")
+        return nil
+    end
+
+    local sql = string.format([[
+        SELECT e.extension, e.customer_id, e.display_name
+        FROM extensions e
+        WHERE e.assigned_did = %s AND e.status = 'active'
+        LIMIT 1
+    ]], sql_string(clean_did))
+
+    local cursor, err = execute_query(sql)
+    if not cursor then
+        freeswitch.consoleLog("ERR", "Extension DID lookup failed: " .. tostring(err) .. "\n")
+        return nil
+    end
+
+    local row = cursor:fetch({}, "a")
+    cursor:close()
+
+    return row
+end
+
+-- Lookup assigned DID for an extension (for outbound caller ID)
+function M.lookup_did_for_extension(ext)
+    if not ext or ext == "" then
+        return nil
+    end
+
+    -- Extensions are short digit strings (e.g., "1001"), sanitize
+    local clean_ext = tostring(ext):gsub("[^%d]", "")
+    if clean_ext == "" then
+        return nil
+    end
+
+    local sql = string.format([[
+        SELECT assigned_did
+        FROM extensions
+        WHERE extension = %s AND assigned_did IS NOT NULL AND status = 'active'
+        LIMIT 1
+    ]], sql_string(clean_ext))
+
+    local cursor, err = execute_query(sql)
+    if not cursor then
+        freeswitch.consoleLog("ERR", "DID for extension lookup failed: " .. tostring(err) .. "\n")
+        return nil
+    end
+
+    local row = cursor:fetch({}, "a")
+    cursor:close()
+
+    return row
+end
+
 -- Close connection explicitly (for cleanup)
 function M.close()
     if conn then

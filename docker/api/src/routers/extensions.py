@@ -3,10 +3,14 @@
 Extensions map users to phone extensions within a customer account.
 Includes directory listing with presence status for BLF/contacts.
 """
+import re
 from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel, field_validator
 from typing import Optional
 from datetime import datetime
+
+# E.164 format: + followed by 1-15 digits (ITU-T E.164)
+_E164_RE = re.compile(r"^\+[1-9]\d{6,14}$")
 
 from db import database as db
 from auth.dependencies import get_current_user, require_admin, get_customer_filter
@@ -23,6 +27,7 @@ class ExtensionCreate(BaseModel):
     customer_id: int
     user_id: Optional[int] = None
     display_name: Optional[str] = None
+    assigned_did: Optional[str] = None
     voicemail_enabled: bool = True
     voicemail_pin: str = "1234"
     dnd: bool = False
@@ -35,6 +40,15 @@ class ExtensionCreate(BaseModel):
     def validate_extension(cls, v: str) -> str:
         if not v.isdigit() or len(v) < 2 or len(v) > 10:
             raise ValueError("Extension must be 2-10 digits")
+        return v
+
+    @field_validator("assigned_did")
+    @classmethod
+    def validate_assigned_did(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and not _E164_RE.match(v):
+            raise ValueError(
+                "assigned_did must be in E.164 format (e.g. +17745551234)"
+            )
         return v
 
     @field_validator("voicemail_pin")
@@ -55,6 +69,7 @@ class ExtensionCreate(BaseModel):
 class ExtensionUpdate(BaseModel):
     user_id: Optional[int] = None
     display_name: Optional[str] = None
+    assigned_did: Optional[str] = None
     voicemail_enabled: Optional[bool] = None
     voicemail_pin: Optional[str] = None
     dnd: Optional[bool] = None
@@ -62,6 +77,19 @@ class ExtensionUpdate(BaseModel):
     forward_on_no_answer: Optional[str] = None
     forward_timeout: Optional[int] = None
     status: Optional[str] = None
+
+    @field_validator("assigned_did")
+    @classmethod
+    def validate_assigned_did(cls, v: Optional[str]) -> Optional[str]:
+        # Allow explicit empty string to clear the DID
+        if v is not None and v != "" and not _E164_RE.match(v):
+            raise ValueError(
+                "assigned_did must be in E.164 format (e.g. +17745551234)"
+            )
+        # Normalise empty string to None so the DB stores NULL
+        if v == "":
+            return None
+        return v
 
     @field_validator("voicemail_pin")
     @classmethod
@@ -121,6 +149,7 @@ async def list_extensions(
     """
     query = """
         SELECT e.id, e.extension, e.user_id, e.customer_id, e.display_name,
+               e.assigned_did,
                e.voicemail_enabled, e.dnd, e.forward_on_busy, e.forward_on_no_answer,
                e.forward_timeout, e.status, e.created_at,
                u.name AS user_name, u.email AS user_email,
@@ -166,6 +195,7 @@ async def extension_directory(
     """
     query = """
         SELECT e.id, e.extension, e.display_name,
+               e.assigned_did,
                u.name AS user_name,
                COALESCE(p.status, 'offline') AS presence_status,
                p.status_message AS presence_message,
@@ -197,6 +227,7 @@ async def get_extension(
     """Get a single extension with full details."""
     query = """
         SELECT e.id, e.extension, e.user_id, e.customer_id, e.display_name,
+               e.assigned_did,
                e.voicemail_enabled, e.voicemail_pin, e.dnd,
                e.forward_on_busy, e.forward_on_no_answer, e.forward_timeout,
                e.status, e.created_at,
@@ -254,18 +285,31 @@ async def create_extension(
                 detail="User does not belong to the specified customer",
             )
 
+    # Validate assigned_did uniqueness (nicer error than a DB constraint violation)
+    if body.assigned_did is not None:
+        did_conflict = await db.fetch_one(
+            "SELECT id, extension FROM extensions WHERE assigned_did = $1",
+            body.assigned_did,
+        )
+        if did_conflict:
+            raise HTTPException(
+                status_code=409,
+                detail=f"DID {body.assigned_did} is already assigned to extension {did_conflict['extension']}",
+            )
+
     row = await db.fetch_one(
         """INSERT INTO extensions
-               (extension, user_id, customer_id, display_name,
+               (extension, user_id, customer_id, display_name, assigned_did,
                 voicemail_enabled, voicemail_pin, dnd,
                 forward_on_busy, forward_on_no_answer, forward_timeout)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
            RETURNING id, extension, user_id, customer_id, display_name,
-                     voicemail_enabled, dnd, status, created_at""",
+                     assigned_did, voicemail_enabled, dnd, status, created_at""",
         body.extension,
         body.user_id,
         body.customer_id,
         body.display_name,
+        body.assigned_did,
         body.voicemail_enabled,
         body.voicemail_pin,
         body.dnd,
@@ -297,12 +341,26 @@ async def update_extension(
     if not existing:
         raise HTTPException(status_code=404, detail="Extension not found")
 
+    # Validate assigned_did uniqueness if being changed
+    update_data = body.model_dump(exclude_none=True)
+    if "assigned_did" in update_data and update_data["assigned_did"] is not None:
+        did_conflict = await db.fetch_one(
+            "SELECT id, extension FROM extensions WHERE assigned_did = $1 AND id != $2",
+            update_data["assigned_did"],
+            extension_id,
+        )
+        if did_conflict:
+            raise HTTPException(
+                status_code=409,
+                detail=f"DID {update_data['assigned_did']} is already assigned to extension {did_conflict['extension']}",
+            )
+
     # Build dynamic UPDATE
     updates: list[str] = []
     values: list = []
     idx = 1
 
-    for field, value in body.model_dump(exclude_none=True).items():
+    for field, value in update_data.items():
         updates.append(f"{field} = ${idx}")
         values.append(value)
         idx += 1
@@ -315,8 +373,8 @@ async def update_extension(
         UPDATE extensions SET {', '.join(updates)}
         WHERE id = ${idx}
         RETURNING id, extension, user_id, customer_id, display_name,
-                  voicemail_enabled, dnd, forward_on_busy, forward_on_no_answer,
-                  forward_timeout, status, created_at
+                  assigned_did, voicemail_enabled, dnd, forward_on_busy,
+                  forward_on_no_answer, forward_timeout, status, created_at
     """
     row = await db.fetch_one(query, *values)
     if not row:
