@@ -131,6 +131,9 @@ services:
   api:
     build: ./docker/api
     container_name: voip-api
+    # Dev: --reload watches the mounted volume for code changes (single-worker).
+    # Production builds use the Dockerfile CMD (multi-worker, no reload).
+    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
     depends_on:
       postgres:
         condition: service_healthy
