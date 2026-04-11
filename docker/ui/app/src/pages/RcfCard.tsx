@@ -290,6 +290,12 @@ export function RcfCard({ entry, pendingValue, onPendingChange }: RcfCardProps) 
         <div style={{ minWidth: 0, flex: 1 }}>
           {/* Editable name label — prominent when set, subtle placeholder when empty */}
           <RcfNameField entry={entry} canEdit={canEdit} />
+          {/* Show customer name when admin is viewing all customers */}
+          {entry.customer_name && user?.role === 'admin' && (
+            <div style={{ fontSize: '0.7rem', fontWeight: 600, color: '#64748b', marginBottom: 4, letterSpacing: '0.02em' }}>
+              {entry.customer_name}
+            </div>
+          )}
           <div
             style={{
               fontSize: '1.2rem',
