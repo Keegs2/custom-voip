@@ -98,8 +98,10 @@
         These are completely separate conferences.
 
       Video:
-        Uses the "video" profile from conference.conf.xml which enables
-        VP8 mux compositing at 1920x1080 / 30fps.
+        Currently using "default" (audio-only) profile. The "video" profile
+        requires conference_layouts.conf.xml with layout definitions for mux
+        mode. Switch to @video once layouts are configured and VP8 canvas
+        is validated with Verto/WebRTC clients.
 
       PIN protection:
         If a PIN is provided in the dial string, the conference application's
@@ -110,30 +112,48 @@
     <!-- PIN variant must be before the no-PIN variant so it matches first -->
     <extension name="conference_room_pin">
       <condition field="destination_number" expression="^\*88(\d{2,4})P(\d{2,4})$">
-        <action application="log" data="INFO Conference join with PIN: ${caller_id_number} -> room $1 (pin provided)"/>
-        <action application="answer"/>
+        <action application="log" data="INFO Conference join with PIN: ${caller_id_number} -> room $1 (pin provided, domain=${customer_domain})"/>
+
         <!-- Multi-tenant: namespace conference by customer -->
         <!-- ${customer_domain} is set by mod_xml_curl during registration -->
         <!-- Extract customer_id: customer_5.voiceplatform.local -> 5 -->
-        <action application="set" data="conf_customer_id=${regex(${customer_domain}|customer_(\d+)\.|%1)}"/>
-        <!-- Fallback for legacy test extensions without customer_domain -->
-        <action application="set" data="conf_customer_id=${cond(${conf_customer_id} == '' ? 0 : ${conf_customer_id})}"/>
-        <!-- Join video conference with PIN protection -->
-        <!-- The +PIN syntax sets the conference PIN inline -->
-        <action application="conference" data="room_${conf_customer_id}_$1+$2@video"/>
+        <!-- Use sip_from_host as fallback if customer_domain is not set -->
+        <action application="set" data="conf_domain=${customer_domain:-${sip_from_host}}"/>
+        <action application="set" data="conf_customer_id=${regex(${conf_domain}|customer_(\d+)|%1)}"/>
+        <!-- Fallback to 0 if regex didn't match (legacy/test extensions) -->
+        <action application="set" data="conf_customer_id=${conf_customer_id:-0}"/>
+        <action application="log" data="INFO Conference tenant: conf_domain=${conf_domain} conf_customer_id=${conf_customer_id}"/>
+
+        <!-- Answer the call - for Verto/WebRTC this completes SDP negotiation -->
+        <action application="answer"/>
+        <action application="sleep" data="500"/>
+
+        <!-- Join audio conference with PIN protection -->
+        <!-- Using default (audio-only) profile: video mux requires conference_layouts.conf.xml -->
+        <!-- TODO: Switch back to @video once video layouts and VP8 canvas are validated -->
+        <action application="conference" data="room_${conf_customer_id}_$1+$2@default"/>
       </condition>
     </extension>
 
     <!-- Conference without PIN: *88{room} where room=2-4 digits -->
     <extension name="conference_room">
       <condition field="destination_number" expression="^\*88(\d{2,4})$">
-        <action application="log" data="INFO Conference join: ${caller_id_number} -> room $1"/>
-        <action application="answer"/>
+        <action application="log" data="INFO Conference join: ${caller_id_number} -> room $1 (domain=${customer_domain})"/>
+
         <!-- Multi-tenant: namespace conference by customer -->
-        <action application="set" data="conf_customer_id=${regex(${customer_domain}|customer_(\d+)\.|%1)}"/>
-        <action application="set" data="conf_customer_id=${cond(${conf_customer_id} == '' ? 0 : ${conf_customer_id})}"/>
-        <!-- Join video conference (no PIN) -->
-        <action application="conference" data="room_${conf_customer_id}_$1@video"/>
+        <action application="set" data="conf_domain=${customer_domain:-${sip_from_host}}"/>
+        <action application="set" data="conf_customer_id=${regex(${conf_domain}|customer_(\d+)|%1)}"/>
+        <action application="set" data="conf_customer_id=${conf_customer_id:-0}"/>
+        <action application="log" data="INFO Conference tenant: conf_domain=${conf_domain} conf_customer_id=${conf_customer_id}"/>
+
+        <!-- Answer the call - for Verto/WebRTC this completes SDP negotiation -->
+        <action application="answer"/>
+        <action application="sleep" data="500"/>
+
+        <!-- Join audio conference (no PIN) -->
+        <!-- Using default (audio-only) profile: video mux requires conference_layouts.conf.xml -->
+        <!-- TODO: Switch back to @video once video layouts and VP8 canvas are validated -->
+        <action application="conference" data="room_${conf_customer_id}_$1@default"/>
       </condition>
     </extension>
 
