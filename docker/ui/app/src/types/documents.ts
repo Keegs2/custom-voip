@@ -13,7 +13,7 @@ export interface SharedDocument {
   mime_type: string;
   file_size: number;
   description: string | null;
-  tags: string[];
+  tags: string[] | null;
   folder_id: number | null;
   uploaded_by: number;
   uploader_name: string;

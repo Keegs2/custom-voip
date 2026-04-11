@@ -629,7 +629,7 @@ interface EditDescModalProps {
 
 function EditDescModal({ doc, onSave, onClose }: EditDescModalProps) {
   const [desc, setDesc] = useState(doc.description ?? '');
-  const [tagsInput, setTagsInput] = useState(doc.tags.join(', '));
+  const [tagsInput, setTagsInput] = useState((doc.tags ?? []).join(', '));
 
   const handleSave = () => {
     const tags = tagsInput
@@ -1091,9 +1091,9 @@ function DocRow({ doc, folders, onDownload, onEdit, onMove, onDelete }: DocRowPr
             {doc.description}
           </div>
         )}
-        {doc.tags.length > 0 && (
+        {(doc.tags ?? []).length > 0 && (
           <div style={{ display: 'flex', gap: 4, marginTop: 3, flexWrap: 'wrap' }}>
-            {doc.tags.slice(0, 3).map((tag) => (
+            {(doc.tags ?? []).slice(0, 3).map((tag) => (
               <span
                 key={tag}
                 style={{
@@ -1256,9 +1256,9 @@ function DocCard({ doc, folders, onDownload, onEdit, onMove, onDelete }: DocCard
           <span style={{ fontSize: '0.72rem', color: '#475569' }}>{formatFileSize(doc.file_size)}</span>
           <span style={{ fontSize: '0.72rem', color: '#475569' }}>{formatDate(doc.created_at)}</span>
         </div>
-        {doc.tags.length > 0 && (
+        {(doc.tags ?? []).length > 0 && (
           <div style={{ display: 'flex', gap: 3, marginTop: 6, flexWrap: 'wrap' }}>
-            {doc.tags.slice(0, 2).map((tag) => (
+            {(doc.tags ?? []).slice(0, 2).map((tag) => (
               <span
                 key={tag}
                 style={{
