@@ -280,7 +280,8 @@ async def user_360_view(
 
     Runs all queries in parallel via asyncio.gather for performance.
     Includes: user info, extension, presence, voicemail counts, chat counts,
-    recent calls, and registered devices.
+    recent calls, registered devices, and product-specific data (RCF numbers,
+    API DIDs, SIP trunks) based on the customer's account.
     """
 
     # -- 1. User info (with customer join) ------------------------------------
@@ -410,21 +411,104 @@ async def user_360_view(
         """, user_id)
         return [dict(r) for r in rows]
 
+    # -- 8. RCF Numbers (product-specific) ------------------------------------
+    async def fetch_rcf_numbers(user_future):
+        user = await user_future
+        if not user:
+            return []
+        rows = await db.fetch_all("""
+            SELECT
+                id,
+                did,
+                name,
+                forward_to,
+                enabled,
+                ring_timeout,
+                failover_to,
+                pass_caller_id
+            FROM rcf_numbers
+            WHERE customer_id = $1
+            ORDER BY did
+        """, user["customer_id"])
+        return [dict(r) for r in rows]
+
+    # -- 9. API DIDs (product-specific) ---------------------------------------
+    async def fetch_api_dids(user_future):
+        user = await user_future
+        if not user:
+            return []
+        rows = await db.fetch_all("""
+            SELECT
+                id,
+                did,
+                voice_url,
+                fallback_url,
+                voice_method,
+                enabled
+            FROM api_dids
+            WHERE customer_id = $1
+            ORDER BY did
+        """, user["customer_id"])
+        return [dict(r) for r in rows]
+
+    # -- 10. SIP Trunks (product-specific) ------------------------------------
+    async def fetch_sip_trunks(user_future):
+        user = await user_future
+        if not user:
+            return []
+        rows = await db.fetch_all("""
+            SELECT
+                t.id,
+                t.trunk_name,
+                t.max_channels,
+                t.cps_limit,
+                t.auth_type,
+                t.tech_prefix,
+                t.enabled,
+                (SELECT COUNT(*) FROM trunk_dids td WHERE td.trunk_id = t.id)
+                    AS did_count,
+                COALESCE(
+                    (SELECT jsonb_agg(jsonb_build_object(
+                        'ip', host(a.ip_address),
+                        'description', a.description
+                    ))
+                    FROM trunk_auth_ips a WHERE a.trunk_id = t.id),
+                    '[]'::jsonb
+                ) AS auth_ips
+            FROM sip_trunks t
+            WHERE t.customer_id = $1
+            ORDER BY t.id
+        """, user["customer_id"])
+        results = []
+        for r in rows:
+            d = dict(r)
+            # Parse auth_ips from jsonb if it came back as a string
+            if isinstance(d["auth_ips"], str):
+                d["auth_ips"] = orjson.loads(d["auth_ips"])
+            results.append(d)
+        return results
+
     # -- Run independent queries in parallel ----------------------------------
     # Extension is fetched first since voicemail and calls depend on it.
+    # User is fetched first since product queries depend on customer_id.
     # We use an asyncio.Event-like pattern with a shared future.
     ext_task = asyncio.ensure_future(fetch_extension())
+    user_task = asyncio.ensure_future(fetch_user())
 
-    user_row, _, presence_row, voicemail_data, chat_data, recent_calls, devices = (
-        await asyncio.gather(
-            fetch_user(),
-            ext_task,             # also awaited here to propagate exceptions
-            fetch_presence(),
-            fetch_voicemail(ext_task),
-            fetch_chat(),
-            fetch_recent_calls(ext_task),
-            fetch_devices(),
-        )
+    (
+        user_row, _, presence_row, voicemail_data, chat_data,
+        recent_calls, devices, rcf_rows, api_did_rows, trunk_rows,
+    ) = await asyncio.gather(
+        user_task,                      # also awaited here to propagate exceptions
+        ext_task,                       # also awaited here to propagate exceptions
+        fetch_presence(),
+        fetch_voicemail(ext_task),
+        fetch_chat(),
+        fetch_recent_calls(ext_task),
+        fetch_devices(),
+        fetch_rcf_numbers(user_task),
+        fetch_api_dids(user_task),
+        fetch_sip_trunks(user_task),
     )
 
     # -- Validate the user exists ---------------------------------------------
@@ -469,4 +553,9 @@ async def user_360_view(
         "chat": chat_data,
         "recent_calls": recent_calls,
         "devices": devices,
+        "products": {
+            "rcf": rcf_rows,
+            "api_dids": api_did_rows,
+            "trunks": trunk_rows,
+        },
     }

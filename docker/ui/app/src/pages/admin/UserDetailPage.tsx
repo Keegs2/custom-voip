@@ -12,6 +12,7 @@ type PresenceStatus = 'available' | 'away' | 'busy' | 'dnd' | 'offline';
 type CallDirection = 'inbound' | 'outbound';
 type CallResult = 'answered' | 'failed' | 'busy' | 'no-answer' | 'cancelled';
 type UserRole = 'admin' | 'user' | 'readonly';
+type AccountType = 'RCF' | 'API' | 'Trunk' | 'UCaaS' | 'Hybrid';
 
 interface UserSearchResult {
   id: number;
@@ -46,6 +47,32 @@ interface Device {
   expires_at: string;
 }
 
+interface RcfProduct {
+  id: number;
+  did: string;
+  name: string | null;
+  forward_to: string;
+  enabled: boolean;
+  ring_timeout: number;
+  failover_to: string | null;
+  pass_caller_id: boolean;
+}
+
+interface ApiDidProduct {
+  did: string;
+  voice_url: string;
+  enabled: boolean;
+}
+
+interface TrunkProduct {
+  id: number;
+  trunk_name: string;
+  max_channels: number;
+  enabled: boolean;
+  did_count: number;
+  ip_count: number;
+}
+
 interface User360Response {
   user: {
     id: number;
@@ -54,6 +81,7 @@ interface User360Response {
     role: UserRole;
     customer_id: number;
     customer_name: string;
+    account_type: AccountType | null;
     status: 'active' | 'disabled' | 'suspended';
     last_login: string | null;
   };
@@ -81,6 +109,11 @@ interface User360Response {
   };
   recent_calls: RecentCall[];
   devices: Device[];
+  products: {
+    rcf: RcfProduct[];
+    api_dids: ApiDidProduct[];
+    trunks: TrunkProduct[];
+  };
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -105,6 +138,14 @@ const ROLE_CONFIG: Record<UserRole, { label: string; color: string }> = {
   admin:    { label: 'Admin',     color: '#a855f7' },
   user:     { label: 'User',      color: '#0ea5e9' },
   readonly: { label: 'Read-Only', color: '#64748b' },
+};
+
+const ACCOUNT_TYPE_CONFIG: Record<AccountType, { label: string; color: string }> = {
+  RCF:    { label: 'RCF',    color: '#22c55e' },
+  API:    { label: 'API',    color: '#a855f7' },
+  Trunk:  { label: 'Trunk',  color: '#f59e0b' },
+  UCaaS:  { label: 'UCaaS',  color: '#0ea5e9' },
+  Hybrid: { label: 'Hybrid', color: '#3b82f6' },
 };
 
 const AVATAR_COLORS = [
@@ -457,8 +498,9 @@ interface HeaderCardProps {
 
 function HeaderCard({ data }: HeaderCardProps) {
   const { user, extension, presence } = data;
-  const presenceCfg = PRESENCE_CONFIG[presence?.status ?? 'offline'];
-  const roleCfg     = ROLE_CONFIG[user.role];
+  const presenceCfg   = PRESENCE_CONFIG[presence?.status ?? 'offline'];
+  const roleCfg       = ROLE_CONFIG[user.role];
+  const accountTypeCfg = user.account_type ? ACCOUNT_TYPE_CONFIG[user.account_type] : null;
 
   return (
     <div
@@ -527,6 +569,24 @@ function HeaderCard({ data }: HeaderCardProps) {
             <Badge variant={user.status === 'active' ? 'active' : user.status === 'suspended' ? 'suspended' : 'disabled'}>
               {user.status}
             </Badge>
+            {accountTypeCfg && (
+              <span
+                style={{
+                  fontSize: '0.65rem',
+                  fontWeight: 700,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.08em',
+                  padding: '2px 8px',
+                  borderRadius: 5,
+                  color: accountTypeCfg.color,
+                  background: `${accountTypeCfg.color}18`,
+                  border: `1px solid ${accountTypeCfg.color}35`,
+                  flexShrink: 0,
+                }}
+              >
+                {accountTypeCfg.label}
+              </span>
+            )}
           </div>
           <div style={{ fontSize: '0.8rem', color: '#64748b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {user.email}
@@ -1361,6 +1421,322 @@ function SectionCard({ children, accent = '#3b82f6', title, icon }: SectionCardP
   );
 }
 
+// ─── RCF Numbers Card ─────────────────────────────────────────────────────────
+
+interface RcfCardProps {
+  rcf: RcfProduct[];
+}
+
+function RcfCard({ rcf }: RcfCardProps) {
+  const accent = '#22c55e';
+  return (
+    <SectionCard
+      accent={accent}
+      title={`RCF Numbers (${rcf.length})`}
+      icon={
+        // PhoneForwarded
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} style={{ width: 16, height: 16 }}>
+          <polyline points="19 8 23 12 19 16" strokeLinecap="round" strokeLinejoin="round" />
+          <line x1="23" y1="12" x2="13" y2="12" strokeLinecap="round" />
+          <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.6 1h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L7.91 8.6a16 16 0 0 0 6.05 6.05l1.96-1.84a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 14.92Z" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      }
+    >
+      <div
+        style={{
+          borderRadius: 10,
+          border: '1px solid rgba(255,255,255,0.05)',
+          overflow: 'hidden',
+          background: 'rgba(0,0,0,0.2)',
+        }}
+      >
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead>
+            <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+              {['DID', 'Name', 'Forward To', 'Timeout', 'Failover', 'Caller ID', 'Status'].map((col) => (
+                <th
+                  key={col}
+                  style={{
+                    padding: '9px 12px',
+                    textAlign: 'left',
+                    fontSize: '0.58rem',
+                    fontWeight: 700,
+                    color: '#334155',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.1em',
+                    background: 'rgba(0,0,0,0.06)',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {col}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rcf.map((r, i) => (
+              <tr
+                key={r.id}
+                style={{
+                  background: i % 2 === 1 ? 'rgba(255,255,255,0.015)' : 'transparent',
+                  borderBottom: '1px solid rgba(255,255,255,0.03)',
+                }}
+              >
+                <td style={{ padding: '8px 12px', fontSize: '0.8rem', color: '#cbd5e0', fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
+                  {fmt(r.did)}
+                </td>
+                <td style={{ padding: '8px 12px', fontSize: '0.8rem', color: '#94a3b8' }}>
+                  {r.name ?? <span style={{ color: '#4a5568', fontStyle: 'italic' }}>—</span>}
+                </td>
+                <td style={{ padding: '8px 12px', fontSize: '0.8rem', color: '#e2e8f0', fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
+                  {fmt(r.forward_to)}
+                </td>
+                <td style={{ padding: '8px 12px', fontSize: '0.78rem', color: '#64748b', whiteSpace: 'nowrap' }}>
+                  {r.ring_timeout}s
+                </td>
+                <td style={{ padding: '8px 12px', fontSize: '0.78rem', color: '#94a3b8', fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
+                  {r.failover_to ? fmt(r.failover_to) : <span style={{ color: '#4a5568', fontStyle: 'italic' }}>None</span>}
+                </td>
+                <td style={{ padding: '8px 12px', textAlign: 'center' }}>
+                  <span style={{ fontSize: '0.72rem', color: r.pass_caller_id ? '#22c55e' : '#64748b' }}>
+                    {r.pass_caller_id ? 'Pass' : 'Strip'}
+                  </span>
+                </td>
+                <td style={{ padding: '8px 12px', textAlign: 'center' }}>
+                  <span
+                    style={{
+                      fontSize: '0.63rem',
+                      fontWeight: 700,
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.04em',
+                      color: r.enabled ? accent : '#64748b',
+                      background: r.enabled ? `${accent}14` : 'rgba(100,116,139,0.1)',
+                      border: `1px solid ${r.enabled ? `${accent}28` : 'rgba(100,116,139,0.2)'}`,
+                      borderRadius: 4,
+                      padding: '2px 7px',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {r.enabled ? 'Active' : 'Disabled'}
+                  </span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </SectionCard>
+  );
+}
+
+// ─── API DIDs Card ────────────────────────────────────────────────────────────
+
+interface ApiDidCardProps {
+  api_dids: ApiDidProduct[];
+}
+
+function ApiDidCard({ api_dids }: ApiDidCardProps) {
+  const accent = '#a855f7';
+  return (
+    <SectionCard
+      accent={accent}
+      title={`API DIDs (${api_dids.length})`}
+      icon={
+        // Code brackets
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} style={{ width: 16, height: 16 }}>
+          <polyline points="16 18 22 12 16 6" strokeLinecap="round" strokeLinejoin="round" />
+          <polyline points="8 6 2 12 8 18" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      }
+    >
+      <div
+        style={{
+          borderRadius: 10,
+          border: '1px solid rgba(255,255,255,0.05)',
+          overflow: 'hidden',
+          background: 'rgba(0,0,0,0.2)',
+        }}
+      >
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead>
+            <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+              {['DID', 'Voice URL', 'Status'].map((col) => (
+                <th
+                  key={col}
+                  style={{
+                    padding: '9px 12px',
+                    textAlign: 'left',
+                    fontSize: '0.58rem',
+                    fontWeight: 700,
+                    color: '#334155',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.1em',
+                    background: 'rgba(0,0,0,0.06)',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {col}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {api_dids.map((d, i) => (
+              <tr
+                key={d.did}
+                style={{
+                  background: i % 2 === 1 ? 'rgba(255,255,255,0.015)' : 'transparent',
+                  borderBottom: '1px solid rgba(255,255,255,0.03)',
+                }}
+              >
+                <td style={{ padding: '8px 12px', fontSize: '0.8rem', color: '#cbd5e0', fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
+                  {fmt(d.did)}
+                </td>
+                <td style={{ padding: '8px 12px', maxWidth: 320 }}>
+                  <span
+                    style={{
+                      fontSize: '0.75rem',
+                      fontFamily: 'monospace',
+                      color: '#94a3b8',
+                      display: 'block',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                    title={d.voice_url}
+                  >
+                    {d.voice_url}
+                  </span>
+                </td>
+                <td style={{ padding: '8px 12px', textAlign: 'center' }}>
+                  <span
+                    style={{
+                      fontSize: '0.63rem',
+                      fontWeight: 700,
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.04em',
+                      color: d.enabled ? accent : '#64748b',
+                      background: d.enabled ? `${accent}14` : 'rgba(100,116,139,0.1)',
+                      border: `1px solid ${d.enabled ? `${accent}28` : 'rgba(100,116,139,0.2)'}`,
+                      borderRadius: 4,
+                      padding: '2px 7px',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {d.enabled ? 'Active' : 'Disabled'}
+                  </span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </SectionCard>
+  );
+}
+
+// ─── SIP Trunks Card ──────────────────────────────────────────────────────────
+
+interface TrunksCardProps {
+  trunks: TrunkProduct[];
+}
+
+function TrunksCard({ trunks }: TrunksCardProps) {
+  const accent = '#f59e0b';
+  return (
+    <SectionCard
+      accent={accent}
+      title={`SIP Trunks (${trunks.length})`}
+      icon={
+        // Network / share icon
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} style={{ width: 16, height: 16 }}>
+          <circle cx="18" cy="5" r="3" />
+          <circle cx="6" cy="12" r="3" />
+          <circle cx="18" cy="19" r="3" />
+          <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" strokeLinecap="round" />
+          <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" strokeLinecap="round" />
+        </svg>
+      }
+    >
+      <div
+        style={{
+          borderRadius: 10,
+          border: '1px solid rgba(255,255,255,0.05)',
+          overflow: 'hidden',
+          background: 'rgba(0,0,0,0.2)',
+        }}
+      >
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead>
+            <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+              {['Trunk Name', 'Max Channels', 'DIDs', 'Auth IPs', 'Status'].map((col) => (
+                <th
+                  key={col}
+                  style={{
+                    padding: '9px 12px',
+                    textAlign: 'left',
+                    fontSize: '0.58rem',
+                    fontWeight: 700,
+                    color: '#334155',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.1em',
+                    background: 'rgba(0,0,0,0.06)',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {col}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {trunks.map((t, i) => (
+              <tr
+                key={t.id}
+                style={{
+                  background: i % 2 === 1 ? 'rgba(255,255,255,0.015)' : 'transparent',
+                  borderBottom: '1px solid rgba(255,255,255,0.03)',
+                }}
+              >
+                <td style={{ padding: '8px 12px', fontSize: '0.82rem', fontWeight: 600, color: '#e2e8f0' }}>
+                  {t.trunk_name}
+                </td>
+                <td style={{ padding: '8px 12px', fontSize: '0.8rem', color: '#94a3b8', fontVariantNumeric: 'tabular-nums' }}>
+                  {t.max_channels}
+                </td>
+                <td style={{ padding: '8px 12px', fontSize: '0.8rem', color: '#94a3b8', fontVariantNumeric: 'tabular-nums' }}>
+                  {t.did_count}
+                </td>
+                <td style={{ padding: '8px 12px', fontSize: '0.8rem', color: '#94a3b8', fontVariantNumeric: 'tabular-nums' }}>
+                  {t.ip_count}
+                </td>
+                <td style={{ padding: '8px 12px', textAlign: 'center' }}>
+                  <span
+                    style={{
+                      fontSize: '0.63rem',
+                      fontWeight: 700,
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.04em',
+                      color: t.enabled ? accent : '#64748b',
+                      background: t.enabled ? `${accent}14` : 'rgba(100,116,139,0.1)',
+                      border: `1px solid ${t.enabled ? `${accent}28` : 'rgba(100,116,139,0.2)'}`,
+                      borderRadius: 4,
+                      padding: '2px 7px',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {t.enabled ? 'Active' : 'Disabled'}
+                  </span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </SectionCard>
+  );
+}
+
 // ─── 360 View ─────────────────────────────────────────────────────────────────
 
 interface User360ViewProps {
@@ -1446,6 +1822,17 @@ function User360View({ userId }: User360ViewProps) {
       {/* Recent calls */}
       <RecentCallsCard calls={data.recent_calls} />
 
+      {/* Product-specific sections — rendered only when data is present */}
+      {data.products.rcf.length > 0 && (
+        <RcfCard rcf={data.products.rcf} />
+      )}
+      {data.products.api_dids.length > 0 && (
+        <ApiDidCard api_dids={data.products.api_dids} />
+      )}
+      {data.products.trunks.length > 0 && (
+        <TrunksCard trunks={data.products.trunks} />
+      )}
+
       {/* Quick actions */}
       <QuickActions data={data} />
     </div>
@@ -1526,7 +1913,7 @@ export function UserDetailPage() {
             marginRight: 'auto',
           }}
         >
-          Search for any UCaaS user to view their full profile — extension config, presence, call history, and devices.
+          Search for any user to view their full profile — extension config, products (RCF, API, Trunks), presence, call history, and devices.
         </p>
       </div>
 
