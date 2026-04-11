@@ -342,7 +342,7 @@ async def update_extension(
         raise HTTPException(status_code=404, detail="Extension not found")
 
     # Validate assigned_did uniqueness if being changed
-    update_data = body.model_dump(exclude_none=True)
+    update_data = body.model_dump(exclude_unset=True)
     if "assigned_did" in update_data and update_data["assigned_did"] is not None:
         did_conflict = await db.fetch_one(
             "SELECT id, extension FROM extensions WHERE assigned_did = $1 AND id != $2",
