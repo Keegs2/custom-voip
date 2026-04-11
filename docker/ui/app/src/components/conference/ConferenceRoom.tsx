@@ -639,8 +639,10 @@ export function ConferenceRoom({
             {conferenceName}
           </span>
           <span style={{ fontSize: '0.7rem', color: '#475569' }}>
-            {liveStatus?.is_active
-              ? `${memberCount} participant${memberCount !== 1 ? 's' : ''} in room`
+            {activeCall.state === 'active'
+              ? liveStatus?.is_active
+                ? `${memberCount} participant${memberCount !== 1 ? 's' : ''} in room`
+                : 'Connected'
               : 'Connecting...'}
           </span>
         </div>

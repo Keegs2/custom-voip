@@ -635,19 +635,41 @@ async def get_live_status(
         return {
             "conference_id": conference_id,
             "fs_room_name": fs_name,
+            "is_active": False,
             "active": False,
             "member_count": 0,
             "members": [],
+            "recording": False,
         }
 
-    members = _parse_conference_list(response)
+    raw_members = _parse_conference_list(response)
 
+    # Transform raw parsed fields into the shape the frontend expects:
+    #   id       <- member_id (int)
+    #   name     <- caller_name (falls back to caller_id if blank)
+    #   talking  <- is_talking
+    #   muted    <- is_muted
+    #   video    <- False (audio-only conferences; update when MCU video is wired)
+    members = [
+        {
+            "id": int(m["member_id"]) if m["member_id"].isdigit() else 0,
+            "name": m["caller_name"] or m["caller_id"] or "Unknown",
+            "talking": m["is_talking"],
+            "muted": m["is_muted"],
+            "video": False,
+        }
+        for m in raw_members
+    ]
+
+    is_active = len(members) > 0
     return {
         "conference_id": conference_id,
         "fs_room_name": fs_name,
-        "active": len(members) > 0,
+        "is_active": is_active,
+        "active": is_active,
         "member_count": len(members),
         "members": members,
+        "recording": False,
     }
 
 
