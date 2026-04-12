@@ -92,7 +92,7 @@ function SidebarNavItem({ item, onNavigate, badge, badgeColor }: SidebarNavItemP
         alignItems: 'center',
         gap: 10,
         padding: '7px 10px',
-        borderRadius: 8,
+        borderRadius: 10,
         fontSize: '0.825rem',
         fontWeight: isActive ? 600 : 500,
         letterSpacing: '-0.01em',
@@ -576,9 +576,9 @@ export function Sidebar() {
                 onToggle={toggleGroup}
               >
                 {isAdmin && <SidebarNavItem item={customersItem}   onNavigate={closeMobile} />}
-                <SidebarNavItem item={callQualityItem} onNavigate={closeMobile} />
                 {isAdmin && <SidebarNavItem item={didLookupItem}   onNavigate={closeMobile} />}
                 {isAdmin && <SidebarNavItem item={userLookupItem}  onNavigate={closeMobile} />}
+                <SidebarNavItem item={callQualityItem} onNavigate={closeMobile} />
                 <SidebarNavItem item={troubleItem}     onNavigate={closeMobile} />
               </CollapsibleGroup>
             </>
