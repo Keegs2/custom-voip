@@ -255,8 +255,22 @@ function CollapsibleGroup({ id, label, icon, isOpen, onToggle, children }: Colla
 /* ─── Sidebar ─────────────────────────────────────────────── */
 
 export function Sidebar() {
+  // All hooks must be declared unconditionally at the top, before any
+  // derived values, conditionals, or early returns — React tracks hooks by
+  // call order and will throw error #310 if the count changes between renders.
   const [mobileOpen, setMobileOpen] = useState(false);
   const [showPresenceMenu, setShowPresenceMenu] = useState(false);
+  const [groupOpen, setGroupOpen] = useState<Record<string, boolean>>(() => {
+    // Lazy initializer: reads localStorage once on mount. hasUcaas is not yet
+    // computed here, so we default communications to true and let the
+    // auto-expand useEffect below sync it on the first render.
+    const stored = loadGroupState();
+    return {
+      products:       stored.products       ?? true,
+      communications: stored.communications ?? true,
+      administration: stored.administration ?? false,
+    };
+  });
   const navigate = useNavigate();
   const location = useLocation();
   const { user, isAdmin, logout } = useAuth();
@@ -282,17 +296,6 @@ export function Sidebar() {
       return item.accountTypes.includes(user.account_type);
     }
     return !item.accountTypes;
-  });
-
-  /* ── Group open/close state with localStorage persistence ── */
-
-  const [groupOpen, setGroupOpen] = useState<Record<string, boolean>>(() => {
-    const stored = loadGroupState();
-    return {
-      products:        stored.products        ?? true,
-      communications:  stored.communications  ?? hasUcaas,
-      administration:  stored.administration  ?? false,
-    };
   });
 
   // Auto-expand group when current route lives inside it
