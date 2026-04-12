@@ -419,8 +419,9 @@ export function SoftphoneWidget() {
   });
   const [isDragging, setIsDragging] = useState(false);
   const dragOffset = useRef({ x: 0, y: 0 });
-  // Track whether we actually moved during a drag (to distinguish click vs drag)
-  const didMove = useRef(false);
+  // Mousedown coordinates recorded on the FAB — used to compute drag distance
+  // and distinguish a click (< 5px) from a real drag (>= 5px).
+  const fabMouseDownPos = useRef<{ x: number; y: number } | null>(null);
 
   /* ─── Measure FAB width after every render ──────────────────── */
   // We run this as a layout effect so the measurement happens synchronously
@@ -448,7 +449,6 @@ export function SoftphoneWidget() {
   const handleDragStart = useCallback(
     (clientX: number, clientY: number) => {
       dragOffset.current = { x: clientX - position.x, y: clientY - position.y };
-      didMove.current = false;
       setIsDragging(true);
     },
     [position],
@@ -457,7 +457,6 @@ export function SoftphoneWidget() {
   const handleDragMove = useCallback(
     (clientX: number, clientY: number) => {
       if (!isDragging) return;
-      didMove.current = true;
       const newX = clientX - dragOffset.current.x;
       const newY = clientY - dragOffset.current.y;
       setPosition({ x: newX, y: newY });
@@ -579,24 +578,41 @@ export function SoftphoneWidget() {
     handleDragEnd(touch.clientX, touch.clientY);
   };
 
-  // FAB click should only fire if we didn't drag
-  const onFabClick = () => {
-    if (didMove.current) return;
+  // Collapse the panel and snap the FAB to the nearest horizontal edge.
+  // This is the canonical "close" action, called only from the X button.
+  const collapsePanel = useCallback(() => {
+    const fabPos = snapToEdge(position, false, fabWidth);
+    setPosition(fabPos);
+    savePosition(fabPos);
+    setExpanded(false);
+  }, [position, fabWidth, setExpanded]);
 
-    if (!isExpanded) {
-      // Expanding: derive panel position from current FAB position
-      const panelPos = expandedPositionFromFab(position, fabWidth);
-      setPosition(panelPos);
-      setExpanded(true);
-    } else {
-      // Collapsing: snap FAB to the nearest horizontal edge based on
-      // where the panel's center currently sits
-      const fabPos = snapToEdge(position, false, fabWidth);
-      setPosition(fabPos);
-      savePosition(fabPos);
-      setExpanded(false);
-    }
-  };
+  // FAB onMouseUp — used instead of onClick so we can apply the 5px drag
+  // threshold right at the moment of release without racing against the
+  // global mouseup handler (handleDragEnd) that runs first.
+  const onFabMouseUp = useCallback(
+    (e: React.MouseEvent) => {
+      if (e.button !== 0) return;
+      // If already expanded, the FAB does nothing — only X closes the panel.
+      if (isExpanded) return;
+
+      const downPos = fabMouseDownPos.current;
+      if (!downPos) return;
+
+      const dx = e.clientX - downPos.x;
+      const dy = e.clientY - downPos.y;
+      const distance = Math.sqrt(dx * dx + dy * dy);
+
+      // Less than 5px of movement → treat as a click, expand immediately.
+      if (distance < 5) {
+        const panelPos = expandedPositionFromFab(position, fabWidth);
+        setPosition(panelPos);
+        setExpanded(true);
+      }
+      // >= 5px → was a drag; handleDragEnd already snapped the FAB to edge.
+    },
+    [isExpanded, position, fabWidth, setExpanded],
+  );
 
   /* ─── Derived visual states ──────────────────────────────────── */
 
@@ -685,7 +701,7 @@ export function SoftphoneWidget() {
                   ? '1px solid rgba(34,197,94,0.20)'
                   : '1px solid rgba(255,255,255,0.06)',
                 flexShrink: 0,
-                cursor: isDragging ? 'grabbing' : 'pointer',
+                cursor: isDragging ? 'grabbing' : 'grab',
                 userSelect: 'none',
                 background: headerBackground,
                 animation: isIncoming ? 'softphone-header-pulse 2s ease-in-out infinite' : undefined,
@@ -705,7 +721,7 @@ export function SoftphoneWidget() {
                     onClick={(e) => {
                       // Prevent header drag from swallowing this click
                       e.stopPropagation();
-                      if (!didMove.current) setShowPresenceMenu((v) => !v);
+                      setShowPresenceMenu((v) => !v);
                     }}
                     onMouseDown={(e) => e.stopPropagation()}
                     aria-label="Set presence status"
@@ -846,18 +862,12 @@ export function SoftphoneWidget() {
                 )}
               </div>
 
-              {/* Minimize button — stop propagation so it doesn't trigger drag */}
+              {/* Minimize button — the ONLY way to close the expanded panel */}
               <button
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation();
-                  if (!didMove.current) {
-                    // Snap FAB to nearest edge based on where panel center sits
-                    const fabPos = snapToEdge(position, false, fabWidth);
-                    setPosition(fabPos);
-                    savePosition(fabPos);
-                    setExpanded(false);
-                  }
+                  collapsePanel();
                 }}
                 onMouseDown={(e) => e.stopPropagation()}
                 aria-label="Minimize softphone"
@@ -995,11 +1005,16 @@ export function SoftphoneWidget() {
           onMouseDown={(e) => {
             if (e.button !== 0) return;
             e.preventDefault();
+            // Record the exact pixel where the press began so onMouseUp can
+            // measure how far the pointer travelled to distinguish click vs drag.
+            fabMouseDownPos.current = { x: e.clientX, y: e.clientY };
             handleDragStart(e.clientX, e.clientY);
           }}
+          onMouseUp={onFabMouseUp}
           onTouchStart={(e) => {
             const touch = e.touches[0];
             if (!touch) return;
+            fabMouseDownPos.current = { x: touch.clientX, y: touch.clientY };
             handleDragStart(touch.clientX, touch.clientY);
           }}
           onTouchMove={(e) => {
@@ -1011,9 +1026,19 @@ export function SoftphoneWidget() {
           onTouchEnd={(e) => {
             const touch = e.changedTouches[0];
             if (!touch) return;
+            const downPos = fabMouseDownPos.current;
             handleDragEnd(touch.clientX, touch.clientY);
+            // Touch tap: same distance threshold as mouse
+            if (!isExpanded && downPos) {
+              const dx = touch.clientX - downPos.x;
+              const dy = touch.clientY - downPos.y;
+              if (Math.sqrt(dx * dx + dy * dy) < 5) {
+                const panelPos = expandedPositionFromFab(position, fabWidth);
+                setPosition(panelPos);
+                setExpanded(true);
+              }
+            }
           }}
-          onClick={onFabClick}
           aria-label={isExpanded ? 'Minimize softphone' : 'Open softphone'}
           aria-expanded={isExpanded}
           style={{
