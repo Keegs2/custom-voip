@@ -21,10 +21,18 @@ const FAB_SIZE = 60;
 // by FAB_SIZE. The real width is measured via fabRef after each render.
 const FAB_WIDTH_FALLBACK = 180;
 const EDGE_MARGIN = 8;
-// Extra clearance at the bottom of the viewport to keep the panel above OS
-// taskbars / the macOS Dock, which can consume 60–80px of screen real-estate
-// that window.innerHeight does not account for.
-const BOTTOM_MARGIN = 60;
+
+/* ─── Viewport helpers ──────────────────────────────────────── */
+
+// visualViewport.height excludes browser chrome and OS elements (taskbars,
+// the macOS Dock, mobile on-screen keyboards, etc.) automatically, so we
+// no longer need a hardcoded BOTTOM_MARGIN offset.
+function getViewportHeight(): number {
+  return window.visualViewport?.height ?? window.innerHeight;
+}
+function getViewportWidth(): number {
+  return window.visualViewport?.width ?? window.innerWidth;
+}
 
 const PRESENCE_OPTIONS: { value: PresenceStatus; label: string; color: string }[] = [
   { value: 'available', label: 'Available',      color: '#22c55e' },
@@ -49,8 +57,8 @@ function defaultPosition(fabWidth: number = FAB_WIDTH_FALLBACK): { x: number; y:
   // Default: bottom-right corner, FAB docked to right edge.
   // Uses the measured pill width so the full chip stays on screen.
   return {
-    x: window.innerWidth  - fabWidth - EDGE_MARGIN,
-    y: window.innerHeight - FAB_SIZE - EDGE_MARGIN,
+    x: getViewportWidth()  - fabWidth - EDGE_MARGIN,
+    y: getViewportHeight() - FAB_SIZE - EDGE_MARGIN,
   };
 }
 
@@ -64,12 +72,9 @@ function clampPosition(
   // Horizontal extent: for the FAB use the measured pill width, not the circle size.
   const w = isExpanded ? WIDGET_WIDTH : fabWidth;
   const h = isExpanded ? WIDGET_HEIGHT : FAB_SIZE;
-  // Use a larger bottom margin for the expanded panel so the full height clears
-  // OS taskbars / the macOS Dock, which sit below window.innerHeight.
-  const bottomMargin = isExpanded ? BOTTOM_MARGIN : EDGE_MARGIN;
   return {
-    x: Math.max(EDGE_MARGIN, Math.min(x, window.innerWidth  - w - EDGE_MARGIN)),
-    y: Math.max(EDGE_MARGIN, Math.min(y, window.innerHeight - h - bottomMargin)),
+    x: Math.max(EDGE_MARGIN, Math.min(x, getViewportWidth()  - w - EDGE_MARGIN)),
+    y: Math.max(EDGE_MARGIN, Math.min(y, getViewportHeight() - h - EDGE_MARGIN)),
   };
 }
 
@@ -85,14 +90,13 @@ function snapToEdge(
   const w = isExpanded ? WIDGET_WIDTH : fabWidth;
   const h = isExpanded ? WIDGET_HEIGHT : FAB_SIZE;
   const centerX = pos.x + w / 2;
-  const screenMidX = window.innerWidth / 2;
+  const screenMidX = getViewportWidth() / 2;
 
   const x = centerX < screenMidX
-    ? EDGE_MARGIN                              // snap to left edge
-    : window.innerWidth - w - EDGE_MARGIN;    // snap to right edge
+    ? EDGE_MARGIN                                    // snap to left edge
+    : getViewportWidth() - w - EDGE_MARGIN;          // snap to right edge
 
-  const bottomMargin = isExpanded ? BOTTOM_MARGIN : EDGE_MARGIN;
-  const y = Math.max(EDGE_MARGIN, Math.min(pos.y, window.innerHeight - h - bottomMargin));
+  const y = Math.max(EDGE_MARGIN, Math.min(pos.y, getViewportHeight() - h - EDGE_MARGIN));
 
   return { x, y };
 }
@@ -105,14 +109,15 @@ function expandedPositionFromFab(
 ): { x: number; y: number } {
   if (typeof window === 'undefined') return fabPos;
   const fabCenterX = fabPos.x + fabWidth / 2;
-  const onRightSide = fabCenterX >= window.innerWidth / 2;
+  const onRightSide = fabCenterX >= getViewportWidth() / 2;
 
   const x = onRightSide
-    ? window.innerWidth - WIDGET_WIDTH - EDGE_MARGIN   // right-align panel
+    ? getViewportWidth() - WIDGET_WIDTH - EDGE_MARGIN  // right-align panel
     : EDGE_MARGIN;                                      // left-align panel
 
-  // Clamp so the full panel height is visible above the OS taskbar / Dock.
-  const y = Math.max(EDGE_MARGIN, Math.min(fabPos.y, window.innerHeight - WIDGET_HEIGHT - BOTTOM_MARGIN));
+  // Clamp so the full panel height is visible; visualViewport already excludes
+  // OS elements, so EDGE_MARGIN alone is sufficient clearance.
+  const y = Math.max(EDGE_MARGIN, Math.min(fabPos.y, getViewportHeight() - WIDGET_HEIGHT - EDGE_MARGIN));
 
   return { x, y };
 }
@@ -742,9 +747,11 @@ export function SoftphoneWidget() {
     };
   }, [isDragging, handleDragMove, handleDragEnd]);
 
-  // Re-snap / re-clamp position whenever window resizes
+  // Re-snap / re-clamp position whenever the viewport resizes.
+  // Prefer visualViewport (fires on mobile keyboard open/close, zoom, etc.)
+  // and fall back to window for environments that lack the API.
   useEffect(() => {
-    const onResize = () => {
+    const handleResize = () => {
       setPosition((prev) => {
         if (!isExpanded) {
           // Re-snap FAB to the same edge but within new viewport bounds
@@ -756,8 +763,10 @@ export function SoftphoneWidget() {
         return clampPosition(prev.x, prev.y, true, fabWidth);
       });
     };
-    window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
+    const vv = window.visualViewport;
+    const target: Window | VisualViewport = vv ?? window;
+    target.addEventListener('resize', handleResize);
+    return () => target.removeEventListener('resize', handleResize);
   }, [isExpanded, fabWidth]);
 
   // Collapse the panel and snap the FAB to the nearest horizontal edge.
