@@ -523,6 +523,42 @@ export function SoftphoneWidget() {
     return () => window.removeEventListener('resize', onResize);
   }, [isExpanded, fabWidth]);
 
+  // Collapse the panel and snap the FAB to the nearest horizontal edge.
+  // This is the canonical "close" action, called only from the X button.
+  const collapsePanel = useCallback(() => {
+    const fabPos = snapToEdge(position, false, fabWidth);
+    setPosition(fabPos);
+    savePosition(fabPos);
+    setExpanded(false);
+  }, [position, fabWidth, setExpanded]);
+
+  // FAB onMouseUp — used instead of onClick so we can apply the 5px drag
+  // threshold right at the moment of release without racing against the
+  // global mouseup handler (handleDragEnd) that runs first.
+  const onFabMouseUp = useCallback(
+    (e: React.MouseEvent) => {
+      if (e.button !== 0) return;
+      // If already expanded, the FAB does nothing — only X closes the panel.
+      if (isExpanded) return;
+
+      const downPos = fabMouseDownPos.current;
+      if (!downPos) return;
+
+      const dx = e.clientX - downPos.x;
+      const dy = e.clientY - downPos.y;
+      const distance = Math.sqrt(dx * dx + dy * dy);
+
+      // Less than 5px of movement → treat as a click, expand immediately.
+      if (distance < 5) {
+        const panelPos = expandedPositionFromFab(position, fabWidth);
+        setPosition(panelPos);
+        setExpanded(true);
+      }
+      // >= 5px → was a drag; handleDragEnd already snapped the FAB to edge.
+    },
+    [isExpanded, position, fabWidth, setExpanded],
+  );
+
   // ── Guard: UCaaS feature check ──
   const hasUcaas =
     user?.role === 'admin' ||
@@ -577,42 +613,6 @@ export function SoftphoneWidget() {
     if (!touch) return;
     handleDragEnd(touch.clientX, touch.clientY);
   };
-
-  // Collapse the panel and snap the FAB to the nearest horizontal edge.
-  // This is the canonical "close" action, called only from the X button.
-  const collapsePanel = useCallback(() => {
-    const fabPos = snapToEdge(position, false, fabWidth);
-    setPosition(fabPos);
-    savePosition(fabPos);
-    setExpanded(false);
-  }, [position, fabWidth, setExpanded]);
-
-  // FAB onMouseUp — used instead of onClick so we can apply the 5px drag
-  // threshold right at the moment of release without racing against the
-  // global mouseup handler (handleDragEnd) that runs first.
-  const onFabMouseUp = useCallback(
-    (e: React.MouseEvent) => {
-      if (e.button !== 0) return;
-      // If already expanded, the FAB does nothing — only X closes the panel.
-      if (isExpanded) return;
-
-      const downPos = fabMouseDownPos.current;
-      if (!downPos) return;
-
-      const dx = e.clientX - downPos.x;
-      const dy = e.clientY - downPos.y;
-      const distance = Math.sqrt(dx * dx + dy * dy);
-
-      // Less than 5px of movement → treat as a click, expand immediately.
-      if (distance < 5) {
-        const panelPos = expandedPositionFromFab(position, fabWidth);
-        setPosition(panelPos);
-        setExpanded(true);
-      }
-      // >= 5px → was a drag; handleDragEnd already snapped the FAB to edge.
-    },
-    [isExpanded, position, fabWidth, setExpanded],
-  );
 
   /* ─── Derived visual states ──────────────────────────────────── */
 
