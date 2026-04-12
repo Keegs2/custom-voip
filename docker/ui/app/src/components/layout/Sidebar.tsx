@@ -91,7 +91,7 @@ function SidebarNavItem({ item, onNavigate, badge, badgeColor }: SidebarNavItemP
         display: 'flex',
         alignItems: 'center',
         gap: 10,
-        padding: '7px 12px',
+        padding: '7px 10px',
         borderRadius: 8,
         fontSize: '0.825rem',
         fontWeight: isActive ? 600 : 500,
@@ -200,7 +200,7 @@ function CollapsibleGroup({ id, label, icon, isOpen, onToggle, children }: Colla
           alignItems: 'center',
           gap: 7,
           width: '100%',
-          padding: '5px 12px',
+          padding: '5px 10px',
           borderRadius: 7,
           background: 'transparent',
           border: 'none',
@@ -522,7 +522,7 @@ export function Sidebar() {
         <nav
           style={{
             flex: 1,
-            padding: '12px 10px',
+            padding: '12px 16px',
             overflowY: 'auto',
             overflowX: 'hidden',
             // Thin scrollbar
