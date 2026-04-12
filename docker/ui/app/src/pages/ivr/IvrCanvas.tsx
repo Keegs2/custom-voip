@@ -37,30 +37,40 @@ export function IvrCanvas({ nodes, path, selectedNodeId, dispatch }: IvrCanvasPr
       <>
         <IvrDropZone path={path} position={0} />
         <div
-          className="flex flex-col items-center justify-center py-10 text-center mx-auto"
           style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            textAlign: 'center',
+            margin: '40px auto 0',
             maxWidth: 400,
-            background: 'linear-gradient(135deg, rgba(30,33,48,0.4) 0%, rgba(19,21,29,0.5) 100%)',
-            border: '1px dashed rgba(42,47,69,0.5)',
-            borderRadius: 16,
-            padding: '32px 24px',
-            marginTop: 8,
+            width: '100%',
+            padding: '40px',
+            border: '2px dashed rgba(59,130,246,0.20)',
+            borderRadius: 12,
           }}
         >
           <div
-            className="w-10 h-10 rounded-xl flex items-center justify-center mx-auto mb-4"
             style={{
-              background: 'rgba(6,182,212,0.08)',
-              border: '1px solid rgba(6,182,212,0.2)',
+              width: 40,
+              height: 40,
+              borderRadius: '50%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              margin: '0 auto 16px',
+              background: 'rgba(59,130,246,0.10)',
+              border: '1px solid rgba(59,130,246,0.20)',
             }}
             aria-hidden="true"
           >
-            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.5} style={{ width: 20, height: 20, color: '#06b6d4' }}>
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.5} style={{ width: 20, height: 20, color: '#3b82f6' }}>
               <path d="M10 3v14M3 10h14" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
           </div>
-          <p className="text-[#718096] text-sm font-semibold">Flow is empty</p>
-          <p className="text-[#4a5568] text-xs mt-2 leading-relaxed">
+          <p style={{ color: '#475569', fontSize: '0.875rem', fontWeight: 600, margin: 0 }}>Flow is empty</p>
+          <p style={{ color: '#334155', fontSize: '0.78rem', marginTop: 8, lineHeight: 1.6, marginBottom: 0 }}>
             Drag a verb from the toolbar above and drop it here to begin building your call flow.
           </p>
         </div>
@@ -69,12 +79,12 @@ export function IvrCanvas({ nodes, path, selectedNodeId, dispatch }: IvrCanvasPr
   }
 
   return (
-    <div className="flex flex-col gap-0">
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
       {/* Leading drop zone (position 0) */}
       <IvrDropZone path={path} position={0} />
 
       {nodes.map((node, idx) => (
-        <div key={node.id} className="flex flex-col">
+        <div key={node.id} style={{ display: 'flex', flexDirection: 'column' }}>
           {/* The node card */}
           <IvrNode
             node={node}
@@ -95,7 +105,7 @@ export function IvrCanvas({ nodes, path, selectedNodeId, dispatch }: IvrCanvasPr
 
           {/* Connector line */}
           <div
-            className="w-[2px] min-h-[12px] bg-[#2a2f45] mx-auto"
+            style={{ width: 2, minHeight: 12, background: '#2a2f45', margin: '0 auto' }}
             aria-hidden="true"
           />
 

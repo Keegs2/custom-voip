@@ -36,7 +36,7 @@ import {
 
 import { useIvrFlow } from './ivr/useIvrFlow';
 import type { IvrFlowState } from './ivr/useIvrFlow';
-import { generateXml, verbColor, verbTextClass, verbIcon, type BuilderNode } from './ivr/ivrUtils';
+import { generateXml, verbColor, verbIcon, type BuilderNode } from './ivr/ivrUtils';
 import type { IvrVerbType, IvrFlowListItem } from '../types/ivr';
 
 import { IvrTopbar } from './ivr/IvrTopbar';
@@ -54,26 +54,56 @@ interface PaletteGhostProps {
 
 function PaletteGhost({ verb }: PaletteGhostProps) {
   const accentColor = verbColor(verb);
-  const textClass = verbTextClass(verb);
   const icon = verbIcon(verb);
 
   return (
     <div
-      className="flex items-center gap-2.5 px-3 py-2.5 rounded-lg border border-[#3d4460] bg-[#1e2130] shadow-[0_8px_24px_rgba(0,0,0,0.5)] opacity-95 pointer-events-none"
-      style={{ width: '160px' }}
+      style={{
+        position: 'relative',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 10,
+        padding: '10px 12px',
+        borderRadius: 8,
+        border: '1px solid #3d4460',
+        background: '#1e2130',
+        boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
+        opacity: 0.95,
+        pointerEvents: 'none',
+        width: 160,
+      }}
     >
       <div
-        className="absolute left-0 inset-y-0 w-[3px] rounded-l-lg"
-        style={{ backgroundColor: accentColor }}
+        style={{
+          position: 'absolute',
+          left: 0,
+          top: 0,
+          bottom: 0,
+          width: 3,
+          borderRadius: '8px 0 0 8px',
+          backgroundColor: accentColor,
+        }}
         aria-hidden="true"
       />
       <div
-        className={`flex-shrink-0 w-6 h-6 rounded-md flex items-center justify-center text-xs font-bold ml-1 ${textClass}`}
-        style={{ backgroundColor: `${accentColor}22` }}
+        style={{
+          flexShrink: 0,
+          width: 24,
+          height: 24,
+          borderRadius: 6,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          fontSize: '0.75rem',
+          fontWeight: 700,
+          marginLeft: 4,
+          backgroundColor: `${accentColor}22`,
+          color: accentColor,
+        }}
       >
         {icon}
       </div>
-      <span className={`text-xs font-bold ${textClass}`}>{verb.toUpperCase()}</span>
+      <span style={{ fontSize: '0.75rem', fontWeight: 700, color: accentColor }}>{verb.toUpperCase()}</span>
     </div>
   );
 }
@@ -87,15 +117,42 @@ function NodeGhost({ node }: NodeGhostProps) {
 
   return (
     <div
-      className="flex items-center gap-2 px-3 py-2.5 rounded-lg border border-[#3d4460] bg-[#1a1d27] shadow-[0_8px_24px_rgba(0,0,0,0.5)] opacity-90 pointer-events-none"
-      style={{ width: '280px' }}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+        padding: '10px 12px',
+        borderRadius: 8,
+        border: '1px solid #3d4460',
+        background: '#1a1d27',
+        boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
+        opacity: 0.9,
+        pointerEvents: 'none',
+        width: 280,
+      }}
     >
       <div
-        className="w-[3px] h-full min-h-[28px] rounded-full flex-shrink-0"
-        style={{ backgroundColor: accentColor }}
+        style={{
+          width: 3,
+          minHeight: 28,
+          alignSelf: 'stretch',
+          borderRadius: 99,
+          flexShrink: 0,
+          backgroundColor: accentColor,
+        }}
         aria-hidden="true"
       />
-      <span className="text-xs font-semibold text-[#718096] uppercase tracking-wide">{node.type}</span>
+      <span
+        style={{
+          fontSize: '0.75rem',
+          fontWeight: 600,
+          color: '#718096',
+          textTransform: 'uppercase',
+          letterSpacing: '0.05em',
+        }}
+      >
+        {node.type}
+      </span>
     </div>
   );
 }
@@ -202,12 +259,25 @@ function FlowListItem({ flow, isSelected, onClick }: FlowListItemProps) {
 function NoFlowSelected() {
   return (
     <div
-      className="flex flex-col items-center justify-center h-full text-center"
-      style={{ padding: '40px 32px' }}
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        height: '100%',
+        textAlign: 'center',
+        padding: '40px 32px',
+      }}
     >
       <div
-        className="w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-5"
         style={{
+          width: 56,
+          height: 56,
+          borderRadius: 16,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          margin: '0 auto 20px',
           background: 'rgba(6,182,212,0.07)',
           border: '1px solid rgba(6,182,212,0.18)',
         }}
@@ -222,10 +292,10 @@ function NoFlowSelected() {
           <path d="M6.5 10v4" strokeLinecap="round" />
         </svg>
       </div>
-      <p className="text-sm font-semibold" style={{ color: '#475569', marginBottom: 6 }}>
+      <p style={{ fontSize: '0.875rem', fontWeight: 600, color: '#475569', marginBottom: 6, marginTop: 0 }}>
         No flow selected
       </p>
-      <p className="text-xs leading-relaxed" style={{ color: '#334155', maxWidth: 240 }}>
+      <p style={{ fontSize: '0.75rem', lineHeight: 1.6, color: '#334155', maxWidth: 240, margin: 0 }}>
         Choose a flow from the left panel, or click "New" to create one.
       </p>
     </div>
@@ -622,32 +692,54 @@ export function IvrBuilderPage() {
                 />
 
                 {/* Main canvas + config pane row */}
-                <div className="flex flex-1 min-h-0 overflow-hidden">
+                <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
                   {/* Center: flow canvas */}
                   <main
-                    className="flex-1 overflow-y-auto p-6 flex flex-col items-center"
                     role="main"
                     aria-label="IVR flow canvas"
-                    style={{ background: '#0f1117' }}
+                    style={{
+                      flex: 1,
+                      overflowY: 'auto',
+                      padding: '24px 24px 0',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      background: '#0f1117',
+                    }}
                   >
                     {/* START sentinel */}
                     <div
-                      className="flex items-center justify-center gap-1.5 px-4 h-8 rounded-full mb-0"
                       style={{
-                        background: 'rgba(6,182,212,0.08)',
-                        border: '1px solid rgba(6,182,212,0.25)',
-                        boxShadow: '0 0 10px rgba(6,182,212,0.08)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: 6,
+                        padding: '4px 14px',
+                        borderRadius: 20,
+                        background: 'rgba(34,197,94,0.15)',
+                        border: '1px solid rgba(34,197,94,0.35)',
                       }}
                       aria-label="Flow start"
                     >
                       <div
-                        className="w-1.5 h-1.5 rounded-full"
-                        style={{ backgroundColor: '#06b6d4', boxShadow: '0 0 4px rgba(6,182,212,0.6)' }}
+                        style={{
+                          width: 6,
+                          height: 6,
+                          borderRadius: '50%',
+                          backgroundColor: '#22c55e',
+                          boxShadow: '0 0 4px rgba(34,197,94,0.7)',
+                          flexShrink: 0,
+                        }}
                         aria-hidden="true"
                       />
                       <span
-                        className="text-[0.6rem] font-bold uppercase tracking-[1.5px]"
-                        style={{ color: '#06b6d4' }}
+                        style={{
+                          fontSize: '0.65rem',
+                          fontWeight: 700,
+                          letterSpacing: '0.12em',
+                          color: '#22c55e',
+                          textTransform: 'uppercase',
+                        }}
                       >
                         START
                       </span>
@@ -655,13 +747,16 @@ export function IvrBuilderPage() {
 
                     {/* Connector from START to first node */}
                     <div
-                      className="w-[2px] min-h-[12px]"
-                      style={{ background: 'linear-gradient(to bottom, rgba(6,182,212,0.3), rgba(42,47,69,0.6))' }}
+                      style={{
+                        width: 2,
+                        minHeight: 16,
+                        background: 'linear-gradient(to bottom, rgba(34,197,94,0.4), rgba(42,47,69,0.5))',
+                      }}
                       aria-hidden="true"
                     />
 
                     {/* Node tree */}
-                    <div className="w-full max-w-[600px]" onClick={(e) => e.stopPropagation()}>
+                    <div style={{ width: '100%', maxWidth: 600 }} onClick={(e) => e.stopPropagation()}>
                       <IvrCanvas
                         nodes={state.nodes}
                         path="nodes"
