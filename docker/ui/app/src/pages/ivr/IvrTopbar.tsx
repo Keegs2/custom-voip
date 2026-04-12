@@ -11,7 +11,6 @@
  */
 
 import { useState, useEffect } from 'react';
-import { cn } from '../../utils/cn';
 import { listCustomers } from '../../api/customers';
 import { listApiDids } from '../../api/apiDids';
 import type { Customer } from '../../types/customer';
@@ -28,6 +27,22 @@ interface IvrTopbarProps {
   isSaving: boolean;
   isDeleting: boolean;
 }
+
+// Shared pill base styles applied to both selects and buttons
+const pillBase: React.CSSProperties = {
+  fontSize: '0.75rem',
+  fontWeight: 600,
+  height: 30,
+  borderRadius: 7,
+  padding: '5px 12px',
+  border: '1px solid rgba(255,255,255,0.10)',
+  background: 'rgba(255,255,255,0.04)',
+  color: '#94a3b8',
+  outline: 'none',
+  cursor: 'pointer',
+  flexShrink: 0,
+  transition: 'border-color 150ms, background 150ms',
+};
 
 export function IvrTopbar({
   state,
@@ -59,25 +74,6 @@ export function IvrTopbar({
       .catch(() => setDids([]));
   }, [state.customerId]);
 
-  // Pill-style select — matches the sidebar "New" button language but muted
-  const selectClass = cn(
-    'text-[0.75rem] font-semibold bg-[rgba(255,255,255,0.04)] border border-[rgba(255,255,255,0.10)]',
-    'text-[#94a3b8] rounded-[7px] px-3 py-[5px] h-[30px]',
-    'outline-none transition-[border-color,background] duration-150 cursor-pointer',
-    'focus:border-[rgba(59,130,246,0.40)] focus:bg-[rgba(59,130,246,0.06)]',
-    'appearance-none',
-    // Inline chevron via background SVG
-    'bg-no-repeat bg-[right_8px_center] bg-[length:10px_10px]',
-  );
-
-  // Secondary / ghost pill — Preview XML
-  const ghostBtnClass = cn(
-    'text-[0.75rem] font-semibold px-3 py-[5px] h-[30px] rounded-[7px] flex-shrink-0',
-    'bg-[rgba(255,255,255,0.04)] border border-[rgba(255,255,255,0.10)] text-[#94a3b8]',
-    'hover:bg-[rgba(255,255,255,0.08)] hover:border-[rgba(255,255,255,0.18)] hover:text-[#cbd5e1]',
-    'transition-all duration-150',
-  );
-
   return (
     <div
       role="toolbar"
@@ -90,15 +86,26 @@ export function IvrTopbar({
     >
       {/* ── Row 1: name + customer/DID + actions ─────────── */}
       <div
-        className="flex items-center gap-3"
-        style={{ padding: '10px 20px', borderBottom: '1px solid rgba(255,255,255,0.04)' }}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 12,
+          padding: '10px 20px',
+          borderBottom: '1px solid rgba(255,255,255,0.04)',
+        }}
       >
         {/* Flow name */}
-        <div className="flex items-center gap-2 min-w-0 flex-1">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, flex: 1 }}>
           {/* Cyan accent dot */}
           <div
-            className="w-2 h-2 rounded-full flex-shrink-0"
-            style={{ backgroundColor: '#06b6d4', boxShadow: '0 0 6px rgba(6,182,212,0.5)' }}
+            style={{
+              width: 8,
+              height: 8,
+              borderRadius: '50%',
+              flexShrink: 0,
+              backgroundColor: '#06b6d4',
+              boxShadow: '0 0 6px rgba(6,182,212,0.5)',
+            }}
             aria-hidden="true"
           />
           <input
@@ -107,24 +114,34 @@ export function IvrTopbar({
             onChange={(e) => dispatch({ type: 'SET_NAME', name: e.target.value })}
             placeholder="Untitled Flow"
             aria-label="Flow name"
-            className={cn(
-              'text-sm font-bold bg-transparent outline-none min-w-0 w-[160px]',
-              'text-[#e2e8f0] placeholder:text-[#334155] focus:ring-0',
-              // Subtle bottom border — invisible on blur, accent on focus
-              'border-b border-transparent focus:border-[rgba(59,130,246,0.35)]',
-              'transition-[border-color] duration-150 pb-px',
-            )}
+            style={{
+              fontSize: '0.875rem',
+              fontWeight: 700,
+              background: 'transparent',
+              outline: 'none',
+              minWidth: 0,
+              width: 160,
+              color: '#e2e8f0',
+              border: 'none',
+              borderBottom: '1px solid transparent',
+              paddingBottom: 1,
+              transition: 'border-color 150ms',
+            }}
+            onFocus={(e) => { e.currentTarget.style.borderBottomColor = 'rgba(59,130,246,0.35)'; }}
+            onBlur={(e) => { e.currentTarget.style.borderBottomColor = 'transparent'; }}
           />
         </div>
 
         {/* Divider */}
-        <div className="w-px h-5 flex-shrink-0" style={{ background: 'rgba(255,255,255,0.06)' }} aria-hidden="true" />
+        <div
+          style={{ width: 1, height: 20, flexShrink: 0, background: 'rgba(255,255,255,0.06)' }}
+          aria-hidden="true"
+        />
 
         {/* Customer dropdown — pill style with custom chevron */}
-        <div className="relative flex-shrink-0">
+        <div style={{ position: 'relative', flexShrink: 0 }}>
           <select
-            className={selectClass}
-            style={{ paddingRight: '26px' }}
+            style={{ ...pillBase, appearance: 'none', paddingRight: 26 }}
             value={state.customerId ?? ''}
             aria-label="Select customer"
             onChange={(e) => {
@@ -139,7 +156,13 @@ export function IvrTopbar({
           </select>
           {/* Custom chevron */}
           <svg
-            className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2"
+            style={{
+              pointerEvents: 'none',
+              position: 'absolute',
+              right: 8,
+              top: '50%',
+              transform: 'translateY(-50%)',
+            }}
             width="10" height="10" viewBox="0 0 10 10" fill="none"
             aria-hidden="true"
           >
@@ -148,10 +171,15 @@ export function IvrTopbar({
         </div>
 
         {/* DID dropdown — pill style with custom chevron */}
-        <div className="relative flex-shrink-0">
+        <div style={{ position: 'relative', flexShrink: 0 }}>
           <select
-            className={selectClass}
-            style={{ paddingRight: '26px' }}
+            style={{
+              ...pillBase,
+              appearance: 'none',
+              paddingRight: 26,
+              opacity: !state.customerId ? 0.4 : 1,
+              cursor: !state.customerId ? 'not-allowed' : 'pointer',
+            }}
             value={state.did ?? ''}
             disabled={!state.customerId}
             aria-label="Select DID"
@@ -165,7 +193,13 @@ export function IvrTopbar({
             ))}
           </select>
           <svg
-            className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2"
+            style={{
+              pointerEvents: 'none',
+              position: 'absolute',
+              right: 8,
+              top: '50%',
+              transform: 'translateY(-50%)',
+            }}
             width="10" height="10" viewBox="0 0 10 10" fill="none"
             aria-hidden="true"
           >
@@ -174,8 +208,28 @@ export function IvrTopbar({
         </div>
 
         {/* Right-side actions */}
-        <div className="ml-auto flex items-center gap-2">
-          <button type="button" onClick={onPreviewXml} className={ghostBtnClass}>
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
+          {/* Preview XML — ghost/secondary pill */}
+          <button
+            type="button"
+            onClick={onPreviewXml}
+            style={{
+              ...pillBase,
+              background: 'rgba(255,255,255,0.04)',
+              border: '1px solid rgba(255,255,255,0.10)',
+              color: '#94a3b8',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = 'rgba(255,255,255,0.08)';
+              e.currentTarget.style.borderColor = 'rgba(255,255,255,0.18)';
+              e.currentTarget.style.color = '#cbd5e1';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'rgba(255,255,255,0.04)';
+              e.currentTarget.style.borderColor = 'rgba(255,255,255,0.10)';
+              e.currentTarget.style.color = '#94a3b8';
+            }}
+          >
             Preview XML
           </button>
 
@@ -185,33 +239,58 @@ export function IvrTopbar({
               type="button"
               disabled={isDeleting}
               onClick={onDelete}
-              className={cn(
-                'text-[0.75rem] font-semibold px-3 py-[5px] h-[30px] rounded-[7px] flex-shrink-0',
-                'bg-[rgba(239,68,68,0.10)] border border-[rgba(239,68,68,0.25)] text-[#f87171]',
-                'hover:bg-[rgba(239,68,68,0.18)] hover:border-[rgba(239,68,68,0.40)]',
-                'transition-all duration-150',
-                'disabled:opacity-40 disabled:cursor-not-allowed',
-              )}
+              style={{
+                ...pillBase,
+                background: 'rgba(239,68,68,0.10)',
+                border: '1px solid rgba(239,68,68,0.25)',
+                color: '#f87171',
+                opacity: isDeleting ? 0.4 : 1,
+                cursor: isDeleting ? 'not-allowed' : 'pointer',
+              }}
+              onMouseEnter={(e) => {
+                if (!isDeleting) {
+                  e.currentTarget.style.background = 'rgba(239,68,68,0.18)';
+                  e.currentTarget.style.borderColor = 'rgba(239,68,68,0.40)';
+                }
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = 'rgba(239,68,68,0.10)';
+                e.currentTarget.style.borderColor = 'rgba(239,68,68,0.25)';
+              }}
             >
               {isDeleting ? 'Deleting...' : 'Delete'}
             </button>
           )}
 
           {/* Divider */}
-          <div className="w-px h-5 flex-shrink-0" style={{ background: 'rgba(255,255,255,0.06)' }} aria-hidden="true" />
+          <div
+            style={{ width: 1, height: 20, flexShrink: 0, background: 'rgba(255,255,255,0.06)' }}
+            aria-hidden="true"
+          />
 
           {/* Save — primary pill CTA, mirrors sidebar "New" button */}
           <button
             type="button"
             disabled={isSaving}
             onClick={onSave}
-            className={cn(
-              'text-[0.75rem] font-semibold px-3 py-[5px] h-[30px] rounded-[7px] flex-shrink-0',
-              'bg-[rgba(59,130,246,0.15)] border border-[rgba(59,130,246,0.30)] text-[#60a5fa]',
-              'hover:bg-[rgba(59,130,246,0.22)] hover:border-[rgba(59,130,246,0.45)]',
-              'transition-all duration-150',
-              'disabled:opacity-50 disabled:cursor-not-allowed',
-            )}
+            style={{
+              ...pillBase,
+              background: 'rgba(59,130,246,0.15)',
+              border: '1px solid rgba(59,130,246,0.30)',
+              color: '#60a5fa',
+              opacity: isSaving ? 0.5 : 1,
+              cursor: isSaving ? 'not-allowed' : 'pointer',
+            }}
+            onMouseEnter={(e) => {
+              if (!isSaving) {
+                e.currentTarget.style.background = 'rgba(59,130,246,0.22)';
+                e.currentTarget.style.borderColor = 'rgba(59,130,246,0.45)';
+              }
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'rgba(59,130,246,0.15)';
+              e.currentTarget.style.borderColor = 'rgba(59,130,246,0.30)';
+            }}
           >
             {isSaving ? 'Saving...' : 'Save Flow'}
           </button>
@@ -219,10 +298,7 @@ export function IvrTopbar({
       </div>
 
       {/* ── Row 2: verb palette toolbar ───────────────────── */}
-      <div
-        className="flex items-center"
-        style={{ padding: '7px 20px' }}
-      >
+      <div style={{ display: 'flex', alignItems: 'center', padding: '7px 20px' }}>
         <IvrPalette />
       </div>
     </div>

@@ -7,8 +7,7 @@
  */
 
 import { useDraggable } from '@dnd-kit/core';
-import { cn } from '../../utils/cn';
-import { verbIcon, verbColor, verbTextClass } from './ivrUtils';
+import { verbIcon, verbColor } from './ivrUtils';
 import type { IvrVerbType } from '../../types/ivr';
 
 // ---------------------------------------------------------------------------
@@ -40,21 +39,26 @@ function PaletteChip({ verb, label }: PaletteChipProps) {
   });
 
   const accentColor = verbColor(verb);
-  const textClass = verbTextClass(verb);
   const icon = verbIcon(verb);
 
   return (
     <div
       ref={setNodeRef}
-      className={cn(
-        'relative flex items-center gap-1.5 px-[10px] py-[4px]',
-        'border rounded-[6px] overflow-hidden',
-        'cursor-grab select-none transition-all duration-150',
-        isDragging && 'opacity-25 cursor-grabbing scale-95',
-      )}
       style={{
+        position: 'relative',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 6,
+        padding: '4px 10px',
+        border: `1px solid ${accentColor}40`,
+        borderRadius: 6,
+        overflow: 'hidden',
+        cursor: isDragging ? 'grabbing' : 'grab',
+        userSelect: 'none',
+        transition: 'opacity 150ms, transform 150ms',
         background: `${accentColor}0d`,
-        borderColor: `${accentColor}40`,
+        opacity: isDragging ? 0.25 : 1,
+        transform: isDragging ? 'scale(0.95)' : 'scale(1)',
       }}
       {...listeners}
       {...attributes}
@@ -63,15 +67,33 @@ function PaletteChip({ verb, label }: PaletteChipProps) {
     >
       {/* Icon badge */}
       <div
-        className={cn('flex-shrink-0 w-4 h-4 rounded flex items-center justify-center text-[0.6rem] font-bold', textClass)}
-        style={{ backgroundColor: `${accentColor}18` }}
+        style={{
+          flexShrink: 0,
+          width: 16,
+          height: 16,
+          borderRadius: 4,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          fontSize: '0.6rem',
+          fontWeight: 700,
+          backgroundColor: `${accentColor}18`,
+          color: accentColor,
+        }}
         aria-hidden="true"
       >
         {icon}
       </div>
 
       {/* Label */}
-      <span className={cn('text-[0.72rem] font-semibold tracking-wide', textClass)}>
+      <span
+        style={{
+          fontSize: '0.72rem',
+          fontWeight: 600,
+          letterSpacing: '0.03em',
+          color: accentColor,
+        }}
+      >
         {label}
       </span>
     </div>
@@ -87,12 +109,24 @@ export function IvrPalette() {
     <div
       role="toolbar"
       aria-label="IVR verb palette — drag verbs onto the canvas"
-      className="flex items-center gap-[6px] flex-wrap"
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 6,
+        flexWrap: 'wrap',
+      }}
     >
       {/* Section label */}
       <span
-        className="text-[0.65rem] font-[700] uppercase tracking-[0.10em] mr-1 flex-shrink-0"
-        style={{ color: '#334155', letterSpacing: '0.1em' }}
+        style={{
+          fontSize: '0.65rem',
+          fontWeight: 700,
+          textTransform: 'uppercase',
+          letterSpacing: '0.10em',
+          marginRight: 4,
+          flexShrink: 0,
+          color: '#334155',
+        }}
         aria-hidden="true"
       >
         Verbs
@@ -102,10 +136,14 @@ export function IvrPalette() {
         <PaletteChip key={verb} verb={verb} label={label} />
       ))}
 
-      {/* Drag hint — hidden from assistive tech, visible on wider screens */}
+      {/* Drag hint — hidden from assistive tech */}
       <span
-        className="ml-2 text-[0.65rem] hidden sm:inline flex-shrink-0"
-        style={{ color: '#1e293b' }}
+        style={{
+          marginLeft: 8,
+          fontSize: '0.65rem',
+          flexShrink: 0,
+          color: '#1e293b',
+        }}
         aria-hidden="true"
       >
         drag onto canvas
