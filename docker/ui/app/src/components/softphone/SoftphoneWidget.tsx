@@ -21,6 +21,10 @@ const FAB_SIZE = 60;
 // by FAB_SIZE. The real width is measured via fabRef after each render.
 const FAB_WIDTH_FALLBACK = 180;
 const EDGE_MARGIN = 8;
+// Extra clearance at the bottom of the viewport to keep the panel above OS
+// taskbars / the macOS Dock, which can consume 60–80px of screen real-estate
+// that window.innerHeight does not account for.
+const BOTTOM_MARGIN = 60;
 
 const PRESENCE_OPTIONS: { value: PresenceStatus; label: string; color: string }[] = [
   { value: 'available', label: 'Available',      color: '#22c55e' },
@@ -60,9 +64,12 @@ function clampPosition(
   // Horizontal extent: for the FAB use the measured pill width, not the circle size.
   const w = isExpanded ? WIDGET_WIDTH : fabWidth;
   const h = isExpanded ? WIDGET_HEIGHT : FAB_SIZE;
+  // Use a larger bottom margin for the expanded panel so the full height clears
+  // OS taskbars / the macOS Dock, which sit below window.innerHeight.
+  const bottomMargin = isExpanded ? BOTTOM_MARGIN : EDGE_MARGIN;
   return {
     x: Math.max(EDGE_MARGIN, Math.min(x, window.innerWidth  - w - EDGE_MARGIN)),
-    y: Math.max(EDGE_MARGIN, Math.min(y, window.innerHeight - h - EDGE_MARGIN)),
+    y: Math.max(EDGE_MARGIN, Math.min(y, window.innerHeight - h - bottomMargin)),
   };
 }
 
@@ -84,7 +91,8 @@ function snapToEdge(
     ? EDGE_MARGIN                              // snap to left edge
     : window.innerWidth - w - EDGE_MARGIN;    // snap to right edge
 
-  const y = Math.max(EDGE_MARGIN, Math.min(pos.y, window.innerHeight - h - EDGE_MARGIN));
+  const bottomMargin = isExpanded ? BOTTOM_MARGIN : EDGE_MARGIN;
+  const y = Math.max(EDGE_MARGIN, Math.min(pos.y, window.innerHeight - h - bottomMargin));
 
   return { x, y };
 }
@@ -103,7 +111,8 @@ function expandedPositionFromFab(
     ? window.innerWidth - WIDGET_WIDTH - EDGE_MARGIN   // right-align panel
     : EDGE_MARGIN;                                      // left-align panel
 
-  const y = Math.max(EDGE_MARGIN, Math.min(fabPos.y, window.innerHeight - WIDGET_HEIGHT - EDGE_MARGIN));
+  // Clamp so the full panel height is visible above the OS taskbar / Dock.
+  const y = Math.max(EDGE_MARGIN, Math.min(fabPos.y, window.innerHeight - WIDGET_HEIGHT - BOTTOM_MARGIN));
 
   return { x, y };
 }
