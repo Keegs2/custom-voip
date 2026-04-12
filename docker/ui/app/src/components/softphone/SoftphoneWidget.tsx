@@ -856,7 +856,7 @@ export function SoftphoneWidget() {
     ? '0 4px 20px rgba(34,197,94,0.45)'
     : isDragging
     ? '0 8px 32px rgba(0,0,0,0.60)'
-    : '0 4px 20px rgba(0,0,0,0.45)';
+    : '0 2px 12px rgba(0,0,0,0.4), 0 0 20px rgba(59,130,246,0.15), inset 0 1px 0 rgba(255,255,255,0.06)';
 
   const headerBackground = isIncoming
     ? 'linear-gradient(90deg, rgba(22,163,74,0.22) 0%, rgba(34,197,94,0.12) 100%)'
@@ -868,7 +868,7 @@ export function SoftphoneWidget() {
     ? '0 32px 80px rgba(0,0,0,0.80), 0 0 0 1px rgba(255,255,255,0.06)'
     : isIncoming
     ? '0 24px 64px rgba(0,0,0,0.70), 0 0 0 1px rgba(34,197,94,0.20), 0 0 40px rgba(34,197,94,0.08)'
-    : '0 24px 64px rgba(0,0,0,0.70), 0 0 0 1px rgba(255,255,255,0.04)';
+    : '0 8px 32px rgba(0,0,0,0.5), 0 0 40px rgba(59,130,246,0.08), inset 0 1px 0 rgba(255,255,255,0.04)';
 
   /* ─── Render ──────────────────────────────────────────────────── */
 
@@ -907,7 +907,7 @@ export function SoftphoneWidget() {
               display: 'flex',
               flexDirection: 'column',
               background: 'linear-gradient(180deg, #131825 0%, #0f1420 100%)',
-              border: '1px solid rgba(255,255,255,0.08)',
+              border: '1px solid rgba(59,130,246,0.15)',
               borderRadius: 20,
               boxShadow: panelBoxShadow,
               overflow: 'hidden',
@@ -1272,7 +1272,7 @@ export function SoftphoneWidget() {
             background: fabBackground,
             border: isIncoming
               ? '1px solid rgba(34,197,94,0.40)'
-              : '1px solid rgba(255,255,255,0.10)',
+              : '1px solid rgba(59,130,246,0.25)',
             color: hasActiveCall || isIncoming ? '#fff' : '#94a3b8',
             cursor: isDragging ? 'grabbing' : 'pointer',
             boxShadow: fabBoxShadow,
