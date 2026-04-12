@@ -367,33 +367,6 @@ export function SoftphoneWidget() {
   // Track whether we actually moved during a drag (to distinguish click vs drag)
   const didMove = useRef(false);
 
-  // ── Guard: UCaaS feature check ──
-  const hasUcaas =
-    user?.role === 'admin' ||
-    user?.account_type === 'ucaas' ||
-    (user?.account_type !== 'rcf' && user?.ucaas_enabled === true);
-  if (!hasUcaas) return null;
-  if (!credentials && connectionState === 'disconnected') return null;
-
-  const hasActiveCall = activeCall !== null && activeCall.state !== 'ended';
-  const isIncoming = incomingCall !== null;
-  const isDialingOrRinging =
-    hasActiveCall &&
-    activeCall.direction === 'outbound' &&
-    (activeCall.state === 'dialing' || activeCall.state === 'ringing' || activeCall.state === 'early');
-  const connInfo = CONNECTION_LABEL[connectionState] ?? CONNECTION_LABEL['disconnected'];
-
-  // Auto-switch to call tab when outbound call starts
-  const effectiveTab = hasActiveCall && activeTab === 'dialpad' ? 'call' : activeTab;
-
-  const tabs: { id: WidgetTab; icon: React.ReactNode; label: string; badge?: number }[] = [
-    { id: 'dialpad',  icon: <IconDialpad />,  label: 'Pad' },
-    { id: 'call',     icon: <IconPhone />,    label: 'Call' },
-    { id: 'history',  icon: <IconHistory />,  label: 'History' },
-    { id: 'contacts', icon: <IconContacts />, label: 'Contacts' },
-    { id: 'settings', icon: <IconSettings />, label: 'Settings' },
-  ];
-
   /* ─── Drag handlers ────────────────────────────────────────── */
 
   const handleDragStart = useCallback(
@@ -472,6 +445,33 @@ export function SoftphoneWidget() {
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
   }, [isExpanded]);
+
+  // ── Guard: UCaaS feature check ──
+  const hasUcaas =
+    user?.role === 'admin' ||
+    user?.account_type === 'ucaas' ||
+    (user?.account_type !== 'rcf' && user?.ucaas_enabled === true);
+  if (!hasUcaas) return null;
+  if (!credentials && connectionState === 'disconnected') return null;
+
+  const hasActiveCall = activeCall !== null && activeCall.state !== 'ended';
+  const isIncoming = incomingCall !== null;
+  const isDialingOrRinging =
+    hasActiveCall &&
+    activeCall.direction === 'outbound' &&
+    (activeCall.state === 'dialing' || activeCall.state === 'ringing' || activeCall.state === 'early');
+  const connInfo = CONNECTION_LABEL[connectionState] ?? CONNECTION_LABEL['disconnected'];
+
+  // Auto-switch to call tab when outbound call starts
+  const effectiveTab = hasActiveCall && activeTab === 'dialpad' ? 'call' : activeTab;
+
+  const tabs: { id: WidgetTab; icon: React.ReactNode; label: string; badge?: number }[] = [
+    { id: 'dialpad',  icon: <IconDialpad />,  label: 'Pad' },
+    { id: 'call',     icon: <IconPhone />,    label: 'Call' },
+    { id: 'history',  icon: <IconHistory />,  label: 'History' },
+    { id: 'contacts', icon: <IconContacts />, label: 'Contacts' },
+    { id: 'settings', icon: <IconSettings />, label: 'Settings' },
+  ];
 
   /* ─── Mouse event shims for drag handle ─────────────────────── */
 
