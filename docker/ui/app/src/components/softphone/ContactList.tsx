@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
+import { Phone } from 'lucide-react';
 import { getDirectory } from '../../api/extensions';
 import { useSoftphone } from '../../contexts/SoftphoneContext';
 import { PresenceIndicator } from './PresenceIndicator';
@@ -144,15 +145,16 @@ export function ContactList() {
                   <div style={{ fontSize: '0.8rem', fontWeight: 600, color: '#e2e8f0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {ext.display_name}
                   </div>
-                  <div style={{ fontSize: '0.68rem', color: '#475569', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {[
-                      ext.customer_name,
-                      ext.assigned_did
+                  <div style={{ fontSize: '0.68rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {ext.customer_name && (
+                      <span style={{ color: '#818cf8', fontWeight: 500 }}>{ext.customer_name}</span>
+                    )}
+                    <span style={{ color: '#475569' }}>
+                      {ext.customer_name ? ' · ' : ''}
+                      {ext.assigned_did
                         ? `Ext. ${ext.extension} · ${formatPhoneNumber(ext.assigned_did)}`
-                        : `Ext. ${ext.extension}`,
-                    ]
-                      .filter(Boolean)
-                      .join(' · ')}
+                        : `Ext. ${ext.extension}`}
+                    </span>
                   </div>
                 </div>
 
@@ -177,9 +179,7 @@ export function ContactList() {
                       cursor: 'pointer',
                     }}
                   >
-                    <svg viewBox="0 0 24 24" fill="currentColor" style={{ width: 12, height: 12 }}>
-                      <path fillRule="evenodd" d="M1.5 4.5a3 3 0 0 1 3-3h1.372c.86 0 1.61.586 1.819 1.42l1.105 4.423a1.875 1.875 0 0 1-.694 1.955l-1.293.97c-.135.101-.164.249-.126.352a11.285 11.285 0 0 0 6.697 6.697c.103.038.25.009.352-.126l.97-1.293a1.875 1.875 0 0 1 1.955-.694l4.423 1.105c.834.209 1.42.959 1.42 1.82V19.5a3 3 0 0 1-3 3h-2.25C8.552 22.5 1.5 15.448 1.5 6.75V4.5Z" clipRule="evenodd" />
-                    </svg>
+                    <Phone size={14} />
                   </button>
                 )}
               </div>

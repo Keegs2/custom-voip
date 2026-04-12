@@ -10,7 +10,7 @@ import {
   IconRCF, IconTrunk, IconAPI, IconIVR, IconDocs,
   IconAdmin, IconSignal, IconTroubleshoot, IconVoicemail,
 } from '../icons/ProductIcons';
-import { FolderOpen, Package, MessageCircle, Shield, ChevronDown } from 'lucide-react';
+import { FolderOpen, Package, MessageCircle, Shield, ChevronDown, Phone } from 'lucide-react';
 
 /* ─── Types ───────────────────────────────────────────────── */
 
@@ -477,10 +477,7 @@ export function Sidebar() {
                 flexShrink: 0,
               }}
             >
-              <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth={2} style={{ width: 16, height: 16 }}>
-                <path d="M2.25 6.338c0 12.03 9.716 21.75 21.75 21.75" strokeLinecap="round" strokeLinejoin="round" />
-                <path d="m2.25 6.338 3.56-3.56a1.5 1.5 0 0 1 2.121 0l2.296 2.296a1.5 1.5 0 0 1 0 2.122l-1.054 1.053c-.226.226-.296.56-.144.849a13.478 13.478 0 0 0 5.636 5.635c.29.153.624.083.85-.143l1.053-1.054a1.5 1.5 0 0 1 2.122 0l2.296 2.296a1.5 1.5 0 0 1 0 2.121l-3.56 3.56" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
+              <Phone size={18} color="white" />
             </div>
             <div>
               <div
