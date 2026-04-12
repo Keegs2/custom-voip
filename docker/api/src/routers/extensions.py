@@ -204,11 +204,13 @@ async def extension_directory(
         SELECT e.id, e.extension, e.display_name,
                e.assigned_did,
                u.name AS user_name,
+               c.name AS customer_name,
                COALESCE(p.status, 'offline') AS presence_status,
                p.status_message AS presence_message,
                e.dnd
         FROM extensions e
         LEFT JOIN users u ON e.user_id = u.id
+        LEFT JOIN customers c ON e.customer_id = c.id
         LEFT JOIN presence_status p ON e.user_id = p.user_id
         WHERE e.status = 'active'
     """

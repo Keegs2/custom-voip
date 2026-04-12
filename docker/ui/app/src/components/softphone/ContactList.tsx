@@ -48,6 +48,7 @@ export function ContactList() {
       ext.extension.includes(q) ||
       ext.display_name.toLowerCase().includes(q) ||
       (ext.user_name ?? '').toLowerCase().includes(q) ||
+      (ext.customer_name ?? '').toLowerCase().includes(q) ||
       // Allow searching by raw digits or formatted DID
       (ext.assigned_did !== undefined && ext.assigned_did.replace(/\D/g, '').includes(q.replace(/\D/g, '')))
     );
@@ -138,15 +139,20 @@ export function ContactList() {
                   </div>
                 </div>
 
-                {/* Name + extension + DID */}
+                {/* Name + customer + extension + DID */}
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: '0.8rem', fontWeight: 600, color: '#e2e8f0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {ext.display_name}
                   </div>
-                  <div style={{ fontSize: '0.68rem', color: '#475569', fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {ext.assigned_did
-                      ? `Ext. ${ext.extension} · ${formatPhoneNumber(ext.assigned_did)}`
-                      : `Ext. ${ext.extension}`}
+                  <div style={{ fontSize: '0.68rem', color: '#475569', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {[
+                      ext.customer_name,
+                      ext.assigned_did
+                        ? `Ext. ${ext.extension} · ${formatPhoneNumber(ext.assigned_did)}`
+                        : `Ext. ${ext.extension}`,
+                    ]
+                      .filter(Boolean)
+                      .join(' · ')}
                   </div>
                 </div>
 
