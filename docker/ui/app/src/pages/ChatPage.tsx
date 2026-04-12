@@ -239,16 +239,16 @@ export function ChatPage() {
           height: '100vh',
         }}
       >
-        {/* Left pane — conversation list (320px) */}
+        {/* Left pane — conversation list (280px) */}
         <div
           style={{
-            width: 320,
+            width: 280,
             flexShrink: 0,
             borderRight: '1px solid rgba(255,255,255,0.06)',
             display: 'flex',
             flexDirection: 'column',
             minHeight: 0,
-            background: '#131520',
+            background: '#0c0e16',
           }}
         >
           <ConversationList

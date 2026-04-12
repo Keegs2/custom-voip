@@ -138,7 +138,7 @@ function ConvRow({ conversation, isSelected, currentUserId, onSelect }: ConvRowP
               height: 11,
               borderRadius: '50%',
               background: '#3b82f6',
-              border: '2px solid #131520',
+              border: '2px solid #0c0e16',
               boxShadow: '0 0 6px rgba(59,130,246,0.60)',
             }}
           />
@@ -155,7 +155,7 @@ function ConvRow({ conversation, isSelected, currentUserId, onSelect }: ConvRowP
               height: 10,
               borderRadius: '50%',
               background: '#22c55e',
-              border: '2px solid #131520',
+              border: '2px solid #0c0e16',
             }}
           />
         )}
@@ -271,7 +271,7 @@ export function ConversationList({
       {/* Header bar */}
       <div
         style={{
-          padding: '18px 14px 12px',
+          padding: '18px 16px 12px',
           flexShrink: 0,
           borderBottom: '1px solid rgba(255,255,255,0.05)',
         }}
@@ -304,53 +304,43 @@ export function ConversationList({
             </div>
             <span
               style={{
-                fontSize: '0.85rem',
+                fontSize: '0.7rem',
                 fontWeight: 700,
-                color: '#94a3b8',
-                letterSpacing: '0.02em',
+                color: '#334155',
+                textTransform: 'uppercase',
+                letterSpacing: '0.12em',
               }}
             >
               Messages
             </span>
           </div>
 
-          {/* New conversation button — filled circle with plus */}
+          {/* New conversation button */}
           <button
             type="button"
             onClick={onNewChat}
             title="New conversation"
             aria-label="New conversation"
             style={{
-              width: 30,
-              height: 30,
-              borderRadius: '50%',
+              background: 'rgba(59,130,246,0.12)',
+              border: '1px solid rgba(59,130,246,0.25)',
+              borderRadius: 7,
+              cursor: 'pointer',
+              color: '#60a5fa',
               display: 'flex',
               alignItems: 'center',
-              justifyContent: 'center',
-              background: 'linear-gradient(135deg, #2563eb 0%, #3b82f6 100%)',
-              border: 'none',
-              color: '#fff',
-              cursor: 'pointer',
-              transition: 'opacity 0.15s, transform 0.12s, box-shadow 0.15s',
-              boxShadow: '0 2px 10px rgba(59,130,246,0.40)',
+              gap: 5,
+              padding: '5px 9px',
+              fontSize: '0.72rem',
+              fontWeight: 600,
+              transition: 'background 0.15s',
               flexShrink: 0,
             }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.opacity = '0.88';
-              e.currentTarget.style.transform = 'scale(1.08)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.opacity = '1';
-              e.currentTarget.style.transform = 'scale(1)';
-            }}
-            onMouseDown={(e) => {
-              e.currentTarget.style.transform = 'scale(0.94)';
-            }}
-            onMouseUp={(e) => {
-              e.currentTarget.style.transform = 'scale(1.08)';
-            }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(59,130,246,0.20)'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(59,130,246,0.12)'; }}
           >
-            <Plus size={15} strokeWidth={2.5} />
+            <Plus size={13} strokeWidth={2} />
+            New
           </button>
         </div>
 

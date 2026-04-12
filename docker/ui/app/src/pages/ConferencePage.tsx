@@ -2247,51 +2247,53 @@ export function ConferencePage() {
         {/* Left panel — room list */}
         <div
           style={{
-            width: 320,
+            width: 280,
             flexShrink: 0,
             borderRight: '1px solid rgba(255,255,255,0.06)',
             display: 'flex',
             flexDirection: 'column',
             minHeight: 0,
-            background: '#131520',
+            background: '#0c0e16',
           }}
         >
           {/* Panel header */}
           <div
             style={{
-              padding: '20px 16px 14px',
-              borderBottom: '1px solid rgba(255,255,255,0.06)',
+              padding: '18px 16px 12px',
+              borderBottom: '1px solid rgba(255,255,255,0.05)',
               flexShrink: 0,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
             }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <Video size={17} color="#60a5fa" strokeWidth={1.75} />
-                <span style={{ fontSize: '0.95rem', fontWeight: 700, color: '#e2e8f0', letterSpacing: '-0.02em' }}>
-                  Conferences
-                </span>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowCreateModal(true)}
-                title="Create conference room"
-                style={{
-                  width: 30,
-                  height: 30,
-                  borderRadius: 8,
-                  background: 'rgba(59,130,246,0.14)',
-                  border: '1px solid rgba(59,130,246,0.30)',
-                  color: '#60a5fa',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  transition: 'background 0.15s',
-                }}
-              >
-                <Plus size={15} />
-              </button>
-            </div>
+            <span style={{ fontSize: '0.7rem', fontWeight: 700, color: '#334155', textTransform: 'uppercase', letterSpacing: '0.12em' }}>
+              Conferences
+            </span>
+            <button
+              type="button"
+              onClick={() => setShowCreateModal(true)}
+              title="Create conference room"
+              style={{
+                background: 'rgba(59,130,246,0.12)',
+                border: '1px solid rgba(59,130,246,0.25)',
+                borderRadius: 7,
+                cursor: 'pointer',
+                color: '#60a5fa',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 5,
+                padding: '5px 9px',
+                fontSize: '0.72rem',
+                fontWeight: 600,
+                transition: 'background 0.15s',
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(59,130,246,0.20)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(59,130,246,0.12)'; }}
+            >
+              <Plus size={13} strokeWidth={2} />
+              New
+            </button>
           </div>
 
           {/* Room list */}
