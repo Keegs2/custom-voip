@@ -699,11 +699,11 @@ export function SoftphoneWidget() {
   const handleDragMove = useCallback(
     (clientX: number, clientY: number) => {
       if (!isDragging) return;
-      const newX = clientX - dragOffset.current.x;
-      const newY = clientY - dragOffset.current.y;
-      setPosition({ x: newX, y: newY });
+      const rawX = clientX - dragOffset.current.x;
+      const rawY = clientY - dragOffset.current.y;
+      setPosition(clampPosition(rawX, rawY, isExpanded, fabWidth));
     },
-    [isDragging],
+    [isDragging, isExpanded, fabWidth],
   );
 
   const handleDragEnd = useCallback(
