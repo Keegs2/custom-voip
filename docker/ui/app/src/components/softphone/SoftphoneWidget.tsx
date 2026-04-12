@@ -13,9 +13,9 @@ import type { PresenceStatus } from '../../types/softphone';
 type WidgetTab = 'dialpad' | 'call' | 'history' | 'contacts' | 'settings';
 
 const WIDGET_WIDTH = 320;
-const WIDGET_HEIGHT = 560; // approximate collapsed widget height
-const FAB_SIZE = 52;
-const EDGE_MARGIN = 24;
+const WIDGET_HEIGHT = 520;
+const FAB_SIZE = 60;
+const EDGE_MARGIN = 8;
 
 const PRESENCE_OPTIONS: { value: PresenceStatus; label: string; color: string }[] = [
   { value: 'available', label: 'Available',      color: '#22c55e' },
@@ -35,28 +35,57 @@ const CONNECTION_LABEL: Record<string, { label: string; color: string }> = {
 
 /* ─── Position helpers ──────────────────────────────────────── */
 
-function defaultPosition(isExpanded: boolean): { x: number; y: number } {
+function defaultPosition(): { x: number; y: number } {
   if (typeof window === 'undefined') return { x: 0, y: 0 };
-  if (isExpanded) {
-    return {
-      x: window.innerWidth  - WIDGET_WIDTH  - EDGE_MARGIN,
-      y: window.innerHeight - WIDGET_HEIGHT - EDGE_MARGIN,
-    };
-  }
+  // Default: bottom-right corner, FAB docked to right edge
   return {
-    x: window.innerWidth  - 200 - EDGE_MARGIN,
+    x: window.innerWidth  - FAB_SIZE  - EDGE_MARGIN,
     y: window.innerHeight - FAB_SIZE - EDGE_MARGIN,
   };
 }
 
 function clampPosition(x: number, y: number, isExpanded: boolean): { x: number; y: number } {
   if (typeof window === 'undefined') return { x, y };
-  const w = isExpanded ? WIDGET_WIDTH  : 200;
+  const w = isExpanded ? WIDGET_WIDTH  : FAB_SIZE;
   const h = isExpanded ? WIDGET_HEIGHT : FAB_SIZE;
   return {
-    x: Math.max(0, Math.min(x, window.innerWidth  - w)),
-    y: Math.max(0, Math.min(y, window.innerHeight - h)),
+    x: Math.max(EDGE_MARGIN, Math.min(x, window.innerWidth  - w - EDGE_MARGIN)),
+    y: Math.max(EDGE_MARGIN, Math.min(y, window.innerHeight - h - EDGE_MARGIN)),
   };
+}
+
+// Snap to nearest horizontal edge (left or right), keep vertical position.
+// Should be called on drag-end for FAB, and on collapse.
+function snapToEdge(pos: { x: number; y: number }, isExpanded: boolean): { x: number; y: number } {
+  if (typeof window === 'undefined') return pos;
+  const w = isExpanded ? WIDGET_WIDTH  : FAB_SIZE;
+  const h = isExpanded ? WIDGET_HEIGHT : FAB_SIZE;
+  const centerX = pos.x + w / 2;
+  const screenMidX = window.innerWidth / 2;
+
+  const x = centerX < screenMidX
+    ? EDGE_MARGIN                              // snap to left edge
+    : window.innerWidth - w - EDGE_MARGIN;    // snap to right edge
+
+  const y = Math.max(EDGE_MARGIN, Math.min(pos.y, window.innerHeight - h - EDGE_MARGIN));
+
+  return { x, y };
+}
+
+// Given a FAB position, compute where the panel should open so it stays on screen.
+// Aligns the panel to the same side (left/right) as the FAB.
+function expandedPositionFromFab(fabPos: { x: number; y: number }): { x: number; y: number } {
+  if (typeof window === 'undefined') return fabPos;
+  const fabCenterX = fabPos.x + FAB_SIZE / 2;
+  const onRightSide = fabCenterX >= window.innerWidth / 2;
+
+  const x = onRightSide
+    ? window.innerWidth - WIDGET_WIDTH - EDGE_MARGIN   // right-align panel
+    : EDGE_MARGIN;                                      // left-align panel
+
+  const y = Math.max(EDGE_MARGIN, Math.min(fabPos.y, window.innerHeight - WIDGET_HEIGHT - EDGE_MARGIN));
+
+  return { x, y };
 }
 
 function loadSavedPosition(): { x: number; y: number } | null {
@@ -356,11 +385,11 @@ export function SoftphoneWidget() {
   const [position, setPosition] = useState<{ x: number; y: number }>(() => {
     const saved = loadSavedPosition();
     if (saved) {
-      // Validate saved position still fits on screen
-      const clamped = clampPosition(saved.x, saved.y, true);
-      return clamped;
+      // Re-snap to edge in case viewport has changed since last save.
+      // We always persist the FAB (collapsed) position, so snap as FAB.
+      return snapToEdge(saved, false);
     }
-    return defaultPosition(true);
+    return defaultPosition();
   });
   const [isDragging, setIsDragging] = useState(false);
   const dragOffset = useRef({ x: 0, y: 0 });
@@ -394,26 +423,23 @@ export function SoftphoneWidget() {
       if (!isDragging) return;
       setIsDragging(false);
 
-      // Snap to default if dragged way off-screen (more than half widget out)
-      const halfW = (isExpanded ? WIDGET_WIDTH : 200) / 2;
-      const halfH = (isExpanded ? WIDGET_HEIGHT : FAB_SIZE) / 2;
-      const finalX = clientX - dragOffset.current.x;
-      const finalY = clientY - dragOffset.current.y;
+      const rawPos = {
+        x: clientX - dragOffset.current.x,
+        y: clientY - dragOffset.current.y,
+      };
 
-      if (
-        finalX + halfW < 0 ||
-        finalX > window.innerWidth ||
-        finalY + halfH < 0 ||
-        finalY > window.innerHeight
-      ) {
-        const def = defaultPosition(isExpanded);
-        setPosition(def);
-        savePosition(def);
+      let finalPos: { x: number; y: number };
+      if (!isExpanded) {
+        // FAB: always snap to nearest horizontal edge after drag ends
+        finalPos = snapToEdge(rawPos, false);
+        // Save FAB edge position so expand/collapse can reference it
+        savePosition(finalPos);
       } else {
-        const clamped = clampPosition(finalX, finalY, isExpanded);
-        setPosition(clamped);
-        savePosition(clamped);
+        // Panel: just clamp within viewport, no edge-snapping
+        finalPos = clampPosition(rawPos.x, rawPos.y, true);
+        // Don't persist panel position — we always derive it from FAB position
       }
+      setPosition(finalPos);
     },
     [isDragging, isExpanded],
   );
@@ -433,13 +459,18 @@ export function SoftphoneWidget() {
     };
   }, [isDragging, handleDragMove, handleDragEnd]);
 
-  // Clamp position whenever window resizes
+  // Re-snap / re-clamp position whenever window resizes
   useEffect(() => {
     const onResize = () => {
       setPosition((prev) => {
-        const clamped = clampPosition(prev.x, prev.y, isExpanded);
-        savePosition(clamped);
-        return clamped;
+        if (!isExpanded) {
+          // Re-snap FAB to the same edge but within new viewport bounds
+          const snapped = snapToEdge(prev, false);
+          savePosition(snapped);
+          return snapped;
+        }
+        // Panel: just clamp within new viewport
+        return clampPosition(prev.x, prev.y, true);
       });
     };
     window.addEventListener('resize', onResize);
@@ -504,7 +535,20 @@ export function SoftphoneWidget() {
   // FAB click should only fire if we didn't drag
   const onFabClick = () => {
     if (didMove.current) return;
-    setExpanded(!isExpanded);
+
+    if (!isExpanded) {
+      // Expanding: derive panel position from current FAB position
+      const panelPos = expandedPositionFromFab(position);
+      setPosition(panelPos);
+      setExpanded(true);
+    } else {
+      // Collapsing: snap FAB to the nearest horizontal edge based on
+      // where the panel's center currently sits
+      const fabPos = snapToEdge(position, false);
+      setPosition(fabPos);
+      savePosition(fabPos);
+      setExpanded(false);
+    }
   };
 
   /* ─── Derived visual states ──────────────────────────────────── */
@@ -760,7 +804,13 @@ export function SoftphoneWidget() {
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation();
-                  if (!didMove.current) setExpanded(false);
+                  if (!didMove.current) {
+                    // Snap FAB to nearest edge based on where panel center sits
+                    const fabPos = snapToEdge(position, false);
+                    setPosition(fabPos);
+                    savePosition(fabPos);
+                    setExpanded(false);
+                  }
                 }}
                 onMouseDown={(e) => e.stopPropagation()}
                 aria-label="Minimize softphone"
