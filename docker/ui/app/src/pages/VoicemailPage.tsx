@@ -1,12 +1,28 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { listVoicemails, deleteVoicemail, markVoicemailRead } from '../api/voicemail';
 import { useSoftphone } from '../contexts/SoftphoneContext';
+import { Sidebar } from '../components/layout/Sidebar';
+import { SoftphoneWidget } from '../components/softphone/SoftphoneWidget';
 import type { VoicemailMessage } from '../types/softphone';
+
+/* ─── Keyframe injection ─────────────────────────────────── */
+
+const GLOBAL_STYLES = `
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes vmFadeIn {
+    from { opacity: 0; transform: translateY(5px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+`;
+
+/* ─── Filter type ────────────────────────────────────────── */
+
+type FilterKey = 'all' | 'unread';
 
 /* ─── Icons ──────────────────────────────────────────────── */
 
-const IconVoicemail = () => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} style={{ width: 22, height: 22 }}>
+const IconVoicemail = ({ size = 22 }: { size?: number }) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} style={{ width: size, height: size }}>
     <path d="M5.25 8.25a3 3 0 1 0 6 0 3 3 0 0 0-6 0ZM12.75 8.25a3 3 0 1 0 6 0 3 3 0 0 0-6 0Z" strokeLinecap="round" strokeLinejoin="round" />
     <path d="M2.25 14.25h7.5M14.25 14.25h7.5M5.25 14.25a3.75 3.75 0 0 0 0 0M18.75 14.25a3.75 3.75 0 0 0 0 0" strokeLinecap="round" strokeLinejoin="round" />
   </svg>
@@ -37,6 +53,12 @@ const IconCallBack = () => (
   </svg>
 );
 
+const IconRefresh = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} style={{ width: 14, height: 14 }}>
+    <path d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+
 /* ─── Helpers ────────────────────────────────────────────── */
 
 function formatDuration(ms: number): string {
@@ -56,16 +78,16 @@ function formatDate(iso: string): string {
     const diffH = Math.floor(diffMs / 3600000);
     if (diffH === 0) {
       const diffM = Math.floor(diffMs / 60000);
-      return diffM < 2 ? 'Just now' : `${diffM} minutes ago`;
+      return diffM < 2 ? 'Just now' : `${diffM}m ago`;
     }
-    return diffH === 1 ? '1 hour ago' : `${diffH} hours ago`;
+    return `${diffH}h ago`;
   }
   if (diffDays === 1) return 'Yesterday ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   if (diffDays < 7) return d.toLocaleDateString([], { weekday: 'long' }) + ', ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   return d.toLocaleDateString([], { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
-/* ─── Audio player component ─────────────────────────────── */
+/* ─── Audio player ───────────────────────────────────────── */
 
 interface AudioPlayerProps {
   url: string;
@@ -181,271 +203,6 @@ function AudioPlayer({ url, onPlay }: AudioPlayerProps) {
   );
 }
 
-/* ─── Main page ──────────────────────────────────────────── */
-
-export function VoicemailPage() {
-  const { refreshVoicemailCount, makeCall, connectionState } = useSoftphone();
-  const [messages, setMessages] = useState<VoicemailMessage[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [deletingIds, setDeletingIds] = useState<Set<number>>(new Set());
-  const [totalUnread, setTotalUnread] = useState(0);
-
-  const load = useCallback(async () => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      const result = await listVoicemails({ limit: 100 });
-      // API returns a bare array, not { items, unread_count }
-      const items = Array.isArray(result) ? result : (result.items ?? []);
-      setMessages(items);
-      const unread = Array.isArray(result) ? items.filter((m) => !m.is_read).length : (result.unread_count ?? 0);
-      setTotalUnread(unread);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load voicemails');
-    } finally {
-      setIsLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  const handleDelete = useCallback(async (id: number) => {
-    setDeletingIds((prev) => new Set([...prev, id]));
-    try {
-      await deleteVoicemail(id);
-      setMessages((prev) => prev.filter((m) => m.id !== id));
-      refreshVoicemailCount();
-    } catch {
-      // Revert optimistic UI
-    } finally {
-      setDeletingIds((prev) => { const next = new Set(prev); next.delete(id); return next; });
-    }
-  }, [refreshVoicemailCount]);
-
-  const handleMarkRead = useCallback(async (id: number) => {
-    try {
-      await markVoicemailRead(id);
-      setMessages((prev) => prev.map((m) => m.id === id ? { ...m, is_read: true } : m));
-      setTotalUnread((prev) => Math.max(0, prev - 1));
-      refreshVoicemailCount();
-    } catch {
-      // Not critical — ignore
-    }
-  }, [refreshVoicemailCount]);
-
-  const unreadMessages = messages.filter((m) => !m.is_read);
-  const readMessages = messages.filter((m) => m.is_read);
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
-      {/* Page header */}
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 }}>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <div
-              style={{
-                width: 40,
-                height: 40,
-                borderRadius: 12,
-                background: 'linear-gradient(135deg, rgba(99,102,241,0.25) 0%, rgba(59,130,246,0.20) 100%)',
-                border: '1px solid rgba(99,102,241,0.30)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                color: '#818cf8',
-              }}
-            >
-              <IconVoicemail />
-            </div>
-            <div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <h1 style={{ margin: 0, fontSize: '1.5rem', fontWeight: 800, color: '#f1f5f9', letterSpacing: '-0.03em' }}>
-                  Voicemail
-                </h1>
-                {totalUnread > 0 && (
-                  <span
-                    style={{
-                      background: '#ef4444',
-                      color: '#fff',
-                      fontSize: '0.7rem',
-                      fontWeight: 700,
-                      borderRadius: 10,
-                      padding: '2px 8px',
-                      letterSpacing: '0.02em',
-                    }}
-                  >
-                    {totalUnread} new
-                  </span>
-                )}
-              </div>
-              <p style={{ margin: 0, fontSize: '0.875rem', color: '#475569', marginTop: 2 }}>
-                Visual voicemail — listen, call back, or delete
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <button
-          type="button"
-          onClick={() => void load()}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-            padding: '8px 14px',
-            borderRadius: 8,
-            background: 'rgba(255,255,255,0.05)',
-            border: '1px solid rgba(255,255,255,0.08)',
-            color: '#64748b',
-            fontSize: '0.8rem',
-            cursor: 'pointer',
-            fontWeight: 500,
-          }}
-        >
-          Refresh
-        </button>
-      </div>
-
-      {/* Error state */}
-      {error && (
-        <div
-          style={{
-            padding: '12px 16px',
-            borderRadius: 10,
-            background: 'rgba(239,68,68,0.08)',
-            border: '1px solid rgba(239,68,68,0.20)',
-            color: '#f87171',
-            fontSize: '0.875rem',
-          }}
-        >
-          {error}
-        </div>
-      )}
-
-      {/* Loading state */}
-      {isLoading ? (
-        <div style={{ display: 'flex', justifyContent: 'center', padding: 48 }}>
-          <div style={{ width: 28, height: 28, border: '2px solid rgba(255,255,255,0.08)', borderTopColor: '#3b82f6', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
-        </div>
-      ) : messages.length === 0 ? (
-        <div
-          style={{
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: 12,
-            padding: '64px 24px',
-            color: '#334155',
-          }}
-        >
-          <IconVoicemail />
-          <div style={{ fontSize: '1rem', fontWeight: 600 }}>No voicemail messages</div>
-          <div style={{ fontSize: '0.875rem', color: '#1e293b' }}>New messages will appear here</div>
-        </div>
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-          {/* Unread section */}
-          {unreadMessages.length > 0 && (
-            <MessageSection
-              title="New Messages"
-              count={unreadMessages.length}
-              messages={unreadMessages}
-              onDelete={handleDelete}
-              onMarkRead={handleMarkRead}
-              onCallBack={(num) => void makeCall(num)}
-              canCallBack={connectionState === 'registered'}
-              deletingIds={deletingIds}
-              accentColor="#ef4444"
-            />
-          )}
-
-          {/* Read section */}
-          {readMessages.length > 0 && (
-            <MessageSection
-              title="Heard"
-              count={readMessages.length}
-              messages={readMessages}
-              onDelete={handleDelete}
-              onMarkRead={handleMarkRead}
-              onCallBack={(num) => void makeCall(num)}
-              canCallBack={connectionState === 'registered'}
-              deletingIds={deletingIds}
-              accentColor="#3b82f6"
-            />
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-/* ─── Message section ────────────────────────────────────── */
-
-interface MessageSectionProps {
-  title: string;
-  count: number;
-  messages: VoicemailMessage[];
-  onDelete: (id: number) => Promise<void>;
-  onMarkRead: (id: number) => Promise<void>;
-  onCallBack: (number: string) => void;
-  canCallBack: boolean;
-  deletingIds: Set<number>;
-  accentColor: string;
-}
-
-function MessageSection({
-  title,
-  count,
-  messages,
-  onDelete,
-  onMarkRead,
-  onCallBack,
-  canCallBack,
-  deletingIds,
-  accentColor,
-}: MessageSectionProps) {
-  return (
-    <div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-        <span style={{ fontSize: '0.7rem', fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
-          {title}
-        </span>
-        <span
-          style={{
-            fontSize: '0.65rem',
-            fontWeight: 700,
-            background: `${accentColor}18`,
-            color: accentColor,
-            border: `1px solid ${accentColor}30`,
-            borderRadius: 8,
-            padding: '1px 6px',
-          }}
-        >
-          {count}
-        </span>
-      </div>
-
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-        {messages.map((msg) => (
-          <VoicemailCard
-            key={msg.id}
-            message={msg}
-            onDelete={() => void onDelete(msg.id)}
-            onMarkRead={() => void onMarkRead(msg.id)}
-            onCallBack={() => onCallBack(msg.caller_id)}
-            canCallBack={canCallBack}
-            isDeleting={deletingIds.has(msg.id)}
-          />
-        ))}
-      </div>
-    </div>
-  );
-}
-
 /* ─── Voicemail card ─────────────────────────────────────── */
 
 interface VoicemailCardProps {
@@ -469,26 +226,33 @@ function VoicemailCard({ message, onDelete, onMarkRead, onCallBack, canCallBack,
         display: 'flex',
         flexDirection: 'column',
         gap: 12,
-        padding: '14px 16px',
-        borderRadius: 12,
-        background: message.is_read ? 'rgba(255,255,255,0.025)' : 'rgba(99,102,241,0.06)',
-        border: `1px solid ${message.is_read ? 'rgba(255,255,255,0.05)' : 'rgba(99,102,241,0.15)'}`,
-        transition: 'opacity 0.2s',
+        padding: '14px 20px',
+        borderBottom: '1px solid rgba(255,255,255,0.04)',
+        background: message.is_read ? 'transparent' : 'rgba(99,102,241,0.04)',
+        transition: 'background 0.15s, opacity 0.2s',
         opacity: isDeleting ? 0.4 : 1,
+        animation: 'vmFadeIn 0.18s ease-out',
+        cursor: 'default',
+      }}
+      onMouseEnter={(e) => {
+        if (!isDeleting) (e.currentTarget as HTMLDivElement).style.background = message.is_read ? 'rgba(255,255,255,0.025)' : 'rgba(99,102,241,0.07)';
+      }}
+      onMouseLeave={(e) => {
+        (e.currentTarget as HTMLDivElement).style.background = message.is_read ? 'transparent' : 'rgba(99,102,241,0.04)';
       }}
     >
       {/* Header row */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-        {/* Unread indicator */}
+        {/* Unread dot */}
         {!message.is_read && (
           <div
             style={{
-              width: 8,
-              height: 8,
+              width: 7,
+              height: 7,
               borderRadius: '50%',
               background: '#818cf8',
               flexShrink: 0,
-              boxShadow: '0 0 6px #818cf880',
+              boxShadow: '0 0 6px rgba(129,140,248,0.55)',
             }}
           />
         )}
@@ -496,18 +260,19 @@ function VoicemailCard({ message, onDelete, onMarkRead, onCallBack, canCallBack,
         {/* Avatar */}
         <div
           style={{
-            width: 40,
-            height: 40,
+            width: 38,
+            height: 38,
             borderRadius: '50%',
             background: 'linear-gradient(135deg, rgba(99,102,241,0.20) 0%, rgba(59,130,246,0.15) 100%)',
             border: '1px solid rgba(99,102,241,0.20)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            fontSize: '0.9rem',
+            fontSize: '0.875rem',
             fontWeight: 700,
             color: '#818cf8',
             flexShrink: 0,
+            marginLeft: message.is_read ? 15 : 0,
           }}
         >
           {(displayName ?? message.caller_id).charAt(0).toUpperCase()}
@@ -516,25 +281,25 @@ function VoicemailCard({ message, onDelete, onMarkRead, onCallBack, canCallBack,
         {/* Caller info */}
         <div style={{ flex: 1, minWidth: 0 }}>
           {displayName && (
-            <div style={{ fontSize: '0.9rem', fontWeight: 700, color: '#f1f5f9', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <div style={{ fontSize: '0.875rem', fontWeight: 700, color: '#f1f5f9', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {displayName}
             </div>
           )}
-          <div style={{ fontSize: displayName ? '0.78rem' : '0.9rem', color: displayName ? '#64748b' : '#f1f5f9', fontFamily: 'monospace', fontWeight: 600 }}>
+          <div style={{ fontSize: displayName ? '0.78rem' : '0.875rem', color: displayName ? '#64748b' : '#e2e8f0', fontFamily: 'monospace', fontWeight: 600 }}>
             {message.caller_id}
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 2 }}>
-            <span style={{ fontSize: '0.68rem', color: '#334155' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
+            <span style={{ fontSize: '0.7rem', color: '#475569' }}>
               {formatDate(message.created_at)}
             </span>
-            <span style={{ color: '#1e293b' }}>·</span>
-            <span style={{ fontSize: '0.68rem', color: '#334155' }}>
+            <span style={{ color: '#1e293b', fontSize: '0.7rem' }}>·</span>
+            <span style={{ fontSize: '0.7rem', color: '#475569' }}>
               {formatDuration(message.duration_ms)}
             </span>
           </div>
         </div>
 
-        {/* Actions */}
+        {/* Action buttons */}
         <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
           {canCallBack && (
             <button
@@ -581,7 +346,7 @@ function VoicemailCard({ message, onDelete, onMarkRead, onCallBack, canCallBack,
               transition: 'background 0.15s',
               opacity: isDeleting ? 0.5 : 1,
             }}
-            onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(239,68,68,0.18)'; }}
+            onMouseEnter={(e) => { if (!isDeleting) e.currentTarget.style.background = 'rgba(239,68,68,0.18)'; }}
             onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(239,68,68,0.08)'; }}
           >
             <IconDelete />
@@ -591,7 +356,7 @@ function VoicemailCard({ message, onDelete, onMarkRead, onCallBack, canCallBack,
 
       {/* Audio player */}
       {hasAudio ? (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, paddingLeft: message.is_read ? 0 : 20 }}>
+        <div style={{ paddingLeft: message.is_read ? 50 : 34, paddingRight: 2 }}>
           <AudioPlayer
             url={message.audio_url!}
             onPlay={() => { if (!message.is_read) void onMarkRead(); }}
@@ -600,26 +365,27 @@ function VoicemailCard({ message, onDelete, onMarkRead, onCallBack, canCallBack,
       ) : (
         <div
           style={{
-            padding: '8px 12px',
+            marginLeft: message.is_read ? 50 : 34,
+            padding: '7px 12px',
             borderRadius: 8,
             background: 'rgba(255,255,255,0.03)',
             border: '1px solid rgba(255,255,255,0.05)',
-            fontSize: '0.78rem',
+            fontSize: '0.75rem',
             color: '#334155',
-            paddingLeft: message.is_read ? 12 : 32,
           }}
         >
           Audio not available — message may be stored on the server
         </div>
       )}
 
-      {/* Mark as read button for unread messages without audio interaction */}
+      {/* Mark as read — only when no audio to trigger it automatically */}
       {!message.is_read && !hasAudio && (
         <button
           type="button"
           onClick={onMarkRead}
           style={{
             alignSelf: 'flex-start',
+            marginLeft: 34,
             padding: '4px 10px',
             borderRadius: 6,
             background: 'transparent',
@@ -627,12 +393,440 @@ function VoicemailCard({ message, onDelete, onMarkRead, onCallBack, canCallBack,
             color: '#818cf8',
             fontSize: '0.7rem',
             cursor: 'pointer',
-            marginLeft: 20,
           }}
         >
           Mark as heard
         </button>
       )}
+    </div>
+  );
+}
+
+/* ─── Left panel filter item ─────────────────────────────── */
+
+interface FilterItemProps {
+  label: string;
+  count: number;
+  isSelected: boolean;
+  badgeColor?: 'red' | 'blue' | 'neutral';
+  onClick: () => void;
+}
+
+function FilterItem({ label, count, isSelected, badgeColor = 'neutral', onClick }: FilterItemProps) {
+  const badgeStyles: Record<string, React.CSSProperties> = {
+    red:     { background: 'rgba(239,68,68,0.15)',   color: '#f87171', border: '1px solid rgba(239,68,68,0.25)' },
+    blue:    { background: 'rgba(59,130,246,0.15)',  color: '#60a5fa', border: '1px solid rgba(59,130,246,0.25)' },
+    neutral: { background: 'rgba(255,255,255,0.06)', color: '#475569', border: 'none' },
+  };
+
+  return (
+    <div
+      onClick={onClick}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onClick(); }}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+        padding: '8px 14px',
+        borderRadius: 8,
+        cursor: 'pointer',
+        userSelect: 'none',
+        background: isSelected
+          ? 'linear-gradient(135deg, rgba(59,130,246,0.16) 0%, rgba(59,130,246,0.08) 100%)'
+          : 'transparent',
+        color: isSelected ? '#93c5fd' : '#64748b',
+        transition: 'background 0.12s, color 0.12s',
+        marginBottom: 2,
+      }}
+      onMouseEnter={(e) => {
+        if (!isSelected) {
+          (e.currentTarget as HTMLDivElement).style.background = 'rgba(255,255,255,0.04)';
+          (e.currentTarget as HTMLDivElement).style.color = '#94a3b8';
+        }
+      }}
+      onMouseLeave={(e) => {
+        if (!isSelected) {
+          (e.currentTarget as HTMLDivElement).style.background = 'transparent';
+          (e.currentTarget as HTMLDivElement).style.color = '#64748b';
+        }
+      }}
+    >
+      {/* Voicemail icon */}
+      <span style={{ flexShrink: 0, display: 'flex', color: isSelected ? '#60a5fa' : 'inherit' }}>
+        <IconVoicemail size={15} />
+      </span>
+
+      <span style={{
+        flex: 1,
+        fontSize: '0.825rem',
+        fontWeight: isSelected ? 700 : 500,
+        color: isSelected ? '#e2e8f0' : 'inherit',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
+      }}>
+        {label}
+      </span>
+
+      {count > 0 && (
+        <span style={{ fontSize: '0.65rem', fontWeight: 700, borderRadius: 4, padding: '1px 5px', flexShrink: 0, ...badgeStyles[badgeColor] }}>
+          {count}
+        </span>
+      )}
+      {count === 0 && (
+        <span style={{ fontSize: '0.65rem', color: '#475569', background: 'rgba(255,255,255,0.06)', borderRadius: 4, padding: '1px 5px', flexShrink: 0 }}>
+          0
+        </span>
+      )}
+    </div>
+  );
+}
+
+/* ─── Empty / loading states for right panel ─────────────── */
+
+function RightPanelEmpty() {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        height: '100%',
+        gap: 14,
+        padding: 48,
+        color: '#334155',
+      }}
+    >
+      <div
+        style={{
+          width: 72,
+          height: 72,
+          borderRadius: 20,
+          background: 'linear-gradient(135deg, rgba(99,102,241,0.12) 0%, rgba(59,130,246,0.08) 100%)',
+          border: '1px solid rgba(99,102,241,0.18)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          color: '#6366f1',
+        }}
+      >
+        <IconVoicemail size={32} />
+      </div>
+      <div style={{ textAlign: 'center', maxWidth: 260 }}>
+        <div style={{ fontSize: '1rem', fontWeight: 700, color: '#94a3b8', marginBottom: 6, letterSpacing: '-0.02em' }}>
+          No voicemail messages
+        </div>
+        <div style={{ fontSize: '0.85rem', color: '#475569', lineHeight: 1.6 }}>
+          New messages will appear here as they arrive.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RightPanelNoUnread() {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        height: '100%',
+        gap: 14,
+        padding: 48,
+        color: '#334155',
+      }}
+    >
+      <div
+        style={{
+          width: 72,
+          height: 72,
+          borderRadius: 20,
+          background: 'linear-gradient(135deg, rgba(34,197,94,0.12) 0%, rgba(59,130,246,0.08) 100%)',
+          border: '1px solid rgba(34,197,94,0.18)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          color: '#22c55e',
+        }}
+      >
+        <IconVoicemail size={32} />
+      </div>
+      <div style={{ textAlign: 'center', maxWidth: 260 }}>
+        <div style={{ fontSize: '1rem', fontWeight: 700, color: '#94a3b8', marginBottom: 6 }}>
+          All caught up
+        </div>
+        <div style={{ fontSize: '0.85rem', color: '#475569', lineHeight: 1.6 }}>
+          No unread voicemails. Switch to All Messages to see your history.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─── Main page ──────────────────────────────────────────── */
+
+export function VoicemailPage() {
+  const { refreshVoicemailCount, makeCall, connectionState } = useSoftphone();
+  const [messages, setMessages] = useState<VoicemailMessage[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [deletingIds, setDeletingIds] = useState<Set<number>>(new Set());
+  const [filter, setFilter] = useState<FilterKey>('all');
+
+  const load = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const result = await listVoicemails({ limit: 100 });
+      const items = Array.isArray(result) ? result : (result.items ?? []);
+      setMessages(items);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load voicemails');
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const handleDelete = useCallback(async (id: number) => {
+    setDeletingIds((prev) => new Set([...prev, id]));
+    try {
+      await deleteVoicemail(id);
+      setMessages((prev) => prev.filter((m) => m.id !== id));
+      refreshVoicemailCount();
+    } catch {
+      // Revert optimistic UI — just leave the item; a reload will fix state
+    } finally {
+      setDeletingIds((prev) => { const next = new Set(prev); next.delete(id); return next; });
+    }
+  }, [refreshVoicemailCount]);
+
+  const handleMarkRead = useCallback(async (id: number) => {
+    try {
+      await markVoicemailRead(id);
+      setMessages((prev) => prev.map((m) => m.id === id ? { ...m, is_read: true } : m));
+      refreshVoicemailCount();
+    } catch {
+      // Not critical — ignore
+    }
+  }, [refreshVoicemailCount]);
+
+  /* ── Derived counts ──────────────────────────────────────── */
+  const totalCount = messages.length;
+  const unreadCount = messages.filter((m) => !m.is_read).length;
+
+  const visibleMessages = filter === 'unread'
+    ? messages.filter((m) => !m.is_read)
+    : messages;
+
+  const filterLabel = filter === 'unread' ? 'Unread' : 'All Messages';
+
+  /* ── Render ──────────────────────────────────────────────── */
+  return (
+    <div
+      style={{
+        display: 'flex',
+        height: '100vh',
+        width: '100vw',
+        overflow: 'hidden',
+        background: '#0f1117',
+      }}
+    >
+      <style>{GLOBAL_STYLES}</style>
+
+      {/* Fixed sidebar — same as AppLayout and other full-screen pages */}
+      <Sidebar />
+
+      {/* Main shell — fills space to the right of the sidebar */}
+      <div
+        style={{
+          marginLeft: 240,
+          flex: 1,
+          display: 'flex',
+          overflow: 'hidden',
+          height: '100vh',
+        }}
+      >
+        {/* ── Left panel: filter list (280px) ─────────────── */}
+        <div
+          style={{
+            width: 280,
+            flexShrink: 0,
+            borderRight: '1px solid rgba(255,255,255,0.06)',
+            display: 'flex',
+            flexDirection: 'column',
+            minHeight: 0,
+            background: '#0c0e16',
+          }}
+        >
+          {/* Panel header */}
+          <div
+            style={{
+              padding: '18px 16px 12px',
+              borderBottom: '1px solid rgba(255,255,255,0.05)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              flexShrink: 0,
+            }}
+          >
+            <span style={{ fontSize: '0.7rem', fontWeight: 700, color: '#334155', textTransform: 'uppercase', letterSpacing: '0.12em' }}>
+              Voicemail
+            </span>
+            <button
+              type="button"
+              onClick={() => void load()}
+              title="Refresh"
+              style={{
+                background: 'rgba(255,255,255,0.05)',
+                border: '1px solid rgba(255,255,255,0.08)',
+                borderRadius: 7,
+                cursor: 'pointer',
+                color: '#475569',
+                display: 'flex',
+                alignItems: 'center',
+                padding: '5px 7px',
+                transition: 'background 0.15s, color 0.15s',
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.09)'; e.currentTarget.style.color = '#94a3b8'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.05)'; e.currentTarget.style.color = '#475569'; }}
+            >
+              <IconRefresh />
+            </button>
+          </div>
+
+          {/* Filter list */}
+          <div style={{ flex: 1, overflowY: 'auto', padding: '8px 8px' }}>
+            <FilterItem
+              label="All Messages"
+              count={totalCount}
+              isSelected={filter === 'all'}
+              badgeColor="neutral"
+              onClick={() => setFilter('all')}
+            />
+            <FilterItem
+              label="Unread"
+              count={unreadCount}
+              isSelected={filter === 'unread'}
+              badgeColor="red"
+              onClick={() => setFilter('unread')}
+            />
+          </div>
+        </div>
+
+        {/* ── Right panel: message list ────────────────────── */}
+        <div
+          style={{
+            flex: 1,
+            display: 'flex',
+            flexDirection: 'column',
+            minHeight: 0,
+            minWidth: 0,
+            background: '#0f1117',
+          }}
+        >
+          {/* Right panel header */}
+          <div
+            style={{
+              padding: '14px 24px',
+              borderBottom: '1px solid rgba(255,255,255,0.06)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              flexShrink: 0,
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span style={{ fontSize: '0.925rem', fontWeight: 700, color: '#e2e8f0', letterSpacing: '-0.02em' }}>
+                {filterLabel}
+              </span>
+              {!isLoading && (
+                <span
+                  style={{
+                    fontSize: '0.7rem',
+                    fontWeight: 600,
+                    color: '#475569',
+                    background: 'rgba(255,255,255,0.06)',
+                    borderRadius: 5,
+                    padding: '2px 7px',
+                  }}
+                >
+                  {visibleMessages.length} {visibleMessages.length === 1 ? 'message' : 'messages'}
+                </span>
+              )}
+              {unreadCount > 0 && filter === 'all' && (
+                <span
+                  style={{
+                    fontSize: '0.7rem',
+                    fontWeight: 700,
+                    color: '#f87171',
+                    background: 'rgba(239,68,68,0.12)',
+                    border: '1px solid rgba(239,68,68,0.22)',
+                    borderRadius: 5,
+                    padding: '2px 7px',
+                  }}
+                >
+                  {unreadCount} new
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* Error banner */}
+          {error && (
+            <div
+              style={{
+                margin: '12px 24px 0',
+                padding: '10px 14px',
+                borderRadius: 10,
+                background: 'rgba(239,68,68,0.08)',
+                border: '1px solid rgba(239,68,68,0.20)',
+                color: '#f87171',
+                fontSize: '0.85rem',
+                flexShrink: 0,
+              }}
+            >
+              {error}
+            </div>
+          )}
+
+          {/* Message list — scrollable */}
+          <div style={{ flex: 1, overflowY: 'auto' }}>
+            {isLoading ? (
+              <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
+                <div style={{ width: 26, height: 26, border: '2px solid rgba(255,255,255,0.08)', borderTopColor: '#3b82f6', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+              </div>
+            ) : visibleMessages.length === 0 && filter === 'all' ? (
+              <RightPanelEmpty />
+            ) : visibleMessages.length === 0 && filter === 'unread' ? (
+              <RightPanelNoUnread />
+            ) : (
+              visibleMessages.map((msg) => (
+                <VoicemailCard
+                  key={msg.id}
+                  message={msg}
+                  onDelete={() => void handleDelete(msg.id)}
+                  onMarkRead={() => void handleMarkRead(msg.id)}
+                  onCallBack={() => void makeCall(msg.caller_id)}
+                  canCallBack={connectionState === 'registered'}
+                  isDeleting={deletingIds.has(msg.id)}
+                />
+              ))
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Softphone overlay */}
+      <SoftphoneWidget />
     </div>
   );
 }
