@@ -132,23 +132,18 @@ function RoomListItem({ conf, liveStatus, isSelected, onClick }: RoomListItemPro
         display: 'flex',
         alignItems: 'center',
         gap: 10,
-        padding: '10px 12px',
-        borderRadius: 10,
+        padding: '8px 14px',
+        borderRadius: 8,
         background: isSelected
-          ? 'linear-gradient(135deg, rgba(59,130,246,0.14) 0%, rgba(59,130,246,0.07) 100%)'
+          ? 'linear-gradient(135deg, rgba(59,130,246,0.16) 0%, rgba(59,130,246,0.08) 100%)'
           : 'transparent',
-        border: isSelected
-          ? '1px solid rgba(59,130,246,0.28)'
-          : '1px solid transparent',
+        border: 'none',
         cursor: 'pointer',
         textAlign: 'left',
-        transition: 'background 0.15s, border-color 0.15s',
-        boxShadow: isSelected
-          ? '0 2px 12px rgba(59,130,246,0.10)'
-          : 'none',
+        transition: 'background 0.15s, color 0.15s',
       }}
       onMouseEnter={(e) => {
-        if (!isSelected) e.currentTarget.style.background = 'rgba(255,255,255,0.03)';
+        if (!isSelected) e.currentTarget.style.background = 'rgba(255,255,255,0.04)';
       }}
       onMouseLeave={(e) => {
         if (!isSelected) e.currentTarget.style.background = 'transparent';
@@ -198,9 +193,9 @@ function RoomListItem({ conf, liveStatus, isSelected, onClick }: RoomListItemPro
       <div style={{ flex: 1, minWidth: 0 }}>
         <div
           style={{
-            fontSize: '0.85rem',
-            fontWeight: 600,
-            color: isSelected ? '#e2e8f0' : '#94a3b8',
+            fontSize: '0.825rem',
+            fontWeight: isSelected ? 700 : 500,
+            color: isSelected ? '#e2e8f0' : '#64748b',
             overflow: 'hidden',
             textOverflow: 'ellipsis',
             whiteSpace: 'nowrap',

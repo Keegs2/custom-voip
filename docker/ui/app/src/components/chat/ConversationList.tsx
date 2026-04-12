@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { MessageSquare, Search, Plus, Users } from 'lucide-react';
+import { Search, Plus, Users } from 'lucide-react';
 import type { Conversation } from '../../types/chat';
 import { useAuth } from '../../contexts/AuthContext';
 
@@ -74,30 +74,25 @@ function ConvRow({ conversation, isSelected, currentUserId, onSelect }: ConvRowP
         display: 'flex',
         alignItems: 'center',
         gap: 10,
-        padding: '9px 10px',
-        borderRadius: 10,
+        padding: '8px 14px',
+        borderRadius: 8,
         background: isSelected
-          ? 'linear-gradient(135deg, rgba(59,130,246,0.16) 0%, rgba(129,140,248,0.09) 100%)'
+          ? 'linear-gradient(135deg, rgba(59,130,246,0.16) 0%, rgba(59,130,246,0.08) 100%)'
           : 'transparent',
-        border: isSelected
-          ? '1px solid rgba(59,130,246,0.24)'
-          : '1px solid transparent',
-        boxShadow: isSelected ? '0 1px 8px rgba(59,130,246,0.12)' : 'none',
+        border: 'none',
         cursor: 'pointer',
         textAlign: 'left',
         width: '100%',
-        transition: 'background 0.12s, border-color 0.12s, box-shadow 0.12s',
+        transition: 'background 0.12s, color 0.12s',
       }}
       onMouseEnter={(e) => {
         if (!isSelected) {
           e.currentTarget.style.background = 'rgba(255,255,255,0.04)';
-          e.currentTarget.style.borderColor = 'rgba(255,255,255,0.05)';
         }
       }}
       onMouseLeave={(e) => {
         if (!isSelected) {
           e.currentTarget.style.background = 'transparent';
-          e.currentTarget.style.borderColor = 'transparent';
         }
       }}
     >
@@ -166,9 +161,9 @@ function ConvRow({ conversation, isSelected, currentUserId, onSelect }: ConvRowP
         <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 4 }}>
           <span
             style={{
-              fontSize: '0.875rem',
-              fontWeight: unread > 0 ? 700 : 500,
-              color: unread > 0 ? '#f1f5f9' : '#cbd5e1',
+              fontSize: '0.825rem',
+              fontWeight: (isSelected || unread > 0) ? 700 : 500,
+              color: isSelected ? '#e2e8f0' : (unread > 0 ? '#94a3b8' : '#64748b'),
               overflow: 'hidden',
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',
@@ -285,35 +280,17 @@ export function ConversationList({
             marginBottom: 12,
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <div
-              style={{
-                width: 28,
-                height: 28,
-                borderRadius: 8,
-                background: 'linear-gradient(135deg, rgba(59,130,246,0.20) 0%, rgba(129,140,248,0.12) 100%)',
-                border: '1px solid rgba(59,130,246,0.22)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                color: '#60a5fa',
-                flexShrink: 0,
-              }}
-            >
-              <MessageSquare size={14} strokeWidth={2} />
-            </div>
-            <span
-              style={{
-                fontSize: '0.7rem',
-                fontWeight: 700,
-                color: '#334155',
-                textTransform: 'uppercase',
-                letterSpacing: '0.12em',
-              }}
-            >
-              Messages
-            </span>
-          </div>
+          <span
+            style={{
+              fontSize: '0.7rem',
+              fontWeight: 700,
+              color: '#334155',
+              textTransform: 'uppercase',
+              letterSpacing: '0.12em',
+            }}
+          >
+            Messages
+          </span>
 
           {/* New conversation button */}
           <button
