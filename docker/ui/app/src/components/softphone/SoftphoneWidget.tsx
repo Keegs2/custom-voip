@@ -685,7 +685,7 @@ export function SoftphoneWidget() {
                   ? '1px solid rgba(34,197,94,0.20)'
                   : '1px solid rgba(255,255,255,0.06)',
                 flexShrink: 0,
-                cursor: isDragging ? 'grabbing' : 'grab',
+                cursor: isDragging ? 'grabbing' : 'pointer',
                 userSelect: 'none',
                 background: headerBackground,
                 animation: isIncoming ? 'softphone-header-pulse 2s ease-in-out infinite' : undefined,
@@ -1027,7 +1027,7 @@ export function SoftphoneWidget() {
               ? '1px solid rgba(34,197,94,0.40)'
               : '1px solid rgba(255,255,255,0.10)',
             color: hasActiveCall || isIncoming ? '#fff' : '#94a3b8',
-            cursor: isDragging ? 'grabbing' : 'grab',
+            cursor: isDragging ? 'grabbing' : 'pointer',
             boxShadow: fabBoxShadow,
             transition: isDragging ? 'none' : 'box-shadow 0.2s, background 0.25s',
             userSelect: 'none',
