@@ -47,15 +47,14 @@ function PaletteChip({ verb, label }: PaletteChipProps) {
     <div
       ref={setNodeRef}
       className={cn(
-        'relative flex items-center gap-1.5 px-2.5 py-1.5',
-        'border rounded-lg overflow-hidden',
+        'relative flex items-center gap-1.5 px-[10px] py-[4px]',
+        'border rounded-[6px] overflow-hidden',
         'cursor-grab select-none transition-all duration-150',
-        'hover:bg-[rgba(255,255,255,0.05)]',
         isDragging && 'opacity-25 cursor-grabbing scale-95',
       )}
       style={{
         background: `${accentColor}0d`,
-        borderColor: `${accentColor}28`,
+        borderColor: `${accentColor}40`,
       }}
       {...listeners}
       {...attributes}
@@ -64,7 +63,7 @@ function PaletteChip({ verb, label }: PaletteChipProps) {
     >
       {/* Icon badge */}
       <div
-        className={cn('flex-shrink-0 w-5 h-5 rounded flex items-center justify-center text-[0.65rem] font-bold', textClass)}
+        className={cn('flex-shrink-0 w-4 h-4 rounded flex items-center justify-center text-[0.6rem] font-bold', textClass)}
         style={{ backgroundColor: `${accentColor}18` }}
         aria-hidden="true"
       >
@@ -88,12 +87,12 @@ export function IvrPalette() {
     <div
       role="toolbar"
       aria-label="IVR verb palette — drag verbs onto the canvas"
-      className="flex items-center gap-1.5 flex-wrap"
+      className="flex items-center gap-[6px] flex-wrap"
     >
       {/* Section label */}
       <span
-        className="text-[0.6rem] font-bold uppercase tracking-[0.12em] mr-1 flex-shrink-0"
-        style={{ color: '#334155' }}
+        className="text-[0.65rem] font-[700] uppercase tracking-[0.10em] mr-1 flex-shrink-0"
+        style={{ color: '#334155', letterSpacing: '0.1em' }}
         aria-hidden="true"
       >
         Verbs
@@ -105,8 +104,8 @@ export function IvrPalette() {
 
       {/* Drag hint — hidden from assistive tech, visible on wider screens */}
       <span
-        className="ml-2 text-[0.65rem] hidden sm:inline"
-        style={{ color: 'rgba(74,85,104,0.55)' }}
+        className="ml-2 text-[0.65rem] hidden sm:inline flex-shrink-0"
+        style={{ color: '#1e293b' }}
         aria-hidden="true"
       >
         drag onto canvas
