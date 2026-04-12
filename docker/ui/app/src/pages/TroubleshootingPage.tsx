@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Sidebar } from '../components/layout/Sidebar';
+import { SoftphoneWidget } from '../components/softphone/SoftphoneWidget';
 
 export function TroubleshootingPage() {
   const [error, setError] = useState(false);
@@ -9,6 +10,7 @@ export function TroubleshootingPage() {
     return (
       <div className="min-h-screen bg-[#0f1117]">
         <Sidebar />
+        <SoftphoneWidget />
         <div
           style={{
             marginLeft: 240,
@@ -35,6 +37,7 @@ export function TroubleshootingPage() {
   return (
     <div className="min-h-screen bg-[#0f1117]">
       <Sidebar />
+      <SoftphoneWidget />
       <div style={{ marginLeft: 240, height: '100vh' }}>
         <iframe
           src={homerUrl}
