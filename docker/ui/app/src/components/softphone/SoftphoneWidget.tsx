@@ -337,6 +337,11 @@ const SOFTPHONE_STYLES = `
     50%       { box-shadow: 0 4px 30px rgba(59,130,246,0.75), 0 0 50px rgba(59,130,246,0.30); }
   }
 
+  @keyframes softphone-glow-green-idle {
+    0%, 100% { box-shadow: 0 4px 16px rgba(34,197,94,0.35), 0 0 0 0 rgba(34,197,94,0.20); }
+    50%       { box-shadow: 0 4px 28px rgba(34,197,94,0.60), 0 0 32px rgba(34,197,94,0.18); }
+  }
+
   @keyframes softphone-ripple {
     0%   { transform: scale(1);    opacity: 0.8; }
     100% { transform: scale(1.85); opacity: 0; }
@@ -379,6 +384,232 @@ const SOFTPHONE_STYLES = `
   @keyframes softphone-ripple-accept {
     0%   { transform: scale(1);   opacity: 0.6; }
     100% { transform: scale(2.2); opacity: 0;   }
+  }
+
+  @keyframes softphone-dial-flash {
+    0%   { background: rgba(59,130,246,0.30); box-shadow: 0 0 0 0 rgba(59,130,246,0.50); }
+    40%  { background: rgba(59,130,246,0.18); box-shadow: 0 0 12px 4px rgba(59,130,246,0.25); }
+    100% { background: rgba(255,255,255,0.05); box-shadow: none; }
+  }
+
+  @keyframes softphone-presence-pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50%       { opacity: 0.65; transform: scale(1.35); }
+  }
+
+  /* ── Tab bar buttons ── */
+  .sp-tab-btn {
+    transition: color 0.15s ease, background 0.15s ease, transform 0.12s ease;
+  }
+  .sp-tab-btn:hover:not([aria-selected="true"]) {
+    color: #94a3b8 !important;
+    background: rgba(255,255,255,0.04) !important;
+  }
+  .sp-tab-btn:active {
+    transform: scale(0.95);
+    background: rgba(255,255,255,0.06) !important;
+  }
+  .sp-tab-btn[aria-selected="true"] {
+    color: #60a5fa !important;
+  }
+
+  /* ── Close / minimize button ── */
+  .sp-close-btn {
+    transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease, transform 0.12s ease;
+  }
+  .sp-close-btn:hover {
+    color: #f87171 !important;
+    background: rgba(239,68,68,0.12) !important;
+    border-color: rgba(239,68,68,0.25) !important;
+    transform: rotate(8deg);
+  }
+  .sp-close-btn:active {
+    transform: scale(0.88) rotate(8deg);
+    background: rgba(239,68,68,0.20) !important;
+  }
+
+  /* ── Dial pad digit buttons ── */
+  .sp-dial-key {
+    transition: background 0.10s ease, border-color 0.10s ease, transform 0.08s ease, box-shadow 0.10s ease;
+    position: relative;
+    overflow: hidden;
+  }
+  .sp-dial-key:hover {
+    background: rgba(255,255,255,0.10) !important;
+    border-color: rgba(59,130,246,0.30) !important;
+    box-shadow: 0 0 0 1px rgba(59,130,246,0.15) inset !important;
+  }
+  .sp-dial-key:active {
+    transform: scale(0.92) !important;
+    background: rgba(59,130,246,0.18) !important;
+    animation: softphone-dial-flash 0.35s ease-out forwards;
+  }
+
+  /* ── Call (green) button ── */
+  .sp-call-btn {
+    transition: transform 0.12s ease, box-shadow 0.15s ease, opacity 0.2s;
+  }
+  .sp-call-btn:not(:disabled):hover {
+    transform: scale(1.05);
+    box-shadow: 0 6px 28px rgba(34,197,94,0.55) !important;
+  }
+  .sp-call-btn:not(:disabled):active {
+    transform: scale(0.91) !important;
+    box-shadow: 0 2px 10px rgba(34,197,94,0.40) !important;
+  }
+  .sp-call-btn:not(:disabled) {
+    animation: softphone-glow-green-idle 2.4s ease-in-out infinite;
+  }
+
+  /* ── Hangup (red) button ── */
+  .sp-hangup-btn {
+    transition: transform 0.12s ease, box-shadow 0.15s ease;
+  }
+  .sp-hangup-btn:not(:disabled):hover {
+    transform: scale(1.05);
+    box-shadow: 0 6px 28px rgba(239,68,68,0.65) !important;
+  }
+  .sp-hangup-btn:not(:disabled):active {
+    transform: scale(0.90) !important;
+    box-shadow: 0 2px 8px rgba(239,68,68,0.40) !important;
+  }
+
+  /* ── Mute / Hold / Keypad action buttons ── */
+  .sp-action-btn {
+    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, transform 0.12s ease, box-shadow 0.15s ease;
+  }
+  .sp-action-btn:not(:disabled):hover {
+    background: rgba(255,255,255,0.12) !important;
+    color: #f1f5f9 !important;
+    border-color: rgba(255,255,255,0.18) !important;
+  }
+  .sp-action-btn:not(:disabled):active {
+    transform: scale(0.93) !important;
+  }
+
+  /* ── DTMF pad (in-call keypad) ── */
+  .sp-dtmf-key {
+    transition: background 0.10s ease, transform 0.08s ease;
+  }
+  .sp-dtmf-key:hover {
+    background: rgba(255,255,255,0.10) !important;
+    border-color: rgba(59,130,246,0.25) !important;
+  }
+  .sp-dtmf-key:active {
+    transform: scale(0.93);
+    background: rgba(59,130,246,0.15) !important;
+  }
+
+  /* ── Back-to-controls link ── */
+  .sp-back-btn {
+    transition: color 0.12s ease;
+  }
+  .sp-back-btn:hover {
+    color: #94a3b8 !important;
+  }
+
+  /* ── Backspace button ── */
+  .sp-backspace-btn {
+    transition: color 0.12s ease, background 0.12s ease, transform 0.10s ease;
+  }
+  .sp-backspace-btn:hover {
+    color: #94a3b8 !important;
+    background: rgba(255,255,255,0.06) !important;
+  }
+  .sp-backspace-btn:active {
+    transform: scale(0.88);
+  }
+
+  /* ── Contact list rows ── */
+  .sp-contact-row {
+    transition: background 0.12s ease, border-left-color 0.12s ease;
+    border-left: 2px solid transparent;
+  }
+  .sp-contact-row:hover {
+    background: rgba(59,130,246,0.06) !important;
+    border-left-color: rgba(59,130,246,0.40) !important;
+  }
+  .sp-contact-row:active {
+    background: rgba(59,130,246,0.10) !important;
+  }
+
+  /* ── Contact call button ── */
+  .sp-contact-call-btn {
+    transition: background 0.15s ease, transform 0.12s ease, box-shadow 0.15s ease;
+  }
+  .sp-contact-call-btn:hover {
+    background: rgba(34,197,94,0.22) !important;
+    transform: scale(1.08);
+    box-shadow: 0 0 10px rgba(34,197,94,0.30) !important;
+  }
+  .sp-contact-call-btn:active {
+    transform: scale(0.93) !important;
+  }
+
+  /* ── Presence dot — pulse on available ── */
+  .sp-presence-available {
+    animation: softphone-presence-pulse 2.2s ease-in-out infinite;
+  }
+
+  /* ── Call history rows ── */
+  .sp-history-row {
+    transition: background 0.12s ease;
+    position: relative;
+  }
+  .sp-history-row:hover {
+    background: rgba(255,255,255,0.04) !important;
+  }
+  .sp-history-row:active {
+    background: rgba(255,255,255,0.07) !important;
+  }
+
+  /* ── History call-back button ── */
+  .sp-callback-btn {
+    transition: background 0.12s ease, color 0.12s ease, transform 0.10s ease, box-shadow 0.12s ease;
+  }
+  .sp-callback-btn:hover {
+    background: rgba(34,197,94,0.22) !important;
+    color: #86efac !important;
+    box-shadow: 0 0 8px rgba(34,197,94,0.25) !important;
+  }
+  .sp-callback-btn:active {
+    transform: scale(0.93);
+  }
+
+  /* ── Call history filter tabs ── */
+  .sp-filter-btn {
+    transition: all 0.15s ease;
+  }
+  .sp-filter-btn:hover {
+    background: rgba(255,255,255,0.05) !important;
+    color: #94a3b8 !important;
+  }
+  .sp-filter-btn:active {
+    transform: scale(0.95);
+  }
+
+  /* ── Presence dropdown items ── */
+  .sp-presence-opt {
+    transition: background 0.12s ease;
+  }
+  .sp-presence-opt:hover {
+    background: rgba(255,255,255,0.08) !important;
+  }
+  .sp-presence-opt:active {
+    background: rgba(255,255,255,0.12) !important;
+  }
+
+  /* ── Device selector ── */
+  .sp-device-select {
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+  .sp-device-select:hover {
+    border-color: rgba(255,255,255,0.18) !important;
+    box-shadow: 0 0 0 1px rgba(59,130,246,0.15) !important;
+  }
+  .sp-device-select:focus {
+    border-color: rgba(59,130,246,0.50) !important;
+    box-shadow: 0 0 0 2px rgba(59,130,246,0.15) !important;
   }
 `;
 
@@ -769,6 +1000,7 @@ export function SoftphoneWidget() {
                             void setPresence(opt.value);
                             setShowPresenceMenu(false);
                           }}
+                          className="sp-presence-opt"
                           style={{
                             display: 'flex',
                             alignItems: 'center',
@@ -781,10 +1013,7 @@ export function SoftphoneWidget() {
                             fontSize: '0.8rem',
                             cursor: 'pointer',
                             textAlign: 'left',
-                            transition: 'background 0.12s',
                           }}
-                          onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.08)'; }}
-                          onMouseLeave={(e) => { e.currentTarget.style.background = presence === opt.value ? 'rgba(255,255,255,0.06)' : 'transparent'; }}
                         >
                           <span style={{ width: 8, height: 8, borderRadius: '50%', background: opt.color, flexShrink: 0 }} />
                           {opt.label}
@@ -871,6 +1100,7 @@ export function SoftphoneWidget() {
                 }}
                 onMouseDown={(e) => e.stopPropagation()}
                 aria-label="Minimize softphone"
+                className="sp-close-btn"
                 style={{
                   background: 'rgba(255,255,255,0.05)',
                   border: '1px solid rgba(255,255,255,0.08)',
@@ -883,11 +1113,8 @@ export function SoftphoneWidget() {
                   width: 24,
                   height: 24,
                   padding: 0,
-                  transition: 'color 0.15s',
                   flexShrink: 0,
                 }}
-                onMouseEnter={(e) => { e.currentTarget.style.color = '#94a3b8'; }}
-                onMouseLeave={(e) => { e.currentTarget.style.color = '#475569'; }}
               >
                 <IconClose />
               </button>
@@ -920,6 +1147,7 @@ export function SoftphoneWidget() {
                       onClick={() => setActiveTab(tab.id)}
                       aria-label={tab.label}
                       aria-selected={isActive}
+                      className="sp-tab-btn"
                       style={{
                         flex: 1,
                         display: 'flex',
@@ -937,11 +1165,8 @@ export function SoftphoneWidget() {
                         fontWeight: 600,
                         textTransform: 'uppercase',
                         letterSpacing: '0.06em',
-                        transition: 'color 0.15s, border-color 0.15s',
                         position: 'relative',
                       }}
-                      onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.color = '#64748b'; }}
-                      onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.color = '#475569'; }}
                     >
                       {tab.icon}
                       {tab.label}

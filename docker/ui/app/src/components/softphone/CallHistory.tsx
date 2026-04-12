@@ -84,6 +84,7 @@ export function CallHistory() {
             key={f}
             type="button"
             onClick={() => setFilter(f)}
+            className="sp-filter-btn"
             style={{
               flex: 1,
               padding: '5px 4px',
@@ -96,7 +97,6 @@ export function CallHistory() {
               border: filter === f ? '1px solid rgba(59,130,246,0.30)' : '1px solid transparent',
               color: filter === f ? '#60a5fa' : '#475569',
               cursor: 'pointer',
-              transition: 'all 0.15s',
             }}
           >
             {f}
@@ -125,16 +125,14 @@ export function CallHistory() {
               return (
                 <div
                   key={cdr.uuid}
+                  className="sp-history-row"
                   style={{
                     display: 'flex',
                     alignItems: 'center',
                     gap: 10,
                     padding: '8px 6px',
                     borderRadius: 8,
-                    transition: 'background 0.12s',
                   }}
-                  onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.03)'; }}
-                  onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
                 >
                   {/* Direction icon */}
                   <div
@@ -177,6 +175,7 @@ export function CallHistory() {
                         type="button"
                         onClick={() => void makeCall(remoteParty)}
                         aria-label={`Call back ${remoteParty}`}
+                        className="sp-callback-btn"
                         style={{
                           background: 'rgba(34,197,94,0.10)',
                           border: '1px solid rgba(34,197,94,0.20)',

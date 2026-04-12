@@ -31,6 +31,7 @@ export function PresenceIndicator({ status, size = 8, showLabel = false }: Prese
     <span
       title={showLabel ? label : undefined}
       aria-label={`Presence: ${label}`}
+      className={status === 'available' ? 'sp-presence-available' : undefined}
       style={{
         display: 'inline-block',
         width: size,

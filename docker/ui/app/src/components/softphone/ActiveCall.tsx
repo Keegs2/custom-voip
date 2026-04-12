@@ -182,6 +182,7 @@ export function ActiveCallView() {
           <button
             type="button"
             onClick={() => setShowDtmf(false)}
+            className="sp-back-btn"
             style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: '0.75rem', textAlign: 'left', padding: '0 4px' }}
           >
             ← Back to controls
@@ -196,6 +197,7 @@ export function ActiveCallView() {
         onClick={hangupCall}
         aria-label="Hang up"
         disabled={state === 'ended'}
+        className="sp-hangup-btn"
         style={{
           display: 'flex',
           alignItems: 'center',
@@ -208,11 +210,8 @@ export function ActiveCallView() {
           color: '#fff',
           cursor: state === 'ended' ? 'not-allowed' : 'pointer',
           boxShadow: '0 4px 20px rgba(239,68,68,0.50)',
-          transition: 'transform 0.1s, box-shadow 0.1s',
           opacity: state === 'ended' ? 0.5 : 1,
         }}
-        onMouseDown={(e) => { e.currentTarget.style.transform = 'scale(0.92)'; }}
-        onMouseUp={(e) => { e.currentTarget.style.transform = 'scale(1)'; }}
       >
         {/* Rotated phone icon (hang up position) */}
         <div style={{ transform: 'rotate(135deg)' }}>
@@ -243,6 +242,7 @@ function ActionButton({ onClick, label, active, activeColor, disabled, children 
         aria-label={label}
         aria-pressed={active}
         disabled={disabled}
+        className="sp-action-btn"
         style={{
           width: 48,
           height: 48,
@@ -254,9 +254,8 @@ function ActionButton({ onClick, label, active, activeColor, disabled, children 
           border: `1px solid ${active ? `${activeColor}50` : 'rgba(255,255,255,0.08)'}`,
           color: active ? activeColor : '#94a3b8',
           cursor: disabled ? 'not-allowed' : 'pointer',
-          transition: 'background 0.15s, color 0.15s, border-color 0.15s',
           opacity: disabled ? 0.4 : 1,
-          boxShadow: active ? `0 0 10px ${activeColor}30` : 'none',
+          boxShadow: active ? `0 0 14px ${activeColor}40` : 'none',
         }}
       >
         {children}
@@ -282,6 +281,7 @@ function DtmfPad() {
           type="button"
           onClick={() => sendDTMF(k)}
           aria-label={`DTMF ${k}`}
+          className="sp-dtmf-key"
           style={{
             height: 40,
             borderRadius: 8,
@@ -291,10 +291,7 @@ function DtmfPad() {
             fontSize: '1rem',
             fontWeight: 600,
             cursor: 'pointer',
-            transition: 'background 0.1s',
           }}
-          onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.10)'; }}
-          onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.05)'; }}
         >
           {k}
         </button>

@@ -105,16 +105,14 @@ export function ContactList() {
             {filtered.map((ext) => (
               <div
                 key={ext.id}
+                className="sp-contact-row"
                 style={{
                   display: 'flex',
                   alignItems: 'center',
                   gap: 10,
                   padding: '7px 6px',
                   borderRadius: 8,
-                  transition: 'background 0.12s',
                 }}
-                onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.04)'; }}
-                onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
               >
                 {/* Avatar with presence dot */}
                 <div style={{ position: 'relative', flexShrink: 0 }}>
@@ -158,6 +156,7 @@ export function ContactList() {
                     type="button"
                     onClick={() => void makeCall(ext.extension)}
                     aria-label={`Call ${ext.display_name}`}
+                    className="sp-contact-call-btn"
                     style={{
                       flexShrink: 0,
                       width: 28,
@@ -170,10 +169,7 @@ export function ContactList() {
                       border: '1px solid rgba(34,197,94,0.25)',
                       color: '#22c55e',
                       cursor: 'pointer',
-                      transition: 'background 0.15s',
                     }}
-                    onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(34,197,94,0.20)'; }}
-                    onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(34,197,94,0.10)'; }}
                   >
                     <svg viewBox="0 0 24 24" fill="currentColor" style={{ width: 12, height: 12 }}>
                       <path fillRule="evenodd" d="M1.5 4.5a3 3 0 0 1 3-3h1.372c.86 0 1.61.586 1.819 1.42l1.105 4.423a1.875 1.875 0 0 1-.694 1.955l-1.293.97c-.135.101-.164.249-.126.352a11.285 11.285 0 0 0 6.697 6.697c.103.038.25.009.352-.126l.97-1.293a1.875 1.875 0 0 1 1.955-.694l4.423 1.105c.834.209 1.42.959 1.42 1.82V19.5a3 3 0 0 1-3 3h-2.25C8.552 22.5 1.5 15.448 1.5 6.75V4.5Z" clipRule="evenodd" />

@@ -112,6 +112,7 @@ export function DialPad() {
             type="button"
             onClick={handleBackspace}
             aria-label="Delete last digit"
+            className="sp-backspace-btn"
             style={{
               position: 'absolute',
               right: 10,
@@ -152,6 +153,7 @@ export function DialPad() {
             type="button"
             onClick={() => handleKey(label)}
             aria-label={`Dial ${label}`}
+            className="sp-dial-key"
             style={{
               display: 'flex',
               flexDirection: 'column',
@@ -164,20 +166,7 @@ export function DialPad() {
               border: '1px solid rgba(255,255,255,0.08)',
               color: '#e2e8f0',
               cursor: 'pointer',
-              transition: 'background 0.12s, transform 0.08s',
               userSelect: 'none',
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background = 'rgba(255,255,255,0.10)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = 'rgba(255,255,255,0.05)';
-            }}
-            onMouseDown={(e) => {
-              e.currentTarget.style.transform = 'scale(0.95)';
-            }}
-            onMouseUp={(e) => {
-              e.currentTarget.style.transform = 'scale(1)';
             }}
           >
             <span style={{ fontSize: '1.1rem', fontWeight: 600, lineHeight: 1 }}>{label}</span>
@@ -197,6 +186,7 @@ export function DialPad() {
           onClick={() => void handleCall()}
           disabled={!canDial}
           aria-label="Make call"
+          className="sp-call-btn"
           style={{
             display: 'flex',
             alignItems: 'center',
@@ -212,7 +202,6 @@ export function DialPad() {
             fontSize: '0.875rem',
             fontWeight: 600,
             cursor: canDial ? 'pointer' : 'not-allowed',
-            transition: 'background 0.2s, opacity 0.2s',
             opacity: isDialing ? 0.7 : 1,
             boxShadow: canDial ? '0 4px 16px rgba(34,197,94,0.35)' : 'none',
           }}

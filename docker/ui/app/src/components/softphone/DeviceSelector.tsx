@@ -44,6 +44,7 @@ function DeviceSelect({ label, icon, value, onChange, devices }: SelectProps) {
         value={value ?? ''}
         onChange={(e) => onChange(e.target.value)}
         aria-label={label}
+        className="sp-device-select"
         style={{
           width: '100%',
           background: 'rgba(255,255,255,0.04)',
