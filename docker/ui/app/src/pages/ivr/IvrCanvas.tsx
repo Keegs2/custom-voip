@@ -61,7 +61,7 @@ export function IvrCanvas({ nodes, path, selectedNodeId, dispatch }: IvrCanvasPr
           </div>
           <p className="text-[#718096] text-sm font-semibold">Flow is empty</p>
           <p className="text-[#4a5568] text-xs mt-2 leading-relaxed">
-            Drag a verb from the left panel and drop it above to begin building your call flow.
+            Drag a verb from the toolbar above and drop it here to begin building your call flow.
           </p>
         </div>
       </>
