@@ -77,6 +77,9 @@ export function DialPad() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '8px 0' }}>
       {/* Number display input */}
+      <style>{`
+        input[aria-label="Phone number input"]::placeholder { color: #334155; opacity: 1; }
+      `}</style>
       <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
         <input
           type="tel"
@@ -91,12 +94,12 @@ export function DialPad() {
             border: '1px solid rgba(255,255,255,0.08)',
             borderRadius: 10,
             color: '#f1f5f9',
-            fontSize: '1.25rem',
-            fontWeight: 500,
-            letterSpacing: '0.05em',
+            fontSize: '1.4rem',
+            fontWeight: 600,
+            letterSpacing: '0.02em',
             padding: '10px 44px 10px 14px',
             outline: 'none',
-            fontFamily: 'monospace',
+            fontFamily: 'inherit',
             textAlign: 'center',
             boxSizing: 'border-box',
           }}
