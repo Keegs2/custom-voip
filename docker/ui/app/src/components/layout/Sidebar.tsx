@@ -524,7 +524,7 @@ export function Sidebar() {
             flex: 1,
             padding: '12px 16px',
             overflowY: 'auto',
-            overflowX: 'hidden',
+            overflowX: 'visible',
             // Thin scrollbar
             scrollbarWidth: 'thin',
             scrollbarColor: 'rgba(42,47,69,0.6) transparent',
