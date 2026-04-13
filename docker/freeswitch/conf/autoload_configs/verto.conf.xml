@@ -88,6 +88,19 @@
       -->
       <param name="apply-candidate-acl" value="wan_v4.auto"/>
 
+      <!-- RTP Keepalive: Send a short RTP comfort packet every 15 seconds
+           during silence on the WebRTC leg. Browser-to-FS media traverses
+           GCE's NAT (30-second UDP idle timeout). Without keepalive, a
+           muted WebRTC client would lose the NAT pinhole after 30 seconds
+           and experience one-way audio on unmute. -->
+      <param name="rtp-keepalive-sec" value="15"/>
+
+      <!-- Comfort Noise: Generate CN packets during silence on the WebRTC
+           leg. Opus (the primary WebRTC codec) has built-in DTX/CN, but
+           this ensures FS-originated silence also produces CN packets for
+           NAT traversal and UX continuity. -->
+      <param name="suppress-cng" value="false"/>
+
       <!-- Enable SRTP for WebRTC media (mandatory per WebRTC spec) -->
       <param name="rtp-secure-media" value="true"/>
 

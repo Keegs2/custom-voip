@@ -154,6 +154,19 @@
     <!-- User-Agent -->
     <param name="user-agent-string" value="VoicePlatform/1.0"/>
 
+    <!-- RTP Keepalive: Send a short RTP comfort packet every 15 seconds
+         during silence periods. Keeps GCE's NAT pinhole open (30-second
+         UDP idle timeout). The external profile handles the carrier-facing
+         B-leg RTP, so this is critical for outbound calls to Bandwidth
+         where long silence (IVR prompts, hold) would otherwise kill the
+         NAT mapping and cause one-way audio on resume. -->
+    <param name="rtp-keepalive-sec" value="15"/>
+
+    <!-- Comfort Noise Generation (RFC 3389): Generate CN packets during
+         silence on the carrier-facing leg. Supplements rtp-keepalive-sec
+         and provides natural background hiss to the remote party. -->
+    <param name="suppress-cng" value="false"/>
+
     <!-- RTP timeout -->
     <param name="rtp-timeout-sec" value="60"/>
     <param name="rtp-hold-timeout-sec" value="1800"/>

@@ -231,6 +231,14 @@
     <!-- MEDIA HANDLING                              -->
     <!-- ============================================ -->
 
+    <!-- RTP Keepalive: Send a short RTP comfort packet every 15 seconds
+         during silence periods (mute, hold, no speech). This keeps GCE's
+         NAT pinhole open (30-second UDP idle timeout). Without this, silence
+         longer than 30 seconds causes the NAT mapping to expire, and RTP
+         cannot resume when speech starts again. 15s = half the 30s timeout,
+         providing a comfortable safety margin per BCP 38 recommendations. -->
+    <param name="rtp-keepalive-sec" value="15"/>
+
     <!-- RTP timeout - hang up if no media -->
     <param name="rtp-timeout-sec" value="60"/>
     <param name="rtp-hold-timeout-sec" value="1800"/>
@@ -264,7 +272,16 @@
 
     <!-- RFC compliance -->
     <param name="rfc2833-send-payload" value="101"/>
-    <param name="suppress-cng" value="true"/>
+    <!-- Comfort Noise Generation (RFC 3389): Generate CN packets during
+         silence periods. This provides two benefits:
+         1. NAT keepalive — CN packets maintain the RTP pinhole (supplements
+            rtp-keepalive-sec for double protection)
+         2. User experience — remote party hears gentle background hiss
+            instead of dead silence, confirming the call is still connected.
+         The CN codec (payload type 13) is already offered in SDP. Setting
+         suppress-cng=false tells FreeSWITCH to actually generate CN packets
+         when VAD detects silence, rather than sending nothing. -->
+    <param name="suppress-cng" value="false"/>
 
     <!-- Hold music (will be overridden by dialplan if needed) -->
     <param name="hold-music" value="silence_stream://-1"/>

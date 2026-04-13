@@ -48,28 +48,33 @@
 # 1 sip:freeswitch-3:5080 0 0 weight=100;maxload=2000;duid=fs-tertiary
 
 # ============================================================
-# Group 2: Carrier Gateways (Outbound PSTN)
+# Group 2: Bandwidth Standard Carrier (Dallas)
 # ============================================================
-# These are upstream carriers for terminating calls to PSTN
-# Add your carrier IPs here when ready for production
-
-# Example carrier configurations (uncomment and modify):
-# Primary carrier - Bandwidth/Level3/etc
-# 2 sip:carrier1.example.com:5060 0 0 weight=50;duid=carrier-primary
-
-# Secondary carrier for failover
-# 2 sip:carrier2.example.com:5060 0 1 weight=30;duid=carrier-secondary
-
-# Tertiary carrier (least cost routing or overflow)
-# 2 sip:carrier3.example.com:5060 0 2 weight=20;duid=carrier-tertiary
+# Bandwidth Dallas signaling IP for standard/backup trunks.
+# Mapped from X-Carrier: standard | backup in route[TO_CARRIER].
+#
+# PURPOSE: Dispatcher sends periodic SIP OPTIONS to this IP
+# (controlled by ds_ping_interval). This serves two functions:
+#   1. NAT keepalive — Keeps the SIP signaling NAT pinhole open
+#      through GCE's 30-second UDP idle timeout. Without periodic
+#      SIP traffic, the NAT mapping expires and inbound SIP from
+#      Bandwidth (new INVITEs, re-INVITEs) may not reach Kamailio.
+#   2. Health monitoring — Detects carrier unreachability early.
+#      If Bandwidth stops responding to OPTIONS, ds_probing marks
+#      the destination inactive and logs a warning.
+#
+# NOTE: This group is for probing/keepalive ONLY. Actual outbound
+# call routing to Bandwidth is handled by route[TO_CARRIER] using
+# $rd/$du directly — NOT via ds_select_dst on this group.
+2 sip:67.231.2.12:5060 0 0 weight=100;duid=bw-dallas-standard
 
 # ============================================================
-# Group 3: Premium Traffic Carriers
+# Group 3: Bandwidth Premium Carrier (Los Angeles)
 # ============================================================
-# Higher quality/cost carriers for premium traffic grade
-
-# Premium carrier (higher cost, better quality)
-# 3 sip:premium-carrier.example.com:5060 0 0 weight=100;duid=carrier-premium
+# Bandwidth LA signaling IP for premium/high-CPS trunk.
+# Mapped from X-Carrier: premium in route[TO_CARRIER].
+# Same keepalive/health-monitoring purpose as Group 2.
+3 sip:216.82.238.134:5060 0 0 weight=100;duid=bw-la-premium
 
 # ============================================================
 # Notes:
