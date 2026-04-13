@@ -734,12 +734,14 @@ local function execute_dial(verb)
     set_var("continue_on_fail", "true")
     set_var("hangup_after_bridge", "false")
 
-    -- RFC 4028 session timers: force FS to include Session-Expires and Min-SE
-    -- in the outbound INVITE. Without these, Bandwidth sends Session-Expires:30
-    -- in 200 OK and tears down the call when FS doesn't send refresh re-INVITEs.
-    set_var("sip_session_timeout", "1800")
-    set_var("sip_minimum_session_expires", "90")
-    set_var("enable_timer", "true")
+    -- RFC 4028 session timers: export to B-leg so mod_sofia includes
+    -- Session-Expires and Min-SE in the outbound INVITE.
+    -- CRITICAL: set_var() only sets on the A-leg. export via session:execute
+    -- marks the variable for propagation to the B-leg channel.
+    -- Belt-and-suspenders: these are also included in the bridge {} blocks.
+    pcall(function() session:execute("export", "sip_session_timeout=1800") end)
+    pcall(function() session:execute("export", "sip_minimum_session_expires=90") end)
+    pcall(function() session:execute("export", "enable_timer=true") end)
 
     -- Build dial strings for all targets
     -- Multiple targets are separated by | for sequential or , for simultaneous
@@ -775,7 +777,8 @@ local function execute_dial(verb)
             -- X-Carrier tells Kamailio which Bandwidth IP to route to
             local dial_number = clean_target:gsub("^%+", "")
             table.insert(dial_strings, string.format(
-                "{call_timeout=%d,ignore_early_media=false,sip_h_X-Carrier=premium}sofia/external/%s@127.0.0.1:5060",
+                "{call_timeout=%d,ignore_early_media=false,sip_h_X-Carrier=premium" ..
+                ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true}sofia/external/%s@127.0.0.1:5060",
                 dial_timeout, dial_number
             ))
         end

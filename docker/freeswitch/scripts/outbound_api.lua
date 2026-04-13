@@ -239,7 +239,8 @@ else
     -- The internal profile does NOT apply ext-sip-ip to outbound calls.
     -- X-Carrier tells Kamailio which Bandwidth IP to route to.
     local dial_string = string.format(
-        "{origination_caller_id_number=%s,call_timeout=%d,ignore_early_media=false,sip_h_X-Carrier=premium}sofia/external/%s@127.0.0.1:5060",
+        "{origination_caller_id_number=%s,call_timeout=%d,ignore_early_media=false,sip_h_X-Carrier=premium" ..
+        ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true}sofia/external/%s@127.0.0.1:5060",
         from_did ~= "" and from_did or "anonymous",
         call_timeout,
         normalized_dest:gsub("^%+", "")
@@ -253,12 +254,14 @@ else
     set_var("continue_on_fail", "true")
     set_var("hangup_after_bridge", "true")
 
-    -- RFC 4028 session timers: force FS to include Session-Expires and Min-SE
-    -- in the outbound INVITE. Without these, Bandwidth sends Session-Expires:30
-    -- in 200 OK and tears down the call when FS doesn't send refresh re-INVITEs.
-    set_var("sip_session_timeout", "1800")
-    set_var("sip_minimum_session_expires", "90")
-    set_var("enable_timer", "true")
+    -- RFC 4028 session timers: export to B-leg so mod_sofia includes
+    -- Session-Expires and Min-SE in the outbound INVITE.
+    -- CRITICAL: set_var() only sets on the A-leg. export via session:execute
+    -- marks the variable for propagation to the B-leg channel.
+    -- Belt-and-suspenders: these are also included in the bridge {} blocks.
+    pcall(function() session:execute("export", "sip_session_timeout=1800") end)
+    pcall(function() session:execute("export", "sip_minimum_session_expires=90") end)
+    pcall(function() session:execute("export", "enable_timer=true") end)
 
     pcall(function()
         session:execute("bridge", dial_string)
@@ -280,7 +283,8 @@ else
             ))
 
             dial_string = string.format(
-                "{origination_caller_id_number=%s,call_timeout=%d,sip_h_X-Carrier=backup}sofia/external/%s@127.0.0.1:5060",
+                "{origination_caller_id_number=%s,call_timeout=%d,sip_h_X-Carrier=backup" ..
+                ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true}sofia/external/%s@127.0.0.1:5060",
                 from_did ~= "" and from_did or "anonymous",
                 call_timeout,
                 normalized_dest:gsub("^%+", "")

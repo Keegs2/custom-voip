@@ -239,10 +239,16 @@
 
         <!-- RFC 4028 session timers: force FS to include Session-Expires and Min-SE
              in the outbound INVITE. Without these, Bandwidth sends Session-Expires:30
-             in 200 OK and tears down the call when FS doesn't send refresh re-INVITEs. -->
-        <action application="set" data="sip_session_timeout=1800"/>
-        <action application="set" data="sip_minimum_session_expires=90"/>
-        <action application="set" data="enable_timer=true"/>
+             in 200 OK and tears down the call when FS doesn't send refresh re-INVITEs.
+
+             CRITICAL: Must use "export" not "set". "set" puts the variable on the
+             A-leg only. "export" copies it to the B-leg, where mod_sofia reads it
+             when constructing the outbound INVITE. Without export, the B-leg sees
+             no session timer channel variables and relies solely on the sofia profile
+             defaults, which may not produce the headers in all code paths. -->
+        <action application="export" data="sip_session_timeout=1800"/>
+        <action application="export" data="sip_minimum_session_expires=90"/>
+        <action application="export" data="enable_timer=true"/>
 
         <!-- Look up the user's assigned DID for outbound caller ID.
              Extension numbers like "1001" are rejected by the carrier because
@@ -252,13 +258,14 @@
         <action application="lua" data="lookup_user_did.lua"/>
 
         <!-- Primary: Bandwidth Dallas via Kamailio -->
+        <!-- Session timer vars in {} block ensure B-leg has them even if export fails -->
         <action application="set" data="sip_h_X-Carrier=standard"/>
-        <action application="bridge" data="sofia/external/${e164_dest}@127.0.0.1:5060"/>
+        <action application="bridge" data="{sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true}sofia/external/${e164_dest}@127.0.0.1:5060"/>
 
         <!-- Failover: Bandwidth LA via Kamailio -->
         <action application="log" data="WARNING PSTN primary failed (${bridge_hangup_cause}), trying premium carrier"/>
         <action application="set" data="sip_h_X-Carrier=premium"/>
-        <action application="bridge" data="sofia/external/${e164_dest}@127.0.0.1:5060"/>
+        <action application="bridge" data="{sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true}sofia/external/${e164_dest}@127.0.0.1:5060"/>
 
         <!-- Both carriers failed -->
         <action application="log" data="ERR PSTN outbound failed on all carriers: ${caller_id_number} -> ${e164_dest} cause=${bridge_hangup_cause}"/>

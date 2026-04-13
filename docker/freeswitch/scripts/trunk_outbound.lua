@@ -509,7 +509,8 @@ set_var("transfer_ringback", "%(2000,4000,440,480)")
 -- Build dial string using external profile to ensure public IP in Via/Contact/SDP.
 -- X-Carrier tells Kamailio which Bandwidth IP to route to.
 local dial_string = string.format(
-    "{ignore_early_media=false,call_timeout=60,sip_h_X-Carrier=standard}sofia/external/%s@127.0.0.1:5060",
+    "{ignore_early_media=false,call_timeout=60,sip_h_X-Carrier=standard" ..
+    ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true}sofia/external/%s@127.0.0.1:5060",
     normalized_dest:gsub("^%+", "")  -- Remove + for carrier (carrier-dependent)
 )
 
@@ -524,12 +525,14 @@ set_var("hangup_after_bridge", "true")
 -- Mark that Lua is handling routing (prevents dialplan fallback 404)
 set_var("lua_routed", "true")
 
--- RFC 4028 session timers: force FS to include Session-Expires and Min-SE
--- in the outbound INVITE. Without these, Bandwidth sends Session-Expires:30
--- in 200 OK and tears down the call when FS doesn't send refresh re-INVITEs.
-set_var("sip_session_timeout", "1800")
-set_var("sip_minimum_session_expires", "90")
-set_var("enable_timer", "true")
+-- RFC 4028 session timers: export to B-leg so mod_sofia includes
+-- Session-Expires and Min-SE in the outbound INVITE.
+-- CRITICAL: set_var() only sets on the A-leg. export via session:execute
+-- marks the variable for propagation to the B-leg channel.
+-- Belt-and-suspenders: these are also included in the bridge {} blocks.
+pcall(function() session:execute("export", "sip_session_timeout=1800") end)
+pcall(function() session:execute("export", "sip_minimum_session_expires=90") end)
+pcall(function() session:execute("export", "enable_timer=true") end)
 
 -- Execute bridge
 pcall(function()
@@ -551,7 +554,8 @@ if bridge_result ~= "SUCCESS" then
     set_var("carrier_used", "carrier_backup")
 
     local failover_dial = string.format(
-        "{ignore_early_media=false,call_timeout=60,sip_h_X-Carrier=backup}sofia/external/%s@127.0.0.1:5060",
+        "{ignore_early_media=false,call_timeout=60,sip_h_X-Carrier=backup" ..
+        ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true}sofia/external/%s@127.0.0.1:5060",
         normalized_dest:gsub("^%+", "")
     )
 

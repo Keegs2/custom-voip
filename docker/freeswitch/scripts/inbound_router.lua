@@ -571,6 +571,7 @@ if product_type == "rcf" then
         -- Both were set via setVariable above (FusionPBX pattern).
         dial_string = string.format(
             "{ignore_early_media=false,call_timeout=%d,sip_h_X-Carrier=%s" ..
+            ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true" ..
             "}sofia/external/%s@127.0.0.1:5060",
             ring_timeout,
             carrier,
@@ -591,14 +592,14 @@ if product_type == "rcf" then
     -- This prevents the dialplan fallback 404 from masking bridge failures
     set_var("lua_routed", "true")
 
-    -- RFC 4028 session timers: force FS to include Session-Expires and Min-SE
-    -- in the outbound INVITE. Without these, Bandwidth sends Session-Expires:30
-    -- in 200 OK and tears down the call when FS doesn't send refresh re-INVITEs.
-    -- Channel variables override profile-level settings and are the reliable way
-    -- to activate session timers on the B-leg of a bridged call.
-    set_var("sip_session_timeout", "1800")
-    set_var("sip_minimum_session_expires", "90")
-    set_var("enable_timer", "true")
+    -- RFC 4028 session timers: export to B-leg so mod_sofia includes
+    -- Session-Expires and Min-SE in the outbound INVITE.
+    -- CRITICAL: set_var() only sets on the A-leg. export via session:execute
+    -- marks the variable for propagation to the B-leg channel.
+    -- Belt-and-suspenders: these are also included in the bridge {} blocks.
+    pcall(function() session:execute("export", "sip_session_timeout=1800") end)
+    pcall(function() session:execute("export", "sip_minimum_session_expires=90") end)
+    pcall(function() session:execute("export", "enable_timer=true") end)
 
     pcall(function()
         session:execute("bridge", dial_string)
@@ -622,6 +623,7 @@ if product_type == "rcf" then
         -- Only the X-Carrier header changes for the failover carrier.
         local failover_dial = string.format(
             "{ignore_early_media=false,call_timeout=%d,sip_h_X-Carrier=backup" ..
+            ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true" ..
             "}sofia/external/%s@127.0.0.1:5060",
             ring_timeout,
             forward_to
@@ -803,7 +805,9 @@ elseif product_type == "trunk" then
         set_var("sip_h_X-PBX-Dest", pbx_ip)
 
         local dial_string = string.format(
-            "{ignore_early_media=false,call_timeout=60}sofia/external/%s@127.0.0.1:5060",
+            "{ignore_early_media=false,call_timeout=60" ..
+            ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true" ..
+            "}sofia/external/%s@127.0.0.1:5060",
             bridge_did
         )
 
