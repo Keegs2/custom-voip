@@ -634,6 +634,7 @@ export function SoftphoneWidget() {
     presence,
     isExpanded,
     credentials,
+    remoteVideoStream,
     setExpanded,
     setPresence,
   } = useSoftphone();
@@ -805,6 +806,22 @@ export function SoftphoneWidget() {
     [isExpanded, position, fabWidth, setExpanded],
   );
 
+  // ── Remote audio playback for regular (non-conference) calls ──
+  // ConferenceRoom has its own <audio> element; SoftphoneWidget needs one too.
+  // The ref is declared here (above early returns) so hook ordering is stable.
+  const remoteAudioRef = useRef<HTMLAudioElement>(null);
+
+  useEffect(() => {
+    const el = remoteAudioRef.current;
+    if (!el) return;
+    if (remoteVideoStream) {
+      el.srcObject = remoteVideoStream;
+      el.play().catch(() => {});
+    } else {
+      el.srcObject = null;
+    }
+  }, [remoteVideoStream]);
+
   // ── Guard: UCaaS feature check ──
   const hasUcaas =
     user?.role === 'admin' ||
@@ -897,6 +914,10 @@ export function SoftphoneWidget() {
 
       {/* Inject keyframe animations */}
       <style>{SOFTPHONE_STYLES}</style>
+
+      {/* Hidden audio element — plays the remote party's audio stream for regular calls.
+          autoPlay is allowed here because the user initiated the call (user gesture). */}
+      <audio ref={remoteAudioRef} autoPlay playsInline style={{ display: 'none' }} />
 
       {/* Fixed-positioned root — position driven by drag state */}
       <div
