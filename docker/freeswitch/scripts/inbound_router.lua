@@ -591,6 +591,15 @@ if product_type == "rcf" then
     -- This prevents the dialplan fallback 404 from masking bridge failures
     set_var("lua_routed", "true")
 
+    -- RFC 4028 session timers: force FS to include Session-Expires and Min-SE
+    -- in the outbound INVITE. Without these, Bandwidth sends Session-Expires:30
+    -- in 200 OK and tears down the call when FS doesn't send refresh re-INVITEs.
+    -- Channel variables override profile-level settings and are the reliable way
+    -- to activate session timers on the B-leg of a bridged call.
+    set_var("sip_session_timeout", "1800")
+    set_var("sip_minimum_session_expires", "90")
+    set_var("enable_timer", "true")
+
     pcall(function()
         session:execute("bridge", dial_string)
     end)

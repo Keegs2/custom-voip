@@ -129,6 +129,7 @@
     -->
     <param name="enable-timer" value="true"/>
     <param name="sip-session-timeout" value="1800"/>
+    <param name="sip-min-session-expires" value="90"/>
     <!--
       minimum-session-expires: Floor for session timer negotiation.
       Set to 90s (matching internal profile) for carrier compatibility.

@@ -237,6 +237,13 @@
         <action application="set" data="direction=outbound"/>
         <action application="set" data="call_start_time=${strftime(%Y-%m-%d %H:%M:%S)}"/>
 
+        <!-- RFC 4028 session timers: force FS to include Session-Expires and Min-SE
+             in the outbound INVITE. Without these, Bandwidth sends Session-Expires:30
+             in 200 OK and tears down the call when FS doesn't send refresh re-INVITEs. -->
+        <action application="set" data="sip_session_timeout=1800"/>
+        <action application="set" data="sip_minimum_session_expires=90"/>
+        <action application="set" data="enable_timer=true"/>
+
         <!-- Look up the user's assigned DID for outbound caller ID.
              Extension numbers like "1001" are rejected by the carrier because
              they are not provisioned DIDs. The Lua script queries the extensions

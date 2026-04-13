@@ -734,6 +734,13 @@ local function execute_dial(verb)
     set_var("continue_on_fail", "true")
     set_var("hangup_after_bridge", "false")
 
+    -- RFC 4028 session timers: force FS to include Session-Expires and Min-SE
+    -- in the outbound INVITE. Without these, Bandwidth sends Session-Expires:30
+    -- in 200 OK and tears down the call when FS doesn't send refresh re-INVITEs.
+    set_var("sip_session_timeout", "1800")
+    set_var("sip_minimum_session_expires", "90")
+    set_var("enable_timer", "true")
+
     -- Build dial strings for all targets
     -- Multiple targets are separated by | for sequential or , for simultaneous
     local dial_strings = {}
