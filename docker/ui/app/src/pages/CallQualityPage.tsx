@@ -1258,7 +1258,7 @@ export function CallQualityPage() {
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 24, paddingBottom: 40 }}>
 
       {/* Page header */}
       <div
