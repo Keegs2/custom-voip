@@ -93,19 +93,23 @@ function SidebarNavItem({ item, onNavigate, badge, badgeColor }: SidebarNavItemP
         gap: 10,
         padding: '7px 10px',
         borderRadius: 10,
+        overflow: 'hidden',
         fontSize: '0.825rem',
         fontWeight: isActive ? 600 : 500,
         letterSpacing: '-0.01em',
         cursor: 'pointer',
         userSelect: 'none',
-        transition: 'background 0.15s, color 0.15s, box-shadow 0.15s',
+        transition: 'background 0.15s, color 0.15s, border-color 0.15s, box-shadow 0.15s',
         textDecoration: 'none',
         color: isActive ? '#f1f5f9' : '#64748b',
         background: isActive
           ? `linear-gradient(135deg, ${item.color}22 0%, ${item.color}10 100%)`
           : 'transparent',
+        border: isActive
+          ? `1px solid ${item.color}40`
+          : '1px solid transparent',
         boxShadow: isActive
-          ? `0 0 0 1px ${item.color}35, 0 2px 12px -4px ${item.color}40`
+          ? `0 2px 12px -4px ${item.color}40`
           : 'none',
       })}
     >
