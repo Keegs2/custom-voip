@@ -155,8 +155,8 @@ async def _process_cdr_body(body: dict) -> dict:
             logger.warning("CDR ingest: missing uuid in variables and callflow")
             return {"status": "error", "detail": "missing uuid"}
 
-        direction = variables.get("direction", "inbound")
-        product_type = variables.get("product_type", "trunk")
+        direction = str(variables.get("direction", "inbound"))
+        product_type = str(variables.get("product_type", "trunk"))
 
         # destination_number: prefer variables, fall back to callflow caller_profile
         destination = variables.get("destination_number")
@@ -199,20 +199,28 @@ async def _process_cdr_body(body: dict) -> dict:
         answer_time = _epoch_to_timestamp(variables.get("answer_epoch"))
 
         duration_sec = _safe_int(variables.get("duration"), default=0)
-        duration_ms = duration_sec * 1000
+        duration_ms = int(duration_sec * 1000)
 
         billsec = _safe_int(variables.get("billsec"), default=0)
-        billable_ms = billsec * 1000
+        billable_ms = int(billsec * 1000)
 
         hangup_cause = variables.get("hangup_cause")
+        if hangup_cause is not None:
+            hangup_cause = str(hangup_cause)
         sip_code = _safe_int(variables.get("sip_term_status"))
         carrier_used = variables.get("carrier_used")
+        if carrier_used is not None:
+            carrier_used = str(carrier_used)
         traffic_grade = variables.get("traffic_grade")
+        if traffic_grade is not None:
+            traffic_grade = str(traffic_grade)
         freeswitch_node = variables.get("FreeSWITCH-Hostname")
+        if freeswitch_node is not None:
+            freeswitch_node = str(freeswitch_node)
 
         # Extract a destination prefix (up to first 6 digits after +) for
         # rate-lookup caching.  e.g. "+17743260301" -> "+17743"
-        destination_prefix = destination[:6] if destination else None
+        destination_prefix = str(destination[:6]) if destination else None
 
         # ---- RTP quality metrics ------------------------------------------
         mos = _safe_float(variables.get("rtp_audio_in_mos"))
@@ -241,12 +249,85 @@ async def _process_cdr_body(body: dict) -> dict:
         rtp_jitter_burst_rate = _safe_float(variables.get("rtp_audio_in_jitter_burst_rate"))
         rtp_jitter_loss_rate = _safe_float(variables.get("rtp_audio_in_jitter_loss_rate"))
         read_codec = variables.get("read_codec")
+        if read_codec is not None:
+            read_codec = str(read_codec)
         write_codec = variables.get("write_codec")
+        if write_codec is not None:
+            write_codec = str(write_codec)
+
+        # ---- Additional SIP detail fields ---------------------------------
+        read_rate = _safe_int(variables.get("read_rate"))
+        write_rate = _safe_int(variables.get("write_rate"))
+        sip_from_user = variables.get("sip_from_user")
+        if sip_from_user is not None:
+            sip_from_user = str(sip_from_user)[:64]
+        sip_to_user = variables.get("sip_to_user")
+        if sip_to_user is not None:
+            sip_to_user = str(sip_to_user)[:64]
+        hangup_cause_q850 = _safe_int(variables.get("hangup_cause_q850"))
+        sip_hangup_disposition = variables.get("sip_hangup_disposition")
+        if sip_hangup_disposition is not None:
+            sip_hangup_disposition = str(sip_hangup_disposition)[:30]
+        sip_user_agent = variables.get("sip_user_agent")
+        if sip_user_agent is not None:
+            sip_user_agent = str(sip_user_agent)[:128]
+        # network_addr: prefer callflow caller_profile, fall back to variables
+        network_addr = caller_profile.get("network_addr") or variables.get("network_addr")
+        if network_addr is not None:
+            network_addr = str(network_addr)[:45]
+        bridge_uuid = variables.get("bridge_uuid") or variables.get("call_uuid")
+        if bridge_uuid is not None:
+            bridge_uuid = str(bridge_uuid)[:64]
+
+        # ---- Logging: summarize what we extracted -------------------------
+        extracted = []
+        dropped = []
+        field_checks = {
+            "mos": mos, "quality_pct": quality_pct,
+            "jitter_min_ms": jitter_min_ms, "jitter_max_ms": jitter_max_ms,
+            "jitter_avg_ms": jitter_avg_ms, "rtp_mean_interval": rtp_mean_interval,
+            "packet_loss_count": packet_loss_count, "packet_total_count": packet_total_count,
+            "packet_loss_pct": packet_loss_pct, "flaw_total": flaw_total,
+            "r_factor": r_factor,
+            "rtp_in_raw_bytes": rtp_audio_in_raw_bytes,
+            "rtp_in_media_bytes": rtp_audio_in_media_bytes,
+            "rtp_out_raw_bytes": rtp_audio_out_raw_bytes,
+            "rtp_out_media_bytes": rtp_audio_out_media_bytes,
+            "rtp_in_pkt_count": rtp_audio_in_packet_count,
+            "rtp_out_pkt_count": rtp_audio_out_packet_count,
+            "burst_rate": rtp_jitter_burst_rate, "loss_rate": rtp_jitter_loss_rate,
+            "read_codec": read_codec, "write_codec": write_codec,
+            "read_rate": read_rate, "write_rate": write_rate,
+            "sip_from_user": sip_from_user, "sip_to_user": sip_to_user,
+            "hangup_cause_q850": hangup_cause_q850,
+            "sip_hangup_disposition": sip_hangup_disposition,
+            "sip_user_agent": sip_user_agent,
+            "network_addr": network_addr, "bridge_uuid": bridge_uuid,
+            "trunk_id": trunk_id, "carrier_used": carrier_used,
+            "answer_time": answer_time, "sip_code": sip_code,
+        }
+        for fname, fval in field_checks.items():
+            if fval is not None:
+                extracted.append(fname)
+            else:
+                dropped.append(fname)
+
+        logger.info(
+            "CDR ingest: uuid=%s extracted %d fields (%s), "
+            "%d fields null (%s)",
+            call_uuid,
+            len(extracted), ",".join(extracted) if extracted else "none",
+            len(dropped), ",".join(dropped) if dropped else "none",
+        )
 
         # ---- Insert with duplicate guard ----------------------------------
         # The cdrs table uses a composite PK (id, start_time) for TimescaleDB
         # hypertable partitioning, so ON CONFLICT on uuid is not available.
         # Instead we use a NOT EXISTS subquery to skip duplicates.
+        #
+        # IMPORTANT: every parameter gets an explicit ::type cast so asyncpg
+        # never needs to infer PostgreSQL types.  This prevents
+        # AmbiguousParameterError when values are None.
         result = await db.execute(
             """
             INSERT INTO cdrs (
@@ -264,67 +345,84 @@ async def _process_cdr_body(body: dict) -> dict:
                 rtp_audio_in_packet_count, rtp_audio_out_packet_count,
                 rtp_audio_in_jitter_burst_rate, rtp_audio_in_jitter_loss_rate,
                 rtp_audio_in_mean_interval,
-                read_codec, write_codec
+                read_codec, write_codec,
+                read_rate, write_rate,
+                sip_from_user, sip_to_user,
+                hangup_cause_q850, sip_hangup_disposition,
+                sip_user_agent, network_addr, bridge_uuid
             )
             SELECT
-                $1, $2, $3, $4, $5,
-                $6, $7, $8,
-                $9, $10, $11,
-                $12, $13,
-                $14, $15, $16, $17,
-                $18,
-                $19, $20, $21, $22, $23,
-                $24, $25, $26,
-                $27, $28,
-                $29, $30,
-                $31, $32,
-                $33, $34,
-                $35, $36,
-                $37,
-                $38, $39
+                $1::varchar,  $2::int,       $3::varchar,  $4::int,       $5::varchar,
+                $6::varchar,  $7::varchar,   $8::varchar,
+                $9::timestamptz, $10::timestamptz, $11::timestamptz,
+                $12::int,     $13::int,
+                $14::varchar, $15::int,      $16::varchar,  $17::varchar,
+                $18::varchar,
+                $19::numeric, $20::numeric,  $21::numeric,  $22::numeric, $23::numeric,
+                $24::int,     $25::int,      $26::numeric,
+                $27::int,     $28::numeric,
+                $29::bigint,  $30::bigint,
+                $31::bigint,  $32::bigint,
+                $33::int,     $34::int,
+                $35::numeric, $36::numeric,
+                $37::numeric,
+                $38::varchar, $39::varchar,
+                $40::int,     $41::int,
+                $42::varchar, $43::varchar,
+                $44::smallint, $45::varchar,
+                $46::varchar, $47::varchar, $48::varchar
             WHERE NOT EXISTS (
-                SELECT 1 FROM cdrs WHERE uuid = $1
+                SELECT 1 FROM cdrs WHERE uuid = $1::varchar
             )
             """,
-            call_uuid,
-            customer_id,
-            product_type,
-            trunk_id,
-            direction,
-            caller_id,
-            destination,
-            destination_prefix,
-            start_time,
-            answer_time,
-            end_time,
-            duration_ms,
-            billable_ms,
-            hangup_cause,
-            sip_code,
-            carrier_used,
-            traffic_grade,
-            freeswitch_node,
-            mos,
-            quality_pct,
-            jitter_min_ms,
-            jitter_max_ms,
-            jitter_avg_ms,
-            packet_loss_count,
-            packet_total_count,
-            packet_loss_pct,
-            flaw_total,
-            r_factor,
-            rtp_audio_in_raw_bytes,
-            rtp_audio_in_media_bytes,
-            rtp_audio_out_raw_bytes,
-            rtp_audio_out_media_bytes,
-            rtp_audio_in_packet_count,
-            rtp_audio_out_packet_count,
-            rtp_jitter_burst_rate,
-            rtp_jitter_loss_rate,
-            rtp_mean_interval,
-            read_codec,
-            write_codec,
+            str(call_uuid),         # $1  uuid
+            int(customer_id),       # $2  customer_id
+            str(product_type),      # $3  product_type
+            trunk_id,               # $4  trunk_id (int | None)
+            str(direction),         # $5  direction
+            caller_id,              # $6  caller_id (str | None)
+            str(destination),       # $7  destination
+            destination_prefix,     # $8  destination_prefix (str | None)
+            start_time,             # $9  start_time (datetime)
+            answer_time,            # $10 answer_time (datetime | None)
+            end_time,               # $11 end_time (datetime)
+            int(duration_ms),       # $12 duration_ms
+            int(billable_ms),       # $13 billable_ms
+            hangup_cause,           # $14 hangup_cause (str | None)
+            sip_code,               # $15 sip_code (int | None)
+            carrier_used,           # $16 carrier_used (str | None)
+            traffic_grade,          # $17 traffic_grade (str | None)
+            freeswitch_node,        # $18 freeswitch_node (str | None)
+            mos,                    # $19 mos (float | None)
+            quality_pct,            # $20 quality_pct (float | None)
+            jitter_min_ms,          # $21 jitter_min_ms (float | None)
+            jitter_max_ms,          # $22 jitter_max_ms (float | None)
+            jitter_avg_ms,          # $23 jitter_avg_ms (float | None)
+            packet_loss_count,      # $24 packet_loss_count (int | None)
+            packet_total_count,     # $25 packet_total_count (int | None)
+            packet_loss_pct,        # $26 packet_loss_pct (float | None)
+            flaw_total,             # $27 flaw_total (int | None)
+            r_factor,               # $28 r_factor (float | None)
+            rtp_audio_in_raw_bytes,     # $29 (int | None)
+            rtp_audio_in_media_bytes,   # $30 (int | None)
+            rtp_audio_out_raw_bytes,    # $31 (int | None)
+            rtp_audio_out_media_bytes,  # $32 (int | None)
+            rtp_audio_in_packet_count,  # $33 (int | None)
+            rtp_audio_out_packet_count, # $34 (int | None)
+            rtp_jitter_burst_rate,      # $35 (float | None)
+            rtp_jitter_loss_rate,       # $36 (float | None)
+            rtp_mean_interval,          # $37 (float | None)
+            read_codec,             # $38 read_codec (str | None)
+            write_codec,            # $39 write_codec (str | None)
+            read_rate,              # $40 read_rate (int | None)
+            write_rate,             # $41 write_rate (int | None)
+            sip_from_user,          # $42 sip_from_user (str | None)
+            sip_to_user,            # $43 sip_to_user (str | None)
+            hangup_cause_q850,      # $44 hangup_cause_q850 (int | None)
+            sip_hangup_disposition,  # $45 sip_hangup_disposition (str | None)
+            sip_user_agent,         # $46 sip_user_agent (str | None)
+            network_addr,           # $47 network_addr (str | None)
+            bridge_uuid,            # $48 bridge_uuid (str | None)
         )
 
         if result and "INSERT 0 0" in result:
@@ -332,8 +430,10 @@ async def _process_cdr_body(body: dict) -> dict:
             return {"status": "duplicate", "uuid": call_uuid}
 
         logger.info(
-            "CDR ingest: inserted uuid=%s customer=%s dest=%s duration=%ds",
+            "CDR ingest: inserted uuid=%s customer=%s dest=%s duration=%ds "
+            "hangup=%s sip_code=%s carrier=%s mos=%s",
             call_uuid, customer_id, destination, duration_sec,
+            hangup_cause, sip_code, carrier_used, mos,
         )
         return {"status": "ok", "uuid": call_uuid}
 
@@ -474,11 +574,15 @@ async def query_cdrs(
                mos, quality_pct, jitter_min_ms, jitter_max_ms, jitter_avg_ms,
                packet_loss_count, packet_total_count, packet_loss_pct,
                flaw_total, r_factor, read_codec, write_codec,
+               read_rate, write_rate,
                rtp_audio_in_raw_bytes, rtp_audio_in_media_bytes,
                rtp_audio_out_raw_bytes, rtp_audio_out_media_bytes,
                rtp_audio_in_packet_count, rtp_audio_out_packet_count,
                rtp_audio_in_jitter_burst_rate, rtp_audio_in_jitter_loss_rate,
-               rtp_audio_in_mean_interval
+               rtp_audio_in_mean_interval,
+               sip_from_user, sip_to_user, hangup_cause_q850,
+               sip_hangup_disposition, sip_user_agent,
+               network_addr, bridge_uuid
         FROM cdrs
         WHERE start_time >= $1 AND start_time <= $2
     """
@@ -610,7 +714,11 @@ async def get_cdr(cdr_uuid: str):
                rtp_audio_in_packet_count, rtp_audio_out_packet_count,
                rtp_audio_in_jitter_burst_rate, rtp_audio_in_jitter_loss_rate,
                rtp_audio_in_mean_interval,
-               read_codec, write_codec
+               read_codec, write_codec,
+               read_rate, write_rate,
+               sip_from_user, sip_to_user, hangup_cause_q850,
+               sip_hangup_disposition, sip_user_agent,
+               network_addr, bridge_uuid
         FROM cdrs WHERE uuid = $1
         """,
         cdr_uuid

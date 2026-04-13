@@ -63,6 +63,17 @@ CREATE TABLE cdrs (
     rtp_audio_in_mean_interval NUMERIC(8,3),
     read_codec VARCHAR(20),
     write_codec VARCHAR(20),
+    read_rate INTEGER,           -- audio sample rate in Hz (e.g. 8000, 16000)
+    write_rate INTEGER,
+
+    -- SIP-level detail (useful for debugging and correlation)
+    sip_from_user VARCHAR(64),
+    sip_to_user VARCHAR(64),
+    hangup_cause_q850 SMALLINT,
+    sip_hangup_disposition VARCHAR(30),
+    sip_user_agent VARCHAR(128),
+    network_addr VARCHAR(45),          -- remote IP (v4 or v6)
+    bridge_uuid VARCHAR(64),           -- UUID of the bridged B-leg
 
     PRIMARY KEY (id, start_time)
 );
