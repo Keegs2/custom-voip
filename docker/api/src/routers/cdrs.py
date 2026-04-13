@@ -4,6 +4,7 @@ from typing import Optional
 from datetime import datetime, timedelta, timezone
 from db import database as db
 import logging
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -80,58 +81,92 @@ def _epoch_to_timestamp(epoch_str):
         return None
 
 
-@router.post("/ingest")
-async def ingest_cdr(request: Request):
-    """Receive a raw JSON CDR from FreeSWITCH mod_json_cdr and insert it.
+def _get_callflow_caller_profile(body: dict) -> dict:
+    """Extract the first caller_profile from the callflow array.
 
-    This endpoint is called directly by FreeSWITCH after each call ends.
-    It must always return 200 -- returning an error causes FS to retry and
-    can flood the endpoint with duplicate data.
+    FreeSWITCH's JSON CDR places caller_profile data under
+    callflow[0].caller_profile. Some fields (destination_number,
+    caller_id_number) are reliably present there but may be absent or
+    malformed in the top-level variables dict.
 
-    No authentication is required; FreeSWITCH calls this over the internal
-    Docker network.
+    Handles both list and single-dict callflow structures.
+    """
+    callflow = body.get("callflow", [])
+    if isinstance(callflow, list) and callflow:
+        return callflow[0].get("caller_profile", {})
+    elif isinstance(callflow, dict):
+        return callflow.get("caller_profile", {})
+    return {}
+
+
+def _clean_caller_id_number(raw: str | None) -> str | None:
+    """Extract a clean phone number from a possibly SIP-formatted caller ID.
+
+    FreeSWITCH variables.caller_id_number may contain the full SIP
+    display format: '"DISPLAY NAME" <+15087282017>' or just the number.
+    The callflow.caller_profile.caller_id_number is usually clean, but
+    we normalize in either case.
+
+    Returns the bare number (e.g. '+15087282017') or None.
+    """
+    if not raw:
+        return None
+    # Already a clean number (starts with + or digit)
+    raw = raw.strip()
+    if re.match(r'^\+?\d+$', raw):
+        return raw
+    # Try extracting from SIP angle-bracket format: "Name" <+1234>
+    m = re.search(r'<([^>]+)>', raw)
+    if m:
+        return m.group(1).strip()
+    # Try extracting any E.164-ish number from the string
+    m = re.search(r'(\+?\d{7,15})', raw)
+    if m:
+        return m.group(1)
+    # Return as-is if nothing matched; let downstream handle it
+    return raw
+
+
+async def _process_cdr_body(body: dict) -> dict:
+    """Extract fields from a parsed FreeSWITCH JSON CDR and insert into the database.
+
+    Field resolution order for key fields:
+      - destination_number: variables -> callflow[0].caller_profile
+      - caller_id_number:   callflow[0].caller_profile -> variables (cleaned)
+      - uuid:               variables -> core-uuid -> callflow caller_profile
+
+    Returns a dict with 'status' ('ok', 'duplicate', or 'error') and details.
+    Never raises -- errors are caught, logged, and returned.
     """
     try:
-        content_type = request.headers.get("content-type", "")
-        if "application/json" in content_type:
-            body = await request.json()
-        elif "x-www-form-urlencoded" in content_type:
-            # mod_json_cdr with encode-values sends URL-encoded form with a 'cdr' field
-            import json
-            from urllib.parse import unquote
-            form = await request.form()
-            cdr_raw = form.get("cdr", "")
-            if not cdr_raw:
-                # Some versions send the JSON as the entire body without a field name
-                raw_body = await request.body()
-                cdr_raw = unquote(raw_body.decode("utf-8", errors="replace"))
-            else:
-                cdr_raw = str(cdr_raw)
-            body = json.loads(cdr_raw)
-        else:
-            # Try raw body as JSON (mod_json_cdr may send without content-type)
-            import json
-            raw_body = await request.body()
-            body = json.loads(raw_body.decode("utf-8", errors="replace"))
-    except Exception as e:
-        logger.warning("CDR ingest: failed to parse body: %s", e)
-        return {"status": "error", "detail": "invalid JSON"}
-
-    try:
         variables = body.get("variables", {})
-        if not variables:
-            logger.warning("CDR ingest: missing 'variables' key in payload")
+        caller_profile = _get_callflow_caller_profile(body)
+
+        if not variables and not caller_profile:
+            logger.warning("CDR ingest: missing both 'variables' and 'callflow' in payload")
             return {"status": "error", "detail": "missing variables"}
 
         # ---- Extract and validate required fields -------------------------
         call_uuid = variables.get("uuid")
         if not call_uuid:
-            logger.warning("CDR ingest: missing uuid in variables")
+            # uuid is sometimes at the top level of the CDR as well
+            call_uuid = body.get("core-uuid") or caller_profile.get("uuid")
+        if not call_uuid:
+            logger.warning("CDR ingest: missing uuid in variables and callflow")
             return {"status": "error", "detail": "missing uuid"}
 
         direction = variables.get("direction", "inbound")
         product_type = variables.get("product_type", "trunk")
+
+        # destination_number: prefer variables, fall back to callflow caller_profile
         destination = variables.get("destination_number")
+        if not destination:
+            destination = caller_profile.get("destination_number")
+            if destination:
+                logger.debug(
+                    "CDR ingest: destination_number resolved from callflow "
+                    "caller_profile for uuid=%s", call_uuid,
+                )
         if not destination:
             logger.warning("CDR ingest: missing destination_number for uuid=%s", call_uuid)
             return {"status": "error", "detail": "missing destination"}
@@ -153,7 +188,14 @@ async def ingest_cdr(request: Request):
 
         # ---- Optional fields ----------------------------------------------
         trunk_id = _safe_int(variables.get("trunk_id"))
-        caller_id = variables.get("caller_id_number")
+
+        # caller_id_number: prefer callflow (clean number), fall back to
+        # variables (may contain SIP display name format), then clean it
+        caller_id = caller_profile.get("caller_id_number")
+        if not caller_id:
+            caller_id = variables.get("caller_id_number")
+        caller_id = _clean_caller_id_number(caller_id)
+
         answer_time = _epoch_to_timestamp(variables.get("answer_epoch"))
 
         duration_sec = _safe_int(variables.get("duration"), default=0)
@@ -297,8 +339,111 @@ async def ingest_cdr(request: Request):
 
     except Exception:
         logger.exception("CDR ingest: unexpected error processing CDR")
-        # Always return 200 so FreeSWITCH does not retry
         return {"status": "error", "detail": "internal processing error"}
+
+
+@router.post("/ingest")
+async def ingest_cdr(request: Request):
+    """Receive a raw JSON CDR from FreeSWITCH mod_json_cdr and insert it.
+
+    This endpoint is called directly by FreeSWITCH after each call ends.
+    It must always return 200 -- returning an error causes FS to retry and
+    can flood the endpoint with duplicate data.
+
+    No authentication is required; FreeSWITCH calls this over the internal
+    Docker network.
+    """
+    try:
+        content_type = request.headers.get("content-type", "")
+        if "application/json" in content_type:
+            body = await request.json()
+        elif "x-www-form-urlencoded" in content_type:
+            # mod_json_cdr with encode-values sends URL-encoded form with a 'cdr' field
+            import json
+            from urllib.parse import unquote
+            form = await request.form()
+            cdr_raw = form.get("cdr", "")
+            if not cdr_raw:
+                # Some versions send the JSON as the entire body without a field name
+                raw_body = await request.body()
+                cdr_raw = unquote(raw_body.decode("utf-8", errors="replace"))
+            else:
+                cdr_raw = str(cdr_raw)
+            body = json.loads(cdr_raw)
+        else:
+            # Try raw body as JSON (mod_json_cdr may send without content-type)
+            import json
+            raw_body = await request.body()
+            body = json.loads(raw_body.decode("utf-8", errors="replace"))
+    except Exception as e:
+        logger.warning("CDR ingest: failed to parse body: %s", e)
+        return {"status": "error", "detail": "invalid JSON"}
+
+    return await _process_cdr_body(body)
+
+
+@router.post("/ingest/bulk")
+async def ingest_cdr_bulk(request: Request):
+    """Bulk-ingest CDR JSON files that were saved to disk by mod_json_cdr fallback.
+
+    Accepts a JSON array of CDR objects (each one a full FreeSWITCH JSON CDR).
+    Processes each CDR independently -- individual failures do not block others.
+    Always returns 200 with a summary of results.
+
+    Usage from the VM to re-ingest fallback files:
+
+        # One file at a time:
+        curl -X POST http://127.0.0.1:8088/v1/cdrs/ingest \\
+             -H 'Content-Type: application/json' \\
+             -d @/var/log/freeswitch/json_cdr/a_]]<uuid>.cdr.json
+
+        # Bulk (all files at once):
+        jq -s '.' /var/log/freeswitch/json_cdr/a_*.cdr.json | \\
+        curl -X POST http://127.0.0.1:8088/v1/cdrs/ingest/bulk \\
+             -H 'Content-Type: application/json' -d @-
+    """
+    try:
+        body = await request.json()
+    except Exception as e:
+        logger.warning("CDR bulk ingest: failed to parse body: %s", e)
+        return {"status": "error", "detail": "invalid JSON"}
+
+    if not isinstance(body, list):
+        return {"status": "error", "detail": "expected a JSON array of CDR objects"}
+
+    results = {"ok": 0, "duplicate": 0, "error": 0, "total": len(body), "errors": []}
+
+    for i, cdr_body in enumerate(body):
+        if not isinstance(cdr_body, dict):
+            logger.warning("CDR bulk ingest: item %d is not a dict, skipping", i)
+            results["error"] += 1
+            results["errors"].append({"index": i, "detail": "not a JSON object"})
+            continue
+
+        result = await _process_cdr_body(cdr_body)
+        status = result.get("status", "error")
+        if status in results:
+            results[status] += 1
+        else:
+            results["error"] += 1
+
+        if status == "error":
+            results["errors"].append({
+                "index": i,
+                "uuid": result.get("uuid"),
+                "detail": result.get("detail"),
+            })
+
+    # Truncate error details to avoid massive responses
+    if len(results["errors"]) > 50:
+        results["errors"] = results["errors"][:50]
+        results["errors_truncated"] = True
+
+    logger.info(
+        "CDR bulk ingest: processed %d CDRs (ok=%d, duplicate=%d, error=%d)",
+        results["total"], results["ok"], results["duplicate"], results["error"],
+    )
+    return results
 
 
 @router.get("")
