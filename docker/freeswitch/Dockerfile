@@ -250,6 +250,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     openssl \
     ca-certificates \
     curl \
+    # iproute2 provides the 'ip' command, needed by entrypoint.sh to add
+    # the public IP to loopback for GCE hairpin NAT workaround
+    iproute2 \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy FreeSWITCH installation from builder
@@ -332,10 +335,18 @@ EXPOSE 16384-18383/udp
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
     CMD /usr/local/freeswitch/bin/fs_cli -x "status" 2>/dev/null | grep -q "UP" || exit 1
 
-# Start FreeSWITCH in foreground with custom config directory
-# Must specify all of: -conf, -log, -db together
+# Copy entrypoint script that adds public IP to loopback before starting FS.
+# This solves the GCE hairpin NAT issue: packets from FS to its own public IP
+# (e.g., ACK/BYE to Kamailio's Record-Route address) are delivered locally
+# instead of being dropped by GCE's network fabric.
+COPY entrypoint.sh /usr/local/freeswitch/entrypoint.sh
+RUN chmod +x /usr/local/freeswitch/entrypoint.sh
+
+# Start FreeSWITCH via entrypoint (adds loopback IP, then exec's freeswitch).
+# Must specify all of: -conf, -log, -db together.
 # CRITICAL: Do NOT use -nonat here. The -nonat flag disables ext-rtp-ip and
 # ext-sip-ip processing, causing SDP to contain Docker internal IPs (172.28.x.x)
 # instead of the public IP. Bandwidth would send RTP to an unreachable address.
 # NAT traversal via ext-rtp-ip/ext-sip-ip is essential in Docker environments.
-CMD ["/usr/local/freeswitch/bin/freeswitch", "-nc", "-nf", "-conf", "/usr/local/freeswitch/conf", "-log", "/var/log/freeswitch", "-db", "/var/lib/freeswitch/db", "-scripts", "/usr/local/freeswitch/scripts"]
+ENTRYPOINT ["/usr/local/freeswitch/entrypoint.sh"]
+CMD ["-nc", "-nf", "-conf", "/usr/local/freeswitch/conf", "-log", "/var/log/freeswitch", "-db", "/var/lib/freeswitch/db", "-scripts", "/usr/local/freeswitch/scripts"]
