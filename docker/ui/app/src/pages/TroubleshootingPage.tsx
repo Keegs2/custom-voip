@@ -4,8 +4,7 @@ import { SoftphoneWidget } from '../components/softphone/SoftphoneWidget';
 
 export function TroubleshootingPage() {
   const [error, setError] = useState(false);
-  // Cache-bust query param prevents GCP LB from serving stale cached index.html
-  const homerUrl = `/homer/?_cb=${Date.now()}`;
+  const homerUrl = '/homer/';
 
   if (error) {
     return (
