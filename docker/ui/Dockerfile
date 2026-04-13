@@ -7,7 +7,7 @@
 # This eliminates the GCP LB caching/MIME issue: static files served by nginx
 # always get the correct Content-Type regardless of what the LB does.
 FROM ghcr.io/sipcapture/homer-app AS homer-source
-RUN sed -i 's|// PREFIX: "/dist/homer-ui/",|PREFIX: "/homer/",|g' /usr/local/homer/dist/index.html
+RUN sed -i 's|// PREFIX: "/dist/homer-ui/",|PREFIX: "/homer/", APIURL: "/api/v3",|g' /usr/local/homer/dist/index.html
 
 # Stage 2: Build the React SPA
 FROM node:20-alpine AS build
