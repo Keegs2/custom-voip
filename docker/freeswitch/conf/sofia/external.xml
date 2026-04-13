@@ -119,23 +119,26 @@
     <!--
       CRITICAL: Without session timer support on the carrier-facing profile,
       FreeSWITCH cannot negotiate or refresh sessions. If Bandwidth sends
-      Session-Expires: 30 in the 200 OK and FreeSWITCH does not send a
-      re-INVITE/UPDATE before it expires, the carrier tears down the call
-      at exactly 30 seconds.
+      Session-Expires in the 200 OK and FreeSWITCH does not send a
+      re-INVITE/UPDATE before it expires, the carrier tears down the call.
 
       enable-timer: Activates RFC 4028 session timer negotiation.
       sip-session-timeout: Our proposed session interval (30 min).
         The carrier may propose shorter; FS will negotiate per RFC 4028.
-      minimum-session-expires: Floor for negotiation. If the carrier
-        proposes Session-Expires below this, FS responds with 422
-        (Session Interval Too Small) and includes Min-SE, forcing the
-        carrier to use at least this value. 120s is a safe minimum that
-        avoids excessive re-INVITE traffic while preventing premature
-        session expiry.
+      minimum-session-expires: Floor for negotiation (see below).
     -->
     <param name="enable-timer" value="true"/>
     <param name="sip-session-timeout" value="1800"/>
-    <param name="minimum-session-expires" value="120"/>
+    <!--
+      minimum-session-expires: Floor for session timer negotiation.
+      Set to 90s (matching internal profile) for carrier compatibility.
+      Previously 120s, which could cause 422 rejection loops with carriers
+      that propose intervals between 90-119s. 90s is the RFC 4028
+      recommended minimum and balances refresh overhead vs. compatibility.
+      Bandwidth typically proposes 30s; FS will send Min-SE:90 in the
+      INVITE, and Bandwidth will negotiate up to at least 90s.
+    -->
+    <param name="minimum-session-expires" value="90"/>
 
     <!-- ============================================ -->
     <!-- DTMF CONFIGURATION                          -->
