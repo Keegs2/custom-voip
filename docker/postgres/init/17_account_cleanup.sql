@@ -16,6 +16,8 @@ BEGIN;
 -- =========================================================================
 UPDATE customers
 SET name = 'Granite Telephony',
+    account_type = 'hybrid',
+    ucaas_enabled = true,
     updated_at = NOW()
 WHERE name IN ('Granite Engineering', 'Granite Telephony');
 
@@ -232,7 +234,7 @@ WHERE NOT EXISTS (
 );
 
 -- =========================================================================
--- STEP 8: Create RCF number for Demo RCF Customer
+-- STEP 8: Create RCF number for Granite Telephony (real TN)
 --         +16174544217 forwarding to +17744045256
 -- =========================================================================
 
@@ -242,8 +244,8 @@ DELETE FROM rcf_numbers WHERE did = '+16174544217';
 INSERT INTO rcf_numbers (did, name, customer_id, forward_to, pass_caller_id, enabled, ring_timeout)
 VALUES (
     '+16174544217',
-    'Demo RCF Line',
-    (SELECT id FROM customers WHERE name = 'Demo RCF Customer'),
+    'Granite RCF Line',
+    (SELECT id FROM customers WHERE name = 'Granite Telephony'),
     '+17744045256',
     true,
     true,
