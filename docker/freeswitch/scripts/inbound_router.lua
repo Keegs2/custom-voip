@@ -700,11 +700,18 @@ elseif product_type == "ucaas" then
     -- UCaaS Extension DID - Route inbound call to user's extension
     local ext = routing.extension
     local display = routing.display_name or ("Extension " .. ext)
-    local domain = get_domain()
+
+    -- Multi-tenant: build customer-specific domain from customer_id.
+    -- Extensions register under customer_{id}.voiceplatform.local (e.g.,
+    -- 100@customer_13.voiceplatform.local). The global domain (voiceplatform.local)
+    -- will NOT resolve the user because mod_xml_curl scopes lookups by the
+    -- customer domain extracted from the SIP request.
+    local base_domain = get_domain()
+    local customer_domain = string.format("customer_%s.%s", tostring(customer_id), base_domain)
 
     freeswitch.consoleLog("INFO", string.format(
         "[%s] UCaaS inbound: DID %s -> ext %s (%s) @ %s\n",
-        uuid, normalized_did, ext, display, domain
+        uuid, normalized_did, ext, display, customer_domain
     ))
 
     -- Media anchoring and ringback (same pattern as RCF local)
@@ -723,12 +730,12 @@ elseif product_type == "ucaas" then
 
     local dial_string = string.format(
         "{ignore_early_media=false,call_timeout=30}user/%s@%s",
-        ext, domain
+        ext, customer_domain
     )
 
     freeswitch.consoleLog("INFO", string.format(
         "[%s] UCaaS Bridge: %s -> user/%s@%s\n",
-        uuid, normalized_did, ext, domain
+        uuid, normalized_did, ext, customer_domain
     ))
 
     pcall(function()
@@ -742,13 +749,13 @@ elseif product_type == "ucaas" then
     if bridge_result ~= "SUCCESS" then
         -- Extension unavailable (not registered, busy, etc.) - send to voicemail
         freeswitch.consoleLog("INFO", string.format(
-            "[%s] UCaaS bridge failed (cause=%s), sending to voicemail for ext %s\n",
-            uuid, last_bridge_hangup, ext
+            "[%s] UCaaS bridge failed (cause=%s), sending to voicemail for ext %s@%s\n",
+            uuid, last_bridge_hangup, ext, customer_domain
         ))
         pcall(function()
             session:answer()
             session:sleep(1000)
-            session:execute("voicemail", "default " .. domain .. " " .. ext)
+            session:execute("voicemail", "default " .. customer_domain .. " " .. ext)
         end)
     end
 

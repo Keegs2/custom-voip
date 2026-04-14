@@ -217,6 +217,31 @@
     <!-- NAT HANDLING                                -->
     <!-- ============================================ -->
 
+    <!--
+      local-network-acl: Controls whether mod_sofia uses sip-ip or ext-sip-ip
+      (and rtp-ip vs ext-rtp-ip) for SDP and SIP headers in responses.
+
+      If the remote IP (Kamailio 172.28.0.1) is in the local-network-acl,
+      mod_sofia uses sip-ip/rtp-ip (private Docker IP) in the 200 OK SDP.
+      The default ACL includes RFC1918 ranges, so 172.28.0.1 is treated as
+      "local" and the SDP c= line gets the private IP (10.142.0.100) instead
+      of the public IP (34.74.71.32). This causes one-way audio on inbound
+      calls because the carrier sends RTP to the private IP.
+
+      Fix: Set to loopback.auto so only 127.0.0.0/8 is "local." All other
+      sources (including Docker 172.28.x.x) trigger ext-rtp-ip in the SDP.
+      This mirrors the external profile's configuration.
+    -->
+    <param name="local-network-acl" value="loopback.auto"/>
+
+    <!--
+      apply-nat-acl: Belt-and-suspenders — force ext-rtp-ip/ext-sip-ip for
+      any source matching RFC1918 addresses. Since Kamailio is at 172.28.0.1
+      (RFC1918), this ensures the public IP is used in SDP responses even if
+      other ACL logic changes.
+    -->
+    <param name="apply-nat-acl" value="rfc1918.auto"/>
+
     <!-- NAT detection - enabled for local Zoiper testing -->
     <param name="aggressive-nat-detection" value="true"/>
     <param name="NDLB-force-rport" value="true"/>
