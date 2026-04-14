@@ -933,19 +933,46 @@ export class VertoClient {
         return;
       }
 
+      // Resolve as soon as we have at least one candidate (host candidate
+      // is typically available within ~100ms). STUN candidates may take 2-5s
+      // to arrive from Google, but they aren't needed — FS is on a public IP
+      // and can reach the browser's host candidate directly.
+      let hasCandidate = false;
+      let candidateTimer: ReturnType<typeof setTimeout> | null = null;
+
+      const finish = () => {
+        if (candidateTimer) clearTimeout(candidateTimer);
+        clearTimeout(timeout);
+        pc.removeEventListener('icegatheringstatechange', onStateChange);
+        pc.removeEventListener('icecandidate', onCandidate);
+        resolve(pc.localDescription?.sdp ?? '');
+      };
+
+      // Hard timeout — safety net if no candidates arrive at all
       const timeout = setTimeout(() => {
         console.warn('[Verto] ICE gathering timed out — using partial SDP');
-        resolve(pc.localDescription?.sdp ?? '');
-      }, 5_000);
+        finish();
+      }, 3_000);
 
-      const onStateChange = () => {
-        if (pc.iceGatheringState === 'complete') {
-          clearTimeout(timeout);
-          pc.removeEventListener('icegatheringstatechange', onStateChange);
-          resolve(pc.localDescription!.sdp);
+      const onCandidate = (ev: RTCPeerConnectionIceEvent) => {
+        if (ev.candidate && !hasCandidate) {
+          hasCandidate = true;
+          // Got first candidate — wait a short window for more host candidates
+          // then resolve immediately without waiting for STUN/TURN
+          candidateTimer = setTimeout(() => {
+            console.log(`[Verto] ICE fast-resolve: sending SDP after first candidates`);
+            finish();
+          }, 200);
         }
       };
 
+      const onStateChange = () => {
+        if (pc.iceGatheringState === 'complete') {
+          finish();
+        }
+      };
+
+      pc.addEventListener('icecandidate', onCandidate);
       pc.addEventListener('icegatheringstatechange', onStateChange);
     });
   }
