@@ -31,7 +31,7 @@ discover_alias_path() {
     code=$(curl -s -o /dev/null -w "%{http_code}" \
       -H "Authorization: Bearer ${token}" \
       "${HOMER_URL}${candidate}")
-    if [ "$code" = "200" ]; then
+    if [ "$code" = "200" ] || [ "$code" = "201" ]; then
       echo "$candidate"
       return 0
     fi
