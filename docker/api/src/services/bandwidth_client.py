@@ -20,8 +20,8 @@ BANDWIDTH_CLIENT_ID = os.getenv("BANDWIDTH_API_CLIENT_ID", "")
 BANDWIDTH_CLIENT_SECRET = os.getenv("BANDWIDTH_API_CLIENT_SECRET", "")
 BANDWIDTH_ACCOUNT_ID = os.getenv("BANDWIDTH_ACCOUNT_ID", "5006123")
 
-TOKEN_URL = "https://id.bandwidth.com/api/v1/oauth2/token"
-NUMBERS_BASE = f"https://numbers.bandwidth.com/api/v1/accounts/{BANDWIDTH_ACCOUNT_ID}"
+TOKEN_URL = "https://api.bandwidth.com/api/v1/oauth2/token"
+NUMBERS_BASE = "https://api.bandwidth.com/api"
 
 # Redis cache key and TTL
 CACHE_KEY = "bandwidth:tns"
@@ -100,7 +100,7 @@ async def _api_get(path: str, params: dict | None = None, _retried: bool = False
 
 async def list_tns(page: int = 1, size: int = 500) -> dict:
     """Fetch a single page of TNs from Bandwidth."""
-    return await _api_get("/tns", params={"page": page, "size": size})
+    return await _api_get("/tns", params={"accountId": BANDWIDTH_ACCOUNT_ID, "page": page, "size": size})
 
 
 async def get_all_tns() -> list[dict]:
