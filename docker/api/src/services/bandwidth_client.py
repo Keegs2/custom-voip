@@ -26,9 +26,10 @@ logger = logging.getLogger(__name__)
 BANDWIDTH_CLIENT_ID = os.getenv("BANDWIDTH_API_CLIENT_ID", "")
 BANDWIDTH_CLIENT_SECRET = os.getenv("BANDWIDTH_API_CLIENT_SECRET", "")
 
-# The accountId param for the /tns endpoint should be the *sub-account*
-# (location) where our numbers live, not the parent account.
-BANDWIDTH_TN_ACCOUNT_ID = os.getenv("BANDWIDTH_TN_ACCOUNT_ID", "1162116")
+# Main account ID — the OAuth2 token is scoped to this account.
+BANDWIDTH_ACCOUNT_ID = os.getenv("BANDWIDTH_ACCOUNT_ID", "9900717")
+# Sub-account (site) to filter TNs — "Granite Lab" = 12455
+BANDWIDTH_SITE_ID = os.getenv("BANDWIDTH_SITE_ID", "12455")
 
 TOKEN_URL = "https://api.bandwidth.com/api/v1/oauth2/token"
 NUMBERS_BASE = "https://api.bandwidth.com/api"
@@ -187,7 +188,7 @@ async def _api_get_raw(
     """
     token = await _get_access_token()
 
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
         resp = await client.get(
             f"{NUMBERS_BASE}{path}",
             params=params,
@@ -218,7 +219,7 @@ async def _api_get_url_raw(
     """GET an absolute URL (used for pagination 'next' links)."""
     token = await _get_access_token()
 
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
         resp = await client.get(
             url,
             headers={
@@ -250,7 +251,8 @@ async def list_tns(page: int = 1, size: int = 500) -> tuple[list[dict], int, Opt
     Returns (tns, total_count, next_url).
     """
     xml_bytes = await _api_get_raw("/tns", params={
-        "accountId": BANDWIDTH_TN_ACCOUNT_ID,
+        "accountId": BANDWIDTH_ACCOUNT_ID,
+        "siteId": BANDWIDTH_SITE_ID,
         "page": page,
         "size": size,
     })
