@@ -49,6 +49,35 @@ WHERE customer_id = (SELECT id FROM customers WHERE name = 'Granite Telephony')
 -- users.customer_id is ON DELETE SET NULL, so we must delete users explicitly.
 -- =========================================================================
 
+-- Clean up document references before deleting users (FK not CASCADE)
+DELETE FROM shared_documents WHERE uploaded_by IN (
+    SELECT id FROM users WHERE customer_id IN (1,2,3,4,5)
+      AND email NOT IN ('admin@customvoip.com', 'support@granite.com')
+);
+DELETE FROM document_folders WHERE created_by IN (
+    SELECT id FROM users WHERE customer_id IN (1,2,3,4,5)
+      AND email NOT IN ('admin@customvoip.com', 'support@granite.com')
+);
+-- Clean up chat references (participants, messages)
+DELETE FROM chat_messages WHERE sender_id IN (
+    SELECT id FROM users WHERE customer_id IN (1,2,3,4,5)
+      AND email NOT IN ('admin@customvoip.com', 'support@granite.com')
+);
+DELETE FROM chat_participants WHERE user_id IN (
+    SELECT id FROM users WHERE customer_id IN (1,2,3,4,5)
+      AND email NOT IN ('admin@customvoip.com', 'support@granite.com')
+);
+-- Clean up presence
+DELETE FROM presence_status WHERE user_id IN (
+    SELECT id FROM users WHERE customer_id IN (1,2,3,4,5)
+      AND email NOT IN ('admin@customvoip.com', 'support@granite.com')
+);
+-- Clean up conference participants
+DELETE FROM conference_participants WHERE user_id IN (
+    SELECT id FROM users WHERE customer_id IN (1,2,3,4,5)
+      AND email NOT IN ('admin@customvoip.com', 'support@granite.com')
+);
+
 -- Delete users that belong to old test customers (IDs 1-5).
 -- Preserve admin@customvoip.com and support@granite.com regardless.
 DELETE FROM users
@@ -56,7 +85,12 @@ WHERE customer_id IN (1, 2, 3, 4, 5)
   AND email NOT IN ('admin@customvoip.com', 'support@granite.com');
 
 -- Also clean up any demo users from prior runs of this script
--- (their customer will be deleted, leaving them orphaned with SET NULL)
+DELETE FROM shared_documents WHERE uploaded_by IN (
+    SELECT id FROM users WHERE email IN ('rcf@demo.customvoip.com','trunk@demo.customvoip.com','ucaas@demo.customvoip.com','hybrid@demo.customvoip.com')
+);
+DELETE FROM document_folders WHERE created_by IN (
+    SELECT id FROM users WHERE email IN ('rcf@demo.customvoip.com','trunk@demo.customvoip.com','ucaas@demo.customvoip.com','hybrid@demo.customvoip.com')
+);
 DELETE FROM users
 WHERE email IN (
     'rcf@demo.customvoip.com',
