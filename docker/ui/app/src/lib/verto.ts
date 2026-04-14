@@ -631,14 +631,29 @@ export class VertoClient {
     const dp = params['dialogParams'] as VertoDialogParams | undefined;
     const remoteSdp = params['sdp'] as string | undefined;
 
-    if (!dp?.callID || !remoteSdp) return;
+    // Resolve callID — same multi-step approach as verto.bye/verto.answer.
+    // For inbound calls via verto.rtc, FS may place the callID at different
+    // locations in the params depending on the origination path.
+    let callId: string | undefined;
+    if (dp?.callID) {
+      callId = dp.callID;
+    } else if (typeof params['callID'] === 'string' && params['callID']) {
+      callId = params['callID'];
+    }
 
-    const pc = this.createPeerConnection(dp.callID);
+    console.log(`[Verto] handleIncomingInvite: callId=${callId ?? 'MISSING'}, hasSdp=${!!remoteSdp}, params keys=${Object.keys(params).join(',')}`);
+
+    if (!callId || !remoteSdp) {
+      console.warn('[Verto] Dropping inbound invite — missing callId or SDP', { callId, hasSdp: !!remoteSdp });
+      return;
+    }
+
+    const pc = this.createPeerConnection(callId);
     const remoteStream = new MediaStream();
     pc.ontrack = (ev) => {
       ev.streams[0]?.getTracks().forEach((track) => remoteStream.addTrack(track));
-      this.playRemoteAudio(dp.callID, remoteStream);
-      this.onStreamChange(dp.callID, 'remote', remoteStream);
+      this.playRemoteAudio(callId!, remoteStream);
+      this.onStreamChange(callId!, 'remote', remoteStream);
     };
 
     await pc.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp: remoteSdp }));
@@ -647,11 +662,11 @@ export class VertoClient {
     const offersVideo = remoteSdp.includes('m=video');
 
     const call: ActiveCall = {
-      id: dp.callID,
+      id: callId,
       direction: 'inbound',
       state: 'ringing',
-      remoteNumber: dp.remote_caller_id_number ?? dp.caller_id_number ?? 'Unknown',
-      remoteName: dp.remote_caller_id_name ?? dp.caller_id_name ?? 'Unknown',
+      remoteNumber: dp?.remote_caller_id_number ?? dp?.caller_id_number ?? (params['caller_id_number'] as string | undefined) ?? 'Unknown',
+      remoteName: dp?.remote_caller_id_name ?? dp?.caller_id_name ?? (params['caller_id_name'] as string | undefined) ?? 'Unknown',
       startTime: null,
       duration: 0,
       muted: false,
@@ -660,7 +675,9 @@ export class VertoClient {
       isScreenSharing: false,
     };
 
-    this.sessions.set(dp.callID, {
+    console.log(`[Verto] Inbound call: ${call.remoteName} <${call.remoteNumber}> -> callId=${callId}`);
+
+    this.sessions.set(callId, {
       call,
       peerConnection: pc,
       localStream: null,
