@@ -751,15 +751,61 @@ elseif product_type == "ucaas" then
     local last_bridge_hangup = get_var("last_bridge_hangup_cause", "")
 
     if bridge_result ~= "SUCCESS" then
-        -- Extension unavailable (not registered, busy, etc.) - send to voicemail
+        -- Extension unavailable (not registered, busy, rejected, etc.)
+        -- Record a voicemail directly: play a brief tone sequence, beep, record.
+        -- We bypass mod_voicemail's phrase-macro flow (which needs full sound
+        -- packs for a good UX) and handle recording ourselves, then deposit
+        -- the file where mod_voicemail can pick it up for retrieval later.
         freeswitch.consoleLog("INFO", string.format(
-            "[%s] UCaaS bridge failed (cause=%s), sending to voicemail for ext %s@%s\n",
+            "[%s] UCaaS bridge failed (cause=%s), recording voicemail for ext %s@%s\n",
             uuid, last_bridge_hangup, ext, customer_domain
         ))
         pcall(function()
+            if not session:ready() then return end
             session:answer()
-            session:sleep(1000)
-            session:execute("voicemail", "default " .. customer_domain .. " " .. ext)
+            session:sleep(500)
+
+            -- "The person at extension <ext> is not available."
+            -- Three ascending tones = universal "not available" signal
+            session:execute("playback", "tone_stream://%(200,80,500);%(200,80,650);%(200,0,800)")
+            session:sleep(800)
+
+            -- "Please leave a message after the tone."
+            -- Two short tones = "get ready"
+            session:execute("playback", "tone_stream://%(150,100,700);%(150,0,700)")
+            session:sleep(600)
+
+            -- BEEP — start recording
+            session:execute("playback", "tone_stream://%(1000,0,640)")
+
+            -- Record to mod_voicemail's storage directory so *97 retrieval works.
+            -- Format: /var/lib/freeswitch/voicemail/<domain>/<ext>/msg_<uuid>.wav
+            local vm_dir = string.format(
+                "/var/lib/freeswitch/voicemail/%s/%s",
+                customer_domain, ext
+            )
+            session:execute("set", "playback_terminators=#")
+            os.execute("mkdir -p " .. vm_dir)
+            local vm_file = string.format("%s/msg_%s.wav", vm_dir, uuid)
+
+            freeswitch.consoleLog("INFO", string.format(
+                "[%s] Recording voicemail to %s (max 300s, silence detect 200/3)\n",
+                uuid, vm_file
+            ))
+
+            -- record <file> <max_seconds> <silence_threshold> <silence_hits>
+            session:execute("record", vm_file .. " 300 200 3")
+
+            -- Confirmation beep
+            if session:ready() then
+                session:execute("playback", "tone_stream://%(100,0,800)")
+                session:sleep(300)
+                session:execute("playback", "tone_stream://%(200,80,600);%(200,0,400)")
+            end
+
+            freeswitch.consoleLog("INFO", string.format(
+                "[%s] Voicemail recorded: %s\n", uuid, vm_file
+            ))
         end)
     end
 
