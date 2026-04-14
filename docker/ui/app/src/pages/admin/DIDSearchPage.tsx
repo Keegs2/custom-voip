@@ -237,7 +237,7 @@ function Pagination({ currentPage, totalPages, onPageChange, isFetching }: Pagin
           </svg>
         </button>
 
-        {pages.map((p, idx) => {
+        {pages.map((p) => {
           if (p === 'ellipsis-start' || p === 'ellipsis-end') {
             return (
               <span key={p === 'ellipsis-start' ? 'es' : 'ee'} style={{ color: '#334155', fontSize: '0.78rem', padding: '0 2px', userSelect: 'none' }}>
