@@ -28,8 +28,8 @@ BANDWIDTH_CLIENT_SECRET = os.getenv("BANDWIDTH_API_CLIENT_SECRET", "")
 
 # Main account ID — the OAuth2 token is scoped to this account.
 BANDWIDTH_ACCOUNT_ID = os.getenv("BANDWIDTH_ACCOUNT_ID", "9900717")
-# Sub-account (site) to filter TNs — "Granite Lab" = 12455
-BANDWIDTH_SITE_ID = os.getenv("BANDWIDTH_SITE_ID", "12455")
+# SIP Peer (location) to filter TNs — "custom-voip-poc" = 1162116
+BANDWIDTH_SIP_PEER_ID = os.getenv("BANDWIDTH_SIP_PEER_ID", "1162116")
 
 TOKEN_URL = "https://api.bandwidth.com/api/v1/oauth2/token"
 NUMBERS_BASE = "https://api.bandwidth.com/api"
@@ -252,7 +252,7 @@ async def list_tns(page: int = 1, size: int = 500) -> tuple[list[dict], int, Opt
     """
     xml_bytes = await _api_get_raw("/tns", params={
         "accountId": BANDWIDTH_ACCOUNT_ID,
-        "siteId": BANDWIDTH_SITE_ID,
+        "sipPeerId": BANDWIDTH_SIP_PEER_ID,
         "page": page,
         "size": size,
     })
