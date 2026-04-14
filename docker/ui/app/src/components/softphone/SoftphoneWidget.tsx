@@ -196,6 +196,19 @@ const IconGripDots = () => (
   </svg>
 );
 
+const IconPhoneDown = () => (
+  <svg viewBox="0 0 24 24" fill="currentColor" style={{ width: 22, height: 22 }}>
+    <path fillRule="evenodd" d="M1.5 4.5a3 3 0 0 1 3-3h1.372c.86 0 1.61.586 1.819 1.42l1.105 4.423a1.875 1.875 0 0 1-.694 1.955l-1.293.97c-.135.101-.164.249-.126.352a11.285 11.285 0 0 0 6.697 6.697c.103.038.25.009.352-.126l.97-1.293a1.875 1.875 0 0 1 1.955-.694l4.423 1.105c.834.209 1.42.959 1.42 1.82V19.5a3 3 0 0 1-3 3h-2.25C8.552 22.5 1.5 15.448 1.5 6.75V4.5Z" clipRule="evenodd" />
+    <path d="M20.53 3.47a.75.75 0 0 0-1.06 0L18 4.94l-1.47-1.47a.75.75 0 0 0-1.06 1.06L16.94 6l-1.47 1.47a.75.75 0 1 0 1.06 1.06L18 7.06l1.47 1.47a.75.75 0 1 0 1.06-1.06L19.06 6l1.47-1.47a.75.75 0 0 0 0-1.06Z" />
+  </svg>
+);
+
+const IconPhoneAnswer = () => (
+  <svg viewBox="0 0 24 24" fill="currentColor" style={{ width: 22, height: 22 }}>
+    <path fillRule="evenodd" d="M1.5 4.5a3 3 0 0 1 3-3h1.372c.86 0 1.61.586 1.819 1.42l1.105 4.423a1.875 1.875 0 0 1-.694 1.955l-1.293.97c-.135.101-.164.249-.126.352a11.285 11.285 0 0 0 6.697 6.697c.103.038.25.009.352-.126l.97-1.293a1.875 1.875 0 0 1 1.955-.694l4.423 1.105c.834.209 1.42.959 1.42 1.82V19.5a3 3 0 0 1-3 3h-2.25C8.552 22.5 1.5 15.448 1.5 6.75V4.5Z" clipRule="evenodd" />
+  </svg>
+);
+
 /* ─── Animated sound wave bars (for ringing state) ─────────── */
 
 function SoundWaveBars({ color = '#22c55e' }: { color?: string }) {
@@ -400,6 +413,34 @@ const SOFTPHONE_STYLES = `
     0%   { background: rgba(59,130,246,0.30); box-shadow: 0 0 0 0 rgba(59,130,246,0.50); }
     40%  { background: rgba(59,130,246,0.18); box-shadow: 0 0 12px 4px rgba(59,130,246,0.25); }
     100% { background: rgba(255,255,255,0.05); box-shadow: none; }
+  }
+
+  @keyframes softphone-answer-pulse {
+    0%, 100% { box-shadow: 0 4px 20px rgba(34,197,94,0.50), 0 0 0 0   rgba(34,197,94,0.45); }
+    50%       { box-shadow: 0 4px 32px rgba(34,197,94,0.75), 0 0 0 16px rgba(34,197,94,0); }
+  }
+
+  /* ── Incoming call answer/reject buttons ── */
+  .sp-answer-btn {
+    transition: transform 0.12s ease, box-shadow 0.15s ease;
+  }
+  .sp-answer-btn:hover {
+    transform: scale(1.10) !important;
+    box-shadow: 0 6px 32px rgba(34,197,94,0.70) !important;
+  }
+  .sp-answer-btn:active {
+    transform: scale(0.90) !important;
+  }
+
+  .sp-reject-btn {
+    transition: transform 0.12s ease, box-shadow 0.15s ease;
+  }
+  .sp-reject-btn:hover {
+    transform: scale(1.10) !important;
+    box-shadow: 0 6px 32px rgba(239,68,68,0.70) !important;
+  }
+  .sp-reject-btn:active {
+    transform: scale(0.90) !important;
   }
 
   @keyframes softphone-presence-pulse {
@@ -636,6 +677,8 @@ export function SoftphoneWidget() {
     remoteVideoStream,
     setExpanded,
     setPresence,
+    answerCall,
+    rejectCall,
   } = useSoftphone();
   const { user } = useAuth();
 
@@ -820,6 +863,19 @@ export function SoftphoneWidget() {
       el.srcObject = null;
     }
   }, [remoteVideoStream]);
+
+  // ── Auto-expand when an incoming call arrives ──
+  // Must be above early return nulls to satisfy hook ordering rules.
+  useEffect(() => {
+    if (incomingCall !== null && !isExpanded) {
+      const panelPos = expandedPositionFromFab(position, fabWidth);
+      setPosition(panelPos);
+      setExpanded(true);
+    }
+  // We only want to fire this when incomingCall transitions to non-null.
+  // Including position/fabWidth would cause re-runs on every drag tick.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [incomingCall]);
 
   // ── Guard: UCaaS feature check ──
   const hasUcaas =
@@ -1154,16 +1210,211 @@ export function SoftphoneWidget() {
               </button>
             </div>
 
+            {/* ── Incoming call UI ── */}
+            {isIncoming && incomingCall && (
+              <div
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  gap: 20,
+                  padding: '32px 24px 36px',
+                  flex: 1,
+                  background: 'linear-gradient(180deg, rgba(22,163,74,0.08) 0%, transparent 60%)',
+                }}
+              >
+                {/* Caller avatar / pulse ring stack */}
+                <div
+                  style={{
+                    position: 'relative',
+                    width: 88,
+                    height: 88,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    flexShrink: 0,
+                  }}
+                >
+                  <div
+                    style={{
+                      position: 'absolute',
+                      inset: 0,
+                      borderRadius: '50%',
+                      border: '2px solid rgba(34,197,94,0.55)',
+                      animation: 'softphone-ripple 1.8s 0.0s ease-out infinite',
+                    }}
+                  />
+                  <div
+                    style={{
+                      position: 'absolute',
+                      inset: 0,
+                      borderRadius: '50%',
+                      border: '2px solid rgba(34,197,94,0.35)',
+                      animation: 'softphone-ripple 1.8s 0.6s ease-out infinite',
+                    }}
+                  />
+                  <div
+                    style={{
+                      position: 'absolute',
+                      inset: 0,
+                      borderRadius: '50%',
+                      border: '2px solid rgba(34,197,94,0.20)',
+                      animation: 'softphone-ripple 1.8s 1.2s ease-out infinite',
+                    }}
+                  />
+                  <div
+                    style={{
+                      width: 64,
+                      height: 64,
+                      borderRadius: '50%',
+                      background: 'linear-gradient(135deg, #14532d 0%, #166534 100%)',
+                      border: '2px solid rgba(34,197,94,0.40)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      boxShadow: '0 4px 20px rgba(34,197,94,0.35)',
+                      zIndex: 1,
+                    }}
+                  >
+                    {/* Caller initials */}
+                    <span
+                      style={{
+                        fontSize: '1.4rem',
+                        fontWeight: 700,
+                        color: '#86efac',
+                        lineHeight: 1,
+                        userSelect: 'none',
+                      }}
+                    >
+                      {(incomingCall.remoteName && incomingCall.remoteName !== incomingCall.remoteNumber
+                        ? incomingCall.remoteName
+                        : incomingCall.remoteNumber
+                      ).charAt(0).toUpperCase()}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Label */}
+                <div
+                  style={{
+                    fontSize: '0.65rem',
+                    fontWeight: 700,
+                    color: '#4ade80',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.12em',
+                  }}
+                >
+                  Incoming Call
+                </div>
+
+                {/* Caller name + number */}
+                <div style={{ textAlign: 'center' }}>
+                  <div
+                    style={{
+                      fontSize: '1.15rem',
+                      fontWeight: 700,
+                      color: '#f1f5f9',
+                      letterSpacing: '-0.02em',
+                      lineHeight: 1.2,
+                    }}
+                  >
+                    {incomingCall.remoteName && incomingCall.remoteName !== incomingCall.remoteNumber
+                      ? incomingCall.remoteName
+                      : incomingCall.remoteNumber}
+                  </div>
+                  {incomingCall.remoteName && incomingCall.remoteName !== incomingCall.remoteNumber && (
+                    <div
+                      style={{
+                        fontSize: '0.82rem',
+                        color: '#64748b',
+                        fontFamily: 'monospace',
+                        marginTop: 4,
+                      }}
+                    >
+                      {incomingCall.remoteNumber}
+                    </div>
+                  )}
+                </div>
+
+                {/* Answer / Reject buttons */}
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 40,
+                    marginTop: 8,
+                  }}
+                >
+                  {/* Reject button */}
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+                    <button
+                      type="button"
+                      onClick={() => rejectCall()}
+                      aria-label="Reject incoming call"
+                      className="sp-reject-btn"
+                      style={{
+                        width: 64,
+                        height: 64,
+                        borderRadius: '50%',
+                        background: '#ef4444',
+                        border: '2px solid rgba(239,68,68,0.40)',
+                        color: '#fff',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        boxShadow: '0 4px 20px rgba(239,68,68,0.40)',
+                      }}
+                    >
+                      <IconPhoneDown />
+                    </button>
+                    <span style={{ fontSize: '0.68rem', fontWeight: 600, color: '#94a3b8', letterSpacing: '0.04em' }}>
+                      Decline
+                    </span>
+                  </div>
+
+                  {/* Answer button */}
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+                    <button
+                      type="button"
+                      onClick={() => { void answerCall(); }}
+                      aria-label="Answer incoming call"
+                      className="sp-answer-btn"
+                      style={{
+                        width: 64,
+                        height: 64,
+                        borderRadius: '50%',
+                        background: '#22c55e',
+                        border: '2px solid rgba(34,197,94,0.40)',
+                        color: '#fff',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        animation: 'softphone-answer-pulse 1.6s ease-in-out infinite',
+                      }}
+                    >
+                      <IconPhoneAnswer />
+                    </button>
+                    <span style={{ fontSize: '0.68rem', fontWeight: 600, color: '#94a3b8', letterSpacing: '0.04em' }}>
+                      Answer
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* ── Outbound dialing / ringing state ── */}
-            {isDialingOrRinging && (
+            {!isIncoming && isDialingOrRinging && (
               <OutboundRingingIndicator
                 remoteName={activeCall.remoteName}
                 remoteNumber={activeCall.remoteNumber}
               />
             )}
 
-            {/* ── Tab bar (hidden while dialing outbound) ── */}
-            {!isDialingOrRinging && (
+            {/* ── Tab bar (hidden while dialing outbound or ringing inbound) ── */}
+            {!isIncoming && !isDialingOrRinging && (
               <div
                 style={{
                   display: 'flex',
@@ -1234,7 +1485,7 @@ export function SoftphoneWidget() {
             )}
 
             {/* ── Tab content ── */}
-            {!isDialingOrRinging && (
+            {!isIncoming && !isDialingOrRinging && (
               <div
                 style={{
                   flex: 1,
