@@ -728,13 +728,17 @@ elseif product_type == "ucaas" then
     -- Mark as lua-routed so the dialplan fallback doesn't return 404
     set_var("lua_routed", "true")
 
+    -- Verto (WebRTC) users don't appear in sofia registrations — they connect
+    -- via mod_verto's WebSocket.  "user/" does a sofia lookup and fails.
+    -- "verto.rtc/" reaches the Verto endpoint directly.  Fall back to "user/"
+    -- for any future SIP-registered extensions.
     local dial_string = string.format(
-        "{ignore_early_media=false,call_timeout=30}user/%s@%s",
-        ext, customer_domain
+        "{ignore_early_media=false,call_timeout=30}verto.rtc/%s@%s|user/%s@%s",
+        ext, customer_domain, ext, customer_domain
     )
 
     freeswitch.consoleLog("INFO", string.format(
-        "[%s] UCaaS Bridge: %s -> user/%s@%s\n",
+        "[%s] UCaaS Bridge: %s -> verto.rtc/%s@%s (fallback user/)\n",
         uuid, normalized_did, ext, customer_domain
     ))
 
