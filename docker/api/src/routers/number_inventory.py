@@ -52,53 +52,25 @@ async def _build_assignment_map() -> dict[str, dict]:
 
 
 def _normalize(tn: str) -> str:
-    """Normalize a TN to a consistent format for comparison.
+    """Normalize a TN to plain digits (no '+') for comparison.
 
-    Bandwidth may return '5087282017', '15087282017', or '+15087282017'.
-    Internal tables store E.164 (+15087282017).  We compare all as plain
-    digits (no '+') so both sides match.
+    The bandwidth_client already returns fullNumber in E.164 (+1NPANXXXXXX).
+    Internal tables also store E.164.  We strip the '+' so both sides match.
     """
     return tn.lstrip("+")
 
 
-def _tn_to_e164(tn: str) -> str:
-    """Best-effort conversion of a Bandwidth TN to E.164."""
-    digits = tn.lstrip("+")
-    if len(digits) == 10:
-        return f"+1{digits}"
-    if len(digits) == 11 and digits.startswith("1"):
-        return f"+{digits}"
-    return f"+{digits}"
+def _extract_tn_metadata(tn: dict) -> dict:
+    """Pull city/state/status fields out of a parsed Bandwidth TN dict.
 
-
-def _extract_tn_number(tn) -> str:
-    """Extract the telephone number string from a TN record.
-
-    Bandwidth may return the TN as a plain string or as a dict with a key
-    like 'telephoneNumber', 'tn', 'fullNumber', etc.
+    The bandwidth_client now returns dicts with consistent keys from XML
+    parsing: city, state, lata, rateCenter, tier, status, etc.
     """
-    if isinstance(tn, str):
-        return tn
-    if isinstance(tn, dict):
-        return (
-            tn.get("telephoneNumber")
-            or tn.get("tn")
-            or tn.get("fullNumber")
-            or tn.get("number")
-            or str(tn)
-        )
-    return str(tn)
-
-
-def _extract_tn_metadata(tn) -> dict:
-    """Pull city/state/status fields out of a Bandwidth TN record."""
-    if not isinstance(tn, dict):
-        return {}
     return {
         "city": tn.get("city", ""),
         "state": tn.get("state", ""),
         "lata": tn.get("lata", ""),
-        "rate_center": tn.get("rateCenter", tn.get("rate_center", "")),
+        "rate_center": tn.get("rateCenter", ""),
         "tier": tn.get("tier", ""),
         "bw_status": tn.get("status", ""),
     }
@@ -128,10 +100,9 @@ async def get_inventory(admin: dict = Depends(require_admin)):
 
     results = []
     for tn in tns:
-        number = _extract_tn_number(tn)
+        e164 = tn.get("fullNumber", "")
         meta = _extract_tn_metadata(tn)
-        e164 = _tn_to_e164(number)
-        norm = _normalize(number)
+        norm = _normalize(e164)
         assignment = normalized_map.get(norm)
 
         results.append({
@@ -166,10 +137,9 @@ async def get_available(admin: dict = Depends(require_admin)):
 
     results = []
     for tn in tns:
-        number = _extract_tn_number(tn)
+        e164 = tn.get("fullNumber", "")
         meta = _extract_tn_metadata(tn)
-        e164 = _tn_to_e164(number)
-        norm = _normalize(number)
+        norm = _normalize(e164)
 
         if norm not in normalized_map:
             results.append({"tn": e164, **meta})
@@ -203,8 +173,8 @@ async def get_stats(admin: dict = Depends(require_admin)):
     assigned = 0
 
     for tn in tns:
-        number = _extract_tn_number(tn)
-        norm = _normalize(number)
+        e164 = tn.get("fullNumber", "")
+        norm = _normalize(e164)
         info = normalized_map.get(norm)
         if info:
             assigned += 1
