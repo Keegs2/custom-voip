@@ -8,7 +8,6 @@ import { ActiveCallView } from './ActiveCall';
 import { CallHistory } from './CallHistory';
 import { ContactList } from './ContactList';
 import { DeviceSelector } from './DeviceSelector';
-import { IncomingCallBanner } from './IncomingCallBanner';
 import type { PresenceStatus } from '../../types/softphone';
 
 type WidgetTab = 'dialpad' | 'call' | 'history' | 'contacts' | 'settings';
