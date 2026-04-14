@@ -43,6 +43,8 @@ interface CallHistoryResponse {
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
+const PAGE_SIZE = 25;
+
 const PRODUCT_ACCENT: Record<DIDProduct, string> = {
   rcf:   '#22c55e',
   api:   '#a855f7',
@@ -65,21 +67,173 @@ const PRODUCT_LABEL: Record<DIDProduct, string> = {
 };
 
 const CALL_RESULT_COLOR: Record<CallResult, string> = {
-  answered:  '#22c55e',
-  failed:    '#ef4444',
-  busy:      '#f59e0b',
+  answered:    '#22c55e',
+  failed:      '#ef4444',
+  busy:        '#f59e0b',
   'no-answer': '#64748b',
-  cancelled: '#64748b',
+  cancelled:   '#64748b',
 };
 
 // ─── API functions ────────────────────────────────────────────────────────────
 
-async function searchDIDs(q: string): Promise<DIDSearchResponse> {
-  return apiRequest<DIDSearchResponse>('GET', `/search/did?q=${encodeURIComponent(q)}`);
+interface FetchDIDsParams {
+  /** When provided, performs a filtered search. When absent, lists all DIDs. */
+  q?: string;
+  limit: number;
+  offset: number;
+}
+
+async function fetchDIDs({ q, limit, offset }: FetchDIDsParams): Promise<DIDSearchResponse> {
+  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+  if (q) params.set('q', q);
+  return apiRequest<DIDSearchResponse>('GET', `/search/did?${params.toString()}`);
 }
 
 async function fetchDIDCalls(did: string): Promise<CallHistoryResponse> {
   return apiRequest<CallHistoryResponse>('GET', `/search/did/${encodeURIComponent(did)}/calls`);
+}
+
+// ─── Pagination control ───────────────────────────────────────────────────────
+
+interface PaginationProps {
+  currentPage: number; // 0-indexed
+  totalPages: number;
+  onPageChange: (page: number) => void;
+  isFetching: boolean;
+}
+
+function Pagination({ currentPage, totalPages, onPageChange, isFetching }: PaginationProps) {
+  if (totalPages <= 1) return null;
+
+  // Build the window of page numbers to show: always show first, last, and up
+  // to 2 siblings on either side of the current page, with ellipsis gaps.
+  const pages: Array<number | 'ellipsis-start' | 'ellipsis-end'> = [];
+  if (totalPages <= 7) {
+    for (let i = 0; i < totalPages; i++) pages.push(i);
+  } else {
+    pages.push(0);
+    if (currentPage > 3) pages.push('ellipsis-start');
+    const rangeStart = Math.max(1, currentPage - 2);
+    const rangeEnd = Math.min(totalPages - 2, currentPage + 2);
+    for (let i = rangeStart; i <= rangeEnd; i++) pages.push(i);
+    if (currentPage < totalPages - 4) pages.push('ellipsis-end');
+    pages.push(totalPages - 1);
+  }
+
+  const btnBase: React.CSSProperties = {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 32,
+    height: 32,
+    padding: '0 8px',
+    borderRadius: 8,
+    border: '1px solid rgba(255,255,255,0.07)',
+    background: 'rgba(255,255,255,0.03)',
+    color: '#64748b',
+    fontSize: '0.78rem',
+    fontWeight: 500,
+    cursor: 'pointer',
+    transition: 'background 0.12s, color 0.12s, border-color 0.12s',
+    lineHeight: 1,
+    userSelect: 'none',
+  };
+
+  const btnActive: React.CSSProperties = {
+    ...btnBase,
+    background: 'rgba(59,130,246,0.18)',
+    border: '1px solid rgba(59,130,246,0.4)',
+    color: '#93c5fd',
+    fontWeight: 700,
+    cursor: 'default',
+  };
+
+  const btnDisabled: React.CSSProperties = {
+    ...btnBase,
+    opacity: 0.3,
+    cursor: 'not-allowed',
+    pointerEvents: 'none',
+  };
+
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        padding: '14px 20px',
+        borderTop: '1px solid rgba(255,255,255,0.05)',
+        background: 'rgba(0,0,0,0.08)',
+      }}
+    >
+      {/* Left: page x of y */}
+      <span style={{ fontSize: '0.72rem', color: '#475569', display: 'flex', alignItems: 'center', gap: 6 }}>
+        Page {currentPage + 1} of {totalPages}
+        {isFetching && <Spinner size="xs" />}
+      </span>
+
+      {/* Center: page buttons */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+        {/* Previous */}
+        <button
+          type="button"
+          onClick={() => onPageChange(currentPage - 1)}
+          disabled={currentPage === 0}
+          style={currentPage === 0 ? btnDisabled : btnBase}
+          onMouseEnter={(e) => { if (currentPage !== 0) { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.07)'; (e.currentTarget as HTMLButtonElement).style.color = '#94a3b8'; } }}
+          onMouseLeave={(e) => { if (currentPage !== 0) { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.03)'; (e.currentTarget as HTMLButtonElement).style.color = '#64748b'; } }}
+          aria-label="Previous page"
+        >
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={2} style={{ width: 12, height: 12 }}>
+            <path d="M10 12L6 8l4-4" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
+
+        {pages.map((p, idx) => {
+          if (p === 'ellipsis-start' || p === 'ellipsis-end') {
+            return (
+              <span key={p === 'ellipsis-start' ? 'es' : 'ee'} style={{ color: '#334155', fontSize: '0.78rem', padding: '0 2px', userSelect: 'none' }}>
+                …
+              </span>
+            );
+          }
+          return (
+            <button
+              key={p}
+              type="button"
+              onClick={() => onPageChange(p)}
+              disabled={p === currentPage}
+              style={p === currentPage ? btnActive : btnBase}
+              onMouseEnter={(e) => { if (p !== currentPage) { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.07)'; (e.currentTarget as HTMLButtonElement).style.color = '#94a3b8'; } }}
+              onMouseLeave={(e) => { if (p !== currentPage) { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.03)'; (e.currentTarget as HTMLButtonElement).style.color = '#64748b'; } }}
+              aria-label={`Page ${p + 1}`}
+              aria-current={p === currentPage ? 'page' : undefined}
+            >
+              {p + 1}
+            </button>
+          );
+        })}
+
+        {/* Next */}
+        <button
+          type="button"
+          onClick={() => onPageChange(currentPage + 1)}
+          disabled={currentPage >= totalPages - 1}
+          style={currentPage >= totalPages - 1 ? btnDisabled : btnBase}
+          onMouseEnter={(e) => { if (currentPage < totalPages - 1) { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.07)'; (e.currentTarget as HTMLButtonElement).style.color = '#94a3b8'; } }}
+          onMouseLeave={(e) => { if (currentPage < totalPages - 1) { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.03)'; (e.currentTarget as HTMLButtonElement).style.color = '#64748b'; } }}
+          aria-label="Next page"
+        >
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={2} style={{ width: 12, height: 12 }}>
+            <path d="M6 4l4 4-4 4" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
+      </div>
+
+      {/* Right: intentionally empty for balance */}
+      <span style={{ minWidth: 80 }} />
+    </div>
+  );
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -485,10 +639,7 @@ function ResultRow({ result, isExpanded, onToggle }: ResultRowProps) {
       {/* Expanded panel rendered as a full-width row */}
       {isExpanded && (
         <tr>
-          <td
-            colSpan={5}
-            style={{ padding: 0 }}
-          >
+          <td colSpan={5} style={{ padding: 0 }}>
             <ExpandedDetailPanel result={result} />
           </td>
         </tr>
@@ -513,25 +664,136 @@ function getDetailSummary(product: DIDProduct, details: Record<string, string | 
   }
 }
 
+// ─── Results table ────────────────────────────────────────────────────────────
+
+interface DIDTableProps {
+  results: DIDResult[];
+  total: number;
+  currentPage: number;
+  totalPages: number;
+  onPageChange: (page: number) => void;
+  expandedDID: string | null;
+  onToggleExpand: (did: string) => void;
+  isFetching: boolean;
+  /** Short label shown in the header alongside the count, e.g. "results" or "DIDs" */
+  countLabel: string;
+}
+
+function DIDTable({
+  results,
+  total,
+  currentPage,
+  totalPages,
+  onPageChange,
+  expandedDID,
+  onToggleExpand,
+  isFetching,
+  countLabel,
+}: DIDTableProps) {
+  return (
+    <div
+      style={{
+        background: 'rgba(255,255,255,0.02)',
+        border: '1px solid rgba(255,255,255,0.06)',
+        borderRadius: 14,
+        overflow: 'hidden',
+      }}
+    >
+      {/* Table header with result count */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '12px 20px',
+          borderBottom: '1px solid rgba(255,255,255,0.05)',
+          background: 'rgba(0,0,0,0.1)',
+        }}
+      >
+        <span style={{ fontSize: '0.75rem', color: '#64748b', fontWeight: 600 }}>
+          {total === 1 ? `1 ${countLabel.replace(/s$/, '')}` : `${total.toLocaleString()} ${countLabel}`}
+          {isFetching && (
+            <span style={{ marginLeft: 8, opacity: 0.6 }}>
+              <Spinner size="xs" />
+            </span>
+          )}
+        </span>
+        <span style={{ fontSize: '0.7rem', color: '#334155' }}>
+          Click a row to expand details
+        </span>
+      </div>
+
+      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+        <thead>
+          <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+            {['DID', 'Product', 'Customer', 'Status', 'Details'].map((col) => (
+              <th
+                key={col}
+                style={{
+                  padding: '10px 20px',
+                  textAlign: 'left',
+                  fontSize: '0.6rem',
+                  fontWeight: 700,
+                  color: '#334155',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.1em',
+                  whiteSpace: 'nowrap',
+                  background: 'rgba(0,0,0,0.06)',
+                }}
+              >
+                {col}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {results.map((result) => (
+            <ResultRow
+              key={result.did}
+              result={result}
+              isExpanded={expandedDID === result.did}
+              onToggle={() => onToggleExpand(result.did)}
+            />
+          ))}
+        </tbody>
+      </table>
+
+      <Pagination
+        currentPage={currentPage}
+        totalPages={totalPages}
+        onPageChange={onPageChange}
+        isFetching={isFetching}
+      />
+    </div>
+  );
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export function DIDSearchPage() {
   const [inputValue, setInputValue] = useState('');
+  // The committed search query. Empty string = browse-all mode.
   const [query, setQuery] = useState('');
   const [expandedDID, setExpandedDID] = useState<string | null>(null);
+  // Separate page cursors for browse and search modes so switching back keeps
+  // the user on the same browse page they left.
+  const [browsePage, setBrowsePage] = useState(0);
+  const [searchPage, setSearchPage] = useState(0);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const isSearching = query.length >= 4;
+  const currentPage = isSearching ? searchPage : browsePage;
 
   const handleInputChange = useCallback((value: string) => {
     setInputValue(value);
 
-    if (debounceRef.current) {
-      clearTimeout(debounceRef.current);
-    }
+    if (debounceRef.current) clearTimeout(debounceRef.current);
 
     const digits = value.replace(/\D/g, '');
     if (digits.length >= 4) {
       debounceRef.current = setTimeout(() => {
         setQuery(value.trim());
+        setSearchPage(0);   // reset search pagination on new query
         setExpandedDID(null);
       }, 300);
     } else {
@@ -540,31 +802,55 @@ export function DIDSearchPage() {
     }
   }, []);
 
-  // Cleanup on unmount
+  // Cleanup debounce timer on unmount
   useEffect(() => {
-    return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-    };
+    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
   }, []);
 
-  const {
-    data,
-    isLoading,
-    isError,
-    isFetching,
-  } = useQuery({
-    queryKey: ['did-search', query],
-    queryFn: () => searchDIDs(query),
-    enabled: query.length >= 4,
-    staleTime: 15_000,
+  // Browse-all query — always enabled; fetches the current browse page.
+  const browseQuery = useQuery({
+    queryKey: ['did-browse', browsePage],
+    queryFn: () => fetchDIDs({ limit: PAGE_SIZE, offset: browsePage * PAGE_SIZE }),
+    staleTime: 30_000,
+    // Keep previous page data visible while the next page loads
+    placeholderData: (prev) => prev,
   });
+
+  // Search query — only enabled when the user has typed enough digits.
+  const searchQueryResult = useQuery({
+    queryKey: ['did-search', query, searchPage],
+    queryFn: () => fetchDIDs({ q: query, limit: PAGE_SIZE, offset: searchPage * PAGE_SIZE }),
+    enabled: isSearching,
+    staleTime: 15_000,
+    placeholderData: (prev) => prev,
+  });
+
+  // Pick the active data source based on mode
+  const activeQuery = isSearching ? searchQueryResult : browseQuery;
+  const { data, isLoading, isError, isFetching } = activeQuery;
 
   const results = data?.results ?? [];
   const total = data?.total ?? 0;
-  const showResults = query.length >= 4;
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+
+  function handlePageChange(page: number) {
+    setExpandedDID(null);
+    if (isSearching) {
+      setSearchPage(page);
+    } else {
+      setBrowsePage(page);
+    }
+  }
 
   function handleToggleExpand(did: string) {
     setExpandedDID((prev) => (prev === did ? null : did));
+  }
+
+  function handleClearSearch() {
+    setInputValue('');
+    setQuery('');
+    setSearchPage(0);
+    setExpandedDID(null);
   }
 
   return (
@@ -629,12 +915,7 @@ export function DIDSearchPage() {
       </div>
 
       {/* ── Search Bar ──────────────────────────────────────────── */}
-      <div
-        style={{
-          position: 'relative',
-          marginBottom: 24,
-        }}
-      >
+      <div style={{ position: 'relative', marginBottom: 24 }}>
         {/* Search icon */}
         <span
           aria-hidden="true"
@@ -700,11 +981,11 @@ export function DIDSearchPage() {
             gap: 8,
           }}
         >
-          {isFetching && <Spinner size="sm" />}
-          {inputValue && !isFetching && (
+          {isFetching && isSearching && <Spinner size="sm" />}
+          {inputValue && !(isFetching && isSearching) && (
             <button
               type="button"
-              onClick={() => { setInputValue(''); setQuery(''); setExpandedDID(null); }}
+              onClick={handleClearSearch}
               title="Clear search"
               style={{
                 background: 'transparent',
@@ -731,52 +1012,26 @@ export function DIDSearchPage() {
 
       {/* ── Results Area ─────────────────────────────────────────── */}
 
-      {/* Before search: prompt */}
-      {!showResults && (
+      {/* Initial load spinner — only shown on the very first browse fetch */}
+      {!isSearching && isLoading && (
         <div
           style={{
             display: 'flex',
-            flexDirection: 'column',
             alignItems: 'center',
+            gap: 10,
             justifyContent: 'center',
-            padding: '72px 16px',
-            gap: 12,
-            textAlign: 'center',
-            background: 'linear-gradient(135deg, rgba(30,33,48,0.4) 0%, rgba(19,21,29,0.5) 100%)',
-            border: '1px solid rgba(42,47,69,0.3)',
-            borderRadius: 16,
+            padding: '48px 0',
+            color: '#64748b',
+            fontSize: '0.875rem',
           }}
         >
-          <div
-            style={{
-              width: 56,
-              height: 56,
-              borderRadius: 16,
-              background: 'rgba(59,130,246,0.06)',
-              border: '1px solid rgba(59,130,246,0.12)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: '#334155',
-            }}
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.4} style={{ width: 26, height: 26 }}>
-              <path d="m21 21-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0Z" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </div>
-          <div>
-            <p style={{ color: '#64748b', fontSize: '0.9rem', fontWeight: 500, margin: '0 0 4px' }}>
-              Enter a phone number or DID to search across all products
-            </p>
-            <p style={{ color: '#334155', fontSize: '0.78rem', margin: 0 }}>
-              Type at least 4 digits — search is automatic
-            </p>
-          </div>
+          <Spinner size="md" />
+          <span>Loading DIDs…</span>
         </div>
       )}
 
-      {/* Loading state */}
-      {showResults && isLoading && (
+      {/* Search loading state */}
+      {isSearching && isLoading && (
         <div
           style={{
             display: 'flex',
@@ -794,7 +1049,7 @@ export function DIDSearchPage() {
       )}
 
       {/* Error state */}
-      {showResults && isError && (
+      {isError && !isLoading && (
         <div
           style={{
             padding: '14px 18px',
@@ -805,12 +1060,12 @@ export function DIDSearchPage() {
             fontSize: '0.875rem',
           }}
         >
-          Search failed. Please try again.
+          {isSearching ? 'Search failed. Please try again.' : 'Failed to load DIDs. Please refresh the page.'}
         </div>
       )}
 
-      {/* No results */}
-      {showResults && !isLoading && !isError && results.length === 0 && (
+      {/* No results (search mode only — browse having zero DIDs is an infrastructure problem, not a UX state) */}
+      {isSearching && !isLoading && !isError && results.length === 0 && (
         <div
           style={{
             display: 'flex',
@@ -835,79 +1090,19 @@ export function DIDSearchPage() {
         </div>
       )}
 
-      {/* Results table */}
-      {showResults && !isLoading && results.length > 0 && (
-        <div
-          style={{
-            background: 'rgba(255,255,255,0.02)',
-            border: '1px solid rgba(255,255,255,0.06)',
-            borderRadius: 14,
-            overflow: 'hidden',
-          }}
-        >
-          {/* Table header with result count */}
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              padding: '12px 20px',
-              borderBottom: '1px solid rgba(255,255,255,0.05)',
-              background: 'rgba(0,0,0,0.1)',
-            }}
-          >
-            <span style={{ fontSize: '0.75rem', color: '#64748b', fontWeight: 600 }}>
-              {total === 1 ? '1 result' : `${total} results`}
-              {isFetching && !isLoading && (
-                <span style={{ marginLeft: 8, opacity: 0.6 }}>
-                  <Spinner size="xs" />
-                </span>
-              )}
-            </span>
-            <span style={{ fontSize: '0.7rem', color: '#334155' }}>
-              Click a row to expand details
-            </span>
-          </div>
-
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead>
-              <tr
-                style={{
-                  borderBottom: '1px solid rgba(255,255,255,0.05)',
-                }}
-              >
-                {['DID', 'Product', 'Customer', 'Status', 'Details'].map((col) => (
-                  <th
-                    key={col}
-                    style={{
-                      padding: '10px 20px',
-                      textAlign: 'left',
-                      fontSize: '0.6rem',
-                      fontWeight: 700,
-                      color: '#334155',
-                      textTransform: 'uppercase',
-                      letterSpacing: '0.1em',
-                      whiteSpace: 'nowrap',
-                      background: 'rgba(0,0,0,0.06)',
-                    }}
-                  >
-                    {col}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {results.map((result) => (
-                <ResultRow
-                  key={result.did}
-                  result={result}
-                  isExpanded={expandedDID === result.did}
-                  onToggle={() => handleToggleExpand(result.did)}
-                />
-              ))}
-            </tbody>
-          </table>
-        </div>
+      {/* Results table — shown in both browse and search modes once data is ready */}
+      {!isLoading && !isError && results.length > 0 && (
+        <DIDTable
+          results={results}
+          total={total}
+          currentPage={currentPage}
+          totalPages={totalPages}
+          onPageChange={handlePageChange}
+          expandedDID={expandedDID}
+          onToggleExpand={handleToggleExpand}
+          isFetching={isFetching}
+          countLabel={isSearching ? 'results' : 'DIDs'}
+        />
       )}
     </div>
   );
