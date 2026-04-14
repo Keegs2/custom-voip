@@ -909,8 +909,7 @@ export function SoftphoneWidget() {
 
   return (
     <>
-      {/* Incoming call banner renders via portal at top of screen */}
-      <IncomingCallBanner />
+      {/* Incoming call banner removed — answer/reject only via softphone widget */}
 
       {/* Inject keyframe animations */}
       <style>{SOFTPHONE_STYLES}</style>
