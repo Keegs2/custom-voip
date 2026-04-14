@@ -15,7 +15,7 @@ from db.redis_client import init_redis, close_redis
 from routers import (
     rcf, calls, trunks, cdrs, customers, health, tiers, api_dids, rates,
     ivr, carriers, auth, extensions, presence, voicemail, webrtc, search,
-    freeswitch,
+    freeswitch, number_inventory,
 )
 from routers.chat import router as chat_router
 from routers.conference import router as conference_router
@@ -125,6 +125,7 @@ app.include_router(chat_router, prefix="/v1/chat", tags=["Chat"])
 app.include_router(conference_router, prefix="/v1/conferences", tags=["Conferences"])
 app.include_router(documents_router, prefix="/v1/documents", tags=["Documents"])
 app.include_router(search.router, prefix="/v1/search", tags=["Search"])
+app.include_router(number_inventory.router, prefix="/v1/numbers", tags=["Number Inventory"])
 
 # FreeSWITCH mod_xml_curl directory endpoint (no auth, called over loopback)
 app.include_router(freeswitch.router, prefix="/freeswitch", tags=["FreeSWITCH"])
@@ -148,6 +149,7 @@ app.include_router(chat_router, prefix="/chat", tags=["Chat"])
 app.include_router(conference_router, prefix="/conferences", tags=["Conferences"])
 app.include_router(documents_router, prefix="/documents", tags=["Documents"])
 app.include_router(search.router, prefix="/search", tags=["Search"])
+app.include_router(number_inventory.router, prefix="/numbers", tags=["Number Inventory"])
 
 
 @app.get("/")

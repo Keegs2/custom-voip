@@ -148,6 +148,9 @@ services:
       - VERTO_WS_URL=${VERTO_WS_URL:-ws://34.74.71.32:8082}
       - SIP_DOMAIN=${SIP_DOMAIN:-voiceplatform.local}
       - TEST_MODE=true
+      - BANDWIDTH_API_CLIENT_ID=${BANDWIDTH_API_CLIENT_ID:-}
+      - BANDWIDTH_API_CLIENT_SECRET=${BANDWIDTH_API_CLIENT_SECRET:-}
+      - BANDWIDTH_ACCOUNT_ID=${BANDWIDTH_ACCOUNT_ID:-5006123}
     ports:
       - "8088:8000"  # Use 8088 on host to avoid conflict with other services
     volumes:
