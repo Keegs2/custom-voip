@@ -26,11 +26,9 @@ WHERE name IN ('Granite Engineering', 'Granite Telephony');
 --         +17743260301 -> ext 100,  +16174544217 as RCF DID (step 8)
 -- =========================================================================
 
--- Clear any stale DID assignments on Granite Telephony extensions first
-UPDATE extensions
-SET assigned_did = NULL
-WHERE customer_id = (SELECT id FROM customers WHERE name = 'Granite Telephony')
-  AND assigned_did IS NOT NULL;
+-- Clear any stale DID assignments globally for the DIDs we're about to assign
+UPDATE extensions SET assigned_did = NULL WHERE assigned_did = '+17743260301';
+UPDATE extensions SET assigned_did = NULL WHERE assigned_did = '+16174544217';
 
 -- Assign +17743260301 to extension 100
 UPDATE extensions
