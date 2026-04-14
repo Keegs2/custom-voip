@@ -1,0 +1,227 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  English Language Definition for FreeSWITCH
+  Minimal configuration using tone_stream:// for all prompts.
+
+  This avoids requiring freeswitch-sounds packages (hundreds of MB).
+  mod_voicemail, mod_say_en, and the phrase engine all require a
+  <language name="en"> entry to exist or they fail with:
+      [ERR] switch_xml.c: Can't find language en.
+
+  Tone legend:
+    - Short beep   %(150,0,800)              : attention
+    - Double beep  %(150,100,800);%(150,0,800): prompt separator
+    - Long beep    %(1000,0,640)             : record-start beep
+    - Descending   %(200,80,600);%(200,0,400): "goodbye"
+    - Ascending    %(200,80,600);%(200,0,800): "not available"
+
+  To upgrade to spoken prompts later:
+    1. Install freeswitch-sounds-en-us-callie
+    2. Set sound-prefix="/usr/share/freeswitch/sounds/en/us/callie"
+    3. Replace tone_stream:// actions with file paths
+-->
+<language name="en" say-module="en" sound-prefix="" tts-engine="" tts-voice="">
+
+  <phrases>
+    <macros>
+
+      <!-- ============================================ -->
+      <!-- VOICEMAIL CALLER-FACING MACROS               -->
+      <!-- These are heard by the person LEAVING a msg  -->
+      <!-- ============================================ -->
+
+      <!-- Played when no personal greeting file exists.
+           This is the primary "please leave a message" substitute. -->
+      <macro name="voicemail_not_available">
+        <input pattern="(.*)">
+          <match>
+            <action function="play-file" data="tone_stream://%(200,80,600);%(200,80,700);%(200,0,800)"/>
+            <action function="sleep" data="800"/>
+          </match>
+        </input>
+      </macro>
+
+      <!-- Greeting playback wrapper (used when personal greeting exists) -->
+      <macro name="voicemail_play_greeting">
+        <input pattern="(.*)">
+          <match>
+            <action function="play-file" data="tone_stream://%(200,100,800);%(200,0,800)"/>
+            <action function="sleep" data="500"/>
+          </match>
+        </input>
+      </macro>
+
+      <!-- Generic greeting macro (some FS versions use this name) -->
+      <macro name="voicemail_greeting">
+        <input pattern="(.*)">
+          <match>
+            <action function="play-file" data="tone_stream://%(200,100,800);%(200,0,800)"/>
+            <action function="sleep" data="500"/>
+          </match>
+        </input>
+      </macro>
+
+      <!-- After recording: "press 1 to save, 2 to re-record..." -->
+      <macro name="voicemail_record_file_check">
+        <input pattern="(.*)">
+          <match>
+            <action function="play-file" data="tone_stream://%(100,100,600);%(100,0,600)"/>
+            <action function="sleep" data="300"/>
+          </match>
+        </input>
+      </macro>
+
+      <!-- After recording: urgent check -->
+      <macro name="voicemail_record_urgent_check">
+        <input pattern="(.*)">
+          <match>
+            <action function="play-file" data="tone_stream://%(100,100,600);%(100,0,600)"/>
+          </match>
+        </input>
+      </macro>
+
+      <!-- Record message prompt ("leave message after the tone") -->
+      <macro name="voicemail_record_message">
+        <input pattern="(.*)">
+          <match>
+            <action function="play-file" data="tone_stream://%(200,80,600);%(200,80,700);%(200,0,800)"/>
+            <action function="sleep" data="500"/>
+          </match>
+        </input>
+      </macro>
+
+      <!-- ACK tone after saving message -->
+      <macro name="voicemail_ACK">
+        <input pattern="(.*)">
+          <match>
+            <action function="play-file" data="tone_stream://%(100,0,800)"/>
+          </match>
+        </input>
+      </macro>
+
+      <!-- Also match lowercase ack variant -->
+      <macro name="voicemail_ack">
+        <input pattern="(.*)">
+          <match>
+            <action function="play-file" data="tone_stream://%(100,0,800)"/>
+          </match>
+        </input>
+      </macro>
+
+      <!-- Goodbye -->
+      <macro name="voicemail_goodbye">
+        <input pattern="(.*)">
+          <match>
+            <action function="play-file" data="tone_stream://%(200,80,600);%(200,0,400)"/>
+          </match>
+        </input>
+      </macro>
+
+      <!-- ============================================ -->
+      <!-- VOICEMAIL OWNER-FACING MACROS                -->
+      <!-- These are heard when checking voicemail      -->
+      <!-- ============================================ -->
+
+      <!-- "You have N new messages" -->
+      <macro name="voicemail_message_count">
+        <input pattern="(.*)">
+          <match>
+            <action function="play-file" data="tone_stream://%(150,50,800);%(150,0,600)"/>
+          </match>
+        </input>
+      </macro>
+
+      <!-- After listening: "press 1 to save, 7 to delete..." -->
+      <macro name="voicemail_listen_file_check">
+        <input pattern="(.*)">
+          <match>
+            <action function="play-file" data="tone_stream://%(100,100,600);%(100,0,600)"/>
+          </match>
+        </input>
+      </macro>
+
+      <!-- Main menu -->
+      <macro name="voicemail_menu">
+        <input pattern="(.*)">
+          <match>
+            <action function="play-file" data="tone_stream://%(100,100,800);%(100,0,600)"/>
+          </match>
+        </input>
+      </macro>
+
+      <!-- Config/options menu -->
+      <macro name="voicemail_config_menu">
+        <input pattern="(.*)">
+          <match>
+            <action function="play-file" data="tone_stream://%(100,100,800);%(100,0,600)"/>
+          </match>
+        </input>
+      </macro>
+
+      <!-- Choose greeting slot -->
+      <macro name="voicemail_choose_greeting">
+        <input pattern="(.*)">
+          <match>
+            <action function="play-file" data="tone_stream://%(100,100,600);%(100,0,600)"/>
+          </match>
+        </input>
+      </macro>
+
+      <!-- Record your name -->
+      <macro name="voicemail_record_name">
+        <input pattern="(.*)">
+          <match>
+            <action function="play-file" data="tone_stream://%(200,0,800)"/>
+          </match>
+        </input>
+      </macro>
+
+      <!-- Record a greeting -->
+      <macro name="voicemail_record_greeting">
+        <input pattern="(.*)">
+          <match>
+            <action function="play-file" data="tone_stream://%(200,0,800)"/>
+          </match>
+        </input>
+      </macro>
+
+      <!-- Enter mailbox ID -->
+      <macro name="voicemail_enter_id">
+        <input pattern="(.*)">
+          <match>
+            <action function="play-file" data="tone_stream://%(200,0,800)"/>
+          </match>
+        </input>
+      </macro>
+
+      <!-- Enter password -->
+      <macro name="voicemail_enter_pass">
+        <input pattern="(.*)">
+          <match>
+            <action function="play-file" data="tone_stream://%(200,0,600)"/>
+          </match>
+        </input>
+      </macro>
+
+      <!-- Failed authentication -->
+      <macro name="voicemail_fail_auth">
+        <input pattern="(.*)">
+          <match>
+            <action function="play-file" data="tone_stream://%(250,0,300);%(250,0,200)"/>
+          </match>
+        </input>
+      </macro>
+
+      <!-- Forwarded message prepend -->
+      <macro name="voicemail_forward_prepend">
+        <input pattern="(.*)">
+          <match>
+            <action function="play-file" data="tone_stream://%(200,0,800)"/>
+          </match>
+        </input>
+      </macro>
+
+    </macros>
+  </phrases>
+
+</language>

@@ -299,6 +299,7 @@ COPY conf/autoload_configs/ /usr/local/freeswitch/conf/autoload_configs/
 COPY conf/dialplan/ /usr/local/freeswitch/conf/dialplan/
 COPY conf/directory/ /usr/local/freeswitch/conf/directory/
 COPY conf/sofia/ /usr/local/freeswitch/conf/sofia/
+COPY conf/lang/ /usr/local/freeswitch/conf/lang/
 
 # Copy Lua scripts for RCF routing
 COPY scripts/ /usr/local/freeswitch/scripts/
