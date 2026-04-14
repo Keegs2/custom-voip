@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { apiRequest } from '../../api/client';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   listTrunks,
@@ -211,12 +212,44 @@ function IpSection({ trunk }: { trunk: Trunk }) {
   );
 }
 
+// ─── Available TN type ───────────────────────────────────────────────────────
+
+interface AvailableTN {
+  tn: string;
+  city: string;
+  state: string;
+  rate_center: string;
+  lata: string;
+  tier: string;
+  bw_status: string;
+}
+
 // ─── DID Management Section ───────────────────────────────────────────────────
 
 function DidSection({ trunk }: { trunk: Trunk }) {
+  // ALL hooks must be declared before any conditional returns (React rule #310)
   const qc = useQueryClient();
   const { toastOk, toastErr } = useToast();
-  const [newDid, setNewDid] = useState('');
+
+  // Input / dropdown state
+  const [inputValue, setInputValue] = useState('');
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [highlightedIndex, setHighlightedIndex] = useState(-1);
+
+  // Selected TN from dropdown (null means user typed a custom value)
+  const [selectedTN, setSelectedTN] = useState<AvailableTN | null>(null);
+
+  // Confirmation step state
+  const [pendingDid, setPendingDid] = useState('');
+  const [pendingTN, setPendingTN] = useState<AvailableTN | null>(null);
+  const [showConfirm, setShowConfirm] = useState(false);
+
+  // Available numbers fetched once on mount
+  const [availableTNs, setAvailableTNs] = useState<AvailableTN[]>([]);
+  const [loadingTNs, setLoadingTNs] = useState(false);
+
+  // Refs for click-outside handling
+  const wrapperRef = useRef<HTMLDivElement>(null);
 
   const { data: dids, isLoading } = useQuery<TrunkDid[]>({
     queryKey: ['trunk-dids', trunk.id],
@@ -224,11 +257,15 @@ function DidSection({ trunk }: { trunk: Trunk }) {
   });
 
   const addMutation = useMutation({
-    mutationFn: () => addTrunkDid(trunk.id, newDid.trim()),
+    mutationFn: (did: string) => addTrunkDid(trunk.id, did),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['trunk-dids', trunk.id] });
       qc.invalidateQueries({ queryKey: ['trunks'] });
-      setNewDid('');
+      setInputValue('');
+      setSelectedTN(null);
+      setShowConfirm(false);
+      setPendingDid('');
+      setPendingTN(null);
       toastOk('DID added');
     },
     onError: (err: Error) => toastErr(err.message),
@@ -244,11 +281,118 @@ function DidSection({ trunk }: { trunk: Trunk }) {
     onError: (err: Error) => toastErr(err.message),
   });
 
-  function handleAddDid(e: React.FormEvent) {
-    e.preventDefault();
-    if (!newDid.trim()) { toastErr('DID is required'); return; }
-    addMutation.mutate();
+  // Fetch available numbers once on mount
+  useEffect(() => {
+    let cancelled = false;
+    setLoadingTNs(true);
+    apiRequest<AvailableTN[]>('GET', '/numbers/available')
+      .then((data) => {
+        if (!cancelled) setAvailableTNs(data);
+      })
+      .catch(() => {
+        // Non-fatal — user can still type manually
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingTNs(false);
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  // Click-outside closes the dropdown
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
+        setDropdownOpen(false);
+        setHighlightedIndex(-1);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // Filtered options — match on TN, city, or state
+  const filteredOptions = useCallback((): AvailableTN[] => {
+    const q = inputValue.trim().toLowerCase();
+    if (!q) return availableTNs;
+    return availableTNs.filter(
+      (t) =>
+        t.tn.toLowerCase().includes(q) ||
+        t.city.toLowerCase().includes(q) ||
+        t.state.toLowerCase().includes(q),
+    );
+  }, [inputValue, availableTNs]);
+
+  function handleInputChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const val = e.target.value;
+    setInputValue(val);
+    setSelectedTN(null);
+    setDropdownOpen(true);
+    setHighlightedIndex(-1);
+    // Hide confirmation if user is editing after already staging one
+    if (showConfirm) {
+      setShowConfirm(false);
+      setPendingDid('');
+      setPendingTN(null);
+    }
   }
+
+  function handleInputFocus() {
+    setDropdownOpen(true);
+  }
+
+  function selectOption(tn: AvailableTN) {
+    setInputValue(tn.tn);
+    setSelectedTN(tn);
+    setDropdownOpen(false);
+    setHighlightedIndex(-1);
+  }
+
+  function handleInputKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    const options = filteredOptions();
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setHighlightedIndex((i) => Math.min(i + 1, options.length - 1));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setHighlightedIndex((i) => Math.max(i - 1, -1));
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (highlightedIndex >= 0 && options[highlightedIndex]) {
+        selectOption(options[highlightedIndex]);
+      }
+    } else if (e.key === 'Escape') {
+      setDropdownOpen(false);
+      setHighlightedIndex(-1);
+    }
+  }
+
+  function handleAddDidClick(e: React.FormEvent) {
+    e.preventDefault();
+    const value = inputValue.trim();
+    if (!value) { toastErr('DID is required'); return; }
+    // Stage the confirmation step
+    setPendingDid(value);
+    setPendingTN(selectedTN);
+    setShowConfirm(true);
+    setDropdownOpen(false);
+  }
+
+  function handleConfirmAssignment() {
+    addMutation.mutate(pendingDid);
+  }
+
+  function handleCancelConfirm() {
+    setShowConfirm(false);
+    setPendingDid('');
+    setPendingTN(null);
+  }
+
+  const options = filteredOptions();
+
+  // Label for the confirmation message
+  const pendingLabel = pendingTN
+    ? `${pendingTN.tn} (${pendingTN.city}, ${pendingTN.state})`
+    : pendingDid;
 
   return (
     <div>
@@ -320,19 +464,187 @@ function DidSection({ trunk }: { trunk: Trunk }) {
         <div style={{ fontSize: '0.8rem', color: '#4a5568', marginBottom: 12 }}>No DIDs assigned.</div>
       )}
 
-      <form onSubmit={handleAddDid} style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
-        <div style={{ flex: '0 0 240px' }}>
-          <FormField
-            label="DID / Phone Number"
-            value={newDid}
-            onChange={(e) => setNewDid((e.target as HTMLInputElement).value)}
-            placeholder="+14155551234"
+      {/* Input row with searchable dropdown */}
+      <form onSubmit={handleAddDidClick} style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+        <div ref={wrapperRef} style={{ flex: '0 0 320px', position: 'relative' }}>
+          {/* Label */}
+          <div
+            style={{
+              fontSize: '0.72rem',
+              fontWeight: 600,
+              color: '#94a3b8',
+              marginBottom: 5,
+              letterSpacing: '0.03em',
+            }}
+          >
+            DID / Phone Number
+          </div>
+
+          {/* Text input */}
+          <input
+            type="text"
+            value={inputValue}
+            onChange={handleInputChange}
+            onFocus={handleInputFocus}
+            onKeyDown={handleInputKeyDown}
+            placeholder={loadingTNs ? 'Loading numbers…' : '+14155551234'}
+            autoComplete="off"
+            style={{
+              width: '100%',
+              boxSizing: 'border-box',
+              padding: '7px 10px',
+              borderRadius: 6,
+              border: '1px solid rgba(42,47,69,0.6)',
+              background: '#0f1117',
+              color: '#e2e8f0',
+              fontSize: '0.82rem',
+              fontFamily: 'monospace',
+              outline: 'none',
+              transition: 'border-color 0.15s',
+            }}
+            onFocusCapture={(e) => {
+              (e.target as HTMLInputElement).style.borderColor = '#3b82f6';
+            }}
+            onBlurCapture={(e) => {
+              (e.target as HTMLInputElement).style.borderColor = 'rgba(42,47,69,0.6)';
+            }}
           />
+
+          {/* Dropdown */}
+          {dropdownOpen && (
+            <div
+              style={{
+                position: 'absolute',
+                top: 'calc(100% + 4px)',
+                left: 0,
+                right: 0,
+                zIndex: 50,
+                background: '#181b28',
+                border: '1px solid rgba(42,47,69,0.6)',
+                borderRadius: 8,
+                boxShadow: '0 8px 24px rgba(0,0,0,0.45)',
+                maxHeight: 220,
+                overflowY: 'auto',
+              }}
+            >
+              {loadingTNs && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', color: '#64748b', fontSize: '0.8rem' }}>
+                  <Spinner size="xs" /> Loading available numbers…
+                </div>
+              )}
+
+              {!loadingTNs && options.length === 0 && (
+                <div style={{ padding: '10px 14px', color: '#64748b', fontSize: '0.8rem' }}>
+                  No available numbers
+                  {inputValue.trim() && ' matching your search'}
+                  . You can still submit a custom number.
+                </div>
+              )}
+
+              {!loadingTNs && options.map((tn, idx) => (
+                <DropdownOption
+                  key={tn.tn}
+                  tn={tn}
+                  highlighted={idx === highlightedIndex}
+                  onSelect={selectOption}
+                />
+              ))}
+            </div>
+          )}
         </div>
-        <Button type="submit" variant="ghost" size="sm" loading={addMutation.isPending}>
+
+        <Button type="submit" variant="ghost" size="sm" disabled={showConfirm}>
           + Add DID
         </Button>
       </form>
+
+      {/* Inline confirmation step */}
+      {showConfirm && (
+        <div
+          style={{
+            marginTop: 12,
+            padding: '12px 14px',
+            borderRadius: 8,
+            background: 'rgba(59,130,246,0.07)',
+            border: '1px solid rgba(59,130,246,0.25)',
+          }}
+        >
+          <div style={{ fontSize: '0.82rem', color: '#e2e8f0', marginBottom: 10, lineHeight: 1.5 }}>
+            Assign{' '}
+            <span style={{ fontFamily: 'monospace', color: '#93c5fd' }}>{pendingLabel}</span>{' '}
+            to this trunk? This DID will be routed to this trunk for all inbound calls.
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={handleCancelConfirm}
+              disabled={addMutation.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="primary"
+              size="sm"
+              loading={addMutation.isPending}
+              onClick={handleConfirmAssignment}
+            >
+              Confirm Assignment
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Dropdown option sub-component ───────────────────────────────────────────
+
+function DropdownOption({
+  tn,
+  highlighted,
+  onSelect,
+}: {
+  tn: AvailableTN;
+  highlighted: boolean;
+  onSelect: (tn: AvailableTN) => void;
+}) {
+  const [hovered, setHovered] = useState(false);
+
+  const bg = highlighted
+    ? 'rgba(59,130,246,0.15)'
+    : hovered
+    ? 'rgba(59,130,246,0.08)'
+    : 'transparent';
+
+  return (
+    <div
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      onMouseDown={(e) => {
+        // Use mousedown so it fires before the input's blur closes the dropdown
+        e.preventDefault();
+        onSelect(tn);
+      }}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 10,
+        padding: '8px 14px',
+        cursor: 'pointer',
+        background: bg,
+        transition: 'background 0.15s',
+        borderBottom: '1px solid rgba(255,255,255,0.04)',
+      }}
+    >
+      <span style={{ fontFamily: 'monospace', fontSize: '0.82rem', color: '#e2e8f0', minWidth: 130 }}>
+        {tn.tn}
+      </span>
+      <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>
+        {tn.city}, {tn.state}
+      </span>
     </div>
   );
 }
