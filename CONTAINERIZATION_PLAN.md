@@ -1,617 +1,552 @@
-# MVP Containerization Plan for VCenter Deployment
+# Custom VoIP Platform — Deployment Guide
 
 ## Overview
 
-This plan outlines how to containerize the MVP Voice Platform for deployment to VCenter VMs, enabling testing of:
-- Remote Call Forwarding (RCF)
-- API Calling functionality
-- Call Rating/Billing system
+This document covers deploying the Custom VoIP platform to both **GCP Compute Engine** and **VMware vCenter** environments. The platform runs as a Docker Compose stack with 11 services handling SIP signaling, media processing, REST API, web UI, and SIP monitoring.
+
+The same Docker Compose configuration works in both environments. The only differences are network configuration (public IP, NAT handling) and the base OS provisioning steps.
 
 ---
 
-## Architecture: Containerized Stack
+## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                     VCenter VM (Docker Host)                    │
-├─────────────────────────────────────────────────────────────────┤
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐ │
-│  │   Kamailio  │  │  FreeSWITCH │  │       FastAPI           │ │
-│  │    (SBC)    │──│   (Core)    │──│    (REST API)           │ │
-│  │  Port 5060  │  │  Port 5080  │  │    Port 8000            │ │
-│  └─────────────┘  └─────────────┘  └─────────────────────────┘ │
-│         │                │                    │                 │
-│  ┌──────┴────────────────┴────────────────────┴──────────────┐ │
-│  │                    Docker Network                          │ │
-│  └──────┬────────────────┬────────────────────┬──────────────┘ │
-│  ┌──────┴──────┐  ┌──────┴──────┐  ┌──────────┴─────────────┐ │
-│  │ PostgreSQL  │  │    Redis    │  │   Test Webhook Server  │ │
-│  │  Port 5432  │  │  Port 6379  │  │      Port 9000         │ │
-│  └─────────────┘  └─────────────┘  └────────────────────────┘ │
-└─────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────┐
+│                  VM (Docker Host) — Host Networking                  │
+│                                                                      │
+│  ┌────────────┐    ┌──────────────┐                                  │
+│  │  Kamailio  │───▶│  FreeSWITCH  │  ← Both use host networking     │
+│  │  SBC/SIP   │    │  B2BUA/RTP   │    (no Docker NAT overhead)      │
+│  │  :5060     │    │  :5080/:5090 │                                  │
+│  └────────────┘    │  :8021 (ESL) │                                  │
+│                    │  :8082 (WS)  │                                  │
+│                    │  :16384-18383│                                  │
+│                    └──────────────┘                                  │
+│                           │                                          │
+│  ┌────────────────────────┼──────────────────────────────────────┐  │
+│  │       Docker Bridge Network (172.28.0.0/16)                   │  │
+│  │                        │                                      │  │
+│  │  ┌──────────┐  ┌──────┴─────┐  ┌──────────┐  ┌────────────┐ │  │
+│  │  │PostgreSQL│  │  FastAPI   │  │  Redis   │  │  Nginx UI  │ │  │
+│  │  │+PgBouncer│  │  REST API  │  │  Cache   │  │  React SPA │ │  │
+│  │  │:5432/6432│  │  :8000     │  │  :6379   │  │  :80       │ │  │
+│  │  └──────────┘  └────────────┘  └──────────┘  └────────────┘ │  │
+│  │                                                               │  │
+│  │  ┌──────────────────────────────────────────────────────────┐ │  │
+│  │  │  Homer Stack: homer-db :5432, heplify :9060, webapp :80  │ │  │
+│  │  └──────────────────────────────────────────────────────────┘ │  │
+│  │                                                               │  │
+│  │  ┌──────────────┐  ┌──────────────┐                           │  │
+│  │  │ Webhook Test │  │  SIPp Load   │                           │  │
+│  │  │  :9000       │  │  Test :8001  │                           │  │
+│  │  └──────────────┘  └──────────────┘                           │  │
+│  └───────────────────────────────────────────────────────────────┘  │
+└──────────────────────────────────────────────────────────────────────┘
 ```
+
+**Key design decisions:**
+- FreeSWITCH and Kamailio use **host networking** — eliminates Docker port mapping for RTP, preserves real source IPs for SIP security
+- All other services use the Docker bridge network and communicate via service names
+- FreeSWITCH connects to Postgres/Redis via `127.0.0.1` (host ports), not Docker DNS
 
 ---
 
-## Container Definitions
+## Services
 
-### 1. PostgreSQL Container
-**Purpose**: Customer data, RCF config, CDRs, billing
-
-```dockerfile
-# docker/postgres/Dockerfile
-FROM postgres:16-alpine
-
-# Copy init scripts for schema
-COPY init/*.sql /docker-entrypoint-initdb.d/
-
-ENV POSTGRES_DB=voip
-ENV POSTGRES_USER=voip
-ENV POSTGRES_PASSWORD=voip_secret
-```
-
-**Init SQL**: Create all tables from MVP spec (customers, rcf_numbers, api_credentials, etc.)
+| Service | Image/Build | Host Port | Purpose |
+|---------|-------------|-----------|---------|
+| PostgreSQL + PgBouncer | `timescale/timescaledb:pg16` + custom | 5432, 6432 | Voice DB, CDR hypertables, connection pooling |
+| Redis | `redis:7-alpine` + custom config | 6380 | Caching, velocity tracking, channel acquisition |
+| FreeSWITCH | Built from source (Debian bookworm) | 5060, 5080, 5090, 8021, 8082, 16384-18383/udp | SIP B2BUA, RTP media, Verto WebRTC, conferencing |
+| Kamailio | `kamailio:5.8` (Debian bookworm) | 5060, 5061 | SBC — rate limiting, topology hiding, carrier routing |
+| FastAPI | Python 3.12 + uvicorn | 8088 | REST API, provisioning, CDR queries, WebSocket |
+| Nginx UI | nginx:alpine + React build + Homer | 8080 | Web UI, API proxy, Homer SIP capture proxy |
+| Homer DB | `postgres:14-alpine` | — | SIP packet capture storage |
+| Heplify Server | `ghcr.io/sipcapture/heplify-server` | 9060, 9061 | HEP packet collector |
+| Homer Webapp | `ghcr.io/sipcapture/homer-app` | 9080 | SIP capture analysis UI |
+| Webhook Test | Python 3.12 + Flask | 9000 | Mock webhook for API calling tests |
+| SIPp | Python 3.12 + sip-tester | — | Load testing microservice |
 
 ---
 
-### 2. Redis Container
-**Purpose**: Channel counters, velocity tracking, real-time state
+## Resource Requirements
 
-```dockerfile
-# docker/redis/Dockerfile
-FROM redis:7-alpine
+### Minimum VM Specs
 
-# Custom config for persistence
-COPY redis.conf /usr/local/etc/redis/redis.conf
+| Resource | Minimum | Recommended |
+|----------|---------|-------------|
+| CPU | 8 vCPUs | 12+ vCPUs |
+| RAM | 12 GB | 16 GB |
+| Disk | 50 GB SSD | 100 GB SSD (thin-provisioned OK) |
+| Network | 1 NIC with routable IP | 1 NIC with static public IP |
 
-CMD ["redis-server", "/usr/local/etc/redis/redis.conf"]
-```
+### Per-Service Resource Limits (from docker-compose.yml)
 
----
+| Service | CPU Limit | Memory Limit | CPU Reserve | Memory Reserve |
+|---------|-----------|--------------|-------------|----------------|
+| FreeSWITCH | 4 | 4 GB | 2 | 2 GB |
+| Kamailio | 2 | 512 MB | 0.5 | 128 MB |
+| FastAPI | 2 | 1 GB | 0.5 | 256 MB |
+| PostgreSQL | 1 | 1 GB | 0.5 | 256 MB |
+| Redis | 1 | 2 GB | 0.5 | 512 MB |
+| SIPp | 2 | 512 MB | — | — |
+| Nginx UI | 0.5 | 128 MB | — | — |
+| Webhook Test | 0.5 | 128 MB | — | — |
 
-### 3. FreeSWITCH Container
-**Purpose**: Core SIP switch, call routing, CDR generation
-
-```dockerfile
-# docker/freeswitch/Dockerfile
-FROM debian:bookworm-slim
-
-# Install FreeSWITCH 1.10.x
-RUN apt-get update && apt-get install -y \
-    gnupg2 wget lsb-release \
-    && wget -O - https://files.freeswitch.org/repo/deb/debian-release/fsstretch-archive-keyring.asc | apt-key add - \
-    && echo "deb http://files.freeswitch.org/repo/deb/debian-release/ bookworm main" > /etc/apt/sources.list.d/freeswitch.list \
-    && apt-get update && apt-get install -y \
-    freeswitch \
-    freeswitch-mod-sofia \
-    freeswitch-mod-lua \
-    freeswitch-mod-xml-curl \
-    freeswitch-mod-cdr-pg-csv \
-    freeswitch-mod-httapi \
-    freeswitch-mod-event-socket \
-    freeswitch-mod-dptools \
-    freeswitch-mod-dialplan-xml \
-    freeswitch-mod-commands \
-    freeswitch-sounds-en-us-callie \
-    lua5.3 lua-sql-postgres lua-redis \
-    && apt-get clean
-
-# Copy configuration
-COPY conf/ /etc/freeswitch/
-COPY scripts/ /etc/freeswitch/scripts/
-
-EXPOSE 5080/udp 5080/tcp 5081/tcp 8021/tcp
-
-CMD ["/usr/bin/freeswitch", "-nonat", "-nc"]
-```
-
-**Key Config Files**:
-- `vars.xml` - Global variables
-- `sofia/internal.xml` - SIP profile
-- `dialplan/default.xml` - Call routing
-- `scripts/rcf_lookup.lua` - RCF forwarding logic
-- `scripts/fraud_check.lua` - Fraud detection
-- `scripts/trunk_channel_check.lua` - Channel management
+**Total reserved:** ~6 vCPUs, ~3.5 GB RAM
+**Total limits:** ~13 vCPUs, ~10 GB RAM (not all services peak simultaneously)
 
 ---
 
-### 4. FastAPI Container
-**Purpose**: REST API for provisioning, CDR queries, billing
+## Environment Variables
 
-```dockerfile
-# docker/api/Dockerfile
-FROM python:3.11-slim
-
-WORKDIR /app
-
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-COPY src/ /app/
-
-EXPOSE 8000
-
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
-```
-
-**requirements.txt**:
-```
-fastapi>=0.109.0
-uvicorn[standard]>=0.27.0
-asyncpg>=0.29.0
-redis>=5.0.0
-pydantic>=2.5.0
-httpx>=0.26.0
-python-jose[cryptography]>=3.3.0
-passlib[bcrypt]>=1.7.4
-```
-
----
-
-### 5. Kamailio Container (Optional for Initial Testing)
-**Purpose**: SBC - rate limiting, topology hiding, TLS
-
-```dockerfile
-# docker/kamailio/Dockerfile
-FROM debian:bookworm-slim
-
-RUN apt-get update && apt-get install -y \
-    gnupg2 wget \
-    && wget -O- https://deb.kamailio.org/kamailiodebkey.gpg | apt-key add - \
-    && echo "deb http://deb.kamailio.org/kamailio58 bookworm main" > /etc/apt/sources.list.d/kamailio.list \
-    && apt-get update && apt-get install -y \
-    kamailio \
-    kamailio-redis-modules \
-    kamailio-postgres-modules \
-    kamailio-tls-modules \
-    && apt-get clean
-
-COPY kamailio.cfg /etc/kamailio/
-
-EXPOSE 5060/udp 5060/tcp 5061/tcp
-
-CMD ["/usr/sbin/kamailio", "-DD", "-E"]
-```
-
----
-
-### 6. Test Webhook Server (For API Calling Tests)
-**Purpose**: Mock customer webhook endpoint for testing API call control
-
-```dockerfile
-# docker/webhook-test/Dockerfile
-FROM python:3.11-slim
-
-WORKDIR /app
-COPY webhook_server.py .
-RUN pip install flask
-
-EXPOSE 9000
-
-CMD ["python", "webhook_server.py"]
-```
-
----
-
-## Docker Compose Configuration
-
-```yaml
-# docker-compose.yml
-version: '3.8'
-
-services:
-  postgres:
-    build: ./docker/postgres
-    container_name: voip-postgres
-    environment:
-      POSTGRES_DB: voip
-      POSTGRES_USER: voip
-      POSTGRES_PASSWORD: voip_secret
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./docker/postgres/init:/docker-entrypoint-initdb.d
-    ports:
-      - "5432:5432"
-    networks:
-      - voip-network
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U voip -d voip"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-
-  redis:
-    build: ./docker/redis
-    container_name: voip-redis
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-    networks:
-      - voip-network
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-
-  freeswitch:
-    build: ./docker/freeswitch
-    container_name: voip-freeswitch
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    environment:
-      - DB_HOST=postgres
-      - DB_NAME=voip
-      - DB_USER=voip
-      - DB_PASS=voip_secret
-      - REDIS_HOST=redis
-    ports:
-      - "5080:5080/udp"   # SIP UDP
-      - "5080:5080/tcp"   # SIP TCP
-      - "5081:5081/tcp"   # SIP TLS
-      - "8021:8021/tcp"   # Event Socket
-      - "16384-16484:16384-16484/udp"  # RTP range
-    volumes:
-      - ./docker/freeswitch/conf:/etc/freeswitch
-      - ./docker/freeswitch/scripts:/etc/freeswitch/scripts
-      - freeswitch_logs:/var/log/freeswitch
-    networks:
-      - voip-network
-    cap_add:
-      - NET_ADMIN  # For RTP
-
-  api:
-    build: ./docker/api
-    container_name: voip-api
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    environment:
-      - DATABASE_URL=postgresql://voip:voip_secret@postgres:5432/voip
-      - REDIS_URL=redis://redis:6379
-      - FREESWITCH_ESL_HOST=freeswitch
-      - FREESWITCH_ESL_PORT=8021
-      - FREESWITCH_ESL_PASSWORD=ClueCon
-    ports:
-      - "8000:8000"
-    volumes:
-      - ./docker/api/src:/app
-    networks:
-      - voip-network
-
-  kamailio:
-    build: ./docker/kamailio
-    container_name: voip-kamailio
-    depends_on:
-      - freeswitch
-    environment:
-      - FREESWITCH_HOST=freeswitch
-      - FREESWITCH_PORT=5080
-    ports:
-      - "5060:5060/udp"   # SIP UDP (external)
-      - "5060:5060/tcp"   # SIP TCP
-      - "5061:5061/tcp"   # SIP TLS
-    networks:
-      - voip-network
-
-  webhook-test:
-    build: ./docker/webhook-test
-    container_name: voip-webhook-test
-    ports:
-      - "9000:9000"
-    networks:
-      - voip-network
-
-networks:
-  voip-network:
-    driver: bridge
-
-volumes:
-  postgres_data:
-  redis_data:
-  freeswitch_logs:
-```
-
----
-
-## Directory Structure
-
-```
-revup/
-├── docker-compose.yml
-├── docker/
-│   ├── postgres/
-│   │   ├── Dockerfile
-│   │   └── init/
-│   │       ├── 01_schema.sql      # Core tables
-│   │       ├── 02_rcf.sql         # RCF tables
-│   │       ├── 03_trunks.sql      # SIP trunk tables
-│   │       ├── 04_api.sql         # API calling tables
-│   │       ├── 05_fraud.sql       # Fraud detection tables
-│   │       └── 06_seed_data.sql   # Test data
-│   ├── redis/
-│   │   ├── Dockerfile
-│   │   └── redis.conf
-│   ├── freeswitch/
-│   │   ├── Dockerfile
-│   │   ├── conf/
-│   │   │   ├── freeswitch.xml
-│   │   │   ├── vars.xml
-│   │   │   ├── sofia/
-│   │   │   │   └── internal.xml
-│   │   │   └── dialplan/
-│   │   │       └── default.xml
-│   │   └── scripts/
-│   │       ├── rcf_lookup.lua
-│   │       ├── fraud_check.lua
-│   │       └── trunk_channel_check.lua
-│   ├── api/
-│   │   ├── Dockerfile
-│   │   ├── requirements.txt
-│   │   └── src/
-│   │       ├── main.py
-│   │       ├── routers/
-│   │       │   ├── rcf.py
-│   │       │   ├── calls.py
-│   │       │   ├── trunks.py
-│   │       │   └── cdrs.py
-│   │       ├── models/
-│   │       ├── services/
-│   │       └── db/
-│   ├── kamailio/
-│   │   ├── Dockerfile
-│   │   └── kamailio.cfg
-│   └── webhook-test/
-│       ├── Dockerfile
-│       └── webhook_server.py
-└── tests/
-    ├── test_rcf.py
-    ├── test_api_calling.py
-    └── test_rating.py
-```
-
----
-
-## Implementation Phases
-
-### Phase 1: Core Infrastructure (Days 1-2)
-1. Create directory structure
-2. Set up PostgreSQL with full schema
-3. Set up Redis container
-4. Verify database connectivity
-
-### Phase 2: FreeSWITCH Core (Days 3-5)
-1. Build FreeSWITCH container with required modules
-2. Configure SIP profile (internal.xml)
-3. Implement basic dialplan
-4. Implement Lua scripts:
-   - `rcf_lookup.lua` - RCF forwarding
-   - `fraud_check.lua` - Basic fraud checks
-   - `trunk_channel_check.lua` - Channel management
-5. Configure CDR to PostgreSQL
-
-### Phase 3: FastAPI Layer (Days 6-8)
-1. Build API skeleton with authentication
-2. Implement endpoints:
-   - `POST /v1/rcf` - Create RCF number
-   - `GET /v1/rcf/{did}` - Get RCF config
-   - `POST /v1/calls` - Initiate outbound call
-   - `GET /v1/calls/{id}` - Get call status
-   - `GET /v1/cdrs` - Query CDRs
-   - `POST /v1/trunks` - Create SIP trunk
-3. Implement billing/rating service
-
-### Phase 4: Testing Setup (Days 9-10)
-1. Create test webhook server for API calling
-2. Seed test data (customers, DIDs, trunks)
-3. Write test scripts
-4. Document test procedures
-
----
-
-## Test Scenarios
-
-### Test 1: RCF Functionality
-**Objective**: Verify DID forwards to configured destination
+Create a `.env` file in the repo root. Only the deployment-specific variables need customization:
 
 ```bash
-# 1. Create test customer and RCF number via API
-curl -X POST http://localhost:8000/v1/customers \
-  -H "Content-Type: application/json" \
-  -d '{"name": "Test Customer", "account_type": "rcf"}'
+# ─── Network (MUST CHANGE per deployment) ─────────────────────────
+# Set to the VM's public/routable IP address
+EXTERNAL_SIP_IP=<PUBLIC_IP>
+EXTERNAL_RTP_IP=<PUBLIC_IP>
+VERTO_WS_URL=ws://<PUBLIC_IP>:8082
+SIP_DOMAIN=voiceplatform.local
 
-curl -X POST http://localhost:8000/v1/rcf \
-  -H "Content-Type: application/json" \
-  -d '{
-    "customer_id": 1,
-    "did": "+15551234567",
-    "forward_to": "+15559876543",
-    "pass_caller_id": true
-  }'
+# ─── Mode ─────────────────────────────────────────────────────────
+# true = plays tone for test calls (no carrier needed)
+# false = routes to real carriers (Bandwidth)
+TEST_MODE=true
 
-# 2. Make test call to the DID
-# Use SIP softphone (Zoiper, Linphone) or sipp tool
-sipp -sn uac -s +15551234567 -r 1 localhost:5060
+# ─── Database (defaults are fine for single-VM deployments) ───────
+POSTGRES_DB=voip
+POSTGRES_USER=voip
+POSTGRES_PASSWORD=voip_secret
 
-# 3. Verify:
-# - Call is answered and forwarded
-# - CDR is generated with correct billing
-# - Caller ID is passed through (if configured)
-```
+# ─── Bandwidth Carrier Integration (production only) ─────────────
+BANDWIDTH_API_CLIENT_ID=
+BANDWIDTH_API_CLIENT_SECRET=
+BANDWIDTH_ACCOUNT_ID=9900717
+BANDWIDTH_SIP_PEER_ID=1162116
 
-### Test 2: API Calling
-**Objective**: Verify outbound call via API with webhook control
-
-```bash
-# 1. Create API credentials for customer
-curl -X POST http://localhost:8000/v1/api-credentials \
-  -H "Content-Type: application/json" \
-  -d '{
-    "customer_id": 1,
-    "webhook_url": "http://webhook-test:9000/voice"
-  }'
-
-# 2. Provision DID with voice URL
-curl -X POST http://localhost:8000/v1/api-dids \
-  -H "Content-Type: application/json" \
-  -d '{
-    "customer_id": 1,
-    "did": "+15552223333",
-    "voice_url": "http://webhook-test:9000/voice"
-  }'
-
-# 3. Initiate outbound call via API
-curl -X POST http://localhost:8000/v1/calls \
-  -H "Authorization: Bearer <api_key>" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "from": "+15552223333",
-    "to": "+15551111111",
-    "webhook_url": "http://webhook-test:9000/status"
-  }'
-
-# 4. Verify:
-# - Call is initiated
-# - Webhook receives call events
-# - Call can be controlled via webhook responses
-# - CDR is generated
-```
-
-### Test 3: Call Rating System
-**Objective**: Verify CDRs are correctly rated
-
-```bash
-# 1. Set up rate tables
-curl -X POST http://localhost:8000/v1/rates \
-  -H "Content-Type: application/json" \
-  -d '{
-    "prefix": "1",
-    "rate_per_min": 0.01,
-    "description": "US Domestic"
-  }'
-
-# 2. Make test calls with known durations
-
-# 3. Query CDRs and verify rating
-curl http://localhost:8000/v1/cdrs?customer_id=1
-
-# Expected response:
-# {
-#   "cdrs": [
-#     {
-#       "uuid": "abc123",
-#       "duration_sec": 120,
-#       "billable_sec": 120,
-#       "rate_per_min": 0.01,
-#       "total_cost": 0.02
-#     }
-#   ]
-# }
-
-# 4. Verify customer balance updated
-curl http://localhost:8000/v1/customers/1
-
-# 5. Test fraud detection
-# - Try calling blocked prefix
-# - Exceed velocity limits
-# - Exceed daily spend cap
-```
-
-### Test 4: SIP Trunk Channel Limits
-**Objective**: Verify channel enforcement
-
-```bash
-# 1. Create trunk with 2 channel limit
-curl -X POST http://localhost:8000/v1/trunks \
-  -d '{"customer_id": 1, "max_channels": 2, "cps_limit": 5}'
-
-# 2. Make 3 simultaneous calls
-# - First 2 should connect
-# - Third should receive 486 Busy Here
-
-# 3. Verify Redis channel counter
-redis-cli GET trunk:1:channels
+# ─── FreeSWITCH ESL ──────────────────────────────────────────────
+FREESWITCH_ESL_PASSWORD=ClueCon
 ```
 
 ---
 
-## VCenter VM Deployment
+## Firewall / Port Requirements
 
-### VM Requirements
-- **OS**: Ubuntu 24.04 LTS or Debian 12
-- **CPU**: 4+ vCPUs
-- **RAM**: 8+ GB
-- **Disk**: 50+ GB SSD
-- **Network**: Public IP or NAT with port forwarding for SIP (5060/5061)
+Open these ports on the VM's firewall (GCP firewall rules or vCenter NSX/iptables):
 
-### Deployment Steps
+| Port | Protocol | Direction | Purpose |
+|------|----------|-----------|---------|
+| 5060 | UDP + TCP | Inbound | SIP signaling (Kamailio SBC) |
+| 5061 | TCP | Inbound | SIP TLS (optional) |
+| 8082 | TCP | Inbound | WebRTC/Verto WebSocket |
+| 16384-18383 | UDP | Inbound | RTP media (FreeSWITCH) |
+| 8080 | TCP | Inbound | Web UI (Nginx) |
+| 8088 | TCP | Inbound | REST API (FastAPI) |
+| 9080 | TCP | Inbound | Homer SIP capture UI |
+| 9060 | UDP + TCP | Inbound | HEP capture (Heplify) |
+
+**Outbound:** Allow all (needed for carrier SIP, Bandwidth API, package repos).
+
+---
+
+## Deployment: GCP Compute Engine
+
+### 1. Create the VM
 
 ```bash
-# 1. Install Docker on VM
-sudo apt update
-sudo apt install -y docker.io docker-compose-v2
-sudo usermod -aG docker $USER
+gcloud compute instances create custom-voip \
+  --zone=us-east1-b \
+  --machine-type=e2-standard-8 \
+  --boot-disk-size=100GB \
+  --boot-disk-type=pd-ssd \
+  --image-family=debian-12 \
+  --image-project=debian-cloud \
+  --tags=voip-server
+```
 
-# 2. Clone repository
-git clone <repo> /opt/voip-platform
-cd /opt/voip-platform
+### 2. Create firewall rules
 
-# 3. Configure environment
-cp .env.example .env
-# Edit .env with production values
+```bash
+gcloud compute firewall-rules create voip-sip \
+  --allow=udp:5060,tcp:5060,tcp:5061 \
+  --target-tags=voip-server \
+  --description="SIP signaling"
 
-# 4. Build and start containers
+gcloud compute firewall-rules create voip-rtp \
+  --allow=udp:16384-18383 \
+  --target-tags=voip-server \
+  --description="RTP media"
+
+gcloud compute firewall-rules create voip-web \
+  --allow=tcp:8080,tcp:8082,tcp:8088,tcp:9080 \
+  --target-tags=voip-server \
+  --description="Web UI, WebRTC, API, Homer"
+
+gcloud compute firewall-rules create voip-hep \
+  --allow=udp:9060,tcp:9060,tcp:9061 \
+  --target-tags=voip-server \
+  --description="HEP SIP capture"
+```
+
+### 3. Install Docker and deploy
+
+```bash
+# SSH into the VM
+gcloud compute ssh custom-voip --zone=us-east1-b
+
+# Install Docker
+sudo apt update && sudo apt install -y docker.io docker-compose-plugin git
+sudo systemctl enable docker
+
+# Clone and deploy
+sudo git clone https://github.com/Keegs2/custom-voip.git /opt/revup
+cd /opt/revup
+
+# Get the VM's external IP
+EXTERNAL_IP=$(curl -s http://metadata.google.internal/computeMetadata/v1/instance/network-interfaces/0/access-configs/0/external-ip -H "Metadata-Flavor: Google")
+
+# Create .env
+sudo tee .env << EOF
+EXTERNAL_SIP_IP=${EXTERNAL_IP}
+EXTERNAL_RTP_IP=${EXTERNAL_IP}
+VERTO_WS_URL=ws://${EXTERNAL_IP}:8082
+SIP_DOMAIN=voiceplatform.local
+TEST_MODE=true
+FREESWITCH_ESL_PASSWORD=ClueCon
+EOF
+
+# Build and start
+sudo docker compose build
+sudo docker compose up -d
+
+# Verify
+sudo docker compose ps
+```
+
+### GCE-specific: NAT hairpin workaround
+
+GCE uses 1:1 NAT — the public IP is not on the VM's interface. The FreeSWITCH `entrypoint.sh` automatically handles this by adding the public IP to the loopback interface:
+
+```bash
+ip addr add ${EXTERNAL_SIP_IP}/32 dev lo
+```
+
+This runs automatically on container start. It requires the `NET_ADMIN` capability (already set in docker-compose.yml). No manual action needed.
+
+---
+
+## Deployment: VMware vCenter
+
+### 1. Create the VM
+
+- **ISO:** Debian 12 (Bookworm) netinst — `debian-12.9.0-amd64-netinst.iso`
+  Download: https://cdimage.debian.org/debian-cd/current/amd64/iso-cd/
+- **vCPUs:** 8+ (12 recommended)
+- **RAM:** 16 GB
+- **Disk:** 100 GB thin-provisioned (LSI Logic SAS or VMware Paravirtual)
+- **Network:** 1 VMXNET3 NIC on a port group with routable IP access
+- **Guest OS type:** Debian 12 (64-bit)
+
+### 2. Install Debian
+
+During the Debian installer:
+- Choose minimal install (no desktop, no print server)
+- Select SSH server and standard system utilities
+- Set hostname (e.g., `custom-voip`)
+- Configure static IP if required by your network
+
+### 3. Post-install: Docker and deploy
+
+```bash
+# Install Docker (as root or with sudo)
+apt update && apt install -y ca-certificates curl gnupg git
+install -m 0755 -d /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
+chmod a+r /etc/apt/keyrings/docker.asc
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+apt update && apt install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+
+# Clone and deploy
+git clone https://github.com/Keegs2/custom-voip.git /opt/revup
+cd /opt/revup
+
+# Create .env — replace <PUBLIC_IP> with the VM's routable IP
+cat > .env << 'EOF'
+EXTERNAL_SIP_IP=<PUBLIC_IP>
+EXTERNAL_RTP_IP=<PUBLIC_IP>
+VERTO_WS_URL=ws://<PUBLIC_IP>:8082
+SIP_DOMAIN=voiceplatform.local
+TEST_MODE=true
+FREESWITCH_ESL_PASSWORD=ClueCon
+EOF
+
+# Build all containers (first build takes 10-15 minutes)
 docker compose build
+
+# Start the stack
 docker compose up -d
 
-# 5. Verify all services running
+# Verify all services are running
+docker compose ps
+```
+
+### 4. vCenter-specific: NAT considerations
+
+**If the VM has a directly assigned public IP (no NAT):**
+- The `entrypoint.sh` loopback workaround is harmless but unnecessary
+- Set `EXTERNAL_SIP_IP` and `EXTERNAL_RTP_IP` to the VM's IP
+- Everything works out of the box
+
+**If the VM is behind NAT (private IP, NAT to public):**
+- The same GCE hairpin workaround applies — `entrypoint.sh` adds the public IP to loopback automatically
+- Set `EXTERNAL_SIP_IP` and `EXTERNAL_RTP_IP` to the **public** (post-NAT) IP
+- Ensure the NAT device forwards all required ports (SIP, RTP range, Web)
+- The NAT device must support **symmetric RTP** or **full cone NAT** for media to work
+
+**If there is no public IP (internal-only deployment):**
+- Set `EXTERNAL_SIP_IP` and `EXTERNAL_RTP_IP` to the VM's private IP
+- SIP peers (PBXes, softphones) must be on the same network or reachable via routing
+- Carrier integration (Bandwidth) will not work without a public IP
+
+### 5. vCenter firewall (iptables)
+
+If the VM uses iptables directly (no NSX):
+
+```bash
+# SIP
+iptables -A INPUT -p udp --dport 5060 -j ACCEPT
+iptables -A INPUT -p tcp --dport 5060 -j ACCEPT
+iptables -A INPUT -p tcp --dport 5061 -j ACCEPT
+
+# WebRTC
+iptables -A INPUT -p tcp --dport 8082 -j ACCEPT
+
+# RTP
+iptables -A INPUT -p udp --dport 16384:18383 -j ACCEPT
+
+# Web UI, API, Homer
+iptables -A INPUT -p tcp --dport 8080 -j ACCEPT
+iptables -A INPUT -p tcp --dport 8088 -j ACCEPT
+iptables -A INPUT -p tcp --dport 9080 -j ACCEPT
+
+# HEP capture
+iptables -A INPUT -p udp --dport 9060 -j ACCEPT
+iptables -A INPUT -p tcp --dport 9060 -j ACCEPT
+iptables -A INPUT -p tcp --dport 9061 -j ACCEPT
+
+# Save
+iptables-save > /etc/iptables/rules.v4
+```
+
+---
+
+## Database Initialization
+
+On first start, PostgreSQL runs all SQL scripts in `/docker/postgres/init/` alphabetically:
+
+| Script | Purpose |
+|--------|---------|
+| 01_extensions.sql | TimescaleDB, pg_stat_statements; creates freeswitch/api DB users |
+| 02_schema_core.sql | customers, rcf_numbers, sip_trunks, trunk_dids, trunk_auth_ips, rates |
+| 03_schema_api.sql | API calling: api_credentials, api_dids, api_call_logs |
+| 04_schema_fraud.sql | Fraud prefixes, velocity tables, block lists |
+| 05_schema_cdr.sql | CDR hypertable (TimescaleDB), partitioned by day |
+| 06_seed_data.sql | Demo customers, RCF numbers, rate tables |
+| 07_cps_tiers.sql | CPS rate limiting tiers |
+| 08_carrier_gateways.sql | Carrier trunk definitions |
+| 09_schema_users.sql | User authentication, RBAC (admin/user roles) |
+| 10_schema_ucaas.sql | Extensions, voicemail, call queues, presence |
+| 11_schema_chat.sql | Chat conversations, messages, attachments |
+| 11a-d | DID assignment, UCaaS type refinements |
+| 12_multi_tenant_extensions.sql | Per-customer extension isolation |
+| 13_schema_conferencing.sql | Conference rooms, schedules, participants |
+| 14_granite_accounts.sql | Granite Telephony account setup |
+| 15_schema_documents.sql | Document sharing metadata |
+| 16_cdr_detail_columns.sql | CDR enrichment columns |
+| 17_account_cleanup.sql | Demo account restructuring |
+
+These only run on a **fresh** database (empty `postgres_data` volume). To re-initialize:
+
+```bash
+docker compose down
+docker volume rm revup_postgres_data
+docker compose up -d
+```
+
+---
+
+## Startup Order and Health Checks
+
+Docker Compose enforces this dependency chain:
+
+```
+PostgreSQL ──(healthy)──▶ FreeSWITCH ──▶ Kamailio
+     │                         │
+     ├──(healthy)──▶ FastAPI ──▶ Nginx UI
+     │
+Redis ──(healthy)──▶ FreeSWITCH
+     │
+     └──(healthy)──▶ FastAPI
+
+Homer DB ──(healthy)──▶ Heplify Server
+     │
+     └──(healthy)──▶ Homer Webapp
+```
+
+| Service | Health Check | Interval | Retries |
+|---------|-------------|----------|---------|
+| PostgreSQL | `pg_isready -U voip -d voip` | 5s | 10 |
+| Redis | `redis-cli ping` | 5s | 5 |
+| FreeSWITCH | `fs_cli -x "status"` | 30s | 3 |
+| Kamailio | `kamcmd core.uptime` | 30s | 3 |
+| Homer DB | `psql -h localhost -U root -c '\l'` | 2s | 30 |
+
+---
+
+## Post-Deployment Verification
+
+After all services are running, verify the stack:
+
+```bash
+# 1. Check all containers are healthy
 docker compose ps
 
-# 6. Check logs
-docker compose logs -f freeswitch
-docker compose logs -f api
+# 2. API health check
+curl http://localhost:8088/health
 
-# 7. Run health checks
-curl http://localhost:8000/health
+# 3. Get an admin token
+TOKEN=$(curl -s http://localhost:8088/auth/login -H "Content-Type: application/json" -d '{"email":"admin@customvoip.com","password":"admin123"}' | jq -r '.access_token')
+
+# 4. List customers
+curl -s http://localhost:8088/customers -H "Authorization: Bearer $TOKEN" | jq
+
+# 5. Check Bandwidth TN inventory (if credentials configured)
+curl -s http://localhost:8088/numbers/stats -H "Authorization: Bearer $TOKEN" | jq
+
+# 6. FreeSWITCH status
+docker exec voip-freeswitch fs_cli -x "sofia status"
+
+# 7. Kamailio status
+docker exec voip-kamailio kamcmd core.uptime
+
+# 8. Web UI
+# Open http://<PUBLIC_IP>:8080 in a browser
+# Login: admin@customvoip.com / admin123
+
+# 9. Homer SIP capture
+# Open http://<PUBLIC_IP>:9080 in a browser
+# Login: admin / sipcapture
 ```
 
-### Firewall Configuration
+---
+
+## Updating the Platform
+
+The deployment workflow is the same for both GCP and vCenter:
+
 ```bash
-# Required ports
-sudo ufw allow 5060/udp   # SIP UDP
-sudo ufw allow 5060/tcp   # SIP TCP
-sudo ufw allow 5061/tcp   # SIP TLS
-sudo ufw allow 8000/tcp   # API
-sudo ufw allow 16384:16484/udp  # RTP range
+cd /opt/revup
+
+# Pull latest code
+git pull
+
+# Rebuild only changed services (Docker layer caching makes this fast)
+docker compose build
+
+# Restart with new images
+docker compose up -d
+
+# For API-only changes (no Docker rebuild needed — code is bind-mounted in dev):
+docker compose restart api
+```
+
+**Note:** The UI container requires a full rebuild (`docker compose build ui`) because the React app is compiled into the Docker image at build time. The API container in dev mode uses `--reload` with a bind-mounted source directory, so code changes take effect on save.
+
+---
+
+## Kernel Tuning (Optional, recommended for production)
+
+For high call volumes (100+ concurrent calls), apply these sysctl settings on the host:
+
+```bash
+# /etc/sysctl.d/99-voip.conf
+
+# Network buffers
+net.core.rmem_max = 16777216
+net.core.wmem_max = 16777216
+net.core.rmem_default = 1048576
+net.core.wmem_default = 1048576
+net.core.netdev_max_backlog = 65536
+net.core.somaxconn = 65535
+
+# TCP tuning
+net.ipv4.tcp_max_syn_backlog = 65536
+net.ipv4.tcp_tw_reuse = 1
+net.ipv4.tcp_fin_timeout = 15
+net.ipv4.tcp_keepalive_time = 300
+net.ipv4.tcp_keepalive_intvl = 15
+net.ipv4.tcp_keepalive_probes = 5
+
+# UDP buffer for RTP
+net.ipv4.udp_mem = 65536 131072 262144
+net.ipv4.udp_rmem_min = 16384
+net.ipv4.udp_wmem_min = 16384
+
+# Connection tracking (for Docker NAT)
+net.netfilter.nf_conntrack_max = 262144
+
+# Apply
+sysctl --system
 ```
 
 ---
 
-## Success Criteria
+## Default Credentials
 
-| Test | Pass Criteria |
-|------|---------------|
-| RCF Call | Inbound call to DID forwards to configured number within 2 seconds |
-| API Outbound | API call initiates outbound call, webhook receives events |
-| Webhook Control | Webhook response controls call flow (play, gather, dial) |
-| CDR Generation | CDR written to PostgreSQL within 5 seconds of call end |
-| Call Rating | CDR contains correct rate and total_cost based on destination |
-| Balance Update | Customer balance decremented after rated call |
-| Fraud Block | Calls to blocked prefixes rejected with proper hangup cause |
-| Channel Limit | Calls beyond trunk limit receive 486 response |
-| Velocity Limit | Rapid calls beyond limit are blocked |
+| Service | Username | Password | Notes |
+|---------|----------|----------|-------|
+| Web UI (admin) | admin@customvoip.com | admin123 | Full admin access |
+| Web UI (support) | support@granite.com | admin123 | Granite Telephony user |
+| PostgreSQL | voip | voip_secret | Main database |
+| PostgreSQL (FS) | freeswitch | fs_secret | FreeSWITCH read-only |
+| PostgreSQL (API) | api | api_secret | API service |
+| Redis | — | — | No auth (internal only) |
+| FreeSWITCH ESL | — | ClueCon | Event Socket |
+| Homer | admin | sipcapture | SIP capture UI |
+
+**Change all passwords before exposing to any network beyond the lab.**
 
 ---
 
-## Next Steps After This Document
+## Troubleshooting
 
-1. Review and approve this plan
-2. Create the directory structure
-3. Begin Phase 1 implementation
-4. Set up CI/CD for container builds (optional)
+### No audio on calls
+- Verify RTP ports (16384-18383/udp) are open in firewall
+- Check `EXTERNAL_RTP_IP` matches the VM's public/routable IP
+- On GCE: verify `ip addr show lo` includes the public IP
+
+### SIP registration fails
+- Check Kamailio is running: `docker exec voip-kamailio kamcmd core.uptime`
+- Check FreeSWITCH profiles: `docker exec voip-freeswitch fs_cli -x "sofia status"`
+- Verify port 5060 is reachable: `nc -zvu <PUBLIC_IP> 5060`
+
+### Calls disconnect after 28-32 seconds
+- ACK routing issue — the public IP is not looped back locally
+- Verify: `ip addr show lo | grep <PUBLIC_IP>`
+- If missing, restart FreeSWITCH: `docker compose restart freeswitch`
+
+### Web UI shows old content after update
+- The UI is compiled into the Docker image
+- Must rebuild: `docker compose build ui && docker compose up -d ui`
+
+### API returns 502 on Bandwidth endpoints
+- Check credentials in .env: `grep BANDWIDTH .env`
+- Test token: `curl -s -X POST https://api.bandwidth.com/api/v1/oauth2/token -u "$CLIENT_ID:$CLIENT_SECRET" -d "grant_type=client_credentials" | jq`
+- Clear Redis cache: `docker exec voip-redis redis-cli DEL bandwidth:tns`
+
+### Container won't start (health check failing)
+- Check logs: `docker compose logs <service> --tail 50`
+- Database not ready: `docker compose restart <service>` (health checks will retry)
+- Port conflict: another process on the host using the same port
