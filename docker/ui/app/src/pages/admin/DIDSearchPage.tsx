@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { apiRequest } from '../../api/client';
 import { Badge } from '../../components/ui/Badge';
 import { Spinner } from '../../components/ui/Spinner';
+import { TabBar } from '../../components/ui/TabBar';
 import { fmt, fmtDuration } from '../../utils/format';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -41,6 +42,31 @@ interface CallHistoryResponse {
   calls: CallRecord[];
 }
 
+// ─── Inventory Types ──────────────────────────────────────────────────────────
+
+interface InventoryAssignment {
+  product: DIDProduct;
+  customer_name: string;
+}
+
+interface InventoryTN {
+  tn: string;
+  city: string;
+  state: string;
+  lata: string;
+  rate_center: string;
+  tier: string;
+  bw_status: string;
+  assigned_to: InventoryAssignment | null;
+}
+
+interface InventoryStats {
+  total: number;
+  assigned: number;
+  available: number;
+  by_product: Record<DIDProduct, number>;
+}
+
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 const PAGE_SIZE = 25;
@@ -64,6 +90,28 @@ const PRODUCT_LABEL: Record<DIDProduct, string> = {
   api:   'API',
   trunk: 'Trunk',
   ucaas: 'UCaaS',
+};
+
+// Pill badge colors for the inventory product column
+const INV_PRODUCT_BG: Record<DIDProduct, string> = {
+  rcf:   'rgba(59,130,246,0.15)',
+  api:   'rgba(168,85,247,0.15)',
+  trunk: 'rgba(245,158,11,0.15)',
+  ucaas: 'rgba(34,197,94,0.15)',
+};
+
+const INV_PRODUCT_COLOR: Record<DIDProduct, string> = {
+  rcf:   '#60a5fa',
+  api:   '#c084fc',
+  trunk: '#fbbf24',
+  ucaas: '#4ade80',
+};
+
+const INV_PRODUCT_BORDER: Record<DIDProduct, string> = {
+  rcf:   'rgba(59,130,246,0.3)',
+  api:   'rgba(168,85,247,0.3)',
+  trunk: 'rgba(245,158,11,0.3)',
+  ucaas: 'rgba(34,197,94,0.3)',
 };
 
 const CALL_RESULT_COLOR: Record<CallResult, string> = {
@@ -768,9 +816,386 @@ function DIDTable({
   );
 }
 
+// ─── DID Inventory Tab ────────────────────────────────────────────────────────
+
+interface DIDInventoryTabProps {
+  /** Triggered the first time this tab is rendered so data loads on activation */
+  isActive: boolean;
+}
+
+function DIDInventoryTab({ isActive }: DIDInventoryTabProps) {
+  const [stats, setStats] = useState<InventoryStats | null>(null);
+  const [inventory, setInventory] = useState<InventoryTN[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [hasFetched, setHasFetched] = useState(false);
+  // Hover state tracked by TN key to avoid per-row component overhead
+  const [hoveredTN, setHoveredTN] = useState<string | null>(null);
+
+  useEffect(() => {
+    // Only fetch once, the first time the tab becomes active
+    if (!isActive || hasFetched) return;
+
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+
+    Promise.all([
+      apiRequest<InventoryStats>('GET', '/numbers/stats'),
+      apiRequest<InventoryTN[]>('GET', '/numbers/inventory'),
+    ])
+      .then(([statsData, inventoryData]) => {
+        if (cancelled) return;
+        setStats(statsData);
+        setInventory(inventoryData);
+        setHasFetched(true);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setError(err instanceof Error ? err.message : 'Failed to load inventory');
+        setHasFetched(true);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => { cancelled = true; };
+  }, [isActive, hasFetched]);
+
+  if (loading) {
+    return (
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '72px 0',
+          gap: 14,
+          color: '#64748b',
+          fontSize: '0.875rem',
+        }}
+      >
+        <Spinner size="md" />
+        <span>Fetching TN inventory from Bandwidth…</span>
+        <span style={{ fontSize: '0.75rem', color: '#475569' }}>This may take a few seconds</span>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div
+        style={{
+          padding: '16px 20px',
+          borderRadius: 10,
+          background: 'rgba(239,68,68,0.06)',
+          border: '1px solid rgba(239,68,68,0.18)',
+          color: '#f87171',
+          fontSize: '0.875rem',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+        }}
+      >
+        <svg viewBox="0 0 20 20" fill="currentColor" style={{ width: 18, height: 18, flexShrink: 0 }}>
+          <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+        </svg>
+        <span>{error}</span>
+      </div>
+    );
+  }
+
+  if (!hasFetched) {
+    // Not yet active — render nothing, avoids flash on mount before isActive
+    return null;
+  }
+
+  const statCards: Array<{ label: string; value: number | string; accent: string }> = [
+    { label: 'Total TNs', value: stats?.total ?? 0, accent: '#3b82f6' },
+    { label: 'Assigned', value: stats?.assigned ?? 0, accent: '#22c55e' },
+    { label: 'Available', value: stats?.available ?? 0, accent: '#f59e0b' },
+  ];
+
+  const productBreakdown: Array<{ key: DIDProduct; label: string }> = [
+    { key: 'rcf', label: 'RCF' },
+    { key: 'api', label: 'API' },
+    { key: 'trunk', label: 'Trunk' },
+    { key: 'ucaas', label: 'UCaaS' },
+  ];
+
+  return (
+    <div>
+      {/* ── Stats Row ─────────────────────────────────────────────── */}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
+          gap: 12,
+          marginBottom: 28,
+        }}
+      >
+        {/* Total / Assigned / Available cards */}
+        {statCards.map(({ label, value, accent }) => (
+          <div
+            key={label}
+            style={{
+              background: '#1a1d2e',
+              border: `1px solid ${accent}28`,
+              borderRadius: 8,
+              padding: '16px 20px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 4,
+            }}
+          >
+            <div style={{ fontSize: '0.62rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+              {label}
+            </div>
+            <div style={{ fontSize: '1.6rem', fontWeight: 800, color: accent, lineHeight: 1, letterSpacing: '-0.02em' }}>
+              {typeof value === 'number' ? value.toLocaleString() : value}
+            </div>
+          </div>
+        ))}
+
+        {/* By-product breakdown card */}
+        <div
+          style={{
+            background: '#1a1d2e',
+            border: '1px solid rgba(255,255,255,0.06)',
+            borderRadius: 8,
+            padding: '16px 20px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 8,
+            gridColumn: 'span 1',
+          }}
+        >
+          <div style={{ fontSize: '0.62rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+            By Product
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 14px' }}>
+            {productBreakdown.map(({ key, label }) => (
+              <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                <span
+                  style={{
+                    display: 'inline-block',
+                    width: 8,
+                    height: 8,
+                    borderRadius: '50%',
+                    background: INV_PRODUCT_COLOR[key],
+                    flexShrink: 0,
+                  }}
+                />
+                <span style={{ fontSize: '0.75rem', color: '#94a3b8', fontWeight: 600 }}>
+                  {label}
+                </span>
+                <span style={{ fontSize: '0.75rem', color: '#e2e8f0', fontWeight: 700 }}>
+                  {(stats?.by_product?.[key] ?? 0).toLocaleString()}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* ── Inventory Table ───────────────────────────────────────── */}
+      <div
+        style={{
+          background: 'rgba(255,255,255,0.02)',
+          border: '1px solid rgba(255,255,255,0.06)',
+          borderRadius: 14,
+          overflow: 'hidden',
+        }}
+      >
+        {/* Table header bar */}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '12px 20px',
+            borderBottom: '1px solid rgba(255,255,255,0.05)',
+            background: 'rgba(0,0,0,0.1)',
+          }}
+        >
+          <span style={{ fontSize: '0.75rem', color: '#64748b', fontWeight: 600 }}>
+            {inventory.length === 1 ? '1 number' : `${inventory.length.toLocaleString()} numbers`}
+          </span>
+          <span style={{ fontSize: '0.7rem', color: '#334155' }}>
+            Bandwidth TN inventory
+          </span>
+        </div>
+
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 680 }}>
+            <thead>
+              <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                {['Number', 'City', 'State', 'Rate Center', 'BW Status', 'Assignment'].map((col) => (
+                  <th
+                    key={col}
+                    style={{
+                      padding: '10px 16px',
+                      textAlign: 'left',
+                      fontSize: '0.6rem',
+                      fontWeight: 700,
+                      color: '#334155',
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.1em',
+                      whiteSpace: 'nowrap',
+                      background: 'rgba(0,0,0,0.06)',
+                    }}
+                  >
+                    {col}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {inventory.map((tn) => {
+                const isHovered = hoveredTN === tn.tn;
+                const assignment = tn.assigned_to;
+
+                return (
+                  <tr
+                    key={tn.tn}
+                    style={{
+                      background: isHovered ? 'rgba(255,255,255,0.025)' : 'transparent',
+                      transition: 'background 0.15s',
+                      borderBottom: '1px solid rgba(255,255,255,0.03)',
+                    }}
+                    onMouseEnter={() => setHoveredTN(tn.tn)}
+                    onMouseLeave={() => setHoveredTN(null)}
+                  >
+                    {/* Number */}
+                    <td style={{ padding: '12px 16px', whiteSpace: 'nowrap' }}>
+                      <span
+                        style={{
+                          fontSize: '0.875rem',
+                          fontWeight: 700,
+                          color: '#e2e8f0',
+                          fontFamily: 'monospace',
+                          fontVariantNumeric: 'tabular-nums',
+                          letterSpacing: '-0.01em',
+                        }}
+                      >
+                        {tn.tn}
+                      </span>
+                    </td>
+
+                    {/* City */}
+                    <td style={{ padding: '12px 16px', fontSize: '0.82rem', color: '#94a3b8', whiteSpace: 'nowrap' }}>
+                      {tn.city || '—'}
+                    </td>
+
+                    {/* State */}
+                    <td style={{ padding: '12px 16px', fontSize: '0.82rem', color: '#94a3b8', whiteSpace: 'nowrap' }}>
+                      {tn.state || '—'}
+                    </td>
+
+                    {/* Rate Center */}
+                    <td style={{ padding: '12px 16px', fontSize: '0.8rem', color: '#64748b', whiteSpace: 'nowrap' }}>
+                      {tn.rate_center || '—'}
+                    </td>
+
+                    {/* BW Status */}
+                    <td style={{ padding: '12px 16px', whiteSpace: 'nowrap' }}>
+                      <span
+                        style={{
+                          fontSize: '0.68rem',
+                          fontWeight: 700,
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.04em',
+                          color: tn.bw_status === 'Inservice' ? '#4ade80' : '#94a3b8',
+                          background: tn.bw_status === 'Inservice' ? 'rgba(34,197,94,0.1)' : 'rgba(148,163,184,0.08)',
+                          border: `1px solid ${tn.bw_status === 'Inservice' ? 'rgba(34,197,94,0.25)' : 'rgba(148,163,184,0.15)'}`,
+                          borderRadius: 4,
+                          padding: '2px 8px',
+                        }}
+                      >
+                        {tn.bw_status || '—'}
+                      </span>
+                    </td>
+
+                    {/* Assignment */}
+                    <td style={{ padding: '12px 16px', whiteSpace: 'nowrap' }}>
+                      {assignment ? (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                          <span
+                            style={{
+                              fontSize: '0.65rem',
+                              fontWeight: 700,
+                              textTransform: 'uppercase',
+                              letterSpacing: '0.05em',
+                              color: INV_PRODUCT_COLOR[assignment.product],
+                              background: INV_PRODUCT_BG[assignment.product],
+                              border: `1px solid ${INV_PRODUCT_BORDER[assignment.product]}`,
+                              borderRadius: 20,
+                              padding: '2px 9px',
+                            }}
+                          >
+                            {PRODUCT_LABEL[assignment.product]}
+                          </span>
+                          <span style={{ fontSize: '0.82rem', color: '#94a3b8' }}>
+                            {assignment.customer_name}
+                          </span>
+                        </div>
+                      ) : (
+                        <span
+                          style={{
+                            fontSize: '0.78rem',
+                            fontWeight: 600,
+                            color: '#4ade80',
+                          }}
+                        >
+                          Available
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+
+              {inventory.length === 0 && (
+                <tr>
+                  <td
+                    colSpan={6}
+                    style={{
+                      padding: '48px 16px',
+                      textAlign: 'center',
+                      color: '#334155',
+                      fontSize: '0.85rem',
+                      fontStyle: 'italic',
+                    }}
+                  >
+                    No TNs found in inventory.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Tab definitions ──────────────────────────────────────────────────────────
+
+const TABS = [
+  { id: 'lookup', label: 'DID Lookup' },
+  { id: 'inventory', label: 'DID Inventory' },
+] as const;
+
+type TabId = typeof TABS[number]['id'];
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export function DIDSearchPage() {
+  // ── Tab state — must stay above ALL early returns (React #310 rule) ─────────
+  const [activeTab, setActiveTab] = useState<TabId>('lookup');
+
+  // ── DID Lookup tab state ────────────────────────────────────────────────────
   const [inputValue, setInputValue] = useState('');
   // The committed search query. Empty string = browse-all mode.
   const [query, setQuery] = useState('');
@@ -858,9 +1283,9 @@ export function DIDSearchPage() {
       {/* ── Page Header ─────────────────────────────────────────── */}
       <div
         style={{
-          marginBottom: 32,
+          marginBottom: 28,
           paddingTop: 8,
-          paddingBottom: 28,
+          paddingBottom: 24,
           borderBottom: '1px solid rgba(42,47,69,0.6)',
           textAlign: 'center',
         }}
@@ -897,7 +1322,7 @@ export function DIDSearchPage() {
             margin: '0 0 6px',
           }}
         >
-          DID Lookup
+          DID Management
         </h1>
         <p
           style={{
@@ -910,9 +1335,25 @@ export function DIDSearchPage() {
             marginRight: 'auto',
           }}
         >
-          Search for any DID across all products and customers. View configuration, ownership, and call history.
+          Search DIDs across all products and customers, or browse the full Bandwidth TN inventory.
         </p>
       </div>
+
+      {/* ── Tab Bar ─────────────────────────────────────────────── */}
+      <TabBar
+        tabs={TABS as unknown as Array<{ id: string; label: string }>}
+        activeTab={activeTab}
+        onTabChange={(id) => setActiveTab(id as TabId)}
+      />
+
+      {/* ── DID Inventory Tab ────────────────────────────────────── */}
+      {activeTab === 'inventory' && (
+        <DIDInventoryTab isActive={activeTab === 'inventory'} />
+      )}
+
+      {/* ── DID Lookup Tab ──────────────────────────────────────── */}
+      {activeTab === 'lookup' && (
+      <div>
 
       {/* ── Search Bar ──────────────────────────────────────────── */}
       <div style={{ position: 'relative', marginBottom: 24 }}>
@@ -1103,6 +1544,8 @@ export function DIDSearchPage() {
           isFetching={isFetching}
           countLabel={isSearching ? 'results' : 'DIDs'}
         />
+      )}
+      </div>
       )}
     </div>
   );
