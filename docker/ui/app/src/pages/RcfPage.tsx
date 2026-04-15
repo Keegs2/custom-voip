@@ -550,10 +550,9 @@ export function RcfPage() {
     <div>
       <PortalHeader
         icon={<IconRCF size={24} />}
-        title={user?.customer_name ? `${user.customer_name}'s Numbers` : 'RCF Numbers'}
-        subtitle="Change where your calls forward to. Updates take effect within seconds."
+        title={user?.customer_name ? `${user.customer_name}'s RCF Numbers` : 'RCF Numbers'}
+        subtitle="Manage Remote Call Forwarding numbers. Changes take effect within seconds."
         badgeVariant="rcf"
-        userEmail={user?.email}
       />
 
       <AdminCustomerSelector
