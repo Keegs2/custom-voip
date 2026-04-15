@@ -172,9 +172,11 @@
         -->
 
         <!-- Join video conference (no PIN) -->
-        <!-- +flags{speak} ensures all members get the speak flag on join.
-             Without this, passthrough video mode can strip speak from non-floor
-             members, causing one-way audio (they hear but are not heard). -->
+        <!-- Force speak flag via channel variable — +flags{speak} in the data
+             string is not reliable in passthrough video mode because mod_conference
+             strips speak from non-floor members after join. Setting the channel
+             variable before entering ensures the member keeps speak. -->
+        <action application="set" data="conference_member_flags=speak"/>
         <action application="conference" data="room_${conf_customer_id}_$1@video+flags{speak}"/>
       </condition>
     </extension>
