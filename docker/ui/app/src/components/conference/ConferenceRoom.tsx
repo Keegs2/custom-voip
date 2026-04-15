@@ -529,7 +529,10 @@ function Lobby({ conferenceName, onJoin, onCancel }: LobbyProps) {
         }
 
         // Wire up AudioContext analyser for the mic level meter.
+        // Chrome creates AudioContext in 'suspended' state; resume() is
+        // required before the analyser will produce non-zero frequency data.
         const audioCtx = new AudioContext();
+        void audioCtx.resume();
         const source = audioCtx.createMediaStreamSource(stream);
         const analyser = audioCtx.createAnalyser();
         analyser.fftSize = 256;

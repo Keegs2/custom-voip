@@ -68,6 +68,15 @@ interface VertoCallSession {
    * screen share stops. Null for audio-only calls.
    */
   cameraStream: MediaStream | null;
+  /**
+   * Detached Audio element used to play remote audio independently of the
+   * React render cycle. A detached element avoids the autoplay timing issue
+   * where the browser's user-gesture context has expired by the time the
+   * React <audio> node mounts (which happens asynchronously after makeCall
+   * resolves and the component re-renders). Created on first ontrack and
+   * reused for subsequent tracks on the same call.
+   */
+  audioElement: HTMLAudioElement | null;
 }
 
 export interface VertoConfig {
@@ -275,6 +284,7 @@ export class VertoClient {
       localStream,
       remoteStream,
       cameraStream: isVideo ? localStream : null,
+      audioElement: null,
     });
 
     // Notify listener so the UI can attach the local stream to a <video> element
@@ -689,6 +699,7 @@ export class VertoClient {
       localStream: null,
       remoteStream,
       cameraStream: null,
+      audioElement: null,
     });
 
     this.onIncomingCall(call);
@@ -1022,20 +1033,27 @@ export class VertoClient {
   }
 
   /**
-   * Remote audio/video playback is handled entirely by the React layer via
-   * onStreamChange → remoteVideoStream. A detached Audio() element cannot
-   * reliably autoplay without a prior user gesture (NotAllowedError). The
-   * ConferenceRoom and Softphone widget bind remoteVideoStream to DOM
-   * <audio>/<video> elements that are already in a user-gesture context.
-   *
-   * This method is intentionally a no-op; callers are retained for clarity
-   * but the actual work now happens in the UI layer.
+   * Play remote audio via a detached Audio element that lives on the session
+   * object rather than in the React DOM. This sidesteps the autoplay timing
+   * problem: by the time the conference <audio> element mounts (after the
+   * lobby→joined transition and a React re-render), the browser's user-gesture
+   * context has already expired, so .play() throws NotAllowedError. A
+   * detached Audio() created synchronously inside the ontrack handler — which
+   * fires while makeCall's RTCPeerConnection is still being negotiated — runs
+   * close enough to the original "Join Meeting" click gesture to be allowed.
    */
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  private playRemoteAudio(_callId: string, _stream: MediaStream): void {
-    // No-op: React components bind remoteVideoStream to <audio muted={false}>
-    // elements inside ConferenceRoom / the softphone widget, which inherit
-    // the user-gesture context from the Join / Answer click.
+  private playRemoteAudio(callId: string, stream: MediaStream): void {
+    const session = this.sessions.get(callId);
+    if (!session) return;
+
+    if (!session.audioElement) {
+      session.audioElement = new Audio();
+      session.audioElement.autoplay = true;
+    }
+    session.audioElement.srcObject = stream;
+    session.audioElement.play().catch((err: unknown) => {
+      console.warn('[Verto] Remote audio autoplay blocked:', err);
+    });
   }
 
   private cleanupSession(callId: string): void {
@@ -1048,8 +1066,12 @@ export class VertoClient {
       session.cameraStream.getTracks().forEach((t) => t.stop());
     }
     session.peerConnection.close();
-    // Remote audio cleanup is handled by the React component unmounting its
-    // <audio> element (srcObject cleared when remoteVideoStream → null).
+    // Stop the detached audio element so the speaker is released immediately.
+    if (session.audioElement) {
+      session.audioElement.pause();
+      session.audioElement.srcObject = null;
+      session.audioElement = null;
+    }
   }
 
   private cleanupAllSessions(): void {
