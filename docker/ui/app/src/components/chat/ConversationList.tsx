@@ -139,21 +139,25 @@ function ConvRow({ conversation, isSelected, currentUserId, onSelect }: ConvRowP
           />
         )}
 
-        {/* Online presence dot — shown on DMs only when no unread (avoid overlap) */}
-        {!isGroup && unread === 0 && (
-          <div
-            style={{
-              position: 'absolute',
-              bottom: 0,
-              right: 0,
-              width: 10,
-              height: 10,
-              borderRadius: '50%',
-              background: '#22c55e',
-              border: '2px solid #0c0e16',
-            }}
-          />
-        )}
+        {/* Presence dot — shown on DMs when no unread badge (avoid overlap) */}
+        {!isGroup && unread === 0 && (() => {
+          const other = conversation.participants.find((p) => p.user_id !== currentUserId);
+          const isOnline = other?.presence_status === 'available';
+          return (
+            <div
+              style={{
+                position: 'absolute',
+                bottom: 0,
+                right: 0,
+                width: 10,
+                height: 10,
+                borderRadius: '50%',
+                background: isOnline ? '#22c55e' : '#475569',
+                border: '2px solid #0c0e16',
+              }}
+            />
+          );
+        })()}
       </div>
 
       {/* Text content */}

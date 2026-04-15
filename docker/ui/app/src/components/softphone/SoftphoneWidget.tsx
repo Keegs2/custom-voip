@@ -18,7 +18,7 @@ const FAB_SIZE = 60;
 // Conservative fallback used before the FAB is measured. The pill contains
 // an icon + label + dot so it is always wider than the 60px circle assumed
 // by FAB_SIZE. The real width is measured via fabRef after each render.
-const FAB_WIDTH_FALLBACK = 180;
+const FAB_WIDTH_FALLBACK = 220;
 const EDGE_MARGIN = 8;
 
 /* ─── Viewport helpers ──────────────────────────────────────── */

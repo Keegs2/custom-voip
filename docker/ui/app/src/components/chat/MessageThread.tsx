@@ -300,21 +300,25 @@ export function MessageThread({ conversation }: MessageThreadProps) {
             avatarInitial
           )}
 
-          {/* Online presence dot — DMs only */}
-          {!isGroup && (
-            <div
-              style={{
-                position: 'absolute',
-                bottom: -1,
-                right: -1,
-                width: 11,
-                height: 11,
-                borderRadius: '50%',
-                background: '#22c55e',
-                border: '2px solid #0f1117',
-              }}
-            />
-          )}
+          {/* Presence dot — DMs only, color reflects actual status */}
+          {!isGroup && (() => {
+            const other = conversation.participants.find((p) => p.user_id !== user?.id);
+            const isOnline = other?.presence_status === 'available';
+            return (
+              <div
+                style={{
+                  position: 'absolute',
+                  bottom: -1,
+                  right: -1,
+                  width: 11,
+                  height: 11,
+                  borderRadius: '50%',
+                  background: isOnline ? '#22c55e' : '#475569',
+                  border: '2px solid #0f1117',
+                }}
+              />
+            );
+          })()}
         </div>
 
         {/* Title + subtitle */}
