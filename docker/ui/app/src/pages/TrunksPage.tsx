@@ -793,7 +793,6 @@ export function TrunksPage() {
         title={user?.customer_name ? `${user.customer_name}'s SIP Trunks` : 'SIP Trunks'}
         subtitle="Monitor your trunk performance and capacity. Contact support to adjust channel limits or authorized IPs."
         badgeVariant="trunk"
-        userEmail={user?.email}
       />
 
       <AdminCustomerSelector

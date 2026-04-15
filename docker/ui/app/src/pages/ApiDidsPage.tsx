@@ -11,7 +11,6 @@ export function ApiDidsPage() {
         title={user?.customer_name ? `${user.customer_name}'s API Calling` : 'API Calling'}
         subtitle="Programmable voice with webhook-driven call control."
         badgeVariant="api"
-        userEmail={user?.email}
       />
 
       <div
