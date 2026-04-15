@@ -10,6 +10,7 @@ import {
 import { VertoClient, type StreamChangeHandler } from '../lib/verto';
 import { getWebRTCCredentials } from '../api/webrtc';
 import { updatePresence } from '../api/presence';
+import { apiRequest } from '../api/client';
 import { getUnreadCount } from '../api/voicemail';
 import type {
   ActiveCall,
@@ -341,6 +342,23 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthenticated, user?.id]);
+
+  /* ─── Presence heartbeat ────────────────────────────────── */
+
+  useEffect(() => {
+    if (connectionState !== 'registered') return;
+
+    // Send an immediate heartbeat, then repeat every 30 s.
+    // The server TTL is 60 s, so 30 s gives a comfortable margin.
+    // Errors are swallowed — the heartbeat is fire-and-forget.
+    apiRequest('PUT', '/v1/presence/heartbeat').catch(() => undefined);
+
+    const interval = setInterval(() => {
+      apiRequest('PUT', '/v1/presence/heartbeat').catch(() => undefined);
+    }, 30_000);
+
+    return () => clearInterval(interval);
+  }, [connectionState]);
 
   /* ─── Action implementations ─────────────────────────────── */
 

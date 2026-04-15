@@ -160,7 +160,11 @@ async def list_extensions(
                e.voicemail_enabled, e.dnd, e.forward_on_busy, e.forward_on_no_answer,
                e.forward_timeout, e.status, e.created_at,
                u.name AS user_name, u.email AS user_email,
-               COALESCE(p.status, 'offline') AS presence_status,
+               COALESCE(
+                   CASE WHEN p.updated_at > NOW() - INTERVAL '60 seconds'
+                   THEN p.status ELSE 'offline' END,
+                   'offline'
+               ) AS presence_status,
                p.status_message AS presence_message
         FROM extensions e
         LEFT JOIN users u ON e.user_id = u.id
@@ -207,7 +211,11 @@ async def extension_directory(
                e.assigned_did,
                u.name AS user_name,
                c.name AS customer_name,
-               COALESCE(p.status, 'offline') AS presence_status,
+               COALESCE(
+                   CASE WHEN p.updated_at > NOW() - INTERVAL '60 seconds'
+                   THEN p.status ELSE 'offline' END,
+                   'offline'
+               ) AS presence_status,
                p.status_message AS presence_message,
                e.dnd
         FROM extensions e
@@ -248,7 +256,11 @@ async def get_extension(
                e.forward_on_busy, e.forward_on_no_answer, e.forward_timeout,
                e.status, e.created_at,
                u.name AS user_name, u.email AS user_email,
-               COALESCE(p.status, 'offline') AS presence_status,
+               COALESCE(
+                   CASE WHEN p.updated_at > NOW() - INTERVAL '60 seconds'
+                   THEN p.status ELSE 'offline' END,
+                   'offline'
+               ) AS presence_status,
                p.status_message AS presence_message
         FROM extensions e
         LEFT JOIN users u ON e.user_id = u.id

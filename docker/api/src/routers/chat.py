@@ -156,7 +156,11 @@ async def list_conversations(user: dict = Depends(get_current_user)):
                     'user_id', pu.id,
                     'name', pu.name,
                     'email', pu.email,
-                    'presence_status', COALESCE(pp_ps.status, 'offline')
+                    'presence_status', COALESCE(
+                        CASE WHEN pp_ps.updated_at > NOW() - INTERVAL '60 seconds'
+                        THEN pp_ps.status ELSE 'offline' END,
+                        'offline'
+                    )
                 ))
                 FROM chat_participants pp
                 JOIN users pu ON pu.id = pp.user_id
@@ -341,7 +345,11 @@ async def get_conversation(conversation_id: int, user: dict = Depends(get_curren
         SELECT cp.user_id, cp.role, cp.joined_at,
                cp.last_read_message_id, cp.last_read_at,
                u.name, u.email,
-               COALESCE(p.status, 'offline') AS presence_status
+               COALESCE(
+                   CASE WHEN p.updated_at > NOW() - INTERVAL '60 seconds'
+                   THEN p.status ELSE 'offline' END,
+                   'offline'
+               ) AS presence_status
         FROM chat_participants cp
         JOIN users u ON u.id = cp.user_id
         LEFT JOIN presence_status p ON p.user_id = cp.user_id

@@ -51,18 +51,27 @@ async def lifespan(app: FastAPI):
     chat_task = asyncio.create_task(_chat_subscriber())
     logger.info("Chat WebSocket subscriber started")
 
+    # Start background presence TTL cleanup (marks stale users offline)
+    presence_cleanup_task = asyncio.create_task(_presence_ttl_cleanup())
+    logger.info("Presence TTL cleanup task started")
+
     yield
 
     # Cleanup
     logger.info("Shutting down...")
     presence_task.cancel()
     chat_task.cancel()
+    presence_cleanup_task.cancel()
     try:
         await presence_task
     except asyncio.CancelledError:
         pass
     try:
         await chat_task
+    except asyncio.CancelledError:
+        pass
+    try:
+        await presence_cleanup_task
     except asyncio.CancelledError:
         pass
     await close_db()
@@ -231,6 +240,70 @@ async def _presence_subscriber():
                 "Presence subscriber reconnecting in 2s", exc_info=True
             )
             await asyncio.sleep(2)
+
+
+async def _presence_ttl_cleanup():
+    """Background task: every 30 seconds, find presence rows that have gone
+    stale (updated_at older than 60s) and flip them to 'offline'.
+
+    Publishes each status change to Redis so WebSocket subscribers get
+    real-time notification of the transition.
+    """
+    from db.database import fetch_all, execute
+    from db.redis_client import get_client
+
+    while True:
+        try:
+            await asyncio.sleep(30)
+
+            # Find and update stale rows in one atomic UPDATE .. RETURNING
+            stale_rows = await fetch_all(
+                """UPDATE presence_status
+                   SET status = 'offline', updated_at = NOW()
+                   WHERE status != 'offline'
+                     AND updated_at < NOW() - INTERVAL '60 seconds'
+                   RETURNING user_id""",
+            )
+
+            if not stale_rows:
+                continue
+
+            logger.info(
+                "Presence TTL cleanup: set %d stale user(s) to offline",
+                len(stale_rows),
+            )
+
+            # Publish each transition to Redis for WebSocket fanout
+            try:
+                rc = await get_client()
+                for row in stale_rows:
+                    # Look up customer_id for proper WebSocket scoping
+                    user_row = await fetch_all(
+                        "SELECT customer_id FROM users WHERE id = $1",
+                        row["user_id"],
+                    )
+                    customer_id = user_row[0]["customer_id"] if user_row else None
+
+                    payload = orjson.dumps({
+                        "user_id": row["user_id"],
+                        "status": "offline",
+                        "status_message": None,
+                        "updated_at": None,
+                        "customer_id": customer_id,
+                    }).decode()
+                    await rc.publish("presence:updates", payload)
+            except Exception:
+                logger.warning(
+                    "Failed to publish stale-presence updates to Redis",
+                    exc_info=True,
+                )
+
+        except asyncio.CancelledError:
+            break
+        except Exception:
+            logger.warning(
+                "Presence TTL cleanup error, retrying in 30s", exc_info=True
+            )
 
 
 @app.websocket("/ws/presence")

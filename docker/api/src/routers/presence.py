@@ -51,6 +51,22 @@ class PresenceUpdate(BaseModel):
 # Endpoints
 # ---------------------------------------------------------------------------
 
+@router.put("/heartbeat")
+async def heartbeat(user: dict = Depends(get_current_user)):
+    """Refresh the calling user's presence timestamp without changing status.
+
+    Called every 30 seconds from the frontend. If heartbeats stop for 60
+    seconds the user is treated as offline by all presence queries, and
+    the background cleanup task will flip the DB row to 'offline'.
+    """
+    user_id = int(user["sub"])
+    await db.execute(
+        "UPDATE presence_status SET updated_at = NOW() WHERE user_id = $1",
+        user_id,
+    )
+    return {"ok": True}
+
+
 @router.get("")
 async def list_presence(
     customer_filter: int | None = Depends(get_customer_filter),
@@ -58,10 +74,15 @@ async def list_presence(
     """Get presence statuses for all users within scope.
 
     Admins see every user. Non-admins see only users in their customer.
+    Presence is treated as 'offline' if the heartbeat is older than 60s.
     """
     query = """
         SELECT u.id AS user_id, u.name, u.email,
-               COALESCE(p.status, 'offline') AS status,
+               COALESCE(
+                   CASE WHEN p.updated_at > NOW() - INTERVAL '60 seconds'
+                   THEN p.status ELSE 'offline' END,
+                   'offline'
+               ) AS status,
                p.status_message,
                p.updated_at
         FROM users u
@@ -87,10 +108,17 @@ async def get_presence(
     user_id: int,
     customer_filter: int | None = Depends(get_customer_filter),
 ):
-    """Get a specific user's presence status."""
+    """Get a specific user's presence status.
+
+    Presence is treated as 'offline' if the heartbeat is older than 60s.
+    """
     query = """
         SELECT u.id AS user_id, u.name, u.email,
-               COALESCE(p.status, 'offline') AS status,
+               COALESCE(
+                   CASE WHEN p.updated_at > NOW() - INTERVAL '60 seconds'
+                   THEN p.status ELSE 'offline' END,
+                   'offline'
+               ) AS status,
                p.status_message,
                p.updated_at
         FROM users u
