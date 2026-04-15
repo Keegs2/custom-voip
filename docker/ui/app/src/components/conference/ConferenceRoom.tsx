@@ -491,6 +491,12 @@ function Lobby({ conferenceName, onJoin, onCancel }: LobbyProps) {
   const [mediaError, setMediaError] = useState<string | null>(null);
   const [joining, setJoining] = useState(false);
 
+  // Device enumeration — labels are only populated after getUserMedia grants permission.
+  const [audioDevices, setAudioDevices] = useState<MediaDeviceInfo[]>([]);
+  const [videoDevices, setVideoDevices] = useState<MediaDeviceInfo[]>([]);
+  const [selectedAudioId, setSelectedAudioId] = useState<string>('');
+  const [selectedVideoId, setSelectedVideoId] = useState<string>('');
+
   /*
    * All media resource handles live in refs so cleanup functions always
    * reach the current values regardless of which render closure runs.
@@ -500,6 +506,55 @@ function Lobby({ conferenceName, onJoin, onCancel }: LobbyProps) {
   const analyserRef = useRef<AnalyserNode | null>(null);
   const rafIdRef = useRef<number | null>(null);
   const videoElRef = useRef<HTMLVideoElement>(null);
+
+  /* ── Wire stream into video element + AudioContext analyser ── */
+
+  function connectStream(stream: MediaStream) {
+    previewStreamRef.current = stream;
+
+    const videoEl = videoElRef.current;
+    if (videoEl) {
+      videoEl.srcObject = stream;
+      void videoEl.play().catch(() => undefined);
+    }
+
+    // Tear down any existing AudioContext before creating a new one.
+    if (rafIdRef.current !== null) {
+      cancelAnimationFrame(rafIdRef.current);
+      rafIdRef.current = null;
+    }
+    if (analyserRef.current) {
+      analyserRef.current.disconnect();
+      analyserRef.current = null;
+    }
+    if (audioCtxRef.current) {
+      void audioCtxRef.current.close();
+      audioCtxRef.current = null;
+    }
+
+    // Chrome creates AudioContext in 'suspended' state; resume() is required
+    // before the analyser will produce non-zero frequency data.
+    const audioCtx = new AudioContext();
+    void audioCtx.resume();
+    const source = audioCtx.createMediaStreamSource(stream);
+    const analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 256;
+    source.connect(analyser);
+    audioCtxRef.current = audioCtx;
+    analyserRef.current = analyser;
+
+    const dataArray = new Uint8Array(analyser.frequencyBinCount);
+
+    function tick() {
+      if (!analyserRef.current) return;
+      analyserRef.current.getByteFrequencyData(dataArray);
+      const avg = dataArray.reduce((a, b) => a + b, 0) / dataArray.length;
+      setMicLevel((avg / 255) * 100);
+      rafIdRef.current = requestAnimationFrame(tick);
+    }
+
+    rafIdRef.current = requestAnimationFrame(tick);
+  }
 
   /* ── Acquire preview stream on mount ──────────────────── */
 
@@ -519,38 +574,22 @@ function Lobby({ conferenceName, onJoin, onCancel }: LobbyProps) {
           return;
         }
 
-        previewStreamRef.current = stream;
+        connectStream(stream);
 
-        // Bind to the video preview element.
-        const videoEl = videoElRef.current;
-        if (videoEl) {
-          videoEl.srcObject = stream;
-          void videoEl.play().catch(() => undefined);
-        }
+        // Enumerate devices after permission is granted so labels are populated.
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        if (cancelled) return;
 
-        // Wire up AudioContext analyser for the mic level meter.
-        // Chrome creates AudioContext in 'suspended' state; resume() is
-        // required before the analyser will produce non-zero frequency data.
-        const audioCtx = new AudioContext();
-        void audioCtx.resume();
-        const source = audioCtx.createMediaStreamSource(stream);
-        const analyser = audioCtx.createAnalyser();
-        analyser.fftSize = 256;
-        source.connect(analyser);
-        audioCtxRef.current = audioCtx;
-        analyserRef.current = analyser;
+        const audioInputs = devices.filter((d) => d.kind === 'audioinput');
+        const videoInputs = devices.filter((d) => d.kind === 'videoinput');
+        setAudioDevices(audioInputs);
+        setVideoDevices(videoInputs);
 
-        const dataArray = new Uint8Array(analyser.frequencyBinCount);
-
-        function tick() {
-          if (!analyserRef.current) return;
-          analyserRef.current.getByteFrequencyData(dataArray);
-          const avg = dataArray.reduce((a, b) => a + b, 0) / dataArray.length;
-          setMicLevel((avg / 255) * 100);
-          rafIdRef.current = requestAnimationFrame(tick);
-        }
-
-        rafIdRef.current = requestAnimationFrame(tick);
+        // Seed selected IDs from the tracks that getUserMedia actually chose.
+        const audioTrack = stream.getAudioTracks()[0];
+        const videoTrack = stream.getVideoTracks()[0];
+        if (audioTrack) setSelectedAudioId(audioTrack.getSettings().deviceId ?? '');
+        if (videoTrack) setSelectedVideoId(videoTrack.getSettings().deviceId ?? '');
       } catch (err) {
         if (!cancelled) {
           const message = err instanceof Error ? err.message : 'Unknown error';
@@ -585,6 +624,32 @@ function Lobby({ conferenceName, onJoin, onCancel }: LobbyProps) {
     if (previewStreamRef.current) {
       previewStreamRef.current.getTracks().forEach((t) => t.stop());
       previewStreamRef.current = null;
+    }
+  }
+
+  /* ── Switch to a specific audio or video device ──────── */
+
+  async function switchDevice(audioId?: string, videoId?: string) {
+    // Stop existing tracks so the old device is released before re-acquiring.
+    if (previewStreamRef.current) {
+      previewStreamRef.current.getTracks().forEach((t) => t.stop());
+      previewStreamRef.current = null;
+    }
+
+    try {
+      const newStream = await navigator.mediaDevices.getUserMedia({
+        audio: audioId ? { deviceId: { exact: audioId } } : true,
+        video: videoId ? { deviceId: { exact: videoId } } : true,
+      });
+
+      connectStream(newStream);
+
+      // Re-apply current enabled state (mute/camera-off survives device switch).
+      newStream.getAudioTracks().forEach((t) => { t.enabled = micOn; });
+      newStream.getVideoTracks().forEach((t) => { t.enabled = cameraOn; });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      setMediaError(`Could not switch device: ${message}`);
     }
   }
 
@@ -772,6 +837,99 @@ function Lobby({ conferenceName, onJoin, onCancel }: LobbyProps) {
             </div>
           )}
         </div>
+
+        {/* Device selectors */}
+        {(audioDevices.length > 0 || videoDevices.length > 0) && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {/* Mic selector */}
+            {audioDevices.length > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <span
+                  style={{
+                    fontSize: '0.7rem',
+                    color: '#64748b',
+                    fontWeight: 600,
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.07em',
+                  }}
+                >
+                  Microphone
+                </span>
+                <select
+                  value={selectedAudioId}
+                  disabled={!!mediaError}
+                  onChange={(e) => {
+                    const id = e.target.value;
+                    setSelectedAudioId(id);
+                    void switchDevice(id, selectedVideoId || undefined);
+                  }}
+                  style={{
+                    width: '100%',
+                    background: 'rgba(255,255,255,0.04)',
+                    border: '1px solid rgba(255,255,255,0.08)',
+                    borderRadius: 8,
+                    color: '#e2e8f0',
+                    padding: '10px 12px',
+                    fontSize: '0.82rem',
+                    cursor: mediaError ? 'not-allowed' : 'pointer',
+                    appearance: 'none',
+                    outline: 'none',
+                  }}
+                >
+                  {audioDevices.map((d) => (
+                    <option key={d.deviceId} value={d.deviceId} style={{ background: '#1a1d2e' }}>
+                      {d.label || `Microphone ${d.deviceId.slice(0, 8)}`}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {/* Camera selector */}
+            {videoDevices.length > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <span
+                  style={{
+                    fontSize: '0.7rem',
+                    color: '#64748b',
+                    fontWeight: 600,
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.07em',
+                  }}
+                >
+                  Camera
+                </span>
+                <select
+                  value={selectedVideoId}
+                  disabled={!!mediaError}
+                  onChange={(e) => {
+                    const id = e.target.value;
+                    setSelectedVideoId(id);
+                    void switchDevice(selectedAudioId || undefined, id);
+                  }}
+                  style={{
+                    width: '100%',
+                    background: 'rgba(255,255,255,0.04)',
+                    border: '1px solid rgba(255,255,255,0.08)',
+                    borderRadius: 8,
+                    color: '#e2e8f0',
+                    padding: '10px 12px',
+                    fontSize: '0.82rem',
+                    cursor: mediaError ? 'not-allowed' : 'pointer',
+                    appearance: 'none',
+                    outline: 'none',
+                  }}
+                >
+                  {videoDevices.map((d) => (
+                    <option key={d.deviceId} value={d.deviceId} style={{ background: '#1a1d2e' }}>
+                      {d.label || `Camera ${d.deviceId.slice(0, 8)}`}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Mic level meter */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
