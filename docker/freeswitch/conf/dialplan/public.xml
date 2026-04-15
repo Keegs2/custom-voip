@@ -55,14 +55,19 @@
     -->
     <extension name="local_extension">
       <condition field="destination_number" expression="^(\d{2,6})$">
-        <action application="log" data="INFO Local extension call: ${caller_id_number} -> $1 (domain=${customer_domain:-$${domain}})"/>
+        <!-- Debug: log all domain-related variables to find the right one -->
+        <action application="log" data="INFO EXT-DIAL: caller=${caller_id_number} dest=$1 customer_domain=${customer_domain} domain_name=${domain_name} sip_from_host=${sip_from_host} verto_profile_domain=${verto_profile_domain} domain=${domain}"/>
         <action application="set" data="hangup_after_bridge=true"/>
         <action application="set" data="call_timeout=30"/>
         <action application="set" data="continue_on_fail=true"/>
         <!-- Set the dialed extension for voicemail fallback -->
         <action application="set" data="dialed_extension=$1"/>
-        <!-- Resolve the target domain: customer_domain from registration, or legacy fallback -->
-        <action application="set" data="target_domain=${customer_domain:-$${domain}}"/>
+        <!-- Resolve the target domain: try multiple variable names.
+             mod_verto sets domain_name from the user's login domain.
+             customer_domain may be set by mod_xml_curl directory handler.
+             Fall back to global domain as last resort. -->
+        <action application="set" data="target_domain=${customer_domain:-${domain_name:-${sip_from_host:-$${domain}}}}"/>
+        <action application="log" data="INFO EXT-DIAL: resolved target_domain=${target_domain}"/>
         <!-- Ring via Verto first (WebRTC), then SIP fallback -->
         <action application="bridge" data="{ignore_early_media=false,call_timeout=30}verto.rtc/$1@${target_domain}|user/$1@${target_domain}"/>
         <!-- If no answer, busy, or not registered: send to voicemail -->
@@ -395,12 +400,13 @@
     -->
     <extension name="local_extension_public">
       <condition field="destination_number" expression="^(\d{2,6})$">
-        <action application="log" data="INFO Local extension call (public): ${caller_id_number} -> $1 (domain=${customer_domain:-$${domain}})"/>
+        <action application="log" data="INFO EXT-DIAL (public): caller=${caller_id_number} dest=$1 customer_domain=${customer_domain} domain_name=${domain_name}"/>
         <action application="set" data="hangup_after_bridge=true"/>
         <action application="set" data="call_timeout=30"/>
         <action application="set" data="continue_on_fail=true"/>
         <action application="set" data="dialed_extension=$1"/>
-        <action application="set" data="target_domain=${customer_domain:-$${domain}}"/>
+        <action application="set" data="target_domain=${customer_domain:-${domain_name:-${sip_from_host:-$${domain}}}}"/>
+        <action application="log" data="INFO EXT-DIAL (public): resolved target_domain=${target_domain}"/>
         <!-- Ring via Verto first (WebRTC), then SIP fallback.
              See local_extension in default context for full explanation. -->
         <action application="bridge" data="{ignore_early_media=false,call_timeout=30}verto.rtc/$1@${target_domain}|user/$1@${target_domain}"/>
