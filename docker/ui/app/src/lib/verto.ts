@@ -233,7 +233,11 @@ export class VertoClient {
       }
       console.log(`[Verto] ontrack: kind=${ev.track.kind} streamTracks=${remoteStream.getTracks().length}`);
       this.playRemoteAudio(callId, remoteStream);
-      this.onStreamChange(callId, 'remote', remoteStream);
+      // Create a new MediaStream instance so React's referential equality check
+      // in useState detects a change when subsequent tracks (e.g. audio after
+      // video) are added to the same underlying stream object.
+      const snapshot = new MediaStream(remoteStream.getTracks());
+      this.onStreamChange(callId, 'remote', snapshot);
     };
 
     localStream.getTracks().forEach((track) => pc.addTrack(track, localStream));
@@ -653,7 +657,9 @@ export class VertoClient {
     pc.ontrack = (ev) => {
       ev.streams[0]?.getTracks().forEach((track) => remoteStream.addTrack(track));
       this.playRemoteAudio(callId!, remoteStream);
-      this.onStreamChange(callId!, 'remote', remoteStream);
+      // Snapshot so React sees a new reference on every track arrival.
+      const snapshot = new MediaStream(remoteStream.getTracks());
+      this.onStreamChange(callId!, 'remote', snapshot);
     };
 
     await pc.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp: remoteSdp }));

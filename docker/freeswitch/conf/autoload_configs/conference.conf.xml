@@ -83,6 +83,7 @@
     -->
     <profile name="video">
       <param name="domain" value="$${domain}"/>
+      <param name="codec-string" value="opus,VP8"/>
       <param name="rate" value="48000"/>
       <param name="interval" value="20"/>
       <param name="energy-level" value="100"/>

@@ -570,6 +570,7 @@ export function ConferenceRoom({
     startScreenShare,
     stopScreenShare,
     setCameraEnabled,
+    credentials,
   } = useSoftphone();
 
   const [liveStatus, setLiveStatus] = useState<ConferenceLiveStatus | null>(null);
@@ -846,25 +847,41 @@ export function ConferenceRoom({
             >
               {members.map((m, index) => {
                 /*
-                 * Stream selection per tile:
+                 * Stream selection per tile (passthrough / 2-party mode):
                  *
-                 * When a remoteVideoStream exists (2+ participants, FreeSWITCH
-                 * is relaying the mixed/active-speaker feed), every tile shows
-                 * that stream — the MCU decides whose video appears.
+                 * FreeSWITCH passthrough sends exactly ONE remote stream — the
+                 * other participant's feed. We must not assign that same stream
+                 * to every tile or both tiles end up showing the same person.
                  *
-                 * When there is no remote stream (solo participant), only the
-                 * first tile (index 0, the local user) gets the local camera
-                 * feed so they can see themselves in the main grid instead of
-                 * a blank avatar.
+                 * Strategy:
+                 *  - Identify the local user's tile by matching member.name
+                 *    against credentials.extension (e.g. "1001"). FreeSWITCH
+                 *    reports the dialing extension as the member name.
+                 *  - Local tile → selfViewStream (own camera) so the user can
+                 *    see themselves, mirrored.
+                 *  - Remote tile → remoteVideoStream (the other party's feed).
+                 *
+                 * When there is no remote stream (solo participant, not yet
+                 * connected), fall back to the original behaviour: first tile
+                 * (index 0) shows the local camera, rest show avatars.
                  */
+                const localExtension = credentials?.extension ?? null;
+                const isLocalTile = localExtension !== null
+                  ? m.name === localExtension
+                  : index === 0;
+
                 const tileStream = remoteVideoStream
-                  ? remoteVideoStream
+                  ? isLocalTile
+                    ? (cameraOn ? selfViewStream : null)
+                    : remoteVideoStream
                   : index === 0
                   ? (cameraOn ? selfViewStream : null)
                   : null;
 
-                // Mirror only when showing the local camera (no remote stream, first tile).
-                const mirror = !remoteVideoStream && index === 0;
+                // Mirror only when showing the local camera feed.
+                const mirror = isLocalTile
+                  ? !!remoteVideoStream && cameraOn
+                  : !remoteVideoStream && index === 0;
 
                 return (
                   <div key={m.id} className="tile-container" style={{ position: 'relative' }}>
