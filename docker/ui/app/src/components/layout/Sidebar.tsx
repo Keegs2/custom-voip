@@ -189,16 +189,31 @@ interface CollapsibleGroupProps {
   isOpen: boolean;
   onToggle: (id: string) => void;
   children: React.ReactNode;
+  /** When provided: first click expands the group (if collapsed), second click navigates here. */
+  to?: string;
 }
 
-function CollapsibleGroup({ id, label, icon, isOpen, onToggle, children }: CollapsibleGroupProps) {
+function CollapsibleGroup({ id, label, icon, isOpen, onToggle, children, to }: CollapsibleGroupProps) {
+  const navigate = useNavigate();
+
+  const handleClick = () => {
+    if (to && isOpen) {
+      // Group is already open — navigate to the landing page
+      navigate(to);
+    } else {
+      // Collapsed or no `to` — just toggle
+      onToggle(id);
+    }
+  };
+
   return (
     <div style={{ marginBottom: 4 }}>
       {/* Group header */}
       <button
         type="button"
-        onClick={() => onToggle(id)}
+        onClick={handleClick}
         aria-expanded={isOpen}
+        title={to && isOpen ? `Go to ${label}` : undefined}
         style={{
           display: 'flex',
           alignItems: 'center',
@@ -307,7 +322,7 @@ export function Sidebar() {
     const path = location.pathname;
 
     const productPaths  = productNavItems.map((i) => i.to);
-    const commPaths     = ['/chat', '/conference', '/documents', '/voicemail'];
+    const commPaths     = ['/chat', '/conference', '/documents', '/voicemail', '/communications'];
     const adminPaths    = ['/admin', '/call-quality', '/admin/did-search', '/admin/user', '/troubleshooting'];
 
     const inProducts = productPaths.some((p) => path === p || path.startsWith(p + '/'));
@@ -557,6 +572,7 @@ export function Sidebar() {
                 icon={<MessageCircle size={11} strokeWidth={2.5} />}
                 isOpen={groupOpen.communications}
                 onToggle={toggleGroup}
+                to="/communications"
               >
                 <SidebarNavItem item={chatItem} onNavigate={closeMobile} badge={unreadChatCount} badgeColor="#3b82f6" />
                 <SidebarNavItem item={confItem} onNavigate={closeMobile} />
