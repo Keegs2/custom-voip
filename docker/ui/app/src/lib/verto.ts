@@ -982,6 +982,15 @@ export class VertoClient {
    * HD constraints suitable for video calls.
    */
   private async acquireMedia(video: boolean): Promise<MediaStream> {
+    // getUserMedia requires a secure context (HTTPS or localhost).
+    // On plain HTTP, navigator.mediaDevices is undefined.
+    if (!navigator.mediaDevices?.getUserMedia) {
+      throw new Error(
+        'Microphone/camera access requires HTTPS. ' +
+        'Please access this site using https:// instead of http://'
+      );
+    }
+
     if (video) {
       return navigator.mediaDevices.getUserMedia({
         audio: {
