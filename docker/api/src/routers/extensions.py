@@ -201,7 +201,7 @@ async def extension_directory(
     Returns a compact list optimised for phone displays and soft-key panels.
     """
     query = """
-        SELECT e.id, e.extension, e.display_name,
+        SELECT e.id, e.user_id, e.extension, e.display_name,
                e.assigned_did,
                u.name AS user_name,
                c.name AS customer_name,

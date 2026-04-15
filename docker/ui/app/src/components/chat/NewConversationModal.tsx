@@ -40,7 +40,7 @@ export function NewConversationModal({ onClose, onCreated }: NewConversationModa
       .then((raw) => {
         // Map API shape to DirectoryUser: API returns {id, extension, display_name, user_name, assigned_did, ...}
         const users: DirectoryUser[] = raw.map((r) => ({
-          user_id: r.id as number,
+          user_id: (r.user_id ?? r.id) as number,
           name: (r.display_name || r.user_name || r.extension || 'Unknown') as string,
           email: (r.email || '') as string,
           extension_number: r.extension as string | undefined,
