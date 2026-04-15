@@ -110,16 +110,11 @@ async def get_webrtc_credentials(request: Request, user: dict = Depends(get_curr
     # When the frontend is on HTTPS, browsers block insecure ws:// connections
     # (mixed content). Detect this via X-Forwarded-Proto (set by nginx) and
     # return the WSS URL proxied through nginx instead of direct ws:// to FS.
+    # Nginx passes $http_host (includes port) so host header has host:port.
     proto = request.headers.get("x-forwarded-proto", request.url.scheme)
     if proto == "https":
-        # Nginx proxies wss://host:port/ws/verto/ → ws://FS:8082
-        # Use the full Origin or Referer to get host:port since nginx $host strips port
-        origin = request.headers.get("origin", "")
-        if origin.startswith("https://"):
-            host_with_port = origin.replace("https://", "")
-        else:
-            host_with_port = request.headers.get("host", request.url.hostname or "localhost")
-        ws_url = f"wss://{host_with_port}/ws/verto/"
+        host = request.headers.get("host", "localhost")
+        ws_url = f"wss://{host}/ws/verto/"
     else:
         ws_url = VERTO_WS_URL
 
