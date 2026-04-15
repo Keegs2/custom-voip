@@ -39,6 +39,19 @@ class RegisterRequest(BaseModel):
         return v.lower()
 
 
+class UpdateMeRequest(BaseModel):
+    name: Optional[str] = None
+    current_password: Optional[str] = None
+    new_password: Optional[str] = None
+
+    @field_validator("new_password")
+    @classmethod
+    def validate_new_password(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and len(v) < 8:
+            raise ValueError("New password must be at least 8 characters")
+        return v
+
+
 class UserUpdate(BaseModel):
     email: Optional[str] = None
     password: Optional[str] = None
@@ -207,6 +220,71 @@ async def get_me(user: dict = Depends(get_current_user)):
         account_type == "ucaas"
         or (account_type in ("api", "trunk", "hybrid") and result.get("ucaas_enabled"))
     )
+    return result
+
+
+@router.put("/me")
+async def update_me(body: UpdateMeRequest, user: dict = Depends(get_current_user)):
+    """Allow authenticated users to update their own name and/or password."""
+    user_id = int(user["sub"])
+
+    # Validate password-change requirements
+    if body.new_password and not body.current_password:
+        raise HTTPException(status_code=400, detail="current_password is required to set a new password")
+    if body.current_password and not body.new_password:
+        raise HTTPException(status_code=400, detail="new_password is required when current_password is provided")
+
+    # Nothing to update
+    if not body.name and not body.new_password:
+        raise HTTPException(status_code=400, detail="No fields to update")
+
+    # If changing password, verify the current one first
+    if body.new_password:
+        row = await db.fetch_one("SELECT password_hash FROM users WHERE id = $1", user_id)
+        if not row:
+            raise HTTPException(status_code=404, detail="User not found")
+        if not verify_password(body.current_password, row["password_hash"]):
+            raise HTTPException(status_code=401, detail="Current password is incorrect")
+
+    # Build dynamic UPDATE
+    updates = []
+    values = []
+    idx = 1
+    if body.name is not None:
+        updates.append(f"name = ${idx}")
+        values.append(body.name)
+        idx += 1
+    if body.new_password:
+        updates.append(f"password_hash = ${idx}")
+        values.append(hash_password(body.new_password))
+        idx += 1
+
+    values.append(user_id)
+    query = f"""
+        UPDATE users SET {', '.join(updates)}
+        WHERE id = ${idx}
+        RETURNING id, email, name, role, customer_id, status, created_at, last_login
+    """
+    updated = await db.fetch_one(query, *values)
+    if not updated:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # Return the same enriched shape as GET /me
+    result = dict(updated)
+    if result.get("customer_id"):
+        cust = await db.fetch_one(
+            "SELECT name, account_type, ucaas_enabled FROM customers WHERE id = $1",
+            result["customer_id"],
+        )
+        if cust:
+            result["customer_name"] = cust["name"]
+            account_type = cust["account_type"]
+            result["account_type"] = account_type
+            result["ucaas_enabled"] = cust["ucaas_enabled"]
+            result["has_ucaas"] = (
+                account_type == "ucaas"
+                or (account_type in ("api", "trunk", "hybrid") and bool(cust.get("ucaas_enabled")))
+            )
     return result
 
 

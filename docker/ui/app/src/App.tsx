@@ -30,6 +30,7 @@ import { VoicemailPage } from './pages/VoicemailPage';
 import { ChatPage } from './pages/ChatPage';
 import { ConferencePage } from './pages/ConferencePage';
 import { DocumentsPage } from './pages/DocumentsPage';
+import { AccountPage } from './pages/AccountPage';
 
 export function App() {
   return (
@@ -58,6 +59,7 @@ export function App() {
             <Route path="trunks"     element={<TrunksPage />} />
             <Route path="documentation" element={<DocsPage />} />
             <Route path="call-quality" element={<CallQualityPage />} />
+            <Route path="account"     element={<AccountPage />} />
 
             {/* DID Search — admin-only, standalone (not nested inside AdminPage tabs) */}
             <Route

@@ -25,6 +25,8 @@ interface AuthContextValue {
   isLoading: boolean;
   login: (email: string, password: string) => Promise<void>;
   logout: () => void;
+  /** Re-fetches /auth/me and updates the user in context. Use after profile edits. */
+  refreshUser: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -93,12 +95,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     navigate('/login', { replace: true });
   }, [navigate]);
 
+  /* ── Refresh user ────────────────────────────────────────── */
+  const refreshUser = useCallback(async (): Promise<void> => {
+    const me = await getMe();
+    setUser(me);
+  }, []);
+
   /* ── Derived state ───────────────────────────────────────── */
   const isAuthenticated = user !== null && token !== null;
   const isAdmin = user?.role === 'admin';
 
   return (
-    <AuthContext.Provider value={{ user, token, isAuthenticated, isAdmin, isLoading, login, logout }}>
+    <AuthContext.Provider value={{ user, token, isAuthenticated, isAdmin, isLoading, login, logout, refreshUser }}>
       {children}
     </AuthContext.Provider>
   );

@@ -613,6 +613,38 @@ export function Sidebar() {
               position: 'relative',
             }}
           >
+            {/* Clickable area: avatar + name — navigates to /account */}
+            <NavLink
+              to="/account"
+              onClick={closeMobile}
+              title="Account settings"
+              style={({ isActive }) => ({
+                display: 'flex',
+                alignItems: 'center',
+                gap: 10,
+                flex: 1,
+                minWidth: 0,
+                textDecoration: 'none',
+                borderRadius: 7,
+                padding: '2px 4px',
+                margin: '-2px -4px',
+                background: isActive ? 'rgba(59,130,246,0.08)' : 'transparent',
+                transition: 'background 0.15s',
+                cursor: 'pointer',
+              })}
+              onMouseEnter={(e) => {
+                const el = e.currentTarget as HTMLAnchorElement;
+                if (!el.classList.contains('active')) {
+                  el.style.background = 'rgba(255,255,255,0.05)';
+                }
+              }}
+              onMouseLeave={(e) => {
+                const el = e.currentTarget as HTMLAnchorElement;
+                if (!el.classList.contains('active')) {
+                  el.style.background = 'transparent';
+                }
+              }}
+            >
             {/* Avatar + presence dot */}
             <div style={{ position: 'relative', flexShrink: 0 }}>
               <div
@@ -638,7 +670,7 @@ export function Sidebar() {
               {hasUcaas && (
                 <button
                   type="button"
-                  onClick={() => setShowPresenceMenu((v) => !v)}
+                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); setShowPresenceMenu((v) => !v); }}
                   aria-label="Change presence status"
                   aria-haspopup="listbox"
                   aria-expanded={showPresenceMenu}
@@ -710,34 +742,35 @@ export function Sidebar() {
               )}
             </div>
 
-            {/* Name + context label */}
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div
-                style={{
-                  fontSize: '0.8rem',
-                  fontWeight: 600,
-                  color: '#94a3b8',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                  lineHeight: 1.3,
-                }}
-              >
-                {displayName}
+              {/* Name + context label */}
+              <div style={{ minWidth: 0 }}>
+                <div
+                  style={{
+                    fontSize: '0.8rem',
+                    fontWeight: 600,
+                    color: '#94a3b8',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                    lineHeight: 1.3,
+                  }}
+                >
+                  {displayName}
+                </div>
+                <div
+                  style={{
+                    fontSize: '0.65rem',
+                    color: '#334155',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                    marginTop: 1,
+                  }}
+                >
+                  {contextLabel ?? displayEmail}
+                </div>
               </div>
-              <div
-                style={{
-                  fontSize: '0.65rem',
-                  color: '#334155',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                  marginTop: 1,
-                }}
-              >
-                {contextLabel ?? displayEmail}
-              </div>
-            </div>
+            </NavLink>
 
             {/* Sign out */}
             <button
