@@ -243,6 +243,27 @@ function CollapsibleGroup({ id, label, icon, isOpen, onToggle, children, to }: C
       >
         <span style={{ display: 'flex', alignItems: 'center', color: 'inherit' }}>{icon}</span>
         <span style={{ flex: 1, textAlign: 'left' }}>{label}</span>
+        {/* Small arrow indicator when this group is navigable and expanded */}
+        {to && isOpen && (
+          <svg
+            viewBox="0 0 16 16"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={2}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            style={{
+              width: 10,
+              height: 10,
+              flexShrink: 0,
+              color: '#3b82f6',
+              opacity: 0.7,
+              transition: 'opacity 0.15s',
+            }}
+          >
+            <path d="M4 12 12 4M12 4H5M12 4v7" />
+          </svg>
+        )}
         <ChevronDown
           size={12}
           strokeWidth={2.5}
