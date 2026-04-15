@@ -568,10 +568,14 @@ async def get_join_info(
 def _parse_conference_list(raw: str) -> list[dict]:
     """Parse the output of 'conference <name> list' into structured data.
 
-    Each line of a populated conference looks like:
-        member_id;caller_id;caller_name;uuid;codec;flags;...
+    FreeSWITCH conference list lines have this field order (semicolon-separated):
+        member_id ; net_addr:port ; caller_id_number ; caller_id_name ; uuid ; codec ; flags
 
-    The exact format depends on FS version, but the first fields are stable.
+    Note: parts[1] is the network address (e.g. "10.0.0.1:30456"), NOT the
+    caller ID.  The caller ID number is at parts[2] and the display name is at
+    parts[3].  An earlier version of this parser had the offsets wrong, which
+    caused caller_id_number to contain an IP:port string instead of the
+    extension number, breaking the local-tile identification logic in the UI.
     """
     members = []
     if not raw:
@@ -583,24 +587,31 @@ def _parse_conference_list(raw: str) -> list[dict]:
         if not line or line.startswith("Conference") or line.startswith("+OK") or line.startswith("-ERR"):
             continue
         # Skip content-type / content-length ESL envelope lines
-        if ":" in line and not ";" in line:
+        if ":" in line and ";" not in line:
             continue
 
         parts = line.split(";")
         if len(parts) < 4:
             continue
 
+        # parts[0] = member_id
+        # parts[1] = net_addr:port  (skipped — not useful to the frontend)
+        # parts[2] = caller_id_number  (e.g. "100")
+        # parts[3] = caller_id_name    (e.g. "Keegan Grabhorn")
+        # parts[4] = uuid
+        # parts[5] = codec
+        # parts[6] = flags             (e.g. "hear|speak|talking|video")
         member = {
             "member_id": parts[0].strip(),
-            "caller_id": parts[1].strip() if len(parts) > 1 else "",
-            "caller_name": parts[2].strip() if len(parts) > 2 else "",
-            "uuid": parts[3].strip() if len(parts) > 3 else "",
-            "codec": parts[4].strip() if len(parts) > 4 else "",
+            "caller_id": parts[2].strip() if len(parts) > 2 else "",
+            "caller_name": parts[3].strip() if len(parts) > 3 else "",
+            "uuid": parts[4].strip() if len(parts) > 4 else "",
+            "codec": parts[5].strip() if len(parts) > 5 else "",
         }
 
         # Parse flags if present (e.g. "hear|speak|talking")
-        if len(parts) > 5:
-            flags_str = parts[5].strip()
+        if len(parts) > 6:
+            flags_str = parts[6].strip()
             flags = [f.strip() for f in flags_str.split("|") if f.strip()]
             member["flags"] = flags
             member["is_talking"] = "talking" in flags

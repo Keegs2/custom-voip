@@ -601,6 +601,14 @@ export function ConferenceRoom({
    * user gesture (NotAllowedError). Instead we render a hidden <audio> inside
    * this component — which is already inside the user-gesture context from
    * the "Join Conference" click — and bind remoteVideoStream to it here.
+   *
+   * WHY !!activeCall is in the dependency array:
+   * The <audio> element lives below the `if (!activeCall) return null` guard,
+   * so remoteAudioRef.current is null until activeCall is truthy and the
+   * element mounts. remoteVideoStream can arrive via ontrack before the first
+   * render that includes the <audio> element. Including !!activeCall ensures
+   * the effect re-runs once the element actually exists in the DOM, so the
+   * srcObject assignment is never silently skipped on a null ref.
    */
   useEffect(() => {
     const el = remoteAudioRef.current;
@@ -609,7 +617,7 @@ export function ConferenceRoom({
     if (remoteVideoStream) {
       void el.play().catch(() => undefined);
     }
-  }, [remoteVideoStream]);
+  }, [remoteVideoStream, activeCall]);
 
   /* ── Poll live status every 3 seconds ─────────────────── */
 
