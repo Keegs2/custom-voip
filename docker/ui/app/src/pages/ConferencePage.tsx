@@ -110,117 +110,6 @@ function formatDate(iso: string): string {
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
-/* ─── Room list item ─────────────────────────────────────── */
-
-interface RoomListItemProps {
-  conf: Conference;
-  liveStatus: ConferenceLiveStatus | null;
-  isSelected: boolean;
-  onClick: () => void;
-}
-
-function RoomListItem({ conf, liveStatus, isSelected, onClick }: RoomListItemProps) {
-  const isActive = liveStatus?.is_active ?? false;
-  const memberCount = liveStatus?.members.length ?? 0;
-
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      style={{
-        width: '100%',
-        display: 'flex',
-        alignItems: 'center',
-        gap: 10,
-        padding: '8px 14px',
-        borderRadius: 8,
-        background: isSelected
-          ? 'linear-gradient(135deg, rgba(59,130,246,0.16) 0%, rgba(59,130,246,0.08) 100%)'
-          : 'transparent',
-        border: 'none',
-        cursor: 'pointer',
-        textAlign: 'left',
-        transition: 'background 0.15s, color 0.15s',
-      }}
-      onMouseEnter={(e) => {
-        if (!isSelected) e.currentTarget.style.background = 'rgba(255,255,255,0.04)';
-      }}
-      onMouseLeave={(e) => {
-        if (!isSelected) e.currentTarget.style.background = 'transparent';
-      }}
-    >
-      {/* Icon with live indicator */}
-      <div style={{ position: 'relative', flexShrink: 0 }}>
-        <div
-          style={{
-            width: 38,
-            height: 38,
-            borderRadius: 10,
-            background: isActive
-              ? 'linear-gradient(135deg, rgba(34,197,94,0.20) 0%, rgba(34,197,94,0.10) 100%)'
-              : 'linear-gradient(135deg, rgba(59,130,246,0.15) 0%, rgba(99,102,241,0.10) 100%)',
-            border: isActive
-              ? '1px solid rgba(34,197,94,0.30)'
-              : '1px solid rgba(59,130,246,0.20)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            color: isActive ? '#22c55e' : '#60a5fa',
-            animation: isActive ? 'liveGlow 2s ease-in-out infinite' : 'none',
-          }}
-        >
-          <Video size={17} strokeWidth={1.75} />
-        </div>
-        {/* Live dot */}
-        {isActive && (
-          <div
-            style={{
-              position: 'absolute',
-              top: -2,
-              right: -2,
-              width: 10,
-              height: 10,
-              borderRadius: '50%',
-              background: '#22c55e',
-              border: '2px solid #0c0e16',
-              animation: 'confPulse 2s ease-in-out infinite',
-            }}
-          />
-        )}
-      </div>
-
-      {/* Name + meta */}
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div
-          style={{
-            fontSize: '0.825rem',
-            fontWeight: isSelected ? 700 : 500,
-            color: isSelected ? '#e2e8f0' : '#64748b',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-            letterSpacing: '-0.01em',
-          }}
-        >
-          {conf.name}
-        </div>
-        <div style={{ fontSize: '0.72rem', color: '#334155', marginTop: 1 }}>
-          *88{conf.room_number}
-          {isActive && (
-            <span style={{ color: '#22c55e', fontWeight: 600, marginLeft: 6 }}>
-              {memberCount} live
-            </span>
-          )}
-        </div>
-      </div>
-
-      {isSelected && (
-        <ChevronRight size={14} color="#3b82f6" />
-      )}
-    </button>
-  );
-}
-
 /* ─── Create room modal ──────────────────────────────────── */
 
 interface CreateRoomModalProps {
@@ -2133,10 +2022,10 @@ export function ConferencePage() {
   const { makeCall, activeCall } = useSoftphone();
 
   const [conferences, setConferences] = useState<Conference[]>([]);
-  const [liveStatuses, setLiveStatuses] = useState<Map<number, ConferenceLiveStatus>>(new Map());
+  const [, setLiveStatuses] = useState<Map<number, ConferenceLiveStatus>>(new Map());
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const [, setLoadError] = useState<string | null>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [allSchedules, setAllSchedules] = useState<AggregatedSchedule[]>([]);
   const [startNowHover, setStartNowHover] = useState(false);
