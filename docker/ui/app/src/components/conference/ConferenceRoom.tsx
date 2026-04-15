@@ -1,12 +1,15 @@
 /**
  * ConferenceRoom — in-call overlay shown when the active call is to a
- * conference room (*88XX). Displays a video grid, self-view PiP, controls
+ * conference room (*88XX). Displays an equal-grid video layout where every
+ * participant (including the local user) gets a same-sized tile, a controls
  * bar, and a toggleable participant list sidebar.
  *
- * Video rendering is ready for FreeSWITCH MCU output: remote tracks from
- * the VertoClient's remoteStream are connected directly to <video> elements.
- * When FS video MCU is not yet enabled, the grid shows placeholder tiles
- * with live participant names from the conference API.
+ * Video rendering is ready for FreeSWITCH passthrough mode: there is exactly
+ * one remote video stream (the active speaker). The local user's tile shows
+ * their own camera feed (selfViewStream, mirrored). All other tiles show the
+ * single remoteVideoStream; non-speaking participants fall back to an avatar.
+ *
+ * Grid sizing: 1 member → 1 col, 2-4 → 2 cols, 5-9 → 3 cols, 10+ → 4 cols.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -233,90 +236,6 @@ const tileBtn: React.CSSProperties = {
   justifyContent: 'center',
   backdropFilter: 'blur(4px)',
 };
-
-/* ─── Self-view PiP ──────────────────────────────────────── */
-
-function SelfView({ stream }: { stream: MediaStream | null }) {
-  const videoRef = useRef<HTMLVideoElement>(null);
-
-  useEffect(() => {
-    const el = videoRef.current;
-    if (!el) return;
-    // Always assign — even null — so the element clears when the stream stops.
-    el.srcObject = stream;
-    if (stream) {
-      // play() may already be running due to autoPlay; ignore the benign
-      // "play() was interrupted" DOMException if the srcObject swap races it.
-      void el.play().catch(() => undefined);
-    }
-  }, [stream]);
-
-  return (
-    <div
-      style={{
-        position: 'absolute',
-        bottom: 88,
-        right: 16,
-        width: 160,
-        aspectRatio: '16/9',
-        borderRadius: 10,
-        overflow: 'hidden',
-        border: '2px solid rgba(255,255,255,0.12)',
-        boxShadow: '0 8px 32px rgba(0,0,0,0.6)',
-        background: 'rgba(15,17,23,0.9)',
-        zIndex: 10,
-      }}
-    >
-      {/*
-       * Render the <video> unconditionally so videoRef is always attached.
-       * When stream is null the element is invisible but stays mounted,
-       * which means the ref is ready the moment a stream arrives and the
-       * useEffect above can assign srcObject without waiting for a re-render
-       * cycle to mount a new element.
-       */}
-      <video
-        ref={videoRef}
-        autoPlay
-        muted
-        playsInline
-        style={{
-          width: '100%',
-          height: '100%',
-          objectFit: 'cover',
-          transform: 'scaleX(-1)',
-          display: stream ? 'block' : 'none',
-        }}
-      />
-      {!stream && (
-        <div
-          style={{
-            width: '100%',
-            height: '100%',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            background: 'linear-gradient(135deg, rgba(59,130,246,0.12) 0%, rgba(99,102,241,0.10) 100%)',
-          }}
-        >
-          <VideoOff size={20} color="#475569" />
-        </div>
-      )}
-      <div
-        style={{
-          position: 'absolute',
-          bottom: 4,
-          left: 6,
-          fontSize: '0.6rem',
-          fontWeight: 600,
-          color: 'rgba(255,255,255,0.7)',
-          letterSpacing: '0.04em',
-        }}
-      >
-        You
-      </div>
-    </div>
-  );
-}
 
 /* ─── Control button ─────────────────────────────────────── */
 
@@ -797,20 +716,21 @@ export function ConferenceRoom({
 
       {/* Main body: video grid + optional sidebar */}
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
-        {/* Video grid */}
+        {/* Video grid — equal tiles for every participant including self */}
         <div
           style={{
             flex: 1,
-            padding: 16,
-            overflowY: 'auto',
-            position: 'relative',
+            padding: 8,
+            overflow: 'hidden',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
           }}
         >
           {members.length === 0 ? (
             /* Empty state while waiting for others */
             <div
               style={{
-                height: '100%',
                 display: 'flex',
                 flexDirection: 'column',
                 alignItems: 'center',
@@ -844,54 +764,39 @@ export function ConferenceRoom({
               </div>
             </div>
           ) : (
+            /*
+             * Equal grid — every participant gets the same-sized tile.
+             *
+             * Column count:   1 person → 1 col, 2-4 → 2 cols, 5-9 → 3 cols, 10+ → 4 cols.
+             * The grid fills the available flex space and tiles stretch to fill it,
+             * so a 2-person call gets two side-by-side tiles of equal size.
+             *
+             * Stream assignment (FreeSWITCH passthrough sends ONE remote stream):
+             *   - Local tile (caller_id_number === credentials.extension):
+             *       → selfViewStream (own camera), mirrored.
+             *   - Remote tiles: → remoteVideoStream (the active speaker feed).
+             *       If remoteVideoStream is null (not yet connected), show avatar.
+             *   - When credentials are unavailable, index 0 is treated as local.
+             */
             <div
               style={{
                 display: 'grid',
                 gridTemplateColumns: `repeat(${cols}, 1fr)`,
-                gap: 12,
-                maxWidth: cols === 1 ? 720 : '100%',
-                margin: '0 auto',
+                gap: 8,
+                width: '100%',
+                height: '100%',
+                alignContent: 'center',
               }}
             >
               {members.map((m, index) => {
-                /*
-                 * Stream selection per tile (passthrough / 2-party mode):
-                 *
-                 * FreeSWITCH passthrough sends exactly ONE remote stream — the
-                 * other participant's feed. We must not assign that same stream
-                 * to every tile or both tiles end up showing the same person.
-                 *
-                 * Strategy:
-                 *  - Identify the local user's tile by comparing
-                 *    member.caller_id_number (the raw FS caller-ID, e.g. "100")
-                 *    against credentials.extension (also "100").
-                 *    member.name is a display name like "Keegan Grabhorn" which
-                 *    will never equal the numeric extension string.
-                 *  - Local tile → selfViewStream (own camera) so the user can
-                 *    see themselves, mirrored.
-                 *  - Remote tile → remoteVideoStream (the other party's feed).
-                 *
-                 * When there is no remote stream (solo participant, not yet
-                 * connected), fall back to the original behaviour: first tile
-                 * (index 0) shows the local camera, rest show avatars.
-                 */
                 const localExtension = credentials?.extension ?? null;
                 const isLocalTile = localExtension !== null
                   ? m.caller_id_number === localExtension
                   : index === 0;
 
-                const tileStream = remoteVideoStream
-                  ? isLocalTile
-                    ? (cameraOn ? selfViewStream : null)
-                    : remoteVideoStream
-                  : index === 0
-                  ? (cameraOn ? selfViewStream : null)
-                  : null;
-
-                // Mirror only when showing the local camera feed.
-                const mirror = isLocalTile
-                  ? !!remoteVideoStream && cameraOn
-                  : !remoteVideoStream && index === 0;
+                const tileStream: MediaStream | null = isLocalTile
+                  ? (cameraOn ? (selfViewStream ?? null) : null)
+                  : (remoteVideoStream ?? null);
 
                 return (
                   <div key={m.id} className="tile-container" style={{ position: 'relative' }}>
@@ -901,24 +806,12 @@ export function ConferenceRoom({
                       onKick={handleKick}
                       onMute={handleMute}
                       videoStream={tileStream}
-                      mirrorVideo={mirror}
+                      mirrorVideo={isLocalTile && cameraOn}
                     />
                   </div>
                 );
               })}
             </div>
-          )}
-
-          {/*
-           * Self-view PiP — shown only when there are 2+ participants.
-           * With a single participant the local camera feed is already
-           * displayed in the main tile (index 0), so the PiP would be
-           * a redundant duplicate. With 2+ participants the main tile
-           * switches to the remote/MCU stream and the PiP re-appears
-           * so the user can still monitor their own feed.
-           */}
-          {activeCall.isVideo && memberCount >= 2 && (
-            <SelfView stream={cameraOn ? selfViewStream : null} />
           )}
         </div>
 

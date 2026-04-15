@@ -147,7 +147,10 @@
         -->
 
         <!-- Join video conference with PIN protection -->
-        <action application="conference" data="room_${conf_customer_id}_$1+$2@video"/>
+        <!-- +flags{speak} ensures all members get the speak flag on join.
+             Without this, passthrough video mode can strip speak from non-floor
+             members, causing one-way audio (they hear but are not heard). -->
+        <action application="conference" data="room_${conf_customer_id}_$1+$2@video+flags{speak}"/>
       </condition>
     </extension>
 
@@ -169,7 +172,10 @@
         -->
 
         <!-- Join video conference (no PIN) -->
-        <action application="conference" data="room_${conf_customer_id}_$1@video"/>
+        <!-- +flags{speak} ensures all members get the speak flag on join.
+             Without this, passthrough video mode can strip speak from non-floor
+             members, causing one-way audio (they hear but are not heard). -->
+        <action application="conference" data="room_${conf_customer_id}_$1@video+flags{speak}"/>
       </condition>
     </extension>
 
