@@ -45,6 +45,14 @@
 
     <!-- Local extension dialing: short codes 2-6 digits (multi-tenant) -->
     <!-- Matches any 2-6 digit extension within the caller's customer domain -->
+    <!--
+      IMPORTANT: Bridge order is verto.rtc/ THEN user/ (pipe failover).
+      Verto/WebRTC clients register via mod_verto's WebSocket, NOT via sofia SIP.
+      "user/" does a sofia registration lookup and fails instantly for Verto-only
+      users, causing immediate voicemail. "verto.rtc/" reaches the Verto endpoint
+      directly. The pipe "|" provides sequential failover: try Verto first, then
+      SIP, so both Verto and SIP clients are reachable.
+    -->
     <extension name="local_extension">
       <condition field="destination_number" expression="^(\d{2,6})$">
         <action application="log" data="INFO Local extension call: ${caller_id_number} -> $1 (domain=${customer_domain:-$${domain}})"/>
@@ -55,8 +63,8 @@
         <action application="set" data="dialed_extension=$1"/>
         <!-- Resolve the target domain: customer_domain from registration, or legacy fallback -->
         <action application="set" data="target_domain=${customer_domain:-$${domain}}"/>
-        <!-- Ring the called extension in the caller's customer domain -->
-        <action application="bridge" data="user/$1@${target_domain}"/>
+        <!-- Ring via Verto first (WebRTC), then SIP fallback -->
+        <action application="bridge" data="{ignore_early_media=false,call_timeout=30}verto.rtc/$1@${target_domain}|user/$1@${target_domain}"/>
         <!-- If no answer, busy, or not registered: send to voicemail -->
         <action application="log" data="INFO Extension $1 unavailable, sending to voicemail"/>
         <action application="answer"/>
@@ -393,8 +401,9 @@
         <action application="set" data="continue_on_fail=true"/>
         <action application="set" data="dialed_extension=$1"/>
         <action application="set" data="target_domain=${customer_domain:-$${domain}}"/>
-        <!-- Ring the called extension in the caller's customer domain -->
-        <action application="bridge" data="user/$1@${target_domain}"/>
+        <!-- Ring via Verto first (WebRTC), then SIP fallback.
+             See local_extension in default context for full explanation. -->
+        <action application="bridge" data="{ignore_early_media=false,call_timeout=30}verto.rtc/$1@${target_domain}|user/$1@${target_domain}"/>
         <!-- If no answer, busy, or not registered: send to voicemail -->
         <action application="log" data="INFO Extension $1 unavailable, sending to voicemail"/>
         <action application="answer"/>
