@@ -645,15 +645,21 @@ async def get_live_status(
     raw_members = _parse_conference_list(response)
 
     # Transform raw parsed fields into the shape the frontend expects:
-    #   id       <- member_id (int)
-    #   name     <- caller_name (falls back to caller_id if blank)
-    #   talking  <- is_talking
-    #   muted    <- is_muted
-    #   video    <- False (audio-only conferences; update when MCU video is wired)
+    #   id                <- member_id (int)
+    #   name              <- caller_name (falls back to caller_id if blank)
+    #   caller_id_number  <- caller_id (the raw extension number, e.g. "100")
+    #   talking           <- is_talking
+    #   muted             <- is_muted
+    #   video             <- False (audio-only conferences; update when MCU video is wired)
+    #
+    # caller_id_number is kept separate from name so the frontend can identify
+    # the local user's tile by comparing against credentials.extension without
+    # relying on display-name matching.
     members = [
         {
             "id": int(m["member_id"]) if m["member_id"].isdigit() else 0,
             "name": m["caller_name"] or m["caller_id"] or "Unknown",
+            "caller_id_number": m["caller_id"] or "",
             "talking": m["is_talking"],
             "muted": m["is_muted"],
             "video": False,

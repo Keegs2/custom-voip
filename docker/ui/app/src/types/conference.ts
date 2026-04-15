@@ -33,6 +33,10 @@ export interface ConferenceLiveStatus {
 export interface LiveMember {
   id: number;
   name: string;
+  /** The raw caller-ID number from FreeSWITCH (e.g. "100"). Use this field
+   *  to identify the local user's tile — `name` is a display name that will
+   *  NOT match `credentials.extension`. */
+  caller_id_number: string;
   talking: boolean;
   muted: boolean;
   video: boolean;

@@ -854,9 +854,11 @@ export function ConferenceRoom({
                  * to every tile or both tiles end up showing the same person.
                  *
                  * Strategy:
-                 *  - Identify the local user's tile by matching member.name
-                 *    against credentials.extension (e.g. "1001"). FreeSWITCH
-                 *    reports the dialing extension as the member name.
+                 *  - Identify the local user's tile by comparing
+                 *    member.caller_id_number (the raw FS caller-ID, e.g. "100")
+                 *    against credentials.extension (also "100").
+                 *    member.name is a display name like "Keegan Grabhorn" which
+                 *    will never equal the numeric extension string.
                  *  - Local tile → selfViewStream (own camera) so the user can
                  *    see themselves, mirrored.
                  *  - Remote tile → remoteVideoStream (the other party's feed).
@@ -867,7 +869,7 @@ export function ConferenceRoom({
                  */
                 const localExtension = credentials?.extension ?? null;
                 const isLocalTile = localExtension !== null
-                  ? m.name === localExtension
+                  ? m.caller_id_number === localExtension
                   : index === 0;
 
                 const tileStream = remoteVideoStream

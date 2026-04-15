@@ -2030,6 +2030,19 @@ export function ConferencePage() {
   const [startNowHover, setStartNowHover] = useState(false);
   const [isStartingNow, setIsStartingNow] = useState(false);
 
+  /*
+   * Guard against makeCall firing more than once per join action.
+   *
+   * Using a ref (not state) so that the flag is readable and writable
+   * synchronously within the same event loop tick — a state update would
+   * not be visible until the next render and would therefore not prevent
+   * a second call that arrives before React flushes the state change.
+   *
+   * The ref is cleared when activeCall goes from non-null back to null
+   * (i.e. the call ends), so a fresh join after hanging up works normally.
+   */
+  const joiningRef = useRef(false);
+
   /* ── Conference room overlay state ──────────────────────── */
   // If the active call destination matches *88XX and we have a selected room
   const isInConference = activeCall !== null &&
@@ -2109,9 +2122,23 @@ export function ConferencePage() {
     return () => clearInterval(timer);
   }, [pollLiveStatuses]);
 
+  /* ── Reset join guard when the call ends ────────────────── */
+
+  useEffect(() => {
+    if (activeCall === null) {
+      joiningRef.current = false;
+    }
+  }, [activeCall]);
+
   /* ── Join handler ────────────────────────────────────────── */
 
   const handleJoin = useCallback(async (conf: Conference) => {
+    // Prevent duplicate makeCall invocations from re-renders, double-clicks,
+    // or the "auto-create then join" flow calling handleJoin after setting
+    // state that causes a re-render mid-await.
+    if (joiningRef.current) return;
+    joiningRef.current = true;
+
     // Ensure the conference is selected BEFORE dialing so that when the call
     // transitions to 'active', isInConference is true and the overlay renders.
     setSelectedId(conf.id);
