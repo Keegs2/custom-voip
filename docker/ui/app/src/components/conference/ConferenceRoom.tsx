@@ -543,13 +543,23 @@ function Lobby({ conferenceName, onJoin, onCancel }: LobbyProps) {
     audioCtxRef.current = audioCtx;
     analyserRef.current = analyser;
 
-    const dataArray = new Uint8Array(analyser.frequencyBinCount);
+    const dataArray = new Uint8Array(analyser.fftSize);
 
     function tick() {
       if (!analyserRef.current) return;
-      analyserRef.current.getByteFrequencyData(dataArray);
-      const avg = dataArray.reduce((a, b) => a + b, 0) / dataArray.length;
-      setMicLevel((avg / 255) * 100);
+      // Use time-domain data (raw waveform) instead of frequency data.
+      // getByteFrequencyData returns near-zero for quiet speech because
+      // conversational audio has very low frequency magnitudes. Time-domain
+      // data shows the actual waveform amplitude: silence = 128, sound
+      // deviates above/below 128. We measure peak deviation as the level.
+      analyserRef.current.getByteTimeDomainData(dataArray);
+      let peak = 0;
+      for (let i = 0; i < dataArray.length; i++) {
+        const deviation = Math.abs(dataArray[i] - 128);
+        if (deviation > peak) peak = deviation;
+      }
+      // peak is 0-128, map to 0-100% (with a 2x boost for sensitivity)
+      setMicLevel(Math.min(100, (peak / 128) * 200));
       rafIdRef.current = requestAnimationFrame(tick);
     }
 
@@ -747,15 +757,15 @@ function Lobby({ conferenceName, onJoin, onCancel }: LobbyProps) {
 
   const toggleBtnOn: React.CSSProperties = {
     ...toggleBtnBase,
-    border: '1.5px solid #22c55e',
-    color: '#22c55e',
-    boxShadow: '0 0 10px rgba(34,197,94,0.25)',
+    border: '1.5px solid #3b82f6',
+    color: '#60a5fa',
+    boxShadow: '0 0 10px rgba(59,130,246,0.2)',
   };
 
   const toggleBtnOff: React.CSSProperties = {
     ...toggleBtnBase,
-    border: '1.5px solid #475569',
-    color: '#475569',
+    border: '1.5px solid rgba(239,68,68,0.5)',
+    color: '#ef4444',
   };
 
   return (
@@ -934,7 +944,7 @@ function Lobby({ conferenceName, onJoin, onCancel }: LobbyProps) {
         {/* Mic level meter */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Mic size={13} color={micOn ? '#22c55e' : '#475569'} />
+            <Mic size={13} color={micOn ? '#60a5fa' : '#475569'} />
             <span style={{ fontSize: '0.72rem', color: '#475569', fontWeight: 500 }}>
               {micOn ? 'Microphone' : 'Microphone (muted)'}
             </span>
@@ -957,7 +967,7 @@ function Lobby({ conferenceName, onJoin, onCancel }: LobbyProps) {
                 borderRadius: 3,
                 background: micLevel > 70
                   ? '#f59e0b'
-                  : '#22c55e',
+                  : '#3b82f6',
                 transition: 'width 80ms linear, background 200ms',
               }}
             />
@@ -977,7 +987,7 @@ function Lobby({ conferenceName, onJoin, onCancel }: LobbyProps) {
             >
               {cameraOn ? <Video size={20} /> : <VideoOff size={20} />}
             </button>
-            <span style={{ fontSize: '0.65rem', color: cameraOn ? '#22c55e' : '#475569', fontWeight: 500 }}>
+            <span style={{ fontSize: '0.65rem', color: cameraOn ? '#94a3b8' : '#ef4444', fontWeight: 500 }}>
               {cameraOn ? 'Camera On' : 'Camera Off'}
             </span>
           </div>
@@ -993,7 +1003,7 @@ function Lobby({ conferenceName, onJoin, onCancel }: LobbyProps) {
             >
               {micOn ? <Mic size={20} /> : <MicOff size={20} />}
             </button>
-            <span style={{ fontSize: '0.65rem', color: micOn ? '#22c55e' : '#475569', fontWeight: 500 }}>
+            <span style={{ fontSize: '0.65rem', color: micOn ? '#94a3b8' : '#ef4444', fontWeight: 500 }}>
               {micOn ? 'Mic On' : 'Mic Off'}
             </span>
           </div>
@@ -1009,7 +1019,7 @@ function Lobby({ conferenceName, onJoin, onCancel }: LobbyProps) {
               width: '100%',
               height: 48,
               borderRadius: 10,
-              background: joining ? 'rgba(34,197,94,0.4)' : '#22c55e',
+              background: joining ? 'rgba(59,130,246,0.4)' : '#3b82f6',
               border: 'none',
               color: '#fff',
               fontSize: '0.95rem',
@@ -1017,7 +1027,7 @@ function Lobby({ conferenceName, onJoin, onCancel }: LobbyProps) {
               cursor: joining ? 'not-allowed' : 'pointer',
               letterSpacing: '-0.01em',
               transition: 'background 0.15s, opacity 0.15s',
-              boxShadow: joining ? 'none' : '0 4px 18px rgba(34,197,94,0.35)',
+              boxShadow: joining ? 'none' : '0 4px 18px rgba(59,130,246,0.35)',
             }}
           >
             {joining ? 'Joining...' : 'Join Meeting'}
