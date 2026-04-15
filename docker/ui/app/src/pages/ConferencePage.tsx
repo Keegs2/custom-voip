@@ -2028,6 +2028,7 @@ export function ConferencePage() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [allSchedules, setAllSchedules] = useState<AggregatedSchedule[]>([]);
   const [startNowHover, setStartNowHover] = useState(false);
+  const [isStartingNow, setIsStartingNow] = useState(false);
 
   /* ── Conference room overlay state ──────────────────────── */
   // If the active call destination matches *88XX and we have a selected room
@@ -2174,11 +2175,37 @@ export function ConferencePage() {
             <button
               type="button"
               onClick={() => {
-                // Join the first available room, or do nothing if no rooms loaded
+                if (isLoading || isStartingNow) return;
                 const firstConf = conferences[0] ?? null;
-                if (firstConf) void handleJoin(firstConf);
+                if (firstConf) {
+                  // Rooms exist — join immediately
+                  void handleJoin(firstConf);
+                } else {
+                  // No rooms yet — auto-create one then join it
+                  void (async () => {
+                    setIsStartingNow(true);
+                    try {
+                      const payload: CreateConferencePayload = {
+                        name: 'Quick Meeting',
+                        max_members: 25,
+                        video_enabled: true,
+                        recording_enabled: false,
+                        pin: null,
+                        moderator_pin: null,
+                      };
+                      const newRoom = await createConference(payload);
+                      setConferences((prev) => [...prev, newRoom]);
+                      setSelectedId(newRoom.id);
+                      await handleJoin(newRoom);
+                    } catch {
+                      // Silently ignore — user can try the Create Room modal instead
+                    } finally {
+                      setIsStartingNow(false);
+                    }
+                  })();
+                }
               }}
-              disabled={conferences.length === 0 || isLoading}
+              disabled={isLoading || isStartingNow}
               onMouseEnter={() => setStartNowHover(true)}
               onMouseLeave={() => setStartNowHover(false)}
               style={{
@@ -2189,22 +2216,41 @@ export function ConferencePage() {
                 gap: 9,
                 padding: '12px 16px',
                 borderRadius: 10,
-                background: startNowHover && conferences.length > 0 && !isLoading
+                background: startNowHover && !isLoading && !isStartingNow
                   ? '#16a34a'
                   : '#22c55e',
                 border: 'none',
                 color: '#fff',
                 fontSize: '0.9rem',
                 fontWeight: 700,
-                cursor: conferences.length === 0 || isLoading ? 'not-allowed' : 'pointer',
-                opacity: conferences.length === 0 || isLoading ? 0.55 : 1,
+                cursor: isLoading || isStartingNow ? 'not-allowed' : 'pointer',
+                opacity: isLoading || isStartingNow ? 0.55 : 1,
                 transition: 'background 0.15s, opacity 0.15s',
                 letterSpacing: '-0.01em',
                 boxShadow: '0 4px 18px rgba(34,197,94,0.30)',
               }}
             >
-              <Video size={17} strokeWidth={2} />
-              Start Meeting Now
+              {isStartingNow ? (
+                <>
+                  <div
+                    style={{
+                      width: 16,
+                      height: 16,
+                      border: '2px solid rgba(255,255,255,0.3)',
+                      borderTopColor: '#fff',
+                      borderRadius: '50%',
+                      animation: 'spin 0.7s linear infinite',
+                      flexShrink: 0,
+                    }}
+                  />
+                  Starting...
+                </>
+              ) : (
+                <>
+                  <Video size={17} strokeWidth={2} />
+                  Start Meeting Now
+                </>
+              )}
             </button>
           </div>
 
