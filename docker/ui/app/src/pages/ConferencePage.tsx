@@ -29,7 +29,6 @@ import {
   Plus,
   Play,
   PhoneOff,
-  ChevronRight,
   Hash,
   Lock,
   Shield,
