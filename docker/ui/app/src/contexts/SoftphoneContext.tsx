@@ -261,6 +261,7 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
       }
 
       setCredentials(creds);
+      extensionIdRef.current = creds.extension_id;
 
       // Enumerate audio devices now that we know we'll need them
       await enumerateDevices();
@@ -281,10 +282,16 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
         if (!cancelled) handleCallStateChange(callId, state);
       };
       client.onRegistered = () => {
-        if (!cancelled) setConnectionState('registered');
+        if (!cancelled) {
+          setConnectionState('registered');
+          void updatePresence('available').catch(() => undefined);
+        }
       };
       client.onUnregistered = () => {
-        if (!cancelled) setConnectionState('disconnected');
+        if (!cancelled) {
+          setConnectionState('disconnected');
+          void updatePresence('offline').catch(() => undefined);
+        }
       };
       client.onError = (err) => {
         if (!cancelled) {
@@ -330,6 +337,7 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
       clientRef.current = null;
       stopDurationTimer();
       stopRingtone();
+      void updatePresence('offline').catch(() => undefined);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthenticated, user?.id]);
@@ -457,10 +465,7 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
 
   const setPresence = useCallback(async (status: PresenceStatus): Promise<void> => {
     setPresenceState(status);
-    const extId = extensionIdRef.current;
-    if (extId !== null) {
-      await updatePresence(extId, status).catch(() => undefined);
-    }
+    await updatePresence(status).catch(() => undefined);
   }, []);
 
   const setExpanded = useCallback((expanded: boolean): void => {

@@ -128,7 +128,7 @@ async def update_presence(
            VALUES ($1, $2, $3, $4)
            ON CONFLICT (user_id)
            DO UPDATE SET status = EXCLUDED.status,
-                         status_message = EXCLUDED.status_message,
+                         status_message = COALESCE(EXCLUDED.status_message, presence_status.status_message),
                          updated_at = EXCLUDED.updated_at
            RETURNING user_id, status, status_message, updated_at""",
         user_id,

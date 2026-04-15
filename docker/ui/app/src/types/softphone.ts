@@ -55,6 +55,7 @@ export interface WebRTCCredentials {
   password: string;
   display_name: string;
   extension: string;
+  extension_id: number;
   ice_servers: RTCIceServer[];
 }
 

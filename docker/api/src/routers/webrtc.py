@@ -87,7 +87,7 @@ async def get_webrtc_credentials(user: dict = Depends(get_current_user)):
     # --- Step 2: Look up the user's active extension ---
     # 404 = user has UCaaS but no extension yet (chat-only user).
     row = await db.fetch_one(
-        """SELECT e.extension, e.voicemail_pin, e.customer_id,
+        """SELECT e.id, e.extension, e.voicemail_pin, e.customer_id,
                   e.display_name, e.status
            FROM extensions e
            WHERE e.user_id = $1 AND e.status = 'active'""",
@@ -113,6 +113,7 @@ async def get_webrtc_credentials(user: dict = Depends(get_current_user)):
         "password": ext["voicemail_pin"],
         "display_name": ext["display_name"] or ext["extension"],
         "extension": ext["extension"],
+        "extension_id": ext["id"],
         "customer_domain": customer_domain,
         "ice_servers": _build_ice_servers(),
     }
