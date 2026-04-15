@@ -286,7 +286,7 @@ function CreateRoomModal({ onClose, onCreate }: CreateRoomModalProps) {
       const conf = await createConference(payload);
       onCreate(conf);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create conference');
+      setError(err instanceof Error ? err.message : 'Failed to create meeting room');
     } finally {
       setLoading(false);
     }
@@ -346,7 +346,7 @@ function CreateRoomModal({ onClose, onCreate }: CreateRoomModalProps) {
             </div>
             <div>
               <div style={{ fontSize: '0.95rem', fontWeight: 700, color: '#e2e8f0' }}>
-                New Conference Room
+                New Meeting Room
               </div>
               <div style={{ fontSize: '0.73rem', color: '#475569' }}>
                 Creates a persistent room with a dial code
@@ -488,7 +488,7 @@ function CreateRoomModal({ onClose, onCreate }: CreateRoomModalProps) {
                 opacity: loading ? 0.65 : 1,
               }}
             >
-              {loading ? 'Creating...' : 'Create Room'}
+              {loading ? 'Creating...' : 'Create Meeting Room'}
             </button>
           </div>
         </form>
@@ -1312,7 +1312,7 @@ function DetailPanel({ conf, onJoin, onRefresh, onDelete }: DetailPanelProps) {
                     }}
                   />
                   <span style={{ fontSize: '0.65rem', fontWeight: 700, color: '#22c55e', letterSpacing: '0.06em' }}>
-                    LIVE · {liveStatus.members.length} IN ROOM
+                    LIVE · {liveStatus.members.length} IN MEETING
                   </span>
                 </div>
               )}
@@ -1381,7 +1381,7 @@ function DetailPanel({ conf, onJoin, onRefresh, onDelete }: DetailPanelProps) {
             onMouseLeave={(e) => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.opacity = '1'; }}
           >
             <Phone size={15} />
-            Join Conference
+            Join Meeting
           </button>
         </div>
 
@@ -1453,10 +1453,10 @@ function DetailPanel({ conf, onJoin, onRefresh, onDelete }: DetailPanelProps) {
                 </div>
                 <div style={{ textAlign: 'center' }}>
                   <div style={{ fontSize: '0.95rem', fontWeight: 600, color: '#475569', marginBottom: 5 }}>
-                    Room is empty
+                    Meeting room is empty
                   </div>
                   <div style={{ fontSize: '0.8rem', color: '#334155', lineHeight: 1.6 }}>
-                    Dial <span style={{ color: '#60a5fa', fontFamily: 'monospace', fontWeight: 700 }}>{dialCode}</span> from your softphone, or share the dial code with others.
+                    Dial <span style={{ color: '#60a5fa', fontFamily: 'monospace', fontWeight: 700 }}>{dialCode}</span> from your softphone, or click "Start Meeting Now" to join instantly.
                   </div>
                 </div>
                 <button
@@ -1502,7 +1502,7 @@ function DetailPanel({ conf, onJoin, onRefresh, onDelete }: DetailPanelProps) {
                 {/* Member grid */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                   <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#334155', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 4 }}>
-                    Members in room
+                    Members in meeting
                   </div>
                   {liveStatus.members.map((m) => (
                     <div
@@ -1587,7 +1587,7 @@ function DetailPanel({ conf, onJoin, onRefresh, onDelete }: DetailPanelProps) {
                         <button
                           type="button"
                           onClick={() => void handleKick(m.id)}
-                          title="Remove from conference"
+                          title="Remove from meeting"
                           style={{
                             width: 30,
                             height: 30,
@@ -1918,7 +1918,7 @@ function DetailPanel({ conf, onJoin, onRefresh, onDelete }: DetailPanelProps) {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 20, maxWidth: 560 }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <div style={{ fontSize: '0.85rem', fontWeight: 600, color: '#64748b' }}>
-                Room configuration
+                Meeting room configuration
               </div>
               {!editingSettings ? (
                 <button
@@ -2020,7 +2020,7 @@ function DetailPanel({ conf, onJoin, onRefresh, onDelete }: DetailPanelProps) {
                 Danger Zone
               </div>
               <div style={{ fontSize: '0.8rem', color: '#64748b', marginBottom: 12 }}>
-                Permanently delete this conference room. All schedules and participant assignments will be lost.
+                Permanently delete this meeting room. All schedules and participant assignments will be lost.
               </div>
               <button
                 type="button"
@@ -2044,7 +2044,7 @@ function DetailPanel({ conf, onJoin, onRefresh, onDelete }: DetailPanelProps) {
                 }}
               >
                 <Trash2 size={13} />
-                Delete Conference Room
+                Delete Meeting Room
               </button>
             </div>
           </div>
@@ -2113,10 +2113,10 @@ function EmptyDetail() {
       </div>
       <div style={{ textAlign: 'center', maxWidth: 280 }}>
         <div style={{ fontSize: '1.05rem', fontWeight: 700, color: '#64748b', marginBottom: 7, letterSpacing: '-0.02em' }}>
-          Select a conference room
+          Select a meeting room
         </div>
         <div style={{ fontSize: '0.82rem', color: '#334155', lineHeight: 1.65 }}>
-          Pick a room from the list to see live status, schedule sessions, and manage participants.
+          Pick a room from the list to see live status, schedule meetings, and manage participants.
         </div>
       </div>
     </div>
@@ -2124,6 +2124,10 @@ function EmptyDetail() {
 }
 
 /* ─── Page ───────────────────────────────────────────────── */
+
+interface AggregatedSchedule extends ConferenceSchedule {
+  conference: Conference;
+}
 
 export function ConferencePage() {
   const { makeCall, activeCall } = useSoftphone();
@@ -2134,6 +2138,8 @@ export function ConferencePage() {
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [allSchedules, setAllSchedules] = useState<AggregatedSchedule[]>([]);
+  const [startNowHover, setStartNowHover] = useState(false);
 
   /* ── Conference room overlay state ──────────────────────── */
   // If the active call destination matches *88XX and we have a selected room
@@ -2146,6 +2152,28 @@ export function ConferencePage() {
     ? conferences.find((c) => c.id === selectedId) ?? null
     : null;
 
+  /* ── Load all schedules across rooms ────────────────────── */
+
+  const loadAllSchedules = useCallback(async (confs: Conference[]) => {
+    if (confs.length === 0) { setAllSchedules([]); return; }
+    const results = await Promise.allSettled(
+      confs.map((c) => listSchedules(c.id).then((s) => s.map((sch) => ({ ...sch, conference: c })))),
+    );
+    const now = new Date();
+    const combined: AggregatedSchedule[] = [];
+    for (const r of results) {
+      if (r.status === 'fulfilled') {
+        for (const s of r.value) {
+          // Only show upcoming schedules (end_time in the future)
+          if (new Date(s.end_time) >= now) combined.push(s);
+        }
+      }
+    }
+    // Sort by start time ascending
+    combined.sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime());
+    setAllSchedules(combined);
+  }, []);
+
   /* ── Load conferences ────────────────────────────────────── */
 
   const loadConferences = useCallback(async () => {
@@ -2157,12 +2185,14 @@ export function ConferencePage() {
       if (selectedId === null && list.length > 0) {
         setSelectedId(list[0].id);
       }
+      // Kick off schedule aggregation with the fresh list
+      void loadAllSchedules(list);
     } catch (err) {
-      setLoadError(err instanceof Error ? err.message : 'Failed to load conferences');
+      setLoadError(err instanceof Error ? err.message : 'Failed to load meeting rooms');
     } finally {
       setIsLoading(false);
     }
-  }, [selectedId]);
+  }, [selectedId, loadAllSchedules]);
 
   useEffect(() => {
     void loadConferences();
@@ -2239,66 +2269,250 @@ export function ConferencePage() {
           height: '100vh',
         }}
       >
-        {/* Left panel — room list */}
+        {/* Left panel — meeting sidebar */}
         <div
           style={{
-            width: 280,
+            width: 320,
             flexShrink: 0,
-            borderRight: '1px solid rgba(255,255,255,0.06)',
+            borderRight: '1px solid rgba(42,47,69,0.6)',
             display: 'flex',
             flexDirection: 'column',
             minHeight: 0,
             background: '#0c0e16',
           }}
         >
-          {/* Panel header */}
+          {/* ── TOP: Start Meeting Now button ─────────────── */}
+          <div style={{ padding: '18px 16px 14px', flexShrink: 0 }}>
+            <button
+              type="button"
+              onClick={() => {
+                // Join the first available room, or do nothing if no rooms loaded
+                const firstConf = conferences[0] ?? null;
+                if (firstConf) void handleJoin(firstConf);
+              }}
+              disabled={conferences.length === 0 || isLoading}
+              onMouseEnter={() => setStartNowHover(true)}
+              onMouseLeave={() => setStartNowHover(false)}
+              style={{
+                width: '100%',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 9,
+                padding: '12px 16px',
+                borderRadius: 10,
+                background: startNowHover && conferences.length > 0 && !isLoading
+                  ? '#16a34a'
+                  : '#22c55e',
+                border: 'none',
+                color: '#fff',
+                fontSize: '0.9rem',
+                fontWeight: 700,
+                cursor: conferences.length === 0 || isLoading ? 'not-allowed' : 'pointer',
+                opacity: conferences.length === 0 || isLoading ? 0.55 : 1,
+                transition: 'background 0.15s, opacity 0.15s',
+                letterSpacing: '-0.01em',
+                boxShadow: '0 4px 18px rgba(34,197,94,0.30)',
+              }}
+            >
+              <Video size={17} strokeWidth={2} />
+              Start Meeting Now
+            </button>
+          </div>
+
+          {/* Divider */}
+          <div style={{ margin: '0 16px', height: 1, flexShrink: 0, background: 'rgba(255,255,255,0.06)' }} />
+
+          {/* ── MIDDLE: Scheduled Meetings ────────────────── */}
           <div
             style={{
-              padding: '18px 16px 12px',
-              borderBottom: '1px solid rgba(255,255,255,0.05)',
+              flexShrink: 0,
+              maxHeight: 280,
+              overflowY: 'auto',
+              display: 'flex',
+              flexDirection: 'column',
+            }}
+          >
+            {/* Section header */}
+            <div style={{ padding: '12px 16px 8px', flexShrink: 0 }}>
+              <span style={{ fontSize: '0.65rem', fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.12em' }}>
+                Scheduled Meetings
+              </span>
+            </div>
+
+            {isLoading ? (
+              <div style={{ display: 'flex', justifyContent: 'center', padding: '12px 16px 16px' }}>
+                <div
+                  style={{
+                    width: 18,
+                    height: 18,
+                    border: '2px solid rgba(59,130,246,0.15)',
+                    borderTopColor: '#3b82f6',
+                    borderRadius: '50%',
+                    animation: 'spin 0.8s linear infinite',
+                  }}
+                />
+              </div>
+            ) : allSchedules.length === 0 ? (
+              <div style={{ padding: '8px 16px 16px', display: 'flex', flexDirection: 'column', gap: 10, alignItems: 'flex-start' }}>
+                <div style={{ fontSize: '0.8rem', color: '#334155' }}>
+                  No upcoming meetings
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    // Navigate to the first room's schedule tab by selecting it
+                    if (conferences.length > 0) setSelectedId(conferences[0].id);
+                  }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    padding: '6px 12px',
+                    borderRadius: 7,
+                    background: 'rgba(59,130,246,0.10)',
+                    border: '1px solid rgba(59,130,246,0.22)',
+                    color: '#60a5fa',
+                    fontSize: '0.78rem',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    transition: 'background 0.15s',
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(59,130,246,0.18)'; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(59,130,246,0.10)'; }}
+                >
+                  <Calendar size={12} />
+                  Schedule a Meeting
+                </button>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 2, padding: '0 8px 10px' }}>
+                {allSchedules.map((s) => (
+                  <button
+                    key={`${s.conference.id}-${s.id}`}
+                    type="button"
+                    onClick={() => setSelectedId(s.conference.id)}
+                    style={{
+                      width: '100%',
+                      display: 'flex',
+                      alignItems: 'flex-start',
+                      gap: 10,
+                      padding: '9px 10px',
+                      borderRadius: 8,
+                      background: selectedId === s.conference.id
+                        ? 'rgba(59,130,246,0.10)'
+                        : 'transparent',
+                      border: selectedId === s.conference.id
+                        ? '1px solid rgba(59,130,246,0.20)'
+                        : '1px solid transparent',
+                      cursor: 'pointer',
+                      textAlign: 'left',
+                      transition: 'background 0.12s, border-color 0.12s',
+                    }}
+                    onMouseEnter={(e) => {
+                      if (selectedId !== s.conference.id) e.currentTarget.style.background = 'rgba(255,255,255,0.03)';
+                    }}
+                    onMouseLeave={(e) => {
+                      if (selectedId !== s.conference.id) e.currentTarget.style.background = 'transparent';
+                    }}
+                  >
+                    {/* Calendar icon */}
+                    <div
+                      style={{
+                        width: 30,
+                        height: 30,
+                        borderRadius: 7,
+                        background: 'rgba(59,130,246,0.10)',
+                        border: '1px solid rgba(59,130,246,0.18)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        color: '#60a5fa',
+                        flexShrink: 0,
+                        marginTop: 1,
+                      }}
+                    >
+                      <Calendar size={13} />
+                    </div>
+
+                    {/* Text content */}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div
+                        style={{
+                          fontSize: '0.8rem',
+                          fontWeight: 600,
+                          color: '#cbd5e1',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                          lineHeight: 1.3,
+                        }}
+                      >
+                        {s.title}
+                      </div>
+                      <div style={{ fontSize: '0.7rem', color: '#475569', marginTop: 2 }}>
+                        {formatDate(s.start_time)} · {formatTime(s.start_time)}
+                      </div>
+                      <div style={{ fontSize: '0.68rem', color: '#334155', marginTop: 1 }}>
+                        *88{s.conference.room_number}
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Divider */}
+          <div style={{ margin: '0 16px', height: 1, flexShrink: 0, background: 'rgba(255,255,255,0.06)' }} />
+
+          {/* ── BOTTOM: Meeting Rooms list ────────────────── */}
+          <div
+            style={{
+              padding: '12px 16px 8px',
               flexShrink: 0,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',
             }}
           >
-            <span style={{ fontSize: '0.7rem', fontWeight: 700, color: '#334155', textTransform: 'uppercase', letterSpacing: '0.12em' }}>
-              Conferences
+            <span style={{ fontSize: '0.65rem', fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.12em' }}>
+              Meeting Rooms
             </span>
             <button
               type="button"
               onClick={() => setShowCreateModal(true)}
-              title="Create conference room"
+              title="Create meeting room"
               style={{
-                background: 'rgba(59,130,246,0.12)',
-                border: '1px solid rgba(59,130,246,0.25)',
-                borderRadius: 7,
+                background: 'rgba(59,130,246,0.10)',
+                border: '1px solid rgba(59,130,246,0.22)',
+                borderRadius: 6,
                 cursor: 'pointer',
                 color: '#60a5fa',
                 display: 'flex',
                 alignItems: 'center',
-                gap: 5,
-                padding: '5px 9px',
-                fontSize: '0.72rem',
+                gap: 4,
+                padding: '4px 8px',
+                fontSize: '0.7rem',
                 fontWeight: 600,
                 transition: 'background 0.15s',
               }}
-              onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(59,130,246,0.20)'; }}
-              onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(59,130,246,0.12)'; }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(59,130,246,0.18)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(59,130,246,0.10)'; }}
             >
-              <Plus size={13} strokeWidth={2} />
+              <Plus size={11} strokeWidth={2.5} />
               New
             </button>
           </div>
 
           {/* Room list */}
-          <div style={{ flex: 1, overflowY: 'auto', padding: '8px 8px' }}>
+          <div style={{ flex: 1, overflowY: 'auto', padding: '0 8px 8px' }}>
             {isLoading ? (
-              <div style={{ display: 'flex', justifyContent: 'center', padding: 32 }}>
+              <div style={{ display: 'flex', justifyContent: 'center', padding: 24 }}>
                 <div
                   style={{
-                    width: 24,
-                    height: 24,
+                    width: 22,
+                    height: 22,
                     border: '2px solid rgba(59,130,246,0.15)',
                     borderTopColor: '#3b82f6',
                     borderRadius: '50%',
@@ -2307,18 +2521,18 @@ export function ConferencePage() {
                 />
               </div>
             ) : loadError ? (
-              <div style={{ padding: 16, color: '#ef4444', fontSize: '0.8rem', textAlign: 'center' }}>
+              <div style={{ padding: '12px 8px', color: '#ef4444', fontSize: '0.8rem', textAlign: 'center' }}>
                 {loadError}
               </div>
             ) : conferences.length === 0 ? (
-              <div style={{ padding: '32px 16px', textAlign: 'center' }}>
-                <div style={{ color: '#334155', fontSize: '0.85rem', marginBottom: 12 }}>
-                  No conference rooms yet
+              <div style={{ padding: '20px 8px', textAlign: 'center' }}>
+                <div style={{ color: '#334155', fontSize: '0.83rem', marginBottom: 12 }}>
+                  No meeting rooms yet
                 </div>
                 <button
                   type="button"
                   onClick={() => setShowCreateModal(true)}
-                  style={{ ...primaryBtn, fontSize: '0.8rem', padding: '7px 14px' }}
+                  style={{ ...primaryBtn, fontSize: '0.78rem', padding: '7px 14px' }}
                 >
                   <Plus size={13} />
                   Create Room
