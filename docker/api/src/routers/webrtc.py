@@ -5,7 +5,7 @@ browser-based softphone can connect to FreeSWITCH.
 """
 import os
 import logging
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Request
 
 from db import database as db
 from auth.dependencies import get_current_user
@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 # Configuration from environment with sensible defaults
-VERTO_WS_URL = os.getenv("VERTO_WS_URL", "wss://localhost:8082")
+VERTO_WS_URL = os.getenv("VERTO_WS_URL", "ws://localhost:8082")
 SIP_DOMAIN = os.getenv("SIP_DOMAIN", "voiceplatform.local")
 
 # STUN / TURN configuration
@@ -44,7 +44,7 @@ def _build_ice_servers() -> list[dict]:
 
 
 @router.get("/credentials")
-async def get_webrtc_credentials(user: dict = Depends(get_current_user)):
+async def get_webrtc_credentials(request: Request, user: dict = Depends(get_current_user)):
     """Return Verto / WebRTC login credentials for the authenticated user.
 
     The response contains everything the browser softphone needs to register:
@@ -107,8 +107,19 @@ async def get_webrtc_credentials(user: dict = Depends(get_current_user)):
     customer_domain = f"customer_{ext['customer_id']}.{SIP_DOMAIN}"
     login = f"{ext['extension']}@{customer_domain}"
 
+    # When the frontend is on HTTPS, browsers block insecure ws:// connections
+    # (mixed content). Detect this via X-Forwarded-Proto (set by nginx) and
+    # return the WSS URL proxied through nginx instead of direct ws:// to FS.
+    proto = request.headers.get("x-forwarded-proto", request.url.scheme)
+    if proto == "https":
+        # Nginx proxies wss://host/ws/verto/ → ws://FS:8082
+        host = request.headers.get("host", request.url.hostname or "localhost")
+        ws_url = f"wss://{host}/ws/verto/"
+    else:
+        ws_url = VERTO_WS_URL
+
     return {
-        "ws_url": VERTO_WS_URL,
+        "ws_url": ws_url,
         "login": login,
         "password": ext["voicemail_pin"],
         "display_name": ext["display_name"] or ext["extension"],
