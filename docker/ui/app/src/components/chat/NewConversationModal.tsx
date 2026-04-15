@@ -36,7 +36,8 @@ export function NewConversationModal({ onClose, onCreated }: NewConversationModa
   /* ─── Load directory ─────────────────────────────────────── */
 
   useEffect(() => {
-    void apiRequest<Record<string, unknown>[]>('GET', '/extensions/directory?include_presence=true')
+    const custParam = user?.customer_id ? `&customer_id=${user.customer_id}` : '';
+    void apiRequest<Record<string, unknown>[]>('GET', `/extensions/directory?include_presence=true${custParam}`)
       .then((raw) => {
         // Map API shape to DirectoryUser: API returns {id, extension, display_name, user_name, assigned_did, ...}
         const users: DirectoryUser[] = raw.map((r) => ({

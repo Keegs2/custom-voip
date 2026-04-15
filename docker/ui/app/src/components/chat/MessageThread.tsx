@@ -332,10 +332,19 @@ export function MessageThread({ conversation }: MessageThreadProps) {
           >
             {conversationTitle}
           </div>
-          <div style={{ fontSize: '0.72rem', color: '#22c55e', marginTop: 1, fontWeight: 500 }}>
+          <div style={{ fontSize: '0.72rem', marginTop: 1, fontWeight: 500 }}>
             {isGroup
-              ? `${conversation.participants.length} members`
-              : 'Active now'}
+              ? <span style={{ color: '#94a3b8' }}>{conversation.participants.length} members</span>
+              : (() => {
+                  const other = conversation.participants.find((p) => p.user_id !== user?.id);
+                  const status = other?.presence_status ?? 'offline';
+                  const isOnline = status === 'available';
+                  return (
+                    <span style={{ color: isOnline ? '#22c55e' : '#64748b' }}>
+                      {isOnline ? 'Active now' : 'Offline'}
+                    </span>
+                  );
+                })()}
           </div>
         </div>
 

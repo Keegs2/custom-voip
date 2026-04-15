@@ -194,11 +194,13 @@ async def list_extensions(
 
 @router.get("/directory")
 async def extension_directory(
+    customer_id: Optional[int] = Query(None, description="Filter by customer (admin only)"),
     customer_filter: int | None = Depends(get_customer_filter),
 ):
     """List all extensions with presence status for BLF / contacts directory.
 
     Returns a compact list optimised for phone displays and soft-key panels.
+    Admins can pass customer_id to scope results to a single customer.
     """
     query = """
         SELECT e.id, e.user_id, e.extension, e.display_name,
@@ -220,6 +222,11 @@ async def extension_directory(
     if customer_filter is not None:
         query += f" AND e.customer_id = ${idx}"
         values.append(customer_filter)
+        idx += 1
+    elif customer_id is not None:
+        # Admin with explicit customer_id filter
+        query += f" AND e.customer_id = ${idx}"
+        values.append(customer_id)
         idx += 1
 
     query += " ORDER BY e.extension ASC"

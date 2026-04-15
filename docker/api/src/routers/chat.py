@@ -155,10 +155,12 @@ async def list_conversations(user: dict = Depends(get_current_user)):
                 SELECT json_agg(json_build_object(
                     'user_id', pu.id,
                     'name', pu.name,
-                    'email', pu.email
+                    'email', pu.email,
+                    'presence_status', COALESCE(pp_ps.status, 'offline')
                 ))
                 FROM chat_participants pp
                 JOIN users pu ON pu.id = pp.user_id
+                LEFT JOIN presence_status pp_ps ON pp_ps.user_id = pu.id
                 WHERE pp.conversation_id = c.id
             ) AS participants
         FROM chat_participants cp
@@ -338,9 +340,11 @@ async def get_conversation(conversation_id: int, user: dict = Depends(get_curren
         """
         SELECT cp.user_id, cp.role, cp.joined_at,
                cp.last_read_message_id, cp.last_read_at,
-               u.name, u.email
+               u.name, u.email,
+               COALESCE(p.status, 'offline') AS presence_status
         FROM chat_participants cp
         JOIN users u ON u.id = cp.user_id
+        LEFT JOIN presence_status p ON p.user_id = cp.user_id
         WHERE cp.conversation_id = $1
         ORDER BY cp.joined_at ASC
         """,
