@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiRequest } from '../../api/client';
 import { Badge } from '../../components/ui/Badge';
 import { Spinner } from '../../components/ui/Spinner';
@@ -139,6 +139,15 @@ interface User360Response {
     api_dids: ApiDidProduct[];
     trunks: TrunkProduct[];
   };
+}
+
+interface UpdateUserPayload {
+  name?: string;
+  email?: string;
+  role?: UserRole;
+  status?: 'active' | 'disabled';
+  customer_id?: number;
+  password?: string;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -927,9 +936,11 @@ function Avatar({ name, size = 64 }: AvatarProps) {
 
 interface HeaderCardProps {
   data: User360Response;
+  isEditing: boolean;
+  onEditToggle: () => void;
 }
 
-function HeaderCard({ data }: HeaderCardProps) {
+function HeaderCard({ data, isEditing, onEditToggle }: HeaderCardProps) {
   const { user, extension, presence } = data;
   const presenceCfg   = PRESENCE_CONFIG[presence?.status ?? 'offline'];
   const roleCfg       = ROLE_CONFIG[user.role];
@@ -1075,10 +1086,63 @@ function HeaderCard({ data }: HeaderCardProps) {
         )}
       </div>
 
-      {/* Right: Presence + last login */}
-      <div style={{ flex: '0 0 auto', textAlign: 'right' }}>
+      {/* Right: Presence + last login + edit toggle */}
+      <div style={{ flex: '0 0 auto', textAlign: 'right', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+        {/* Edit button */}
+        <button
+          type="button"
+          onClick={onEditToggle}
+          title={isEditing ? 'Close editor' : 'Edit this user'}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 6,
+            padding: '6px 12px',
+            borderRadius: 8,
+            background: isEditing ? 'rgba(59,130,246,0.18)' : 'rgba(255,255,255,0.05)',
+            border: `1px solid ${isEditing ? 'rgba(59,130,246,0.45)' : 'rgba(255,255,255,0.1)'}`,
+            color: isEditing ? '#93c5fd' : '#94a3b8',
+            fontSize: '0.78rem',
+            fontWeight: 600,
+            cursor: 'pointer',
+            fontFamily: 'inherit',
+            transition: 'background 0.15s, border-color 0.15s, color 0.15s',
+            marginBottom: 8,
+          }}
+          onMouseEnter={(e) => {
+            if (!isEditing) {
+              (e.currentTarget as HTMLButtonElement).style.background = 'rgba(59,130,246,0.1)';
+              (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(59,130,246,0.3)';
+              (e.currentTarget as HTMLButtonElement).style.color = '#60a5fa';
+            }
+          }}
+          onMouseLeave={(e) => {
+            if (!isEditing) {
+              (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.05)';
+              (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(255,255,255,0.1)';
+              (e.currentTarget as HTMLButtonElement).style.color = '#94a3b8';
+            }
+          }}
+        >
+          {isEditing ? (
+            <>
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={2} style={{ width: 12, height: 12 }}>
+                <path d="M4 4l8 8M12 4l-8 8" strokeLinecap="round" />
+              </svg>
+              Close
+            </>
+          ) : (
+            <>
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={2} style={{ width: 12, height: 12 }}>
+                <path d="M11.5 2.5a2.121 2.121 0 0 1 3 3L5 15l-4 1 1-4 9.5-9.5Z" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              Edit User
+            </>
+          )}
+        </button>
+
         {/* Presence */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'flex-end', marginBottom: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'flex-end', marginBottom: 4 }}>
           <span
             style={{
               width: 10,
@@ -1096,7 +1160,7 @@ function HeaderCard({ data }: HeaderCardProps) {
 
         {/* Presence message */}
         {presence?.message && (
-          <div style={{ fontSize: '0.72rem', color: '#64748b', fontStyle: 'italic', marginBottom: 6, maxWidth: 180, textAlign: 'right' }}>
+          <div style={{ fontSize: '0.72rem', color: '#64748b', fontStyle: 'italic', marginBottom: 4, maxWidth: 180, textAlign: 'right' }}>
             &ldquo;{presence.message}&rdquo;
           </div>
         )}
@@ -2170,6 +2234,384 @@ function TrunksCard({ trunks }: TrunksCardProps) {
   );
 }
 
+// ─── Edit User Panel ──────────────────────────────────────────────────────────
+
+interface EditUserPanelProps {
+  userId: number;
+  user: User360Response['user'];
+  onSuccess: () => void;
+  onCancel: () => void;
+}
+
+function EditUserPanel({ userId, user, onSuccess, onCancel }: EditUserPanelProps) {
+  // ALL hooks before any early returns (React #310)
+  const [name, setName]           = useState(user.name);
+  const [email, setEmail]         = useState(user.email);
+  const [role, setRole]           = useState<UserRole>(user.role);
+  const [status, setStatus]       = useState<'active' | 'disabled'>(
+    user.status === 'suspended' ? 'active' : user.status,
+  );
+  const [customerId, setCustomerId] = useState<number>(user.customer_id);
+  const [password, setPassword]   = useState('');
+  const [saving, setSaving]       = useState(false);
+  const [banner, setBanner]       = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+  const { data: customers, isLoading: customersLoading } = useQuery({
+    queryKey: ['customers'],
+    queryFn:  fetchCustomers,
+    staleTime: 60_000,
+  });
+
+  const sortedCustomers = [...(customers ?? [])].sort((a, b) => a.name.localeCompare(b.name));
+
+  async function handleSave() {
+    setSaving(true);
+    setBanner(null);
+
+    // Build payload with only changed fields
+    const payload: UpdateUserPayload = {};
+    if (name.trim()    !== user.name)         payload.name        = name.trim();
+    if (email.trim()   !== user.email)        payload.email       = email.trim();
+    if (role           !== user.role)         payload.role        = role;
+    if (status         !== user.status && !(user.status === 'suspended' && status === 'active')) {
+      payload.status = status;
+    }
+    if (customerId     !== user.customer_id)  payload.customer_id = customerId;
+    if (password.trim().length > 0)           payload.password    = password.trim();
+
+    // If nothing changed, just close
+    if (Object.keys(payload).length === 0) {
+      onSuccess();
+      return;
+    }
+
+    try {
+      await apiRequest('PUT', `/auth/users/${userId}`, payload);
+      setBanner({ type: 'success', message: 'User updated successfully.' });
+      setSaving(false);
+      // Brief delay so the user sees the success banner before panel closes
+      setTimeout(onSuccess, 800);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'An unexpected error occurred.';
+      setBanner({ type: 'error', message: msg });
+      setSaving(false);
+    }
+  }
+
+  const inputStyle: React.CSSProperties = {
+    width: '100%',
+    boxSizing: 'border-box',
+    padding: '9px 12px',
+    fontSize: '0.875rem',
+    background: 'rgba(255,255,255,0.04)',
+    border: '1px solid rgba(255,255,255,0.08)',
+    borderRadius: 6,
+    color: '#e2e8f0',
+    outline: 'none',
+    fontFamily: 'inherit',
+    transition: 'border-color 0.15s, box-shadow 0.15s',
+  };
+
+  const labelStyle: React.CSSProperties = {
+    display: 'block',
+    fontSize: '0.68rem',
+    fontWeight: 700,
+    color: '#64748b',
+    textTransform: 'uppercase',
+    letterSpacing: '0.08em',
+    marginBottom: 6,
+  };
+
+  function handleInputFocus(e: React.FocusEvent<HTMLInputElement | HTMLSelectElement>) {
+    e.currentTarget.style.borderColor = 'rgba(59,130,246,0.5)';
+    e.currentTarget.style.boxShadow   = '0 0 0 3px rgba(59,130,246,0.1)';
+  }
+
+  function handleInputBlur(e: React.FocusEvent<HTMLInputElement | HTMLSelectElement>) {
+    e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)';
+    e.currentTarget.style.boxShadow   = 'none';
+  }
+
+  return (
+    <div
+      style={{
+        background: 'linear-gradient(135deg, rgba(26,29,39,0.98) 0%, rgba(15,17,23,1) 100%)',
+        border: '1px solid rgba(59,130,246,0.2)',
+        borderRadius: 16,
+        padding: '24px 28px',
+        position: 'relative',
+        overflow: 'hidden',
+        boxShadow: '0 4px 24px rgba(0,0,0,0.3)',
+      }}
+    >
+      {/* Top accent - blue to indicate edit mode */}
+      <div
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 40,
+          right: 40,
+          height: 2,
+          background: 'linear-gradient(90deg, transparent, rgba(59,130,246,0.9), transparent)',
+          opacity: 0.7,
+        }}
+      />
+
+      {/* Section header */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 20 }}>
+        <span style={{ color: '#3b82f6', display: 'flex', alignItems: 'center' }}>
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={2} style={{ width: 14, height: 14 }}>
+            <path d="M11.5 2.5a2.121 2.121 0 0 1 3 3L5 15l-4 1 1-4 9.5-9.5Z" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </span>
+        <h3
+          style={{
+            margin: 0,
+            fontSize: '0.72rem',
+            fontWeight: 700,
+            color: '#64748b',
+            textTransform: 'uppercase',
+            letterSpacing: '0.1em',
+          }}
+        >
+          Edit User
+        </h3>
+      </div>
+
+      {/* Banner */}
+      {banner && (
+        <div
+          style={{
+            padding: '10px 14px',
+            borderRadius: 8,
+            marginBottom: 20,
+            background: banner.type === 'success' ? 'rgba(34,197,94,0.08)' : 'rgba(239,68,68,0.08)',
+            border: `1px solid ${banner.type === 'success' ? 'rgba(34,197,94,0.25)' : 'rgba(239,68,68,0.25)'}`,
+            color: banner.type === 'success' ? '#4ade80' : '#f87171',
+            fontSize: '0.82rem',
+            fontWeight: 500,
+          }}
+        >
+          {banner.message}
+        </div>
+      )}
+
+      {/* Form grid */}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
+          gap: '16px 20px',
+          marginBottom: 20,
+        }}
+      >
+        {/* Name */}
+        <div>
+          <label style={labelStyle}>Name</label>
+          <input
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onFocus={handleInputFocus}
+            onBlur={handleInputBlur}
+            style={inputStyle}
+            disabled={saving}
+            placeholder="Full name"
+          />
+        </div>
+
+        {/* Email */}
+        <div>
+          <label style={labelStyle}>Email</label>
+          <input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            onFocus={handleInputFocus}
+            onBlur={handleInputBlur}
+            style={inputStyle}
+            disabled={saving}
+            placeholder="user@example.com"
+          />
+        </div>
+
+        {/* Role */}
+        <div>
+          <label style={labelStyle}>Role</label>
+          <select
+            value={role}
+            onChange={(e) => setRole(e.target.value as UserRole)}
+            onFocus={handleInputFocus}
+            onBlur={handleInputBlur}
+            disabled={saving}
+            style={{
+              ...inputStyle,
+              appearance: 'none',
+              WebkitAppearance: 'none',
+              cursor: 'pointer',
+              paddingRight: 32,
+            }}
+          >
+            <option value="admin"    style={{ background: '#1a1d2e', color: '#e2e8f0' }}>Admin</option>
+            <option value="user"     style={{ background: '#1a1d2e', color: '#e2e8f0' }}>User</option>
+            <option value="readonly" style={{ background: '#1a1d2e', color: '#e2e8f0' }}>Read-Only</option>
+          </select>
+        </div>
+
+        {/* Status */}
+        <div>
+          <label style={labelStyle}>Status</label>
+          <select
+            value={status}
+            onChange={(e) => setStatus(e.target.value as 'active' | 'disabled')}
+            onFocus={handleInputFocus}
+            onBlur={handleInputBlur}
+            disabled={saving}
+            style={{
+              ...inputStyle,
+              appearance: 'none',
+              WebkitAppearance: 'none',
+              cursor: 'pointer',
+              paddingRight: 32,
+            }}
+          >
+            <option value="active"   style={{ background: '#1a1d2e', color: '#e2e8f0' }}>Active</option>
+            <option value="disabled" style={{ background: '#1a1d2e', color: '#e2e8f0' }}>Disabled</option>
+          </select>
+        </div>
+
+        {/* Customer */}
+        <div>
+          <label style={labelStyle}>Customer</label>
+          <select
+            value={customerId}
+            onChange={(e) => setCustomerId(parseInt(e.target.value, 10))}
+            onFocus={handleInputFocus}
+            onBlur={handleInputBlur}
+            disabled={saving || customersLoading}
+            style={{
+              ...inputStyle,
+              appearance: 'none',
+              WebkitAppearance: 'none',
+              cursor: saving || customersLoading ? 'wait' : 'pointer',
+              paddingRight: 32,
+              color: customersLoading ? '#64748b' : '#e2e8f0',
+            }}
+          >
+            {customersLoading ? (
+              <option value={customerId} style={{ background: '#1a1d2e', color: '#64748b' }}>
+                Loading customers…
+              </option>
+            ) : (
+              sortedCustomers.map((c) => (
+                <option key={c.id} value={c.id} style={{ background: '#1a1d2e', color: '#e2e8f0' }}>
+                  {c.name}{c.status !== 'active' ? ` (${c.status})` : ''}
+                </option>
+              ))
+            )}
+          </select>
+        </div>
+
+        {/* New Password */}
+        <div>
+          <label style={labelStyle}>New Password (leave blank to keep current)</label>
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            onFocus={handleInputFocus}
+            onBlur={handleInputBlur}
+            style={inputStyle}
+            disabled={saving}
+            placeholder="Leave blank to keep current"
+            autoComplete="new-password"
+          />
+        </div>
+      </div>
+
+      {/* Action buttons */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <button
+          type="button"
+          onClick={handleSave}
+          disabled={saving}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 7,
+            padding: '9px 20px',
+            borderRadius: 8,
+            background: saving ? 'rgba(59,130,246,0.5)' : '#3b82f6',
+            border: '1px solid rgba(59,130,246,0.4)',
+            color: '#fff',
+            fontSize: '0.85rem',
+            fontWeight: 600,
+            cursor: saving ? 'not-allowed' : 'pointer',
+            fontFamily: 'inherit',
+            transition: 'background 0.15s',
+          }}
+          onMouseEnter={(e) => {
+            if (!saving) (e.currentTarget as HTMLButtonElement).style.background = '#2563eb';
+          }}
+          onMouseLeave={(e) => {
+            if (!saving) (e.currentTarget as HTMLButtonElement).style.background = '#3b82f6';
+          }}
+        >
+          {saving ? (
+            <>
+              <Spinner size="sm" />
+              Saving…
+            </>
+          ) : (
+            <>
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={2} style={{ width: 12, height: 12 }}>
+                <path d="M13 2H5L2 5v9h12V2Z" strokeLinecap="round" strokeLinejoin="round" />
+                <path d="M10 2v4H5V2M5 9h6" strokeLinecap="round" />
+              </svg>
+              Save Changes
+            </>
+          )}
+        </button>
+
+        <button
+          type="button"
+          onClick={onCancel}
+          disabled={saving}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 6,
+            padding: '9px 16px',
+            borderRadius: 8,
+            background: 'transparent',
+            border: '1px solid rgba(255,255,255,0.08)',
+            color: '#94a3b8',
+            fontSize: '0.85rem',
+            fontWeight: 600,
+            cursor: saving ? 'not-allowed' : 'pointer',
+            fontFamily: 'inherit',
+            transition: 'border-color 0.15s, color 0.15s',
+          }}
+          onMouseEnter={(e) => {
+            if (!saving) {
+              (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(255,255,255,0.18)';
+              (e.currentTarget as HTMLButtonElement).style.color = '#e2e8f0';
+            }
+          }}
+          onMouseLeave={(e) => {
+            if (!saving) {
+              (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(255,255,255,0.08)';
+              (e.currentTarget as HTMLButtonElement).style.color = '#94a3b8';
+            }
+          }}
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ─── 360 View ─────────────────────────────────────────────────────────────────
 
 interface User360ViewProps {
@@ -2177,12 +2619,21 @@ interface User360ViewProps {
 }
 
 function User360View({ userId }: User360ViewProps) {
+  // ALL hooks must be declared before any early returns (React #310)
+  const queryClient = useQueryClient();
+  const [isEditing, setIsEditing] = useState(false);
+
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ['user-360', userId],
     queryFn:  () => fetchUser360(userId),
     staleTime: 30_000,
     retry: 1,
   });
+
+  function handleEditSuccess() {
+    setIsEditing(false);
+    queryClient.invalidateQueries({ queryKey: ['user-360', userId] });
+  }
 
   if (isLoading) {
     return (
@@ -2227,7 +2678,21 @@ function User360View({ userId }: User360ViewProps) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       {/* Header card */}
-      <HeaderCard data={data} />
+      <HeaderCard
+        data={data}
+        isEditing={isEditing}
+        onEditToggle={() => setIsEditing((prev) => !prev)}
+      />
+
+      {/* Edit panel — shown below header when editing */}
+      {isEditing && (
+        <EditUserPanel
+          userId={userId}
+          user={data.user}
+          onSuccess={handleEditSuccess}
+          onCancel={() => setIsEditing(false)}
+        />
+      )}
 
       {/* Status grid */}
       <StatusGrid data={data} />
