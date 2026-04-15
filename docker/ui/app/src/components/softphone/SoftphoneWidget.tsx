@@ -877,6 +877,16 @@ export function SoftphoneWidget() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [incomingCall]);
 
+  // ── Keep the widget on-screen after expand, resize, or page load ──
+  // If the saved position + current expanded state causes overflow, re-clamp.
+  useEffect(() => {
+    const clamped = clampPosition(position.x, position.y, isExpanded, fabWidth);
+    if (clamped.x !== position.x || clamped.y !== position.y) {
+      setPosition(clamped);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isExpanded]);
+
   // ── Guard: UCaaS feature check ──
   const hasUcaas =
     user?.role === 'admin' ||
