@@ -77,6 +77,7 @@ interface VertoCallSession {
    * reused for subsequent tracks on the same call.
    */
   audioElement: HTMLAudioElement | null;
+  audioPlayTimer: ReturnType<typeof setTimeout> | null;
 }
 
 export interface VertoConfig {
@@ -285,6 +286,7 @@ export class VertoClient {
       remoteStream,
       cameraStream: isVideo ? localStream : null,
       audioElement: null,
+      audioPlayTimer: null,
     });
 
     // Notify listener so the UI can attach the local stream to a <video> element
@@ -700,6 +702,7 @@ export class VertoClient {
       remoteStream,
       cameraStream: null,
       audioElement: null,
+      audioPlayTimer: null,
     });
 
     this.onIncomingCall(call);
@@ -1050,10 +1053,21 @@ export class VertoClient {
       session.audioElement = new Audio();
       session.audioElement.autoplay = true;
     }
+
+    // Set srcObject to the latest stream (accumulates tracks as ontrack fires)
     session.audioElement.srcObject = stream;
-    session.audioElement.play().catch((err: unknown) => {
-      console.warn('[Verto] Remote audio autoplay blocked:', err);
-    });
+
+    // Debounce .play() — ontrack fires once per track (audio then video).
+    // If we call .play() on the first ontrack and srcObject changes on the
+    // second ontrack before the first .play() resolves, the browser aborts it
+    // with "AbortError: The play() request was interrupted by a new load request".
+    // Waiting 150ms lets both tracks arrive before we call .play() once.
+    if (session.audioPlayTimer) clearTimeout(session.audioPlayTimer);
+    session.audioPlayTimer = setTimeout(() => {
+      session.audioElement?.play().catch((err: unknown) => {
+        console.warn('[Verto] Remote audio play failed:', err);
+      });
+    }, 150);
   }
 
   private cleanupSession(callId: string): void {
@@ -1066,6 +1080,8 @@ export class VertoClient {
       session.cameraStream.getTracks().forEach((t) => t.stop());
     }
     session.peerConnection.close();
+    // Clear debounced play timer
+    if (session.audioPlayTimer) clearTimeout(session.audioPlayTimer);
     // Stop the detached audio element so the speaker is released immediately.
     if (session.audioElement) {
       session.audioElement.pause();
