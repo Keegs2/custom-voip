@@ -594,24 +594,25 @@ def _parse_conference_list(raw: str) -> list[dict]:
         if len(parts) < 4:
             continue
 
-        # parts[0] = member_id
-        # parts[1] = net_addr:port  (skipped — not useful to the frontend)
-        # parts[2] = caller_id_number  (e.g. "100")
-        # parts[3] = caller_id_name    (e.g. "Keegan Grabhorn")
-        # parts[4] = uuid
-        # parts[5] = codec
-        # parts[6] = flags             (e.g. "hear|speak|talking|video")
+        # Actual FS 'conference list' output for Verto members:
+        # parts[0] = member_id        (e.g. "12")
+        # parts[1] = channel          (e.g. "verto.rtc/*88100")
+        # parts[2] = uuid             (e.g. "9f728bb9-...")
+        # parts[3] = caller_name      (e.g. "Dan Persson")
+        # parts[4] = caller_id_number (e.g. "104")
+        # parts[5] = flags            (e.g. "hear|speak|video")
+        # parts[6..8] = misc          (e.g. "0;0;100")
         member = {
             "member_id": parts[0].strip(),
-            "caller_id": parts[2].strip() if len(parts) > 2 else "",
+            "caller_id": parts[4].strip() if len(parts) > 4 else "",
             "caller_name": parts[3].strip() if len(parts) > 3 else "",
-            "uuid": parts[4].strip() if len(parts) > 4 else "",
-            "codec": parts[5].strip() if len(parts) > 5 else "",
+            "uuid": parts[2].strip() if len(parts) > 2 else "",
+            "codec": "",
         }
 
-        # Parse flags if present (e.g. "hear|speak|talking")
-        if len(parts) > 6:
-            flags_str = parts[6].strip()
+        # Parse flags at index 5 (e.g. "hear|speak|talking|video")
+        if len(parts) > 5:
+            flags_str = parts[5].strip()
             flags = [f.strip() for f in flags_str.split("|") if f.strip()]
             member["flags"] = flags
             member["is_talking"] = "talking" in flags
