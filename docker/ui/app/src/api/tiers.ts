@@ -29,8 +29,13 @@ export async function deleteTier(id: number): Promise<void> {
   return apiRequest('DELETE', `/tiers/${id}`);
 }
 
-export async function getCustomerTier(customerId: number): Promise<CustomerTierResponse> {
-  return apiRequest('GET', `/customers/${customerId}/tier`);
+export async function getCustomerTier(customerId: number): Promise<CustomerTierResponse | null> {
+  try {
+    return await apiRequest('GET', `/customers/${customerId}/tier`);
+  } catch {
+    // Endpoint may not exist yet — return null instead of crashing
+    return null;
+  }
 }
 
 export async function assignCustomerTier(customerId: number, tierId: number): Promise<CustomerTierResponse> {

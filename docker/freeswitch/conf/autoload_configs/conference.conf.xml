@@ -92,17 +92,17 @@
       <param name="exit-sound" value="tone_stream://%(500,0,300,200,100,50,25)"/>
       <param name="max-members" value="50"/>
       <param name="comfort-noise" value="true"/>
-      <!-- Video: mux mode — composites all video streams and mixes all audio.
-           Passthrough mode only forwards floor holder's video and can strip
-           speak flags from non-floor members, causing one-way audio. Mux mode
-           ensures all participants can both see and hear each other. -->
-      <param name="video-mode" value="mux"/>
+      <!-- Video: passthrough mode with forced speak flag.
+           Mux mode had layout parsing issues. Passthrough is simpler for
+           WebRTC: FS forwards the active speaker's video directly without
+           transcoding. Audio is still mixed for all members. -->
+      <param name="video-mode" value="passthrough"/>
       <param name="video-codec-bandwidth" value="2mb"/>
       <param name="video-fps" value="30"/>
-      <param name="video-canvas-size" value="1280x720"/>
-      <param name="video-canvas-bgcolor" value="#0f1117"/>
-      <param name="video-layout-name" value="group:grid"/>
       <param name="video-auto-floor" value="true"/>
+      <!-- Force all members to have speak permission regardless of floor status -->
+      <param name="unmute-new-members" value="true"/>
+      <param name="mute-detect" value="false"/>
     </profile>
   </profiles>
 
