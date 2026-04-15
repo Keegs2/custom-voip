@@ -300,7 +300,8 @@ services:
     depends_on:
       - api
     ports:
-      - "8080:80"
+      - "8080:80"    # HTTP → HTTPS redirect
+      - "8443:443"   # HTTPS (self-signed TLS for WebRTC getUserMedia)
     networks:
       - voip-network
     deploy:

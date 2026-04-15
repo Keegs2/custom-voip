@@ -20,6 +20,17 @@ RUN npm run build
 # Stage 3: Assemble the final nginx image
 FROM nginx:alpine
 RUN rm /etc/nginx/conf.d/default.conf
+
+# Generate a self-signed TLS certificate at build time.
+# WebRTC requires HTTPS for getUserMedia (camera/microphone access).
+# 10-year validity — rebuild the image to rotate.
+RUN apk add --no-cache openssl && \
+    mkdir -p /etc/nginx/ssl && \
+    openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
+      -keyout /etc/nginx/ssl/server.key \
+      -out /etc/nginx/ssl/server.crt \
+      -subj "/CN=voiceplatform.local"
+
 COPY nginx-maps.conf /etc/nginx/conf.d/00-maps.conf
 COPY nginx.conf /etc/nginx/conf.d/rcf-ui.conf
 COPY --from=build /app/dist /usr/share/nginx/html
@@ -27,4 +38,4 @@ COPY --from=build /app/dist /usr/share/nginx/html
 # index.html is already patched with PREFIX: "/homer/" so base href resolves to
 # /homer/ — matching exactly where we place the files on disk.
 COPY --from=homer-source /usr/local/homer/dist /usr/share/nginx/html/homer
-EXPOSE 80
+EXPOSE 80 443
