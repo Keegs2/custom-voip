@@ -10,6 +10,11 @@
  * single remoteVideoStream; non-speaking participants fall back to an avatar.
  *
  * Grid sizing: 1 member → 1 col, 2-4 → 2 cols, 5-9 → 3 cols, 10+ → 4 cols.
+ *
+ * Flow:
+ *   ConferenceRoom mounts → Lobby shown (camera preview, mic level meter)
+ *   User clicks "Join Meeting" → onJoin() fires (makeCall) → activeCall becomes
+ *   non-null → lobbyState transitions to 'joined' → conference grid renders.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -38,6 +43,17 @@ interface ConferenceRoomProps {
   roomNumber: string;
   /** Whether this user has moderator privileges */
   isModerator: boolean;
+  /**
+   * Called when the user confirms they want to join from the lobby.
+   * Should trigger makeCall(*88XX). The conference grid renders once
+   * activeCall becomes non-null following this call.
+   */
+  onJoin: () => void;
+  /**
+   * Called when the user dismisses the lobby without joining.
+   * Should close/unmount the ConferenceRoom overlay entirely.
+   */
+  onCancel: () => void;
 }
 
 /* ─── Video tile ─────────────────────────────────────────── */
@@ -460,6 +476,417 @@ function ParticipantSidebar({ members, isModerator, onKick: _onKick, onMute, onC
   );
 }
 
+/* ─── Lobby ──────────────────────────────────────────────── */
+
+interface LobbyProps {
+  conferenceName: string;
+  onJoin: () => void;
+  onCancel: () => void;
+}
+
+function Lobby({ conferenceName, onJoin, onCancel }: LobbyProps) {
+  const [cameraOn, setCameraOn] = useState(true);
+  const [micOn, setMicOn] = useState(true);
+  const [micLevel, setMicLevel] = useState(0);
+  const [mediaError, setMediaError] = useState<string | null>(null);
+  const [joining, setJoining] = useState(false);
+
+  /*
+   * All media resource handles live in refs so cleanup functions always
+   * reach the current values regardless of which render closure runs.
+   */
+  const previewStreamRef = useRef<MediaStream | null>(null);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const rafIdRef = useRef<number | null>(null);
+  const videoElRef = useRef<HTMLVideoElement>(null);
+
+  /* ── Acquire preview stream on mount ──────────────────── */
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function acquireMedia() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: true,
+          video: true,
+        });
+
+        if (cancelled) {
+          // Component unmounted before getUserMedia resolved — release immediately.
+          stream.getTracks().forEach((t) => t.stop());
+          return;
+        }
+
+        previewStreamRef.current = stream;
+
+        // Bind to the video preview element.
+        const videoEl = videoElRef.current;
+        if (videoEl) {
+          videoEl.srcObject = stream;
+          void videoEl.play().catch(() => undefined);
+        }
+
+        // Wire up AudioContext analyser for the mic level meter.
+        const audioCtx = new AudioContext();
+        const source = audioCtx.createMediaStreamSource(stream);
+        const analyser = audioCtx.createAnalyser();
+        analyser.fftSize = 256;
+        source.connect(analyser);
+        audioCtxRef.current = audioCtx;
+        analyserRef.current = analyser;
+
+        const dataArray = new Uint8Array(analyser.frequencyBinCount);
+
+        function tick() {
+          if (!analyserRef.current) return;
+          analyserRef.current.getByteFrequencyData(dataArray);
+          const avg = dataArray.reduce((a, b) => a + b, 0) / dataArray.length;
+          setMicLevel((avg / 255) * 100);
+          rafIdRef.current = requestAnimationFrame(tick);
+        }
+
+        rafIdRef.current = requestAnimationFrame(tick);
+      } catch (err) {
+        if (!cancelled) {
+          const message = err instanceof Error ? err.message : 'Unknown error';
+          setMediaError(`Could not access camera or microphone: ${message}`);
+        }
+      }
+    }
+
+    void acquireMedia();
+
+    return () => {
+      cancelled = true;
+      stopPreview();
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /* ── Stop all preview resources ───────────────────────── */
+
+  function stopPreview() {
+    if (rafIdRef.current !== null) {
+      cancelAnimationFrame(rafIdRef.current);
+      rafIdRef.current = null;
+    }
+    if (analyserRef.current) {
+      analyserRef.current.disconnect();
+      analyserRef.current = null;
+    }
+    if (audioCtxRef.current) {
+      void audioCtxRef.current.close();
+      audioCtxRef.current = null;
+    }
+    if (previewStreamRef.current) {
+      previewStreamRef.current.getTracks().forEach((t) => t.stop());
+      previewStreamRef.current = null;
+    }
+  }
+
+  /* ── Camera toggle — enable/disable the video track ───── */
+
+  function handleCameraToggle() {
+    const stream = previewStreamRef.current;
+    if (!stream) return;
+    const next = !cameraOn;
+    stream.getVideoTracks().forEach((t) => {
+      t.enabled = next;
+    });
+    setCameraOn(next);
+  }
+
+  /* ── Mic toggle — enable/disable the audio track ───────── */
+
+  function handleMicToggle() {
+    const stream = previewStreamRef.current;
+    if (!stream) return;
+    const next = !micOn;
+    stream.getAudioTracks().forEach((t) => {
+      t.enabled = next;
+    });
+    setMicOn(next);
+    // Freeze the level meter display at 0 when muted.
+    if (!next) setMicLevel(0);
+  }
+
+  /* ── Join — stop preview then call onJoin ─────────────── */
+
+  function handleJoin() {
+    setJoining(true);
+    stopPreview();
+    onJoin();
+  }
+
+  /* ── Styles ───────────────────────────────────────────── */
+
+  const overlayStyle: React.CSSProperties = {
+    position: 'fixed',
+    inset: 0,
+    background: '#0a0c13',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 200,
+  };
+
+  const cardStyle: React.CSSProperties = {
+    background: '#1a1d2e',
+    border: '1px solid rgba(42,47,69,0.6)',
+    borderRadius: 16,
+    padding: '32px 32px 28px',
+    width: '100%',
+    maxWidth: 560,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 24,
+    boxShadow: '0 24px 80px rgba(0,0,0,0.6)',
+  };
+
+  const previewContainerStyle: React.CSSProperties = {
+    position: 'relative',
+    width: '100%',
+    aspectRatio: '4/3',
+    borderRadius: 12,
+    overflow: 'hidden',
+    background: '#0d0f1a',
+    border: '1px solid rgba(42,47,69,0.5)',
+  };
+
+  const cameraOffOverlayStyle: React.CSSProperties = {
+    position: 'absolute',
+    inset: 0,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    background: 'linear-gradient(135deg, rgba(15,17,30,1) 0%, rgba(26,29,46,1) 100%)',
+    flexDirection: 'column',
+    gap: 12,
+  };
+
+  const toggleBtnBase: React.CSSProperties = {
+    width: 48,
+    height: 48,
+    borderRadius: '50%',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    cursor: 'pointer',
+    transition: 'background 0.15s, border-color 0.15s, box-shadow 0.15s',
+    background: 'rgba(255,255,255,0.05)',
+  };
+
+  const toggleBtnOn: React.CSSProperties = {
+    ...toggleBtnBase,
+    border: '1.5px solid #22c55e',
+    color: '#22c55e',
+    boxShadow: '0 0 10px rgba(34,197,94,0.25)',
+  };
+
+  const toggleBtnOff: React.CSSProperties = {
+    ...toggleBtnBase,
+    border: '1.5px solid #475569',
+    color: '#475569',
+  };
+
+  return (
+    <div style={overlayStyle}>
+      <div style={cardStyle}>
+
+        {/* Meeting title */}
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: '0.7rem', fontWeight: 600, color: '#475569', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 6 }}>
+            You&apos;re about to join
+          </div>
+          <h2 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 700, color: '#e2e8f0', letterSpacing: '-0.02em' }}>
+            {conferenceName}
+          </h2>
+        </div>
+
+        {/* Camera preview */}
+        <div style={previewContainerStyle}>
+          <video
+            ref={videoElRef}
+            autoPlay
+            muted
+            playsInline
+            style={{
+              position: 'absolute',
+              inset: 0,
+              width: '100%',
+              height: '100%',
+              objectFit: 'cover',
+              transform: 'scaleX(-1)', // mirror self-view
+              display: cameraOn ? 'block' : 'none',
+            }}
+          />
+
+          {/* Camera-off placeholder */}
+          {!cameraOn && (
+            <div style={cameraOffOverlayStyle}>
+              <div
+                style={{
+                  width: 64,
+                  height: 64,
+                  borderRadius: '50%',
+                  background: 'linear-gradient(135deg, rgba(59,130,246,0.18) 0%, rgba(99,102,241,0.14) 100%)',
+                  border: '1px solid rgba(59,130,246,0.2)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: '#3b82f6',
+                }}
+              >
+                <VideoOff size={28} strokeWidth={1.5} />
+              </div>
+              <span style={{ fontSize: '0.8rem', color: '#475569', fontWeight: 500 }}>
+                Camera is off
+              </span>
+            </div>
+          )}
+
+          {/* Media error message */}
+          {mediaError && (
+            <div
+              style={{
+                position: 'absolute',
+                inset: 0,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexDirection: 'column',
+                gap: 8,
+                padding: 16,
+                background: 'rgba(10,12,19,0.92)',
+                textAlign: 'center',
+              }}
+            >
+              <VideoOff size={24} color="#ef4444" />
+              <span style={{ fontSize: '0.78rem', color: '#94a3b8', lineHeight: 1.5 }}>
+                {mediaError}
+              </span>
+            </div>
+          )}
+        </div>
+
+        {/* Mic level meter */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Mic size={13} color={micOn ? '#22c55e' : '#475569'} />
+            <span style={{ fontSize: '0.72rem', color: '#475569', fontWeight: 500 }}>
+              {micOn ? 'Microphone' : 'Microphone (muted)'}
+            </span>
+          </div>
+          {/* Track */}
+          <div
+            style={{
+              width: '100%',
+              height: 6,
+              borderRadius: 3,
+              background: 'rgba(255,255,255,0.06)',
+              overflow: 'hidden',
+            }}
+          >
+            {/* Fill */}
+            <div
+              style={{
+                height: '100%',
+                width: `${micOn ? micLevel : 0}%`,
+                borderRadius: 3,
+                background: micLevel > 70
+                  ? '#f59e0b'
+                  : '#22c55e',
+                transition: 'width 80ms linear, background 200ms',
+              }}
+            />
+          </div>
+        </div>
+
+        {/* Toggle buttons */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 20 }}>
+          {/* Camera toggle */}
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
+            <button
+              type="button"
+              onClick={handleCameraToggle}
+              disabled={!!mediaError}
+              aria-label={cameraOn ? 'Turn camera off' : 'Turn camera on'}
+              style={cameraOn ? toggleBtnOn : toggleBtnOff}
+            >
+              {cameraOn ? <Video size={20} /> : <VideoOff size={20} />}
+            </button>
+            <span style={{ fontSize: '0.65rem', color: cameraOn ? '#22c55e' : '#475569', fontWeight: 500 }}>
+              {cameraOn ? 'Camera On' : 'Camera Off'}
+            </span>
+          </div>
+
+          {/* Mic toggle */}
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
+            <button
+              type="button"
+              onClick={handleMicToggle}
+              disabled={!!mediaError}
+              aria-label={micOn ? 'Mute microphone' : 'Unmute microphone'}
+              style={micOn ? toggleBtnOn : toggleBtnOff}
+            >
+              {micOn ? <Mic size={20} /> : <MicOff size={20} />}
+            </button>
+            <span style={{ fontSize: '0.65rem', color: micOn ? '#22c55e' : '#475569', fontWeight: 500 }}>
+              {micOn ? 'Mic On' : 'Mic Off'}
+            </span>
+          </div>
+        </div>
+
+        {/* Join + Cancel */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <button
+            type="button"
+            onClick={handleJoin}
+            disabled={joining}
+            style={{
+              width: '100%',
+              height: 48,
+              borderRadius: 10,
+              background: joining ? 'rgba(34,197,94,0.4)' : '#22c55e',
+              border: 'none',
+              color: '#fff',
+              fontSize: '0.95rem',
+              fontWeight: 700,
+              cursor: joining ? 'not-allowed' : 'pointer',
+              letterSpacing: '-0.01em',
+              transition: 'background 0.15s, opacity 0.15s',
+              boxShadow: joining ? 'none' : '0 4px 18px rgba(34,197,94,0.35)',
+            }}
+          >
+            {joining ? 'Joining...' : 'Join Meeting'}
+          </button>
+
+          <button
+            type="button"
+            onClick={onCancel}
+            style={{
+              background: 'none',
+              border: 'none',
+              color: '#475569',
+              cursor: 'pointer',
+              fontSize: '0.82rem',
+              fontWeight: 500,
+              padding: '4px 0',
+              textDecoration: 'underline',
+              textDecorationColor: 'rgba(71,85,105,0.4)',
+              transition: 'color 0.15s',
+            }}
+          >
+            Cancel
+          </button>
+        </div>
+
+      </div>
+    </div>
+  );
+}
+
 /* ─── Main component ─────────────────────────────────────── */
 
 const GLOBAL_STYLES = `
@@ -477,6 +904,8 @@ export function ConferenceRoom({
   conferenceId,
   conferenceName,
   isModerator,
+  onJoin,
+  onCancel,
 }: ConferenceRoomProps) {
   const {
     activeCall,
@@ -491,6 +920,18 @@ export function ConferenceRoom({
     setCameraEnabled,
     credentials,
   } = useSoftphone();
+
+  /*
+   * ── Lobby state ─────────────────────────────────────────
+   *
+   * Starts as 'lobby'. Transitions to 'joined' when the user clicks
+   * "Join Meeting" in the Lobby. The conference grid becomes visible once
+   * activeCall is also non-null (makeCall has completed).
+   *
+   * IMPORTANT: this useState must remain above ALL early returns to satisfy
+   * React rule #310 (hooks must not be called conditionally).
+   */
+  const [lobbyState, setLobbyState] = useState<'lobby' | 'joined'>('lobby');
 
   const [liveStatus, setLiveStatus] = useState<ConferenceLiveStatus | null>(null);
   const [showParticipants, setShowParticipants] = useState(false);
@@ -558,6 +999,18 @@ export function ConferenceRoom({
     };
   }, [fetchLiveStatus]);
 
+  /*
+   * ── Transition to 'joined' once activeCall arrives ──────
+   *
+   * When makeCall completes and the SoftphoneContext sets activeCall, we
+   * flip lobbyState so the conference grid replaces the "Joining..." state.
+   */
+  useEffect(() => {
+    if (activeCall && lobbyState === 'lobby') {
+      setLobbyState('joined');
+    }
+  }, [activeCall, lobbyState]);
+
   /* ── Recording ─────────────────────────────────────────── */
 
   const toggleRecording = useCallback(async () => {
@@ -613,7 +1066,77 @@ export function ConferenceRoom({
     else muteCall();
   }, [activeCall?.muted, muteCall, unmuteCall]);
 
-  if (!activeCall) return null;
+  /* ── Lobby handler ─────────────────────────────────────── */
+
+  const handleLobbyJoin = useCallback(() => {
+    /*
+     * Preview stream is stopped inside the Lobby component before this
+     * fires, so the conference call's getUserMedia can claim the same
+     * hardware tracks without conflict.
+     */
+    onJoin();
+  }, [onJoin]);
+
+  /* ── Lobby render path ─────────────────────────────────── */
+
+  if (lobbyState === 'lobby') {
+    return (
+      <>
+        <style>{GLOBAL_STYLES}</style>
+        <Lobby
+          conferenceName={conferenceName}
+          onJoin={handleLobbyJoin}
+          onCancel={onCancel}
+        />
+      </>
+    );
+  }
+
+  /* ── Conference grid — only after activeCall is set ─────── */
+
+  if (!activeCall) {
+    /*
+     * Edge case: lobbyState is 'joined' but makeCall has not resolved yet
+     * (the context hasn't propagated activeCall). Show a brief connecting
+     * screen rather than nothing, so the user knows their click registered.
+     */
+    return (
+      <div
+        style={{
+          position: 'fixed',
+          inset: 0,
+          background: '#0a0c13',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 200,
+          flexDirection: 'column',
+          gap: 16,
+        }}
+      >
+        <style>{GLOBAL_STYLES}</style>
+        <div
+          style={{
+            width: 64,
+            height: 64,
+            borderRadius: 18,
+            background: 'linear-gradient(135deg, rgba(34,197,94,0.16) 0%, rgba(16,185,129,0.10) 100%)',
+            border: '1px solid rgba(34,197,94,0.25)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: '#22c55e',
+            animation: 'conferencePulse 2s ease-in-out infinite',
+          }}
+        >
+          <Users size={30} strokeWidth={1.5} />
+        </div>
+        <span style={{ fontSize: '0.9rem', color: '#475569', fontWeight: 500 }}>
+          Connecting to {conferenceName}...
+        </span>
+      </div>
+    );
+  }
 
   const members = liveStatus?.members ?? [];
   const memberCount = members.length;

@@ -2027,6 +2027,12 @@ export function ConferencePage() {
   const [, setLoadError] = useState<string | null>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [allSchedules, setAllSchedules] = useState<AggregatedSchedule[]>([]);
+  /**
+   * Controls whether the ConferenceRoom overlay (including the lobby) is
+   * visible. Set to true as soon as the user clicks a join/start-now button
+   * so the lobby can show immediately — before makeCall fires.
+   */
+  const [showConferenceOverlay, setShowConferenceOverlay] = useState(false);
   const [startNowHover, setStartNowHover] = useState(false);
   const [isStartingNow, setIsStartingNow] = useState(false);
 
@@ -2044,11 +2050,6 @@ export function ConferencePage() {
   const joiningRef = useRef(false);
 
   /* ── Conference room overlay state ──────────────────────── */
-  // If the active call destination matches *88XX and we have a selected room
-  const isInConference = activeCall !== null &&
-    activeCall.state === 'active' &&
-    activeCall.remoteNumber.startsWith('*88') &&
-    selectedId !== null;
 
   const activeConference = selectedId !== null
     ? conferences.find((c) => c.id === selectedId) ?? null
@@ -2127,25 +2128,48 @@ export function ConferencePage() {
   useEffect(() => {
     if (activeCall === null) {
       joiningRef.current = false;
+      // Close the conference overlay when the call ends (hangup from inside
+      // the room closes the overlay; we also guard the case where the call
+      // drops unexpectedly while still in the lobby).
+      setShowConferenceOverlay(false);
     }
   }, [activeCall]);
 
-  /* ── Join handler ────────────────────────────────────────── */
+  /* ── Join handlers ───────────────────────────────────────── */
 
-  const handleJoin = useCallback(async (conf: Conference) => {
-    // Prevent duplicate makeCall invocations from re-renders, double-clicks,
-    // or the "auto-create then join" flow calling handleJoin after setting
-    // state that causes a re-render mid-await.
+  /**
+   * Opens the ConferenceRoom overlay with the lobby screen for the given
+   * conference. makeCall does NOT fire yet — it fires only when the user
+   * clicks "Join Meeting" inside the lobby (via dialConference below).
+   */
+  const openLobby = useCallback((conf: Conference) => {
+    setSelectedId(conf.id);
+    setShowConferenceOverlay(true);
+  }, []);
+
+  /**
+   * Dials into the currently selected conference room. Called by the lobby's
+   * "Join Meeting" button via the onJoin prop of ConferenceRoom.
+   *
+   * Guarded by joiningRef to prevent duplicate makeCall invocations.
+   */
+  const dialConference = useCallback(async () => {
+    if (!activeConference) return;
     if (joiningRef.current) return;
     joiningRef.current = true;
 
-    // Ensure the conference is selected BEFORE dialing so that when the call
-    // transitions to 'active', isInConference is true and the overlay renders.
-    setSelectedId(conf.id);
+    const dialCode = `*88${activeConference.room_number}`;
+    await makeCall(dialCode, { video: activeConference.video_enabled });
+  }, [activeConference, makeCall]);
 
-    const dialCode = `*88${conf.room_number}`;
-    await makeCall(dialCode, { video: conf.video_enabled });
-  }, [makeCall]);
+  /**
+   * Legacy helper kept for the "auto-create then join" flow used by the
+   * Start Meeting Now button when no rooms exist. Opens the lobby for the
+   * newly created room so the user still goes through the device check.
+   */
+  const handleJoin = useCallback((conf: Conference) => {
+    openLobby(conf);
+  }, [openLobby]);
 
   /* ── Created / deleted ───────────────────────────────────── */
 
@@ -2445,13 +2469,15 @@ export function ConferencePage() {
       {/* Softphone overlay */}
       <SoftphoneWidget />
 
-      {/* Conference room full-screen overlay */}
-      {isInConference && activeConference && (
+      {/* Conference room full-screen overlay (includes lobby pre-join screen) */}
+      {showConferenceOverlay && activeConference && (
         <ConferenceRoom
           conferenceId={activeConference.id}
           conferenceName={activeConference.name}
           roomNumber={activeConference.room_number}
           isModerator={true}
+          onJoin={() => void dialConference()}
+          onCancel={() => setShowConferenceOverlay(false)}
         />
       )}
 
