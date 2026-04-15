@@ -301,7 +301,8 @@ async def did_call_history(
 
 @router.get("/user")
 async def search_users(
-    q: str = Query(..., min_length=1, description="Search by name, email, or extension"),
+    q: str | None = Query(None, min_length=1, description="Search by name, email, or extension"),
+    customer_id: int | None = Query(None, description="Filter results to a specific customer"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     admin: dict = Depends(require_admin),
@@ -309,37 +310,101 @@ async def search_users(
     """Search users by name, email, or extension number.
 
     Returns basic user info with extension and customer context for each match.
-    """
-    like_pattern = f"%{q}%"
 
-    search_sql = """
-    WITH matched AS (
-        SELECT DISTINCT ON (u.id)
-            u.id,
-            u.name,
-            u.email,
-            u.customer_id,
-            c.name                  AS customer_name,
-            e.extension,
-            e.assigned_did,
-            ps.status               AS presence_status
-        FROM users u
-        LEFT JOIN customers c       ON c.id = u.customer_id
-        LEFT JOIN extensions e      ON e.user_id = u.id AND e.status = 'active'
-        LEFT JOIN presence_status ps ON ps.user_id = u.id
-        WHERE u.name ILIKE $1
-           OR u.email ILIKE $1
-           OR e.extension = $2
-    )
-    SELECT *, COUNT(*) OVER() AS _total
-    FROM matched
-    ORDER BY name
-    LIMIT $3 OFFSET $4
+    When ``customer_id`` is provided without ``q``, returns all users for that
+    customer.  When both are provided, the text search is scoped to that
+    customer only.
     """
+    if q is None and customer_id is None:
+        raise HTTPException(
+            status_code=400,
+            detail="At least one of 'q' or 'customer_id' must be provided",
+        )
 
-    # For extension search, pass the raw query (exact match on extension).
-    # For name/email, the ILIKE handles partial matching.
-    rows = await db.fetch_all(search_sql, like_pattern, q, limit, offset)
+    if q is not None and customer_id is not None:
+        # Text search scoped to a specific customer
+        like_pattern = f"%{q}%"
+        search_sql = """
+        WITH matched AS (
+            SELECT DISTINCT ON (u.id)
+                u.id,
+                u.name,
+                u.email,
+                u.customer_id,
+                c.name                  AS customer_name,
+                e.extension,
+                e.assigned_did,
+                ps.status               AS presence_status
+            FROM users u
+            LEFT JOIN customers c       ON c.id = u.customer_id
+            LEFT JOIN extensions e      ON e.user_id = u.id AND e.status = 'active'
+            LEFT JOIN presence_status ps ON ps.user_id = u.id
+            WHERE u.customer_id = $3
+              AND (u.name ILIKE $1
+                   OR u.email ILIKE $1
+                   OR e.extension = $2)
+        )
+        SELECT *, COUNT(*) OVER() AS _total
+        FROM matched
+        ORDER BY name
+        LIMIT $4 OFFSET $5
+        """
+        rows = await db.fetch_all(search_sql, like_pattern, q, customer_id, limit, offset)
+
+    elif q is not None:
+        # Text search across all customers (original behaviour)
+        like_pattern = f"%{q}%"
+        search_sql = """
+        WITH matched AS (
+            SELECT DISTINCT ON (u.id)
+                u.id,
+                u.name,
+                u.email,
+                u.customer_id,
+                c.name                  AS customer_name,
+                e.extension,
+                e.assigned_did,
+                ps.status               AS presence_status
+            FROM users u
+            LEFT JOIN customers c       ON c.id = u.customer_id
+            LEFT JOIN extensions e      ON e.user_id = u.id AND e.status = 'active'
+            LEFT JOIN presence_status ps ON ps.user_id = u.id
+            WHERE u.name ILIKE $1
+               OR u.email ILIKE $1
+               OR e.extension = $2
+        )
+        SELECT *, COUNT(*) OVER() AS _total
+        FROM matched
+        ORDER BY name
+        LIMIT $3 OFFSET $4
+        """
+        rows = await db.fetch_all(search_sql, like_pattern, q, limit, offset)
+
+    else:
+        # customer_id only — list all users for that customer
+        search_sql = """
+        WITH matched AS (
+            SELECT DISTINCT ON (u.id)
+                u.id,
+                u.name,
+                u.email,
+                u.customer_id,
+                c.name                  AS customer_name,
+                e.extension,
+                e.assigned_did,
+                ps.status               AS presence_status
+            FROM users u
+            LEFT JOIN customers c       ON c.id = u.customer_id
+            LEFT JOIN extensions e      ON e.user_id = u.id AND e.status = 'active'
+            LEFT JOIN presence_status ps ON ps.user_id = u.id
+            WHERE u.customer_id = $1
+        )
+        SELECT *, COUNT(*) OVER() AS _total
+        FROM matched
+        ORDER BY name
+        LIMIT $2 OFFSET $3
+        """
+        rows = await db.fetch_all(search_sql, customer_id, limit, offset)
 
     total = int(rows[0]["_total"]) if rows else 0
 
@@ -357,6 +422,65 @@ async def search_users(
         })
 
     return {"results": results, "total": total}
+
+
+# ---------------------------------------------------------------------------
+# List Users by Customer — all users under a single customer
+# ---------------------------------------------------------------------------
+
+@router.get("/user/by-customer/{customer_id}")
+async def list_users_by_customer(
+    customer_id: int,
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    admin: dict = Depends(require_admin),
+):
+    """Return all users for a specific customer with extension and presence info.
+
+    Results are ordered by extension number (nulls last), then by name.
+    """
+    list_sql = """
+    WITH matched AS (
+        SELECT DISTINCT ON (u.id)
+            u.id,
+            u.name,
+            u.email,
+            u.role,
+            u.status,
+            u.last_login,
+            e.extension,
+            e.assigned_did,
+            ps.status               AS presence_status
+        FROM users u
+        LEFT JOIN extensions e      ON e.user_id = u.id AND e.status = 'active'
+        LEFT JOIN presence_status ps ON ps.user_id = u.id
+        WHERE u.customer_id = $1
+    )
+    SELECT *, COUNT(*) OVER() AS _total
+    FROM matched
+    ORDER BY extension ASC NULLS LAST, name
+    LIMIT $2 OFFSET $3
+    """
+
+    rows = await db.fetch_all(list_sql, customer_id, limit, offset)
+
+    total = int(rows[0]["_total"]) if rows else 0
+
+    results = []
+    for r in rows:
+        results.append({
+            "id": r["id"],
+            "name": r["name"],
+            "email": r["email"],
+            "role": r["role"],
+            "status": r["status"],
+            "extension": r["extension"],
+            "assigned_did": r["assigned_did"],
+            "presence_status": r["presence_status"],
+            "last_login": r["last_login"],
+        })
+
+    return {"results": results, "total": total, "customer_id": customer_id}
 
 
 # ---------------------------------------------------------------------------
