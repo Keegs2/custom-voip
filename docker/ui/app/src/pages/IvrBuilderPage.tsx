@@ -24,7 +24,6 @@ import {
 
 import { useToast } from '../components/ui/ToastContext';
 import { Sidebar } from '../components/layout/Sidebar';
-import { SoftphoneWidget } from '../components/softphone/SoftphoneWidget';
 import { Spinner } from '../components/ui/Spinner';
 import {
   listIvrFlows,
@@ -552,7 +551,6 @@ export function IvrBuilderPage() {
       <div style={{ display: 'flex', height: '100vh', width: '100vw', overflow: 'hidden', background: '#0f1117' }}>
         {/* Nav sidebar (240px) */}
         <Sidebar />
-        <SoftphoneWidget />
 
         {/* Content area — sits to the right of the 240px sidebar */}
         <div style={{ marginLeft: 240, flex: 1, display: 'flex', overflow: 'hidden', height: '100vh' }}>

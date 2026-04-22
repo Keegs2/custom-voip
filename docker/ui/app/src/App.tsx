@@ -1,7 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
-import { SoftphoneProvider } from './contexts/SoftphoneContext';
-import { ChatProvider } from './contexts/ChatContext';
 import { RequireAuth } from './components/auth/RequireAuth';
 import { RequireAdmin } from './components/auth/RequireAdmin';
 import { AppLayout } from './components/layout/AppLayout';
@@ -26,22 +24,13 @@ import { TrunksAdminPage } from './pages/admin/TrunksAdminPage';
 import { DIDSearchPage } from './pages/admin/DIDSearchPage';
 import { UserDetailPage } from './pages/admin/UserDetailPage';
 import { CallQualityPage } from './pages/CallQualityPage';
-import { VoicemailPage } from './pages/VoicemailPage';
-import { ChatPage } from './pages/ChatPage';
-import { ConferencePage } from './pages/ConferencePage';
-import { DocumentsPage } from './pages/DocumentsPage';
 import { AccountPage } from './pages/AccountPage';
-import { CommunicationsPage } from './pages/CommunicationsPage';
 
 export function App() {
   return (
     <BrowserRouter>
       {/* AuthProvider is inside BrowserRouter so it can call useNavigate */}
       <AuthProvider>
-        {/* SoftphoneProvider is inside AuthProvider so it can read auth state */}
-        <SoftphoneProvider>
-        {/* ChatProvider is inside SoftphoneProvider — both depend on auth */}
-        <ChatProvider>
         <Routes>
           {/* Public route — no auth required */}
           <Route path="login" element={<LoginPage />} />
@@ -61,7 +50,6 @@ export function App() {
             <Route path="documentation" element={<DocsPage />} />
             <Route path="call-quality" element={<CallQualityPage />} />
             <Route path="account"          element={<AccountPage />} />
-            <Route path="communications"  element={<CommunicationsPage />} />
 
             {/* DID Search — admin-only, standalone (not nested inside AdminPage tabs) */}
             <Route
@@ -138,44 +126,10 @@ export function App() {
               </RequireAuth>
             }
           />
-          <Route
-            path="chat"
-            element={
-              <RequireAuth>
-                <ChatPage />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="conference"
-            element={
-              <RequireAuth>
-                <ConferencePage />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="documents"
-            element={
-              <RequireAuth>
-                <DocumentsPage />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="voicemail"
-            element={
-              <RequireAuth>
-                <VoicemailPage />
-              </RequireAuth>
-            }
-          />
 
           {/* Catch-all redirect to home */}
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
-        </ChatProvider>
-        </SoftphoneProvider>
       </AuthProvider>
     </BrowserRouter>
   );

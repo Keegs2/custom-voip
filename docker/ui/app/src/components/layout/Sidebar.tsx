@@ -2,15 +2,11 @@ import { useState, useEffect, useCallback } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { cn } from '../../utils/cn';
 import { useAuth } from '../../contexts/AuthContext';
-import { useSoftphone } from '../../contexts/SoftphoneContext';
-import { useChat } from '../../contexts/ChatContext';
-import { PresenceIndicator } from '../softphone/PresenceIndicator';
-import type { PresenceStatus } from '../../types/softphone';
 import {
   IconRCF, IconTrunk, IconAPI, IconIVR, IconDocs,
-  IconAdmin, IconSignal, IconTroubleshoot, IconVoicemail,
+  IconAdmin, IconSignal, IconTroubleshoot,
 } from '../icons/ProductIcons';
-import { FolderOpen, Package, MessageCircle, Shield, ChevronDown, Phone } from 'lucide-react';
+import { Package, Shield, ChevronDown, Phone } from 'lucide-react';
 
 /* ─── Types ───────────────────────────────────────────────── */
 
@@ -22,24 +18,6 @@ interface NavItemDef {
   accountTypes?: string[];
   adminOnly?: boolean;
 }
-
-/* ─── Presence config ─────────────────────────────────────── */
-
-const PRESENCE_OPTIONS: { value: PresenceStatus; label: string; color: string }[] = [
-  { value: 'available', label: 'Available',      color: '#22c55e' },
-  { value: 'away',      label: 'Away',           color: '#f59e0b' },
-  { value: 'busy',      label: 'Busy',           color: '#ef4444' },
-  { value: 'dnd',       label: 'Do Not Disturb', color: '#ef4444' },
-  { value: 'offline',   label: 'Appear Offline', color: '#64748b' },
-];
-
-/* ─── Icons ───────────────────────────────────────────────── */
-
-const IconSignOut = () => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} style={{ width: 14, height: 14 }}>
-    <path d="M15.75 9V5.25A2.25 2.25 0 0 0 13.5 3h-6a2.25 2.25 0 0 0-2.25 2.25v13.5A2.25 2.25 0 0 0 7.5 21h6a2.25 2.25 0 0 0 2.25-2.25V15m3 0 3-3m0 0-3-3m3 3H9" strokeLinecap="round" strokeLinejoin="round" />
-  </svg>
-);
 
 /* ─── Nav item definitions ────────────────────────────────── */
 
@@ -72,16 +50,22 @@ function saveGroupState(state: Record<string, boolean>): void {
   }
 }
 
+/* ─── Icons ───────────────────────────────────────────────── */
+
+const IconSignOut = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} style={{ width: 14, height: 14 }}>
+    <path d="M15.75 9V5.25A2.25 2.25 0 0 0 13.5 3h-6a2.25 2.25 0 0 0-2.25 2.25v13.5A2.25 2.25 0 0 0 7.5 21h6a2.25 2.25 0 0 0 2.25-2.25V15m3 0 3-3m0 0-3-3m3 3H9" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+
 /* ─── SidebarNavItem ──────────────────────────────────────── */
 
 interface SidebarNavItemProps {
   item: NavItemDef;
   onNavigate?: () => void;
-  badge?: number;
-  badgeColor?: string;
 }
 
-function SidebarNavItem({ item, onNavigate, badge, badgeColor }: SidebarNavItemProps) {
+function SidebarNavItem({ item, onNavigate }: SidebarNavItemProps) {
   return (
     <NavLink
       to={item.to}
@@ -139,30 +123,8 @@ function SidebarNavItem({ item, onNavigate, badge, badgeColor }: SidebarNavItemP
           <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {item.label}
           </span>
-          {/* Unread badge */}
-          {badge !== undefined && badge > 0 && (
-            <span
-              style={{
-                minWidth: 17,
-                height: 17,
-                borderRadius: 9,
-                background: badgeColor ?? '#3b82f6',
-                color: '#fff',
-                fontSize: '0.575rem',
-                fontWeight: 700,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                padding: '0 4px',
-                flexShrink: 0,
-                letterSpacing: '0.02em',
-              }}
-            >
-              {badge > 99 ? '99+' : badge}
-            </span>
-          )}
-          {/* Active dot when no badge */}
-          {isActive && (badge === undefined || badge === 0) && (
+          {/* Active dot */}
+          {isActive && (
             <span
               style={{
                 width: 5,
@@ -299,32 +261,20 @@ export function Sidebar() {
   // derived values, conditionals, or early returns — React tracks hooks by
   // call order and will throw error #310 if the count changes between renders.
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [showPresenceMenu, setShowPresenceMenu] = useState(false);
   const [groupOpen, setGroupOpen] = useState<Record<string, boolean>>(() => {
-    // Lazy initializer: reads localStorage once on mount. hasUcaas is not yet
-    // computed here, so we default communications to true and let the
-    // auto-expand useEffect below sync it on the first render.
     const stored = loadGroupState();
     return {
       products:       stored.products       ?? true,
-      communications: stored.communications ?? true,
       administration: stored.administration ?? false,
     };
   });
   const navigate = useNavigate();
   const location = useLocation();
   const { user, isAdmin, logout } = useAuth();
-  const { presence, setPresence, unreadVoicemailCount, credentials } = useSoftphone();
-  const { totalUnread: unreadChatCount } = useChat();
 
   /* ── Access flags ──────────────────────────────────────── */
 
   const isSupport = user?.role === 'readonly';
-  const hasUcaas =
-    user?.role === 'admin' ||
-    user?.account_type === 'ucaas' ||
-    (user?.account_type !== 'rcf' && user?.ucaas_enabled === true);
-
   const showAdmin = isAdmin || isSupport;
 
   /* ── Product items filtered by role/account_type ───────── */
@@ -342,21 +292,17 @@ export function Sidebar() {
   useEffect(() => {
     const path = location.pathname;
 
-    const productPaths  = productNavItems.map((i) => i.to);
-    const commPaths     = ['/chat', '/conference', '/documents', '/voicemail', '/communications'];
-    const adminPaths    = ['/admin', '/call-quality', '/admin/did-search', '/admin/user', '/troubleshooting'];
+    const productPaths = productNavItems.map((i) => i.to);
+    const adminPaths   = ['/admin', '/call-quality', '/admin/did-search', '/admin/user', '/troubleshooting'];
 
     const inProducts = productPaths.some((p) => path === p || path.startsWith(p + '/'));
-    const inComms    = commPaths.some((p) => path === p || path.startsWith(p + '/'));
     const inAdmin    = adminPaths.some((p) => path === p || path.startsWith(p + '/'));
 
     setGroupOpen((prev) => {
       const next = { ...prev };
       if (inProducts && !prev.products)       next.products       = true;
-      if (inComms    && !prev.communications) next.communications = true;
       if (inAdmin    && !prev.administration) next.administration = true;
       if (next.products === prev.products &&
-          next.communications === prev.communications &&
           next.administration === prev.administration) {
         return prev; // avoid unnecessary re-render
       }
@@ -381,13 +327,6 @@ export function Sidebar() {
   const displayName  = user?.name || user?.email?.split('@')[0] || '';
   const displayEmail = user?.email ?? '';
   const contextLabel = user?.customer_name ?? null;
-
-  /* ── Communications items ──────────────────────────────── */
-
-  const chatItem: NavItemDef  = { label: 'Chat',        to: '/chat',       color: '#60a5fa', icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} style={{ width: 15, height: 15 }}><path d="M8.625 12a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H8.25m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H12m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 0 1-2.555-.337A5.972 5.972 0 0 1 5.41 20.97a5.969 5.969 0 0 1-.474-.065 4.48 4.48 0 0 0 .978-2.025c.09-.457-.133-.901-.467-1.226C3.93 16.178 3 14.189 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25Z" strokeLinecap="round" strokeLinejoin="round" /></svg> };
-  const confItem: NavItemDef  = { label: 'Meetings',    to: '/conference', color: '#4ade80', icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} style={{ width: 15, height: 15 }}><path d="m15.75 10.5 4.72-4.72a.75.75 0 0 1 1.28.53v11.38a.75.75 0 0 1-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 0 0 2.25-2.25v-9a2.25 2.25 0 0 0-2.25-2.25h-9A2.25 2.25 0 0 0 2.25 7.5v9a2.25 2.25 0 0 0 2.25 2.25Z" strokeLinecap="round" strokeLinejoin="round" /></svg> };
-  const docsItem: NavItemDef  = { label: 'Documents',   to: '/documents',  color: '#fbbf24', icon: <FolderOpen size={14} strokeWidth={1.8} /> };
-  const vmItem: NavItemDef    = { label: 'Voicemail',   to: '/voicemail',  color: '#818cf8', icon: <IconVoicemail size={15} /> };
 
   /* ── Admin items ───────────────────────────────────────── */
 
@@ -432,7 +371,7 @@ export function Sidebar() {
           }}
           aria-label="Toggle navigation"
         >
-          ☰
+          &#9776;
         </button>
         <span
           style={{
@@ -583,29 +522,7 @@ export function Sidebar() {
             ))}
           </CollapsibleGroup>
 
-          {/* ── GROUP 2: Communications (UCaaS only) ────── */}
-          {hasUcaas && (
-            <>
-              <div style={{ height: 6 }} />
-              <CollapsibleGroup
-                id="communications"
-                label="Communications"
-                icon={<MessageCircle size={11} strokeWidth={2.5} />}
-                isOpen={groupOpen.communications}
-                onToggle={toggleGroup}
-                to="/communications"
-              >
-                <SidebarNavItem item={chatItem} onNavigate={closeMobile} badge={unreadChatCount} badgeColor="#3b82f6" />
-                <SidebarNavItem item={confItem} onNavigate={closeMobile} />
-                <SidebarNavItem item={docsItem} onNavigate={closeMobile} />
-                {credentials && (
-                  <SidebarNavItem item={vmItem} onNavigate={closeMobile} badge={unreadVoicemailCount} badgeColor="#ef4444" />
-                )}
-              </CollapsibleGroup>
-            </>
-          )}
-
-          {/* ── GROUP 3: Administration (admin + support) ─ */}
+          {/* ── GROUP 2: Administration (admin + support) ─ */}
           {showAdmin && (
             <>
               <div style={{ height: 6 }} />
@@ -682,102 +599,29 @@ export function Sidebar() {
                 }
               }}
             >
-            {/* Avatar + presence dot */}
-            <div style={{ position: 'relative', flexShrink: 0 }}>
-              <div
-                style={{
-                  width: 30,
-                  height: 30,
-                  borderRadius: '50%',
-                  background: 'linear-gradient(135deg, rgba(59,130,246,0.30) 0%, rgba(59,130,246,0.15) 100%)',
-                  border: '1px solid rgba(59,130,246,0.3)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: '0.7rem',
-                  fontWeight: 700,
-                  color: '#60a5fa',
-                  letterSpacing: '0.02em',
-                  textTransform: 'uppercase',
-                }}
-                aria-hidden="true"
-              >
-                {displayName.charAt(0) || '?'}
-              </div>
-              {hasUcaas && (
-                <button
-                  type="button"
-                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); setShowPresenceMenu((v) => !v); }}
-                  aria-label="Change presence status"
-                  aria-haspopup="listbox"
-                  aria-expanded={showPresenceMenu}
-                  style={{
-                    position: 'absolute',
-                    bottom: -1,
-                    right: -1,
-                    background: 'transparent',
-                    border: 'none',
-                    padding: 0,
-                    cursor: 'pointer',
-                    display: 'flex',
-                  }}
-                >
-                  <PresenceIndicator status={presence} size={9} />
-                </button>
-              )}
-
-              {/* Presence dropdown */}
-              {showPresenceMenu && hasUcaas && (
+              {/* Avatar */}
+              <div style={{ position: 'relative', flexShrink: 0 }}>
                 <div
                   style={{
-                    position: 'absolute',
-                    bottom: 36,
-                    left: 0,
-                    background: '#1e2435',
-                    border: '1px solid rgba(255,255,255,0.10)',
-                    borderRadius: 10,
-                    boxShadow: '0 -8px 24px rgba(0,0,0,0.6)',
-                    zIndex: 200,
-                    minWidth: 164,
-                    overflow: 'hidden',
+                    width: 30,
+                    height: 30,
+                    borderRadius: '50%',
+                    background: 'linear-gradient(135deg, rgba(59,130,246,0.30) 0%, rgba(59,130,246,0.15) 100%)',
+                    border: '1px solid rgba(59,130,246,0.3)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '0.7rem',
+                    fontWeight: 700,
+                    color: '#60a5fa',
+                    letterSpacing: '0.02em',
+                    textTransform: 'uppercase',
                   }}
-                  role="listbox"
-                  aria-label="Presence status"
+                  aria-hidden="true"
                 >
-                  {PRESENCE_OPTIONS.map((opt) => (
-                    <button
-                      key={opt.value}
-                      type="button"
-                      role="option"
-                      aria-selected={presence === opt.value}
-                      onClick={() => {
-                        void setPresence(opt.value);
-                        setShowPresenceMenu(false);
-                      }}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 8,
-                        width: '100%',
-                        padding: '8px 12px',
-                        background: presence === opt.value ? 'rgba(255,255,255,0.06)' : 'transparent',
-                        border: 'none',
-                        color: '#e2e8f0',
-                        fontSize: '0.8rem',
-                        cursor: 'pointer',
-                        textAlign: 'left',
-                        transition: 'background 0.12s',
-                      }}
-                      onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.08)'; }}
-                      onMouseLeave={(e) => { e.currentTarget.style.background = presence === opt.value ? 'rgba(255,255,255,0.06)' : 'transparent'; }}
-                    >
-                      <span style={{ width: 8, height: 8, borderRadius: '50%', background: opt.color, flexShrink: 0 }} />
-                      {opt.label}
-                    </button>
-                  ))}
+                  {displayName.charAt(0) || '?'}
                 </div>
-              )}
-            </div>
+              </div>
 
               {/* Name + context label */}
               <div style={{ minWidth: 0 }}>
