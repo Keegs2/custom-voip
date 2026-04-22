@@ -550,3 +550,4 @@ sysctl --system
 - Check logs: `docker compose logs <service> --tail 50`
 - Database not ready: `docker compose restart <service>` (health checks will retry)
 - Port conflict: another process on the host using the same port
+
