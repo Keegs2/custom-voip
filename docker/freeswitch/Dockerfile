@@ -58,7 +58,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libspeexdsp-dev \
     # mod_enum
     libldns-dev \
-    # RCF-V1: mod_av (video) not built — libavformat-dev/libswscale-dev removed
+    # RCF-V1: mod_av (video) disabled — libavformat-dev/libswscale-dev not needed
     # mod_lua - critical for RCF routing
     liblua5.3-dev \
     lua5.3 \
@@ -160,17 +160,17 @@ RUN sed -i 's|#applications/mod_commands|applications/mod_commands|' build/modul
     # TTS - disabled mod_flite as it requires additional deps
     # To enable, install libflite1 and libflite-dev
     # sed -i 's|#asr_tts/mod_flite|asr_tts/mod_flite|' build/modules.conf.in && \
-    # RCF-V1: conferencing, video, WebRTC, voicemail, call center, parking stripped
-    # These modules are NOT built to reduce image size and attack surface.
-    # Uncomment to restore UCaaS features in a future branch.
-    # sed -i 's|#applications/mod_conference|applications/mod_conference|' build/modules.conf.in && \
-    # sed -i 's|#formats/mod_av|formats/mod_av|' build/modules.conf.in && \
-    # sed -i 's|#endpoints/mod_verto|endpoints/mod_verto|' build/modules.conf.in && \
-    # sed -i 's|#endpoints/mod_rtc|endpoints/mod_rtc|' build/modules.conf.in && \
-    # sed -i 's|#applications/mod_voicemail|applications/mod_voicemail|' build/modules.conf.in && \
-    # sed -i 's|#applications/mod_callcenter|applications/mod_callcenter|' build/modules.conf.in && \
-    # sed -i 's|#applications/mod_valet_parking|applications/mod_valet_parking|' build/modules.conf.in && \
-    # sed -i 's|#applications/mod_spy|applications/mod_spy|' build/modules.conf.in && \
+    # RCF-V1: Explicitly DISABLE modules that are enabled by default in FS source
+    # but not needed for RCF. These must be commented OUT (add #) not just left alone.
+    sed -i 's|^applications/mod_conference|#applications/mod_conference|' build/modules.conf.in && \
+    sed -i 's|^applications/mod_av|#applications/mod_av|' build/modules.conf.in && \
+    sed -i 's|^formats/mod_png|#formats/mod_png|' build/modules.conf.in && \
+    sed -i 's|^endpoints/mod_verto|#endpoints/mod_verto|' build/modules.conf.in && \
+    sed -i 's|^endpoints/mod_rtc|#endpoints/mod_rtc|' build/modules.conf.in && \
+    sed -i 's|^applications/mod_voicemail|#applications/mod_voicemail|' build/modules.conf.in && \
+    sed -i 's|^applications/mod_callcenter|#applications/mod_callcenter|' build/modules.conf.in && \
+    sed -i 's|^applications/mod_valet_parking|#applications/mod_valet_parking|' build/modules.conf.in && \
+    sed -i 's|^applications/mod_spy|#applications/mod_spy|' build/modules.conf.in && \
     # DSP for DTMF/fax — still needed for RCF
     sed -i 's|#applications/mod_spandsp|applications/mod_spandsp|' build/modules.conf.in
 

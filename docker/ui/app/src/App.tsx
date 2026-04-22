@@ -47,6 +47,7 @@ export function App() {
             <Route path="rcf"        element={<RcfPage />} />
             <Route path="api-dids"   element={<ApiDidsPage />} />
             <Route path="trunks"     element={<TrunksPage />} />
+            <Route path="ivr"        element={<IvrBuilderPage />} />
             <Route path="documentation" element={<DocsPage />} />
             <Route path="call-quality" element={<CallQualityPage />} />
             <Route path="account"          element={<AccountPage />} />
@@ -110,14 +111,6 @@ export function App() {
           </Route>
 
           {/* Full-screen pages — outside AppLayout (no max-width/padding) */}
-          <Route
-            path="ivr"
-            element={
-              <RequireAuth>
-                <IvrBuilderPage />
-              </RequireAuth>
-            }
-          />
           <Route
             path="troubleshooting"
             element={
