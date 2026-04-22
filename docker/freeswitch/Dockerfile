@@ -1,5 +1,6 @@
-# FreeSWITCH Built from SignalWire Source with mod_lua Support
+# FreeSWITCH — RCF-V1 Production Build
 # Multi-stage build for optimized production image
+# Stripped to Remote Call Forwarding only (no UCaaS/WebRTC/voicemail/conferencing).
 #
 # Key Features:
 # - Built from official SignalWire/FreeSWITCH source
@@ -7,6 +8,7 @@
 # - lua-hiredis for Redis connectivity (velocity/caching)
 # - luasql-postgres for PostgreSQL connectivity (RCF lookups)
 # - Multi-architecture support (AMD64/ARM64)
+# - TLS certs provided by CA (not self-signed) — mount at /usr/local/freeswitch/conf/tls/
 
 # =============================================================================
 # Stage 1: Build FreeSWITCH and dependencies from source
@@ -56,9 +58,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libspeexdsp-dev \
     # mod_enum
     libldns-dev \
-    # mod_av (video support)
-    libavformat-dev \
-    libswscale-dev \
+    # RCF-V1: mod_av (video) not built — libavformat-dev/libswscale-dev removed
     # mod_lua - critical for RCF routing
     liblua5.3-dev \
     lua5.3 \
@@ -160,21 +160,19 @@ RUN sed -i 's|#applications/mod_commands|applications/mod_commands|' build/modul
     # TTS - disabled mod_flite as it requires additional deps
     # To enable, install libflite1 and libflite-dev
     # sed -i 's|#asr_tts/mod_flite|asr_tts/mod_flite|' build/modules.conf.in && \
-    # Conferencing
-    sed -i 's|#applications/mod_conference|applications/mod_conference|' build/modules.conf.in && \
-    # DSP for DTMF/fax
-    sed -i 's|#applications/mod_spandsp|applications/mod_spandsp|' build/modules.conf.in && \
-    # Video support: mod_av provides VP8/H264 codec support via ffmpeg/libav
-    # Required for conference video-mode=mux (server-side compositing)
-    # mod_av is under formats/ in the FreeSWITCH source tree
-    sed -i 's|#formats/mod_av|formats/mod_av|' build/modules.conf.in && \
-    # UCaaS Tier 1: WebRTC, voicemail, call center, parking, monitoring
-    sed -i 's|#endpoints/mod_verto|endpoints/mod_verto|' build/modules.conf.in && \
-    sed -i 's|#endpoints/mod_rtc|endpoints/mod_rtc|' build/modules.conf.in && \
-    sed -i 's|#applications/mod_voicemail|applications/mod_voicemail|' build/modules.conf.in && \
-    sed -i 's|#applications/mod_callcenter|applications/mod_callcenter|' build/modules.conf.in && \
-    sed -i 's|#applications/mod_valet_parking|applications/mod_valet_parking|' build/modules.conf.in && \
-    sed -i 's|#applications/mod_spy|applications/mod_spy|' build/modules.conf.in
+    # RCF-V1: conferencing, video, WebRTC, voicemail, call center, parking stripped
+    # These modules are NOT built to reduce image size and attack surface.
+    # Uncomment to restore UCaaS features in a future branch.
+    # sed -i 's|#applications/mod_conference|applications/mod_conference|' build/modules.conf.in && \
+    # sed -i 's|#formats/mod_av|formats/mod_av|' build/modules.conf.in && \
+    # sed -i 's|#endpoints/mod_verto|endpoints/mod_verto|' build/modules.conf.in && \
+    # sed -i 's|#endpoints/mod_rtc|endpoints/mod_rtc|' build/modules.conf.in && \
+    # sed -i 's|#applications/mod_voicemail|applications/mod_voicemail|' build/modules.conf.in && \
+    # sed -i 's|#applications/mod_callcenter|applications/mod_callcenter|' build/modules.conf.in && \
+    # sed -i 's|#applications/mod_valet_parking|applications/mod_valet_parking|' build/modules.conf.in && \
+    # sed -i 's|#applications/mod_spy|applications/mod_spy|' build/modules.conf.in && \
+    # DSP for DTMF/fax — still needed for RCF
+    sed -i 's|#applications/mod_spandsp|applications/mod_spandsp|' build/modules.conf.in
 
 # Bootstrap and configure FreeSWITCH
 RUN ./bootstrap.sh -j
@@ -204,7 +202,7 @@ RUN luarocks install luasocket && \
 FROM debian:bookworm-slim AS runtime
 
 LABEL maintainer="Voice Platform Team"
-LABEL description="FreeSWITCH production image with mod_lua for RCF routing"
+LABEL description="FreeSWITCH RCF-V1 production image — Remote Call Forwarding only"
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -219,8 +217,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libtpl0 \
     uuid-runtime \
     libldns3 \
-    libavformat59 \
-    libswscale6 \
+    # RCF-V1: libavformat59/libswscale6 removed (mod_av not built)
     libodbc2 \
     unixodbc \
     # Codec libraries
@@ -288,7 +285,6 @@ RUN mkdir -p /var/log/freeswitch/cdr-csv \
     && mkdir -p /var/lib/freeswitch/recordings \
     && mkdir -p /var/lib/freeswitch/storage \
     && mkdir -p /var/lib/freeswitch/db \
-    && mkdir -p /var/lib/freeswitch/voicemail \
     && mkdir -p /usr/local/freeswitch/scripts/lib \
     && mkdir -p /usr/local/freeswitch/conf/tls \
     && mkdir -p /etc/freeswitch
@@ -299,20 +295,16 @@ COPY conf/autoload_configs/ /usr/local/freeswitch/conf/autoload_configs/
 COPY conf/dialplan/ /usr/local/freeswitch/conf/dialplan/
 COPY conf/directory/ /usr/local/freeswitch/conf/directory/
 COPY conf/sofia/ /usr/local/freeswitch/conf/sofia/
-COPY conf/lang/ /usr/local/freeswitch/conf/lang/
+# RCF-V1: lang/ not copied — voicemail/IVR prompts not needed for RCF
 
 # Copy Lua scripts for RCF routing
 COPY scripts/ /usr/local/freeswitch/scripts/
 
-# Generate self-signed certificates for TLS
-RUN openssl req -x509 -newkey rsa:2048 \
-    -keyout /usr/local/freeswitch/conf/tls/agent.key \
-    -out /usr/local/freeswitch/conf/tls/agent.crt \
-    -days 365 -nodes \
-    -subj "/C=US/ST=State/L=City/O=VoicePlatform/OU=FreeSWITCH/CN=fs.voiceplatform.local" && \
-    cat /usr/local/freeswitch/conf/tls/agent.crt /usr/local/freeswitch/conf/tls/agent.key > /usr/local/freeswitch/conf/tls/agent.pem && \
-    cp /usr/local/freeswitch/conf/tls/agent.pem /usr/local/freeswitch/conf/tls/wss.pem && \
-    chmod 600 /usr/local/freeswitch/conf/tls/*.key /usr/local/freeswitch/conf/tls/*.pem
+# RCF-V1: No self-signed TLS certs — production uses CA-issued certificates.
+# Mount your CA certs at /usr/local/freeswitch/conf/tls/ via docker-compose volume:
+#   volumes:
+#     - ./certs/agent.pem:/usr/local/freeswitch/conf/tls/agent.pem
+#     - ./certs/agent.key:/usr/local/freeswitch/conf/tls/agent.key
 
 # Set Lua path environment variables for mod_lua to find libraries
 ENV LUA_PATH="/usr/local/freeswitch/scripts/?.lua;/usr/local/freeswitch/scripts/lib/?.lua;/usr/local/share/lua/5.3/?.lua;/usr/local/share/lua/5.3/?/init.lua;/usr/share/lua/5.3/?.lua;/usr/share/lua/5.3/?/init.lua;;"
@@ -324,13 +316,12 @@ EXPOSE 5060/udp 5060/tcp
 EXPOSE 5080/udp 5080/tcp
 EXPOSE 5081/tcp
 EXPOSE 5090/udp 5090/tcp
-# WebRTC (mod_verto WSS)
-EXPOSE 8082/tcp
+# RCF-V1: WebRTC (mod_verto WSS) disabled — no EXPOSE 8082/tcp
 # Event Socket
 EXPOSE 8021/tcp
-# RTP media (must match rtp-start-port/rtp-end-port in switch.conf.xml
-# and the port mapping in docker-compose.yml)
-EXPOSE 16384-18383/udp
+# RTP media — RCF-V1: expanded for 10K concurrent calls (host networking required)
+# Must match rtp-start-port/rtp-end-port in switch.conf.xml
+EXPOSE 16384-49151/udp
 
 # Health check using fs_cli
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \

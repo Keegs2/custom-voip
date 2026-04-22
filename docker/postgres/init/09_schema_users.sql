@@ -20,7 +20,4 @@ INSERT INTO users (email, password_hash, customer_id, role, name, status) VALUES
 ('admin@customvoip.com', '$2b$12$3waCBHwkLKsE33ZqkisqJeEKtRx18REHt8AKTMNBuQwmgjuqXN8xy', NULL, 'admin', 'Platform Admin', 'active')
 ON CONFLICT (email) DO NOTHING;
 
--- Seed UCaaS test user: ucaas@customvoip.com / password123
-INSERT INTO users (email, password_hash, customer_id, role, name, status) VALUES
-('ucaas@customvoip.com', '$2b$12$3waCBHwkLKsE33ZqkisqJeEKtRx18REHt8AKTMNBuQwmgjuqXN8xy', 5, 'user', 'UCaaS Test User', 'active')
-ON CONFLICT (email) DO NOTHING;
+-- RCF-V1: UCaaS test user removed (no UCaaS features in this build)

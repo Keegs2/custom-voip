@@ -1,29 +1,32 @@
-# Voice Platform - Docker Compose Configuration
-# Optimized for high-volume performance
+# RCF-V1 Production Voice Platform - Docker Compose Configuration
+# Remote Call Forwarding only — no UCaaS, no WebRTC, no UI
+#
+# Services: PostgreSQL, Redis, FreeSWITCH, Kamailio, FastAPI
 #
 # Usage:
 #   docker compose up -d          # Start all services
 #   docker compose logs -f        # Follow logs
 #   docker compose down           # Stop all services
 #
-version: '3.8'
+# NOTE: In production, PostgreSQL runs on dedicated VMs (Patroni cluster),
+# not in Docker. The postgres service here is for development/testing only.
 
 services:
   # PostgreSQL with TimescaleDB and PgBouncer
+  # PRODUCTION: Replace with dedicated Patroni-managed VMs
   postgres:
     build: ./docker/postgres
     container_name: voip-postgres
     environment:
-      POSTGRES_DB: voip
-      POSTGRES_USER: voip
-      POSTGRES_PASSWORD: voip_secret
-      # Performance tuning
+      POSTGRES_DB: ${POSTGRES_DB:-voip}
+      POSTGRES_USER: ${POSTGRES_USER:-voip}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-voip_secret}
       POSTGRES_INITDB_ARGS: "--data-checksums"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
     ports:
-      - "5432:5432"   # Direct PostgreSQL
+      - "5432:5432"
       - "6432:6432"   # PgBouncer
     networks:
       - voip-network
@@ -35,19 +38,19 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '1'
-          memory: 1G
+          cpus: '2'
+          memory: 2G
         reservations:
-          cpus: '0.5'
-          memory: 256M
+          cpus: '1'
+          memory: 512M
     restart: unless-stopped
 
-  # Redis - High-performance caching and real-time state
+  # Redis - Ephemeral caching (channel counters, velocity tracking, session cache)
   redis:
     build: ./docker/redis
     container_name: voip-redis
     ports:
-      - "6380:6379"  # Use 6380 on host to avoid conflict with local Redis
+      - "6380:6379"
     volumes:
       - redis_data:/data
     networks:
@@ -69,7 +72,7 @@ services:
       - net.core.somaxconn=65535
     restart: unless-stopped
 
-  # FreeSWITCH - Core voice switch
+  # FreeSWITCH - Core voice switch (RCF call routing + media proxy)
   freeswitch:
     build: ./docker/freeswitch
     container_name: voip-freeswitch
@@ -78,46 +81,37 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    # Host networking eliminates Docker port mapping overhead for RTP.
-    # FreeSWITCH binds directly to the host's network stack — no NAT,
-    # no port range mapping, no iptables rules per port. This is the
-    # production standard for SIP B2BUAs handling RTP media.
+    # Host networking: production standard for SIP B2BUAs
+    # Eliminates Docker NAT overhead for RTP media
     network_mode: host
     environment:
-      # With host networking, Docker DNS (service names) doesn't work.
-      # Use 127.0.0.1 since postgres/redis expose ports on the host.
-      - DB_HOST=127.0.0.1
-      - DB_PORT=5432
-      - DB_NAME=voip
-      - DB_USER=freeswitch
-      - DB_PASS=fs_secret
-      - REDIS_HOST=127.0.0.1
-      - REDIS_PORT=6380
-      - API_HOST=127.0.0.1
-      - API_PORT=8000
-      # With host networking, FS binds directly to the host IP.
-      # ext-rtp-ip and ext-sip-ip should still be set for clarity,
-      # but autonat will now correctly resolve to the host's public IP.
-      - EXTERNAL_RTP_IP=${EXTERNAL_RTP_IP:-34.74.71.32}
-      - EXTERNAL_SIP_IP=${EXTERNAL_SIP_IP:-34.74.71.32}
-      - TEST_MODE=${TEST_MODE:-true}
-    # No ports section needed — host networking exposes all ports directly
+      - DB_HOST=${DB_HOST:-127.0.0.1}
+      - DB_PORT=${DB_PORT:-5432}
+      - DB_NAME=${DB_NAME:-voip}
+      - DB_USER=${DB_USER:-freeswitch}
+      - DB_PASS=${DB_PASS:-fs_secret}
+      - REDIS_HOST=${REDIS_HOST:-127.0.0.1}
+      - REDIS_PORT=${REDIS_PORT:-6380}
+      - API_HOST=${API_HOST:-127.0.0.1}
+      - API_PORT=${API_PORT:-8000}
+      - EXTERNAL_RTP_IP=${EXTERNAL_RTP_IP}
+      - EXTERNAL_SIP_IP=${EXTERNAL_SIP_IP}
+      - TEST_MODE=${TEST_MODE:-false}
     volumes:
       - ./docker/freeswitch/conf:/usr/local/freeswitch/conf
       - ./docker/freeswitch/scripts:/usr/local/freeswitch/scripts
       - freeswitch_logs:/var/log/freeswitch
-    # No networks section — host networking doesn't use Docker networks
     cap_add:
       - NET_ADMIN
       - SYS_NICE
     deploy:
       resources:
         limits:
-          cpus: '4'
-          memory: 4G
+          cpus: '8'
+          memory: 16G
         reservations:
-          cpus: '2'
-          memory: 2G
+          cpus: '4'
+          memory: 8G
     ulimits:
       nofile:
         soft: 65536
@@ -127,37 +121,56 @@ services:
         hard: -1
     restart: unless-stopped
 
-  # FastAPI - REST API layer
+  # Kamailio SBC - SIP signaling security, rate limiting, carrier routing
+  kamailio:
+    build: ./docker/kamailio
+    container_name: voip-kamailio
+    depends_on:
+      - freeswitch
+    network_mode: host
+    environment:
+      - EXTERNAL_SIP_IP=${EXTERNAL_SIP_IP}
+    extra_hosts:
+      - "freeswitch:127.0.0.1"
+    volumes:
+      - ./docker/kamailio/kamailio.cfg:/etc/kamailio/kamailio.cfg:ro
+      - ./docker/kamailio/dispatcher.list:/etc/kamailio/dispatcher.list:ro
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 2G
+        reservations:
+          cpus: '2'
+          memory: 512M
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    restart: unless-stopped
+
+  # FastAPI - REST API for RCF provisioning, CDR queries, health
   api:
     build: ./docker/api
     container_name: voip-api
-    # Dev: --reload watches the mounted volume for code changes (single-worker).
-    # Production builds use the Dockerfile CMD (multi-worker, no reload).
-    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
     environment:
-      - DATABASE_URL=postgresql://api:api_secret@postgres:5432/voip
+      - DATABASE_URL=postgresql://${API_DB_USER:-api}:${API_DB_PASS:-api_secret}@postgres:5432/${DB_NAME:-voip}
       - REDIS_URL=redis://redis:6379
-      - FREESWITCH_ESL_HOST=10.142.0.100
-      - FREESWITCH_ESL_PORT=8021
-      - FREESWITCH_ESL_PASSWORD=ClueCon
-      - VERTO_WS_URL=${VERTO_WS_URL:-ws://34.74.71.32:8082}
-      - SIP_DOMAIN=${SIP_DOMAIN:-voiceplatform.local}
-      - TEST_MODE=true
+      - FREESWITCH_ESL_HOST=${FREESWITCH_ESL_HOST:-127.0.0.1}
+      - FREESWITCH_ESL_PORT=${FREESWITCH_ESL_PORT:-8021}
+      - FREESWITCH_ESL_PASSWORD=${FREESWITCH_ESL_PASSWORD:-ClueCon}
+      - TEST_MODE=${TEST_MODE:-false}
       - BANDWIDTH_API_CLIENT_ID=${BANDWIDTH_API_CLIENT_ID:-}
       - BANDWIDTH_API_CLIENT_SECRET=${BANDWIDTH_API_CLIENT_SECRET:-}
       - BANDWIDTH_ACCOUNT_ID=${BANDWIDTH_ACCOUNT_ID:-9900717}
       - BANDWIDTH_SIP_PEER_ID=${BANDWIDTH_SIP_PEER_ID:-1162116}
     ports:
-      - "8088:8000"  # Use 8088 on host to avoid conflict with other services
-    volumes:
-      - ./docker/api/src:/app:ro
-      - chat_uploads:/data/chat-uploads
-      - shared_documents:/data/shared-documents
+      - "${API_PORT:-8088}:8000"
     networks:
       - voip-network
     deploy:
@@ -170,43 +183,12 @@ services:
           memory: 256M
     restart: unless-stopped
 
-  # Kamailio SBC - Front-end signaling security and rate limiting
-  # Entry point for all external SIP traffic (Bandwidth -> Kamailio -> FreeSWITCH)
-  # Uses host networking so it sees real source IPs (not Docker NAT)
-  kamailio:
-    build: ./docker/kamailio
-    container_name: voip-kamailio
-    depends_on:
-      - freeswitch
-    network_mode: host
-    environment:
-      - EXTERNAL_SIP_IP=${EXTERNAL_SIP_IP:-34.74.71.32}
-    extra_hosts:
-      - "freeswitch:127.0.0.1"
-    volumes:
-      - ./docker/kamailio/kamailio.cfg:/etc/kamailio/kamailio.cfg:ro
-      - ./docker/kamailio/dispatcher.list:/etc/kamailio/dispatcher.list:ro
-    deploy:
-      resources:
-        limits:
-          cpus: '2'
-          memory: 512M
-        reservations:
-          cpus: '0.5'
-          memory: 128M
-    ulimits:
-      nofile:
-        soft: 65536
-        hard: 65536
-    restart: unless-stopped
-
-  # Homer 7 SIP Monitoring — proper 3-service stack
-  # Default login: admin / sipcapture
+  # Homer 7 SIP Monitoring — essential for RCF SIP troubleshooting
   homer-db:
     image: postgres:14-alpine
     container_name: voip-homer-db
     environment:
-      POSTGRES_PASSWORD: homerSeven
+      POSTGRES_PASSWORD: ${HOMER_DB_PASS:-homerSeven}
       POSTGRES_USER: root
     volumes:
       - homer_db_data:/var/lib/postgresql/data
@@ -234,7 +216,7 @@ services:
       - "HEPLIFYSERVER_DBDRIVER=postgres"
       - "HEPLIFYSERVER_DBADDR=homer-db:5432"
       - "HEPLIFYSERVER_DBUSER=root"
-      - "HEPLIFYSERVER_DBPASS=homerSeven"
+      - "HEPLIFYSERVER_DBPASS=${HOMER_DB_PASS:-homerSeven}"
       - "HEPLIFYSERVER_LOGLVL=info"
       - "HEPLIFYSERVER_LOGSTD=true"
     depends_on:
@@ -252,7 +234,7 @@ services:
     environment:
       - "DB_HOST=homer-db"
       - "DB_USER=root"
-      - "DB_PASS=homerSeven"
+      - "DB_PASS=${HOMER_DB_PASS:-homerSeven}"
       - "HOMER_LOGLEVEL=info"
     volumes:
       - ./docker/homer/bootstrap:/app/bootstrap
@@ -261,54 +243,6 @@ services:
         condition: service_healthy
     networks:
       - voip-network
-    restart: unless-stopped
-
-  # Webhook test server
-  webhook-test:
-    build: ./docker/webhook-test
-    container_name: voip-webhook-test
-    ports:
-      - "9000:9000"
-    networks:
-      - voip-network
-    deploy:
-      resources:
-        limits:
-          cpus: '0.5'
-          memory: 128M
-    restart: unless-stopped
-
-  # SIPp load testing microservice
-  sipp:
-    build: ./docker/sipp
-    container_name: voip-sipp
-    depends_on:
-      - freeswitch
-    networks:
-      - voip-network
-    deploy:
-      resources:
-        limits:
-          cpus: '2'
-          memory: 512M
-    restart: unless-stopped
-
-  # Web UI for RCF management
-  ui:
-    build: ./docker/ui
-    container_name: voip-ui
-    depends_on:
-      - api
-    ports:
-      - "8080:80"    # HTTP → HTTPS redirect
-      - "8443:443"   # HTTPS (self-signed TLS for WebRTC getUserMedia)
-    networks:
-      - voip-network
-    deploy:
-      resources:
-        limits:
-          cpus: '0.5'
-          memory: 128M
     restart: unless-stopped
 
 networks:
@@ -326,8 +260,4 @@ volumes:
   freeswitch_logs:
     driver: local
   homer_db_data:
-    driver: local
-  chat_uploads:
-    driver: local
-  shared_documents:
     driver: local

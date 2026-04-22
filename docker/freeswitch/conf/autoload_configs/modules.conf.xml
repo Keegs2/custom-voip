@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  FreeSWITCH Module Configuration
-  Optimized module selection for high-volume voice platform
+  FreeSWITCH Module Configuration — RCF-V1 Production Build
+  Stripped to only what's needed for Remote Call Forwarding.
 
   Module Categories:
-  - REQUIRED: Essential for basic operation
+  - REQUIRED: Essential for RCF operation
   - RECOMMENDED: Improve functionality/performance
-  - OPTIONAL: Enable for specific features
+  - DISABLED: UCaaS/conferencing/voicemail features not needed for RCF
 
   NOTE: More modules = more memory. Load only what you need.
 -->
@@ -137,10 +137,11 @@
     <!-- <load module="mod_unimrcp"/> --> <!-- For ASR/TTS via MRCP -->
 
     <!-- ============================================ -->
-    <!-- CONFERENCING (for API calling product)     -->
+    <!-- CONFERENCING (disabled — RCF-V1 only)      -->
     <!-- ============================================ -->
 
-    <load module="mod_conference"/>
+    <!-- RCF-V1: conferencing not needed for remote call forwarding -->
+    <!-- <load module="mod_conference"/> -->
 
     <!-- ============================================ -->
     <!-- DATABASE                                    -->
@@ -156,10 +157,11 @@
     <!-- <load module="mod_odbc_query"/> -->
 
     <!-- ============================================ -->
-    <!-- VOICEMAIL                                   -->
+    <!-- VOICEMAIL (disabled — RCF-V1 only)          -->
     <!-- ============================================ -->
 
-    <load module="mod_voicemail"/>
+    <!-- RCF-V1: voicemail not needed for remote call forwarding -->
+    <!-- <load module="mod_voicemail"/> -->
 
     <!-- ============================================ -->
     <!-- RECORDING                                   -->
@@ -178,17 +180,15 @@
     <!-- SIP REFER handling -->
     <!-- <load module="mod_sofia" data="refer"/> --> <!-- Built into mod_sofia -->
 
-    <!-- Video support: VP8/H264 codec via ffmpeg/libav -->
-    <!-- Required for conference video-mode=mux (server-side compositing) -->
-    <!-- Does NOT require GPU — CPU-based VP8 encode/decode via libvpx/libavcodec -->
-    <load module="mod_av"/>
+    <!-- RCF-V1: video not needed for remote call forwarding -->
+    <!-- <load module="mod_av"/> -->
 
-    <!-- WebRTC (Verto signaling + RTC endpoint) -->
-    <load module="mod_rtc"/>
-    <load module="mod_verto"/>
+    <!-- RCF-V1: WebRTC not needed for remote call forwarding -->
+    <!-- <load module="mod_rtc"/> -->
+    <!-- <load module="mod_verto"/> -->
 
-    <!-- Call Parking -->
-    <load module="mod_valet_parking"/>
+    <!-- RCF-V1: call parking not needed for remote call forwarding -->
+    <!-- <load module="mod_valet_parking"/> -->
 
     <!-- ============================================ -->
     <!-- MONITORING                                  -->
