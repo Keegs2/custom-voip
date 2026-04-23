@@ -6,13 +6,13 @@
                     ┌──────────────────────────────┐
                     │       Bandwidth Carrier       │
                     │   Whitelists ONE IP:          │
-                    │   34.144.237.167 (VIP)        │
+                    │   34.24.133.82 (VIP)        │
                     │   67.231.x.x / 216.82.x.x    │
                     └──────────────┬───────────────┘
                                    │
                     ┌──────────────┴───────────────┐
                     │   GCP Network Load Balancer   │
-                    │   34.144.237.167 (VIP)        │
+                    │   34.24.133.82 (VIP)        │
                     │   UDP/TCP :5060 passthrough   │
                     │   Session affinity: CLIENT_IP │
                     │   Health: TCP 5060 / 5s       │
@@ -25,7 +25,7 @@
               │  34.74.71.32   │  │  35.243.136.35    │
               │  10.142.0.100  │  │  10.142.0.101     │
               │  Advertises:   │  │  Advertises:      │
-              │  34.144.237.167│  │  34.144.237.167   │
+              │  34.24.133.82│  │  34.24.133.82   │
               └────────┬───────┘  └────────┬──────────┘
                        │                   │
                        └─────────┬─────────┘
@@ -63,7 +63,7 @@
 | kam-g2 | 10.142.0.101 | 35.243.136.35 | KAM-G2 (SBC) | docker-compose.sbc.yml |
 | fs-media | 10.142.0.102 | 34.139.119.135 | FreeSWITCH + Redis | docker-compose.media.yml |
 | services | 10.142.0.103 | 34.26.57.37 | PG + API + UI + Homer | docker-compose.services.yml |
-| **VIP (NLB)** | — | **34.144.237.167** | SBC floating IP | GCP Network LB |
+| **VIP (NLB)** | — | **34.24.133.82** | SBC floating IP | GCP Network LB |
 
 ---
 
@@ -72,12 +72,12 @@
 Both SBCs are behind a GCP External Passthrough Network Load Balancer. This replaces
 traditional keepalived/VRRP (which doesn't work on GCP due to multicast blocking).
 
-- **Frontend:** 34.144.237.167 (VIP) — the ONLY IP Bandwidth needs
+- **Frontend:** 34.24.133.82 (VIP) — the ONLY IP Bandwidth needs
 - **Backend:** Instance group containing poc-custom-voip + kam-g2
 - **Protocol:** UDP + TCP on port 5060
 - **Session affinity:** CLIENT_IP — ensures all SIP from the same Bandwidth gateway hits the same SBC
 - **Health check:** TCP 5060, interval 5s, unhealthy after 3 failures (15s failover)
-- **Both SBCs advertise the VIP** (34.144.237.167) in SIP headers via EXTERNAL_SIP_IP env var
+- **Both SBCs advertise the VIP** (34.24.133.82) in SIP headers via EXTERNAL_SIP_IP env var
 
 ### Failover behavior
 1. KAM-G1 dies → NLB detects in 15 seconds (3 × 5s health probes)
@@ -90,8 +90,8 @@ traditional keepalived/VRRP (which doesn't work on GCP due to multicast blocking
 Health Check:    sbc-health-check (TCP 5060, 5s interval, 3 threshold)
 Backend Service: sbc-backend (UDP, CLIENT_IP affinity, EXTERNAL LB)
 Instance Group:  sbc-group (poc-custom-voip + kam-g2)
-Forwarding Rule: sbc-vip-udp (34.144.237.167, UDP:5060)
-Forwarding Rule: sbc-vip-tcp (34.144.237.167, TCP:5060)
+Forwarding Rule: sbc-vip-udp (34.24.133.82, UDP:5060)
+Forwarding Rule: sbc-vip-tcp (34.24.133.82, TCP:5060)
 ```
 
 ---
@@ -113,7 +113,7 @@ Forwarding Rule: sbc-vip-tcp (34.144.237.167, TCP:5060)
 
 ### Both SBCs (.env on poc-custom-voip and kam-g2)
 ```
-EXTERNAL_SIP_IP=34.144.237.167      # VIP — both SBCs advertise the SAME IP
+EXTERNAL_SIP_IP=34.24.133.82      # VIP — both SBCs advertise the SAME IP
 FREESWITCH_IP=10.142.0.102          # VM2 internal
 DB_HOST=10.142.0.103                # VM3 internal
 DB_PORT=6432                        # PgBouncer
@@ -166,7 +166,7 @@ HOMER_DB_PASS=<STRONG_HOMER_PASSWORD>
 
 | Source | Destination | Port | Purpose |
 |---|---|---|---|
-| Bandwidth → NLB | 34.144.237.167:5060 | UDP/TCP | Inbound SIP (NLB → healthy SBC) |
+| Bandwidth → NLB | 34.24.133.82:5060 | UDP/TCP | Inbound SIP (NLB → healthy SBC) |
 | SBCs → FS | 10.142.0.102:5080 | UDP | SIP dispatch (via dispatcher) |
 | SBCs → FS | 10.142.0.102:5090 | UDP | In-dialog routing (WITHINDIALOG) |
 | SBCs → DB | 10.142.0.103:6432 | TCP | Trunk auth IP lookup (sqlops) |
@@ -214,7 +214,7 @@ sudo docker compose -f docker-compose.sbc.yml up -d
 In Bandwidth Dashboard for account 9900717 / location 1162116:
 
 **Replace:** 34.74.71.32 (old individual SBC IP)
-**With:** 34.144.237.167 (VIP — single IP, both SBCs behind it)
+**With:** 34.24.133.82 (VIP — single IP, both SBCs behind it)
 
 ---
 
@@ -226,7 +226,7 @@ sudo docker logs voip-kamailio --tail 5  # Should show OPTIONS 200 OK
 
 # SBCs — check templating
 sudo docker exec voip-kamailio grep "ADVERTISE_IP" /etc/kamailio/kamailio.cfg | head -1
-# Should show: 34.144.237.167
+# Should show: 34.24.133.82
 
 sudo docker exec voip-kamailio cat /etc/kamailio/dispatcher.list | grep "sip:"
 # Should show: 10.142.0.102:5080
