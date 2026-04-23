@@ -1,220 +1,260 @@
 # GCP Production Deployment Plan — RCF-V1
 
-## Architecture: 4 VMs (1 existing + 3 new)
+## Architecture: 4 VMs + Shared VIP via GCP Network Load Balancer
 
 ```
-                    ┌─────────────────────────┐
-                    │    Bandwidth Carrier     │
-                    │  67.231.x.x / 216.82.x.x│
-                    └───────┬─────────┬───────┘
-                            │         │
-              ┌─────────────┴───┐ ┌───┴──────────────┐
-              │  EXISTING VM    │ │  NEW VM1          │
-              │  34.74.71.32    │ │  KAM-G2           │
-              │  KAM-G1 (SBC)  │ │  SBC              │
-              │  :5060          │ │  :5060            │
-              │  Already with   │ │  New static IP    │
-              │  Bandwidth      │ │  Add to Bandwidth │
-              └────────┬────────┘ └────────┬──────────┘
+                    ┌──────────────────────────────┐
+                    │       Bandwidth Carrier       │
+                    │   Whitelists ONE IP:          │
+                    │   34.144.237.167 (VIP)        │
+                    │   67.231.x.x / 216.82.x.x    │
+                    └──────────────┬───────────────┘
+                                   │
+                    ┌──────────────┴───────────────┐
+                    │   GCP Network Load Balancer   │
+                    │   34.144.237.167 (VIP)        │
+                    │   UDP/TCP :5060 passthrough   │
+                    │   Session affinity: CLIENT_IP │
+                    │   Health: TCP 5060 / 5s       │
+                    │   Failover: <10 seconds       │
+                    └───────┬──────────────┬───────┘
+                            │              │
+              ┌─────────────┴───┐  ┌───────┴──────────┐
+              │  poc-custom-voip│  │  kam-g2           │
+              │  KAM-G1 (SBC)  │  │  KAM-G2 (SBC)    │
+              │  34.74.71.32   │  │  35.243.136.35    │
+              │  10.142.0.100  │  │  10.142.0.101     │
+              │  Advertises:   │  │  Advertises:      │
+              │  34.144.237.167│  │  34.144.237.167   │
+              └────────┬───────┘  └────────┬──────────┘
                        │                   │
                        └─────────┬─────────┘
-                                 │ dispatch
+                                 │ dispatch to FS
                     ┌────────────┴────────────┐
-                    │  NEW VM2: FreeSWITCH    │
-                    │  e2-standard-8          │
-                    │  + Redis (local)        │
-                    │  Internal: 10.142.0.20  │
-                    │  Public IP for RTP      │
+                    │  fs-media               │
+                    │  FreeSWITCH + Redis     │
+                    │  34.139.119.135         │
+                    │  10.142.0.102           │
+                    │  :5080/:5090 (SIP)      │
+                    │  :16384-49151 (RTP)     │
+                    │  :8021 (ESL)            │
+                    │  :6379 (Redis local)    │
                     └────────────┬────────────┘
                                  │
                     ┌────────────┴────────────┐
-                    │  NEW VM3: Services      │
-                    │  e2-standard-4          │
-                    │  PostgreSQL + PgBouncer  │
-                    │  FastAPI + UI (nginx)   │
-                    │  Homer stack            │
-                    │  Internal: 10.142.0.30  │
-                    │  Public IP (for UI/API) │
+                    │  services               │
+                    │  PostgreSQL (bare)       │
+                    │  + PgBouncer :6432       │
+                    │  FastAPI :8088           │
+                    │  UI (nginx) :8080/:8443  │
+                    │  Homer stack :9080       │
+                    │  34.26.57.37            │
+                    │  10.142.0.103           │
                     └─────────────────────────┘
 ```
 
-## VM Inventory
+---
 
-| VM | IP | Role | Machine Type | What Runs |
+## IP Assignment
+
+| VM | Internal IP | External IP | Role | Compose File |
 |---|---|---|---|---|
-| Existing (poc-custom-voip) | 34.74.71.32 (public) + 10.142.0.100 (internal) | KAM-G1 — SBC only | e2-standard-4 (downsize) | Kamailio + heplify agent |
-| VM1 (new) | New static public IP + 10.142.0.11 | KAM-G2 — SBC | e2-standard-4 | Kamailio + heplify agent |
-| VM2 (new) | New static public IP + 10.142.0.20 | Media Server | e2-standard-8 | FreeSWITCH + Redis |
-| VM3 (new) | New static public IP + 10.142.0.30 | Data + Services | e2-standard-4 | PostgreSQL + PgBouncer + FastAPI + UI + Homer |
+| poc-custom-voip | 10.142.0.100 | 34.74.71.32 | KAM-G1 (SBC) | docker-compose.sbc.yml |
+| kam-g2 | 10.142.0.101 | 35.243.136.35 | KAM-G2 (SBC) | docker-compose.sbc.yml |
+| fs-media | 10.142.0.102 | 34.139.119.135 | FreeSWITCH + Redis | docker-compose.media.yml |
+| services | 10.142.0.103 | 34.26.57.37 | PG + API + UI + Homer | docker-compose.services.yml |
+| **VIP (NLB)** | — | **34.144.237.167** | SBC floating IP | GCP Network LB |
 
-## Compose Files
+---
 
-Each VM gets its own compose file:
+## GCP Network Load Balancer (VIP)
 
-- `docker-compose.sbc.yml` — Kamailio only (existing VM + VM1)
-- `docker-compose.media.yml` — FreeSWITCH + Redis (VM2)
-- `docker-compose.services.yml` — API + UI + Homer stack (VM3)
-- PostgreSQL installed bare on VM3 (not Docker, for data safety)
+Both SBCs are behind a GCP External Passthrough Network Load Balancer. This replaces
+traditional keepalived/VRRP (which doesn't work on GCP due to multicast blocking).
 
-## Network Design
+- **Frontend:** 34.144.237.167 (VIP) — the ONLY IP Bandwidth needs
+- **Backend:** Instance group containing poc-custom-voip + kam-g2
+- **Protocol:** UDP + TCP on port 5060
+- **Session affinity:** CLIENT_IP — ensures all SIP from the same Bandwidth gateway hits the same SBC
+- **Health check:** TCP 5060, interval 5s, unhealthy after 3 failures (15s failover)
+- **Both SBCs advertise the VIP** (34.144.237.167) in SIP headers via EXTERNAL_SIP_IP env var
 
-- VPC: existing `default` VPC in us-east1-b
-- All VMs in same subnet (10.142.0.0/20)
-- Internal communication via private IPs
-- SBCs and FS need public IPs for SIP/RTP
-- DB VM internal only (no public IP)
+### Failover behavior
+1. KAM-G1 dies → NLB detects in 15 seconds (3 × 5s health probes)
+2. All new SIP traffic routes to KAM-G2 automatically
+3. Active calls on KAM-G1 are lost (SIP calls cannot be migrated)
+4. KAM-G1 recovers → NLB adds it back after 2 healthy probes (10s)
+
+### NLB Components
+```
+Health Check:    sbc-health-check (TCP 5060, 5s interval, 3 threshold)
+Backend Service: sbc-backend (UDP, CLIENT_IP affinity, EXTERNAL LB)
+Instance Group:  sbc-group (poc-custom-voip + kam-g2)
+Forwarding Rule: sbc-vip-udp (34.144.237.167, UDP:5060)
+Forwarding Rule: sbc-vip-tcp (34.144.237.167, TCP:5060)
+```
+
+---
 
 ## Firewall Rules
 
-| Rule | Source | Ports | Target VMs |
+| Rule | Source | Ports | Target Tags |
 |---|---|---|---|
-| sip-inbound | Bandwidth IPs (67.231.0.0/16, 216.82.224.0/19) | 5060/udp+tcp | Existing, VM1 |
-| rtp-inbound | 0.0.0.0/0 | 16384-49151/udp | VM2 |
-| web-admin | Office IPs | 8080, 8443, 9080 | VM3 |
-| api-access | Office IPs | 8088 | VM3 |
-| internal-sip | 10.142.0.0/20 | 5060-5090/udp+tcp | VM2 |
-| internal-esl | 10.142.0.0/20 | 8021/tcp | VM2 |
-| internal-db | 10.142.0.0/20 | 5432, 6432 | VM3 |
-| internal-redis | 10.142.0.0/20 | 6379 | VM2 |
-| internal-hep | 10.142.0.0/20 | 9060/udp+tcp, 9061/tcp | VM3 |
-| internal-api | 10.142.0.0/20 | 8000, 8088 | VM3 |
+| voip-sip-inbound | 67.231.0.0/16, 216.82.224.0/19 | udp:5060, tcp:5060 | voip-sbc |
+| voip-health-check | 35.191.0.0/16, 130.211.0.0/22 | tcp:5060 | voip-sbc |
+| voip-rtp | 0.0.0.0/0 | udp:16384-49151 | voip-media |
+| voip-web-admin | Office IP/32 (or 0.0.0.0/0 during setup) | tcp:8080,8443,8088,9080 | voip-services |
+| voip-internal | voip-sbc, voip-media, voip-services tags | all tcp/udp/icmp | all voip tags |
+| allow-ssh-iap | 35.235.240.0/20 | tcp:22 | all voip tags |
 
-## Kamailio Dispatcher Config
+---
 
-### Existing VM (KAM-G1) — dispatcher.list:
+## Per-VM Environment Variables
+
+### Both SBCs (.env on poc-custom-voip and kam-g2)
 ```
-# Group 1: FreeSWITCH on VM2
-1 sip:10.142.0.20:5080 0 0 weight=100;maxload=10000;duid=fs-gcp
-
-# Group 2: Bandwidth Dallas
-2 sip:67.231.2.12:5060 0 0 weight=100;duid=bw-dallas
-
-# Group 3: Bandwidth LA
-3 sip:216.82.238.134:5060 0 0 weight=100;duid=bw-la
+EXTERNAL_SIP_IP=34.144.237.167      # VIP — both SBCs advertise the SAME IP
+FREESWITCH_IP=10.142.0.102          # VM2 internal
+DB_HOST=10.142.0.103                # VM3 internal
+DB_PORT=6432                        # PgBouncer
+DB_USER=freeswitch
+DB_PASS=<STRONG_FS_DB_PASSWORD>
+HOMER_IP=10.142.0.103               # VM3 internal
 ```
 
-### VM1 (KAM-G2) — identical dispatcher.list (same FS target)
-
-### Kamailio substdef per SBC:
+### fs-media (.env)
 ```
-# Existing VM (KAM-G1):
-#!substdef "!ADVERTISE_IP!34.74.71.32!g"
-#!define INTERNAL_IP 10.142.0.100
-
-# VM1 (KAM-G2):
-#!substdef "!ADVERTISE_IP!<VM1_PUBLIC_IP>!g"
-#!define INTERNAL_IP 10.142.0.11
-```
-
-## FreeSWITCH Config (VM2)
-
-- `EXTERNAL_SIP_IP=<VM2_PUBLIC_IP>`
-- `EXTERNAL_RTP_IP=<VM2_PUBLIC_IP>`
-- `DB_HOST=10.142.0.30` (VM3 PostgreSQL via PgBouncer)
-- `DB_PORT=6432` (PgBouncer)
-- `REDIS_HOST=127.0.0.1` (local Redis)
-- `REDIS_PORT=6379`
-- `API_HOST=10.142.0.30`
-- `API_PORT=8000`
-- Entrypoint: adds public IP to loopback (GCE NAT)
-
-## PostgreSQL Config (VM3, bare install)
-
-- PostgreSQL 16 + TimescaleDB extension
-- PgBouncer in transaction mode (pool_size=200)
-- Listen on 10.142.0.30:5432 (PG direct) and :6432 (PgBouncer)
-- Users: voip (owner), api (read/write), freeswitch (read-only)
-- Data directory: /var/lib/postgresql/data on 200GB SSD
-- Automated daily backups to GCS bucket
-- Patroni-ready: install but run standalone until CHI/DAL
-
-## API + UI Config (VM3)
-
-- `DATABASE_URL=postgresql://api:api_secret@127.0.0.1:6432/voip` (local PgBouncer)
-- `REDIS_URL=redis://10.142.0.20:6379` (VM2 Redis)
-- `FREESWITCH_ESL_HOST=10.142.0.20`
-- Bandwidth env vars for TN inventory
-- UI served on :8080 (HTTP) and :8443 (HTTPS)
-- Homer webapp on :9080
-
-## Migration Phases
-
-### Phase 1: Build New VMs (no disruption)
-1. Create VM1, VM2, VM3 in same VPC
-2. Assign static IPs to VM1 and VM2
-3. Install Docker on VM1, VM2, VM3
-4. Install PostgreSQL 16 + TimescaleDB bare on VM3
-5. Migrate database: pg_dump from existing VM → pg_restore on VM3
-6. Deploy FreeSWITCH + Redis on VM2 via docker-compose.media.yml
-7. Deploy API + UI + Homer on VM3 via docker-compose.services.yml
-8. Internal testing: verify FS on VM2 can route calls via VM3 DB
-
-### Phase 2: Cut Over SBCs (brief ~2 second disruption)
-9. Update existing VM Kamailio dispatcher: local FS → VM2 FS (10.142.0.20:5080)
-10. Reload Kamailio: `kamcmd dispatcher.reload`
-11. Test live call: existing KAM → VM2 FS → VM3 DB → Bandwidth
-12. Stop non-Kamailio services on existing VM (FS, PG, Redis, API, UI, Homer)
-13. Existing VM is now a dedicated SBC
-
-### Phase 3: Add Second SBC (no disruption)
-14. Deploy Kamailio on VM1 via docker-compose.sbc.yml
-15. Whitelist VM1 public IP with Bandwidth (secondary)
-16. Test: call routes through VM1 → VM2 FS
-17. Both SBCs active — Bandwidth sends to both IPs
-
-### Phase 4: Cleanup
-18. Downsize existing VM to e2-standard-4
-19. Remove unused Docker images/volumes from existing VM
-20. Update monitoring/alerting for all 4 VMs
-21. Document the final architecture and runbook
-
-## Rollback Plan
-
-At any phase, roll back by:
-1. Pointing existing VM Kamailio back to local FS
-2. Restarting all services on existing VM
-3. Existing VM returns to single-VM mode
-
-## Bandwidth Integration
-
-- **Existing IP (34.74.71.32):** Already whitelisted, stays as primary SBC
-- **VM1 IP:** Add to Bandwidth SIP Peer as secondary (Priority 2)
-- **VM2 IP:** Not needed in Bandwidth — FS talks to Bandwidth via KAM SBCs
-- **DID routing:** All DIDs to both SBC IPs, priority ordering
-
-## Environment Files
-
-### .env.sbc (existing VM + VM1)
-```
-EXTERNAL_SIP_IP=<this_vm_public_ip>
-```
-
-### .env.media (VM2)
-```
-EXTERNAL_SIP_IP=<vm2_public_ip>
-EXTERNAL_RTP_IP=<vm2_public_ip>
-DB_HOST=10.142.0.30
-DB_PORT=6432
+EXTERNAL_SIP_IP=34.139.119.135      # VM2 public (for SDP/RTP)
+EXTERNAL_RTP_IP=34.139.119.135
+DB_HOST=10.142.0.103                # VM3 internal
+DB_PORT=6432                        # PgBouncer
 DB_NAME=voip
 DB_USER=freeswitch
-DB_PASS=<strong_password>
-REDIS_HOST=127.0.0.1
+DB_PASS=<STRONG_FS_DB_PASSWORD>
+REDIS_HOST=127.0.0.1                # Local Redis
 REDIS_PORT=6379
-API_HOST=10.142.0.30
-API_PORT=8000
+API_HOST=10.142.0.103               # VM3 internal
+API_PORT=8088                       # Host-mapped API port
+HOMER_IP=10.142.0.103
+SBC_PROXY_IP=10.142.0.100           # Primary SBC for outbound calls
+ESL_PASSWORD=<STRONG_ESL_PASSWORD>
 TEST_MODE=false
 ```
 
-### .env.services (VM3)
+### services (.env)
 ```
-DATABASE_URL=postgresql://api:<strong_password>@127.0.0.1:6432/voip
-REDIS_URL=redis://10.142.0.20:6379
-FREESWITCH_ESL_HOST=10.142.0.20
+JWT_SECRET_KEY=<64+ char random>
+DATABASE_URL=postgresql://api:<API_DB_PASS>@127.0.0.1:6432/voip
+REDIS_URL=redis://10.142.0.102:6379
+FREESWITCH_ESL_HOST=10.142.0.102
 FREESWITCH_ESL_PORT=8021
-FREESWITCH_ESL_PASSWORD=<strong_password>
+FREESWITCH_ESL_PASSWORD=<STRONG_ESL_PASSWORD>
+CORS_ORIGINS=https://34.26.57.37:8443,http://34.26.57.37:8080
+SBC_PROXY_IP=10.142.0.100
 BANDWIDTH_API_CLIENT_ID=CLI-8cab93d7-e797-4d7d-8717-45aa430c7185
-BANDWIDTH_API_CLIENT_SECRET=<from_vault>
+BANDWIDTH_API_CLIENT_SECRET=<from Bandwidth>
 BANDWIDTH_ACCOUNT_ID=9900717
 BANDWIDTH_SIP_PEER_ID=1162116
 TEST_MODE=false
+ENABLE_DOCS=true
+HOMER_DB_PASS=<STRONG_HOMER_PASSWORD>
 ```
+
+---
+
+## Cross-VM Connectivity Map
+
+| Source | Destination | Port | Purpose |
+|---|---|---|---|
+| Bandwidth → NLB | 34.144.237.167:5060 | UDP/TCP | Inbound SIP (NLB → healthy SBC) |
+| SBCs → FS | 10.142.0.102:5080 | UDP | SIP dispatch (via dispatcher) |
+| SBCs → FS | 10.142.0.102:5090 | UDP | In-dialog routing (WITHINDIALOG) |
+| SBCs → DB | 10.142.0.103:6432 | TCP | Trunk auth IP lookup (sqlops) |
+| SBCs → Homer | 10.142.0.103:9060 | UDP | HEP SIP capture |
+| FS → SBC | 10.142.0.100:5060 | UDP | Outbound calls (bridge to carrier) |
+| FS → DB | 10.142.0.103:6432 | TCP | Lua DID/customer lookups |
+| FS → Redis | 127.0.0.1:6379 | TCP | Local cache (velocity, sessions) |
+| FS → API | 10.142.0.103:8088 | TCP | xml_curl directory, CDR ingest |
+| FS → Homer | 10.142.0.103:9060 | UDP | HEP SIP capture from sofia |
+| API → DB | 127.0.0.1:6432 | TCP | PgBouncer (local on VM3) |
+| API → Redis | 10.142.0.102:6379 | TCP | Cache, session state |
+| API → FS ESL | 10.142.0.102:8021 | TCP | Call origination, status |
+| GCP HC → SBCs | :5060 | TCP | NLB health probes |
+
+---
+
+## Deploy Commands Per VM
+
+### VM3 (services) — deploy FIRST
+```
+# PostgreSQL bare install (one-time setup — see bootstrap section)
+cd /opt/revup
+sudo docker compose -f docker-compose.services.yml build
+sudo docker compose -f docker-compose.services.yml up -d
+```
+
+### VM2 (fs-media) — deploy SECOND (needs DB on VM3)
+```
+cd /opt/revup
+sudo docker compose -f docker-compose.media.yml build
+sudo docker compose -f docker-compose.media.yml up -d
+```
+
+### Both SBCs — deploy LAST (needs FS on VM2)
+```
+cd /opt/revup
+sudo docker compose -f docker-compose.sbc.yml build
+sudo docker compose -f docker-compose.sbc.yml up -d
+```
+
+---
+
+## Bandwidth Configuration
+
+In Bandwidth Dashboard for account 9900717 / location 1162116:
+
+**Replace:** 34.74.71.32 (old individual SBC IP)
+**With:** 34.144.237.167 (VIP — single IP, both SBCs behind it)
+
+---
+
+## Verification Checklist
+
+```bash
+# SBCs — check dispatcher hits FS
+sudo docker logs voip-kamailio --tail 5  # Should show OPTIONS 200 OK
+
+# SBCs — check templating
+sudo docker exec voip-kamailio grep "ADVERTISE_IP" /etc/kamailio/kamailio.cfg | head -1
+# Should show: 34.144.237.167
+
+sudo docker exec voip-kamailio cat /etc/kamailio/dispatcher.list | grep "sip:"
+# Should show: 10.142.0.102:5080
+
+# FS — check profiles
+sudo docker exec voip-freeswitch /usr/local/freeswitch/bin/fs_cli -x "sofia status"
+
+# Services — check health
+curl -s http://localhost:8088/health
+
+# NLB — check both backends healthy
+gcloud compute backend-services get-health sbc-backend --region=us-east1
+
+# Live call test
+# Call +16174544217 → should forward to +17744045256
+```
+
+---
+
+## Rollback Plan
+
+If anything breaks, revert existing VM to standalone mode:
+```
+cd /opt/revup
+sudo git checkout Full-System
+sudo docker compose down
+sudo docker compose build
+sudo docker compose up -d
+```
+
+Update Bandwidth back to 34.74.71.32 (individual SBC IP).

@@ -323,9 +323,8 @@ EXPOSE 8021/tcp
 # Must match rtp-start-port/rtp-end-port in switch.conf.xml
 EXPOSE 16384-49151/udp
 
-# Health check using fs_cli
-HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
-    CMD /usr/local/freeswitch/bin/fs_cli -x "status" 2>/dev/null | grep -q "UP" || exit 1
+# Health check defined in docker-compose files (not here) so the ESL password
+# can be passed via $ESL_PASSWORD environment variable.
 
 # Copy entrypoint script that adds public IP to loopback before starting FS.
 # This solves the GCE hairpin NAT issue: packets from FS to its own public IP

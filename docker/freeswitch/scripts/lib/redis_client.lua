@@ -78,9 +78,9 @@ function M.get_connection()
 
     -- Get connection parameters
     -- Default to 127.0.0.1 because FreeSWITCH runs with network_mode: host
-    -- and Redis is exposed on the host at port 6380 (mapped from container 6379)
+    -- and Redis is exposed on the host at port 6379
     local host = REDIS_HOST or os.getenv("REDIS_HOST") or "127.0.0.1"
-    local port = tonumber(REDIS_PORT or os.getenv("REDIS_PORT") or 6380)
+    local port = tonumber(REDIS_PORT or os.getenv("REDIS_PORT") or 6379)
 
     -- Try to connect with retries
     for attempt = 1, MAX_RETRY_ATTEMPTS do

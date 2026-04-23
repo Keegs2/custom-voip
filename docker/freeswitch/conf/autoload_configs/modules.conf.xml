@@ -123,8 +123,12 @@
     <!-- MP3/Shout streaming -->
     <load module="mod_shout"/>
 
-    <!-- Local audio streams (MOH, etc.) -->
-    <load module="mod_local_stream"/>
+    <!-- Local audio streams (MOH, etc.) — disabled for RCF-V1:
+         mod_local_stream requires local_stream.conf which doesn't exist locally.
+         When xml_curl can't reach the API (e.g., during startup or on the media VM),
+         the missing config causes a CRIT module load failure. RCF uses
+         silence_stream:// for hold music, so this module isn't needed. -->
+    <!-- <load module="mod_local_stream"/> -->
 
     <!-- Text-to-speech: Flite (offline TTS) - disabled, not built -->
     <!-- <load module="mod_flite"/> -->

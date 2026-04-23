@@ -21,9 +21,9 @@ freeswitch.consoleLog("INFO", "============================================\n")
 
 -- Redis Configuration
 -- Default to 127.0.0.1 because FreeSWITCH runs with network_mode: host
--- and Redis is exposed on the host at port 6380 (mapped from container 6379)
+-- and Redis is exposed on the host at port 6379
 REDIS_HOST = os.getenv("REDIS_HOST") or "127.0.0.1"
-REDIS_PORT = tonumber(os.getenv("REDIS_PORT") or 6380)
+REDIS_PORT = tonumber(os.getenv("REDIS_PORT") or 6379)
 
 -- PostgreSQL Configuration (via PgBouncer for connection pooling)
 PG_HOST = os.getenv("DB_HOST") or "postgres"
