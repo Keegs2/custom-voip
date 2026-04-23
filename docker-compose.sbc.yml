@@ -1,0 +1,46 @@
+# RCF-V1 Production — SBC VM (Kamailio only)
+# Deploy: docker compose -f docker-compose.sbc.yml up -d
+#
+# Runs on: VM1 (KAM-G1 / KAM-G2 SBC instances)
+# Each SBC VM gets its own .env with its public IP set in EXTERNAL_SIP_IP.
+# Uses host networking — Kamailio binds directly to the VM's interfaces.
+#
+# Prerequisites:
+#   - Copy .env.sbc.example to .env and fill in all REQUIRED values
+#   - Ensure firewall allows: 5060/udp+tcp (SIP), 5061/tcp (TLS)
+
+services:
+  kamailio:
+    build: ./docker/kamailio
+    container_name: voip-kamailio
+    network_mode: host
+    environment:
+      - EXTERNAL_SIP_IP=${EXTERNAL_SIP_IP}
+      - FREESWITCH_IP=${FREESWITCH_IP}
+      - DB_HOST=${DB_HOST}
+      - DB_PORT=${DB_PORT:-6432}
+      - DB_USER=${DB_USER:-freeswitch}
+      - DB_PASS=${DB_PASS}
+      - HOMER_IP=${HOMER_IP}
+    volumes:
+      - ./docker/kamailio/kamailio.cfg:/etc/kamailio/kamailio.cfg.tmpl:ro
+      - ./docker/kamailio/dispatcher.list:/etc/kamailio/dispatcher.list.tmpl:ro
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 2G
+        reservations:
+          cpus: '2'
+          memory: 512M
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    healthcheck:
+      test: ["CMD", "kamcmd", "core.uptime"]
+      interval: 30s
+      timeout: 10s
+      start_period: 5s
+      retries: 3
+    restart: unless-stopped

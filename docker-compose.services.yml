@@ -1,0 +1,145 @@
+# RCF-V1 Production — Services VM (API + UI + Homer)
+# Deploy: docker compose -f docker-compose.services.yml up -d
+#
+# Runs on: VM3 (application services)
+# All services use a shared bridge network. PostgreSQL for the main voip
+# database runs bare on this VM (NOT in Docker) — accessed via PgBouncer
+# on 127.0.0.1:6432. Homer has its own Dockerized Postgres (homer-db) for
+# SIP capture data only.
+#
+# Prerequisites:
+#   - Copy .env.services.example to .env and fill in all REQUIRED values
+#   - PostgreSQL + PgBouncer running bare on this VM (port 6432)
+#   - Ensure firewall allows: 8080/tcp (UI HTTP), 8443/tcp (UI HTTPS),
+#     8088/tcp (API), 9060/udp+tcp (HEP), 9061/tcp (HEP TCP), 9080/tcp (Homer UI)
+
+services:
+  # FastAPI — RCF provisioning, CDR queries, health endpoints
+  # Connects to bare-metal PostgreSQL via PgBouncer at 127.0.0.1:6432
+  api:
+    build: ./docker/api
+    container_name: voip-api
+    environment:
+      - DATABASE_URL=${DATABASE_URL:-postgresql://api:api_secret@127.0.0.1:6432/voip}
+      - REDIS_URL=${REDIS_URL}
+      - FREESWITCH_ESL_HOST=${FREESWITCH_ESL_HOST}
+      - FREESWITCH_ESL_PORT=${FREESWITCH_ESL_PORT:-8021}
+      - FREESWITCH_ESL_PASSWORD=${FREESWITCH_ESL_PASSWORD}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+      - CORS_ORIGINS=${CORS_ORIGINS}
+      - SBC_PROXY_IP=${SBC_PROXY_IP}
+      - BANDWIDTH_API_CLIENT_ID=${BANDWIDTH_API_CLIENT_ID:-}
+      - BANDWIDTH_API_CLIENT_SECRET=${BANDWIDTH_API_CLIENT_SECRET:-}
+      - BANDWIDTH_ACCOUNT_ID=${BANDWIDTH_ACCOUNT_ID:-9900717}
+      - BANDWIDTH_SIP_PEER_ID=${BANDWIDTH_SIP_PEER_ID:-1162116}
+      - TEST_MODE=${TEST_MODE:-false}
+      - ENABLE_DOCS=${ENABLE_DOCS:-true}
+    ports:
+      - "8088:8000"
+    networks:
+      - services-network
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8000/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # Nginx — serves React SPA + Homer UI, reverse-proxies to API
+  ui:
+    build: ./docker/ui
+    container_name: voip-ui
+    depends_on:
+      - api
+    ports:
+      - "8080:80"
+      - "8443:443"
+    networks:
+      - services-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 128M
+    restart: unless-stopped
+
+  # Homer DB — dedicated Postgres for SIP capture data (separate from voip DB)
+  homer-db:
+    image: postgres:14-alpine
+    container_name: voip-homer-db
+    environment:
+      POSTGRES_PASSWORD: ${HOMER_DB_PASS:-homerSeven}
+      POSTGRES_USER: root
+    volumes:
+      - homer_db_data:/var/lib/postgresql/data
+      - ./docker/homer/init-user-db.sh:/docker-entrypoint-initdb.d/init-user-db.sh
+    networks:
+      - services-network
+    healthcheck:
+      test: ["CMD-SHELL", "psql -h localhost -U root -c '\\l'"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+  # Heplify Server — receives HEP packets from Kamailio/FreeSWITCH, writes to Homer DB
+  heplify-server:
+    image: ghcr.io/sipcapture/heplify-server
+    container_name: voip-heplify-server
+    ports:
+      - "9060:9060"
+      - "9060:9060/udp"
+      - "9061:9061/tcp"
+    environment:
+      - "HEPLIFYSERVER_HEPADDR=0.0.0.0:9060"
+      - "HEPLIFYSERVER_HEPTCPADDR=0.0.0.0:9061"
+      - "HEPLIFYSERVER_DBSHEMA=homer7"
+      - "HEPLIFYSERVER_DBDRIVER=postgres"
+      - "HEPLIFYSERVER_DBADDR=homer-db:5432"
+      - "HEPLIFYSERVER_DBUSER=root"
+      - "HEPLIFYSERVER_DBPASS=${HOMER_DB_PASS:-homerSeven}"
+      - "HEPLIFYSERVER_LOGLVL=info"
+      - "HEPLIFYSERVER_LOGSTD=true"
+    depends_on:
+      homer-db:
+        condition: service_healthy
+    networks:
+      - services-network
+    restart: unless-stopped
+
+  # Homer Webapp — SIP trace visualization and call debugging UI
+  homer-webapp:
+    image: ghcr.io/sipcapture/homer-app
+    container_name: voip-homer-webapp
+    ports:
+      - "9080:80"
+    environment:
+      - "DB_HOST=homer-db"
+      - "DB_USER=root"
+      - "DB_PASS=${HOMER_DB_PASS:-homerSeven}"
+      - "HOMER_LOGLEVEL=info"
+    volumes:
+      - ./docker/homer/bootstrap:/app/bootstrap
+    depends_on:
+      homer-db:
+        condition: service_healthy
+    networks:
+      - services-network
+    restart: unless-stopped
+
+networks:
+  services-network:
+    driver: bridge
+
+volumes:
+  homer_db_data:
+    driver: local
