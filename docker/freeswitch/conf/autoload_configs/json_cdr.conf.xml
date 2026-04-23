@@ -3,8 +3,9 @@
   mod_json_cdr Configuration
   Posts JSON CDR data to the FastAPI server after every completed call.
 
-  Network path: FreeSWITCH (host networking) -> localhost:8088 -> API container (port 8000 internal)
-  The API container publishes port 8000 on host port 8088 (see docker-compose.yml).
+  Multi-VM: api_host and api_port are set in freeswitch.xml from env vars
+  API_HOST and API_PORT. Docker default: api:8000. Multi-VM: set API_HOST
+  to the API server IP (e.g., 10.142.0.103) and API_PORT (e.g., 8088).
 
   NOTE: The API must expose a POST /v1/cdrs/ingest endpoint that accepts the
   mod_json_cdr JSON payload. That endpoint is responsible for extracting the
@@ -17,17 +18,16 @@
     <!-- HTTP POST Target                            -->
     <!-- ============================================ -->
 
-    <!-- Primary CDR receiver — FastAPI on the host-published port.
-         FreeSWITCH runs with network_mode: host, so 127.0.0.1:8088
-         reaches the API container's port 8000 via Docker port mapping. -->
-    <param name="url" value="http://127.0.0.1:8088/v1/cdrs/ingest"/>
+    <!-- Primary CDR receiver — FastAPI server.
+         In Docker: api:8000. In multi-VM: set API_HOST/API_PORT env vars. -->
+    <param name="url" value="http://$${api_host}:$${api_port}/v1/cdrs/ingest"/>
 
     <!-- HTTP timeout in seconds. Keep short so a slow/dead API server
          does not block FreeSWITCH channel teardown. 5s is generous for
          a local loopback POST. -->
     <param name="timeout" value="5"/>
 
-    <!-- Disable SSL certificate verification (not needed for localhost). -->
+    <!-- Disable SSL certificate verification (internal network). -->
     <param name="ssl-cert-check" value="false"/>
 
     <!-- ============================================ -->

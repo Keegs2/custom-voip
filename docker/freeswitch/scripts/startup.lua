@@ -4,9 +4,10 @@
 -- This script runs once when FreeSWITCH starts.
 -- It sets up global variables and optionally tests service connectivity.
 
--- Fix package paths early so require() finds luarocks-installed libraries
--- before mod_lua's custom searcher tries the scripts directory as a file.
-package.path = "/usr/local/share/lua/5.3/?.lua;/usr/local/share/lua/5.3/?/init.lua;/usr/share/lua/5.3/?.lua;/usr/share/lua/5.3/?/init.lua;" .. (package.path or "")
+-- Fix package paths early so require() finds our lib modules and luarocks-installed
+-- libraries before mod_lua's custom searcher tries the scripts directory as a file.
+-- The scripts/lib/ path is needed for require("db_client"), require("redis_client"), etc.
+package.path = "/usr/local/freeswitch/scripts/lib/?.lua;/usr/local/freeswitch/scripts/?.lua;/usr/local/share/lua/5.3/?.lua;/usr/local/share/lua/5.3/?/init.lua;/usr/share/lua/5.3/?.lua;/usr/share/lua/5.3/?/init.lua;" .. (package.path or "")
 package.cpath = "/usr/local/lib/lua/5.3/?.so;/usr/local/lib/lua/5.3/?/?.so;/usr/lib/lua/5.3/?.so;/usr/lib/lua/5.3/?/?.so;" .. (package.cpath or "")
 
 freeswitch.consoleLog("INFO", "\n")

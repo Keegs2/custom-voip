@@ -24,18 +24,22 @@
   - If the API is unreachable, FS falls back to static XML directory.
 
   Security:
-  - The API endpoint requires no authentication (called over loopback from FS).
+  - The API endpoint requires no authentication (internal network from FS to API).
   - The endpoint only serves directory XML; it does not accept writes.
+
+  Multi-VM: api_host and api_port are set in freeswitch.xml from env vars
+  API_HOST and API_PORT. Default for Docker: api:8000. For multi-VM, set
+  API_HOST=10.142.0.103 API_PORT=8088 (or whatever VM3 exposes).
 -->
 <configuration name="xml_curl.conf" description="cURL XML Gateway">
   <bindings>
     <binding name="directory">
-      <param name="gateway-url" value="http://127.0.0.1:8088/freeswitch/directory"/>
+      <param name="gateway-url" value="http://$${api_host}:$${api_port}/freeswitch/directory"/>
       <param name="bindings" value="directory"/>
       <param name="method" value="POST"/>
       <!-- Timeout in milliseconds: 3 seconds to avoid blocking call setup -->
       <param name="timeout" value="3"/>
-      <!-- Disable SSL verification (loopback connection, no TLS needed) -->
+      <!-- Disable SSL verification (internal network, no TLS needed) -->
       <param name="disable-100-continue" value="true"/>
     </binding>
   </bindings>

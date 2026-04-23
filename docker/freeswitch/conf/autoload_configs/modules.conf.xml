@@ -79,8 +79,8 @@
     <!-- Event Socket - Primary API interface -->
     <load module="mod_event_socket"/>
 
-    <!-- HTTP API for webhooks -->
-    <load module="mod_httapi"/>
+    <!-- HTTP API for webhooks (disabled: not needed for RCF, missing config causes CRIT abort) -->
+    <!-- <load module="mod_httapi"/> -->
 
     <!-- XML CURL for dynamic configuration -->
     <load module="mod_xml_curl"/>
@@ -88,8 +88,8 @@
     <!-- CURL for making HTTP requests -->
     <load module="mod_curl"/>
 
-    <!-- HTTP cache for audio files -->
-    <load module="mod_http_cache"/>
+    <!-- HTTP cache for audio files (disabled: not needed for RCF, missing config causes CRIT abort) -->
+    <!-- <load module="mod_http_cache"/> -->
 
     <!-- ============================================ -->
     <!-- CDR / BILLING                               -->

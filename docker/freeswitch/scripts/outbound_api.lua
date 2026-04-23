@@ -15,7 +15,9 @@ local external_sip_ip = os.getenv("EXTERNAL_SIP_IP") or "auto"
 -- - Proper logging for debugging
 -- - Webhook fallback support
 
-package.path = package.path .. ";/etc/freeswitch/scripts/lib/?.lua"
+-- Fix package paths: scripts/lib for our modules, luarocks paths for redis-lua etc.
+package.path = "/usr/local/freeswitch/scripts/lib/?.lua;/usr/local/freeswitch/scripts/?.lua;/usr/local/share/lua/5.3/?.lua;/usr/local/share/lua/5.3/?/init.lua;/usr/share/lua/5.3/?.lua;/usr/share/lua/5.3/?/init.lua;" .. (package.path or "")
+package.cpath = "/usr/local/lib/lua/5.3/?.so;/usr/local/lib/lua/5.3/?/?.so;/usr/lib/lua/5.3/?.so;/usr/lib/lua/5.3/?/?.so;" .. (package.cpath or "")
 
 local ok, redis = pcall(require, "redis_client")
 if not ok then
