@@ -341,4 +341,4 @@ RUN chmod +x /usr/local/freeswitch/entrypoint.sh
 # instead of the public IP. Bandwidth would send RTP to an unreachable address.
 # NAT traversal via ext-rtp-ip/ext-sip-ip is essential in Docker environments.
 ENTRYPOINT ["/usr/local/freeswitch/entrypoint.sh"]
-CMD ["-nf", "-c", "-conf", "/usr/local/freeswitch/conf", "-log", "/var/log/freeswitch", "-db", "/var/lib/freeswitch/db", "-scripts", "/usr/local/freeswitch/scripts"]
+CMD ["-nf", "-conf", "/usr/local/freeswitch/conf", "-log", "/var/log/freeswitch", "-db", "/var/lib/freeswitch/db", "-scripts", "/usr/local/freeswitch/scripts"]
