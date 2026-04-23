@@ -11,7 +11,9 @@ logger = logging.getLogger(__name__)
 
 # ESL connection settings
 # FS runs with host networking — API container reaches it via host's VPC IP
-ESL_HOST = os.getenv("FREESWITCH_ESL_HOST", "10.142.0.100")
+ESL_HOST = os.getenv("FREESWITCH_ESL_HOST", "")
+if not ESL_HOST:
+    logger.warning("FREESWITCH_ESL_HOST not set — ESL commands will fail")
 ESL_PORT = int(os.getenv("FREESWITCH_ESL_PORT", "8021"))
 ESL_PASSWORD = os.getenv("FREESWITCH_ESL_PASSWORD", "ClueCon")
 
@@ -108,7 +110,8 @@ async def originate_call(
         # Use sofia/external/dest@proxy to ensure the outbound INVITE uses
         # ext-sip-ip (public IP) in Via, Contact, and SDP headers.
         # X-Carrier header tells Kamailio which Bandwidth IP to route to.
-        command = f"originate {{{vars_str}}}sofia/external/{to}@172.28.0.1:5060 &lua(outbound_api.lua)"
+        sbc_proxy = os.getenv("SBC_PROXY_IP", "127.0.0.1")
+        command = f"originate {{{vars_str}}}sofia/external/{to}@{sbc_proxy}:5060 &lua(outbound_api.lua)"
 
     logger.info(f"Originating call: {uuid} to {to}")
     response = await _send_esl_command(command)

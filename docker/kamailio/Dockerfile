@@ -45,9 +45,13 @@ RUN mkdir -p /run/kamailio \
     && mkdir -p /etc/kamailio/tls \
     && chown -R kamailio:kamailio /run/kamailio /var/log/kamailio /etc/kamailio
 
-# Copy configuration files
-COPY kamailio.cfg /etc/kamailio/kamailio.cfg
-COPY dispatcher.list /etc/kamailio/dispatcher.list
+# Copy configuration templates (entrypoint.sh will template these at startup)
+COPY kamailio.cfg /etc/kamailio/kamailio.cfg.tmpl
+COPY dispatcher.list /etc/kamailio/dispatcher.list.tmpl
+
+# Copy and install entrypoint script
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
 
 # Create TLS configuration file (will use self-signed certs for dev)
 RUN echo '[server:default]' > /etc/kamailio/tls.cfg && \
@@ -68,8 +72,8 @@ RUN openssl req -x509 -newkey rsa:4096 -keyout /etc/kamailio/tls/kamailio.key \
     && chmod 600 /etc/kamailio/tls/kamailio.key \
     && chown kamailio:kamailio /etc/kamailio/tls/*
 
-# Validate configuration syntax
-RUN kamailio -c /etc/kamailio/kamailio.cfg || echo "Config validation skipped (modules not available in build)"
+# Config validation skipped — config is templated at runtime by entrypoint.sh
+# RUN kamailio -c /etc/kamailio/kamailio.cfg || echo "Config validation skipped (modules not available in build)"
 
 # SIP ports: 5060 (UDP/TCP), 5061 (TLS)
 EXPOSE 5060/udp 5060/tcp 5061/tcp
@@ -81,8 +85,10 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
 # Run as kamailio user for security
 USER kamailio
 
+# Entrypoint templates the config then exec's kamailio with CMD args
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+
 # Start Kamailio in foreground with debug output
 # -DD = don't daemonize, dump core on crash
 # -E = log to stderr
-# -e = set log color
-CMD ["/usr/sbin/kamailio", "-DD", "-E", "-f", "/etc/kamailio/kamailio.cfg", "-M", "512", "-m", "16"]
+CMD ["-DD", "-E", "-f", "/etc/kamailio/kamailio.cfg", "-M", "512", "-m", "16"]

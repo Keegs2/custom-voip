@@ -269,7 +269,7 @@ async def delete_rcf(identifier: str):
     """Delete an RCF number by ID (numeric) or DID (E.164 string)."""
     if identifier.isdigit():
         # Lookup DID first for cache invalidation, then delete by ID
-        row = await db.fetchrow(
+        row = await db.fetch_one(
             "SELECT did FROM rcf_numbers WHERE id = $1", int(identifier)
         )
         if not row:

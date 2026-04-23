@@ -40,10 +40,11 @@ async def init_db():
         host=host,
         port=int(port),
         database=database,
-        min_size=10,           # Minimum connections in pool
-        max_size=100,          # Maximum connections
+        min_size=3,            # Minimum connections in pool
+        max_size=25,           # Maximum connections (4 workers × 25 = 100 total for PgBouncer)
         max_inactive_connection_lifetime=300,  # 5 minutes
         command_timeout=30,    # Query timeout
+        statement_cache_size=0,  # Required for PgBouncer transaction-mode pooling
     )
 
     logger.info(f"Database pool created: {host}:{port}/{database}")

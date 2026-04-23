@@ -179,7 +179,7 @@
       capture-id 201 distinguishes this from the internal profile (200)
       and Kamailio (100) in Homer's SIP ladder diagrams.
     -->
-    <param name="capture-server" value="udp:127.0.0.1:9060;hep=3;capture_id=201"/>
+    <param name="capture-server" value="udp:$${homer_ip}:9060;hep=3;capture_id=201"/>
     <param name="sip-capture" value="yes"/>
 
   </settings>

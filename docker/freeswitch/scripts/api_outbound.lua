@@ -1,4 +1,6 @@
 -- API Outbound Handler - API Calling Product Outbound Calls
+local sbc_proxy_ip = os.getenv("SBC_PROXY_IP") or "127.0.0.1"
+local external_sip_ip = os.getenv("EXTERNAL_SIP_IP") or "auto"
 -- Handles outbound calls originated via ESL/API with full tier enforcement
 --
 -- Call Flow:
@@ -336,7 +338,7 @@ end
 -- X-Carrier tells Kamailio which Bandwidth IP to route to.
 local dial_string = string.format(
     "{origination_caller_id_number=%s,origination_caller_id_name=%s,call_timeout=60,ignore_early_media=false,sip_h_X-Carrier=premium" ..
-    ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true}sofia/external/%s@127.0.0.1:5060",
+    ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true}sofia/external/%s@" .. sbc_proxy_ip .. ":5060",
     outbound_caller_id,
     outbound_caller_name,
     normalized_dest:gsub("^%+", "")  -- Remove + for carrier (carrier-dependent)
@@ -418,7 +420,7 @@ else
 
             dial_string = string.format(
                 "{origination_caller_id_number=%s,origination_caller_id_name=%s,call_timeout=60,sip_h_X-Carrier=backup" ..
-                ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true}sofia/external/%s@127.0.0.1:5060",
+                ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true}sofia/external/%s@" .. sbc_proxy_ip .. ":5060",
                 outbound_caller_id,
                 outbound_caller_name,
                 normalized_dest:gsub("^%+", "")

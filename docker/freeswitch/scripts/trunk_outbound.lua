@@ -1,4 +1,6 @@
 -- Trunk Outbound Handler - SIP Trunk Customer Outbound Calls
+local sbc_proxy_ip = os.getenv("SBC_PROXY_IP") or "127.0.0.1"
+local external_sip_ip = os.getenv("EXTERNAL_SIP_IP") or "auto"
 -- Handles outbound calls from customer PBXs through SIP trunks to PSTN
 --
 -- Call Flow:
@@ -490,7 +492,7 @@ session:setVariable("sip_h_X-Original-CID", original_cid or outbound_did_10)
 
 -- Diversion header: indicates the call originated from a trunk DID
 session:setVariable("sip_h_Diversion",
-    "<sip:" .. outbound_did_10 .. "@34.74.71.32>;reason=unconditional")
+    "<sip:" .. outbound_did_10 .. "@" .. external_sip_ip .. ">;reason=unconditional")
 
 freeswitch.consoleLog("INFO", string.format(
     "[trunk_outbound] CID setup: outbound_cid=%s effective_cid=%s original_pbx=%s\n",
@@ -510,7 +512,7 @@ set_var("transfer_ringback", "%(2000,4000,440,480)")
 -- X-Carrier tells Kamailio which Bandwidth IP to route to.
 local dial_string = string.format(
     "{ignore_early_media=false,call_timeout=60,sip_h_X-Carrier=standard" ..
-    ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true}sofia/external/%s@127.0.0.1:5060",
+    ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true}sofia/external/%s@" .. sbc_proxy_ip .. ":5060",
     normalized_dest:gsub("^%+", "")  -- Remove + for carrier (carrier-dependent)
 )
 
@@ -555,7 +557,7 @@ if bridge_result ~= "SUCCESS" then
 
     local failover_dial = string.format(
         "{ignore_early_media=false,call_timeout=60,sip_h_X-Carrier=backup" ..
-        ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true}sofia/external/%s@127.0.0.1:5060",
+        ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true}sofia/external/%s@" .. sbc_proxy_ip .. ":5060",
         normalized_dest:gsub("^%+", "")
     )
 

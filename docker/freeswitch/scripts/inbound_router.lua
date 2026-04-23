@@ -38,9 +38,14 @@ local function load_module(name)
     return result
 end
 
--- Redis disabled temporarily — connection fails inside mod_lua
+-- RCF-V1: Redis velocity checks disabled. The redis-lua library has
+-- connection pooling issues inside mod_lua's threading model that can
+-- cause intermittent call failures. Velocity/fraud checks will be
+-- re-enabled in Phase 2 with a more robust Redis client or via the
+-- API layer (pre-call webhook). For now, RCF calls route without
+-- velocity rate-limiting.
 local redis = nil
-freeswitch.consoleLog("ERR", ">>> redis=SKIPPED Loading db_client <<<\n")
+freeswitch.consoleLog("INFO", ">>> redis=DISABLED (RCF-V1) Loading db_client <<<\n")
 local db = load_module("db_client")
 freeswitch.consoleLog("ERR", ">>> db=" .. tostring(db ~= nil) .. " Modules loaded <<<\n")
 
@@ -80,6 +85,11 @@ local function hangup(cause, log_msg)
         session:hangup(cause)
     end)
 end
+
+-- Environment-based IPs for multi-VM deployment
+-- These replace hardcoded IPs so each VM gets the correct addresses
+local external_sip_ip = os.getenv("EXTERNAL_SIP_IP") or "auto"
+local sbc_proxy_ip = os.getenv("SBC_PROXY_IP") or "127.0.0.1"
 
 -- Get call details
 local uuid = get_var("uuid", "unknown")
@@ -499,7 +509,7 @@ if product_type == "rcf" then
     end
 
     -- Diversion header indicates the call was forwarded and from which number
-    session:setVariable("sip_h_Diversion", "<sip:" .. outbound_did .. "@34.74.71.32>;reason=unconditional")
+    session:setVariable("sip_h_Diversion", "<sip:" .. outbound_did .. "@" .. external_sip_ip .. ">;reason=unconditional")
 
     -- X-Original-CID: Kamailio reads this to build P-Asserted-Identity
     session:setVariable("sip_h_X-Original-CID", outbound_original_cid)
@@ -531,7 +541,7 @@ if product_type == "rcf" then
     else
         -- PSTN/CARRIER ROUTING via Kamailio proxy (no gateway syntax)
         -- Using sofia/external/dest@proxy ensures the outbound INVITE uses
-        -- ext-sip-ip (public IP 34.74.71.32) in Via, Contact, and SDP.
+        -- ext-sip-ip (public IP from EXTERNAL_SIP_IP) in Via, Contact, and SDP.
         -- The internal profile does NOT apply ext-sip-ip to outbound calls.
         -- X-Carrier header tells Kamailio which Bandwidth IP to use.
         set_var("carrier_used", "carrier_" .. carrier)
@@ -540,7 +550,7 @@ if product_type == "rcf" then
         -- that don't support P-Asserted-Identity
         if pass_caller_id then
             session:setVariable("sip_h_Remote-Party-ID",
-                "<sip:" .. original_caller_number .. "@34.74.71.32>;party=calling;privacy=off;screen=yes")
+                "<sip:" .. original_caller_number .. "@" .. external_sip_ip .. ">;party=calling;privacy=off;screen=yes")
         end
 
         -- Simplified bridge string -- no origination_caller_id_number override needed.
@@ -550,10 +560,11 @@ if product_type == "rcf" then
         dial_string = string.format(
             "{ignore_early_media=false,call_timeout=%d,sip_h_X-Carrier=%s" ..
             ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true" ..
-            "}sofia/external/%s@127.0.0.1:5060",
+            "}sofia/external/%s@%s:5060",
             ring_timeout,
             carrier,
-            forward_to
+            forward_to,
+            sbc_proxy_ip
         )
 
         freeswitch.consoleLog("INFO", string.format(
@@ -602,9 +613,10 @@ if product_type == "rcf" then
         local failover_dial = string.format(
             "{ignore_early_media=false,call_timeout=%d,sip_h_X-Carrier=backup" ..
             ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true" ..
-            "}sofia/external/%s@127.0.0.1:5060",
+            "}sofia/external/%s@%s:5060",
             ring_timeout,
-            forward_to
+            forward_to,
+            sbc_proxy_ip
         )
 
         pcall(function()
@@ -719,7 +731,7 @@ elseif product_type == "trunk" then
         set_var("effective_caller_id_number", original_caller)
 
         -- Build dial string to customer PBX through Kamailio SBC
-        -- Same pattern as RCF: FS -> Kamailio (127.0.0.1:5060) -> PBX
+        -- Same pattern as RCF: FS -> Kamailio (sbc_proxy_ip:5060) -> PBX
         -- X-PBX-Dest header tells Kamailio where to relay the call
         local bridge_did = normalized_did:gsub("^%+", "")
         local pbx_ip = endpoint_ips[1]
@@ -729,8 +741,9 @@ elseif product_type == "trunk" then
         local dial_string = string.format(
             "{ignore_early_media=false,call_timeout=60" ..
             ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true" ..
-            "}sofia/external/%s@127.0.0.1:5060",
-            bridge_did
+            "}sofia/external/%s@%s:5060",
+            bridge_did,
+            sbc_proxy_ip
         )
 
         freeswitch.consoleLog("ERR", ">>> BRIDGE (via SBC): " .. dial_string .. " X-PBX-Dest=" .. pbx_ip .. " <<<\n")

@@ -327,7 +327,7 @@
       capture-id: Node identifier in Homer (200 = FreeSWITCH,
         distinct from Kamailio's 100)
     -->
-    <param name="capture-server" value="udp:127.0.0.1:9060;hep=3;capture_id=200"/>
+    <param name="capture-server" value="udp:$${homer_ip}:9060;hep=3;capture_id=200"/>
     <param name="sip-capture" value="yes"/>
 
   </settings>

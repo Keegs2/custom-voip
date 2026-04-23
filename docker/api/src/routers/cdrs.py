@@ -452,6 +452,9 @@ async def ingest_cdr(request: Request):
 
     No authentication is required; FreeSWITCH calls this over the internal
     Docker network.
+
+    Body size is implicitly constrained by the Pydantic-validated CDR shape
+    (a single FreeSWITCH JSON CDR, typically 2-10 KB).
     """
     try:
         content_type = request.headers.get("content-type", "")
@@ -511,6 +514,14 @@ async def ingest_cdr_bulk(request: Request):
     if not isinstance(body, list):
         return {"status": "error", "detail": "expected a JSON array of CDR objects"}
 
+    # Guard against oversized bulk payloads — max 1000 CDRs per batch
+    MAX_BULK_CDRS = 1000
+    if len(body) > MAX_BULK_CDRS:
+        return {
+            "status": "error",
+            "detail": f"batch too large: {len(body)} CDRs (max {MAX_BULK_CDRS})",
+        }
+
     results = {"ok": 0, "duplicate": 0, "error": 0, "total": len(body), "errors": []}
 
     for i, cdr_body in enumerate(body):
@@ -562,9 +573,9 @@ async def query_cdrs(
     """Query CDRs with filters."""
     # Default to last 24 hours if no date range
     if not start_date:
-        start_date = datetime.utcnow() - timedelta(hours=24)
+        start_date = datetime.now(timezone.utc) - timedelta(hours=24)
     if not end_date:
-        end_date = datetime.utcnow()
+        end_date = datetime.now(timezone.utc)
 
     query = """
         SELECT uuid, customer_id, product_type, trunk_id, direction,
@@ -642,9 +653,9 @@ async def cdr_summary(
 ):
     """Get CDR summary statistics."""
     if not start_date:
-        start_date = datetime.utcnow() - timedelta(days=7)
+        start_date = datetime.now(timezone.utc) - timedelta(days=7)
     if not end_date:
-        end_date = datetime.utcnow()
+        end_date = datetime.now(timezone.utc)
 
     if group_by == "day":
         query = """

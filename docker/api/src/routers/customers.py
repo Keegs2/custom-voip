@@ -126,25 +126,32 @@ async def update_customer(customer_id: int, customer: CustomerUpdate):
 
 @router.delete("/{customer_id}")
 async def delete_customer(customer_id: int):
-    """Delete a customer and all associated records."""
-    # Delete dependent records first (FK constraints)
-    await db.execute("DELETE FROM rcf_numbers WHERE customer_id = $1", customer_id)
-    await db.execute("DELETE FROM api_dids WHERE customer_id = $1", customer_id)
-    # Trunk children
-    await db.execute(
-        "DELETE FROM trunk_dids WHERE trunk_id IN (SELECT id FROM sip_trunks WHERE customer_id = $1)",
-        customer_id
-    )
-    await db.execute(
-        "DELETE FROM trunk_auth_ips WHERE trunk_id IN (SELECT id FROM sip_trunks WHERE customer_id = $1)",
-        customer_id
-    )
-    await db.execute("DELETE FROM sip_trunks WHERE customer_id = $1", customer_id)
-    await db.execute("DELETE FROM api_credentials WHERE customer_id = $1", customer_id)
-    # Delete customer
-    result = await db.execute("DELETE FROM customers WHERE id = $1", customer_id)
-    if result == "DELETE 0":
-        raise HTTPException(status_code=404, detail="Customer not found")
+    """Delete a customer and all associated records.
+
+    All DELETEs are wrapped in a single transaction so that a failure
+    midway does not leave orphaned records or a half-deleted customer.
+    """
+    pool = await db.get_pool()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            # Delete dependent records first (FK constraints)
+            await conn.execute("DELETE FROM rcf_numbers WHERE customer_id = $1", customer_id)
+            await conn.execute("DELETE FROM api_dids WHERE customer_id = $1", customer_id)
+            # Trunk children
+            await conn.execute(
+                "DELETE FROM trunk_dids WHERE trunk_id IN (SELECT id FROM sip_trunks WHERE customer_id = $1)",
+                customer_id,
+            )
+            await conn.execute(
+                "DELETE FROM trunk_auth_ips WHERE trunk_id IN (SELECT id FROM sip_trunks WHERE customer_id = $1)",
+                customer_id,
+            )
+            await conn.execute("DELETE FROM sip_trunks WHERE customer_id = $1", customer_id)
+            await conn.execute("DELETE FROM api_credentials WHERE customer_id = $1", customer_id)
+            # Delete customer
+            result = await conn.execute("DELETE FROM customers WHERE id = $1", customer_id)
+            if result == "DELETE 0":
+                raise HTTPException(status_code=404, detail="Customer not found")
     return {"status": "deleted", "customer_id": customer_id}
 
 

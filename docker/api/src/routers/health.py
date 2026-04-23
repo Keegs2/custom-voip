@@ -1,15 +1,29 @@
 """Health check endpoints."""
 from fastapi import APIRouter
-from db.database import get_pool
-from db.redis_client import get_client
+from db import database as db
+from db import redis_client as cache
 
 router = APIRouter()
 
 
 @router.get("/health")
 async def health_check():
-    """Basic health check."""
-    return {"status": "healthy"}
+    """Health check with DB and Redis connectivity verification."""
+    checks = {"api": "ok"}
+    try:
+        await db.fetch_one("SELECT 1")
+        checks["database"] = "ok"
+    except Exception:
+        checks["database"] = "error"
+    try:
+        rc = await cache.get_client()
+        await rc.ping()
+        checks["redis"] = "ok"
+    except Exception:
+        checks["redis"] = "error"
+
+    healthy = all(v == "ok" for v in checks.values())
+    return {"status": "healthy" if healthy else "degraded", "checks": checks}
 
 
 @router.get("/health/detailed")
@@ -19,16 +33,14 @@ async def detailed_health():
 
     # Check database
     try:
-        pool = await get_pool()
-        async with pool.acquire() as conn:
-            await conn.fetchval("SELECT 1")
+        await db.fetch_one("SELECT 1")
         status["database"] = "healthy"
     except Exception as e:
         status["database"] = f"unhealthy: {str(e)}"
 
     # Check Redis
     try:
-        client = await get_client()
+        client = await cache.get_client()
         await client.ping()
         status["redis"] = "healthy"
     except Exception as e:

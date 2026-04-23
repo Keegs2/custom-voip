@@ -2,6 +2,7 @@
 Async Redis Client
 Uses redis-py async for high-performance caching and real-time data
 """
+import asyncio
 import os
 import logging
 from typing import Optional
@@ -12,9 +13,18 @@ logger = logging.getLogger(__name__)
 # Redis client
 client: Optional[redis.Redis] = None
 
+# Retry configuration for init_redis()
+_REDIS_INIT_RETRIES = 5
+_REDIS_INIT_BACKOFF_SEC = 2
+
 
 async def init_redis():
-    """Initialize Redis connection."""
+    """Initialize Redis connection with retry logic.
+
+    Retries up to _REDIS_INIT_RETRIES times with _REDIS_INIT_BACKOFF_SEC
+    seconds between attempts. This prevents the API from crashing if Redis
+    on VM2 is temporarily unreachable at startup.
+    """
     global client
 
     redis_url = os.getenv("REDIS_URL", "redis://redis:6379")
@@ -24,11 +34,33 @@ async def init_redis():
         encoding="utf-8",
         decode_responses=True,
         max_connections=50,
+        retry_on_timeout=True,
+        socket_connect_timeout=5,
+        socket_timeout=5,
     )
 
-    # Test connection
-    await client.ping()
-    logger.info(f"Redis connected: {redis_url}")
+    # Test connection with retry
+    for attempt in range(1, _REDIS_INIT_RETRIES + 1):
+        try:
+            await client.ping()
+            logger.info(f"Redis connected: {redis_url}")
+            return
+        except (redis.ConnectionError, redis.TimeoutError, OSError) as exc:
+            if attempt == _REDIS_INIT_RETRIES:
+                logger.error(
+                    "Redis connection failed after %d attempts: %s",
+                    _REDIS_INIT_RETRIES, exc,
+                )
+                # Close the failed client so convenience functions treat it
+                # as unavailable rather than holding a broken handle.
+                await client.close()
+                client = None
+                raise
+            logger.warning(
+                "Redis connection attempt %d/%d failed (%s), retrying in %ds...",
+                attempt, _REDIS_INIT_RETRIES, exc, _REDIS_INIT_BACKOFF_SEC,
+            )
+            await asyncio.sleep(_REDIS_INIT_BACKOFF_SEC)
 
 
 async def close_redis():
@@ -47,25 +79,37 @@ async def get_client() -> redis.Redis:
     return client
 
 
-# Convenience functions
+# Convenience functions — all gracefully handle client is None so callers
+# never crash when Redis is unavailable.
 
 async def cache_get(key: str) -> Optional[str]:
-    """Get a cached value."""
+    """Get a cached value. Returns None if Redis is unavailable."""
+    if not client:
+        return None
     return await client.get(key)
 
 
 async def cache_set(key: str, value: str, ttl: int = 300):
-    """Set a cached value with TTL."""
+    """Set a cached value with TTL. No-op if Redis is unavailable."""
+    if not client:
+        return
     await client.set(key, value, ex=ttl)
 
 
 async def cache_delete(key: str):
-    """Delete a cached value."""
+    """Delete a cached value. No-op if Redis is unavailable."""
+    if not client:
+        return
     await client.delete(key)
 
 
 async def incr_with_ttl(key: str, ttl: int = 60) -> int:
-    """Increment a counter with TTL (for velocity tracking)."""
+    """Increment a counter with TTL (for velocity tracking).
+
+    Returns 0 if Redis is unavailable.
+    """
+    if not client:
+        return 0
     pipe = client.pipeline()
     pipe.incr(key)
     pipe.expire(key, ttl)
@@ -74,7 +118,13 @@ async def incr_with_ttl(key: str, ttl: int = 60) -> int:
 
 
 async def get_velocity(customer_id: int) -> dict:
-    """Get current velocity metrics for a customer."""
+    """Get current velocity metrics for a customer.
+
+    Returns zeroed metrics if Redis is unavailable.
+    """
+    if not client:
+        return {"calls_per_minute": 0, "daily_spend": 0.0}
+
     import datetime
     today = datetime.date.today().strftime("%Y%m%d")
 
@@ -93,12 +143,16 @@ async def get_velocity(customer_id: int) -> dict:
 
 
 async def invalidate_rcf_cache(did: str):
-    """Invalidate RCF cache when config changes."""
+    """Invalidate RCF cache when config changes. No-op if Redis is unavailable."""
+    if not client:
+        return
     await client.delete(f"rcf:{did}")
 
 
 async def invalidate_trunk_cache(ip: str):
-    """Invalidate trunk IP cache when config changes."""
+    """Invalidate trunk IP cache when config changes. No-op if Redis is unavailable."""
+    if not client:
+        return
     await client.delete(f"trunk_ip:{ip}")
 
 
@@ -127,6 +181,10 @@ async def sync_cps_tier_to_redis(
     Returns:
         True if sync successful, False otherwise
     """
+    if not client:
+        logger.warning("sync_cps_tier_to_redis: Redis unavailable, skipping")
+        return False
+
     key = f"account:{customer_id}:limits"
     try:
         await client.hset(key, mapping={
@@ -149,6 +207,9 @@ async def get_cps_tier_from_redis(customer_id: int) -> Optional[dict]:
     Returns dict with keys: tier, cps_limit, type
     Or None if not found in Redis.
     """
+    if not client:
+        return None
+
     key = f"account:{customer_id}:limits"
     try:
         result = await client.hgetall(key)
@@ -182,6 +243,9 @@ async def check_cps_limit(
     Returns:
         Tuple of (allowed: bool, current_cps: int)
     """
+    if not client:
+        return True, 0  # Fail open when Redis is unavailable
+
     import time
     import uuid as uuid_module
 
@@ -249,6 +313,9 @@ async def get_current_cps(customer_id: int, tier_type: str = "api") -> int:
     Returns:
         Current CPS count in the sliding window
     """
+    if not client:
+        return 0
+
     import time
 
     key = f"cps:{tier_type}:{customer_id}"
@@ -284,6 +351,9 @@ async def record_cps_hit(customer_id: int, tier_type: str = "api") -> bool:
     Returns:
         True if recorded successfully
     """
+    if not client:
+        return False
+
     import time
     import uuid as uuid_module
 

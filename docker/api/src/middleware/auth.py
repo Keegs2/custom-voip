@@ -43,8 +43,7 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         # Exempt FreeSWITCH ingest endpoints (called without auth over Docker network)
-        if (path.endswith("/cdrs/ingest") or path.endswith("/cdrs/ingest/bulk")
-                or path.endswith("/voicemail/ingest")):
+        if path.endswith("/cdrs/ingest") or path.endswith("/cdrs/ingest/bulk"):
             return await call_next(request)
 
         # WebSocket connections authenticate via query param, not header

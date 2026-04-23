@@ -1,4 +1,6 @@
 -- Voice Webhook Engine - TwiML-compatible XML execution for FreeSWITCH
+local sbc_proxy_ip = os.getenv("SBC_PROXY_IP") or "127.0.0.1"
+local external_sip_ip = os.getenv("EXTERNAL_SIP_IP") or "auto"
 -- Fetches XML instructions from customer webhook URLs and executes them
 -- as FreeSWITCH call control commands.
 --
@@ -778,7 +780,7 @@ local function execute_dial(verb)
             local dial_number = clean_target:gsub("^%+", "")
             table.insert(dial_strings, string.format(
                 "{call_timeout=%d,ignore_early_media=false,sip_h_X-Carrier=premium" ..
-                ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true}sofia/external/%s@127.0.0.1:5060",
+                ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true}sofia/external/%s@" .. sbc_proxy_ip .. ":5060",
                 dial_timeout, dial_number
             ))
         end

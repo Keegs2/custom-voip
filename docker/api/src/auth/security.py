@@ -7,7 +7,9 @@ import bcrypt
 from datetime import datetime, timedelta, timezone
 from jose import jwt, JWTError
 
-JWT_SECRET = os.getenv("JWT_SECRET_KEY", "voip-dev-secret-change-in-production")
+JWT_SECRET = os.getenv("JWT_SECRET_KEY")
+if not JWT_SECRET:
+    raise RuntimeError("JWT_SECRET_KEY environment variable is required")
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRE_MINUTES = int(os.getenv("JWT_EXPIRE_MINUTES", "480"))  # 8 hours
 

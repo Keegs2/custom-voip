@@ -48,10 +48,10 @@
   <!-- ============================================ -->
   <!-- RTP PORT RANGE                              -->
   <!-- ============================================ -->
-  <!-- RTP port range must match Docker port mapping in docker-compose.yml -->
-  <!-- 2000 ports = ~500 concurrent B2BUA calls. For higher scale, use host networking. -->
+  <!-- RTP port range: 32K ports for ~10K concurrent B2BUA calls.
+       switch.conf.xml also sets these — values here must match. -->
   <X-PRE-PROCESS cmd="set" data="rtp_start_port=16384"/>
-  <X-PRE-PROCESS cmd="set" data="rtp_end_port=18383"/>
+  <X-PRE-PROCESS cmd="set" data="rtp_end_port=49151"/>
 
   <!-- ============================================ -->
   <!-- EXTERNAL IP (for NAT traversal)            -->
@@ -64,6 +64,10 @@
   <!-- Override with environment variables if set -->
   <X-PRE-PROCESS cmd="exec-set" data="external_rtp_ip=echo ${EXTERNAL_RTP_IP:-auto-nat}"/>
   <X-PRE-PROCESS cmd="exec-set" data="external_sip_ip=echo ${EXTERNAL_SIP_IP:-auto-nat}"/>
+
+  <!-- Homer SIP capture endpoint and SBC proxy IP for multi-VM deployment -->
+  <X-PRE-PROCESS cmd="exec-set" data="homer_ip=echo ${HOMER_IP:-127.0.0.1}"/>
+  <X-PRE-PROCESS cmd="exec-set" data="sbc_proxy_ip=echo ${SBC_PROXY_IP:-127.0.0.1}"/>
 
   <!-- ============================================ -->
   <!-- DATABASE CONFIGURATION (PostgreSQL via PgBouncer) -->

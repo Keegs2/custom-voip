@@ -2,6 +2,8 @@
 RCF Platform API - Production FastAPI Application
 Stripped to RCF-only services for RCF-V1 deployment
 """
+import os
+import time
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, ORJSONResponse
@@ -55,10 +57,14 @@ app = FastAPI(
     redoc_url=None,   # Disabled — served via custom dark-themed route below
 )
 
-# CORS
+# Docs toggle — set ENABLE_DOCS=false in production to disable Swagger UI / ReDoc
+ENABLE_DOCS = os.getenv("ENABLE_DOCS", "true").lower() == "true"
+
+# CORS — restrict origins via env var; defaults to localhost for dev safety
+CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:8080").split(",")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Restrict in production
+    allow_origins=CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -71,7 +77,6 @@ app.add_middleware(JWTAuthMiddleware)
 # Request timing middleware
 @app.middleware("http")
 async def add_timing_header(request: Request, call_next):
-    import time
     start = time.perf_counter()
     response = await call_next(request)
     duration = (time.perf_counter() - start) * 1000
@@ -376,11 +381,11 @@ REDOC_HTML = """
 """
 
 
-@app.get("/docs", include_in_schema=False)
-async def custom_swagger_ui():
-    return HTMLResponse(content=SWAGGER_HTML)
+if ENABLE_DOCS:
+    @app.get("/docs", include_in_schema=False)
+    async def custom_swagger_ui():
+        return HTMLResponse(content=SWAGGER_HTML)
 
-
-@app.get("/redoc", include_in_schema=False)
-async def custom_redoc():
-    return HTMLResponse(content=REDOC_HTML)
+    @app.get("/redoc", include_in_schema=False)
+    async def custom_redoc():
+        return HTMLResponse(content=REDOC_HTML)

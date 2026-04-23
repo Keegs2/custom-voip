@@ -41,7 +41,7 @@
 # Weight: 100, MaxLoad: 2000 concurrent calls
 # FS binds to the VM's internal VPC IP (local_ip_v4 = 10.142.0.100)
 # so dispatcher must target that IP, not 127.0.0.1
-1 sip:10.142.0.100:5080 0 0 weight=100;maxload=2000;duid=fs-primary
+1 sip:__FS_IP__:5080 0 0 weight=100;maxload=2000;duid=fs-primary
 
 # Add additional FreeSWITCH instances here for horizontal scaling:
 # 1 sip:freeswitch-2:5080 0 0 weight=100;maxload=2000;duid=fs-secondary
