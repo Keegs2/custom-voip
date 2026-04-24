@@ -23,6 +23,77 @@ async function updateRcfEnabled(id: number, enabled: boolean): Promise<RcfEntry>
   return apiRequest('PATCH', `/rcf/${id}`, { enabled });
 }
 
+async function updateRcfPassCallerId(id: number, pass_caller_id: boolean): Promise<RcfEntry> {
+  return apiRequest('PATCH', `/rcf/${id}`, { pass_caller_id });
+}
+
+// ─── CardCallerIdToggle ──────────────────────────────────────────────────────
+
+function CardCallerIdToggle({ entry, canEdit }: { entry: RcfEntry; canEdit: boolean }) {
+  const queryClient = useQueryClient();
+  const { toastOk, toastErr } = useToast();
+
+  const mutation = useMutation({
+    mutationFn: (pass: boolean) => updateRcfPassCallerId(entry.id, pass),
+    onSuccess: (_, pass) => {
+      void queryClient.invalidateQueries({ queryKey: ['rcf'] });
+      toastOk(pass ? `Caller ID pass-through enabled for ${fmt(entry.did)}` : `Caller ID will show ${fmt(entry.did)} instead`);
+    },
+    onError: (err: Error) => toastErr(err.message ?? 'Failed to update'),
+  });
+
+  const passthrough = entry.pass_caller_id;
+  const pending = mutation.isPending;
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={passthrough}
+        disabled={!canEdit || pending}
+        onClick={() => { if (canEdit && !pending) mutation.mutate(!passthrough); }}
+        title={canEdit ? (passthrough ? 'Showing original caller ID — click to show your DID' : 'Showing your DID — click to pass through original caller ID') : 'Caller ID setting'}
+        style={{
+          position: 'relative',
+          display: 'inline-flex',
+          alignItems: 'center',
+          width: 34,
+          height: 20,
+          borderRadius: 10,
+          border: `1px solid ${passthrough ? 'rgba(59,130,246,0.55)' : 'rgba(255,255,255,0.12)'}`,
+          background: passthrough
+            ? 'linear-gradient(135deg, rgba(59,130,246,0.5) 0%, rgba(59,130,246,0.35) 100%)'
+            : 'rgba(255,255,255,0.06)',
+          cursor: canEdit ? 'pointer' : 'not-allowed',
+          transition: 'background 0.2s, border-color 0.2s, box-shadow 0.2s',
+          flexShrink: 0,
+          padding: 0,
+          outline: 'none',
+          boxShadow: passthrough ? '0 0 6px rgba(59,130,246,0.3)' : 'none',
+          opacity: pending ? 0.5 : 1,
+        }}
+      >
+        <span
+          style={{
+            position: 'absolute',
+            left: passthrough ? 16 : 2,
+            width: 14,
+            height: 14,
+            borderRadius: '50%',
+            background: '#fff',
+            boxShadow: '0 1px 3px rgba(0,0,0,0.4)',
+            transition: 'left 0.2s ease',
+          }}
+        />
+      </button>
+      <span style={{ fontSize: '0.68rem', color: passthrough ? '#60a5fa' : '#475569', fontWeight: 500 }}>
+        {passthrough ? 'Caller ID: Pass-through' : 'Caller ID: Show DID'}
+      </span>
+    </div>
+  );
+}
+
 // ─── CardEnableToggle ─────────────────────────────────────────────────────────
 
 function CardEnableToggle({
@@ -524,9 +595,9 @@ export function RcfCard({ entry, pendingValue, onPendingChange }: RcfCardProps) 
           )}
         </div>
 
-        {/* Info notes */}
-        <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 5 }}>
-          {entry.pass_caller_id && <InfoNote>Caller ID passed through to destination</InfoNote>}
+        {/* Caller ID toggle + info */}
+        <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <CardCallerIdToggle entry={entry} canEdit={canEdit} />
           <InfoNote>
             Ring timeout: {entry.ring_timeout != null ? `${entry.ring_timeout}s` : '30s'}
           </InfoNote>
