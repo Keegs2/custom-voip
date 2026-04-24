@@ -8,20 +8,20 @@ import { type CSSProperties, useMemo } from 'react';
  *
  * Architecture (each location has two discrete SBC nodes):
  *
- *                                    ┌─ US-East: [SBC-1][SBC-2] → [Keystone] ──┐
- *  [Inbound] → [Keystone] ──────────┼─ US-Central:[SBC-1][SBC-2]→ [Keystone] ──┼→ [Dallas]
- *    Trunk      HA Server           └─ US-West:  [SBC-1][SBC-2] → [Keystone] ──┤→ [LA]
+ *                                    ┌─ Granite East: [SBC-1][SBC-2] → [Keystone] ──┐
+ *  [Inbound] → [Keystone] ──────────┼─ Granite Central:[SBC-1][SBC-2]→ [Keystone] ──┼→ [Dallas]
+ *    Trunk      HA Server           └─ Granite West:  [SBC-1][SBC-2] → [Keystone] ──┤→ [LA]
  *                                                                               └→ [Backup]
  *
  * Failover simulation — a 64-second CSS keyframe cycle drives four scenarios:
  *   0–8s   Normal operation
- *   8–16s  SBC-2 in US-Central fails → traffic reroutes through SBC-1
+ *   8–16s  SBC-2 in Granite Central fails → traffic reroutes through SBC-1
  *  16–24s  Normal operation
- *  24–32s  US-West datacenter fails → traffic reroutes to East + Central
+ *  24–32s  Granite West datacenter fails → traffic reroutes to East + Central
  *  32–40s  Normal operation
  *  40–48s  Dallas trunk fails → outbound reroutes to LA + Backup
  *  48–56s  Normal operation
- *  56–64s  SBC-1 in US-East fails → traffic reroutes through SBC-2
+ *  56–64s  SBC-1 in Granite East fails → traffic reroutes through SBC-2
  *
  * Status indicator at top-centre shows current failover state.
  * Pure SVG + CSS animations. No JavaScript timers, no requestAnimationFrame.
@@ -45,7 +45,7 @@ const COL = {
 } as const;
 
 // Row y-centres for each geographic location
-const LOC_Y = [68, 150, 232] as const;   // US-East, US-Central, US-West
+const LOC_Y = [68, 150, 232] as const;   // Granite East, Granite Central, Granite West
 const LOC_HALF_H = 36;                    // half-height of each location container
 const LOC_W = COL.locOut - COL.locIn;    // 392px
 
@@ -82,10 +82,10 @@ function cubicPath(
  *
  * Groups:
  *   'normal'         — always visible
- *   'sbc2-central'   — SBC-2 in US-Central (fails 8-16s)
- *   'west-loc'       — entire US-West datacenter (fails 24-32s)
+ *   'sbc2-central'   — SBC-2 in Granite Central (fails 8-16s)
+ *   'west-loc'       — entire Granite West datacenter (fails 24-32s)
  *   'term-dallas'    — Dallas termination trunk (fails 40-48s)
- *   'sbc1-east'      — SBC-1 in US-East (fails 56-64s)
+ *   'sbc1-east'      — SBC-1 in Granite East (fails 56-64s)
  *
  * Reroute groups (only visible during their paired failure):
  *   'reroute-sbc2central'  — extra packets through SBC-1 central when SBC-2 fails
@@ -673,7 +673,7 @@ export function HaArchitectureViz() {
           opacity: 0.75,
         }}
       >
-        Live Infrastructure Topology
+        High Availability Architecture
       </div>
 
       <style dangerouslySetInnerHTML={{ __html: css }} />
@@ -854,9 +854,9 @@ export function HaArchitectureViz() {
         <NlbNode uid={uid} />
 
         {/* Three geographic location containers */}
-        <LocationGroup uid={uid} locIdx={0} label="US-East"    sbc1Class={`${uid}-node-sbc1east`}    locClass={undefined} />
-        <LocationGroup uid={uid} locIdx={1} label="US-Central" sbc2Class={undefined}                  locClass={undefined} sbc1Class={undefined} sbc2CentralClass={`${uid}-node-sbc2central`} />
-        <LocationGroup uid={uid} locIdx={2} label="US-West"    sbc2Class={undefined}                  locClass={`${uid}-node-westloc`} />
+        <LocationGroup uid={uid} locIdx={0} label="Granite East"    sbc1Class={`${uid}-node-sbc1east`}    locClass={undefined} />
+        <LocationGroup uid={uid} locIdx={1} label="Granite Central" sbc2Class={undefined}                  locClass={undefined} sbc1Class={undefined} sbc2CentralClass={`${uid}-node-sbc2central`} />
+        <LocationGroup uid={uid} locIdx={2} label="Granite West"    sbc2Class={undefined}                  locClass={`${uid}-node-westloc`} />
 
         {/* Three termination trunk nodes */}
         <TermNode uid={uid} termIdx={0} label="Dallas" sublabel="PoP"   nodeClass={`${uid}-node-termdallas`} />
@@ -1246,22 +1246,22 @@ function StatusIndicatorHtml({ uid }: { uid: string }) {
         <span style={textStyle('rgba(134,239,172,0.80)')}>All Systems Operational</span>
       </div>
 
-      {/* Failover: SBC-2 US-Central — amber */}
+      {/* Failover: SBC-2 Granite Central — amber */}
       <div className={`${uid}-status-sbc2c`} style={{ ...rowStyle, opacity: 0 }}>
         <div style={{ position: 'relative', width: 8, height: 8 }}>
           <div style={haloStyle('rgba(251,191,36,0.20)')} />
           <div style={dotStyle('rgba(251,191,36,0.90)')} />
         </div>
-        <span style={textStyle('rgba(251,191,36,0.88)')}>Failover: SBC-2 US-Central</span>
+        <span style={textStyle('rgba(251,191,36,0.88)')}>Failover: SBC-2 Granite Central</span>
       </div>
 
-      {/* Failover: US-West Zone — amber */}
+      {/* Failover: Granite West Zone — amber */}
       <div className={`${uid}-status-west`} style={{ ...rowStyle, opacity: 0 }}>
         <div style={{ position: 'relative', width: 8, height: 8 }}>
           <div style={haloStyle('rgba(251,191,36,0.20)')} />
           <div style={dotStyle('rgba(251,191,36,0.90)')} />
         </div>
-        <span style={textStyle('rgba(251,191,36,0.88)')}>Failover: US-West Zone</span>
+        <span style={textStyle('rgba(251,191,36,0.88)')}>Failover: Granite West Zone</span>
       </div>
 
       {/* Failover: Dallas PoP — amber */}
@@ -1273,13 +1273,13 @@ function StatusIndicatorHtml({ uid }: { uid: string }) {
         <span style={textStyle('rgba(251,191,36,0.88)')}>Failover: Dallas PoP</span>
       </div>
 
-      {/* Failover: SBC-1 US-East — amber */}
+      {/* Failover: SBC-1 Granite East — amber */}
       <div className={`${uid}-status-sbc1e`} style={{ ...rowStyle, opacity: 0 }}>
         <div style={{ position: 'relative', width: 8, height: 8 }}>
           <div style={haloStyle('rgba(251,191,36,0.20)')} />
           <div style={dotStyle('rgba(251,191,36,0.90)')} />
         </div>
-        <span style={textStyle('rgba(251,191,36,0.88)')}>Failover: SBC-1 US-East</span>
+        <span style={textStyle('rgba(251,191,36,0.88)')}>Failover: SBC-1 Granite East</span>
       </div>
     </div>
   );
