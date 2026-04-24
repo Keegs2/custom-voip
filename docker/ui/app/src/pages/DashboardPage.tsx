@@ -21,9 +21,9 @@ const CAPABILITY_CARDS: CapabilityCard[] = [
   },
   {
     icon: <Zap size={22} strokeWidth={1.75} />,
-    title: 'Carrier-Grade Infrastructure',
+    title: 'Purpose-Built SIP Architecture',
     description:
-      'Enterprise SIP architecture engineered for sub-10ms latency to carrier Points of Presence. Session timer management, SRTP-ready media paths, and STIR/SHAKEN call attestation on every session.',
+      'Multi-layer SIP proxy design with sub-10ms latency to signaling endpoints. Intelligent session management handles timer negotiation automatically. SRTP-ready media paths and STIR/SHAKEN attestation on every call.',
     animDelay: '0.4s',
   },
   {
@@ -381,10 +381,17 @@ export function DashboardPage() {
           }}
         >
           {/* Keystone branded image with scan-line overlay */}
+          {/*
+            Two-layer structure:
+            - .dash-keystone-hero-wrap  → outer; handles hover scale via CSS transition
+            - img.dash-keystone-hero    → inner; owns glow + float animation, never paused
+            Keeping them on separate elements prevents the animation transform and the
+            hover scale transform from fighting on the same CSS property.
+          */}
           <div
+            className="dash-keystone-hero-wrap"
             style={{
               position: 'relative',
-              display: 'inline-block',
               marginBottom: 32,
               overflow: 'hidden',
             }}

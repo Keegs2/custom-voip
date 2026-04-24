@@ -107,30 +107,35 @@ export function LoginPage() {
               0%, 100% { transform: translateY(0px); }
               50%       { transform: translateY(-4px); }
             }
+            /* Inner image — glow + float run continuously, never paused */
             .keystone-hero-img {
               animation: keystoneGlow 3s ease-in-out infinite alternate,
                          keystoneFloat 6s ease-in-out infinite;
-              transition: filter 0.3s ease, transform 0.3s ease;
             }
-            .keystone-hero-img:hover {
-              filter: drop-shadow(0 0 28px rgba(59, 130, 246, 0.7)) drop-shadow(0 0 56px rgba(59, 130, 246, 0.35)) !important;
-              transform: translateY(-4px) scale(1.03) !important;
-              animation-play-state: paused;
+            /* Outer wrapper — scale hover is independent of the animation */
+            .keystone-hero-wrap {
+              display: inline-block;
+              transition: transform 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+            }
+            .keystone-hero-wrap:hover {
+              transform: scale(1.02);
             }
           `}</style>
 
           {/* Hero branded image — contains "KEYSTONE" text + subtitle built in */}
-          <img
-            src="/keystone_image.png"
-            alt="Granite Keystone — Unified Voice & Communications"
-            className="keystone-hero-img"
-            style={{
-              width: 220,
-              height: 'auto',
-              display: 'block',
-              margin: '0 auto 16px',
-            }}
-          />
+          <div className="keystone-hero-wrap">
+            <img
+              src="/keystone_image.png"
+              alt="Granite Keystone — Unified Voice & Communications"
+              className="keystone-hero-img"
+              style={{
+                width: 220,
+                height: 'auto',
+                display: 'block',
+                margin: '0 auto 16px',
+              }}
+            />
+          </div>
 
           <p
             style={{

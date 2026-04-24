@@ -241,20 +241,21 @@ input[type="time"] {
   50%       { transform: translateY(-6px); }
 }
 
+/* Inner image — owns the glow + float animation; never paused or overridden */
 .dash-keystone-hero {
   animation:
     dashKeystoneGlow3 3s ease-in-out infinite alternate,
     dashKeystoneFloat2 6s ease-in-out infinite;
-  transition: filter 0.3s ease, transform 0.3s ease;
 }
 
-.dash-keystone-hero:hover {
-  filter:
-    drop-shadow(0 0 32px rgba(59, 130, 246, 0.80))
-    drop-shadow(0 0 72px rgba(59, 130, 246, 0.42))
-    drop-shadow(0 0 120px rgba(59, 130, 246, 0.18)) !important;
-  transform: translateY(-6px) scale(1.04) !important;
-  animation-play-state: paused;
+/* Outer wrapper — owns the hover scale; completely independent of the animation */
+.dash-keystone-hero-wrap {
+  display: inline-block;
+  transition: transform 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+
+.dash-keystone-hero-wrap:hover {
+  transform: scale(1.02);
 }
 
 /* ─── Staggered fade-in-up delays (extending existing 100-500ms set) */
