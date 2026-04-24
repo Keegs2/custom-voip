@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { type CSSProperties, useMemo } from 'react';
 
 /**
  * HaArchitectureViz
@@ -9,8 +9,8 @@ import { useMemo } from 'react';
  * Architecture (each location has two discrete SBC nodes):
  *
  *                                    ┌─ US-East: [SBC-1][SBC-2] → [Keystone] ──┐
- *  [Inbound] → [Geo Router] ────────┼─ US-Central:[SBC-1][SBC-2]→ [Keystone] ──┼→ [Dallas]
- *    Trunk         NLB              └─ US-West:  [SBC-1][SBC-2] → [Keystone] ──┤→ [LA]
+ *  [Inbound] → [Keystone] ──────────┼─ US-Central:[SBC-1][SBC-2]→ [Keystone] ──┼→ [Dallas]
+ *    Trunk      HA Server           └─ US-West:  [SBC-1][SBC-2] → [Keystone] ──┤→ [LA]
  *                                                                               └→ [Backup]
  *
  * Failover simulation — a 64-second CSS keyframe cycle drives four scenarios:
@@ -34,14 +34,14 @@ const VB_H = 300;
 
 // Column x-positions
 const COL = {
-  inbound: 78,    // Stage 1: inbound trunk node
-  nlb:     238,   // Stage 2: NLB / geo-router
-  locIn:   358,   // left edge of location containers
-  locOut:  750,   // right edge of location containers
-  sbc1X:   448,   // SBC-1 node centre (upper SBC within location)
-  sbc2X:   448,   // SBC-2 node centre — same X as SBC-1, stacked vertically
-  ksX:     620,   // Keystone engine node centre (right of SBC column)
-  termX:   940,   // Stage 4: termination trunk nodes
+  inbound: 80,    // Stage 1: inbound trunk node
+  nlb:     240,   // Stage 2: NLB / geo-router
+  locIn:   370,   // left edge of location containers
+  locOut:  800,   // right edge of location containers
+  sbc1X:   468,   // SBC-1 node centre (upper SBC within location)
+  sbc2X:   468,   // SBC-2 node centre — same X as SBC-1, stacked vertically
+  ksX:     660,   // Keystone engine node centre (right of SBC column)
+  termX:   1120,  // Stage 4: termination trunk nodes (near right edge of 1200px viewBox)
 } as const;
 
 // Row y-centres for each geographic location
@@ -56,10 +56,6 @@ const SBC_OFFSET = 17; // SBC-1 is cy-17, SBC-2 is cy+17
 const TERM_Y = [82, 150, 218] as const;  // Dallas, LA, Backup
 
 /* ─── SVG path helpers ───────────────────────────────────────────────── */
-
-function linePath(x1: number, y1: number, x2: number, y2: number): string {
-  return `M ${x1} ${y1} L ${x2} ${y2}`;
-}
 
 function quadPath(
   x1: number, y1: number,
@@ -117,11 +113,18 @@ interface PathDef {
 
 /* ─── Path definitions ───────────────────────────────────────────────── */
 
-// Stage 1→2: Inbound → NLB
-const PATH_INBOUND_NLB: PathDef = {
-  id: 'in-nlb',
+// Stage 1→2: Dual inbound trunks → NLB (Keystone HA Server)
+// Trunk 1 (upper, y≈133) curves slightly up into NLB at y=150
+const PATH_INBOUND1_NLB: PathDef = {
+  id: 'in1-nlb',
   group: 'normal',
-  d: linePath(COL.inbound + 20, 150, COL.nlb - 26, 150),
+  d: quadPath(COL.inbound + 20, 133, (COL.inbound + COL.nlb) / 2, 130, COL.nlb - 26, 150),
+};
+// Trunk 2 (lower, y≈167) curves slightly down into NLB at y=150
+const PATH_INBOUND2_NLB: PathDef = {
+  id: 'in2-nlb',
+  group: 'normal',
+  d: quadPath(COL.inbound + 20, 167, (COL.inbound + COL.nlb) / 2, 170, COL.nlb - 26, 150),
 };
 
 // Stage 2→3: NLB → SBC-1 and SBC-2 for each location
@@ -223,7 +226,7 @@ const PATHS_WEST_TERM = [
 // All static paths (no reroute paths need separate SVG <path> elements
 // because we render extra packets on existing healthy paths)
 const PATHS: PathDef[] = [
-  PATH_INBOUND_NLB,
+  PATH_INBOUND1_NLB, PATH_INBOUND2_NLB,
   PATH_NLB_E1, PATH_NLB_E2,
   PATH_NLB_C1, PATH_NLB_C2,
   PATH_NLB_W1, PATH_NLB_W2,
@@ -271,71 +274,72 @@ function makePackets(
 }
 
 const ALL_PACKETS: PacketConfig[] = [
-  // Inbound → NLB (always flowing)
-  ...makePackets('in-nlb', 4, 2.4, 'normal', false, 0.0),
+  // Dual inbound trunks → NLB (both always flowing — staggered for visual separation)
+  ...makePackets('in1-nlb', 3, 1.2, 'normal', false, 0.0),
+  ...makePackets('in2-nlb', 3, 1.2, 'normal', false, 0.6),
 
   // NLB → SBC-1 and SBC-2 for each location (normal operation)
-  ...makePackets('nlb-e1', 2, 3.2, 'normal',      false, 0.0),
-  ...makePackets('nlb-e2', 2, 3.2, 'normal',      false, 1.6),
-  ...makePackets('nlb-c1', 2, 3.2, 'normal',      false, 0.5),
-  ...makePackets('nlb-c2', 2, 3.2, 'sbc2-central',false, 2.1),
-  ...makePackets('nlb-w1', 2, 3.2, 'west-loc',    false, 1.0),
-  ...makePackets('nlb-w2', 2, 3.2, 'west-loc',    false, 2.6),
+  ...makePackets('nlb-e1', 3, 1.6, 'normal',      false, 0.0),
+  ...makePackets('nlb-e2', 3, 1.6, 'normal',      false, 0.8),
+  ...makePackets('nlb-c1', 3, 1.6, 'normal',      false, 0.3),
+  ...makePackets('nlb-c2', 3, 1.6, 'sbc2-central',false, 1.1),
+  ...makePackets('nlb-w1', 3, 1.6, 'west-loc',    false, 0.5),
+  ...makePackets('nlb-w2', 3, 1.6, 'west-loc',    false, 1.3),
 
   // SBC-1 → East Keystone (normal; fails during sbc1-east event)
-  ...makePackets('s1ks-e', 2, 2.0, 'sbc1-east', false, 0.3),
+  ...makePackets('s1ks-e', 3, 1.0, 'sbc1-east', false, 0.2),
   // SBC-2 → East Keystone (normal always)
-  ...makePackets('s2ks-e', 2, 2.0, 'normal',    false, 1.3),
+  ...makePackets('s2ks-e', 3, 1.0, 'normal',    false, 0.7),
 
   // SBC-1 → Central Keystone (normal always)
-  ...makePackets('s1ks-c', 2, 2.0, 'normal',       false, 0.8),
+  ...makePackets('s1ks-c', 3, 1.0, 'normal',       false, 0.4),
   // SBC-2 → Central Keystone (fails during sbc2-central event)
-  ...makePackets('s2ks-c', 2, 2.0, 'sbc2-central', false, 1.8),
+  ...makePackets('s2ks-c', 3, 1.0, 'sbc2-central', false, 0.9),
 
   // SBC-1/2 → West Keystone (fail during west-loc event)
-  ...makePackets('s1ks-w', 2, 2.0, 'west-loc', false, 0.1),
-  ...makePackets('s2ks-w', 2, 2.0, 'west-loc', false, 1.1),
+  ...makePackets('s1ks-w', 3, 1.0, 'west-loc', false, 0.1),
+  ...makePackets('s2ks-w', 3, 1.0, 'west-loc', false, 0.6),
 
   // East Keystone → termination trunks
-  ...makePackets('e-t0', 1, 3.6, 'term-dallas', true,  0.0),
-  ...makePackets('e-t1', 1, 3.6, 'normal',      true,  0.4),
-  ...makePackets('e-t2', 1, 3.6, 'normal',      true,  0.8),
+  ...makePackets('e-t0', 2, 1.8, 'term-dallas', true,  0.0),
+  ...makePackets('e-t1', 2, 1.8, 'normal',      true,  0.2),
+  ...makePackets('e-t2', 2, 1.8, 'normal',      true,  0.4),
 
   // Central Keystone → termination trunks
-  ...makePackets('c-t0', 1, 3.6, 'term-dallas', true,  1.2),
-  ...makePackets('c-t1', 1, 3.6, 'normal',      true,  1.6),
-  ...makePackets('c-t2', 1, 3.6, 'normal',      true,  2.0),
+  ...makePackets('c-t0', 2, 1.8, 'term-dallas', true,  0.6),
+  ...makePackets('c-t1', 2, 1.8, 'normal',      true,  0.8),
+  ...makePackets('c-t2', 2, 1.8, 'normal',      true,  1.0),
 
   // West Keystone → termination trunks (fail during west-loc event)
   // w-t0 (Dallas-bound from West) must ALSO stop during the Dallas failure window,
   // so it uses the combined 'west-loc-or-dallas' group instead of plain 'west-loc'.
-  ...makePackets('w-t0', 1, 3.6, 'west-loc-or-dallas', true,  0.6),
-  ...makePackets('w-t1', 1, 3.6, 'west-loc',            true,  1.0),
-  ...makePackets('w-t2', 1, 3.6, 'west-loc',            true,  1.4),
+  ...makePackets('w-t0', 2, 1.8, 'west-loc-or-dallas', true,  0.3),
+  ...makePackets('w-t1', 2, 1.8, 'west-loc',            true,  0.5),
+  ...makePackets('w-t2', 2, 1.8, 'west-loc',            true,  0.7),
 
   // ── Reroute packets: only appear during their specific failure event ──
 
   // When SBC-2 Central fails → SBC-1 Central absorbs extra load
-  ...makePackets('s1ks-c', 2, 1.8, 'reroute-sbc2central', false, 0.2),
-  ...makePackets('nlb-c1', 2, 2.8, 'reroute-sbc2central', false, 0.6),
+  ...makePackets('s1ks-c', 3, 0.9, 'reroute-sbc2central', false, 0.1),
+  ...makePackets('nlb-c1', 3, 1.4, 'reroute-sbc2central', false, 0.3),
 
   // When West datacenter fails → East and Central absorb extra load
-  ...makePackets('nlb-e1', 2, 2.4, 'reroute-west', false, 0.2),
-  ...makePackets('nlb-c1', 2, 2.4, 'reroute-west', false, 0.9),
-  ...makePackets('s1ks-e', 2, 1.6, 'reroute-west', false, 0.4),
-  ...makePackets('s1ks-c', 2, 1.6, 'reroute-west', false, 0.7),
-  ...makePackets('e-t1',   1, 2.8, 'reroute-west', true,  0.3),
-  ...makePackets('c-t1',   1, 2.8, 'reroute-west', true,  0.7),
+  ...makePackets('nlb-e1', 3, 1.2, 'reroute-west', false, 0.1),
+  ...makePackets('nlb-c1', 3, 1.2, 'reroute-west', false, 0.5),
+  ...makePackets('s1ks-e', 3, 0.8, 'reroute-west', false, 0.2),
+  ...makePackets('s1ks-c', 3, 0.8, 'reroute-west', false, 0.4),
+  ...makePackets('e-t1',   2, 1.4, 'reroute-west', true,  0.2),
+  ...makePackets('c-t1',   2, 1.4, 'reroute-west', true,  0.4),
 
   // When Dallas fails → LA and Backup absorb extra load
-  ...makePackets('e-t1', 1, 2.6, 'reroute-dallas', true, 0.1),
-  ...makePackets('e-t2', 1, 2.6, 'reroute-dallas', true, 0.5),
-  ...makePackets('c-t1', 1, 2.6, 'reroute-dallas', true, 0.3),
-  ...makePackets('c-t2', 1, 2.6, 'reroute-dallas', true, 0.7),
+  ...makePackets('e-t1', 2, 1.3, 'reroute-dallas', true, 0.1),
+  ...makePackets('e-t2', 2, 1.3, 'reroute-dallas', true, 0.3),
+  ...makePackets('c-t1', 2, 1.3, 'reroute-dallas', true, 0.2),
+  ...makePackets('c-t2', 2, 1.3, 'reroute-dallas', true, 0.4),
 
   // When SBC-1 East fails → SBC-2 East absorbs extra load
-  ...makePackets('s2ks-e', 2, 1.6, 'reroute-sbc1east', false, 0.2),
-  ...makePackets('nlb-e2', 2, 2.6, 'reroute-sbc1east', false, 0.5),
+  ...makePackets('s2ks-e', 3, 0.8, 'reroute-sbc1east', false, 0.1),
+  ...makePackets('nlb-e2', 3, 1.3, 'reroute-sbc1east', false, 0.3),
 ];
 
 /* ─── Failover timing (master 64-second cycle) ───────────────────────── */
@@ -662,7 +666,7 @@ export function HaArchitectureViz() {
           letterSpacing: '0.14em',
           textTransform: 'uppercase',
           color: '#3b82f6',
-          marginBottom: 12,
+          marginBottom: 8,
           opacity: 0.75,
         }}
       >
@@ -671,13 +675,16 @@ export function HaArchitectureViz() {
 
       <style dangerouslySetInnerHTML={{ __html: css }} />
 
+      {/* Status indicator — HTML element above the SVG, centered */}
+      <StatusIndicatorHtml uid={uid} />
+
       <svg
         viewBox={`0 0 ${VB_W} ${VB_H}`}
         width="100%"
         height="auto"
         preserveAspectRatio="xMidYMid meet"
         style={{ display: 'block' }}
-        aria-label="Granite Keystone HA: inbound trunk routes through geo-router NLB to three geographic locations each with two discrete SBCs and a Keystone engine, terminating via Dallas, LA, and Backup Bandwidth PoP trunks"
+        aria-label="Granite Keystone HA: inbound trunk routes through Keystone HA Server to three geographic locations each with two discrete SBCs and a Keystone engine, terminating via Dallas, LA, and Backup Bandwidth PoP trunks"
       >
         <defs>
           {/* Grid background pattern */}
@@ -771,8 +778,9 @@ export function HaArchitectureViz() {
 
         {/* ── Connection lines ────────────────────────────────────── */}
         <g fill="none" clipPath={`url(#${uid}-clip)`}>
-          {/* Stage 1→2 */}
-          <path d={PATH_INBOUND_NLB.d} stroke="rgba(59,130,246,0.22)" strokeWidth="1.1" />
+          {/* Stage 1→2: dual inbound trunks */}
+          <path d={PATH_INBOUND1_NLB.d} stroke="rgba(59,130,246,0.22)" strokeWidth="1.0" />
+          <path d={PATH_INBOUND2_NLB.d} stroke="rgba(59,130,246,0.22)" strokeWidth="1.0" />
 
           {/* Stage 2→3 fan — NLB to SBC pairs */}
           <path d={PATH_NLB_E1.d} stroke="rgba(59,130,246,0.17)" strokeWidth="0.9" />
@@ -812,7 +820,22 @@ export function HaArchitectureViz() {
         </g>
 
         {/* ── Stage nodes ───────────────────────────────────────── */}
-        <InboundNode uid={uid} />
+        {/* Dual redundant inbound trunks — stacked vertically */}
+        {/* "Inbound" group label sits above the pair */}
+        <text
+          x={COL.inbound}
+          y={116}
+          textAnchor="middle"
+          fontSize="6"
+          fontFamily="'SF Mono', 'Fira Code', 'Consolas', monospace"
+          letterSpacing="0.12em"
+          fill="rgba(148,163,184,0.38)"
+          fontWeight="700"
+        >
+          INBOUND
+        </text>
+        <InboundTrunkNode uid={uid} cy={133} label="Trunk 1" />
+        <InboundTrunkNode uid={uid} cy={167} label="Trunk 2" />
         <NlbNode uid={uid} />
 
         {/* Three geographic location containers */}
@@ -830,9 +853,6 @@ export function HaArchitectureViz() {
         <ColumnLabel text="DISTRIBUTION" x={COL.nlb}                          y={22} />
         <ColumnLabel text="PROCESSING"   x={(COL.locIn + COL.locOut) / 2}     y={22} />
         <ColumnLabel text="TERMINATION"  x={COL.termX}                        y={22} />
-
-        {/* ── Status indicator — top centre ─────────────────────── */}
-        <StatusIndicator uid={uid} />
 
         {/* ── Watermark ──────────────────────────────────────────── */}
         <text
@@ -869,39 +889,52 @@ function ColumnLabel({ text, x, y }: { text: string; x: number; y: number }) {
   );
 }
 
-/* ── Inbound Trunk — rounded rectangle with bandwidth icon ── */
-function InboundNode({ uid }: { uid: string }) {
+/**
+ * InboundTrunkNode
+ * One of two redundant inbound carrier trunks, rendered as a smaller rounded
+ * rectangle. Both instances sit at the same x column, stacked vertically.
+ */
+function InboundTrunkNode({
+  uid,
+  cy,
+  label,
+}: {
+  uid: string;
+  cy: number;
+  label: string;
+}) {
   const cx = COL.inbound;
-  const cy = 150;
-  const W  = 64;
-  const H  = 40;
-  const R  = 8;
+  const W  = 52;
+  const H  = 26;
+  const R  = 7;
 
   return (
     <g transform={`translate(${cx}, ${cy})`}>
-      <circle r="48" fill={`url(#${uid}-ng)`} />
+      <circle r="36" fill={`url(#${uid}-ng)`} />
       <rect
         x={-W / 2} y={-H / 2}
         width={W} height={H} rx={R}
-        fill="rgba(15,17,23,0.72)"
+        fill="rgba(15,17,23,0.75)"
         stroke="rgba(59,130,246,0.30)"
-        strokeWidth="1"
+        strokeWidth="0.9"
       />
+      {/* Top shimmer */}
       <rect
         x={-W / 2 + 1} y={-H / 2 + 1}
         width={W - 2} height={H * 0.28} rx={R - 1}
         fill="rgba(96,165,250,0.07)"
       />
-      <BandwidthIcon />
-      <text y={H / 2 + 12} textAnchor="middle" fontSize="7.5"
+      {/* Bandwidth / signal bars — scaled down to fit the smaller node */}
+      <g transform="translate(-6, -7)" opacity="0.52">
+        <rect x="0"   y="7"  width="3" height="4"  rx="0.8" fill="rgba(96,165,250,0.60)" />
+        <rect x="4.5" y="5"  width="3" height="6"  rx="0.8" fill="rgba(96,165,250,0.60)" />
+        <rect x="9"   y="2"  width="3" height="9"  rx="0.8" fill="rgba(96,165,250,0.60)" />
+      </g>
+      {/* Label below the node */}
+      <text y={H / 2 + 9} textAnchor="middle" fontSize="6.5"
         fontFamily="'SF Mono', 'Fira Code', 'Consolas', monospace"
-        letterSpacing="0.09em" fill="rgba(148,163,184,0.62)" fontWeight="600">
-        Inbound
-      </text>
-      <text y={H / 2 + 21} textAnchor="middle" fontSize="6"
-        fontFamily="'SF Mono', 'Fira Code', 'Consolas', monospace"
-        letterSpacing="0.07em" fill="rgba(100,116,139,0.55)" fontWeight="500">
-        Trunk
+        letterSpacing="0.09em" fill="rgba(148,163,184,0.60)" fontWeight="600">
+        {label}
       </text>
     </g>
   );
@@ -933,12 +966,12 @@ function NlbNode({ uid }: { uid: string }) {
       <text y={s + 14} textAnchor="middle" fontSize="7.5"
         fontFamily="'SF Mono', 'Fira Code', 'Consolas', monospace"
         letterSpacing="0.09em" fill="rgba(148,163,184,0.62)" fontWeight="600">
-        Geo Router
+        Keystone
       </text>
       <text y={s + 23} textAnchor="middle" fontSize="6"
         fontFamily="'SF Mono', 'Fira Code', 'Consolas', monospace"
         letterSpacing="0.07em" fill="rgba(100,116,139,0.52)" fontWeight="500">
-        NLB
+        HA Server
       </text>
     </g>
   );
@@ -1140,87 +1173,100 @@ function TermNode({
   );
 }
 
-/* ── Status indicator — top-center of SVG ── */
-function StatusIndicator({ uid }: { uid: string }) {
-  // Centred horizontally in the viewBox; placed below the column header row (y=22)
-  const cx = VB_W / 2;  // 600 — horizontal centre
-  const y  = 33;        // sits below column headers at y=22, above location rows
-  const dotR = 3;
-  // Dot sits left of the text; both are centred together via a <g transform>
-  // by anchoring the text at "middle" relative to cx, with the dot offset left.
-  const dotOffsetX = -78; // shift dot left of the text centre
-  const textOffsetX = dotOffsetX + dotR * 2 + 5; // text starts just right of dot
-  const fontSize = 6.5;
-  const fontFamily = "'SF Mono', 'Fira Code', 'Consolas', monospace";
+/* ── Status indicator — HTML element rendered above the SVG ── */
+function StatusIndicatorHtml({ uid }: { uid: string }) {
+  // Shared dot style helper — renders the pulsing halo + solid dot as stacked divs
+  const dotStyle = (color: string): CSSProperties => ({
+    width: 8,
+    height: 8,
+    borderRadius: '50%',
+    background: color,
+    flexShrink: 0,
+    position: 'relative',
+  });
+
+  const haloStyle = (color: string): CSSProperties => ({
+    position: 'absolute',
+    inset: -3,
+    borderRadius: '50%',
+    background: color,
+  });
+
+  const textStyle = (color: string): CSSProperties => ({
+    fontFamily: "'SF Mono', 'Fira Code', 'Consolas', monospace",
+    fontSize: '0.60rem',
+    fontWeight: 600,
+    letterSpacing: '0.08em',
+    color,
+  });
+
+  const rowStyle: CSSProperties = {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 7,
+    height: 18,
+    // Stacked absolutely so only the animated-in one is visible
+    position: 'absolute',
+    inset: 0,
+  };
 
   return (
-    <g transform={`translate(${cx}, 0)`}>
-      {/* Normal — green dot */}
-      <g className={`${uid}-status-normal`}>
-        <circle r={dotR * 2.2} cx={dotOffsetX} cy={y - 0.5} fill="rgba(34,197,94,0.12)" />
-        <circle r={dotR}       cx={dotOffsetX} cy={y - 0.5} fill="rgba(34,197,94,0.90)" />
-        <text x={textOffsetX} y={y + 2.5} textAnchor="start" fontSize={fontSize}
-          fontFamily={fontFamily} letterSpacing="0.08em"
-          fill="rgba(134,239,172,0.72)" fontWeight="600">
-          All Systems Operational
-        </text>
-      </g>
+    <div
+      style={{
+        position: 'relative',
+        height: 18,
+        marginBottom: 8,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}
+    >
+      {/* Normal — green */}
+      <div className={`${uid}-status-normal`} style={rowStyle}>
+        <div style={{ position: 'relative', width: 8, height: 8 }}>
+          <div style={haloStyle('rgba(34,197,94,0.18)')} />
+          <div style={dotStyle('rgba(34,197,94,0.90)')} />
+        </div>
+        <span style={textStyle('rgba(134,239,172,0.80)')}>All Systems Operational</span>
+      </div>
 
-      {/* Failover: SBC-2 US-Central — amber dot */}
-      <g className={`${uid}-status-sbc2c`}>
-        <circle r={dotR * 2.2} cx={dotOffsetX} cy={y - 0.5} fill="rgba(251,191,36,0.15)" />
-        <circle r={dotR}       cx={dotOffsetX} cy={y - 0.5} fill="rgba(251,191,36,0.90)" />
-        <text x={textOffsetX} y={y + 2.5} textAnchor="start" fontSize={fontSize}
-          fontFamily={fontFamily} letterSpacing="0.08em"
-          fill="rgba(251,191,36,0.82)" fontWeight="600">
-          Failover: SBC-2 US-Central
-        </text>
-      </g>
+      {/* Failover: SBC-2 US-Central — amber */}
+      <div className={`${uid}-status-sbc2c`} style={{ ...rowStyle, opacity: 0 }}>
+        <div style={{ position: 'relative', width: 8, height: 8 }}>
+          <div style={haloStyle('rgba(251,191,36,0.20)')} />
+          <div style={dotStyle('rgba(251,191,36,0.90)')} />
+        </div>
+        <span style={textStyle('rgba(251,191,36,0.88)')}>Failover: SBC-2 US-Central</span>
+      </div>
 
-      {/* Failover: US-West Zone — amber dot */}
-      <g className={`${uid}-status-west`}>
-        <circle r={dotR * 2.2} cx={dotOffsetX} cy={y - 0.5} fill="rgba(251,191,36,0.15)" />
-        <circle r={dotR}       cx={dotOffsetX} cy={y - 0.5} fill="rgba(251,191,36,0.90)" />
-        <text x={textOffsetX} y={y + 2.5} textAnchor="start" fontSize={fontSize}
-          fontFamily={fontFamily} letterSpacing="0.08em"
-          fill="rgba(251,191,36,0.82)" fontWeight="600">
-          Failover: US-West Zone
-        </text>
-      </g>
+      {/* Failover: US-West Zone — amber */}
+      <div className={`${uid}-status-west`} style={{ ...rowStyle, opacity: 0 }}>
+        <div style={{ position: 'relative', width: 8, height: 8 }}>
+          <div style={haloStyle('rgba(251,191,36,0.20)')} />
+          <div style={dotStyle('rgba(251,191,36,0.90)')} />
+        </div>
+        <span style={textStyle('rgba(251,191,36,0.88)')}>Failover: US-West Zone</span>
+      </div>
 
-      {/* Failover: Dallas PoP — amber dot */}
-      <g className={`${uid}-status-dallas`}>
-        <circle r={dotR * 2.2} cx={dotOffsetX} cy={y - 0.5} fill="rgba(251,191,36,0.15)" />
-        <circle r={dotR}       cx={dotOffsetX} cy={y - 0.5} fill="rgba(251,191,36,0.90)" />
-        <text x={textOffsetX} y={y + 2.5} textAnchor="start" fontSize={fontSize}
-          fontFamily={fontFamily} letterSpacing="0.08em"
-          fill="rgba(251,191,36,0.82)" fontWeight="600">
-          Failover: Dallas PoP
-        </text>
-      </g>
+      {/* Failover: Dallas PoP — amber */}
+      <div className={`${uid}-status-dallas`} style={{ ...rowStyle, opacity: 0 }}>
+        <div style={{ position: 'relative', width: 8, height: 8 }}>
+          <div style={haloStyle('rgba(251,191,36,0.20)')} />
+          <div style={dotStyle('rgba(251,191,36,0.90)')} />
+        </div>
+        <span style={textStyle('rgba(251,191,36,0.88)')}>Failover: Dallas PoP</span>
+      </div>
 
-      {/* Failover: SBC-1 US-East — amber dot */}
-      <g className={`${uid}-status-sbc1e`}>
-        <circle r={dotR * 2.2} cx={dotOffsetX} cy={y - 0.5} fill="rgba(251,191,36,0.15)" />
-        <circle r={dotR}       cx={dotOffsetX} cy={y - 0.5} fill="rgba(251,191,36,0.90)" />
-        <text x={textOffsetX} y={y + 2.5} textAnchor="start" fontSize={fontSize}
-          fontFamily={fontFamily} letterSpacing="0.08em"
-          fill="rgba(251,191,36,0.82)" fontWeight="600">
-          Failover: SBC-1 US-East
-        </text>
-      </g>
-    </g>
-  );
-}
-
-/* ── Signal bars / Bandwidth icon ── */
-function BandwidthIcon() {
-  return (
-    <g transform="translate(-8, -9)" opacity="0.54">
-      <rect x="0.5" y="9"   width="4" height="5"  rx="1" fill="rgba(96,165,250,0.58)" />
-      <rect x="6"   y="6"   width="4" height="8"  rx="1" fill="rgba(96,165,250,0.58)" />
-      <rect x="11.5" y="3"  width="4" height="11" rx="1" fill="rgba(96,165,250,0.58)" />
-    </g>
+      {/* Failover: SBC-1 US-East — amber */}
+      <div className={`${uid}-status-sbc1e`} style={{ ...rowStyle, opacity: 0 }}>
+        <div style={{ position: 'relative', width: 8, height: 8 }}>
+          <div style={haloStyle('rgba(251,191,36,0.20)')} />
+          <div style={dotStyle('rgba(251,191,36,0.90)')} />
+        </div>
+        <span style={textStyle('rgba(251,191,36,0.88)')}>Failover: SBC-1 US-East</span>
+      </div>
+    </div>
   );
 }
 
