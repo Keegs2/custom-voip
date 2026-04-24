@@ -1,18 +1,21 @@
-import { NavLink, Outlet, useLocation } from 'react-router-dom';
+import { useLocation, NavLink, Outlet } from 'react-router-dom';
 
-interface AdminTab {
+interface PlatformTab {
   label: string;
   to: string;
 }
 
-const adminTabs: AdminTab[] = [
-  { label: 'Customers',       to: '/admin/customers' },
-  { label: 'Customer Trunks', to: '/admin/trunks'    },
+const platformTabs: PlatformTab[] = [
+  { label: 'Carrier Trunks', to: '/admin/platform/carriers' },
+  { label: 'CDRs',           to: '/admin/platform/cdrs'     },
+  { label: 'Rates',          to: '/admin/platform/rates'    },
+  { label: 'Tiers',          to: '/admin/platform/tiers'    },
+  { label: 'Testing',        to: '/admin/platform/sipp'     },
 ];
 
 const ACCENT = '#3b82f6';
 
-export function AdminPage() {
+export function PlatformManagementPage() {
   const location = useLocation();
 
   return (
@@ -101,7 +104,7 @@ export function AdminPage() {
                 marginBottom: 6,
               }}
             >
-              Customer Management
+              Platform Management
             </div>
             <h1
               style={{
@@ -113,7 +116,7 @@ export function AdminPage() {
                 margin: '0 0 8px',
               }}
             >
-              Customer Administration
+              Platform Configuration
             </h1>
             <p
               style={{
@@ -124,7 +127,7 @@ export function AdminPage() {
                 maxWidth: 500,
               }}
             >
-              Manage customer accounts, trunks, and configurations
+              Carrier trunks, CDR management, rates, tiers, and testing tools
             </p>
           </div>
         </div>
@@ -144,12 +147,10 @@ export function AdminPage() {
         <nav
           style={{ display: 'flex', justifyContent: 'center', gap: 4 }}
           role="tablist"
-          aria-label="Customer management sections"
+          aria-label="Platform sections"
         >
-          {adminTabs.map((tab) => {
-            const isActive =
-              location.pathname === tab.to ||
-              location.pathname.startsWith(tab.to + '/');
+          {platformTabs.map((tab) => {
+            const isActive = location.pathname === tab.to || location.pathname.startsWith(tab.to + '/');
 
             return (
               <NavLink

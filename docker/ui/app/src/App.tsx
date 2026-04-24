@@ -12,6 +12,7 @@ import { IvrBuilderPage } from './pages/IvrBuilderPage';
 import { DocsPage } from './pages/DocsPage';
 import { TroubleshootingPage } from './pages/TroubleshootingPage';
 import { AdminPage } from './pages/admin/AdminPage';
+import { PlatformManagementPage } from './pages/admin/PlatformManagementPage';
 import { CustomersAdminPage } from './pages/admin/CustomersAdminPage';
 import { CustomerAccountPage } from './pages/admin/CustomerAccountPage';
 import { CdrsAdminPage } from './pages/admin/CdrsAdminPage';
@@ -90,7 +91,7 @@ export function App() {
               }
             />
 
-            {/* Admin nested routes */}
+            {/* Customer Management — nested under AdminPage tab shell */}
             <Route
               path="admin"
               element={
@@ -99,14 +100,26 @@ export function App() {
                 </RequireAdmin>
               }
             >
-              <Route index             element={<Navigate to="customers" replace />} />
-              <Route path="customers"  element={<CustomersAdminPage />} />
-              <Route path="trunks"     element={<TrunksAdminPage />} />
-              <Route path="cdrs"       element={<CdrsAdminPage />} />
-              <Route path="rates"      element={<RatesAdminPage />} />
-              <Route path="tiers"      element={<TiersAdminPage />} />
-              <Route path="carriers"   element={<CarriersAdminPage />} />
-              <Route path="sipp"       element={<SippAdminPage />} />
+              <Route index            element={<Navigate to="customers" replace />} />
+              <Route path="customers" element={<CustomersAdminPage />} />
+              <Route path="trunks"    element={<TrunksAdminPage />} />
+            </Route>
+
+            {/* Platform Management — nested under PlatformManagementPage tab shell */}
+            <Route
+              path="admin/platform"
+              element={
+                <RequireAdmin>
+                  <PlatformManagementPage />
+                </RequireAdmin>
+              }
+            >
+              <Route index           element={<Navigate to="carriers" replace />} />
+              <Route path="carriers" element={<CarriersAdminPage />} />
+              <Route path="cdrs"     element={<CdrsAdminPage />} />
+              <Route path="rates"    element={<RatesAdminPage />} />
+              <Route path="tiers"    element={<TiersAdminPage />} />
+              <Route path="sipp"     element={<SippAdminPage />} />
             </Route>
           </Route>
 
