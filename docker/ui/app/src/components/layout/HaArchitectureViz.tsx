@@ -769,7 +769,7 @@ export function HaArchitectureViz() {
         height="auto"
         preserveAspectRatio="xMidYMid meet"
         style={{ display: 'block' }}
-        aria-label="Granite Keystone HA: inbound trunk routes through Keystone HA Server to three geographic locations each with two discrete SBCs and a Keystone engine, terminating via Dallas, LA, and Backup Bandwidth PoP trunks"
+        aria-label="Keystone: inbound trunks route through the Key Distributor to three Granite locations, each with dual Signal Keys and a Keystone Engine, terminating via Dallas, LA, and Backup PoP trunks"
       >
         <defs>
           {/* Grid background pattern */}
@@ -1088,12 +1088,12 @@ function NlbNode({ uid }: { uid: string }) {
       <text y={s + 14} textAnchor="middle" fontSize="7.5"
         fontFamily="'SF Mono', 'Fira Code', 'Consolas', monospace"
         letterSpacing="0.09em" fill="rgba(148,163,184,0.62)" fontWeight="600">
-        Keystone
+        Key
       </text>
       <text y={s + 23} textAnchor="middle" fontSize="6"
         fontFamily="'SF Mono', 'Fira Code', 'Consolas', monospace"
         letterSpacing="0.07em" fill="rgba(100,116,139,0.52)" fontWeight="500">
-        HA Server
+        Distributor
       </text>
     </g>
   );
@@ -1161,14 +1161,14 @@ function LocationGroup({
       </text>
 
       {/* SBC-1 (upper) */}
-      <SbcNode uid={uid} cx={COL.sbc1X} cy={sbc1Y} label="SBC-1" nodeClass={sbc1Class} />
+      <SbcNode uid={uid} cx={COL.sbc1X} cy={sbc1Y} label="Signal Key 1" nodeClass={sbc1Class} />
 
       {/* SBC-2 (lower) — may have its own failure class */}
       <SbcNode
         uid={uid}
         cx={COL.sbc2X}
         cy={sbc2Y}
-        label="SBC-2"
+        label="Signal Key 2"
         nodeClass={sbc2CentralClass ?? sbc2Class}
       />
 
@@ -1240,6 +1240,11 @@ function KsNode({ uid, cx, cy }: { uid: string; cx: number; cy: number }) {
         filter={`url(#${uid}-imgf)`}
         preserveAspectRatio="xMidYMid meet"
       />
+      <text y={S / 2 + 10} textAnchor="middle" fontSize="5"
+        fontFamily="'SF Mono', 'Fira Code', 'Consolas', monospace"
+        letterSpacing="0.06em" fill="rgba(96,165,250,0.45)" fontWeight="600">
+        Keystone Engine
+      </text>
     </g>
   );
 }
@@ -1364,13 +1369,13 @@ function StatusIndicatorHtml({ uid }: { uid: string }) {
       </div>
 
       {/* Failover rows — red, pulsing, urgent */}
-      {/* Failover: SBC-2 Granite Central */}
+      {/* Failover: Signal Key 2 Granite Central */}
       <div className={`${uid}-status-sbc2c`} style={{ ...rowStyle, opacity: 0 }}>
         <div style={{ position: 'relative', width: 9, height: 9 }}>
           <div style={haloStyle('rgba(239,68,68,0.30)')} className={`${uid}-alert-halo`} />
           <div style={dotStyle('rgba(239,68,68,0.95)')} />
         </div>
-        <span style={alertTextStyle}>Failover: SBC-2 Granite Central</span>
+        <span style={alertTextStyle}>Failover: Signal Key 2 Granite Central</span>
       </div>
 
       {/* Failover: Granite West Zone */}
@@ -1391,13 +1396,13 @@ function StatusIndicatorHtml({ uid }: { uid: string }) {
         <span style={alertTextStyle}>Failover: Dallas PoP</span>
       </div>
 
-      {/* Failover: SBC-1 Granite East */}
+      {/* Failover: Signal Key 1 Granite East */}
       <div className={`${uid}-status-sbc1e`} style={{ ...rowStyle, opacity: 0 }}>
         <div style={{ position: 'relative', width: 9, height: 9 }}>
           <div style={haloStyle('rgba(239,68,68,0.30)')} className={`${uid}-alert-halo`} />
           <div style={dotStyle('rgba(239,68,68,0.95)')} />
         </div>
-        <span style={alertTextStyle}>Failover: SBC-1 Granite East</span>
+        <span style={alertTextStyle}>Failover: Signal Key 1 Granite East</span>
       </div>
     </div>
   );
