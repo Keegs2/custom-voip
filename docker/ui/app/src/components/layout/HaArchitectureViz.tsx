@@ -6,17 +6,24 @@ import { useMemo } from 'react';
  * SVG-based animated diagram that visualises the Granite Keystone HA
  * call-routing architecture in a horizontal left-to-right flow:
  *
- *   [Phone 1] ─┐
- *   [Phone 2] ─┤→  [NLB]  →  [SBC-1] ─┐                      ┌→ [US-East]
- *   [Phone 3] ─┘              [SBC-2] ─┤→  [Route Engine]  ─┤→ [US-Central]
- *                                        └                    └→ [US-West]
+ *                                ┌─ [US-East:  2×SBC → Media] ──┐
+ *  [Inbound] → [Geo Router] ────┼─ [US-Central: 2×SBC → Media] ─┼→ [Dallas]
+ *    Trunk                      └─ [US-West:  2×SBC → Media] ──┤→ [LA]
+ *                                                                └→ [Backup]
+ *
+ * A single inbound SIP trunk from Bandwidth delivers calls to the Network
+ * Load Balancer (Geo Router), which selects one of three geographic locations
+ * based on health and proximity. Each location has a redundant SBC pair and a
+ * FreeSWITCH media server. All locations terminate via the same three Bandwidth
+ * PoP trunks on the right.
  *
  * Animated "packet" dots ride CSS offset-path along each SVG path segment.
  * Multiple staggered copies of each dot keep the diagram feeling like live
  * traffic rather than a one-shot animation.
  *
- * Every ~20 s the SBC-2 node dims briefly and the packets on its upstream/
- * downstream paths fade out — illustrating automatic failover.
+ * Every ~20 s the US-West location dims and packets on its paths fade out —
+ * illustrating automatic geographic failover with traffic redistributed to
+ * US-East and US-Central.
  *
  * Pure SVG + CSS. No canvas, no WebGL, no extra npm packages.
  */
@@ -24,21 +31,29 @@ import { useMemo } from 'react';
 /* ─── Geometry constants ─────────────────────────────────────────────── */
 
 const VB_W = 1000;
-const VB_H = 280;
+const VB_H = 290;
 
-// Node centre coordinates — horizontal left-to-right flow
-const NODES = {
-  caller0: { x: 72,  y: 62  },
-  caller1: { x: 72,  y: 117 },
-  caller2: { x: 72,  y: 172 },
-  lb:      { x: 248, y: 117 },
-  sbc1:    { x: 440, y: 72  },
-  sbc2:    { x: 440, y: 195 },
-  re:      { x: 630, y: 117 },
-  zoneE:   { x: 850, y: 55  },
-  zoneC:   { x: 850, y: 117 },
-  zoneW:   { x: 850, y: 179 },
+// ── Column x-positions ────────────────────────────────────────────────
+const COL = {
+  inbound: 72,    // Stage 1: single inbound trunk node (centre)
+  nlb:     228,   // Stage 2: NLB / geo-router (centre)
+  locIn:   340,   // left edge of location containers
+  locOut:  650,   // right edge of location containers
+  sbcX:    420,   // SBC pair node centre (within location)
+  fsX:     568,   // FreeSWITCH node centre (within location)
+  termX:   870,   // Stage 4: termination trunk nodes (centre)
 } as const;
+
+// ── Row y-centres for each geographic location ─────────────────────────
+// VB_H=290, header at y=22, bottom margin ~10px.
+// Usable: ~255px in [35, 290]. Three rows evenly: 35+28=63, 63+91=154…
+// Chosen for visual balance with NLB centred at y=145:
+const LOC_Y = [62, 145, 228] as const;   // US-East, US-Central, US-West
+const LOC_HALF_H = 28;                    // half-height of each location container
+const LOC_W = COL.locOut - COL.locIn;    // 310px
+
+// ── Termination trunk y-positions ─────────────────────────────────────
+const TERM_Y = [75, 145, 215] as const;  // Dallas, LA, Backup
 
 /* ─── SVG path helpers ───────────────────────────────────────────────── */
 
@@ -54,31 +69,134 @@ function quadPath(
   return `M ${x1} ${y1} Q ${cpX} ${cpY} ${x2} ${y2}`;
 }
 
+function cubicPath(
+  x1: number, y1: number,
+  cp1X: number, cp1Y: number,
+  cp2X: number, cp2Y: number,
+  x2: number, y2: number,
+): string {
+  return `M ${x1} ${y1} C ${cp1X} ${cp1Y} ${cp2X} ${cp2Y} ${x2} ${y2}`;
+}
+
 /* ─── Path definitions ───────────────────────────────────────────────── */
 
-type PathGroup = 'caller-lb' | 'lb-sbc1' | 'lb-sbc2' | 'sbc1-re' | 'sbc2-re' | 'zone';
+/**
+ * Path groups control which packets participate in the failover animation.
+ * All 'west' groups fade when US-West fails over.
+ */
+type PathGroup =
+  | 'inbound-nlb'
+  | 'nlb-east' | 'nlb-central' | 'nlb-west'
+  | 'sbc-fs-east' | 'sbc-fs-central' | 'sbc-fs-west'
+  | 'east-term' | 'central-term' | 'west-term';
 
 interface PathDef {
   id: string;
   d: string;
   group: PathGroup;
+  isWest: boolean;
 }
 
+// ── Stage 1→2: Inbound → NLB ─────────────────────────────────────────
+const PATH_INBOUND_NLB: PathDef = {
+  id: 'in-nlb',
+  group: 'inbound-nlb',
+  isWest: false,
+  d: linePath(COL.inbound + 18, 145, COL.nlb - 24, 145),
+};
+
+// ── Stage 2→3: NLB → each location ────────────────────────────────────
+// Packets enter the left edge of the container (locIn + 8 to clear the border)
+const PATH_NLB_EAST: PathDef = {
+  id: 'nlb-east',
+  group: 'nlb-east',
+  isWest: false,
+  d: quadPath(COL.nlb + 24, 145, 284, LOC_Y[0], COL.locIn + 8, LOC_Y[0]),
+};
+const PATH_NLB_CENTRAL: PathDef = {
+  id: 'nlb-central',
+  group: 'nlb-central',
+  isWest: false,
+  d: linePath(COL.nlb + 24, 145, COL.locIn + 8, LOC_Y[1]),
+};
+const PATH_NLB_WEST: PathDef = {
+  id: 'nlb-west',
+  group: 'nlb-west',
+  isWest: true,
+  d: quadPath(COL.nlb + 24, 145, 284, LOC_Y[2], COL.locIn + 8, LOC_Y[2]),
+};
+
+// ── Stage 3 internal: SBC → FS (within each location) ─────────────────
+const PATH_SBC_FS_EAST: PathDef = {
+  id: 'sbc-fs-east',
+  group: 'sbc-fs-east',
+  isWest: false,
+  d: linePath(COL.sbcX + 26, LOC_Y[0], COL.fsX - 18, LOC_Y[0]),
+};
+const PATH_SBC_FS_CENTRAL: PathDef = {
+  id: 'sbc-fs-central',
+  group: 'sbc-fs-central',
+  isWest: false,
+  d: linePath(COL.sbcX + 26, LOC_Y[1], COL.fsX - 18, LOC_Y[1]),
+};
+const PATH_SBC_FS_WEST: PathDef = {
+  id: 'sbc-fs-west',
+  group: 'sbc-fs-west',
+  isWest: true,
+  d: linePath(COL.sbcX + 26, LOC_Y[2], COL.fsX - 18, LOC_Y[2]),
+};
+
+// ── Stage 3→4: each location → each termination trunk (9 paths) ────────
+// Paths exit the right edge of each container and converge at the trunks.
+function makeTermPath(
+  locIdx: number,
+  termIdx: number,
+  group: PathGroup,
+  id: string,
+  isWest: boolean,
+): PathDef {
+  const x1 = COL.locOut - 8;
+  const y1 = LOC_Y[locIdx];
+  const x2 = COL.termX - 20;
+  const y2 = TERM_Y[termIdx];
+  // Cubic bezier produces smooth S-curves for the convergence fan
+  const cp1X = x1 + (x2 - x1) * 0.40;
+  const cp2X = x1 + (x2 - x1) * 0.60;
+  return {
+    id,
+    group,
+    isWest,
+    d: cubicPath(x1, y1, cp1X, y1, cp2X, y2, x2, y2),
+  };
+}
+
+const PATHS_EAST_TERM: PathDef[] = [
+  makeTermPath(0, 0, 'east-term', 'e-t0', false),
+  makeTermPath(0, 1, 'east-term', 'e-t1', false),
+  makeTermPath(0, 2, 'east-term', 'e-t2', false),
+];
+const PATHS_CENTRAL_TERM: PathDef[] = [
+  makeTermPath(1, 0, 'central-term', 'c-t0', false),
+  makeTermPath(1, 1, 'central-term', 'c-t1', false),
+  makeTermPath(1, 2, 'central-term', 'c-t2', false),
+];
+const PATHS_WEST_TERM: PathDef[] = [
+  makeTermPath(2, 0, 'west-term', 'w-t0', true),
+  makeTermPath(2, 1, 'west-term', 'w-t1', true),
+  makeTermPath(2, 2, 'west-term', 'w-t2', true),
+];
+
 const PATHS: PathDef[] = [
-  // Callers → LB
-  { id: 'c0-lb',   group: 'caller-lb', d: quadPath(NODES.caller0.x + 13, NODES.caller0.y, 165, 72,  NODES.lb.x - 23, NODES.lb.y) },
-  { id: 'c1-lb',   group: 'caller-lb', d: linePath(NODES.caller1.x + 13, NODES.caller1.y, NODES.lb.x - 23, NODES.lb.y) },
-  { id: 'c2-lb',   group: 'caller-lb', d: quadPath(NODES.caller2.x + 13, NODES.caller2.y, 165, 162, NODES.lb.x - 23, NODES.lb.y) },
-  // LB → SBCs
-  { id: 'lb-sbc1', group: 'lb-sbc1',   d: quadPath(NODES.lb.x + 23, NODES.lb.y, 345, 72,  NODES.sbc1.x - 28, NODES.sbc1.y) },
-  { id: 'lb-sbc2', group: 'lb-sbc2',   d: quadPath(NODES.lb.x + 23, NODES.lb.y, 345, 195, NODES.sbc2.x - 28, NODES.sbc2.y) },
-  // SBCs → Routing Engine
-  { id: 'sbc1-re', group: 'sbc1-re',   d: quadPath(NODES.sbc1.x + 28, NODES.sbc1.y, 535, 72,  NODES.re.x - 27, NODES.re.y) },
-  { id: 'sbc2-re', group: 'sbc2-re',   d: quadPath(NODES.sbc2.x + 28, NODES.sbc2.y, 535, 195, NODES.re.x - 27, NODES.re.y) },
-  // RE → Zones
-  { id: 're-zE',   group: 'zone',      d: quadPath(NODES.re.x + 27, NODES.re.y, 740, 55,  NODES.zoneE.x - 15, NODES.zoneE.y) },
-  { id: 're-zC',   group: 'zone',      d: linePath(NODES.re.x + 27, NODES.re.y, NODES.zoneC.x - 15, NODES.zoneC.y) },
-  { id: 're-zW',   group: 'zone',      d: quadPath(NODES.re.x + 27, NODES.re.y, 740, 179, NODES.zoneW.x - 15, NODES.zoneW.y) },
+  PATH_INBOUND_NLB,
+  PATH_NLB_EAST,
+  PATH_NLB_CENTRAL,
+  PATH_NLB_WEST,
+  PATH_SBC_FS_EAST,
+  PATH_SBC_FS_CENTRAL,
+  PATH_SBC_FS_WEST,
+  ...PATHS_EAST_TERM,
+  ...PATHS_CENTRAL_TERM,
+  ...PATHS_WEST_TERM,
 ];
 
 /* ─── Packet animation config ────────────────────────────────────────── */
@@ -87,48 +205,64 @@ interface PacketConfig {
   pathId: string;
   delay: number;
   duration: number;
-  /** Whether this packet belongs to the SBC-2 failover group */
-  isSbc2Path: boolean;
+  /** Packet belongs to the US-West failover group — fades on failover */
+  isWest: boolean;
+  /** Termination-leg packet — rendered with a green tint */
+  isTerm: boolean;
 }
 
 function makePackets(
   pathId: string,
   count: number,
   duration: number,
-  isSbc2Path: boolean,
+  isWest: boolean,
+  isTerm = false,
   startDelay = 0,
 ): PacketConfig[] {
   return Array.from({ length: count }, (_, i) => ({
     pathId,
     delay: startDelay + (duration / count) * i,
     duration,
-    isSbc2Path,
+    isWest,
+    isTerm,
   }));
 }
 
 const ALL_PACKETS: PacketConfig[] = [
-  // Callers → LB
-  ...makePackets('c0-lb',   2, 3.2, false, 0.0),
-  ...makePackets('c1-lb',   2, 3.2, false, 1.0),
-  ...makePackets('c2-lb',   2, 3.2, false, 2.0),
-  // LB → SBC1
-  ...makePackets('lb-sbc1', 3, 2.8, false, 0.0),
-  // LB → SBC2 (dims during failover)
-  ...makePackets('lb-sbc2', 3, 2.8, true,  0.5),
-  // SBC1 → RE
-  ...makePackets('sbc1-re', 2, 2.4, false, 0.3),
-  // SBC2 → RE (dims during failover)
-  ...makePackets('sbc2-re', 2, 2.4, true,  0.8),
-  // RE → Zones
-  ...makePackets('re-zE',   2, 2.6, false, 0.0),
-  ...makePackets('re-zC',   2, 2.6, false, 0.9),
-  ...makePackets('re-zW',   2, 2.6, false, 1.8),
+  // Inbound → NLB
+  ...makePackets('in-nlb',       3, 2.6, false, false, 0.0),
+
+  // NLB → locations (geo-router splits traffic staggered so it looks dynamic)
+  ...makePackets('nlb-east',     2, 3.4, false, false, 0.0),
+  ...makePackets('nlb-central',  2, 3.4, false, false, 1.1),
+  ...makePackets('nlb-west',     2, 3.4, true,  false, 2.2),
+
+  // SBC → FS (within each location)
+  ...makePackets('sbc-fs-east',    2, 1.9, false, false, 0.2),
+  ...makePackets('sbc-fs-central', 2, 1.9, false, false, 1.3),
+  ...makePackets('sbc-fs-west',    2, 1.9, true,  false, 2.4),
+
+  // East → termination trunks
+  ...makePackets('e-t0', 1, 3.8, false, true, 0.0),
+  ...makePackets('e-t1', 1, 3.8, false, true, 0.5),
+  ...makePackets('e-t2', 1, 3.8, false, true, 1.0),
+
+  // Central → termination trunks
+  ...makePackets('c-t0', 1, 3.8, false, true, 1.3),
+  ...makePackets('c-t1', 1, 3.8, false, true, 1.8),
+  ...makePackets('c-t2', 1, 3.8, false, true, 2.3),
+
+  // West → termination trunks (failover group)
+  ...makePackets('w-t0', 1, 3.8, true, true, 0.7),
+  ...makePackets('w-t1', 1, 3.8, true, true, 1.2),
+  ...makePackets('w-t2', 1, 3.8, true, true, 1.7),
 ];
 
 /* ─── Component ──────────────────────────────────────────────────────── */
 
 export function HaArchitectureViz() {
-  // Stable, unique ID prefix for CSS names (avoids class collisions)
+  // Stable, unique ID prefix for CSS names — prevents class collisions if the
+  // component is ever mounted more than once in the same document.
   const uid = useMemo(
     () => `ha-${Math.random().toString(36).substring(2, 8)}`,
     [],
@@ -136,16 +270,16 @@ export function HaArchitectureViz() {
 
   /**
    * Build the full CSS block:
-   *  1. Per-path @keyframes using offset-distance 0%→100%
+   *  1. Per-path @keyframes (offset-distance 0%→100%)
    *  2. Per-packet animation rules (class → path + timing)
-   *  3. Failover keyframes: SBC-2 node dims to amber, its packets fade
+   *  3. US-West failover keyframes: location dims to amber, packets fade
    */
   const css = useMemo(() => {
-    // 1. Path traversal keyframes (one per path, shared by all packets on it)
+    // 1. Path traversal keyframes — one per unique path id
     const pathKf = PATHS.map(
       (p) => `@keyframes ${uid}-pkt-${p.id} {
   0%   { offset-distance:   0%; opacity: 0; }
-  7%   { opacity: 1; }
+  8%   { opacity: 1; }
   88%  { opacity: 1; }
   100% { offset-distance: 100%; opacity: 0; }
 }`,
@@ -154,52 +288,47 @@ export function HaArchitectureViz() {
     // 2. Per-packet CSS class rules
     const packetRules = ALL_PACKETS.map((pkt, i) => {
       const path = PATHS.find((p) => p.id === pkt.pathId)!;
-      // sbc2 packets carry a second animation for the failover fade
-      const animName = pkt.isSbc2Path
-        ? `${uid}-pkt-${path.id}, ${uid}-sbc2-pkt-fault`
+
+      // West packets carry a second animation layer for the failover fade
+      const animName = pkt.isWest
+        ? `${uid}-pkt-${path.id}, ${uid}-west-pkt-fault`
         : `${uid}-pkt-${path.id}`;
-      const animDur = pkt.isSbc2Path
-        ? `${pkt.duration}s, 20s`
-        : `${pkt.duration}s`;
-      const animDelay = pkt.isSbc2Path
-        ? `${pkt.delay}s, 0s`
-        : `${pkt.delay}s`;
-      const animIter = pkt.isSbc2Path
-        ? 'infinite, infinite'
-        : 'infinite';
-      const animFill = pkt.isSbc2Path
-        ? 'both, both'
-        : 'both';
+      const animDur  = pkt.isWest ? `${pkt.duration}s, 20s`           : `${pkt.duration}s`;
+      const animDel  = pkt.isWest ? `${pkt.delay}s, 0s`               : `${pkt.delay}s`;
+      const animIter = pkt.isWest ? 'infinite, infinite'               : 'infinite';
+      const animFill = pkt.isWest ? 'both, both'                       : 'both';
+      const animTf   = pkt.isWest
+        ? 'cubic-bezier(0.4, 0, 0.6, 1), ease-in-out'
+        : 'cubic-bezier(0.4, 0, 0.6, 1)';
 
       return `.${uid}-p${i} {
   offset-path: path('${path.d}');
   animation-name: ${animName};
   animation-duration: ${animDur};
-  animation-delay: ${animDelay};
-  animation-timing-function: cubic-bezier(0.4, 0, 0.6, 1), ease-in-out;
+  animation-delay: ${animDel};
+  animation-timing-function: ${animTf};
   animation-iteration-count: ${animIter};
   animation-fill-mode: ${animFill};
 }`;
     }).join('\n');
 
     // 3. Failover animations
-    // SBC-2 node: dims at 65%, recovers at 80% of the 20s cycle
-    // SBC-2 packet: fully disappears during the same window
+    // US-West location box dims at 65% of the 20s cycle, recovers at 82%.
     const failoverKf = `
-@keyframes ${uid}-sbc2-node-fault {
+@keyframes ${uid}-west-loc-fault {
   0%,  62%  { opacity: 1;    filter: none; }
-  66%        { opacity: 0.28; filter: sepia(1) hue-rotate(20deg) brightness(1.6); }
-  76%        { opacity: 0.28; filter: sepia(1) hue-rotate(20deg) brightness(1.6); }
-  82%, 100%  { opacity: 1;   filter: none; }
+  66%        { opacity: 0.20; filter: sepia(1) hue-rotate(20deg) brightness(2.0); }
+  79%        { opacity: 0.20; filter: sepia(1) hue-rotate(20deg) brightness(2.0); }
+  85%, 100%  { opacity: 1;   filter: none; }
 }
-@keyframes ${uid}-sbc2-pkt-fault {
+@keyframes ${uid}-west-pkt-fault {
   0%,  62%  { opacity: 1; }
-  66%, 76%  { opacity: 0; }
-  82%, 100% { opacity: 1; }
+  66%, 79%  { opacity: 0; }
+  85%, 100% { opacity: 1; }
 }`;
 
-    const failoverRules = `.${uid}-sbc2-node {
-  animation: ${uid}-sbc2-node-fault 20s ease-in-out infinite;
+    const failoverRules = `.${uid}-west-loc {
+  animation: ${uid}-west-loc-fault 20s ease-in-out infinite;
 }`;
 
     return [pathKf, packetRules, failoverKf, failoverRules].join('\n');
@@ -246,10 +375,10 @@ export function HaArchitectureViz() {
         height="auto"
         preserveAspectRatio="xMidYMid meet"
         style={{ display: 'block' }}
-        aria-label="HA architecture diagram showing left-to-right call flow"
+        aria-label="Granite Keystone HA: single inbound trunk routes through geo-router NLB to three geographic locations (each with 2× SBC + FreeSWITCH), terminating via Dallas, LA, and Backup Bandwidth PoP trunks"
       >
         <defs>
-          {/* Repeating grid lines */}
+          {/* ── Grid lines ────────────────────────────────────────── */}
           <pattern
             id={`${uid}-grid`}
             width="48"
@@ -264,39 +393,53 @@ export function HaArchitectureViz() {
             />
           </pattern>
 
-          {/* Node ambient glow */}
+          {/* ── Node glow gradients ───────────────────────────────── */}
+          {/* Standard blue ambient glow */}
           <radialGradient id={`${uid}-ng`} cx="50%" cy="50%" r="50%">
             <stop offset="0%"   stopColor="#3b82f6" stopOpacity="0.22" />
             <stop offset="100%" stopColor="#3b82f6" stopOpacity="0" />
           </radialGradient>
 
-          {/* LB / RE stronger glow */}
+          {/* NLB / key node brighter glow */}
           <radialGradient id={`${uid}-lg`} cx="50%" cy="50%" r="50%">
-            <stop offset="0%"   stopColor="#60a5fa" stopOpacity="0.30" />
+            <stop offset="0%"   stopColor="#60a5fa" stopOpacity="0.32" />
             <stop offset="100%" stopColor="#3b82f6" stopOpacity="0" />
           </radialGradient>
 
-          {/* Packet dot fill */}
-          <radialGradient id={`${uid}-pg`} cx="40%" cy="35%" r="60%">
-            <stop offset="0%"   stopColor="#bfdbfe" stopOpacity="1" />
-            <stop offset="100%" stopColor="#3b82f6" stopOpacity="0.7" />
+          {/* Termination trunk green glow */}
+          <radialGradient id={`${uid}-tg`} cx="50%" cy="50%" r="50%">
+            <stop offset="0%"   stopColor="#34d399" stopOpacity="0.22" />
+            <stop offset="100%" stopColor="#059669" stopOpacity="0" />
           </radialGradient>
 
-          {/* Clip packets to viewBox */}
+          {/* ── Packet dot fills ──────────────────────────────────── */}
+          {/* Blue packet (inbound / processing legs) */}
+          <radialGradient id={`${uid}-pg`} cx="40%" cy="35%" r="60%">
+            <stop offset="0%"   stopColor="#bfdbfe" stopOpacity="1" />
+            <stop offset="100%" stopColor="#3b82f6"  stopOpacity="0.75" />
+          </radialGradient>
+
+          {/* Green-tinted packet (termination legs) */}
+          <radialGradient id={`${uid}-ptg`} cx="40%" cy="35%" r="60%">
+            <stop offset="0%"   stopColor="#a7f3d0" stopOpacity="1" />
+            <stop offset="100%" stopColor="#10b981"  stopOpacity="0.75" />
+          </radialGradient>
+
+          {/* ── Utility ───────────────────────────────────────────── */}
           <clipPath id={`${uid}-clip`}>
             <rect x="0" y="0" width={VB_W} height={VB_H} />
           </clipPath>
 
-          {/* Packet glow filter */}
-          <filter id={`${uid}-pf`} x="-120%" y="-120%" width="340%" height="340%">
-            <feGaussianBlur in="SourceGraphic" stdDeviation="2" result="b" />
+          {/* Packet glow (soft halo around each dot) */}
+          <filter id={`${uid}-pf`} x="-140%" y="-140%" width="380%" height="380%">
+            <feGaussianBlur in="SourceGraphic" stdDeviation="1.6" result="b" />
             <feMerge>
               <feMergeNode in="b" />
               <feMergeNode in="SourceGraphic" />
             </feMerge>
           </filter>
 
-          {/* Node inner glow filter */}
+          {/* Node inner glow */}
           <filter id={`${uid}-nf`} x="-50%" y="-50%" width="200%" height="200%">
             <feGaussianBlur in="SourceGraphic" stdDeviation="3" result="b" />
             <feMerge>
@@ -309,46 +452,68 @@ export function HaArchitectureViz() {
         {/* ── Grid background ─────────────────────────────────────── */}
         <rect x="0" y="0" width={VB_W} height={VB_H} fill={`url(#${uid}-grid)`} />
 
-        {/* ── Soft radial glow centred on the middle ───────────── */}
+        {/* ── Central ambient glow ─────────────────────────────────── */}
         <ellipse
           cx={VB_W / 2} cy={VB_H / 2}
-          rx={VB_W * 0.48} ry={VB_H * 0.60}
-          fill="rgba(59,130,246,0.03)"
+          rx={VB_W * 0.46} ry={VB_H * 0.58}
+          fill="rgba(59,130,246,0.025)"
         />
 
         {/* ── Connection lines ─────────────────────────────────────── */}
-        <g stroke="rgba(59,130,246,0.15)" strokeWidth="1" fill="none" clipPath={`url(#${uid}-clip)`}>
-          {PATHS.map((p) => <path key={p.id} d={p.d} />)}
+        <g fill="none" clipPath={`url(#${uid}-clip)`}>
+          {/* Stage 1→2 */}
+          <path d={PATH_INBOUND_NLB.d} stroke="rgba(59,130,246,0.22)" strokeWidth="1.1" />
+
+          {/* Stage 2→3 fan */}
+          <path d={PATH_NLB_EAST.d}    stroke="rgba(59,130,246,0.18)" strokeWidth="1" />
+          <path d={PATH_NLB_CENTRAL.d} stroke="rgba(59,130,246,0.18)" strokeWidth="1" />
+          <path d={PATH_NLB_WEST.d}    stroke="rgba(59,130,246,0.18)" strokeWidth="1" />
+
+          {/* Stage 3 internal SBC→FS (dashed to distinguish) */}
+          <path d={PATH_SBC_FS_EAST.d}    stroke="rgba(59,130,246,0.16)" strokeWidth="0.8" strokeDasharray="3 2.5" />
+          <path d={PATH_SBC_FS_CENTRAL.d} stroke="rgba(59,130,246,0.16)" strokeWidth="0.8" strokeDasharray="3 2.5" />
+          <path d={PATH_SBC_FS_WEST.d}    stroke="rgba(59,130,246,0.16)" strokeWidth="0.8" strokeDasharray="3 2.5" />
+
+          {/* Stage 3→4 convergence (green-tinted) */}
+          {[...PATHS_EAST_TERM, ...PATHS_CENTRAL_TERM, ...PATHS_WEST_TERM].map((p) => (
+            <path key={p.id} d={p.d} stroke="rgba(52,211,153,0.13)" strokeWidth="0.85" />
+          ))}
         </g>
 
-        {/* ── Animated packets ─────────────────────────────────────── */}
+        {/* ── Animated packet dots ─────────────────────────────────── */}
         <g clipPath={`url(#${uid}-clip)`}>
-          {ALL_PACKETS.map((_, i) => (
+          {ALL_PACKETS.map((pkt, i) => (
             <circle
               key={i}
-              r={3.5}
+              r={3}
               cx="0"
               cy="0"
-              fill={`url(#${uid}-pg)`}
+              fill={pkt.isTerm ? `url(#${uid}-ptg)` : `url(#${uid}-pg)`}
               filter={`url(#${uid}-pf)`}
               className={`${uid}-p${i}`}
             />
           ))}
         </g>
 
-        {/* ── Nodes ────────────────────────────────────────────────── */}
-        <CallerColumn uid={uid} />
-        <LbNode uid={uid} />
-        <SbcGroup uid={uid} />
-        <ReNode uid={uid} />
-        <ZoneColumn uid={uid} />
+        {/* ── Stage nodes ──────────────────────────────────────────── */}
+        <InboundNode uid={uid} />
+        <NlbNode uid={uid} />
+
+        {/* Three geographic location containers */}
+        <LocationGroup uid={uid} locIdx={0} label="US-East"    isWest={false} />
+        <LocationGroup uid={uid} locIdx={1} label="US-Central" isWest={false} />
+        <LocationGroup uid={uid} locIdx={2} label="US-West"    isWest={true} />
+
+        {/* Three Bandwidth termination trunk nodes */}
+        <TermNode uid={uid} termIdx={0} label="Dallas" sublabel="PoP" />
+        <TermNode uid={uid} termIdx={1} label="LA"     sublabel="PoP" />
+        <TermNode uid={uid} termIdx={2} label="Backup" sublabel="Trunk" />
 
         {/* ── Column header labels ──────────────────────────────────── */}
-        <ColumnLabel text="INBOUND CALLS" x={NODES.caller1.x} y={22} />
-        <ColumnLabel text="LOAD BALANCER" x={NODES.lb.x}      y={22} />
-        <ColumnLabel text="SESSION BORDER" x={NODES.sbc1.x}    y={22} />
-        <ColumnLabel text="ROUTING ENGINE" x={NODES.re.x}      y={22} />
-        <ColumnLabel text="ZONES"           x={NODES.zoneC.x}  y={22} />
+        <ColumnLabel text="ORIGINATION"  x={COL.inbound}                      y={22} />
+        <ColumnLabel text="DISTRIBUTION" x={COL.nlb}                          y={22} />
+        <ColumnLabel text="PROCESSING"   x={(COL.locIn + COL.locOut) / 2}     y={22} />
+        <ColumnLabel text="TERMINATION"  x={COL.termX}                        y={22} />
 
         {/* ── Watermark ────────────────────────────────────────────── */}
         <text
@@ -357,7 +522,7 @@ export function HaArchitectureViz() {
           fontSize="6"
           fontFamily="'SF Mono', 'Fira Code', 'Consolas', monospace"
           letterSpacing="0.12em"
-          fill="rgba(59,130,246,0.20)"
+          fill="rgba(59,130,246,0.18)"
           fontWeight="600"
         >
           LIVE INFRASTRUCTURE
@@ -367,7 +532,7 @@ export function HaArchitectureViz() {
   );
 }
 
-/* ─── Node sub-components ────────────────────────────────────────────── */
+/* ─── Sub-components ─────────────────────────────────────────────────── */
 
 function ColumnLabel({ text, x, y }: { text: string; x: number; y: number }) {
   return (
@@ -377,7 +542,7 @@ function ColumnLabel({ text, x, y }: { text: string; x: number; y: number }) {
       fontSize="7"
       fontFamily="'SF Mono', 'Fira Code', 'Consolas', monospace"
       letterSpacing="0.13em"
-      fill="rgba(148,163,184,0.30)"
+      fill="rgba(148,163,184,0.28)"
       fontWeight="600"
     >
       {text}
@@ -385,220 +550,291 @@ function ColumnLabel({ text, x, y }: { text: string; x: number; y: number }) {
   );
 }
 
-function NodeLabel({ text, y }: { text: string; y: number }) {
-  return (
-    <text
-      y={y}
-      textAnchor="middle"
-      fontSize="7.5"
-      fontFamily="'SF Mono', 'Fira Code', 'Consolas', monospace"
-      letterSpacing="0.09em"
-      fill="rgba(148,163,184,0.55)"
-      fontWeight="600"
-    >
-      {text}
-    </text>
-  );
-}
-
-/* ── Caller nodes (left column, stacked vertically) ── */
-function CallerColumn({ uid }: { uid: string }) {
-  const callers = [NODES.caller0, NODES.caller1, NODES.caller2] as const;
+/* ── Inbound Trunk — rounded rectangle with signal-bars icon ── */
+function InboundNode({ uid }: { uid: string }) {
+  const cx = COL.inbound;
+  const cy = 145;
+  const W = 62;
+  const H = 40;
+  const R = 8;
 
   return (
-    <g>
-      {callers.map((c, i) => (
-        <g key={i} transform={`translate(${c.x}, ${c.y})`}>
-          {/* Ambient glow disc */}
-          <circle r="22" fill={`url(#${uid}-ng)`} />
-          {/* Node circle */}
-          <circle
-            r="13"
-            fill="rgba(15,17,23,0.65)"
-            stroke="rgba(59,130,246,0.24)"
-            strokeWidth="1"
-          />
-          {/* Phone icon */}
-          <PhoneIcon />
-        </g>
-      ))}
-    </g>
-  );
-}
-
-/* ── Load Balancer — diamond shape ── */
-function LbNode({ uid }: { uid: string }) {
-  const { x, y } = NODES.lb;
-  const s = 22; // half-diagonal of the diamond
-
-  return (
-    <g transform={`translate(${x}, ${y})`}>
-      {/* Glow */}
-      <circle r="46" fill={`url(#${uid}-lg)`} />
-      {/* Outer diamond */}
-      <polygon
-        points={`0,${-s} ${s},0 0,${s} ${-s},0`}
-        fill="rgba(15,17,23,0.68)"
-        stroke="rgba(59,130,246,0.30)"
-        strokeWidth="1"
-      />
-      {/* Inner diamond accent */}
-      <polygon
-        points={`0,${-s * 0.46} ${s * 0.46},0 0,${s * 0.46} ${-s * 0.46},0`}
-        fill="rgba(59,130,246,0.15)"
-        stroke="rgba(96,165,250,0.30)"
-        strokeWidth="0.75"
-      />
-      {/* Four-way distribution marker */}
-      <line x1="-8" y1="0" x2="8"  y2="0"  stroke="rgba(96,165,250,0.40)" strokeWidth="0.8" />
-      <line x1="0"  y1="-8" x2="0" y2="8"  stroke="rgba(96,165,250,0.40)" strokeWidth="0.8" />
-      <NodeLabel text="NLB" y={s + 13} />
-    </g>
-  );
-}
-
-/* ── SBC pair ── */
-function SbcGroup({ uid }: { uid: string }) {
-  return (
-    <g>
-      <SbcNode uid={uid} label="SBC — 1" x={NODES.sbc1.x} y={NODES.sbc1.y} faults={false} />
-      <SbcNode uid={uid} label="SBC — 2" x={NODES.sbc2.x} y={NODES.sbc2.y} faults={true}  />
-    </g>
-  );
-}
-
-function SbcNode({
-  uid, label, x, y, faults,
-}: {
-  uid: string;
-  label: string;
-  x: number;
-  y: number;
-  faults: boolean;
-}) {
-  const W = 56;
-  const H = 30;
-  const R = 7;
-
-  return (
-    <g
-      transform={`translate(${x}, ${y})`}
-      className={faults ? `${uid}-sbc2-node` : undefined}
-    >
-      {/* Glow */}
-      <circle r="40" fill={`url(#${uid}-ng)`} />
-      {/* Body */}
+    <g transform={`translate(${cx}, ${cy})`}>
+      <circle r="46" fill={`url(#${uid}-ng)`} />
       <rect
         x={-W / 2} y={-H / 2}
         width={W} height={H}
         rx={R}
-        fill="rgba(15,17,23,0.70)"
-        stroke="rgba(59,130,246,0.26)"
+        fill="rgba(15,17,23,0.72)"
+        stroke="rgba(59,130,246,0.30)"
         strokeWidth="1"
       />
-      {/* Inner highlight */}
+      {/* Top highlight strip */}
       <rect
         x={-W / 2 + 1} y={-H / 2 + 1}
-        width={W - 2} height={H * 0.35}
+        width={W - 2} height={H * 0.28}
+        rx={R - 1}
+        fill="rgba(96,165,250,0.07)"
+      />
+      {/* Signal-bars icon centred in the rect */}
+      <BandwidthIcon />
+      {/* Labels below */}
+      <text y={H / 2 + 12} textAnchor="middle" fontSize="7.5"
+        fontFamily="'SF Mono', 'Fira Code', 'Consolas', monospace"
+        letterSpacing="0.09em" fill="rgba(148,163,184,0.62)" fontWeight="600">
+        Inbound
+      </text>
+      <text y={H / 2 + 21} textAnchor="middle" fontSize="6"
+        fontFamily="'SF Mono', 'Fira Code', 'Consolas', monospace"
+        letterSpacing="0.07em" fill="rgba(100,116,139,0.55)" fontWeight="500">
+        Trunk
+      </text>
+    </g>
+  );
+}
+
+/* ── NLB / Geo Router — diamond ── */
+function NlbNode({ uid }: { uid: string }) {
+  const cx = COL.nlb;
+  const cy = 145;
+  const s = 24; // half-diagonal of diamond
+
+  return (
+    <g transform={`translate(${cx}, ${cy})`}>
+      <circle r="54" fill={`url(#${uid}-lg)`} />
+      {/* Outer diamond */}
+      <polygon
+        points={`0,${-s} ${s},0 0,${s} ${-s},0`}
+        fill="rgba(15,17,23,0.72)"
+        stroke="rgba(59,130,246,0.34)"
+        strokeWidth="1"
+      />
+      {/* Inner diamond accent */}
+      <polygon
+        points={`0,${-s * 0.42} ${s * 0.42},0 0,${s * 0.42} ${-s * 0.42},0`}
+        fill="rgba(59,130,246,0.15)"
+        stroke="rgba(96,165,250,0.28)"
+        strokeWidth="0.75"
+      />
+      {/* Distribution cross */}
+      <line x1="-9" y1="0" x2="9"  y2="0" stroke="rgba(96,165,250,0.40)" strokeWidth="0.9" />
+      <line x1="0" y1="-9" x2="0" y2="9"  stroke="rgba(96,165,250,0.40)" strokeWidth="0.9" />
+      {/* Labels */}
+      <text y={s + 13} textAnchor="middle" fontSize="7.5"
+        fontFamily="'SF Mono', 'Fira Code', 'Consolas', monospace"
+        letterSpacing="0.09em" fill="rgba(148,163,184,0.62)" fontWeight="600">
+        Geo Router
+      </text>
+      <text y={s + 22} textAnchor="middle" fontSize="6"
+        fontFamily="'SF Mono', 'Fira Code', 'Consolas', monospace"
+        letterSpacing="0.07em" fill="rgba(100,116,139,0.52)" fontWeight="500">
+        NLB
+      </text>
+    </g>
+  );
+}
+
+/* ── Geographic Location Container ── */
+function LocationGroup({
+  uid,
+  locIdx,
+  label,
+  isWest,
+}: {
+  uid: string;
+  locIdx: number;
+  label: string;
+  isWest: boolean;
+}) {
+  const cy = LOC_Y[locIdx];
+  const x  = COL.locIn;
+  const h  = LOC_HALF_H * 2;  // 56px total height
+  const R  = 9;
+
+  return (
+    <g className={isWest ? `${uid}-west-loc` : undefined}>
+      {/* Container background */}
+      <rect
+        x={x}
+        y={cy - LOC_HALF_H}
+        width={LOC_W}
+        height={h}
+        rx={R}
+        fill="rgba(15,17,23,0.52)"
+        stroke="rgba(59,130,246,0.20)"
+        strokeWidth="0.75"
+      />
+      {/* Top shimmer */}
+      <rect
+        x={x + 1}
+        y={cy - LOC_HALF_H + 1}
+        width={LOC_W - 2}
+        height={h * 0.24}
         rx={R - 1}
         fill="rgba(96,165,250,0.05)"
       />
-      {/* Layer lines */}
-      <line x1="-14" y1="-5" x2="14" y2="-5" stroke="rgba(59,130,246,0.28)" strokeWidth="0.7" />
-      <line x1="-10" y1="0"  x2="10" y2="0"  stroke="rgba(59,130,246,0.18)" strokeWidth="0.7" />
-      <line x1="-6"  y1="5"  x2="6"  y2="5"  stroke="rgba(59,130,246,0.12)" strokeWidth="0.7" />
-      <NodeLabel text={label} y={H / 2 + 12} />
+      {/* Location name — top-left */}
+      <text
+        x={x + 10}
+        y={cy - LOC_HALF_H + 12}
+        fontSize="6.5"
+        fontFamily="'SF Mono', 'Fira Code', 'Consolas', monospace"
+        letterSpacing="0.10em"
+        fill="rgba(148,163,184,0.48)"
+        fontWeight="700"
+      >
+        {label}
+      </text>
+
+      {/* SBC pair node */}
+      <SbcPairNode uid={uid} cx={COL.sbcX} cy={cy} />
+
+      {/* FreeSWITCH media server node */}
+      <FsNode uid={uid} cx={COL.fsX} cy={cy} />
     </g>
   );
 }
 
-/* ── Routing Engine — hexagon ── */
-function ReNode({ uid }: { uid: string }) {
-  const { x, y } = NODES.re;
-  const R = 26;
+/* ── SBC Pair — labelled pill ── */
+function SbcPairNode({ uid, cx, cy }: { uid: string; cx: number; cy: number }) {
+  // Sized to comfortably sit within the LOC_HALF_H=28 container
+  const W = 54;
+  const H = 30;
+  const R = 7;
 
-  // Flat-top hexagon points
-  const hexPoints = (radius: number) =>
+  return (
+    <g transform={`translate(${cx}, ${cy})`}>
+      <circle r="34" fill={`url(#${uid}-ng)`} />
+      <rect
+        x={-W / 2} y={-H / 2}
+        width={W} height={H}
+        rx={R}
+        fill="rgba(15,17,23,0.74)"
+        stroke="rgba(59,130,246,0.28)"
+        strokeWidth="0.85"
+      />
+      {/* Top highlight */}
+      <rect
+        x={-W / 2 + 1} y={-H / 2 + 1}
+        width={W - 2} height={H * 0.30}
+        rx={R - 1}
+        fill="rgba(96,165,250,0.07)"
+      />
+      {/* Layer lines */}
+      <line x1="-14" y1="-5" x2="14" y2="-5" stroke="rgba(59,130,246,0.28)" strokeWidth="0.7" />
+      <line x1="-10" y1=" 0" x2="10" y2=" 0" stroke="rgba(59,130,246,0.18)" strokeWidth="0.7" />
+      <line x1="-6"  y1=" 5" x2="6"  y2=" 5" stroke="rgba(59,130,246,0.11)" strokeWidth="0.7" />
+      {/* Label inside pill */}
+      <text y={H / 2 + 10} textAnchor="middle" fontSize="6.5"
+        fontFamily="'SF Mono', 'Fira Code', 'Consolas', monospace"
+        letterSpacing="0.07em" fill="rgba(148,163,184,0.55)" fontWeight="600">
+        2× SBC
+      </text>
+    </g>
+  );
+}
+
+/* ── FreeSWITCH Media Server — hexagon ── */
+function FsNode({ uid, cx, cy }: { uid: string; cx: number; cy: number }) {
+  const R = 17;
+
+  const hexPts = (r: number) =>
     Array.from({ length: 6 }, (_, i) => {
       const a = (Math.PI / 3) * i - Math.PI / 6;
-      return `${(radius * Math.cos(a)).toFixed(2)},${(radius * Math.sin(a)).toFixed(2)}`;
+      return `${(r * Math.cos(a)).toFixed(2)},${(r * Math.sin(a)).toFixed(2)}`;
     }).join(' ');
 
   return (
-    <g transform={`translate(${x}, ${y})`}>
-      {/* Glow */}
-      <circle r="50" fill={`url(#${uid}-lg)`} />
-      {/* Outer hexagon */}
+    <g transform={`translate(${cx}, ${cy})`}>
+      <circle r="30" fill={`url(#${uid}-ng)`} />
       <polygon
-        points={hexPoints(R)}
-        fill="rgba(15,17,23,0.72)"
-        stroke="rgba(59,130,246,0.28)"
-        strokeWidth="1"
-      />
-      {/* Inner hexagon */}
-      <polygon
-        points={hexPoints(R * 0.52)}
-        fill="rgba(59,130,246,0.13)"
-        stroke="rgba(96,165,250,0.26)"
-        strokeWidth="0.75"
-      />
-      {/* Cross-hatch */}
-      <line x1="-18" y1="0"  x2="18" y2="0"  stroke="rgba(59,130,246,0.22)" strokeWidth="0.75" />
-      <line x1="0"   y1="-18" x2="0" y2="18" stroke="rgba(59,130,246,0.22)" strokeWidth="0.75" />
-      <line x1="-12" y1="-12" x2="12" y2="12" stroke="rgba(59,130,246,0.10)" strokeWidth="0.6" />
-      <line x1="12"  y1="-12" x2="-12" y2="12" stroke="rgba(59,130,246,0.10)" strokeWidth="0.6" />
-      <NodeLabel text="ROUTE" y={R + 12} />
-    </g>
-  );
-}
-
-/* ── Zone nodes (right column, stacked vertically) ── */
-function ZoneColumn({ uid }: { uid: string }) {
-  const zones = [
-    { ...NODES.zoneE, label: 'US-E' },
-    { ...NODES.zoneC, label: 'US-C' },
-    { ...NODES.zoneW, label: 'US-W' },
-  ] as const;
-
-  return (
-    <g>
-      {zones.map((z, i) => (
-        <g key={i} transform={`translate(${z.x}, ${z.y})`}>
-          {/* Glow */}
-          <circle r="28" fill={`url(#${uid}-ng)`} />
-          {/* Node */}
-          <circle
-            r="15"
-            fill="rgba(15,17,23,0.65)"
-            stroke="rgba(59,130,246,0.22)"
-            strokeWidth="1"
-          />
-          {/* Status dot — indicates active zone */}
-          <circle r="4"   fill="rgba(59,130,246,0.55)" />
-          <circle r="2"   fill="rgba(147,197,253,0.90)" />
-          <NodeLabel text={z.label} y={24} />
-        </g>
-      ))}
-    </g>
-  );
-}
-
-/* ─── Phone icon ─────────────────────────────────────────────────────── */
-
-function PhoneIcon() {
-  return (
-    <g transform="translate(-6, -6)" opacity="0.55">
-      <rect
-        x="1" y="1"
-        width="10" height="10"
-        rx="2"
-        fill="none"
-        stroke="rgba(96,165,250,0.55)"
+        points={hexPts(R)}
+        fill="rgba(15,17,23,0.74)"
+        stroke="rgba(59,130,246,0.26)"
         strokeWidth="0.85"
       />
-      <line x1="3.5" y1="3.5" x2="8.5" y2="3.5" stroke="rgba(96,165,250,0.45)" strokeWidth="0.7" strokeLinecap="round" />
-      <line x1="3.5" y1="5.5" x2="8.5" y2="5.5" stroke="rgba(96,165,250,0.30)" strokeWidth="0.7" strokeLinecap="round" />
-      <circle cx="6" cy="8.5" r="1" fill="rgba(96,165,250,0.40)" />
+      <polygon
+        points={hexPts(R * 0.48)}
+        fill="rgba(59,130,246,0.12)"
+        stroke="rgba(96,165,250,0.22)"
+        strokeWidth="0.7"
+      />
+      {/* Cross-hatch detail */}
+      <line x1="-10" y1="0"   x2="10" y2="0"   stroke="rgba(59,130,246,0.20)" strokeWidth="0.7" />
+      <line x1="0"   y1="-10" x2="0"  y2="10"  stroke="rgba(59,130,246,0.20)" strokeWidth="0.7" />
+      {/* Label below */}
+      <text y={R + 10} textAnchor="middle" fontSize="6.5"
+        fontFamily="'SF Mono', 'Fira Code', 'Consolas', monospace"
+        letterSpacing="0.07em" fill="rgba(148,163,184,0.55)" fontWeight="600">
+        Media
+      </text>
+    </g>
+  );
+}
+
+/* ── Termination Trunk — green-accented pill ── */
+function TermNode({
+  uid,
+  termIdx,
+  label,
+  sublabel,
+}: {
+  uid: string;
+  termIdx: number;
+  label: string;
+  sublabel: string;
+}) {
+  const cx = COL.termX;
+  const cy = TERM_Y[termIdx];
+  const W  = 58;
+  const H  = 32;
+  const R  = 8;
+
+  return (
+    <g transform={`translate(${cx}, ${cy})`}>
+      <circle r="40" fill={`url(#${uid}-tg)`} />
+      <rect
+        x={-W / 2} y={-H / 2}
+        width={W} height={H}
+        rx={R}
+        fill="rgba(15,17,23,0.72)"
+        stroke="rgba(52,211,153,0.28)"
+        strokeWidth="0.9"
+      />
+      {/* Top highlight */}
+      <rect
+        x={-W / 2 + 1} y={-H / 2 + 1}
+        width={W - 2} height={H * 0.28}
+        rx={R - 1}
+        fill="rgba(52,211,153,0.06)"
+      />
+      {/* Active status dot */}
+      <circle r="3"   cx="0" cy="0" fill="rgba(52,211,153,0.40)" />
+      <circle r="1.5" cx="0" cy="0" fill="rgba(167,243,208,0.92)" />
+      {/* Labels */}
+      <text y={H / 2 + 12} textAnchor="middle" fontSize="7.5"
+        fontFamily="'SF Mono', 'Fira Code', 'Consolas', monospace"
+        letterSpacing="0.09em" fill="rgba(148,163,184,0.62)" fontWeight="600">
+        {label}
+      </text>
+      <text y={H / 2 + 21} textAnchor="middle" fontSize="6"
+        fontFamily="'SF Mono', 'Fira Code', 'Consolas', monospace"
+        letterSpacing="0.07em" fill="rgba(100,116,139,0.52)" fontWeight="500">
+        {sublabel}
+      </text>
+    </g>
+  );
+}
+
+/* ─── Signal bars / bandwidth icon ───────────────────────────────────── */
+
+function BandwidthIcon() {
+  return (
+    <g transform="translate(-8, -9)" opacity="0.54">
+      {/* Three ascending bars */}
+      <rect x="0.5" y="9"  width="4" height="5"  rx="1" fill="rgba(96,165,250,0.58)" />
+      <rect x="6"   y="6"  width="4" height="8"  rx="1" fill="rgba(96,165,250,0.58)" />
+      <rect x="11.5" y="3" width="4" height="11" rx="1" fill="rgba(96,165,250,0.58)" />
     </g>
   );
 }
