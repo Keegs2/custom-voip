@@ -646,7 +646,7 @@ async def query_cdrs(
 
 @router.get("/summary")
 async def cdr_summary(
-    customer_id: int,
+    customer_id: Optional[int] = None,
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
     group_by: str = "day"  # day, hour, destination
@@ -657,8 +657,13 @@ async def cdr_summary(
     if not end_date:
         end_date = datetime.now(timezone.utc)
 
+    # Build dynamic WHERE clause — start_date=$1, end_date=$2, customer_id=$3 (if present)
+    cust_filter = ""
+    if customer_id is not None:
+        cust_filter = "AND customer_id = $3"
+
     if group_by == "day":
-        query = """
+        query = f"""
             SELECT
                 DATE(start_time) as date,
                 product_type,
@@ -668,12 +673,12 @@ async def cdr_summary(
                 SUM(duration_ms) / 1000 as total_duration_sec,
                 SUM(total_cost) as total_cost
             FROM cdrs
-            WHERE customer_id = $1 AND start_time >= $2 AND start_time <= $3
+            WHERE start_time >= $1 AND start_time <= $2 {cust_filter}
             GROUP BY DATE(start_time), product_type, direction
             ORDER BY date DESC
         """
     elif group_by == "destination":
-        query = """
+        query = f"""
             SELECT
                 SUBSTRING(destination, 1, 4) as prefix,
                 COUNT(*) as total_calls,
@@ -682,26 +687,29 @@ async def cdr_summary(
                 SUM(total_cost) as total_cost,
                 AVG(duration_ms) FILTER (WHERE answer_time IS NOT NULL) / 1000 as avg_duration_sec
             FROM cdrs
-            WHERE customer_id = $1 AND start_time >= $2 AND start_time <= $3
+            WHERE start_time >= $1 AND start_time <= $2 {cust_filter}
             GROUP BY prefix
             ORDER BY total_calls DESC
             LIMIT 50
         """
     else:  # hour
-        query = """
+        query = f"""
             SELECT
                 DATE_TRUNC('hour', start_time) as hour,
                 COUNT(*) as total_calls,
                 COUNT(*) FILTER (WHERE answer_time IS NOT NULL) as answered_calls,
                 SUM(total_cost) as total_cost
             FROM cdrs
-            WHERE customer_id = $1 AND start_time >= $2 AND start_time <= $3
+            WHERE start_time >= $1 AND start_time <= $2 {cust_filter}
             GROUP BY hour
             ORDER BY hour DESC
             LIMIT 168
         """
 
-    results = await db.fetch_all(query, customer_id, start_date, end_date)
+    values = [start_date, end_date]
+    if customer_id is not None:
+        values.append(customer_id)
+    results = await db.fetch_all(query, *values)
     return {"summary": [dict(r) for r in results], "group_by": group_by}
 
 
