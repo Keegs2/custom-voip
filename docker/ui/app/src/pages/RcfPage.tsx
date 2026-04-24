@@ -11,8 +11,11 @@ import { apiRequest } from '../api/client';
 import { useToast } from '../components/ui/Toast';
 import { searchCdrs, getCdrSummary } from '../api/cdrs';
 import type { Cdr } from '../types/cdr';
-import { listAvailableDids, listMyDids, requestDid } from '../api/didInventory';
+import { listAvailableDids, listMyDids, requestDid, unassignDid } from '../api/didInventory';
 import type { DidInventoryItem } from '../types/didInventory';
+
+// Alias — customer-facing name for the unassign operation
+const releaseDid = (did: string) => unassignDid(did);
 
 // ─── API helpers ──────────────────────────────────────────────────────────────
 
@@ -1001,6 +1004,16 @@ function TabBar({ active, onChange }: TabBarProps) {
       ),
     },
     {
+      id: 'dids',
+      label: 'DID Management',
+      icon: (
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.8} style={{ width: 13, height: 13 }}>
+          <rect x="2" y="2" width="12" height="12" rx="2" />
+          <path d="M5 8h6M8 5v6" strokeLinecap="round" />
+        </svg>
+      ),
+    },
+    {
       id: 'activity',
       label: 'Call Activity',
       icon: (
@@ -1016,16 +1029,6 @@ function TabBar({ active, onChange }: TabBarProps) {
         <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.8} style={{ width: 13, height: 13 }}>
           <circle cx="8" cy="8" r="6" />
           <path d="M8 5v3l2 2" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      ),
-    },
-    {
-      id: 'dids',
-      label: 'DID Management',
-      icon: (
-        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.8} style={{ width: 13, height: 13 }}>
-          <rect x="2" y="2" width="12" height="12" rx="2" />
-          <path d="M5 8h6M8 5v6" strokeLinecap="round" />
         </svg>
       ),
     },
@@ -2484,6 +2487,271 @@ function QualityTab({ customerId }: QualityTabProps) {
 
 // ─── DIDManagementTab ─────────────────────────────────────────────────────────
 
+// ── E.164 helpers ─────────────────────────────────────────────────────────────
+
+/** Extract NPA (area code) from E.164 +1NPANXXXXXX */
+function extractNpa(did: string): string {
+  return did.replace(/^\+1/, '').substring(0, 3);
+}
+
+/** Extract NXX (exchange) from E.164 +1NPANXXXXXX */
+function extractNxx(did: string): string {
+  return did.replace(/^\+1/, '').substring(3, 6);
+}
+
+// ── Filter bar ────────────────────────────────────────────────────────────────
+
+interface DidFilterState {
+  npa: string;
+  nxx: string;
+  state: string;
+  search: string;
+}
+
+interface DidFilterBarProps {
+  filters: DidFilterState;
+  onFiltersChange: (filters: DidFilterState) => void;
+  availableStates: string[];
+  resultCount: number;
+  totalCount: number;
+  compact?: boolean;
+}
+
+function DidFilterBar({
+  filters,
+  onFiltersChange,
+  availableStates,
+  resultCount,
+  totalCount,
+  compact = false,
+}: DidFilterBarProps) {
+  const hasActive = filters.npa || filters.nxx || filters.state || filters.search;
+
+  const inputBase: React.CSSProperties = {
+    fontSize: '0.78rem',
+    background: 'rgba(15,17,23,0.65)',
+    border: '1px solid rgba(59,130,246,0.16)',
+    borderRadius: 8,
+    color: '#e2e8f0',
+    outline: 'none',
+    fontFamily: 'inherit',
+    transition: 'border-color 0.18s, box-shadow 0.18s',
+  };
+
+  return (
+    <div
+      style={{
+        padding: compact ? '10px 16px' : '12px 20px',
+        borderBottom: '1px solid rgba(59,130,246,0.08)',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+        flexWrap: 'wrap',
+        background: 'rgba(59,130,246,0.018)',
+      }}
+    >
+      {/* NPA input */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 3, flexShrink: 0 }}>
+        <label style={{ fontSize: '0.56rem', fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.10em' }}>
+          Area Code (NPA)
+        </label>
+        <input
+          type="text"
+          value={filters.npa}
+          onChange={(e) => {
+            const v = e.target.value.replace(/\D/g, '').slice(0, 3);
+            onFiltersChange({ ...filters, npa: v });
+          }}
+          placeholder="617"
+          maxLength={3}
+          inputMode="numeric"
+          onFocus={(e) => {
+            e.currentTarget.style.borderColor = 'rgba(59,130,246,0.5)';
+            e.currentTarget.style.boxShadow = '0 0 0 3px rgba(59,130,246,0.12)';
+          }}
+          onBlur={(e) => {
+            e.currentTarget.style.borderColor = 'rgba(59,130,246,0.16)';
+            e.currentTarget.style.boxShadow = 'none';
+          }}
+          style={{
+            ...inputBase,
+            width: 56,
+            padding: '6px 8px',
+            fontFamily: 'monospace',
+            textAlign: 'center',
+            letterSpacing: '0.08em',
+          }}
+        />
+      </div>
+
+      {/* NXX input */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 3, flexShrink: 0 }}>
+        <label style={{ fontSize: '0.56rem', fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.10em' }}>
+          Exchange (NXX)
+        </label>
+        <input
+          type="text"
+          value={filters.nxx}
+          onChange={(e) => {
+            const v = e.target.value.replace(/\D/g, '').slice(0, 3);
+            onFiltersChange({ ...filters, nxx: v });
+          }}
+          placeholder="454"
+          maxLength={3}
+          inputMode="numeric"
+          onFocus={(e) => {
+            e.currentTarget.style.borderColor = 'rgba(59,130,246,0.5)';
+            e.currentTarget.style.boxShadow = '0 0 0 3px rgba(59,130,246,0.12)';
+          }}
+          onBlur={(e) => {
+            e.currentTarget.style.borderColor = 'rgba(59,130,246,0.16)';
+            e.currentTarget.style.boxShadow = 'none';
+          }}
+          style={{
+            ...inputBase,
+            width: 56,
+            padding: '6px 8px',
+            fontFamily: 'monospace',
+            textAlign: 'center',
+            letterSpacing: '0.08em',
+          }}
+        />
+      </div>
+
+      {/* State dropdown */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 3, flexShrink: 0 }}>
+        <label style={{ fontSize: '0.56rem', fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.10em' }}>
+          State
+        </label>
+        <select
+          value={filters.state}
+          onChange={(e) => onFiltersChange({ ...filters, state: e.target.value })}
+          onFocus={(e) => {
+            e.currentTarget.style.borderColor = 'rgba(59,130,246,0.5)';
+            e.currentTarget.style.boxShadow = '0 0 0 3px rgba(59,130,246,0.12)';
+          }}
+          onBlur={(e) => {
+            e.currentTarget.style.borderColor = 'rgba(59,130,246,0.16)';
+            e.currentTarget.style.boxShadow = 'none';
+          }}
+          style={{
+            ...inputBase,
+            padding: '6px 8px',
+            cursor: 'pointer',
+            minWidth: 88,
+          }}
+        >
+          <option value="">All States</option>
+          {availableStates.map((s) => (
+            <option key={s} value={s}>{s}</option>
+          ))}
+        </select>
+      </div>
+
+      {/* Free text search */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 3, flex: '1 1 160px', minWidth: 140 }}>
+        <label style={{ fontSize: '0.56rem', fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.10em' }}>
+          Search
+        </label>
+        <div style={{ position: 'relative' }}>
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={2} style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)', width: 12, height: 12, color: '#475569', pointerEvents: 'none' }}>
+            <path d="m19 19-4.35-4.35M15 9A6 6 0 1 1 3 9a6 6 0 0 1 12 0Z" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          <input
+            type="text"
+            value={filters.search}
+            onChange={(e) => onFiltersChange({ ...filters, search: e.target.value })}
+            placeholder="City, rate center, DID…"
+            onFocus={(e) => {
+              e.currentTarget.style.borderColor = 'rgba(59,130,246,0.5)';
+              e.currentTarget.style.boxShadow = '0 0 0 3px rgba(59,130,246,0.12)';
+            }}
+            onBlur={(e) => {
+              e.currentTarget.style.borderColor = 'rgba(59,130,246,0.16)';
+              e.currentTarget.style.boxShadow = 'none';
+            }}
+            style={{
+              ...inputBase,
+              width: '100%',
+              boxSizing: 'border-box',
+              padding: '6px 8px 6px 26px',
+            }}
+          />
+        </div>
+      </div>
+
+      {/* Result count pill */}
+      <div style={{ marginLeft: 'auto', flexShrink: 0, alignSelf: 'flex-end', paddingBottom: 1 }}>
+        <span
+          style={{
+            fontSize: '0.67rem',
+            fontWeight: 600,
+            color: hasActive ? '#60a5fa' : '#475569',
+            background: hasActive ? 'rgba(59,130,246,0.12)' : 'rgba(59,130,246,0.05)',
+            border: `1px solid ${hasActive ? 'rgba(59,130,246,0.28)' : 'rgba(59,130,246,0.10)'}`,
+            borderRadius: 20,
+            padding: '3px 10px',
+            transition: 'all 0.2s',
+          }}
+        >
+          {hasActive ? `${resultCount} of ${totalCount}` : `${totalCount} total`}
+        </span>
+      </div>
+
+      {/* Clear all button */}
+      {hasActive && (
+        <button
+          type="button"
+          onClick={() => onFiltersChange({ npa: '', nxx: '', state: '', search: '' })}
+          style={{
+            alignSelf: 'flex-end',
+            padding: '4px 10px',
+            borderRadius: 6,
+            border: 'none',
+            background: 'transparent',
+            color: '#475569',
+            fontSize: '0.68rem',
+            cursor: 'pointer',
+            fontFamily: 'inherit',
+            textDecoration: 'underline',
+            marginBottom: 1,
+          }}
+        >
+          Clear
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** Apply DID filters (AND logic) to an array of inventory items */
+function applyDidFilters(items: DidInventoryItem[], filters: DidFilterState): DidInventoryItem[] {
+  return items.filter((item) => {
+    if (filters.npa && extractNpa(item.did) !== filters.npa) return false;
+    if (filters.nxx && extractNxx(item.did) !== filters.nxx) return false;
+    if (filters.state && item.state !== filters.state) return false;
+    if (filters.search) {
+      const q = filters.search.toLowerCase();
+      const matches =
+        item.did.includes(q) ||
+        (item.city ?? '').toLowerCase().includes(q) ||
+        (item.rate_center ?? '').toLowerCase().includes(q) ||
+        fmt(item.did).toLowerCase().includes(q);
+      if (!matches) return false;
+    }
+    return true;
+  });
+}
+
+/** Extract unique sorted states from an array of inventory items */
+function extractStates(items: DidInventoryItem[]): string[] {
+  const set = new Set<string>();
+  for (const item of items) {
+    if (item.state) set.add(item.state);
+  }
+  return [...set].sort();
+}
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 function didStatusBadge(status: DidInventoryItem['status']): React.ReactNode {
@@ -2817,13 +3085,213 @@ function RequestModal({ did, onConfirm, onCancel, isPending }: RequestModalProps
   );
 }
 
+// ── Release confirmation modal ────────────────────────────────────────────────
+
+interface ReleaseModalProps {
+  did: DidInventoryItem | null;
+  onConfirm: (did: DidInventoryItem) => void;
+  onCancel: () => void;
+  isPending: boolean;
+}
+
+function ReleaseModal({ did, onConfirm, onCancel, isPending }: ReleaseModalProps) {
+  if (!did) return null;
+  return (
+    <div
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 1000,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 24,
+        background: 'rgba(0,0,0,0.70)',
+        backdropFilter: 'blur(5px)',
+        WebkitBackdropFilter: 'blur(5px)',
+        animation: 'fadeIn 0.15s ease',
+      }}
+      onClick={(e) => { if (e.target === e.currentTarget && !isPending) onCancel(); }}
+    >
+      <div
+        style={{
+          background: 'linear-gradient(145deg, rgba(26,29,39,0.99) 0%, rgba(19,21,29,1) 100%)',
+          border: '1px solid rgba(239,68,68,0.22)',
+          borderRadius: 18,
+          padding: '32px 32px 28px',
+          maxWidth: 440,
+          width: '100%',
+          position: 'relative',
+          boxShadow: '0 24px 64px -8px rgba(0,0,0,0.80), 0 0 0 1px rgba(239,68,68,0.06)',
+          animation: 'fadeInUp 0.2s ease',
+        }}
+      >
+        {/* Top amber/red accent line */}
+        <div
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 48,
+            right: 48,
+            height: 2,
+            background: 'linear-gradient(90deg, transparent, rgba(245,158,11,0.65), transparent)',
+            borderRadius: '0 0 2px 2px',
+          }}
+        />
+
+        {/* Warning icon */}
+        <div
+          style={{
+            width: 52,
+            height: 52,
+            borderRadius: 13,
+            background: 'linear-gradient(135deg, rgba(245,158,11,0.16) 0%, rgba(245,158,11,0.07) 100%)',
+            border: '1px solid rgba(245,158,11,0.28)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            marginBottom: 20,
+            boxShadow: '0 0 20px rgba(245,158,11,0.14)',
+          }}
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="#fbbf24" strokeWidth={1.7} style={{ width: 26, height: 26 }}>
+            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" strokeLinecap="round" strokeLinejoin="round" />
+            <line x1="12" y1="9" x2="12" y2="13" strokeLinecap="round" />
+            <line x1="12" y1="17" x2="12.01" y2="17" strokeLinecap="round" />
+          </svg>
+        </div>
+
+        <div style={{ fontSize: '1.08rem', fontWeight: 700, color: '#e2e8f0', marginBottom: 6, letterSpacing: '-0.02em' }}>
+          Release Number
+        </div>
+
+        {/* DID displayed prominently */}
+        <div
+          style={{
+            fontFamily: 'monospace',
+            fontSize: '1.25rem',
+            fontWeight: 800,
+            color: '#60a5fa',
+            letterSpacing: '0.04em',
+            marginBottom: 16,
+          }}
+        >
+          {fmt(did.did)}
+        </div>
+
+        {/* Warning text */}
+        <div
+          style={{
+            padding: '13px 16px',
+            borderRadius: 10,
+            background: 'rgba(245,158,11,0.06)',
+            border: '1px solid rgba(245,158,11,0.18)',
+            marginBottom: 18,
+            fontSize: '0.81rem',
+            color: '#92400e',
+            lineHeight: 1.6,
+          }}
+        >
+          <span style={{ color: '#fbbf24', fontWeight: 600 }}>Warning: </span>
+          <span style={{ color: '#a3a090' }}>
+            Releasing this number will immediately stop call forwarding. The number will return to the available pool and may be claimed by another customer.
+          </span>
+        </div>
+
+        <div style={{ fontSize: '0.83rem', color: '#64748b', marginBottom: 24, lineHeight: 1.55 }}>
+          Are you sure you want to release{' '}
+          <span style={{ fontFamily: 'monospace', color: '#94a3b8', fontWeight: 600 }}>{fmt(did.did)}</span>?
+        </div>
+
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={isPending}
+            style={{
+              padding: '9px 20px',
+              borderRadius: 9,
+              border: '1px solid rgba(255,255,255,0.08)',
+              background: 'rgba(255,255,255,0.04)',
+              color: '#64748b',
+              fontSize: '0.83rem',
+              fontWeight: 500,
+              cursor: isPending ? 'not-allowed' : 'pointer',
+              fontFamily: 'inherit',
+              transition: 'background 0.15s, color 0.15s',
+              opacity: isPending ? 0.5 : 1,
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={() => onConfirm(did)}
+            disabled={isPending}
+            style={{
+              padding: '9px 22px',
+              borderRadius: 9,
+              border: '1px solid rgba(239,68,68,0.35)',
+              background: isPending
+                ? 'rgba(239,68,68,0.20)'
+                : 'rgba(239,68,68,0.18)',
+              color: isPending ? '#ef4444' : '#f87171',
+              fontSize: '0.83rem',
+              fontWeight: 700,
+              cursor: isPending ? 'not-allowed' : 'pointer',
+              fontFamily: 'inherit',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 7,
+              transition: 'background 0.15s, color 0.15s, border-color 0.15s',
+              letterSpacing: '-0.01em',
+            }}
+            onMouseEnter={(e) => {
+              if (!isPending) {
+                (e.currentTarget as HTMLButtonElement).style.background = 'rgba(239,68,68,0.28)';
+                (e.currentTarget as HTMLButtonElement).style.color = '#fca5a5';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (!isPending) {
+                (e.currentTarget as HTMLButtonElement).style.background = 'rgba(239,68,68,0.18)';
+                (e.currentTarget as HTMLButtonElement).style.color = '#f87171';
+              }
+            }}
+          >
+            {isPending && (
+              <svg viewBox="0 0 16 16" style={{ width: 12, height: 12, animation: 'spin 0.7s linear infinite' }}>
+                <circle cx="8" cy="8" r="6" fill="none" stroke="rgba(239,68,68,0.4)" strokeWidth={2} />
+                <path d="M8 2a6 6 0 0 1 6 6" stroke="#ef4444" strokeWidth={2} fill="none" strokeLinecap="round" />
+              </svg>
+            )}
+            {isPending ? 'Releasing…' : 'Release Number'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── My Numbers section ────────────────────────────────────────────────────────
 
-function MyNumbersSection({ items, isLoading, isError }: {
+interface MyNumbersSectionProps {
   items: DidInventoryItem[];
   isLoading: boolean;
   isError: boolean;
-}) {
+  onRelease: (item: DidInventoryItem) => void;
+  onSwitchToNumbers: () => void;
+}
+
+function MyNumbersSection({ items, isLoading, isError, onRelease, onSwitchToNumbers }: MyNumbersSectionProps) {
+  // ALL hooks unconditionally at top
+  const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [filters, setFilters] = useState<DidFilterState>({ npa: '', nxx: '', state: '', search: '' });
+
+  const availableStates = useMemo(() => extractStates(items), [items]);
+
+  const filtered = useMemo(() => applyDidFilters(items, filters), [items, filters]);
+
   if (isLoading) {
     return (
       <DidCard>
@@ -2894,78 +3362,357 @@ function MyNumbersSection({ items, isLoading, isError }: {
           </div>
         </div>
       ) : (
-        <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 560 }}>
-            <thead>
-              <tr>
-                <DidTh>DID</DidTh>
-                <DidTh>City</DidTh>
-                <DidTh>State</DidTh>
-                <DidTh>Product</DidTh>
-                <DidTh>Status</DidTh>
-                <DidTh>Assigned</DidTh>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((item, idx) => (
-                <tr
-                  key={item.id}
-                  style={{
-                    borderBottom: idx < items.length - 1 ? '1px solid rgba(59,130,246,0.06)' : 'none',
-                    animation: 'fadeInUp 0.3s ease both',
-                    animationDelay: `${idx * 40}ms`,
-                  }}
-                >
-                  <td style={{ padding: '13px 16px' }}>
-                    <div>
-                      <div style={{ fontSize: '0.88rem', fontWeight: 700, color: '#e2e8f0', fontFamily: 'monospace', letterSpacing: '0.02em' }}>
-                        {fmt(item.did)}
-                      </div>
-                      <div style={{ fontSize: '0.63rem', color: '#334155', fontFamily: 'monospace', marginTop: 2, letterSpacing: '0.01em' }}>
-                        {item.did}
-                      </div>
-                    </div>
-                  </td>
-                  <td style={{ padding: '13px 16px' }}>
-                    <span style={{ fontSize: '0.82rem', color: item.city ? '#94a3b8' : '#2d3748', fontStyle: item.city ? 'normal' : 'italic' }}>
-                      {item.city ?? '—'}
-                    </span>
-                  </td>
-                  <td style={{ padding: '13px 16px' }}>
-                    <span style={{ fontSize: '0.82rem', color: item.state ? '#94a3b8' : '#2d3748', fontWeight: item.state ? 600 : 400 }}>
-                      {item.state ?? '—'}
-                    </span>
-                  </td>
-                  <td style={{ padding: '13px 16px' }}>
-                    <span
-                      style={{
-                        fontSize: '0.67rem',
-                        fontWeight: 700,
-                        color: '#60a5fa',
-                        background: 'rgba(59,130,246,0.10)',
-                        border: '1px solid rgba(59,130,246,0.22)',
-                        borderRadius: 5,
-                        padding: '3px 8px',
-                        textTransform: 'uppercase',
-                        letterSpacing: '0.08em',
-                      }}
-                    >
-                      {item.product_type ?? 'RCF'}
-                    </span>
-                  </td>
-                  <td style={{ padding: '13px 16px' }}>
-                    {didStatusBadge(item.status)}
-                  </td>
-                  <td style={{ padding: '13px 16px' }}>
-                    <span style={{ fontSize: '0.78rem', color: '#64748b', fontVariantNumeric: 'tabular-nums' }}>
-                      {fmtAssignedDate(item.assigned_at)}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <>
+          {/* Filter bar */}
+          <DidFilterBar
+            filters={filters}
+            onFiltersChange={setFilters}
+            availableStates={availableStates}
+            resultCount={filtered.length}
+            totalCount={items.length}
+          />
+
+          {filtered.length === 0 ? (
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: '40px 24px',
+                gap: 10,
+                textAlign: 'center',
+              }}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="#334155" strokeWidth={1.5} style={{ width: 28, height: 28 }}>
+                <path d="m21 21-5.197-5.197M15.803 15.803A7.5 7.5 0 1 0 4.197 4.197a7.5 7.5 0 0 0 11.606 11.606Z" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              <p style={{ color: '#64748b', fontSize: '0.85rem', fontWeight: 500, margin: 0 }}>
+                No numbers match these filters
+              </p>
+              <button
+                type="button"
+                onClick={() => setFilters({ npa: '', nxx: '', state: '', search: '' })}
+                style={{ background: 'transparent', border: 'none', color: '#3b82f6', fontSize: '0.78rem', cursor: 'pointer', textDecoration: 'underline', fontFamily: 'inherit', padding: 0 }}
+              >
+                Clear filters
+              </button>
+            </div>
+          ) : (
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 640 }}>
+                <thead>
+                  <tr>
+                    <DidTh></DidTh>
+                    <DidTh>DID</DidTh>
+                    <DidTh>NPA</DidTh>
+                    <DidTh>City</DidTh>
+                    <DidTh>State</DidTh>
+                    <DidTh>Product</DidTh>
+                    <DidTh>Status</DidTh>
+                    <DidTh>Assigned</DidTh>
+                    <DidTh></DidTh>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map((item, idx) => {
+                    const isExpanded = expandedId === item.id;
+                    return (
+                      <>
+                        <tr
+                          key={item.id}
+                          style={{
+                            borderBottom: isExpanded ? 'none' : (idx < filtered.length - 1 ? '1px solid rgba(59,130,246,0.06)' : 'none'),
+                            animation: 'fadeInUp 0.3s ease both',
+                            animationDelay: `${idx * 40}ms`,
+                            cursor: 'pointer',
+                            background: isExpanded ? 'rgba(59,130,246,0.05)' : 'transparent',
+                            transition: 'background 0.15s',
+                          }}
+                          onClick={() => setExpandedId(isExpanded ? null : item.id)}
+                          onMouseEnter={(e) => {
+                            if (!isExpanded) (e.currentTarget as HTMLTableRowElement).style.background = 'rgba(59,130,246,0.03)';
+                          }}
+                          onMouseLeave={(e) => {
+                            (e.currentTarget as HTMLTableRowElement).style.background = isExpanded ? 'rgba(59,130,246,0.05)' : 'transparent';
+                          }}
+                        >
+                          {/* Expand chevron */}
+                          <td style={{ padding: '13px 8px 13px 16px', width: 28 }}>
+                            <svg
+                              viewBox="0 0 16 16"
+                              fill="none"
+                              stroke="#475569"
+                              strokeWidth={2}
+                              strokeLinecap="round"
+                              style={{
+                                width: 12,
+                                height: 12,
+                                transform: isExpanded ? 'rotate(180deg)' : 'rotate(0deg)',
+                                transition: 'transform 0.2s',
+                                display: 'block',
+                              }}
+                            >
+                              <path d="M3 6l5 5 5-5" />
+                            </svg>
+                          </td>
+
+                          <td style={{ padding: '13px 16px' }}>
+                            <div>
+                              <div style={{ fontSize: '0.88rem', fontWeight: 700, color: '#e2e8f0', fontFamily: 'monospace', letterSpacing: '0.02em' }}>
+                                {fmt(item.did)}
+                              </div>
+                              <div style={{ fontSize: '0.63rem', color: '#334155', fontFamily: 'monospace', marginTop: 2, letterSpacing: '0.01em' }}>
+                                {item.did}
+                              </div>
+                            </div>
+                          </td>
+
+                          {/* NPA */}
+                          <td style={{ padding: '13px 16px' }}>
+                            <span style={{ fontSize: '0.80rem', color: '#60a5fa', fontFamily: 'monospace', fontWeight: 600, letterSpacing: '0.04em' }}>
+                              {extractNpa(item.did)}
+                            </span>
+                          </td>
+
+                          <td style={{ padding: '13px 16px' }}>
+                            <span style={{ fontSize: '0.82rem', color: item.city ? '#94a3b8' : '#2d3748', fontStyle: item.city ? 'normal' : 'italic' }}>
+                              {item.city ?? '—'}
+                            </span>
+                          </td>
+                          <td style={{ padding: '13px 16px' }}>
+                            <span style={{ fontSize: '0.82rem', color: item.state ? '#94a3b8' : '#2d3748', fontWeight: item.state ? 600 : 400 }}>
+                              {item.state ?? '—'}
+                            </span>
+                          </td>
+                          <td style={{ padding: '13px 16px' }}>
+                            <span
+                              style={{
+                                fontSize: '0.67rem',
+                                fontWeight: 700,
+                                color: '#60a5fa',
+                                background: 'rgba(59,130,246,0.10)',
+                                border: '1px solid rgba(59,130,246,0.22)',
+                                borderRadius: 5,
+                                padding: '3px 8px',
+                                textTransform: 'uppercase',
+                                letterSpacing: '0.08em',
+                              }}
+                            >
+                              {item.product_type ?? 'RCF'}
+                            </span>
+                          </td>
+                          <td style={{ padding: '13px 16px' }}>
+                            {didStatusBadge(item.status)}
+                          </td>
+                          <td style={{ padding: '13px 16px' }}>
+                            <span style={{ fontSize: '0.78rem', color: '#64748b', fontVariantNumeric: 'tabular-nums' }}>
+                              {fmtAssignedDate(item.assigned_at)}
+                            </span>
+                          </td>
+
+                          {/* Release button */}
+                          <td style={{ padding: '10px 16px' }} onClick={(e) => e.stopPropagation()}>
+                            <button
+                              type="button"
+                              onClick={() => onRelease(item)}
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 5,
+                                padding: '6px 13px',
+                                borderRadius: 7,
+                                border: '1px solid rgba(239,68,68,0.22)',
+                                background: 'rgba(239,68,68,0.10)',
+                                color: '#ef4444',
+                                fontSize: '0.72rem',
+                                fontWeight: 600,
+                                cursor: 'pointer',
+                                fontFamily: 'inherit',
+                                letterSpacing: '0.01em',
+                                transition: 'background 0.15s, color 0.15s, border-color 0.15s',
+                                whiteSpace: 'nowrap',
+                              }}
+                              onMouseEnter={(e) => {
+                                (e.currentTarget as HTMLButtonElement).style.background = 'rgba(239,68,68,0.20)';
+                                (e.currentTarget as HTMLButtonElement).style.color = '#fca5a5';
+                                (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(239,68,68,0.38)';
+                              }}
+                              onMouseLeave={(e) => {
+                                (e.currentTarget as HTMLButtonElement).style.background = 'rgba(239,68,68,0.10)';
+                                (e.currentTarget as HTMLButtonElement).style.color = '#ef4444';
+                                (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(239,68,68,0.22)';
+                              }}
+                              title="Release this number back to the pool"
+                            >
+                              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.8} style={{ width: 10, height: 10 }}>
+                                <path d="M13 4L4 13M4 4l9 9" strokeLinecap="round" />
+                              </svg>
+                              Release
+                            </button>
+                          </td>
+                        </tr>
+
+                        {/* Expanded detail panel */}
+                        {isExpanded && (
+                          <tr key={`${item.id}-detail`}>
+                            <td
+                              colSpan={9}
+                              style={{
+                                padding: '0 20px 20px 20px',
+                                background: 'rgba(59,130,246,0.03)',
+                                borderBottom: idx < filtered.length - 1 ? '1px solid rgba(59,130,246,0.08)' : 'none',
+                              }}
+                            >
+                              {/* Detail panel */}
+                              <div
+                                style={{
+                                  background: 'rgba(15,17,23,0.65)',
+                                  backdropFilter: 'blur(10px)',
+                                  WebkitBackdropFilter: 'blur(10px)',
+                                  border: '1px solid rgba(59,130,246,0.14)',
+                                  borderRadius: 12,
+                                  padding: '20px 22px',
+                                  display: 'grid',
+                                  gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
+                                  gap: 16,
+                                  position: 'relative',
+                                  overflow: 'hidden',
+                                }}
+                              >
+                                {/* Top accent line */}
+                                <div
+                                  style={{
+                                    position: 'absolute',
+                                    top: 0,
+                                    left: 32,
+                                    right: 32,
+                                    height: 2,
+                                    background: 'linear-gradient(90deg, transparent, rgba(59,130,246,0.45), transparent)',
+                                  }}
+                                />
+
+                                {/* DID large */}
+                                <div>
+                                  <div style={{ fontSize: '0.58rem', fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.10em', marginBottom: 6 }}>
+                                    Number
+                                  </div>
+                                  <div style={{ fontFamily: 'monospace', fontSize: '1.15rem', fontWeight: 800, color: '#60a5fa', letterSpacing: '0.04em' }}>
+                                    {fmt(item.did)}
+                                  </div>
+                                  <div style={{ fontSize: '0.67rem', color: '#334155', fontFamily: 'monospace', marginTop: 3 }}>
+                                    {item.did}
+                                  </div>
+                                </div>
+
+                                {/* Location */}
+                                <div>
+                                  <div style={{ fontSize: '0.58rem', fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.10em', marginBottom: 6 }}>
+                                    Location
+                                  </div>
+                                  <div style={{ fontSize: '0.88rem', color: '#e2e8f0', fontWeight: 600, lineHeight: 1.4 }}>
+                                    {item.city ?? '—'}
+                                    {item.state ? `, ${item.state}` : ''}
+                                  </div>
+                                  {item.rate_center && (
+                                    <div style={{ fontSize: '0.73rem', color: '#64748b', marginTop: 3 }}>
+                                      Rate Center: {item.rate_center}
+                                    </div>
+                                  )}
+                                  {item.lata && (
+                                    <div style={{ fontSize: '0.70rem', color: '#475569', marginTop: 1 }}>
+                                      LATA: {item.lata}
+                                    </div>
+                                  )}
+                                </div>
+
+                                {/* Product & Status */}
+                                <div>
+                                  <div style={{ fontSize: '0.58rem', fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.10em', marginBottom: 6 }}>
+                                    Product
+                                  </div>
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                                    <span
+                                      style={{
+                                        display: 'inline-flex',
+                                        alignSelf: 'flex-start',
+                                        fontSize: '0.68rem',
+                                        fontWeight: 700,
+                                        color: '#60a5fa',
+                                        background: 'rgba(59,130,246,0.12)',
+                                        border: '1px solid rgba(59,130,246,0.24)',
+                                        borderRadius: 5,
+                                        padding: '3px 9px',
+                                        textTransform: 'uppercase',
+                                        letterSpacing: '0.08em',
+                                      }}
+                                    >
+                                      {item.product_type ?? 'RCF'}
+                                    </span>
+                                    {didStatusBadge(item.status)}
+                                  </div>
+                                </div>
+
+                                {/* Assigned date */}
+                                <div>
+                                  <div style={{ fontSize: '0.58rem', fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.10em', marginBottom: 6 }}>
+                                    Assigned Date
+                                  </div>
+                                  <div style={{ fontSize: '0.88rem', color: '#e2e8f0', fontWeight: 500 }}>
+                                    {fmtAssignedDate(item.assigned_at)}
+                                  </div>
+                                </div>
+
+                                {/* Configure Forwarding link */}
+                                <div style={{ display: 'flex', alignItems: 'flex-end' }}>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => { e.stopPropagation(); onSwitchToNumbers(); }}
+                                    style={{
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: 7,
+                                      padding: '8px 16px',
+                                      borderRadius: 8,
+                                      border: 'none',
+                                      background: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
+                                      color: '#fff',
+                                      fontSize: '0.78rem',
+                                      fontWeight: 700,
+                                      cursor: 'pointer',
+                                      fontFamily: 'inherit',
+                                      letterSpacing: '-0.01em',
+                                      boxShadow: '0 3px 12px rgba(59,130,246,0.30)',
+                                      transition: 'filter 0.15s, box-shadow 0.15s',
+                                      whiteSpace: 'nowrap',
+                                    }}
+                                    onMouseEnter={(e) => {
+                                      (e.currentTarget as HTMLButtonElement).style.filter = 'brightness(1.1)';
+                                      (e.currentTarget as HTMLButtonElement).style.boxShadow = '0 4px 18px rgba(59,130,246,0.45)';
+                                    }}
+                                    onMouseLeave={(e) => {
+                                      (e.currentTarget as HTMLButtonElement).style.filter = 'none';
+                                      (e.currentTarget as HTMLButtonElement).style.boxShadow = '0 3px 12px rgba(59,130,246,0.30)';
+                                    }}
+                                  >
+                                    Configure Forwarding
+                                    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={2.2} style={{ width: 12, height: 12 }}>
+                                      <path d="M3 8h10M9 4l4 4-4 4" strokeLinecap="round" strokeLinejoin="round" />
+                                    </svg>
+                                  </button>
+                                </div>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
       )}
     </DidCard>
   );
@@ -3047,20 +3794,26 @@ function AvailableNumbersSection({
   onRequest: (item: DidInventoryItem) => void;
   requestingDid: string | null;
 }) {
-  const [search, setSearch] = useState('');
-  const [searchFocused, setSearchFocused] = useState(false);
+  // ALL hooks unconditionally at top
+  const [filters, setFilters] = useState<DidFilterState>({ npa: '', nxx: '', state: '', search: '' });
 
-  const filtered = useMemo(() => {
-    if (!search.trim()) return items;
-    const q = search.trim().toLowerCase();
-    return items.filter(
-      (item) =>
-        item.did.includes(q) ||
-        (item.city ?? '').toLowerCase().includes(q) ||
-        (item.state ?? '').toLowerCase().includes(q) ||
-        (item.rate_center ?? '').toLowerCase().includes(q),
-    );
-  }, [items, search]);
+  const availableStates = useMemo(() => extractStates(items), [items]);
+
+  // Sort by state by default so customers can scan regionally
+  const sortedItems = useMemo(
+    () =>
+      [...items].sort((a, b) => {
+        const stateA = a.state ?? '';
+        const stateB = b.state ?? '';
+        if (stateA !== stateB) return stateA.localeCompare(stateB);
+        const cityA = a.city ?? '';
+        const cityB = b.city ?? '';
+        return cityA.localeCompare(cityB);
+      }),
+    [items],
+  );
+
+  const filtered = useMemo(() => applyDidFilters(sortedItems, filters), [sortedItems, filters]);
 
   if (isLoading) {
     return (
@@ -3091,73 +3844,6 @@ function AvailableNumbersSection({
         title="Available Numbers"
         count={filtered.length}
         countLabel={filtered.length === 1 ? 'number available' : 'numbers available'}
-        right={
-          /* search bar in header right slot */
-          <div style={{ position: 'relative', width: 280 }}>
-            <span
-              style={{
-                position: 'absolute',
-                left: 11,
-                top: '50%',
-                transform: 'translateY(-50%)',
-                color: searchFocused ? '#3b82f6' : '#475569',
-                display: 'flex',
-                alignItems: 'center',
-                pointerEvents: 'none',
-                transition: 'color 0.2s',
-              }}
-            >
-              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={2} style={{ width: 13, height: 13 }}>
-                <path d="m19 19-4.35-4.35M15 9A6 6 0 1 1 3 9a6 6 0 0 1 12 0Z" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            </span>
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Filter by area code, city, state…"
-              onFocus={() => setSearchFocused(true)}
-              onBlur={() => setSearchFocused(false)}
-              style={{
-                width: '100%',
-                boxSizing: 'border-box',
-                padding: '7px 10px 7px 28px',
-                fontSize: '0.78rem',
-                background: searchFocused ? 'rgba(15,17,23,0.9)' : 'rgba(15,17,23,0.55)',
-                border: `1px solid ${searchFocused ? 'rgba(59,130,246,0.40)' : 'rgba(59,130,246,0.14)'}`,
-                borderRadius: 9,
-                color: '#e2e8f0',
-                outline: 'none',
-                fontFamily: 'inherit',
-                transition: 'border-color 0.2s, box-shadow 0.2s, background 0.2s',
-                boxShadow: searchFocused ? '0 0 0 3px rgba(59,130,246,0.12)' : 'none',
-              }}
-            />
-            {search && (
-              <button
-                type="button"
-                onClick={() => setSearch('')}
-                style={{
-                  position: 'absolute',
-                  right: 8,
-                  top: '50%',
-                  transform: 'translateY(-50%)',
-                  background: 'transparent',
-                  border: 'none',
-                  color: '#475569',
-                  cursor: 'pointer',
-                  padding: '2px 3px',
-                  display: 'flex',
-                  alignItems: 'center',
-                }}
-              >
-                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={2.2} style={{ width: 10, height: 10 }}>
-                  <path d="M4 4l8 8M12 4l-8 8" strokeLinecap="round" />
-                </svg>
-              </button>
-            )}
-          </div>
-        }
       />
 
       {items.length === 0 ? (
@@ -3198,140 +3884,177 @@ function AvailableNumbersSection({
             </p>
           </div>
         </div>
-      ) : filtered.length === 0 ? (
-        <div
-          style={{
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '48px 24px',
-            gap: 10,
-            textAlign: 'center',
-          }}
-        >
-          <svg viewBox="0 0 24 24" fill="none" stroke="#334155" strokeWidth={1.5} style={{ width: 32, height: 32 }}>
-            <path d="m21 21-5.197-5.197M15.803 15.803A7.5 7.5 0 1 0 4.197 4.197a7.5 7.5 0 0 0 11.606 11.606Z" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-          <p style={{ color: '#64748b', fontSize: '0.88rem', fontWeight: 500, margin: 0 }}>
-            No numbers match &ldquo;{search}&rdquo;
-          </p>
-          <button
-            type="button"
-            onClick={() => setSearch('')}
-            style={{ background: 'transparent', border: 'none', color: '#3b82f6', fontSize: '0.8rem', cursor: 'pointer', textDecoration: 'underline', fontFamily: 'inherit', padding: 0 }}
-          >
-            Clear filter
-          </button>
-        </div>
       ) : (
-        <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 560 }}>
-            <thead>
-              <tr>
-                <DidTh>DID</DidTh>
-                <DidTh>City</DidTh>
-                <DidTh>State</DidTh>
-                <DidTh>Rate Center</DidTh>
-                <DidTh>Action</DidTh>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((item, idx) => {
-                const isRequesting = requestingDid === item.did;
-                return (
-                  <tr
-                    key={item.id}
-                    style={{
-                      borderBottom: idx < filtered.length - 1 ? '1px solid rgba(59,130,246,0.06)' : 'none',
-                      animation: 'fadeInUp 0.3s ease both',
-                      animationDelay: `${Math.min(idx * 30, 400)}ms`,
-                      transition: 'background 0.15s',
-                    }}
-                    onMouseEnter={(e) => { (e.currentTarget as HTMLTableRowElement).style.background = 'rgba(59,130,246,0.04)'; }}
-                    onMouseLeave={(e) => { (e.currentTarget as HTMLTableRowElement).style.background = 'transparent'; }}
-                  >
-                    <td style={{ padding: '13px 16px' }}>
-                      <div>
-                        <div style={{ fontSize: '0.88rem', fontWeight: 700, color: '#e2e8f0', fontFamily: 'monospace', letterSpacing: '0.02em' }}>
-                          {fmt(item.did)}
-                        </div>
-                        <div style={{ fontSize: '0.63rem', color: '#334155', fontFamily: 'monospace', marginTop: 2 }}>
-                          {item.did}
-                        </div>
-                      </div>
-                    </td>
-                    <td style={{ padding: '13px 16px' }}>
-                      <span style={{ fontSize: '0.82rem', color: item.city ? '#94a3b8' : '#2d3748', fontStyle: item.city ? 'normal' : 'italic' }}>
-                        {item.city ?? '—'}
-                      </span>
-                    </td>
-                    <td style={{ padding: '13px 16px' }}>
-                      <span style={{ fontSize: '0.82rem', color: item.state ? '#94a3b8' : '#2d3748', fontWeight: item.state ? 600 : 400 }}>
-                        {item.state ?? '—'}
-                      </span>
-                    </td>
-                    <td style={{ padding: '13px 16px' }}>
-                      <span style={{ fontSize: '0.78rem', color: '#64748b' }}>
-                        {item.rate_center ?? '—'}
-                      </span>
-                    </td>
-                    <td style={{ padding: '10px 16px' }}>
-                      <button
-                        type="button"
-                        onClick={() => onRequest(item)}
-                        disabled={isRequesting}
-                        style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: 6,
-                          padding: '7px 16px',
-                          borderRadius: 8,
-                          border: 'none',
-                          background: isRequesting
-                            ? 'rgba(59,130,246,0.25)'
-                            : 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
-                          color: '#fff',
-                          fontSize: '0.75rem',
-                          fontWeight: 700,
-                          cursor: isRequesting ? 'not-allowed' : 'pointer',
-                          fontFamily: 'inherit',
-                          letterSpacing: '0.02em',
-                          boxShadow: isRequesting ? 'none' : '0 3px 12px rgba(59,130,246,0.30)',
-                          transition: 'background 0.15s, box-shadow 0.15s, filter 0.15s',
-                          whiteSpace: 'nowrap',
-                        }}
-                        onMouseEnter={(e) => {
-                          if (!isRequesting) {
-                            (e.currentTarget as HTMLButtonElement).style.filter = 'brightness(1.12)';
-                            (e.currentTarget as HTMLButtonElement).style.boxShadow = '0 4px 18px rgba(59,130,246,0.45)';
-                          }
-                        }}
-                        onMouseLeave={(e) => {
-                          (e.currentTarget as HTMLButtonElement).style.filter = 'none';
-                          (e.currentTarget as HTMLButtonElement).style.boxShadow = isRequesting ? 'none' : '0 3px 12px rgba(59,130,246,0.30)';
-                        }}
-                      >
-                        {isRequesting ? (
-                          <svg viewBox="0 0 16 16" style={{ width: 11, height: 11, animation: 'spin 0.7s linear infinite' }}>
-                            <circle cx="8" cy="8" r="6" fill="none" stroke="rgba(255,255,255,0.3)" strokeWidth={2} />
-                            <path d="M8 2a6 6 0 0 1 6 6" stroke="#fff" strokeWidth={2} fill="none" strokeLinecap="round" />
-                          </svg>
-                        ) : (
-                          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={2} style={{ width: 11, height: 11 }}>
-                            <circle cx="8" cy="8" r="6" />
-                            <path d="M8 5v6M5 8h6" strokeLinecap="round" />
-                          </svg>
-                        )}
-                        {isRequesting ? 'Requesting…' : 'Request'}
-                      </button>
-                    </td>
+        <>
+          {/* Filter bar */}
+          <DidFilterBar
+            filters={filters}
+            onFiltersChange={setFilters}
+            availableStates={availableStates}
+            resultCount={filtered.length}
+            totalCount={items.length}
+          />
+
+          {filtered.length === 0 ? (
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: '48px 24px',
+                gap: 10,
+                textAlign: 'center',
+              }}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="#334155" strokeWidth={1.5} style={{ width: 32, height: 32 }}>
+                <path d="m21 21-5.197-5.197M15.803 15.803A7.5 7.5 0 1 0 4.197 4.197a7.5 7.5 0 0 0 11.606 11.606Z" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              <p style={{ color: '#64748b', fontSize: '0.88rem', fontWeight: 500, margin: 0 }}>
+                No numbers match these filters
+              </p>
+              <button
+                type="button"
+                onClick={() => setFilters({ npa: '', nxx: '', state: '', search: '' })}
+                style={{ background: 'transparent', border: 'none', color: '#3b82f6', fontSize: '0.8rem', cursor: 'pointer', textDecoration: 'underline', fontFamily: 'inherit', padding: 0 }}
+              >
+                Clear filters
+              </button>
+            </div>
+          ) : (
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 640 }}>
+                <thead>
+                  <tr>
+                    <DidTh>DID</DidTh>
+                    <DidTh>NPA</DidTh>
+                    <DidTh>State</DidTh>
+                    <DidTh>City</DidTh>
+                    <DidTh>Rate Center</DidTh>
+                    <DidTh>Action</DidTh>
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+                </thead>
+                <tbody>
+                  {filtered.map((item, idx) => {
+                    const isRequesting = requestingDid === item.did;
+                    return (
+                      <tr
+                        key={item.id}
+                        style={{
+                          borderBottom: idx < filtered.length - 1 ? '1px solid rgba(59,130,246,0.06)' : 'none',
+                          animation: 'fadeInUp 0.3s ease both',
+                          animationDelay: `${Math.min(idx * 30, 400)}ms`,
+                          transition: 'background 0.15s',
+                        }}
+                        onMouseEnter={(e) => { (e.currentTarget as HTMLTableRowElement).style.background = 'rgba(59,130,246,0.04)'; }}
+                        onMouseLeave={(e) => { (e.currentTarget as HTMLTableRowElement).style.background = 'transparent'; }}
+                      >
+                        <td style={{ padding: '13px 16px' }}>
+                          <div>
+                            <div style={{ fontSize: '0.88rem', fontWeight: 700, color: '#e2e8f0', fontFamily: 'monospace', letterSpacing: '0.02em' }}>
+                              {fmt(item.did)}
+                            </div>
+                            <div style={{ fontSize: '0.63rem', color: '#334155', fontFamily: 'monospace', marginTop: 2 }}>
+                              {item.did}
+                            </div>
+                          </div>
+                        </td>
+
+                        {/* NPA column */}
+                        <td style={{ padding: '13px 16px' }}>
+                          <span
+                            style={{
+                              fontSize: '0.80rem',
+                              fontFamily: 'monospace',
+                              fontWeight: 600,
+                              color: '#60a5fa',
+                              background: 'rgba(59,130,246,0.08)',
+                              border: '1px solid rgba(59,130,246,0.16)',
+                              borderRadius: 5,
+                              padding: '2px 7px',
+                              letterSpacing: '0.06em',
+                              display: 'inline-block',
+                            }}
+                          >
+                            {extractNpa(item.did)}
+                          </span>
+                        </td>
+
+                        {/* State — prominent */}
+                        <td style={{ padding: '13px 16px' }}>
+                          <span style={{ fontSize: '0.82rem', color: item.state ? '#94a3b8' : '#2d3748', fontWeight: item.state ? 700 : 400 }}>
+                            {item.state ?? '—'}
+                          </span>
+                        </td>
+
+                        <td style={{ padding: '13px 16px' }}>
+                          <span style={{ fontSize: '0.82rem', color: item.city ? '#94a3b8' : '#2d3748', fontStyle: item.city ? 'normal' : 'italic' }}>
+                            {item.city ?? '—'}
+                          </span>
+                        </td>
+                        <td style={{ padding: '13px 16px' }}>
+                          <span style={{ fontSize: '0.78rem', color: '#64748b' }}>
+                            {item.rate_center ?? '—'}
+                          </span>
+                        </td>
+                        <td style={{ padding: '10px 16px' }}>
+                          <button
+                            type="button"
+                            onClick={() => onRequest(item)}
+                            disabled={isRequesting}
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 6,
+                              padding: '7px 16px',
+                              borderRadius: 8,
+                              border: 'none',
+                              background: isRequesting
+                                ? 'rgba(59,130,246,0.25)'
+                                : 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
+                              color: '#fff',
+                              fontSize: '0.75rem',
+                              fontWeight: 700,
+                              cursor: isRequesting ? 'not-allowed' : 'pointer',
+                              fontFamily: 'inherit',
+                              letterSpacing: '0.02em',
+                              boxShadow: isRequesting ? 'none' : '0 3px 12px rgba(59,130,246,0.30)',
+                              transition: 'background 0.15s, box-shadow 0.15s, filter 0.15s',
+                              whiteSpace: 'nowrap',
+                            }}
+                            onMouseEnter={(e) => {
+                              if (!isRequesting) {
+                                (e.currentTarget as HTMLButtonElement).style.filter = 'brightness(1.12)';
+                                (e.currentTarget as HTMLButtonElement).style.boxShadow = '0 4px 18px rgba(59,130,246,0.45)';
+                              }
+                            }}
+                            onMouseLeave={(e) => {
+                              (e.currentTarget as HTMLButtonElement).style.filter = 'none';
+                              (e.currentTarget as HTMLButtonElement).style.boxShadow = isRequesting ? 'none' : '0 3px 12px rgba(59,130,246,0.30)';
+                            }}
+                          >
+                            {isRequesting ? (
+                              <svg viewBox="0 0 16 16" style={{ width: 11, height: 11, animation: 'spin 0.7s linear infinite' }}>
+                                <circle cx="8" cy="8" r="6" fill="none" stroke="rgba(255,255,255,0.3)" strokeWidth={2} />
+                                <path d="M8 2a6 6 0 0 1 6 6" stroke="#fff" strokeWidth={2} fill="none" strokeLinecap="round" />
+                              </svg>
+                            ) : (
+                              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={2} style={{ width: 11, height: 11 }}>
+                                <circle cx="8" cy="8" r="6" />
+                                <path d="M8 5v6M5 8h6" strokeLinecap="round" />
+                              </svg>
+                            )}
+                            {isRequesting ? 'Requesting…' : 'Request'}
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
       )}
     </DidCard>
   );
@@ -3341,15 +4064,18 @@ function AvailableNumbersSection({
 
 interface DIDManagementTabProps {
   customerId: number | undefined;
+  onSwitchTab: (tab: DashboardTab) => void;
 }
 
-function DIDManagementTab({ customerId }: DIDManagementTabProps) {
+function DIDManagementTab({ customerId, onSwitchTab }: DIDManagementTabProps) {
   // ALL hooks unconditionally at top — React rules-of-hooks
   const queryClient = useQueryClient();
   const { toastOk, toastErr } = useToast();
 
-  // Modal state — null = closed, DidInventoryItem = confirm dialog open
-  const [confirmTarget, setConfirmTarget] = useState<DidInventoryItem | null>(null);
+  // Request modal state
+  const [requestTarget, setRequestTarget] = useState<DidInventoryItem | null>(null);
+  // Release modal state
+  const [releaseTarget, setReleaseTarget] = useState<DidInventoryItem | null>(null);
 
   const {
     data: myDids,
@@ -3367,7 +4093,7 @@ function DIDManagementTab({ customerId }: DIDManagementTabProps) {
     isError: availError,
   } = useQuery({
     queryKey: ['available-dids'],
-    queryFn: () => listAvailableDids({ limit: 100 }),
+    queryFn: () => listAvailableDids({ limit: 200 }),
     staleTime: 30_000,
   });
 
@@ -3376,12 +4102,26 @@ function DIDManagementTab({ customerId }: DIDManagementTabProps) {
     onSuccess: (_data, did) => {
       void queryClient.invalidateQueries({ queryKey: ['my-dids'] });
       void queryClient.invalidateQueries({ queryKey: ['available-dids'] });
-      setConfirmTarget(null);
+      setRequestTarget(null);
       toastOk(`Number requested — ${fmt(did)} is pending admin approval`);
     },
     onError: (err: Error) => {
-      setConfirmTarget(null);
+      setRequestTarget(null);
       toastErr(err.message ?? 'Failed to request number');
+    },
+  });
+
+  const releaseMutation = useMutation({
+    mutationFn: (did: string) => releaseDid(did),
+    onSuccess: (_data, did) => {
+      void queryClient.invalidateQueries({ queryKey: ['my-dids'] });
+      void queryClient.invalidateQueries({ queryKey: ['available-dids'] });
+      setReleaseTarget(null);
+      toastOk(`Number released — ${fmt(did)} has returned to the pool`);
+    },
+    onError: (err: Error) => {
+      setReleaseTarget(null);
+      toastErr(err.message ?? 'Failed to release number');
     },
   });
 
@@ -3399,22 +4139,40 @@ function DIDManagementTab({ customerId }: DIDManagementTabProps) {
   );
 
   function handleRequestClick(item: DidInventoryItem) {
-    setConfirmTarget(item);
+    setRequestTarget(item);
   }
 
   function handleConfirmRequest(item: DidInventoryItem) {
     requestMutation.mutate(item.did);
   }
 
+  function handleReleaseClick(item: DidInventoryItem) {
+    setReleaseTarget(item);
+  }
+
+  function handleConfirmRelease(item: DidInventoryItem) {
+    releaseMutation.mutate(item.did);
+  }
+
   return (
     <>
-      {/* Confirmation modal — rendered at top level so it sits over everything */}
-      {confirmTarget && (
+      {/* Request confirmation modal */}
+      {requestTarget && (
         <RequestModal
-          did={confirmTarget}
+          did={requestTarget}
           onConfirm={handleConfirmRequest}
-          onCancel={() => setConfirmTarget(null)}
+          onCancel={() => setRequestTarget(null)}
           isPending={requestMutation.isPending}
+        />
+      )}
+
+      {/* Release confirmation modal */}
+      {releaseTarget && (
+        <ReleaseModal
+          did={releaseTarget}
+          onConfirm={handleConfirmRelease}
+          onCancel={() => setReleaseTarget(null)}
+          isPending={releaseMutation.isPending}
         />
       )}
 
@@ -3424,6 +4182,8 @@ function DIDManagementTab({ customerId }: DIDManagementTabProps) {
           items={assignedItems}
           isLoading={myLoading}
           isError={myError}
+          onRelease={handleReleaseClick}
+          onSwitchToNumbers={() => onSwitchTab('numbers')}
         />
 
         {/* Section 2: Pending Requests */}
@@ -3465,6 +4225,7 @@ export function RcfPage() {
   const [sortDir, setSortDir] = useState<SortDir>('asc');
   const [searchFocused, setSearchFocused] = useState(false);
   const [pendingEdits, setPendingEdits] = useState<Record<string, string>>({});
+  const [npaFilter, setNpaFilter] = useState('');
 
   // Numbers query — always run (enabled unconditionally)
   const { data, isLoading, isError } = useQuery({
@@ -3484,16 +4245,22 @@ export function RcfPage() {
   const serverTotal: number = data?.total ?? 0;
 
   const filteredEntries = useMemo(() => {
-    if (!searchQuery) return rawEntries;
-    const q = searchQuery.toLowerCase();
-    return rawEntries.filter(
-      (e) =>
-        e.did.includes(q) ||
-        e.forward_to.toLowerCase().includes(q) ||
-        (e.name ?? '').toLowerCase().includes(q) ||
-        (e.customer_name ?? '').toLowerCase().includes(q),
-    );
-  }, [rawEntries, searchQuery]);
+    let result = rawEntries;
+    if (npaFilter.length === 3) {
+      result = result.filter((e) => extractNpa(e.did) === npaFilter);
+    }
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      result = result.filter(
+        (e) =>
+          e.did.includes(q) ||
+          e.forward_to.toLowerCase().includes(q) ||
+          (e.name ?? '').toLowerCase().includes(q) ||
+          (e.customer_name ?? '').toLowerCase().includes(q),
+      );
+    }
+    return result;
+  }, [rawEntries, searchQuery, npaFilter]);
 
   const sortedEntries = useMemo(
     () => sortEntries(filteredEntries, sortField, sortDir),
@@ -3523,6 +4290,7 @@ export function RcfPage() {
     setPage(1);
     setSearchInput('');
     setSearchQuery('');
+    setNpaFilter('');
   }
 
   function handlePendingChange(did: string, value: string) {
@@ -3649,6 +4417,72 @@ export function RcfPage() {
                 )}
               </div>
 
+              {/* NPA (area code) filter */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                <label style={{ fontSize: '0.68rem', fontWeight: 600, color: '#475569', whiteSpace: 'nowrap' }}>
+                  NPA
+                </label>
+                <input
+                  type="text"
+                  value={npaFilter}
+                  onChange={(e) => {
+                    const v = e.target.value.replace(/\D/g, '').slice(0, 3);
+                    setNpaFilter(v);
+                    setPage(1);
+                  }}
+                  placeholder="617"
+                  maxLength={3}
+                  inputMode="numeric"
+                  title="Filter by area code (NPA)"
+                  style={{
+                    width: 56,
+                    padding: '8px 8px',
+                    fontSize: '0.83rem',
+                    fontFamily: 'monospace',
+                    textAlign: 'center',
+                    letterSpacing: '0.08em',
+                    background: npaFilter.length === 3 ? 'rgba(19,21,29,0.85)' : 'rgba(19,21,29,0.65)',
+                    backdropFilter: 'blur(8px)',
+                    WebkitBackdropFilter: 'blur(8px)',
+                    border: `1px solid ${npaFilter.length === 3 ? 'rgba(59,130,246,0.55)' : 'rgba(59,130,246,0.12)'}`,
+                    borderRadius: 9,
+                    color: npaFilter.length === 3 ? '#60a5fa' : '#e2e8f0',
+                    outline: 'none',
+                    boxShadow: npaFilter.length === 3 ? '0 0 0 3px rgba(59,130,246,0.14)' : '0 2px 8px rgba(0,0,0,0.2)',
+                    transition: 'border-color 0.2s, box-shadow 0.2s, color 0.2s',
+                  }}
+                  onFocus={(e) => {
+                    e.currentTarget.style.borderColor = 'rgba(59,130,246,0.45)';
+                    e.currentTarget.style.boxShadow = '0 0 0 3px rgba(59,130,246,0.14), 0 4px 16px rgba(0,0,0,0.3)';
+                  }}
+                  onBlur={(e) => {
+                    e.currentTarget.style.borderColor = npaFilter.length === 3 ? 'rgba(59,130,246,0.55)' : 'rgba(59,130,246,0.12)';
+                    e.currentTarget.style.boxShadow = npaFilter.length === 3 ? '0 0 0 3px rgba(59,130,246,0.14)' : '0 2px 8px rgba(0,0,0,0.2)';
+                  }}
+                />
+                {npaFilter && (
+                  <button
+                    type="button"
+                    onClick={() => { setNpaFilter(''); setPage(1); }}
+                    style={{
+                      background: 'rgba(59,130,246,0.10)',
+                      border: '1px solid rgba(59,130,246,0.18)',
+                      borderRadius: 5,
+                      color: '#60a5fa',
+                      cursor: 'pointer',
+                      padding: '3px 5px',
+                      display: 'flex',
+                      alignItems: 'center',
+                    }}
+                    title="Clear NPA filter"
+                  >
+                    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={2.2} style={{ width: 9, height: 9 }}>
+                      <path d="M4 4l8 8M12 4l-8 8" strokeLinecap="round" />
+                    </svg>
+                  </button>
+                )}
+              </div>
+
               {/* Count pill */}
               {serverTotal > 0 && (
                 <div
@@ -3665,7 +4499,7 @@ export function RcfPage() {
                     letterSpacing: '0.02em',
                   }}
                 >
-                  {searchQuery && filteredEntries.length !== rawEntries.length
+                  {(searchQuery || npaFilter.length === 3) && filteredEntries.length !== rawEntries.length
                     ? `${filteredEntries.length} of ${serverTotal}`
                     : `${serverTotal} ${serverTotal === 1 ? 'number' : 'numbers'}`}
                 </div>
@@ -3784,7 +4618,7 @@ export function RcfPage() {
 
       {/* ── DID Management Tab ───────────────────────────────── */}
       {activeTab === 'dids' && (
-        <DIDManagementTab customerId={customerId} />
+        <DIDManagementTab customerId={customerId} onSwitchTab={setActiveTab} />
       )}
     </div>
   );
