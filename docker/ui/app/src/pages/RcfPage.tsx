@@ -2897,7 +2897,7 @@ function DidSectionHeader({
 
 // ── Th helper for DID tables ──────────────────────────────────────────────────
 
-function DidTh({ children }: { children: React.ReactNode }) {
+function DidTh({ children }: { children?: React.ReactNode }) {
   return (
     <th
       style={{
