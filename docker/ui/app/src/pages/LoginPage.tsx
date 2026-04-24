@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { ApiError } from '../api/client';
+import { AnimatedGridBackground } from '../components/layout/AnimatedGridBackground';
 
 /* ─── Location state type ────────────────────────────────── */
 
@@ -73,8 +74,17 @@ export function LoginPage() {
           'radial-gradient(ellipse 80% 60% at 50% -10%, rgba(59,130,246,0.12) 0%, transparent 60%)',
           'radial-gradient(ellipse 40% 30% at 80% 90%, rgba(59,130,246,0.06) 0%, transparent 50%)',
         ].join(', '),
+        position: 'relative',
       }}
     >
+      {/* Animated grid background — sits at z-0 behind all content */}
+      <AnimatedGridBackground
+        gridSize={56}
+        dotsPerSide={6}
+        gridOpacity={0.05}
+        showGlow={true}
+      />
+
       <div
         style={{
           width: '100%',
@@ -82,6 +92,8 @@ export function LoginPage() {
           display: 'flex',
           flexDirection: 'column',
           gap: 0,
+          position: 'relative',
+          zIndex: 1,
         }}
       >
         {/* ── Brand header above card ───────────────────────── */}

@@ -6,7 +6,7 @@ import {
   IconRCF, IconTrunk, IconAPI, IconIVR, IconDocs,
   IconAdmin, IconSignal, IconTroubleshoot,
 } from '../icons/ProductIcons';
-import { Package, Shield, ChevronDown } from 'lucide-react';
+import { Package, Shield, ChevronDown, Clock } from 'lucide-react';
 
 /* ─── Types ───────────────────────────────────────────────── */
 
@@ -22,11 +22,21 @@ interface NavItemDef {
 /* ─── Nav item definitions ────────────────────────────────── */
 
 const allProductNavItems: NavItemDef[] = [
-  { label: 'RCF',         icon: <IconRCF size={18} />,   to: '/rcf',           color: '#4ade80', accountTypes: ['rcf', 'hybrid'] },
-  { label: 'SIP Trunks',  icon: <IconTrunk size={18} />, to: '/trunks',        color: '#fbbf24', accountTypes: ['trunk', 'hybrid'] },
-  { label: 'API Calling', icon: <IconAPI size={18} />,   to: '/api-dids',      color: '#c084fc', adminOnly: true },
-  { label: 'IVR Builder', icon: <IconIVR size={18} />,   to: '/ivr',           color: '#22d3ee', accountTypes: ['ucaas', 'hybrid'] },
-  { label: 'API Docs',    icon: <IconDocs size={18} />,  to: '/documentation', color: '#94a3b8' },
+  { label: 'RCF',      icon: <IconRCF size={18} />,  to: '/rcf',           color: '#4ade80', accountTypes: ['rcf', 'hybrid'] },
+  { label: 'API Docs', icon: <IconDocs size={18} />, to: '/documentation', color: '#94a3b8' },
+];
+
+/* ─── Coming Soon item definitions ───────────────────────── */
+
+interface ComingSoonItemDef {
+  label: string;
+  icon: React.ReactNode;
+}
+
+const COMING_SOON_ITEMS: ComingSoonItemDef[] = [
+  { label: 'SIP Trunking', icon: <IconTrunk size={18} /> },
+  { label: 'API Calling',  icon: <IconAPI size={18} /> },
+  { label: 'IVR Builder',  icon: <IconIVR size={18} /> },
 ];
 
 /* ─── localStorage helpers ────────────────────────────────── */
@@ -57,6 +67,72 @@ const IconSignOut = () => (
     <path d="M15.75 9V5.25A2.25 2.25 0 0 0 13.5 3h-6a2.25 2.25 0 0 0-2.25 2.25v13.5A2.25 2.25 0 0 0 7.5 21h6a2.25 2.25 0 0 0 2.25-2.25V15m3 0 3-3m0 0-3-3m3 3H9" strokeLinecap="round" strokeLinejoin="round" />
   </svg>
 );
+
+/* ─── ComingSoonNavItem ───────────────────────────────────── */
+
+function ComingSoonNavItem({ item }: { item: ComingSoonItemDef }) {
+  return (
+    <div
+      title="Coming Soon"
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 10,
+        padding: '7px 10px',
+        borderRadius: 10,
+        fontSize: '0.825rem',
+        fontWeight: 500,
+        letterSpacing: '-0.01em',
+        color: '#64748b',
+        opacity: 0.45,
+        cursor: 'default',
+        userSelect: 'none',
+      }}
+    >
+      {/* Icon swatch */}
+      <span
+        style={{
+          width: 28,
+          height: 28,
+          borderRadius: 7,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          flexShrink: 0,
+          background: 'rgba(255,255,255,0.04)',
+          border: '1px solid rgba(255,255,255,0.06)',
+          color: '#475569',
+        }}
+      >
+        {item.icon}
+      </span>
+
+      {/* Label */}
+      <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        {item.label}
+      </span>
+
+      {/* "Soon" badge */}
+      <span
+        style={{
+          fontSize: '0.55rem',
+          fontWeight: 700,
+          letterSpacing: '0.06em',
+          textTransform: 'uppercase',
+          color: '#818cf8',
+          background: 'rgba(99,102,241,0.15)',
+          border: '1px solid rgba(99,102,241,0.25)',
+          borderRadius: 999,
+          padding: '2px 7px',
+          lineHeight: 1.6,
+          flexShrink: 0,
+        }}
+      >
+        Soon
+      </span>
+    </div>
+  );
+}
 
 /* ─── SidebarNavItem ──────────────────────────────────────── */
 
@@ -265,6 +341,7 @@ export function Sidebar() {
     const stored = loadGroupState();
     return {
       products:       stored.products       ?? true,
+      comingSoon:     stored.comingSoon     ?? false,
       administration: stored.administration ?? false,
     };
   });
@@ -500,7 +577,21 @@ export function Sidebar() {
             ))}
           </CollapsibleGroup>
 
-          {/* ── GROUP 2: Administration (admin + support) ─ */}
+          {/* ── GROUP 2: Coming Soon ──────────────────────── */}
+          <div style={{ height: 6 }} />
+          <CollapsibleGroup
+            id="comingSoon"
+            label="Coming Soon"
+            icon={<Clock size={11} strokeWidth={2.5} />}
+            isOpen={groupOpen.comingSoon}
+            onToggle={toggleGroup}
+          >
+            {COMING_SOON_ITEMS.map((item) => (
+              <ComingSoonNavItem key={item.label} item={item} />
+            ))}
+          </CollapsibleGroup>
+
+          {/* ── GROUP 3: Administration (admin + support) ─ */}
           {showAdmin && (
             <>
               <div style={{ height: 6 }} />

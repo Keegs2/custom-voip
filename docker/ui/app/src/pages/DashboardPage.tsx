@@ -1,348 +1,337 @@
-import { useNavigate } from 'react-router-dom';
-import { cn } from '../utils/cn';
-import {
-  IconRCF, IconTrunk, IconAPI, IconIVR, IconDocs,
-  IconAdmin, IconSignal, IconTroubleshoot,
-} from '../components/icons/ProductIcons';
+import { useState } from 'react';
+import { Shield, Zap, Globe, Activity } from 'lucide-react';
+import { AnimatedGridBackground } from '../components/layout/AnimatedGridBackground';
 
-/* ─── Types ──────────────────────────────────────────────── */
+/* ─── Capability card data ───────────────────────────────── */
 
-interface NavCard {
+interface CapabilityCard {
+  icon: React.ReactNode;
   title: string;
   description: string;
-  path: string;
-  accent: string;
-  glow: string;
-  icon: React.ReactNode;
-  badge?: string;
-  muted?: boolean;
-  compact?: boolean;
+  animDelay: string;
 }
 
-/* ─── Card Definitions ───────────────────────────────────── */
-
-const PRIMARY_CARDS: NavCard[] = [
+const CAPABILITY_CARDS: CapabilityCard[] = [
   {
-    title: 'RCF',
-    description: 'Remote Call Forwarding — route DIDs to any destination instantly.',
-    path: '/rcf',
-    accent: '#22c55e',
-    glow: 'rgba(34, 197, 94, 0.18)',
-    icon: <IconRCF size={28} />,
+    icon: <Globe size={22} strokeWidth={1.75} />,
+    title: 'Multi-Zone Redundancy',
+    description:
+      'Three availability zones with active traffic distribution. Calls route to the nearest healthy zone. If a zone becomes unavailable, traffic fails over automatically — no manual intervention, no hardware swap.',
+    animDelay: '0.2s',
   },
   {
-    title: 'SIP Trunks',
-    description: 'Connect PBX systems with IP-authenticated trunks.',
-    path: '/trunks',
-    accent: '#f59e0b',
-    glow: 'rgba(245, 158, 11, 0.18)',
-    icon: <IconTrunk size={28} />,
-  },
-];
-
-const COMING_SOON_CARDS: NavCard[] = [
-  {
-    title: 'API Calling',
-    description: 'Programmable voice with webhook-driven call control — coming soon.',
-    path: '/api-dids',
-    accent: '#a855f7',
-    glow: 'rgba(168, 85, 247, 0.18)',
-    icon: <IconAPI size={28} />,
-    badge: 'Phase 2',
-    muted: true,
+    icon: <Zap size={22} strokeWidth={1.75} />,
+    title: 'Carrier-Grade Infrastructure',
+    description:
+      'Enterprise SIP architecture engineered for sub-10ms latency to carrier Points of Presence. Session timer management, SRTP-ready media paths, and STIR/SHAKEN call attestation on every session.',
+    animDelay: '0.4s',
   },
   {
-    title: 'IVR Builder',
-    description: 'Design call flows visually with drag-and-drop — coming soon.',
-    path: '/ivr',
-    accent: '#06b6d4',
-    glow: 'rgba(6, 182, 212, 0.18)',
-    icon: <IconIVR size={28} />,
-    badge: 'Phase 2',
-    muted: true,
+    icon: <Shield size={22} strokeWidth={1.75} />,
+    title: '99.999% Uptime Target',
+    description:
+      'Dual SBC layer fronted by network load balancers with continuous health monitoring. Failed components are detected and bypassed in under 15 seconds. Self-healing by design.',
+    animDelay: '0.6s',
+  },
+  {
+    icon: <Activity size={22} strokeWidth={1.75} />,
+    title: 'Intelligent Call Routing',
+    description:
+      'Every call passes through a proprietary routing engine with real-time fraud detection, velocity limiting, and quality analysis. MOS scoring is captured per session for full visibility.',
+    animDelay: '0.8s',
   },
 ];
 
-const UTILITY_CARDS: NavCard[] = [
+/* ─── How it works steps ─────────────────────────────────── */
+
+interface Step {
+  number: string;
+  title: string;
+  description: string;
+  animDelay: string;
+}
+
+const HOW_IT_WORKS: Step[] = [
   {
-    title: 'Administration',
-    description: 'Manage customers, billing, rates, and platform configuration.',
-    path: '/admin',
-    accent: '#3b82f6',
-    glow: 'rgba(59, 130, 246, 0.18)',
-    icon: <IconAdmin size={28} />,
-    compact: true,
+    number: '01',
+    title: 'Provision Numbers',
+    description:
+      'Port existing DIDs or provision new numbers directly through the platform. No carrier coordination required.',
+    animDelay: '0.3s',
   },
   {
-    title: 'Call Quality',
-    description: 'Platform-wide SIP call quality analysis, RTP diagnostics, and MOS trends.',
-    path: '/call-quality',
-    accent: '#22c55e',
-    glow: 'rgba(34, 197, 94, 0.15)',
-    icon: <IconSignal size={28} />,
-    compact: true,
+    number: '02',
+    title: 'Configure Routing',
+    description:
+      'Set forwarding rules with instant activation. Point to any PSTN number or SIP endpoint — no hardware, no reboots.',
+    animDelay: '0.5s',
   },
   {
-    title: 'Troubleshooting',
-    description: 'SIP capture, call flow analysis, and debugging.',
-    path: '/troubleshooting',
-    accent: '#f59e0b',
-    glow: 'rgba(245, 158, 11, 0.15)',
-    icon: <IconTroubleshoot size={28} />,
-    compact: true,
-  },
-  {
-    title: 'API Docs',
-    description: 'Complete API reference and integration guide.',
-    path: '/documentation',
-    accent: '#94a3b8',
-    glow: 'rgba(148, 163, 184, 0.12)',
-    icon: <IconDocs size={28} />,
-    compact: true,
+    number: '03',
+    title: 'Monitor in Real Time',
+    description:
+      'Every call is logged with quality metrics. Drill into MOS scores, packet loss, and jitter from the Call Quality dashboard.',
+    animDelay: '0.7s',
   },
 ];
 
-/* ─── Section Label ──────────────────────────────────────── */
+/* ─── Stat bar data ──────────────────────────────────────── */
+
+interface Stat {
+  value: string;
+  label: string;
+  animDelay: string;
+}
+
+const STATS: Stat[] = [
+  { value: '3',        label: 'Availability Zones',   animDelay: '0.2s' },
+  { value: '< 15s',   label: 'Automatic Failover',    animDelay: '0.35s' },
+  { value: '99.999%', label: 'Uptime Target',          animDelay: '0.5s' },
+  { value: 'Sub-10ms',label: 'Carrier PoP Latency',   animDelay: '0.65s' },
+];
+
+/* ─── CapabilityCardEl ───────────────────────────────────── */
+
+function CapabilityCardEl({ card }: { card: CapabilityCard }) {
+  const [hovered, setHovered] = useState(false);
+
+  return (
+    <div
+      className="animate-fade-in-up"
+      style={{
+        animationDelay: card.animDelay,
+        position: 'relative',
+        background: 'rgba(19, 21, 29, 0.70)',
+        backdropFilter: 'blur(8px)',
+        WebkitBackdropFilter: 'blur(8px)',
+        border: `1px solid ${hovered ? 'rgba(59,130,246,0.30)' : 'rgba(59,130,246,0.12)'}`,
+        borderRadius: 20,
+        padding: '28px 28px 24px',
+        transition: 'border-color 0.25s ease, box-shadow 0.25s ease',
+        boxShadow: hovered
+          ? '0 0 0 1px rgba(59,130,246,0.18), 0 20px 50px -12px rgba(0,0,0,0.55)'
+          : '0 4px 20px -6px rgba(0,0,0,0.4)',
+        overflow: 'hidden',
+      }}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
+      {/* Top accent line — visible on hover */}
+      <div
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 28,
+          right: 28,
+          height: 2,
+          background:
+            'linear-gradient(90deg, transparent, rgba(59,130,246,0.8), transparent)',
+          opacity: hovered ? 1 : 0,
+          transition: 'opacity 0.25s ease',
+          borderRadius: '0 0 2px 2px',
+        }}
+      />
+
+      {/* Icon container */}
+      <div
+        style={{
+          width: 48,
+          height: 48,
+          borderRadius: 13,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          marginBottom: 18,
+          color: hovered ? '#60a5fa' : '#3b82f6',
+          background: hovered
+            ? 'linear-gradient(135deg, rgba(59,130,246,0.22) 0%, rgba(59,130,246,0.10) 100%)'
+            : 'linear-gradient(135deg, rgba(59,130,246,0.14) 0%, rgba(59,130,246,0.06) 100%)',
+          border: `1px solid ${hovered ? 'rgba(59,130,246,0.35)' : 'rgba(59,130,246,0.20)'}`,
+          transition: 'background 0.25s ease, border-color 0.25s ease, color 0.25s ease',
+        }}
+      >
+        {card.icon}
+      </div>
+
+      <h3
+        style={{
+          fontSize: '1rem',
+          fontWeight: 700,
+          color: '#e2e8f0',
+          letterSpacing: '-0.01em',
+          marginBottom: 10,
+        }}
+      >
+        {card.title}
+      </h3>
+
+      <p
+        style={{
+          fontSize: '0.85rem',
+          color: '#718096',
+          lineHeight: 1.7,
+        }}
+      >
+        {card.description}
+      </p>
+    </div>
+  );
+}
+
+/* ─── StepEl ─────────────────────────────────────────────── */
+
+function StepEl({ step, isLast }: { step: Step; isLast: boolean }) {
+  return (
+    <div
+      className="animate-fade-in-up"
+      style={{
+        animationDelay: step.animDelay,
+        flex: 1,
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'flex-start',
+        position: 'relative',
+      }}
+    >
+      {/* Connector line between steps */}
+      {!isLast && (
+        <div
+          style={{
+            position: 'absolute',
+            top: 21,
+            left: 'calc(44px + 16px)',
+            right: -16,
+            height: 1,
+            background:
+              'linear-gradient(90deg, rgba(59,130,246,0.25) 0%, rgba(59,130,246,0.05) 100%)',
+            zIndex: 0,
+          }}
+        />
+      )}
+
+      {/* Step number badge */}
+      <div
+        style={{
+          width: 44,
+          height: 44,
+          borderRadius: '50%',
+          border: '1.5px solid rgba(59,130,246,0.40)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          marginBottom: 18,
+          background: 'rgba(59,130,246,0.08)',
+          position: 'relative',
+          zIndex: 1,
+          flexShrink: 0,
+        }}
+      >
+        <span
+          style={{
+            fontSize: '0.7rem',
+            fontWeight: 800,
+            color: '#3b82f6',
+            letterSpacing: '0.04em',
+            fontVariantNumeric: 'tabular-nums',
+          }}
+        >
+          {step.number}
+        </span>
+      </div>
+
+      <h4
+        style={{
+          fontSize: '0.95rem',
+          fontWeight: 700,
+          color: '#e2e8f0',
+          letterSpacing: '-0.01em',
+          marginBottom: 8,
+        }}
+      >
+        {step.title}
+      </h4>
+
+      <p
+        style={{
+          fontSize: '0.83rem',
+          color: '#718096',
+          lineHeight: 1.7,
+          maxWidth: 280,
+        }}
+      >
+        {step.description}
+      </p>
+    </div>
+  );
+}
+
+/* ─── StatCardEl ─────────────────────────────────────────── */
+
+function StatCardEl({ stat }: { stat: Stat }) {
+  const [hovered, setHovered] = useState(false);
+
+  return (
+    <div
+      className="animate-fade-in-up"
+      style={{
+        animationDelay: stat.animDelay,
+        flex: 1,
+        minWidth: 120,
+        background: 'rgba(19, 21, 29, 0.65)',
+        backdropFilter: 'blur(8px)',
+        WebkitBackdropFilter: 'blur(8px)',
+        border: `1px solid ${hovered ? 'rgba(59,130,246,0.25)' : 'rgba(59,130,246,0.10)'}`,
+        borderRadius: 16,
+        padding: '20px 18px',
+        textAlign: 'center',
+        transition: 'border-color 0.2s ease, box-shadow 0.2s ease',
+        boxShadow: hovered ? '0 0 24px -6px rgba(59,130,246,0.18)' : 'none',
+      }}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
+      <div
+        style={{
+          fontSize: '2rem',
+          fontWeight: 800,
+          color: '#3b82f6',
+          lineHeight: 1.1,
+          letterSpacing: '-0.03em',
+          fontVariantNumeric: 'tabular-nums',
+          marginBottom: 6,
+        }}
+      >
+        {stat.value}
+      </div>
+      <div
+        style={{
+          fontSize: '0.7rem',
+          fontWeight: 600,
+          color: '#475569',
+          textTransform: 'uppercase',
+          letterSpacing: '0.09em',
+          lineHeight: 1.4,
+        }}
+      >
+        {stat.label}
+      </div>
+    </div>
+  );
+}
+
+/* ─── Section label ──────────────────────────────────────── */
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
     <div
       style={{
-        fontSize: '0.65rem',
+        fontSize: '0.62rem',
         fontWeight: 700,
-        letterSpacing: '0.12em',
+        letterSpacing: '0.14em',
         textTransform: 'uppercase',
-        color: '#4a5568',
-        marginBottom: 14,
-      }}
-    >
-      {children}
-    </div>
-  );
-}
-
-/* ─── Phase 2 Badge ──────────────────────────────────────── */
-
-function Phase2Badge({ accent }: { accent: string }) {
-  return (
-    <div
-      style={{
-        position: 'absolute',
-        top: 16,
-        right: 16,
-        fontSize: '0.6rem',
-        fontWeight: 700,
-        letterSpacing: '0.08em',
-        textTransform: 'uppercase',
-        color: accent,
-        background: `${accent}18`,
-        border: `1px solid ${accent}35`,
-        borderRadius: 999,
-        padding: '3px 9px',
-        zIndex: 2,
-        lineHeight: 1.5,
-      }}
-    >
-      Phase 2
-    </div>
-  );
-}
-
-/* ─── DashCard ───────────────────────────────────────────── */
-
-interface DashCardProps {
-  card: NavCard;
-  onClick: () => void;
-  delay: number;
-  /** Override flex-basis for the card */
-  flexBasis?: string;
-  /** Override minHeight for the card */
-  minHeight?: number;
-}
-
-function DashCard({ card, onClick, delay, flexBasis = '420px', minHeight = 220 }: DashCardProps) {
-  const padding = card.compact ? 22 : 32;
-
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      style={{
-        animationDelay: `${delay}s`,
-        flex: `0 1 ${flexBasis}`,
-        minHeight,
-        opacity: card.muted ? 0.72 : 1,
-        position: 'relative',
-      }}
-      className={cn(
-        'group text-left',
-        'rounded-2xl overflow-hidden',
-        'cursor-pointer select-none',
-        'animate-fade-in-up',
-        'transition-all duration-300 ease-out',
-        'hover:-translate-y-1.5',
-        'focus-visible:outline-none',
-      )}
-      onMouseEnter={(e) => {
-        const el = e.currentTarget;
-        el.style.boxShadow = `0 0 0 1px ${card.accent}50, 0 25px 60px -15px ${card.glow}, 0 10px 24px -8px rgba(0,0,0,0.5)`;
-        if (card.muted) el.style.opacity = '1';
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.boxShadow = '';
-        if (card.muted) e.currentTarget.style.opacity = '0.72';
-      }}
-    >
-      {/* Badge */}
-      {card.badge && <Phase2Badge accent={card.accent} />}
-
-      {/* Background layer */}
-      <div
-        style={{
-          position: 'absolute',
-          inset: 0,
-          borderRadius: 16,
-          background: 'linear-gradient(135deg, rgba(30, 33, 48, 0.9) 0%, rgba(19, 21, 29, 0.95) 100%)',
-          border: '1px solid rgba(42, 47, 69, 0.6)',
-          transition: 'border-color 0.3s',
-        }}
-        className="group-hover:!border-transparent"
-      />
-
-      {/* Hover gradient overlay */}
-      <div
-        style={{
-          position: 'absolute',
-          inset: 0,
-          borderRadius: 16,
-          background: `linear-gradient(135deg, ${card.accent}18 0%, ${card.accent}05 100%)`,
-          opacity: 0,
-          transition: 'opacity 0.3s',
-        }}
-        className="group-hover:!opacity-100"
-      />
-
-      {/* Hover border */}
-      <div
-        style={{
-          position: 'absolute',
-          inset: 0,
-          borderRadius: 16,
-          border: `1px solid ${card.accent}40`,
-          opacity: 0,
-          transition: 'opacity 0.3s',
-          pointerEvents: 'none',
-        }}
-        className="group-hover:!opacity-100"
-      />
-
-      {/* Top accent gradient line */}
-      <div
-        style={{
-          position: 'absolute',
-          top: 0,
-          left: 32,
-          right: 32,
-          height: 2,
-          background: `linear-gradient(90deg, transparent, ${card.accent}, transparent)`,
-          opacity: 0.5,
-          transition: 'opacity 0.3s',
-        }}
-        className="group-hover:!opacity-100"
-      />
-
-      {/* Content */}
-      <div style={{ position: 'relative', zIndex: 1, padding }}>
-        {/* Icon */}
-        <div
-          style={{
-            width: card.compact ? 44 : 52,
-            height: card.compact ? 44 : 52,
-            borderRadius: 14,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            marginBottom: card.compact ? 16 : 24,
-            color: card.accent,
-            background: `linear-gradient(135deg, ${card.accent}20 0%, ${card.accent}10 100%)`,
-            border: `1px solid ${card.accent}30`,
-            transition: 'transform 0.3s, box-shadow 0.3s',
-          }}
-          className="group-hover:scale-110"
-        >
-          {card.icon}
-        </div>
-
-        {/* Title */}
-        <h3
-          style={{
-            fontSize: card.compact ? '1rem' : '1.125rem',
-            fontWeight: 700,
-            color: '#e2e8f0',
-            letterSpacing: '-0.01em',
-            marginBottom: 8,
-          }}
-        >
-          {card.title}
-        </h3>
-
-        {/* Description */}
-        <p
-          style={{
-            fontSize: '0.875rem',
-            color: '#718096',
-            lineHeight: 1.65,
-            marginBottom: card.compact ? 16 : 24,
-          }}
-        >
-          {card.description}
-        </p>
-
-        {/* Footer arrow */}
-        <div
-          style={{ display: 'flex', alignItems: 'center', gap: 6 }}
-          className="transition-all duration-200 group-hover:gap-3"
-        >
-          <span
-            style={{
-              fontSize: '0.8rem',
-              fontWeight: 600,
-              letterSpacing: '0.02em',
-              color: card.accent,
-              opacity: 0.7,
-              transition: 'opacity 0.2s',
-            }}
-            className="group-hover:!opacity-100"
-          >
-            {card.muted ? 'Preview' : 'Open'}
-          </span>
-          <svg
-            style={{ width: 14, height: 14, color: card.accent, opacity: 0.5, transition: 'all 0.2s' }}
-            className="group-hover:!opacity-100 group-hover:translate-x-0.5"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-            strokeWidth={2.5}
-          >
-            <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3" />
-          </svg>
-        </div>
-      </div>
-    </button>
-  );
-}
-
-/* ─── Row wrapper ────────────────────────────────────────── */
-
-function CardRow({ children, style }: { children: React.ReactNode; style?: React.CSSProperties }) {
-  return (
-    <div
-      style={{
-        display: 'flex',
-        gap: 24,
-        width: '100%',
-        maxWidth: 1060,
-        ...style,
+        color: '#3b82f6',
+        marginBottom: 20,
+        opacity: 0.75,
       }}
     >
       {children}
@@ -353,123 +342,194 @@ function CardRow({ children, style }: { children: React.ReactNode; style?: React
 /* ─── Page ───────────────────────────────────────────────── */
 
 export function DashboardPage() {
-  const navigate = useNavigate();
-
   return (
-    <div
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        width: '100%',
-        paddingTop: 52,
-        paddingBottom: 64,
-        paddingLeft: 24,
-        paddingRight: 24,
-        boxSizing: 'border-box',
-      }}
-    >
-      {/* ── Page Header ── */}
+    <div style={{ position: 'relative', minHeight: '100vh' }}>
+      {/* Animated grid — z-0, behind all content */}
+      <AnimatedGridBackground
+        gridSize={56}
+        dotsPerSide={8}
+        gridOpacity={0.06}
+        showGlow={true}
+      />
+
+      {/* All content floats above the grid */}
       <div
-        className="text-center animate-fade-in-up"
-        style={{ marginBottom: 48, width: '100%', maxWidth: 1060 }}
+        style={{
+          position: 'relative',
+          zIndex: 1,
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          width: '100%',
+          paddingLeft: 24,
+          paddingRight: 24,
+          paddingTop: 72,
+          paddingBottom: 80,
+          boxSizing: 'border-box',
+        }}
       >
-        <style>{`
-          @keyframes dashKeystoneGlow {
-            0%   { filter: drop-shadow(0 0 14px rgba(59, 130, 246, 0.3)) drop-shadow(0 0 28px rgba(59, 130, 246, 0.1)); }
-            100% { filter: drop-shadow(0 0 24px rgba(59, 130, 246, 0.55)) drop-shadow(0 0 48px rgba(59, 130, 246, 0.22)); }
-          }
-          @keyframes dashKeystoneFloat {
-            0%, 100% { transform: translateY(0px); }
-            50%       { transform: translateY(-4px); }
-          }
-          .dash-keystone-hero {
-            animation: dashKeystoneGlow 3s ease-in-out infinite alternate,
-                       dashKeystoneFloat 6s ease-in-out infinite;
-            transition: filter 0.3s ease, transform 0.3s ease;
-          }
-          .dash-keystone-hero:hover {
-            filter: drop-shadow(0 0 32px rgba(59, 130, 246, 0.72)) drop-shadow(0 0 64px rgba(59, 130, 246, 0.35)) !important;
-            transform: translateY(-4px) scale(1.03) !important;
-            animation-play-state: paused;
-          }
-        `}</style>
-
-        {/* Hero branded image — contains "KEYSTONE" text + subtitle built in */}
-        <img
-          src="/keystone_image.png"
-          alt="Granite Keystone — Unified Voice & Communications"
-          className="dash-keystone-hero"
+        {/* ──────────────────────────────────────────────────── */}
+        {/* HERO SECTION                                         */}
+        {/* ──────────────────────────────────────────────────── */}
+        <div
+          className="animate-fade-in-up"
           style={{
-            width: 300,
-            height: 'auto',
-            display: 'block',
-            margin: '0 auto 16px',
-          }}
-        />
-
-        <p
-          style={{
-            fontSize: '0.8rem',
-            fontWeight: 600,
-            letterSpacing: '0.14em',
-            textTransform: 'uppercase',
-            color: '#374151',
+            textAlign: 'center',
+            marginBottom: 72,
+            width: '100%',
+            maxWidth: 760,
           }}
         >
-          Enterprise Voice Platform
-        </p>
-      </div>
-
-      {/* ── Row 1: Primary Products ── */}
-      <div style={{ width: '100%', maxWidth: 1060 }}>
-        <SectionLabel>Products</SectionLabel>
-        <CardRow>
-          {PRIMARY_CARDS.map((card, i) => (
-            <DashCard
-              key={card.path}
-              card={card}
-              onClick={() => navigate(card.path)}
-              delay={i * 0.08}
-              flexBasis="calc(50% - 12px)"
-              minHeight={240}
+          {/* Keystone branded image with scan-line overlay */}
+          <div
+            style={{
+              position: 'relative',
+              display: 'inline-block',
+              marginBottom: 32,
+              overflow: 'hidden',
+            }}
+          >
+            <img
+              src="/keystone_image.png"
+              alt="Granite Keystone — Distributed Voice Infrastructure"
+              className="dash-keystone-hero"
+              style={{
+                width: 320,
+                height: 'auto',
+                display: 'block',
+              }}
             />
-          ))}
-        </CardRow>
-      </div>
-
-      {/* ── Row 2: Coming Soon ── */}
-      <div style={{ width: '100%', maxWidth: 1060, marginTop: 32 }}>
-        <SectionLabel>Coming Soon</SectionLabel>
-        <CardRow>
-          {COMING_SOON_CARDS.map((card, i) => (
-            <DashCard
-              key={card.path}
-              card={card}
-              onClick={() => navigate(card.path)}
-              delay={0.16 + i * 0.08}
-              flexBasis="calc(50% - 12px)"
-              minHeight={200}
+            {/* Scan-line overlay */}
+            <div
+              className="dash-scan-line"
+              style={{
+                position: 'absolute',
+                inset: 0,
+                background:
+                  'linear-gradient(180deg, transparent 0%, rgba(96,165,250,0.06) 50%, transparent 100%)',
+                pointerEvents: 'none',
+              }}
             />
-          ))}
-        </CardRow>
-      </div>
+          </div>
 
-      {/* ── Row 3: Utilities ── */}
-      <div style={{ width: '100%', maxWidth: 1060, marginTop: 32 }}>
-        <SectionLabel>Tools</SectionLabel>
-        <CardRow>
-          {UTILITY_CARDS.map((card, i) => (
-            <DashCard
-              key={card.path}
-              card={card}
-              onClick={() => navigate(card.path)}
-              delay={0.32 + i * 0.08}
-              flexBasis="calc(50% - 12px)"
-              minHeight={150}
-            />
-          ))}
-        </CardRow>
+          {/* Tagline */}
+          <h1
+            className="animate-fade-in-up animation-delay-200"
+            style={{
+              fontSize: 'clamp(1.5rem, 3.5vw, 2.1rem)',
+              fontWeight: 800,
+              color: '#e2e8f0',
+              letterSpacing: '-0.03em',
+              lineHeight: 1.2,
+              marginBottom: 16,
+            }}
+          >
+            <span style={{ color: '#3b82f6' }}>Distributed</span>{' '}
+            Voice Infrastructure.{' '}
+            <br />
+            Built for the Enterprise.
+          </h1>
+
+          {/* Subtitle */}
+          <p
+            className="animate-fade-in-up animation-delay-400"
+            style={{
+              fontSize: '1rem',
+              color: '#718096',
+              lineHeight: 1.75,
+              maxWidth: 600,
+              margin: '0 auto',
+            }}
+          >
+            Port your numbers. Configure your rules. Route every call through
+            carrier-grade infrastructure with automatic failover across three
+            availability zones.
+          </p>
+        </div>
+
+        {/* ──────────────────────────────────────────────────── */}
+        {/* PLATFORM CAPABILITIES — 2×2 glass-morphism grid     */}
+        {/* ──────────────────────────────────────────────────── */}
+        <div
+          style={{
+            width: '100%',
+            maxWidth: 1000,
+            marginBottom: 72,
+          }}
+        >
+          <div className="animate-fade-in-up animation-delay-200">
+            <SectionLabel>Platform Capabilities</SectionLabel>
+          </div>
+
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
+              gap: 20,
+            }}
+          >
+            {CAPABILITY_CARDS.map((card) => (
+              <CapabilityCardEl key={card.title} card={card} />
+            ))}
+          </div>
+        </div>
+
+        {/* ──────────────────────────────────────────────────── */}
+        {/* HOW IT WORKS — 3 horizontal steps                   */}
+        {/* ──────────────────────────────────────────────────── */}
+        <div
+          style={{
+            width: '100%',
+            maxWidth: 1000,
+            marginBottom: 72,
+          }}
+        >
+          <div className="animate-fade-in-up animation-delay-200">
+            <SectionLabel>How It Works</SectionLabel>
+          </div>
+
+          <div
+            style={{
+              display: 'flex',
+              gap: 32,
+              flexWrap: 'wrap',
+            }}
+          >
+            {HOW_IT_WORKS.map((step, idx) => (
+              <StepEl
+                key={step.number}
+                step={step}
+                isLast={idx === HOW_IT_WORKS.length - 1}
+              />
+            ))}
+          </div>
+        </div>
+
+        {/* ──────────────────────────────────────────────────── */}
+        {/* STATS BAR — 4 glass-morphism stat cards             */}
+        {/* ──────────────────────────────────────────────────── */}
+        <div
+          style={{
+            width: '100%',
+            maxWidth: 1000,
+          }}
+        >
+          <div className="animate-fade-in-up animation-delay-200">
+            <SectionLabel>By the Numbers</SectionLabel>
+          </div>
+
+          <div
+            style={{
+              display: 'flex',
+              gap: 16,
+              flexWrap: 'wrap',
+            }}
+          >
+            {STATS.map((stat) => (
+              <StatCardEl key={stat.label} stat={stat} />
+            ))}
+          </div>
+        </div>
       </div>
     </div>
   );
