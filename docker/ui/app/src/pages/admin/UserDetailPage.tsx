@@ -2,6 +2,8 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiRequest } from '../../api/client';
+import { listUsers } from '../../api/auth';
+import type { User } from '../../types/auth';
 import { Badge } from '../../components/ui/Badge';
 import { Spinner } from '../../components/ui/Spinner';
 import { fmt, fmtDuration } from '../../utils/format';
@@ -19,39 +21,6 @@ interface Customer {
   name: string;
   account_type: string;
   status: string;
-}
-
-interface UserSearchResult {
-  id: number;
-  name: string;
-  email: string;
-  customer_name: string;
-  extension: string | null;
-  assigned_did: string | null;
-  presence_status: PresenceStatus;
-}
-
-interface UserSearchResponse {
-  results: UserSearchResult[];
-  total: number;
-}
-
-interface CustomerUserResult {
-  id: number;
-  name: string;
-  email: string;
-  role: UserRole;
-  status: 'active' | 'disabled';
-  extension: string | null;
-  assigned_did: string | null;
-  presence_status: PresenceStatus;
-  last_login: string | null;
-}
-
-interface CustomerUsersResponse {
-  results: CustomerUserResult[];
-  total: number;
-  customer_id: number;
 }
 
 interface RecentCall {
@@ -225,300 +194,11 @@ async function fetchCustomers(): Promise<Customer[]> {
   return apiRequest<Customer[]>('GET', '/customers');
 }
 
-async function searchUsers(q: string, customerId?: number): Promise<UserSearchResponse> {
-  const params = new URLSearchParams({ q });
-  if (customerId != null) params.set('customer_id', String(customerId));
-  return apiRequest<UserSearchResponse>('GET', `/search/user?${params.toString()}`);
-}
-
-async function fetchUsersByCustomer(customerId: number): Promise<CustomerUsersResponse> {
-  return apiRequest<CustomerUsersResponse>('GET', `/search/user/by-customer/${customerId}`);
-}
-
 async function fetchUser360(userId: number): Promise<User360Response> {
   return apiRequest<User360Response>('GET', `/search/user/${userId}/360`);
 }
 
-// ─── Search Bar ───────────────────────────────────────────────────────────────
 
-interface UserSearchBarProps {
-  onSelect: (userId: number) => void;
-  initialQuery?: string;
-  customerId?: number | null;
-}
-
-function UserSearchBar({ onSelect, initialQuery = '', customerId }: UserSearchBarProps) {
-  const [inputValue, setInputValue] = useState(initialQuery);
-  const [query, setQuery]           = useState('');
-  const [open, setOpen]             = useState(false);
-  const debounceRef                 = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const containerRef                = useRef<HTMLDivElement>(null);
-
-  const handleInputChange = useCallback((value: string) => {
-    setInputValue(value);
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-
-    if (value.trim().length >= 2) {
-      debounceRef.current = setTimeout(() => {
-        setQuery(value.trim());
-        setOpen(true);
-      }, 280);
-    } else {
-      setQuery('');
-      setOpen(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
-  }, []);
-
-  // Close dropdown on outside click
-  useEffect(() => {
-    function handleClick(e: MouseEvent) {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    }
-    document.addEventListener('mousedown', handleClick);
-    return () => document.removeEventListener('mousedown', handleClick);
-  }, []);
-
-  const { data, isLoading, isFetching } = useQuery({
-    queryKey: ['user-search', query, customerId ?? null],
-    queryFn:  () => searchUsers(query, customerId ?? undefined),
-    enabled:  query.length >= 2,
-    staleTime: 10_000,
-  });
-
-  const results = data?.results ?? [];
-
-  function handleSelect(result: UserSearchResult) {
-    setInputValue(result.name);
-    setOpen(false);
-    onSelect(result.id);
-  }
-
-  return (
-    <div ref={containerRef} style={{ position: 'relative' }}>
-      {/* Search icon */}
-      <span
-        aria-hidden="true"
-        style={{
-          position: 'absolute',
-          left: 18,
-          top: '50%',
-          transform: 'translateY(-50%)',
-          color: '#475569',
-          display: 'flex',
-          alignItems: 'center',
-          pointerEvents: 'none',
-          zIndex: 1,
-        }}
-      >
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} style={{ width: 20, height: 20 }}>
-          <circle cx="11" cy="11" r="7" />
-          <path d="m21 21-4.35-4.35" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      </span>
-
-      <input
-        type="text"
-        value={inputValue}
-        onChange={(e) => handleInputChange(e.target.value)}
-        onFocus={() => { if (results.length > 0) setOpen(true); }}
-        placeholder="Search by name, email, or extension..."
-        autoFocus
-        style={{
-          width: '100%',
-          boxSizing: 'border-box',
-          padding: '16px 52px 16px 52px',
-          fontSize: '1rem',
-          fontWeight: 500,
-          background: 'rgba(255,255,255,0.03)',
-          border: '1px solid rgba(255,255,255,0.08)',
-          borderRadius: open && results.length > 0 ? '14px 14px 0 0' : 14,
-          color: '#f1f5f9',
-          outline: 'none',
-          transition: 'border-color 0.15s, box-shadow 0.15s, background 0.15s',
-          boxShadow: '0 4px 24px rgba(0,0,0,0.3)',
-          fontFamily: 'inherit',
-        }}
-        onFocusCapture={(e) => {
-          e.currentTarget.style.borderColor = 'rgba(59,130,246,0.5)';
-          e.currentTarget.style.boxShadow = '0 0 0 3px rgba(59,130,246,0.12), 0 4px 24px rgba(0,0,0,0.3)';
-          e.currentTarget.style.background = 'rgba(255,255,255,0.04)';
-        }}
-        onBlur={(e) => {
-          e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)';
-          e.currentTarget.style.boxShadow = '0 4px 24px rgba(0,0,0,0.3)';
-          e.currentTarget.style.background = 'rgba(255,255,255,0.03)';
-        }}
-      />
-
-      {/* Right: spinner / clear */}
-      <span
-        style={{
-          position: 'absolute',
-          right: 16,
-          top: '50%',
-          transform: 'translateY(-50%)',
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-        }}
-      >
-        {(isLoading || isFetching) && <Spinner size="sm" />}
-        {inputValue && !(isLoading || isFetching) && (
-          <button
-            type="button"
-            onClick={() => { setInputValue(''); setQuery(''); setOpen(false); }}
-            title="Clear search"
-            style={{
-              background: 'transparent',
-              border: 'none',
-              color: '#475569',
-              cursor: 'pointer',
-              padding: 4,
-              borderRadius: 4,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-            onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = '#94a3b8'; }}
-            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = '#475569'; }}
-          >
-            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={2} style={{ width: 14, height: 14 }}>
-              <path d="M4 4l8 8M12 4l-8 8" strokeLinecap="round" />
-            </svg>
-          </button>
-        )}
-      </span>
-
-      {/* Dropdown results */}
-      {open && query.length >= 2 && !isLoading && (
-        <div
-          style={{
-            position: 'absolute',
-            top: '100%',
-            left: 0,
-            right: 0,
-            background: 'rgba(15,17,23,0.98)',
-            border: '1px solid rgba(59,130,246,0.3)',
-            borderTop: 'none',
-            borderRadius: '0 0 14px 14px',
-            overflow: 'hidden',
-            zIndex: 50,
-            boxShadow: '0 16px 40px rgba(0,0,0,0.5)',
-            backdropFilter: 'blur(12px)',
-          }}
-        >
-          {results.length === 0 ? (
-            <div style={{ padding: '14px 20px', fontSize: '0.82rem', color: '#64748b', fontStyle: 'italic' }}>
-              No users found matching &ldquo;{query}&rdquo;
-            </div>
-          ) : (
-            results.map((r) => {
-              const avatarColor = getAvatarColor(r.name);
-              const presence    = PRESENCE_CONFIG[r.presence_status] ?? PRESENCE_CONFIG.offline;
-              return (
-                <button
-                  key={r.id}
-                  type="button"
-                  onClick={() => handleSelect(r)}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 12,
-                    width: '100%',
-                    padding: '12px 20px',
-                    background: 'transparent',
-                    border: 'none',
-                    borderBottom: '1px solid rgba(255,255,255,0.04)',
-                    cursor: 'pointer',
-                    textAlign: 'left',
-                    transition: 'background 0.1s',
-                    color: '#e2e8f0',
-                  }}
-                  onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(59,130,246,0.08)'; }}
-                  onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent'; }}
-                >
-                  {/* Mini avatar */}
-                  <div
-                    style={{
-                      width: 32,
-                      height: 32,
-                      borderRadius: 8,
-                      background: `${avatarColor}22`,
-                      border: `1px solid ${avatarColor}44`,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      fontSize: '0.82rem',
-                      fontWeight: 700,
-                      color: avatarColor,
-                      flexShrink: 0,
-                    }}
-                  >
-                    {r.name.charAt(0).toUpperCase()}
-                  </div>
-
-                  {/* Name / email */}
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: '0.875rem', fontWeight: 600, color: '#e2e8f0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {r.name}
-                    </div>
-                    <div style={{ fontSize: '0.72rem', color: '#64748b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {r.email}
-                    </div>
-                  </div>
-
-                  {/* Extension */}
-                  {r.extension && (
-                    <div style={{ fontSize: '0.75rem', color: '#94a3b8', fontFamily: 'monospace', flexShrink: 0 }}>
-                      Ext {r.extension}
-                    </div>
-                  )}
-
-                  {/* Presence dot */}
-                  <span
-                    style={{
-                      width: 8,
-                      height: 8,
-                      borderRadius: '50%',
-                      background: presence.color,
-                      flexShrink: 0,
-                      boxShadow: `0 0 6px ${presence.color}80`,
-                    }}
-                    title={presence.label}
-                  />
-                </button>
-              );
-            })
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ─── Customer Dropdown ────────────────────────────────────────────────────────
-
-interface CustomerDropdownProps {
-  selectedId: number | null;
-  onChange: (id: number | null) => void;
-}
-
-function CustomerDropdown({ selectedId, onChange }: CustomerDropdownProps) {
-  const [focused, setFocused] = useState(false);
-
-  const { data: customers, isLoading, isError } = useQuery({
-    queryKey: ['customers'],
-    queryFn:  fetchCustomers,
-    staleTime: 60_000,
-  });
-
-  const sorted = [...(customers ?? [])].sort((a, b) => a.name.localeCompare(b.name));
 
   return (
     <div style={{ position: 'relative' }}>
@@ -2739,33 +2419,457 @@ function User360View({ userId }: User360ViewProps) {
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
+// ─── All Users Table ──────────────────────────────────────────────────────────
+
+interface AllUsersTableProps {
+  users: User[];
+  searchTerm: string;
+  onSelectUser: (userId: number) => void;
+}
+
+function AllUsersTable({ users, searchTerm, onSelectUser }: AllUsersTableProps) {
+  const [hoveredRow, setHoveredRow] = useState<number | null>(null);
+
+  const term = searchTerm.trim().toLowerCase();
+  const filtered = term.length === 0
+    ? users
+    : users.filter((u) => {
+        return (
+          u.name.toLowerCase().includes(term) ||
+          u.email.toLowerCase().includes(term) ||
+          u.role.toLowerCase().includes(term) ||
+          u.status.toLowerCase().includes(term) ||
+          (u.customer_name ?? '').toLowerCase().includes(term) ||
+          (u.account_type ?? '').toLowerCase().includes(term)
+        );
+      });
+
+  if (filtered.length === 0) {
+    return (
+      <div
+        style={{
+          padding: '40px 20px',
+          textAlign: 'center',
+          color: '#4a5568',
+          fontSize: '0.85rem',
+          fontStyle: 'italic',
+        }}
+      >
+        {term.length > 0
+          ? `No users match "${searchTerm}"`
+          : 'No users found.'}
+      </div>
+    );
+  }
+
+  return (
+    <div
+      style={{
+        borderRadius: 10,
+        border: '1px solid rgba(255,255,255,0.05)',
+        overflow: 'hidden',
+        background: 'rgba(0,0,0,0.2)',
+      }}
+    >
+      {/* Row count label */}
+      <div
+        style={{
+          padding: '9px 16px',
+          borderBottom: '1px solid rgba(255,255,255,0.04)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+        }}
+      >
+        <span
+          style={{
+            fontSize: '0.68rem',
+            color: '#4a5568',
+            textTransform: 'uppercase',
+            letterSpacing: '0.08em',
+            fontWeight: 700,
+          }}
+        >
+          {filtered.length} user{filtered.length !== 1 ? 's' : ''}
+          {term.length > 0 && users.length !== filtered.length && (
+            <span style={{ color: '#334155', fontWeight: 400, marginLeft: 6 }}>
+              of {users.length} total
+            </span>
+          )}
+        </span>
+        <span style={{ fontSize: '0.68rem', color: '#334155' }}>Click a row to open 360 view</span>
+      </div>
+
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 640 }}>
+          <thead>
+            <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+              {['Name', 'Email', 'Role', 'Customer', 'Status', 'Last Login'].map((col) => (
+                <th
+                  key={col}
+                  style={{
+                    padding: '9px 12px',
+                    textAlign: 'left',
+                    fontSize: '0.58rem',
+                    fontWeight: 700,
+                    color: '#334155',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.1em',
+                    background: 'rgba(0,0,0,0.06)',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {col}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map((u) => {
+              const avatarColor = getAvatarColor(u.name);
+              const isHovered = hoveredRow === u.id;
+              const roleCfg = ROLE_CONFIG[u.role] ?? ROLE_CONFIG.user;
+
+              return (
+                <tr
+                  key={u.id}
+                  onClick={() => onSelectUser(u.id)}
+                  onMouseEnter={() => setHoveredRow(u.id)}
+                  onMouseLeave={() => setHoveredRow(null)}
+                  style={{
+                    background: isHovered ? 'rgba(255,255,255,0.025)' : 'transparent',
+                    borderBottom: '1px solid rgba(255,255,255,0.03)',
+                    cursor: 'pointer',
+                    transition: 'background 0.1s',
+                  }}
+                >
+                  {/* Name + mini avatar */}
+                  <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+                      <div
+                        style={{
+                          width: 28,
+                          height: 28,
+                          borderRadius: 7,
+                          background: `${avatarColor}22`,
+                          border: `1px solid ${avatarColor}44`,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontSize: '0.75rem',
+                          fontWeight: 700,
+                          color: avatarColor,
+                          flexShrink: 0,
+                        }}
+                      >
+                        {u.name.charAt(0).toUpperCase()}
+                      </div>
+                      <span style={{ fontSize: '0.82rem', color: '#e2e8f0', fontWeight: 500 }}>
+                        {u.name}
+                      </span>
+                    </div>
+                  </td>
+
+                  {/* Email */}
+                  <td style={{ padding: '10px 12px', fontSize: '0.78rem', color: '#94a3b8', maxWidth: 220 }}>
+                    <span
+                      style={{
+                        display: 'block',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                      title={u.email}
+                    >
+                      {u.email}
+                    </span>
+                  </td>
+
+                  {/* Role */}
+                  <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
+                    <span
+                      style={{
+                        fontSize: '0.63rem',
+                        fontWeight: 700,
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.04em',
+                        color: roleCfg.color,
+                        background: `${roleCfg.color}18`,
+                        border: `1px solid ${roleCfg.color}35`,
+                        borderRadius: 4,
+                        padding: '2px 7px',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {roleCfg.label}
+                    </span>
+                  </td>
+
+                  {/* Customer */}
+                  <td style={{ padding: '10px 12px', fontSize: '0.8rem', color: '#94a3b8', maxWidth: 180 }}>
+                    {u.customer_name ? (
+                      <span
+                        style={{
+                          display: 'block',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}
+                        title={u.customer_name}
+                      >
+                        {u.customer_name}
+                      </span>
+                    ) : (
+                      <span style={{ color: '#334155', fontStyle: 'italic' }}>—</span>
+                    )}
+                  </td>
+
+                  {/* Status */}
+                  <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
+                    <Badge variant={u.status === 'active' ? 'active' : 'disabled'}>
+                      {u.status}
+                    </Badge>
+                  </td>
+
+                  {/* Last Login */}
+                  <td style={{ padding: '10px 12px', fontSize: '0.75rem', color: '#64748b', whiteSpace: 'nowrap' }}>
+                    {fmtRelativeTime(u.last_login)}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// ─── User Lookup Panel (all-users table + filter bar) ─────────────────────────
+
+interface UserLookupPanelProps {
+  onSelectUser: (userId: number) => void;
+}
+
+function UserLookupPanel({ onSelectUser }: UserLookupPanelProps) {
+  // ALL hooks above any early returns (React #310)
+  const [searchTerm, setSearchTerm] = useState('');
+
+  const { data: users, isLoading, isError, error } = useQuery({
+    queryKey: ['all-users'],
+    queryFn: listUsers,
+    staleTime: 30_000,
+    retry: 1,
+  });
+
+  return (
+    <div
+      style={{
+        background: 'linear-gradient(135deg, rgba(26,29,39,0.95) 0%, rgba(15,17,23,1) 100%)',
+        border: '1px solid rgba(42,47,69,0.6)',
+        borderRadius: 16,
+        padding: '20px 20px',
+        boxShadow: '0 4px 24px rgba(0,0,0,0.25)',
+        position: 'relative',
+        overflow: 'hidden',
+      }}
+    >
+      {/* Top accent */}
+      <div
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 40,
+          right: 40,
+          height: 2,
+          background: 'linear-gradient(90deg, transparent, rgba(168,85,247,0.7), transparent)',
+          opacity: 0.5,
+        }}
+      />
+
+      {/* Section header + search bar row */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 16,
+          marginBottom: 16,
+          flexWrap: 'wrap',
+        }}
+      >
+        {/* Title */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+          <span style={{ color: '#a855f7', display: 'flex', alignItems: 'center' }}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} style={{ width: 15, height: 15 }}>
+              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" strokeLinecap="round" strokeLinejoin="round" />
+              <circle cx="9" cy="7" r="4" />
+              <path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" strokeLinecap="round" />
+            </svg>
+          </span>
+          <h3
+            style={{
+              margin: 0,
+              fontSize: '0.72rem',
+              fontWeight: 700,
+              color: '#64748b',
+              textTransform: 'uppercase',
+              letterSpacing: '0.1em',
+            }}
+          >
+            All Users
+          </h3>
+        </div>
+
+        {/* Filter search input */}
+        <div style={{ position: 'relative', flex: '1 1 240px', minWidth: 200 }}>
+          {/* Search icon */}
+          <span
+            aria-hidden="true"
+            style={{
+              position: 'absolute',
+              left: 12,
+              top: '50%',
+              transform: 'translateY(-50%)',
+              color: '#475569',
+              display: 'flex',
+              alignItems: 'center',
+              pointerEvents: 'none',
+            }}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} style={{ width: 15, height: 15 }}>
+              <circle cx="11" cy="11" r="7" />
+              <path d="m21 21-4.35-4.35" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </span>
+
+          <input
+            type="text"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            placeholder="Filter by name, email, role, customer, status…"
+            style={{
+              width: '100%',
+              boxSizing: 'border-box',
+              padding: '8px 36px 8px 34px',
+              fontSize: '0.82rem',
+              background: 'rgba(255,255,255,0.04)',
+              border: '1px solid rgba(255,255,255,0.08)',
+              borderRadius: 8,
+              color: '#e2e8f0',
+              outline: 'none',
+              fontFamily: 'inherit',
+              transition: 'border-color 0.15s, box-shadow 0.15s',
+            }}
+            onFocus={(e) => {
+              e.currentTarget.style.borderColor = 'rgba(59,130,246,0.5)';
+              e.currentTarget.style.boxShadow = '0 0 0 3px rgba(59,130,246,0.12)';
+            }}
+            onBlur={(e) => {
+              e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)';
+              e.currentTarget.style.boxShadow = 'none';
+            }}
+          />
+
+          {/* Clear button */}
+          {searchTerm.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setSearchTerm('')}
+              title="Clear filter"
+              style={{
+                position: 'absolute',
+                right: 8,
+                top: '50%',
+                transform: 'translateY(-50%)',
+                background: 'transparent',
+                border: 'none',
+                color: '#475569',
+                cursor: 'pointer',
+                padding: 3,
+                borderRadius: 4,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = '#94a3b8'; }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = '#475569'; }}
+            >
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={2} style={{ width: 12, height: 12 }}>
+                <path d="M4 4l8 8M12 4l-8 8" strokeLinecap="round" />
+              </svg>
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Content area */}
+      {isLoading && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            padding: '40px 20px',
+            color: '#64748b',
+            fontSize: '0.875rem',
+            justifyContent: 'center',
+          }}
+        >
+          <Spinner size="md" />
+          <span>Loading users…</span>
+        </div>
+      )}
+
+      {isError && (
+        <div
+          style={{
+            padding: '14px 18px',
+            borderRadius: 10,
+            background: 'rgba(239,68,68,0.06)',
+            border: '1px solid rgba(239,68,68,0.18)',
+            color: '#f87171',
+            fontSize: '0.82rem',
+          }}
+        >
+          <strong style={{ display: 'block', marginBottom: 3 }}>Failed to load users</strong>
+          {error instanceof Error ? error.message : 'Unknown error'}
+        </div>
+      )}
+
+      {!isLoading && !isError && users != null && (
+        <AllUsersTable
+          users={users}
+          searchTerm={searchTerm}
+          onSelectUser={onSelectUser}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─── Page ─────────────────────────────────────────────────────────────────────
+
 export function UserDetailPage() {
+  // ALL hooks must be declared before any early returns (React #310)
   const { userId: userIdParam } = useParams<{ userId: string }>();
   const navigate = useNavigate();
 
-  // ALL hooks must be declared before any early returns (React #310)
   const urlUserId = userIdParam ? parseInt(userIdParam, 10) : null;
   const [selectedUserId, setSelectedUserId] = useState<number | null>(
     urlUserId && !Number.isNaN(urlUserId) ? urlUserId : null,
   );
-  const [selectedCustomerId, setSelectedCustomerId] = useState<number | null>(null);
 
   function handleSelectUser(id: number) {
     setSelectedUserId(id);
     navigate(`/admin/user/${id}`, { replace: true });
   }
 
-  function handleSelectCustomer(id: number | null) {
-    setSelectedCustomerId(id);
-    // Clear the user 360 view when switching customers so the table is shown
+  function handleBackToList() {
     setSelectedUserId(null);
     navigate('/admin/user', { replace: true });
   }
 
-  // Determine which content region to show
-  const showEmptyPrompt   = selectedCustomerId == null && selectedUserId == null;
-  const showCustomerTable = selectedCustomerId != null && selectedUserId == null;
-  const show360View       = selectedUserId != null;
+  const show360View = selectedUserId != null;
 
   return (
     <div style={{ paddingTop: 8 }}>
@@ -2811,7 +2915,7 @@ export function UserDetailPage() {
             margin: '0 0 6px',
           }}
         >
-          User 360 View
+          User Lookup
         </h1>
         <p
           style={{
@@ -2824,161 +2928,45 @@ export function UserDetailPage() {
             marginRight: 'auto',
           }}
         >
-          Select a customer to browse their users, or search directly by name, email, or extension.
+          All platform users. Filter by name, email, role, customer, or status. Click any row for a full 360 view.
         </p>
       </div>
 
-      {/* ── Customer Dropdown ─────────────────────────────────── */}
-      <div style={{ marginBottom: 12 }}>
-        <CustomerDropdown selectedId={selectedCustomerId} onChange={handleSelectCustomer} />
-      </div>
-
-      {/* ── Search Bar ───────────────────────────────────────── */}
-      <div style={{ marginBottom: show360View || showCustomerTable ? 24 : 20 }}>
-        <UserSearchBar
-          onSelect={handleSelectUser}
-          customerId={selectedCustomerId}
-        />
-      </div>
-
-      {/* ── Customer User Table ──────────────────────────────── */}
-      {showCustomerTable && (
-        <div
-          style={{
-            background: 'linear-gradient(135deg, rgba(26,29,39,0.95) 0%, rgba(15,17,23,1) 100%)',
-            border: '1px solid rgba(42,47,69,0.6)',
-            borderRadius: 16,
-            padding: '20px 20px',
-            boxShadow: '0 4px 24px rgba(0,0,0,0.25)',
-            position: 'relative',
-            overflow: 'hidden',
-          }}
-        >
-          {/* Top accent */}
-          <div
-            style={{
-              position: 'absolute',
-              top: 0,
-              left: 40,
-              right: 40,
-              height: 2,
-              background: 'linear-gradient(90deg, transparent, rgba(168,85,247,0.7), transparent)',
-              opacity: 0.5,
-            }}
-          />
-          {/* Section label */}
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              marginBottom: 14,
-            }}
-          >
-            <span style={{ color: '#a855f7', display: 'flex', alignItems: 'center' }}>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} style={{ width: 15, height: 15 }}>
-                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" strokeLinecap="round" strokeLinejoin="round" />
-                <circle cx="9" cy="7" r="4" />
-                <path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" strokeLinecap="round" />
-              </svg>
-            </span>
-            <h3
-              style={{
-                margin: 0,
-                fontSize: '0.72rem',
-                fontWeight: 700,
-                color: '#64748b',
-                textTransform: 'uppercase',
-                letterSpacing: '0.1em',
-              }}
-            >
-              Users in Customer
-            </h3>
-          </div>
-          <CustomerUserTable customerId={selectedCustomerId} onSelectUser={handleSelectUser} />
-        </div>
-      )}
-
-      {/* ── Empty State ───────────────────────────────────────── */}
-      {showEmptyPrompt && (
-        <div
-          style={{
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '64px 16px',
-            gap: 12,
-            textAlign: 'center',
-            background: 'linear-gradient(135deg, rgba(30,33,48,0.4) 0%, rgba(19,21,29,0.5) 100%)',
-            border: '1px solid rgba(42,47,69,0.3)',
-            borderRadius: 16,
-          }}
-        >
-          <div
-            style={{
-              width: 56,
-              height: 56,
-              borderRadius: 16,
-              background: 'rgba(168,85,247,0.06)',
-              border: '1px solid rgba(168,85,247,0.12)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: '#334155',
-            }}
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.4} style={{ width: 26, height: 26 }}>
-              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" strokeLinecap="round" strokeLinejoin="round" />
-              <circle cx="12" cy="7" r="4" />
-            </svg>
-          </div>
-          <div>
-            <p style={{ color: '#64748b', fontSize: '0.9rem', fontWeight: 500, margin: '0 0 4px' }}>
-              Select a customer or search for a user
-            </p>
-            <p style={{ color: '#334155', fontSize: '0.78rem', margin: 0 }}>
-              Choose a customer from the dropdown to browse all their users, or type a name, email, or extension above
-            </p>
-          </div>
-        </div>
+      {/* ── All Users Table (hidden when 360 view is active) ── */}
+      {!show360View && (
+        <UserLookupPanel onSelectUser={handleSelectUser} />
       )}
 
       {/* ── 360 View ─────────────────────────────────────────── */}
       {show360View && (
         <>
-          {/* Back to customer table link when we came from a customer */}
-          {selectedCustomerId != null && (
-            <div style={{ marginBottom: 16 }}>
-              <button
-                type="button"
-                onClick={() => {
-                  setSelectedUserId(null);
-                  navigate('/admin/user', { replace: true });
-                }}
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 6,
-                  background: 'transparent',
-                  border: 'none',
-                  color: '#60a5fa',
-                  fontSize: '0.8rem',
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  padding: '4px 0',
-                  fontFamily: 'inherit',
-                }}
-                onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = '#93c5fd'; }}
-                onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = '#60a5fa'; }}
-              >
-                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={2} style={{ width: 13, height: 13 }}>
-                  <path d="M10 3L5 8l5 5" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-                Back to customer users
-              </button>
-            </div>
-          )}
+          {/* Back button */}
+          <div style={{ marginBottom: 16 }}>
+            <button
+              type="button"
+              onClick={handleBackToList}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                background: 'transparent',
+                border: 'none',
+                color: '#60a5fa',
+                fontSize: '0.8rem',
+                fontWeight: 600,
+                cursor: 'pointer',
+                padding: '4px 0',
+                fontFamily: 'inherit',
+              }}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = '#93c5fd'; }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = '#60a5fa'; }}
+            >
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={2} style={{ width: 13, height: 13 }}>
+                <path d="M10 3L5 8l5 5" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              Back to user list
+            </button>
+          </div>
           <User360View userId={selectedUserId!} />
         </>
       )}

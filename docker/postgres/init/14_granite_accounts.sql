@@ -1,14 +1,14 @@
 -- ==========================================================================
 -- 14_granite_accounts.sql
--- Seed Granite Telephony as the primary RCF customer
--- RCF-V1: No UCaaS, no extensions, no voicemail
+-- Seed Granite Telephony as the primary production customer
+-- Hybrid type: RCF now, all products available as they launch
 -- ==========================================================================
 
 BEGIN;
 
--- Create Granite Telephony as an RCF customer
+-- Create Granite Telephony as a hybrid customer (all products available)
 INSERT INTO customers (name, account_type, balance, credit_limit, status, traffic_grade)
-SELECT 'Granite Telephony', 'rcf', 1000.0000, 500.0000, 'active', 'premium'
+SELECT 'Granite Telephony', 'hybrid', 1000.0000, 500.0000, 'active', 'premium'
 WHERE NOT EXISTS (SELECT 1 FROM customers WHERE name = 'Granite Telephony');
 
 -- Create admin user for Granite
