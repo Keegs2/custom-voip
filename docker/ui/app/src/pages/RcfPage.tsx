@@ -3339,24 +3339,20 @@ function ReleaseModal({ did, onConfirm, onCancel, isPending }: ReleaseModalProps
                 : '0 0 0 rgba(239,68,68,0)',
             }}
           >
-            {/* Progress fill — absolute behind the label */}
+            {/* Progress fill — solid bar that sweeps left to right */}
             <div
               aria-hidden="true"
               style={{
                 position: 'absolute',
-                inset: 0,
+                top: 0,
+                left: 0,
+                bottom: 0,
                 borderRadius: 9,
-                // Horizontal fill from left — amber at 0% to red at 100%
-                background: 'linear-gradient(90deg, rgba(245,158,11,0.38) 0%, rgba(239,68,68,0.52) 100%)',
-                // Leading-edge glow via a pseudo approach using box-shadow isn't
-                // possible on a plain div, so we layer a thin bright stripe at the right edge
-                backgroundSize: `${holdProgress}% 100%`,
-                backgroundRepeat: 'no-repeat',
+                background: `linear-gradient(90deg, rgba(245,158,11,0.55) 0%, rgba(239,68,68,0.7) 100%)`,
                 width: `${holdProgress}%`,
-                transition: holdPhase === 'idle' ? 'width 0.35s cubic-bezier(0.4,0,0.2,1)' : 'width 0.05s linear',
-                // Bright leading-edge glow
+                transition: holdPhase === 'idle' ? 'width 0.35s cubic-bezier(0.4,0,0.2,1)' : 'none',
                 boxShadow: holdProgress > 2 && holdProgress < 100
-                  ? '2px 0 12px 2px rgba(239,68,68,0.45)'
+                  ? '2px 0 16px 3px rgba(239,68,68,0.6), 0 0 24px rgba(245,158,11,0.3)'
                   : 'none',
               }}
             />
