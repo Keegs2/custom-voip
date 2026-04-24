@@ -147,7 +147,7 @@ function makeNlbToSbc(
   };
 }
 
-const PATH_NLB_E1: PathDef  = makeNlbToSbc(0, 1, 'normal',      'nlb-e1');
+const PATH_NLB_E1: PathDef  = makeNlbToSbc(0, 1, 'sbc1-east',   'nlb-e1');
 const PATH_NLB_E2: PathDef  = makeNlbToSbc(0, 2, 'normal',      'nlb-e2');
 const PATH_NLB_C1: PathDef  = makeNlbToSbc(1, 1, 'normal',      'nlb-c1');
 const PATH_NLB_C2: PathDef  = makeNlbToSbc(1, 2, 'sbc2-central','nlb-c2');
@@ -184,13 +184,15 @@ const PATH_SBC1_KS_W: PathDef  = makeSbcToKs(2, 1, 'west-loc',     's1ks-w');
 const PATH_SBC2_KS_W: PathDef  = makeSbcToKs(2, 2, 'west-loc',     's2ks-w');
 
 // Stage 3→4: each location Keystone → each termination trunk (9 paths)
+// Paths originate from the right edge of the Keystone engine node (ksX + 14),
+// since Keystone is the entity that dispatches calls to the termination trunks.
 function makeTermPath(
   locIdx: number,
   termIdx: number,
   group: FailoverGroup,
   id: string,
 ): PathDef {
-  const x1 = COL.locOut - 8;
+  const x1 = COL.ksX + 14;  // right edge of KsNode (S=28, so half = 14)
   const y1 = LOC_Y[locIdx];
   const x2 = COL.termX - 22;
   const y2 = TERM_Y[termIdx];
@@ -279,8 +281,8 @@ const ALL_PACKETS: PacketConfig[] = [
   ...makePackets('in2-nlb', 3, 1.2, 'normal', false, 0.6),
 
   // NLB → SBC-1 and SBC-2 for each location (normal operation)
-  ...makePackets('nlb-e1', 3, 1.6, 'normal',      false, 0.0),
-  ...makePackets('nlb-e2', 3, 1.6, 'normal',      false, 0.8),
+  ...makePackets('nlb-e1', 3, 1.6, 'sbc1-east',   false, 0.0),
+  ...makePackets('nlb-e2', 3, 1.6, 'normal',       false, 0.8),
   ...makePackets('nlb-c1', 3, 1.6, 'normal',      false, 0.3),
   ...makePackets('nlb-c2', 3, 1.6, 'sbc2-central',false, 1.1),
   ...makePackets('nlb-w1', 3, 1.6, 'west-loc',    false, 0.5),
@@ -531,6 +533,7 @@ export function HaArchitectureViz() {
 
       return `.${uid}-p${i} {
   offset-path: path('${path.d}');
+  offset-rotate: auto;
   animation-name: ${animNames};
   animation-duration: ${animDurs};
   animation-delay: ${animDels};
@@ -720,25 +723,32 @@ export function HaArchitectureViz() {
             <stop offset="100%" stopColor="#f59e0b" stopOpacity="0" />
           </radialGradient>
 
-          {/* Packet dot fills */}
-          <radialGradient id={`${uid}-pg`} cx="40%" cy="35%" r="60%">
-            <stop offset="0%"   stopColor="#bfdbfe" stopOpacity="1" />
-            <stop offset="100%" stopColor="#3b82f6"  stopOpacity="0.75" />
-          </radialGradient>
-          <radialGradient id={`${uid}-ptg`} cx="40%" cy="35%" r="60%">
-            <stop offset="0%"   stopColor="#a7f3d0" stopOpacity="1" />
-            <stop offset="100%" stopColor="#10b981"  stopOpacity="0.75" />
-          </radialGradient>
+          {/* Fiber-optic beam gradients — blue for processing paths, green for termination */}
+          <linearGradient id={`${uid}-beam-blue`} x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%"   stopColor="#3b82f6" stopOpacity="0" />
+            <stop offset="30%"  stopColor="#60a5fa" stopOpacity="0.8" />
+            <stop offset="50%"  stopColor="#bfdbfe" stopOpacity="1" />
+            <stop offset="70%"  stopColor="#60a5fa" stopOpacity="0.8" />
+            <stop offset="100%" stopColor="#3b82f6" stopOpacity="0" />
+          </linearGradient>
+          <linearGradient id={`${uid}-beam-green`} x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%"   stopColor="#059669" stopOpacity="0" />
+            <stop offset="30%"  stopColor="#34d399" stopOpacity="0.8" />
+            <stop offset="50%"  stopColor="#a7f3d0" stopOpacity="1" />
+            <stop offset="70%"  stopColor="#34d399" stopOpacity="0.8" />
+            <stop offset="100%" stopColor="#059669" stopOpacity="0" />
+          </linearGradient>
 
           {/* Clip path */}
           <clipPath id={`${uid}-clip`}>
             <rect x="0" y="0" width={VB_W} height={VB_H} />
           </clipPath>
 
-          {/* Packet glow filter */}
-          <filter id={`${uid}-pf`} x="-140%" y="-140%" width="380%" height="380%">
-            <feGaussianBlur in="SourceGraphic" stdDeviation="1.6" result="b" />
+          {/* Beam glow filter — wider and more diffuse than the old dot glow */}
+          <filter id={`${uid}-pf`} x="-200%" y="-400%" width="500%" height="900%">
+            <feGaussianBlur in="SourceGraphic" stdDeviation="2.4" result="b" />
             <feMerge>
+              <feMergeNode in="b" />
               <feMergeNode in="b" />
               <feMergeNode in="SourceGraphic" />
             </feMerge>
@@ -804,15 +814,20 @@ export function HaArchitectureViz() {
           ))}
         </g>
 
-        {/* ── Animated packet dots ──────────────────────────────── */}
+        {/* ── Animated fiber-optic light beams ─────────────────── */}
+        {/* Each rect is 24×3px, centered at origin, oriented along the path
+            via offset-rotate:auto in CSS. The linearGradient fades to
+            transparent at both ends, creating a photon-pulse effect. */}
         <g clipPath={`url(#${uid}-clip)`}>
           {ALL_PACKETS.map((pkt, i) => (
-            <circle
+            <rect
               key={i}
-              r={2.6}
-              cx="0"
-              cy="0"
-              fill={pkt.isTerm ? `url(#${uid}-ptg)` : `url(#${uid}-pg)`}
+              x="-12"
+              y="-1.5"
+              width="24"
+              height="3"
+              rx="1.5"
+              fill={pkt.isTerm ? `url(#${uid}-beam-green)` : `url(#${uid}-beam-blue)`}
               filter={`url(#${uid}-pf)`}
               className={`${uid}-p${i}`}
             />
