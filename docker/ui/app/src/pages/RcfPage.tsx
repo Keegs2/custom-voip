@@ -3095,6 +3095,67 @@ interface ReleaseModalProps {
 }
 
 function ReleaseModal({ did, onConfirm, onCancel, isPending }: ReleaseModalProps) {
+  // ALL hooks unconditionally at top — early return is below (rules-of-hooks)
+  const [holdProgress, setHoldProgress] = useState(0); // 0–100
+  const [holdPhase, setHoldPhase] = useState<'idle' | 'holding' | 'done'>('idle');
+  const rafRef = useRef<number | null>(null);
+  const holdStartRef = useRef<number>(0);
+  const didFireRef = useRef(false);
+
+  // Cancel any in-flight animation and smoothly reset
+  const cancelHold = useCallback(() => {
+    if (rafRef.current !== null) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    }
+    setHoldPhase('idle');
+    setHoldProgress(0);
+    didFireRef.current = false;
+  }, []);
+
+  // Clean up on unmount
+  useEffect(() => () => {
+    if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+  }, []);
+
+  const startHold = useCallback(() => {
+    if (isPending || didFireRef.current) return;
+    holdStartRef.current = performance.now();
+    setHoldPhase('holding');
+
+    const HOLD_MS = 5000;
+
+    const tick = (now: number) => {
+      const elapsed = now - holdStartRef.current;
+      const pct = Math.min((elapsed / HOLD_MS) * 100, 100);
+      setHoldProgress(pct);
+
+      if (pct >= 100 && !didFireRef.current) {
+        didFireRef.current = true;
+        setHoldPhase('done');
+        rafRef.current = null;
+        // Small delay so "Releasing!" text is visible before action fires
+        setTimeout(() => {
+          if (did) onConfirm(did);
+        }, 120);
+        return;
+      }
+
+      rafRef.current = requestAnimationFrame(tick);
+    };
+
+    rafRef.current = requestAnimationFrame(tick);
+  }, [isPending, did, onConfirm]);
+
+  // Derive label from progress
+  const holdLabel = (() => {
+    if (holdPhase === 'done' || isPending) return 'Releasing…';
+    if (holdPhase === 'idle') return 'Hold to Release';
+    if (holdProgress < 20) return 'Hold to Release…';
+    if (holdProgress < 60) return 'Read the warning above…';
+    return 'Releasing…';
+  })();
+
   if (!did) return null;
   return (
     <div
@@ -3207,7 +3268,7 @@ function ReleaseModal({ did, onConfirm, onCancel, isPending }: ReleaseModalProps
           <button
             type="button"
             onClick={onCancel}
-            disabled={isPending}
+            disabled={isPending || holdPhase === 'done'}
             style={{
               padding: '9px 20px',
               borderRadius: 9,
@@ -3216,58 +3277,111 @@ function ReleaseModal({ did, onConfirm, onCancel, isPending }: ReleaseModalProps
               color: '#64748b',
               fontSize: '0.83rem',
               fontWeight: 500,
-              cursor: isPending ? 'not-allowed' : 'pointer',
+              cursor: (isPending || holdPhase === 'done') ? 'not-allowed' : 'pointer',
               fontFamily: 'inherit',
               transition: 'background 0.15s, color 0.15s',
-              opacity: isPending ? 0.5 : 1,
+              opacity: (isPending || holdPhase === 'done') ? 0.5 : 1,
             }}
           >
             Cancel
           </button>
+
+          {/* ── Hold-to-Release button ─────────────────────────── */}
           <button
             type="button"
-            onClick={() => onConfirm(did)}
-            disabled={isPending}
+            disabled={isPending || holdPhase === 'done'}
+            onMouseDown={startHold}
+            onMouseUp={cancelHold}
+            onMouseLeave={cancelHold}
+            onTouchStart={(e) => { e.preventDefault(); startHold(); }}
+            onTouchEnd={(e) => { e.preventDefault(); cancelHold(); }}
+            onKeyDown={(e) => {
+              if ((e.key === 'Enter' || e.key === ' ') && !e.repeat) {
+                e.preventDefault();
+                startHold();
+              }
+            }}
+            onKeyUp={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                cancelHold();
+              }
+            }}
             style={{
+              position: 'relative',
+              overflow: 'hidden',
               padding: '9px 22px',
               borderRadius: 9,
-              border: '1px solid rgba(239,68,68,0.35)',
-              background: isPending
-                ? 'rgba(239,68,68,0.20)'
-                : 'rgba(239,68,68,0.18)',
-              color: isPending ? '#ef4444' : '#f87171',
+              border: holdPhase === 'holding'
+                ? '1px solid rgba(239,68,68,0.55)'
+                : '1px solid rgba(239,68,68,0.28)',
+              background: holdPhase === 'done'
+                ? 'rgba(239,68,68,0.30)'
+                : 'rgba(239,68,68,0.10)',
+              color: holdPhase === 'holding' ? '#fca5a5' : '#f87171',
               fontSize: '0.83rem',
               fontWeight: 700,
-              cursor: isPending ? 'not-allowed' : 'pointer',
+              cursor: (isPending || holdPhase === 'done') ? 'not-allowed' : 'pointer',
               fontFamily: 'inherit',
               display: 'inline-flex',
               alignItems: 'center',
+              justifyContent: 'center',
               gap: 7,
-              transition: 'background 0.15s, color 0.15s, border-color 0.15s',
+              minWidth: 162,
               letterSpacing: '-0.01em',
-            }}
-            onMouseEnter={(e) => {
-              if (!isPending) {
-                (e.currentTarget as HTMLButtonElement).style.background = 'rgba(239,68,68,0.28)';
-                (e.currentTarget as HTMLButtonElement).style.color = '#fca5a5';
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (!isPending) {
-                (e.currentTarget as HTMLButtonElement).style.background = 'rgba(239,68,68,0.18)';
-                (e.currentTarget as HTMLButtonElement).style.color = '#f87171';
-              }
+              userSelect: 'none',
+              WebkitUserSelect: 'none',
+              // Pulse on the border when actively holding
+              animation: holdPhase === 'holding' ? 'releaseButtonPulse 0.9s ease-in-out infinite' : 'none',
+              transition: 'border-color 0.2s, color 0.2s, background 0.2s',
+              boxShadow: holdPhase === 'holding'
+                ? '0 0 12px rgba(239,68,68,0.18), inset 0 0 0 1px rgba(239,68,68,0.06)'
+                : '0 0 0 rgba(239,68,68,0)',
             }}
           >
-            {isPending && (
-              <svg viewBox="0 0 16 16" style={{ width: 12, height: 12, animation: 'spin 0.7s linear infinite' }}>
-                <circle cx="8" cy="8" r="6" fill="none" stroke="rgba(239,68,68,0.4)" strokeWidth={2} />
-                <path d="M8 2a6 6 0 0 1 6 6" stroke="#ef4444" strokeWidth={2} fill="none" strokeLinecap="round" />
-              </svg>
-            )}
-            {isPending ? 'Releasing…' : 'Release Number'}
+            {/* Progress fill — absolute behind the label */}
+            <div
+              aria-hidden="true"
+              style={{
+                position: 'absolute',
+                inset: 0,
+                borderRadius: 9,
+                // Horizontal fill from left — amber at 0% to red at 100%
+                background: 'linear-gradient(90deg, rgba(245,158,11,0.38) 0%, rgba(239,68,68,0.52) 100%)',
+                // Leading-edge glow via a pseudo approach using box-shadow isn't
+                // possible on a plain div, so we layer a thin bright stripe at the right edge
+                backgroundSize: `${holdProgress}% 100%`,
+                backgroundRepeat: 'no-repeat',
+                width: `${holdProgress}%`,
+                transition: holdPhase === 'idle' ? 'width 0.35s cubic-bezier(0.4,0,0.2,1)' : 'width 0.05s linear',
+                // Bright leading-edge glow
+                boxShadow: holdProgress > 2 && holdProgress < 100
+                  ? '2px 0 12px 2px rgba(239,68,68,0.45)'
+                  : 'none',
+              }}
+            />
+
+            {/* Label — rendered above the fill */}
+            <span style={{ position: 'relative', zIndex: 1, display: 'inline-flex', alignItems: 'center', gap: 7 }}>
+              {(isPending || holdPhase === 'done') && (
+                <svg viewBox="0 0 16 16" style={{ width: 12, height: 12, animation: 'spin 0.7s linear infinite', flexShrink: 0 }}>
+                  <circle cx="8" cy="8" r="6" fill="none" stroke="rgba(239,68,68,0.35)" strokeWidth={2} />
+                  <path d="M8 2a6 6 0 0 1 6 6" stroke="#ef4444" strokeWidth={2} fill="none" strokeLinecap="round" />
+                </svg>
+              )}
+              {holdLabel}
+            </span>
           </button>
         </div>
+
+        {/* Keyframe animations injected once via a style tag */}
+        <style>{`
+          @keyframes releaseButtonPulse {
+            0%   { box-shadow: 0 0 0 0 rgba(239,68,68,0.30), inset 0 0 0 1px rgba(239,68,68,0.06); }
+            50%  { box-shadow: 0 0 0 4px rgba(239,68,68,0.08), inset 0 0 0 1px rgba(239,68,68,0.10); }
+            100% { box-shadow: 0 0 0 0 rgba(239,68,68,0.00), inset 0 0 0 1px rgba(239,68,68,0.06); }
+          }
+        `}</style>
       </div>
     </div>
   );
