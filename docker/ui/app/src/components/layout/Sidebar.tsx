@@ -6,7 +6,7 @@ import {
   IconRCF, IconTrunk, IconAPI, IconIVR, IconDocs,
   IconAdmin, IconSignal, IconTroubleshoot,
 } from '../icons/ProductIcons';
-import { Package, Shield, ChevronDown, Phone } from 'lucide-react';
+import { Package, Shield, ChevronDown } from 'lucide-react';
 
 /* ─── Types ───────────────────────────────────────────────── */
 
@@ -443,21 +443,11 @@ export function Sidebar() {
             }}
           />
           <div style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div
-              style={{
-                width: 32,
-                height: 32,
-                borderRadius: 9,
-                background: 'linear-gradient(135deg, #2563eb 0%, #3b82f6 60%, #60a5fa 100%)',
-                boxShadow: '0 0 16px rgba(59, 130, 246, 0.45), 0 2px 8px rgba(0,0,0,0.4)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                flexShrink: 0,
-              }}
-            >
-              <Phone size={18} color="white" />
-            </div>
+            <img
+              src="/keystone_logo.png"
+              alt="Granite Keystone"
+              style={{ height: 34, width: 'auto', flexShrink: 0 }}
+            />
             <div>
               <div
                 style={{
@@ -469,7 +459,7 @@ export function Sidebar() {
                   textShadow: '0 0 28px rgba(59, 130, 246, 0.35)',
                 }}
               >
-                Custom <span style={{ color: '#60a5fa' }}>VoIP</span>
+                Granite <span style={{ color: '#60a5fa' }}>Keystone</span>
               </div>
               <div
                 style={{

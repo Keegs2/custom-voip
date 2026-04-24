@@ -1465,7 +1465,7 @@ export function DocsPage() {
       <PortalHeader
         icon={<IconDocs size={24} />}
         title="API Documentation"
-        subtitle="Integrate with the Custom VoIP platform via REST API"
+        subtitle="Integrate with the Granite Keystone platform via REST API"
         badgeVariant="api"
       />
 

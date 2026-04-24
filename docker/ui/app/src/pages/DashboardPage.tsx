@@ -383,7 +383,7 @@ export function DashboardPage() {
             marginBottom: 12,
           }}
         >
-          <span style={{ color: '#e2e8f0' }}>Custom </span>
+          <span style={{ color: '#e2e8f0' }}>Granite </span>
           <span
             style={{
               backgroundImage: 'linear-gradient(135deg, #3b82f6 0%, #60a5fa 50%, #93c5fd 100%)',
@@ -392,7 +392,7 @@ export function DashboardPage() {
               backgroundClip: 'text',
             }}
           >
-            VoIP
+            Keystone
           </span>
         </h1>
         <p style={{ fontSize: '1.125rem', color: '#718096', fontWeight: 500, letterSpacing: '0.02em' }}>

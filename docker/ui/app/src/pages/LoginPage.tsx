@@ -120,6 +120,11 @@ export function LoginPage() {
             </svg>
           </div>
 
+          <img
+            src="/keystone_logo.png"
+            alt="Granite Keystone"
+            style={{ height: 48, width: 'auto', margin: '0 auto 12px', display: 'block' }}
+          />
           <h1
             style={{
               fontSize: '1.75rem',
@@ -129,7 +134,7 @@ export function LoginPage() {
               margin: '0 0 4px',
             }}
           >
-            <span style={{ color: '#e2e8f0' }}>Custom </span>
+            <span style={{ color: '#e2e8f0' }}>Granite </span>
             <span
               style={{
                 backgroundImage: 'linear-gradient(135deg, #3b82f6 0%, #60a5fa 50%, #93c5fd 100%)',
@@ -138,7 +143,7 @@ export function LoginPage() {
                 backgroundClip: 'text',
               }}
             >
-              VoIP
+              Keystone
             </span>
           </h1>
           <p
@@ -150,7 +155,7 @@ export function LoginPage() {
               color: '#334155',
             }}
           >
-            Voice Platform
+            Enterprise Voice Platform
           </p>
         </div>
 
@@ -315,7 +320,7 @@ export function LoginPage() {
             color: '#1e293b',
           }}
         >
-          Enterprise Voice Platform &middot; v1.0
+          Granite Keystone &middot; v1.0
         </p>
       </div>
     </div>
