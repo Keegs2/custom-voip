@@ -1,13 +1,18 @@
-import { useState, useCallback } from 'react';
+import { useState } from 'react';
 import {
   ChevronDown,
-  Copy,
-  Check,
-  Key,
   Phone,
-  Network,
+  ToggleLeft,
+  UserCheck,
+  PhoneOff,
+  BarChart2,
+  HelpCircle,
+  Info,
+  LogIn,
+  Key,
   Code,
-  Terminal,
+  Database,
+  Server,
 } from 'lucide-react';
 import { PortalHeader } from './RcfPage';
 import { IconDocs } from '../components/icons/ProductIcons';
@@ -24,295 +29,11 @@ const C = {
   textMuted: '#94a3b8',
   textFaint: '#4a5568',
   accent: '#3b82f6',
-  green: '#22c55e',
-  purple: '#a855f7',
   amber: '#f59e0b',
   red: '#ef4444',
-  codeBg: '#0d1117',
-  codeKey: '#79c0ff',
-  codeStr: '#a5d6ff',
-  codeComment: '#6e7681',
-  codeKeyword: '#ff7b72',
-  codeNumber: '#f0883e',
-  codePunct: '#8b949e',
 };
 
-/* ─── Tokenizer ──────────────────────────────────────────── */
-
-type Token = { text: string; color?: string };
-
-function tokenizeLine(line: string): Token[] {
-  const tokens: Token[] = [];
-  let i = 0;
-
-  function push(text: string, color?: string) {
-    if (text) tokens.push({ text, color });
-  }
-
-  while (i < line.length) {
-    const ch = line[i];
-
-    // Comment
-    if ((ch === '#' || (ch === '/' && line[i + 1] === '/')) && tokens.every(t => !t.color || t.color !== C.codeStr)) {
-      push(line.slice(i), C.codeComment);
-      return tokens;
-    }
-
-    // String
-    if (ch === '"' || ch === "'") {
-      let j = i + 1;
-      while (j < line.length && line[j] !== ch) {
-        if (line[j] === '\\') j++;
-        j++;
-      }
-      const str = line.slice(i, j + 1);
-      const after = line.slice(j + 1).trimStart();
-      const isKey = after.startsWith(':');
-      push(str, isKey ? C.codeKey : C.codeStr);
-      i = j + 1;
-      continue;
-    }
-
-    // XML/HTML tag
-    if (ch === '<') {
-      const match = line.slice(i).match(/^<\/?[A-Za-z][^>]*>/);
-      if (match) {
-        push(match[0], C.codeKeyword);
-        i += match[0].length;
-        continue;
-      }
-    }
-
-    // curl flags
-    if (ch === '-' && (i === 0 || line[i - 1] === ' ')) {
-      const match = line.slice(i).match(/^(?:--?[A-Za-z][A-Za-z-]*)/);
-      if (match) {
-        push(match[0], C.codeKeyword);
-        i += match[0].length;
-        continue;
-      }
-    }
-
-    // Numbers (standalone)
-    if (/[0-9]/.test(ch) && (i === 0 || /[\s,:[{(]/.test(line[i - 1]))) {
-      const match = line.slice(i).match(/^[0-9]+\.?[0-9]*/);
-      if (match) {
-        push(match[0], C.codeNumber);
-        i += match[0].length;
-        continue;
-      }
-    }
-
-    // Keywords: true, false, null
-    if (/[a-z]/.test(ch)) {
-      const match = line.slice(i).match(/^(true|false|null|undefined)\b/);
-      if (match) {
-        push(match[0], C.codeNumber);
-        i += match[0].length;
-        continue;
-      }
-    }
-
-    // HTTP methods
-    if (/[A-Z]/.test(ch)) {
-      const match = line.slice(i).match(/^(GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD)\b/);
-      if (match) {
-        push(match[0], '#ff7b72');
-        i += match[0].length;
-        continue;
-      }
-    }
-
-    // Punctuation
-    if ('{}[](),;'.includes(ch)) {
-      push(ch, C.codePunct);
-      i++;
-      continue;
-    }
-
-    push(ch);
-    i++;
-  }
-
-  return tokens;
-}
-
-/* ─── CodeBlock ──────────────────────────────────────────── */
-
-function CodeBlock({ code, label }: { code: string; label?: string }) {
-  const [copied, setCopied] = useState(false);
-
-  const handleCopy = useCallback(() => {
-    void navigator.clipboard.writeText(code);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  }, [code]);
-
-  const lines = code.split('\n');
-
-  return (
-    <div
-      style={{
-        position: 'relative',
-        borderRadius: 10,
-        overflow: 'hidden',
-        border: `1px solid rgba(48,54,82,0.8)`,
-        marginTop: 10,
-        marginBottom: 6,
-      }}
-    >
-      {/* Top bar */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '7px 14px',
-          background: 'rgba(22,27,34,0.95)',
-          borderBottom: `1px solid rgba(48,54,82,0.6)`,
-        }}
-      >
-        <div style={{ display: 'flex', gap: 6 }}>
-          <div style={{ width: 10, height: 10, borderRadius: '50%', background: '#ff5f57' }} />
-          <div style={{ width: 10, height: 10, borderRadius: '50%', background: '#febc2e' }} />
-          <div style={{ width: 10, height: 10, borderRadius: '50%', background: '#28c840' }} />
-        </div>
-        {label && (
-          <span style={{ fontSize: '0.68rem', color: C.codeComment, letterSpacing: '0.04em', fontFamily: 'monospace' }}>
-            {label}
-          </span>
-        )}
-        <button
-          type="button"
-          onClick={handleCopy}
-          title="Copy to clipboard"
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 5,
-            padding: '3px 9px',
-            borderRadius: 5,
-            fontSize: '0.7rem',
-            fontWeight: 600,
-            background: copied ? 'rgba(34,197,94,0.12)' : 'rgba(48,54,82,0.5)',
-            color: copied ? C.green : C.textMuted,
-            border: `1px solid ${copied ? 'rgba(34,197,94,0.25)' : 'rgba(48,54,82,0.8)'}`,
-            cursor: 'pointer',
-            transition: 'all 0.15s',
-            letterSpacing: '0.04em',
-          }}
-        >
-          {copied ? <Check size={11} /> : <Copy size={11} />}
-          {copied ? 'Copied' : 'Copy'}
-        </button>
-      </div>
-
-      <pre
-        style={{
-          margin: 0,
-          padding: '18px 22px',
-          background: C.codeBg,
-          fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace",
-          fontSize: '0.79rem',
-          lineHeight: 1.8,
-          color: '#c9d1d9',
-          overflowX: 'auto',
-          whiteSpace: 'pre',
-        }}
-      >
-        {lines.map((line, li) => {
-          const toks = tokenizeLine(line);
-          return (
-            <span key={li}>
-              {toks.map((t, ti) =>
-                t.color
-                  ? <span key={ti} style={{ color: t.color }}>{t.text}</span>
-                  : <span key={ti}>{t.text}</span>
-              )}
-              {li < lines.length - 1 ? '\n' : ''}
-            </span>
-          );
-        })}
-      </pre>
-    </div>
-  );
-}
-
 /* ─── Shared sub-components ──────────────────────────────── */
-
-function HttpBadge({ method }: { method: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH' }) {
-  const palette: Record<string, { bg: string; fg: string }> = {
-    GET:    { bg: 'rgba(34,197,94,0.1)',   fg: '#4ade80' },
-    POST:   { bg: 'rgba(59,130,246,0.12)', fg: '#60a5fa' },
-    PUT:    { bg: 'rgba(245,158,11,0.12)', fg: '#fbbf24' },
-    DELETE: { bg: 'rgba(239,68,68,0.12)',  fg: '#f87171' },
-    PATCH:  { bg: 'rgba(168,85,247,0.12)', fg: '#c084fc' },
-  };
-  const { bg, fg } = palette[method] ?? palette.GET;
-  return (
-    <span
-      style={{
-        display: 'inline-block',
-        minWidth: 56,
-        padding: '2px 9px',
-        borderRadius: 4,
-        fontSize: '0.67rem',
-        fontWeight: 800,
-        letterSpacing: '0.07em',
-        background: bg,
-        color: fg,
-        fontFamily: 'monospace',
-        textAlign: 'center',
-        flexShrink: 0,
-      }}
-    >
-      {method}
-    </span>
-  );
-}
-
-function Endpoint({
-  method,
-  path,
-  description,
-}: {
-  method: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
-  path: string;
-  description: string;
-}) {
-  return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'flex-start',
-        gap: 12,
-        padding: '12px 16px',
-        borderRadius: 8,
-        background: 'rgba(13,17,23,0.6)',
-        border: `1px solid ${C.borderSubtle}`,
-        marginBottom: 8,
-      }}
-    >
-      <HttpBadge method={method} />
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <code
-          style={{
-            fontSize: '0.81rem',
-            color: '#79c0ff',
-            fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
-            display: 'block',
-            marginBottom: 3,
-          }}
-        >
-          {path}
-        </code>
-        <p style={{ margin: 0, fontSize: '0.82rem', color: C.textMuted, lineHeight: 1.5 }}>
-          {description}
-        </p>
-      </div>
-    </div>
-  );
-}
 
 function P({ children }: { children: React.ReactNode }) {
   return (
@@ -357,198 +78,34 @@ function IC({ children }: { children: React.ReactNode }) {
   );
 }
 
-interface ParamRow {
-  name: string;
-  type: string;
-  required: boolean;
-  description: string;
-}
+/* ─── Callout box ────────────────────────────────────────── */
 
-function ParamTable({ rows }: { rows: ParamRow[] }) {
+function Callout({
+  accent,
+  children,
+}: {
+  accent: string;
+  children: React.ReactNode;
+}) {
   return (
     <div
       style={{
+        display: 'flex',
+        gap: 12,
+        padding: '14px 18px',
         borderRadius: 8,
-        overflow: 'hidden',
-        border: `1px solid ${C.borderSubtle}`,
+        background: `${accent}0a`,
+        border: `1px solid ${accent}25`,
         marginBottom: 16,
+        fontSize: '0.84rem',
+        color: C.textMuted,
+        lineHeight: 1.65,
       }}
     >
-      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' }}>
-        <thead>
-          <tr style={{ background: 'rgba(13,17,23,0.7)' }}>
-            {['Parameter', 'Type', 'Required', 'Description'].map(h => (
-              <th
-                key={h}
-                style={{
-                  padding: '9px 14px',
-                  textAlign: 'left',
-                  color: C.textFaint,
-                  fontWeight: 700,
-                  letterSpacing: '0.06em',
-                  fontSize: '0.67rem',
-                  textTransform: 'uppercase',
-                  borderBottom: `1px solid ${C.borderSubtle}`,
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                {h}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row, i) => (
-            <tr
-              key={i}
-              style={{ background: i % 2 === 0 ? 'transparent' : 'rgba(13,17,23,0.25)' }}
-            >
-              <td style={{ padding: '9px 14px', borderBottom: `1px solid ${C.borderSubtle}`, whiteSpace: 'nowrap' }}>
-                <code style={{ color: '#79c0ff', fontFamily: 'monospace', fontSize: '0.78rem' }}>
-                  {row.name}
-                </code>
-              </td>
-              <td style={{ padding: '9px 14px', borderBottom: `1px solid ${C.borderSubtle}`, whiteSpace: 'nowrap' }}>
-                <span style={{ color: '#f0883e', fontFamily: 'monospace', fontSize: '0.78rem' }}>
-                  {row.type}
-                </span>
-              </td>
-              <td style={{ padding: '9px 14px', borderBottom: `1px solid ${C.borderSubtle}` }}>
-                <span
-                  style={{
-                    fontSize: '0.68rem',
-                    fontWeight: 700,
-                    letterSpacing: '0.05em',
-                    color: row.required ? '#f87171' : C.textFaint,
-                    background: row.required ? 'rgba(239,68,68,0.08)' : 'rgba(74,85,104,0.12)',
-                    padding: '1px 7px',
-                    borderRadius: 4,
-                  }}
-                >
-                  {row.required ? 'required' : 'optional'}
-                </span>
-              </td>
-              <td style={{ padding: '9px 14px', borderBottom: `1px solid ${C.borderSubtle}`, color: C.textMuted, lineHeight: 1.5 }}>
-                {row.description}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-interface TierRow {
-  tier: string;
-  cps: string;
-  perCall: string;
-  monthly: string;
-  highlight?: boolean;
-}
-
-function TierTable({ rows }: { rows: TierRow[] }) {
-  return (
-    <div
-      style={{
-        borderRadius: 8,
-        overflow: 'hidden',
-        border: `1px solid ${C.borderSubtle}`,
-        marginBottom: 16,
-      }}
-    >
-      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' }}>
-        <thead>
-          <tr style={{ background: 'rgba(13,17,23,0.7)' }}>
-            {['Tier', 'Max CPS', 'Per-Call Fee', 'Monthly'].map(h => (
-              <th
-                key={h}
-                style={{
-                  padding: '9px 14px',
-                  textAlign: 'left',
-                  color: C.textFaint,
-                  fontWeight: 700,
-                  letterSpacing: '0.06em',
-                  fontSize: '0.67rem',
-                  textTransform: 'uppercase',
-                  borderBottom: `1px solid ${C.borderSubtle}`,
-                }}
-              >
-                {h}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row, i) => (
-            <tr
-              key={i}
-              style={{
-                background: row.highlight
-                  ? 'rgba(168,85,247,0.06)'
-                  : i % 2 === 0 ? 'transparent' : 'rgba(13,17,23,0.25)',
-              }}
-            >
-              <td style={{ padding: '10px 14px', borderBottom: `1px solid ${C.borderSubtle}` }}>
-                <span
-                  style={{
-                    color: row.highlight ? C.purple : C.text,
-                    fontWeight: row.highlight ? 700 : 400,
-                  }}
-                >
-                  {row.tier}
-                </span>
-                {row.highlight && (
-                  <span
-                    style={{
-                      marginLeft: 8,
-                      fontSize: '0.65rem',
-                      fontWeight: 700,
-                      color: C.purple,
-                      background: 'rgba(168,85,247,0.12)',
-                      padding: '1px 6px',
-                      borderRadius: 4,
-                      letterSpacing: '0.06em',
-                    }}
-                  >
-                    POPULAR
-                  </span>
-                )}
-              </td>
-              <td style={{ padding: '10px 14px', borderBottom: `1px solid ${C.borderSubtle}`, color: C.text, fontFamily: 'monospace' }}>
-                {row.cps}
-              </td>
-              <td style={{ padding: '10px 14px', borderBottom: `1px solid ${C.borderSubtle}`, color: C.textMuted }}>
-                {row.perCall}
-              </td>
-              <td style={{ padding: '10px 14px', borderBottom: `1px solid ${C.borderSubtle}`, color: C.textMuted }}>
-                {row.monthly}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-/* ─── Request/Response pair ──────────────────────────────── */
-
-function ReqRes({ request, response }: { request: string; response: string }) {
-  return (
-    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 4 }}>
-      <div>
-        <div style={{ fontSize: '0.68rem', fontWeight: 700, letterSpacing: '0.08em', color: C.textFaint, textTransform: 'uppercase', marginBottom: 4 }}>
-          Request
-        </div>
-        <CodeBlock code={request} />
+      <div style={{ color: accent, flexShrink: 0, marginTop: 1 }}>
+        <Info size={14} />
       </div>
-      <div>
-        <div style={{ fontSize: '0.68rem', fontWeight: 700, letterSpacing: '0.08em', color: C.textFaint, textTransform: 'uppercase', marginBottom: 4 }}>
-          Response
-        </div>
-        <CodeBlock code={response} />
-      </div>
+      <div>{children}</div>
     </div>
   );
 }
@@ -665,41 +222,36 @@ function AccordionSection({
   );
 }
 
-/* ─── Callout box ────────────────────────────────────────── */
+/* ─── Behavior note card grid ────────────────────────────── */
 
-function Callout({
-  accent,
-  children,
-}: {
-  accent: string;
-  children: React.ReactNode;
-}) {
+function NoteCards({ accent, items }: { accent: string; items: { title: string; body: string }[] }) {
   return (
-    <div
-      style={{
-        display: 'flex',
-        gap: 12,
-        padding: '14px 18px',
-        borderRadius: 8,
-        background: `${accent}0a`,
-        border: `1px solid ${accent}25`,
-        marginBottom: 16,
-        fontSize: '0.84rem',
-        color: C.textMuted,
-        lineHeight: 1.65,
-      }}
-    >
-      <div style={{ color: accent, flexShrink: 0, marginTop: 1 }}>
-        <Terminal size={14} />
-      </div>
-      <div>{children}</div>
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 4 }}>
+      {items.map(({ title, body }) => (
+        <div
+          key={title}
+          style={{
+            padding: '14px 16px',
+            borderRadius: 8,
+            background: `${accent}07`,
+            border: `1px solid ${accent}20`,
+          }}
+        >
+          <div style={{ fontSize: '0.78rem', fontWeight: 700, color: accent, marginBottom: 6 }}>
+            {title}
+          </div>
+          <div style={{ fontSize: '0.81rem', color: C.textMuted, lineHeight: 1.6 }}>
+            {body}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
 
-/* ─── Auth section (always visible) ─────────────────────── */
+/* ─── Getting Started section ────────────────────────────── */
 
-function AuthSection() {
+function GettingStartedSection() {
   return (
     <div
       style={{
@@ -710,7 +262,7 @@ function AuthSection() {
         marginBottom: 28,
       }}
     >
-      {/* Top accent */}
+      {/* Top accent line */}
       <div
         style={{
           height: 2,
@@ -736,7 +288,7 @@ function AuthSection() {
               flexShrink: 0,
             }}
           >
-            <Key size={18} />
+            <LogIn size={18} />
           </div>
           <div>
             <h2
@@ -748,660 +300,110 @@ function AuthSection() {
                 letterSpacing: '-0.01em',
               }}
             >
-              Authentication
+              Getting Started
             </h2>
             <p style={{ margin: 0, fontSize: '0.8rem', color: C.textMuted }}>
-              JWT Bearer token — required on every request
+              Logging in and navigating the Granite Keystone portal
             </p>
           </div>
         </div>
 
-        {/* Base URL + auth method */}
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: '1fr 1fr',
-            gap: 12,
-            marginBottom: 24,
-          }}
-        >
+        <P>
+          The Granite Keystone portal is your self-service hub for managing Remote Call Forwarding (RCF) numbers. Everything you need — number management, call quality monitoring, and troubleshooting tools — is accessible directly from the sidebar.
+        </P>
+
+        <H3>Logging in</H3>
+        <P>
+          Navigate to your portal URL and sign in with the email address and password provided by your Granite account team. If you have forgotten your password, contact your administrator or Granite support to have your credentials reset.
+        </P>
+
+        <H3>What you can do in this portal</H3>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 20 }}>
           {[
-            { label: 'Base URL', value: '/api/v1' },
-            { label: 'Auth Header', value: 'Authorization: Bearer <token>' },
-          ].map(({ label, value }) => (
+            {
+              icon: <Phone size={16} />,
+              title: 'Manage Numbers',
+              body: 'View all your RCF numbers, change forwarding destinations, and enable or disable individual numbers in real time.',
+            },
+            {
+              icon: <BarChart2 size={16} />,
+              title: 'Monitor Call Quality',
+              body: 'Track MOS scores, jitter, and packet loss for your calls. Identify quality issues before they impact your business.',
+            },
+            {
+              icon: <HelpCircle size={16} />,
+              title: 'Troubleshoot Issues',
+              body: 'Access the built-in SIP capture tool (Homer) to inspect call signaling in detail if calls are not connecting as expected.',
+            },
+          ].map(({ icon, title, body }) => (
             <div
-              key={label}
+              key={title}
               style={{
-                padding: '14px 18px',
-                borderRadius: 8,
-                background: 'rgba(13,17,23,0.55)',
-                border: `1px solid ${C.borderSubtle}`,
+                padding: '16px',
+                borderRadius: 10,
+                background: `${C.accent}08`,
+                border: `1px solid ${C.accent}20`,
               }}
             >
-              <div style={{ fontSize: '0.67rem', fontWeight: 700, color: C.textFaint, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 6 }}>
-                {label}
+              <div style={{ color: C.accent, marginBottom: 8 }}>{icon}</div>
+              <div style={{ fontSize: '0.85rem', fontWeight: 700, color: C.text, marginBottom: 6 }}>
+                {title}
               </div>
-              <code style={{ fontFamily: 'monospace', fontSize: '0.82rem', color: '#79c0ff' }}>
-                {value}
-              </code>
+              <div style={{ fontSize: '0.81rem', color: C.textMuted, lineHeight: 1.6 }}>
+                {body}
+              </div>
             </div>
           ))}
         </div>
 
-        <P>
-          All endpoints are protected by JWT authentication. To obtain a token, <IC>POST</IC> your credentials to <IC>/api/v1/auth/login</IC>. The token returned must be included in the <IC>Authorization</IC> header of every subsequent request. Tokens expire after 24 hours.
-        </P>
-
-        <H3>Step 1 — Obtain a token</H3>
-        <ReqRes
-          request={`curl -X POST https://{host}/api/v1/auth/login \\
-  -H "Content-Type: application/json" \\
-  -d '{
-    "username": "your@email.com",
-    "password": "your-password"
-  }'`}
-          response={`{
-  "access_token": "eyJhbGciOiJIUzI1NiIsIn...",
-  "token_type": "bearer",
-  "expires_in": 86400
-}`}
-        />
-
-        <H3>Step 2 — Authenticate requests</H3>
-        <CodeBlock
-          label="All subsequent requests"
-          code={`curl -X GET https://{host}/api/v1/rcf \\
-  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsIn..." \\
-  -H "Content-Type: application/json"`}
-        />
-
         <Callout accent={C.accent}>
-          Store your token securely. Never log it, commit it to version control, or expose it in client-side JavaScript. If compromised, contact your platform administrator to revoke and reissue credentials.
+          All the features described in this guide are accessible from the left sidebar. Use the <strong style={{ color: C.text }}>RCF</strong> page to manage your numbers, <strong style={{ color: C.text }}>Call Quality</strong> to monitor performance, and <strong style={{ color: C.text }}>Troubleshooting</strong> for deep SIP diagnostics.
         </Callout>
       </div>
     </div>
   );
 }
 
-/* ─── Section 1: RCF ─────────────────────────────────────── */
+/* ─── Section: Managing Your Numbers ─────────────────────── */
 
-function RcfSection() {
+function ManagingNumbersSection() {
   return (
     <AccordionSection
-      id="rcf"
-      accent={C.green}
+      id="managing-numbers"
+      accent={C.accent}
       icon={<Phone size={18} />}
-      title="RCF — Remote Call Forwarding"
-      subtitle="Manage phone number forwarding. Create, update, and delete RCF numbers that route incoming calls to any destination."
+      title="Managing Your Numbers"
+      subtitle="View and understand your RCF number inventory — what each column means and how to find the number you need."
       defaultOpen
     >
       <P>
-        RCF numbers are DIDs (Direct Inward Dial numbers) that forward all incoming calls to a configurable destination — another phone number, SIP address, or extension. Use the RCF API to provision numbers, change forwarding targets in real time, set ring timeouts, and configure failover behavior without portal access.
+        The <strong style={{ color: C.text }}>RCF page</strong> (accessible from the sidebar) shows all of your Remote Call Forwarding numbers in one place. Each row represents a single phone number that is configured to forward calls to a destination of your choice.
       </P>
 
-      <Callout accent={C.green}>
-        All phone numbers must be in E.164 format: a leading <IC>+</IC>, country code, then subscriber number. US example: <IC>+15087282017</IC>. Extensions are expressed as short numeric strings (e.g. <IC>1001</IC>).
-      </Callout>
-
-      <H3>Endpoints</H3>
-
-      <Endpoint method="POST"   path="/api/v1/rcf"       description="Create a new RCF number and configure its forwarding destination." />
-      <Endpoint method="GET"    path="/api/v1/rcf"       description="List all RCF numbers. Filter by customer_id or enabled status." />
-      <Endpoint method="GET"    path="/api/v1/rcf/{did}" description="Retrieve a single RCF record by its E.164 DID." />
-      <Endpoint method="PUT"    path="/api/v1/rcf/{did}" description="Update forwarding destination, name, ring timeout, failover, or enabled state." />
-      <Endpoint method="DELETE" path="/api/v1/rcf/{did}" description="Permanently delete an RCF number and stop all forwarding." />
-
-      {/* Create */}
-      <H3>Create RCF — POST /api/v1/rcf</H3>
-      <ParamTable
-        rows={[
-          { name: 'customer_id',    type: 'integer', required: true,  description: 'Your account customer ID.' },
-          { name: 'did',            type: 'string',  required: true,  description: 'The inbound DID in E.164 format (+1XXXXXXXXXX).' },
-          { name: 'forward_to',     type: 'string',  required: true,  description: 'Destination in E.164 format or numeric extension.' },
-          { name: 'name',           type: 'string',  required: false, description: 'Friendly label for this RCF entry.' },
-          { name: 'pass_caller_id', type: 'boolean', required: false, description: 'If true, the original caller\'s number is passed through. If false, the RCF DID is shown as the caller ID. Default: true.' },
-          { name: 'ring_timeout',   type: 'integer', required: false, description: 'Seconds to ring before failing over. Range: 5–120. Default: 30.' },
-          { name: 'failover_to',    type: 'string',  required: false, description: 'If set, calls route here when ring_timeout expires (E.164 or extension).' },
-        ]}
-      />
-
-      <div style={{ fontSize: '0.72rem', fontWeight: 700, letterSpacing: '0.08em', color: C.textFaint, textTransform: 'uppercase', marginBottom: 6 }}>
-        Example — Create RCF number
-      </div>
-      <ReqRes
-        request={`curl -X POST https://{host}/api/v1/rcf \\
-  -H "Authorization: Bearer {token}" \\
-  -H "Content-Type: application/json" \\
-  -d '{
-    "customer_id": 1042,
-    "did": "+15087282017",
-    "forward_to": "+16175550100",
-    "name": "Boston Sales Line",
-    "pass_caller_id": true,
-    "ring_timeout": 25,
-    "failover_to": "+18005550199"
-  }'`}
-        response={`{
-  "id": 8841,
-  "did": "+15087282017",
-  "forward_to": "+16175550100",
-  "name": "Boston Sales Line",
-  "pass_caller_id": true,
-  "ring_timeout": 25,
-  "failover_to": "+18005550199",
-  "enabled": true,
-  "customer_id": 1042,
-  "created_at": "2026-04-10T14:22:01Z"
-}`}
-      />
-
-      {/* List */}
-      <H3>List RCF Numbers — GET /api/v1/rcf</H3>
-      <P>
-        Returns all RCF numbers. Use query parameters to filter results.
-      </P>
-      <ParamTable
-        rows={[
-          { name: 'customer_id', type: 'integer', required: false, description: 'Filter to a specific customer.' },
-          { name: 'enabled',     type: 'boolean', required: false, description: 'Filter by active/inactive status.' },
-        ]}
-      />
-      <CodeBlock
-        label="GET /api/v1/rcf?customer_id=1042"
-        code={`curl -X GET "https://{host}/api/v1/rcf?customer_id=1042&enabled=true" \\
-  -H "Authorization: Bearer {token}"`}
-      />
-
-      {/* Update */}
-      <H3>Update RCF — PUT /api/v1/rcf/{'{did}'}</H3>
-      <P>
-        Change where <IC>+15087282017</IC> forwards to, or adjust any configuration. Only fields included in the request body are updated.
-      </P>
-      <ParamTable
-        rows={[
-          { name: 'forward_to',     type: 'string',  required: false, description: 'New forwarding destination (E.164 or extension).' },
-          { name: 'name',           type: 'string',  required: false, description: 'Updated friendly label.' },
-          { name: 'ring_timeout',   type: 'integer', required: false, description: 'Ring timeout in seconds (5–120).' },
-          { name: 'failover_to',    type: 'string',  required: false, description: 'Updated failover destination.' },
-          { name: 'enabled',        type: 'boolean', required: false, description: 'Enable or disable this RCF number.' },
-          { name: 'pass_caller_id', type: 'boolean', required: false, description: 'Toggle caller ID pass-through.' },
-        ]}
-      />
-
-      <div style={{ fontSize: '0.72rem', fontWeight: 700, letterSpacing: '0.08em', color: C.textFaint, textTransform: 'uppercase', marginBottom: 6 }}>
-        Example — Change where +15087282017 forwards to
-      </div>
-      <ReqRes
-        request={`curl -X PUT https://{host}/api/v1/rcf/%2B15087282017 \\
-  -H "Authorization: Bearer {token}" \\
-  -H "Content-Type: application/json" \\
-  -d '{
-    "forward_to": "+16175559999",
-    "ring_timeout": 40
-  }'`}
-        response={`{
-  "id": 8841,
-  "did": "+15087282017",
-  "forward_to": "+16175559999",
-  "name": "Boston Sales Line",
-  "pass_caller_id": true,
-  "ring_timeout": 40,
-  "failover_to": "+18005550199",
-  "enabled": true,
-  "updated_at": "2026-04-10T16:05:33Z"
-}`}
-      />
-
-      <Callout accent={C.green}>
-        URL-encode the DID when using it as a path parameter. The <IC>+</IC> character must be encoded as <IC>%2B</IC>. Example: <IC>/api/v1/rcf/%2B15087282017</IC>
-      </Callout>
-
-      {/* Behavior notes */}
-      <H3>Behavior Notes</H3>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 4 }}>
-        {[
-          {
-            title: 'Failover',
-            body: 'If ring_timeout expires and failover_to is set, the call is immediately rerouted to that destination. If failover_to is not set, the call goes to the default voicemail treatment.',
-          },
-          {
-            title: 'pass_caller_id',
-            body: 'When true, the original PSTN caller ID is preserved end-to-end. When false, the called party sees the RCF DID as the incoming caller ID — useful for call tracking numbers.',
-          },
-          {
-            title: 'Ring Timeout',
-            body: 'Valid range is 5–120 seconds. Setting below 5 or above 120 returns a 422 validation error. The default is 30 seconds if not specified at creation.',
-          },
-          {
-            title: 'E.164 Format',
-            body: 'All number fields require E.164 format. US numbers: +1 followed by 10 digits. International: + followed by country code and subscriber number. No spaces or dashes.',
-          },
-        ].map(({ title, body }) => (
-          <div
-            key={title}
-            style={{
-              padding: '14px 16px',
-              borderRadius: 8,
-              background: 'rgba(34,197,94,0.04)',
-              border: `1px solid rgba(34,197,94,0.15)`,
-            }}
-          >
-            <div style={{ fontSize: '0.78rem', fontWeight: 700, color: C.green, marginBottom: 6 }}>
-              {title}
-            </div>
-            <div style={{ fontSize: '0.81rem', color: C.textMuted, lineHeight: 1.6 }}>
-              {body}
-            </div>
-          </div>
-        ))}
-      </div>
-    </AccordionSection>
-  );
-}
-
-/* ─── Section 2: SIP Trunking ────────────────────────────── */
-
-function SipTrunkingSection() {
-  return (
-    <AccordionSection
-      id="sip"
-      accent={C.amber}
-      icon={<Network size={18} />}
-      title="SIP Trunking"
-      subtitle="Manage SIP trunks for connecting your PBX to the PSTN. Configure capacity, IP authentication, and DIDs."
-    >
-      <P>
-        SIP trunks provide the gateway between your IP PBX, softswitch, or contact center platform and the public telephone network. Use the Trunks API to provision capacity, authorize your PBX IP addresses, assign DIDs, and monitor real-time utilization — all without a support ticket.
-      </P>
-
-      <Callout accent={C.amber}>
-        Trunk <IC>auth_type</IC> controls how your PBX authenticates inbound registrations: <IC>ip</IC> (source IP whitelist only), <IC>credential</IC> (SIP username/password), or <IC>both</IC> (IP must be whitelisted AND credentials must match).
-      </Callout>
-
-      {/* Core trunk endpoints */}
-      <H3>Trunk Endpoints</H3>
-
-      <Endpoint method="POST" path="/api/v1/trunks"          description="Create a new SIP trunk for a customer." />
-      <Endpoint method="GET"  path="/api/v1/trunks"          description="List all SIP trunks. Filter by customer_id." />
-      <Endpoint method="GET"  path="/api/v1/trunks/{id}"     description="Get full configuration details for a single trunk." />
-      <Endpoint method="PUT"  path="/api/v1/trunks/{id}"     description="Update trunk name, channel capacity, CPS limit, or enabled state." />
-      <Endpoint method="GET"  path="/api/v1/trunks/{id}/stats" description="Real-time trunk statistics: active channels, utilization %, ASR, ACD." />
-
-      <H3>Create Trunk — POST /api/v1/trunks</H3>
-      <ParamTable
-        rows={[
-          { name: 'customer_id', type: 'integer', required: true,  description: 'Customer account this trunk belongs to.' },
-          { name: 'trunk_name',  type: 'string',  required: true,  description: 'Friendly identifier for the trunk (e.g. "HQ PBX - Primary").' },
-          { name: 'max_channels',type: 'integer', required: true,  description: 'Maximum simultaneous calls allowed on this trunk.' },
-          { name: 'cps_limit',   type: 'integer', required: true,  description: 'Max call attempts per second (CPS). Excess attempts receive 503.' },
-          { name: 'auth_type',   type: 'string',  required: true,  description: 'One of: ip | credential | both.' },
-        ]}
-      />
-
-      <div style={{ fontSize: '0.72rem', fontWeight: 700, letterSpacing: '0.08em', color: C.textFaint, textTransform: 'uppercase', marginBottom: 6 }}>
-        Example — Set up a trunk with 100 channels and IP auth
-      </div>
-      <ReqRes
-        request={`curl -X POST https://{host}/api/v1/trunks \\
-  -H "Authorization: Bearer {token}" \\
-  -H "Content-Type: application/json" \\
-  -d '{
-    "customer_id": 1042,
-    "trunk_name": "HQ PBX - Primary",
-    "max_channels": 100,
-    "cps_limit": 10,
-    "auth_type": "ip"
-  }'`}
-        response={`{
-  "id": 221,
-  "trunk_name": "HQ PBX - Primary",
-  "customer_id": 1042,
-  "max_channels": 100,
-  "cps_limit": 10,
-  "auth_type": "ip",
-  "enabled": true,
-  "sip_domain": "hq-pbx.sip.platform.net",
-  "created_at": "2026-04-10T14:30:00Z"
-}`}
-      />
-
-      {/* Real-time stats */}
-      <H3>Real-Time Stats — GET /api/v1/trunks/{'{id}'}/stats</H3>
-      <CodeBlock
-        label="Response"
-        code={`{
-  "trunk_id": 221,
-  "active_channels": 34,
-  "max_channels": 100,
-  "utilization_pct": 34.0,
-  "calls_per_second": 2,
-  "asr_pct": 96.4,
-  "acd_seconds": 187,
-  "as_of": "2026-04-10T16:00:01Z"
-}`}
-      />
-
-      {/* IP Auth */}
-      <H3>IP Authentication</H3>
-      <P>
-        When <IC>auth_type</IC> is <IC>ip</IC> or <IC>both</IC>, only SIP INVITE requests from whitelisted IP addresses are accepted. Add the public IP of your PBX after creating the trunk.
-      </P>
-
-      <Endpoint method="POST"   path="/api/v1/trunks/{id}/ips"          description="Whitelist an IP address for this trunk." />
-      <Endpoint method="GET"    path="/api/v1/trunks/{id}/ips"          description="List all authorized IP addresses." />
-      <Endpoint method="DELETE" path="/api/v1/trunks/{id}/ips/{ip_id}"  description="Remove an IP address from the whitelist." />
-
-      <ParamTable
-        rows={[
-          { name: 'ip_address',  type: 'string', required: true,  description: 'IPv4 or IPv6 address of the PBX (e.g. 203.0.113.10).' },
-          { name: 'description', type: 'string', required: false, description: 'Label for this IP (e.g. "Primary WAN" or "Backup link").' },
-        ]}
-      />
-      <ReqRes
-        request={`curl -X POST https://{host}/api/v1/trunks/221/ips \\
-  -H "Authorization: Bearer {token}" \\
-  -H "Content-Type: application/json" \\
-  -d '{
-    "ip_address": "203.0.113.10",
-    "description": "Primary WAN"
-  }'`}
-        response={`{
-  "id": 55,
-  "trunk_id": 221,
-  "ip_address": "203.0.113.10",
-  "description": "Primary WAN",
-  "created_at": "2026-04-10T14:35:00Z"
-}`}
-      />
-
-      {/* DID Management */}
-      <H3>DID Management</H3>
-      <P>
-        Assign DIDs to a trunk so that inbound calls to those numbers are delivered via that trunk's SIP connection.
-      </P>
-
-      <Endpoint method="POST" path="/api/v1/trunks/{id}/dids" description="Assign a DID to this trunk." />
-      <Endpoint method="GET"  path="/api/v1/trunks/{id}/dids" description="List all DIDs assigned to this trunk." />
-
-      <ReqRes
-        request={`curl -X POST https://{host}/api/v1/trunks/221/dids \\
-  -H "Authorization: Bearer {token}" \\
-  -H "Content-Type: application/json" \\
-  -d '{ "did": "+16175550199" }'`}
-        response={`{
-  "trunk_id": 221,
-  "did": "+16175550199",
-  "assigned_at": "2026-04-10T14:40:00Z"
-}`}
-      />
-
-      {/* Call Path Packages */}
-      <H3>Call Path Packages</H3>
-      <P>
-        Call path packages define the maximum number of concurrent calls (channels) and associated rate card. Browse available packages and assign one to a trunk to change its capacity tier.
-      </P>
-
-      <Endpoint method="GET" path="/api/v1/trunks/call-paths"         description="List all available call path packages and pricing." />
-      <Endpoint method="PUT" path="/api/v1/trunks/{id}/call-paths"    description="Assign a call path package to this trunk." />
-
-      <ParamTable
-        rows={[
-          { name: 'package_id', type: 'integer', required: true, description: 'ID of the call path package to assign (from GET /call-paths).' },
-        ]}
-      />
-
-      {/* Behavior notes */}
-      <H3>Capacity & Rate Limiting</H3>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-        {[
-          {
-            title: 'Channel Capacity',
-            body: 'max_channels is a hard limit. When the trunk is at capacity, new INVITEs are rejected with SIP 503. Use the /stats endpoint to monitor utilization and scale proactively.',
-          },
-          {
-            title: 'CPS Rate Limiting',
-            body: 'cps_limit throttles call attempt bursts. If your PBX sends more than the configured CPS, excess attempts receive SIP 429. Recommended starting point: 1 CPS per 10 channels.',
-          },
-          {
-            title: 'Auth Type: ip',
-            body: 'Only requests from whitelisted IPs are accepted. Best for static PBX installations. No SIP credentials are required or checked.',
-          },
-          {
-            title: 'Auth Type: both',
-            body: 'IP must be whitelisted AND valid SIP credentials must be provided. Most secure — recommended for trunks serving multiple locations.',
-          },
-        ].map(({ title, body }) => (
-          <div
-            key={title}
-            style={{
-              padding: '14px 16px',
-              borderRadius: 8,
-              background: 'rgba(245,158,11,0.04)',
-              border: `1px solid rgba(245,158,11,0.15)`,
-            }}
-          >
-            <div style={{ fontSize: '0.78rem', fontWeight: 700, color: C.amber, marginBottom: 6 }}>
-              {title}
-            </div>
-            <div style={{ fontSize: '0.81rem', color: C.textMuted, lineHeight: 1.6 }}>
-              {body}
-            </div>
-          </div>
-        ))}
-      </div>
-    </AccordionSection>
-  );
-}
-
-/* ─── Section 3: API Calling ─────────────────────────────── */
-
-function ApiCallingSection() {
-  return (
-    <AccordionSection
-      id="api-calling"
-      accent={C.purple}
-      icon={<Code size={18} />}
-      title="API Calling — Programmable Voice"
-      subtitle="Build voice applications with programmable DIDs and call origination. Receive webhooks for inbound calls and initiate outbound calls via API."
-    >
-      <P>
-        Programmable Voice lets you attach a webhook URL to any DID so that every inbound call fetches XML/TwiML instructions from your server — enabling dynamic call routing, IVR menus, recording, conferencing, and more. You can also originate outbound calls programmatically and modify live calls in flight.
-      </P>
-
-      <Callout accent={C.purple}>
-        Your <IC>voice_url</IC> must return valid TwiML XML within 10 seconds. The platform will retry with a <IC>GET</IC> if the initial <IC>POST</IC> fails. If both attempts fail, the call receives a platform error treatment.
-      </Callout>
-
-      {/* DID Management */}
-      <H3>API DID Management</H3>
-      <P>
-        API DIDs are phone numbers with a webhook attached. When a call arrives, your <IC>voice_url</IC> is fetched and the returned TwiML is executed to handle the call.
-      </P>
-
-      <Endpoint method="POST"   path="/api/v1/api-dids"       description="Create an API DID and attach a voice webhook URL." />
-      <Endpoint method="GET"    path="/api/v1/api-dids"       description="List all API DIDs for your account." />
-      <Endpoint method="GET"    path="/api/v1/api-dids/{did}" description="Get configuration for a single API DID." />
-      <Endpoint method="PUT"    path="/api/v1/api-dids/{did}" description="Update voice_url, status_callback, or enabled state." />
-      <Endpoint method="DELETE" path="/api/v1/api-dids/{did}" description="Remove API DID and stop webhook delivery." />
-
-      <H3>Create API DID — POST /api/v1/api-dids</H3>
-      <ParamTable
-        rows={[
-          { name: 'customer_id',      type: 'integer', required: true,  description: 'Customer account this DID belongs to.' },
-          { name: 'did',              type: 'string',  required: true,  description: 'Phone number in E.164 format (+1XXXXXXXXXX).' },
-          { name: 'voice_url',        type: 'string',  required: true,  description: 'HTTPS URL that returns TwiML for inbound call handling.' },
-          { name: 'status_callback',  type: 'string',  required: false, description: 'HTTPS URL to receive call lifecycle status events (ringing, answered, completed, failed).' },
-        ]}
-      />
-
-      <ReqRes
-        request={`curl -X POST https://{host}/api/v1/api-dids \\
-  -H "Authorization: Bearer {token}" \\
-  -H "Content-Type: application/json" \\
-  -d '{
-    "customer_id": 1042,
-    "did": "+16175550300",
-    "voice_url": "https://yourapp.com/voice/inbound",
-    "status_callback": "https://yourapp.com/voice/status"
-  }'`}
-        response={`{
-  "id": 77,
-  "did": "+16175550300",
-  "customer_id": 1042,
-  "voice_url": "https://yourapp.com/voice/inbound",
-  "status_callback": "https://yourapp.com/voice/status",
-  "enabled": true,
-  "created_at": "2026-04-10T15:00:00Z"
-}`}
-      />
-
-      {/* Inbound webhook */}
-      <H3>Inbound Call Webhook</H3>
-      <P>
-        When a call arrives on your API DID, the platform sends a <IC>POST</IC> to your <IC>voice_url</IC> with these parameters. Your server must respond with TwiML.
-      </P>
-
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
-        <div>
-          <div style={{ fontSize: '0.72rem', fontWeight: 700, letterSpacing: '0.08em', color: C.textFaint, textTransform: 'uppercase', marginBottom: 6 }}>
-            Webhook POST body
-          </div>
-          <CodeBlock
-            code={`CallSid=CA123abc...
-From=%2B16175550100
-To=%2B16175550300
-CallStatus=ringing
-Direction=inbound`}
-          />
-        </div>
-        <div>
-          <div style={{ fontSize: '0.72rem', fontWeight: 700, letterSpacing: '0.08em', color: C.textFaint, textTransform: 'uppercase', marginBottom: 6 }}>
-            Your TwiML response
-          </div>
-          <CodeBlock
-            code={`<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-  <Say voice="alice">
-    Welcome. Connecting you now.
-  </Say>
-  <Dial timeout="30">
-    +16175551234
-  </Dial>
-</Response>`}
-          />
-        </div>
-      </div>
-
-      {/* Call Origination */}
-      <H3>Call Origination</H3>
-      <P>
-        Initiate outbound calls programmatically. The platform dials the <IC>to</IC> number, and when answered, fetches your <IC>webhook_url</IC> for call instructions.
-      </P>
-
-      <Endpoint method="POST" path="/api/v1/calls"                   description="Initiate an outbound call." />
-      <Endpoint method="GET"  path="/api/v1/calls/{call_id}"         description="Get current status and metadata for a call." />
-      <Endpoint method="POST" path="/api/v1/calls/{call_id}/update"  description="Modify a live call: hangup, transfer, or hold." />
-
-      <H3>Originate Call — POST /api/v1/calls</H3>
-      <ParamTable
-        rows={[
-          { name: 'from_did',    type: 'string',  required: true,  description: 'Your API DID to call from (E.164). Must be in your account.' },
-          { name: 'to',         type: 'string',  required: true,  description: 'Destination number in E.164 format.' },
-          { name: 'webhook_url', type: 'string',  required: false, description: 'URL to fetch TwiML when the call is answered. Falls back to voice_url on the from_did.' },
-          { name: 'timeout',     type: 'integer', required: false, description: 'Seconds to ring before giving up. Default: 30, max: 120.' },
-          { name: 'caller_id',   type: 'string',  required: false, description: 'Override the caller ID shown to the destination. Must be a verified number in your account.' },
-        ]}
-      />
-
-      <div style={{ fontSize: '0.72rem', fontWeight: 700, letterSpacing: '0.08em', color: C.textFaint, textTransform: 'uppercase', marginBottom: 6 }}>
-        Example — Make an outbound call and get status updates
-      </div>
-      <ReqRes
-        request={`curl -X POST https://{host}/api/v1/calls \\
-  -H "Authorization: Bearer {token}" \\
-  -H "Content-Type: application/json" \\
-  -d '{
-    "from_did": "+16175550300",
-    "to": "+18005551234",
-    "webhook_url": "https://yourapp.com/voice/answered",
-    "timeout": 45,
-    "caller_id": "+16175550300"
-  }'`}
-        response={`{
-  "call_id": "CA7f3d2a1b4e5c6d8f",
-  "status": "queued",
-  "from": "+16175550300",
-  "to": "+18005551234",
-  "direction": "outbound",
-  "created_at": "2026-04-10T16:10:00Z"
-}`}
-      />
-
-      <H3>Get Call Status — GET /api/v1/calls/{'{call_id}'}</H3>
-      <CodeBlock
-        label="Response"
-        code={`{
-  "call_id": "CA7f3d2a1b4e5c6d8f",
-  "status": "in-progress",
-  "from": "+16175550300",
-  "to": "+18005551234",
-  "duration": 47,
-  "direction": "outbound",
-  "answered_at": "2026-04-10T16:10:08Z",
-  "ended_at": null
-}`}
-      />
-
-      <H3>Modify Live Call — POST /api/v1/calls/{'{call_id}'}/update</H3>
-      <ParamTable
-        rows={[
-          { name: 'action', type: 'string', required: true,  description: 'One of: hangup | transfer | hold' },
-          { name: 'target', type: 'string', required: false, description: 'Required for transfer action: E.164 number or SIP URI to transfer to.' },
-        ]}
-      />
-      <ReqRes
-        request={`curl -X POST https://{host}/api/v1/calls/CA7f3d2a1b4e5c6d8f/update \\
-  -H "Authorization: Bearer {token}" \\
-  -H "Content-Type: application/json" \\
-  -d '{
-    "action": "transfer",
-    "target": "+16175559000"
-  }'`}
-        response={`{
-  "call_id": "CA7f3d2a1b4e5c6d8f",
-  "action": "transfer",
-  "target": "+16175559000",
-  "status": "transferring"
-}`}
-      />
-
-      {/* Status callbacks */}
-      <H3>Status Callback Events</H3>
-      <P>
-        When a <IC>status_callback</IC> URL is configured, the platform sends a <IC>POST</IC> for each lifecycle event. Your server must respond with HTTP 200.
-      </P>
+      <H3>Understanding the columns</H3>
 
       <div
         style={{
           borderRadius: 8,
           overflow: 'hidden',
           border: `1px solid ${C.borderSubtle}`,
-          marginBottom: 16,
+          marginBottom: 20,
         }}
       >
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.81rem' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.83rem' }}>
           <thead>
             <tr style={{ background: 'rgba(13,17,23,0.7)' }}>
-              {['Event', 'Description'].map(h => (
+              {['Column', 'What it means'].map(h => (
                 <th
                   key={h}
                   style={{
-                    padding: '9px 14px',
+                    padding: '10px 16px',
                     textAlign: 'left',
                     color: C.textFaint,
                     fontWeight: 700,
+                    letterSpacing: '0.06em',
                     fontSize: '0.67rem',
-                    letterSpacing: '0.08em',
                     textTransform: 'uppercase',
                     borderBottom: `1px solid ${C.borderSubtle}`,
                   }}
@@ -1413,21 +415,37 @@ Direction=inbound`}
           </thead>
           <tbody>
             {[
-              { event: 'queued',      desc: 'Call has been accepted and is waiting to be dialed.' },
-              { event: 'ringing',     desc: 'The destination is ringing.' },
-              { event: 'answered',    desc: 'The call was answered. Webhook fetched for call instructions.' },
-              { event: 'completed',   desc: 'Call ended normally. duration field is populated.' },
-              { event: 'no-answer',   desc: 'Destination rang until timeout without being answered.' },
-              { event: 'busy',        desc: 'Destination returned a busy signal (SIP 486).' },
-              { event: 'failed',      desc: 'Call could not be completed due to a platform or network error.' },
+              {
+                col: 'DID',
+                desc: 'Your inbound phone number — the number callers dial to reach you. Shown in E.164 format (e.g. +17745551234).',
+              },
+              {
+                col: 'Name',
+                desc: 'A friendly label you assign to help identify the number. For example: "Main Office Line" or "Boston Sales". This label is for your reference only.',
+              },
+              {
+                col: 'Forward To',
+                desc: 'The destination where calls to this DID are sent. This is the number or extension that actually rings when someone calls your DID.',
+              },
+              {
+                col: 'Status',
+                desc: 'Whether this number is currently forwarding calls. Green (enabled) means calls are being forwarded. Grey (disabled) means calls are not being forwarded.',
+              },
+              {
+                col: 'Pass Caller ID',
+                desc: 'Whether the original caller\'s number is passed through to the forwarding destination. See the Caller ID Settings section below for a full explanation.',
+              },
             ].map((row, i) => (
-              <tr key={row.event} style={{ background: i % 2 === 0 ? 'transparent' : 'rgba(13,17,23,0.25)' }}>
-                <td style={{ padding: '9px 14px', borderBottom: `1px solid ${C.borderSubtle}` }}>
-                  <code style={{ color: '#c084fc', fontFamily: 'monospace', fontSize: '0.78rem' }}>
-                    {row.event}
+              <tr
+                key={row.col}
+                style={{ background: i % 2 === 0 ? 'transparent' : 'rgba(13,17,23,0.25)' }}
+              >
+                <td style={{ padding: '10px 16px', borderBottom: `1px solid ${C.borderSubtle}`, whiteSpace: 'nowrap' }}>
+                  <code style={{ color: '#79c0ff', fontFamily: 'monospace', fontSize: '0.82rem', fontWeight: 700 }}>
+                    {row.col}
                   </code>
                 </td>
-                <td style={{ padding: '9px 14px', borderBottom: `1px solid ${C.borderSubtle}`, color: C.textMuted }}>
+                <td style={{ padding: '10px 16px', borderBottom: `1px solid ${C.borderSubtle}`, color: C.textMuted, lineHeight: 1.6 }}>
                   {row.desc}
                 </td>
               </tr>
@@ -1436,23 +454,1410 @@ Direction=inbound`}
         </table>
       </div>
 
-      {/* CPS Tiers */}
-      <H3>CPS Tiers</H3>
+      <H3>Searching and filtering</H3>
       <P>
-        Outbound call origination is rate-limited by your CPS tier. If you exceed your tier's CPS limit, the API returns <IC>429 Too Many Requests</IC>. Upgrade your tier to support higher origination volume.
+        Use the search bar at the top of the RCF page to filter numbers by DID, name, or forwarding destination. This is useful when you manage a large number of lines and need to locate a specific one quickly.
       </P>
 
-      <TierTable
-        rows={[
-          { tier: 'Basic',    cps: '5',  perCall: '$0.010', monthly: 'Included' },
-          { tier: 'Standard', cps: '8',  perCall: '$0.008', monthly: '$299',    highlight: true },
-          { tier: 'Premium',  cps: '15', perCall: '$0.005', monthly: '$799' },
+      <Callout accent={C.accent}>
+        Phone numbers in this portal use <strong style={{ color: C.text }}>E.164 format</strong> — the international standard for phone numbers. This means a leading plus sign followed by the country code and subscriber number with no spaces or dashes. For US numbers: <IC>+17745551234</IC>.
+      </Callout>
+    </AccordionSection>
+  );
+}
+
+/* ─── Section: Changing a Forwarding Destination ─────────── */
+
+function ForwardingSection() {
+  return (
+    <AccordionSection
+      id="forwarding"
+      accent={C.accent}
+      icon={<Phone size={18} />}
+      title="Changing a Forwarding Destination"
+      subtitle="How to update where calls to your RCF number are sent — changes take effect within seconds."
+    >
+      <P>
+        You can change where any of your numbers forwards to directly from the RCF page. No support tickets required — changes take effect within seconds.
+      </P>
+
+      <H3>Step-by-step</H3>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 20 }}>
+        {[
+          {
+            step: '1',
+            title: 'Find your number',
+            body: 'Locate the DID you want to update in the RCF page. Use the search bar to filter if you have many numbers.',
+          },
+          {
+            step: '2',
+            title: 'Click the pencil icon',
+            body: 'In the Forward To column, click the pencil (edit) icon that appears when you hover over the row. The field will become an editable text input.',
+          },
+          {
+            step: '3',
+            title: 'Enter the new destination',
+            body: 'Type the full phone number including country code. For US numbers, include +1 followed by the 10-digit number. Example: +17745551234. Do not include spaces or dashes.',
+          },
+          {
+            step: '4',
+            title: 'Save the change',
+            body: 'Click Save (or press Enter). The new destination is applied immediately. Test the change by placing a call to your DID.',
+          },
+        ].map(({ step, title, body }) => (
+          <div
+            key={step}
+            style={{
+              display: 'flex',
+              gap: 16,
+              padding: '16px 18px',
+              borderRadius: 10,
+              background: 'rgba(13,17,23,0.45)',
+              border: `1px solid ${C.borderSubtle}`,
+            }}
+          >
+            <div
+              style={{
+                width: 28,
+                height: 28,
+                borderRadius: '50%',
+                background: `${C.accent}18`,
+                border: `1px solid ${C.accent}35`,
+                color: C.accent,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '0.78rem',
+                fontWeight: 800,
+                flexShrink: 0,
+                fontFamily: 'monospace',
+              }}
+            >
+              {step}
+            </div>
+            <div>
+              <div style={{ fontSize: '0.86rem', fontWeight: 700, color: C.text, marginBottom: 4 }}>
+                {title}
+              </div>
+              <div style={{ fontSize: '0.82rem', color: C.textMuted, lineHeight: 1.65 }}>
+                {body}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <Callout accent={C.accent}>
+        <strong style={{ color: C.text }}>Phone number format:</strong> Always enter the full number including country code, starting with a <IC>+</IC>. For US numbers: <IC>+1</IC> followed by area code and number. Example: <IC>+17745551234</IC>. If you omit the country code, the system may reject the number or route it incorrectly.
+      </Callout>
+
+      <H3>What happens after you save</H3>
+      <P>
+        The platform updates the forwarding configuration in real time. Within a few seconds, all new calls to your DID will be directed to the new destination. Calls already in progress are not affected — only new calls placed after the save will use the new forwarding target.
+      </P>
+    </AccordionSection>
+  );
+}
+
+/* ─── Section: Enabling and Disabling Numbers ────────────── */
+
+function EnableDisableSection() {
+  return (
+    <AccordionSection
+      id="enable-disable"
+      accent={C.accent}
+      icon={<ToggleLeft size={18} />}
+      title="Enabling and Disabling Numbers"
+      subtitle="Temporarily suspend or reactivate forwarding on any number with a single toggle — no waiting, no tickets."
+    >
+      <P>
+        Every RCF number has an enabled/disabled toggle on its row. This is the fastest way to temporarily take a number out of service without deleting it or changing its forwarding configuration.
+      </P>
+
+      <NoteCards
+        accent={C.accent}
+        items={[
+          {
+            title: 'When a number is enabled',
+            body: 'Calls arriving at that DID are forwarded normally to the configured destination. The toggle indicator is lit (active).',
+          },
+          {
+            title: 'When a number is disabled',
+            body: 'Calls to that DID are not forwarded. Callers typically receive a busy signal or a network announcement depending on your carrier treatment.',
+          },
+          {
+            title: 'Re-enabling is instant',
+            body: 'Turning a number back on takes effect within seconds. The forwarding destination and all other settings are preserved exactly as you left them.',
+          },
+          {
+            title: 'Common use cases',
+            body: 'Disable during scheduled maintenance windows, office closures, or when troubleshooting an issue. No configuration is lost when a number is disabled.',
+          },
         ]}
       />
 
-      <Callout accent={C.purple}>
-        Receiving a <IC>429</IC> response means you have hit your CPS ceiling for that second. Implement exponential backoff with jitter — wait 1s, 2s, 4s between retries. To permanently increase throughput, contact your account manager to upgrade your CPS tier.
+      <Callout accent={C.accent}>
+        Disabling a number does <strong style={{ color: C.text }}>not</strong> delete it. All settings — forwarding destination, ring timeout, failover, and caller ID — are preserved and will resume exactly as configured when you re-enable it.
       </Callout>
+    </AccordionSection>
+  );
+}
+
+/* ─── Section: Caller ID Settings ───────────────────────── */
+
+function CallerIdSection() {
+  return (
+    <AccordionSection
+      id="caller-id"
+      accent={C.accent}
+      icon={<UserCheck size={18} />}
+      title="Caller ID Settings"
+      subtitle="Control what phone number appears on the destination's screen when a forwarded call arrives."
+    >
+      <P>
+        When a call is forwarded through your RCF number, you can choose what the person at the destination sees as the incoming caller ID. This is configured per number using the <strong style={{ color: C.text }}>Pass Caller ID</strong> toggle.
+      </P>
+
+      <H3>Pass Caller ID — on vs off</H3>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 20 }}>
+        <div
+          style={{
+            padding: '18px',
+            borderRadius: 10,
+            background: `${C.accent}08`,
+            border: `1px solid ${C.accent}25`,
+          }}
+        >
+          <div style={{ fontSize: '0.8rem', fontWeight: 700, color: C.accent, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <UserCheck size={14} />
+            Pass Caller ID: ON
+          </div>
+          <div style={{ fontSize: '0.83rem', color: C.textMuted, lineHeight: 1.65 }}>
+            The destination phone sees the <strong style={{ color: C.text }}>original caller's number</strong>. If a customer calls your main line from (774) 555-1234, the person at your forwarding destination sees (774) 555-1234.
+          </div>
+          <div style={{ marginTop: 10, fontSize: '0.78rem', color: C.textFaint }}>
+            Best for: most general forwarding scenarios where you want transparency about who is calling.
+          </div>
+        </div>
+
+        <div
+          style={{
+            padding: '18px',
+            borderRadius: 10,
+            background: 'rgba(13,17,23,0.45)',
+            border: `1px solid ${C.borderSubtle}`,
+          }}
+        >
+          <div style={{ fontSize: '0.8rem', fontWeight: 700, color: C.textMuted, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <PhoneOff size={14} />
+            Pass Caller ID: OFF
+          </div>
+          <div style={{ fontSize: '0.83rem', color: C.textMuted, lineHeight: 1.65 }}>
+            The destination phone sees <strong style={{ color: C.text }}>your RCF DID number</strong> as the caller ID. The original caller's number is masked. Useful when you want the destination to know which line was called.
+          </div>
+          <div style={{ marginTop: 10, fontSize: '0.78rem', color: C.textFaint }}>
+            Best for: call tracking numbers, marketing campaigns, or when your agents need to see which DID was dialed.
+          </div>
+        </div>
+      </div>
+
+      <Callout accent={C.accent}>
+        Caller ID pass-through is configured per number. You can have some numbers pass through the original caller ID and others display the RCF DID — it depends on your workflow and how your team handles incoming calls.
+      </Callout>
+    </AccordionSection>
+  );
+}
+
+/* ─── Section: Ring Timeout and Failover ─────────────────── */
+
+function FailoverSection() {
+  return (
+    <AccordionSection
+      id="failover"
+      accent={C.accent}
+      icon={<PhoneOff size={18} />}
+      title="Ring Timeout and Failover"
+      subtitle="Configure how long calls ring before giving up, and where they go if nobody answers."
+    >
+      <P>
+        Two settings work together to make sure calls are never silently dropped: <strong style={{ color: C.text }}>Ring Timeout</strong> and <strong style={{ color: C.text }}>Failover To</strong>. Understanding how these work together helps ensure every caller reaches someone.
+      </P>
+
+      <H3>Ring Timeout</H3>
+      <P>
+        The ring timeout is how long the forwarded call rings at the destination before the platform gives up. The default is 30 seconds. You can configure this anywhere from 5 to 120 seconds.
+      </P>
+      <P>
+        If your primary destination often takes time to answer — for example, a mobile number that always goes to voicemail after a delay — you may want to shorten the timeout so callers are transferred to your failover faster.
+      </P>
+
+      <H3>Failover Destination</H3>
+      <P>
+        The failover destination is a backup phone number that receives the call if the primary forwarding destination does not answer within the ring timeout.
+      </P>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 0, marginBottom: 20 }}>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 12,
+            padding: '14px 18px',
+            background: 'rgba(13,17,23,0.55)',
+            borderTopLeftRadius: 8,
+            borderTopRightRadius: 8,
+            border: `1px solid ${C.borderSubtle}`,
+            borderBottom: 'none',
+          }}
+        >
+          <div style={{ width: 8, height: 8, borderRadius: '50%', background: C.accent, flexShrink: 0 }} />
+          <div style={{ fontSize: '0.83rem', color: C.textMuted, lineHeight: 1.6 }}>
+            Caller dials your DID. The platform immediately forwards to your primary destination.
+          </div>
+        </div>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 12,
+            padding: '14px 18px',
+            background: 'rgba(13,17,23,0.45)',
+            border: `1px solid ${C.borderSubtle}`,
+            borderBottom: 'none',
+          }}
+        >
+          <div style={{ width: 8, height: 8, borderRadius: '50%', background: C.textFaint, flexShrink: 0 }} />
+          <div style={{ fontSize: '0.83rem', color: C.textMuted, lineHeight: 1.6 }}>
+            If the primary destination does not answer within the ring timeout (e.g. 30 seconds), the call is redirected.
+          </div>
+        </div>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 12,
+            padding: '14px 18px',
+            background: 'rgba(13,17,23,0.35)',
+            borderBottomLeftRadius: 8,
+            borderBottomRightRadius: 8,
+            border: `1px solid ${C.borderSubtle}`,
+          }}
+        >
+          <div style={{ width: 8, height: 8, borderRadius: '50%', background: C.accent, flexShrink: 0, opacity: 0.5 }} />
+          <div style={{ fontSize: '0.83rem', color: C.textMuted, lineHeight: 1.6 }}>
+            The call rings the failover destination. If no failover is set, the caller receives a standard busy or no-answer treatment.
+          </div>
+        </div>
+      </div>
+
+      <Callout accent={C.accent}>
+        Setting a failover destination is strongly recommended for any business-critical number. It ensures no call goes unanswered simply because one person or location is unavailable. Common failover destinations include a mobile number, a colleague's extension, or a general reception line.
+      </Callout>
+
+      <NoteCards
+        accent={C.accent}
+        items={[
+          {
+            title: 'No failover configured',
+            body: 'When ring timeout expires and no failover is set, the caller receives the default platform treatment — typically a busy signal or a carrier-level no-answer announcement.',
+          },
+          {
+            title: 'Failover configured',
+            body: 'When ring timeout expires, the platform immediately dials the failover number. The caller experiences a seamless redirect with no re-dialing required on their part.',
+          },
+          {
+            title: 'Ring timeout range',
+            body: 'Valid values are 5 to 120 seconds. The default is 30 seconds. Setting it too short may redirect calls before the destination has time to answer.',
+          },
+          {
+            title: 'Failover number format',
+            body: 'The failover destination must be a valid phone number in E.164 format, just like the primary forwarding destination. Example: +18005551234.',
+          },
+        ]}
+      />
+    </AccordionSection>
+  );
+}
+
+/* ─── Section: Call Quality Monitoring ──────────────────── */
+
+function CallQualitySection() {
+  return (
+    <AccordionSection
+      id="call-quality"
+      accent={C.accent}
+      icon={<BarChart2 size={18} />}
+      title="Call Quality Monitoring"
+      subtitle="Understand your call quality metrics — what MOS, jitter, and packet loss mean and how to read them."
+    >
+      <P>
+        The <strong style={{ color: C.text }}>Call Quality</strong> page (accessible from the sidebar) gives you a real-time and historical view of the quality of calls flowing through your RCF numbers. You can use this to spot trends, investigate complaints, and verify that a quality issue has been resolved.
+      </P>
+
+      <H3>Key metrics explained</H3>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 20 }}>
+        {[
+          {
+            metric: 'MOS Score',
+            range: '1 – 5 scale',
+            color: C.accent,
+            what: 'Mean Opinion Score — the standard measure of perceived audio quality on a voice call. Think of it as a school grade: 5 is perfect, 4 is excellent, 3 is acceptable but noticeable degradation, below 3 is poor.',
+            good: '4.0 or above is considered excellent. Most well-configured RCF calls score between 4.0 and 4.5.',
+          },
+          {
+            metric: 'Jitter',
+            range: 'milliseconds (ms)',
+            color: C.accent,
+            what: 'Jitter measures how much the timing of audio packets varies as they travel across the network. High jitter causes the audio to sound choppy, robotic, or broken up.',
+            good: 'Below 20ms is good. Above 50ms will typically cause audible audio issues.',
+          },
+          {
+            metric: 'Packet Loss',
+            range: 'percentage (%)',
+            color: C.accent,
+            what: 'The percentage of audio packets that did not arrive at their destination. Even small amounts of packet loss can cause noticeable audio dropouts, clicks, or missing words.',
+            good: 'Below 1% is acceptable. Above 3% will typically cause significant audio degradation.',
+          },
+          {
+            metric: 'R-Factor',
+            range: '0 – 100 scale',
+            color: C.accent,
+            what: 'The R-Factor (also called E-Model score) is a composite quality score that accounts for delay, jitter, packet loss, and codec quality. It maps closely to MOS.',
+            good: 'Above 80 is considered good. Above 90 is excellent. Below 70 indicates a noticeable quality problem.',
+          },
+        ].map(({ metric, range, what, good }) => (
+          <div
+            key={metric}
+            style={{
+              padding: '16px 18px',
+              borderRadius: 10,
+              background: 'rgba(13,17,23,0.45)',
+              border: `1px solid ${C.borderSubtle}`,
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
+              <div style={{ fontSize: '0.88rem', fontWeight: 700, color: C.text }}>
+                {metric}
+              </div>
+              <div style={{ fontSize: '0.72rem', color: C.textFaint, fontFamily: 'monospace' }}>
+                {range}
+              </div>
+            </div>
+            <div style={{ fontSize: '0.82rem', color: C.textMuted, lineHeight: 1.65, marginBottom: 8 }}>
+              {what}
+            </div>
+            <div style={{ fontSize: '0.79rem', color: C.accent, lineHeight: 1.5 }}>
+              Target: {good}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <Callout accent={C.accent}>
+        If you are seeing consistently low MOS scores or high packet loss on calls through a specific RCF number, the issue is most likely network-related between your forwarding destination and the carrier. Check with your network team or contact Granite support — the Call Quality page shows the data needed to diagnose it quickly.
+      </Callout>
+    </AccordionSection>
+  );
+}
+
+/* ─── Section: Troubleshooting ───────────────────────────── */
+
+function TroubleshootingSection() {
+  return (
+    <AccordionSection
+      id="troubleshooting"
+      accent={C.accent}
+      icon={<HelpCircle size={18} />}
+      title="Troubleshooting"
+      subtitle="Step-by-step guidance for the most common RCF issues, plus where to go for deeper diagnostics."
+    >
+      <P>
+        Most issues with RCF numbers fall into a small number of categories. Start with the checklist below before escalating to support — many problems can be resolved in seconds directly from the portal.
+      </P>
+
+      <H3>Calls are not forwarding</H3>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 20 }}>
+        {[
+          {
+            check: 'Is the number enabled?',
+            action: 'Open the RCF page and confirm the toggle for that DID is active (lit). If it is disabled, enable it — forwarding will resume immediately.',
+          },
+          {
+            check: 'Is the forwarding destination correct?',
+            action: 'Check the Forward To column for that number. Confirm the number is in E.164 format with no typos. Click the pencil icon to correct it if needed.',
+          },
+          {
+            check: 'Is the destination reachable?',
+            action: 'Try calling the forwarding destination number directly from another phone. If that number is not reachable, the issue is at the destination — not with your RCF configuration.',
+          },
+        ].map(({ check, action }, i) => (
+          <div
+            key={i}
+            style={{
+              padding: '14px 16px',
+              borderRadius: 8,
+              background: 'rgba(13,17,23,0.45)',
+              border: `1px solid ${C.borderSubtle}`,
+            }}
+          >
+            <div style={{ fontSize: '0.83rem', fontWeight: 700, color: C.text, marginBottom: 4 }}>
+              {check}
+            </div>
+            <div style={{ fontSize: '0.81rem', color: C.textMuted, lineHeight: 1.6 }}>
+              {action}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <H3>One-way audio on calls</H3>
+      <P>
+        One-way audio (where one party can hear the other but not vice versa) is almost always a network or firewall issue, not a configuration issue in the portal. Here is how to diagnose it:
+      </P>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 20 }}>
+        {[
+          {
+            check: 'Check Call Quality metrics',
+            action: 'Open the Call Quality page and look at packet loss and jitter for recent calls on that number. High packet loss in one direction strongly indicates a firewall or NAT issue between your network and the carrier.',
+          },
+          {
+            check: 'Check for SIP signaling issues',
+            action: 'Open the Troubleshooting page (Homer SIP capture) to inspect the SIP dialog for the affected call. Look for mismatched SDP media addresses or missing RTP streams.',
+          },
+        ].map(({ check, action }, i) => (
+          <div
+            key={i}
+            style={{
+              padding: '14px 16px',
+              borderRadius: 8,
+              background: 'rgba(13,17,23,0.45)',
+              border: `1px solid ${C.borderSubtle}`,
+            }}
+          >
+            <div style={{ fontSize: '0.83rem', fontWeight: 700, color: C.text, marginBottom: 4 }}>
+              {check}
+            </div>
+            <div style={{ fontSize: '0.81rem', color: C.textMuted, lineHeight: 1.6 }}>
+              {action}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <H3>Using the Troubleshooting page (Homer)</H3>
+      <P>
+        The <strong style={{ color: C.text }}>Troubleshooting</strong> page in the sidebar opens the Homer SIP capture tool. Homer provides packet-level visibility into every SIP message exchanged during a call. It is intended for advanced users or network engineers investigating signaling-level issues such as:
+      </P>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 20 }}>
+        {[
+          'Calls connecting but immediately dropping',
+          'Registration failures',
+          'Calls not being delivered to the correct destination',
+          'Codec negotiation issues causing audio problems',
+          'Unusual SIP error codes (e.g. 503, 487, 486)',
+          'Latency or delay troubleshooting at the SIP layer',
+        ].map((item, i) => (
+          <div
+            key={i}
+            style={{
+              padding: '10px 14px',
+              borderRadius: 7,
+              background: 'rgba(13,17,23,0.45)',
+              border: `1px solid ${C.borderSubtle}`,
+              fontSize: '0.81rem',
+              color: C.textMuted,
+              lineHeight: 1.5,
+            }}
+          >
+            {item}
+          </div>
+        ))}
+      </div>
+
+      <NoteCards
+        accent={C.amber}
+        items={[
+          {
+            title: 'Still not working?',
+            body: 'If you have checked the above and calls are still not forwarding correctly, contact Granite support. Include the affected DID, the approximate time of the failed call, and any error information you can see in the Call Quality or Troubleshooting pages.',
+          },
+          {
+            title: 'Tip: note the timestamps',
+            body: 'When reporting an issue to support, note the exact time (with timezone) of a failed call. This lets the Granite team locate the call record and SIP trace quickly, which dramatically speeds up resolution.',
+          },
+        ]}
+      />
+    </AccordionSection>
+  );
+}
+
+/* ─── API Reference: shared sub-components ──────────────── */
+
+/** Syntax-highlighted code block with blue accent palette. */
+function CodeBlock({ code, label }: { code: string; label?: string }) {
+  const [copied, setCopied] = useState(false);
+
+  function handleCopy() {
+    void navigator.clipboard.writeText(code).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    });
+  }
+
+  // Tokenise for blue-accent syntax colouring:
+  // strings → #93c5fd (light blue), keys/paths → #60a5fa, booleans/numbers → #818cf8, comments → #475569
+  const lines = code.split('\n');
+
+  return (
+    <div
+      style={{
+        borderRadius: 10,
+        overflow: 'hidden',
+        border: `1px solid rgba(59,130,246,0.2)`,
+        marginBottom: 16,
+      }}
+    >
+      {/* Top bar */}
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          padding: '8px 16px',
+          background: 'rgba(59,130,246,0.06)',
+          borderBottom: '1px solid rgba(59,130,246,0.15)',
+        }}
+      >
+        <span
+          style={{
+            fontSize: '0.7rem',
+            fontWeight: 700,
+            letterSpacing: '0.08em',
+            textTransform: 'uppercase',
+            color: '#60a5fa',
+            fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
+          }}
+        >
+          {label ?? 'code'}
+        </span>
+        <button
+          type="button"
+          onClick={handleCopy}
+          style={{
+            background: 'none',
+            border: 'none',
+            cursor: 'pointer',
+            fontSize: '0.7rem',
+            color: copied ? '#4ade80' : '#475569',
+            fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
+            padding: '2px 6px',
+            borderRadius: 4,
+            transition: 'color 0.2s',
+          }}
+        >
+          {copied ? 'copied' : 'copy'}
+        </button>
+      </div>
+
+      {/* Code body */}
+      <div
+        style={{
+          background: 'rgba(10,13,22,0.85)',
+          padding: '16px 20px',
+          overflowX: 'auto',
+          fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
+          fontSize: '0.78rem',
+          lineHeight: 1.75,
+        }}
+      >
+        {lines.map((raw, idx) => (
+          <CodeLine key={idx} raw={raw} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Renders a single code line with simple blue-palette token colouring.
+ * Covers the patterns that appear in curl/JSON examples without a full parser.
+ */
+function CodeLine({ raw }: { raw: string }) {
+  // Comment lines
+  if (/^\s*#/.test(raw)) {
+    return (
+      <div>
+        <span style={{ color: '#334155' }}>{raw}</span>
+      </div>
+    );
+  }
+
+  // Tokenise by splitting on JSON string literals, numbers, booleans, and
+  // shell keywords so we can colour each segment differently.
+  const tokens: Array<{ text: string; color: string }> = [];
+  let remaining = raw;
+
+  // Regex groups in order of precedence:
+  //   1. JSON key:  "someKey":
+  //   2. JSON string value:  "someValue"
+  //   3. Bareword keywords: true, false, null, curl, -X, --header, --data
+  //   4. Numbers (optionally in JSON context)
+  //   5. Everything else
+  const TOKEN_RE = /("[\w\s:+@./\\-]*"\s*:)|("(?:[^"\\]|\\.)*")|(\b(?:true|false|null)\b)|(\b\d+(?:\.\d+)?\b)/g;
+
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  TOKEN_RE.lastIndex = 0;
+  while ((match = TOKEN_RE.exec(remaining)) !== null) {
+    // Plain text before this match
+    if (match.index > lastIndex) {
+      tokens.push({ text: remaining.slice(lastIndex, match.index), color: '#94a3b8' });
+    }
+
+    if (match[1]) {
+      // JSON key — lighter blue
+      tokens.push({ text: match[1], color: '#60a5fa' });
+    } else if (match[2]) {
+      // String value — pale blue
+      tokens.push({ text: match[2], color: '#93c5fd' });
+    } else if (match[3]) {
+      // boolean / null — indigo
+      tokens.push({ text: match[3], color: '#818cf8' });
+    } else if (match[4]) {
+      // number — sky
+      tokens.push({ text: match[4], color: '#38bdf8' });
+    }
+
+    lastIndex = match.index + match[0].length;
+  }
+
+  if (lastIndex < remaining.length) {
+    tokens.push({ text: remaining.slice(lastIndex), color: '#94a3b8' });
+  }
+
+  if (tokens.length === 0) {
+    return <div><span style={{ color: '#94a3b8' }}>{raw || '\u00A0'}</span></div>;
+  }
+
+  return (
+    <div>
+      {tokens.map((t, i) => (
+        <span key={i} style={{ color: t.color }}>{t.text}</span>
+      ))}
+    </div>
+  );
+}
+
+/** HTTP method badge + path + description row. */
+function Endpoint({
+  method,
+  path,
+  description,
+}: {
+  method: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
+  path: string;
+  description: string;
+}) {
+  const methodColors: Record<string, { bg: string; text: string }> = {
+    GET:    { bg: 'rgba(59,130,246,0.15)',  text: '#60a5fa' },
+    POST:   { bg: 'rgba(34,197,94,0.12)',   text: '#4ade80' },
+    PUT:    { bg: 'rgba(245,158,11,0.12)',   text: '#fbbf24' },
+    DELETE: { bg: 'rgba(239,68,68,0.12)',    text: '#f87171' },
+    PATCH:  { bg: 'rgba(168,85,247,0.12)',   text: '#c084fc' },
+  };
+  const mc = methodColors[method] ?? methodColors.GET;
+
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 12,
+        padding: '12px 16px',
+        borderRadius: 8,
+        background: 'rgba(10,13,22,0.55)',
+        border: `1px solid rgba(59,130,246,0.18)`,
+        marginBottom: 12,
+      }}
+    >
+      <span
+        style={{
+          display: 'inline-block',
+          padding: '3px 9px',
+          borderRadius: 5,
+          background: mc.bg,
+          color: mc.text,
+          fontSize: '0.68rem',
+          fontWeight: 800,
+          letterSpacing: '0.08em',
+          fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
+          flexShrink: 0,
+        }}
+      >
+        {method}
+      </span>
+      <code
+        style={{
+          color: '#93c5fd',
+          fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
+          fontSize: '0.82rem',
+          flexShrink: 0,
+        }}
+      >
+        {path}
+      </code>
+      <span style={{ color: C.textMuted, fontSize: '0.81rem', lineHeight: 1.4 }}>
+        {description}
+      </span>
+    </div>
+  );
+}
+
+/** Parameter reference table. */
+interface Param {
+  name: string;
+  type: string;
+  required: boolean;
+  description: string;
+}
+
+function ParamTable({ params }: { params: Param[] }) {
+  return (
+    <div
+      style={{
+        borderRadius: 8,
+        overflow: 'hidden',
+        border: `1px solid rgba(59,130,246,0.18)`,
+        marginBottom: 20,
+      }}
+    >
+      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' }}>
+        <thead>
+          <tr style={{ background: 'rgba(10,13,22,0.7)' }}>
+            {['Parameter', 'Type', 'Required', 'Description'].map(h => (
+              <th
+                key={h}
+                style={{
+                  padding: '9px 14px',
+                  textAlign: 'left',
+                  color: '#475569',
+                  fontWeight: 700,
+                  letterSpacing: '0.06em',
+                  fontSize: '0.67rem',
+                  textTransform: 'uppercase',
+                  borderBottom: '1px solid rgba(59,130,246,0.15)',
+                }}
+              >
+                {h}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {params.map((p, i) => (
+            <tr key={p.name} style={{ background: i % 2 === 0 ? 'transparent' : 'rgba(10,13,22,0.28)' }}>
+              <td style={{ padding: '9px 14px', borderBottom: '1px solid rgba(42,47,69,0.3)', whiteSpace: 'nowrap' }}>
+                <code style={{ color: '#60a5fa', fontFamily: 'monospace', fontSize: '0.8rem', fontWeight: 700 }}>
+                  {p.name}
+                </code>
+              </td>
+              <td style={{ padding: '9px 14px', borderBottom: '1px solid rgba(42,47,69,0.3)', whiteSpace: 'nowrap' }}>
+                <code style={{ color: '#818cf8', fontFamily: 'monospace', fontSize: '0.78rem' }}>
+                  {p.type}
+                </code>
+              </td>
+              <td style={{ padding: '9px 14px', borderBottom: '1px solid rgba(42,47,69,0.3)', whiteSpace: 'nowrap' }}>
+                <span
+                  style={{
+                    display: 'inline-block',
+                    padding: '2px 7px',
+                    borderRadius: 4,
+                    fontSize: '0.67rem',
+                    fontWeight: 700,
+                    letterSpacing: '0.05em',
+                    background: p.required ? 'rgba(59,130,246,0.12)' : 'rgba(71,85,105,0.2)',
+                    color: p.required ? '#60a5fa' : '#475569',
+                  }}
+                >
+                  {p.required ? 'required' : 'optional'}
+                </span>
+              </td>
+              <td style={{ padding: '9px 14px', borderBottom: '1px solid rgba(42,47,69,0.3)', color: C.textMuted, lineHeight: 1.55 }}>
+                {p.description}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/** Side-by-side (or stacked on narrow) request + response code blocks. */
+function ReqRes({ request, response }: { request: string; response: string }) {
+  return (
+    <div
+      style={{
+        display: 'grid',
+        gridTemplateColumns: '1fr 1fr',
+        gap: 12,
+        marginBottom: 20,
+      }}
+    >
+      <CodeBlock code={request} label="request" />
+      <CodeBlock code={response} label="response" />
+    </div>
+  );
+}
+
+/* ─── API Reference: Section 1 — Authentication ─────────── */
+
+function ApiAuthSection() {
+  return (
+    <AccordionSection
+      id="api-auth"
+      accent={C.accent}
+      icon={<Key size={18} />}
+      title="API Reference — Authentication"
+      subtitle="Obtain a JWT token and authenticate every API request with a Bearer header."
+    >
+      <P>
+        The Keystone API uses JSON Web Tokens (JWT) for authentication. Every request to a protected
+        endpoint must include an <IC>Authorization</IC> header containing a valid token. Tokens are
+        obtained by POSTing credentials to the login endpoint.
+      </P>
+
+      <H3>Obtain a token</H3>
+      <Endpoint method="POST" path="/api/v1/auth/login" description="Exchange email + password for a JWT access token." />
+
+      <ParamTable
+        params={[
+          { name: 'email',    type: 'string', required: true,  description: 'The email address associated with your Keystone account.' },
+          { name: 'password', type: 'string', required: true,  description: 'Your account password.' },
+        ]}
+      />
+
+      <ReqRes
+        request={`curl -X POST https://your-portal.example.com/api/v1/auth/login \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "email": "you@example.com",
+    "password": "your-password"
+  }'`}
+        response={`{
+  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "token_type": "bearer",
+  "user": {
+    "id": 42,
+    "email": "you@example.com",
+    "name": "Jane Smith",
+    "role": "user",
+    "account_type": "rcf",
+    "customer_id": 7
+  }
+}`}
+      />
+
+      <H3>Using the token</H3>
+      <P>
+        Include the token in the <IC>Authorization</IC> header on every subsequent request. The
+        value must be prefixed with the word <IC>Bearer</IC> followed by a single space.
+      </P>
+
+      <CodeBlock
+        label="all authenticated requests"
+        code={`curl https://your-portal.example.com/api/v1/rcf \\
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."`}
+      />
+
+      <H3>Token lifetime and refresh</H3>
+      <P>
+        Tokens are valid for <strong style={{ color: C.text }}>24 hours</strong> from the time of
+        issue. After expiry the API returns <IC>401 Unauthorized</IC>. There is no refresh endpoint
+        — simply POST to <IC>/api/v1/auth/login</IC> again to obtain a new token. Store the token
+        securely in your application (environment variable or secrets manager — never in source
+        control).
+      </P>
+
+      <Callout accent={C.accent}>
+        All API endpoints below require a valid Bearer token. A request without a token, or with an
+        expired token, returns <IC>401 Unauthorized</IC>. A token belonging to a user who does not
+        have access to the requested resource returns <IC>403 Forbidden</IC>.
+      </Callout>
+    </AccordionSection>
+  );
+}
+
+/* ─── API Reference: Section 2 — RCF Endpoints ──────────── */
+
+function ApiRcfSection() {
+  return (
+    <AccordionSection
+      id="api-rcf"
+      accent={C.accent}
+      icon={<Code size={18} />}
+      title="API Reference — RCF Endpoints"
+      subtitle="Create, read, update, and delete Remote Call Forwarding numbers programmatically."
+    >
+      <P>
+        The RCF API lets you manage your forwarding numbers from any application or script. All
+        endpoints are scoped to your customer account — you can only read and modify numbers
+        belonging to your organisation.
+      </P>
+
+      {/* ── List numbers ─────────────────────────────── */}
+      <H3>List RCF numbers</H3>
+      <Endpoint method="GET" path="/api/v1/rcf" description="Return all RCF entries for your account, with optional filters." />
+
+      <ParamTable
+        params={[
+          { name: 'customer_id', type: 'integer', required: false, description: 'Filter by customer ID. Defaults to your own account.' },
+          { name: 'enabled',     type: 'boolean', required: false, description: 'Pass true to return only enabled numbers, false for disabled only.' },
+          { name: 'search',      type: 'string',  required: false, description: 'Free-text search across DID, name, and forward_to fields.' },
+        ]}
+      />
+
+      <ReqRes
+        request={`curl "https://your-portal.example.com/api/v1/rcf?enabled=true" \\
+  -H "Authorization: Bearer <token>"`}
+        response={`[
+  {
+    "did": "+17745551234",
+    "name": "Main Office Line",
+    "forward_to": "+18005559999",
+    "enabled": true,
+    "pass_caller_id": true,
+    "ring_timeout": 30,
+    "failover_to": "+18005550000",
+    "customer_id": 7,
+    "created_at": "2025-01-15T10:00:00Z",
+    "updated_at": "2026-03-20T14:22:11Z"
+  },
+  {
+    "did": "+17745558888",
+    "name": "Sales Line",
+    "forward_to": "+16175551111",
+    "enabled": true,
+    "pass_caller_id": false,
+    "ring_timeout": 20,
+    "failover_to": null,
+    "customer_id": 7,
+    "created_at": "2025-02-01T08:00:00Z",
+    "updated_at": "2026-04-01T09:11:05Z"
+  }
+]`}
+      />
+
+      {/* ── Get single number ─────────────────────────── */}
+      <H3>Get a single RCF number</H3>
+      <Endpoint method="GET" path="/api/v1/rcf/{did}" description="Retrieve one RCF entry by its DID." />
+
+      <ParamTable
+        params={[
+          { name: 'did', type: 'string (path)', required: true, description: 'The DID in E.164 format, URL-encoded. The + sign must be encoded as %2B. Example: %2B17745551234' },
+        ]}
+      />
+
+      <ReqRes
+        request={`curl "https://your-portal.example.com/api/v1/rcf/%2B17745551234" \\
+  -H "Authorization: Bearer <token>"`}
+        response={`{
+  "did": "+17745551234",
+  "name": "Main Office Line",
+  "forward_to": "+18005559999",
+  "enabled": true,
+  "pass_caller_id": true,
+  "ring_timeout": 30,
+  "failover_to": "+18005550000",
+  "customer_id": 7,
+  "created_at": "2025-01-15T10:00:00Z",
+  "updated_at": "2026-03-20T14:22:11Z"
+}`}
+      />
+
+      {/* ── Create number ─────────────────────────────── */}
+      <H3>Create an RCF number</H3>
+      <Endpoint method="POST" path="/api/v1/rcf" description="Provision a new RCF forwarding entry." />
+
+      <ParamTable
+        params={[
+          { name: 'did',            type: 'string',  required: true,  description: 'The inbound DID to register. Must be E.164 format and already allocated to your account.' },
+          { name: 'customer_id',    type: 'integer', required: true,  description: 'The customer account this number belongs to.' },
+          { name: 'forward_to',     type: 'string',  required: true,  description: 'The destination to forward calls to. E.164 format.' },
+          { name: 'name',           type: 'string',  required: false, description: 'A friendly label for this number. Shown only in the portal.' },
+          { name: 'pass_caller_id', type: 'boolean', required: false, description: 'Whether to pass the original caller ID through to the destination. Default: true.' },
+          { name: 'ring_timeout',   type: 'integer', required: false, description: 'Seconds to ring the destination before giving up. Range 5–120. Default: 30.' },
+          { name: 'failover_to',    type: 'string',  required: false, description: 'Backup destination number (E.164) called if ring_timeout expires. Omit to leave unset.' },
+          { name: 'enabled',        type: 'boolean', required: false, description: 'Whether to start forwarding immediately. Default: true.' },
+        ]}
+      />
+
+      <ReqRes
+        request={`curl -X POST https://your-portal.example.com/api/v1/rcf \\
+  -H "Authorization: Bearer <token>" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "did": "+17745554321",
+    "customer_id": 7,
+    "forward_to": "+16175552222",
+    "name": "Boston Sales",
+    "pass_caller_id": true,
+    "ring_timeout": 25,
+    "failover_to": "+18005550000",
+    "enabled": true
+  }'`}
+        response={`{
+  "did": "+17745554321",
+  "name": "Boston Sales",
+  "forward_to": "+16175552222",
+  "enabled": true,
+  "pass_caller_id": true,
+  "ring_timeout": 25,
+  "failover_to": "+18005550000",
+  "customer_id": 7,
+  "created_at": "2026-04-23T11:05:00Z",
+  "updated_at": "2026-04-23T11:05:00Z"
+}`}
+      />
+
+      {/* ── Update number ─────────────────────────────── */}
+      <H3>Update an RCF number</H3>
+      <Endpoint method="PUT" path="/api/v1/rcf/{did}" description="Partially update a forwarding entry — only send the fields you want to change." />
+
+      <ParamTable
+        params={[
+          { name: 'did (path)',     type: 'string',  required: true,  description: 'URL-encoded DID of the number to update. Encode + as %2B.' },
+          { name: 'forward_to',    type: 'string',  required: false, description: 'New forwarding destination in E.164 format.' },
+          { name: 'name',          type: 'string',  required: false, description: 'Updated friendly label.' },
+          { name: 'ring_timeout',  type: 'integer', required: false, description: 'New ring timeout in seconds (5–120).' },
+          { name: 'failover_to',   type: 'string',  required: false, description: 'New failover destination. Send null to remove.' },
+          { name: 'enabled',       type: 'boolean', required: false, description: 'Enable (true) or disable (false) forwarding.' },
+          { name: 'pass_caller_id',type: 'boolean', required: false, description: 'Update caller ID pass-through behaviour.' },
+        ]}
+      />
+
+      <P>Example: change the forwarding destination on an existing number.</P>
+      <ReqRes
+        request={`curl -X PUT "https://your-portal.example.com/api/v1/rcf/%2B17745554321" \\
+  -H "Authorization: Bearer <token>" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "forward_to": "+16175553333"
+  }'`}
+        response={`{
+  "did": "+17745554321",
+  "name": "Boston Sales",
+  "forward_to": "+16175553333",
+  "enabled": true,
+  "pass_caller_id": true,
+  "ring_timeout": 25,
+  "failover_to": "+18005550000",
+  "customer_id": 7,
+  "created_at": "2026-04-23T11:05:00Z",
+  "updated_at": "2026-04-23T12:00:00Z"
+}`}
+      />
+
+      <P>Example: disable a number without changing any other settings.</P>
+      <ReqRes
+        request={`curl -X PUT "https://your-portal.example.com/api/v1/rcf/%2B17745554321" \\
+  -H "Authorization: Bearer <token>" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "enabled": false
+  }'`}
+        response={`{
+  "did": "+17745554321",
+  "name": "Boston Sales",
+  "forward_to": "+16175553333",
+  "enabled": false,
+  "pass_caller_id": true,
+  "ring_timeout": 25,
+  "failover_to": "+18005550000",
+  "customer_id": 7,
+  "created_at": "2026-04-23T11:05:00Z",
+  "updated_at": "2026-04-23T12:01:44Z"
+}`}
+      />
+
+      {/* ── Delete number ─────────────────────────────── */}
+      <H3>Delete an RCF number</H3>
+      <Endpoint method="DELETE" path="/api/v1/rcf/{did}" description="Permanently remove a forwarding entry. This cannot be undone." />
+
+      <ParamTable
+        params={[
+          { name: 'did (path)', type: 'string', required: true, description: 'URL-encoded DID of the number to delete. Encode + as %2B.' },
+        ]}
+      />
+
+      <CodeBlock
+        label="request"
+        code={`curl -X DELETE "https://your-portal.example.com/api/v1/rcf/%2B17745554321" \\
+  -H "Authorization: Bearer <token>"
+# Returns: 204 No Content — no response body`}
+      />
+
+      <Callout accent={C.accent}>
+        URL-encode the <IC>+</IC> sign in E.164 numbers when placing them in URL path segments.
+        Replace <IC>+</IC> with <IC>%2B</IC>. For example, <IC>+17745551234</IC> becomes
+        <IC>/api/v1/rcf/%2B17745551234</IC>. Query parameters (like <IC>?search=+177...</IC>)
+        follow the same rule.
+      </Callout>
+
+      <H3>Health check</H3>
+      <Endpoint method="GET" path="/api/v1/health" description="Verify the API is reachable and all platform components are operational." />
+
+      <ReqRes
+        request={`curl https://your-portal.example.com/api/v1/health \\
+  -H "Authorization: Bearer <token>"`}
+        response={`{
+  "status": "healthy",
+  "timestamp": "2026-04-23T11:00:00Z",
+  "components": {
+    "database": "healthy",
+    "sip_platform": "healthy"
+  }
+}`}
+      />
+    </AccordionSection>
+  );
+}
+
+/* ─── API Reference: Section 3 — CDR / Usage ────────────── */
+
+function ApiCdrSection() {
+  return (
+    <AccordionSection
+      id="api-cdrs"
+      accent={C.accent}
+      icon={<Database size={18} />}
+      title="API Reference — CDR / Usage"
+      subtitle="Query call detail records and aggregated usage statistics for your RCF numbers."
+    >
+      <P>
+        The CDR API provides access to raw call records and aggregated summary statistics for all
+        calls that have passed through your RCF numbers. Use it to build usage dashboards, generate
+        billing reconciliation reports, or investigate individual calls.
+      </P>
+
+      {/* ── Search CDRs ──────────────────────────────── */}
+      <H3>Search call records</H3>
+      <Endpoint method="GET" path="/api/v1/cdrs" description="Return paginated call detail records matching the specified filters." />
+
+      <ParamTable
+        params={[
+          { name: 'customer_id', type: 'integer', required: false, description: 'Scope results to a specific customer. Defaults to your own account.' },
+          { name: 'start_date',  type: 'string',  required: false, description: 'ISO 8601 datetime (UTC). Only return calls starting on or after this time. Example: 2026-04-01T00:00:00Z' },
+          { name: 'end_date',    type: 'string',  required: false, description: 'ISO 8601 datetime (UTC). Only return calls starting before this time.' },
+          { name: 'did',         type: 'string',  required: false, description: 'Filter to a specific inbound DID in E.164 format.' },
+          { name: 'direction',   type: 'string',  required: false, description: 'Call direction: inbound or outbound.' },
+          { name: 'limit',       type: 'integer', required: false, description: 'Maximum number of records to return. Default 50, max 500.' },
+          { name: 'offset',      type: 'integer', required: false, description: 'Number of records to skip for pagination. Default 0.' },
+        ]}
+      />
+
+      <ReqRes
+        request={`curl "https://your-portal.example.com/api/v1/cdrs\\
+?start_date=2026-04-01T00:00:00Z\\
+&end_date=2026-04-08T00:00:00Z\\
+&limit=2" \\
+  -H "Authorization: Bearer <token>"`}
+        response={`{
+  "items": [
+    {
+      "id": "cdr-001",
+      "did": "+17745551234",
+      "caller": "+16175559999",
+      "forward_to": "+18005559999",
+      "direction": "inbound",
+      "duration": 142,
+      "answered": true,
+      "start_time": "2026-04-02T14:30:00Z",
+      "end_time": "2026-04-02T14:32:22Z",
+      "mos": 4.2,
+      "jitter": 12.4,
+      "packet_loss": 0.3,
+      "r_factor": 88
+    },
+    {
+      "id": "cdr-002",
+      "did": "+17745551234",
+      "caller": "+17815558888",
+      "forward_to": "+18005559999",
+      "direction": "inbound",
+      "duration": 0,
+      "answered": false,
+      "start_time": "2026-04-02T16:10:05Z",
+      "end_time": "2026-04-02T16:10:35Z",
+      "mos": null,
+      "jitter": null,
+      "packet_loss": null,
+      "r_factor": null
+    }
+  ],
+  "total": 418,
+  "offset": 0,
+  "limit": 2
+}`}
+      />
+
+      {/* ── CDR summary ──────────────────────────────── */}
+      <H3>Usage summary</H3>
+      <Endpoint method="GET" path="/api/v1/cdrs/summary" description="Return aggregated call statistics for the specified date range." />
+
+      <ParamTable
+        params={[
+          { name: 'customer_id', type: 'integer', required: false, description: 'Scope summary to a specific customer account.' },
+          { name: 'start_date',  type: 'string',  required: false, description: 'Start of the summary period (ISO 8601, UTC).' },
+          { name: 'end_date',    type: 'string',  required: false, description: 'End of the summary period (ISO 8601, UTC).' },
+          { name: 'did',         type: 'string',  required: false, description: 'Narrow the summary to a single DID.' },
+        ]}
+      />
+
+      <ReqRes
+        request={`curl "https://your-portal.example.com/api/v1/cdrs/summary\\
+?start_date=2026-04-01T00:00:00Z\\
+&end_date=2026-05-01T00:00:00Z" \\
+  -H "Authorization: Bearer <token>"`}
+        response={`{
+  "total_calls": 1842,
+  "answered_calls": 1671,
+  "unanswered_calls": 171,
+  "asr": 90.7,
+  "total_duration_seconds": 237924,
+  "acd_seconds": 142,
+  "avg_mos": 4.18,
+  "avg_jitter": 14.2,
+  "avg_packet_loss": 0.4,
+  "avg_r_factor": 87.3,
+  "period_start": "2026-04-01T00:00:00Z",
+  "period_end": "2026-05-01T00:00:00Z"
+}`}
+      />
+
+      <NoteCards
+        accent={C.accent}
+        items={[
+          {
+            title: 'ASR — Answer Seizure Ratio',
+            body: 'The percentage of calls that were answered (connected). ASR = (answered / total) × 100. A healthy RCF deployment typically shows ASR above 85%.',
+          },
+          {
+            title: 'ACD — Average Call Duration',
+            body: 'The mean duration in seconds of all answered calls. Unanswered calls (duration 0) are excluded from the ACD calculation.',
+          },
+          {
+            title: 'Quality fields may be null',
+            body: 'MOS, jitter, packet loss, and R-factor are only populated when RTP quality data is captured. Short or unanswered calls typically have null quality metrics.',
+          },
+          {
+            title: 'Date ranges',
+            body: 'Both start_date and end_date are optional. Omitting them returns all available records. For large accounts, always specify a date range to keep response times fast.',
+          },
+        ]}
+      />
+
+      <Callout accent={C.accent}>
+        CDR data is retained for <strong style={{ color: C.text }}>90 days</strong>. For long-term
+        record keeping, export CDRs periodically using the summary or detail endpoints and store
+        them in your own data warehouse.
+      </Callout>
+
+      {/* ── Base URL + error codes ────────────────────── */}
+      <H3>Base URL and error responses</H3>
+
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 12,
+          padding: '14px 18px',
+          borderRadius: 8,
+          background: 'rgba(10,13,22,0.55)',
+          border: '1px solid rgba(59,130,246,0.18)',
+          marginBottom: 20,
+        }}
+      >
+        <Server size={16} style={{ color: C.accent, flexShrink: 0 }} />
+        <div>
+          <div style={{ fontSize: '0.78rem', fontWeight: 700, color: C.textMuted, marginBottom: 3 }}>Base URL</div>
+          <code style={{ color: '#93c5fd', fontFamily: 'monospace', fontSize: '0.82rem' }}>
+            https://{'<'}your-portal-domain{'>'}/api/v1
+          </code>
+        </div>
+      </div>
+
+      <div
+        style={{
+          borderRadius: 8,
+          overflow: 'hidden',
+          border: '1px solid rgba(59,130,246,0.18)',
+          marginBottom: 16,
+        }}
+      >
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' }}>
+          <thead>
+            <tr style={{ background: 'rgba(10,13,22,0.7)' }}>
+              {['Status', 'Meaning'].map(h => (
+                <th
+                  key={h}
+                  style={{
+                    padding: '9px 14px',
+                    textAlign: 'left',
+                    color: '#475569',
+                    fontWeight: 700,
+                    letterSpacing: '0.06em',
+                    fontSize: '0.67rem',
+                    textTransform: 'uppercase',
+                    borderBottom: '1px solid rgba(59,130,246,0.15)',
+                  }}
+                >
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {[
+              { status: '200 OK',              meaning: 'Request succeeded. Response body contains the requested data.' },
+              { status: '201 Created',         meaning: 'Resource created successfully. Response body contains the new resource.' },
+              { status: '204 No Content',      meaning: 'Request succeeded with no response body (used by DELETE).' },
+              { status: '400 Bad Request',     meaning: 'Request body or query parameters are invalid. Check the detail field in the error response.' },
+              { status: '401 Unauthorized',    meaning: 'No token supplied, or the token has expired. Re-authenticate and retry.' },
+              { status: '403 Forbidden',       meaning: 'Token is valid but does not have permission to access this resource.' },
+              { status: '404 Not Found',       meaning: 'The requested DID or resource does not exist in your account.' },
+              { status: '422 Unprocessable',   meaning: 'Validation error — the request body was parseable but failed field-level validation.' },
+              { status: '500 Server Error',    meaning: 'Unexpected server-side error. Contact Granite support if this persists.' },
+            ].map((row, i) => (
+              <tr key={row.status} style={{ background: i % 2 === 0 ? 'transparent' : 'rgba(10,13,22,0.28)' }}>
+                <td style={{ padding: '9px 14px', borderBottom: '1px solid rgba(42,47,69,0.3)', whiteSpace: 'nowrap' }}>
+                  <code style={{ color: '#60a5fa', fontFamily: 'monospace', fontSize: '0.8rem', fontWeight: 700 }}>
+                    {row.status}
+                  </code>
+                </td>
+                <td style={{ padding: '9px 14px', borderBottom: '1px solid rgba(42,47,69,0.3)', color: C.textMuted, lineHeight: 1.55 }}>
+                  {row.meaning}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <P>
+        Error responses always include a <IC>detail</IC> field with a human-readable message:
+      </P>
+      <CodeBlock
+        label="error response"
+        code={`{
+  "detail": "RCF entry +17745554321 not found"
+}`}
+      />
     </AccordionSection>
   );
 }
@@ -1464,9 +1869,9 @@ export function DocsPage() {
     <div className="flex flex-col h-full">
       <PortalHeader
         icon={<IconDocs size={24} />}
-        title="API Documentation"
-        subtitle="Integrate with the Granite Keystone platform via REST API"
-        badgeVariant="api"
+        title="RCF Help Guide"
+        subtitle="Everything you need to know about managing your Remote Call Forwarding numbers"
+        badgeVariant="rcf"
       />
 
       <div
@@ -1490,20 +1895,61 @@ export function DocsPage() {
                 letterSpacing: '-0.02em',
               }}
             >
-              API Documentation
+              Remote Call Forwarding — Customer Guide
             </h1>
             <p style={{ margin: 0, fontSize: '0.92rem', color: C.textMuted, lineHeight: 1.6 }}>
-              Full self-service reference for RCF, SIP Trunking, and Programmable Voice. All endpoints require JWT authentication.
+              A complete reference for managing your RCF numbers, understanding your call quality metrics, and troubleshooting issues — all from the Granite Keystone portal.
             </p>
           </div>
 
-          {/* Always-visible auth section */}
-          <AuthSection />
+          {/* Always-visible getting started section */}
+          <GettingStartedSection />
 
-          {/* Collapsible product sections */}
-          <RcfSection />
-          <SipTrunkingSection />
-          <ApiCallingSection />
+          {/* Collapsible guide sections */}
+          <ManagingNumbersSection />
+          <ForwardingSection />
+          <EnableDisableSection />
+          <CallerIdSection />
+          <FailoverSection />
+          <CallQualitySection />
+          <TroubleshootingSection />
+
+          {/* Developer API reference */}
+          <div style={{ margin: '36px 0 16px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+              <Server size={16} style={{ color: C.accent }} />
+              <span
+                style={{
+                  fontSize: '0.68rem',
+                  fontWeight: 800,
+                  letterSpacing: '0.12em',
+                  textTransform: 'uppercase',
+                  color: C.accent,
+                }}
+              >
+                Developer API
+              </span>
+            </div>
+            <h2
+              style={{
+                margin: '0 0 6px',
+                fontSize: '1.25rem',
+                fontWeight: 800,
+                color: C.text,
+                letterSpacing: '-0.02em',
+              }}
+            >
+              API Reference
+            </h2>
+            <p style={{ margin: 0, fontSize: '0.86rem', color: C.textMuted, lineHeight: 1.6 }}>
+              Interact with your RCF numbers programmatically using the REST API.
+              All endpoints use JSON and require a Bearer token obtained from the login endpoint.
+            </p>
+          </div>
+
+          <ApiAuthSection />
+          <ApiRcfSection />
+          <ApiCdrSection />
 
         </div>
       </div>
