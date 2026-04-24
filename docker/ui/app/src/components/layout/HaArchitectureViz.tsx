@@ -285,74 +285,76 @@ function makePackets(
 }
 
 const ALL_PACKETS: PacketConfig[] = [
-  // ── Stage 1: SLOWEST — carrier delivery pace ──────────────────────────
-  // Dual inbound trunks → NLB. Staggered for visual separation.
-  // beamLen=12 (24px total), normal brightness — fast and consistent carrier pace
-  ...makePackets('in1-nlb', 3, 1.4, 'normal', false, 0.0,  12, false),
-  ...makePackets('in2-nlb', 3, 1.4, 'normal', false, 0.7,  12, false),
+  // ── Stage 1: Inbound — fire hose of carrier traffic ────────────────────
+  // 2 trunks × 5-6 beams × (1/0.8s) ≈ 12.5 beams/sec total inbound volume.
+  // Heavy count + fast pace = carrier hammering us with calls.
+  ...makePackets('in1-nlb', 6, 0.8, 'normal', false, 0.0,  12, false),
+  ...makePackets('in2-nlb', 5, 0.8, 'normal', false, 0.4,  12, false),
 
-  // ── Stage 2: FASTER — entering Granite infrastructure ─────────────────
-  // NLB → SBC pairs. 4 beams, 0.8s, slightly longer streak (beamLen=14)
-  ...makePackets('nlb-e1', 4, 0.8, 'sbc1-east',    false, 0.0,  14, false),
-  ...makePackets('nlb-e2', 4, 0.8, 'normal',        false, 0.2,  14, false),
-  ...makePackets('nlb-c1', 4, 0.8, 'normal',        false, 0.1,  14, false),
-  ...makePackets('nlb-c2', 4, 0.8, 'sbc2-central',  false, 0.3,  14, false),
-  ...makePackets('nlb-w1', 4, 0.8, 'west-loc',      false, 0.15, 14, false),
-  ...makePackets('nlb-w2', 4, 0.8, 'west-loc',      false, 0.35, 14, false),
+  // ── Stage 2: HA → SBCs — load distributed across 6 paths ──────────────
+  // 6 paths × 3 beams × (1/0.6s) ≈ 30 beams/sec capacity (2.4× headroom).
+  // Each path carries ~1/3 the density of inbound — Granite fans out the load.
+  ...makePackets('nlb-e1', 3, 0.6, 'sbc1-east',    false, 0.0,  13, false),
+  ...makePackets('nlb-e2', 3, 0.6, 'normal',        false, 0.2,  13, false),
+  ...makePackets('nlb-c1', 3, 0.6, 'normal',        false, 0.1,  13, false),
+  ...makePackets('nlb-c2', 3, 0.6, 'sbc2-central',  false, 0.3,  13, false),
+  ...makePackets('nlb-w1', 3, 0.6, 'west-loc',      false, 0.15, 13, false),
+  ...makePackets('nlb-w2', 3, 0.6, 'west-loc',      false, 0.35, 13, false),
 
-  // ── Stage 3: EVEN FASTER — core SBC→Keystone processing ──────────────
-  // Blazing fast internal hops, 4-5 beams, 0.5s, long streaks (beamLen=15), bright
-  ...makePackets('s1ks-e', 4, 0.5, 'sbc1-east',    false, 0.05, 15, true),
-  ...makePackets('s2ks-e', 5, 0.5, 'normal',        false, 0.10, 15, true),
+  // ── Stage 3: SBC → Keystone — rapid-fire core processing ───────────────
+  // 6 paths × 2-3 beams × (1/0.4s) = blazing throughput, bright streaks.
+  ...makePackets('s1ks-e', 3, 0.4, 'sbc1-east',    false, 0.05, 14, true),
+  ...makePackets('s2ks-e', 2, 0.4, 'normal',        false, 0.10, 14, true),
 
-  ...makePackets('s1ks-c', 5, 0.5, 'normal',        false, 0.08, 15, true),
-  ...makePackets('s2ks-c', 4, 0.5, 'sbc2-central',  false, 0.18, 15, true),
+  ...makePackets('s1ks-c', 2, 0.4, 'normal',        false, 0.08, 14, true),
+  ...makePackets('s2ks-c', 3, 0.4, 'sbc2-central',  false, 0.18, 14, true),
 
-  ...makePackets('s1ks-w', 4, 0.5, 'west-loc',      false, 0.03, 15, true),
-  ...makePackets('s2ks-w', 4, 0.5, 'west-loc',      false, 0.13, 15, true),
+  ...makePackets('s1ks-w', 3, 0.4, 'west-loc',      false, 0.03, 14, true),
+  ...makePackets('s2ks-w', 2, 0.4, 'west-loc',      false, 0.13, 14, true),
 
-  // ── Stage 4: FASTEST — calls racing out to termination trunks ─────────
-  // Maximum speed, dense beams, longest streaks (beamLen=15), brightest
+  // ── Stage 4: Keystone → Termination — smooth distributed outbound ───────
+  // 9 paths × 2 beams × (1/0.6s) ≈ 30 beams/sec — matches inbound volume,
+  // spread across 9 exit paths for fault-tolerant delivery.
   // East Keystone → termination trunks
-  ...makePackets('e-t0', 4, 0.7, 'term-dallas', true,  0.00, 15, true),
-  ...makePackets('e-t1', 4, 0.7, 'normal',      true,  0.08, 15, true),
-  ...makePackets('e-t2', 4, 0.7, 'normal',      true,  0.20, 15, true),
+  ...makePackets('e-t0', 2, 0.6, 'term-dallas', true,  0.00, 14, true),
+  ...makePackets('e-t1', 2, 0.6, 'normal',      true,  0.08, 14, true),
+  ...makePackets('e-t2', 2, 0.6, 'normal',      true,  0.20, 14, true),
 
   // Central Keystone → termination trunks
-  ...makePackets('c-t0', 4, 0.7, 'term-dallas', true,  0.10, 15, true),
-  ...makePackets('c-t1', 4, 0.7, 'normal',      true,  0.05, 15, true),
-  ...makePackets('c-t2', 4, 0.7, 'normal',      true,  0.15, 15, true),
+  ...makePackets('c-t0', 2, 0.6, 'term-dallas', true,  0.10, 14, true),
+  ...makePackets('c-t1', 2, 0.6, 'normal',      true,  0.05, 14, true),
+  ...makePackets('c-t2', 2, 0.6, 'normal',      true,  0.15, 14, true),
 
   // West Keystone → termination trunks (fail during west-loc event)
   // w-t0 (Dallas-bound from West) must ALSO stop during the Dallas failure window,
   // so it uses the combined 'west-loc-or-dallas' group instead of plain 'west-loc'.
-  ...makePackets('w-t0', 4, 0.7, 'west-loc-or-dallas', true,  0.05, 15, true),
-  ...makePackets('w-t1', 4, 0.7, 'west-loc',            true,  0.15, 15, true),
-  ...makePackets('w-t2', 4, 0.7, 'west-loc',            true,  0.25, 15, true),
+  ...makePackets('w-t0', 2, 0.6, 'west-loc-or-dallas', true,  0.05, 14, true),
+  ...makePackets('w-t1', 2, 0.6, 'west-loc',            true,  0.15, 14, true),
+  ...makePackets('w-t2', 2, 0.6, 'west-loc',            true,  0.25, 14, true),
 
   // ── Reroute packets: only appear during their specific failure event ──
 
   // When SBC-2 Central fails → SBC-1 Central absorbs extra load
-  ...makePackets('s1ks-c', 4, 0.5, 'reroute-sbc2central', false, 0.1, 15, true),
-  ...makePackets('nlb-c1', 4, 0.8, 'reroute-sbc2central', false, 0.3, 14, false),
+  ...makePackets('s1ks-c', 3, 0.4, 'reroute-sbc2central', false, 0.1, 14, true),
+  ...makePackets('nlb-c1', 3, 0.6, 'reroute-sbc2central', false, 0.3, 13, false),
 
   // When West datacenter fails → East and Central absorb extra load
-  ...makePackets('nlb-e1', 4, 0.8, 'reroute-west', false, 0.1,  14, false),
-  ...makePackets('nlb-c1', 4, 0.8, 'reroute-west', false, 0.4,  14, false),
-  ...makePackets('s1ks-e', 4, 0.5, 'reroute-west', false, 0.15, 15, true),
-  ...makePackets('s1ks-c', 4, 0.5, 'reroute-west', false, 0.35, 15, true),
-  ...makePackets('e-t1',   4, 0.7, 'reroute-west', true,  0.10, 15, true),
-  ...makePackets('c-t1',   4, 0.7, 'reroute-west', true,  0.30, 15, true),
+  ...makePackets('nlb-e1', 3, 0.6, 'reroute-west', false, 0.1,  13, false),
+  ...makePackets('nlb-c1', 3, 0.6, 'reroute-west', false, 0.4,  13, false),
+  ...makePackets('s1ks-e', 3, 0.4, 'reroute-west', false, 0.15, 14, true),
+  ...makePackets('s1ks-c', 3, 0.4, 'reroute-west', false, 0.35, 14, true),
+  ...makePackets('e-t1',   2, 0.6, 'reroute-west', true,  0.10, 14, true),
+  ...makePackets('c-t1',   2, 0.6, 'reroute-west', true,  0.30, 14, true),
 
   // When Dallas fails → LA and Backup absorb extra load
-  ...makePackets('e-t1', 4, 0.7, 'reroute-dallas', true, 0.05, 15, true),
-  ...makePackets('e-t2', 4, 0.7, 'reroute-dallas', true, 0.20, 15, true),
-  ...makePackets('c-t1', 4, 0.7, 'reroute-dallas', true, 0.10, 15, true),
-  ...makePackets('c-t2', 4, 0.7, 'reroute-dallas', true, 0.25, 15, true),
+  ...makePackets('e-t1', 2, 0.6, 'reroute-dallas', true, 0.05, 14, true),
+  ...makePackets('e-t2', 2, 0.6, 'reroute-dallas', true, 0.20, 14, true),
+  ...makePackets('c-t1', 2, 0.6, 'reroute-dallas', true, 0.10, 14, true),
+  ...makePackets('c-t2', 2, 0.6, 'reroute-dallas', true, 0.25, 14, true),
 
   // When SBC-1 East fails → SBC-2 East absorbs extra load
-  ...makePackets('s2ks-e', 4, 0.5, 'reroute-sbc1east', false, 0.1, 15, true),
-  ...makePackets('nlb-e2', 4, 0.8, 'reroute-sbc1east', false, 0.3, 14, false),
+  ...makePackets('s2ks-e', 3, 0.4, 'reroute-sbc1east', false, 0.1, 14, true),
+  ...makePackets('nlb-e2', 3, 0.6, 'reroute-sbc1east', false, 0.3, 13, false),
 ];
 
 /* ─── Failover timing (master 64-second cycle) ───────────────────────── */
