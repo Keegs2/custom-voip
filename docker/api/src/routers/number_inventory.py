@@ -83,6 +83,112 @@ def _normalize_did(did: str) -> str:
     return f"+{digits}"
 
 
+async def _reconcile_product_tables() -> dict:
+    """Reconcile did_inventory with actual product tables (rcf_numbers, api_dids, trunk_dids).
+
+    For every DID assigned in a product table, upserts into did_inventory with
+    status='assigned' and the correct customer_id/product_type/product_ref_id.
+
+    This is idempotent and safe to run multiple times. It ensures did_inventory
+    reflects the ground truth in the product tables, covering:
+      - DIDs that existed before did_inventory was created
+      - Ported numbers not from Bandwidth
+      - Any drift between product tables and did_inventory
+    """
+    pool = await db.get_pool()
+    reconciled = 0
+    by_product = {"rcf": 0, "api": 0, "trunk": 0}
+
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            # --- RCF numbers ---
+            rcf_rows = await conn.fetch(
+                """
+                SELECT r.id AS ref_id, r.did, r.customer_id, r.created_at
+                  FROM rcf_numbers r
+                  JOIN customers c ON r.customer_id = c.id
+                """
+            )
+            for row in rcf_rows:
+                await conn.execute(
+                    """
+                    INSERT INTO did_inventory (did, customer_id, product_type, product_ref_id,
+                                               status, assigned_at, updated_at)
+                    VALUES ($1, $2, 'rcf', $3, 'assigned', $4, NOW())
+                    ON CONFLICT (did) DO UPDATE
+                       SET customer_id = EXCLUDED.customer_id,
+                           product_type = EXCLUDED.product_type,
+                           product_ref_id = EXCLUDED.product_ref_id,
+                           status = 'assigned',
+                           assigned_at = COALESCE(did_inventory.assigned_at, EXCLUDED.assigned_at),
+                           updated_at = NOW()
+                    """,
+                    row["did"], row["customer_id"], row["ref_id"], row["created_at"],
+                )
+                by_product["rcf"] += 1
+
+            # --- API DIDs ---
+            api_rows = await conn.fetch(
+                """
+                SELECT a.id AS ref_id, a.did, a.customer_id, a.created_at
+                  FROM api_dids a
+                  JOIN customers c ON a.customer_id = c.id
+                """
+            )
+            for row in api_rows:
+                await conn.execute(
+                    """
+                    INSERT INTO did_inventory (did, customer_id, product_type, product_ref_id,
+                                               status, assigned_at, updated_at)
+                    VALUES ($1, $2, 'api', $3, 'assigned', $4, NOW())
+                    ON CONFLICT (did) DO UPDATE
+                       SET customer_id = EXCLUDED.customer_id,
+                           product_type = EXCLUDED.product_type,
+                           product_ref_id = EXCLUDED.product_ref_id,
+                           status = 'assigned',
+                           assigned_at = COALESCE(did_inventory.assigned_at, EXCLUDED.assigned_at),
+                           updated_at = NOW()
+                    """,
+                    row["did"], row["customer_id"], row["ref_id"], row["created_at"],
+                )
+                by_product["api"] += 1
+
+            # --- Trunk DIDs (join through sip_trunks to get customer_id) ---
+            trunk_rows = await conn.fetch(
+                """
+                SELECT td.id AS ref_id, td.did, t.customer_id, t.created_at
+                  FROM trunk_dids td
+                  JOIN sip_trunks t ON td.trunk_id = t.id
+                  JOIN customers c ON t.customer_id = c.id
+                """
+            )
+            for row in trunk_rows:
+                await conn.execute(
+                    """
+                    INSERT INTO did_inventory (did, customer_id, product_type, product_ref_id,
+                                               status, assigned_at, updated_at)
+                    VALUES ($1, $2, 'trunk', $3, 'assigned', $4, NOW())
+                    ON CONFLICT (did) DO UPDATE
+                       SET customer_id = EXCLUDED.customer_id,
+                           product_type = EXCLUDED.product_type,
+                           product_ref_id = EXCLUDED.product_ref_id,
+                           status = 'assigned',
+                           assigned_at = COALESCE(did_inventory.assigned_at, EXCLUDED.assigned_at),
+                           updated_at = NOW()
+                    """,
+                    row["did"], row["customer_id"], row["ref_id"], row["created_at"],
+                )
+                by_product["trunk"] += 1
+
+    reconciled = sum(by_product.values())
+    logger.info(
+        "Product table reconciliation complete: %d total (rcf=%d, api=%d, trunk=%d)",
+        reconciled, by_product["rcf"], by_product["api"], by_product["trunk"],
+    )
+
+    return {"reconciled": reconciled, "by_product": by_product}
+
+
 # ---------------------------------------------------------------------------
 # Admin endpoints
 # ---------------------------------------------------------------------------
@@ -289,9 +395,13 @@ async def sync_from_bandwidth(admin: dict = Depends(require_admin)):
     # Return removed DIDs as a warning (don't auto-delete; admin reviews)
     removed_list = sorted(removed_dids) if removed_dids else []
 
+    # Reconcile product tables so assigned DIDs from rcf_numbers/api_dids/trunk_dids
+    # are reflected in did_inventory (covers ported numbers not from Bandwidth)
+    reconcile_result = await _reconcile_product_tables()
+
     logger.info(
-        "Bandwidth sync complete: %d total, %d inserted, %d updated, %d removed from Bandwidth",
-        len(bw_dids), inserted, updated, len(removed_list),
+        "Bandwidth sync complete: %d total, %d inserted, %d updated, %d removed from Bandwidth, %d reconciled from product tables",
+        len(bw_dids), inserted, updated, len(removed_list), reconcile_result["reconciled"],
     )
 
     return {
@@ -299,6 +409,26 @@ async def sync_from_bandwidth(admin: dict = Depends(require_admin)):
         "inserted": inserted,
         "updated": updated,
         "removed": removed_list,
+        "reconciled": reconcile_result["reconciled"],
+        "reconciled_by_product": reconcile_result["by_product"],
+    }
+
+
+@router.post("/reconcile")
+async def reconcile_product_tables(admin: dict = Depends(require_admin)):
+    """Reconcile did_inventory with product tables. Admin only.
+
+    Scans rcf_numbers, api_dids, and trunk_dids and upserts every assigned DID
+    into did_inventory. Useful for initial setup or after manual DB changes,
+    without needing Bandwidth API credentials.
+
+    Idempotent: safe to run multiple times.
+    """
+    result = await _reconcile_product_tables()
+    return {
+        "status": "ok",
+        "reconciled": result["reconciled"],
+        "by_product": result["by_product"],
     }
 
 
@@ -555,35 +685,117 @@ async def get_my_numbers(
     user: dict = Depends(get_current_user),
     customer_filter: int | None = Depends(get_customer_filter),
 ):
-    """Get all DIDs assigned to the current user's customer. Any authenticated user."""
+    """Get all DIDs assigned to the current user's customer. Any authenticated user.
+
+    Uses a UNION query so that even if did_inventory hasn't been synced/reconciled
+    yet, customers still see their real numbers from the product tables
+    (rcf_numbers, api_dids, trunk_dids).
+    """
     customer_id = customer_filter
     if customer_id is None:
-        # Admin: require explicit customer_id? No -- show all assigned.
-        # But for non-admin, customer_filter returns their customer_id.
-        # For admin, show all assigned DIDs (they can filter via /inventory).
+        # Admin: show all assigned DIDs from did_inventory + product tables
         rows = await db.fetch_all(
             """
-            SELECT d.did, d.product_type, d.status, d.city, d.state,
-                   d.assigned_at, d.notes, d.customer_id,
-                   c.name AS customer_name
-              FROM did_inventory d
-              LEFT JOIN customers c ON d.customer_id = c.id
-             WHERE d.status IN ('assigned', 'reserved')
-             ORDER BY d.did
+            SELECT did, product_type, status, city, state,
+                   assigned_at, notes, customer_id, customer_name
+              FROM (
+                SELECT d.did, d.product_type, d.status, d.city, d.state,
+                       d.assigned_at, d.notes, d.customer_id,
+                       c.name AS customer_name
+                  FROM did_inventory d
+                  LEFT JOIN customers c ON d.customer_id = c.id
+                 WHERE d.status IN ('assigned', 'reserved')
+                UNION
+                SELECT r.did, 'rcf' AS product_type, 'assigned' AS status,
+                       NULL AS city, NULL AS state,
+                       r.created_at AS assigned_at, NULL AS notes,
+                       r.customer_id,
+                       c.name AS customer_name
+                  FROM rcf_numbers r
+                  JOIN customers c ON r.customer_id = c.id
+                 WHERE r.did NOT IN (
+                       SELECT di.did FROM did_inventory di
+                        WHERE di.status IN ('assigned', 'reserved'))
+                UNION
+                SELECT a.did, 'api' AS product_type, 'assigned' AS status,
+                       NULL AS city, NULL AS state,
+                       a.created_at AS assigned_at, NULL AS notes,
+                       a.customer_id,
+                       c.name AS customer_name
+                  FROM api_dids a
+                  JOIN customers c ON a.customer_id = c.id
+                 WHERE a.did NOT IN (
+                       SELECT di.did FROM did_inventory di
+                        WHERE di.status IN ('assigned', 'reserved'))
+                UNION
+                SELECT td.did, 'trunk' AS product_type, 'assigned' AS status,
+                       NULL AS city, NULL AS state,
+                       t.created_at AS assigned_at, NULL AS notes,
+                       t.customer_id,
+                       c.name AS customer_name
+                  FROM trunk_dids td
+                  JOIN sip_trunks t ON td.trunk_id = t.id
+                  JOIN customers c ON t.customer_id = c.id
+                 WHERE td.did NOT IN (
+                       SELECT di.did FROM did_inventory di
+                        WHERE di.status IN ('assigned', 'reserved'))
+              ) combined
+             ORDER BY did
              LIMIT 500
             """
         )
     else:
         rows = await db.fetch_all(
             """
-            SELECT d.did, d.product_type, d.status, d.city, d.state,
-                   d.assigned_at, d.notes, d.customer_id,
-                   c.name AS customer_name
-              FROM did_inventory d
-              LEFT JOIN customers c ON d.customer_id = c.id
-             WHERE d.customer_id = $1
-               AND d.status IN ('assigned', 'reserved')
-             ORDER BY d.did
+            SELECT did, product_type, status, city, state,
+                   assigned_at, notes, customer_id, customer_name
+              FROM (
+                SELECT d.did, d.product_type, d.status, d.city, d.state,
+                       d.assigned_at, d.notes, d.customer_id,
+                       c.name AS customer_name
+                  FROM did_inventory d
+                  LEFT JOIN customers c ON d.customer_id = c.id
+                 WHERE d.customer_id = $1
+                   AND d.status IN ('assigned', 'reserved')
+                UNION
+                SELECT r.did, 'rcf' AS product_type, 'assigned' AS status,
+                       NULL AS city, NULL AS state,
+                       r.created_at AS assigned_at, NULL AS notes,
+                       r.customer_id,
+                       c.name AS customer_name
+                  FROM rcf_numbers r
+                  JOIN customers c ON r.customer_id = c.id
+                 WHERE r.customer_id = $1
+                   AND r.did NOT IN (
+                       SELECT di.did FROM did_inventory di
+                        WHERE di.customer_id = $1)
+                UNION
+                SELECT a.did, 'api' AS product_type, 'assigned' AS status,
+                       NULL AS city, NULL AS state,
+                       a.created_at AS assigned_at, NULL AS notes,
+                       a.customer_id,
+                       c.name AS customer_name
+                  FROM api_dids a
+                  JOIN customers c ON a.customer_id = c.id
+                 WHERE a.customer_id = $1
+                   AND a.did NOT IN (
+                       SELECT di.did FROM did_inventory di
+                        WHERE di.customer_id = $1)
+                UNION
+                SELECT td.did, 'trunk' AS product_type, 'assigned' AS status,
+                       NULL AS city, NULL AS state,
+                       t.created_at AS assigned_at, NULL AS notes,
+                       t.customer_id,
+                       c.name AS customer_name
+                  FROM trunk_dids td
+                  JOIN sip_trunks t ON td.trunk_id = t.id
+                  JOIN customers c ON t.customer_id = c.id
+                 WHERE t.customer_id = $1
+                   AND td.did NOT IN (
+                       SELECT di.did FROM did_inventory di
+                        WHERE di.customer_id = $1)
+              ) combined
+             ORDER BY did
             """,
             customer_id,
         )
