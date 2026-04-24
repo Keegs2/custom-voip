@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { Shield, Zap, Globe, Activity } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Shield, Zap, Globe, Activity, PhoneForwarded, Phone, Code, Voicemail } from 'lucide-react';
 import { HaArchitectureViz } from '../components/layout/HaArchitectureViz';
 
 /* ─── Capability card data ───────────────────────────────── */
@@ -42,52 +43,47 @@ const CAPABILITY_CARDS: CapabilityCard[] = [
   },
 ];
 
-/* ─── How it works steps ─────────────────────────────────── */
+/* ─── Product card data ──────────────────────────────────── */
 
-interface Step {
-  number: string;
+interface ProductCard {
+  icon: React.ReactNode;
   title: string;
-  description: string;
+  subtitle: string;
+  active: boolean;
+  route?: string;
   animDelay: string;
 }
 
-const HOW_IT_WORKS: Step[] = [
+const PRODUCT_CARDS: ProductCard[] = [
   {
-    number: '01',
-    title: 'Provision Numbers',
-    description:
-      'Port existing DIDs or provision new numbers directly through the platform. No carrier coordination required.',
+    icon: <PhoneForwarded size={20} strokeWidth={1.75} />,
+    title: 'Remote Call Forwarding',
+    subtitle: 'Intelligent DID forwarding with multi-zone redundancy',
+    active: true,
+    route: '/rcf',
+    animDelay: '0.1s',
+  },
+  {
+    icon: <Phone size={20} strokeWidth={1.75} />,
+    title: 'SIP Trunking',
+    subtitle: 'Enterprise SIP connectivity',
+    active: false,
+    animDelay: '0.2s',
+  },
+  {
+    icon: <Code size={20} strokeWidth={1.75} />,
+    title: 'API Calling',
+    subtitle: 'Programmable voice via webhooks',
+    active: false,
     animDelay: '0.3s',
   },
   {
-    number: '02',
-    title: 'Configure Routing',
-    description:
-      'Set forwarding rules with instant activation. Point to any PSTN number or SIP endpoint — no hardware, no reboots.',
-    animDelay: '0.5s',
+    icon: <Voicemail size={20} strokeWidth={1.75} />,
+    title: 'Voicemail',
+    subtitle: 'Visual voicemail with transcription',
+    active: false,
+    animDelay: '0.4s',
   },
-  {
-    number: '03',
-    title: 'Monitor in Real Time',
-    description:
-      'Every call is logged with quality metrics. Drill into MOS scores, packet loss, and jitter from the Call Quality dashboard.',
-    animDelay: '0.7s',
-  },
-];
-
-/* ─── Stat bar data ──────────────────────────────────────── */
-
-interface Stat {
-  value: string;
-  label: string;
-  animDelay: string;
-}
-
-const STATS: Stat[] = [
-  { value: '3',        label: 'Availability Zones',   animDelay: '0.2s' },
-  { value: '< 15s',   label: 'Automatic Failover',    animDelay: '0.35s' },
-  { value: '99.999%', label: 'Uptime Target',          animDelay: '0.5s' },
-  { value: 'Sub-10ms',label: 'Carrier PoP Latency',   animDelay: '0.65s' },
 ];
 
 /* ─── CapabilityCardEl ───────────────────────────────────── */
@@ -178,142 +174,223 @@ function CapabilityCardEl({ card }: { card: CapabilityCard }) {
   );
 }
 
-/* ─── StepEl ─────────────────────────────────────────────── */
+/* ─── ProductCardEl ──────────────────────────────────────── */
 
-function StepEl({ step, isLast }: { step: Step; isLast: boolean }) {
-  return (
-    <div
-      className="animate-fade-in-up"
-      style={{
-        animationDelay: step.animDelay,
-        flex: 1,
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'flex-start',
-        position: 'relative',
-      }}
-    >
-      {/* Connector line between steps */}
-      {!isLast && (
+function ProductCardEl({ card }: { card: ProductCard }) {
+  const [hovered, setHovered] = useState(false);
+  const navigate = useNavigate();
+
+  function handleClick() {
+    if (card.active && card.route) {
+      navigate(card.route);
+    }
+  }
+
+  if (card.active) {
+    return (
+      <div
+        className="animate-fade-in-up"
+        style={{
+          animationDelay: card.animDelay,
+          flex: 1,
+          position: 'relative',
+          background: 'rgba(19, 21, 29, 0.70)',
+          backdropFilter: 'blur(8px)',
+          WebkitBackdropFilter: 'blur(8px)',
+          border: `1px solid ${hovered ? 'rgba(59,130,246,0.45)' : 'rgba(59,130,246,0.28)'}`,
+          borderRadius: 16,
+          padding: '20px',
+          cursor: 'pointer',
+          transition: 'border-color 0.22s ease, box-shadow 0.22s ease, transform 0.18s ease',
+          boxShadow: hovered
+            ? '0 0 0 1px rgba(59,130,246,0.22), 0 0 28px -6px rgba(59,130,246,0.25), 0 12px 32px -10px rgba(0,0,0,0.5)'
+            : '0 0 16px -6px rgba(59,130,246,0.12), 0 4px 16px -4px rgba(0,0,0,0.35)',
+          transform: hovered ? 'translateY(-2px)' : 'translateY(0)',
+          overflow: 'hidden',
+        }}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
+        onClick={handleClick}
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') handleClick(); }}
+      >
+        {/* Top accent line */}
         <div
           style={{
             position: 'absolute',
-            top: 21,
-            left: 'calc(44px + 16px)',
-            right: -16,
-            height: 1,
-            background:
-              'linear-gradient(90deg, rgba(59,130,246,0.25) 0%, rgba(59,130,246,0.05) 100%)',
-            zIndex: 0,
+            top: 0,
+            left: 16,
+            right: 16,
+            height: 2,
+            background: 'linear-gradient(90deg, transparent, rgba(59,130,246,0.9), transparent)',
+            opacity: hovered ? 1 : 0.4,
+            transition: 'opacity 0.22s ease',
+            borderRadius: '0 0 2px 2px',
           }}
         />
-      )}
 
-      {/* Step number badge */}
-      <div
-        style={{
-          width: 44,
-          height: 44,
-          borderRadius: '50%',
-          border: '1.5px solid rgba(59,130,246,0.40)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          marginBottom: 18,
-          background: 'rgba(59,130,246,0.08)',
-          position: 'relative',
-          zIndex: 1,
-          flexShrink: 0,
-        }}
-      >
-        <span
+        {/* Header row: icon + active badge */}
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 14 }}>
+          <div
+            style={{
+              width: 40,
+              height: 40,
+              borderRadius: 10,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: hovered ? '#93c5fd' : '#60a5fa',
+              background: hovered
+                ? 'linear-gradient(135deg, rgba(59,130,246,0.28) 0%, rgba(59,130,246,0.12) 100%)'
+                : 'linear-gradient(135deg, rgba(59,130,246,0.18) 0%, rgba(59,130,246,0.08) 100%)',
+              border: `1px solid ${hovered ? 'rgba(59,130,246,0.45)' : 'rgba(59,130,246,0.28)'}`,
+              transition: 'background 0.22s ease, border-color 0.22s ease, color 0.22s ease',
+              flexShrink: 0,
+            }}
+          >
+            {card.icon}
+          </div>
+
+          {/* Active badge */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 5,
+              background: 'rgba(59,130,246,0.12)',
+              border: '1px solid rgba(59,130,246,0.30)',
+              borderRadius: 20,
+              padding: '3px 8px',
+            }}
+          >
+            <div
+              style={{
+                width: 6,
+                height: 6,
+                borderRadius: '50%',
+                background: '#3b82f6',
+                boxShadow: '0 0 6px rgba(59,130,246,0.8)',
+              }}
+            />
+            <span
+              style={{
+                fontSize: '0.6rem',
+                fontWeight: 700,
+                color: '#60a5fa',
+                letterSpacing: '0.08em',
+                textTransform: 'uppercase',
+              }}
+            >
+              Active
+            </span>
+          </div>
+        </div>
+
+        <div
           style={{
-            fontSize: '0.7rem',
-            fontWeight: 800,
-            color: '#3b82f6',
-            letterSpacing: '0.04em',
-            fontVariantNumeric: 'tabular-nums',
+            fontSize: '0.85rem',
+            fontWeight: 700,
+            color: '#e2e8f0',
+            letterSpacing: '-0.01em',
+            marginBottom: 5,
           }}
         >
-          {step.number}
-        </span>
+          {card.title}
+        </div>
+        <div
+          style={{
+            fontSize: '0.72rem',
+            color: '#64748b',
+            lineHeight: 1.5,
+          }}
+        >
+          {card.subtitle}
+        </div>
       </div>
+    );
+  }
 
-      <h4
-        style={{
-          fontSize: '0.95rem',
-          fontWeight: 700,
-          color: '#e2e8f0',
-          letterSpacing: '-0.01em',
-          marginBottom: 8,
-        }}
-      >
-        {step.title}
-      </h4>
-
-      <p
-        style={{
-          fontSize: '0.83rem',
-          color: '#718096',
-          lineHeight: 1.7,
-          maxWidth: 280,
-        }}
-      >
-        {step.description}
-      </p>
-    </div>
-  );
-}
-
-/* ─── StatCardEl ─────────────────────────────────────────── */
-
-function StatCardEl({ stat }: { stat: Stat }) {
-  const [hovered, setHovered] = useState(false);
-
+  /* Coming soon card */
   return (
     <div
       className="animate-fade-in-up"
       style={{
-        animationDelay: stat.animDelay,
+        animationDelay: card.animDelay,
         flex: 1,
-        minWidth: 120,
-        background: 'rgba(19, 21, 29, 0.65)',
+        position: 'relative',
+        background: 'rgba(19, 21, 29, 0.70)',
         backdropFilter: 'blur(8px)',
         WebkitBackdropFilter: 'blur(8px)',
-        border: `1px solid ${hovered ? 'rgba(59,130,246,0.25)' : 'rgba(59,130,246,0.10)'}`,
+        border: '1px solid rgba(59,130,246,0.08)',
         borderRadius: 16,
-        padding: '20px 18px',
-        textAlign: 'center',
-        transition: 'border-color 0.2s ease, box-shadow 0.2s ease',
-        boxShadow: hovered ? '0 0 24px -6px rgba(59,130,246,0.18)' : 'none',
+        padding: '20px',
+        cursor: 'default',
+        opacity: 0.45,
+        overflow: 'hidden',
       }}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
     >
+      {/* Header row: icon + soon badge */}
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 14 }}>
+        <div
+          style={{
+            width: 40,
+            height: 40,
+            borderRadius: 10,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: '#94a3b8',
+            background: 'rgba(148,163,184,0.08)',
+            border: '1px solid rgba(148,163,184,0.14)',
+            flexShrink: 0,
+          }}
+        >
+          {card.icon}
+        </div>
+
+        {/* Soon badge */}
+        <div
+          style={{
+            background: 'rgba(168,85,247,0.12)',
+            border: '1px solid rgba(168,85,247,0.22)',
+            borderRadius: 20,
+            padding: '3px 8px',
+          }}
+        >
+          <span
+            style={{
+              fontSize: '0.6rem',
+              fontWeight: 700,
+              color: '#c084fc',
+              letterSpacing: '0.08em',
+              textTransform: 'uppercase',
+            }}
+          >
+            Soon
+          </span>
+        </div>
+      </div>
+
       <div
         style={{
-          fontSize: '2rem',
-          fontWeight: 800,
-          color: '#3b82f6',
-          lineHeight: 1.1,
-          letterSpacing: '-0.03em',
-          fontVariantNumeric: 'tabular-nums',
-          marginBottom: 6,
+          fontSize: '0.85rem',
+          fontWeight: 700,
+          color: '#e2e8f0',
+          letterSpacing: '-0.01em',
+          marginBottom: 5,
         }}
       >
-        {stat.value}
+        {card.title}
       </div>
       <div
         style={{
-          fontSize: '0.7rem',
-          fontWeight: 600,
-          color: '#475569',
-          textTransform: 'uppercase',
-          letterSpacing: '0.09em',
-          lineHeight: 1.4,
+          fontSize: '0.72rem',
+          color: '#64748b',
+          lineHeight: 1.5,
         }}
       >
-        {stat.label}
+        {card.subtitle}
       </div>
     </div>
   );
@@ -365,7 +442,7 @@ export function DashboardPage() {
           className="animate-fade-in-up"
           style={{
             textAlign: 'center',
-            marginBottom: 72,
+            marginBottom: 56,
             width: '100%',
             maxWidth: 760,
           }}
@@ -446,6 +523,32 @@ export function DashboardPage() {
         </div>
 
         {/* ──────────────────────────────────────────────────── */}
+        {/* PRODUCTS — 4 horizontal cards                        */}
+        {/* ──────────────────────────────────────────────────── */}
+        <div
+          style={{
+            width: '100%',
+            maxWidth: 1060,
+            marginBottom: 48,
+          }}
+        >
+          <div className="animate-fade-in-up animation-delay-200">
+            <SectionLabel>Products</SectionLabel>
+          </div>
+
+          <div
+            style={{
+              display: 'flex',
+              gap: 16,
+            }}
+          >
+            {PRODUCT_CARDS.map((card) => (
+              <ProductCardEl key={card.title} card={card} />
+            ))}
+          </div>
+        </div>
+
+        {/* ──────────────────────────────────────────────────── */}
         {/* HA ARCHITECTURE VISUALIZATION                        */}
         {/* ──────────────────────────────────────────────────── */}
         <div
@@ -478,63 +581,6 @@ export function DashboardPage() {
           >
             {CAPABILITY_CARDS.map((card) => (
               <CapabilityCardEl key={card.title} card={card} />
-            ))}
-          </div>
-        </div>
-
-        {/* ──────────────────────────────────────────────────── */}
-        {/* HOW IT WORKS — 3 horizontal steps                   */}
-        {/* ──────────────────────────────────────────────────── */}
-        <div
-          style={{
-            width: '100%',
-            maxWidth: 1000,
-            marginBottom: 72,
-          }}
-        >
-          <div className="animate-fade-in-up animation-delay-200">
-            <SectionLabel>How It Works</SectionLabel>
-          </div>
-
-          <div
-            style={{
-              display: 'flex',
-              gap: 32,
-              flexWrap: 'wrap',
-            }}
-          >
-            {HOW_IT_WORKS.map((step, idx) => (
-              <StepEl
-                key={step.number}
-                step={step}
-                isLast={idx === HOW_IT_WORKS.length - 1}
-              />
-            ))}
-          </div>
-        </div>
-
-        {/* ──────────────────────────────────────────────────── */}
-        {/* STATS BAR — 4 glass-morphism stat cards             */}
-        {/* ──────────────────────────────────────────────────── */}
-        <div
-          style={{
-            width: '100%',
-            maxWidth: 1000,
-          }}
-        >
-          <div className="animate-fade-in-up animation-delay-200">
-            <SectionLabel>By the Numbers</SectionLabel>
-          </div>
-
-          <div
-            style={{
-              display: 'flex',
-              gap: 16,
-              flexWrap: 'wrap',
-            }}
-          >
-            {STATS.map((stat) => (
-              <StatCardEl key={stat.label} stat={stat} />
             ))}
           </div>
         </div>
