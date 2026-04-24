@@ -102,7 +102,7 @@ function CapabilityCardEl({ card }: { card: CapabilityCard }) {
         WebkitBackdropFilter: 'blur(8px)',
         border: `1px solid ${hovered ? 'rgba(59,130,246,0.30)' : 'rgba(59,130,246,0.12)'}`,
         borderRadius: 20,
-        padding: '28px 28px 24px',
+        padding: '22px 22px 20px',
         transition: 'border-color 0.25s ease, box-shadow 0.25s ease',
         boxShadow: hovered
           ? '0 0 0 1px rgba(59,130,246,0.18), 0 20px 50px -12px rgba(0,0,0,0.55)'
@@ -131,13 +131,13 @@ function CapabilityCardEl({ card }: { card: CapabilityCard }) {
       {/* Icon container */}
       <div
         style={{
-          width: 48,
-          height: 48,
-          borderRadius: 13,
+          width: 44,
+          height: 44,
+          borderRadius: 12,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          marginBottom: 18,
+          marginBottom: 14,
           color: hovered ? '#60a5fa' : '#3b82f6',
           background: hovered
             ? 'linear-gradient(135deg, rgba(59,130,246,0.22) 0%, rgba(59,130,246,0.10) 100%)'
@@ -163,9 +163,9 @@ function CapabilityCardEl({ card }: { card: CapabilityCard }) {
 
       <p
         style={{
-          fontSize: '0.85rem',
+          fontSize: '0.8rem',
           color: '#718096',
-          lineHeight: 1.7,
+          lineHeight: 1.65,
         }}
       >
         {card.description}
@@ -528,7 +528,7 @@ export function DashboardPage() {
         <div
           style={{
             width: '100%',
-            maxWidth: 1060,
+            maxWidth: 1400,
             marginBottom: 48,
           }}
         >
@@ -553,7 +553,7 @@ export function DashboardPage() {
         {/* ──────────────────────────────────────────────────── */}
         <div
           className="animate-fade-in-up animation-delay-600"
-          style={{ width: '100%', maxWidth: 1060 }}
+          style={{ width: '100%', maxWidth: 1400 }}
         >
           <HaArchitectureViz />
         </div>
@@ -564,7 +564,7 @@ export function DashboardPage() {
         <div
           style={{
             width: '100%',
-            maxWidth: 1000,
+            maxWidth: 1400,
             marginBottom: 72,
           }}
         >
@@ -575,7 +575,7 @@ export function DashboardPage() {
           <div
             style={{
               display: 'grid',
-              gridTemplateColumns: 'repeat(2, 1fr)',
+              gridTemplateColumns: 'repeat(4, 1fr)',
               gap: 20,
             }}
           >

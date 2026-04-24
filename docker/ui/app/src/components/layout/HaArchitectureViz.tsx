@@ -338,7 +338,7 @@ export function HaArchitectureViz() {
     <div
       style={{
         width: '100%',
-        maxWidth: 1060,
+        maxWidth: 1400,
         margin: '0 auto',
         marginTop: 40,
         marginBottom: 48,
@@ -347,7 +347,7 @@ export function HaArchitectureViz() {
         WebkitBackdropFilter: 'blur(10px)',
         border: '1px solid rgba(59,130,246,0.12)',
         borderRadius: 20,
-        padding: '20px 24px 16px',
+        padding: '24px 32px 20px',
         boxShadow: '0 4px 24px -8px rgba(0,0,0,0.50)',
         overflow: 'hidden',
       }}
