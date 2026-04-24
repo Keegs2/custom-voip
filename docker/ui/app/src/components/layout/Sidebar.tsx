@@ -6,7 +6,7 @@ import {
   IconRCF, IconTrunk, IconAPI, IconIVR, IconDocs,
   IconAdmin, IconSignal, IconTroubleshoot,
 } from '../icons/ProductIcons';
-import { Package, Shield, ChevronDown, Clock, Eye, EyeOff, Users, LifeBuoy } from 'lucide-react';
+import { Package, Shield, ChevronDown, Clock, Eye, EyeOff } from 'lucide-react';
 
 /* ─── Types ───────────────────────────────────────────────── */
 
@@ -330,85 +330,23 @@ function CollapsibleGroup({ id, label, icon, isOpen, onToggle, children, to }: C
   );
 }
 
-/* ─── CollapsibleSubGroup ─────────────────────────────────── */
+/* ─── SubGroupLabel — simple static divider, not collapsible ── */
 
-interface CollapsibleSubGroupProps {
-  label: string;
-  icon: React.ReactNode;
-  isOpen: boolean;
-  onToggle: () => void;
-  children: React.ReactNode;
-}
-
-function CollapsibleSubGroup({ label, icon, isOpen, onToggle, children }: CollapsibleSubGroupProps) {
+function SubGroupLabel({ label }: { label: string }) {
   return (
-    <div style={{ marginBottom: 2 }}>
-      {/* Sub-group header */}
-      <button
-        type="button"
-        onClick={onToggle}
-        aria-expanded={isOpen}
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 5,
-          width: '100%',
-          padding: '4px 10px',
-          background: 'transparent',
-          border: 'none',
-          cursor: 'pointer',
-          userSelect: 'none',
-          marginTop: 6,
-          marginBottom: 2,
-        }}
-      >
-        <span
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            color: 'rgba(59, 130, 246, 0.45)',
-          }}
-        >
-          {icon}
-        </span>
-        <span
-          style={{
-            flex: 1,
-            textAlign: 'left',
-            fontSize: '0.58rem',
-            fontWeight: 700,
-            letterSpacing: '0.1em',
-            textTransform: 'uppercase',
-            color: 'rgba(59, 130, 246, 0.40)',
-          }}
-        >
-          {label}
-        </span>
-        <ChevronDown
-          size={9}
-          strokeWidth={2.5}
-          style={{
-            flexShrink: 0,
-            color: 'rgba(59, 130, 246, 0.35)',
-            transition: 'transform 0.2s ease',
-            transform: isOpen ? 'rotate(0deg)' : 'rotate(-90deg)',
-          }}
-        />
-      </button>
-
-      {/* Animated content */}
-      <div
-        style={{
-          overflow: 'hidden',
-          maxHeight: isOpen ? 400 : 0,
-          opacity: isOpen ? 1 : 0,
-          transition: 'max-height 0.2s ease, opacity 0.18s ease',
-        }}
-      >
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-          {children}
-        </div>
-      </div>
+    <div
+      style={{
+        padding: '6px 10px 2px',
+        fontSize: '0.52rem',
+        fontWeight: 700,
+        letterSpacing: '0.1em',
+        textTransform: 'uppercase',
+        color: 'rgba(71, 85, 105, 0.6)',
+        marginTop: 8,
+        userSelect: 'none',
+      }}
+    >
+      {label}
     </div>
   );
 }
@@ -426,8 +364,6 @@ export function Sidebar() {
       products:          stored.products          ?? true,
       comingSoon:        stored.comingSoon        ?? false,
       administration:    stored.administration    ?? false,
-      adminSubCustomers: stored.adminSubCustomers ?? true,
-      adminSubSupport:   stored.adminSubSupport   ?? true,
     };
   });
   const navigate = useNavigate();
@@ -456,25 +392,16 @@ export function Sidebar() {
 
     const productPaths = productNavItems.map((i) => i.to);
     const adminPaths        = ['/admin', '/call-quality', '/admin/did-search', '/admin/user', '/troubleshooting'];
-    const adminCustomerPaths = ['/admin/customers', '/admin/did-search', '/admin/user'];
-    const adminSupportPaths  = ['/call-quality', '/troubleshooting'];
-
-    const inProducts        = productPaths.some((p) => path === p || path.startsWith(p + '/'));
-    const inAdmin           = adminPaths.some((p) => path === p || path.startsWith(p + '/'));
-    const inAdminCustomers  = adminCustomerPaths.some((p) => path === p || path.startsWith(p + '/'));
-    const inAdminSupport    = adminSupportPaths.some((p) => path === p || path.startsWith(p + '/'));
+    const inProducts = productPaths.some((p) => path === p || path.startsWith(p + '/'));
+    const inAdmin    = adminPaths.some((p) => path === p || path.startsWith(p + '/'));
 
     setGroupOpen((prev) => {
       const next = { ...prev };
-      if (inProducts       && !prev.products)          next.products          = true;
-      if (inAdmin          && !prev.administration)    next.administration    = true;
-      if (inAdminCustomers && !prev.adminSubCustomers) next.adminSubCustomers = true;
-      if (inAdminSupport   && !prev.adminSubSupport)   next.adminSubSupport   = true;
-      if (next.products          === prev.products          &&
-          next.administration    === prev.administration    &&
-          next.adminSubCustomers === prev.adminSubCustomers &&
-          next.adminSubSupport   === prev.adminSubSupport) {
-        return prev; // avoid unnecessary re-render
+      if (inProducts && !prev.products)       next.products       = true;
+      if (inAdmin    && !prev.administration) next.administration = true;
+      if (next.products       === prev.products &&
+          next.administration === prev.administration) {
+        return prev;
       }
       return next;
     });
@@ -727,28 +654,18 @@ export function Sidebar() {
               >
                 {/* ── Customers sub-group (admin only) ──── */}
                 {isAdmin && (
-                  <CollapsibleSubGroup
-                    label="Customers"
-                    icon={<Users size={9} strokeWidth={2.5} />}
-                    isOpen={groupOpen.adminSubCustomers}
-                    onToggle={() => toggleGroup('adminSubCustomers')}
-                  >
+                  <>
+                    <SubGroupLabel label="Customers" />
                     <SidebarNavItem item={customersItem}  onNavigate={closeMobile} />
                     <SidebarNavItem item={didLookupItem}  onNavigate={closeMobile} />
                     <SidebarNavItem item={userLookupItem} onNavigate={closeMobile} />
-                  </CollapsibleSubGroup>
+                  </>
                 )}
 
                 {/* ── Support sub-group (admin + readonly) */}
-                <CollapsibleSubGroup
-                  label="Support"
-                  icon={<LifeBuoy size={9} strokeWidth={2.5} />}
-                  isOpen={groupOpen.adminSubSupport}
-                  onToggle={() => toggleGroup('adminSubSupport')}
-                >
-                  <SidebarNavItem item={callQualityItem} onNavigate={closeMobile} />
-                  <SidebarNavItem item={troubleItem}     onNavigate={closeMobile} />
-                </CollapsibleSubGroup>
+                <SubGroupLabel label="Support" />
+                <SidebarNavItem item={callQualityItem} onNavigate={closeMobile} />
+                <SidebarNavItem item={troubleItem}     onNavigate={closeMobile} />
               </CollapsibleGroup>
             </>
           )}
