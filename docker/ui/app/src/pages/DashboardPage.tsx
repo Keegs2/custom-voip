@@ -343,15 +343,10 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
 
 export function DashboardPage() {
   return (
-    <div style={{ position: 'relative', minHeight: '100vh' }}>
-      {/* HA architecture viz — z-0, behind all content */}
-      <HaArchitectureViz />
-
-      {/* All content floats above the grid */}
+    <div style={{ minHeight: '100vh' }}>
+      {/* Page content — single column, centered */}
       <div
         style={{
-          position: 'relative',
-          zIndex: 1,
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center',
@@ -451,6 +446,16 @@ export function DashboardPage() {
         </div>
 
         {/* ──────────────────────────────────────────────────── */}
+        {/* HA ARCHITECTURE VISUALIZATION                        */}
+        {/* ──────────────────────────────────────────────────── */}
+        <div
+          className="animate-fade-in-up animation-delay-600"
+          style={{ width: '100%', maxWidth: 1060 }}
+        >
+          <HaArchitectureViz />
+        </div>
+
+        {/* ──────────────────────────────────────────────────── */}
         {/* PLATFORM CAPABILITIES — 2×2 glass-morphism grid     */}
         {/* ──────────────────────────────────────────────────── */}
         <div
@@ -467,7 +472,7 @@ export function DashboardPage() {
           <div
             style={{
               display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
+              gridTemplateColumns: 'repeat(2, 1fr)',
               gap: 20,
             }}
           >

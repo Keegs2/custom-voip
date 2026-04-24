@@ -4,15 +4,12 @@ import { useMemo } from 'react';
  * HaArchitectureViz
  *
  * SVG-based animated diagram that visualises the Granite Keystone HA
- * call-routing architecture:
+ * call-routing architecture in a horizontal left-to-right flow:
  *
- *   Inbound callers  →  Network Load Balancer
- *                           ↙          ↘
- *                       SBC-1          SBC-2   (Kamailio session border)
- *                           ↘          ↙
- *                         Routing Engine       (call processing + fraud)
- *                        ↙     ↓       ↘
- *                    US-East  US-Central  US-West   (GCP availability zones)
+ *   [Phone 1] ─┐
+ *   [Phone 2] ─┤→  [NLB]  →  [SBC-1] ─┐                      ┌→ [US-East]
+ *   [Phone 3] ─┘              [SBC-2] ─┤→  [Route Engine]  ─┤→ [US-Central]
+ *                                        └                    └→ [US-West]
  *
  * Animated "packet" dots ride CSS offset-path along each SVG path segment.
  * Multiple staggered copies of each dot keep the diagram feeling like live
@@ -26,22 +23,21 @@ import { useMemo } from 'react';
 
 /* ─── Geometry constants ─────────────────────────────────────────────── */
 
-const VB_W = 800;
-const VB_H = 580;
+const VB_W = 1000;
+const VB_H = 280;
 
-// Node centre coordinates (in SVG viewBox units)
+// Node centre coordinates — horizontal left-to-right flow
 const NODES = {
-  caller0: { x: 170, y: 62 },
-  caller1: { x: 300, y: 48 },
-  caller2: { x: 500, y: 48 },
-  caller3: { x: 630, y: 62 },
-  lb:      { x: 400, y: 155 },
-  sbc1:    { x: 265, y: 270 },
-  sbc2:    { x: 535, y: 270 },
-  re:      { x: 400, y: 385 },
-  zoneE:   { x: 220, y: 498 },
-  zoneC:   { x: 400, y: 498 },
-  zoneW:   { x: 580, y: 498 },
+  caller0: { x: 72,  y: 62  },
+  caller1: { x: 72,  y: 117 },
+  caller2: { x: 72,  y: 172 },
+  lb:      { x: 248, y: 117 },
+  sbc1:    { x: 440, y: 72  },
+  sbc2:    { x: 440, y: 195 },
+  re:      { x: 630, y: 117 },
+  zoneE:   { x: 850, y: 55  },
+  zoneC:   { x: 850, y: 117 },
+  zoneW:   { x: 850, y: 179 },
 } as const;
 
 /* ─── SVG path helpers ───────────────────────────────────────────────── */
@@ -70,20 +66,19 @@ interface PathDef {
 
 const PATHS: PathDef[] = [
   // Callers → LB
-  { id: 'c0-lb',   group: 'caller-lb', d: linePath(NODES.caller0.x, NODES.caller0.y, NODES.lb.x, NODES.lb.y) },
-  { id: 'c1-lb',   group: 'caller-lb', d: quadPath(NODES.caller1.x, NODES.caller1.y, 360, 100, NODES.lb.x, NODES.lb.y) },
-  { id: 'c2-lb',   group: 'caller-lb', d: quadPath(NODES.caller2.x, NODES.caller2.y, 440, 100, NODES.lb.x, NODES.lb.y) },
-  { id: 'c3-lb',   group: 'caller-lb', d: linePath(NODES.caller3.x, NODES.caller3.y, NODES.lb.x, NODES.lb.y) },
+  { id: 'c0-lb',   group: 'caller-lb', d: quadPath(NODES.caller0.x + 13, NODES.caller0.y, 165, 72,  NODES.lb.x - 23, NODES.lb.y) },
+  { id: 'c1-lb',   group: 'caller-lb', d: linePath(NODES.caller1.x + 13, NODES.caller1.y, NODES.lb.x - 23, NODES.lb.y) },
+  { id: 'c2-lb',   group: 'caller-lb', d: quadPath(NODES.caller2.x + 13, NODES.caller2.y, 165, 162, NODES.lb.x - 23, NODES.lb.y) },
   // LB → SBCs
-  { id: 'lb-sbc1', group: 'lb-sbc1',   d: quadPath(NODES.lb.x, NODES.lb.y, 320, 210, NODES.sbc1.x, NODES.sbc1.y) },
-  { id: 'lb-sbc2', group: 'lb-sbc2',   d: quadPath(NODES.lb.x, NODES.lb.y, 480, 210, NODES.sbc2.x, NODES.sbc2.y) },
+  { id: 'lb-sbc1', group: 'lb-sbc1',   d: quadPath(NODES.lb.x + 23, NODES.lb.y, 345, 72,  NODES.sbc1.x - 28, NODES.sbc1.y) },
+  { id: 'lb-sbc2', group: 'lb-sbc2',   d: quadPath(NODES.lb.x + 23, NODES.lb.y, 345, 195, NODES.sbc2.x - 28, NODES.sbc2.y) },
   // SBCs → Routing Engine
-  { id: 'sbc1-re', group: 'sbc1-re',   d: quadPath(NODES.sbc1.x, NODES.sbc1.y, 310, 330, NODES.re.x, NODES.re.y) },
-  { id: 'sbc2-re', group: 'sbc2-re',   d: quadPath(NODES.sbc2.x, NODES.sbc2.y, 490, 330, NODES.re.x, NODES.re.y) },
+  { id: 'sbc1-re', group: 'sbc1-re',   d: quadPath(NODES.sbc1.x + 28, NODES.sbc1.y, 535, 72,  NODES.re.x - 27, NODES.re.y) },
+  { id: 'sbc2-re', group: 'sbc2-re',   d: quadPath(NODES.sbc2.x + 28, NODES.sbc2.y, 535, 195, NODES.re.x - 27, NODES.re.y) },
   // RE → Zones
-  { id: 're-zE',   group: 'zone',      d: quadPath(NODES.re.x, NODES.re.y, 290, 445, NODES.zoneE.x, NODES.zoneE.y) },
-  { id: 're-zC',   group: 'zone',      d: linePath(NODES.re.x, NODES.re.y, NODES.zoneC.x, NODES.zoneC.y) },
-  { id: 're-zW',   group: 'zone',      d: quadPath(NODES.re.x, NODES.re.y, 510, 445, NODES.zoneW.x, NODES.zoneW.y) },
+  { id: 're-zE',   group: 'zone',      d: quadPath(NODES.re.x + 27, NODES.re.y, 740, 55,  NODES.zoneE.x - 15, NODES.zoneE.y) },
+  { id: 're-zC',   group: 'zone',      d: linePath(NODES.re.x + 27, NODES.re.y, NODES.zoneC.x - 15, NODES.zoneC.y) },
+  { id: 're-zW',   group: 'zone',      d: quadPath(NODES.re.x + 27, NODES.re.y, 740, 179, NODES.zoneW.x - 15, NODES.zoneW.y) },
 ];
 
 /* ─── Packet animation config ────────────────────────────────────────── */
@@ -113,22 +108,21 @@ function makePackets(
 
 const ALL_PACKETS: PacketConfig[] = [
   // Callers → LB
-  ...makePackets('c0-lb',   2, 3.8, false, 0.0),
-  ...makePackets('c1-lb',   2, 3.8, false, 0.9),
-  ...makePackets('c2-lb',   2, 3.8, false, 1.8),
-  ...makePackets('c3-lb',   2, 3.8, false, 2.7),
+  ...makePackets('c0-lb',   2, 3.2, false, 0.0),
+  ...makePackets('c1-lb',   2, 3.2, false, 1.0),
+  ...makePackets('c2-lb',   2, 3.2, false, 2.0),
   // LB → SBC1
-  ...makePackets('lb-sbc1', 3, 3.2, false, 0.0),
+  ...makePackets('lb-sbc1', 3, 2.8, false, 0.0),
   // LB → SBC2 (dims during failover)
-  ...makePackets('lb-sbc2', 3, 3.2, true,  0.6),
+  ...makePackets('lb-sbc2', 3, 2.8, true,  0.5),
   // SBC1 → RE
-  ...makePackets('sbc1-re', 2, 2.8, false, 0.3),
+  ...makePackets('sbc1-re', 2, 2.4, false, 0.3),
   // SBC2 → RE (dims during failover)
-  ...makePackets('sbc2-re', 2, 2.8, true,  0.9),
+  ...makePackets('sbc2-re', 2, 2.4, true,  0.8),
   // RE → Zones
-  ...makePackets('re-zE',   2, 3.0, false, 0.0),
-  ...makePackets('re-zC',   2, 3.0, false, 1.0),
-  ...makePackets('re-zW',   2, 3.0, false, 2.0),
+  ...makePackets('re-zE',   2, 2.6, false, 0.0),
+  ...makePackets('re-zC',   2, 2.6, false, 0.9),
+  ...makePackets('re-zW',   2, 2.6, false, 1.8),
 ];
 
 /* ─── Component ──────────────────────────────────────────────────────── */
@@ -213,40 +207,59 @@ export function HaArchitectureViz() {
 
   return (
     <div
-      aria-hidden="true"
       style={{
-        position: 'absolute',
-        top: 0,
-        left: 0,
-        right: 0,
-        height: 620,
-        pointerEvents: 'none',
-        zIndex: 0,
-        opacity: 0.55,
+        width: '100%',
+        maxWidth: 1060,
+        margin: '0 auto',
+        marginTop: 40,
+        marginBottom: 48,
+        background: 'rgba(19, 21, 29, 0.70)',
+        backdropFilter: 'blur(10px)',
+        WebkitBackdropFilter: 'blur(10px)',
+        border: '1px solid rgba(59,130,246,0.12)',
+        borderRadius: 20,
+        padding: '20px 24px 16px',
+        boxShadow: '0 4px 24px -8px rgba(0,0,0,0.50)',
         overflow: 'hidden',
       }}
     >
+      {/* Section label */}
+      <div
+        style={{
+          fontSize: '0.62rem',
+          fontWeight: 700,
+          letterSpacing: '0.14em',
+          textTransform: 'uppercase',
+          color: '#3b82f6',
+          marginBottom: 12,
+          opacity: 0.75,
+        }}
+      >
+        Live Infrastructure Topology
+      </div>
+
       <style dangerouslySetInnerHTML={{ __html: css }} />
 
       <svg
         viewBox={`0 0 ${VB_W} ${VB_H}`}
         width="100%"
-        height="100%"
-        preserveAspectRatio="xMidYMin meet"
+        height="auto"
+        preserveAspectRatio="xMidYMid meet"
         style={{ display: 'block' }}
+        aria-label="HA architecture diagram showing left-to-right call flow"
       >
         <defs>
-          {/* Repeating grid lines — matches AnimatedGridBackground's aesthetic */}
+          {/* Repeating grid lines */}
           <pattern
             id={`${uid}-grid`}
-            width="56"
-            height="56"
+            width="48"
+            height="48"
             patternUnits="userSpaceOnUse"
           >
             <path
-              d="M 56 0 L 0 0 0 56"
+              d="M 48 0 L 0 0 0 48"
               fill="none"
-              stroke="rgba(99,130,180,0.07)"
+              stroke="rgba(99,130,180,0.06)"
               strokeWidth="1"
             />
           </pattern>
@@ -259,7 +272,7 @@ export function HaArchitectureViz() {
 
           {/* LB / RE stronger glow */}
           <radialGradient id={`${uid}-lg`} cx="50%" cy="50%" r="50%">
-            <stop offset="0%"   stopColor="#60a5fa" stopOpacity="0.32" />
+            <stop offset="0%"   stopColor="#60a5fa" stopOpacity="0.30" />
             <stop offset="100%" stopColor="#3b82f6" stopOpacity="0" />
           </radialGradient>
 
@@ -276,7 +289,7 @@ export function HaArchitectureViz() {
 
           {/* Packet glow filter */}
           <filter id={`${uid}-pf`} x="-120%" y="-120%" width="340%" height="340%">
-            <feGaussianBlur in="SourceGraphic" stdDeviation="2.2" result="b" />
+            <feGaussianBlur in="SourceGraphic" stdDeviation="2" result="b" />
             <feMerge>
               <feMergeNode in="b" />
               <feMergeNode in="SourceGraphic" />
@@ -296,15 +309,15 @@ export function HaArchitectureViz() {
         {/* ── Grid background ─────────────────────────────────────── */}
         <rect x="0" y="0" width={VB_W} height={VB_H} fill={`url(#${uid}-grid)`} />
 
-        {/* ── Soft blue radial glow centred on the upper portion ──── */}
+        {/* ── Soft radial glow centred on the middle ───────────── */}
         <ellipse
-          cx={VB_W / 2} cy={VB_H * 0.28}
-          rx={VB_W * 0.50} ry={VB_H * 0.38}
-          fill="rgba(59,130,246,0.04)"
+          cx={VB_W / 2} cy={VB_H / 2}
+          rx={VB_W * 0.48} ry={VB_H * 0.60}
+          fill="rgba(59,130,246,0.03)"
         />
 
         {/* ── Connection lines ─────────────────────────────────────── */}
-        <g stroke="rgba(59,130,246,0.13)" strokeWidth="1" fill="none" clipPath={`url(#${uid}-clip)`}>
+        <g stroke="rgba(59,130,246,0.15)" strokeWidth="1" fill="none" clipPath={`url(#${uid}-clip)`}>
           {PATHS.map((p) => <path key={p.id} d={p.d} />)}
         </g>
 
@@ -313,7 +326,7 @@ export function HaArchitectureViz() {
           {ALL_PACKETS.map((_, i) => (
             <circle
               key={i}
-              r={3.8}
+              r={3.5}
               cx="0"
               cy="0"
               fill={`url(#${uid}-pg)`}
@@ -323,21 +336,28 @@ export function HaArchitectureViz() {
           ))}
         </g>
 
-        {/* ── Nodes (drawn on top of lines and packets) ────────────── */}
-        <CallerRow uid={uid} />
+        {/* ── Nodes ────────────────────────────────────────────────── */}
+        <CallerColumn uid={uid} />
         <LbNode uid={uid} />
         <SbcGroup uid={uid} />
         <ReNode uid={uid} />
-        <ZoneRow uid={uid} />
+        <ZoneColumn uid={uid} />
+
+        {/* ── Column header labels ──────────────────────────────────── */}
+        <ColumnLabel text="INBOUND CALLS" x={NODES.caller1.x} y={22} />
+        <ColumnLabel text="LOAD BALANCER" x={NODES.lb.x}      y={22} />
+        <ColumnLabel text="SESSION BORDER" x={NODES.sbc1.x}    y={22} />
+        <ColumnLabel text="ROUTING ENGINE" x={NODES.re.x}      y={22} />
+        <ColumnLabel text="ZONES"           x={NODES.zoneC.x}  y={22} />
 
         {/* ── Watermark ────────────────────────────────────────────── */}
         <text
-          x={VB_W - 10} y={VB_H - 8}
+          x={VB_W - 8} y={VB_H - 6}
           textAnchor="end"
-          fontSize="6.5"
+          fontSize="6"
           fontFamily="'SF Mono', 'Fira Code', 'Consolas', monospace"
-          letterSpacing="0.13em"
-          fill="rgba(59,130,246,0.22)"
+          letterSpacing="0.12em"
+          fill="rgba(59,130,246,0.20)"
           fontWeight="600"
         >
           LIVE INFRASTRUCTURE
@@ -349,22 +369,15 @@ export function HaArchitectureViz() {
 
 /* ─── Node sub-components ────────────────────────────────────────────── */
 
-function Label({
-  text, y, anchor = 'middle', opacity = 0.38,
-}: {
-  text: string;
-  y: number;
-  anchor?: 'middle' | 'start' | 'end';
-  opacity?: number;
-}) {
+function ColumnLabel({ text, x, y }: { text: string; x: number; y: number }) {
   return (
     <text
-      y={y}
-      textAnchor={anchor}
-      fontSize="8"
+      x={x} y={y}
+      textAnchor="middle"
+      fontSize="7"
       fontFamily="'SF Mono', 'Fira Code', 'Consolas', monospace"
-      letterSpacing="0.10em"
-      fill={`rgba(148,163,184,${opacity})`}
+      letterSpacing="0.13em"
+      fill="rgba(148,163,184,0.30)"
       fontWeight="600"
     >
       {text}
@@ -372,37 +385,40 @@ function Label({
   );
 }
 
-/* ── Caller nodes (top row) ── */
-function CallerRow({ uid }: { uid: string }) {
-  const callers = [NODES.caller0, NODES.caller1, NODES.caller2, NODES.caller3] as const;
+function NodeLabel({ text, y }: { text: string; y: number }) {
+  return (
+    <text
+      y={y}
+      textAnchor="middle"
+      fontSize="7.5"
+      fontFamily="'SF Mono', 'Fira Code', 'Consolas', monospace"
+      letterSpacing="0.09em"
+      fill="rgba(148,163,184,0.55)"
+      fontWeight="600"
+    >
+      {text}
+    </text>
+  );
+}
+
+/* ── Caller nodes (left column, stacked vertically) ── */
+function CallerColumn({ uid }: { uid: string }) {
+  const callers = [NODES.caller0, NODES.caller1, NODES.caller2] as const;
 
   return (
     <g>
-      {/* Row section label */}
-      <text
-        x={VB_W / 2} y={15}
-        textAnchor="middle"
-        fontSize="7.5"
-        fontFamily="'SF Mono', 'Fira Code', 'Consolas', monospace"
-        letterSpacing="0.14em"
-        fill="rgba(148,163,184,0.28)"
-        fontWeight="600"
-      >
-        INBOUND CALLS
-      </text>
-
       {callers.map((c, i) => (
         <g key={i} transform={`translate(${c.x}, ${c.y})`}>
           {/* Ambient glow disc */}
-          <circle r="26" fill={`url(#${uid}-ng)`} />
+          <circle r="22" fill={`url(#${uid}-ng)`} />
           {/* Node circle */}
           <circle
             r="13"
-            fill="rgba(15,17,23,0.60)"
-            stroke="rgba(59,130,246,0.22)"
+            fill="rgba(15,17,23,0.65)"
+            stroke="rgba(59,130,246,0.24)"
             strokeWidth="1"
           />
-          {/* Handset icon — drawn in local coords centred at 0,0 */}
+          {/* Phone icon */}
           <PhoneIcon />
         </g>
       ))}
@@ -413,30 +429,30 @@ function CallerRow({ uid }: { uid: string }) {
 /* ── Load Balancer — diamond shape ── */
 function LbNode({ uid }: { uid: string }) {
   const { x, y } = NODES.lb;
-  const s = 23; // half-diagonal of the diamond
+  const s = 22; // half-diagonal of the diamond
 
   return (
     <g transform={`translate(${x}, ${y})`}>
       {/* Glow */}
-      <circle r="50" fill={`url(#${uid}-lg)`} />
+      <circle r="46" fill={`url(#${uid}-lg)`} />
       {/* Outer diamond */}
       <polygon
         points={`0,${-s} ${s},0 0,${s} ${-s},0`}
-        fill="rgba(15,17,23,0.65)"
-        stroke="rgba(59,130,246,0.28)"
+        fill="rgba(15,17,23,0.68)"
+        stroke="rgba(59,130,246,0.30)"
         strokeWidth="1"
       />
       {/* Inner diamond accent */}
       <polygon
         points={`0,${-s * 0.46} ${s * 0.46},0 0,${s * 0.46} ${-s * 0.46},0`}
-        fill="rgba(59,130,246,0.16)"
-        stroke="rgba(96,165,250,0.32)"
+        fill="rgba(59,130,246,0.15)"
+        stroke="rgba(96,165,250,0.30)"
         strokeWidth="0.75"
       />
       {/* Four-way distribution marker */}
-      <line x1="-9" y1="0" x2="9"  y2="0"  stroke="rgba(96,165,250,0.40)" strokeWidth="0.8" />
-      <line x1="0"  y1="-9" x2="0" y2="9"  stroke="rgba(96,165,250,0.40)" strokeWidth="0.8" />
-      <Label text="LOAD BALANCER" y={s + 14} />
+      <line x1="-8" y1="0" x2="8"  y2="0"  stroke="rgba(96,165,250,0.40)" strokeWidth="0.8" />
+      <line x1="0"  y1="-8" x2="0" y2="8"  stroke="rgba(96,165,250,0.40)" strokeWidth="0.8" />
+      <NodeLabel text="NLB" y={s + 13} />
     </g>
   );
 }
@@ -461,7 +477,7 @@ function SbcNode({
   faults: boolean;
 }) {
   const W = 56;
-  const H = 32;
+  const H = 30;
   const R = 7;
 
   return (
@@ -470,14 +486,14 @@ function SbcNode({
       className={faults ? `${uid}-sbc2-node` : undefined}
     >
       {/* Glow */}
-      <circle r="44" fill={`url(#${uid}-ng)`} />
+      <circle r="40" fill={`url(#${uid}-ng)`} />
       {/* Body */}
       <rect
         x={-W / 2} y={-H / 2}
         width={W} height={H}
         rx={R}
-        fill="rgba(15,17,23,0.68)"
-        stroke="rgba(59,130,246,0.24)"
+        fill="rgba(15,17,23,0.70)"
+        stroke="rgba(59,130,246,0.26)"
         strokeWidth="1"
       />
       {/* Inner highlight */}
@@ -487,11 +503,11 @@ function SbcNode({
         rx={R - 1}
         fill="rgba(96,165,250,0.05)"
       />
-      {/* Layer lines — suggests stacked proxy */}
-      <line x1="-15" y1="-5" x2="15" y2="-5" stroke="rgba(59,130,246,0.28)" strokeWidth="0.7" />
-      <line x1="-11" y1="0"  x2="11" y2="0"  stroke="rgba(59,130,246,0.18)" strokeWidth="0.7" />
-      <line x1="-7"  y1="5"  x2="7"  y2="5"  stroke="rgba(59,130,246,0.12)" strokeWidth="0.7" />
-      <Label text={label} y={H / 2 + 13} />
+      {/* Layer lines */}
+      <line x1="-14" y1="-5" x2="14" y2="-5" stroke="rgba(59,130,246,0.28)" strokeWidth="0.7" />
+      <line x1="-10" y1="0"  x2="10" y2="0"  stroke="rgba(59,130,246,0.18)" strokeWidth="0.7" />
+      <line x1="-6"  y1="5"  x2="6"  y2="5"  stroke="rgba(59,130,246,0.12)" strokeWidth="0.7" />
+      <NodeLabel text={label} y={H / 2 + 12} />
     </g>
   );
 }
@@ -499,7 +515,7 @@ function SbcNode({
 /* ── Routing Engine — hexagon ── */
 function ReNode({ uid }: { uid: string }) {
   const { x, y } = NODES.re;
-  const R = 27;
+  const R = 26;
 
   // Flat-top hexagon points
   const hexPoints = (radius: number) =>
@@ -511,69 +527,56 @@ function ReNode({ uid }: { uid: string }) {
   return (
     <g transform={`translate(${x}, ${y})`}>
       {/* Glow */}
-      <circle r="54" fill={`url(#${uid}-lg)`} />
+      <circle r="50" fill={`url(#${uid}-lg)`} />
       {/* Outer hexagon */}
       <polygon
         points={hexPoints(R)}
-        fill="rgba(15,17,23,0.70)"
-        stroke="rgba(59,130,246,0.26)"
+        fill="rgba(15,17,23,0.72)"
+        stroke="rgba(59,130,246,0.28)"
         strokeWidth="1"
       />
       {/* Inner hexagon */}
       <polygon
-        points={hexPoints(R * 0.54)}
+        points={hexPoints(R * 0.52)}
         fill="rgba(59,130,246,0.13)"
-        stroke="rgba(96,165,250,0.28)"
+        stroke="rgba(96,165,250,0.26)"
         strokeWidth="0.75"
       />
-      {/* Cross-hatch — suggests computational grid */}
-      <line x1="-19" y1="0"  x2="19" y2="0"  stroke="rgba(59,130,246,0.22)" strokeWidth="0.75" />
-      <line x1="0"   y1="-19" x2="0" y2="19" stroke="rgba(59,130,246,0.22)" strokeWidth="0.75" />
-      <line x1="-13" y1="-13" x2="13" y2="13" stroke="rgba(59,130,246,0.10)" strokeWidth="0.6" />
-      <line x1="13"  y1="-13" x2="-13" y2="13" stroke="rgba(59,130,246,0.10)" strokeWidth="0.6" />
-      <Label text="ROUTING ENGINE" y={R + 14} />
+      {/* Cross-hatch */}
+      <line x1="-18" y1="0"  x2="18" y2="0"  stroke="rgba(59,130,246,0.22)" strokeWidth="0.75" />
+      <line x1="0"   y1="-18" x2="0" y2="18" stroke="rgba(59,130,246,0.22)" strokeWidth="0.75" />
+      <line x1="-12" y1="-12" x2="12" y2="12" stroke="rgba(59,130,246,0.10)" strokeWidth="0.6" />
+      <line x1="12"  y1="-12" x2="-12" y2="12" stroke="rgba(59,130,246,0.10)" strokeWidth="0.6" />
+      <NodeLabel text="ROUTE" y={R + 12} />
     </g>
   );
 }
 
-/* ── Zone nodes (bottom row) ── */
-function ZoneRow({ uid }: { uid: string }) {
+/* ── Zone nodes (right column, stacked vertically) ── */
+function ZoneColumn({ uid }: { uid: string }) {
   const zones = [
-    { ...NODES.zoneE, label: 'US-EAST' },
-    { ...NODES.zoneC, label: 'US-CENTRAL' },
-    { ...NODES.zoneW, label: 'US-WEST' },
+    { ...NODES.zoneE, label: 'US-E' },
+    { ...NODES.zoneC, label: 'US-C' },
+    { ...NODES.zoneW, label: 'US-W' },
   ] as const;
 
   return (
     <g>
-      {/* Section label */}
-      <text
-        x={VB_W / 2} y={VB_H - 6}
-        textAnchor="middle"
-        fontSize="7"
-        fontFamily="'SF Mono', 'Fira Code', 'Consolas', monospace"
-        letterSpacing="0.14em"
-        fill="rgba(148,163,184,0.22)"
-        fontWeight="600"
-      >
-        AVAILABILITY ZONES
-      </text>
-
       {zones.map((z, i) => (
         <g key={i} transform={`translate(${z.x}, ${z.y})`}>
           {/* Glow */}
-          <circle r="30" fill={`url(#${uid}-ng)`} />
+          <circle r="28" fill={`url(#${uid}-ng)`} />
           {/* Node */}
           <circle
             r="15"
             fill="rgba(15,17,23,0.65)"
-            stroke="rgba(59,130,246,0.20)"
+            stroke="rgba(59,130,246,0.22)"
             strokeWidth="1"
           />
           {/* Status dot — indicates active zone */}
-          <circle r="4" fill="rgba(59,130,246,0.55)" />
-          <circle r="2" fill="rgba(147,197,253,0.90)" />
-          <Label text={z.label} y={26} />
+          <circle r="4"   fill="rgba(59,130,246,0.55)" />
+          <circle r="2"   fill="rgba(147,197,253,0.90)" />
+          <NodeLabel text={z.label} y={24} />
         </g>
       ))}
     </g>
@@ -582,14 +585,9 @@ function ZoneRow({ uid }: { uid: string }) {
 
 /* ─── Phone icon ─────────────────────────────────────────────────────── */
 
-/**
- * Simple phone handset drawn in a 12×12 local coordinate space,
- * centred at origin (translate -6,-6 applied via the group).
- */
 function PhoneIcon() {
   return (
-    <g transform="translate(-6, -6)" opacity="0.50">
-      {/* Handset outline */}
+    <g transform="translate(-6, -6)" opacity="0.55">
       <rect
         x="1" y="1"
         width="10" height="10"
@@ -598,10 +596,8 @@ function PhoneIcon() {
         stroke="rgba(96,165,250,0.55)"
         strokeWidth="0.85"
       />
-      {/* Speaker grille lines */}
       <line x1="3.5" y1="3.5" x2="8.5" y2="3.5" stroke="rgba(96,165,250,0.45)" strokeWidth="0.7" strokeLinecap="round" />
       <line x1="3.5" y1="5.5" x2="8.5" y2="5.5" stroke="rgba(96,165,250,0.30)" strokeWidth="0.7" strokeLinecap="round" />
-      {/* Mic dot */}
       <circle cx="6" cy="8.5" r="1" fill="rgba(96,165,250,0.40)" />
     </g>
   );
