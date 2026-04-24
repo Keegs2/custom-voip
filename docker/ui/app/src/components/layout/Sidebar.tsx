@@ -139,9 +139,10 @@ function ComingSoonNavItem({ item }: { item: ComingSoonItemDef }) {
 interface SidebarNavItemProps {
   item: NavItemDef;
   onNavigate?: () => void;
+  small?: boolean;
 }
 
-function SidebarNavItem({ item, onNavigate }: SidebarNavItemProps) {
+function SidebarNavItem({ item, onNavigate, small }: SidebarNavItemProps) {
   return (
     <NavLink
       to={item.to}
@@ -150,11 +151,11 @@ function SidebarNavItem({ item, onNavigate }: SidebarNavItemProps) {
       style={({ isActive }) => ({
         display: 'flex',
         alignItems: 'center',
-        gap: 10,
-        padding: '7px 10px',
+        gap: small ? 8 : 10,
+        padding: small ? '5px 10px 5px 14px' : '7px 10px',
         borderRadius: 10,
         overflow: 'hidden',
-        fontSize: '0.825rem',
+        fontSize: small ? '0.76rem' : '0.825rem',
         fontWeight: isActive ? 600 : 500,
         letterSpacing: '-0.01em',
         cursor: 'pointer',
@@ -177,9 +178,9 @@ function SidebarNavItem({ item, onNavigate }: SidebarNavItemProps) {
         <>
           <span
             style={{
-              width: 28,
-              height: 28,
-              borderRadius: 7,
+              width: small ? 24 : 28,
+              height: small ? 24 : 28,
+              borderRadius: small ? 6 : 7,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -656,16 +657,16 @@ export function Sidebar() {
                 {isAdmin && (
                   <>
                     <SubGroupLabel label="Customers" />
-                    <SidebarNavItem item={customersItem}  onNavigate={closeMobile} />
-                    <SidebarNavItem item={didLookupItem}  onNavigate={closeMobile} />
-                    <SidebarNavItem item={userLookupItem} onNavigate={closeMobile} />
+                    <SidebarNavItem item={customersItem}  onNavigate={closeMobile} small />
+                    <SidebarNavItem item={didLookupItem}  onNavigate={closeMobile} small />
+                    <SidebarNavItem item={userLookupItem} onNavigate={closeMobile} small />
                   </>
                 )}
 
                 {/* ── Support sub-group (admin + readonly) */}
                 <SubGroupLabel label="Support" />
-                <SidebarNavItem item={callQualityItem} onNavigate={closeMobile} />
-                <SidebarNavItem item={troubleItem}     onNavigate={closeMobile} />
+                <SidebarNavItem item={callQualityItem} onNavigate={closeMobile} small />
+                <SidebarNavItem item={troubleItem}     onNavigate={closeMobile} small />
               </CollapsibleGroup>
             </>
           )}
