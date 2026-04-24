@@ -249,6 +249,9 @@ const PATHS: PathDef[] = [
  *   duration — time for one full traversal
  *   group    — which failover scenario controls its visibility
  *   isTerm   — render green (termination leg) vs blue (processing leg)
+ *   beamLen  — half-length of the beam rect in SVG units (default 12 → 24px total)
+ *              Longer beams on fast segments create a "streak" effect.
+ *   bright   — render with the high-opacity bright gradient variant
  */
 interface PacketConfig {
   pathId: string;
@@ -256,6 +259,8 @@ interface PacketConfig {
   duration: number;
   group: FailoverGroup;
   isTerm: boolean;
+  beamLen: number;
+  bright: boolean;
 }
 
 function makePackets(
@@ -265,6 +270,8 @@ function makePackets(
   group: FailoverGroup,
   isTerm = false,
   startDelay = 0,
+  beamLen = 12,
+  bright = false,
 ): PacketConfig[] {
   return Array.from({ length: count }, (_, i) => ({
     pathId,
@@ -272,76 +279,80 @@ function makePackets(
     duration,
     group,
     isTerm,
+    beamLen,
+    bright,
   }));
 }
 
 const ALL_PACKETS: PacketConfig[] = [
-  // Dual inbound trunks → NLB (both always flowing — staggered for visual separation)
-  ...makePackets('in1-nlb', 3, 1.2, 'normal', false, 0.0),
-  ...makePackets('in2-nlb', 3, 1.2, 'normal', false, 0.6),
+  // ── Stage 1: SLOWEST — carrier delivery pace ──────────────────────────
+  // Dual inbound trunks → NLB. Staggered for visual separation.
+  // beamLen=12 (24px total), normal brightness — "carrier pace"
+  ...makePackets('in1-nlb', 3, 2.0, 'normal', false, 0.0,  12, false),
+  ...makePackets('in2-nlb', 3, 2.0, 'normal', false, 1.0,  12, false),
 
-  // NLB → SBC-1 and SBC-2 for each location (normal operation)
-  ...makePackets('nlb-e1', 3, 1.6, 'sbc1-east',   false, 0.0),
-  ...makePackets('nlb-e2', 3, 1.6, 'normal',       false, 0.8),
-  ...makePackets('nlb-c1', 3, 1.6, 'normal',      false, 0.3),
-  ...makePackets('nlb-c2', 3, 1.6, 'sbc2-central',false, 1.1),
-  ...makePackets('nlb-w1', 3, 1.6, 'west-loc',    false, 0.5),
-  ...makePackets('nlb-w2', 3, 1.6, 'west-loc',    false, 1.3),
+  // ── Stage 2: FASTER — entering Granite infrastructure ─────────────────
+  // NLB → SBC pairs. 4 beams, 0.8s, slightly longer streak (beamLen=14)
+  ...makePackets('nlb-e1', 4, 0.8, 'sbc1-east',    false, 0.0,  14, false),
+  ...makePackets('nlb-e2', 4, 0.8, 'normal',        false, 0.2,  14, false),
+  ...makePackets('nlb-c1', 4, 0.8, 'normal',        false, 0.1,  14, false),
+  ...makePackets('nlb-c2', 4, 0.8, 'sbc2-central',  false, 0.3,  14, false),
+  ...makePackets('nlb-w1', 4, 0.8, 'west-loc',      false, 0.15, 14, false),
+  ...makePackets('nlb-w2', 4, 0.8, 'west-loc',      false, 0.35, 14, false),
 
-  // SBC-1 → East Keystone (normal; fails during sbc1-east event)
-  ...makePackets('s1ks-e', 3, 1.0, 'sbc1-east', false, 0.2),
-  // SBC-2 → East Keystone (normal always)
-  ...makePackets('s2ks-e', 3, 1.0, 'normal',    false, 0.7),
+  // ── Stage 3: EVEN FASTER — core SBC→Keystone processing ──────────────
+  // Blazing fast internal hops, 4-5 beams, 0.5s, long streaks (beamLen=15), bright
+  ...makePackets('s1ks-e', 4, 0.5, 'sbc1-east',    false, 0.05, 15, true),
+  ...makePackets('s2ks-e', 5, 0.5, 'normal',        false, 0.10, 15, true),
 
-  // SBC-1 → Central Keystone (normal always)
-  ...makePackets('s1ks-c', 3, 1.0, 'normal',       false, 0.4),
-  // SBC-2 → Central Keystone (fails during sbc2-central event)
-  ...makePackets('s2ks-c', 3, 1.0, 'sbc2-central', false, 0.9),
+  ...makePackets('s1ks-c', 5, 0.5, 'normal',        false, 0.08, 15, true),
+  ...makePackets('s2ks-c', 4, 0.5, 'sbc2-central',  false, 0.18, 15, true),
 
-  // SBC-1/2 → West Keystone (fail during west-loc event)
-  ...makePackets('s1ks-w', 3, 1.0, 'west-loc', false, 0.1),
-  ...makePackets('s2ks-w', 3, 1.0, 'west-loc', false, 0.6),
+  ...makePackets('s1ks-w', 4, 0.5, 'west-loc',      false, 0.03, 15, true),
+  ...makePackets('s2ks-w', 4, 0.5, 'west-loc',      false, 0.13, 15, true),
 
+  // ── Stage 4: FASTEST — calls racing out to termination trunks ─────────
+  // Maximum speed, dense beams, longest streaks (beamLen=15), brightest
   // East Keystone → termination trunks
-  ...makePackets('e-t0', 2, 1.8, 'term-dallas', true,  0.0),
-  ...makePackets('e-t1', 2, 1.8, 'normal',      true,  0.2),
-  ...makePackets('e-t2', 2, 1.8, 'normal',      true,  0.4),
+  ...makePackets('e-t0', 4, 0.4, 'term-dallas', true,  0.00, 15, true),
+  ...makePackets('e-t1', 5, 0.4, 'normal',      true,  0.08, 15, true),
+  ...makePackets('e-t2', 4, 0.4, 'normal',      true,  0.20, 15, true),
 
   // Central Keystone → termination trunks
-  ...makePackets('c-t0', 2, 1.8, 'term-dallas', true,  0.6),
-  ...makePackets('c-t1', 2, 1.8, 'normal',      true,  0.8),
-  ...makePackets('c-t2', 2, 1.8, 'normal',      true,  1.0),
+  ...makePackets('c-t0', 4, 0.4, 'term-dallas', true,  0.10, 15, true),
+  ...makePackets('c-t1', 5, 0.4, 'normal',      true,  0.05, 15, true),
+  ...makePackets('c-t2', 4, 0.4, 'normal',      true,  0.15, 15, true),
 
   // West Keystone → termination trunks (fail during west-loc event)
   // w-t0 (Dallas-bound from West) must ALSO stop during the Dallas failure window,
   // so it uses the combined 'west-loc-or-dallas' group instead of plain 'west-loc'.
-  ...makePackets('w-t0', 2, 1.8, 'west-loc-or-dallas', true,  0.3),
-  ...makePackets('w-t1', 2, 1.8, 'west-loc',            true,  0.5),
-  ...makePackets('w-t2', 2, 1.8, 'west-loc',            true,  0.7),
+  ...makePackets('w-t0', 4, 0.4, 'west-loc-or-dallas', true,  0.05, 15, true),
+  ...makePackets('w-t1', 4, 0.4, 'west-loc',            true,  0.15, 15, true),
+  ...makePackets('w-t2', 4, 0.4, 'west-loc',            true,  0.25, 15, true),
 
   // ── Reroute packets: only appear during their specific failure event ──
 
   // When SBC-2 Central fails → SBC-1 Central absorbs extra load
-  ...makePackets('s1ks-c', 3, 0.9, 'reroute-sbc2central', false, 0.1),
-  ...makePackets('nlb-c1', 3, 1.4, 'reroute-sbc2central', false, 0.3),
+  ...makePackets('s1ks-c', 4, 0.5, 'reroute-sbc2central', false, 0.1, 15, true),
+  ...makePackets('nlb-c1', 4, 0.8, 'reroute-sbc2central', false, 0.3, 14, false),
 
   // When West datacenter fails → East and Central absorb extra load
-  ...makePackets('nlb-e1', 3, 1.2, 'reroute-west', false, 0.1),
-  ...makePackets('nlb-c1', 3, 1.2, 'reroute-west', false, 0.5),
-  ...makePackets('s1ks-e', 3, 0.8, 'reroute-west', false, 0.2),
-  ...makePackets('s1ks-c', 3, 0.8, 'reroute-west', false, 0.4),
-  ...makePackets('e-t1',   2, 1.4, 'reroute-west', true,  0.2),
-  ...makePackets('c-t1',   2, 1.4, 'reroute-west', true,  0.4),
+  ...makePackets('nlb-e1', 4, 0.8, 'reroute-west', false, 0.1,  14, false),
+  ...makePackets('nlb-c1', 4, 0.8, 'reroute-west', false, 0.4,  14, false),
+  ...makePackets('s1ks-e', 4, 0.5, 'reroute-west', false, 0.15, 15, true),
+  ...makePackets('s1ks-c', 4, 0.5, 'reroute-west', false, 0.35, 15, true),
+  ...makePackets('e-t1',   4, 0.4, 'reroute-west', true,  0.10, 15, true),
+  ...makePackets('c-t1',   4, 0.4, 'reroute-west', true,  0.30, 15, true),
 
   // When Dallas fails → LA and Backup absorb extra load
-  ...makePackets('e-t1', 2, 1.3, 'reroute-dallas', true, 0.1),
-  ...makePackets('e-t2', 2, 1.3, 'reroute-dallas', true, 0.3),
-  ...makePackets('c-t1', 2, 1.3, 'reroute-dallas', true, 0.2),
-  ...makePackets('c-t2', 2, 1.3, 'reroute-dallas', true, 0.4),
+  ...makePackets('e-t1', 4, 0.4, 'reroute-dallas', true, 0.05, 15, true),
+  ...makePackets('e-t2', 4, 0.4, 'reroute-dallas', true, 0.20, 15, true),
+  ...makePackets('c-t1', 4, 0.4, 'reroute-dallas', true, 0.10, 15, true),
+  ...makePackets('c-t2', 4, 0.4, 'reroute-dallas', true, 0.25, 15, true),
 
   // When SBC-1 East fails → SBC-2 East absorbs extra load
-  ...makePackets('s2ks-e', 3, 0.8, 'reroute-sbc1east', false, 0.1),
-  ...makePackets('nlb-e2', 3, 1.3, 'reroute-sbc1east', false, 0.3),
+  ...makePackets('s2ks-e', 4, 0.5, 'reroute-sbc1east', false, 0.1, 15, true),
+  ...makePackets('nlb-e2', 4, 0.8, 'reroute-sbc1east', false, 0.3, 14, false),
 ];
 
 /* ─── Failover timing (master 64-second cycle) ───────────────────────── */
@@ -724,6 +735,7 @@ export function HaArchitectureViz() {
           </radialGradient>
 
           {/* Fiber-optic beam gradients — blue for processing paths, green for termination */}
+          {/* Standard variants (inbound / stage-2 carrier pace) */}
           <linearGradient id={`${uid}-beam-blue`} x1="0" y1="0" x2="1" y2="0">
             <stop offset="0%"   stopColor="#3b82f6" stopOpacity="0" />
             <stop offset="30%"  stopColor="#60a5fa" stopOpacity="0.8" />
@@ -736,6 +748,21 @@ export function HaArchitectureViz() {
             <stop offset="30%"  stopColor="#34d399" stopOpacity="0.8" />
             <stop offset="50%"  stopColor="#a7f3d0" stopOpacity="1" />
             <stop offset="70%"  stopColor="#34d399" stopOpacity="0.8" />
+            <stop offset="100%" stopColor="#059669" stopOpacity="0" />
+          </linearGradient>
+          {/* Bright variants (fast Granite-internal paths) — higher opacity core */}
+          <linearGradient id={`${uid}-beam-blue-bright`} x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%"   stopColor="#3b82f6" stopOpacity="0" />
+            <stop offset="20%"  stopColor="#93c5fd" stopOpacity="0.92" />
+            <stop offset="50%"  stopColor="#eff6ff" stopOpacity="1" />
+            <stop offset="80%"  stopColor="#93c5fd" stopOpacity="0.92" />
+            <stop offset="100%" stopColor="#3b82f6" stopOpacity="0" />
+          </linearGradient>
+          <linearGradient id={`${uid}-beam-green-bright`} x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%"   stopColor="#059669" stopOpacity="0" />
+            <stop offset="20%"  stopColor="#6ee7b7" stopOpacity="0.92" />
+            <stop offset="50%"  stopColor="#ecfdf5" stopOpacity="1" />
+            <stop offset="80%"  stopColor="#6ee7b7" stopOpacity="0.92" />
             <stop offset="100%" stopColor="#059669" stopOpacity="0" />
           </linearGradient>
 
@@ -815,23 +842,32 @@ export function HaArchitectureViz() {
         </g>
 
         {/* ── Animated fiber-optic light beams ─────────────────── */}
-        {/* Each rect is 24×3px, centered at origin, oriented along the path
-            via offset-rotate:auto in CSS. The linearGradient fades to
-            transparent at both ends, creating a photon-pulse effect. */}
+        {/* Each rect is centered at origin, oriented along the path via
+            offset-rotate:auto in CSS. The linearGradient fades to transparent
+            at both ends, creating a photon-pulse effect. Faster segments use
+            longer beams (beamLen > 12) and the bright gradient variant to
+            communicate higher throughput speed visually. */}
         <g clipPath={`url(#${uid}-clip)`}>
-          {ALL_PACKETS.map((pkt, i) => (
-            <rect
-              key={i}
-              x="-12"
-              y="-1.5"
-              width="24"
-              height="3"
-              rx="1.5"
-              fill={pkt.isTerm ? `url(#${uid}-beam-green)` : `url(#${uid}-beam-blue)`}
-              filter={`url(#${uid}-pf)`}
-              className={`${uid}-p${i}`}
-            />
-          ))}
+          {ALL_PACKETS.map((pkt, i) => {
+            const halfLen = pkt.beamLen;
+            const fullLen = halfLen * 2;
+            const gradId = pkt.isTerm
+              ? (pkt.bright ? `${uid}-beam-green-bright` : `${uid}-beam-green`)
+              : (pkt.bright ? `${uid}-beam-blue-bright`  : `${uid}-beam-blue`);
+            return (
+              <rect
+                key={i}
+                x={-halfLen}
+                y="-1.5"
+                width={fullLen}
+                height="3"
+                rx="1.5"
+                fill={`url(#${gradId})`}
+                filter={`url(#${uid}-pf)`}
+                className={`${uid}-p${i}`}
+              />
+            );
+          })}
         </g>
 
         {/* ── Stage nodes ───────────────────────────────────────── */}
