@@ -6,7 +6,7 @@ import {
   IconRCF, IconTrunk, IconAPI, IconIVR, IconDocs,
   IconAdmin, IconSignal, IconTroubleshoot,
 } from '../icons/ProductIcons';
-import { Package, Shield, ChevronDown, Clock } from 'lucide-react';
+import { Package, Shield, ChevronDown, Clock, Eye, EyeOff } from 'lucide-react';
 
 /* ─── Types ───────────────────────────────────────────────── */
 
@@ -347,7 +347,7 @@ export function Sidebar() {
   });
   const navigate = useNavigate();
   const location = useLocation();
-  const { user, isAdmin, logout } = useAuth();
+  const { user, isAdmin, isActualAdmin, customerViewMode, toggleCustomerView, logout } = useAuth();
 
   /* ── Access flags ──────────────────────────────────────── */
 
@@ -490,11 +490,41 @@ export function Sidebar() {
         style={{
           width: 240,
           background: 'linear-gradient(180deg, #0c0e16 0%, #0a0c13 100%)',
-          borderRight: '1px solid rgba(42, 47, 69, 0.7)',
-          transition: 'transform 250ms ease-in-out',
+          borderRight: customerViewMode
+            ? '1px solid rgba(245, 158, 11, 0.35)'
+            : '1px solid rgba(42, 47, 69, 0.7)',
+          transition: 'transform 250ms ease-in-out, border-color 0.2s ease',
         }}
         aria-label="Main navigation"
       >
+        {/* ── Customer view banner ────────────────────────── */}
+        {customerViewMode && (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 7,
+              padding: '6px 14px',
+              background: 'rgba(245, 158, 11, 0.12)',
+              borderBottom: '1px solid rgba(245, 158, 11, 0.35)',
+              flexShrink: 0,
+            }}
+          >
+            <Eye size={11} style={{ color: '#f59e0b', flexShrink: 0 }} />
+            <span
+              style={{
+                fontSize: '0.6rem',
+                fontWeight: 700,
+                letterSpacing: '0.08em',
+                textTransform: 'uppercase',
+                color: '#f59e0b',
+              }}
+            >
+              Viewing as Customer
+            </span>
+          </div>
+        )}
+
         {/* ── Brand area ─────────────────────────────────── */}
         <div
           onClick={handleBrandClick}
@@ -621,6 +651,87 @@ export function Sidebar() {
             background: 'linear-gradient(90deg, transparent, rgba(42, 47, 69, 0.7) 20%, rgba(42, 47, 69, 0.7) 80%, transparent)',
           }}
         />
+
+        {/* ── Customer view toggle (admin only) ───────────── */}
+        {isActualAdmin && (
+          <div style={{ padding: '8px 16px 2px', flexShrink: 0 }}>
+            <button
+              type="button"
+              onClick={toggleCustomerView}
+              title={customerViewMode ? 'Return to admin view' : 'Preview the app as a customer'}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                width: '100%',
+                padding: '6px 10px',
+                borderRadius: 8,
+                background: customerViewMode
+                  ? 'rgba(245, 158, 11, 0.10)'
+                  : 'transparent',
+                border: customerViewMode
+                  ? '1px solid rgba(245, 158, 11, 0.30)'
+                  : '1px solid rgba(42, 47, 69, 0.4)',
+                cursor: 'pointer',
+                transition: 'background 0.15s, border-color 0.15s',
+              }}
+              onMouseEnter={(e) => {
+                if (!customerViewMode) {
+                  e.currentTarget.style.background = 'rgba(255,255,255,0.04)';
+                  e.currentTarget.style.borderColor = 'rgba(42,47,69,0.7)';
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (!customerViewMode) {
+                  e.currentTarget.style.background = 'transparent';
+                  e.currentTarget.style.borderColor = 'rgba(42,47,69,0.4)';
+                }
+              }}
+            >
+              {/* Icon */}
+              {customerViewMode
+                ? <EyeOff size={13} style={{ color: '#f59e0b', flexShrink: 0 }} />
+                : <Eye    size={13} style={{ color: '#475569', flexShrink: 0 }} />
+              }
+
+              {/* Label */}
+              <span
+                style={{
+                  flex: 1,
+                  textAlign: 'left',
+                  fontSize: '0.75rem',
+                  fontWeight: 500,
+                  color: customerViewMode ? '#f59e0b' : '#475569',
+                  letterSpacing: '-0.01em',
+                  transition: 'color 0.15s',
+                }}
+              >
+                {customerViewMode ? 'Exit Customer View' : 'View as Customer'}
+              </span>
+
+              {/* Active pill */}
+              {customerViewMode && (
+                <span
+                  style={{
+                    fontSize: '0.55rem',
+                    fontWeight: 700,
+                    letterSpacing: '0.06em',
+                    textTransform: 'uppercase',
+                    color: '#f59e0b',
+                    background: 'rgba(245,158,11,0.15)',
+                    border: '1px solid rgba(245,158,11,0.30)',
+                    borderRadius: 999,
+                    padding: '2px 6px',
+                    lineHeight: 1.6,
+                    flexShrink: 0,
+                  }}
+                >
+                  ON
+                </span>
+              )}
+            </button>
+          </div>
+        )}
 
         {/* ── User profile footer ─────────────────────────── */}
         <div style={{ padding: '12px 16px 18px', flexShrink: 0 }}>
