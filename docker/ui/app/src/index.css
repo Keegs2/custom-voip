@@ -248,14 +248,14 @@ input[type="time"] {
     dashKeystoneFloat2 6s ease-in-out infinite;
 }
 
-/* Outer wrapper — owns the hover scale; completely independent of the animation */
+/* Outer wrapper — owns the hover 3D rotation; completely independent of the animation */
 .dash-keystone-hero-wrap {
   display: inline-block;
-  transition: transform 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  transition: transform 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94);
 }
 
 .dash-keystone-hero-wrap:hover {
-  transform: scale(1.02);
+  transform: perspective(800px) rotateY(-8deg) rotateX(3deg) scale(1.01);
 }
 
 /* ─── Staggered fade-in-up delays (extending existing 100-500ms set) */

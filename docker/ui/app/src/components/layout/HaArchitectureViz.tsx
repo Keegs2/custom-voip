@@ -447,6 +447,18 @@ export function HaArchitectureViz() {
               <feMergeNode in="SourceGraphic" />
             </feMerge>
           </filter>
+
+          {/* Keystone logo image glow — blue halo for the image nodes */}
+          <filter id={`${uid}-imgf`} x="-60%" y="-60%" width="220%" height="220%">
+            <feGaussianBlur in="SourceGraphic" stdDeviation="2.8" result="blur" />
+            <feColorMatrix in="blur" type="matrix"
+              values="0 0 0 0 0.23   0 0 0 0 0.51   0 0 0 0 0.96   0 0 0 0.55 0"
+              result="coloredBlur" />
+            <feMerge>
+              <feMergeNode in="coloredBlur" />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
         </defs>
 
         {/* ── Grid background ─────────────────────────────────────── */}
@@ -734,40 +746,25 @@ function SbcPairNode({ uid, cx, cy }: { uid: string; cx: number; cy: number }) {
   );
 }
 
-/* ── FreeSWITCH Media Server — hexagon ── */
+/* ── Keystone Media Engine — logo image node ── */
 function FsNode({ uid, cx, cy }: { uid: string; cx: number; cy: number }) {
-  const R = 17;
-
-  const hexPts = (r: number) =>
-    Array.from({ length: 6 }, (_, i) => {
-      const a = (Math.PI / 3) * i - Math.PI / 6;
-      return `${(r * Math.cos(a)).toFixed(2)},${(r * Math.sin(a)).toFixed(2)}`;
-    }).join(' ');
+  // 30px image, centered; ambient glow radius matches neighbour SBC node
+  const S = 30; // image width & height in SVG units
 
   return (
     <g transform={`translate(${cx}, ${cy})`}>
+      {/* Ambient blue glow halo behind the image */}
       <circle r="30" fill={`url(#${uid}-ng)`} />
-      <polygon
-        points={hexPts(R)}
-        fill="rgba(15,17,23,0.74)"
-        stroke="rgba(59,130,246,0.26)"
-        strokeWidth="0.85"
+      {/* Keystone logo — transparent PNG, blue glow filter applied */}
+      <image
+        href="/keystone_logo.png"
+        x={-S / 2}
+        y={-S / 2}
+        width={S}
+        height={S}
+        filter={`url(#${uid}-imgf)`}
+        preserveAspectRatio="xMidYMid meet"
       />
-      <polygon
-        points={hexPts(R * 0.48)}
-        fill="rgba(59,130,246,0.12)"
-        stroke="rgba(96,165,250,0.22)"
-        strokeWidth="0.7"
-      />
-      {/* Cross-hatch detail */}
-      <line x1="-10" y1="0"   x2="10" y2="0"   stroke="rgba(59,130,246,0.20)" strokeWidth="0.7" />
-      <line x1="0"   y1="-10" x2="0"  y2="10"  stroke="rgba(59,130,246,0.20)" strokeWidth="0.7" />
-      {/* Label below */}
-      <text y={R + 10} textAnchor="middle" fontSize="6.5"
-        fontFamily="'SF Mono', 'Fira Code', 'Consolas', monospace"
-        letterSpacing="0.07em" fill="rgba(148,163,184,0.55)" fontWeight="600">
-        Media
-      </text>
     </g>
   );
 }
