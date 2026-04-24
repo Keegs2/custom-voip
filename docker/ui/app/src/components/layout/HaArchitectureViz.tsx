@@ -30,7 +30,7 @@ import { type CSSProperties, useMemo } from 'react';
 /* ─── Geometry constants ─────────────────────────────────────────────── */
 
 const VB_W = 1200;
-const VB_H = 300;
+const VB_H = 390;
 
 // Column x-positions
 const COL = {
@@ -44,16 +44,20 @@ const COL = {
   termX:   1120,  // Stage 4: termination trunk nodes (near right edge of 1200px viewBox)
 } as const;
 
-// Row y-centres for each geographic location
-const LOC_Y = [68, 150, 232] as const;   // Granite East, Granite Central, Granite West
-const LOC_HALF_H = 36;                    // half-height of each location container
-const LOC_W = COL.locOut - COL.locIn;    // 392px
+// Row y-centres for each geographic location.
+// Spacing of 115px between rows; LOC_HALF_H=50 → 15px inter-container gap.
+const LOC_Y = [80, 195, 310] as const;   // Granite East, Granite Central, Granite West
+const LOC_HALF_H = 50;                    // half-height of each location container
+const LOC_W = COL.locOut - COL.locIn;    // 430px
 
-// SBC node offsets within a location (relative to location centre y)
-const SBC_OFFSET = 17; // SBC-1 is cy-17, SBC-2 is cy+17
+// SBC node offsets within a location (relative to location centre y).
+// SBC icon half-extent=15, label baseline at +24 from node centre.
+// SBC-2 label sits at cy+19+24=cy+43, with container bottom at cy+50 → 7px clearance.
+// SBC-1 image top at cy-34, location label baseline at cy-36 → 2px gap (text baseline only, ascenders clear).
+const SBC_OFFSET = 19; // SBC-1 is cy-19, SBC-2 is cy+19
 
-// Termination trunk y-positions
-const TERM_Y = [82, 150, 218] as const;  // Dallas, LA, Backup
+// Termination trunk y-positions — centred on VB_H/2=195, spaced 60px apart.
+const TERM_Y = [135, 195, 255] as const;  // Dallas, LA, Backup
 
 /* ─── SVG path helpers ───────────────────────────────────────────────── */
 
@@ -114,17 +118,17 @@ interface PathDef {
 /* ─── Path definitions ───────────────────────────────────────────────── */
 
 // Stage 1→2: Dual inbound trunks → NLB (Keystone HA Server)
-// Trunk 1 (upper, y≈133) curves slightly up into NLB at y=150
+// Trunk 1 (upper, y=175) curves slightly up into NLB at y=195
 const PATH_INBOUND1_NLB: PathDef = {
   id: 'in1-nlb',
   group: 'normal',
-  d: quadPath(COL.inbound + 20, 133, (COL.inbound + COL.nlb) / 2, 130, COL.nlb - 26, 150),
+  d: quadPath(COL.inbound + 20, 175, (COL.inbound + COL.nlb) / 2, 172, COL.nlb - 26, 195),
 };
-// Trunk 2 (lower, y≈167) curves slightly down into NLB at y=150
+// Trunk 2 (lower, y=215) curves slightly down into NLB at y=195
 const PATH_INBOUND2_NLB: PathDef = {
   id: 'in2-nlb',
   group: 'normal',
-  d: quadPath(COL.inbound + 20, 167, (COL.inbound + COL.nlb) / 2, 170, COL.nlb - 26, 150),
+  d: quadPath(COL.inbound + 20, 215, (COL.inbound + COL.nlb) / 2, 218, COL.nlb - 26, 195),
 };
 
 // Stage 2→3: NLB → SBC-1 and SBC-2 for each location
@@ -143,7 +147,7 @@ function makeNlbToSbc(
   return {
     id,
     group,
-    d: quadPath(COL.nlb + 26, 150, cpX, targetY, sbcColX - 14, targetY),
+    d: quadPath(COL.nlb + 26, 195, cpX, targetY, sbcColX - 14, targetY),
   };
 }
 
@@ -946,7 +950,7 @@ export function HaArchitectureViz() {
         {/* "Inbound" group label sits above the pair */}
         <text
           x={COL.inbound}
-          y={116}
+          y={158}
           textAnchor="middle"
           fontSize="6"
           fontFamily="'SF Mono', 'Fira Code', 'Consolas', monospace"
@@ -956,8 +960,8 @@ export function HaArchitectureViz() {
         >
           INBOUND
         </text>
-        <InboundTrunkNode uid={uid} cy={133} label="Trunk 1" />
-        <InboundTrunkNode uid={uid} cy={167} label="Trunk 2" />
+        <InboundTrunkNode uid={uid} cy={175} label="Trunk 1" />
+        <InboundTrunkNode uid={uid} cy={215} label="Trunk 2" />
         <NlbNode uid={uid} />
 
         {/* Three geographic location containers */}
@@ -1065,7 +1069,7 @@ function InboundTrunkNode({
 /* ── NLB / Key Distributor — stone block with blue glowing crosshair ── */
 function NlbNode({ uid }: { uid: string }) {
   const cx = COL.nlb;
-  const cy = 150;
+  const cy = 195;
   // S=46 keeps the image prominent while path endpoints (±26) clear the image
   // edge (±23) with a small gap — connection lines terminate just outside the art.
   const S  = 46;
@@ -1146,7 +1150,7 @@ function LocationGroup({
       {/* Location name */}
       <text
         x={x + 10}
-        y={cy - LOC_HALF_H + 12}
+        y={cy - LOC_HALF_H + 14}
         fontSize="6.5"
         fontFamily="'SF Mono', 'Fira Code', 'Consolas', monospace"
         letterSpacing="0.10em"
