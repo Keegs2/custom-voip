@@ -1021,13 +1021,15 @@ interface CallActivityTabProps {
 }
 
 function CallActivityTab({ customerId }: CallActivityTabProps) {
+  const [activitySearch, setActivitySearch] = useState('');
+
   const { data, isLoading, isError } = useQuery({
     queryKey: ['rcf-activity', customerId],
     queryFn: () =>
       searchCdrs({
         customer_id: customerId,
         product_type: 'rcf',
-        limit: 50,
+        limit: 200,
         sort_by: 'start_time',
         sort_dir: 'desc',
       }),
@@ -1035,7 +1037,24 @@ function CallActivityTab({ customerId }: CallActivityTabProps) {
     staleTime: 60_000,
   });
 
-  const calls = data?.items ?? [];
+  const allCalls = data?.items ?? [];
+  const calls = useMemo(() => {
+    if (!activitySearch.trim()) return allCalls;
+    const q = activitySearch.trim().toLowerCase();
+    return allCalls.filter((c) => {
+      const fields = [
+        c.caller_id,
+        c.destination,
+        c.hangup_cause,
+        c.carrier_used,
+        c.start_time,
+        c.sip_code?.toString(),
+        fmt(c.caller_id),
+        fmt(c.destination),
+      ];
+      return fields.some((f) => f && f.toLowerCase().includes(q));
+    });
+  }, [allCalls, activitySearch]);
 
   if (isLoading) {
     return (
@@ -1118,12 +1137,49 @@ function CallActivityTab({ customerId }: CallActivityTabProps) {
           borderBottom: '1px solid rgba(59,130,246,0.08)',
           display: 'flex',
           alignItems: 'center',
-          gap: 10,
+          gap: 12,
+          flexWrap: 'wrap',
         }}
       >
         <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
           Recent Calls
         </span>
+        <div
+          style={{
+            flex: 1,
+            minWidth: 200,
+            position: 'relative',
+          }}
+        >
+          <svg viewBox="0 0 20 20" fill="currentColor" style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', width: 14, height: 14, color: '#334155' }}>
+            <path fillRule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clipRule="evenodd" />
+          </svg>
+          <input
+            type="text"
+            value={activitySearch}
+            onChange={(e) => setActivitySearch(e.target.value)}
+            placeholder="Filter by number, date, cause..."
+            style={{
+              width: '100%',
+              padding: '7px 12px 7px 30px',
+              fontSize: '0.8rem',
+              color: '#e2e8f0',
+              background: 'rgba(15,17,23,0.5)',
+              border: '1px solid rgba(59,130,246,0.12)',
+              borderRadius: 10,
+              outline: 'none',
+              transition: 'border-color 0.2s, box-shadow 0.2s',
+            }}
+            onFocus={(e) => {
+              e.currentTarget.style.borderColor = 'rgba(59,130,246,0.4)';
+              e.currentTarget.style.boxShadow = '0 0 0 3px rgba(59,130,246,0.10)';
+            }}
+            onBlur={(e) => {
+              e.currentTarget.style.borderColor = 'rgba(59,130,246,0.12)';
+              e.currentTarget.style.boxShadow = 'none';
+            }}
+          />
+        </div>
         <span
           style={{
             fontSize: '0.68rem',
@@ -1133,9 +1189,10 @@ function CallActivityTab({ customerId }: CallActivityTabProps) {
             border: '1px solid rgba(59,130,246,0.20)',
             borderRadius: 20,
             padding: '2px 9px',
+            flexShrink: 0,
           }}
         >
-          {calls.length} shown
+          {calls.length}{activitySearch.trim() ? ` of ${allCalls.length}` : ''} shown
         </span>
       </div>
 
