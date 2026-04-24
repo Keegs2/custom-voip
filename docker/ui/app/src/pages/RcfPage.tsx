@@ -4427,7 +4427,7 @@ export function RcfPage() {
   // ── Render ────────────────────────────────────────────────────────────────────
 
   return (
-    <div style={{ paddingTop: 4 }}>
+    <div style={{ paddingTop: 20 }}>
       {/* Premium glass-morphism header */}
       <RcfPageHeader
         title={pageTitle}

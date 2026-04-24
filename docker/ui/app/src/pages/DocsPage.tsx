@@ -14,8 +14,6 @@ import {
   Database,
   Server,
 } from 'lucide-react';
-import { PortalHeader } from './RcfPage';
-import { IconDocs } from '../components/icons/ProductIcons';
 
 /* ─── Design tokens ──────────────────────────────────────── */
 
@@ -1866,41 +1864,127 @@ function ApiCdrSection() {
 
 export function DocsPage() {
   return (
-    <div className="flex flex-col h-full">
-      <PortalHeader
-        icon={<IconDocs size={24} />}
-        title="RCF Help Guide"
-        subtitle="Everything you need to know about managing your Remote Call Forwarding numbers"
-        badgeVariant="rcf"
-      />
+    <div style={{ paddingTop: 20 }}>
 
+      {/* Glass-morphism page header — matches RcfPageHeader style */}
       <div
+        className="animate-fade-in-up"
         style={{
-          flex: 1,
-          overflowY: 'auto',
-          padding: '28px 32px 60px',
-          background: C.bg,
+          position: 'relative',
+          background: 'rgba(19, 21, 29, 0.72)',
+          backdropFilter: 'blur(10px)',
+          WebkitBackdropFilter: 'blur(10px)',
+          border: '1px solid rgba(59,130,246,0.16)',
+          borderRadius: 20,
+          padding: '32px 36px 28px',
+          marginBottom: 28,
+          overflow: 'hidden',
+          boxShadow: '0 8px 40px -12px rgba(0,0,0,0.55), 0 0 0 1px rgba(59,130,246,0.06)',
         }}
       >
-        <div style={{ maxWidth: 1080, margin: '0 auto' }}>
+        {/* Top accent line */}
+        <div
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 48,
+            right: 48,
+            height: 2,
+            background: 'linear-gradient(90deg, transparent, rgba(59,130,246,0.7), transparent)',
+            borderRadius: '0 0 2px 2px',
+          }}
+        />
 
-          {/* Page intro */}
-          <div style={{ marginBottom: 28 }}>
+        {/* Subtle radial glow background */}
+        <div
+          style={{
+            position: 'absolute',
+            top: -60,
+            right: -60,
+            width: 280,
+            height: 280,
+            background: 'radial-gradient(circle, rgba(59,130,246,0.07) 0%, transparent 70%)',
+            pointerEvents: 'none',
+          }}
+        />
+
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 24 }}>
+          {/* Keystone logo with glow */}
+          <div style={{ flexShrink: 0, position: 'relative' }}>
+            <div
+              style={{
+                width: 56,
+                height: 56,
+                borderRadius: 14,
+                background: 'linear-gradient(135deg, rgba(59,130,246,0.18) 0%, rgba(59,130,246,0.08) 100%)',
+                border: '1px solid rgba(59,130,246,0.28)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                boxShadow: '0 0 24px rgba(59,130,246,0.20)',
+              }}
+            >
+              <img
+                src="/keystone_logo.png"
+                alt="Keystone"
+                style={{
+                  width: 36,
+                  height: 36,
+                  objectFit: 'contain',
+                  filter: 'drop-shadow(0 0 8px rgba(59,130,246,0.55)) brightness(1.1)',
+                }}
+              />
+            </div>
+          </div>
+
+          {/* Title + subtitle */}
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div
+              style={{
+                fontSize: '0.6rem',
+                fontWeight: 700,
+                letterSpacing: '0.14em',
+                textTransform: 'uppercase',
+                color: '#3b82f6',
+                opacity: 0.8,
+                marginBottom: 6,
+              }}
+            >
+              API Documentation
+            </div>
             <h1
               style={{
-                fontSize: '1.6rem',
+                fontSize: 'clamp(1.2rem, 2.5vw, 1.55rem)',
                 fontWeight: 800,
-                color: C.text,
+                color: '#e2e8f0',
+                letterSpacing: '-0.025em',
+                lineHeight: 1.15,
                 margin: '0 0 8px',
-                letterSpacing: '-0.02em',
               }}
             >
               Remote Call Forwarding — Customer Guide
             </h1>
-            <p style={{ margin: 0, fontSize: '0.92rem', color: C.textMuted, lineHeight: 1.6 }}>
+            <p
+              style={{
+                fontSize: '0.85rem',
+                color: '#718096',
+                lineHeight: 1.65,
+                margin: 0,
+                maxWidth: 500,
+              }}
+            >
               A complete reference for managing your RCF numbers, understanding your call quality metrics, and troubleshooting issues — all from the Granite Keystone portal.
             </p>
           </div>
+        </div>
+      </div>
+
+      <div
+        style={{
+          padding: '0 0 60px',
+        }}
+      >
+        <div style={{ maxWidth: 1080, margin: '0 auto' }}>
 
           {/* Always-visible getting started section */}
           <GettingStartedSection />
