@@ -290,8 +290,8 @@ async def delete_rcf(identifier: str):
 async def list_rcf(customer_id: Optional[int] = None, enabled: Optional[bool] = None):
     """List RCF numbers with optional filters."""
     query = """
-        SELECT r.id, r.did, r.name, r.forward_to, r.enabled, r.customer_id,
-               c.name as customer_name
+        SELECT r.id, r.did, r.name, r.forward_to, r.pass_caller_id, r.enabled,
+               r.ring_timeout, r.failover_to, r.customer_id, c.name as customer_name
         FROM rcf_numbers r
         JOIN customers c ON r.customer_id = c.id
         WHERE 1=1
