@@ -310,7 +310,7 @@ export function HaArchitectureViz() {
 
         {/* ── Animated packets ─────────────────────────────────────── */}
         <g clipPath={`url(#${uid}-clip)`}>
-          {ALL_PACKETS.map((pkt, i) => (
+          {ALL_PACKETS.map((_, i) => (
             <circle
               key={i}
               r={3.8}
