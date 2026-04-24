@@ -77,10 +77,10 @@ function ComingSoonNavItem({ item }: { item: ComingSoonItemDef }) {
       style={{
         display: 'flex',
         alignItems: 'center',
-        gap: 10,
-        padding: '7px 10px',
+        gap: 8,
+        padding: '5px 10px 5px 14px',
         borderRadius: 10,
-        fontSize: '0.825rem',
+        fontSize: '0.76rem',
         fontWeight: 500,
         letterSpacing: '-0.01em',
         color: '#64748b',
@@ -92,9 +92,9 @@ function ComingSoonNavItem({ item }: { item: ComingSoonItemDef }) {
       {/* Icon swatch */}
       <span
         style={{
-          width: 28,
-          height: 28,
-          borderRadius: 7,
+          width: 24,
+          height: 24,
+          borderRadius: 6,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
@@ -624,7 +624,7 @@ export function Sidebar() {
             onToggle={toggleGroup}
           >
             {productNavItems.map((item) => (
-              <SidebarNavItem key={item.to} item={item} onNavigate={closeMobile} />
+              <SidebarNavItem key={item.to} item={item} onNavigate={closeMobile} small />
             ))}
           </CollapsibleGroup>
 
