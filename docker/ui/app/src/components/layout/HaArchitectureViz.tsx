@@ -3,57 +3,57 @@ import { useMemo } from 'react';
 /**
  * HaArchitectureViz
  *
- * SVG-based animated diagram that visualises the Granite Keystone HA
- * call-routing architecture in a horizontal left-to-right flow:
+ * SVG-based animated diagram visualising the Granite Keystone HA
+ * call-routing architecture in a horizontal left-to-right flow.
  *
- *                                ┌─ [US-East:  2×SBC → Media] ──┐
- *  [Inbound] → [Geo Router] ────┼─ [US-Central: 2×SBC → Media] ─┼→ [Dallas]
- *    Trunk                      └─ [US-West:  2×SBC → Media] ──┤→ [LA]
- *                                                                └→ [Backup]
+ * Architecture (each location has two discrete SBC nodes):
  *
- * A single inbound SIP trunk from Bandwidth delivers calls to the Network
- * Load Balancer (Geo Router), which selects one of three geographic locations
- * based on health and proximity. Each location has a redundant SBC pair and a
- * FreeSWITCH media server. All locations terminate via the same three Bandwidth
- * PoP trunks on the right.
+ *                                    ┌─ US-East: [SBC-1][SBC-2] → [Keystone] ──┐
+ *  [Inbound] → [Geo Router] ────────┼─ US-Central:[SBC-1][SBC-2]→ [Keystone] ──┼→ [Dallas]
+ *    Trunk         NLB              └─ US-West:  [SBC-1][SBC-2] → [Keystone] ──┤→ [LA]
+ *                                                                               └→ [Backup]
  *
- * Animated "packet" dots ride CSS offset-path along each SVG path segment.
- * Multiple staggered copies of each dot keep the diagram feeling like live
- * traffic rather than a one-shot animation.
+ * Failover simulation — a 64-second CSS keyframe cycle drives four scenarios:
+ *   0–8s   Normal operation
+ *   8–16s  SBC-2 in US-Central fails → traffic reroutes through SBC-1
+ *  16–24s  Normal operation
+ *  24–32s  US-West datacenter fails → traffic reroutes to East + Central
+ *  32–40s  Normal operation
+ *  40–48s  Dallas trunk fails → outbound reroutes to LA + Backup
+ *  48–56s  Normal operation
+ *  56–64s  SBC-1 in US-East fails → traffic reroutes through SBC-2
  *
- * Every ~20 s the US-West location dims and packets on its paths fade out —
- * illustrating automatic geographic failover with traffic redistributed to
- * US-East and US-Central.
- *
- * Pure SVG + CSS. No canvas, no WebGL, no extra npm packages.
+ * Status indicator at bottom-right shows current failover state.
+ * Pure SVG + CSS animations. No JavaScript timers, no requestAnimationFrame.
  */
 
 /* ─── Geometry constants ─────────────────────────────────────────────── */
 
-const VB_W = 1000;
-const VB_H = 290;
+const VB_W = 1200;
+const VB_H = 300;
 
-// ── Column x-positions ────────────────────────────────────────────────
+// Column x-positions
 const COL = {
-  inbound: 72,    // Stage 1: single inbound trunk node (centre)
-  nlb:     228,   // Stage 2: NLB / geo-router (centre)
-  locIn:   340,   // left edge of location containers
-  locOut:  650,   // right edge of location containers
-  sbcX:    420,   // SBC pair node centre (within location)
-  fsX:     568,   // FreeSWITCH node centre (within location)
-  termX:   870,   // Stage 4: termination trunk nodes (centre)
+  inbound: 78,    // Stage 1: inbound trunk node
+  nlb:     238,   // Stage 2: NLB / geo-router
+  locIn:   358,   // left edge of location containers
+  locOut:  750,   // right edge of location containers
+  sbc1X:   448,   // SBC-1 node centre (upper SBC within location)
+  sbc2X:   548,   // SBC-2 node centre (lower SBC within location)
+  ksX:     670,   // Keystone engine node centre (right of SBCs)
+  termX:   940,   // Stage 4: termination trunk nodes
 } as const;
 
-// ── Row y-centres for each geographic location ─────────────────────────
-// VB_H=290, header at y=22, bottom margin ~10px.
-// Usable: ~255px in [35, 290]. Three rows evenly: 35+28=63, 63+91=154…
-// Chosen for visual balance with NLB centred at y=145:
-const LOC_Y = [62, 145, 228] as const;   // US-East, US-Central, US-West
-const LOC_HALF_H = 28;                    // half-height of each location container
-const LOC_W = COL.locOut - COL.locIn;    // 310px
+// Row y-centres for each geographic location
+const LOC_Y = [68, 150, 232] as const;   // US-East, US-Central, US-West
+const LOC_HALF_H = 36;                    // half-height of each location container
+const LOC_W = COL.locOut - COL.locIn;    // 392px
 
-// ── Termination trunk y-positions ─────────────────────────────────────
-const TERM_Y = [75, 145, 215] as const;  // Dallas, LA, Backup
+// SBC node offsets within a location (relative to location centre y)
+const SBC_OFFSET = 17; // SBC-1 is cy-17, SBC-2 is cy+17
+
+// Termination trunk y-positions
+const TERM_Y = [82, 150, 218] as const;  // Dallas, LA, Backup
 
 /* ─── SVG path helpers ───────────────────────────────────────────────── */
 
@@ -78,122 +78,157 @@ function cubicPath(
   return `M ${x1} ${y1} C ${cp1X} ${cp1Y} ${cp2X} ${cp2Y} ${x2} ${y2}`;
 }
 
-/* ─── Path definitions ───────────────────────────────────────────────── */
-
+/* ─── Failover group taxonomy ────────────────────────────────────────── */
 /**
- * Path groups control which packets participate in the failover animation.
- * All 'west' groups fade when US-West fails over.
+ * Each path and packet belongs to one or more failover groups.
+ * During a failure event, the relevant group gets a CSS class that
+ * drives opacity to 0 via the master 64-second keyframe cycle.
+ *
+ * Groups:
+ *   'normal'         — always visible
+ *   'sbc2-central'   — SBC-2 in US-Central (fails 8-16s)
+ *   'west-loc'       — entire US-West datacenter (fails 24-32s)
+ *   'term-dallas'    — Dallas termination trunk (fails 40-48s)
+ *   'sbc1-east'      — SBC-1 in US-East (fails 56-64s)
+ *
+ * Reroute groups (only visible during their paired failure):
+ *   'reroute-sbc2central'  — extra packets through SBC-1 central when SBC-2 fails
+ *   'reroute-west'         — extra packets through East/Central when West fails
+ *   'reroute-dallas'       — extra packets through LA/Backup when Dallas fails
+ *   'reroute-sbc1east'     — extra packets through SBC-2 east when SBC-1 fails
  */
-type PathGroup =
-  | 'inbound-nlb'
-  | 'nlb-east' | 'nlb-central' | 'nlb-west'
-  | 'sbc-fs-east' | 'sbc-fs-central' | 'sbc-fs-west'
-  | 'east-term' | 'central-term' | 'west-term';
+type FailoverGroup =
+  | 'normal'
+  | 'sbc2-central'
+  | 'west-loc'
+  | 'term-dallas'
+  | 'sbc1-east'
+  | 'reroute-sbc2central'
+  | 'reroute-west'
+  | 'reroute-dallas'
+  | 'reroute-sbc1east';
 
 interface PathDef {
   id: string;
   d: string;
-  group: PathGroup;
-  isWest: boolean;
+  group: FailoverGroup;
 }
 
-// ── Stage 1→2: Inbound → NLB ─────────────────────────────────────────
+/* ─── Path definitions ───────────────────────────────────────────────── */
+
+// Stage 1→2: Inbound → NLB
 const PATH_INBOUND_NLB: PathDef = {
   id: 'in-nlb',
-  group: 'inbound-nlb',
-  isWest: false,
-  d: linePath(COL.inbound + 18, 145, COL.nlb - 24, 145),
+  group: 'normal',
+  d: linePath(COL.inbound + 20, 150, COL.nlb - 26, 150),
 };
 
-// ── Stage 2→3: NLB → each location ────────────────────────────────────
-// Packets enter the left edge of the container (locIn + 8 to clear the border)
-const PATH_NLB_EAST: PathDef = {
-  id: 'nlb-east',
-  group: 'nlb-east',
-  isWest: false,
-  d: quadPath(COL.nlb + 24, 145, 284, LOC_Y[0], COL.locIn + 8, LOC_Y[0]),
-};
-const PATH_NLB_CENTRAL: PathDef = {
-  id: 'nlb-central',
-  group: 'nlb-central',
-  isWest: false,
-  d: linePath(COL.nlb + 24, 145, COL.locIn + 8, LOC_Y[1]),
-};
-const PATH_NLB_WEST: PathDef = {
-  id: 'nlb-west',
-  group: 'nlb-west',
-  isWest: true,
-  d: quadPath(COL.nlb + 24, 145, 284, LOC_Y[2], COL.locIn + 8, LOC_Y[2]),
-};
-
-// ── Stage 3 internal: SBC → FS (within each location) ─────────────────
-const PATH_SBC_FS_EAST: PathDef = {
-  id: 'sbc-fs-east',
-  group: 'sbc-fs-east',
-  isWest: false,
-  d: linePath(COL.sbcX + 26, LOC_Y[0], COL.fsX - 18, LOC_Y[0]),
-};
-const PATH_SBC_FS_CENTRAL: PathDef = {
-  id: 'sbc-fs-central',
-  group: 'sbc-fs-central',
-  isWest: false,
-  d: linePath(COL.sbcX + 26, LOC_Y[1], COL.fsX - 18, LOC_Y[1]),
-};
-const PATH_SBC_FS_WEST: PathDef = {
-  id: 'sbc-fs-west',
-  group: 'sbc-fs-west',
-  isWest: true,
-  d: linePath(COL.sbcX + 26, LOC_Y[2], COL.fsX - 18, LOC_Y[2]),
-};
-
-// ── Stage 3→4: each location → each termination trunk (9 paths) ────────
-// Paths exit the right edge of each container and converge at the trunks.
-function makeTermPath(
+// Stage 2→3: NLB → SBC-1 and SBC-2 for each location
+// Each location has two entry paths (one per SBC)
+function makeNlbToSbc(
   locIdx: number,
-  termIdx: number,
-  group: PathGroup,
+  sbcNum: 1 | 2,
+  group: FailoverGroup,
   id: string,
-  isWest: boolean,
 ): PathDef {
-  const x1 = COL.locOut - 8;
-  const y1 = LOC_Y[locIdx];
-  const x2 = COL.termX - 20;
-  const y2 = TERM_Y[termIdx];
-  // Cubic bezier produces smooth S-curves for the convergence fan
-  const cp1X = x1 + (x2 - x1) * 0.40;
-  const cp2X = x1 + (x2 - x1) * 0.60;
+  const sbcColX = sbcNum === 1 ? COL.sbc1X : COL.sbc2X;
+  const sbcOffset = sbcNum === 1 ? -SBC_OFFSET : SBC_OFFSET;
+  const locY = LOC_Y[locIdx];
+  const targetY = locY + sbcOffset;
+  const cpX = (COL.nlb + sbcColX) / 2;
   return {
     id,
     group,
-    isWest,
+    d: quadPath(COL.nlb + 26, 150, cpX, targetY, sbcColX - 14, targetY),
+  };
+}
+
+const PATH_NLB_E1: PathDef  = makeNlbToSbc(0, 1, 'normal',      'nlb-e1');
+const PATH_NLB_E2: PathDef  = makeNlbToSbc(0, 2, 'normal',      'nlb-e2');
+const PATH_NLB_C1: PathDef  = makeNlbToSbc(1, 1, 'normal',      'nlb-c1');
+const PATH_NLB_C2: PathDef  = makeNlbToSbc(1, 2, 'sbc2-central','nlb-c2');
+const PATH_NLB_W1: PathDef  = makeNlbToSbc(2, 1, 'west-loc',    'nlb-w1');
+const PATH_NLB_W2: PathDef  = makeNlbToSbc(2, 2, 'west-loc',    'nlb-w2');
+
+// Stage 3 internal: SBC → Keystone (within each location)
+function makeSbcToKs(
+  locIdx: number,
+  sbcNum: 1 | 2,
+  group: FailoverGroup,
+  id: string,
+): PathDef {
+  const sbcColX = sbcNum === 1 ? COL.sbc1X : COL.sbc2X;
+  const sbcOffset = sbcNum === 1 ? -SBC_OFFSET : SBC_OFFSET;
+  const locY = LOC_Y[locIdx];
+  const y1 = locY + sbcOffset;
+  const y2 = locY;
+  // Cubic bezier: slight arc converging to Keystone centre
+  const cp1X = sbcColX + (COL.ksX - sbcColX) * 0.35;
+  const cp2X = sbcColX + (COL.ksX - sbcColX) * 0.65;
+  return {
+    id,
+    group,
+    d: cubicPath(sbcColX + 14, y1, cp1X, y1, cp2X, y2, COL.ksX - 18, y2),
+  };
+}
+
+const PATH_SBC1_KS_E: PathDef  = makeSbcToKs(0, 1, 'sbc1-east',    's1ks-e');
+const PATH_SBC2_KS_E: PathDef  = makeSbcToKs(0, 2, 'normal',       's2ks-e');
+const PATH_SBC1_KS_C: PathDef  = makeSbcToKs(1, 1, 'normal',       's1ks-c');
+const PATH_SBC2_KS_C: PathDef  = makeSbcToKs(1, 2, 'sbc2-central', 's2ks-c');
+const PATH_SBC1_KS_W: PathDef  = makeSbcToKs(2, 1, 'west-loc',     's1ks-w');
+const PATH_SBC2_KS_W: PathDef  = makeSbcToKs(2, 2, 'west-loc',     's2ks-w');
+
+// Stage 3→4: each location Keystone → each termination trunk (9 paths)
+function makeTermPath(
+  locIdx: number,
+  termIdx: number,
+  group: FailoverGroup,
+  id: string,
+): PathDef {
+  const x1 = COL.locOut - 8;
+  const y1 = LOC_Y[locIdx];
+  const x2 = COL.termX - 22;
+  const y2 = TERM_Y[termIdx];
+  const cp1X = x1 + (x2 - x1) * 0.38;
+  const cp2X = x1 + (x2 - x1) * 0.62;
+  return {
+    id,
+    group,
     d: cubicPath(x1, y1, cp1X, y1, cp2X, y2, x2, y2),
   };
 }
 
-const PATHS_EAST_TERM: PathDef[] = [
-  makeTermPath(0, 0, 'east-term', 'e-t0', false),
-  makeTermPath(0, 1, 'east-term', 'e-t1', false),
-  makeTermPath(0, 2, 'east-term', 'e-t2', false),
+// Dallas-bound paths (e-t0, c-t0, w-t0) are in the 'term-dallas' failover group
+// so they fade when the Dallas trunk fails during the 40–48s window.
+const PATHS_EAST_TERM = [
+  makeTermPath(0, 0, 'term-dallas', 'e-t0'),
+  makeTermPath(0, 1, 'normal',      'e-t1'),
+  makeTermPath(0, 2, 'normal',      'e-t2'),
 ];
-const PATHS_CENTRAL_TERM: PathDef[] = [
-  makeTermPath(1, 0, 'central-term', 'c-t0', false),
-  makeTermPath(1, 1, 'central-term', 'c-t1', false),
-  makeTermPath(1, 2, 'central-term', 'c-t2', false),
+const PATHS_CENTRAL_TERM = [
+  makeTermPath(1, 0, 'term-dallas', 'c-t0'),
+  makeTermPath(1, 1, 'normal',      'c-t1'),
+  makeTermPath(1, 2, 'normal',      'c-t2'),
 ];
-const PATHS_WEST_TERM: PathDef[] = [
-  makeTermPath(2, 0, 'west-term', 'w-t0', true),
-  makeTermPath(2, 1, 'west-term', 'w-t1', true),
-  makeTermPath(2, 2, 'west-term', 'w-t2', true),
+// West paths are also in 'west-loc' so they disappear during datacenter failure.
+// West→Dallas is doubly-faulted (west-loc takes precedence; handled by packet groups).
+const PATHS_WEST_TERM = [
+  makeTermPath(2, 0, 'west-loc',    'w-t0'),
+  makeTermPath(2, 1, 'west-loc',    'w-t1'),
+  makeTermPath(2, 2, 'west-loc',    'w-t2'),
 ];
 
+// All static paths (no reroute paths need separate SVG <path> elements
+// because we render extra packets on existing healthy paths)
 const PATHS: PathDef[] = [
   PATH_INBOUND_NLB,
-  PATH_NLB_EAST,
-  PATH_NLB_CENTRAL,
-  PATH_NLB_WEST,
-  PATH_SBC_FS_EAST,
-  PATH_SBC_FS_CENTRAL,
-  PATH_SBC_FS_WEST,
+  PATH_NLB_E1, PATH_NLB_E2,
+  PATH_NLB_C1, PATH_NLB_C2,
+  PATH_NLB_W1, PATH_NLB_W2,
+  PATH_SBC1_KS_E, PATH_SBC2_KS_E,
+  PATH_SBC1_KS_C, PATH_SBC2_KS_C,
+  PATH_SBC1_KS_W, PATH_SBC2_KS_W,
   ...PATHS_EAST_TERM,
   ...PATHS_CENTRAL_TERM,
   ...PATHS_WEST_TERM,
@@ -201,13 +236,19 @@ const PATHS: PathDef[] = [
 
 /* ─── Packet animation config ────────────────────────────────────────── */
 
+/**
+ * PacketConfig describes one animated dot:
+ *   pathId   — which SVG path it rides
+ *   delay    — animation-delay for staggering
+ *   duration — time for one full traversal
+ *   group    — which failover scenario controls its visibility
+ *   isTerm   — render green (termination leg) vs blue (processing leg)
+ */
 interface PacketConfig {
   pathId: string;
   delay: number;
   duration: number;
-  /** Packet belongs to the US-West failover group — fades on failover */
-  isWest: boolean;
-  /** Termination-leg packet — rendered with a green tint */
+  group: FailoverGroup;
   isTerm: boolean;
 }
 
@@ -215,7 +256,7 @@ function makePackets(
   pathId: string,
   count: number,
   duration: number,
-  isWest: boolean,
+  group: FailoverGroup,
   isTerm = false,
   startDelay = 0,
 ): PacketConfig[] {
@@ -223,59 +264,103 @@ function makePackets(
     pathId,
     delay: startDelay + (duration / count) * i,
     duration,
-    isWest,
+    group,
     isTerm,
   }));
 }
 
 const ALL_PACKETS: PacketConfig[] = [
-  // Inbound → NLB
-  ...makePackets('in-nlb',       3, 2.6, false, false, 0.0),
+  // Inbound → NLB (always flowing)
+  ...makePackets('in-nlb', 4, 2.4, 'normal', false, 0.0),
 
-  // NLB → locations (geo-router splits traffic staggered so it looks dynamic)
-  ...makePackets('nlb-east',     2, 3.4, false, false, 0.0),
-  ...makePackets('nlb-central',  2, 3.4, false, false, 1.1),
-  ...makePackets('nlb-west',     2, 3.4, true,  false, 2.2),
+  // NLB → SBC-1 and SBC-2 for each location (normal operation)
+  ...makePackets('nlb-e1', 2, 3.2, 'normal',      false, 0.0),
+  ...makePackets('nlb-e2', 2, 3.2, 'normal',      false, 1.6),
+  ...makePackets('nlb-c1', 2, 3.2, 'normal',      false, 0.5),
+  ...makePackets('nlb-c2', 2, 3.2, 'sbc2-central',false, 2.1),
+  ...makePackets('nlb-w1', 2, 3.2, 'west-loc',    false, 1.0),
+  ...makePackets('nlb-w2', 2, 3.2, 'west-loc',    false, 2.6),
 
-  // SBC → FS (within each location)
-  ...makePackets('sbc-fs-east',    2, 1.9, false, false, 0.2),
-  ...makePackets('sbc-fs-central', 2, 1.9, false, false, 1.3),
-  ...makePackets('sbc-fs-west',    2, 1.9, true,  false, 2.4),
+  // SBC-1 → East Keystone (normal; fails during sbc1-east event)
+  ...makePackets('s1ks-e', 2, 2.0, 'sbc1-east', false, 0.3),
+  // SBC-2 → East Keystone (normal always)
+  ...makePackets('s2ks-e', 2, 2.0, 'normal',    false, 1.3),
 
-  // East → termination trunks
-  ...makePackets('e-t0', 1, 3.8, false, true, 0.0),
-  ...makePackets('e-t1', 1, 3.8, false, true, 0.5),
-  ...makePackets('e-t2', 1, 3.8, false, true, 1.0),
+  // SBC-1 → Central Keystone (normal always)
+  ...makePackets('s1ks-c', 2, 2.0, 'normal',       false, 0.8),
+  // SBC-2 → Central Keystone (fails during sbc2-central event)
+  ...makePackets('s2ks-c', 2, 2.0, 'sbc2-central', false, 1.8),
 
-  // Central → termination trunks
-  ...makePackets('c-t0', 1, 3.8, false, true, 1.3),
-  ...makePackets('c-t1', 1, 3.8, false, true, 1.8),
-  ...makePackets('c-t2', 1, 3.8, false, true, 2.3),
+  // SBC-1/2 → West Keystone (fail during west-loc event)
+  ...makePackets('s1ks-w', 2, 2.0, 'west-loc', false, 0.1),
+  ...makePackets('s2ks-w', 2, 2.0, 'west-loc', false, 1.1),
 
-  // West → termination trunks (failover group)
-  ...makePackets('w-t0', 1, 3.8, true, true, 0.7),
-  ...makePackets('w-t1', 1, 3.8, true, true, 1.2),
-  ...makePackets('w-t2', 1, 3.8, true, true, 1.7),
+  // East Keystone → termination trunks
+  ...makePackets('e-t0', 1, 3.6, 'term-dallas', true,  0.0),
+  ...makePackets('e-t1', 1, 3.6, 'normal',      true,  0.4),
+  ...makePackets('e-t2', 1, 3.6, 'normal',      true,  0.8),
+
+  // Central Keystone → termination trunks
+  ...makePackets('c-t0', 1, 3.6, 'term-dallas', true,  1.2),
+  ...makePackets('c-t1', 1, 3.6, 'normal',      true,  1.6),
+  ...makePackets('c-t2', 1, 3.6, 'normal',      true,  2.0),
+
+  // West Keystone → termination trunks (fail during west-loc event)
+  ...makePackets('w-t0', 1, 3.6, 'west-loc',   true,  0.6),
+  ...makePackets('w-t1', 1, 3.6, 'west-loc',   true,  1.0),
+  ...makePackets('w-t2', 1, 3.6, 'west-loc',   true,  1.4),
+
+  // ── Reroute packets: only appear during their specific failure event ──
+
+  // When SBC-2 Central fails → SBC-1 Central absorbs extra load
+  ...makePackets('s1ks-c', 2, 1.8, 'reroute-sbc2central', false, 0.2),
+  ...makePackets('nlb-c1', 2, 2.8, 'reroute-sbc2central', false, 0.6),
+
+  // When West datacenter fails → East and Central absorb extra load
+  ...makePackets('nlb-e1', 2, 2.4, 'reroute-west', false, 0.2),
+  ...makePackets('nlb-c1', 2, 2.4, 'reroute-west', false, 0.9),
+  ...makePackets('s1ks-e', 2, 1.6, 'reroute-west', false, 0.4),
+  ...makePackets('s1ks-c', 2, 1.6, 'reroute-west', false, 0.7),
+  ...makePackets('e-t1',   1, 2.8, 'reroute-west', true,  0.3),
+  ...makePackets('c-t1',   1, 2.8, 'reroute-west', true,  0.7),
+
+  // When Dallas fails → LA and Backup absorb extra load
+  ...makePackets('e-t1', 1, 2.6, 'reroute-dallas', true, 0.1),
+  ...makePackets('e-t2', 1, 2.6, 'reroute-dallas', true, 0.5),
+  ...makePackets('c-t1', 1, 2.6, 'reroute-dallas', true, 0.3),
+  ...makePackets('c-t2', 1, 2.6, 'reroute-dallas', true, 0.7),
+
+  // When SBC-1 East fails → SBC-2 East absorbs extra load
+  ...makePackets('s2ks-e', 2, 1.6, 'reroute-sbc1east', false, 0.2),
+  ...makePackets('nlb-e2', 2, 2.6, 'reroute-sbc1east', false, 0.5),
 ];
+
+/* ─── Failover timing (master 64-second cycle) ───────────────────────── */
+/**
+ * t = time in seconds within the 64s cycle
+ * pct(t) = t/64 * 100 expressed as a percentage string
+ *
+ * Schedule:
+ *   0–8s    (0–12.5%)    Normal
+ *   8–16s   (12.5–25%)   SBC-2 Central fails
+ *   16–24s  (25–37.5%)   Normal
+ *   24–32s  (37.5–50%)   West datacenter fails
+ *   32–40s  (50–62.5%)   Normal
+ *   40–48s  (62.5–75%)   Dallas trunk fails
+ *   48–56s  (75–87.5%)   Normal
+ *   56–64s  (87.5–100%)  SBC-1 East fails
+ */
 
 /* ─── Component ──────────────────────────────────────────────────────── */
 
 export function HaArchitectureViz() {
-  // Stable, unique ID prefix for CSS names — prevents class collisions if the
-  // component is ever mounted more than once in the same document.
   const uid = useMemo(
     () => `ha-${Math.random().toString(36).substring(2, 8)}`,
     [],
   );
 
-  /**
-   * Build the full CSS block:
-   *  1. Per-path @keyframes (offset-distance 0%→100%)
-   *  2. Per-packet animation rules (class → path + timing)
-   *  3. US-West failover keyframes: location dims to amber, packets fade
-   */
   const css = useMemo(() => {
-    // 1. Path traversal keyframes — one per unique path id
+    // 1. Per-path traversal @keyframes
     const pathKf = PATHS.map(
       (p) => `@keyframes ${uid}-pkt-${p.id} {
   0%   { offset-distance:   0%; opacity: 0; }
@@ -286,59 +371,262 @@ export function HaArchitectureViz() {
     ).join('\n');
 
     // 2. Per-packet CSS class rules
-    const packetRules = ALL_PACKETS.map((pkt, i) => {
-      const path = PATHS.find((p) => p.id === pkt.pathId)!;
+    // Each packet gets a traversal animation AND a visibility animation
+    // driven by its failover group and the 64s master cycle.
 
-      // West packets carry a second animation layer for the failover fade
-      const animName = pkt.isWest
-        ? `${uid}-pkt-${path.id}, ${uid}-west-pkt-fault`
+    /**
+     * For each failover group, define an opacity keyframe over 64s:
+     *
+     *   'normal'             — always 1
+     *   'sbc2-central'       — 0→12.5%: 1, 12.5%: fade to 0.15, 25%: back to 1, rest: 1
+     *   'west-loc'           — 0→37.5%: 1, 37.5%: fade to 0.15, 50%: back to 1, rest: 1
+     *   'term-dallas'        — 0→62.5%: 1, 62.5%: fade to 0.15, 75%: back to 1, rest: 1
+     *   'sbc1-east'          — 0→87.5%: 1, 87.5%: fade to 0.15, 100%: 1
+     *   'reroute-sbc2central'— only visible 12.5–25%, zero otherwise
+     *   'reroute-west'       — only visible 37.5–50%
+     *   'reroute-dallas'     — only visible 62.5–75%
+     *   'reroute-sbc1east'   — only visible 87.5–100%
+     */
+
+    // Group visibility keyframes (all 64s cycle)
+    const groupKf = `
+@keyframes ${uid}-vis-normal {
+  0%, 100% { opacity: 1; }
+}
+@keyframes ${uid}-vis-sbc2central {
+  0%, 12.4%  { opacity: 1; filter: none; }
+  12.5%      { opacity: 0.15; filter: sepia(1) hue-rotate(320deg) brightness(1.2); }
+  24.9%      { opacity: 0.15; filter: sepia(1) hue-rotate(320deg) brightness(1.2); }
+  25%        { opacity: 1; filter: none; }
+  100%       { opacity: 1; filter: none; }
+}
+@keyframes ${uid}-vis-westloc {
+  0%, 37.4%  { opacity: 1; filter: none; }
+  37.5%      { opacity: 0.15; filter: sepia(1) hue-rotate(20deg) brightness(1.8); }
+  49.9%      { opacity: 0.15; filter: sepia(1) hue-rotate(20deg) brightness(1.8); }
+  50%        { opacity: 1; filter: none; }
+  100%       { opacity: 1; filter: none; }
+}
+@keyframes ${uid}-vis-termdallas {
+  0%, 62.4%  { opacity: 1; filter: none; }
+  62.5%      { opacity: 0.15; filter: sepia(1) hue-rotate(320deg) brightness(1.2); }
+  74.9%      { opacity: 0.15; filter: sepia(1) hue-rotate(320deg) brightness(1.2); }
+  75%        { opacity: 1; filter: none; }
+  100%       { opacity: 1; filter: none; }
+}
+@keyframes ${uid}-vis-sbc1east {
+  0%, 87.4%  { opacity: 1; filter: none; }
+  87.5%      { opacity: 0.15; filter: sepia(1) hue-rotate(320deg) brightness(1.2); }
+  99.9%      { opacity: 0.15; filter: sepia(1) hue-rotate(320deg) brightness(1.2); }
+  100%       { opacity: 1; filter: none; }
+}
+@keyframes ${uid}-pkt-sbc2central {
+  0%, 12.4%  { opacity: 1; }
+  12.5%      { opacity: 0; }
+  24.9%      { opacity: 0; }
+  25%, 100%  { opacity: 1; }
+}
+@keyframes ${uid}-pkt-westloc {
+  0%, 37.4%  { opacity: 1; }
+  37.5%      { opacity: 0; }
+  49.9%      { opacity: 0; }
+  50%, 100%  { opacity: 1; }
+}
+@keyframes ${uid}-pkt-termdallas {
+  0%, 62.4%  { opacity: 1; }
+  62.5%      { opacity: 0; }
+  74.9%      { opacity: 0; }
+  75%, 100%  { opacity: 1; }
+}
+@keyframes ${uid}-pkt-sbc1east {
+  0%, 87.4%  { opacity: 1; }
+  87.5%      { opacity: 0; }
+  99.9%      { opacity: 0; }
+  100%       { opacity: 1; }
+}
+@keyframes ${uid}-pkt-reroute-sbc2c {
+  0%, 12.4%  { opacity: 0; }
+  12.5%      { opacity: 1; }
+  24.9%      { opacity: 1; }
+  25%, 100%  { opacity: 0; }
+}
+@keyframes ${uid}-pkt-reroute-west {
+  0%, 37.4%  { opacity: 0; }
+  37.5%      { opacity: 1; }
+  49.9%      { opacity: 1; }
+  50%, 100%  { opacity: 0; }
+}
+@keyframes ${uid}-pkt-reroute-dallas {
+  0%, 62.4%  { opacity: 0; }
+  62.5%      { opacity: 1; }
+  74.9%      { opacity: 1; }
+  75%, 100%  { opacity: 0; }
+}
+@keyframes ${uid}-pkt-reroute-sbc1e {
+  0%, 87.4%  { opacity: 0; }
+  87.5%      { opacity: 1; }
+  99.9%      { opacity: 1; }
+  100%       { opacity: 0; }
+}`;
+
+    // Map group to packet visibility animation name
+    function pktvizAnim(group: FailoverGroup): string | null {
+      switch (group) {
+        case 'normal':             return null;
+        case 'sbc2-central':       return `${uid}-pkt-sbc2central`;
+        case 'west-loc':           return `${uid}-pkt-westloc`;
+        case 'term-dallas':        return `${uid}-pkt-termdallas`;
+        case 'sbc1-east':          return `${uid}-pkt-sbc1east`;
+        case 'reroute-sbc2central':return `${uid}-pkt-reroute-sbc2c`;
+        case 'reroute-west':       return `${uid}-pkt-reroute-west`;
+        case 'reroute-dallas':     return `${uid}-pkt-reroute-dallas`;
+        case 'reroute-sbc1east':   return `${uid}-pkt-reroute-sbc1e`;
+      }
+    }
+
+    const packetRules = ALL_PACKETS.map((pkt, i) => {
+      const path = PATHS.find((p) => p.id === pkt.pathId);
+      if (!path) return '';
+
+      const visAnim = pktvizAnim(pkt.group);
+
+      const animNames = visAnim
+        ? `${uid}-pkt-${path.id}, ${visAnim}`
         : `${uid}-pkt-${path.id}`;
-      const animDur  = pkt.isWest ? `${pkt.duration}s, 20s`           : `${pkt.duration}s`;
-      const animDel  = pkt.isWest ? `${pkt.delay}s, 0s`               : `${pkt.delay}s`;
-      const animIter = pkt.isWest ? 'infinite, infinite'               : 'infinite';
-      const animFill = pkt.isWest ? 'both, both'                       : 'both';
-      const animTf   = pkt.isWest
-        ? 'cubic-bezier(0.4, 0, 0.6, 1), ease-in-out'
-        : 'cubic-bezier(0.4, 0, 0.6, 1)';
+      const animDurs = visAnim
+        ? `${pkt.duration}s, 64s`
+        : `${pkt.duration}s`;
+      const animDels = visAnim
+        ? `${pkt.delay}s, 0s`
+        : `${pkt.delay}s`;
+      const animIters = visAnim
+        ? 'infinite, infinite'
+        : 'infinite';
+      const animFills = visAnim
+        ? 'both, both'
+        : 'both';
+      const animTfs = visAnim
+        ? 'cubic-bezier(0.4,0,0.6,1), step-start'
+        : 'cubic-bezier(0.4,0,0.6,1)';
+
+      // Reroute packets start invisible (visibility animation controls them)
+      const startOpacity = pkt.group.startsWith('reroute') ? 0 : undefined;
 
       return `.${uid}-p${i} {
   offset-path: path('${path.d}');
-  animation-name: ${animName};
-  animation-duration: ${animDur};
-  animation-delay: ${animDel};
-  animation-timing-function: ${animTf};
-  animation-iteration-count: ${animIter};
-  animation-fill-mode: ${animFill};
+  animation-name: ${animNames};
+  animation-duration: ${animDurs};
+  animation-delay: ${animDels};
+  animation-timing-function: ${animTfs};
+  animation-iteration-count: ${animIters};
+  animation-fill-mode: ${animFills};${startOpacity !== undefined ? `\n  opacity: ${startOpacity};` : ''}
 }`;
     }).join('\n');
 
-    // 3. Failover animations
-    // US-West location box dims at 65% of the 20s cycle, recovers at 82%.
-    const failoverKf = `
-@keyframes ${uid}-west-loc-fault {
-  0%,  62%  { opacity: 1;    filter: none; }
-  66%        { opacity: 0.20; filter: sepia(1) hue-rotate(20deg) brightness(2.0); }
-  79%        { opacity: 0.20; filter: sepia(1) hue-rotate(20deg) brightness(2.0); }
-  85%, 100%  { opacity: 1;   filter: none; }
+    // 3. Node visibility animations (drive the node opacity during failure)
+    // These use the same 64s cycle but with smooth transitions instead of steps
+    const nodeKf = `
+@keyframes ${uid}-node-sbc2central {
+  0%, 12.4%  { opacity: 1; filter: none; }
+  13%        { opacity: 0.15; filter: sepia(1) hue-rotate(320deg) brightness(1.4); }
+  24.5%      { opacity: 0.15; filter: sepia(1) hue-rotate(320deg) brightness(1.4); }
+  25.2%      { opacity: 1; filter: none; }
+  100%       { opacity: 1; filter: none; }
 }
-@keyframes ${uid}-west-pkt-fault {
-  0%,  62%  { opacity: 1; }
-  66%, 79%  { opacity: 0; }
-  85%, 100% { opacity: 1; }
+@keyframes ${uid}-node-westloc {
+  0%, 37.4%  { opacity: 1; filter: none; }
+  38%        { opacity: 0.15; filter: sepia(1) hue-rotate(20deg) brightness(2.0); }
+  49.5%      { opacity: 0.15; filter: sepia(1) hue-rotate(20deg) brightness(2.0); }
+  50.2%      { opacity: 1; filter: none; }
+  100%       { opacity: 1; filter: none; }
+}
+@keyframes ${uid}-node-termdallas {
+  0%, 62.4%  { opacity: 1; filter: none; }
+  63%        { opacity: 0.15; filter: sepia(1) hue-rotate(320deg) brightness(1.4); }
+  74.5%      { opacity: 0.15; filter: sepia(1) hue-rotate(320deg) brightness(1.4); }
+  75.2%      { opacity: 1; filter: none; }
+  100%       { opacity: 1; filter: none; }
+}
+@keyframes ${uid}-node-sbc1east {
+  0%, 87.4%  { opacity: 1; filter: none; }
+  88%        { opacity: 0.15; filter: sepia(1) hue-rotate(320deg) brightness(1.4); }
+  99.5%      { opacity: 0.15; filter: sepia(1) hue-rotate(320deg) brightness(1.4); }
+  100%       { opacity: 1; filter: none; }
 }`;
 
-    const failoverRules = `.${uid}-west-loc {
-  animation: ${uid}-west-loc-fault 20s ease-in-out infinite;
+    // 4. Node CSS classes
+    const nodeRules = `
+.${uid}-node-sbc2central {
+  animation: ${uid}-node-sbc2central 64s linear infinite;
+}
+.${uid}-node-westloc {
+  animation: ${uid}-node-westloc 64s linear infinite;
+}
+.${uid}-node-termdallas {
+  animation: ${uid}-node-termdallas 64s linear infinite;
+}
+.${uid}-node-sbc1east {
+  animation: ${uid}-node-sbc1east 64s linear infinite;
 }`;
 
-    return [pathKf, packetRules, failoverKf, failoverRules].join('\n');
+    // 5. Status indicator text animations (switch at exact keyframe boundaries)
+    // Four text elements, only one visible at a time
+    const statusKf = `
+@keyframes ${uid}-status-normal {
+  0%,  12.4%  { opacity: 1; }
+  12.5%       { opacity: 0; }
+  24.9%       { opacity: 0; }
+  25%,  37.4% { opacity: 1; }
+  37.5%       { opacity: 0; }
+  49.9%       { opacity: 0; }
+  50%, 62.4%  { opacity: 1; }
+  62.5%       { opacity: 0; }
+  74.9%       { opacity: 0; }
+  75%, 87.4%  { opacity: 1; }
+  87.5%       { opacity: 0; }
+  99.9%       { opacity: 0; }
+  100%        { opacity: 1; }
+}
+@keyframes ${uid}-status-sbc2c {
+  0%, 12.4%  { opacity: 0; }
+  12.5%      { opacity: 1; }
+  24.9%      { opacity: 1; }
+  25%, 100%  { opacity: 0; }
+}
+@keyframes ${uid}-status-west {
+  0%, 37.4%  { opacity: 0; }
+  37.5%      { opacity: 1; }
+  49.9%      { opacity: 1; }
+  50%, 100%  { opacity: 0; }
+}
+@keyframes ${uid}-status-dallas {
+  0%, 62.4%  { opacity: 0; }
+  62.5%      { opacity: 1; }
+  74.9%      { opacity: 1; }
+  75%, 100%  { opacity: 0; }
+}
+@keyframes ${uid}-status-sbc1e {
+  0%, 87.4%  { opacity: 0; }
+  87.5%      { opacity: 1; }
+  99.9%      { opacity: 1; }
+  100%       { opacity: 0; }
+}`;
+
+    const statusRules = `
+.${uid}-status-normal  { animation: ${uid}-status-normal  64s step-start infinite; }
+.${uid}-status-sbc2c   { animation: ${uid}-status-sbc2c   64s step-start infinite; opacity: 0; }
+.${uid}-status-west    { animation: ${uid}-status-west    64s step-start infinite; opacity: 0; }
+.${uid}-status-dallas  { animation: ${uid}-status-dallas  64s step-start infinite; opacity: 0; }
+.${uid}-status-sbc1e   { animation: ${uid}-status-sbc1e   64s step-start infinite; opacity: 0; }`;
+
+    return [pathKf, groupKf, packetRules, nodeKf, nodeRules, statusKf, statusRules].join('\n');
   }, [uid]);
 
   return (
     <div
       style={{
         width: '100%',
-        maxWidth: 1400,
+        maxWidth: 1560,
         margin: '0 auto',
         marginTop: 40,
         marginBottom: 48,
@@ -350,6 +638,7 @@ export function HaArchitectureViz() {
         padding: '24px 32px 20px',
         boxShadow: '0 4px 24px -8px rgba(0,0,0,0.50)',
         overflow: 'hidden',
+        position: 'relative',
       }}
     >
       {/* Section label */}
@@ -375,10 +664,10 @@ export function HaArchitectureViz() {
         height="auto"
         preserveAspectRatio="xMidYMid meet"
         style={{ display: 'block' }}
-        aria-label="Granite Keystone HA: single inbound trunk routes through geo-router NLB to three geographic locations (each with 2× SBC + FreeSWITCH), terminating via Dallas, LA, and Backup Bandwidth PoP trunks"
+        aria-label="Granite Keystone HA: inbound trunk routes through geo-router NLB to three geographic locations each with two discrete SBCs and a Keystone engine, terminating via Dallas, LA, and Backup Bandwidth PoP trunks"
       >
         <defs>
-          {/* ── Grid lines ────────────────────────────────────────── */}
+          {/* Grid background pattern */}
           <pattern
             id={`${uid}-grid`}
             width="48"
@@ -393,44 +682,40 @@ export function HaArchitectureViz() {
             />
           </pattern>
 
-          {/* ── Node glow gradients ───────────────────────────────── */}
-          {/* Standard blue ambient glow */}
+          {/* Node glow gradients */}
           <radialGradient id={`${uid}-ng`} cx="50%" cy="50%" r="50%">
             <stop offset="0%"   stopColor="#3b82f6" stopOpacity="0.22" />
             <stop offset="100%" stopColor="#3b82f6" stopOpacity="0" />
           </radialGradient>
-
-          {/* NLB / key node brighter glow */}
           <radialGradient id={`${uid}-lg`} cx="50%" cy="50%" r="50%">
             <stop offset="0%"   stopColor="#60a5fa" stopOpacity="0.32" />
             <stop offset="100%" stopColor="#3b82f6" stopOpacity="0" />
           </radialGradient>
-
-          {/* Termination trunk green glow */}
           <radialGradient id={`${uid}-tg`} cx="50%" cy="50%" r="50%">
             <stop offset="0%"   stopColor="#34d399" stopOpacity="0.22" />
             <stop offset="100%" stopColor="#059669" stopOpacity="0" />
           </radialGradient>
+          <radialGradient id={`${uid}-ag`} cx="50%" cy="50%" r="50%">
+            <stop offset="0%"   stopColor="#f59e0b" stopOpacity="0.22" />
+            <stop offset="100%" stopColor="#f59e0b" stopOpacity="0" />
+          </radialGradient>
 
-          {/* ── Packet dot fills ──────────────────────────────────── */}
-          {/* Blue packet (inbound / processing legs) */}
+          {/* Packet dot fills */}
           <radialGradient id={`${uid}-pg`} cx="40%" cy="35%" r="60%">
             <stop offset="0%"   stopColor="#bfdbfe" stopOpacity="1" />
             <stop offset="100%" stopColor="#3b82f6"  stopOpacity="0.75" />
           </radialGradient>
-
-          {/* Green-tinted packet (termination legs) */}
           <radialGradient id={`${uid}-ptg`} cx="40%" cy="35%" r="60%">
             <stop offset="0%"   stopColor="#a7f3d0" stopOpacity="1" />
             <stop offset="100%" stopColor="#10b981"  stopOpacity="0.75" />
           </radialGradient>
 
-          {/* ── Utility ───────────────────────────────────────────── */}
+          {/* Clip path */}
           <clipPath id={`${uid}-clip`}>
             <rect x="0" y="0" width={VB_W} height={VB_H} />
           </clipPath>
 
-          {/* Packet glow (soft halo around each dot) */}
+          {/* Packet glow filter */}
           <filter id={`${uid}-pf`} x="-140%" y="-140%" width="380%" height="380%">
             <feGaussianBlur in="SourceGraphic" stdDeviation="1.6" result="b" />
             <feMerge>
@@ -439,7 +724,7 @@ export function HaArchitectureViz() {
             </feMerge>
           </filter>
 
-          {/* Node inner glow */}
+          {/* Node inner glow filter */}
           <filter id={`${uid}-nf`} x="-50%" y="-50%" width="200%" height="200%">
             <feGaussianBlur in="SourceGraphic" stdDeviation="3" result="b" />
             <feMerge>
@@ -448,7 +733,7 @@ export function HaArchitectureViz() {
             </feMerge>
           </filter>
 
-          {/* Keystone logo image glow — blue halo for the image nodes */}
+          {/* Keystone logo glow — blue halo */}
           <filter id={`${uid}-imgf`} x="-60%" y="-60%" width="220%" height="220%">
             <feGaussianBlur in="SourceGraphic" stdDeviation="2.8" result="blur" />
             <feColorMatrix in="blur" type="matrix"
@@ -461,43 +746,49 @@ export function HaArchitectureViz() {
           </filter>
         </defs>
 
-        {/* ── Grid background ─────────────────────────────────────── */}
+        {/* Grid background */}
         <rect x="0" y="0" width={VB_W} height={VB_H} fill={`url(#${uid}-grid)`} />
 
-        {/* ── Central ambient glow ─────────────────────────────────── */}
+        {/* Central ambient glow */}
         <ellipse
           cx={VB_W / 2} cy={VB_H / 2}
           rx={VB_W * 0.46} ry={VB_H * 0.58}
-          fill="rgba(59,130,246,0.025)"
+          fill="rgba(59,130,246,0.022)"
         />
 
-        {/* ── Connection lines ─────────────────────────────────────── */}
+        {/* ── Connection lines ────────────────────────────────────── */}
         <g fill="none" clipPath={`url(#${uid}-clip)`}>
           {/* Stage 1→2 */}
           <path d={PATH_INBOUND_NLB.d} stroke="rgba(59,130,246,0.22)" strokeWidth="1.1" />
 
-          {/* Stage 2→3 fan */}
-          <path d={PATH_NLB_EAST.d}    stroke="rgba(59,130,246,0.18)" strokeWidth="1" />
-          <path d={PATH_NLB_CENTRAL.d} stroke="rgba(59,130,246,0.18)" strokeWidth="1" />
-          <path d={PATH_NLB_WEST.d}    stroke="rgba(59,130,246,0.18)" strokeWidth="1" />
+          {/* Stage 2→3 fan — NLB to SBC pairs */}
+          <path d={PATH_NLB_E1.d} stroke="rgba(59,130,246,0.17)" strokeWidth="0.9" />
+          <path d={PATH_NLB_E2.d} stroke="rgba(59,130,246,0.17)" strokeWidth="0.9" />
+          <path d={PATH_NLB_C1.d} stroke="rgba(59,130,246,0.17)" strokeWidth="0.9" />
+          <path d={PATH_NLB_C2.d} stroke="rgba(59,130,246,0.17)" strokeWidth="0.9" />
+          <path d={PATH_NLB_W1.d} stroke="rgba(59,130,246,0.17)" strokeWidth="0.9" />
+          <path d={PATH_NLB_W2.d} stroke="rgba(59,130,246,0.17)" strokeWidth="0.9" />
 
-          {/* Stage 3 internal SBC→FS (dashed to distinguish) */}
-          <path d={PATH_SBC_FS_EAST.d}    stroke="rgba(59,130,246,0.16)" strokeWidth="0.8" strokeDasharray="3 2.5" />
-          <path d={PATH_SBC_FS_CENTRAL.d} stroke="rgba(59,130,246,0.16)" strokeWidth="0.8" strokeDasharray="3 2.5" />
-          <path d={PATH_SBC_FS_WEST.d}    stroke="rgba(59,130,246,0.16)" strokeWidth="0.8" strokeDasharray="3 2.5" />
+          {/* Stage 3 internal — SBC to Keystone (dashed) */}
+          <path d={PATH_SBC1_KS_E.d} stroke="rgba(59,130,246,0.14)" strokeWidth="0.75" strokeDasharray="3 2.5" />
+          <path d={PATH_SBC2_KS_E.d} stroke="rgba(59,130,246,0.14)" strokeWidth="0.75" strokeDasharray="3 2.5" />
+          <path d={PATH_SBC1_KS_C.d} stroke="rgba(59,130,246,0.14)" strokeWidth="0.75" strokeDasharray="3 2.5" />
+          <path d={PATH_SBC2_KS_C.d} stroke="rgba(59,130,246,0.14)" strokeWidth="0.75" strokeDasharray="3 2.5" />
+          <path d={PATH_SBC1_KS_W.d} stroke="rgba(59,130,246,0.14)" strokeWidth="0.75" strokeDasharray="3 2.5" />
+          <path d={PATH_SBC2_KS_W.d} stroke="rgba(59,130,246,0.14)" strokeWidth="0.75" strokeDasharray="3 2.5" />
 
-          {/* Stage 3→4 convergence (green-tinted) */}
+          {/* Stage 3→4 convergence fan — green-tinted */}
           {[...PATHS_EAST_TERM, ...PATHS_CENTRAL_TERM, ...PATHS_WEST_TERM].map((p) => (
-            <path key={p.id} d={p.d} stroke="rgba(52,211,153,0.13)" strokeWidth="0.85" />
+            <path key={p.id} d={p.d} stroke="rgba(52,211,153,0.12)" strokeWidth="0.8" />
           ))}
         </g>
 
-        {/* ── Animated packet dots ─────────────────────────────────── */}
+        {/* ── Animated packet dots ──────────────────────────────── */}
         <g clipPath={`url(#${uid}-clip)`}>
           {ALL_PACKETS.map((pkt, i) => (
             <circle
               key={i}
-              r={3}
+              r={2.6}
               cx="0"
               cy="0"
               fill={pkt.isTerm ? `url(#${uid}-ptg)` : `url(#${uid}-pg)`}
@@ -507,27 +798,30 @@ export function HaArchitectureViz() {
           ))}
         </g>
 
-        {/* ── Stage nodes ──────────────────────────────────────────── */}
+        {/* ── Stage nodes ───────────────────────────────────────── */}
         <InboundNode uid={uid} />
         <NlbNode uid={uid} />
 
         {/* Three geographic location containers */}
-        <LocationGroup uid={uid} locIdx={0} label="US-East"    isWest={false} />
-        <LocationGroup uid={uid} locIdx={1} label="US-Central" isWest={false} />
-        <LocationGroup uid={uid} locIdx={2} label="US-West"    isWest={true} />
+        <LocationGroup uid={uid} locIdx={0} label="US-East"    sbc1Class={`${uid}-node-sbc1east`}    locClass={undefined} />
+        <LocationGroup uid={uid} locIdx={1} label="US-Central" sbc2Class={undefined}                  locClass={undefined} sbc1Class={undefined} sbc2CentralClass={`${uid}-node-sbc2central`} />
+        <LocationGroup uid={uid} locIdx={2} label="US-West"    sbc2Class={undefined}                  locClass={`${uid}-node-westloc`} />
 
-        {/* Three Bandwidth termination trunk nodes */}
-        <TermNode uid={uid} termIdx={0} label="Dallas" sublabel="PoP" />
-        <TermNode uid={uid} termIdx={1} label="LA"     sublabel="PoP" />
-        <TermNode uid={uid} termIdx={2} label="Backup" sublabel="Trunk" />
+        {/* Three termination trunk nodes */}
+        <TermNode uid={uid} termIdx={0} label="Dallas" sublabel="PoP"   nodeClass={`${uid}-node-termdallas`} />
+        <TermNode uid={uid} termIdx={1} label="LA"     sublabel="PoP"   nodeClass={undefined} />
+        <TermNode uid={uid} termIdx={2} label="Backup" sublabel="Trunk" nodeClass={undefined} />
 
-        {/* ── Column header labels ──────────────────────────────────── */}
+        {/* ── Column header labels ───────────────────────────────── */}
         <ColumnLabel text="ORIGINATION"  x={COL.inbound}                      y={22} />
         <ColumnLabel text="DISTRIBUTION" x={COL.nlb}                          y={22} />
         <ColumnLabel text="PROCESSING"   x={(COL.locIn + COL.locOut) / 2}     y={22} />
         <ColumnLabel text="TERMINATION"  x={COL.termX}                        y={22} />
 
-        {/* ── Watermark ────────────────────────────────────────────── */}
+        {/* ── Status indicator — bottom right corner ─────────────── */}
+        <StatusIndicator uid={uid} />
+
+        {/* ── Watermark ──────────────────────────────────────────── */}
         <text
           x={VB_W - 8} y={VB_H - 6}
           textAnchor="end"
@@ -562,35 +856,30 @@ function ColumnLabel({ text, x, y }: { text: string; x: number; y: number }) {
   );
 }
 
-/* ── Inbound Trunk — rounded rectangle with signal-bars icon ── */
+/* ── Inbound Trunk — rounded rectangle with bandwidth icon ── */
 function InboundNode({ uid }: { uid: string }) {
   const cx = COL.inbound;
-  const cy = 145;
-  const W = 62;
-  const H = 40;
-  const R = 8;
+  const cy = 150;
+  const W  = 64;
+  const H  = 40;
+  const R  = 8;
 
   return (
     <g transform={`translate(${cx}, ${cy})`}>
-      <circle r="46" fill={`url(#${uid}-ng)`} />
+      <circle r="48" fill={`url(#${uid}-ng)`} />
       <rect
         x={-W / 2} y={-H / 2}
-        width={W} height={H}
-        rx={R}
+        width={W} height={H} rx={R}
         fill="rgba(15,17,23,0.72)"
         stroke="rgba(59,130,246,0.30)"
         strokeWidth="1"
       />
-      {/* Top highlight strip */}
       <rect
         x={-W / 2 + 1} y={-H / 2 + 1}
-        width={W - 2} height={H * 0.28}
-        rx={R - 1}
+        width={W - 2} height={H * 0.28} rx={R - 1}
         fill="rgba(96,165,250,0.07)"
       />
-      {/* Signal-bars icon centred in the rect */}
       <BandwidthIcon />
-      {/* Labels below */}
       <text y={H / 2 + 12} textAnchor="middle" fontSize="7.5"
         fontFamily="'SF Mono', 'Fira Code', 'Consolas', monospace"
         letterSpacing="0.09em" fill="rgba(148,163,184,0.62)" fontWeight="600">
@@ -608,36 +897,32 @@ function InboundNode({ uid }: { uid: string }) {
 /* ── NLB / Geo Router — diamond ── */
 function NlbNode({ uid }: { uid: string }) {
   const cx = COL.nlb;
-  const cy = 145;
-  const s = 24; // half-diagonal of diamond
+  const cy = 150;
+  const s  = 26;
 
   return (
     <g transform={`translate(${cx}, ${cy})`}>
-      <circle r="54" fill={`url(#${uid}-lg)`} />
-      {/* Outer diamond */}
+      <circle r="56" fill={`url(#${uid}-lg)`} />
       <polygon
         points={`0,${-s} ${s},0 0,${s} ${-s},0`}
         fill="rgba(15,17,23,0.72)"
         stroke="rgba(59,130,246,0.34)"
         strokeWidth="1"
       />
-      {/* Inner diamond accent */}
       <polygon
         points={`0,${-s * 0.42} ${s * 0.42},0 0,${s * 0.42} ${-s * 0.42},0`}
         fill="rgba(59,130,246,0.15)"
         stroke="rgba(96,165,250,0.28)"
         strokeWidth="0.75"
       />
-      {/* Distribution cross */}
-      <line x1="-9" y1="0" x2="9"  y2="0" stroke="rgba(96,165,250,0.40)" strokeWidth="0.9" />
-      <line x1="0" y1="-9" x2="0" y2="9"  stroke="rgba(96,165,250,0.40)" strokeWidth="0.9" />
-      {/* Labels */}
-      <text y={s + 13} textAnchor="middle" fontSize="7.5"
+      <line x1="-10" y1="0" x2="10" y2="0" stroke="rgba(96,165,250,0.40)" strokeWidth="0.9" />
+      <line x1="0" y1="-10" x2="0" y2="10" stroke="rgba(96,165,250,0.40)" strokeWidth="0.9" />
+      <text y={s + 14} textAnchor="middle" fontSize="7.5"
         fontFamily="'SF Mono', 'Fira Code', 'Consolas', monospace"
         letterSpacing="0.09em" fill="rgba(148,163,184,0.62)" fontWeight="600">
         Geo Router
       </text>
-      <text y={s + 22} textAnchor="middle" fontSize="6"
+      <text y={s + 23} textAnchor="middle" fontSize="6"
         fontFamily="'SF Mono', 'Fira Code', 'Consolas', monospace"
         letterSpacing="0.07em" fill="rgba(100,116,139,0.52)" fontWeight="500">
         NLB
@@ -651,20 +936,29 @@ function LocationGroup({
   uid,
   locIdx,
   label,
-  isWest,
+  locClass,
+  sbc1Class,
+  sbc2Class,
+  sbc2CentralClass,
 }: {
   uid: string;
   locIdx: number;
   label: string;
-  isWest: boolean;
+  locClass?: string;
+  sbc1Class?: string;
+  sbc2Class?: string;
+  sbc2CentralClass?: string;
 }) {
   const cy = LOC_Y[locIdx];
   const x  = COL.locIn;
-  const h  = LOC_HALF_H * 2;  // 56px total height
+  const h  = LOC_HALF_H * 2;  // 72px total height
   const R  = 9;
 
+  const sbc1Y = cy - SBC_OFFSET;
+  const sbc2Y = cy + SBC_OFFSET;
+
   return (
-    <g className={isWest ? `${uid}-west-loc` : undefined}>
+    <g className={locClass}>
       {/* Container background */}
       <rect
         x={x}
@@ -673,7 +967,7 @@ function LocationGroup({
         height={h}
         rx={R}
         fill="rgba(15,17,23,0.52)"
-        stroke="rgba(59,130,246,0.20)"
+        stroke="rgba(59,130,246,0.18)"
         strokeWidth="0.75"
       />
       {/* Top shimmer */}
@@ -681,81 +975,94 @@ function LocationGroup({
         x={x + 1}
         y={cy - LOC_HALF_H + 1}
         width={LOC_W - 2}
-        height={h * 0.24}
+        height={h * 0.22}
         rx={R - 1}
-        fill="rgba(96,165,250,0.05)"
+        fill="rgba(96,165,250,0.045)"
       />
-      {/* Location name — top-left */}
+      {/* Location name */}
       <text
         x={x + 10}
         y={cy - LOC_HALF_H + 12}
         fontSize="6.5"
         fontFamily="'SF Mono', 'Fira Code', 'Consolas', monospace"
         letterSpacing="0.10em"
-        fill="rgba(148,163,184,0.48)"
+        fill="rgba(148,163,184,0.45)"
         fontWeight="700"
       >
         {label}
       </text>
 
-      {/* SBC pair node */}
-      <SbcPairNode uid={uid} cx={COL.sbcX} cy={cy} />
+      {/* SBC-1 (upper) */}
+      <SbcNode uid={uid} cx={COL.sbc1X} cy={sbc1Y} label="SBC-1" nodeClass={sbc1Class} />
 
-      {/* FreeSWITCH media server node */}
-      <FsNode uid={uid} cx={COL.fsX} cy={cy} />
+      {/* SBC-2 (lower) — may have its own failure class */}
+      <SbcNode
+        uid={uid}
+        cx={COL.sbc2X}
+        cy={sbc2Y}
+        label="SBC-2"
+        nodeClass={sbc2CentralClass ?? sbc2Class}
+      />
+
+      {/* Keystone engine — right side of the container */}
+      <KsNode uid={uid} cx={COL.ksX} cy={cy} />
     </g>
   );
 }
 
-/* ── SBC Pair — labelled pill ── */
-function SbcPairNode({ uid, cx, cy }: { uid: string; cx: number; cy: number }) {
-  // Sized to comfortably sit within the LOC_HALF_H=28 container
-  const W = 54;
-  const H = 30;
-  const R = 7;
+/* ── Individual SBC node ── */
+function SbcNode({
+  uid,
+  cx,
+  cy,
+  label,
+  nodeClass,
+}: {
+  uid: string;
+  cx: number;
+  cy: number;
+  label: string;
+  nodeClass?: string;
+}) {
+  const W = 46;
+  const H = 24;
+  const R = 6;
 
   return (
-    <g transform={`translate(${cx}, ${cy})`}>
-      <circle r="34" fill={`url(#${uid}-ng)`} />
+    <g transform={`translate(${cx}, ${cy})`} className={nodeClass}>
+      <circle r="28" fill={`url(#${uid}-ng)`} />
       <rect
         x={-W / 2} y={-H / 2}
-        width={W} height={H}
-        rx={R}
-        fill="rgba(15,17,23,0.74)"
+        width={W} height={H} rx={R}
+        fill="rgba(15,17,23,0.76)"
         stroke="rgba(59,130,246,0.28)"
-        strokeWidth="0.85"
+        strokeWidth="0.8"
       />
-      {/* Top highlight */}
       <rect
         x={-W / 2 + 1} y={-H / 2 + 1}
-        width={W - 2} height={H * 0.30}
-        rx={R - 1}
+        width={W - 2} height={H * 0.30} rx={R - 1}
         fill="rgba(96,165,250,0.07)"
       />
-      {/* Layer lines */}
-      <line x1="-14" y1="-5" x2="14" y2="-5" stroke="rgba(59,130,246,0.28)" strokeWidth="0.7" />
-      <line x1="-10" y1=" 0" x2="10" y2=" 0" stroke="rgba(59,130,246,0.18)" strokeWidth="0.7" />
-      <line x1="-6"  y1=" 5" x2="6"  y2=" 5" stroke="rgba(59,130,246,0.11)" strokeWidth="0.7" />
-      {/* Label inside pill */}
-      <text y={H / 2 + 10} textAnchor="middle" fontSize="6.5"
+      {/* Stack lines — visual metaphor for SBC stacking/redundancy */}
+      <line x1="-12" y1="-4" x2="12" y2="-4" stroke="rgba(59,130,246,0.30)" strokeWidth="0.65" />
+      <line x1="-8"  y1=" 0" x2="8"  y2=" 0" stroke="rgba(59,130,246,0.20)" strokeWidth="0.65" />
+      <line x1="-4"  y1=" 4" x2="4"  y2=" 4" stroke="rgba(59,130,246,0.12)" strokeWidth="0.65" />
+      {/* Label below */}
+      <text y={H / 2 + 9} textAnchor="middle" fontSize="6"
         fontFamily="'SF Mono', 'Fira Code', 'Consolas', monospace"
-        letterSpacing="0.07em" fill="rgba(148,163,184,0.55)" fontWeight="600">
-        2× SBC
+        letterSpacing="0.07em" fill="rgba(148,163,184,0.52)" fontWeight="600">
+        {label}
       </text>
     </g>
   );
 }
 
 /* ── Keystone Media Engine — logo image node ── */
-function FsNode({ uid, cx, cy }: { uid: string; cx: number; cy: number }) {
-  // 30px image, centered; ambient glow radius matches neighbour SBC node
-  const S = 30; // image width & height in SVG units
-
+function KsNode({ uid, cx, cy }: { uid: string; cx: number; cy: number }) {
+  const S = 28;
   return (
     <g transform={`translate(${cx}, ${cy})`}>
-      {/* Ambient blue glow halo behind the image */}
-      <circle r="30" fill={`url(#${uid}-ng)`} />
-      {/* Keystone logo — transparent PNG, blue glow filter applied */}
+      <circle r="28" fill={`url(#${uid}-ng)`} />
       <image
         href="/keystone_logo.png"
         x={-S / 2}
@@ -775,40 +1082,37 @@ function TermNode({
   termIdx,
   label,
   sublabel,
+  nodeClass,
 }: {
   uid: string;
   termIdx: number;
   label: string;
   sublabel: string;
+  nodeClass?: string;
 }) {
   const cx = COL.termX;
   const cy = TERM_Y[termIdx];
-  const W  = 58;
-  const H  = 32;
+  const W  = 60;
+  const H  = 34;
   const R  = 8;
 
   return (
-    <g transform={`translate(${cx}, ${cy})`}>
-      <circle r="40" fill={`url(#${uid}-tg)`} />
+    <g transform={`translate(${cx}, ${cy})`} className={nodeClass}>
+      <circle r="42" fill={`url(#${uid}-tg)`} />
       <rect
         x={-W / 2} y={-H / 2}
-        width={W} height={H}
-        rx={R}
+        width={W} height={H} rx={R}
         fill="rgba(15,17,23,0.72)"
         stroke="rgba(52,211,153,0.28)"
         strokeWidth="0.9"
       />
-      {/* Top highlight */}
       <rect
         x={-W / 2 + 1} y={-H / 2 + 1}
-        width={W - 2} height={H * 0.28}
-        rx={R - 1}
+        width={W - 2} height={H * 0.28} rx={R - 1}
         fill="rgba(52,211,153,0.06)"
       />
-      {/* Active status dot */}
       <circle r="3"   cx="0" cy="0" fill="rgba(52,211,153,0.40)" />
       <circle r="1.5" cx="0" cy="0" fill="rgba(167,243,208,0.92)" />
-      {/* Labels */}
       <text y={H / 2 + 12} textAnchor="middle" fontSize="7.5"
         fontFamily="'SF Mono', 'Fira Code', 'Consolas', monospace"
         letterSpacing="0.09em" fill="rgba(148,163,184,0.62)" fontWeight="600">
@@ -823,15 +1127,82 @@ function TermNode({
   );
 }
 
-/* ─── Signal bars / bandwidth icon ───────────────────────────────────── */
+/* ── Status indicator — bottom-right corner of SVG ── */
+function StatusIndicator({ uid }: { uid: string }) {
+  const x  = VB_W - 12;
+  const y  = VB_H - 22;
+  const dotR = 3;
+  const textX = x - dotR * 2 - 4;
+  const fontSize = 6.5;
+  const fontFamily = "'SF Mono', 'Fira Code', 'Consolas', monospace";
 
+  return (
+    <g>
+      {/* Normal — green dot */}
+      <g className={`${uid}-status-normal`}>
+        <circle r={dotR} cx={x} cy={y - 0.5} fill="rgba(34,197,94,0.90)" />
+        <circle r={dotR * 2.2} cx={x} cy={y - 0.5} fill="rgba(34,197,94,0.12)" />
+        <text x={textX} y={y + 2.5} textAnchor="end" fontSize={fontSize}
+          fontFamily={fontFamily} letterSpacing="0.08em"
+          fill="rgba(134,239,172,0.72)" fontWeight="600">
+          All Systems Operational
+        </text>
+      </g>
+
+      {/* Failover: SBC-2 US-Central — amber dot */}
+      <g className={`${uid}-status-sbc2c`}>
+        <circle r={dotR} cx={x} cy={y - 0.5} fill="rgba(251,191,36,0.90)" />
+        <circle r={dotR * 2.2} cx={x} cy={y - 0.5} fill="rgba(251,191,36,0.15)" />
+        <text x={textX} y={y + 2.5} textAnchor="end" fontSize={fontSize}
+          fontFamily={fontFamily} letterSpacing="0.08em"
+          fill="rgba(251,191,36,0.82)" fontWeight="600">
+          Failover: SBC-2 US-Central
+        </text>
+      </g>
+
+      {/* Failover: US-West Zone — amber dot */}
+      <g className={`${uid}-status-west`}>
+        <circle r={dotR} cx={x} cy={y - 0.5} fill="rgba(251,191,36,0.90)" />
+        <circle r={dotR * 2.2} cx={x} cy={y - 0.5} fill="rgba(251,191,36,0.15)" />
+        <text x={textX} y={y + 2.5} textAnchor="end" fontSize={fontSize}
+          fontFamily={fontFamily} letterSpacing="0.08em"
+          fill="rgba(251,191,36,0.82)" fontWeight="600">
+          Failover: US-West Zone
+        </text>
+      </g>
+
+      {/* Failover: Dallas PoP — amber dot */}
+      <g className={`${uid}-status-dallas`}>
+        <circle r={dotR} cx={x} cy={y - 0.5} fill="rgba(251,191,36,0.90)" />
+        <circle r={dotR * 2.2} cx={x} cy={y - 0.5} fill="rgba(251,191,36,0.15)" />
+        <text x={textX} y={y + 2.5} textAnchor="end" fontSize={fontSize}
+          fontFamily={fontFamily} letterSpacing="0.08em"
+          fill="rgba(251,191,36,0.82)" fontWeight="600">
+          Failover: Dallas PoP
+        </text>
+      </g>
+
+      {/* Failover: SBC-1 US-East — amber dot */}
+      <g className={`${uid}-status-sbc1e`}>
+        <circle r={dotR} cx={x} cy={y - 0.5} fill="rgba(251,191,36,0.90)" />
+        <circle r={dotR * 2.2} cx={x} cy={y - 0.5} fill="rgba(251,191,36,0.15)" />
+        <text x={textX} y={y + 2.5} textAnchor="end" fontSize={fontSize}
+          fontFamily={fontFamily} letterSpacing="0.08em"
+          fill="rgba(251,191,36,0.82)" fontWeight="600">
+          Failover: SBC-1 US-East
+        </text>
+      </g>
+    </g>
+  );
+}
+
+/* ── Signal bars / Bandwidth icon ── */
 function BandwidthIcon() {
   return (
     <g transform="translate(-8, -9)" opacity="0.54">
-      {/* Three ascending bars */}
-      <rect x="0.5" y="9"  width="4" height="5"  rx="1" fill="rgba(96,165,250,0.58)" />
-      <rect x="6"   y="6"  width="4" height="8"  rx="1" fill="rgba(96,165,250,0.58)" />
-      <rect x="11.5" y="3" width="4" height="11" rx="1" fill="rgba(96,165,250,0.58)" />
+      <rect x="0.5" y="9"   width="4" height="5"  rx="1" fill="rgba(96,165,250,0.58)" />
+      <rect x="6"   y="6"   width="4" height="8"  rx="1" fill="rgba(96,165,250,0.58)" />
+      <rect x="11.5" y="3"  width="4" height="11" rx="1" fill="rgba(96,165,250,0.58)" />
     </g>
   );
 }

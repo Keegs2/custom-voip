@@ -13,7 +13,7 @@ export function AppLayout() {
         {/* Inner wrapper: fills main, centers content within the content column */}
         <div
           className="flex-1 flex flex-col px-6 py-8 pb-20"
-          style={{ maxWidth: 1160, width: '100%', marginLeft: 'auto', marginRight: 'auto' }}
+          style={{ maxWidth: 1600, width: '100%', marginLeft: 'auto', marginRight: 'auto' }}
         >
           <Outlet />
         </div>
