@@ -1,53 +1,114 @@
 import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Spinner } from '../components/ui/Spinner';
-import { Badge } from '../components/ui/Badge';
 import { listRcf } from '../api/rcf';
 import type { RcfEntry } from '../types/rcf';
 import { RcfCard } from './RcfCard';
 import { useAuth } from '../contexts/AuthContext';
-import { IconRCF } from '../components/icons/ProductIcons';
 import { AdminCustomerSelector } from '../components/AdminCustomerSelector';
 import { fmt } from '../utils/format';
 import { apiRequest } from '../api/client';
 import { useToast } from '../components/ui/Toast';
 
-// ─── API helpers ─────────────────────────────────────────────────────────────
+// ─── API helpers ──────────────────────────────────────────────────────────────
 
 async function updateRcfForwardTo(did: string, forward_to: string): Promise<RcfEntry> {
   return apiRequest('PUT', `/rcf/${encodeURIComponent(did)}`, { forward_to });
 }
 
+async function updateRcfEnabled(id: number, enabled: boolean): Promise<RcfEntry> {
+  return apiRequest('PATCH', `/rcf/${id}`, { enabled });
+}
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type ViewMode = 'card' | 'table';
 type SortField = 'did' | 'name' | 'forward_to' | 'customer' | 'status';
 type SortDir = 'asc' | 'desc';
 
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100] as const;
 const DEFAULT_PAGE_SIZE = 25;
-const TABLE_VIEW_THRESHOLD = 50;
 
-// ─── Sort helpers ────────────────────────────────────────────────────────────
+// ─── Sort helpers ─────────────────────────────────────────────────────────────
 
 function sortEntries(entries: RcfEntry[], field: SortField, dir: SortDir): RcfEntry[] {
-  const sorted = [...entries].sort((a, b) => {
+  return [...entries].sort((a, b) => {
     let aVal = '';
     let bVal = '';
     switch (field) {
-      case 'did':      aVal = a.did;                    bVal = b.did;                    break;
-      case 'name':     aVal = a.name ?? '';              bVal = b.name ?? '';             break;
-      case 'forward_to': aVal = a.forward_to;           bVal = b.forward_to;             break;
-      case 'customer': aVal = a.customer_name ?? '';     bVal = b.customer_name ?? '';   break;
-      case 'status':   aVal = String(a.enabled);        bVal = String(b.enabled);        break;
+      case 'did':        aVal = a.did;                  bVal = b.did;                  break;
+      case 'name':       aVal = a.name ?? '';            bVal = b.name ?? '';           break;
+      case 'forward_to': aVal = a.forward_to;            bVal = b.forward_to;           break;
+      case 'customer':   aVal = a.customer_name ?? '';   bVal = b.customer_name ?? '';  break;
+      case 'status':     aVal = String(a.enabled);       bVal = String(b.enabled);      break;
     }
     const cmp = aVal.localeCompare(bVal, undefined, { numeric: true });
     return dir === 'asc' ? cmp : -cmp;
   });
-  return sorted;
 }
 
-// ─── Sub-components ──────────────────────────────────────────────────────────
+// ─── EnableToggle ─────────────────────────────────────────────────────────────
+
+function EnableToggle({ entry, canEdit }: { entry: RcfEntry; canEdit: boolean }) {
+  const queryClient = useQueryClient();
+  const { toastOk, toastErr } = useToast();
+
+  const mutation = useMutation({
+    mutationFn: (enabled: boolean) => updateRcfEnabled(entry.id, enabled),
+    onSuccess: (_, enabled) => {
+      void queryClient.invalidateQueries({ queryKey: ['rcf'] });
+      toastOk(enabled ? `${fmt(entry.did)} enabled` : `${fmt(entry.did)} disabled`);
+    },
+    onError: (err: Error) => toastErr(err.message ?? 'Failed to update'),
+  });
+
+  const enabled = entry.enabled;
+  const pending = mutation.isPending;
+
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={enabled}
+      disabled={!canEdit || pending}
+      onClick={() => { if (canEdit && !pending) mutation.mutate(!enabled); }}
+      title={canEdit ? (enabled ? 'Click to disable' : 'Click to enable') : undefined}
+      style={{
+        position: 'relative',
+        display: 'inline-flex',
+        alignItems: 'center',
+        width: 38,
+        height: 22,
+        borderRadius: 11,
+        border: `1px solid ${enabled ? 'rgba(59,130,246,0.55)' : 'rgba(255,255,255,0.12)'}`,
+        background: enabled
+          ? 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)'
+          : 'rgba(255,255,255,0.06)',
+        cursor: canEdit && !pending ? 'pointer' : 'not-allowed',
+        transition: 'background 0.2s ease, border-color 0.2s ease, opacity 0.2s',
+        opacity: pending ? 0.55 : 1,
+        flexShrink: 0,
+        padding: 0,
+        outline: 'none',
+        boxShadow: enabled ? '0 0 8px rgba(59,130,246,0.35)' : 'none',
+      }}
+    >
+      <span
+        style={{
+          position: 'absolute',
+          left: enabled ? 18 : 2,
+          width: 16,
+          height: 16,
+          borderRadius: '50%',
+          background: '#fff',
+          boxShadow: '0 1px 3px rgba(0,0,0,0.4)',
+          transition: 'left 0.2s ease',
+        }}
+      />
+    </button>
+  );
+}
+
+// ─── SortHeader ───────────────────────────────────────────────────────────────
 
 interface SortHeaderProps {
   label: string;
@@ -63,50 +124,50 @@ function SortHeader({ label, field, currentField, currentDir, onSort }: SortHead
     <th
       onClick={() => onSort(field)}
       style={{
-        padding: '10px 16px',
+        padding: '12px 16px',
         textAlign: 'left',
         fontSize: '0.6rem',
         fontWeight: 700,
-        color: isActive ? '#94a3b8' : '#334155',
+        color: isActive ? '#60a5fa' : '#475569',
         textTransform: 'uppercase',
-        letterSpacing: '0.1em',
+        letterSpacing: '0.12em',
         whiteSpace: 'nowrap',
-        background: 'rgba(0,0,0,0.06)',
+        background: 'rgba(59,130,246,0.04)',
         cursor: 'pointer',
         userSelect: 'none',
-        transition: 'color 0.1s',
+        transition: 'color 0.15s',
+        borderBottom: '1px solid rgba(59,130,246,0.10)',
       }}
     >
-      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
         {label}
         {isActive ? (
-          <span style={{ color: '#22c55e', fontSize: '0.7rem' }}>
+          <span style={{ color: '#3b82f6', fontSize: '0.75rem', lineHeight: 1 }}>
             {currentDir === 'asc' ? '↑' : '↓'}
           </span>
         ) : (
-          <span style={{ color: '#2d3748', fontSize: '0.7rem' }}>↕</span>
+          <span style={{ color: '#334155', fontSize: '0.75rem', lineHeight: 1 }}>↕</span>
         )}
       </span>
     </th>
   );
 }
 
-interface TableRowProps {
+// ─── ForwardToCell ────────────────────────────────────────────────────────────
+
+interface ForwardToCellProps {
   entry: RcfEntry;
-  isAdmin: boolean;
-  isOdd: boolean;
   canEdit: boolean;
   pendingValue: string;
   onPendingChange: (did: string, value: string) => void;
 }
 
-function TableRow({ entry, isAdmin, isOdd, canEdit, pendingValue, onPendingChange }: TableRowProps) {
+function ForwardToCell({ entry, canEdit, pendingValue, onPendingChange }: ForwardToCellProps) {
   const queryClient = useQueryClient();
   const { toastOk, toastErr } = useToast();
-
-  // Each row manages whether it is in inline-edit mode for forward_to
   const [editing, setEditing] = useState(false);
   const [savedFlash, setSavedFlash] = useState(false);
+  const [hovered, setHovered] = useState(false);
 
   const isDirty = pendingValue !== entry.forward_to && pendingValue !== '';
 
@@ -120,9 +181,7 @@ function TableRow({ entry, isAdmin, isOdd, canEdit, pendingValue, onPendingChang
       setTimeout(() => setSavedFlash(false), 1800);
       toastOk(`Saved — calls to ${fmt(entry.did)} now ring ${fmt(newValue.trim())}`);
     },
-    onError: (error: Error) => {
-      toastErr(error.message ?? 'Failed to save');
-    },
+    onError: (error: Error) => toastErr(error.message ?? 'Failed to save'),
   });
 
   const handleSave = useCallback(() => {
@@ -136,152 +195,226 @@ function TableRow({ entry, isAdmin, isOdd, canEdit, pendingValue, onPendingChang
     setEditing(false);
   }, [entry.did, entry.forward_to, onPendingChange]);
 
+  if (editing && canEdit) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <input
+          type="tel"
+          value={pendingValue}
+          autoFocus
+          placeholder="+1XXXXXXXXXX"
+          disabled={mutation.isPending}
+          onChange={(e) => onPendingChange(entry.did, e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') { e.preventDefault(); handleSave(); }
+            if (e.key === 'Escape') handleCancel();
+          }}
+          style={{
+            width: 150,
+            fontSize: '0.82rem',
+            padding: '5px 9px',
+            borderRadius: 7,
+            border: `1px solid ${isDirty ? '#3b82f6' : 'rgba(59,130,246,0.25)'}`,
+            background: 'rgba(15,17,23,0.85)',
+            color: '#e2e8f0',
+            fontFamily: 'monospace',
+            outline: 'none',
+            boxShadow: isDirty ? '0 0 0 3px rgba(59,130,246,0.18)' : '0 0 0 2px rgba(59,130,246,0.1)',
+            opacity: mutation.isPending ? 0.5 : 1,
+            transition: 'border-color 0.15s, box-shadow 0.15s',
+          }}
+        />
+        <button
+          type="button"
+          disabled={!isDirty || mutation.isPending}
+          onMouseDown={(e) => { e.preventDefault(); handleSave(); }}
+          style={{
+            fontSize: '0.65rem',
+            fontWeight: 700,
+            padding: '5px 11px',
+            borderRadius: 5,
+            border: 'none',
+            background: isDirty && !mutation.isPending
+              ? 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)'
+              : 'rgba(59,130,246,0.25)',
+            color: '#fff',
+            cursor: isDirty && !mutation.isPending ? 'pointer' : 'not-allowed',
+            flexShrink: 0,
+            lineHeight: 1,
+            letterSpacing: '0.02em',
+            transition: 'background 0.15s',
+          }}
+        >
+          {mutation.isPending ? '…' : 'Save'}
+        </button>
+        <button
+          type="button"
+          onMouseDown={(e) => { e.preventDefault(); handleCancel(); }}
+          style={{
+            fontSize: '0.65rem',
+            fontWeight: 500,
+            padding: '5px 9px',
+            borderRadius: 5,
+            border: 'none',
+            background: 'transparent',
+            color: '#64748b',
+            cursor: 'pointer',
+            flexShrink: 0,
+            lineHeight: 1,
+          }}
+        >
+          Cancel
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      style={{ display: 'flex', alignItems: 'center', gap: 7, cursor: canEdit ? 'pointer' : 'default' }}
+      onMouseEnter={() => { if (canEdit) setHovered(true); }}
+      onMouseLeave={() => setHovered(false)}
+      onClick={() => { if (canEdit) setEditing(true); }}
+      title={canEdit ? 'Click to edit destination' : undefined}
+    >
+      <span
+        style={{
+          fontSize: '0.84rem',
+          color: savedFlash ? '#60a5fa' : '#3b82f6',
+          fontFamily: 'monospace',
+          fontWeight: 600,
+          letterSpacing: '0.01em',
+          borderBottom: canEdit ? `1px dashed rgba(59,130,246,${hovered ? '0.6' : '0.28'})` : 'none',
+          paddingBottom: canEdit ? 1 : 0,
+          transition: 'color 0.25s, border-color 0.2s',
+        }}
+      >
+        {fmt(entry.forward_to)}
+      </span>
+      {canEdit && (
+        <svg
+          viewBox="0 0 16 16"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={1.8}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          style={{
+            width: 12,
+            height: 12,
+            color: '#3b82f6',
+            opacity: hovered ? 0.7 : 0,
+            transition: 'opacity 0.2s',
+            flexShrink: 0,
+          }}
+        >
+          <path d="M11.5 2.5a1.414 1.414 0 0 1 2 2L5 13H2v-3L11.5 2.5z" />
+        </svg>
+      )}
+    </div>
+  );
+}
+
+// ─── TableRow ─────────────────────────────────────────────────────────────────
+
+interface TableRowProps {
+  entry: RcfEntry;
+  isAdmin: boolean;
+  canEdit: boolean;
+  pendingValue: string;
+  onPendingChange: (did: string, value: string) => void;
+}
+
+function TableRow({ entry, isAdmin, canEdit, pendingValue, onPendingChange }: TableRowProps) {
+  const [hovered, setHovered] = useState(false);
+
   return (
     <tr
       style={{
-        background: savedFlash
-          ? 'rgba(34,197,94,0.06)'
-          : isOdd ? 'rgba(255,255,255,0.012)' : 'transparent',
-        transition: 'background 0.3s',
-        borderBottom: '1px solid rgba(255,255,255,0.03)',
+        borderBottom: '1px solid rgba(59,130,246,0.06)',
+        background: hovered ? 'rgba(59,130,246,0.05)' : 'transparent',
+        transition: 'background 0.18s ease',
       }}
-      onMouseEnter={(e) => {
-        if (!savedFlash)
-          (e.currentTarget as HTMLTableRowElement).style.background = 'rgba(34,197,94,0.04)';
-      }}
-      onMouseLeave={(e) => {
-        if (!savedFlash)
-          (e.currentTarget as HTMLTableRowElement).style.background = isOdd
-            ? 'rgba(255,255,255,0.012)'
-            : 'transparent';
-      }}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
     >
       {/* DID */}
-      <td style={{ padding: '12px 16px' }}>
+      <td style={{ padding: '14px 16px' }}>
         <div>
           <div
             style={{
-              fontSize: '0.875rem',
+              fontSize: '0.9rem',
               fontWeight: 700,
               color: '#e2e8f0',
-              fontVariantNumeric: 'tabular-nums',
-              letterSpacing: '-0.01em',
+              fontFamily: 'monospace',
+              letterSpacing: '0.02em',
+              lineHeight: 1.2,
             }}
           >
             {fmt(entry.did)}
           </div>
-          <div style={{ fontSize: '0.65rem', color: '#475569', fontFamily: 'monospace', marginTop: 2 }}>
+          <div style={{ fontSize: '0.63rem', color: '#334155', fontFamily: 'monospace', marginTop: 3, letterSpacing: '0.01em' }}>
             {entry.did}
           </div>
         </div>
       </td>
 
       {/* Name */}
-      <td style={{ padding: '12px 16px' }}>
-        <span style={{ fontSize: '0.82rem', color: entry.name ? '#cbd5e0' : '#334155', fontStyle: entry.name ? 'normal' : 'italic' }}>
+      <td style={{ padding: '14px 16px' }}>
+        <span
+          style={{
+            fontSize: '0.83rem',
+            color: entry.name ? '#cbd5e0' : '#2d3748',
+            fontStyle: entry.name ? 'normal' : 'italic',
+          }}
+        >
           {entry.name ?? 'No label'}
         </span>
       </td>
 
-      {/* Forward To — static for readonly, inline-editable for canEdit */}
-      <td style={{ padding: '8px 16px' }}>
-        {canEdit && editing ? (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <input
-              type="tel"
-              value={pendingValue}
-              autoFocus
-              placeholder="+1XXXXXXXXXX"
-              disabled={mutation.isPending}
-              onChange={(e) => onPendingChange(entry.did, e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') { e.preventDefault(); handleSave(); }
-                if (e.key === 'Escape') handleCancel();
-              }}
-              style={{
-                width: 150,
-                fontSize: '0.82rem',
-                padding: '5px 9px',
-                borderRadius: 6,
-                border: `1px solid ${isDirty ? '#3b82f6' : 'rgba(42,47,69,0.8)'}`,
-                background: 'rgba(19,21,29,0.8)',
-                color: '#e2e8f0',
-                fontFamily: 'monospace',
-                outline: 'none',
-                boxShadow: isDirty ? '0 0 0 2px rgba(59,130,246,0.2)' : 'none',
-                opacity: mutation.isPending ? 0.5 : 1,
-                transition: 'border-color 0.15s, box-shadow 0.15s',
-              }}
-            />
-            <button
-              type="button"
-              disabled={!isDirty || mutation.isPending}
-              onMouseDown={(e) => { e.preventDefault(); handleSave(); }}
-              style={{
-                fontSize: '0.65rem',
-                fontWeight: 600,
-                padding: '4px 10px',
-                borderRadius: 4,
-                border: 'none',
-                background: isDirty && !mutation.isPending ? '#22c55e' : 'rgba(34,197,94,0.3)',
-                color: '#fff',
-                cursor: isDirty && !mutation.isPending ? 'pointer' : 'not-allowed',
-                flexShrink: 0,
-                lineHeight: 1,
-              }}
-            >
-              {mutation.isPending ? '…' : 'Save'}
-            </button>
-            <button
-              type="button"
-              onMouseDown={(e) => { e.preventDefault(); handleCancel(); }}
-              style={{
-                fontSize: '0.65rem',
-                fontWeight: 500,
-                padding: '4px 8px',
-                borderRadius: 4,
-                border: 'none',
-                background: 'transparent',
-                color: '#718096',
-                cursor: 'pointer',
-                flexShrink: 0,
-                lineHeight: 1,
-              }}
-            >
-              Cancel
-            </button>
-          </div>
-        ) : (
-          <span
-            onClick={() => { if (canEdit) setEditing(true); }}
-            title={canEdit ? 'Click to edit' : undefined}
-            style={{
-              fontSize: '0.82rem',
-              color: savedFlash ? '#4ade80' : '#22c55e',
-              fontFamily: 'monospace',
-              fontWeight: 600,
-              cursor: canEdit ? 'pointer' : 'default',
-              borderBottom: canEdit ? '1px dashed rgba(34,197,94,0.35)' : 'none',
-              paddingBottom: canEdit ? 1 : 0,
-              transition: 'color 0.3s',
-            }}
-          >
-            {fmt(entry.forward_to)}
-          </span>
-        )}
+      {/* Forward To */}
+      <td style={{ padding: '10px 16px' }}>
+        <ForwardToCell
+          entry={entry}
+          canEdit={canEdit}
+          pendingValue={pendingValue}
+          onPendingChange={onPendingChange}
+        />
       </td>
 
-      {/* Status */}
-      <td style={{ padding: '12px 16px' }}>
-        <Badge variant={entry.enabled ? 'active' : 'disabled'}>
-          {entry.enabled ? 'Active' : 'Disabled'}
-        </Badge>
+      {/* Status — toggle switch */}
+      <td style={{ padding: '14px 16px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+          <EnableToggle entry={entry} canEdit={canEdit} />
+          <span
+            style={{
+              fontSize: '0.72rem',
+              fontWeight: 600,
+              color: entry.enabled ? '#60a5fa' : '#475569',
+              letterSpacing: '0.04em',
+              textTransform: 'uppercase',
+              transition: 'color 0.2s',
+            }}
+          >
+            {entry.enabled ? 'Active' : 'Disabled'}
+          </span>
+        </div>
       </td>
 
       {/* Customer (admin only) */}
       {isAdmin && (
-        <td style={{ padding: '12px 16px' }}>
-          <span style={{ fontSize: '0.78rem', color: '#64748b' }}>
+        <td style={{ padding: '14px 16px' }}>
+          <span
+            style={{
+              fontSize: '0.78rem',
+              color: '#64748b',
+              background: 'rgba(59,130,246,0.06)',
+              border: '1px solid rgba(59,130,246,0.12)',
+              borderRadius: 6,
+              padding: '2px 8px',
+              whiteSpace: 'nowrap',
+            }}
+          >
             {entry.customer_name ?? `ID ${entry.customer_id}`}
           </span>
         </td>
@@ -289,6 +422,8 @@ function TableRow({ entry, isAdmin, isOdd, canEdit, pendingValue, onPendingChang
     </tr>
   );
 }
+
+// ─── PaginationControls ───────────────────────────────────────────────────────
 
 interface PaginationControlsProps {
   currentPage: number;
@@ -310,7 +445,6 @@ function PaginationControls({
   const start = (currentPage - 1) * pageSize + 1;
   const end = Math.min(currentPage * pageSize, totalItems);
 
-  // Build page number buttons — show first, last, and a window around current
   const pageNumbers: (number | 'ellipsis')[] = [];
   if (totalPages <= 7) {
     for (let i = 1; i <= totalPages; i++) pageNumbers.push(i);
@@ -331,19 +465,20 @@ function PaginationControls({
     minWidth: 32,
     height: 32,
     padding: '0 8px',
-    borderRadius: 6,
+    borderRadius: 7,
     fontSize: '0.78rem',
     fontWeight: active ? 700 : 500,
     cursor: disabled ? 'not-allowed' : 'pointer',
-    border: active ? '1px solid #22c55e50' : '1px solid rgba(255,255,255,0.06)',
+    border: active ? '1px solid rgba(59,130,246,0.45)' : '1px solid rgba(255,255,255,0.06)',
     background: active
-      ? 'linear-gradient(135deg, rgba(34,197,94,0.18) 0%, rgba(34,197,94,0.08) 100%)'
+      ? 'linear-gradient(135deg, rgba(59,130,246,0.22) 0%, rgba(59,130,246,0.10) 100%)'
       : 'rgba(255,255,255,0.02)',
-    color: active ? '#22c55e' : disabled ? '#2d3748' : '#64748b',
+    color: active ? '#60a5fa' : disabled ? '#1e293b' : '#64748b',
     opacity: disabled ? 0.4 : 1,
-    transition: 'background 0.1s, color 0.1s, border-color 0.1s',
+    transition: 'background 0.12s, color 0.12s, border-color 0.12s',
     userSelect: 'none',
     fontFamily: 'inherit',
+    boxShadow: active ? '0 0 10px rgba(59,130,246,0.15)' : 'none',
   });
 
   return (
@@ -354,27 +489,28 @@ function PaginationControls({
         justifyContent: 'space-between',
         flexWrap: 'wrap',
         gap: 12,
-        padding: '14px 16px',
-        borderTop: '1px solid rgba(255,255,255,0.05)',
-        background: 'rgba(0,0,0,0.06)',
+        padding: '14px 20px',
+        borderTop: '1px solid rgba(59,130,246,0.08)',
+        background: 'rgba(59,130,246,0.02)',
       }}
     >
-      {/* Left: count info + page size */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
         <span style={{ fontSize: '0.75rem', color: '#64748b' }}>
-          Showing <strong style={{ color: '#94a3b8' }}>{start}–{end}</strong> of{' '}
-          <strong style={{ color: '#94a3b8' }}>{totalItems}</strong>
+          Showing{' '}
+          <strong style={{ color: '#94a3b8', fontVariantNumeric: 'tabular-nums' }}>{start}–{end}</strong>
+          {' '}of{' '}
+          <strong style={{ color: '#94a3b8', fontVariantNumeric: 'tabular-nums' }}>{totalItems}</strong>
         </span>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span style={{ fontSize: '0.72rem', color: '#475569' }}>Per page:</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+          <span style={{ fontSize: '0.7rem', color: '#475569' }}>Per page:</span>
           <select
             value={pageSize}
             onChange={(e) => { onPageSizeChange(Number(e.target.value)); onPageChange(1); }}
             style={{
               fontSize: '0.75rem',
-              background: 'rgba(255,255,255,0.04)',
-              border: '1px solid rgba(255,255,255,0.08)',
-              borderRadius: 6,
+              background: 'rgba(15,17,23,0.8)',
+              border: '1px solid rgba(59,130,246,0.18)',
+              borderRadius: 7,
               color: '#94a3b8',
               padding: '4px 8px',
               cursor: 'pointer',
@@ -389,9 +525,7 @@ function PaginationControls({
         </div>
       </div>
 
-      {/* Right: page buttons */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-        {/* Prev */}
         <button
           type="button"
           disabled={currentPage === 1}
@@ -399,7 +533,7 @@ function PaginationControls({
           style={btnStyle(false, currentPage === 1)}
           aria-label="Previous page"
         >
-          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={2} style={{ width: 12, height: 12 }}>
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={2} style={{ width: 11, height: 11 }}>
             <path d="M10 12L6 8l4-4" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         </button>
@@ -408,18 +542,12 @@ function PaginationControls({
           p === 'ellipsis' ? (
             <span key={`ell-${i}`} style={{ color: '#334155', padding: '0 4px', fontSize: '0.78rem' }}>…</span>
           ) : (
-            <button
-              key={p}
-              type="button"
-              onClick={() => onPageChange(p)}
-              style={btnStyle(currentPage === p, false)}
-            >
+            <button key={p} type="button" onClick={() => onPageChange(p)} style={btnStyle(currentPage === p, false)}>
               {p}
             </button>
-          )
+          ),
         )}
 
-        {/* Next */}
         <button
           type="button"
           disabled={currentPage === totalPages}
@@ -427,11 +555,300 @@ function PaginationControls({
           style={btnStyle(false, currentPage === totalPages)}
           aria-label="Next page"
         >
-          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={2} style={{ width: 12, height: 12 }}>
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={2} style={{ width: 11, height: 11 }}>
             <path d="M6 4l4 4-4 4" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         </button>
       </div>
+    </div>
+  );
+}
+
+// ─── Page header ──────────────────────────────────────────────────────────────
+
+interface RcfPageHeaderProps {
+  title: string;
+  subtitle: string;
+  totalNumbers: number;
+  activeCount: number;
+  disabledCount: number;
+}
+
+function RcfPageHeader({ title, subtitle, totalNumbers, activeCount, disabledCount }: RcfPageHeaderProps) {
+  return (
+    <div
+      className="animate-fade-in-up"
+      style={{
+        position: 'relative',
+        background: 'rgba(19, 21, 29, 0.72)',
+        backdropFilter: 'blur(10px)',
+        WebkitBackdropFilter: 'blur(10px)',
+        border: '1px solid rgba(59,130,246,0.16)',
+        borderRadius: 20,
+        padding: '32px 36px 28px',
+        marginBottom: 28,
+        overflow: 'hidden',
+        boxShadow: '0 8px 40px -12px rgba(0,0,0,0.55), 0 0 0 1px rgba(59,130,246,0.06)',
+      }}
+    >
+      {/* Top accent line */}
+      <div
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 48,
+          right: 48,
+          height: 2,
+          background: 'linear-gradient(90deg, transparent, rgba(59,130,246,0.7), transparent)',
+          borderRadius: '0 0 2px 2px',
+        }}
+      />
+
+      {/* Subtle radial glow background */}
+      <div
+        style={{
+          position: 'absolute',
+          top: -60,
+          right: -60,
+          width: 280,
+          height: 280,
+          background: 'radial-gradient(circle, rgba(59,130,246,0.07) 0%, transparent 70%)',
+          pointerEvents: 'none',
+        }}
+      />
+
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 24 }}>
+        {/* Keystone logo with glow */}
+        <div style={{ flexShrink: 0, position: 'relative' }}>
+          <div
+            style={{
+              width: 56,
+              height: 56,
+              borderRadius: 14,
+              background: 'linear-gradient(135deg, rgba(59,130,246,0.18) 0%, rgba(59,130,246,0.08) 100%)',
+              border: '1px solid rgba(59,130,246,0.28)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              boxShadow: '0 0 24px rgba(59,130,246,0.20)',
+            }}
+          >
+            <img
+              src="/keystone_logo.png"
+              alt="Keystone"
+              style={{
+                width: 36,
+                height: 36,
+                objectFit: 'contain',
+                filter: 'drop-shadow(0 0 8px rgba(59,130,246,0.55)) brightness(1.1)',
+              }}
+            />
+          </div>
+        </div>
+
+        {/* Title + subtitle */}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div
+            style={{
+              fontSize: '0.6rem',
+              fontWeight: 700,
+              letterSpacing: '0.14em',
+              textTransform: 'uppercase',
+              color: '#3b82f6',
+              opacity: 0.8,
+              marginBottom: 6,
+            }}
+          >
+            Remote Call Forwarding
+          </div>
+          <h1
+            style={{
+              fontSize: 'clamp(1.2rem, 2.5vw, 1.55rem)',
+              fontWeight: 800,
+              color: '#e2e8f0',
+              letterSpacing: '-0.025em',
+              lineHeight: 1.15,
+              margin: '0 0 8px',
+            }}
+          >
+            {title}
+          </h1>
+          <p
+            style={{
+              fontSize: '0.85rem',
+              color: '#718096',
+              lineHeight: 1.65,
+              margin: 0,
+              maxWidth: 500,
+            }}
+          >
+            {subtitle}
+          </p>
+        </div>
+
+        {/* Stats row — right aligned */}
+        {totalNumbers > 0 && (
+          <div
+            style={{
+              display: 'flex',
+              gap: 12,
+              flexShrink: 0,
+              alignSelf: 'center',
+            }}
+          >
+            {(
+              [
+                { value: totalNumbers, label: 'Total', color: '#60a5fa' },
+                { value: activeCount, label: 'Active', color: '#3b82f6' },
+                ...(disabledCount > 0 ? [{ value: disabledCount, label: 'Disabled', color: '#ef4444' }] : []),
+              ] as { value: number; label: string; color: string }[]
+            ).map(({ value, label, color }) => (
+              <div
+                key={label}
+                style={{
+                  textAlign: 'center',
+                  padding: '12px 16px',
+                  background: 'rgba(15,17,23,0.55)',
+                  border: '1px solid rgba(59,130,246,0.12)',
+                  borderRadius: 12,
+                  minWidth: 68,
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: '1.6rem',
+                    fontWeight: 800,
+                    color,
+                    lineHeight: 1,
+                    letterSpacing: '-0.03em',
+                    fontVariantNumeric: 'tabular-nums',
+                    marginBottom: 4,
+                  }}
+                >
+                  {value}
+                </div>
+                <div
+                  style={{
+                    fontSize: '0.62rem',
+                    fontWeight: 600,
+                    color: '#475569',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.09em',
+                  }}
+                >
+                  {label}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Empty states ─────────────────────────────────────────────────────────────
+
+function EmptyState() {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '80px 24px',
+        gap: 16,
+        textAlign: 'center',
+        background: 'rgba(19, 21, 29, 0.65)',
+        backdropFilter: 'blur(8px)',
+        WebkitBackdropFilter: 'blur(8px)',
+        border: '1px solid rgba(59,130,246,0.10)',
+        borderRadius: 20,
+      }}
+    >
+      <div
+        style={{
+          width: 72,
+          height: 72,
+          borderRadius: 18,
+          background: 'linear-gradient(135deg, rgba(59,130,246,0.14) 0%, rgba(59,130,246,0.06) 100%)',
+          border: '1px solid rgba(59,130,246,0.22)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          marginBottom: 8,
+          boxShadow: '0 0 24px rgba(59,130,246,0.12)',
+        }}
+      >
+        <img
+          src="/keystone_logo.png"
+          alt="Keystone"
+          style={{
+            width: 44,
+            height: 44,
+            objectFit: 'contain',
+            filter: 'drop-shadow(0 0 8px rgba(59,130,246,0.5)) brightness(1.1)',
+            opacity: 0.7,
+          }}
+        />
+      </div>
+      <div>
+        <p style={{ color: '#94a3b8', fontSize: '1rem', fontWeight: 600, margin: '0 0 6px' }}>
+          No numbers configured yet
+        </p>
+        <p style={{ color: '#475569', fontSize: '0.82rem', margin: 0, lineHeight: 1.6 }}>
+          Contact support to provision Remote Call Forwarding numbers for your account.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function SearchEmptyState({ query, onClear }: { query: string; onClear: () => void }) {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '60px 24px',
+        gap: 12,
+        textAlign: 'center',
+        background: 'rgba(19, 21, 29, 0.55)',
+        border: '1px solid rgba(59,130,246,0.08)',
+        borderRadius: 16,
+      }}
+    >
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={1.5}
+        style={{ width: 36, height: 36, color: '#3b4560', marginBottom: 4 }}
+      >
+        <path d="m21 21-5.197-5.197M15.803 15.803A7.5 7.5 0 1 0 4.197 4.197a7.5 7.5 0 0 0 11.606 11.606Z" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+      <p style={{ color: '#64748b', fontSize: '0.9rem', fontWeight: 500, margin: 0 }}>
+        No numbers match &ldquo;{query}&rdquo;
+      </p>
+      <button
+        type="button"
+        onClick={onClear}
+        style={{
+          background: 'transparent',
+          border: 'none',
+          color: '#3b82f6',
+          fontSize: '0.8rem',
+          cursor: 'pointer',
+          textDecoration: 'underline',
+          fontFamily: 'inherit',
+          padding: 0,
+        }}
+      >
+        Clear filter
+      </button>
     </div>
   );
 }
@@ -442,24 +859,21 @@ export function RcfPage() {
   const { user, isAdmin } = useAuth();
   const [adminSelectedCustomer, setAdminSelectedCustomer] = useState<number | undefined>(undefined);
 
-  // Non-admins: locked to their customer. Admins: use selector (undefined = all)
   const customerId = isAdmin ? adminSelectedCustomer : (user?.customer_id ?? undefined);
 
-  // Pagination: server-side for large result sets
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<number>(DEFAULT_PAGE_SIZE);
 
-  // Search: client-side filter on the current page's data
   const [searchInput, setSearchInput] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // View and sort state
-  const [viewMode, setViewMode] = useState<ViewMode | null>(null); // null = auto
   const [sortField, setSortField] = useState<SortField>('did');
   const [sortDir, setSortDir] = useState<SortDir>('asc');
+  const [searchFocused, setSearchFocused] = useState(false);
 
-  // Reset to page 1 whenever the customer filter or search changes
+  const [pendingEdits, setPendingEdits] = useState<Record<string, string>>({});
+
   function handleSearchInput(value: string) {
     setSearchInput(value);
     if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
@@ -470,10 +884,11 @@ export function RcfPage() {
   }
 
   useEffect(() => {
-    return () => { if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current); };
+    return () => {
+      if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    };
   }, []);
 
-  // When customer changes, reset pagination and search
   function handleCustomerSelect(id: number | undefined) {
     setAdminSelectedCustomer(id);
     setPage(1);
@@ -486,12 +901,9 @@ export function RcfPage() {
     queryFn: () => listRcf({ limit: pageSize, offset: (page - 1) * pageSize, customer_id: customerId }),
   });
 
-  const [pendingEdits, setPendingEdits] = useState<Record<string, string>>({});
-
   const rawEntries: RcfEntry[] = useMemo(() => data?.items ?? [], [data]);
   const serverTotal: number = data?.total ?? 0;
 
-  // Client-side search filter on the fetched page
   const filteredEntries = useMemo(() => {
     if (!searchQuery) return rawEntries;
     const q = searchQuery.toLowerCase();
@@ -504,37 +916,28 @@ export function RcfPage() {
     );
   }, [rawEntries, searchQuery]);
 
-  // Sort the filtered results
   const sortedEntries = useMemo(
     () => sortEntries(filteredEntries, sortField, sortDir),
     [filteredEntries, sortField, sortDir],
   );
 
-  // Derive role-based constraints
   const role = user?.role ?? 'user';
-  // Admin and support (readonly) are always locked to the table view
-  const isTableOnly = role === 'admin' || role === 'readonly';
-  // Readonly users cannot edit forward_to
   const canEdit = role !== 'readonly';
 
-  // Determine effective view mode (auto-switch based on total count)
-  const effectiveViewMode: ViewMode = useMemo(() => {
-    if (isTableOnly) return 'table';
-    if (viewMode !== null) return viewMode;
-    return serverTotal > TABLE_VIEW_THRESHOLD ? 'table' : 'card';
-  }, [isTableOnly, viewMode, serverTotal]);
-
-  // Total pages uses server total (pagination is server-side)
   const totalPages = Math.max(1, Math.ceil(serverTotal / pageSize));
+
+  const activeCount = useMemo(() => rawEntries.filter((e) => e.enabled).length, [rawEntries]);
+  const disabledCount = useMemo(() => rawEntries.filter((e) => !e.enabled).length, [rawEntries]);
+
+  // For the header: use total from server when no search query
+  const headerTotal = serverTotal;
 
   function handlePendingChange(did: string, value: string) {
     setPendingEdits((prev) => ({ ...prev, [did]: value }));
   }
 
   function resolveValue(entry: RcfEntry): string {
-    return pendingEdits[entry.did] !== undefined
-      ? pendingEdits[entry.did]
-      : entry.forward_to;
+    return pendingEdits[entry.did] !== undefined ? pendingEdits[entry.did] : entry.forward_to;
   }
 
   function handleSort(field: SortField) {
@@ -546,46 +949,63 @@ export function RcfPage() {
     }
   }
 
+  // Decide view: admin always table; customers with ≤10 numbers use cards, else table
+  const useCardView = !isAdmin && role !== 'readonly' && serverTotal <= 10;
+
+  const pageTitle = user?.customer_name
+    ? `${user.customer_name}'s Numbers`
+    : 'Remote Call Forwarding';
+
   return (
-    <div>
-      <PortalHeader
-        icon={<IconRCF size={24} />}
-        title={user?.customer_name ? `${user.customer_name}'s RCF Numbers` : 'RCF Numbers'}
-        subtitle="Manage Remote Call Forwarding numbers. Changes take effect within seconds."
-        badgeVariant="rcf"
+    <div style={{ paddingTop: 4 }}>
+      {/* Premium glass-morphism header */}
+      <RcfPageHeader
+        title={pageTitle}
+        subtitle="Manage your Remote Call Forwarding numbers. Changes take effect within seconds — no reboots, no carrier coordination."
+        totalNumbers={isLoading ? 0 : headerTotal}
+        activeCount={isLoading ? 0 : activeCount}
+        disabledCount={isLoading ? 0 : disabledCount}
       />
 
+      {/* Admin customer selector */}
       <AdminCustomerSelector
         selectedCustomerId={adminSelectedCustomer}
         onSelect={handleCustomerSelect}
-        accent="#22c55e"
+        accent="#3b82f6"
         accountTypes={['rcf', 'hybrid']}
       />
 
-      {/* ── Toolbar: Search + View Toggle + Sort ─────────────── */}
-      {(!isLoading && !isError) && (
+      {/* ── Toolbar: Search + count ─────────────────────────── */}
+      {!isLoading && !isError && (
         <div
           style={{
             display: 'flex',
             alignItems: 'center',
             gap: 10,
-            marginBottom: 20,
+            marginBottom: 16,
             flexWrap: 'wrap',
           }}
         >
-          {/* Search input */}
-          <div style={{ position: 'relative', flex: '1 1 220px', minWidth: 180 }}>
+          {/* Glass-morphism search bar */}
+          <div
+            style={{
+              position: 'relative',
+              flex: '1 1 240px',
+              minWidth: 200,
+            }}
+          >
             <span
               aria-hidden="true"
               style={{
                 position: 'absolute',
-                left: 12,
+                left: 13,
                 top: '50%',
                 transform: 'translateY(-50%)',
-                color: '#475569',
+                color: searchFocused ? '#3b82f6' : '#475569',
                 display: 'flex',
                 alignItems: 'center',
                 pointerEvents: 'none',
+                transition: 'color 0.2s',
               }}
             >
               <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={2} style={{ width: 14, height: 14 }}>
@@ -597,26 +1017,27 @@ export function RcfPage() {
               value={searchInput}
               onChange={(e) => handleSearchInput(e.target.value)}
               placeholder="Filter by DID, name, or destination…"
+              onFocus={() => setSearchFocused(true)}
+              onBlur={() => setSearchFocused(false)}
               style={{
                 width: '100%',
                 boxSizing: 'border-box',
-                padding: '8px 12px 8px 34px',
-                fontSize: '0.82rem',
-                background: 'rgba(255,255,255,0.03)',
-                border: '1px solid rgba(255,255,255,0.07)',
-                borderRadius: 9,
+                padding: '9px 36px 9px 36px',
+                fontSize: '0.83rem',
+                background: searchFocused
+                  ? 'rgba(19, 21, 29, 0.85)'
+                  : 'rgba(19, 21, 29, 0.65)',
+                backdropFilter: 'blur(8px)',
+                WebkitBackdropFilter: 'blur(8px)',
+                border: `1px solid ${searchFocused ? 'rgba(59,130,246,0.45)' : 'rgba(59,130,246,0.12)'}`,
+                borderRadius: 11,
                 color: '#e2e8f0',
                 outline: 'none',
                 fontFamily: 'inherit',
-                transition: 'border-color 0.15s, box-shadow 0.15s',
-              }}
-              onFocus={(e) => {
-                e.currentTarget.style.borderColor = 'rgba(34,197,94,0.4)';
-                e.currentTarget.style.boxShadow = '0 0 0 2px rgba(34,197,94,0.1)';
-              }}
-              onBlur={(e) => {
-                e.currentTarget.style.borderColor = 'rgba(255,255,255,0.07)';
-                e.currentTarget.style.boxShadow = 'none';
+                transition: 'border-color 0.2s, box-shadow 0.2s, background 0.2s',
+                boxShadow: searchFocused
+                  ? '0 0 0 3px rgba(59,130,246,0.14), 0 4px 16px rgba(0,0,0,0.3)'
+                  : '0 2px 8px rgba(0,0,0,0.2)',
               }}
             />
             {searchInput && (
@@ -625,251 +1046,105 @@ export function RcfPage() {
                 onClick={() => { setSearchInput(''); setSearchQuery(''); }}
                 style={{
                   position: 'absolute',
-                  right: 8,
+                  right: 10,
                   top: '50%',
                   transform: 'translateY(-50%)',
-                  background: 'transparent',
-                  border: 'none',
-                  color: '#475569',
+                  background: 'rgba(59,130,246,0.12)',
+                  border: '1px solid rgba(59,130,246,0.20)',
+                  borderRadius: 5,
+                  color: '#60a5fa',
                   cursor: 'pointer',
-                  padding: 2,
+                  padding: '2px 5px',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
                 }}
               >
-                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={2.2} style={{ width: 12, height: 12 }}>
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={2.2} style={{ width: 10, height: 10 }}>
                   <path d="M4 4l8 8M12 4l-8 8" strokeLinecap="round" />
                 </svg>
               </button>
             )}
           </div>
 
-          {/* Result count pill */}
+          {/* Count pill */}
           {serverTotal > 0 && (
-            <span
+            <div
               style={{
                 fontSize: '0.72rem',
-                color: '#64748b',
-                background: 'rgba(255,255,255,0.03)',
-                border: '1px solid rgba(255,255,255,0.06)',
-                borderRadius: 6,
-                padding: '4px 10px',
+                fontWeight: 600,
+                color: '#3b82f6',
+                background: 'rgba(59,130,246,0.10)',
+                border: '1px solid rgba(59,130,246,0.20)',
+                borderRadius: 20,
+                padding: '5px 13px',
                 whiteSpace: 'nowrap',
                 flexShrink: 0,
+                letterSpacing: '0.02em',
               }}
             >
               {searchQuery && filteredEntries.length !== rawEntries.length
-                ? `${filteredEntries.length} of ${serverTotal} total`
-                : `${serverTotal} total`}
-            </span>
-          )}
-
-          {/* View mode toggle — hidden for admin/support who are locked to table */}
-          {!isTableOnly && (
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 2,
-                background: 'rgba(255,255,255,0.03)',
-                border: '1px solid rgba(255,255,255,0.07)',
-                borderRadius: 8,
-                padding: 3,
-                flexShrink: 0,
-              }}
-            >
-              {([
-                { mode: 'card' as ViewMode, label: 'Cards', icon: (
-                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.8} style={{ width: 14, height: 14 }}>
-                    <rect x="1" y="1" width="6" height="6" rx="1.5" />
-                    <rect x="9" y="1" width="6" height="6" rx="1.5" />
-                    <rect x="1" y="9" width="6" height="6" rx="1.5" />
-                    <rect x="9" y="9" width="6" height="6" rx="1.5" />
-                  </svg>
-                )},
-                { mode: 'table' as ViewMode, label: 'Table', icon: (
-                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.8} style={{ width: 14, height: 14 }}>
-                    <path d="M1 4h14M1 8h14M1 12h14M5 1v14M11 1v14" strokeLinecap="round" />
-                  </svg>
-                )},
-              ] as const).map(({ mode, label, icon }) => {
-                const isActive = effectiveViewMode === mode;
-                return (
-                  <button
-                    key={mode}
-                    type="button"
-                    onClick={() => setViewMode(mode)}
-                    title={label}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 5,
-                      padding: '5px 10px',
-                      borderRadius: 6,
-                      fontSize: '0.72rem',
-                      fontWeight: isActive ? 600 : 500,
-                      cursor: 'pointer',
-                      border: 'none',
-                      background: isActive
-                        ? 'linear-gradient(135deg, rgba(34,197,94,0.18) 0%, rgba(34,197,94,0.08) 100%)'
-                        : 'transparent',
-                      color: isActive ? '#22c55e' : '#64748b',
-                      transition: 'background 0.12s, color 0.12s',
-                      whiteSpace: 'nowrap',
-                      fontFamily: 'inherit',
-                    }}
-                  >
-                    {icon}
-                    {label}
-                  </button>
-                );
-              })}
+                ? `${filteredEntries.length} of ${serverTotal}`
+                : `${serverTotal} ${serverTotal === 1 ? 'number' : 'numbers'}`}
             </div>
           )}
         </div>
       )}
 
-      {/* ── Loading ─────────────────────────────────────────────── */}
+      {/* ── Loading ─────────────────────────────────────────── */}
       {isLoading && (
-        <div className="flex items-center gap-2.5 text-[#718096] text-sm py-12">
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 12,
+            color: '#718096',
+            fontSize: '0.875rem',
+            padding: '48px 0',
+            justifyContent: 'center',
+          }}
+        >
           <Spinner size="sm" />
           <span>Loading your numbers…</span>
         </div>
       )}
 
-      {/* ── Error ───────────────────────────────────────────────── */}
+      {/* ── Error ───────────────────────────────────────────── */}
       {isError && (
         <div
           style={{
-            padding: '12px 16px',
-            borderRadius: 10,
+            padding: '16px 20px',
+            borderRadius: 12,
             background: 'rgba(239,68,68,0.08)',
-            border: '1px solid rgba(239,68,68,0.2)',
+            border: '1px solid rgba(239,68,68,0.22)',
             color: '#f87171',
             fontSize: '0.875rem',
-            marginTop: 8,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
           }}
         >
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={2} style={{ width: 16, height: 16, flexShrink: 0 }}>
+            <circle cx="8" cy="8" r="7" />
+            <path d="M8 5v3.5M8 10.5v.5" strokeLinecap="round" />
+          </svg>
           Unable to load RCF numbers. Please try refreshing the page.
         </div>
       )}
 
-      {/* ── Empty ───────────────────────────────────────────────── */}
-      {!isLoading && !isError && rawEntries.length === 0 && (
-        <div
-          style={{
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '64px 16px',
-            gap: 8,
-            textAlign: 'center',
-            background: 'linear-gradient(135deg, rgba(30,33,48,0.6) 0%, rgba(19,21,29,0.7) 100%)',
-            border: '1px solid rgba(42,47,69,0.4)',
-            borderRadius: 16,
-          }}
-        >
-          <p style={{ color: '#718096', fontSize: '0.875rem', fontWeight: 500 }}>
-            No RCF numbers found for your account.
-          </p>
-          <p style={{ color: '#4a5568', fontSize: '0.75rem' }}>
-            Contact support to provision numbers.
-          </p>
-        </div>
-      )}
+      {/* ── Empty (no numbers at all) ────────────────────────── */}
+      {!isLoading && !isError && rawEntries.length === 0 && <EmptyState />}
 
-      {/* ── Search empty state ───────────────────────────────────── */}
+      {/* ── Search empty state ───────────────────────────────── */}
       {!isLoading && !isError && rawEntries.length > 0 && sortedEntries.length === 0 && searchQuery && (
-        <div
-          style={{
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '48px 16px',
-            gap: 8,
-            textAlign: 'center',
-            background: 'rgba(30,33,48,0.4)',
-            border: '1px solid rgba(42,47,69,0.3)',
-            borderRadius: 14,
-          }}
-        >
-          <p style={{ color: '#64748b', fontSize: '0.875rem', fontWeight: 500 }}>
-            No numbers match &ldquo;{searchQuery}&rdquo;
-          </p>
-          <button
-            type="button"
-            onClick={() => { setSearchInput(''); setSearchQuery(''); }}
-            style={{
-              background: 'transparent',
-              border: 'none',
-              color: '#22c55e',
-              fontSize: '0.78rem',
-              cursor: 'pointer',
-              textDecoration: 'underline',
-              fontFamily: 'inherit',
-            }}
-          >
-            Clear filter
-          </button>
-        </div>
+        <SearchEmptyState
+          query={searchQuery}
+          onClear={() => { setSearchInput(''); setSearchQuery(''); }}
+        />
       )}
 
-      {/* ── Table View ──────────────────────────────────────────── */}
-      {!isLoading && !isError && sortedEntries.length > 0 && effectiveViewMode === 'table' && (
-        <div
-          style={{
-            background: 'rgba(255,255,255,0.02)',
-            border: '1px solid rgba(255,255,255,0.06)',
-            borderRadius: 14,
-            overflow: 'hidden',
-          }}
-        >
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead>
-              <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-                <SortHeader label="DID"         field="did"        currentField={sortField} currentDir={sortDir} onSort={handleSort} />
-                <SortHeader label="Name"        field="name"       currentField={sortField} currentDir={sortDir} onSort={handleSort} />
-                <SortHeader label="Forward To"  field="forward_to" currentField={sortField} currentDir={sortDir} onSort={handleSort} />
-                <SortHeader label="Status"      field="status"     currentField={sortField} currentDir={sortDir} onSort={handleSort} />
-                {isAdmin && (
-                  <SortHeader label="Customer"  field="customer"   currentField={sortField} currentDir={sortDir} onSort={handleSort} />
-                )}
-              </tr>
-            </thead>
-            <tbody>
-              {sortedEntries.map((entry, i) => (
-                <TableRow
-                  key={entry.id}
-                  entry={entry}
-                  isAdmin={isAdmin}
-                  isOdd={i % 2 === 1}
-                  canEdit={canEdit}
-                  pendingValue={resolveValue(entry)}
-                  onPendingChange={handlePendingChange}
-                />
-              ))}
-            </tbody>
-          </table>
-
-          {/* Pagination */}
-          {serverTotal > pageSize && (
-            <PaginationControls
-              currentPage={page}
-              totalPages={totalPages}
-              pageSize={pageSize}
-              totalItems={serverTotal}
-              onPageChange={setPage}
-              onPageSizeChange={(size) => { setPageSize(size); setPage(1); }}
-            />
-          )}
-        </div>
-      )}
-
-      {/* ── Card View ───────────────────────────────────────────── */}
-      {!isLoading && !isError && sortedEntries.length > 0 && effectiveViewMode === 'card' && (
+      {/* ── Card View (small customer accounts) ─────────────── */}
+      {!isLoading && !isError && sortedEntries.length > 0 && useCardView && (
         <>
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-5">
             {sortedEntries.map((entry) => (
@@ -882,14 +1157,15 @@ export function RcfPage() {
             ))}
           </div>
 
-          {/* Pagination below cards */}
           {serverTotal > pageSize && (
             <div
               style={{
-                marginTop: 24,
-                background: 'rgba(255,255,255,0.02)',
-                border: '1px solid rgba(255,255,255,0.06)',
-                borderRadius: 12,
+                marginTop: 20,
+                background: 'rgba(19, 21, 29, 0.65)',
+                backdropFilter: 'blur(8px)',
+                WebkitBackdropFilter: 'blur(8px)',
+                border: '1px solid rgba(59,130,246,0.10)',
+                borderRadius: 14,
                 overflow: 'hidden',
               }}
             >
@@ -905,11 +1181,63 @@ export function RcfPage() {
           )}
         </>
       )}
+
+      {/* ── Table View ──────────────────────────────────────── */}
+      {!isLoading && !isError && sortedEntries.length > 0 && !useCardView && (
+        <div
+          style={{
+            background: 'rgba(19, 21, 29, 0.68)',
+            backdropFilter: 'blur(10px)',
+            WebkitBackdropFilter: 'blur(10px)',
+            border: '1px solid rgba(59,130,246,0.12)',
+            borderRadius: 16,
+            overflow: 'hidden',
+            boxShadow: '0 8px 32px -8px rgba(0,0,0,0.45)',
+          }}
+        >
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr>
+                <SortHeader label="DID"        field="did"        currentField={sortField} currentDir={sortDir} onSort={handleSort} />
+                <SortHeader label="Name"       field="name"       currentField={sortField} currentDir={sortDir} onSort={handleSort} />
+                <SortHeader label="Forward To" field="forward_to" currentField={sortField} currentDir={sortDir} onSort={handleSort} />
+                <SortHeader label="Status"     field="status"     currentField={sortField} currentDir={sortDir} onSort={handleSort} />
+                {isAdmin && (
+                  <SortHeader label="Customer" field="customer"   currentField={sortField} currentDir={sortDir} onSort={handleSort} />
+                )}
+              </tr>
+            </thead>
+            <tbody>
+              {sortedEntries.map((entry) => (
+                <TableRow
+                  key={entry.id}
+                  entry={entry}
+                  isAdmin={isAdmin}
+                  canEdit={canEdit}
+                  pendingValue={resolveValue(entry)}
+                  onPendingChange={handlePendingChange}
+                />
+              ))}
+            </tbody>
+          </table>
+
+          {serverTotal > pageSize && (
+            <PaginationControls
+              currentPage={page}
+              totalPages={totalPages}
+              pageSize={pageSize}
+              totalItems={serverTotal}
+              onPageChange={setPage}
+              onPageSizeChange={(size) => { setPageSize(size); setPage(1); }}
+            />
+          )}
+        </div>
+      )}
     </div>
   );
 }
 
-// ─── PortalHeader (shared component) ─────────────────────────────────────────
+// ─── PortalHeader (kept for other pages that import it) ──────────────────────
 
 interface PortalHeaderProps {
   icon: React.ReactNode;
@@ -920,7 +1248,7 @@ interface PortalHeaderProps {
 }
 
 const ACCENT_BY_VARIANT: Record<string, string> = {
-  rcf: '#22c55e',
+  rcf: '#3b82f6',
   api: '#a855f7',
   trunk: '#f59e0b',
 };
@@ -938,7 +1266,6 @@ export function PortalHeader({ icon, title, subtitle, badgeVariant = 'rcf', user
         textAlign: 'center',
       }}
     >
-      {/* Icon badge — centered */}
       <div
         style={{
           width: 48,
@@ -957,7 +1284,6 @@ export function PortalHeader({ icon, title, subtitle, badgeVariant = 'rcf', user
         {icon}
       </div>
 
-      {/* Title */}
       <h1
         style={{
           fontSize: '1.5rem',
@@ -971,7 +1297,6 @@ export function PortalHeader({ icon, title, subtitle, badgeVariant = 'rcf', user
         {title}
       </h1>
 
-      {/* User email — personal context */}
       {userEmail && (
         <div
           style={{
