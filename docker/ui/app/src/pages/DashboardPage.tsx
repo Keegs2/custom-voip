@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Shield, Zap, Globe, Activity } from 'lucide-react';
-import { AnimatedGridBackground } from '../components/layout/AnimatedGridBackground';
+import { HaArchitectureViz } from '../components/layout/HaArchitectureViz';
 
 /* ─── Capability card data ───────────────────────────────── */
 
@@ -344,13 +344,8 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
 export function DashboardPage() {
   return (
     <div style={{ position: 'relative', minHeight: '100vh' }}>
-      {/* Animated grid — z-0, behind all content */}
-      <AnimatedGridBackground
-        gridSize={56}
-        dotsPerSide={8}
-        gridOpacity={0.06}
-        showGlow={true}
-      />
+      {/* HA architecture viz — z-0, behind all content */}
+      <HaArchitectureViz />
 
       {/* All content floats above the grid */}
       <div
@@ -394,6 +389,7 @@ export function DashboardPage() {
               position: 'relative',
               marginBottom: 32,
               overflow: 'hidden',
+              borderRadius: 16,
             }}
           >
             <img
