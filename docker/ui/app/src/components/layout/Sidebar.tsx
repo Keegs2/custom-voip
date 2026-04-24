@@ -375,17 +375,17 @@ function CollapsibleSubGroup({ label, icon, isOpen, onToggle, children }: Collap
           style={{
             flex: 1,
             textAlign: 'left',
-            fontSize: '0.55rem',
+            fontSize: '0.58rem',
             fontWeight: 700,
             letterSpacing: '0.1em',
             textTransform: 'uppercase',
-            color: 'rgba(59, 130, 246, 0.45)',
+            color: 'rgba(59, 130, 246, 0.40)',
           }}
         >
           {label}
         </span>
         <ChevronDown
-          size={10}
+          size={9}
           strokeWidth={2.5}
           style={{
             flexShrink: 0,
