@@ -6,9 +6,11 @@ import type { RcfEntry } from '../types/rcf';
 import { RcfCard } from './RcfCard';
 import { useAuth } from '../contexts/AuthContext';
 import { AdminCustomerSelector } from '../components/AdminCustomerSelector';
-import { fmt } from '../utils/format';
+import { fmt, fmtDuration } from '../utils/format';
 import { apiRequest } from '../api/client';
 import { useToast } from '../components/ui/Toast';
+import { searchCdrs, getCdrSummary } from '../api/cdrs';
+import type { Cdr } from '../types/cdr';
 
 // ─── API helpers ──────────────────────────────────────────────────────────────
 
@@ -853,54 +855,942 @@ function SearchEmptyState({ query, onClear }: { query: string; onClear: () => vo
   );
 }
 
+// ─── Tab types ────────────────────────────────────────────────────────────────
+
+type DashboardTab = 'numbers' | 'activity' | 'quality';
+
+// ─── Time helpers ─────────────────────────────────────────────────────────────
+
+function timeAgo(isoString: string): string {
+  const now = Date.now();
+  const then = new Date(isoString).getTime();
+  const diffMs = now - then;
+  const diffSec = Math.floor(diffMs / 1000);
+  if (diffSec < 60) return `${diffSec}s ago`;
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `${diffHr}h ago`;
+  const diffDay = Math.floor(diffHr / 24);
+  return `${diffDay}d ago`;
+}
+
+// ─── Quality colour helpers ────────────────────────────────────────────────────
+
+function mosLabel(mos: number | null | undefined): { text: string; color: string; dot: string } {
+  if (mos == null) return { text: '—', color: '#4a5568', dot: '#4a5568' };
+  if (mos >= 4.0) return { text: 'Great', color: '#22c55e', dot: '#22c55e' };
+  if (mos >= 3.0) return { text: 'OK', color: '#f59e0b', dot: '#f59e0b' };
+  return { text: 'Poor', color: '#ef4444', dot: '#ef4444' };
+}
+
+function callStatusInfo(cdr: Cdr): { label: string; bg: string; color: string } {
+  if (cdr.answer_time != null && cdr.duration_seconds > 0) {
+    return { label: 'Answered', bg: 'rgba(59,130,246,0.12)', color: '#60a5fa' };
+  }
+  const cause = (cdr.hangup_cause ?? '').toLowerCase();
+  if (cause.includes('no_answer') || cause.includes('no answer') || cause === 'originator_cancel') {
+    return { label: 'No Answer', bg: 'rgba(245,158,11,0.12)', color: '#f59e0b' };
+  }
+  if (cdr.sip_code != null && cdr.sip_code >= 400) {
+    return { label: 'Failed', bg: 'rgba(239,68,68,0.12)', color: '#ef4444' };
+  }
+  if (cdr.duration_seconds === 0 && cdr.answer_time == null) {
+    return { label: 'No Answer', bg: 'rgba(245,158,11,0.12)', color: '#f59e0b' };
+  }
+  return { label: 'Answered', bg: 'rgba(59,130,246,0.12)', color: '#60a5fa' };
+}
+
+// ─── TabBar ───────────────────────────────────────────────────────────────────
+
+interface TabBarProps {
+  active: DashboardTab;
+  onChange: (tab: DashboardTab) => void;
+}
+
+function TabBar({ active, onChange }: TabBarProps) {
+  const tabs: { id: DashboardTab; label: string; icon: React.ReactNode }[] = [
+    {
+      id: 'numbers',
+      label: 'Numbers',
+      icon: (
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.8} style={{ width: 13, height: 13 }}>
+          <rect x="2" y="2" width="5" height="5" rx="1.5" />
+          <rect x="9" y="2" width="5" height="5" rx="1.5" />
+          <rect x="2" y="9" width="5" height="5" rx="1.5" />
+          <rect x="9" y="9" width="5" height="5" rx="1.5" />
+        </svg>
+      ),
+    },
+    {
+      id: 'activity',
+      label: 'Call Activity',
+      icon: (
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.8} style={{ width: 13, height: 13 }}>
+          <path d="M2 12 L4 8 L6 10 L9 5 L11 7 L14 3" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      ),
+    },
+    {
+      id: 'quality',
+      label: 'Quality',
+      icon: (
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.8} style={{ width: 13, height: 13 }}>
+          <circle cx="8" cy="8" r="6" />
+          <path d="M8 5v3l2 2" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      ),
+    },
+  ];
+
+  return (
+    <div
+      style={{
+        display: 'flex',
+        gap: 0,
+        background: 'rgba(15,17,23,0.55)',
+        backdropFilter: 'blur(8px)',
+        WebkitBackdropFilter: 'blur(8px)',
+        border: '1px solid rgba(59,130,246,0.12)',
+        borderRadius: 12,
+        padding: 4,
+        marginBottom: 24,
+      }}
+    >
+      {tabs.map((tab) => {
+        const isActive = active === tab.id;
+        return (
+          <button
+            key={tab.id}
+            type="button"
+            onClick={() => onChange(tab.id)}
+            style={{
+              flex: 1,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 7,
+              padding: '9px 16px',
+              borderRadius: 9,
+              border: 'none',
+              cursor: 'pointer',
+              fontSize: '0.82rem',
+              fontWeight: isActive ? 700 : 500,
+              fontFamily: 'inherit',
+              color: isActive ? '#e2e8f0' : '#64748b',
+              background: isActive
+                ? 'linear-gradient(135deg, rgba(59,130,246,0.22) 0%, rgba(59,130,246,0.12) 100%)'
+                : 'transparent',
+              boxShadow: isActive
+                ? '0 0 14px rgba(59,130,246,0.18), inset 0 1px 0 rgba(255,255,255,0.06)'
+                : 'none',
+              transition: 'all 0.18s ease',
+              whiteSpace: 'nowrap',
+              letterSpacing: isActive ? '-0.01em' : 'normal',
+              position: 'relative',
+            }}
+          >
+            <span style={{ color: isActive ? '#60a5fa' : '#475569', transition: 'color 0.18s' }}>
+              {tab.icon}
+            </span>
+            {tab.label}
+            {isActive && (
+              <span
+                style={{
+                  position: 'absolute',
+                  bottom: -4,
+                  left: '30%',
+                  right: '30%',
+                  height: 2,
+                  background: 'linear-gradient(90deg, transparent, #3b82f6, transparent)',
+                  borderRadius: 2,
+                }}
+              />
+            )}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─── CallActivityTab ──────────────────────────────────────────────────────────
+
+interface CallActivityTabProps {
+  customerId: number | undefined;
+}
+
+function CallActivityTab({ customerId }: CallActivityTabProps) {
+  const { data, isLoading, isError } = useQuery({
+    queryKey: ['rcf-activity', customerId],
+    queryFn: () =>
+      searchCdrs({
+        customer_id: customerId,
+        product_type: 'rcf',
+        limit: 50,
+        sort_by: 'start_time',
+        sort_dir: 'desc',
+      }),
+    enabled: true,
+    staleTime: 60_000,
+  });
+
+  const calls = data?.items ?? [];
+
+  if (isLoading) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, justifyContent: 'center', padding: '64px 0', color: '#64748b' }}>
+        <Spinner size="sm" />
+        <span style={{ fontSize: '0.875rem' }}>Loading recent calls…</span>
+      </div>
+    );
+  }
+
+  if (isError) {
+    return (
+      <div style={{ padding: '16px 20px', borderRadius: 12, background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', color: '#f87171', fontSize: '0.875rem' }}>
+        Unable to load call activity. Please try refreshing.
+      </div>
+    );
+  }
+
+  if (calls.length === 0) {
+    return (
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '72px 24px',
+          gap: 16,
+          textAlign: 'center',
+          background: 'rgba(19,21,29,0.65)',
+          backdropFilter: 'blur(8px)',
+          WebkitBackdropFilter: 'blur(8px)',
+          border: '1px solid rgba(59,130,246,0.10)',
+          borderRadius: 16,
+        }}
+      >
+        <div
+          style={{
+            width: 60,
+            height: 60,
+            borderRadius: 15,
+            background: 'linear-gradient(135deg, rgba(59,130,246,0.14) 0%, rgba(59,130,246,0.06) 100%)',
+            border: '1px solid rgba(59,130,246,0.22)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth={1.5} style={{ width: 28, height: 28, opacity: 0.6 }}>
+            <path d="M2 12 L5 8 L7 11 L11 5 L13 8 L17 4 L22 9" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </div>
+        <div>
+          <p style={{ color: '#94a3b8', fontSize: '1rem', fontWeight: 600, margin: '0 0 6px' }}>
+            No recent calls
+          </p>
+          <p style={{ color: '#475569', fontSize: '0.82rem', margin: 0, lineHeight: 1.6, maxWidth: 360 }}>
+            Once calls start flowing, your activity log will light up here.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      style={{
+        background: 'rgba(19,21,29,0.68)',
+        backdropFilter: 'blur(10px)',
+        WebkitBackdropFilter: 'blur(10px)',
+        border: '1px solid rgba(59,130,246,0.12)',
+        borderRadius: 16,
+        overflow: 'hidden',
+        boxShadow: '0 8px 32px -8px rgba(0,0,0,0.45)',
+      }}
+    >
+      <div
+        style={{
+          padding: '14px 20px',
+          borderBottom: '1px solid rgba(59,130,246,0.08)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+        }}
+      >
+        <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+          Recent Calls
+        </span>
+        <span
+          style={{
+            fontSize: '0.68rem',
+            fontWeight: 600,
+            color: '#3b82f6',
+            background: 'rgba(59,130,246,0.10)',
+            border: '1px solid rgba(59,130,246,0.20)',
+            borderRadius: 20,
+            padding: '2px 9px',
+          }}
+        >
+          {calls.length} shown
+        </span>
+      </div>
+
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 680 }}>
+          <thead>
+            <tr style={{ background: 'rgba(59,130,246,0.04)', borderBottom: '1px solid rgba(59,130,246,0.10)' }}>
+              {['Time', 'From', 'To (DID)', 'Forwarded To', 'Duration', 'Status', 'Quality'].map((h) => (
+                <th
+                  key={h}
+                  style={{
+                    padding: '11px 14px',
+                    textAlign: 'left',
+                    fontSize: '0.6rem',
+                    fontWeight: 700,
+                    color: '#475569',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.11em',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {calls.map((cdr, idx) => {
+              const status = callStatusInfo(cdr);
+              const quality = mosLabel(cdr.mos);
+              return (
+                <tr
+                  key={cdr.uuid}
+                  style={{
+                    borderBottom: idx < calls.length - 1 ? '1px solid rgba(59,130,246,0.05)' : 'none',
+                    animation: `fadeInUp 0.3s ease both`,
+                    animationDelay: `${Math.min(idx * 30, 300)}ms`,
+                  }}
+                >
+                  {/* Time */}
+                  <td style={{ padding: '12px 14px', whiteSpace: 'nowrap' }}>
+                    <span style={{ fontSize: '0.78rem', color: '#64748b', fontVariantNumeric: 'tabular-nums' }}>
+                      {timeAgo(cdr.start_time)}
+                    </span>
+                  </td>
+
+                  {/* From */}
+                  <td style={{ padding: '12px 14px' }}>
+                    <span style={{ fontSize: '0.82rem', color: '#94a3b8', fontFamily: 'monospace', fontWeight: 500 }}>
+                      {fmt(cdr.caller_id)}
+                    </span>
+                  </td>
+
+                  {/* To (DID) */}
+                  <td style={{ padding: '12px 14px' }}>
+                    <span style={{ fontSize: '0.82rem', color: '#60a5fa', fontFamily: 'monospace', fontWeight: 600 }}>
+                      {fmt(cdr.destination)}
+                    </span>
+                  </td>
+
+                  {/* Forwarded To */}
+                  <td style={{ padding: '12px 14px' }}>
+                    <span style={{ fontSize: '0.78rem', color: '#64748b', fontFamily: 'monospace' }}>
+                      {cdr.carrier_used ? fmt(cdr.carrier_used) : '—'}
+                    </span>
+                  </td>
+
+                  {/* Duration */}
+                  <td style={{ padding: '12px 14px', whiteSpace: 'nowrap' }}>
+                    <span style={{ fontSize: '0.82rem', color: '#94a3b8', fontVariantNumeric: 'tabular-nums' }}>
+                      {cdr.duration_seconds > 0 ? fmtDuration(cdr.duration_seconds) : '—'}
+                    </span>
+                  </td>
+
+                  {/* Status badge */}
+                  <td style={{ padding: '12px 14px' }}>
+                    <span
+                      style={{
+                        fontSize: '0.68rem',
+                        fontWeight: 700,
+                        color: status.color,
+                        background: status.bg,
+                        borderRadius: 20,
+                        padding: '3px 9px',
+                        whiteSpace: 'nowrap',
+                        letterSpacing: '0.02em',
+                      }}
+                    >
+                      {status.label}
+                    </span>
+                  </td>
+
+                  {/* Quality dot */}
+                  <td style={{ padding: '12px 14px' }}>
+                    {cdr.mos != null ? (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span
+                          style={{
+                            width: 8,
+                            height: 8,
+                            borderRadius: '50%',
+                            background: quality.dot,
+                            flexShrink: 0,
+                            boxShadow: `0 0 6px ${quality.dot}`,
+                            display: 'inline-block',
+                          }}
+                        />
+                        <span style={{ fontSize: '0.72rem', color: quality.color, fontWeight: 600 }}>
+                          {quality.text}
+                        </span>
+                      </div>
+                    ) : (
+                      <span style={{ fontSize: '0.72rem', color: '#334155' }}>—</span>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// ─── QualityTab ───────────────────────────────────────────────────────────────
+
+interface QualityTabProps {
+  customerId: number | undefined;
+}
+
+/** Compute aggregate quality stats from a list of CDRs. */
+function computeQualityStats(cdrs: Cdr[]) {
+  let answered = 0;
+  let mosSum = 0;
+  let mosCount = 0;
+  let durSum = 0;
+  let durCount = 0;
+
+  for (const cdr of cdrs) {
+    if (cdr.answer_time != null && cdr.duration_seconds > 0) {
+      answered++;
+      durSum += cdr.duration_seconds;
+      durCount++;
+    }
+    if (cdr.mos != null) {
+      mosSum += cdr.mos;
+      mosCount++;
+    }
+  }
+
+  const total = cdrs.length;
+  const successRate = total > 0 ? (answered / total) * 100 : null;
+  const avgMos = mosCount > 0 ? mosSum / mosCount : null;
+  const avgDurSec = durCount > 0 ? durSum / durCount : null;
+
+  return { total, answered, successRate, avgMos, avgDurSec };
+}
+
+/** Build daily quality summary for the last 7 days. */
+function buildDailyDots(cdrs: Cdr[]): { date: string; label: string; color: string; tooltip: string }[] {
+  const byDate = new Map<string, { mosSum: number; mosCount: number; total: number; answered: number }>();
+
+  for (const cdr of cdrs) {
+    const key = cdr.start_time.slice(0, 10);
+    const bucket = byDate.get(key) ?? { mosSum: 0, mosCount: 0, total: 0, answered: 0 };
+    bucket.total++;
+    if (cdr.answer_time != null && cdr.duration_seconds > 0) bucket.answered++;
+    if (cdr.mos != null) { bucket.mosSum += cdr.mos; bucket.mosCount++; }
+    byDate.set(key, bucket);
+  }
+
+  const result: { date: string; label: string; color: string; tooltip: string }[] = [];
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    const key = d.toISOString().slice(0, 10);
+    const label = d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+    const b = byDate.get(key);
+
+    if (!b || b.total === 0) {
+      result.push({ date: key, label, color: '#1e293b', tooltip: `${label}: No calls` });
+      continue;
+    }
+
+    const asr = (b.answered / b.total) * 100;
+    const avgMos = b.mosCount > 0 ? b.mosSum / b.mosCount : null;
+
+    let color = '#22c55e'; // green by default
+    if (asr < 85 || (avgMos != null && avgMos < 3)) color = '#ef4444';
+    else if (asr < 95 || (avgMos != null && avgMos < 4)) color = '#f59e0b';
+
+    const mosStr = avgMos != null ? `, MOS ${avgMos.toFixed(1)}` : '';
+    result.push({
+      date: key,
+      label,
+      color,
+      tooltip: `${label}: ${b.total} calls, ${asr.toFixed(0)}% success${mosStr}`,
+    });
+  }
+  return result;
+}
+
+interface BigMetricCardProps {
+  label: string;
+  sublabel: string;
+  value: string;
+  valueColor: string;
+  accent: string;
+  children?: React.ReactNode;
+  delay?: number;
+}
+
+function BigMetricCard({ label, sublabel, value, valueColor, accent, children, delay = 0 }: BigMetricCardProps) {
+  return (
+    <div
+      style={{
+        flex: '1 1 220px',
+        minWidth: 0,
+        background: 'linear-gradient(145deg, rgba(26,29,39,0.95) 0%, rgba(19,21,29,0.98) 100%)',
+        backdropFilter: 'blur(12px)',
+        WebkitBackdropFilter: 'blur(12px)',
+        border: `1px solid ${accent}22`,
+        borderRadius: 18,
+        padding: '24px 24px 20px',
+        position: 'relative',
+        overflow: 'hidden',
+        boxShadow: `0 8px 32px -8px rgba(0,0,0,0.55), 0 0 0 1px ${accent}0a`,
+        animation: 'fadeInUp 0.4s ease both',
+        animationDelay: `${delay}ms`,
+      }}
+    >
+      {/* Accent glow in corner */}
+      <div
+        style={{
+          position: 'absolute',
+          top: -40,
+          right: -40,
+          width: 130,
+          height: 130,
+          borderRadius: '50%',
+          background: `radial-gradient(circle, ${accent}18 0%, transparent 70%)`,
+          pointerEvents: 'none',
+        }}
+      />
+      {/* Top accent line */}
+      <div
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 32,
+          right: 32,
+          height: 2,
+          background: `linear-gradient(90deg, transparent, ${accent}60, transparent)`,
+          borderRadius: '0 0 2px 2px',
+        }}
+      />
+
+      <div style={{ fontSize: '0.6rem', fontWeight: 700, color: accent, textTransform: 'uppercase', letterSpacing: '0.12em', opacity: 0.8, marginBottom: 10 }}>
+        {label}
+      </div>
+
+      <div
+        style={{
+          fontSize: 'clamp(2rem, 4vw, 2.8rem)',
+          fontWeight: 900,
+          color: valueColor,
+          letterSpacing: '-0.04em',
+          lineHeight: 1,
+          marginBottom: 6,
+          fontVariantNumeric: 'tabular-nums',
+          textShadow: `0 0 32px ${valueColor}55`,
+        }}
+      >
+        {value}
+      </div>
+
+      {children && <div style={{ marginBottom: 8 }}>{children}</div>}
+
+      <div style={{ fontSize: '0.75rem', color: '#64748b', lineHeight: 1.5, marginTop: 4 }}>
+        {sublabel}
+      </div>
+    </div>
+  );
+}
+
+/** Horizontal bar showing a percentage, e.g. for call success rate. */
+function PercentBar({ pct, color }: { pct: number; color: string }) {
+  return (
+    <div
+      style={{
+        height: 6,
+        background: 'rgba(255,255,255,0.06)',
+        borderRadius: 4,
+        overflow: 'hidden',
+        marginTop: 8,
+        marginBottom: 2,
+      }}
+    >
+      <div
+        style={{
+          height: '100%',
+          width: `${Math.min(pct, 100)}%`,
+          background: `linear-gradient(90deg, ${color}aa, ${color})`,
+          borderRadius: 4,
+          transition: 'width 0.6s ease',
+          boxShadow: `0 0 8px ${color}66`,
+        }}
+      />
+    </div>
+  );
+}
+
+/** Simple 5-star MOS rating display. */
+function MosStars({ mos }: { mos: number }) {
+  const filled = Math.round(mos); // MOS 1-5 maps naturally to 1-5 filled stars
+  return (
+    <div style={{ display: 'flex', gap: 3, marginTop: 8, marginBottom: 2 }}>
+      {[1, 2, 3, 4, 5].map((i) => (
+        <svg
+          key={i}
+          viewBox="0 0 16 16"
+          fill={i <= filled ? '#f59e0b' : 'none'}
+          stroke={i <= filled ? '#f59e0b' : '#1e293b'}
+          strokeWidth={1.5}
+          style={{ width: 14, height: 14 }}
+        >
+          <path d="M8 1.5l1.8 3.6 4 .6-2.9 2.8.7 3.9L8 10.5l-3.6 1.9.7-3.9L2.2 5.7l4-.6z" />
+        </svg>
+      ))}
+    </div>
+  );
+}
+
+function QualityTab({ customerId }: QualityTabProps) {
+  const { data: summaryData, isLoading: summaryLoading } = useQuery({
+    queryKey: ['rcf-summary', customerId],
+    queryFn: () => getCdrSummary({ customer_id: customerId }),
+    staleTime: 120_000,
+  });
+
+  const { data: cdrData, isLoading: cdrLoading } = useQuery({
+    queryKey: ['rcf-quality-cdrs', customerId],
+    queryFn: () =>
+      searchCdrs({
+        customer_id: customerId,
+        product_type: 'rcf',
+        limit: 500,
+        sort_by: 'start_time',
+        sort_dir: 'desc',
+      }),
+    staleTime: 120_000,
+  });
+
+  const isLoading = summaryLoading || cdrLoading;
+  const cdrs = cdrData?.items ?? [];
+  const stats = useMemo(() => computeQualityStats(cdrs), [cdrs]);
+  const dailyDots = useMemo(() => buildDailyDots(cdrs), [cdrs]);
+
+  // Aggregate total calls from summary rows
+  const summaryRows = summaryData?.summary ?? [];
+  const totalCallsFromSummary = summaryRows.reduce((acc, r) => acc + r.total_calls, 0);
+  const totalCalls = totalCallsFromSummary > 0 ? totalCallsFromSummary : stats.total;
+
+  if (isLoading) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, justifyContent: 'center', padding: '64px 0', color: '#64748b' }}>
+        <Spinner size="sm" />
+        <span style={{ fontSize: '0.875rem' }}>Loading quality data…</span>
+      </div>
+    );
+  }
+
+  if (cdrs.length === 0 && totalCalls === 0) {
+    return (
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '80px 24px',
+          gap: 18,
+          textAlign: 'center',
+          background: 'rgba(19,21,29,0.65)',
+          backdropFilter: 'blur(8px)',
+          WebkitBackdropFilter: 'blur(8px)',
+          border: '1px solid rgba(59,130,246,0.10)',
+          borderRadius: 20,
+        }}
+      >
+        <div
+          style={{
+            width: 72,
+            height: 72,
+            borderRadius: 18,
+            background: 'linear-gradient(135deg, rgba(59,130,246,0.14) 0%, rgba(59,130,246,0.06) 100%)',
+            border: '1px solid rgba(59,130,246,0.22)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            boxShadow: '0 0 24px rgba(59,130,246,0.12)',
+          }}
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth={1.4} style={{ width: 38, height: 38, opacity: 0.65 }}>
+            <circle cx="12" cy="12" r="9" />
+            <path d="M12 8v4l3 3" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </div>
+        <div>
+          <p style={{ color: '#94a3b8', fontSize: '1rem', fontWeight: 600, margin: '0 0 8px' }}>
+            No calls yet
+          </p>
+          <p style={{ color: '#475569', fontSize: '0.84rem', margin: 0, lineHeight: 1.65, maxWidth: 420 }}>
+            Once calls start flowing, your quality dashboard will light up here with real-time health metrics.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // Determine colour thresholds
+  const successRate = stats.successRate;
+  const successColor =
+    successRate == null ? '#4a5568'
+    : successRate >= 95 ? '#22c55e'
+    : successRate >= 85 ? '#f59e0b'
+    : '#ef4444';
+
+  const avgMos = stats.avgMos;
+  const mosColor =
+    avgMos == null ? '#4a5568'
+    : avgMos >= 4.0 ? '#22c55e'
+    : avgMos >= 3.0 ? '#f59e0b'
+    : '#ef4444';
+
+  const mosQualWord =
+    avgMos == null ? '—'
+    : avgMos >= 4.0 ? 'Excellent'
+    : avgMos >= 3.5 ? 'Good'
+    : avgMos >= 3.0 ? 'Fair'
+    : 'Poor';
+
+  const avgDurStr = stats.avgDurSec != null ? fmtDuration(Math.round(stats.avgDurSec)) : '—';
+
+  // 7-day trend summary
+  const dotsWithData = dailyDots.filter((d) => d.color !== '#1e293b');
+  const hasProblems = dotsWithData.some((d) => d.color === '#ef4444');
+  const hasWarnings = dotsWithData.some((d) => d.color === '#f59e0b');
+  const trendSummary =
+    dotsWithData.length === 0 ? 'No data for last 7 days'
+    : hasProblems ? 'Some days had call quality issues — check the dots below'
+    : hasWarnings ? 'Most days were good with minor variations'
+    : 'All excellent — everything is running smoothly';
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+
+      {/* ── Big metric cards ────────────────────────────────── */}
+      <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+
+        {/* Card 1: Call Success Rate */}
+        <BigMetricCard
+          label="Call Success Rate"
+          sublabel="of calls connected successfully"
+          value={successRate != null ? `${successRate.toFixed(1)}%` : '—'}
+          valueColor={successColor}
+          accent={successColor}
+          delay={0}
+        >
+          {successRate != null && (
+            <PercentBar pct={successRate} color={successColor} />
+          )}
+        </BigMetricCard>
+
+        {/* Card 2: Voice Quality */}
+        <BigMetricCard
+          label="Voice Clarity (MOS)"
+          sublabel={`Average voice quality — ${mosQualWord} on the 1–5 scale`}
+          value={avgMos != null ? avgMos.toFixed(1) : '—'}
+          valueColor={mosColor}
+          accent={mosColor}
+          delay={80}
+        >
+          {avgMos != null && <MosStars mos={avgMos} />}
+        </BigMetricCard>
+
+        {/* Card 3: Total Calls */}
+        <BigMetricCard
+          label="Total Calls"
+          sublabel="calls tracked in this period"
+          value={totalCalls.toLocaleString()}
+          valueColor="#60a5fa"
+          accent="#3b82f6"
+          delay={160}
+        />
+
+        {/* Card 4: Avg Duration */}
+        <BigMetricCard
+          label="Avg Call Length"
+          sublabel="average time per connected call"
+          value={avgDurStr}
+          valueColor="#a78bfa"
+          accent="#7c3aed"
+          delay={240}
+        />
+      </div>
+
+      {/* ── Plain-English explainer ────────────────────────── */}
+      <div
+        style={{
+          background: 'rgba(59,130,246,0.04)',
+          border: '1px solid rgba(59,130,246,0.10)',
+          borderRadius: 14,
+          padding: '18px 22px',
+          display: 'flex',
+          gap: 28,
+          flexWrap: 'wrap',
+        }}
+      >
+        <div style={{ flex: '1 1 200px', minWidth: 0 }}>
+          <div style={{ fontSize: '0.68rem', fontWeight: 700, color: '#3b82f6', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 5 }}>
+            What is Voice Clarity?
+          </div>
+          <p style={{ fontSize: '0.81rem', color: '#94a3b8', margin: 0, lineHeight: 1.65 }}>
+            A score from 1–5 measuring how natural voices sound on your calls.{' '}
+            <strong style={{ color: '#22c55e' }}>4+ is excellent</strong> — like talking in the same room.{' '}
+            Below 3 means callers may notice choppy or muffled audio.
+          </p>
+        </div>
+        <div style={{ flex: '1 1 200px', minWidth: 0 }}>
+          <div style={{ fontSize: '0.68rem', fontWeight: 700, color: '#3b82f6', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 5 }}>
+            What is Call Success Rate?
+          </div>
+          <p style={{ fontSize: '0.81rem', color: '#94a3b8', margin: 0, lineHeight: 1.65 }}>
+            The percentage of calls that connected and were answered.{' '}
+            <strong style={{ color: '#22c55e' }}>95%+ means your system is running great.</strong>{' '}
+            A lower number could indicate routing issues worth investigating.
+          </p>
+        </div>
+      </div>
+
+      {/* ── 7-day quality trend ────────────────────────────── */}
+      <div
+        style={{
+          background: 'rgba(19,21,29,0.68)',
+          backdropFilter: 'blur(10px)',
+          WebkitBackdropFilter: 'blur(10px)',
+          border: '1px solid rgba(59,130,246,0.10)',
+          borderRadius: 14,
+          padding: '20px 22px',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 18, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: '0.68rem', fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+            Last 7 Days
+          </span>
+          <span style={{ fontSize: '0.79rem', color: '#64748b', flex: 1 }}>
+            {trendSummary}
+          </span>
+        </div>
+
+        <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+          {dailyDots.map((d) => (
+            <div
+              key={d.date}
+              title={d.tooltip}
+              style={{
+                flex: '1 1 0',
+                minWidth: 32,
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: 6,
+                cursor: 'default',
+              }}
+            >
+              <div
+                style={{
+                  width: '100%',
+                  height: 28,
+                  borderRadius: 6,
+                  background: d.color === '#1e293b'
+                    ? 'rgba(30,41,59,0.4)'
+                    : d.color,
+                  boxShadow: d.color !== '#1e293b' ? `0 0 12px ${d.color}55` : 'none',
+                  opacity: d.color === '#1e293b' ? 0.4 : 0.85,
+                  transition: 'opacity 0.2s',
+                  border: `1px solid ${d.color}33`,
+                }}
+              />
+              <span style={{ fontSize: '0.55rem', color: '#334155', textAlign: 'center', letterSpacing: '-0.01em', whiteSpace: 'nowrap' }}>
+                {new Date(d.date + 'T12:00:00').toLocaleDateString(undefined, { weekday: 'short' })}
+              </span>
+            </div>
+          ))}
+        </div>
+
+        {/* Legend */}
+        <div style={{ display: 'flex', gap: 16, marginTop: 14, flexWrap: 'wrap' }}>
+          {[
+            { color: '#22c55e', label: 'Excellent' },
+            { color: '#f59e0b', label: 'Attention' },
+            { color: '#ef4444', label: 'Issue' },
+            { color: '#1e293b', label: 'No calls' },
+          ].map((l) => (
+            <div key={l.label} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+              <div style={{ width: 8, height: 8, borderRadius: 2, background: l.color, opacity: l.color === '#1e293b' ? 0.4 : 0.85 }} />
+              <span style={{ fontSize: '0.68rem', color: '#475569' }}>{l.label}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export function RcfPage() {
+  // ── All hooks unconditionally at top (React rules-of-hooks) ──────────────────
   const { user, isAdmin } = useAuth();
-  const [adminSelectedCustomer, setAdminSelectedCustomer] = useState<number | undefined>(undefined);
 
+  // Tab state
+  const [activeTab, setActiveTab] = useState<DashboardTab>('numbers');
+
+  // Admin customer selector
+  const [adminSelectedCustomer, setAdminSelectedCustomer] = useState<number | undefined>(undefined);
   const customerId = isAdmin ? adminSelectedCustomer : (user?.customer_id ?? undefined);
 
+  // Numbers tab state
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<number>(DEFAULT_PAGE_SIZE);
-
   const [searchInput, setSearchInput] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
   const [sortField, setSortField] = useState<SortField>('did');
   const [sortDir, setSortDir] = useState<SortDir>('asc');
   const [searchFocused, setSearchFocused] = useState(false);
-
   const [pendingEdits, setPendingEdits] = useState<Record<string, string>>({});
 
-  function handleSearchInput(value: string) {
-    setSearchInput(value);
-    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
-    searchDebounceRef.current = setTimeout(() => {
-      setSearchQuery(value.trim());
-      setPage(1);
-    }, 250);
-  }
+  // Numbers query — always run (enabled unconditionally)
+  const { data, isLoading, isError } = useQuery({
+    queryKey: ['rcf', customerId, page, pageSize],
+    queryFn: () => listRcf({ limit: pageSize, offset: (page - 1) * pageSize, customer_id: customerId }),
+  });
 
+  // Cleanup debounce on unmount
   useEffect(() => {
     return () => {
       if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
     };
   }, []);
 
-  function handleCustomerSelect(id: number | undefined) {
-    setAdminSelectedCustomer(id);
-    setPage(1);
-    setSearchInput('');
-    setSearchQuery('');
-  }
-
-  const { data, isLoading, isError } = useQuery({
-    queryKey: ['rcf', customerId, page, pageSize],
-    queryFn: () => listRcf({ limit: pageSize, offset: (page - 1) * pageSize, customer_id: customerId }),
-  });
-
+  // Derived Numbers tab values
   const rawEntries: RcfEntry[] = useMemo(() => data?.items ?? [], [data]);
   const serverTotal: number = data?.total ?? 0;
 
@@ -923,14 +1813,28 @@ export function RcfPage() {
 
   const role = user?.role ?? 'user';
   const canEdit = role !== 'readonly';
-
   const totalPages = Math.max(1, Math.ceil(serverTotal / pageSize));
-
   const activeCount = useMemo(() => rawEntries.filter((e) => e.enabled).length, [rawEntries]);
   const disabledCount = useMemo(() => rawEntries.filter((e) => !e.enabled).length, [rawEntries]);
+  const useCardView = !isAdmin && role !== 'readonly' && serverTotal <= 10;
 
-  // For the header: use total from server when no search query
-  const headerTotal = serverTotal;
+  // ── Handlers ──────────────────────────────────────────────────────────────────
+
+  function handleSearchInput(value: string) {
+    setSearchInput(value);
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    searchDebounceRef.current = setTimeout(() => {
+      setSearchQuery(value.trim());
+      setPage(1);
+    }, 250);
+  }
+
+  function handleCustomerSelect(id: number | undefined) {
+    setAdminSelectedCustomer(id);
+    setPage(1);
+    setSearchInput('');
+    setSearchQuery('');
+  }
 
   function handlePendingChange(did: string, value: string) {
     setPendingEdits((prev) => ({ ...prev, [did]: value }));
@@ -949,20 +1853,19 @@ export function RcfPage() {
     }
   }
 
-  // Decide view: admin always table; customers with ≤10 numbers use cards, else table
-  const useCardView = !isAdmin && role !== 'readonly' && serverTotal <= 10;
-
   const pageTitle = user?.customer_name
     ? `${user.customer_name}'s Numbers`
     : 'Remote Call Forwarding';
+
+  // ── Render ────────────────────────────────────────────────────────────────────
 
   return (
     <div style={{ paddingTop: 4 }}>
       {/* Premium glass-morphism header */}
       <RcfPageHeader
         title={pageTitle}
-        subtitle="Manage your Remote Call Forwarding numbers. Changes take effect within seconds — no reboots, no carrier coordination."
-        totalNumbers={isLoading ? 0 : headerTotal}
+        subtitle="Manage your Remote Call Forwarding numbers and monitor call health — all in one place."
+        totalNumbers={isLoading ? 0 : serverTotal}
         activeCount={isLoading ? 0 : activeCount}
         disabledCount={isLoading ? 0 : disabledCount}
       />
@@ -975,263 +1878,218 @@ export function RcfPage() {
         accountTypes={['rcf', 'hybrid']}
       />
 
-      {/* ── Toolbar: Search + count ─────────────────────────── */}
-      {!isLoading && !isError && (
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 10,
-            marginBottom: 16,
-            flexWrap: 'wrap',
-          }}
-        >
-          {/* Glass-morphism search bar */}
-          <div
-            style={{
-              position: 'relative',
-              flex: '1 1 240px',
-              minWidth: 200,
-            }}
-          >
-            <span
-              aria-hidden="true"
-              style={{
-                position: 'absolute',
-                left: 13,
-                top: '50%',
-                transform: 'translateY(-50%)',
-                color: searchFocused ? '#3b82f6' : '#475569',
-                display: 'flex',
-                alignItems: 'center',
-                pointerEvents: 'none',
-                transition: 'color 0.2s',
-              }}
-            >
-              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={2} style={{ width: 14, height: 14 }}>
-                <path d="m19 19-4.35-4.35M15 9A6 6 0 1 1 3 9a6 6 0 0 1 12 0Z" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            </span>
-            <input
-              type="text"
-              value={searchInput}
-              onChange={(e) => handleSearchInput(e.target.value)}
-              placeholder="Filter by DID, name, or destination…"
-              onFocus={() => setSearchFocused(true)}
-              onBlur={() => setSearchFocused(false)}
-              style={{
-                width: '100%',
-                boxSizing: 'border-box',
-                padding: '9px 36px 9px 36px',
-                fontSize: '0.83rem',
-                background: searchFocused
-                  ? 'rgba(19, 21, 29, 0.85)'
-                  : 'rgba(19, 21, 29, 0.65)',
-                backdropFilter: 'blur(8px)',
-                WebkitBackdropFilter: 'blur(8px)',
-                border: `1px solid ${searchFocused ? 'rgba(59,130,246,0.45)' : 'rgba(59,130,246,0.12)'}`,
-                borderRadius: 11,
-                color: '#e2e8f0',
-                outline: 'none',
-                fontFamily: 'inherit',
-                transition: 'border-color 0.2s, box-shadow 0.2s, background 0.2s',
-                boxShadow: searchFocused
-                  ? '0 0 0 3px rgba(59,130,246,0.14), 0 4px 16px rgba(0,0,0,0.3)'
-                  : '0 2px 8px rgba(0,0,0,0.2)',
-              }}
-            />
-            {searchInput && (
-              <button
-                type="button"
-                onClick={() => { setSearchInput(''); setSearchQuery(''); }}
-                style={{
-                  position: 'absolute',
-                  right: 10,
-                  top: '50%',
-                  transform: 'translateY(-50%)',
-                  background: 'rgba(59,130,246,0.12)',
-                  border: '1px solid rgba(59,130,246,0.20)',
-                  borderRadius: 5,
-                  color: '#60a5fa',
-                  cursor: 'pointer',
-                  padding: '2px 5px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-              >
-                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={2.2} style={{ width: 10, height: 10 }}>
-                  <path d="M4 4l8 8M12 4l-8 8" strokeLinecap="round" />
-                </svg>
-              </button>
-            )}
-          </div>
+      {/* ── Tab navigation ──────────────────────────────────── */}
+      <TabBar active={activeTab} onChange={setActiveTab} />
 
-          {/* Count pill */}
-          {serverTotal > 0 && (
-            <div
-              style={{
-                fontSize: '0.72rem',
-                fontWeight: 600,
-                color: '#3b82f6',
-                background: 'rgba(59,130,246,0.10)',
-                border: '1px solid rgba(59,130,246,0.20)',
-                borderRadius: 20,
-                padding: '5px 13px',
-                whiteSpace: 'nowrap',
-                flexShrink: 0,
-                letterSpacing: '0.02em',
-              }}
-            >
-              {searchQuery && filteredEntries.length !== rawEntries.length
-                ? `${filteredEntries.length} of ${serverTotal}`
-                : `${serverTotal} ${serverTotal === 1 ? 'number' : 'numbers'}`}
+      {/* ── Numbers Tab ─────────────────────────────────────── */}
+      {activeTab === 'numbers' && (
+        <>
+          {/* Toolbar: Search + count */}
+          {!isLoading && !isError && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
+              {/* Glass-morphism search bar */}
+              <div style={{ position: 'relative', flex: '1 1 240px', minWidth: 200 }}>
+                <span
+                  aria-hidden="true"
+                  style={{
+                    position: 'absolute',
+                    left: 13,
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    color: searchFocused ? '#3b82f6' : '#475569',
+                    display: 'flex',
+                    alignItems: 'center',
+                    pointerEvents: 'none',
+                    transition: 'color 0.2s',
+                  }}
+                >
+                  <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={2} style={{ width: 14, height: 14 }}>
+                    <path d="m19 19-4.35-4.35M15 9A6 6 0 1 1 3 9a6 6 0 0 1 12 0Z" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </span>
+                <input
+                  type="text"
+                  value={searchInput}
+                  onChange={(e) => handleSearchInput(e.target.value)}
+                  placeholder="Filter by DID, name, or destination…"
+                  onFocus={() => setSearchFocused(true)}
+                  onBlur={() => setSearchFocused(false)}
+                  style={{
+                    width: '100%',
+                    boxSizing: 'border-box',
+                    padding: '9px 36px 9px 36px',
+                    fontSize: '0.83rem',
+                    background: searchFocused ? 'rgba(19,21,29,0.85)' : 'rgba(19,21,29,0.65)',
+                    backdropFilter: 'blur(8px)',
+                    WebkitBackdropFilter: 'blur(8px)',
+                    border: `1px solid ${searchFocused ? 'rgba(59,130,246,0.45)' : 'rgba(59,130,246,0.12)'}`,
+                    borderRadius: 11,
+                    color: '#e2e8f0',
+                    outline: 'none',
+                    fontFamily: 'inherit',
+                    transition: 'border-color 0.2s, box-shadow 0.2s, background 0.2s',
+                    boxShadow: searchFocused
+                      ? '0 0 0 3px rgba(59,130,246,0.14), 0 4px 16px rgba(0,0,0,0.3)'
+                      : '0 2px 8px rgba(0,0,0,0.2)',
+                  }}
+                />
+                {searchInput && (
+                  <button
+                    type="button"
+                    onClick={() => { setSearchInput(''); setSearchQuery(''); }}
+                    style={{
+                      position: 'absolute',
+                      right: 10,
+                      top: '50%',
+                      transform: 'translateY(-50%)',
+                      background: 'rgba(59,130,246,0.12)',
+                      border: '1px solid rgba(59,130,246,0.20)',
+                      borderRadius: 5,
+                      color: '#60a5fa',
+                      cursor: 'pointer',
+                      padding: '2px 5px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}
+                  >
+                    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={2.2} style={{ width: 10, height: 10 }}>
+                      <path d="M4 4l8 8M12 4l-8 8" strokeLinecap="round" />
+                    </svg>
+                  </button>
+                )}
+              </div>
+
+              {/* Count pill */}
+              {serverTotal > 0 && (
+                <div
+                  style={{
+                    fontSize: '0.72rem',
+                    fontWeight: 600,
+                    color: '#3b82f6',
+                    background: 'rgba(59,130,246,0.10)',
+                    border: '1px solid rgba(59,130,246,0.20)',
+                    borderRadius: 20,
+                    padding: '5px 13px',
+                    whiteSpace: 'nowrap',
+                    flexShrink: 0,
+                    letterSpacing: '0.02em',
+                  }}
+                >
+                  {searchQuery && filteredEntries.length !== rawEntries.length
+                    ? `${filteredEntries.length} of ${serverTotal}`
+                    : `${serverTotal} ${serverTotal === 1 ? 'number' : 'numbers'}`}
+                </div>
+              )}
             </div>
           )}
-        </div>
-      )}
 
-      {/* ── Loading ─────────────────────────────────────────── */}
-      {isLoading && (
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 12,
-            color: '#718096',
-            fontSize: '0.875rem',
-            padding: '48px 0',
-            justifyContent: 'center',
-          }}
-        >
-          <Spinner size="sm" />
-          <span>Loading your numbers…</span>
-        </div>
-      )}
+          {/* Loading */}
+          {isLoading && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, color: '#718096', fontSize: '0.875rem', padding: '48px 0', justifyContent: 'center' }}>
+              <Spinner size="sm" />
+              <span>Loading your numbers…</span>
+            </div>
+          )}
 
-      {/* ── Error ───────────────────────────────────────────── */}
-      {isError && (
-        <div
-          style={{
-            padding: '16px 20px',
-            borderRadius: 12,
-            background: 'rgba(239,68,68,0.08)',
-            border: '1px solid rgba(239,68,68,0.22)',
-            color: '#f87171',
-            fontSize: '0.875rem',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 10,
-          }}
-        >
-          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={2} style={{ width: 16, height: 16, flexShrink: 0 }}>
-            <circle cx="8" cy="8" r="7" />
-            <path d="M8 5v3.5M8 10.5v.5" strokeLinecap="round" />
-          </svg>
-          Unable to load RCF numbers. Please try refreshing the page.
-        </div>
-      )}
+          {/* Error */}
+          {isError && (
+            <div style={{ padding: '16px 20px', borderRadius: 12, background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.22)', color: '#f87171', fontSize: '0.875rem', display: 'flex', alignItems: 'center', gap: 10 }}>
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={2} style={{ width: 16, height: 16, flexShrink: 0 }}>
+                <circle cx="8" cy="8" r="7" />
+                <path d="M8 5v3.5M8 10.5v.5" strokeLinecap="round" />
+              </svg>
+              Unable to load RCF numbers. Please try refreshing the page.
+            </div>
+          )}
 
-      {/* ── Empty (no numbers at all) ────────────────────────── */}
-      {!isLoading && !isError && rawEntries.length === 0 && <EmptyState />}
+          {/* Empty (no numbers at all) */}
+          {!isLoading && !isError && rawEntries.length === 0 && <EmptyState />}
 
-      {/* ── Search empty state ───────────────────────────────── */}
-      {!isLoading && !isError && rawEntries.length > 0 && sortedEntries.length === 0 && searchQuery && (
-        <SearchEmptyState
-          query={searchQuery}
-          onClear={() => { setSearchInput(''); setSearchQuery(''); }}
-        />
-      )}
+          {/* Search empty state */}
+          {!isLoading && !isError && rawEntries.length > 0 && sortedEntries.length === 0 && searchQuery && (
+            <SearchEmptyState query={searchQuery} onClear={() => { setSearchInput(''); setSearchQuery(''); }} />
+          )}
 
-      {/* ── Card View (small customer accounts) ─────────────── */}
-      {!isLoading && !isError && sortedEntries.length > 0 && useCardView && (
-        <>
-          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-5">
-            {sortedEntries.map((entry) => (
-              <RcfCard
-                key={entry.id}
-                entry={entry}
-                pendingValue={resolveValue(entry)}
-                onPendingChange={handlePendingChange}
-              />
-            ))}
-          </div>
+          {/* Card View (small customer accounts) */}
+          {!isLoading && !isError && sortedEntries.length > 0 && useCardView && (
+            <>
+              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-5">
+                {sortedEntries.map((entry) => (
+                  <RcfCard
+                    key={entry.id}
+                    entry={entry}
+                    pendingValue={resolveValue(entry)}
+                    onPendingChange={handlePendingChange}
+                  />
+                ))}
+              </div>
+              {serverTotal > pageSize && (
+                <div style={{ marginTop: 20, background: 'rgba(19,21,29,0.65)', backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)', border: '1px solid rgba(59,130,246,0.10)', borderRadius: 14, overflow: 'hidden' }}>
+                  <PaginationControls
+                    currentPage={page}
+                    totalPages={totalPages}
+                    pageSize={pageSize}
+                    totalItems={serverTotal}
+                    onPageChange={setPage}
+                    onPageSizeChange={(size) => { setPageSize(size); setPage(1); }}
+                  />
+                </div>
+              )}
+            </>
+          )}
 
-          {serverTotal > pageSize && (
-            <div
-              style={{
-                marginTop: 20,
-                background: 'rgba(19, 21, 29, 0.65)',
-                backdropFilter: 'blur(8px)',
-                WebkitBackdropFilter: 'blur(8px)',
-                border: '1px solid rgba(59,130,246,0.10)',
-                borderRadius: 14,
-                overflow: 'hidden',
-              }}
-            >
-              <PaginationControls
-                currentPage={page}
-                totalPages={totalPages}
-                pageSize={pageSize}
-                totalItems={serverTotal}
-                onPageChange={setPage}
-                onPageSizeChange={(size) => { setPageSize(size); setPage(1); }}
-              />
+          {/* Table View */}
+          {!isLoading && !isError && sortedEntries.length > 0 && !useCardView && (
+            <div style={{ background: 'rgba(19,21,29,0.68)', backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)', border: '1px solid rgba(59,130,246,0.12)', borderRadius: 16, overflow: 'hidden', boxShadow: '0 8px 32px -8px rgba(0,0,0,0.45)' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr>
+                    <SortHeader label="DID"        field="did"        currentField={sortField} currentDir={sortDir} onSort={handleSort} />
+                    <SortHeader label="Name"       field="name"       currentField={sortField} currentDir={sortDir} onSort={handleSort} />
+                    <SortHeader label="Forward To" field="forward_to" currentField={sortField} currentDir={sortDir} onSort={handleSort} />
+                    <SortHeader label="Status"     field="status"     currentField={sortField} currentDir={sortDir} onSort={handleSort} />
+                    {isAdmin && (
+                      <SortHeader label="Customer" field="customer" currentField={sortField} currentDir={sortDir} onSort={handleSort} />
+                    )}
+                  </tr>
+                </thead>
+                <tbody>
+                  {sortedEntries.map((entry) => (
+                    <TableRow
+                      key={entry.id}
+                      entry={entry}
+                      isAdmin={isAdmin}
+                      canEdit={canEdit}
+                      pendingValue={resolveValue(entry)}
+                      onPendingChange={handlePendingChange}
+                    />
+                  ))}
+                </tbody>
+              </table>
+              {serverTotal > pageSize && (
+                <PaginationControls
+                  currentPage={page}
+                  totalPages={totalPages}
+                  pageSize={pageSize}
+                  totalItems={serverTotal}
+                  onPageChange={setPage}
+                  onPageSizeChange={(size) => { setPageSize(size); setPage(1); }}
+                />
+              )}
             </div>
           )}
         </>
       )}
 
-      {/* ── Table View ──────────────────────────────────────── */}
-      {!isLoading && !isError && sortedEntries.length > 0 && !useCardView && (
-        <div
-          style={{
-            background: 'rgba(19, 21, 29, 0.68)',
-            backdropFilter: 'blur(10px)',
-            WebkitBackdropFilter: 'blur(10px)',
-            border: '1px solid rgba(59,130,246,0.12)',
-            borderRadius: 16,
-            overflow: 'hidden',
-            boxShadow: '0 8px 32px -8px rgba(0,0,0,0.45)',
-          }}
-        >
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead>
-              <tr>
-                <SortHeader label="DID"        field="did"        currentField={sortField} currentDir={sortDir} onSort={handleSort} />
-                <SortHeader label="Name"       field="name"       currentField={sortField} currentDir={sortDir} onSort={handleSort} />
-                <SortHeader label="Forward To" field="forward_to" currentField={sortField} currentDir={sortDir} onSort={handleSort} />
-                <SortHeader label="Status"     field="status"     currentField={sortField} currentDir={sortDir} onSort={handleSort} />
-                {isAdmin && (
-                  <SortHeader label="Customer" field="customer"   currentField={sortField} currentDir={sortDir} onSort={handleSort} />
-                )}
-              </tr>
-            </thead>
-            <tbody>
-              {sortedEntries.map((entry) => (
-                <TableRow
-                  key={entry.id}
-                  entry={entry}
-                  isAdmin={isAdmin}
-                  canEdit={canEdit}
-                  pendingValue={resolveValue(entry)}
-                  onPendingChange={handlePendingChange}
-                />
-              ))}
-            </tbody>
-          </table>
+      {/* ── Call Activity Tab ────────────────────────────────── */}
+      {activeTab === 'activity' && (
+        <CallActivityTab customerId={customerId} />
+      )}
 
-          {serverTotal > pageSize && (
-            <PaginationControls
-              currentPage={page}
-              totalPages={totalPages}
-              pageSize={pageSize}
-              totalItems={serverTotal}
-              onPageChange={setPage}
-              onPageSizeChange={(size) => { setPageSize(size); setPage(1); }}
-            />
-          )}
-        </div>
+      {/* ── Quality Tab ──────────────────────────────────────── */}
+      {activeTab === 'quality' && (
+        <QualityTab customerId={customerId} />
       )}
     </div>
   );
