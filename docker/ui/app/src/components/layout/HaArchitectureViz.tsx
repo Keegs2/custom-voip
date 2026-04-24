@@ -23,7 +23,7 @@ import { useMemo } from 'react';
  *  48–56s  Normal operation
  *  56–64s  SBC-1 in US-East fails → traffic reroutes through SBC-2
  *
- * Status indicator at bottom-right shows current failover state.
+ * Status indicator at top-centre shows current failover state.
  * Pure SVG + CSS animations. No JavaScript timers, no requestAnimationFrame.
  */
 
@@ -39,8 +39,8 @@ const COL = {
   locIn:   358,   // left edge of location containers
   locOut:  750,   // right edge of location containers
   sbc1X:   448,   // SBC-1 node centre (upper SBC within location)
-  sbc2X:   548,   // SBC-2 node centre (lower SBC within location)
-  ksX:     670,   // Keystone engine node centre (right of SBCs)
+  sbc2X:   448,   // SBC-2 node centre — same X as SBC-1, stacked vertically
+  ksX:     620,   // Keystone engine node centre (right of SBC column)
   termX:   940,   // Stage 4: termination trunk nodes
 } as const;
 
@@ -102,6 +102,7 @@ type FailoverGroup =
   | 'sbc2-central'
   | 'west-loc'
   | 'term-dallas'
+  | 'west-loc-or-dallas'   // hides during BOTH west datacenter AND dallas trunk failures
   | 'sbc1-east'
   | 'reroute-sbc2central'
   | 'reroute-west'
@@ -306,9 +307,11 @@ const ALL_PACKETS: PacketConfig[] = [
   ...makePackets('c-t2', 1, 3.6, 'normal',      true,  2.0),
 
   // West Keystone → termination trunks (fail during west-loc event)
-  ...makePackets('w-t0', 1, 3.6, 'west-loc',   true,  0.6),
-  ...makePackets('w-t1', 1, 3.6, 'west-loc',   true,  1.0),
-  ...makePackets('w-t2', 1, 3.6, 'west-loc',   true,  1.4),
+  // w-t0 (Dallas-bound from West) must ALSO stop during the Dallas failure window,
+  // so it uses the combined 'west-loc-or-dallas' group instead of plain 'west-loc'.
+  ...makePackets('w-t0', 1, 3.6, 'west-loc-or-dallas', true,  0.6),
+  ...makePackets('w-t1', 1, 3.6, 'west-loc',            true,  1.0),
+  ...makePackets('w-t2', 1, 3.6, 'west-loc',            true,  1.4),
 
   // ── Reroute packets: only appear during their specific failure event ──
 
@@ -438,6 +441,15 @@ export function HaArchitectureViz() {
   74.9%      { opacity: 0; }
   75%, 100%  { opacity: 1; }
 }
+@keyframes ${uid}-pkt-westloc-or-dallas {
+  0%, 37.4%  { opacity: 1; }
+  37.5%      { opacity: 0; }
+  49.9%      { opacity: 0; }
+  50%, 62.4% { opacity: 1; }
+  62.5%      { opacity: 0; }
+  74.9%      { opacity: 0; }
+  75%, 100%  { opacity: 1; }
+}
 @keyframes ${uid}-pkt-sbc1east {
   0%, 87.4%  { opacity: 1; }
   87.5%      { opacity: 0; }
@@ -476,6 +488,7 @@ export function HaArchitectureViz() {
         case 'sbc2-central':       return `${uid}-pkt-sbc2central`;
         case 'west-loc':           return `${uid}-pkt-westloc`;
         case 'term-dallas':        return `${uid}-pkt-termdallas`;
+        case 'west-loc-or-dallas': return `${uid}-pkt-westloc-or-dallas`;
         case 'sbc1-east':          return `${uid}-pkt-sbc1east`;
         case 'reroute-sbc2central':return `${uid}-pkt-reroute-sbc2c`;
         case 'reroute-west':       return `${uid}-pkt-reroute-west`;
@@ -818,7 +831,7 @@ export function HaArchitectureViz() {
         <ColumnLabel text="PROCESSING"   x={(COL.locIn + COL.locOut) / 2}     y={22} />
         <ColumnLabel text="TERMINATION"  x={COL.termX}                        y={22} />
 
-        {/* ── Status indicator — bottom right corner ─────────────── */}
+        {/* ── Status indicator — top centre ─────────────────────── */}
         <StatusIndicator uid={uid} />
 
         {/* ── Watermark ──────────────────────────────────────────── */}
@@ -1127,22 +1140,26 @@ function TermNode({
   );
 }
 
-/* ── Status indicator — bottom-right corner of SVG ── */
+/* ── Status indicator — top-center of SVG ── */
 function StatusIndicator({ uid }: { uid: string }) {
-  const x  = VB_W - 12;
-  const y  = VB_H - 22;
+  // Centred horizontally in the viewBox; placed below the column header row (y=22)
+  const cx = VB_W / 2;  // 600 — horizontal centre
+  const y  = 33;        // sits below column headers at y=22, above location rows
   const dotR = 3;
-  const textX = x - dotR * 2 - 4;
+  // Dot sits left of the text; both are centred together via a <g transform>
+  // by anchoring the text at "middle" relative to cx, with the dot offset left.
+  const dotOffsetX = -78; // shift dot left of the text centre
+  const textOffsetX = dotOffsetX + dotR * 2 + 5; // text starts just right of dot
   const fontSize = 6.5;
   const fontFamily = "'SF Mono', 'Fira Code', 'Consolas', monospace";
 
   return (
-    <g>
+    <g transform={`translate(${cx}, 0)`}>
       {/* Normal — green dot */}
       <g className={`${uid}-status-normal`}>
-        <circle r={dotR} cx={x} cy={y - 0.5} fill="rgba(34,197,94,0.90)" />
-        <circle r={dotR * 2.2} cx={x} cy={y - 0.5} fill="rgba(34,197,94,0.12)" />
-        <text x={textX} y={y + 2.5} textAnchor="end" fontSize={fontSize}
+        <circle r={dotR * 2.2} cx={dotOffsetX} cy={y - 0.5} fill="rgba(34,197,94,0.12)" />
+        <circle r={dotR}       cx={dotOffsetX} cy={y - 0.5} fill="rgba(34,197,94,0.90)" />
+        <text x={textOffsetX} y={y + 2.5} textAnchor="start" fontSize={fontSize}
           fontFamily={fontFamily} letterSpacing="0.08em"
           fill="rgba(134,239,172,0.72)" fontWeight="600">
           All Systems Operational
@@ -1151,9 +1168,9 @@ function StatusIndicator({ uid }: { uid: string }) {
 
       {/* Failover: SBC-2 US-Central — amber dot */}
       <g className={`${uid}-status-sbc2c`}>
-        <circle r={dotR} cx={x} cy={y - 0.5} fill="rgba(251,191,36,0.90)" />
-        <circle r={dotR * 2.2} cx={x} cy={y - 0.5} fill="rgba(251,191,36,0.15)" />
-        <text x={textX} y={y + 2.5} textAnchor="end" fontSize={fontSize}
+        <circle r={dotR * 2.2} cx={dotOffsetX} cy={y - 0.5} fill="rgba(251,191,36,0.15)" />
+        <circle r={dotR}       cx={dotOffsetX} cy={y - 0.5} fill="rgba(251,191,36,0.90)" />
+        <text x={textOffsetX} y={y + 2.5} textAnchor="start" fontSize={fontSize}
           fontFamily={fontFamily} letterSpacing="0.08em"
           fill="rgba(251,191,36,0.82)" fontWeight="600">
           Failover: SBC-2 US-Central
@@ -1162,9 +1179,9 @@ function StatusIndicator({ uid }: { uid: string }) {
 
       {/* Failover: US-West Zone — amber dot */}
       <g className={`${uid}-status-west`}>
-        <circle r={dotR} cx={x} cy={y - 0.5} fill="rgba(251,191,36,0.90)" />
-        <circle r={dotR * 2.2} cx={x} cy={y - 0.5} fill="rgba(251,191,36,0.15)" />
-        <text x={textX} y={y + 2.5} textAnchor="end" fontSize={fontSize}
+        <circle r={dotR * 2.2} cx={dotOffsetX} cy={y - 0.5} fill="rgba(251,191,36,0.15)" />
+        <circle r={dotR}       cx={dotOffsetX} cy={y - 0.5} fill="rgba(251,191,36,0.90)" />
+        <text x={textOffsetX} y={y + 2.5} textAnchor="start" fontSize={fontSize}
           fontFamily={fontFamily} letterSpacing="0.08em"
           fill="rgba(251,191,36,0.82)" fontWeight="600">
           Failover: US-West Zone
@@ -1173,9 +1190,9 @@ function StatusIndicator({ uid }: { uid: string }) {
 
       {/* Failover: Dallas PoP — amber dot */}
       <g className={`${uid}-status-dallas`}>
-        <circle r={dotR} cx={x} cy={y - 0.5} fill="rgba(251,191,36,0.90)" />
-        <circle r={dotR * 2.2} cx={x} cy={y - 0.5} fill="rgba(251,191,36,0.15)" />
-        <text x={textX} y={y + 2.5} textAnchor="end" fontSize={fontSize}
+        <circle r={dotR * 2.2} cx={dotOffsetX} cy={y - 0.5} fill="rgba(251,191,36,0.15)" />
+        <circle r={dotR}       cx={dotOffsetX} cy={y - 0.5} fill="rgba(251,191,36,0.90)" />
+        <text x={textOffsetX} y={y + 2.5} textAnchor="start" fontSize={fontSize}
           fontFamily={fontFamily} letterSpacing="0.08em"
           fill="rgba(251,191,36,0.82)" fontWeight="600">
           Failover: Dallas PoP
@@ -1184,9 +1201,9 @@ function StatusIndicator({ uid }: { uid: string }) {
 
       {/* Failover: SBC-1 US-East — amber dot */}
       <g className={`${uid}-status-sbc1e`}>
-        <circle r={dotR} cx={x} cy={y - 0.5} fill="rgba(251,191,36,0.90)" />
-        <circle r={dotR * 2.2} cx={x} cy={y - 0.5} fill="rgba(251,191,36,0.15)" />
-        <text x={textX} y={y + 2.5} textAnchor="end" fontSize={fontSize}
+        <circle r={dotR * 2.2} cx={dotOffsetX} cy={y - 0.5} fill="rgba(251,191,36,0.15)" />
+        <circle r={dotR}       cx={dotOffsetX} cy={y - 0.5} fill="rgba(251,191,36,0.90)" />
+        <text x={textOffsetX} y={y + 2.5} textAnchor="start" fontSize={fontSize}
           fontFamily={fontFamily} letterSpacing="0.08em"
           fill="rgba(251,191,36,0.82)" fontWeight="600">
           Failover: SBC-1 US-East
