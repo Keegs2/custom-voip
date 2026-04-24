@@ -411,36 +411,39 @@ export function HaArchitectureViz() {
      */
 
     // Group visibility keyframes (all 64s cycle)
+    // Note: these drive the connection-line paths (SVG <path> elements), not the
+    // node boxes. Paths simply fade to near-zero during failures — no red glow
+    // needed here since they disappear entirely (the node boxes carry the drama).
     const groupKf = `
 @keyframes ${uid}-vis-normal {
   0%, 100% { opacity: 1; }
 }
 @keyframes ${uid}-vis-sbc2central {
-  0%, 12.4%  { opacity: 1; filter: none; }
-  12.5%      { opacity: 0.15; filter: sepia(1) hue-rotate(320deg) brightness(1.2); }
-  24.9%      { opacity: 0.15; filter: sepia(1) hue-rotate(320deg) brightness(1.2); }
-  25%        { opacity: 1; filter: none; }
-  100%       { opacity: 1; filter: none; }
+  0%, 12.4%  { opacity: 1; }
+  12.5%      { opacity: 0; }
+  24.9%      { opacity: 0; }
+  25%        { opacity: 1; }
+  100%       { opacity: 1; }
 }
 @keyframes ${uid}-vis-westloc {
-  0%, 37.4%  { opacity: 1; filter: none; }
-  37.5%      { opacity: 0.15; filter: sepia(1) hue-rotate(20deg) brightness(1.8); }
-  49.9%      { opacity: 0.15; filter: sepia(1) hue-rotate(20deg) brightness(1.8); }
-  50%        { opacity: 1; filter: none; }
-  100%       { opacity: 1; filter: none; }
+  0%, 37.4%  { opacity: 1; }
+  37.5%      { opacity: 0; }
+  49.9%      { opacity: 0; }
+  50%        { opacity: 1; }
+  100%       { opacity: 1; }
 }
 @keyframes ${uid}-vis-termdallas {
-  0%, 62.4%  { opacity: 1; filter: none; }
-  62.5%      { opacity: 0.15; filter: sepia(1) hue-rotate(320deg) brightness(1.2); }
-  74.9%      { opacity: 0.15; filter: sepia(1) hue-rotate(320deg) brightness(1.2); }
-  75%        { opacity: 1; filter: none; }
-  100%       { opacity: 1; filter: none; }
+  0%, 62.4%  { opacity: 1; }
+  62.5%      { opacity: 0; }
+  74.9%      { opacity: 0; }
+  75%        { opacity: 1; }
+  100%       { opacity: 1; }
 }
 @keyframes ${uid}-vis-sbc1east {
-  0%, 87.4%  { opacity: 1; filter: none; }
-  87.5%      { opacity: 0.15; filter: sepia(1) hue-rotate(320deg) brightness(1.2); }
-  99.9%      { opacity: 0.15; filter: sepia(1) hue-rotate(320deg) brightness(1.2); }
-  100%       { opacity: 1; filter: none; }
+  0%, 87.4%  { opacity: 1; }
+  87.5%      { opacity: 0; }
+  99.9%      { opacity: 0; }
+  100%       { opacity: 1; }
 }
 @keyframes ${uid}-pkt-sbc2central {
   0%, 12.4%  { opacity: 1; }
@@ -557,34 +560,90 @@ export function HaArchitectureViz() {
     }).join('\n');
 
     // 3. Node visibility animations (drive the node opacity during failure)
-    // These use the same 64s cycle but with smooth transitions instead of steps
+    // Each failure window gets a pulsing red-glow treatment: opacity drops to ~0.5
+    // (visible but clearly degraded) and the filter alternates between a dim and
+    // blazing red drop-shadow on a ~1.6s cycle to scream "THIS IS DOWN."
+    //
+    // Failure window breakdown (all within the 64s master cycle):
+    //   sbc2-central : 12.5% – 25%   (8s)
+    //   west-loc     : 37.5% – 50%   (8s)
+    //   term-dallas  : 62.5% – 75%   (8s)
+    //   sbc1-east    : 87.5% – 100%  (8s)
+    //
+    // Each 1.25% = 0.8s. Pulses alternate at every 1.25% step (0.8s half-period →
+    // 1.6s full pulse cycle), giving ~5 full pulses per 8s failure window.
+    //
+    // filter DIM  = drop-shadow(0 0 8px rgba(239,68,68,0.50)) drop-shadow(0 0 24px rgba(239,68,68,0.25)) sepia(1) hue-rotate(320deg) brightness(0.65)
+    // filter PEAK = drop-shadow(0 0 14px rgba(239,68,68,0.90)) drop-shadow(0 0 36px rgba(239,68,68,0.55)) drop-shadow(0 0 60px rgba(239,68,68,0.20)) sepia(1) hue-rotate(320deg) brightness(0.75)
+
+    const F_DIM  = 'drop-shadow(0 0 8px rgba(239,68,68,0.50)) drop-shadow(0 0 24px rgba(239,68,68,0.25)) sepia(1) hue-rotate(320deg) brightness(0.65)';
+    const F_PEAK = 'drop-shadow(0 0 14px rgba(239,68,68,0.90)) drop-shadow(0 0 36px rgba(239,68,68,0.55)) drop-shadow(0 0 60px rgba(239,68,68,0.20)) sepia(1) hue-rotate(320deg) brightness(0.75)';
+    const OP_FAIL_DIM  = 0.45;
+    const OP_FAIL_PEAK = 0.55;
+
     const nodeKf = `
 @keyframes ${uid}-node-sbc2central {
-  0%, 12.4%  { opacity: 1; filter: none; }
-  13%        { opacity: 0.15; filter: sepia(1) hue-rotate(320deg) brightness(1.4); }
-  24.5%      { opacity: 0.15; filter: sepia(1) hue-rotate(320deg) brightness(1.4); }
-  25.2%      { opacity: 1; filter: none; }
-  100%       { opacity: 1; filter: none; }
+  0%, 12.4%   { opacity: 1; filter: none; }
+  13%         { opacity: ${OP_FAIL_DIM};  filter: ${F_DIM};  }
+  13.75%      { opacity: ${OP_FAIL_PEAK}; filter: ${F_PEAK}; }
+  15%         { opacity: ${OP_FAIL_DIM};  filter: ${F_DIM};  }
+  16.25%      { opacity: ${OP_FAIL_PEAK}; filter: ${F_PEAK}; }
+  17.5%       { opacity: ${OP_FAIL_DIM};  filter: ${F_DIM};  }
+  18.75%      { opacity: ${OP_FAIL_PEAK}; filter: ${F_PEAK}; }
+  20%         { opacity: ${OP_FAIL_DIM};  filter: ${F_DIM};  }
+  21.25%      { opacity: ${OP_FAIL_PEAK}; filter: ${F_PEAK}; }
+  22.5%       { opacity: ${OP_FAIL_DIM};  filter: ${F_DIM};  }
+  23.75%      { opacity: ${OP_FAIL_PEAK}; filter: ${F_PEAK}; }
+  24.5%       { opacity: ${OP_FAIL_DIM};  filter: ${F_DIM};  }
+  25.2%       { opacity: 1; filter: none; }
+  100%        { opacity: 1; filter: none; }
 }
 @keyframes ${uid}-node-westloc {
-  0%, 37.4%  { opacity: 1; filter: none; }
-  38%        { opacity: 0.15; filter: sepia(1) hue-rotate(20deg) brightness(2.0); }
-  49.5%      { opacity: 0.15; filter: sepia(1) hue-rotate(20deg) brightness(2.0); }
-  50.2%      { opacity: 1; filter: none; }
-  100%       { opacity: 1; filter: none; }
+  0%, 37.4%   { opacity: 1; filter: none; }
+  38%         { opacity: ${OP_FAIL_DIM};  filter: ${F_DIM};  }
+  38.75%      { opacity: ${OP_FAIL_PEAK}; filter: ${F_PEAK}; }
+  40%         { opacity: ${OP_FAIL_DIM};  filter: ${F_DIM};  }
+  41.25%      { opacity: ${OP_FAIL_PEAK}; filter: ${F_PEAK}; }
+  42.5%       { opacity: ${OP_FAIL_DIM};  filter: ${F_DIM};  }
+  43.75%      { opacity: ${OP_FAIL_PEAK}; filter: ${F_PEAK}; }
+  45%         { opacity: ${OP_FAIL_DIM};  filter: ${F_DIM};  }
+  46.25%      { opacity: ${OP_FAIL_PEAK}; filter: ${F_PEAK}; }
+  47.5%       { opacity: ${OP_FAIL_DIM};  filter: ${F_DIM};  }
+  48.75%      { opacity: ${OP_FAIL_PEAK}; filter: ${F_PEAK}; }
+  49.5%       { opacity: ${OP_FAIL_DIM};  filter: ${F_DIM};  }
+  50.2%       { opacity: 1; filter: none; }
+  100%        { opacity: 1; filter: none; }
 }
 @keyframes ${uid}-node-termdallas {
-  0%, 62.4%  { opacity: 1; filter: none; }
-  63%        { opacity: 0.15; filter: sepia(1) hue-rotate(320deg) brightness(1.4); }
-  74.5%      { opacity: 0.15; filter: sepia(1) hue-rotate(320deg) brightness(1.4); }
-  75.2%      { opacity: 1; filter: none; }
-  100%       { opacity: 1; filter: none; }
+  0%, 62.4%   { opacity: 1; filter: none; }
+  63%         { opacity: ${OP_FAIL_DIM};  filter: ${F_DIM};  }
+  63.75%      { opacity: ${OP_FAIL_PEAK}; filter: ${F_PEAK}; }
+  65%         { opacity: ${OP_FAIL_DIM};  filter: ${F_DIM};  }
+  66.25%      { opacity: ${OP_FAIL_PEAK}; filter: ${F_PEAK}; }
+  67.5%       { opacity: ${OP_FAIL_DIM};  filter: ${F_DIM};  }
+  68.75%      { opacity: ${OP_FAIL_PEAK}; filter: ${F_PEAK}; }
+  70%         { opacity: ${OP_FAIL_DIM};  filter: ${F_DIM};  }
+  71.25%      { opacity: ${OP_FAIL_PEAK}; filter: ${F_PEAK}; }
+  72.5%       { opacity: ${OP_FAIL_DIM};  filter: ${F_DIM};  }
+  73.75%      { opacity: ${OP_FAIL_PEAK}; filter: ${F_PEAK}; }
+  74.5%       { opacity: ${OP_FAIL_DIM};  filter: ${F_DIM};  }
+  75.2%       { opacity: 1; filter: none; }
+  100%        { opacity: 1; filter: none; }
 }
 @keyframes ${uid}-node-sbc1east {
-  0%, 87.4%  { opacity: 1; filter: none; }
-  88%        { opacity: 0.15; filter: sepia(1) hue-rotate(320deg) brightness(1.4); }
-  99.5%      { opacity: 0.15; filter: sepia(1) hue-rotate(320deg) brightness(1.4); }
-  100%       { opacity: 1; filter: none; }
+  0%, 87.4%   { opacity: 1; filter: none; }
+  88%         { opacity: ${OP_FAIL_DIM};  filter: ${F_DIM};  }
+  88.75%      { opacity: ${OP_FAIL_PEAK}; filter: ${F_PEAK}; }
+  90%         { opacity: ${OP_FAIL_DIM};  filter: ${F_DIM};  }
+  91.25%      { opacity: ${OP_FAIL_PEAK}; filter: ${F_PEAK}; }
+  92.5%       { opacity: ${OP_FAIL_DIM};  filter: ${F_DIM};  }
+  93.75%      { opacity: ${OP_FAIL_PEAK}; filter: ${F_PEAK}; }
+  95%         { opacity: ${OP_FAIL_DIM};  filter: ${F_DIM};  }
+  96.25%      { opacity: ${OP_FAIL_PEAK}; filter: ${F_PEAK}; }
+  97.5%       { opacity: ${OP_FAIL_DIM};  filter: ${F_DIM};  }
+  98.75%      { opacity: ${OP_FAIL_PEAK}; filter: ${F_PEAK}; }
+  99.5%       { opacity: ${OP_FAIL_DIM};  filter: ${F_DIM};  }
+  100%        { opacity: 1; filter: none; }
 }`;
 
     // 4. Node CSS classes
@@ -645,14 +704,24 @@ export function HaArchitectureViz() {
   100%       { opacity: 0; }
 }`;
 
+    // Alert halo pulse — the red dot's outer ring expands and fades on a fast
+    // ~0.9s cycle to create a "beacon" / radar-ping effect when a failover is active.
+    const alertHaloKf = `
+@keyframes ${uid}-alert-halo-pulse {
+  0%   { transform: scale(1);   opacity: 0.70; }
+  60%  { transform: scale(2.4); opacity: 0;    }
+  100% { transform: scale(2.4); opacity: 0;    }
+}`;
+
     const statusRules = `
 .${uid}-status-normal  { animation: ${uid}-status-normal  64s step-start infinite; }
 .${uid}-status-sbc2c   { animation: ${uid}-status-sbc2c   64s step-start infinite; opacity: 0; }
 .${uid}-status-west    { animation: ${uid}-status-west    64s step-start infinite; opacity: 0; }
 .${uid}-status-dallas  { animation: ${uid}-status-dallas  64s step-start infinite; opacity: 0; }
-.${uid}-status-sbc1e   { animation: ${uid}-status-sbc1e   64s step-start infinite; opacity: 0; }`;
+.${uid}-status-sbc1e   { animation: ${uid}-status-sbc1e   64s step-start infinite; opacity: 0; }
+.${uid}-alert-halo     { animation: ${uid}-alert-halo-pulse 0.9s ease-out infinite; }`;
 
-    return [pathKf, groupKf, packetRules, nodeKf, nodeRules, statusKf, statusRules].join('\n');
+    return [pathKf, groupKf, packetRules, nodeKf, nodeRules, statusKf, alertHaloKf, statusRules].join('\n');
   }, [uid]);
 
   return (
@@ -1253,6 +1322,16 @@ function StatusIndicatorHtml({ uid }: { uid: string }) {
     color,
   });
 
+  // Alert variant for failover status rows — red, bolder, slightly larger
+  const alertTextStyle: CSSProperties = {
+    fontFamily: "'SF Mono', 'Fira Code', 'Consolas', monospace",
+    fontSize: '0.65rem',
+    fontWeight: 700,
+    letterSpacing: '0.07em',
+    color: 'rgba(252,165,165,0.95)',
+    textShadow: '0 0 10px rgba(239,68,68,0.50)',
+  };
+
   const rowStyle: CSSProperties = {
     display: 'flex',
     alignItems: 'center',
@@ -1284,40 +1363,41 @@ function StatusIndicatorHtml({ uid }: { uid: string }) {
         <span style={textStyle('rgba(134,239,172,0.80)')}>All Systems Operational</span>
       </div>
 
-      {/* Failover: SBC-2 Granite Central — amber */}
+      {/* Failover rows — red, pulsing, urgent */}
+      {/* Failover: SBC-2 Granite Central */}
       <div className={`${uid}-status-sbc2c`} style={{ ...rowStyle, opacity: 0 }}>
-        <div style={{ position: 'relative', width: 8, height: 8 }}>
-          <div style={haloStyle('rgba(251,191,36,0.20)')} />
-          <div style={dotStyle('rgba(251,191,36,0.90)')} />
+        <div style={{ position: 'relative', width: 9, height: 9 }}>
+          <div style={haloStyle('rgba(239,68,68,0.30)')} className={`${uid}-alert-halo`} />
+          <div style={dotStyle('rgba(239,68,68,0.95)')} />
         </div>
-        <span style={textStyle('rgba(251,191,36,0.88)')}>Failover: SBC-2 Granite Central</span>
+        <span style={alertTextStyle}>Failover: SBC-2 Granite Central</span>
       </div>
 
-      {/* Failover: Granite West Zone — amber */}
+      {/* Failover: Granite West Zone */}
       <div className={`${uid}-status-west`} style={{ ...rowStyle, opacity: 0 }}>
-        <div style={{ position: 'relative', width: 8, height: 8 }}>
-          <div style={haloStyle('rgba(251,191,36,0.20)')} />
-          <div style={dotStyle('rgba(251,191,36,0.90)')} />
+        <div style={{ position: 'relative', width: 9, height: 9 }}>
+          <div style={haloStyle('rgba(239,68,68,0.30)')} className={`${uid}-alert-halo`} />
+          <div style={dotStyle('rgba(239,68,68,0.95)')} />
         </div>
-        <span style={textStyle('rgba(251,191,36,0.88)')}>Failover: Granite West Zone</span>
+        <span style={alertTextStyle}>Failover: Granite West Zone</span>
       </div>
 
-      {/* Failover: Dallas PoP — amber */}
+      {/* Failover: Dallas PoP */}
       <div className={`${uid}-status-dallas`} style={{ ...rowStyle, opacity: 0 }}>
-        <div style={{ position: 'relative', width: 8, height: 8 }}>
-          <div style={haloStyle('rgba(251,191,36,0.20)')} />
-          <div style={dotStyle('rgba(251,191,36,0.90)')} />
+        <div style={{ position: 'relative', width: 9, height: 9 }}>
+          <div style={haloStyle('rgba(239,68,68,0.30)')} className={`${uid}-alert-halo`} />
+          <div style={dotStyle('rgba(239,68,68,0.95)')} />
         </div>
-        <span style={textStyle('rgba(251,191,36,0.88)')}>Failover: Dallas PoP</span>
+        <span style={alertTextStyle}>Failover: Dallas PoP</span>
       </div>
 
-      {/* Failover: SBC-1 Granite East — amber */}
+      {/* Failover: SBC-1 Granite East */}
       <div className={`${uid}-status-sbc1e`} style={{ ...rowStyle, opacity: 0 }}>
-        <div style={{ position: 'relative', width: 8, height: 8 }}>
-          <div style={haloStyle('rgba(251,191,36,0.20)')} />
-          <div style={dotStyle('rgba(251,191,36,0.90)')} />
+        <div style={{ position: 'relative', width: 9, height: 9 }}>
+          <div style={haloStyle('rgba(239,68,68,0.30)')} className={`${uid}-alert-halo`} />
+          <div style={dotStyle('rgba(239,68,68,0.95)')} />
         </div>
-        <span style={textStyle('rgba(251,191,36,0.88)')}>Failover: SBC-1 Granite East</span>
+        <span style={alertTextStyle}>Failover: SBC-1 Granite East</span>
       </div>
     </div>
   );
