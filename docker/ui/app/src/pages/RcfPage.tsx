@@ -22,6 +22,10 @@ async function updateRcfEnabled(id: number, enabled: boolean): Promise<RcfEntry>
   return apiRequest('PATCH', `/rcf/${id}`, { enabled });
 }
 
+async function updateRcfPassCallerId(id: number, pass_caller_id: boolean): Promise<RcfEntry> {
+  return apiRequest('PATCH', `/rcf/${id}`, { pass_caller_id });
+}
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type SortField = 'did' | 'name' | 'forward_to' | 'customer' | 'status';
@@ -107,6 +111,73 @@ function EnableToggle({ entry, canEdit }: { entry: RcfEntry; canEdit: boolean })
         }}
       />
     </button>
+  );
+}
+
+// ─── CallerIdToggle ──────────────────────────────────────────────────────────
+
+function CallerIdToggle({ entry, canEdit }: { entry: RcfEntry; canEdit: boolean }) {
+  const queryClient = useQueryClient();
+  const { toastOk, toastErr } = useToast();
+
+  const mutation = useMutation({
+    mutationFn: (pass: boolean) => updateRcfPassCallerId(entry.id, pass),
+    onSuccess: (_, pass) => {
+      void queryClient.invalidateQueries({ queryKey: ['rcf'] });
+      toastOk(pass ? `Caller ID pass-through enabled for ${fmt(entry.did)}` : `Caller ID will show ${fmt(entry.did)} instead`);
+    },
+    onError: (err: Error) => toastErr(err.message ?? 'Failed to update'),
+  });
+
+  const passthrough = entry.pass_caller_id;
+  const pending = mutation.isPending;
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={passthrough}
+        disabled={!canEdit || pending}
+        onClick={() => { if (canEdit && !pending) mutation.mutate(!passthrough); }}
+        title={canEdit ? (passthrough ? 'Showing original caller ID — click to show your DID instead' : 'Showing your DID — click to pass through original caller ID') : 'Caller ID setting'}
+        style={{
+          position: 'relative',
+          display: 'inline-flex',
+          alignItems: 'center',
+          width: 38,
+          height: 22,
+          borderRadius: 11,
+          border: `1px solid ${passthrough ? 'rgba(59,130,246,0.55)' : 'rgba(255,255,255,0.12)'}`,
+          background: passthrough
+            ? 'linear-gradient(135deg, rgba(59,130,246,0.5) 0%, rgba(59,130,246,0.35) 100%)'
+            : 'rgba(255,255,255,0.06)',
+          cursor: canEdit ? 'pointer' : 'not-allowed',
+          transition: 'background 0.2s, border-color 0.2s, box-shadow 0.2s',
+          flexShrink: 0,
+          padding: 0,
+          outline: 'none',
+          boxShadow: passthrough ? '0 0 8px rgba(59,130,246,0.35)' : 'none',
+          opacity: pending ? 0.5 : 1,
+        }}
+      >
+        <span
+          style={{
+            position: 'absolute',
+            left: passthrough ? 18 : 2,
+            width: 16,
+            height: 16,
+            borderRadius: '50%',
+            background: '#fff',
+            boxShadow: '0 1px 3px rgba(0,0,0,0.4)',
+            transition: 'left 0.2s ease',
+          }}
+        />
+      </button>
+      <span style={{ fontSize: '0.72rem', color: passthrough ? '#60a5fa' : '#475569', fontWeight: 500, whiteSpace: 'nowrap' }}>
+        {passthrough ? 'Pass-through' : 'Show DID'}
+      </span>
+    </div>
   );
 }
 
@@ -401,6 +472,11 @@ function TableRow({ entry, isAdmin, canEdit, pendingValue, onPendingChange }: Ta
             {entry.enabled ? 'Active' : 'Disabled'}
           </span>
         </div>
+      </td>
+
+      {/* Caller ID — pass-through toggle */}
+      <td style={{ padding: '14px 16px' }}>
+        <CallerIdToggle entry={entry} canEdit={canEdit} />
       </td>
 
       {/* Customer (admin only) */}
@@ -2690,6 +2766,7 @@ export function RcfPage() {
                     <SortHeader label="Name"       field="name"       currentField={sortField} currentDir={sortDir} onSort={handleSort} />
                     <SortHeader label="Forward To" field="forward_to" currentField={sortField} currentDir={sortDir} onSort={handleSort} />
                     <SortHeader label="Status"     field="status"     currentField={sortField} currentDir={sortDir} onSort={handleSort} />
+                    <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: '0.6rem', fontWeight: 700, color: '#334155', textTransform: 'uppercase', letterSpacing: '0.1em', whiteSpace: 'nowrap', background: 'rgba(59,130,246,0.04)' }}>Caller ID</th>
                     {isAdmin && (
                       <SortHeader label="Customer" field="customer" currentField={sortField} currentDir={sortDir} onSort={handleSort} />
                     )}
