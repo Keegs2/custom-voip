@@ -237,12 +237,17 @@ All endpoints are mounted at both `/v1/<path>` and `/<path>` (backward compatibi
 | `GET` | `/v1/search/user` | Search users by name/email |
 | `GET` | `/v1/search/user/by-customer/{id}` | List users for a customer |
 
-### Number Inventory (Admin only)
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/v1/numbers/inventory` | Full Bandwidth TN list with assignments |
-| `GET` | `/v1/numbers/available` | Unassigned TNs only |
-| `GET` | `/v1/numbers/stats` | Inventory summary stats |
+### Number Inventory (DID Lifecycle Management)
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `GET` | `/v1/numbers/inventory` | Admin | Full DID inventory with filters and pagination |
+| `GET` | `/v1/numbers/stats` | Admin | Inventory summary stats (by status/product/state) |
+| `POST` | `/v1/numbers/sync` | Admin | Sync Bandwidth TN inventory into did_inventory table |
+| `POST` | `/v1/numbers/{did}/assign` | Admin | Assign DID to customer (creates product record) |
+| `POST` | `/v1/numbers/{did}/unassign` | Admin | Unassign DID (removes product record) |
+| `GET` | `/v1/numbers/available` | User | Browse available DIDs with filters |
+| `GET` | `/v1/numbers/my` | User | Customer's assigned numbers |
+| `POST` | `/v1/numbers/{did}/request` | User | Reserve a number for admin review |
 
 ### Docs (when ENABLE_DOCS=true)
 | Method | Path | Description |

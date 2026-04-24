@@ -1,1552 +1,1698 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { Link } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
-import { apiRequest } from '../../api/client';
-import { Badge } from '../../components/ui/Badge';
+import { useState, useCallback } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import {
+  Phone,
+  RefreshCw,
+  Search,
+  X,
+  MapPin,
+  Users,
+  CheckCircle,
+  Clock,
+  AlertCircle,
+  ArrowRightLeft,
+  Ban,
+} from 'lucide-react';
+import { useAuth } from '../../contexts/AuthContext';
+import { Button } from '../../components/ui/Button';
+import { Modal } from '../../components/ui/Modal';
+import { FormField } from '../../components/ui/FormField';
 import { Spinner } from '../../components/ui/Spinner';
-import { TabBar } from '../../components/ui/TabBar';
-import { fmt, fmtDuration } from '../../utils/format';
+import { useToast } from '../../components/ui/ToastContext';
+import { fmt } from '../../utils/format';
+import {
+  listDidInventory,
+  listAvailableDids,
+  listMyDids,
+  getDidStats,
+  syncDidInventory,
+  assignDid,
+  unassignDid,
+  requestDid,
+} from '../../api/didInventory';
+import { listCustomers } from '../../api/customers';
+import type { DidInventoryItem, DidStatus } from '../../types/didInventory';
 
-// ─── Types ──────────────────────────────────────────────────────────────────
+// ─── Constants ─────────────────────────────────────────────────────────────────
 
-type DIDProduct = 'rcf' | 'api' | 'trunk' | 'ucaas';
+const PAGE_SIZE = 50;
 
-interface DIDResult {
-  did: string;
-  product: DIDProduct;
-  customer_id: number;
-  customer_name: string;
-  status: 'active' | 'disabled' | 'suspended';
-  details: Record<string, string | number | boolean | null>;
+const PRODUCT_TYPES = [
+  { value: 'rcf', label: 'Remote Call Forwarding (RCF)' },
+  { value: 'api', label: 'API Calling' },
+  { value: 'trunk', label: 'SIP Trunk' },
+  { value: 'ucaas', label: 'UCaaS' },
+];
+
+const US_STATES = [
+  'AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA',
+  'HI','ID','IL','IN','IA','KS','KY','LA','ME','MD',
+  'MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ',
+  'NM','NY','NC','ND','OH','OK','OR','PA','RI','SC',
+  'SD','TN','TX','UT','VT','VA','WA','WV','WI','WY',
+  'DC',
+];
+
+// ─── Status badge helper ────────────────────────────────────────────────────────
+
+interface StatusStyle {
+  bg: string;
+  color: string;
+  border: string;
+  label: string;
+  icon: React.ReactNode;
 }
 
-interface DIDSearchResponse {
-  results: DIDResult[];
-  total: number;
-}
-
-type CallDirection = 'inbound' | 'outbound';
-type CallResult = 'answered' | 'failed' | 'busy' | 'no-answer' | 'cancelled';
-
-interface CallRecord {
-  id: string;
-  direction: CallDirection;
-  caller: string;
-  callee: string;
-  duration: number;
-  result: CallResult;
-  timestamp: string;
-}
-
-interface CallHistoryResponse {
-  calls: CallRecord[];
-}
-
-// ─── Inventory Types ──────────────────────────────────────────────────────────
-
-interface InventoryAssignment {
-  product: DIDProduct;
-  customer_name: string;
-}
-
-interface InventoryTN {
-  tn: string;
-  city: string;
-  state: string;
-  lata: string;
-  rate_center: string;
-  tier: string;
-  bw_status: string;
-  assigned_to: InventoryAssignment | null;
-}
-
-interface InventoryStats {
-  total: number;
-  assigned: number;
-  available: number;
-  by_product: Record<DIDProduct, number>;
-}
-
-// ─── Constants ───────────────────────────────────────────────────────────────
-
-const PAGE_SIZE = 25;
-
-const PRODUCT_ACCENT: Record<DIDProduct, string> = {
-  rcf:   '#22c55e',
-  api:   '#a855f7',
-  trunk: '#f59e0b',
-  ucaas: '#0ea5e9',
-};
-
-const PRODUCT_BADGE_VARIANT: Record<DIDProduct, 'rcf' | 'api' | 'trunk' | 'ucaas'> = {
-  rcf:   'rcf',
-  api:   'api',
-  trunk: 'trunk',
-  ucaas: 'ucaas',
-};
-
-const PRODUCT_LABEL: Record<DIDProduct, string> = {
-  rcf:   'RCF',
-  api:   'API',
-  trunk: 'Trunk',
-  ucaas: 'UCaaS',
-};
-
-// Pill badge colors for the inventory product column
-const INV_PRODUCT_BG: Record<DIDProduct, string> = {
-  rcf:   'rgba(59,130,246,0.15)',
-  api:   'rgba(168,85,247,0.15)',
-  trunk: 'rgba(245,158,11,0.15)',
-  ucaas: 'rgba(34,197,94,0.15)',
-};
-
-const INV_PRODUCT_COLOR: Record<DIDProduct, string> = {
-  rcf:   '#60a5fa',
-  api:   '#c084fc',
-  trunk: '#fbbf24',
-  ucaas: '#4ade80',
-};
-
-const INV_PRODUCT_BORDER: Record<DIDProduct, string> = {
-  rcf:   'rgba(59,130,246,0.3)',
-  api:   'rgba(168,85,247,0.3)',
-  trunk: 'rgba(245,158,11,0.3)',
-  ucaas: 'rgba(34,197,94,0.3)',
-};
-
-const CALL_RESULT_COLOR: Record<CallResult, string> = {
-  answered:    '#22c55e',
-  failed:      '#ef4444',
-  busy:        '#f59e0b',
-  'no-answer': '#64748b',
-  cancelled:   '#64748b',
-};
-
-// ─── API functions ────────────────────────────────────────────────────────────
-
-interface FetchDIDsParams {
-  /** When provided, performs a filtered search. When absent, lists all DIDs. */
-  q?: string;
-  limit: number;
-  offset: number;
-}
-
-async function fetchDIDs({ q, limit, offset }: FetchDIDsParams): Promise<DIDSearchResponse> {
-  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
-  if (q) params.set('q', q);
-  return apiRequest<DIDSearchResponse>('GET', `/search/did?${params.toString()}`);
-}
-
-async function fetchDIDCalls(did: string): Promise<CallHistoryResponse> {
-  return apiRequest<CallHistoryResponse>('GET', `/search/did/${encodeURIComponent(did)}/calls`);
-}
-
-// ─── Pagination control ───────────────────────────────────────────────────────
-
-interface PaginationProps {
-  currentPage: number; // 0-indexed
-  totalPages: number;
-  onPageChange: (page: number) => void;
-  isFetching: boolean;
-}
-
-function Pagination({ currentPage, totalPages, onPageChange, isFetching }: PaginationProps) {
-  if (totalPages <= 1) return null;
-
-  // Build the window of page numbers to show: always show first, last, and up
-  // to 2 siblings on either side of the current page, with ellipsis gaps.
-  const pages: Array<number | 'ellipsis-start' | 'ellipsis-end'> = [];
-  if (totalPages <= 7) {
-    for (let i = 0; i < totalPages; i++) pages.push(i);
-  } else {
-    pages.push(0);
-    if (currentPage > 3) pages.push('ellipsis-start');
-    const rangeStart = Math.max(1, currentPage - 2);
-    const rangeEnd = Math.min(totalPages - 2, currentPage + 2);
-    for (let i = rangeStart; i <= rangeEnd; i++) pages.push(i);
-    if (currentPage < totalPages - 4) pages.push('ellipsis-end');
-    pages.push(totalPages - 1);
+function getStatusStyle(status: DidStatus): StatusStyle {
+  switch (status) {
+    case 'available':
+      return {
+        bg: 'rgba(59,130,246,0.12)',
+        color: '#60a5fa',
+        border: 'rgba(59,130,246,0.30)',
+        label: 'Available',
+        icon: <CheckCircle size={11} />,
+      };
+    case 'assigned':
+      return {
+        bg: 'rgba(34,197,94,0.12)',
+        color: '#4ade80',
+        border: 'rgba(34,197,94,0.30)',
+        label: 'Assigned',
+        icon: <CheckCircle size={11} />,
+      };
+    case 'reserved':
+      return {
+        bg: 'rgba(245,158,11,0.12)',
+        color: '#fbbf24',
+        border: 'rgba(245,158,11,0.30)',
+        label: 'Reserved',
+        icon: <Clock size={11} />,
+      };
+    case 'porting_in':
+      return {
+        bg: 'rgba(168,85,247,0.12)',
+        color: '#c084fc',
+        border: 'rgba(168,85,247,0.30)',
+        label: 'Porting In',
+        icon: <ArrowRightLeft size={11} />,
+      };
+    case 'porting_out':
+      return {
+        bg: 'rgba(168,85,247,0.12)',
+        color: '#c084fc',
+        border: 'rgba(168,85,247,0.30)',
+        label: 'Porting Out',
+        icon: <ArrowRightLeft size={11} />,
+      };
+    case 'suspended':
+      return {
+        bg: 'rgba(239,68,68,0.10)',
+        color: '#f87171',
+        border: 'rgba(239,68,68,0.28)',
+        label: 'Suspended',
+        icon: <Ban size={11} />,
+      };
+    default:
+      return {
+        bg: 'rgba(100,116,139,0.12)',
+        color: '#94a3b8',
+        border: 'rgba(100,116,139,0.25)',
+        label: status,
+        icon: <AlertCircle size={11} />,
+      };
   }
+}
 
-  const btnBase: React.CSSProperties = {
-    display: 'inline-flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    minWidth: 32,
-    height: 32,
-    padding: '0 8px',
-    borderRadius: 8,
-    border: '1px solid rgba(255,255,255,0.07)',
-    background: 'rgba(255,255,255,0.03)',
-    color: '#64748b',
-    fontSize: '0.78rem',
-    fontWeight: 500,
-    cursor: 'pointer',
-    transition: 'background 0.12s, color 0.12s, border-color 0.12s',
-    lineHeight: 1,
-    userSelect: 'none',
+function StatusBadge({ status }: { status: DidStatus }) {
+  const s = getStatusStyle(status);
+  return (
+    <span
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 4,
+        padding: '3px 8px',
+        borderRadius: 6,
+        background: s.bg,
+        color: s.color,
+        border: `1px solid ${s.border}`,
+        fontSize: '0.65rem',
+        fontWeight: 700,
+        letterSpacing: '0.05em',
+        textTransform: 'uppercase',
+        whiteSpace: 'nowrap',
+      }}
+    >
+      {s.icon}
+      {s.label}
+    </span>
+  );
+}
+
+// ─── Product pill ───────────────────────────────────────────────────────────────
+
+const PRODUCT_COLORS: Record<string, { bg: string; color: string; border: string }> = {
+  rcf:   { bg: 'rgba(59,130,246,0.12)',  color: '#60a5fa',  border: 'rgba(59,130,246,0.28)' },
+  api:   { bg: 'rgba(168,85,247,0.12)', color: '#c084fc',  border: 'rgba(168,85,247,0.28)' },
+  trunk: { bg: 'rgba(245,158,11,0.12)', color: '#fbbf24',  border: 'rgba(245,158,11,0.28)' },
+  ucaas: { bg: 'rgba(34,197,94,0.12)',  color: '#4ade80',  border: 'rgba(34,197,94,0.28)' },
+};
+
+function ProductPill({ type }: { type: string }) {
+  const c = PRODUCT_COLORS[type] ?? {
+    bg: 'rgba(100,116,139,0.12)',
+    color: '#94a3b8',
+    border: 'rgba(100,116,139,0.25)',
   };
+  return (
+    <span
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        padding: '2px 7px',
+        borderRadius: 5,
+        background: c.bg,
+        color: c.color,
+        border: `1px solid ${c.border}`,
+        fontSize: '0.62rem',
+        fontWeight: 700,
+        letterSpacing: '0.06em',
+        textTransform: 'uppercase',
+        whiteSpace: 'nowrap',
+      }}
+    >
+      {type.toUpperCase()}
+    </span>
+  );
+}
 
-  const btnActive: React.CSSProperties = {
-    ...btnBase,
-    background: 'rgba(59,130,246,0.18)',
-    border: '1px solid rgba(59,130,246,0.4)',
-    color: '#93c5fd',
-    fontWeight: 700,
-    cursor: 'default',
-  };
+// ─── Stat card ──────────────────────────────────────────────────────────────────
 
-  const btnDisabled: React.CSSProperties = {
-    ...btnBase,
-    opacity: 0.3,
-    cursor: 'not-allowed',
-    pointerEvents: 'none',
-  };
+interface StatCardProps {
+  label: string;
+  value: number | string;
+  accent: string;
+  icon: React.ReactNode;
+  delay?: string;
+}
 
+function DidStatCard({ label, value, accent, icon, delay = '0s' }: StatCardProps) {
+  return (
+    <div
+      className="animate-fade-in-up"
+      style={{
+        animationDelay: delay,
+        flex: 1,
+        minWidth: 0,
+        background: 'rgba(19,21,29,0.70)',
+        backdropFilter: 'blur(8px)',
+        border: `1px solid ${accent}22`,
+        borderRadius: 14,
+        padding: '16px 18px',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 14,
+      }}
+    >
+      <div
+        style={{
+          width: 40,
+          height: 40,
+          borderRadius: 10,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: `${accent}18`,
+          border: `1px solid ${accent}30`,
+          color: accent,
+          flexShrink: 0,
+        }}
+      >
+        {icon}
+      </div>
+      <div>
+        <div
+          style={{
+            fontSize: '1.4rem',
+            fontWeight: 800,
+            color: '#e2e8f0',
+            letterSpacing: '-0.03em',
+            lineHeight: 1,
+            marginBottom: 3,
+          }}
+        >
+          {typeof value === 'number' ? value.toLocaleString() : value}
+        </div>
+        <div style={{ fontSize: '0.7rem', color: '#64748b', fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+          {label}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Glass container ────────────────────────────────────────────────────────────
+
+function GlassPanel({
+  children,
+  style,
+  className,
+}: {
+  children: React.ReactNode;
+  style?: React.CSSProperties;
+  className?: string;
+}) {
+  return (
+    <div
+      className={className}
+      style={{
+        background: 'rgba(19,21,29,0.70)',
+        backdropFilter: 'blur(10px)',
+        WebkitBackdropFilter: 'blur(10px)',
+        border: '1px solid rgba(42,47,69,0.6)',
+        borderRadius: 16,
+        overflow: 'hidden',
+        ...style,
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+// ─── Table primitives ───────────────────────────────────────────────────────────
+
+function Th({ children, right }: { children: React.ReactNode; right?: boolean }) {
+  return (
+    <th
+      style={{
+        padding: '10px 14px',
+        fontSize: '0.62rem',
+        fontWeight: 700,
+        color: '#475569',
+        letterSpacing: '0.08em',
+        textTransform: 'uppercase',
+        textAlign: right ? 'right' : 'left',
+        borderBottom: '1px solid rgba(42,47,69,0.6)',
+        background: 'rgba(0,0,0,0.15)',
+        whiteSpace: 'nowrap',
+      }}
+    >
+      {children}
+    </th>
+  );
+}
+
+function Td({
+  children,
+  muted,
+  right,
+}: {
+  children: React.ReactNode;
+  muted?: boolean;
+  right?: boolean;
+}) {
+  return (
+    <td
+      style={{
+        padding: '11px 14px',
+        fontSize: '0.8rem',
+        color: muted ? '#64748b' : '#e2e8f0',
+        borderBottom: '1px solid rgba(42,47,69,0.35)',
+        textAlign: right ? 'right' : 'left',
+        verticalAlign: 'middle',
+      }}
+    >
+      {children}
+    </td>
+  );
+}
+
+// ─── Filter bar ─────────────────────────────────────────────────────────────────
+
+interface FilterBarProps {
+  search: string;
+  onSearchChange: (v: string) => void;
+  statusFilter: DidStatus | '';
+  onStatusChange: (v: DidStatus | '') => void;
+  stateFilter: string;
+  onStateChange: (v: string) => void;
+  placeholder?: string;
+  hideStatus?: boolean;
+}
+
+function FilterBar({
+  search,
+  onSearchChange,
+  statusFilter,
+  onStatusChange,
+  stateFilter,
+  onStateChange,
+  placeholder = 'Search DID, city, rate center…',
+  hideStatus = false,
+}: FilterBarProps) {
   return (
     <div
       style={{
         display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        padding: '14px 20px',
-        borderTop: '1px solid rgba(255,255,255,0.05)',
+        flexWrap: 'wrap',
+        gap: 10,
+        padding: '14px 16px',
+        borderBottom: '1px solid rgba(42,47,69,0.45)',
         background: 'rgba(0,0,0,0.08)',
+        alignItems: 'center',
       }}
     >
-      {/* Left: page x of y */}
-      <span style={{ fontSize: '0.72rem', color: '#475569', display: 'flex', alignItems: 'center', gap: 6 }}>
-        Page {currentPage + 1} of {totalPages}
-        {isFetching && <Spinner size="xs" />}
-      </span>
-
-      {/* Center: page buttons */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-        {/* Previous */}
-        <button
-          type="button"
-          onClick={() => onPageChange(currentPage - 1)}
-          disabled={currentPage === 0}
-          style={currentPage === 0 ? btnDisabled : btnBase}
-          onMouseEnter={(e) => { if (currentPage !== 0) { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.07)'; (e.currentTarget as HTMLButtonElement).style.color = '#94a3b8'; } }}
-          onMouseLeave={(e) => { if (currentPage !== 0) { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.03)'; (e.currentTarget as HTMLButtonElement).style.color = '#64748b'; } }}
-          aria-label="Previous page"
-        >
-          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={2} style={{ width: 12, height: 12 }}>
-            <path d="M10 12L6 8l4-4" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </button>
-
-        {pages.map((p) => {
-          if (p === 'ellipsis-start' || p === 'ellipsis-end') {
-            return (
-              <span key={p === 'ellipsis-start' ? 'es' : 'ee'} style={{ color: '#334155', fontSize: '0.78rem', padding: '0 2px', userSelect: 'none' }}>
-                …
-              </span>
-            );
-          }
-          return (
-            <button
-              key={p}
-              type="button"
-              onClick={() => onPageChange(p)}
-              disabled={p === currentPage}
-              style={p === currentPage ? btnActive : btnBase}
-              onMouseEnter={(e) => { if (p !== currentPage) { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.07)'; (e.currentTarget as HTMLButtonElement).style.color = '#94a3b8'; } }}
-              onMouseLeave={(e) => { if (p !== currentPage) { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.03)'; (e.currentTarget as HTMLButtonElement).style.color = '#64748b'; } }}
-              aria-label={`Page ${p + 1}`}
-              aria-current={p === currentPage ? 'page' : undefined}
-            >
-              {p + 1}
-            </button>
-          );
-        })}
-
-        {/* Next */}
-        <button
-          type="button"
-          onClick={() => onPageChange(currentPage + 1)}
-          disabled={currentPage >= totalPages - 1}
-          style={currentPage >= totalPages - 1 ? btnDisabled : btnBase}
-          onMouseEnter={(e) => { if (currentPage < totalPages - 1) { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.07)'; (e.currentTarget as HTMLButtonElement).style.color = '#94a3b8'; } }}
-          onMouseLeave={(e) => { if (currentPage < totalPages - 1) { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.03)'; (e.currentTarget as HTMLButtonElement).style.color = '#64748b'; } }}
-          aria-label="Next page"
-        >
-          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={2} style={{ width: 12, height: 12 }}>
-            <path d="M6 4l4 4-4 4" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </button>
-      </div>
-
-      {/* Right: intentionally empty for balance */}
-      <span style={{ minWidth: 80 }} />
-    </div>
-  );
-}
-
-// ─── Sub-components ───────────────────────────────────────────────────────────
-
-interface ProductDetailProps {
-  product: DIDProduct;
-  details: Record<string, string | number | boolean | null>;
-}
-
-function ProductDetail({ product, details }: ProductDetailProps) {
-  const accent = PRODUCT_ACCENT[product];
-
-  const renderField = (key: string, value: string | number | boolean | null) => {
-    const label = key.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
-    const displayValue = value === null ? '—' : value === true ? 'Yes' : value === false ? 'No' : String(value);
-
-    return (
-      <div
-        key={key}
-        style={{
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 2,
-          padding: '10px 14px',
-          borderRadius: 8,
-          background: 'rgba(255,255,255,0.02)',
-          border: '1px solid rgba(255,255,255,0.04)',
-          minWidth: 0,
-        }}
-      >
-        <div
+      {/* Search */}
+      <div style={{ position: 'relative', flex: '1 1 220px', minWidth: 180 }}>
+        <Search
+          size={14}
           style={{
-            fontSize: '0.6rem',
-            fontWeight: 700,
-            color: '#4a5568',
-            textTransform: 'uppercase',
-            letterSpacing: '0.1em',
+            position: 'absolute',
+            left: 10,
+            top: '50%',
+            transform: 'translateY(-50%)',
+            color: '#475569',
+            pointerEvents: 'none',
           }}
-        >
-          {label}
-        </div>
-        <div
+        />
+        <input
+          type="text"
+          value={search}
+          onChange={(e) => onSearchChange(e.target.value)}
+          placeholder={placeholder}
           style={{
-            fontSize: '0.875rem',
-            fontWeight: 600,
-            color: accent,
-            fontFamily: 'monospace',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-          }}
-        >
-          {displayValue}
-        </div>
-      </div>
-    );
-  };
-
-  return (
-    <div
-      style={{
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))',
-        gap: 8,
-        marginBottom: 20,
-      }}
-    >
-      {Object.entries(details).map(([k, v]) => renderField(k, v))}
-    </div>
-  );
-}
-
-interface CallHistoryRowProps {
-  call: CallRecord;
-  isOdd: boolean;
-}
-
-function CallHistoryRow({ call, isOdd }: CallHistoryRowProps) {
-  const resultColor = CALL_RESULT_COLOR[call.result] ?? '#64748b';
-  const ts = new Date(call.timestamp);
-  const timeStr = ts.toLocaleString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-
-  return (
-    <tr
-      style={{
-        background: isOdd ? 'rgba(255,255,255,0.015)' : 'transparent',
-      }}
-    >
-      {/* Direction */}
-      <td style={{ padding: '8px 12px', width: 36 }}>
-        <span
-          title={call.direction}
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            width: 22,
-            height: 22,
-            borderRadius: 6,
-            background: call.direction === 'inbound'
-              ? 'rgba(14,165,233,0.12)'
-              : 'rgba(168,85,247,0.12)',
-            color: call.direction === 'inbound' ? '#0ea5e9' : '#a855f7',
-          }}
-        >
-          {call.direction === 'inbound' ? (
-            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={2} style={{ width: 10, height: 10 }}>
-              <path d="M14 2L2 14M2 14h8M2 14V6" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          ) : (
-            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={2} style={{ width: 10, height: 10 }}>
-              <path d="M2 14L14 2M14 2H6M14 2v8" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          )}
-        </span>
-      </td>
-      {/* Caller */}
-      <td style={{ padding: '8px 12px', fontSize: '0.8rem', color: '#cbd5e0', fontFamily: 'monospace' }}>
-        {fmt(call.caller)}
-      </td>
-      {/* Arrow */}
-      <td style={{ padding: '8px 4px', color: '#334155', fontSize: '0.75rem' }}>→</td>
-      {/* Callee */}
-      <td style={{ padding: '8px 12px', fontSize: '0.8rem', color: '#cbd5e0', fontFamily: 'monospace' }}>
-        {fmt(call.callee)}
-      </td>
-      {/* Duration */}
-      <td style={{ padding: '8px 12px', fontSize: '0.78rem', color: '#64748b', textAlign: 'right', whiteSpace: 'nowrap' }}>
-        {call.duration > 0 ? fmtDuration(call.duration) : '—'}
-      </td>
-      {/* Result */}
-      <td style={{ padding: '8px 12px', textAlign: 'center' }}>
-        <span
-          style={{
-            fontSize: '0.65rem',
-            fontWeight: 700,
-            textTransform: 'uppercase',
-            letterSpacing: '0.04em',
-            color: resultColor,
-            background: `${resultColor}14`,
-            border: `1px solid ${resultColor}28`,
-            borderRadius: 4,
-            padding: '2px 7px',
-          }}
-        >
-          {call.result}
-        </span>
-      </td>
-      {/* Time */}
-      <td style={{ padding: '8px 12px', fontSize: '0.72rem', color: '#475569', whiteSpace: 'nowrap', textAlign: 'right' }}>
-        {timeStr}
-      </td>
-    </tr>
-  );
-}
-
-interface CallHistoryPanelProps {
-  did: string;
-}
-
-function CallHistoryPanel({ did }: CallHistoryPanelProps) {
-  const { data, isLoading, isError } = useQuery({
-    queryKey: ['did-calls', did],
-    queryFn: () => fetchDIDCalls(did),
-    staleTime: 30_000,
-  });
-
-  if (isLoading) {
-    return (
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '16px 0', color: '#64748b', fontSize: '0.82rem' }}>
-        <Spinner size="sm" />
-        <span>Loading call history…</span>
-      </div>
-    );
-  }
-
-  if (isError) {
-    return (
-      <div
-        style={{
-          padding: '10px 14px',
-          borderRadius: 8,
-          background: 'rgba(239,68,68,0.06)',
-          border: '1px solid rgba(239,68,68,0.15)',
-          color: '#f87171',
-          fontSize: '0.8rem',
-        }}
-      >
-        Unable to load call history.
-      </div>
-    );
-  }
-
-  const calls = data?.calls ?? [];
-
-  if (calls.length === 0) {
-    return (
-      <div style={{ color: '#4a5568', fontSize: '0.82rem', padding: '12px 0', fontStyle: 'italic' }}>
-        No recent calls found for this DID.
-      </div>
-    );
-  }
-
-  return (
-    <div
-      style={{
-        borderRadius: 10,
-        border: '1px solid rgba(255,255,255,0.05)',
-        overflow: 'hidden',
-        background: 'rgba(0,0,0,0.2)',
-      }}
-    >
-      <div
-        style={{
-          fontSize: '0.65rem',
-          fontWeight: 700,
-          color: '#334155',
-          textTransform: 'uppercase',
-          letterSpacing: '0.1em',
-          padding: '10px 12px 8px',
-          borderBottom: '1px solid rgba(255,255,255,0.04)',
-        }}
-      >
-        Recent Calls ({calls.length})
-      </div>
-      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-        <tbody>
-          {calls.map((call, i) => (
-            <CallHistoryRow key={call.id} call={call} isOdd={i % 2 === 1} />
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-interface ExpandedDetailPanelProps {
-  result: DIDResult;
-}
-
-function ExpandedDetailPanel({ result }: ExpandedDetailPanelProps) {
-  const accent = PRODUCT_ACCENT[result.product];
-
-  return (
-    <div
-      style={{
-        padding: '20px 24px',
-        background: 'rgba(0,0,0,0.18)',
-        borderTop: `1px solid ${accent}20`,
-        borderBottom: '1px solid rgba(255,255,255,0.04)',
-      }}
-    >
-      {/* Product config */}
-      <div
-        style={{
-          fontSize: '0.65rem',
-          fontWeight: 700,
-          color: '#334155',
-          textTransform: 'uppercase',
-          letterSpacing: '0.1em',
-          marginBottom: 10,
-        }}
-      >
-        {PRODUCT_LABEL[result.product]} Configuration
-      </div>
-      <ProductDetail product={result.product} details={result.details} />
-
-      {/* Call history */}
-      <div
-        style={{
-          fontSize: '0.65rem',
-          fontWeight: 700,
-          color: '#334155',
-          textTransform: 'uppercase',
-          letterSpacing: '0.1em',
-          marginBottom: 10,
-        }}
-      >
-        Call History
-      </div>
-      <CallHistoryPanel did={result.did} />
-    </div>
-  );
-}
-
-interface ResultRowProps {
-  result: DIDResult;
-  isExpanded: boolean;
-  onToggle: () => void;
-}
-
-function ResultRow({ result, isExpanded, onToggle }: ResultRowProps) {
-  const accent = PRODUCT_ACCENT[result.product];
-
-  return (
-    <>
-      <tr
-        onClick={onToggle}
-        style={{
-          cursor: 'pointer',
-          transition: 'background 0.12s',
-          background: isExpanded
-            ? `linear-gradient(90deg, ${accent}08 0%, transparent 60%)`
-            : 'transparent',
-          borderLeft: isExpanded ? `2px solid ${accent}60` : '2px solid transparent',
-        }}
-        onMouseEnter={(e) => {
-          if (!isExpanded) {
-            (e.currentTarget as HTMLTableRowElement).style.background = 'rgba(255,255,255,0.025)';
-          }
-        }}
-        onMouseLeave={(e) => {
-          if (!isExpanded) {
-            (e.currentTarget as HTMLTableRowElement).style.background = 'transparent';
-          }
-        }}
-      >
-        {/* DID */}
-        <td style={{ padding: '14px 20px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            {/* Expand chevron */}
-            <span
-              style={{
-                color: '#334155',
-                flexShrink: 0,
-                transition: 'transform 0.15s',
-                transform: isExpanded ? 'rotate(90deg)' : 'none',
-                lineHeight: 1,
-              }}
-            >
-              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={2} style={{ width: 12, height: 12 }}>
-                <path d="M6 4l4 4-4 4" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            </span>
-            <div>
-              <div
-                style={{
-                  fontSize: '0.9rem',
-                  fontWeight: 700,
-                  color: '#e2e8f0',
-                  fontVariantNumeric: 'tabular-nums',
-                  letterSpacing: '-0.01em',
-                }}
-              >
-                {fmt(result.did)}
-              </div>
-              <div style={{ fontSize: '0.68rem', color: '#475569', fontFamily: 'monospace', marginTop: 2 }}>
-                {result.did}
-              </div>
-            </div>
-          </div>
-        </td>
-
-        {/* Product */}
-        <td style={{ padding: '14px 16px' }}>
-          <Badge variant={PRODUCT_BADGE_VARIANT[result.product]}>
-            {PRODUCT_LABEL[result.product]}
-          </Badge>
-        </td>
-
-        {/* Customer */}
-        <td style={{ padding: '14px 16px' }}>
-          <Link
-            to={`/admin/customers/${result.customer_id}`}
-            onClick={(e) => e.stopPropagation()}
-            style={{
-              color: '#60a5fa',
-              textDecoration: 'none',
-              fontSize: '0.85rem',
-              fontWeight: 500,
-              transition: 'color 0.1s',
-            }}
-            onMouseEnter={(e) => { (e.currentTarget as HTMLAnchorElement).style.color = '#93c5fd'; }}
-            onMouseLeave={(e) => { (e.currentTarget as HTMLAnchorElement).style.color = '#60a5fa'; }}
-          >
-            {result.customer_name}
-          </Link>
-          <div style={{ fontSize: '0.68rem', color: '#334155', marginTop: 1 }}>
-            ID {result.customer_id}
-          </div>
-        </td>
-
-        {/* Status */}
-        <td style={{ padding: '14px 16px' }}>
-          <Badge variant={result.status === 'active' ? 'active' : result.status === 'suspended' ? 'suspended' : 'disabled'}>
-            {result.status}
-          </Badge>
-        </td>
-
-        {/* Details summary */}
-        <td style={{ padding: '14px 20px 14px 16px' }}>
-          <div style={{ fontSize: '0.78rem', color: '#64748b', fontFamily: 'monospace' }}>
-            {getDetailSummary(result.product, result.details)}
-          </div>
-        </td>
-      </tr>
-
-      {/* Expanded panel rendered as a full-width row */}
-      {isExpanded && (
-        <tr>
-          <td colSpan={5} style={{ padding: 0 }}>
-            <ExpandedDetailPanel result={result} />
-          </td>
-        </tr>
-      )}
-    </>
-  );
-}
-
-/** Returns a one-line summary of the most important product detail */
-function getDetailSummary(product: DIDProduct, details: Record<string, string | number | boolean | null>): string {
-  switch (product) {
-    case 'rcf':
-      return details['forward_to'] ? `Fwd → ${details['forward_to']}` : '—';
-    case 'api':
-      return details['voice_url'] ? String(details['voice_url']).slice(0, 48) : '—';
-    case 'trunk':
-      return details['trunk_name'] ? String(details['trunk_name']) : '—';
-    case 'ucaas':
-      return details['extension'] ? `Ext ${details['extension']}` : '—';
-    default:
-      return '—';
-  }
-}
-
-// ─── Results table ────────────────────────────────────────────────────────────
-
-interface DIDTableProps {
-  results: DIDResult[];
-  total: number;
-  currentPage: number;
-  totalPages: number;
-  onPageChange: (page: number) => void;
-  expandedDID: string | null;
-  onToggleExpand: (did: string) => void;
-  isFetching: boolean;
-  /** Short label shown in the header alongside the count, e.g. "results" or "DIDs" */
-  countLabel: string;
-}
-
-function DIDTable({
-  results,
-  total,
-  currentPage,
-  totalPages,
-  onPageChange,
-  expandedDID,
-  onToggleExpand,
-  isFetching,
-  countLabel,
-}: DIDTableProps) {
-  return (
-    <div
-      style={{
-        background: 'rgba(255,255,255,0.02)',
-        border: '1px solid rgba(255,255,255,0.06)',
-        borderRadius: 14,
-        overflow: 'hidden',
-      }}
-    >
-      {/* Table header with result count */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '12px 20px',
-          borderBottom: '1px solid rgba(255,255,255,0.05)',
-          background: 'rgba(0,0,0,0.1)',
-        }}
-      >
-        <span style={{ fontSize: '0.75rem', color: '#64748b', fontWeight: 600 }}>
-          {total === 1 ? `1 ${countLabel.replace(/s$/, '')}` : `${total.toLocaleString()} ${countLabel}`}
-          {isFetching && (
-            <span style={{ marginLeft: 8, opacity: 0.6 }}>
-              <Spinner size="xs" />
-            </span>
-          )}
-        </span>
-        <span style={{ fontSize: '0.7rem', color: '#334155' }}>
-          Click a row to expand details
-        </span>
-      </div>
-
-      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-        <thead>
-          <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-            {['DID', 'Product', 'Customer', 'Status', 'Details'].map((col) => (
-              <th
-                key={col}
-                style={{
-                  padding: '10px 20px',
-                  textAlign: 'left',
-                  fontSize: '0.6rem',
-                  fontWeight: 700,
-                  color: '#334155',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.1em',
-                  whiteSpace: 'nowrap',
-                  background: 'rgba(0,0,0,0.06)',
-                }}
-              >
-                {col}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {results.map((result) => (
-            <ResultRow
-              key={result.did}
-              result={result}
-              isExpanded={expandedDID === result.did}
-              onToggle={() => onToggleExpand(result.did)}
-            />
-          ))}
-        </tbody>
-      </table>
-
-      <Pagination
-        currentPage={currentPage}
-        totalPages={totalPages}
-        onPageChange={onPageChange}
-        isFetching={isFetching}
-      />
-    </div>
-  );
-}
-
-// ─── DID Inventory Tab ────────────────────────────────────────────────────────
-
-interface DIDInventoryTabProps {
-  /** Triggered the first time this tab is rendered so data loads on activation */
-  isActive: boolean;
-}
-
-function DIDInventoryTab({ isActive }: DIDInventoryTabProps) {
-  const [stats, setStats] = useState<InventoryStats | null>(null);
-  const [inventory, setInventory] = useState<InventoryTN[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [hasFetched, setHasFetched] = useState(false);
-  // Hover state tracked by TN key to avoid per-row component overhead
-  const [hoveredTN, setHoveredTN] = useState<string | null>(null);
-
-  useEffect(() => {
-    // Only fetch once, the first time the tab becomes active
-    if (!isActive || hasFetched) return;
-
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-
-    Promise.all([
-      apiRequest<InventoryStats>('GET', '/numbers/stats'),
-      apiRequest<InventoryTN[]>('GET', '/numbers/inventory'),
-    ])
-      .then(([statsData, inventoryData]) => {
-        if (cancelled) return;
-        setStats(statsData);
-        setInventory(inventoryData);
-        setHasFetched(true);
-      })
-      .catch((err: unknown) => {
-        if (cancelled) return;
-        setError(err instanceof Error ? err.message : 'Failed to load inventory');
-        setHasFetched(true);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-
-    return () => { cancelled = true; };
-  }, [isActive, hasFetched]);
-
-  if (loading) {
-    return (
-      <div
-        style={{
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          padding: '72px 0',
-          gap: 14,
-          color: '#64748b',
-          fontSize: '0.875rem',
-        }}
-      >
-        <Spinner size="md" />
-        <span>Fetching TN inventory from Bandwidth…</span>
-        <span style={{ fontSize: '0.75rem', color: '#475569' }}>This may take a few seconds</span>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div
-        style={{
-          padding: '16px 20px',
-          borderRadius: 10,
-          background: 'rgba(239,68,68,0.06)',
-          border: '1px solid rgba(239,68,68,0.18)',
-          color: '#f87171',
-          fontSize: '0.875rem',
-          display: 'flex',
-          alignItems: 'center',
-          gap: 10,
-        }}
-      >
-        <svg viewBox="0 0 20 20" fill="currentColor" style={{ width: 18, height: 18, flexShrink: 0 }}>
-          <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-        </svg>
-        <span>{error}</span>
-      </div>
-    );
-  }
-
-  if (!hasFetched) {
-    // Not yet active — render nothing, avoids flash on mount before isActive
-    return null;
-  }
-
-  const statCards: Array<{ label: string; value: number | string; accent: string }> = [
-    { label: 'Total TNs', value: stats?.total ?? 0, accent: '#3b82f6' },
-    { label: 'Assigned', value: stats?.assigned ?? 0, accent: '#22c55e' },
-    { label: 'Available', value: stats?.available ?? 0, accent: '#f59e0b' },
-  ];
-
-  const productBreakdown: Array<{ key: DIDProduct; label: string }> = [
-    { key: 'rcf', label: 'RCF' },
-    { key: 'api', label: 'API' },
-    { key: 'trunk', label: 'Trunk' },
-    { key: 'ucaas', label: 'UCaaS' },
-  ];
-
-  return (
-    <div>
-      {/* ── Stats Row ─────────────────────────────────────────────── */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
-          gap: 12,
-          marginBottom: 28,
-        }}
-      >
-        {/* Total / Assigned / Available cards */}
-        {statCards.map(({ label, value, accent }) => (
-          <div
-            key={label}
-            style={{
-              background: '#1a1d2e',
-              border: `1px solid ${accent}28`,
-              borderRadius: 8,
-              padding: '16px 20px',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 4,
-            }}
-          >
-            <div style={{ fontSize: '0.62rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
-              {label}
-            </div>
-            <div style={{ fontSize: '1.6rem', fontWeight: 800, color: accent, lineHeight: 1, letterSpacing: '-0.02em' }}>
-              {typeof value === 'number' ? value.toLocaleString() : value}
-            </div>
-          </div>
-        ))}
-
-        {/* By-product breakdown card */}
-        <div
-          style={{
-            background: '#1a1d2e',
-            border: '1px solid rgba(255,255,255,0.06)',
+            width: '100%',
+            padding: '6px 10px 6px 30px',
+            background: 'rgba(30,33,48,0.8)',
+            border: '1px solid rgba(42,47,69,0.8)',
             borderRadius: 8,
-            padding: '16px 20px',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 8,
-            gridColumn: 'span 1',
+            color: '#e2e8f0',
+            fontSize: '0.78rem',
+            outline: 'none',
+            boxSizing: 'border-box',
           }}
-        >
-          <div style={{ fontSize: '0.62rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
-            By Product
-          </div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 14px' }}>
-            {productBreakdown.map(({ key, label }) => (
-              <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                <span
-                  style={{
-                    display: 'inline-block',
-                    width: 8,
-                    height: 8,
-                    borderRadius: '50%',
-                    background: INV_PRODUCT_COLOR[key],
-                    flexShrink: 0,
-                  }}
-                />
-                <span style={{ fontSize: '0.75rem', color: '#94a3b8', fontWeight: 600 }}>
-                  {label}
-                </span>
-                <span style={{ fontSize: '0.75rem', color: '#e2e8f0', fontWeight: 700 }}>
-                  {(stats?.by_product?.[key] ?? 0).toLocaleString()}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
+          onFocus={(e) => {
+            e.currentTarget.style.borderColor = 'rgba(59,130,246,0.5)';
+          }}
+          onBlur={(e) => {
+            e.currentTarget.style.borderColor = 'rgba(42,47,69,0.8)';
+          }}
+        />
+        {search && (
+          <button
+            type="button"
+            onClick={() => onSearchChange('')}
+            style={{
+              position: 'absolute',
+              right: 8,
+              top: '50%',
+              transform: 'translateY(-50%)',
+              color: '#475569',
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+            }}
+          >
+            <X size={12} />
+          </button>
+        )}
       </div>
 
-      {/* ── Inventory Table ───────────────────────────────────────── */}
-      <div
+      {/* State filter */}
+      <select
+        value={stateFilter}
+        onChange={(e) => onStateChange(e.target.value)}
         style={{
-          background: 'rgba(255,255,255,0.02)',
-          border: '1px solid rgba(255,255,255,0.06)',
-          borderRadius: 14,
-          overflow: 'hidden',
+          padding: '6px 28px 6px 10px',
+          background: 'rgba(30,33,48,0.8)',
+          border: '1px solid rgba(42,47,69,0.8)',
+          borderRadius: 8,
+          color: stateFilter ? '#e2e8f0' : '#475569',
+          fontSize: '0.78rem',
+          outline: 'none',
+          cursor: 'pointer',
+          minWidth: 100,
+          appearance: 'none',
+          backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23475569' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E")`,
+          backgroundRepeat: 'no-repeat',
+          backgroundPosition: 'calc(100% - 8px) center',
         }}
       >
-        {/* Table header bar */}
+        <option value="">All States</option>
+        {US_STATES.map((s) => (
+          <option key={s} value={s}>{s}</option>
+        ))}
+      </select>
+
+      {/* Status filter */}
+      {!hideStatus && (
+        <select
+          value={statusFilter}
+          onChange={(e) => onStatusChange(e.target.value as DidStatus | '')}
+          style={{
+            padding: '6px 28px 6px 10px',
+            background: 'rgba(30,33,48,0.8)',
+            border: '1px solid rgba(42,47,69,0.8)',
+            borderRadius: 8,
+            color: statusFilter ? '#e2e8f0' : '#475569',
+            fontSize: '0.78rem',
+            outline: 'none',
+            cursor: 'pointer',
+            minWidth: 130,
+            appearance: 'none',
+            backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23475569' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E")`,
+            backgroundRepeat: 'no-repeat',
+            backgroundPosition: 'calc(100% - 8px) center',
+          }}
+        >
+          <option value="">All Statuses</option>
+          <option value="available">Available</option>
+          <option value="assigned">Assigned</option>
+          <option value="reserved">Reserved</option>
+          <option value="porting_in">Porting In</option>
+          <option value="porting_out">Porting Out</option>
+          <option value="suspended">Suspended</option>
+        </select>
+      )}
+    </div>
+  );
+}
+
+// ─── Assign Modal ───────────────────────────────────────────────────────────────
+
+interface AssignModalProps {
+  did: DidInventoryItem | null;
+  open: boolean;
+  onClose: () => void;
+  onSuccess: () => void;
+}
+
+function AssignModal({ did, open, onClose, onSuccess }: AssignModalProps) {
+  // ALL hooks unconditionally at the top — no exceptions (React #310 prevention)
+  const [customerId, setCustomerId] = useState('');
+  const [productType, setProductType] = useState('rcf');
+  const [notes, setNotes] = useState('');
+  const { toastOk, toastErr } = useToast();
+  const queryClient = useQueryClient();
+
+  const { data: customersData, isLoading: customersLoading } = useQuery({
+    queryKey: ['customers-dropdown'],
+    queryFn: () => listCustomers({ limit: 500 }),
+    enabled: open,
+  });
+
+  const assignMutation = useMutation({
+    mutationFn: () =>
+      assignDid(did!.did, {
+        customer_id: Number(customerId),
+        product_type: productType,
+        notes: notes.trim() || undefined,
+      }),
+    onSuccess: () => {
+      toastOk(`${fmt(did!.did)} assigned successfully`);
+      void queryClient.invalidateQueries({ queryKey: ['did-inventory'] });
+      void queryClient.invalidateQueries({ queryKey: ['did-stats'] });
+      void queryClient.invalidateQueries({ queryKey: ['did-available'] });
+      setCustomerId('');
+      setProductType('rcf');
+      setNotes('');
+      onSuccess();
+      onClose();
+    },
+    onError: (err: Error) => {
+      toastErr(err.message ?? 'Failed to assign number');
+    },
+  });
+
+  // Guard AFTER all hooks
+  if (!did) return null;
+
+  const customers = customersData?.items ?? [];
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title={`Assign ${fmt(did.did)}`}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            variant="primary"
+            loading={assignMutation.isPending}
+            disabled={!customerId || assignMutation.isPending}
+            onClick={() => assignMutation.mutate()}
+          >
+            Assign Number
+          </Button>
+        </>
+      }
+    >
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        {/* DID info row */}
+        <div
+          style={{
+            padding: '10px 14px',
+            background: 'rgba(59,130,246,0.06)',
+            border: '1px solid rgba(59,130,246,0.18)',
+            borderRadius: 10,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+          }}
+        >
+          <Phone size={14} color="#60a5fa" />
+          <div>
+            <div style={{ fontSize: '0.9rem', fontWeight: 700, color: '#e2e8f0', letterSpacing: '0.02em' }}>
+              {fmt(did.did)}
+            </div>
+            {(did.city || did.state) && (
+              <div style={{ fontSize: '0.72rem', color: '#64748b', marginTop: 2 }}>
+                {[did.city, did.state].filter(Boolean).join(', ')}
+                {did.rate_center && ` · ${did.rate_center}`}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Customer selector */}
+        <FormField
+          as="select"
+          label="Customer"
+          required
+          value={customerId}
+          onChange={(e) => setCustomerId((e.target as HTMLSelectElement).value)}
+          disabled={customersLoading}
+        >
+          <option value="">
+            {customersLoading ? 'Loading customers…' : 'Select a customer'}
+          </option>
+          {customers.map((c) => (
+            <option key={c.id} value={String(c.id)}>
+              {c.name}
+            </option>
+          ))}
+        </FormField>
+
+        {/* Product type selector */}
+        <FormField
+          as="select"
+          label="Product Type"
+          required
+          value={productType}
+          onChange={(e) => setProductType((e.target as HTMLSelectElement).value)}
+        >
+          {PRODUCT_TYPES.map((pt) => (
+            <option key={pt.value} value={pt.value}>
+              {pt.label}
+            </option>
+          ))}
+        </FormField>
+
+        {/* Notes */}
+        <FormField
+          as="textarea"
+          label="Notes (optional)"
+          value={notes}
+          onChange={(e) => setNotes((e.target as HTMLTextAreaElement).value)}
+          placeholder="Internal note about this assignment…"
+        />
+      </div>
+    </Modal>
+  );
+}
+
+// ─── Unassign Confirm Modal ─────────────────────────────────────────────────────
+
+interface UnassignModalProps {
+  did: DidInventoryItem | null;
+  open: boolean;
+  onClose: () => void;
+  onSuccess: () => void;
+}
+
+function UnassignModal({ did, open, onClose, onSuccess }: UnassignModalProps) {
+  // Hooks always first
+  const { toastOk, toastErr } = useToast();
+  const queryClient = useQueryClient();
+
+  const unassignMutation = useMutation({
+    mutationFn: () => unassignDid(did!.did),
+    onSuccess: () => {
+      toastOk(`${fmt(did!.did)} unassigned`);
+      void queryClient.invalidateQueries({ queryKey: ['did-inventory'] });
+      void queryClient.invalidateQueries({ queryKey: ['did-stats'] });
+      void queryClient.invalidateQueries({ queryKey: ['did-available'] });
+      onSuccess();
+      onClose();
+    },
+    onError: (err: Error) => {
+      toastErr(err.message ?? 'Failed to unassign number');
+    },
+  });
+
+  // Guard after hooks
+  if (!did) return null;
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title="Unassign Number"
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            variant="danger"
+            loading={unassignMutation.isPending}
+            onClick={() => unassignMutation.mutate()}
+          >
+            Unassign
+          </Button>
+        </>
+      }
+    >
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <p style={{ fontSize: '0.85rem', color: '#94a3b8', lineHeight: 1.6 }}>
+          This will remove <strong style={{ color: '#e2e8f0' }}>{fmt(did.did)}</strong> from{' '}
+          <strong style={{ color: '#e2e8f0' }}>{did.customer_name ?? 'this customer'}</strong> and
+          return it to the available pool. This action takes effect immediately.
+        </p>
+        <div
+          style={{
+            padding: '10px 14px',
+            background: 'rgba(239,68,68,0.07)',
+            border: '1px solid rgba(239,68,68,0.20)',
+            borderRadius: 8,
+            fontSize: '0.75rem',
+            color: '#f87171',
+            lineHeight: 1.55,
+          }}
+        >
+          Any active routing rules for this number will stop working immediately.
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// ─── Tab: Inventory ─────────────────────────────────────────────────────────────
+
+function InventoryTab() {
+  // All hooks unconditionally first
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState<DidStatus | ''>('');
+  const [stateFilter, setStateFilter] = useState('');
+  const [offset, setOffset] = useState(0);
+  const [assignTarget, setAssignTarget] = useState<DidInventoryItem | null>(null);
+  const [unassignTarget, setUnassignTarget] = useState<DidInventoryItem | null>(null);
+  const { toastOk, toastErr } = useToast();
+  const queryClient = useQueryClient();
+
+  const { data: statsData, isLoading: statsLoading } = useQuery({
+    queryKey: ['did-stats'],
+    queryFn: getDidStats,
+  });
+
+  const { data, isLoading, isFetching } = useQuery({
+    queryKey: ['did-inventory', { search, statusFilter, stateFilter, offset }],
+    queryFn: () =>
+      listDidInventory({
+        search: search || undefined,
+        status: statusFilter || undefined,
+        state: stateFilter || undefined,
+        limit: PAGE_SIZE,
+        offset,
+      }),
+    placeholderData: (prev) => prev,
+  });
+
+  const syncMutation = useMutation({
+    mutationFn: syncDidInventory,
+    onSuccess: (result) => {
+      toastOk(`Sync complete — ${result.synced} numbers updated`);
+      void queryClient.invalidateQueries({ queryKey: ['did-inventory'] });
+      void queryClient.invalidateQueries({ queryKey: ['did-stats'] });
+      void queryClient.invalidateQueries({ queryKey: ['did-available'] });
+    },
+    onError: (err: Error) => {
+      toastErr(err.message ?? 'Sync failed');
+    },
+  });
+
+  const handleSearchChange = useCallback((v: string) => {
+    setSearch(v);
+    setOffset(0);
+  }, []);
+
+  const handleStatusChange = useCallback((v: DidStatus | '') => {
+    setStatusFilter(v);
+    setOffset(0);
+  }, []);
+
+  const handleStateChange = useCallback((v: string) => {
+    setStateFilter(v);
+    setOffset(0);
+  }, []);
+
+  const items = data?.items ?? [];
+  const total = data?.total ?? 0;
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+      {/* Stats bar */}
+      <div
+        className="animate-fade-in-up"
+        style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}
+      >
+        <DidStatCard
+          label="Total Numbers"
+          value={statsLoading ? '—' : (statsData?.total ?? 0)}
+          accent="#3b82f6"
+          icon={<Phone size={17} />}
+          delay="0.05s"
+        />
+        <DidStatCard
+          label="Available"
+          value={statsLoading ? '—' : (statsData?.available ?? 0)}
+          accent="#60a5fa"
+          icon={<CheckCircle size={17} />}
+          delay="0.10s"
+        />
+        <DidStatCard
+          label="Assigned"
+          value={statsLoading ? '—' : (statsData?.assigned ?? 0)}
+          accent="#4ade80"
+          icon={<Users size={17} />}
+          delay="0.15s"
+        />
+        <DidStatCard
+          label="Reserved"
+          value={statsLoading ? '—' : (statsData?.reserved ?? 0)}
+          accent="#fbbf24"
+          icon={<Clock size={17} />}
+          delay="0.20s"
+        />
+      </div>
+
+      {/* Table */}
+      <GlassPanel className="animate-fade-in-up" style={{ animationDelay: '0.25s' }}>
+        {/* Table toolbar */}
         <div
           style={{
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            padding: '12px 20px',
-            borderBottom: '1px solid rgba(255,255,255,0.05)',
-            background: 'rgba(0,0,0,0.1)',
+            padding: '14px 16px',
+            borderBottom: '1px solid rgba(42,47,69,0.45)',
           }}
         >
-          <span style={{ fontSize: '0.75rem', color: '#64748b', fontWeight: 600 }}>
-            {inventory.length === 1 ? '1 number' : `${inventory.length.toLocaleString()} numbers`}
-          </span>
-          <span style={{ fontSize: '0.7rem', color: '#334155' }}>
-            Bandwidth TN inventory
-          </span>
+          <div style={{ fontSize: '0.78rem', color: '#64748b' }}>
+            {isFetching ? (
+              <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Spinner size="xs" /> Loading…
+              </span>
+            ) : (
+              <span>
+                <strong style={{ color: '#94a3b8' }}>{total.toLocaleString()}</strong> numbers
+                {(search || statusFilter || stateFilter) && ' (filtered)'}
+              </span>
+            )}
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            icon={<RefreshCw size={13} />}
+            loading={syncMutation.isPending}
+            onClick={() => syncMutation.mutate()}
+          >
+            Sync from Bandwidth
+          </Button>
         </div>
 
+        <FilterBar
+          search={search}
+          onSearchChange={handleSearchChange}
+          statusFilter={statusFilter}
+          onStatusChange={handleStatusChange}
+          stateFilter={stateFilter}
+          onStateChange={handleStateChange}
+        />
+
+        {/* Table */}
         <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 680 }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
-              <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-                {['Number', 'City', 'State', 'Rate Center', 'BW Status', 'Assignment'].map((col) => (
-                  <th
-                    key={col}
-                    style={{
-                      padding: '10px 16px',
-                      textAlign: 'left',
-                      fontSize: '0.6rem',
-                      fontWeight: 700,
-                      color: '#334155',
-                      textTransform: 'uppercase',
-                      letterSpacing: '0.1em',
-                      whiteSpace: 'nowrap',
-                      background: 'rgba(0,0,0,0.06)',
-                    }}
-                  >
-                    {col}
-                  </th>
-                ))}
+              <tr>
+                <Th>DID</Th>
+                <Th>City</Th>
+                <Th>State</Th>
+                <Th>Status</Th>
+                <Th>Product</Th>
+                <Th>Customer</Th>
+                <Th right>Actions</Th>
               </tr>
             </thead>
             <tbody>
-              {inventory.map((tn) => {
-                const isHovered = hoveredTN === tn.tn;
-                const assignment = tn.assigned_to;
-
-                return (
-                  <tr
-                    key={tn.tn}
-                    style={{
-                      background: isHovered ? 'rgba(255,255,255,0.025)' : 'transparent',
-                      transition: 'background 0.15s',
-                      borderBottom: '1px solid rgba(255,255,255,0.03)',
-                    }}
-                    onMouseEnter={() => setHoveredTN(tn.tn)}
-                    onMouseLeave={() => setHoveredTN(null)}
-                  >
-                    {/* Number */}
-                    <td style={{ padding: '12px 16px', whiteSpace: 'nowrap' }}>
-                      <span
-                        style={{
-                          fontSize: '0.875rem',
-                          fontWeight: 700,
-                          color: '#e2e8f0',
-                          fontFamily: 'monospace',
-                          fontVariantNumeric: 'tabular-nums',
-                          letterSpacing: '-0.01em',
-                        }}
-                      >
-                        {tn.tn}
-                      </span>
-                    </td>
-
-                    {/* City */}
-                    <td style={{ padding: '12px 16px', fontSize: '0.82rem', color: '#94a3b8', whiteSpace: 'nowrap' }}>
-                      {tn.city || '—'}
-                    </td>
-
-                    {/* State */}
-                    <td style={{ padding: '12px 16px', fontSize: '0.82rem', color: '#94a3b8', whiteSpace: 'nowrap' }}>
-                      {tn.state || '—'}
-                    </td>
-
-                    {/* Rate Center */}
-                    <td style={{ padding: '12px 16px', fontSize: '0.8rem', color: '#64748b', whiteSpace: 'nowrap' }}>
-                      {tn.rate_center || '—'}
-                    </td>
-
-                    {/* BW Status */}
-                    <td style={{ padding: '12px 16px', whiteSpace: 'nowrap' }}>
-                      <span
-                        style={{
-                          fontSize: '0.68rem',
-                          fontWeight: 700,
-                          textTransform: 'uppercase',
-                          letterSpacing: '0.04em',
-                          color: tn.bw_status === 'Inservice' ? '#4ade80' : '#94a3b8',
-                          background: tn.bw_status === 'Inservice' ? 'rgba(34,197,94,0.1)' : 'rgba(148,163,184,0.08)',
-                          border: `1px solid ${tn.bw_status === 'Inservice' ? 'rgba(34,197,94,0.25)' : 'rgba(148,163,184,0.15)'}`,
-                          borderRadius: 4,
-                          padding: '2px 8px',
-                        }}
-                      >
-                        {tn.bw_status || '—'}
-                      </span>
-                    </td>
-
-                    {/* Assignment */}
-                    <td style={{ padding: '12px 16px', whiteSpace: 'nowrap' }}>
-                      {assignment ? (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                          <span
-                            style={{
-                              fontSize: '0.65rem',
-                              fontWeight: 700,
-                              textTransform: 'uppercase',
-                              letterSpacing: '0.05em',
-                              color: INV_PRODUCT_COLOR[assignment.product],
-                              background: INV_PRODUCT_BG[assignment.product],
-                              border: `1px solid ${INV_PRODUCT_BORDER[assignment.product]}`,
-                              borderRadius: 20,
-                              padding: '2px 9px',
-                            }}
-                          >
-                            {PRODUCT_LABEL[assignment.product]}
-                          </span>
-                          <span style={{ fontSize: '0.82rem', color: '#94a3b8' }}>
-                            {assignment.customer_name}
-                          </span>
-                        </div>
-                      ) : (
-                        <span
-                          style={{
-                            fontSize: '0.78rem',
-                            fontWeight: 600,
-                            color: '#4ade80',
-                          }}
-                        >
-                          Available
-                        </span>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-
-              {inventory.length === 0 && (
+              {isLoading ? (
                 <tr>
-                  <td
-                    colSpan={6}
-                    style={{
-                      padding: '48px 16px',
-                      textAlign: 'center',
-                      color: '#334155',
-                      fontSize: '0.85rem',
-                      fontStyle: 'italic',
-                    }}
-                  >
-                    No TNs found in inventory.
+                  <td colSpan={7} style={{ textAlign: 'center', padding: 48, color: '#475569' }}>
+                    <Spinner size="sm" />
                   </td>
                 </tr>
+              ) : items.length === 0 ? (
+                <tr>
+                  <td colSpan={7} style={{ textAlign: 'center', padding: 48, color: '#475569', fontSize: '0.82rem' }}>
+                    No numbers found
+                    {(search || statusFilter || stateFilter) && ' matching those filters'}
+                  </td>
+                </tr>
+              ) : (
+                items.map((item) => (
+                  <tr
+                    key={item.id}
+                    style={{ transition: 'background 0.1s' }}
+                    onMouseEnter={(e) => {
+                      (e.currentTarget as HTMLTableRowElement).style.background = 'rgba(255,255,255,0.025)';
+                    }}
+                    onMouseLeave={(e) => {
+                      (e.currentTarget as HTMLTableRowElement).style.background = '';
+                    }}
+                  >
+                    <Td>
+                      <span style={{ fontFamily: 'monospace', fontSize: '0.82rem', color: '#93c5fd', letterSpacing: '0.03em' }}>
+                        {fmt(item.did)}
+                      </span>
+                    </Td>
+                    <Td muted>{item.city ?? '—'}</Td>
+                    <Td muted>{item.state ?? '—'}</Td>
+                    <Td>
+                      <StatusBadge status={item.status} />
+                    </Td>
+                    <Td>
+                      {item.product_type ? (
+                        <ProductPill type={item.product_type} />
+                      ) : (
+                        <span style={{ color: '#334155', fontSize: '0.75rem' }}>—</span>
+                      )}
+                    </Td>
+                    <Td>
+                      {item.customer_name ? (
+                        <span style={{ fontSize: '0.78rem', color: '#94a3b8' }}>
+                          {item.customer_name}
+                        </span>
+                      ) : (
+                        <span style={{ color: '#334155', fontSize: '0.75rem' }}>—</span>
+                      )}
+                    </Td>
+                    <Td right>
+                      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6 }}>
+                        {item.status === 'available' && (
+                          <Button
+                            size="xs"
+                            variant="primary"
+                            onClick={() => setAssignTarget(item)}
+                          >
+                            Assign
+                          </Button>
+                        )}
+                        {item.status === 'assigned' && (
+                          <Button
+                            size="xs"
+                            variant="danger"
+                            onClick={() => setUnassignTarget(item)}
+                          >
+                            Unassign
+                          </Button>
+                        )}
+                      </div>
+                    </Td>
+                  </tr>
+                ))
               )}
             </tbody>
           </table>
         </div>
-      </div>
+
+        {/* Pagination */}
+        {total > PAGE_SIZE && (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '12px 16px',
+              borderTop: '1px solid rgba(42,47,69,0.45)',
+              background: 'rgba(0,0,0,0.08)',
+            }}
+          >
+            <span style={{ fontSize: '0.72rem', color: '#475569' }}>
+              Showing {Math.min(offset + PAGE_SIZE, total).toLocaleString()} of{' '}
+              {total.toLocaleString()}
+            </span>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <Button
+                size="xs"
+                variant="ghost"
+                disabled={offset === 0}
+                onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}
+              >
+                Previous
+              </Button>
+              <Button
+                size="xs"
+                variant="ghost"
+                disabled={offset + PAGE_SIZE >= total}
+                onClick={() => setOffset(offset + PAGE_SIZE)}
+              >
+                Next
+              </Button>
+            </div>
+          </div>
+        )}
+      </GlassPanel>
+
+      {/* Modals */}
+      <AssignModal
+        did={assignTarget}
+        open={assignTarget !== null}
+        onClose={() => setAssignTarget(null)}
+        onSuccess={() => setAssignTarget(null)}
+      />
+      <UnassignModal
+        did={unassignTarget}
+        open={unassignTarget !== null}
+        onClose={() => setUnassignTarget(null)}
+        onSuccess={() => setUnassignTarget(null)}
+      />
     </div>
   );
 }
 
-// ─── Tab definitions ──────────────────────────────────────────────────────────
+// ─── Tab: Available Numbers ─────────────────────────────────────────────────────
 
-const TABS = [
-  { id: 'lookup', label: 'DID Lookup' },
-  { id: 'inventory', label: 'DID Inventory' },
-] as const;
+interface AvailableTabProps {
+  isAdmin: boolean;
+}
 
-type TabId = typeof TABS[number]['id'];
+function AvailableTab({ isAdmin }: AvailableTabProps) {
+  // All hooks unconditionally first
+  const [search, setSearch] = useState('');
+  const [stateFilter, setStateFilter] = useState('');
+  const [assignTarget, setAssignTarget] = useState<DidInventoryItem | null>(null);
+  const { toastOk, toastErr } = useToast();
+  const queryClient = useQueryClient();
 
-// ─── Main Page ────────────────────────────────────────────────────────────────
-
-export function DIDSearchPage() {
-  // ── Tab state — must stay above ALL early returns (React #310 rule) ─────────
-  const [activeTab, setActiveTab] = useState<TabId>('lookup');
-
-  // ── DID Lookup tab state ────────────────────────────────────────────────────
-  const [inputValue, setInputValue] = useState('');
-  // The committed search query. Empty string = browse-all mode.
-  const [query, setQuery] = useState('');
-  const [expandedDID, setExpandedDID] = useState<string | null>(null);
-  // Separate page cursors for browse and search modes so switching back keeps
-  // the user on the same browse page they left.
-  const [browsePage, setBrowsePage] = useState(0);
-  const [searchPage, setSearchPage] = useState(0);
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const isSearching = query.length >= 4;
-  const currentPage = isSearching ? searchPage : browsePage;
-
-  const handleInputChange = useCallback((value: string) => {
-    setInputValue(value);
-
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-
-    const digits = value.replace(/\D/g, '');
-    if (digits.length >= 4) {
-      debounceRef.current = setTimeout(() => {
-        setQuery(value.trim());
-        setSearchPage(0);   // reset search pagination on new query
-        setExpandedDID(null);
-      }, 300);
-    } else {
-      setQuery('');
-      setExpandedDID(null);
-    }
-  }, []);
-
-  // Cleanup debounce timer on unmount
-  useEffect(() => {
-    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
-  }, []);
-
-  // Browse-all query — always enabled; fetches the current browse page.
-  const browseQuery = useQuery({
-    queryKey: ['did-browse', browsePage],
-    queryFn: () => fetchDIDs({ limit: PAGE_SIZE, offset: browsePage * PAGE_SIZE }),
-    staleTime: 30_000,
-    // Keep previous page data visible while the next page loads
+  const { data: items = [], isLoading } = useQuery({
+    queryKey: ['did-available', { search, stateFilter }],
+    queryFn: () =>
+      listAvailableDids({
+        search: search || undefined,
+        state: stateFilter || undefined,
+        limit: 100,
+      }),
     placeholderData: (prev) => prev,
   });
 
-  // Search query — only enabled when the user has typed enough digits.
-  const searchQueryResult = useQuery({
-    queryKey: ['did-search', query, searchPage],
-    queryFn: () => fetchDIDs({ q: query, limit: PAGE_SIZE, offset: searchPage * PAGE_SIZE }),
-    enabled: isSearching,
-    staleTime: 15_000,
-    placeholderData: (prev) => prev,
+  const requestMutation = useMutation({
+    mutationFn: (did: string) => requestDid(did),
+    onSuccess: (_data, did) => {
+      toastOk(`${fmt(did)} has been requested`);
+      void queryClient.invalidateQueries({ queryKey: ['did-available'] });
+      void queryClient.invalidateQueries({ queryKey: ['did-my'] });
+    },
+    onError: (err: Error) => {
+      toastErr(err.message ?? 'Request failed');
+    },
   });
 
-  // Pick the active data source based on mode
-  const activeQuery = isSearching ? searchQueryResult : browseQuery;
-  const { data, isLoading, isError, isFetching } = activeQuery;
-
-  const results = data?.results ?? [];
-  const total = data?.total ?? 0;
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-
-  function handlePageChange(page: number) {
-    setExpandedDID(null);
-    if (isSearching) {
-      setSearchPage(page);
-    } else {
-      setBrowsePage(page);
-    }
-  }
-
-  function handleToggleExpand(did: string) {
-    setExpandedDID((prev) => (prev === did ? null : did));
-  }
-
-  function handleClearSearch() {
-    setInputValue('');
-    setQuery('');
-    setSearchPage(0);
-    setExpandedDID(null);
-  }
+  const handleSearchChange = useCallback((v: string) => setSearch(v), []);
+  const handleStateChange = useCallback((v: string) => setStateFilter(v), []);
 
   return (
-    <div style={{ paddingTop: 8 }}>
-      {/* ── Page Header ─────────────────────────────────────────── */}
-      <div
-        style={{
-          marginBottom: 28,
-          paddingTop: 8,
-          paddingBottom: 24,
-          borderBottom: '1px solid rgba(42,47,69,0.6)',
-          textAlign: 'center',
-        }}
-      >
-        {/* Icon badge */}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+      <GlassPanel className="animate-fade-in-up">
+        {/* Toolbar */}
         <div
           style={{
-            width: 48,
-            height: 48,
-            borderRadius: 14,
-            display: 'inline-flex',
+            display: 'flex',
             alignItems: 'center',
-            justifyContent: 'center',
-            background: 'linear-gradient(135deg, rgba(59,130,246,0.2) 0%, rgba(59,130,246,0.1) 100%)',
-            border: '1px solid rgba(59,130,246,0.3)',
-            color: '#60a5fa',
-            marginBottom: 14,
+            justifyContent: 'space-between',
+            padding: '14px 16px',
+            borderBottom: '1px solid rgba(42,47,69,0.45)',
           }}
-          aria-hidden="true"
         >
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} style={{ width: 24, height: 24 }}>
-            <path d="m21 21-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0Z" strokeLinecap="round" strokeLinejoin="round" />
-            <path d="M2.25 6.338c0 12.03 9.716 21.75 21.75 21.75" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
+          <div style={{ fontSize: '0.78rem', color: '#64748b' }}>
+            <strong style={{ color: '#94a3b8' }}>{items.length.toLocaleString()}</strong>{' '}
+            available numbers
+          </div>
         </div>
 
-        <h1
-          style={{
-            fontSize: '1.5rem',
-            fontWeight: 800,
-            letterSpacing: '-0.02em',
-            color: '#e2e8f0',
-            lineHeight: 1.15,
-            margin: '0 0 6px',
-          }}
-        >
-          DID Management
-        </h1>
-        <p
-          style={{
-            fontSize: '0.85rem',
-            color: '#718096',
-            marginTop: 4,
-            lineHeight: 1.6,
-            maxWidth: 480,
-            marginLeft: 'auto',
-            marginRight: 'auto',
-          }}
-        >
-          Search DIDs across all products and customers, or browse the full Bandwidth TN inventory.
-        </p>
-      </div>
-
-      {/* ── Tab Bar ─────────────────────────────────────────────── */}
-      <TabBar
-        tabs={TABS as unknown as Array<{ id: string; label: string }>}
-        activeTab={activeTab}
-        onTabChange={(id) => setActiveTab(id as TabId)}
-      />
-
-      {/* ── DID Inventory Tab ────────────────────────────────────── */}
-      {activeTab === 'inventory' && (
-        <DIDInventoryTab isActive={activeTab === 'inventory'} />
-      )}
-
-      {/* ── DID Lookup Tab ──────────────────────────────────────── */}
-      {activeTab === 'lookup' && (
-      <div>
-
-      {/* ── Search Bar ──────────────────────────────────────────── */}
-      <div style={{ position: 'relative', marginBottom: 24 }}>
-        {/* Search icon */}
-        <span
-          aria-hidden="true"
-          style={{
-            position: 'absolute',
-            left: 18,
-            top: '50%',
-            transform: 'translateY(-50%)',
-            color: '#475569',
-            display: 'flex',
-            alignItems: 'center',
-            pointerEvents: 'none',
-            zIndex: 1,
-          }}
-        >
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} style={{ width: 20, height: 20 }}>
-            <path d="m21 21-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0Z" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </span>
-
-        <input
-          type="text"
-          value={inputValue}
-          onChange={(e) => handleInputChange(e.target.value)}
-          placeholder="Search by DID, phone number, or digits..."
-          autoFocus
-          style={{
-            width: '100%',
-            boxSizing: 'border-box',
-            padding: '16px 52px 16px 52px',
-            fontSize: '1rem',
-            fontWeight: 500,
-            background: 'rgba(255,255,255,0.03)',
-            border: '1px solid rgba(255,255,255,0.08)',
-            borderRadius: 14,
-            color: '#f1f5f9',
-            outline: 'none',
-            transition: 'border-color 0.15s, box-shadow 0.15s, background 0.15s',
-            boxShadow: '0 4px 24px rgba(0,0,0,0.3)',
-            fontFamily: 'inherit',
-          }}
-          onFocus={(e) => {
-            e.currentTarget.style.borderColor = 'rgba(59,130,246,0.5)';
-            e.currentTarget.style.boxShadow = '0 0 0 3px rgba(59,130,246,0.12), 0 4px 24px rgba(0,0,0,0.3)';
-            e.currentTarget.style.background = 'rgba(255,255,255,0.04)';
-          }}
-          onBlur={(e) => {
-            e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)';
-            e.currentTarget.style.boxShadow = '0 4px 24px rgba(0,0,0,0.3)';
-            e.currentTarget.style.background = 'rgba(255,255,255,0.03)';
-          }}
+        <FilterBar
+          search={search}
+          onSearchChange={handleSearchChange}
+          statusFilter=""
+          onStatusChange={() => undefined}
+          stateFilter={stateFilter}
+          onStateChange={handleStateChange}
+          placeholder="Search area code, city, rate center…"
+          hideStatus
         />
 
-        {/* Right-side: spinner or clear button */}
-        <span
+        {/* Number grid / table */}
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr>
+                <Th>DID</Th>
+                <Th>City</Th>
+                <Th>State</Th>
+                <Th>LATA</Th>
+                <Th>Rate Center</Th>
+                <Th right>Action</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {isLoading ? (
+                <tr>
+                  <td colSpan={6} style={{ textAlign: 'center', padding: 48, color: '#475569' }}>
+                    <Spinner size="sm" />
+                  </td>
+                </tr>
+              ) : items.length === 0 ? (
+                <tr>
+                  <td colSpan={6} style={{ textAlign: 'center', padding: 48, color: '#475569', fontSize: '0.82rem' }}>
+                    No available numbers
+                    {(search || stateFilter) && ' matching those filters'}
+                  </td>
+                </tr>
+              ) : (
+                items.map((item) => (
+                  <tr
+                    key={item.id}
+                    onMouseEnter={(e) => {
+                      (e.currentTarget as HTMLTableRowElement).style.background = 'rgba(255,255,255,0.025)';
+                    }}
+                    onMouseLeave={(e) => {
+                      (e.currentTarget as HTMLTableRowElement).style.background = '';
+                    }}
+                  >
+                    <Td>
+                      <span style={{ fontFamily: 'monospace', fontSize: '0.82rem', color: '#93c5fd', letterSpacing: '0.03em' }}>
+                        {fmt(item.did)}
+                      </span>
+                    </Td>
+                    <Td muted>{item.city ?? '—'}</Td>
+                    <Td muted>{item.state ?? '—'}</Td>
+                    <Td muted>{item.lata ?? '—'}</Td>
+                    <Td muted>{item.rate_center ?? '—'}</Td>
+                    <Td right>
+                      {isAdmin ? (
+                        <Button
+                          size="xs"
+                          variant="primary"
+                          onClick={() => setAssignTarget(item)}
+                        >
+                          Assign
+                        </Button>
+                      ) : (
+                        <Button
+                          size="xs"
+                          variant="primary"
+                          loading={requestMutation.isPending}
+                          onClick={() => requestMutation.mutate(item.did)}
+                        >
+                          Request
+                        </Button>
+                      )}
+                    </Td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </GlassPanel>
+
+      {/* Assign modal — admin only */}
+      {isAdmin && (
+        <AssignModal
+          did={assignTarget}
+          open={assignTarget !== null}
+          onClose={() => setAssignTarget(null)}
+          onSuccess={() => setAssignTarget(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─── Tab: Assignments (admin) ───────────────────────────────────────────────────
+
+function AssignmentsTab() {
+  // All hooks unconditionally first
+  const [search, setSearch] = useState('');
+  const [stateFilter, setStateFilter] = useState('');
+  const [unassignTarget, setUnassignTarget] = useState<DidInventoryItem | null>(null);
+  const queryClient = useQueryClient();
+
+  const { data, isLoading, isFetching } = useQuery({
+    queryKey: ['did-inventory', { search, stateFilter, statusFilter: 'assigned', offset: 0 }],
+    queryFn: () =>
+      listDidInventory({
+        status: 'assigned',
+        search: search || undefined,
+        state: stateFilter || undefined,
+        limit: 200,
+        offset: 0,
+      }),
+    placeholderData: (prev) => prev,
+  });
+
+  const handleSearchChange = useCallback((v: string) => setSearch(v), []);
+  const handleStateChange = useCallback((v: string) => setStateFilter(v), []);
+
+  const items = data?.items ?? [];
+
+  // Group items by customer for display
+  const byCustomer = items.reduce<Record<string, DidInventoryItem[]>>((acc, item) => {
+    const key = item.customer_name ?? `Customer #${item.customer_id ?? '?'}`;
+    if (!acc[key]) acc[key] = [];
+    acc[key].push(item);
+    return acc;
+  }, {});
+
+  const customerGroups = Object.entries(byCustomer).sort(([a], [b]) => a.localeCompare(b));
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+      <GlassPanel className="animate-fade-in-up">
+        <div
           style={{
-            position: 'absolute',
-            right: 16,
-            top: '50%',
-            transform: 'translateY(-50%)',
             display: 'flex',
             alignItems: 'center',
-            gap: 8,
+            justifyContent: 'space-between',
+            padding: '14px 16px',
+            borderBottom: '1px solid rgba(42,47,69,0.45)',
           }}
         >
-          {isFetching && isSearching && <Spinner size="sm" />}
-          {inputValue && !(isFetching && isSearching) && (
-            <button
-              type="button"
-              onClick={handleClearSearch}
-              title="Clear search"
+          <div style={{ fontSize: '0.78rem', color: '#64748b' }}>
+            {isFetching ? (
+              <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Spinner size="xs" /> Loading…
+              </span>
+            ) : (
+              <span>
+                <strong style={{ color: '#94a3b8' }}>{items.length.toLocaleString()}</strong> assigned numbers
+                {(search || stateFilter) && ' (filtered)'}
+              </span>
+            )}
+          </div>
+        </div>
+
+        <FilterBar
+          search={search}
+          onSearchChange={handleSearchChange}
+          statusFilter="assigned"
+          onStatusChange={() => undefined}
+          stateFilter={stateFilter}
+          onStateChange={handleStateChange}
+          placeholder="Search DID, customer, city…"
+          hideStatus
+        />
+
+        {isLoading ? (
+          <div style={{ textAlign: 'center', padding: 48, color: '#475569' }}>
+            <Spinner size="sm" />
+          </div>
+        ) : customerGroups.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: 48, color: '#475569', fontSize: '0.82rem' }}>
+            No assigned numbers found
+          </div>
+        ) : (
+          <div style={{ padding: '0 0 8px' }}>
+            {customerGroups.map(([customerName, dids]) => (
+              <div key={customerName}>
+                {/* Customer group header */}
+                <div
+                  style={{
+                    padding: '10px 16px 8px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    borderBottom: '1px solid rgba(42,47,69,0.35)',
+                    background: 'rgba(0,0,0,0.12)',
+                  }}
+                >
+                  <Users size={13} color="#3b82f6" />
+                  <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#93c5fd', letterSpacing: '0.02em' }}>
+                    {customerName}
+                  </span>
+                  <span
+                    style={{
+                      marginLeft: 4,
+                      fontSize: '0.62rem',
+                      fontWeight: 700,
+                      color: '#475569',
+                      background: 'rgba(59,130,246,0.10)',
+                      border: '1px solid rgba(59,130,246,0.18)',
+                      padding: '1px 7px',
+                      borderRadius: 4,
+                    }}
+                  >
+                    {dids.length}
+                  </span>
+                </div>
+
+                {/* DIDs in this group */}
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr>
+                      <Th>DID</Th>
+                      <Th>City / State</Th>
+                      <Th>Product</Th>
+                      <Th>Assigned</Th>
+                      <Th>Notes</Th>
+                      <Th right>Actions</Th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {dids.map((item) => (
+                      <tr
+                        key={item.id}
+                        onMouseEnter={(e) => {
+                          (e.currentTarget as HTMLTableRowElement).style.background = 'rgba(255,255,255,0.025)';
+                        }}
+                        onMouseLeave={(e) => {
+                          (e.currentTarget as HTMLTableRowElement).style.background = '';
+                        }}
+                      >
+                        <Td>
+                          <span style={{ fontFamily: 'monospace', fontSize: '0.82rem', color: '#93c5fd', letterSpacing: '0.03em' }}>
+                            {fmt(item.did)}
+                          </span>
+                        </Td>
+                        <Td muted>
+                          {[item.city, item.state].filter(Boolean).join(', ') || '—'}
+                        </Td>
+                        <Td>
+                          {item.product_type ? (
+                            <ProductPill type={item.product_type} />
+                          ) : (
+                            <span style={{ color: '#334155' }}>—</span>
+                          )}
+                        </Td>
+                        <Td muted>
+                          {item.assigned_at
+                            ? new Date(item.assigned_at).toLocaleDateString()
+                            : '—'}
+                        </Td>
+                        <Td muted>
+                          <span
+                            style={{
+                              maxWidth: 180,
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap',
+                              display: 'block',
+                            }}
+                          >
+                            {item.notes ?? '—'}
+                          </span>
+                        </Td>
+                        <Td right>
+                          <Button
+                            size="xs"
+                            variant="danger"
+                            onClick={() => setUnassignTarget(item)}
+                          >
+                            Unassign
+                          </Button>
+                        </Td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ))}
+          </div>
+        )}
+      </GlassPanel>
+
+      <UnassignModal
+        did={unassignTarget}
+        open={unassignTarget !== null}
+        onClose={() => setUnassignTarget(null)}
+        onSuccess={() => {
+          setUnassignTarget(null);
+          void queryClient.invalidateQueries({ queryKey: ['did-inventory'] });
+        }}
+      />
+    </div>
+  );
+}
+
+// ─── Tab: My Numbers (customer) ─────────────────────────────────────────────────
+
+function MyNumbersTab() {
+  // Hooks first
+  const { data: items = [], isLoading } = useQuery({
+    queryKey: ['did-my'],
+    queryFn: listMyDids,
+  });
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+      <GlassPanel className="animate-fade-in-up">
+        <div
+          style={{
+            padding: '14px 16px',
+            borderBottom: '1px solid rgba(42,47,69,0.45)',
+          }}
+        >
+          <span style={{ fontSize: '0.78rem', color: '#64748b' }}>
+            <strong style={{ color: '#94a3b8' }}>{items.length}</strong> numbers assigned to your account
+          </span>
+        </div>
+
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr>
+                <Th>DID</Th>
+                <Th>City</Th>
+                <Th>State</Th>
+                <Th>Product</Th>
+                <Th>Status</Th>
+                <Th>Assigned</Th>
+                <Th>Notes</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {isLoading ? (
+                <tr>
+                  <td colSpan={7} style={{ textAlign: 'center', padding: 48, color: '#475569' }}>
+                    <Spinner size="sm" />
+                  </td>
+                </tr>
+              ) : items.length === 0 ? (
+                <tr>
+                  <td colSpan={7} style={{ textAlign: 'center', padding: 48, color: '#475569', fontSize: '0.82rem' }}>
+                    No numbers are currently assigned to your account
+                  </td>
+                </tr>
+              ) : (
+                items.map((item) => (
+                  <tr
+                    key={item.id}
+                    onMouseEnter={(e) => {
+                      (e.currentTarget as HTMLTableRowElement).style.background = 'rgba(255,255,255,0.025)';
+                    }}
+                    onMouseLeave={(e) => {
+                      (e.currentTarget as HTMLTableRowElement).style.background = '';
+                    }}
+                  >
+                    <Td>
+                      <span style={{ fontFamily: 'monospace', fontSize: '0.82rem', color: '#93c5fd', letterSpacing: '0.03em' }}>
+                        {fmt(item.did)}
+                      </span>
+                    </Td>
+                    <Td muted>{item.city ?? '—'}</Td>
+                    <Td muted>{item.state ?? '—'}</Td>
+                    <Td>
+                      {item.product_type ? (
+                        <ProductPill type={item.product_type} />
+                      ) : (
+                        <span style={{ color: '#334155' }}>—</span>
+                      )}
+                    </Td>
+                    <Td>
+                      <StatusBadge status={item.status} />
+                    </Td>
+                    <Td muted>
+                      {item.assigned_at
+                        ? new Date(item.assigned_at).toLocaleDateString()
+                        : '—'}
+                    </Td>
+                    <Td muted>
+                      <span
+                        style={{
+                          maxWidth: 200,
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                          display: 'block',
+                        }}
+                      >
+                        {item.notes ?? '—'}
+                      </span>
+                    </Td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </GlassPanel>
+    </div>
+  );
+}
+
+// ─── Tab bar ────────────────────────────────────────────────────────────────────
+
+interface Tab {
+  id: string;
+  label: string;
+  icon: React.ReactNode;
+}
+
+interface InternalTabBarProps {
+  tabs: Tab[];
+  activeId: string;
+  onChange: (id: string) => void;
+}
+
+function InternalTabBar({ tabs, activeId, onChange }: InternalTabBarProps) {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        gap: 2,
+        background: 'rgba(0,0,0,0.25)',
+        border: '1px solid rgba(42,47,69,0.6)',
+        borderRadius: 12,
+        padding: 4,
+        width: 'fit-content',
+      }}
+    >
+      {tabs.map((tab) => {
+        const isActive = tab.id === activeId;
+        return (
+          <button
+            key={tab.id}
+            type="button"
+            onClick={() => onChange(tab.id)}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: '7px 14px',
+              borderRadius: 9,
+              border: 'none',
+              background: isActive
+                ? 'rgba(59,130,246,0.15)'
+                : 'transparent',
+              color: isActive ? '#60a5fa' : '#64748b',
+              fontSize: '0.78rem',
+              fontWeight: isActive ? 700 : 500,
+              cursor: 'pointer',
+              transition: 'background 0.15s, color 0.15s',
+              whiteSpace: 'nowrap',
+              outline: 'none',
+              boxShadow: isActive
+                ? 'inset 0 0 0 1px rgba(59,130,246,0.25)'
+                : 'none',
+            }}
+          >
+            <span style={{ opacity: isActive ? 1 : 0.6, display: 'flex', alignItems: 'center' }}>
+              {tab.icon}
+            </span>
+            {tab.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─── Page ───────────────────────────────────────────────────────────────────────
+
+export function DIDSearchPage() {
+  // All hooks unconditionally at the very top
+  const { isAdmin } = useAuth();
+  const [activeTab, setActiveTab] = useState<string>(() =>
+    isAdmin ? 'inventory' : 'available',
+  );
+
+  const adminTabs: Tab[] = [
+    { id: 'inventory',   label: 'Inventory',         icon: <Phone size={13} /> },
+    { id: 'available',   label: 'Available Numbers',  icon: <CheckCircle size={13} /> },
+    { id: 'assignments', label: 'Assignments',        icon: <Users size={13} /> },
+  ];
+
+  const customerTabs: Tab[] = [
+    { id: 'available',  label: 'Available Numbers', icon: <CheckCircle size={13} /> },
+    { id: 'my-numbers', label: 'My Numbers',        icon: <Phone size={13} /> },
+  ];
+
+  const tabs = isAdmin ? adminTabs : customerTabs;
+
+  return (
+    <div style={{ minHeight: '100vh' }}>
+      <div
+        style={{
+          maxWidth: 1280,
+          margin: '0 auto',
+          padding: '40px 24px 80px',
+        }}
+      >
+        {/* ── Page Header ── */}
+        <div
+          className="animate-fade-in-up"
+          style={{ marginBottom: 32 }}
+        >
+          {/* Logo + title row */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 16,
+              marginBottom: 8,
+            }}
+          >
+            <div
               style={{
-                background: 'transparent',
-                border: 'none',
-                color: '#475569',
-                cursor: 'pointer',
-                padding: 4,
-                borderRadius: 4,
+                width: 44,
+                height: 44,
+                borderRadius: 12,
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                transition: 'color 0.1s',
+                background: 'linear-gradient(135deg, rgba(59,130,246,0.22) 0%, rgba(59,130,246,0.08) 100%)',
+                border: '1px solid rgba(59,130,246,0.30)',
+                boxShadow: '0 0 20px rgba(59,130,246,0.15)',
+                flexShrink: 0,
+                color: '#60a5fa',
               }}
-              onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = '#94a3b8'; }}
-              onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = '#475569'; }}
             >
-              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={2} style={{ width: 14, height: 14 }}>
-                <path d="M4 4l8 8M12 4l-8 8" strokeLinecap="round" />
-              </svg>
-            </button>
-          )}
-        </span>
+              <Phone size={20} strokeWidth={1.75} />
+            </div>
+
+            <div>
+              <h1
+                style={{
+                  fontSize: '1.5rem',
+                  fontWeight: 800,
+                  color: '#e2e8f0',
+                  letterSpacing: '-0.03em',
+                  lineHeight: 1.1,
+                }}
+              >
+                Number Management
+              </h1>
+              <p style={{ fontSize: '0.78rem', color: '#64748b', marginTop: 3 }}>
+                {isAdmin
+                  ? 'Full DID lifecycle management — inventory, assignments, and Bandwidth sync'
+                  : 'Browse available numbers and manage your assigned DIDs'}
+              </p>
+            </div>
+          </div>
+
+          {/* Keystone branding strip */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              marginTop: 12,
+              marginBottom: 24,
+            }}
+          >
+            <div
+              style={{
+                width: 24,
+                height: 1,
+                background: 'linear-gradient(90deg, transparent, rgba(59,130,246,0.5))',
+              }}
+            />
+            <span
+              style={{
+                fontSize: '0.6rem',
+                fontWeight: 700,
+                letterSpacing: '0.18em',
+                textTransform: 'uppercase',
+                color: '#3b82f6',
+                opacity: 0.65,
+              }}
+            >
+              Granite Keystone · Telecom Number Management
+            </span>
+            <div
+              style={{
+                flex: 1,
+                height: 1,
+                background: 'linear-gradient(90deg, rgba(59,130,246,0.5), transparent)',
+              }}
+            />
+          </div>
+
+          {/* Location marker pill */}
+          <div
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 5,
+              padding: '3px 10px',
+              borderRadius: 20,
+              background: 'rgba(59,130,246,0.08)',
+              border: '1px solid rgba(59,130,246,0.18)',
+            }}
+          >
+            <MapPin size={11} color="#3b82f6" />
+            <span style={{ fontSize: '0.65rem', fontWeight: 600, color: '#64748b' }}>
+              US DID Inventory · Bandwidth-powered
+            </span>
+          </div>
+        </div>
+
+        {/* ── Tab navigation ── */}
+        <div
+          className="animate-fade-in-up"
+          style={{ marginBottom: 24, animationDelay: '0.08s' }}
+        >
+          <InternalTabBar
+            tabs={tabs}
+            activeId={activeTab}
+            onChange={setActiveTab}
+          />
+        </div>
+
+        {/* ── Tab content ── */}
+        <div className="animate-fade-in-up" style={{ animationDelay: '0.12s' }}>
+          {activeTab === 'inventory' && isAdmin && <InventoryTab />}
+          {activeTab === 'available' && <AvailableTab isAdmin={isAdmin} />}
+          {activeTab === 'assignments' && isAdmin && <AssignmentsTab />}
+          {activeTab === 'my-numbers' && !isAdmin && <MyNumbersTab />}
+        </div>
       </div>
-
-      {/* ── Results Area ─────────────────────────────────────────── */}
-
-      {/* Initial load spinner — only shown on the very first browse fetch */}
-      {!isSearching && isLoading && (
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 10,
-            justifyContent: 'center',
-            padding: '48px 0',
-            color: '#64748b',
-            fontSize: '0.875rem',
-          }}
-        >
-          <Spinner size="md" />
-          <span>Loading DIDs…</span>
-        </div>
-      )}
-
-      {/* Search loading state */}
-      {isSearching && isLoading && (
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 10,
-            justifyContent: 'center',
-            padding: '48px 0',
-            color: '#64748b',
-            fontSize: '0.875rem',
-          }}
-        >
-          <Spinner size="md" />
-          <span>Searching across all products…</span>
-        </div>
-      )}
-
-      {/* Error state */}
-      {isError && !isLoading && (
-        <div
-          style={{
-            padding: '14px 18px',
-            borderRadius: 10,
-            background: 'rgba(239,68,68,0.06)',
-            border: '1px solid rgba(239,68,68,0.18)',
-            color: '#f87171',
-            fontSize: '0.875rem',
-          }}
-        >
-          {isSearching ? 'Search failed. Please try again.' : 'Failed to load DIDs. Please refresh the page.'}
-        </div>
-      )}
-
-      {/* No results (search mode only — browse having zero DIDs is an infrastructure problem, not a UX state) */}
-      {isSearching && !isLoading && !isError && results.length === 0 && (
-        <div
-          style={{
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '56px 16px',
-            gap: 8,
-            textAlign: 'center',
-            background: 'linear-gradient(135deg, rgba(30,33,48,0.4) 0%, rgba(19,21,29,0.5) 100%)',
-            border: '1px solid rgba(42,47,69,0.3)',
-            borderRadius: 16,
-          }}
-        >
-          <div style={{ fontSize: '1.4rem', opacity: 0.3 }}>∅</div>
-          <p style={{ color: '#64748b', fontSize: '0.9rem', fontWeight: 500, margin: '0 0 4px' }}>
-            No DID found matching &lsquo;{query}&rsquo;
-          </p>
-          <p style={{ color: '#334155', fontSize: '0.78rem', margin: 0 }}>
-            Try a different number or check the formatting
-          </p>
-        </div>
-      )}
-
-      {/* Results table — shown in both browse and search modes once data is ready */}
-      {!isLoading && !isError && results.length > 0 && (
-        <DIDTable
-          results={results}
-          total={total}
-          currentPage={currentPage}
-          totalPages={totalPages}
-          onPageChange={handlePageChange}
-          expandedDID={expandedDID}
-          onToggleExpand={handleToggleExpand}
-          isFetching={isFetching}
-          countLabel={isSearching ? 'results' : 'DIDs'}
-        />
-      )}
-      </div>
-      )}
     </div>
   );
 }

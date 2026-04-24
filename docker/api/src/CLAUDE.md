@@ -30,7 +30,7 @@ src/
     trunks.py                # SIP trunk management + call path packages
     cdrs.py                  # CDR ingest (from FreeSWITCH) + query endpoints
     search.py                # Admin DID search, user search
-    number_inventory.py      # Bandwidth TN inventory
+    number_inventory.py      # DID lifecycle management (inventory, assign, sync)
   services/
     __init__.py
     esl_client.py            # FreeSWITCH ESL TCP client
@@ -131,10 +131,13 @@ Admin-only search tools. Uses `require_admin` dependency on all endpoints.
 - All search endpoints use `COUNT(*) OVER()` window function for total count with pagination.
 
 ### number_inventory.py
-Cross-references Bandwidth TN inventory with internal product tables.
-- Builds an assignment map by UNIONing `rcf_numbers`, `api_dids`, `trunk_dids`, and `extensions` (UCaaS)
-- Normalizes TNs (strips `+`) for comparison between Bandwidth E.164 and internal E.164
-- Three endpoints: inventory (all TNs with assignment status), available (unassigned only), stats (counts by product)
+Complete DID lifecycle management backed by the `did_inventory` table.
+- **Admin endpoints**: `GET /inventory` (paginated, filterable), `GET /stats` (counts by status/product/state), `POST /sync` (upsert from Bandwidth API), `POST /{did}/assign`, `POST /{did}/unassign`
+- **Customer endpoints**: `GET /available` (browse available DIDs), `GET /my` (customer's assigned numbers), `POST /{did}/request` (reserve a number for admin review)
+- Assign creates the product record (e.g., `rcf_numbers` row for RCF) inside a transaction
+- Unassign removes the product record and resets status to 'available'
+- Sync is idempotent: inserts new TNs as 'available', updates metadata on existing, flags removed TNs
+- All assignment changes invalidate relevant Redis caches and are logged
 
 ## Database Module (db/)
 
