@@ -1261,6 +1261,442 @@ function CallActivityTab({ customerId }: CallActivityTabProps) {
   );
 }
 
+// ─── Quality helpers ──────────────────────────────────────────────────────────
+
+/** Format raw bytes into a human-readable KB / MB string. */
+function fmtBytes(bytes: number): string {
+  if (bytes >= 1_048_576) return `${(bytes / 1_048_576).toFixed(1)} MB`;
+  if (bytes >= 1_024) return `${(bytes / 1_024).toFixed(1)} KB`;
+  return `${bytes} B`;
+}
+
+/** Format seconds as mm:ss (e.g. 90 → "1:30"). */
+function fmtMmSs(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+/** Relative timestamp — how long ago a call started. */
+function relativeTime(isoString: string): string {
+  const diffMs = Date.now() - new Date(isoString).getTime();
+  const mins = Math.floor(diffMs / 60_000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  return `${days}d ago`;
+}
+
+/** Return green/amber/red for MOS thresholds. */
+function mosColor(mos: number | null | undefined): string {
+  if (mos == null) return '#475569';
+  if (mos >= 4) return '#22c55e';
+  if (mos >= 3) return '#f59e0b';
+  return '#ef4444';
+}
+
+/** Return green/amber/red for quality_pct thresholds. */
+function qualityPctColor(pct: number | null | undefined): string {
+  if (pct == null) return '#475569';
+  if (pct >= 90) return '#22c55e';
+  if (pct >= 70) return '#f59e0b';
+  return '#ef4444';
+}
+
+/** Return green/amber/red for packet loss percentage (lower = better). */
+function packetLossColor(pct: number | null | undefined): string {
+  if (pct == null) return '#475569';
+  if (pct < 1) return '#22c55e';
+  if (pct <= 3) return '#f59e0b';
+  return '#ef4444';
+}
+
+/** Return green/amber/red for jitter avg in ms (lower = better). */
+function jitterColor(ms: number | null | undefined): string {
+  if (ms == null) return '#475569';
+  if (ms < 20) return '#22c55e';
+  if (ms <= 50) return '#f59e0b';
+  return '#ef4444';
+}
+
+/** Return green/amber/red for R-Factor (higher = better). */
+function rFactorColor(r: number | null | undefined): string {
+  if (r == null) return '#475569';
+  if (r >= 80) return '#22c55e';
+  if (r >= 70) return '#f59e0b';
+  return '#ef4444';
+}
+
+/** Render a single metric row inside an expanded detail group. */
+function MetricRow({
+  label,
+  value,
+  color,
+  sub,
+}: {
+  label: string;
+  value: string;
+  color?: string;
+  sub?: string;
+}) {
+  const na = value === '—' || value === 'N/A';
+  return (
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 2,
+        padding: '9px 0',
+        borderBottom: '1px solid rgba(255,255,255,0.04)',
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, justifyContent: 'space-between', flexWrap: 'wrap' }}>
+        <span style={{ fontSize: '0.73rem', color: '#64748b', flexShrink: 0 }}>{label}</span>
+        <span
+          style={{
+            fontSize: '0.82rem',
+            fontWeight: 600,
+            color: na ? '#334155' : (color ?? '#e2e8f0'),
+            fontVariantNumeric: 'tabular-nums',
+            textAlign: 'right',
+          }}
+        >
+          {value}
+        </span>
+      </div>
+      {sub && (
+        <span style={{ fontSize: '0.68rem', color: '#475569', lineHeight: 1.4 }}>{sub}</span>
+      )}
+    </div>
+  );
+}
+
+/** A glass-morphism group card inside the expanded detail panel. */
+function DetailGroup({
+  title,
+  accent,
+  children,
+}: {
+  title: string;
+  accent: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      style={{
+        background: 'rgba(19,21,29,0.70)',
+        backdropFilter: 'blur(10px)',
+        WebkitBackdropFilter: 'blur(10px)',
+        border: `1px solid ${accent}22`,
+        borderRadius: 12,
+        padding: '14px 16px',
+        position: 'relative',
+        overflow: 'hidden',
+      }}
+    >
+      {/* Top accent line */}
+      <div
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 20,
+          right: 20,
+          height: 2,
+          background: `linear-gradient(90deg, transparent, ${accent}55, transparent)`,
+        }}
+      />
+      <div
+        style={{
+          fontSize: '0.60rem',
+          fontWeight: 700,
+          color: accent,
+          textTransform: 'uppercase',
+          letterSpacing: '0.12em',
+          marginBottom: 6,
+          opacity: 0.85,
+        }}
+      >
+        {title}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+/** Full expanded detail panel for a single CDR row. */
+function CdrDetailPanel({ cdr }: { cdr: Cdr }) {
+  const na = '—';
+  const fmtNum = (v: number | null | undefined, decimals = 1) =>
+    v != null ? v.toFixed(decimals) : na;
+  const fmtPct = (v: number | null | undefined) =>
+    v != null ? `${v.toFixed(2)}%` : na;
+  const fmtMs = (v: number | null | undefined) =>
+    v != null ? `${v.toFixed(1)} ms` : na;
+  const fmtBytesOrNa = (v: number | null | undefined) =>
+    v != null ? fmtBytes(v) : na;
+  const fmtCount = (v: number | null | undefined) =>
+    v != null ? v.toLocaleString() : na;
+  const fmtStr = (v: string | null | undefined) =>
+    v != null && v !== '' ? v : na;
+
+  return (
+    <div
+      style={{
+        padding: '16px 4px 8px',
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
+        gap: 12,
+      }}
+    >
+      {/* Group 1: Voice Quality Scores */}
+      <DetailGroup title="Voice Quality Scores" accent="#22c55e">
+        <MetricRow
+          label="MOS (Mean Opinion Score)"
+          value={cdr.mos != null ? cdr.mos.toFixed(2) : na}
+          color={mosColor(cdr.mos)}
+          sub="1–5 scale. 4+ = excellent HD clarity. Below 3 = degraded."
+        />
+        <MetricRow
+          label="Quality Score"
+          value={fmtPct(cdr.quality_pct)}
+          color={qualityPctColor(cdr.quality_pct)}
+          sub="Overall call quality percentage. 90%+ is excellent."
+        />
+        <MetricRow
+          label="R-Factor"
+          value={fmtNum(cdr.r_factor, 1)}
+          color={rFactorColor(cdr.r_factor)}
+          sub="ITU-T G.107. 80+ = high quality. 70–80 = acceptable. Below 70 = poor."
+        />
+        <MetricRow
+          label="Flaw Count"
+          value={fmtCount(cdr.flaw_total)}
+          sub="Detected audio impairments. 0 = perfect."
+        />
+      </DetailGroup>
+
+      {/* Group 2: Packet Performance */}
+      <DetailGroup title="Packet Performance" accent="#3b82f6">
+        <MetricRow
+          label="Packet Loss"
+          value={fmtPct(cdr.packet_loss_pct)}
+          color={packetLossColor(cdr.packet_loss_pct)}
+          sub="<1% = excellent. 1–3% = acceptable. >3% = degraded."
+        />
+        <MetricRow label="Packets Lost" value={fmtCount(cdr.packet_loss_count)} />
+        <MetricRow label="Total Packets" value={fmtCount(cdr.packet_total_count)} />
+        <MetricRow
+          label="Packets Sent"
+          value={fmtCount(cdr.rtp_audio_out_packet_count)}
+          sub="Total RTP packets transmitted to carrier."
+        />
+        <MetricRow
+          label="Packets Received"
+          value={fmtCount(cdr.rtp_audio_in_packet_count)}
+          sub="Total RTP packets received from carrier."
+        />
+      </DetailGroup>
+
+      {/* Group 3: Jitter Analysis */}
+      <DetailGroup title="Jitter Analysis" accent="#f59e0b">
+        <MetricRow
+          label="Average Jitter"
+          value={fmtMs(cdr.jitter_avg_ms)}
+          color={jitterColor(cdr.jitter_avg_ms)}
+          sub="<20 ms = excellent. 20–50 ms = acceptable. >50 ms = poor."
+        />
+        <MetricRow label="Min Jitter" value={fmtMs(cdr.jitter_min_ms)} />
+        <MetricRow
+          label="Max Jitter"
+          value={fmtMs(cdr.jitter_max_ms)}
+          sub="Peak jitter — indicates worst-case moments in the call."
+        />
+        <MetricRow
+          label="Burst Rate"
+          value={fmtNum(cdr.rtp_audio_in_jitter_burst_rate, 4)}
+          sub="Frequency of jitter spikes. Lower is better."
+        />
+        <MetricRow
+          label="Loss Rate"
+          value={fmtNum(cdr.rtp_audio_in_jitter_loss_rate, 4)}
+          sub="Rate of jitter-induced packet loss."
+        />
+      </DetailGroup>
+
+      {/* Group 4: Media Stream Details */}
+      <DetailGroup title="Media Stream" accent="#a78bfa">
+        <MetricRow
+          label="Inbound Audio (raw)"
+          value={fmtBytesOrNa(cdr.rtp_audio_in_raw_bytes)}
+          sub="Total bytes received from carrier."
+        />
+        <MetricRow label="Inbound Media" value={fmtBytesOrNa(cdr.rtp_audio_in_media_bytes)} />
+        <MetricRow
+          label="Outbound Audio (raw)"
+          value={fmtBytesOrNa(cdr.rtp_audio_out_raw_bytes)}
+          sub="Total bytes sent to carrier."
+        />
+        <MetricRow label="Outbound Media" value={fmtBytesOrNa(cdr.rtp_audio_out_media_bytes)} />
+        <MetricRow
+          label="Mean Packet Interval"
+          value={fmtMs(cdr.rtp_audio_in_mean_interval)}
+          sub="Avg time between packets. ~20 ms is ideal for G.711."
+        />
+        <MetricRow label="Read Codec" value={fmtStr(cdr.read_codec)} sub="Incoming audio codec (e.g., PCMU, PCMA)." />
+        <MetricRow label="Write Codec" value={fmtStr(cdr.write_codec)} sub="Outgoing audio codec." />
+      </DetailGroup>
+
+      {/* Group 5: Call Details */}
+      <DetailGroup title="Call Details" accent="#64748b">
+        <MetricRow
+          label="Hangup Cause"
+          value={fmtStr(cdr.hangup_cause)}
+          sub="NORMAL_CLEARING = clean hangup by either party."
+        />
+        <MetricRow
+          label="SIP Response Code"
+          value={cdr.sip_code != null ? String(cdr.sip_code) : na}
+          sub="200 = success. 486 = busy. 404 = not found."
+        />
+        <MetricRow
+          label="Carrier Used"
+          value={fmtStr(cdr.carrier_used)}
+          sub="Termination trunk that handled this call."
+        />
+      </DetailGroup>
+    </div>
+  );
+}
+
+/** A single row in the per-call quality table. */
+function CallQualityTableRow({
+  cdr,
+  isExpanded,
+  onToggle,
+}: {
+  cdr: Cdr;
+  isExpanded: boolean;
+  onToggle: () => void;
+}) {
+  const mc = mosColor(cdr.mos);
+  const qc = qualityPctColor(cdr.quality_pct);
+
+  return (
+    <>
+      {/* Main row */}
+      <tr
+        onClick={onToggle}
+        style={{
+          cursor: 'pointer',
+          background: isExpanded ? 'rgba(59,130,246,0.07)' : 'transparent',
+          transition: 'background 0.15s',
+          borderBottom: isExpanded ? 'none' : '1px solid rgba(255,255,255,0.04)',
+        }}
+        onMouseEnter={(e) => {
+          if (!isExpanded) (e.currentTarget as HTMLTableRowElement).style.background = 'rgba(255,255,255,0.03)';
+        }}
+        onMouseLeave={(e) => {
+          (e.currentTarget as HTMLTableRowElement).style.background = isExpanded ? 'rgba(59,130,246,0.07)' : 'transparent';
+        }}
+      >
+        {/* Time */}
+        <td style={{ padding: '10px 12px', fontSize: '0.78rem', color: '#64748b', whiteSpace: 'nowrap' }}>
+          {relativeTime(cdr.start_time)}
+        </td>
+        {/* DID */}
+        <td style={{ padding: '10px 12px', fontSize: '0.80rem', color: '#94a3b8', whiteSpace: 'nowrap' }}>
+          {fmt(cdr.destination)}
+        </td>
+        {/* Duration */}
+        <td style={{ padding: '10px 12px', fontSize: '0.80rem', color: '#94a3b8', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
+          {fmtMmSs(cdr.duration_seconds)}
+        </td>
+        {/* MOS */}
+        <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
+          {cdr.mos != null ? (
+            <span
+              style={{
+                display: 'inline-block',
+                padding: '2px 8px',
+                borderRadius: 6,
+                fontSize: '0.78rem',
+                fontWeight: 700,
+                fontVariantNumeric: 'tabular-nums',
+                background: `${mc}18`,
+                color: mc,
+                border: `1px solid ${mc}33`,
+              }}
+            >
+              {cdr.mos.toFixed(2)}
+            </span>
+          ) : (
+            <span style={{ fontSize: '0.78rem', color: '#334155' }}>—</span>
+          )}
+        </td>
+        {/* Quality % */}
+        <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
+          {cdr.quality_pct != null ? (
+            <span
+              style={{
+                display: 'inline-block',
+                padding: '2px 8px',
+                borderRadius: 6,
+                fontSize: '0.78rem',
+                fontWeight: 700,
+                fontVariantNumeric: 'tabular-nums',
+                background: `${qc}18`,
+                color: qc,
+                border: `1px solid ${qc}33`,
+              }}
+            >
+              {cdr.quality_pct.toFixed(2)}%
+            </span>
+          ) : (
+            <span style={{ fontSize: '0.78rem', color: '#334155' }}>—</span>
+          )}
+        </td>
+        {/* Expand arrow */}
+        <td style={{ padding: '10px 12px', textAlign: 'right', width: 36 }}>
+          <svg
+            viewBox="0 0 16 16"
+            fill="none"
+            stroke="#475569"
+            strokeWidth={2}
+            strokeLinecap="round"
+            style={{
+              width: 14,
+              height: 14,
+              transform: isExpanded ? 'rotate(180deg)' : 'rotate(0deg)',
+              transition: 'transform 0.2s',
+              display: 'inline-block',
+            }}
+          >
+            <path d="M3 6l5 5 5-5" />
+          </svg>
+        </td>
+      </tr>
+
+      {/* Expanded detail row */}
+      {isExpanded && (
+        <tr>
+          <td
+            colSpan={6}
+            style={{
+              padding: '0 12px 16px',
+              background: 'rgba(59,130,246,0.04)',
+              borderBottom: '1px solid rgba(59,130,246,0.12)',
+            }}
+          >
+            <CdrDetailPanel cdr={cdr} />
+          </td>
+        </tr>
+      )}
+    </>
+  );
+}
+
 // ─── QualityTab ───────────────────────────────────────────────────────────────
 
 interface QualityTabProps {
@@ -1490,15 +1926,29 @@ function QualityTab({ customerId }: QualityTabProps) {
     staleTime: 120_000,
   });
 
+  // Expanded row state — tracks which CDR uuid is expanded (null = none)
+  const [expandedRowUuid, setExpandedRowUuid] = useState<string | null>(null);
+
   const isLoading = summaryLoading || cdrLoading;
   const cdrs = cdrData?.items ?? [];
   const stats = useMemo(() => computeQualityStats(cdrs), [cdrs]);
   const dailyDots = useMemo(() => buildDailyDots(cdrs), [cdrs]);
 
+  // Only show CDRs that have at least some quality data in the table
+  const qualityCdrs = useMemo(
+    () => cdrs.filter((c) => c.mos != null || c.quality_pct != null || c.packet_loss_pct != null),
+    [cdrs],
+  );
+
   // Aggregate total calls from summary rows
   const summaryRows = summaryData?.summary ?? [];
   const totalCallsFromSummary = summaryRows.reduce((acc, r) => acc + r.total_calls, 0);
   const totalCalls = totalCallsFromSummary > 0 ? totalCallsFromSummary : stats.total;
+
+  // Toggle expanded row — only one open at a time
+  const handleToggleRow = useCallback((uuid: string) => {
+    setExpandedRowUuid((prev) => (prev === uuid ? null : uuid));
+  }, []);
 
   if (isLoading) {
     return (
@@ -1748,6 +2198,140 @@ function QualityTab({ customerId }: QualityTabProps) {
             </div>
           ))}
         </div>
+      </div>
+
+      {/* ── Detailed Call Quality Metrics table ────────────────── */}
+      <div
+        style={{
+          background: 'rgba(19,21,29,0.72)',
+          backdropFilter: 'blur(10px)',
+          WebkitBackdropFilter: 'blur(10px)',
+          border: '1px solid rgba(59,130,246,0.10)',
+          borderRadius: 16,
+          overflow: 'hidden',
+        }}
+      >
+        {/* Section header */}
+        <div
+          style={{
+            padding: '16px 20px',
+            borderBottom: '1px solid rgba(59,130,246,0.10)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 12,
+            flexWrap: 'wrap',
+          }}
+        >
+          <div>
+            <div
+              style={{
+                fontSize: '0.68rem',
+                fontWeight: 700,
+                color: '#3b82f6',
+                textTransform: 'uppercase',
+                letterSpacing: '0.12em',
+                marginBottom: 3,
+              }}
+            >
+              Detailed Call Quality Metrics
+            </div>
+            <div style={{ fontSize: '0.78rem', color: '#64748b' }}>
+              Recent calls with quality data — click any row to expand full metrics
+            </div>
+          </div>
+          {qualityCdrs.length > 0 && (
+            <span
+              style={{
+                marginLeft: 'auto',
+                fontSize: '0.72rem',
+                color: '#475569',
+                background: 'rgba(59,130,246,0.08)',
+                border: '1px solid rgba(59,130,246,0.15)',
+                borderRadius: 6,
+                padding: '3px 10px',
+              }}
+            >
+              {qualityCdrs.length} call{qualityCdrs.length !== 1 ? 's' : ''}
+            </span>
+          )}
+        </div>
+
+        {qualityCdrs.length === 0 ? (
+          <div
+            style={{
+              padding: '40px 24px',
+              textAlign: 'center',
+              color: '#475569',
+              fontSize: '0.82rem',
+            }}
+          >
+            No calls with quality metrics found in the current window.
+          </div>
+        ) : (
+          <div style={{ overflowX: 'auto' }}>
+            <table
+              style={{
+                width: '100%',
+                borderCollapse: 'collapse',
+                fontSize: '0.82rem',
+              }}
+            >
+              {/* Table header */}
+              <thead>
+                <tr
+                  style={{
+                    background: 'rgba(59,130,246,0.08)',
+                    borderBottom: '1px solid rgba(59,130,246,0.15)',
+                  }}
+                >
+                  {(['Time', 'DID', 'Duration', 'MOS', 'Quality', ''] as const).map((h) => (
+                    <th
+                      key={h}
+                      style={{
+                        padding: '10px 12px',
+                        textAlign: h === '' ? 'right' : 'left',
+                        fontSize: '0.65rem',
+                        fontWeight: 700,
+                        color: '#3b82f6',
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.10em',
+                        whiteSpace: 'nowrap',
+                        userSelect: 'none',
+                      }}
+                    >
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+
+              <tbody>
+                {qualityCdrs.slice(0, 50).map((cdr) => (
+                  <CallQualityTableRow
+                    key={cdr.uuid}
+                    cdr={cdr}
+                    isExpanded={expandedRowUuid === cdr.uuid}
+                    onToggle={() => handleToggleRow(cdr.uuid)}
+                  />
+                ))}
+              </tbody>
+            </table>
+
+            {qualityCdrs.length > 50 && (
+              <div
+                style={{
+                  padding: '12px 20px',
+                  fontSize: '0.75rem',
+                  color: '#475569',
+                  borderTop: '1px solid rgba(255,255,255,0.04)',
+                  textAlign: 'center',
+                }}
+              >
+                Showing the 50 most recent calls with quality data. Older records are available in the CDR export.
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
