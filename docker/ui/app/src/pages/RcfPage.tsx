@@ -11,6 +11,8 @@ import { apiRequest } from '../api/client';
 import { useToast } from '../components/ui/Toast';
 import { searchCdrs, getCdrSummary } from '../api/cdrs';
 import type { Cdr } from '../types/cdr';
+import { listAvailableDids, listMyDids, requestDid } from '../api/didInventory';
+import type { DidInventoryItem } from '../types/didInventory';
 
 // ─── API helpers ──────────────────────────────────────────────────────────────
 
@@ -933,7 +935,7 @@ function SearchEmptyState({ query, onClear }: { query: string; onClear: () => vo
 
 // ─── Tab types ────────────────────────────────────────────────────────────────
 
-type DashboardTab = 'numbers' | 'activity' | 'quality';
+type DashboardTab = 'numbers' | 'activity' | 'quality' | 'dids';
 
 // ─── Time helpers ─────────────────────────────────────────────────────────────
 
@@ -1014,6 +1016,16 @@ function TabBar({ active, onChange }: TabBarProps) {
         <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.8} style={{ width: 13, height: 13 }}>
           <circle cx="8" cy="8" r="6" />
           <path d="M8 5v3l2 2" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      ),
+    },
+    {
+      id: 'dids',
+      label: 'DID Management',
+      icon: (
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.8} style={{ width: 13, height: 13 }}>
+          <rect x="2" y="2" width="12" height="12" rx="2" />
+          <path d="M5 8h6M8 5v6" strokeLinecap="round" />
         </svg>
       ),
     },
@@ -2470,6 +2482,966 @@ function QualityTab({ customerId }: QualityTabProps) {
   );
 }
 
+// ─── DIDManagementTab ─────────────────────────────────────────────────────────
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+function didStatusBadge(status: DidInventoryItem['status']): React.ReactNode {
+  const styles: Record<
+    DidInventoryItem['status'],
+    { bg: string; color: string; border: string; label: string }
+  > = {
+    available:   { bg: 'rgba(59,130,246,0.12)',  color: '#60a5fa', border: 'rgba(59,130,246,0.30)',  label: 'Available' },
+    assigned:    { bg: 'rgba(34,197,94,0.12)',   color: '#4ade80', border: 'rgba(34,197,94,0.30)',   label: 'Assigned' },
+    reserved:    { bg: 'rgba(245,158,11,0.12)',  color: '#fbbf24', border: 'rgba(245,158,11,0.30)',  label: 'Pending Approval' },
+    porting_in:  { bg: 'rgba(168,85,247,0.12)', color: '#c084fc', border: 'rgba(168,85,247,0.30)', label: 'Porting In' },
+    porting_out: { bg: 'rgba(168,85,247,0.12)', color: '#c084fc', border: 'rgba(168,85,247,0.30)', label: 'Porting Out' },
+    suspended:   { bg: 'rgba(239,68,68,0.12)',  color: '#f87171', border: 'rgba(239,68,68,0.30)',  label: 'Suspended' },
+  };
+  const s = styles[status] ?? styles.available;
+  return (
+    <span
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 5,
+        fontSize: '0.67rem',
+        fontWeight: 700,
+        color: s.color,
+        background: s.bg,
+        border: `1px solid ${s.border}`,
+        borderRadius: 20,
+        padding: '3px 9px',
+        whiteSpace: 'nowrap',
+        letterSpacing: '0.03em',
+      }}
+    >
+      <span
+        style={{
+          width: 5,
+          height: 5,
+          borderRadius: '50%',
+          background: s.color,
+          flexShrink: 0,
+          boxShadow: `0 0 5px ${s.color}`,
+          display: 'inline-block',
+        }}
+      />
+      {s.label}
+    </span>
+  );
+}
+
+function fmtAssignedDate(iso: string | undefined): string {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleDateString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
+}
+
+// ── Glass card wrapper shared across sections ─────────────────────────────────
+
+function DidCard({
+  children,
+  delay = 0,
+}: {
+  children: React.ReactNode;
+  delay?: number;
+}) {
+  return (
+    <div
+      style={{
+        background: 'rgba(19,21,29,0.70)',
+        backdropFilter: 'blur(10px)',
+        WebkitBackdropFilter: 'blur(10px)',
+        border: '1px solid rgba(59,130,246,0.12)',
+        borderRadius: 16,
+        overflow: 'hidden',
+        boxShadow: '0 8px 32px -8px rgba(0,0,0,0.45)',
+        animation: 'fadeInUp 0.35s ease both',
+        animationDelay: `${delay}ms`,
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+// ── Section header bar ────────────────────────────────────────────────────────
+
+function DidSectionHeader({
+  title,
+  count,
+  countLabel,
+  right,
+}: {
+  title: string;
+  count?: number;
+  countLabel?: string;
+  right?: React.ReactNode;
+}) {
+  return (
+    <div
+      style={{
+        padding: '14px 20px',
+        borderBottom: '1px solid rgba(59,130,246,0.08)',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 12,
+        flexWrap: 'wrap',
+        background: 'rgba(59,130,246,0.025)',
+      }}
+    >
+      <span
+        style={{
+          fontSize: '0.72rem',
+          fontWeight: 700,
+          color: '#475569',
+          textTransform: 'uppercase',
+          letterSpacing: '0.1em',
+          flexShrink: 0,
+        }}
+      >
+        {title}
+      </span>
+      {count !== undefined && (
+        <span
+          style={{
+            fontSize: '0.68rem',
+            fontWeight: 600,
+            color: '#3b82f6',
+            background: 'rgba(59,130,246,0.10)',
+            border: '1px solid rgba(59,130,246,0.20)',
+            borderRadius: 20,
+            padding: '2px 9px',
+            flexShrink: 0,
+          }}
+        >
+          {count} {countLabel ?? ''}
+        </span>
+      )}
+      {right && <div style={{ marginLeft: 'auto' }}>{right}</div>}
+    </div>
+  );
+}
+
+// ── Th helper for DID tables ──────────────────────────────────────────────────
+
+function DidTh({ children }: { children: React.ReactNode }) {
+  return (
+    <th
+      style={{
+        padding: '11px 16px',
+        textAlign: 'left',
+        fontSize: '0.6rem',
+        fontWeight: 700,
+        color: '#475569',
+        textTransform: 'uppercase',
+        letterSpacing: '0.11em',
+        whiteSpace: 'nowrap',
+        background: 'rgba(59,130,246,0.04)',
+        borderBottom: '1px solid rgba(59,130,246,0.10)',
+      }}
+    >
+      {children}
+    </th>
+  );
+}
+
+// ── Request confirmation modal ────────────────────────────────────────────────
+
+interface RequestModalProps {
+  did: DidInventoryItem | null;
+  onConfirm: (did: DidInventoryItem) => void;
+  onCancel: () => void;
+  isPending: boolean;
+}
+
+function RequestModal({ did, onConfirm, onCancel, isPending }: RequestModalProps) {
+  if (!did) return null;
+  return (
+    <div
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 1000,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 24,
+        background: 'rgba(0,0,0,0.65)',
+        backdropFilter: 'blur(4px)',
+        WebkitBackdropFilter: 'blur(4px)',
+        animation: 'fadeIn 0.15s ease',
+      }}
+      onClick={(e) => { if (e.target === e.currentTarget && !isPending) onCancel(); }}
+    >
+      <div
+        style={{
+          background: 'linear-gradient(145deg, rgba(26,29,39,0.98) 0%, rgba(19,21,29,0.99) 100%)',
+          border: '1px solid rgba(59,130,246,0.22)',
+          borderRadius: 18,
+          padding: '32px 32px 28px',
+          maxWidth: 420,
+          width: '100%',
+          position: 'relative',
+          boxShadow: '0 24px 64px -8px rgba(0,0,0,0.75), 0 0 0 1px rgba(59,130,246,0.08)',
+          animation: 'fadeInUp 0.2s ease',
+        }}
+      >
+        {/* Top accent line */}
+        <div
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 48,
+            right: 48,
+            height: 2,
+            background: 'linear-gradient(90deg, transparent, rgba(59,130,246,0.65), transparent)',
+            borderRadius: '0 0 2px 2px',
+          }}
+        />
+
+        {/* Icon */}
+        <div
+          style={{
+            width: 52,
+            height: 52,
+            borderRadius: 13,
+            background: 'linear-gradient(135deg, rgba(59,130,246,0.18) 0%, rgba(59,130,246,0.08) 100%)',
+            border: '1px solid rgba(59,130,246,0.28)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            marginBottom: 20,
+            boxShadow: '0 0 20px rgba(59,130,246,0.18)',
+          }}
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="#60a5fa" strokeWidth={1.6} style={{ width: 26, height: 26 }}>
+            <path d="M3 5a2 2 0 0 1 2-2h3.28a1 1 0 0 1 .948.684l1.498 4.493a1 1 0 0 1-.502 1.21l-2.257 1.13a11.042 11.042 0 0 0 5.516 5.516l1.13-2.257a1 1 0 0 1 1.21-.502l4.493 1.498a1 1 0 0 1 .684.949V19a2 2 0 0 1-2 2h-1C9.716 21 3 14.284 3 6V5z" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </div>
+
+        <div style={{ fontSize: '1.05rem', fontWeight: 700, color: '#e2e8f0', marginBottom: 8, letterSpacing: '-0.02em' }}>
+          Request this number?
+        </div>
+        <div style={{ fontSize: '0.84rem', color: '#64748b', marginBottom: 20, lineHeight: 1.6 }}>
+          You are requesting{' '}
+          <span style={{ fontFamily: 'monospace', color: '#60a5fa', fontWeight: 600 }}>
+            {fmt(did.did)}
+          </span>
+          {did.city || did.state ? (
+            <>
+              {' '}({[did.city, did.state].filter(Boolean).join(', ')})
+            </>
+          ) : null}
+          {' '}for your account. An admin will review and approve the assignment.
+        </div>
+
+        <div
+          style={{
+            padding: '12px 16px',
+            borderRadius: 10,
+            background: 'rgba(245,158,11,0.07)',
+            border: '1px solid rgba(245,158,11,0.18)',
+            marginBottom: 24,
+            fontSize: '0.78rem',
+            color: '#92400e',
+            lineHeight: 1.5,
+          }}
+        >
+          <span style={{ color: '#fbbf24', fontWeight: 600 }}>Note: </span>
+          <span style={{ color: '#78716c' }}>
+            This number will be marked as pending until an administrator approves the request. You will be notified once it is assigned.
+          </span>
+        </div>
+
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={isPending}
+            style={{
+              padding: '9px 20px',
+              borderRadius: 9,
+              border: '1px solid rgba(255,255,255,0.08)',
+              background: 'rgba(255,255,255,0.04)',
+              color: '#64748b',
+              fontSize: '0.83rem',
+              fontWeight: 500,
+              cursor: isPending ? 'not-allowed' : 'pointer',
+              fontFamily: 'inherit',
+              transition: 'background 0.15s, color 0.15s',
+              opacity: isPending ? 0.5 : 1,
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={() => onConfirm(did)}
+            disabled={isPending}
+            style={{
+              padding: '9px 22px',
+              borderRadius: 9,
+              border: 'none',
+              background: isPending
+                ? 'rgba(59,130,246,0.35)'
+                : 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
+              color: '#fff',
+              fontSize: '0.83rem',
+              fontWeight: 700,
+              cursor: isPending ? 'not-allowed' : 'pointer',
+              fontFamily: 'inherit',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 7,
+              boxShadow: isPending ? 'none' : '0 4px 16px rgba(59,130,246,0.35)',
+              transition: 'background 0.15s, box-shadow 0.15s',
+              letterSpacing: '-0.01em',
+            }}
+          >
+            {isPending && (
+              <svg viewBox="0 0 16 16" style={{ width: 13, height: 13, animation: 'spin 0.7s linear infinite' }}>
+                <circle cx="8" cy="8" r="6" fill="none" stroke="rgba(255,255,255,0.3)" strokeWidth={2} />
+                <path d="M8 2a6 6 0 0 1 6 6" stroke="#fff" strokeWidth={2} fill="none" strokeLinecap="round" />
+              </svg>
+            )}
+            {isPending ? 'Requesting…' : 'Confirm Request'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── My Numbers section ────────────────────────────────────────────────────────
+
+function MyNumbersSection({ items, isLoading, isError }: {
+  items: DidInventoryItem[];
+  isLoading: boolean;
+  isError: boolean;
+}) {
+  if (isLoading) {
+    return (
+      <DidCard>
+        <DidSectionHeader title="My Numbers" />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, justifyContent: 'center', padding: '48px 0', color: '#64748b' }}>
+          <Spinner size="sm" />
+          <span style={{ fontSize: '0.875rem' }}>Loading your numbers…</span>
+        </div>
+      </DidCard>
+    );
+  }
+
+  if (isError) {
+    return (
+      <DidCard>
+        <DidSectionHeader title="My Numbers" />
+        <div style={{ padding: '16px 20px', margin: 16, borderRadius: 10, background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', color: '#f87171', fontSize: '0.85rem' }}>
+          Unable to load your numbers. Please try refreshing.
+        </div>
+      </DidCard>
+    );
+  }
+
+  return (
+    <DidCard delay={0}>
+      <DidSectionHeader
+        title="My Numbers"
+        count={items.length}
+        countLabel={items.length === 1 ? 'number' : 'numbers'}
+      />
+
+      {items.length === 0 ? (
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '56px 24px',
+            gap: 14,
+            textAlign: 'center',
+          }}
+        >
+          <div
+            style={{
+              width: 56,
+              height: 56,
+              borderRadius: 14,
+              background: 'linear-gradient(135deg, rgba(59,130,246,0.12) 0%, rgba(59,130,246,0.06) 100%)',
+              border: '1px solid rgba(59,130,246,0.20)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              boxShadow: '0 0 20px rgba(59,130,246,0.10)',
+            }}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth={1.5} style={{ width: 28, height: 28, opacity: 0.65 }}>
+              <path d="M3 5a2 2 0 0 1 2-2h3.28a1 1 0 0 1 .948.684l1.498 4.493a1 1 0 0 1-.502 1.21l-2.257 1.13a11.042 11.042 0 0 0 5.516 5.516l1.13-2.257a1 1 0 0 1 1.21-.502l4.493 1.498a1 1 0 0 1 .684.949V19a2 2 0 0 1-2 2h-1C9.716 21 3 14.284 3 6V5z" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </div>
+          <div>
+            <p style={{ color: '#94a3b8', fontSize: '0.95rem', fontWeight: 600, margin: '0 0 6px' }}>
+              No numbers assigned yet
+            </p>
+            <p style={{ color: '#475569', fontSize: '0.82rem', margin: 0, lineHeight: 1.6, maxWidth: 360 }}>
+              Browse the available numbers below and request one for your account. Assignments are approved by our team — usually within one business day.
+            </p>
+          </div>
+        </div>
+      ) : (
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 560 }}>
+            <thead>
+              <tr>
+                <DidTh>DID</DidTh>
+                <DidTh>City</DidTh>
+                <DidTh>State</DidTh>
+                <DidTh>Product</DidTh>
+                <DidTh>Status</DidTh>
+                <DidTh>Assigned</DidTh>
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((item, idx) => (
+                <tr
+                  key={item.id}
+                  style={{
+                    borderBottom: idx < items.length - 1 ? '1px solid rgba(59,130,246,0.06)' : 'none',
+                    animation: 'fadeInUp 0.3s ease both',
+                    animationDelay: `${idx * 40}ms`,
+                  }}
+                >
+                  <td style={{ padding: '13px 16px' }}>
+                    <div>
+                      <div style={{ fontSize: '0.88rem', fontWeight: 700, color: '#e2e8f0', fontFamily: 'monospace', letterSpacing: '0.02em' }}>
+                        {fmt(item.did)}
+                      </div>
+                      <div style={{ fontSize: '0.63rem', color: '#334155', fontFamily: 'monospace', marginTop: 2, letterSpacing: '0.01em' }}>
+                        {item.did}
+                      </div>
+                    </div>
+                  </td>
+                  <td style={{ padding: '13px 16px' }}>
+                    <span style={{ fontSize: '0.82rem', color: item.city ? '#94a3b8' : '#2d3748', fontStyle: item.city ? 'normal' : 'italic' }}>
+                      {item.city ?? '—'}
+                    </span>
+                  </td>
+                  <td style={{ padding: '13px 16px' }}>
+                    <span style={{ fontSize: '0.82rem', color: item.state ? '#94a3b8' : '#2d3748', fontWeight: item.state ? 600 : 400 }}>
+                      {item.state ?? '—'}
+                    </span>
+                  </td>
+                  <td style={{ padding: '13px 16px' }}>
+                    <span
+                      style={{
+                        fontSize: '0.67rem',
+                        fontWeight: 700,
+                        color: '#60a5fa',
+                        background: 'rgba(59,130,246,0.10)',
+                        border: '1px solid rgba(59,130,246,0.22)',
+                        borderRadius: 5,
+                        padding: '3px 8px',
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.08em',
+                      }}
+                    >
+                      {item.product_type ?? 'RCF'}
+                    </span>
+                  </td>
+                  <td style={{ padding: '13px 16px' }}>
+                    {didStatusBadge(item.status)}
+                  </td>
+                  <td style={{ padding: '13px 16px' }}>
+                    <span style={{ fontSize: '0.78rem', color: '#64748b', fontVariantNumeric: 'tabular-nums' }}>
+                      {fmtAssignedDate(item.assigned_at)}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </DidCard>
+  );
+}
+
+// ── Pending Requests section ──────────────────────────────────────────────────
+
+function PendingRequestsSection({ items }: { items: DidInventoryItem[] }) {
+  if (items.length === 0) return null;
+
+  return (
+    <DidCard delay={80}>
+      <DidSectionHeader
+        title="Pending Requests"
+        count={items.length}
+        countLabel={items.length === 1 ? 'pending' : 'pending'}
+      />
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 440 }}>
+          <thead>
+            <tr>
+              <DidTh>DID</DidTh>
+              <DidTh>City</DidTh>
+              <DidTh>State</DidTh>
+              <DidTh>Requested</DidTh>
+              <DidTh>Status</DidTh>
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((item, idx) => (
+              <tr
+                key={item.id}
+                style={{
+                  borderBottom: idx < items.length - 1 ? '1px solid rgba(59,130,246,0.06)' : 'none',
+                  animation: 'fadeInUp 0.3s ease both',
+                  animationDelay: `${idx * 40}ms`,
+                }}
+              >
+                <td style={{ padding: '12px 16px' }}>
+                  <div style={{ fontSize: '0.88rem', fontWeight: 700, color: '#e2e8f0', fontFamily: 'monospace', letterSpacing: '0.02em' }}>
+                    {fmt(item.did)}
+                  </div>
+                </td>
+                <td style={{ padding: '12px 16px' }}>
+                  <span style={{ fontSize: '0.82rem', color: '#94a3b8' }}>{item.city ?? '—'}</span>
+                </td>
+                <td style={{ padding: '12px 16px' }}>
+                  <span style={{ fontSize: '0.82rem', color: '#94a3b8', fontWeight: 600 }}>{item.state ?? '—'}</span>
+                </td>
+                <td style={{ padding: '12px 16px' }}>
+                  <span style={{ fontSize: '0.78rem', color: '#64748b', fontVariantNumeric: 'tabular-nums' }}>
+                    {fmtAssignedDate(item.assigned_at)}
+                  </span>
+                </td>
+                <td style={{ padding: '12px 16px' }}>
+                  {didStatusBadge(item.status)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </DidCard>
+  );
+}
+
+// ── Available Numbers section ─────────────────────────────────────────────────
+
+function AvailableNumbersSection({
+  items,
+  isLoading,
+  isError,
+  onRequest,
+  requestingDid,
+}: {
+  items: DidInventoryItem[];
+  isLoading: boolean;
+  isError: boolean;
+  onRequest: (item: DidInventoryItem) => void;
+  requestingDid: string | null;
+}) {
+  const [search, setSearch] = useState('');
+  const [searchFocused, setSearchFocused] = useState(false);
+
+  const filtered = useMemo(() => {
+    if (!search.trim()) return items;
+    const q = search.trim().toLowerCase();
+    return items.filter(
+      (item) =>
+        item.did.includes(q) ||
+        (item.city ?? '').toLowerCase().includes(q) ||
+        (item.state ?? '').toLowerCase().includes(q) ||
+        (item.rate_center ?? '').toLowerCase().includes(q),
+    );
+  }, [items, search]);
+
+  if (isLoading) {
+    return (
+      <DidCard delay={160}>
+        <DidSectionHeader title="Available Numbers" />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, justifyContent: 'center', padding: '48px 0', color: '#64748b' }}>
+          <Spinner size="sm" />
+          <span style={{ fontSize: '0.875rem' }}>Loading available numbers…</span>
+        </div>
+      </DidCard>
+    );
+  }
+
+  if (isError) {
+    return (
+      <DidCard delay={160}>
+        <DidSectionHeader title="Available Numbers" />
+        <div style={{ padding: '16px 20px', margin: 16, borderRadius: 10, background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', color: '#f87171', fontSize: '0.85rem' }}>
+          Unable to load available numbers. Please try refreshing.
+        </div>
+      </DidCard>
+    );
+  }
+
+  return (
+    <DidCard delay={160}>
+      <DidSectionHeader
+        title="Available Numbers"
+        count={filtered.length}
+        countLabel={filtered.length === 1 ? 'number available' : 'numbers available'}
+        right={
+          /* search bar in header right slot */
+          <div style={{ position: 'relative', width: 280 }}>
+            <span
+              style={{
+                position: 'absolute',
+                left: 11,
+                top: '50%',
+                transform: 'translateY(-50%)',
+                color: searchFocused ? '#3b82f6' : '#475569',
+                display: 'flex',
+                alignItems: 'center',
+                pointerEvents: 'none',
+                transition: 'color 0.2s',
+              }}
+            >
+              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={2} style={{ width: 13, height: 13 }}>
+                <path d="m19 19-4.35-4.35M15 9A6 6 0 1 1 3 9a6 6 0 0 1 12 0Z" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </span>
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Filter by area code, city, state…"
+              onFocus={() => setSearchFocused(true)}
+              onBlur={() => setSearchFocused(false)}
+              style={{
+                width: '100%',
+                boxSizing: 'border-box',
+                padding: '7px 10px 7px 28px',
+                fontSize: '0.78rem',
+                background: searchFocused ? 'rgba(15,17,23,0.9)' : 'rgba(15,17,23,0.55)',
+                border: `1px solid ${searchFocused ? 'rgba(59,130,246,0.40)' : 'rgba(59,130,246,0.14)'}`,
+                borderRadius: 9,
+                color: '#e2e8f0',
+                outline: 'none',
+                fontFamily: 'inherit',
+                transition: 'border-color 0.2s, box-shadow 0.2s, background 0.2s',
+                boxShadow: searchFocused ? '0 0 0 3px rgba(59,130,246,0.12)' : 'none',
+              }}
+            />
+            {search && (
+              <button
+                type="button"
+                onClick={() => setSearch('')}
+                style={{
+                  position: 'absolute',
+                  right: 8,
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  background: 'transparent',
+                  border: 'none',
+                  color: '#475569',
+                  cursor: 'pointer',
+                  padding: '2px 3px',
+                  display: 'flex',
+                  alignItems: 'center',
+                }}
+              >
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={2.2} style={{ width: 10, height: 10 }}>
+                  <path d="M4 4l8 8M12 4l-8 8" strokeLinecap="round" />
+                </svg>
+              </button>
+            )}
+          </div>
+        }
+      />
+
+      {items.length === 0 ? (
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '56px 24px',
+            gap: 14,
+            textAlign: 'center',
+          }}
+        >
+          <div
+            style={{
+              width: 56,
+              height: 56,
+              borderRadius: 14,
+              background: 'linear-gradient(135deg, rgba(59,130,246,0.10) 0%, rgba(59,130,246,0.05) 100%)',
+              border: '1px solid rgba(59,130,246,0.16)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth={1.5} style={{ width: 26, height: 26, opacity: 0.5 }}>
+              <rect x="3" y="3" width="18" height="18" rx="3" />
+              <path d="M9 12h6M12 9v6" strokeLinecap="round" />
+            </svg>
+          </div>
+          <div>
+            <p style={{ color: '#94a3b8', fontSize: '0.95rem', fontWeight: 600, margin: '0 0 6px' }}>
+              No numbers available right now
+            </p>
+            <p style={{ color: '#475569', fontSize: '0.82rem', margin: 0, lineHeight: 1.6, maxWidth: 360 }}>
+              Our team is provisioning additional numbers. Check back soon or contact support to request a specific area code.
+            </p>
+          </div>
+        </div>
+      ) : filtered.length === 0 ? (
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '48px 24px',
+            gap: 10,
+            textAlign: 'center',
+          }}
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="#334155" strokeWidth={1.5} style={{ width: 32, height: 32 }}>
+            <path d="m21 21-5.197-5.197M15.803 15.803A7.5 7.5 0 1 0 4.197 4.197a7.5 7.5 0 0 0 11.606 11.606Z" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          <p style={{ color: '#64748b', fontSize: '0.88rem', fontWeight: 500, margin: 0 }}>
+            No numbers match &ldquo;{search}&rdquo;
+          </p>
+          <button
+            type="button"
+            onClick={() => setSearch('')}
+            style={{ background: 'transparent', border: 'none', color: '#3b82f6', fontSize: '0.8rem', cursor: 'pointer', textDecoration: 'underline', fontFamily: 'inherit', padding: 0 }}
+          >
+            Clear filter
+          </button>
+        </div>
+      ) : (
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 560 }}>
+            <thead>
+              <tr>
+                <DidTh>DID</DidTh>
+                <DidTh>City</DidTh>
+                <DidTh>State</DidTh>
+                <DidTh>Rate Center</DidTh>
+                <DidTh>Action</DidTh>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((item, idx) => {
+                const isRequesting = requestingDid === item.did;
+                return (
+                  <tr
+                    key={item.id}
+                    style={{
+                      borderBottom: idx < filtered.length - 1 ? '1px solid rgba(59,130,246,0.06)' : 'none',
+                      animation: 'fadeInUp 0.3s ease both',
+                      animationDelay: `${Math.min(idx * 30, 400)}ms`,
+                      transition: 'background 0.15s',
+                    }}
+                    onMouseEnter={(e) => { (e.currentTarget as HTMLTableRowElement).style.background = 'rgba(59,130,246,0.04)'; }}
+                    onMouseLeave={(e) => { (e.currentTarget as HTMLTableRowElement).style.background = 'transparent'; }}
+                  >
+                    <td style={{ padding: '13px 16px' }}>
+                      <div>
+                        <div style={{ fontSize: '0.88rem', fontWeight: 700, color: '#e2e8f0', fontFamily: 'monospace', letterSpacing: '0.02em' }}>
+                          {fmt(item.did)}
+                        </div>
+                        <div style={{ fontSize: '0.63rem', color: '#334155', fontFamily: 'monospace', marginTop: 2 }}>
+                          {item.did}
+                        </div>
+                      </div>
+                    </td>
+                    <td style={{ padding: '13px 16px' }}>
+                      <span style={{ fontSize: '0.82rem', color: item.city ? '#94a3b8' : '#2d3748', fontStyle: item.city ? 'normal' : 'italic' }}>
+                        {item.city ?? '—'}
+                      </span>
+                    </td>
+                    <td style={{ padding: '13px 16px' }}>
+                      <span style={{ fontSize: '0.82rem', color: item.state ? '#94a3b8' : '#2d3748', fontWeight: item.state ? 600 : 400 }}>
+                        {item.state ?? '—'}
+                      </span>
+                    </td>
+                    <td style={{ padding: '13px 16px' }}>
+                      <span style={{ fontSize: '0.78rem', color: '#64748b' }}>
+                        {item.rate_center ?? '—'}
+                      </span>
+                    </td>
+                    <td style={{ padding: '10px 16px' }}>
+                      <button
+                        type="button"
+                        onClick={() => onRequest(item)}
+                        disabled={isRequesting}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 6,
+                          padding: '7px 16px',
+                          borderRadius: 8,
+                          border: 'none',
+                          background: isRequesting
+                            ? 'rgba(59,130,246,0.25)'
+                            : 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
+                          color: '#fff',
+                          fontSize: '0.75rem',
+                          fontWeight: 700,
+                          cursor: isRequesting ? 'not-allowed' : 'pointer',
+                          fontFamily: 'inherit',
+                          letterSpacing: '0.02em',
+                          boxShadow: isRequesting ? 'none' : '0 3px 12px rgba(59,130,246,0.30)',
+                          transition: 'background 0.15s, box-shadow 0.15s, filter 0.15s',
+                          whiteSpace: 'nowrap',
+                        }}
+                        onMouseEnter={(e) => {
+                          if (!isRequesting) {
+                            (e.currentTarget as HTMLButtonElement).style.filter = 'brightness(1.12)';
+                            (e.currentTarget as HTMLButtonElement).style.boxShadow = '0 4px 18px rgba(59,130,246,0.45)';
+                          }
+                        }}
+                        onMouseLeave={(e) => {
+                          (e.currentTarget as HTMLButtonElement).style.filter = 'none';
+                          (e.currentTarget as HTMLButtonElement).style.boxShadow = isRequesting ? 'none' : '0 3px 12px rgba(59,130,246,0.30)';
+                        }}
+                      >
+                        {isRequesting ? (
+                          <svg viewBox="0 0 16 16" style={{ width: 11, height: 11, animation: 'spin 0.7s linear infinite' }}>
+                            <circle cx="8" cy="8" r="6" fill="none" stroke="rgba(255,255,255,0.3)" strokeWidth={2} />
+                            <path d="M8 2a6 6 0 0 1 6 6" stroke="#fff" strokeWidth={2} fill="none" strokeLinecap="round" />
+                          </svg>
+                        ) : (
+                          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={2} style={{ width: 11, height: 11 }}>
+                            <circle cx="8" cy="8" r="6" />
+                            <path d="M8 5v6M5 8h6" strokeLinecap="round" />
+                          </svg>
+                        )}
+                        {isRequesting ? 'Requesting…' : 'Request'}
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </DidCard>
+  );
+}
+
+// ── DIDManagementTab (root) ───────────────────────────────────────────────────
+
+interface DIDManagementTabProps {
+  customerId: number | undefined;
+}
+
+function DIDManagementTab({ customerId }: DIDManagementTabProps) {
+  // ALL hooks unconditionally at top — React rules-of-hooks
+  const queryClient = useQueryClient();
+  const { toastOk, toastErr } = useToast();
+
+  // Modal state — null = closed, DidInventoryItem = confirm dialog open
+  const [confirmTarget, setConfirmTarget] = useState<DidInventoryItem | null>(null);
+
+  const {
+    data: myDids,
+    isLoading: myLoading,
+    isError: myError,
+  } = useQuery({
+    queryKey: ['my-dids', customerId],
+    queryFn: () => listMyDids(),
+    staleTime: 30_000,
+  });
+
+  const {
+    data: availableDids,
+    isLoading: availLoading,
+    isError: availError,
+  } = useQuery({
+    queryKey: ['available-dids'],
+    queryFn: () => listAvailableDids({ limit: 100 }),
+    staleTime: 30_000,
+  });
+
+  const requestMutation = useMutation({
+    mutationFn: (did: string) => requestDid(did),
+    onSuccess: (_data, did) => {
+      void queryClient.invalidateQueries({ queryKey: ['my-dids'] });
+      void queryClient.invalidateQueries({ queryKey: ['available-dids'] });
+      setConfirmTarget(null);
+      toastOk(`Number requested — ${fmt(did)} is pending admin approval`);
+    },
+    onError: (err: Error) => {
+      setConfirmTarget(null);
+      toastErr(err.message ?? 'Failed to request number');
+    },
+  });
+
+  const myItems = myDids ?? [];
+  const availItems = availableDids ?? [];
+
+  // Split my numbers into assigned vs reserved/pending
+  const assignedItems = useMemo(
+    () => myItems.filter((d) => d.status === 'assigned'),
+    [myItems],
+  );
+  const pendingItems = useMemo(
+    () => myItems.filter((d) => d.status === 'reserved'),
+    [myItems],
+  );
+
+  function handleRequestClick(item: DidInventoryItem) {
+    setConfirmTarget(item);
+  }
+
+  function handleConfirmRequest(item: DidInventoryItem) {
+    requestMutation.mutate(item.did);
+  }
+
+  return (
+    <>
+      {/* Confirmation modal — rendered at top level so it sits over everything */}
+      {confirmTarget && (
+        <RequestModal
+          did={confirmTarget}
+          onConfirm={handleConfirmRequest}
+          onCancel={() => setConfirmTarget(null)}
+          isPending={requestMutation.isPending}
+        />
+      )}
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+        {/* Section 1: My Numbers (assigned) */}
+        <MyNumbersSection
+          items={assignedItems}
+          isLoading={myLoading}
+          isError={myError}
+        />
+
+        {/* Section 2: Pending Requests */}
+        <PendingRequestsSection items={pendingItems} />
+
+        {/* Section 3: Available Numbers */}
+        <AvailableNumbersSection
+          items={availItems}
+          isLoading={availLoading}
+          isError={availError}
+          onRequest={handleRequestClick}
+          requestingDid={requestMutation.isPending ? (requestMutation.variables ?? null) : null}
+        />
+      </div>
+    </>
+  );
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export function RcfPage() {
@@ -2808,6 +3780,11 @@ export function RcfPage() {
       {/* ── Quality Tab ──────────────────────────────────────── */}
       {activeTab === 'quality' && (
         <QualityTab customerId={customerId} />
+      )}
+
+      {/* ── DID Management Tab ───────────────────────────────── */}
+      {activeTab === 'dids' && (
+        <DIDManagementTab customerId={customerId} />
       )}
     </div>
   );
