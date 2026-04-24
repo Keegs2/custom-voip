@@ -6,7 +6,7 @@ import {
   IconRCF, IconTrunk, IconAPI, IconIVR, IconDocs,
   IconAdmin, IconSignal, IconTroubleshoot,
 } from '../icons/ProductIcons';
-import { Package, Shield, ChevronDown, Clock, Eye, EyeOff } from 'lucide-react';
+import { Package, Shield, ChevronDown, Clock, Eye, EyeOff, Users, LifeBuoy } from 'lucide-react';
 
 /* ─── Types ───────────────────────────────────────────────── */
 
@@ -330,6 +330,89 @@ function CollapsibleGroup({ id, label, icon, isOpen, onToggle, children, to }: C
   );
 }
 
+/* ─── CollapsibleSubGroup ─────────────────────────────────── */
+
+interface CollapsibleSubGroupProps {
+  label: string;
+  icon: React.ReactNode;
+  isOpen: boolean;
+  onToggle: () => void;
+  children: React.ReactNode;
+}
+
+function CollapsibleSubGroup({ label, icon, isOpen, onToggle, children }: CollapsibleSubGroupProps) {
+  return (
+    <div style={{ marginBottom: 2 }}>
+      {/* Sub-group header */}
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={isOpen}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 5,
+          width: '100%',
+          padding: '4px 10px',
+          background: 'transparent',
+          border: 'none',
+          cursor: 'pointer',
+          userSelect: 'none',
+          marginTop: 6,
+          marginBottom: 2,
+        }}
+      >
+        <span
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            color: 'rgba(59, 130, 246, 0.45)',
+          }}
+        >
+          {icon}
+        </span>
+        <span
+          style={{
+            flex: 1,
+            textAlign: 'left',
+            fontSize: '0.55rem',
+            fontWeight: 700,
+            letterSpacing: '0.1em',
+            textTransform: 'uppercase',
+            color: 'rgba(59, 130, 246, 0.45)',
+          }}
+        >
+          {label}
+        </span>
+        <ChevronDown
+          size={10}
+          strokeWidth={2.5}
+          style={{
+            flexShrink: 0,
+            color: 'rgba(59, 130, 246, 0.35)',
+            transition: 'transform 0.2s ease',
+            transform: isOpen ? 'rotate(0deg)' : 'rotate(-90deg)',
+          }}
+        />
+      </button>
+
+      {/* Animated content */}
+      <div
+        style={{
+          overflow: 'hidden',
+          maxHeight: isOpen ? 400 : 0,
+          opacity: isOpen ? 1 : 0,
+          transition: 'max-height 0.2s ease, opacity 0.18s ease',
+        }}
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+          {children}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ─── Sidebar ─────────────────────────────────────────────── */
 
 export function Sidebar() {
@@ -340,9 +423,11 @@ export function Sidebar() {
   const [groupOpen, setGroupOpen] = useState<Record<string, boolean>>(() => {
     const stored = loadGroupState();
     return {
-      products:       stored.products       ?? true,
-      comingSoon:     stored.comingSoon     ?? false,
-      administration: stored.administration ?? false,
+      products:          stored.products          ?? true,
+      comingSoon:        stored.comingSoon        ?? false,
+      administration:    stored.administration    ?? false,
+      adminSubCustomers: stored.adminSubCustomers ?? true,
+      adminSubSupport:   stored.adminSubSupport   ?? true,
     };
   });
   const navigate = useNavigate();
@@ -370,17 +455,25 @@ export function Sidebar() {
     const path = location.pathname;
 
     const productPaths = productNavItems.map((i) => i.to);
-    const adminPaths   = ['/admin', '/call-quality', '/admin/did-search', '/admin/user', '/troubleshooting'];
+    const adminPaths        = ['/admin', '/call-quality', '/admin/did-search', '/admin/user', '/troubleshooting'];
+    const adminCustomerPaths = ['/admin/customers', '/admin/did-search', '/admin/user'];
+    const adminSupportPaths  = ['/call-quality', '/troubleshooting'];
 
-    const inProducts = productPaths.some((p) => path === p || path.startsWith(p + '/'));
-    const inAdmin    = adminPaths.some((p) => path === p || path.startsWith(p + '/'));
+    const inProducts        = productPaths.some((p) => path === p || path.startsWith(p + '/'));
+    const inAdmin           = adminPaths.some((p) => path === p || path.startsWith(p + '/'));
+    const inAdminCustomers  = adminCustomerPaths.some((p) => path === p || path.startsWith(p + '/'));
+    const inAdminSupport    = adminSupportPaths.some((p) => path === p || path.startsWith(p + '/'));
 
     setGroupOpen((prev) => {
       const next = { ...prev };
-      if (inProducts && !prev.products)       next.products       = true;
-      if (inAdmin    && !prev.administration) next.administration = true;
-      if (next.products === prev.products &&
-          next.administration === prev.administration) {
+      if (inProducts       && !prev.products)          next.products          = true;
+      if (inAdmin          && !prev.administration)    next.administration    = true;
+      if (inAdminCustomers && !prev.adminSubCustomers) next.adminSubCustomers = true;
+      if (inAdminSupport   && !prev.adminSubSupport)   next.adminSubSupport   = true;
+      if (next.products          === prev.products          &&
+          next.administration    === prev.administration    &&
+          next.adminSubCustomers === prev.adminSubCustomers &&
+          next.adminSubSupport   === prev.adminSubSupport) {
         return prev; // avoid unnecessary re-render
       }
       return next;
@@ -407,11 +500,11 @@ export function Sidebar() {
 
   /* ── Admin items ───────────────────────────────────────── */
 
-  const customersItem: NavItemDef    = { label: 'Customers',       to: '/admin',             color: '#60a5fa', icon: <IconAdmin /> };
-  const callQualityItem: NavItemDef  = { label: 'Call Quality',    to: '/call-quality',      color: '#22c55e', icon: <IconSignal size={17} /> };
-  const didLookupItem: NavItemDef    = { label: 'DID Lookup',      to: '/admin/did-search',  color: '#60a5fa', icon: <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.7} style={{ width: 15, height: 15 }}><circle cx="8.5" cy="8.5" r="5" /><path d="m13 13 3.5 3.5" strokeLinecap="round" /><path d="M6.5 7.5c.5-.8 1.3-1 2-1" strokeLinecap="round" /></svg> };
-  const userLookupItem: NavItemDef   = { label: 'User Lookup',     to: '/admin/user',        color: '#c084fc', icon: <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.7} style={{ width: 15, height: 15 }}><circle cx="8" cy="6" r="3.5" /><path d="M2 17c0-3 2.5-5 6-5" strokeLinecap="round" /><circle cx="14.5" cy="14.5" r="3" /><path d="m17.5 17.5 1.5 1.5" strokeLinecap="round" /></svg> };
-  const troubleItem: NavItemDef      = { label: 'Troubleshooting', to: '/troubleshooting',   color: '#fbbf24', icon: <IconTroubleshoot size={17} /> };
+  const customersItem: NavItemDef    = { label: 'Customer Management', to: '/admin/customers',   color: '#60a5fa', icon: <IconAdmin /> };
+  const callQualityItem: NavItemDef  = { label: 'Call Quality',        to: '/call-quality',      color: '#22c55e', icon: <IconSignal size={17} /> };
+  const didLookupItem: NavItemDef    = { label: 'DID Management',      to: '/admin/did-search',  color: '#60a5fa', icon: <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.7} style={{ width: 15, height: 15 }}><circle cx="8.5" cy="8.5" r="5" /><path d="m13 13 3.5 3.5" strokeLinecap="round" /><path d="M6.5 7.5c.5-.8 1.3-1 2-1" strokeLinecap="round" /></svg> };
+  const userLookupItem: NavItemDef   = { label: 'User Lookup',         to: '/admin/user',        color: '#c084fc', icon: <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.7} style={{ width: 15, height: 15 }}><circle cx="8" cy="6" r="3.5" /><path d="M2 17c0-3 2.5-5 6-5" strokeLinecap="round" /><circle cx="14.5" cy="14.5" r="3" /><path d="m17.5 17.5 1.5 1.5" strokeLinecap="round" /></svg> };
+  const troubleItem: NavItemDef      = { label: 'Troubleshooting',     to: '/troubleshooting',   color: '#fbbf24', icon: <IconTroubleshoot size={17} /> };
 
   /* ─────────────────────────────────────────────────────── */
 
@@ -632,11 +725,30 @@ export function Sidebar() {
                 isOpen={groupOpen.administration}
                 onToggle={toggleGroup}
               >
-                {isAdmin && <SidebarNavItem item={customersItem}   onNavigate={closeMobile} />}
-                {isAdmin && <SidebarNavItem item={didLookupItem}   onNavigate={closeMobile} />}
-                {isAdmin && <SidebarNavItem item={userLookupItem}  onNavigate={closeMobile} />}
-                <SidebarNavItem item={callQualityItem} onNavigate={closeMobile} />
-                <SidebarNavItem item={troubleItem}     onNavigate={closeMobile} />
+                {/* ── Customers sub-group (admin only) ──── */}
+                {isAdmin && (
+                  <CollapsibleSubGroup
+                    label="Customers"
+                    icon={<Users size={9} strokeWidth={2.5} />}
+                    isOpen={groupOpen.adminSubCustomers}
+                    onToggle={() => toggleGroup('adminSubCustomers')}
+                  >
+                    <SidebarNavItem item={customersItem}  onNavigate={closeMobile} />
+                    <SidebarNavItem item={didLookupItem}  onNavigate={closeMobile} />
+                    <SidebarNavItem item={userLookupItem} onNavigate={closeMobile} />
+                  </CollapsibleSubGroup>
+                )}
+
+                {/* ── Support sub-group (admin + readonly) */}
+                <CollapsibleSubGroup
+                  label="Support"
+                  icon={<LifeBuoy size={9} strokeWidth={2.5} />}
+                  isOpen={groupOpen.adminSubSupport}
+                  onToggle={() => toggleGroup('adminSubSupport')}
+                >
+                  <SidebarNavItem item={callQualityItem} onNavigate={closeMobile} />
+                  <SidebarNavItem item={troubleItem}     onNavigate={closeMobile} />
+                </CollapsibleSubGroup>
               </CollapsibleGroup>
             </>
           )}
