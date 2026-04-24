@@ -1062,35 +1062,31 @@ function InboundTrunkNode({
   );
 }
 
-/* ── NLB / Geo Router — diamond ── */
+/* ── NLB / Key Distributor — stone block with blue glowing crosshair ── */
 function NlbNode({ uid }: { uid: string }) {
   const cx = COL.nlb;
   const cy = 150;
-  const s  = 26;
+  // S=46 keeps the image prominent while path endpoints (±26) clear the image
+  // edge (±23) with a small gap — connection lines terminate just outside the art.
+  const S  = 46;
 
   return (
     <g transform={`translate(${cx}, ${cy})`}>
-      <circle r="56" fill={`url(#${uid}-lg)`} />
-      <polygon
-        points={`0,${-s} ${s},0 0,${s} ${-s},0`}
-        fill="rgba(15,17,23,0.72)"
-        stroke="rgba(59,130,246,0.34)"
-        strokeWidth="1"
+      {/* Ambient glow halo — larger radius to match the more prominent image */}
+      <circle r="58" fill={`url(#${uid}-lg)`} />
+      <image
+        href="/key_distributor.png"
+        x={-S / 2} y={-S / 2}
+        width={S} height={S}
+        filter={`url(#${uid}-imgf)`}
+        preserveAspectRatio="xMidYMid meet"
       />
-      <polygon
-        points={`0,${-s * 0.42} ${s * 0.42},0 0,${s * 0.42} ${-s * 0.42},0`}
-        fill="rgba(59,130,246,0.15)"
-        stroke="rgba(96,165,250,0.28)"
-        strokeWidth="0.75"
-      />
-      <line x1="-10" y1="0" x2="10" y2="0" stroke="rgba(96,165,250,0.40)" strokeWidth="0.9" />
-      <line x1="0" y1="-10" x2="0" y2="10" stroke="rgba(96,165,250,0.40)" strokeWidth="0.9" />
-      <text y={s + 14} textAnchor="middle" fontSize="7.5"
+      <text y={S / 2 + 12} textAnchor="middle" fontSize="7.5"
         fontFamily="'SF Mono', 'Fira Code', 'Consolas', monospace"
         letterSpacing="0.09em" fill="rgba(148,163,184,0.62)" fontWeight="600">
         Key
       </text>
-      <text y={s + 23} textAnchor="middle" fontSize="6"
+      <text y={S / 2 + 21} textAnchor="middle" fontSize="6"
         fontFamily="'SF Mono', 'Fira Code', 'Consolas', monospace"
         letterSpacing="0.07em" fill="rgba(100,116,139,0.52)" fontWeight="500">
         Distributor
@@ -1178,7 +1174,7 @@ function LocationGroup({
   );
 }
 
-/* ── Individual SBC node ── */
+/* ── Individual SBC / Signal Key node — stone octagon with blue glow shield ── */
 function SbcNode({
   uid,
   cx,
@@ -1192,31 +1188,25 @@ function SbcNode({
   label: string;
   nodeClass?: string;
 }) {
-  const W = 46;
-  const H = 24;
-  const R = 6;
+  // S=30: image half-extent (±15) sits just inside the path connection points (±14),
+  // keeping the connection lines visually attached to the image edge.
+  // Two nodes stacked ±17px apart within a LOC_HALF_H=36 container — they clear
+  // the container border with 4px to spare on each side.
+  const S = 30;
 
   return (
     <g transform={`translate(${cx}, ${cy})`} className={nodeClass}>
-      <circle r="28" fill={`url(#${uid}-ng)`} />
-      <rect
-        x={-W / 2} y={-H / 2}
-        width={W} height={H} rx={R}
-        fill="rgba(15,17,23,0.76)"
-        stroke="rgba(59,130,246,0.28)"
-        strokeWidth="0.8"
+      {/* Ambient glow halo — the failover CSS class overrides this with red drop-shadow */}
+      <circle r="26" fill={`url(#${uid}-ng)`} />
+      <image
+        href="/signal_key.png"
+        x={-S / 2} y={-S / 2}
+        width={S} height={S}
+        filter={`url(#${uid}-imgf)`}
+        preserveAspectRatio="xMidYMid meet"
       />
-      <rect
-        x={-W / 2 + 1} y={-H / 2 + 1}
-        width={W - 2} height={H * 0.30} rx={R - 1}
-        fill="rgba(96,165,250,0.07)"
-      />
-      {/* Stack lines — visual metaphor for SBC stacking/redundancy */}
-      <line x1="-12" y1="-4" x2="12" y2="-4" stroke="rgba(59,130,246,0.30)" strokeWidth="0.65" />
-      <line x1="-8"  y1=" 0" x2="8"  y2=" 0" stroke="rgba(59,130,246,0.20)" strokeWidth="0.65" />
-      <line x1="-4"  y1=" 4" x2="4"  y2=" 4" stroke="rgba(59,130,246,0.12)" strokeWidth="0.65" />
       {/* Label below */}
-      <text y={H / 2 + 9} textAnchor="middle" fontSize="6"
+      <text y={S / 2 + 9} textAnchor="middle" fontSize="6"
         fontFamily="'SF Mono', 'Fira Code', 'Consolas', monospace"
         letterSpacing="0.07em" fill="rgba(148,163,184,0.52)" fontWeight="600">
         {label}
