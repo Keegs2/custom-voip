@@ -86,73 +86,47 @@ export function LoginPage() {
       >
         {/* ── Brand header above card ───────────────────────── */}
         <div style={{ textAlign: 'center', marginBottom: 32 }}>
-          {/* Logo mark */}
-          <div
+          <style>{`
+            @keyframes keystoneGlow {
+              0%   { filter: drop-shadow(0 0 12px rgba(59, 130, 246, 0.3)) drop-shadow(0 0 24px rgba(59, 130, 246, 0.1)); }
+              100% { filter: drop-shadow(0 0 20px rgba(59, 130, 246, 0.55)) drop-shadow(0 0 40px rgba(59, 130, 246, 0.22)); }
+            }
+            @keyframes keystoneFloat {
+              0%, 100% { transform: translateY(0px); }
+              50%       { transform: translateY(-4px); }
+            }
+            .keystone-hero-img {
+              animation: keystoneGlow 3s ease-in-out infinite alternate,
+                         keystoneFloat 6s ease-in-out infinite;
+              transition: filter 0.3s ease, transform 0.3s ease;
+            }
+            .keystone-hero-img:hover {
+              filter: drop-shadow(0 0 28px rgba(59, 130, 246, 0.7)) drop-shadow(0 0 56px rgba(59, 130, 246, 0.35)) !important;
+              transform: translateY(-4px) scale(1.03) !important;
+              animation-play-state: paused;
+            }
+          `}</style>
+
+          {/* Hero branded image — contains "KEYSTONE" text + subtitle built in */}
+          <img
+            src="/keystone_image.png"
+            alt="Granite Keystone — Unified Voice & Communications"
+            className="keystone-hero-img"
             style={{
-              width: 48,
-              height: 48,
-              borderRadius: 14,
-              background: 'linear-gradient(135deg, #2563eb 0%, #3b82f6 60%, #60a5fa 100%)',
-              boxShadow: '0 0 32px rgba(59,130,246,0.45), 0 4px 16px rgba(0,0,0,0.5)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
+              width: 220,
+              height: 'auto',
+              display: 'block',
               margin: '0 auto 16px',
             }}
-          >
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="white"
-              strokeWidth={2}
-              style={{ width: 24, height: 24 }}
-            >
-              <path
-                d="M2.25 6.338c0 12.03 9.716 21.75 21.75 21.75"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-              <path
-                d="m2.25 6.338 3.56-3.56a1.5 1.5 0 0 1 2.121 0l2.296 2.296a1.5 1.5 0 0 1 0 2.122l-1.054 1.053c-.226.226-.296.56-.144.849a13.478 13.478 0 0 0 5.636 5.635c.29.153.624.083.85-.143l1.053-1.054a1.5 1.5 0 0 1 2.122 0l2.296 2.296a1.5 1.5 0 0 1 0 2.121l-3.56 3.56"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-          </div>
-
-          <img
-            src="/keystone_logo.png"
-            alt="Granite Keystone"
-            style={{ height: 48, width: 'auto', margin: '0 auto 12px', display: 'block' }}
           />
-          <h1
-            style={{
-              fontSize: '1.75rem',
-              fontWeight: 800,
-              letterSpacing: '-0.03em',
-              lineHeight: 1.1,
-              margin: '0 0 4px',
-            }}
-          >
-            <span style={{ color: '#e2e8f0' }}>Granite </span>
-            <span
-              style={{
-                backgroundImage: 'linear-gradient(135deg, #3b82f6 0%, #60a5fa 50%, #93c5fd 100%)',
-                WebkitBackgroundClip: 'text',
-                WebkitTextFillColor: 'transparent',
-                backgroundClip: 'text',
-              }}
-            >
-              Keystone
-            </span>
-          </h1>
+
           <p
             style={{
-              fontSize: '0.8rem',
+              fontSize: '0.7rem',
               fontWeight: 600,
-              letterSpacing: '0.1em',
+              letterSpacing: '0.12em',
               textTransform: 'uppercase',
-              color: '#334155',
+              color: '#2d3a4a',
             }}
           >
             Enterprise Voice Platform

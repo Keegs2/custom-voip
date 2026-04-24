@@ -374,28 +374,49 @@ export function DashboardPage() {
         className="text-center animate-fade-in-up"
         style={{ marginBottom: 48, width: '100%', maxWidth: 1060 }}
       >
-        <h1
+        <style>{`
+          @keyframes dashKeystoneGlow {
+            0%   { filter: drop-shadow(0 0 14px rgba(59, 130, 246, 0.3)) drop-shadow(0 0 28px rgba(59, 130, 246, 0.1)); }
+            100% { filter: drop-shadow(0 0 24px rgba(59, 130, 246, 0.55)) drop-shadow(0 0 48px rgba(59, 130, 246, 0.22)); }
+          }
+          @keyframes dashKeystoneFloat {
+            0%, 100% { transform: translateY(0px); }
+            50%       { transform: translateY(-4px); }
+          }
+          .dash-keystone-hero {
+            animation: dashKeystoneGlow 3s ease-in-out infinite alternate,
+                       dashKeystoneFloat 6s ease-in-out infinite;
+            transition: filter 0.3s ease, transform 0.3s ease;
+          }
+          .dash-keystone-hero:hover {
+            filter: drop-shadow(0 0 32px rgba(59, 130, 246, 0.72)) drop-shadow(0 0 64px rgba(59, 130, 246, 0.35)) !important;
+            transform: translateY(-4px) scale(1.03) !important;
+            animation-play-state: paused;
+          }
+        `}</style>
+
+        {/* Hero branded image — contains "KEYSTONE" text + subtitle built in */}
+        <img
+          src="/keystone_image.png"
+          alt="Granite Keystone — Unified Voice & Communications"
+          className="dash-keystone-hero"
           style={{
-            fontSize: 'clamp(2.8rem, 5vw, 4.5rem)',
-            fontWeight: 800,
-            letterSpacing: '-0.025em',
-            lineHeight: 1.1,
-            marginBottom: 12,
+            width: 300,
+            height: 'auto',
+            display: 'block',
+            margin: '0 auto 16px',
+          }}
+        />
+
+        <p
+          style={{
+            fontSize: '0.8rem',
+            fontWeight: 600,
+            letterSpacing: '0.14em',
+            textTransform: 'uppercase',
+            color: '#374151',
           }}
         >
-          <span style={{ color: '#e2e8f0' }}>Granite </span>
-          <span
-            style={{
-              backgroundImage: 'linear-gradient(135deg, #3b82f6 0%, #60a5fa 50%, #93c5fd 100%)',
-              WebkitBackgroundClip: 'text',
-              WebkitTextFillColor: 'transparent',
-              backgroundClip: 'text',
-            }}
-          >
-            Keystone
-          </span>
-        </h1>
-        <p style={{ fontSize: '1.125rem', color: '#718096', fontWeight: 500, letterSpacing: '0.02em' }}>
           Enterprise Voice Platform
         </p>
       </div>

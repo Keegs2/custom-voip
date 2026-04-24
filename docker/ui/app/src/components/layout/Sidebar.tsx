@@ -442,38 +442,26 @@ export function Sidebar() {
               pointerEvents: 'none',
             }}
           />
-          <div style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <img
               src="/keystone_logo.png"
               alt="Granite Keystone"
-              style={{ height: 34, width: 'auto', flexShrink: 0 }}
+              style={{
+                height: 40,
+                width: 'auto',
+                flexShrink: 0,
+                filter: 'drop-shadow(0 0 4px rgba(59, 130, 246, 0.2))',
+                transition: 'filter 0.3s ease',
+              }}
+              onMouseEnter={(e) => {
+                (e.currentTarget as HTMLImageElement).style.filter =
+                  'drop-shadow(0 0 8px rgba(59, 130, 246, 0.5)) drop-shadow(0 0 16px rgba(59, 130, 246, 0.2))';
+              }}
+              onMouseLeave={(e) => {
+                (e.currentTarget as HTMLImageElement).style.filter =
+                  'drop-shadow(0 0 4px rgba(59, 130, 246, 0.2))';
+              }}
             />
-            <div>
-              <div
-                style={{
-                  fontSize: '1rem',
-                  fontWeight: 800,
-                  letterSpacing: '-0.03em',
-                  lineHeight: 1.15,
-                  color: '#f1f5f9',
-                  textShadow: '0 0 28px rgba(59, 130, 246, 0.35)',
-                }}
-              >
-                Granite <span style={{ color: '#60a5fa' }}>Keystone</span>
-              </div>
-              <div
-                style={{
-                  fontSize: '0.625rem',
-                  fontWeight: 600,
-                  letterSpacing: '0.12em',
-                  textTransform: 'uppercase',
-                  color: '#334155',
-                  marginTop: 1,
-                }}
-              >
-                Voice Platform
-              </div>
-            </div>
           </div>
         </div>
 
