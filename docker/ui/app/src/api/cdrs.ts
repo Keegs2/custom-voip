@@ -22,6 +22,7 @@ export async function searchCdrs(params: CdrSearchParams = {}): Promise<CdrSearc
   if (params.start_from) query.set('start_from', params.start_from);
   if (params.start_to) query.set('start_to', params.start_to);
   if (params.hangup_cause) query.set('hangup_cause', params.hangup_cause);
+  if (params.sbc_id) query.set('sbc_id', params.sbc_id);
   if (params.limit !== undefined) query.set('limit', String(params.limit));
   if (params.offset !== undefined) query.set('offset', String(params.offset));
   if (params.sort_by) query.set('sort_by', params.sort_by);

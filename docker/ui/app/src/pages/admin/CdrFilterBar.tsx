@@ -28,6 +28,7 @@ export interface CdrFilters {
   start_to: string;
   destination: string;
   rated_only: boolean;
+  sbc_id: string;
 }
 
 export function defaultCdrFilters(): CdrFilters {
@@ -39,6 +40,7 @@ export function defaultCdrFilters(): CdrFilters {
     start_to: defaultEndDate(),
     destination: '',
     rated_only: false,
+    sbc_id: '',
   };
 }
 
@@ -50,6 +52,7 @@ export function filtersToParams(filters: CdrFilters, limit: number, offset: numb
   if (filters.start_from) params.start_from = new Date(filters.start_from).toISOString();
   if (filters.start_to) params.start_to = new Date(filters.start_to).toISOString();
   if (filters.destination) params.destination = filters.destination;
+  if (filters.sbc_id) params.sbc_id = filters.sbc_id;
   return params;
 }
 
@@ -160,6 +163,20 @@ export function CdrFilterBar({ filters, onChange, onSearch, onExport, searching 
             <option value="">All</option>
             <option value="inbound">Inbound</option>
             <option value="outbound">Outbound</option>
+          </select>
+        </div>
+
+        {/* SBC */}
+        <div style={{ display: 'flex', flexDirection: 'column', minWidth: 130 }}>
+          <label style={labelStyle}>SBC</label>
+          <select
+            style={{ ...controlStyle, cursor: 'pointer' }}
+            value={filters.sbc_id}
+            onChange={(e) => set('sbc_id', e.target.value)}
+          >
+            <option value="">All SBCs</option>
+            <option value="east-sbc-1">east-sbc-1</option>
+            <option value="east-sbc-2">east-sbc-2</option>
           </select>
         </div>
 

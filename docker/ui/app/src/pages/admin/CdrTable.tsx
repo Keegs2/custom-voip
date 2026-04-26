@@ -6,7 +6,7 @@ import { fmt } from '../../utils/format';
 import { CdrExpandedRow } from './CdrExpandedRow';
 import type { Cdr, ProductType, CallDirection } from '../../types/cdr';
 
-const COLUMN_COUNT = 13;
+const COLUMN_COUNT = 14;
 
 function fmtTime(iso: string): string {
   const d = new Date(iso);
@@ -35,6 +35,15 @@ function directionBadge(dir: CallDirection) {
 
 function productBadge(pt: ProductType) {
   return <Badge variant={pt}>{pt.toUpperCase()}</Badge>;
+}
+
+function sbcBadge(sbcId: string | null | undefined) {
+  if (!sbcId) return <span className="text-[0.78rem] text-[#475569]">--</span>;
+  // Heuristic: anything ending in "-2" or containing "2" as the last digit gets cyan.
+  const variant = /2$/.test(sbcId) ? 'sbc2' : 'sbc1';
+  // Shorten display: strip common "east-" prefix so it fits in the column.
+  const label = sbcId.replace(/^east-/, '');
+  return <Badge variant={variant}>{label}</Badge>;
 }
 
 interface CdrTableProps {
@@ -92,6 +101,7 @@ export function CdrTable({ cdrs, customerNames }: CdrTableProps) {
             <Th>Margin</Th>
             <Th>Hangup</Th>
             <Th>Carrier</Th>
+            <Th>SBC</Th>
             <Th>Status</Th>
           </tr>
         </Thead>
@@ -182,6 +192,7 @@ export function CdrTable({ cdrs, customerNames }: CdrTableProps) {
                     {cdr.carrier_used || '--'}
                   </span>
                 </Td>
+                <Td>{sbcBadge(cdr.sbc_id)}</Td>
                 <Td>
                   {isRated ? (
                     <Badge variant="pass">Rated</Badge>

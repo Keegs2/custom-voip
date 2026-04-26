@@ -17,7 +17,9 @@ type BadgeVariant =
   | 'economy'
   | 'pass'
   | 'warn'
-  | 'fail';
+  | 'fail'
+  | 'sbc1'
+  | 'sbc2';
 
 interface BadgeProps {
   variant: BadgeVariant;
@@ -43,6 +45,8 @@ const variantClasses: Record<BadgeVariant, string> = {
   pass:      'bg-emerald-500/[0.12] text-emerald-300 border border-emerald-500/20',
   warn:      'bg-amber-500/[0.10] text-amber-300 border border-amber-500/25',
   fail:      'bg-red-500/[0.10] text-red-400 border border-red-500/20',
+  sbc1:      'bg-blue-500/[0.12] text-blue-300 border border-blue-500/25',
+  sbc2:      'bg-cyan-500/[0.10] text-cyan-300 border border-cyan-500/25',
 };
 
 export function Badge({ variant, children, className }: BadgeProps) {

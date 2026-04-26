@@ -114,6 +114,36 @@ export function CdrExpandedRow({ cdr, colSpan, onRated }: CdrExpandedRowProps) {
           />
         </div>
 
+        {/* SIP Details */}
+        {(cdr.sbc_id || cdr.sip_from_user || cdr.sip_to_user || cdr.sip_user_agent || cdr.network_addr) && (
+          <div className="mt-4 pt-3 border-t border-[#2a2f45]/50">
+            <p
+              className="text-[0.65rem] font-bold uppercase tracking-[0.7px] text-[#4a5568] mb-3"
+            >
+              SIP Details
+            </p>
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-x-6 gap-y-3">
+              {cdr.sbc_id && (
+                <DetailItem label="SBC" value={cdr.sbc_id} mono />
+              )}
+              {cdr.network_addr && (
+                <DetailItem label="Network Addr" value={cdr.network_addr} mono />
+              )}
+              {cdr.sip_from_user && (
+                <DetailItem label="SIP From" value={cdr.sip_from_user} mono />
+              )}
+              {cdr.sip_to_user && (
+                <DetailItem label="SIP To" value={cdr.sip_to_user} mono />
+              )}
+              {cdr.sip_user_agent && (
+                <div className="col-span-2 sm:col-span-3 lg:col-span-4">
+                  <DetailItem label="User Agent" value={cdr.sip_user_agent} mono />
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {!cdr.rated_at && (
           <div className="mt-4 pt-3 border-t border-[#2a2f45]/50">
             <Button

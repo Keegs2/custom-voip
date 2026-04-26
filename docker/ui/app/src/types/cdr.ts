@@ -59,6 +59,13 @@ export interface Cdr {
   // Codecs
   read_codec?: string | null;
   write_codec?: string | null;
+
+  // SIP / network metadata
+  sbc_id?: string | null;
+  sip_from_user?: string | null;
+  sip_to_user?: string | null;
+  sip_user_agent?: string | null;
+  network_addr?: string | null;
 }
 
 export interface CdrSearchParams {
@@ -70,6 +77,7 @@ export interface CdrSearchParams {
   start_from?: string;
   start_to?: string;
   hangup_cause?: string;
+  sbc_id?: string;
   limit?: number;
   offset?: number;
   sort_by?: string;
