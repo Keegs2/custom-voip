@@ -8,6 +8,7 @@ import {
   IconAdmin, IconSignal, IconTroubleshoot,
 } from '../icons/ProductIcons';
 import { Package, Shield, ChevronDown, Clock, Eye, EyeOff, Server, BookOpen, Plug } from 'lucide-react';
+import { AccessRequestForm } from './AccessRequestForm';
 
 /* ─── Types ───────────────────────────────────────────────── */
 
@@ -143,16 +144,7 @@ function SidebarLoginForm() {
   };
 
   return (
-    <div style={{ padding: '12px 16px 18px', flexShrink: 0 }}>
-      {/* Divider */}
-      <div
-        style={{
-          height: 1,
-          marginBottom: 14,
-          background: 'linear-gradient(90deg, transparent, rgba(42,47,69,0.7) 20%, rgba(42,47,69,0.7) 80%, transparent)',
-        }}
-      />
-
+    <div style={{ padding: '14px 16px 16px', flexShrink: 0 }}>
       <p
         style={{
           fontSize: '0.6rem',
@@ -800,6 +792,24 @@ export function Sidebar() {
           }}
         />
 
+        {/* ── Unauthenticated: login + request access ──────── */}
+        {!isAuthenticated && (
+          <div
+            style={{
+              flex: 1,
+              overflowY: 'auto',
+              overflowX: 'hidden',
+              scrollbarWidth: 'thin',
+              scrollbarColor: 'rgba(42,47,69,0.6) transparent',
+              display: 'flex',
+              flexDirection: 'column',
+            }}
+          >
+            <SidebarLoginForm />
+            <AccessRequestForm />
+          </div>
+        )}
+
         {/* ── Scrollable nav area (authenticated only) ────── */}
         {isAuthenticated && (
           <nav
@@ -883,9 +893,6 @@ export function Sidebar() {
             )}
           </nav>
         )}
-
-        {/* Spacer when unauthenticated so the login form stays at the bottom */}
-        {!isAuthenticated && <div style={{ flex: 1 }} />}
 
         {/* ── Authenticated bottom section ─────────────────── */}
         {isAuthenticated && (
@@ -1120,8 +1127,6 @@ export function Sidebar() {
           </>
         )}
 
-        {/* ── Unauthenticated: compact login form ──────────── */}
-        {!isAuthenticated && <SidebarLoginForm />}
       </aside>
     </>
   );
