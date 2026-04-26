@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { Badge } from '../../components/ui/Badge';
 import type { Customer, AccountType, CustomerStatus, TrafficGrade } from '../../types/customer';
 
@@ -27,11 +27,14 @@ const tdStyle: React.CSSProperties = {
 };
 
 export function CustomerRow({ customer }: CustomerRowProps) {
+  const navigate = useNavigate();
+
   return (
     <tr
-      style={{ transition: 'background 0.15s' }}
+      onClick={() => navigate(`/admin/customers/${customer.id}`)}
+      style={{ transition: 'background 0.15s', cursor: 'pointer' }}
       onMouseEnter={(e) => {
-        (e.currentTarget as HTMLTableRowElement).style.background = 'rgba(255,255,255,0.018)';
+        (e.currentTarget as HTMLTableRowElement).style.background = 'rgba(255,255,255,0.035)';
       }}
       onMouseLeave={(e) => {
         (e.currentTarget as HTMLTableRowElement).style.background = 'transparent';
@@ -43,24 +46,15 @@ export function CustomerRow({ customer }: CustomerRowProps) {
         </span>
       </td>
       <td style={tdStyle}>
-        <Link
-          to={`/admin/customers/${customer.id}`}
+        <span
           style={{
             color: '#e2e8f0',
             fontWeight: 600,
             fontSize: '0.875rem',
-            textDecoration: 'none',
-            transition: 'color 0.15s',
-          }}
-          onMouseEnter={(e) => {
-            (e.currentTarget as HTMLAnchorElement).style.color = '#93c5fd';
-          }}
-          onMouseLeave={(e) => {
-            (e.currentTarget as HTMLAnchorElement).style.color = '#e2e8f0';
           }}
         >
           {customer.name}
-        </Link>
+        </span>
       </td>
       <td style={tdStyle}>{accountTypeBadge(customer.account_type)}</td>
       <td style={tdStyle}>
