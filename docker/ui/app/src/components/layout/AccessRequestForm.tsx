@@ -885,8 +885,8 @@ export function AccessRequestForm() {
         <div
           style={{
             display: 'flex',
+            flexDirection: 'column',
             alignItems: 'center',
-            justifyContent: 'space-between',
             gap: 8,
           }}
         >
@@ -896,7 +896,6 @@ export function AccessRequestForm() {
               color: '#334155',
               letterSpacing: '0.02em',
               userSelect: 'none',
-              flexShrink: 0,
             }}
           >
             New to Granite Keystone?
@@ -910,18 +909,19 @@ export function AccessRequestForm() {
             style={{
               display: 'flex',
               alignItems: 'center',
+              justifyContent: 'center',
               gap: 4,
-              padding: '4px 9px',
+              padding: '6px 14px',
               borderRadius: 6,
               border: `1px solid ${headerHovered && !expanded ? 'rgba(245,158,11,0.45)' : AMBER_BORDER}`,
               background: expanded ? AMBER_DIM : headerHovered ? 'rgba(245,158,11,0.08)' : 'transparent',
               color: AMBER,
-              fontSize: '0.67rem',
+              fontSize: '0.7rem',
               fontWeight: 700,
               cursor: 'pointer',
               transition: 'background 0.15s, border-color 0.15s',
               letterSpacing: '-0.01em',
-              flexShrink: 0,
+              width: '100%',
             }}
           >
             {expanded ? 'Close' : 'Request Access'}
