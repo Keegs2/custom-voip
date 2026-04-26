@@ -6,7 +6,7 @@ import {
   IconRCF, IconTrunk, IconAPI, IconIVR, IconDocs,
   IconAdmin, IconSignal, IconTroubleshoot,
 } from '../icons/ProductIcons';
-import { Package, Shield, ChevronDown, Clock, Eye, EyeOff, Server } from 'lucide-react';
+import { Package, Shield, ChevronDown, Clock, Eye, EyeOff, Server, BookOpen, Plug } from 'lucide-react';
 
 /* ─── Types ───────────────────────────────────────────────── */
 
@@ -22,8 +22,15 @@ interface NavItemDef {
 /* ─── Nav item definitions ────────────────────────────────── */
 
 const allProductNavItems: NavItemDef[] = [
-  { label: 'RCF',      icon: <IconRCF size={18} />,  to: '/rcf',           color: '#4ade80', accountTypes: ['rcf', 'hybrid'] },
-  { label: 'API Docs', icon: <IconDocs size={18} />, to: '/documentation', color: '#94a3b8' },
+  { label: 'RCF', icon: <IconRCF size={18} />, to: '/rcf', color: '#4ade80', accountTypes: ['rcf', 'hybrid'] },
+];
+
+/* ─── Documentation nav items ─────────────────────────────── */
+
+const docNavItems: NavItemDef[] = [
+  { label: 'RCF Docs',     icon: <IconRCF size={18} />,   to: '/docs/rcf',         color: '#4ade80' },
+  { label: 'API Reference',icon: <IconDocs size={18} />,  to: '/docs/api',         color: '#3b82f6' },
+  { label: 'Integration',  icon: <Plug size={18} strokeWidth={1.6} />, to: '/docs/integration', color: '#f59e0b' },
 ];
 
 /* ─── Coming Soon item definitions ───────────────────────── */
@@ -364,6 +371,7 @@ export function Sidebar() {
     return {
       products:          stored.products          ?? true,
       comingSoon:        stored.comingSoon        ?? false,
+      documentation:     stored.documentation     ?? true,
       administration:    stored.administration    ?? false,
     };
   });
@@ -392,16 +400,20 @@ export function Sidebar() {
     const path = location.pathname;
 
     const productPaths = productNavItems.map((i) => i.to);
-    const adminPaths        = ['/admin', '/call-quality', '/admin/did-search', '/admin/user', '/admin/platform', '/troubleshooting'];
+    const adminPaths   = ['/admin', '/call-quality', '/admin/did-search', '/admin/user', '/admin/platform', '/troubleshooting'];
+    const docPaths     = docNavItems.map((i) => i.to);
     const inProducts = productPaths.some((p) => path === p || path.startsWith(p + '/'));
     const inAdmin    = adminPaths.some((p) => path === p || path.startsWith(p + '/'));
+    const inDocs     = docPaths.some((p) => path === p || path.startsWith(p + '/'));
 
     setGroupOpen((prev) => {
       const next = { ...prev };
       if (inProducts && !prev.products)       next.products       = true;
       if (inAdmin    && !prev.administration) next.administration = true;
+      if (inDocs     && !prev.documentation)  next.documentation  = true;
       if (next.products       === prev.products &&
-          next.administration === prev.administration) {
+          next.administration === prev.administration &&
+          next.documentation  === prev.documentation) {
         return prev;
       }
       return next;
@@ -643,7 +655,21 @@ export function Sidebar() {
             ))}
           </CollapsibleGroup>
 
-          {/* ── GROUP 3: Administration (admin + support) ─ */}
+          {/* ── GROUP 3: Documentation ───────────────────── */}
+          <div style={{ height: 6 }} />
+          <CollapsibleGroup
+            id="documentation"
+            label="Documentation"
+            icon={<BookOpen size={11} strokeWidth={2.5} />}
+            isOpen={groupOpen.documentation}
+            onToggle={toggleGroup}
+          >
+            {docNavItems.map((item) => (
+              <SidebarNavItem key={item.to} item={item} onNavigate={closeMobile} small />
+            ))}
+          </CollapsibleGroup>
+
+          {/* ── GROUP 4: Administration (admin + support) ─ */}
           {showAdmin && (
             <>
               <div style={{ height: 6 }} />

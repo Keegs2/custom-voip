@@ -9,7 +9,9 @@ import { RcfPage } from './pages/RcfPage';
 import { ApiDidsPage } from './pages/ApiDidsPage';
 import { TrunksPage } from './pages/TrunksPage';
 import { IvrBuilderPage } from './pages/IvrBuilderPage';
-import { DocsPage } from './pages/DocsPage';
+import { RcfDocsPage } from './pages/docs/RcfDocsPage';
+import { ApiDocsPage } from './pages/docs/ApiDocsPage';
+import { IntegrationDocsPage } from './pages/docs/IntegrationDocsPage';
 import { TroubleshootingPage } from './pages/TroubleshootingPage';
 import { AdminPage } from './pages/admin/AdminPage';
 import { PlatformManagementPage } from './pages/admin/PlatformManagementPage';
@@ -49,7 +51,10 @@ export function App() {
             <Route path="api-dids"   element={<ApiDidsPage />} />
             <Route path="trunks"     element={<TrunksPage />} />
             <Route path="ivr"        element={<IvrBuilderPage />} />
-            <Route path="documentation" element={<DocsPage />} />
+            <Route path="documentation" element={<Navigate to="/docs/rcf" replace />} />
+            <Route path="docs/rcf"         element={<RcfDocsPage />} />
+            <Route path="docs/api"         element={<ApiDocsPage />} />
+            <Route path="docs/integration" element={<IntegrationDocsPage />} />
             <Route path="call-quality" element={<CallQualityPage />} />
             <Route path="account"          element={<AccountPage />} />
 
