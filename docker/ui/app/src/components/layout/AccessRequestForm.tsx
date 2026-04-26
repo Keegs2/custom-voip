@@ -9,12 +9,11 @@ interface FormData {
   email: string;
   phone: string;
   did_count: string;
-  use_case: string;
-  current_provider: string;
-  regions: string[];
+  porting: string;
+  current_carrier: string;
+  forwarding_setup: string;
   monthly_volume: string;
-  redundancy: string;
-  integration_notes: string;
+  timeline: string;
 }
 
 type FieldErrors = Partial<Record<keyof FormData, string>>;
@@ -25,32 +24,42 @@ const EMPTY_FORM: FormData = {
   email: '',
   phone: '',
   did_count: '',
-  use_case: '',
-  current_provider: '',
-  regions: [],
+  porting: '',
+  current_carrier: '',
+  forwarding_setup: '',
   monthly_volume: '',
-  redundancy: '',
-  integration_notes: '',
+  timeline: '',
 };
 
 /* ─── Constants ───────────────────────────────────────────── */
 
-const DID_COUNT_OPTIONS = ['1–10', '11–50', '51–200', '201–500', '500+'];
-const USE_CASE_OPTIONS  = [
-  'Remote Call Forwarding',
-  'SIP Trunking',
-  'API Calling',
-  'Full UCaaS',
-  'Not sure',
+const DID_COUNT_OPTIONS = ['1–10', '11–50', '51–200', '201–1,000', '1,000+'];
+
+const PORTING_OPTIONS = [
+  'Yes — porting from another carrier',
+  'No — need new numbers',
+  'Both — porting some + new numbers',
 ];
-const REGIONS = ['Northeast', 'Southeast', 'Midwest', 'West Coast', 'Nationwide'];
+
+const FORWARDING_OPTIONS = [
+  'All numbers forward to one destination',
+  'Each number forwards to a different destination',
+  'Need help deciding',
+];
+
 const VOLUME_OPTIONS = [
-  'Under 1,000',
+  'Under 1,000 calls',
   '1,000–10,000',
-  '10,000–100,000',
-  '100,000+',
+  '10,000–50,000',
+  '50,000+',
 ];
-const REDUNDANCY_OPTIONS = ['Standard', 'High Availability', 'Carrier-Grade'];
+
+const TIMELINE_OPTIONS = [
+  'ASAP',
+  'Within 30 days',
+  '1–3 months',
+  'Just exploring',
+];
 
 const AMBER = '#f59e0b';
 const AMBER_DIM = 'rgba(245,158,11,0.12)';
@@ -254,7 +263,7 @@ function NavButtons({ onBack, onNext, onSubmit, isSubmitting, isLastStep }: NavB
       )}
 
       <button
-        type={isLastStep ? 'button' : 'button'}
+        type="button"
         onClick={isLastStep ? onSubmit : onNext}
         disabled={isSubmitting}
         style={{
@@ -304,6 +313,11 @@ function NavButtons({ onBack, onNext, onSubmit, isSubmitting, isLastStep }: NavB
 
 /* ─── Validation ──────────────────────────────────────────── */
 
+// Returns true when the porting answer requires a current carrier field.
+function portingRequiresCarrier(porting: string): boolean {
+  return porting.startsWith('Yes') || porting.startsWith('Both');
+}
+
 function validateStep(step: number, data: FormData): FieldErrors {
   const errs: FieldErrors = {};
   if (step === 0) {
@@ -314,13 +328,14 @@ function validateStep(step: number, data: FormData): FieldErrors {
     if (!data.phone.trim())        errs.phone = 'Required';
   }
   if (step === 1) {
-    if (!data.did_count) errs.did_count = 'Please select an option';
-    if (!data.use_case)  errs.use_case  = 'Please select an option';
-  }
-  if (step === 2) {
-    if (data.regions.length === 0)  errs.regions       = 'Select at least one region';
-    if (!data.monthly_volume)       errs.monthly_volume = 'Please select an option';
-    if (!data.redundancy)           errs.redundancy     = 'Please select an option';
+    if (!data.did_count)        errs.did_count        = 'Please select an option';
+    if (!data.porting)          errs.porting          = 'Please select an option';
+    if (portingRequiresCarrier(data.porting) && !data.current_carrier.trim()) {
+      errs.current_carrier = 'Required when porting numbers';
+    }
+    if (!data.forwarding_setup) errs.forwarding_setup = 'Please select an option';
+    if (!data.monthly_volume)   errs.monthly_volume   = 'Please select an option';
+    if (!data.timeline)         errs.timeline         = 'Please select an option';
   }
   return errs;
 }
@@ -393,7 +408,7 @@ function Step0({ data, errors, onChange }: Step0Props) {
   );
 }
 
-/* ─── Step 1: Service Requirements ────────────────────────── */
+/* ─── Step 1: RCF Requirements ────────────────────────────── */
 
 interface Step1Props {
   data: FormData;
@@ -404,9 +419,12 @@ interface Step1Props {
 function Step1({ data, errors, onChange }: Step1Props) {
   const [focused, setFocused] = useState<string | null>(null);
 
+  // Derived — whether to show the current carrier field
+  const showCarrier = portingRequiresCarrier(data.porting);
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
-      <Field label="DID Count" error={errors.did_count}>
+      <Field label="How many phone numbers do you need?" error={errors.did_count}>
         <StyledSelect
           value={data.did_count}
           onChange={(e) => onChange('did_count', e.target.value)}
@@ -414,120 +432,59 @@ function Step1({ data, errors, onChange }: Step1Props) {
           isFocused={focused === 'did_count'}
           onFocusChange={(f) => setFocused(f ? 'did_count' : null)}
         >
-          <option value="" disabled>Phone numbers needed…</option>
+          <option value="" disabled>Select a range…</option>
           {DID_COUNT_OPTIONS.map((o) => (
             <option key={o} value={o}>{o}</option>
           ))}
         </StyledSelect>
       </Field>
 
-      <Field label="Primary Use Case" error={errors.use_case}>
+      <Field label="Are you porting existing numbers?" error={errors.porting}>
         <StyledSelect
-          value={data.use_case}
-          onChange={(e) => onChange('use_case', e.target.value)}
-          hasError={!!errors.use_case}
-          isFocused={focused === 'use_case'}
-          onFocusChange={(f) => setFocused(f ? 'use_case' : null)}
+          value={data.porting}
+          onChange={(e) => onChange('porting', e.target.value)}
+          hasError={!!errors.porting}
+          isFocused={focused === 'porting'}
+          onFocusChange={(f) => setFocused(f ? 'porting' : null)}
         >
-          <option value="" disabled>Select use case…</option>
-          {USE_CASE_OPTIONS.map((o) => (
+          <option value="" disabled>Select an option…</option>
+          {PORTING_OPTIONS.map((o) => (
             <option key={o} value={o}>{o}</option>
           ))}
         </StyledSelect>
       </Field>
 
-      <Field label="Current Provider (optional)">
-        <StyledInput
-          type="text"
-          placeholder="e.g. AT&T, Lumen, Twilio"
-          value={data.current_provider}
-          onChange={(e) => onChange('current_provider', e.target.value)}
-          isFocused={focused === 'current_provider'}
-          onFocusChange={(f) => setFocused(f ? 'current_provider' : null)}
-        />
-      </Field>
-    </div>
-  );
-}
+      {/* Conditional: only shown when porting is Yes or Both */}
+      {showCarrier && (
+        <Field label="Current carrier" error={errors.current_carrier}>
+          <StyledInput
+            type="text"
+            placeholder="e.g. AT&T, Lumen, Verizon"
+            value={data.current_carrier}
+            onChange={(e) => onChange('current_carrier', e.target.value)}
+            hasError={!!errors.current_carrier}
+            isFocused={focused === 'current_carrier'}
+            onFocusChange={(f) => setFocused(f ? 'current_carrier' : null)}
+          />
+        </Field>
+      )}
 
-/* ─── Step 2: Technical Details ───────────────────────────── */
-
-interface Step2Props {
-  data: FormData;
-  errors: FieldErrors;
-  onChange: (field: keyof FormData, value: string) => void;
-  onToggleRegion: (region: string) => void;
-}
-
-function Step2({ data, errors, onChange, onToggleRegion }: Step2Props) {
-  const [focused, setFocused] = useState<string | null>(null);
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
-      {/* Regions checkboxes */}
-      <Field label="Geographic Regions" error={errors.regions}>
-        <div
-          style={{
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 4,
-            padding: '6px 8px',
-            borderRadius: 7,
-            border: `1px solid ${errors.regions ? 'rgba(239,68,68,0.55)' : 'rgba(42,47,69,0.8)'}`,
-            background: 'rgba(13,15,21,0.8)',
-          }}
+      <Field label="Forwarding setup" error={errors.forwarding_setup}>
+        <StyledSelect
+          value={data.forwarding_setup}
+          onChange={(e) => onChange('forwarding_setup', e.target.value)}
+          hasError={!!errors.forwarding_setup}
+          isFocused={focused === 'forwarding_setup'}
+          onFocusChange={(f) => setFocused(f ? 'forwarding_setup' : null)}
         >
-          {REGIONS.map((region) => {
-            const checked = data.regions.includes(region);
-            return (
-              <label
-                key={region}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 7,
-                  cursor: 'pointer',
-                  userSelect: 'none',
-                  fontSize: '0.72rem',
-                  color: checked ? '#e2e8f0' : '#64748b',
-                  transition: 'color 0.12s',
-                  padding: '1px 0',
-                }}
-              >
-                <span
-                  style={{
-                    width: 13,
-                    height: 13,
-                    borderRadius: 3,
-                    border: `1px solid ${checked ? AMBER : 'rgba(42,47,69,0.9)'}`,
-                    background: checked ? AMBER_DIM : 'transparent',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    flexShrink: 0,
-                    transition: 'border-color 0.12s, background 0.12s',
-                  }}
-                >
-                  {checked && (
-                    <svg viewBox="0 0 10 8" fill="none" style={{ width: 8, height: 8 }}>
-                      <path d="M1 4l2.5 2.5L9 1" stroke={AMBER} strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />
-                    </svg>
-                  )}
-                </span>
-                <input
-                  type="checkbox"
-                  checked={checked}
-                  onChange={() => onToggleRegion(region)}
-                  style={{ display: 'none' }}
-                />
-                {region}
-              </label>
-            );
-          })}
-        </div>
+          <option value="" disabled>Select an option…</option>
+          {FORWARDING_OPTIONS.map((o) => (
+            <option key={o} value={o}>{o}</option>
+          ))}
+        </StyledSelect>
       </Field>
 
-      <Field label="Monthly Call Volume" error={errors.monthly_volume}>
+      <Field label="Expected monthly call volume" error={errors.monthly_volume}>
         <StyledSelect
           value={data.monthly_volume}
           onChange={(e) => onChange('monthly_volume', e.target.value)}
@@ -535,53 +492,34 @@ function Step2({ data, errors, onChange, onToggleRegion }: Step2Props) {
           isFocused={focused === 'monthly_volume'}
           onFocusChange={(f) => setFocused(f ? 'monthly_volume' : null)}
         >
-          <option value="" disabled>Select volume…</option>
+          <option value="" disabled>Select a range…</option>
           {VOLUME_OPTIONS.map((o) => (
             <option key={o} value={o}>{o}</option>
           ))}
         </StyledSelect>
       </Field>
 
-      <Field label="Redundancy Requirements" error={errors.redundancy}>
+      <Field label="When do you need this live?" error={errors.timeline}>
         <StyledSelect
-          value={data.redundancy}
-          onChange={(e) => onChange('redundancy', e.target.value)}
-          hasError={!!errors.redundancy}
-          isFocused={focused === 'redundancy'}
-          onFocusChange={(f) => setFocused(f ? 'redundancy' : null)}
+          value={data.timeline}
+          onChange={(e) => onChange('timeline', e.target.value)}
+          hasError={!!errors.timeline}
+          isFocused={focused === 'timeline'}
+          onFocusChange={(f) => setFocused(f ? 'timeline' : null)}
         >
-          <option value="" disabled>Select level…</option>
-          {REDUNDANCY_OPTIONS.map((o) => (
+          <option value="" disabled>Select a timeline…</option>
+          {TIMELINE_OPTIONS.map((o) => (
             <option key={o} value={o}>{o}</option>
           ))}
         </StyledSelect>
-      </Field>
-
-      <Field label="Integration Notes (optional)">
-        <textarea
-          value={data.integration_notes}
-          onChange={(e) => onChange('integration_notes', e.target.value)}
-          placeholder="Existing PBX, SBC, or cloud infrastructure to integrate with…"
-          rows={3}
-          onFocus={() => setFocused('integration_notes')}
-          onBlur={() => setFocused(null)}
-          style={{
-            ...inputBase,
-            border: `1px solid ${focused === 'integration_notes' ? AMBER : 'rgba(42,47,69,0.8)'}`,
-            boxShadow: focused === 'integration_notes' ? `0 0 0 2px rgba(245,158,11,0.12)` : 'none',
-            resize: 'vertical',
-            minHeight: 56,
-            lineHeight: 1.45,
-          }}
-        />
       </Field>
     </div>
   );
 }
 
-/* ─── Step 3: Review & Submit ─────────────────────────────── */
+/* ─── Step 2: Review & Submit ─────────────────────────────── */
 
-interface Step3Props {
+interface Step2Props {
   data: FormData;
 }
 
@@ -623,68 +561,38 @@ function ReviewRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-function Step3({ data }: Step3Props) {
+const sectionHeadStyle: CSSProperties = {
+  fontSize: '0.58rem',
+  fontWeight: 700,
+  letterSpacing: '0.1em',
+  textTransform: 'uppercase',
+  color: AMBER,
+  marginBottom: 2,
+  opacity: 0.8,
+};
+
+function Step2({ data }: Step2Props) {
+  const showCarrier = portingRequiresCarrier(data.porting);
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
       {/* Section: Contact */}
-      <p
-        style={{
-          fontSize: '0.58rem',
-          fontWeight: 700,
-          letterSpacing: '0.1em',
-          textTransform: 'uppercase',
-          color: AMBER,
-          marginBottom: 2,
-          opacity: 0.8,
-        }}
-      >
-        Contact
-      </p>
-      <ReviewRow label="Company"  value={data.company_name} />
-      <ReviewRow label="Contact"  value={data.contact_name} />
-      <ReviewRow label="Email"    value={data.email} />
-      <ReviewRow label="Phone"    value={data.phone} />
+      <p style={sectionHeadStyle}>Contact</p>
+      <ReviewRow label="Company"      value={data.company_name} />
+      <ReviewRow label="Contact"      value={data.contact_name} />
+      <ReviewRow label="Email"        value={data.email} />
+      <ReviewRow label="Phone"        value={data.phone} />
 
-      {/* Section: Service */}
-      <p
-        style={{
-          fontSize: '0.58rem',
-          fontWeight: 700,
-          letterSpacing: '0.1em',
-          textTransform: 'uppercase',
-          color: AMBER,
-          marginTop: 6,
-          marginBottom: 2,
-          opacity: 0.8,
-        }}
-      >
-        Service
-      </p>
-      <ReviewRow label="DIDs Needed"      value={data.did_count} />
-      <ReviewRow label="Use Case"         value={data.use_case} />
-      <ReviewRow label="Current Provider" value={data.current_provider} />
-
-      {/* Section: Technical */}
-      <p
-        style={{
-          fontSize: '0.58rem',
-          fontWeight: 700,
-          letterSpacing: '0.1em',
-          textTransform: 'uppercase',
-          color: AMBER,
-          marginTop: 6,
-          marginBottom: 2,
-          opacity: 0.8,
-        }}
-      >
-        Technical
-      </p>
-      <ReviewRow label="Regions"       value={data.regions.join(', ')} />
-      <ReviewRow label="Monthly Volume" value={data.monthly_volume} />
-      <ReviewRow label="Redundancy"    value={data.redundancy} />
-      {data.integration_notes && (
-        <ReviewRow label="Integration Notes" value={data.integration_notes} />
+      {/* Section: RCF Requirements */}
+      <p style={{ ...sectionHeadStyle, marginTop: 6 }}>RCF Requirements</p>
+      <ReviewRow label="Phone Numbers"    value={data.did_count} />
+      <ReviewRow label="Porting"          value={data.porting} />
+      {showCarrier && (
+        <ReviewRow label="Current Carrier" value={data.current_carrier} />
       )}
+      <ReviewRow label="Forwarding Setup" value={data.forwarding_setup} />
+      <ReviewRow label="Monthly Volume"   value={data.monthly_volume} />
+      <ReviewRow label="Timeline"         value={data.timeline} />
 
       {/* Note */}
       <p
@@ -787,15 +695,15 @@ function SuccessState({ onReset }: SuccessStateProps) {
 
 export function AccessRequestForm() {
   // All hooks unconditionally at the top — React #310 prevention
-  const [expanded, setExpanded]         = useState(false);
-  const [step, setStep]                 = useState(0);
-  const [formData, setFormData]         = useState<FormData>(EMPTY_FORM);
-  const [errors, setErrors]             = useState<FieldErrors>({});
-  const [submitted, setSubmitted]       = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [expanded, setExpanded]           = useState(false);
+  const [step, setStep]                   = useState(0);
+  const [formData, setFormData]           = useState<FormData>(EMPTY_FORM);
+  const [errors, setErrors]               = useState<FieldErrors>({});
+  const [submitted, setSubmitted]         = useState(false);
+  const [isSubmitting, setIsSubmitting]   = useState(false);
   const [headerHovered, setHeaderHovered] = useState(false);
 
-  const TOTAL_STEPS = 4;
+  const TOTAL_STEPS = 3; // Step 0: Contact, Step 1: RCF Requirements, Step 2: Review
 
   const handleChange = useCallback((field: keyof FormData, value: string) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
@@ -804,21 +712,6 @@ export function AccessRequestForm() {
       if (!prev[field]) return prev;
       const next = { ...prev };
       delete next[field];
-      return next;
-    });
-  }, []);
-
-  const handleToggleRegion = useCallback((region: string) => {
-    setFormData((prev) => {
-      const regions = prev.regions.includes(region)
-        ? prev.regions.filter((r) => r !== region)
-        : [...prev.regions, region];
-      return { ...prev, regions };
-    });
-    setErrors((prev) => {
-      if (!prev.regions) return prev;
-      const next = { ...prev };
-      delete next.regions;
       return next;
     });
   }, []);
@@ -839,7 +732,6 @@ export function AccessRequestForm() {
   }, []);
 
   const handleSubmit = useCallback(() => {
-    // Payload ready for the future API call
     const payload = {
       ...formData,
       submitted_at: new Date().toISOString(),
@@ -971,15 +863,7 @@ export function AccessRequestForm() {
                     <Step1 data={formData} errors={errors} onChange={handleChange} />
                   )}
                   {step === 2 && (
-                    <Step2
-                      data={formData}
-                      errors={errors}
-                      onChange={handleChange}
-                      onToggleRegion={handleToggleRegion}
-                    />
-                  )}
-                  {step === 3 && (
-                    <Step3 data={formData} />
+                    <Step2 data={formData} />
                   )}
 
                   <NavButtons
