@@ -3,7 +3,6 @@ import { AuthProvider } from './contexts/AuthContext';
 import { RequireAuth } from './components/auth/RequireAuth';
 import { RequireAdmin } from './components/auth/RequireAdmin';
 import { AppLayout } from './components/layout/AppLayout';
-import { LoginPage } from './pages/LoginPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { RcfPage } from './pages/RcfPage';
 import { ApiDidsPage } from './pages/ApiDidsPage';
@@ -41,70 +40,69 @@ export function App() {
       {/* AuthProvider is inside BrowserRouter so it can call useNavigate */}
       <AuthProvider>
         <Routes>
-          {/* Public route — no auth required */}
-          <Route path="login" element={<LoginPage />} />
+          {/* Redirect old /login bookmarks to the homepage */}
+          <Route path="login" element={<Navigate to="/" replace />} />
 
-          {/* Routes wrapped in the sidebar layout — all require authentication */}
-          <Route
-            element={
-              <RequireAuth>
-                <AppLayout />
-              </RequireAuth>
-            }
-          >
+          {/* Routes inside the sidebar layout */}
+          <Route element={<AppLayout />}>
+            {/* Public — homepage is visible without authentication */}
             <Route index element={<DashboardPage />} />
-            <Route path="rcf"        element={<RcfPage />} />
-            <Route path="api-dids"   element={<ApiDidsPage />} />
-            <Route path="trunks"     element={<TrunksPage />} />
-            <Route path="ivr"        element={<IvrBuilderPage />} />
-            <Route path="documentation" element={<Navigate to="/docs/rcf" replace />} />
-            <Route path="docs/rcf"         element={<RcfDocsPage />} />
-            <Route path="docs/api"         element={<ApiDocsPage />} />
-            <Route path="docs/integration" element={<IntegrationDocsPage />} />
-            <Route path="call-quality" element={<CallQualityPage />} />
-            <Route path="account"          element={<AccountPage />} />
 
-            {/* Redirects from old standalone paths to their new tab locations */}
-            <Route path="admin/did-search" element={<Navigate to="/admin/platform/dids" replace />} />
-            <Route path="admin/user" element={<Navigate to="/admin/customers/users" replace />} />
-            <Route
-              path="admin/user/:userId"
-              element={<UserDetailRedirect />}
-            />
+            {/* Protected — all other routes require authentication */}
+            <Route element={<RequireAuth />}>
+              <Route path="rcf"        element={<RcfPage />} />
+              <Route path="api-dids"   element={<ApiDidsPage />} />
+              <Route path="trunks"     element={<TrunksPage />} />
+              <Route path="ivr"        element={<IvrBuilderPage />} />
+              <Route path="documentation" element={<Navigate to="/docs/rcf" replace />} />
+              <Route path="docs/rcf"         element={<RcfDocsPage />} />
+              <Route path="docs/api"         element={<ApiDocsPage />} />
+              <Route path="docs/integration" element={<IntegrationDocsPage />} />
+              <Route path="call-quality" element={<CallQualityPage />} />
+              <Route path="account"          element={<AccountPage />} />
 
-            {/* Customer Management — nested under AdminPage tab shell */}
-            <Route
-              path="admin"
-              element={
-                <RequireAdmin>
-                  <AdminPage />
-                </RequireAdmin>
-              }
-            >
-              <Route index                              element={<Navigate to="customers" replace />} />
-              <Route path="customers"                   element={<CustomersAdminPage />} />
-              <Route path="customers/:customerId"       element={<CustomerAccountPage />} />
-              <Route path="trunks"                      element={<TrunksAdminPage />} />
-              <Route path="customers/users"             element={<UserDetailPage />} />
-              <Route path="customers/users/:userId"     element={<UserDetailPage />} />
-            </Route>
+              {/* Redirects from old standalone paths to their new tab locations */}
+              <Route path="admin/did-search" element={<Navigate to="/admin/platform/dids" replace />} />
+              <Route path="admin/user" element={<Navigate to="/admin/customers/users" replace />} />
+              <Route
+                path="admin/user/:userId"
+                element={<UserDetailRedirect />}
+              />
 
-            {/* Platform Management — nested under PlatformManagementPage tab shell */}
-            <Route
-              path="admin/platform"
-              element={
-                <RequireAdmin>
-                  <PlatformManagementPage />
-                </RequireAdmin>
-              }
-            >
-              <Route index           element={<Navigate to="carriers" replace />} />
-              <Route path="carriers" element={<CarriersAdminPage />} />
-              <Route path="cdrs"     element={<CdrsAdminPage />} />
-              <Route path="rates"    element={<RatesAdminPage />} />
-              <Route path="tiers"    element={<TiersAdminPage />} />
-              <Route path="sipp"     element={<SippAdminPage />} />
-              <Route path="dids"     element={<DIDSearchPage />} />
+              {/* Customer Management — nested under AdminPage tab shell */}
+              <Route
+                path="admin"
+                element={
+                  <RequireAdmin>
+                    <AdminPage />
+                  </RequireAdmin>
+                }
+              >
+                <Route index                              element={<Navigate to="customers" replace />} />
+                <Route path="customers"                   element={<CustomersAdminPage />} />
+                <Route path="customers/:customerId"       element={<CustomerAccountPage />} />
+                <Route path="trunks"                      element={<TrunksAdminPage />} />
+                <Route path="customers/users"             element={<UserDetailPage />} />
+                <Route path="customers/users/:userId"     element={<UserDetailPage />} />
+              </Route>
+
+              {/* Platform Management — nested under PlatformManagementPage tab shell */}
+              <Route
+                path="admin/platform"
+                element={
+                  <RequireAdmin>
+                    <PlatformManagementPage />
+                  </RequireAdmin>
+                }
+              >
+                <Route index           element={<Navigate to="carriers" replace />} />
+                <Route path="carriers" element={<CarriersAdminPage />} />
+                <Route path="cdrs"     element={<CdrsAdminPage />} />
+                <Route path="rates"    element={<RatesAdminPage />} />
+                <Route path="tiers"    element={<TiersAdminPage />} />
+                <Route path="sipp"     element={<SippAdminPage />} />
+                <Route path="dids"     element={<DIDSearchPage />} />
+              </Route>
             </Route>
           </Route>
 

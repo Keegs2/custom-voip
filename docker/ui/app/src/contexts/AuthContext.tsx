@@ -77,7 +77,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .catch((err) => {
         if (cancelled) return;
         // Token is invalid or expired — clear it silently. The 401 interceptor
-        // in client.ts will also call window.location.replace('/login'), but we
+        // in client.ts will also call window.location.replace('/'), but we
         // handle it here too so the state is always consistent.
         if (err instanceof ApiError && err.status === 401) {
           localStorage.removeItem(AUTH_TOKEN_KEY);
@@ -109,7 +109,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setToken(null);
     setUser(null);
     setCustomerViewMode(false);
-    navigate('/login', { replace: true });
+    navigate('/', { replace: true });
   }, [navigate]);
 
   /* ── Refresh user ────────────────────────────────────────── */

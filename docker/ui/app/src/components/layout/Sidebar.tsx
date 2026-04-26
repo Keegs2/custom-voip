@@ -1,7 +1,8 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, type FormEvent } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { cn } from '../../utils/cn';
 import { useAuth } from '../../contexts/AuthContext';
+import { ApiError } from '../../api/client';
 import {
   IconRCF, IconTrunk, IconAPI, IconIVR, IconDocs,
   IconAdmin, IconSignal, IconTroubleshoot,
@@ -74,6 +75,191 @@ const IconSignOut = () => (
     <path d="M15.75 9V5.25A2.25 2.25 0 0 0 13.5 3h-6a2.25 2.25 0 0 0-2.25 2.25v13.5A2.25 2.25 0 0 0 7.5 21h6a2.25 2.25 0 0 0 2.25-2.25V15m3 0 3-3m0 0-3-3m3 3H9" strokeLinecap="round" strokeLinejoin="round" />
   </svg>
 );
+
+/* ─── Inline button spinner ───────────────────────────────── */
+
+function SpinnerInline() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      style={{ width: 13, height: 13, animation: 'sidebar-spin 0.75s linear infinite', flexShrink: 0 }}
+    >
+      <style>{`@keyframes sidebar-spin { to { transform: rotate(360deg); } }`}</style>
+      <circle cx="12" cy="12" r="9" stroke="rgba(255,255,255,0.25)" strokeWidth="3" />
+      <path d="M21 12a9 9 0 0 0-9-9" stroke="white" strokeWidth="3" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+/* ─── SidebarLoginForm ────────────────────────────────────── */
+
+function SidebarLoginForm() {
+  const { login } = useAuth();
+
+  // All hooks declared unconditionally at the top — React #310 prevention
+  const [email, setEmail]           = useState('');
+  const [password, setPassword]     = useState('');
+  const [error, setError]           = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [emailFocused, setEmailFocused] = useState(false);
+  const [passFocused, setPassFocused]   = useState(false);
+
+  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setError(null);
+    setIsSubmitting(true);
+
+    try {
+      await login(email.trim(), password);
+      // On success the AuthContext updates isAuthenticated → Sidebar re-renders
+      // automatically showing the nav. No redirect needed; user stays on the
+      // homepage (or wherever they already are).
+    } catch (err) {
+      if (err instanceof ApiError) {
+        setError(
+          err.status === 401
+            ? 'Invalid email or password.'
+            : (err.message || 'An unexpected error occurred.'),
+        );
+      } else {
+        setError('Unable to connect. Check your network.');
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  const inputBase: React.CSSProperties = {
+    width: '100%',
+    boxSizing: 'border-box',
+    background: 'rgba(13,15,21,0.8)',
+    borderRadius: 8,
+    padding: '8px 10px',
+    fontSize: '0.78rem',
+    color: '#e2e8f0',
+    outline: 'none',
+    transition: 'border-color 0.15s, box-shadow 0.15s',
+  };
+
+  return (
+    <div style={{ padding: '12px 16px 18px', flexShrink: 0 }}>
+      {/* Divider */}
+      <div
+        style={{
+          height: 1,
+          marginBottom: 14,
+          background: 'linear-gradient(90deg, transparent, rgba(42,47,69,0.7) 20%, rgba(42,47,69,0.7) 80%, transparent)',
+        }}
+      />
+
+      <p
+        style={{
+          fontSize: '0.6rem',
+          fontWeight: 700,
+          letterSpacing: '0.1em',
+          textTransform: 'uppercase',
+          color: '#334155',
+          marginBottom: 10,
+          userSelect: 'none',
+        }}
+      >
+        Sign In
+      </p>
+
+      <form onSubmit={handleSubmit} noValidate style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {/* Email */}
+        <input
+          type="email"
+          autoComplete="email"
+          required
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          onFocus={() => setEmailFocused(true)}
+          onBlur={() => setEmailFocused(false)}
+          placeholder="Email"
+          style={{
+            ...inputBase,
+            border: `1px solid ${emailFocused ? '#3b82f6' : 'rgba(42,47,69,0.8)'}`,
+            boxShadow: emailFocused ? '0 0 0 2px rgba(59,130,246,0.12)' : 'none',
+          }}
+        />
+
+        {/* Password */}
+        <input
+          type="password"
+          autoComplete="current-password"
+          required
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          onFocus={() => setPassFocused(true)}
+          onBlur={() => setPassFocused(false)}
+          placeholder="Password"
+          style={{
+            ...inputBase,
+            border: `1px solid ${passFocused ? '#3b82f6' : 'rgba(42,47,69,0.8)'}`,
+            boxShadow: passFocused ? '0 0 0 2px rgba(59,130,246,0.12)' : 'none',
+          }}
+        />
+
+        {/* Error */}
+        {error && (
+          <div
+            role="alert"
+            style={{
+              fontSize: '0.7rem',
+              color: '#f87171',
+              lineHeight: 1.45,
+              padding: '6px 8px',
+              borderRadius: 6,
+              background: 'rgba(239,68,68,0.07)',
+              border: '1px solid rgba(239,68,68,0.18)',
+            }}
+          >
+            {error}
+          </div>
+        )}
+
+        {/* Submit */}
+        <button
+          type="submit"
+          disabled={isSubmitting}
+          style={{
+            width: '100%',
+            padding: '8px 12px',
+            borderRadius: 8,
+            background: isSubmitting
+              ? 'rgba(59,130,246,0.45)'
+              : 'linear-gradient(135deg, #2563eb 0%, #3b82f6 100%)',
+            border: 'none',
+            color: '#fff',
+            fontSize: '0.78rem',
+            fontWeight: 700,
+            letterSpacing: '-0.01em',
+            cursor: isSubmitting ? 'not-allowed' : 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 6,
+            boxShadow: isSubmitting
+              ? 'none'
+              : '0 2px 12px -3px rgba(59,130,246,0.5)',
+            transition: 'background 0.15s, box-shadow 0.15s',
+          }}
+        >
+          {isSubmitting ? (
+            <>
+              <SpinnerInline />
+              Signing in…
+            </>
+          ) : (
+            'Sign In'
+          )}
+        </button>
+      </form>
+    </div>
+  );
+}
 
 /* ─── ComingSoonNavItem ───────────────────────────────────── */
 
@@ -377,7 +563,7 @@ export function Sidebar() {
   });
   const navigate = useNavigate();
   const location = useLocation();
-  const { user, isAdmin, isActualAdmin, customerViewMode, toggleCustomerView, logout } = useAuth();
+  const { user, isAuthenticated, isAdmin, isActualAdmin, customerViewMode, toggleCustomerView, logout } = useAuth();
 
   /* ── Access flags ──────────────────────────────────────── */
 
@@ -614,315 +800,328 @@ export function Sidebar() {
           }}
         />
 
-        {/* ── Scrollable nav area ─────────────────────────── */}
-        <nav
-          style={{
-            flex: 1,
-            padding: '12px 16px',
-            overflowY: 'auto',
-            overflowX: 'visible',
-            // Thin scrollbar
-            scrollbarWidth: 'thin',
-            scrollbarColor: 'rgba(42,47,69,0.6) transparent',
-          }}
-        >
-          {/* ── GROUP 1: Products ───────────────────────── */}
-          <CollapsibleGroup
-            id="products"
-            label="Products"
-            icon={<Package size={11} strokeWidth={2.5} />}
-            isOpen={groupOpen.products}
-            onToggle={toggleGroup}
-          >
-            {productNavItems.map((item) => (
-              <SidebarNavItem key={item.to} item={item} onNavigate={closeMobile} small />
-            ))}
-          </CollapsibleGroup>
-
-          {/* ── GROUP 2: Coming Soon ──────────────────────── */}
-          <div style={{ height: 6 }} />
-          <CollapsibleGroup
-            id="comingSoon"
-            label="Coming Soon"
-            icon={<Clock size={11} strokeWidth={2.5} />}
-            isOpen={groupOpen.comingSoon}
-            onToggle={toggleGroup}
-          >
-            {COMING_SOON_ITEMS.map((item) => (
-              <ComingSoonNavItem key={item.label} item={item} />
-            ))}
-          </CollapsibleGroup>
-
-          {/* ── GROUP 3: Documentation ───────────────────── */}
-          <div style={{ height: 6 }} />
-          <CollapsibleGroup
-            id="documentation"
-            label="Documentation"
-            icon={<BookOpen size={11} strokeWidth={2.5} />}
-            isOpen={groupOpen.documentation}
-            onToggle={toggleGroup}
-          >
-            {docNavItems.map((item) => (
-              <SidebarNavItem key={item.to} item={item} onNavigate={closeMobile} small />
-            ))}
-          </CollapsibleGroup>
-
-          {/* ── GROUP 4: Administration (admin + support) ─ */}
-          {showAdmin && (
-            <>
-              <div style={{ height: 6 }} />
-              <CollapsibleGroup
-                id="administration"
-                label="Administration"
-                icon={<Shield size={11} strokeWidth={2.5} />}
-                isOpen={groupOpen.administration}
-                onToggle={toggleGroup}
-              >
-                {/* ── Customers sub-group (admin only) ──── */}
-                {isAdmin && (
-                  <>
-                    <SubGroupLabel label="Customers" />
-                    <SidebarNavItem item={customersItem} onNavigate={closeMobile} small />
-                    <SidebarNavItem item={platformItem}  onNavigate={closeMobile} small />
-                  </>
-                )}
-
-                {/* ── Support sub-group (admin + readonly) */}
-                <SubGroupLabel label="Support" />
-                <SidebarNavItem item={callQualityItem} onNavigate={closeMobile} small />
-                <SidebarNavItem item={troubleItem}     onNavigate={closeMobile} small />
-              </CollapsibleGroup>
-            </>
-          )}
-        </nav>
-
-        {/* Divider before user footer */}
-        <div
-          style={{
-            margin: '0 16px',
-            height: 1,
-            flexShrink: 0,
-            background: 'linear-gradient(90deg, transparent, rgba(42, 47, 69, 0.7) 20%, rgba(42, 47, 69, 0.7) 80%, transparent)',
-          }}
-        />
-
-        {/* ── Customer view toggle (admin only) ───────────── */}
-        {isActualAdmin && (
-          <div style={{ padding: '8px 16px 2px', flexShrink: 0 }}>
-            <button
-              type="button"
-              onClick={toggleCustomerView}
-              title={customerViewMode ? 'Return to admin view' : 'Preview the app as a customer'}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-                width: '100%',
-                padding: '6px 10px',
-                borderRadius: 8,
-                background: customerViewMode
-                  ? 'rgba(245, 158, 11, 0.10)'
-                  : 'transparent',
-                border: customerViewMode
-                  ? '1px solid rgba(245, 158, 11, 0.30)'
-                  : '1px solid rgba(42, 47, 69, 0.4)',
-                cursor: 'pointer',
-                transition: 'background 0.15s, border-color 0.15s',
-              }}
-              onMouseEnter={(e) => {
-                if (!customerViewMode) {
-                  e.currentTarget.style.background = 'rgba(255,255,255,0.04)';
-                  e.currentTarget.style.borderColor = 'rgba(42,47,69,0.7)';
-                }
-              }}
-              onMouseLeave={(e) => {
-                if (!customerViewMode) {
-                  e.currentTarget.style.background = 'transparent';
-                  e.currentTarget.style.borderColor = 'rgba(42,47,69,0.4)';
-                }
-              }}
-            >
-              {/* Icon */}
-              {customerViewMode
-                ? <EyeOff size={13} style={{ color: '#f59e0b', flexShrink: 0 }} />
-                : <Eye    size={13} style={{ color: '#475569', flexShrink: 0 }} />
-              }
-
-              {/* Label */}
-              <span
-                style={{
-                  flex: 1,
-                  textAlign: 'left',
-                  fontSize: '0.75rem',
-                  fontWeight: 500,
-                  color: customerViewMode ? '#f59e0b' : '#475569',
-                  letterSpacing: '-0.01em',
-                  transition: 'color 0.15s',
-                }}
-              >
-                {customerViewMode ? 'Exit Customer View' : 'View as Customer'}
-              </span>
-
-              {/* Active pill */}
-              {customerViewMode && (
-                <span
-                  style={{
-                    fontSize: '0.55rem',
-                    fontWeight: 700,
-                    letterSpacing: '0.06em',
-                    textTransform: 'uppercase',
-                    color: '#f59e0b',
-                    background: 'rgba(245,158,11,0.15)',
-                    border: '1px solid rgba(245,158,11,0.30)',
-                    borderRadius: 999,
-                    padding: '2px 6px',
-                    lineHeight: 1.6,
-                    flexShrink: 0,
-                  }}
-                >
-                  ON
-                </span>
-              )}
-            </button>
-          </div>
-        )}
-
-        {/* ── User profile footer ─────────────────────────── */}
-        <div style={{ padding: '12px 16px 18px', flexShrink: 0 }}>
-          <div
+        {/* ── Scrollable nav area (authenticated only) ────── */}
+        {isAuthenticated && (
+          <nav
             style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 10,
-              padding: '8px 10px',
-              borderRadius: 10,
-              background: 'rgba(255,255,255,0.02)',
-              border: '1px solid rgba(42,47,69,0.4)',
-              position: 'relative',
+              flex: 1,
+              padding: '12px 16px',
+              overflowY: 'auto',
+              overflowX: 'visible',
+              // Thin scrollbar
+              scrollbarWidth: 'thin',
+              scrollbarColor: 'rgba(42,47,69,0.6) transparent',
             }}
           >
-            {/* Clickable area: avatar + name — navigates to /account */}
-            <NavLink
-              to="/account"
-              onClick={closeMobile}
-              title="Account settings"
-              style={({ isActive }) => ({
-                display: 'flex',
-                alignItems: 'center',
-                gap: 10,
-                flex: 1,
-                minWidth: 0,
-                textDecoration: 'none',
-                borderRadius: 7,
-                padding: '2px 4px',
-                margin: '-2px -4px',
-                background: isActive ? 'rgba(59,130,246,0.08)' : 'transparent',
-                transition: 'background 0.15s',
-                cursor: 'pointer',
-              })}
-              onMouseEnter={(e) => {
-                const el = e.currentTarget as HTMLAnchorElement;
-                if (!el.classList.contains('active')) {
-                  el.style.background = 'rgba(255,255,255,0.05)';
-                }
-              }}
-              onMouseLeave={(e) => {
-                const el = e.currentTarget as HTMLAnchorElement;
-                if (!el.classList.contains('active')) {
-                  el.style.background = 'transparent';
-                }
-              }}
+            {/* ── GROUP 1: Products ───────────────────────── */}
+            <CollapsibleGroup
+              id="products"
+              label="Products"
+              icon={<Package size={11} strokeWidth={2.5} />}
+              isOpen={groupOpen.products}
+              onToggle={toggleGroup}
             >
-              {/* Avatar */}
-              <div style={{ position: 'relative', flexShrink: 0 }}>
-                <div
+              {productNavItems.map((item) => (
+                <SidebarNavItem key={item.to} item={item} onNavigate={closeMobile} small />
+              ))}
+            </CollapsibleGroup>
+
+            {/* ── GROUP 2: Coming Soon ──────────────────────── */}
+            <div style={{ height: 6 }} />
+            <CollapsibleGroup
+              id="comingSoon"
+              label="Coming Soon"
+              icon={<Clock size={11} strokeWidth={2.5} />}
+              isOpen={groupOpen.comingSoon}
+              onToggle={toggleGroup}
+            >
+              {COMING_SOON_ITEMS.map((item) => (
+                <ComingSoonNavItem key={item.label} item={item} />
+              ))}
+            </CollapsibleGroup>
+
+            {/* ── GROUP 3: Documentation ───────────────────── */}
+            <div style={{ height: 6 }} />
+            <CollapsibleGroup
+              id="documentation"
+              label="Documentation"
+              icon={<BookOpen size={11} strokeWidth={2.5} />}
+              isOpen={groupOpen.documentation}
+              onToggle={toggleGroup}
+            >
+              {docNavItems.map((item) => (
+                <SidebarNavItem key={item.to} item={item} onNavigate={closeMobile} small />
+              ))}
+            </CollapsibleGroup>
+
+            {/* ── GROUP 4: Administration (admin + support) ─ */}
+            {showAdmin && (
+              <>
+                <div style={{ height: 6 }} />
+                <CollapsibleGroup
+                  id="administration"
+                  label="Administration"
+                  icon={<Shield size={11} strokeWidth={2.5} />}
+                  isOpen={groupOpen.administration}
+                  onToggle={toggleGroup}
+                >
+                  {/* ── Customers sub-group (admin only) ──── */}
+                  {isAdmin && (
+                    <>
+                      <SubGroupLabel label="Customers" />
+                      <SidebarNavItem item={customersItem} onNavigate={closeMobile} small />
+                      <SidebarNavItem item={platformItem}  onNavigate={closeMobile} small />
+                    </>
+                  )}
+
+                  {/* ── Support sub-group (admin + readonly) */}
+                  <SubGroupLabel label="Support" />
+                  <SidebarNavItem item={callQualityItem} onNavigate={closeMobile} small />
+                  <SidebarNavItem item={troubleItem}     onNavigate={closeMobile} small />
+                </CollapsibleGroup>
+              </>
+            )}
+          </nav>
+        )}
+
+        {/* Spacer when unauthenticated so the login form stays at the bottom */}
+        {!isAuthenticated && <div style={{ flex: 1 }} />}
+
+        {/* ── Authenticated bottom section ─────────────────── */}
+        {isAuthenticated && (
+          <>
+            {/* Divider before user footer */}
+            <div
+              style={{
+                margin: '0 16px',
+                height: 1,
+                flexShrink: 0,
+                background: 'linear-gradient(90deg, transparent, rgba(42, 47, 69, 0.7) 20%, rgba(42, 47, 69, 0.7) 80%, transparent)',
+              }}
+            />
+
+            {/* ── Customer view toggle (admin only) ───────── */}
+            {isActualAdmin && (
+              <div style={{ padding: '8px 16px 2px', flexShrink: 0 }}>
+                <button
+                  type="button"
+                  onClick={toggleCustomerView}
+                  title={customerViewMode ? 'Return to admin view' : 'Preview the app as a customer'}
                   style={{
-                    width: 30,
-                    height: 30,
-                    borderRadius: '50%',
-                    background: 'linear-gradient(135deg, rgba(59,130,246,0.30) 0%, rgba(59,130,246,0.15) 100%)',
-                    border: '1px solid rgba(59,130,246,0.3)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    width: '100%',
+                    padding: '6px 10px',
+                    borderRadius: 8,
+                    background: customerViewMode
+                      ? 'rgba(245, 158, 11, 0.10)'
+                      : 'transparent',
+                    border: customerViewMode
+                      ? '1px solid rgba(245, 158, 11, 0.30)'
+                      : '1px solid rgba(42, 47, 69, 0.4)',
+                    cursor: 'pointer',
+                    transition: 'background 0.15s, border-color 0.15s',
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!customerViewMode) {
+                      e.currentTarget.style.background = 'rgba(255,255,255,0.04)';
+                      e.currentTarget.style.borderColor = 'rgba(42,47,69,0.7)';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!customerViewMode) {
+                      e.currentTarget.style.background = 'transparent';
+                      e.currentTarget.style.borderColor = 'rgba(42,47,69,0.4)';
+                    }
+                  }}
+                >
+                  {/* Icon */}
+                  {customerViewMode
+                    ? <EyeOff size={13} style={{ color: '#f59e0b', flexShrink: 0 }} />
+                    : <Eye    size={13} style={{ color: '#475569', flexShrink: 0 }} />
+                  }
+
+                  {/* Label */}
+                  <span
+                    style={{
+                      flex: 1,
+                      textAlign: 'left',
+                      fontSize: '0.75rem',
+                      fontWeight: 500,
+                      color: customerViewMode ? '#f59e0b' : '#475569',
+                      letterSpacing: '-0.01em',
+                      transition: 'color 0.15s',
+                    }}
+                  >
+                    {customerViewMode ? 'Exit Customer View' : 'View as Customer'}
+                  </span>
+
+                  {/* Active pill */}
+                  {customerViewMode && (
+                    <span
+                      style={{
+                        fontSize: '0.55rem',
+                        fontWeight: 700,
+                        letterSpacing: '0.06em',
+                        textTransform: 'uppercase',
+                        color: '#f59e0b',
+                        background: 'rgba(245,158,11,0.15)',
+                        border: '1px solid rgba(245,158,11,0.30)',
+                        borderRadius: 999,
+                        padding: '2px 6px',
+                        lineHeight: 1.6,
+                        flexShrink: 0,
+                      }}
+                    >
+                      ON
+                    </span>
+                  )}
+                </button>
+              </div>
+            )}
+
+            {/* ── User profile footer ──────────────────────── */}
+            <div style={{ padding: '12px 16px 18px', flexShrink: 0 }}>
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 10,
+                  padding: '8px 10px',
+                  borderRadius: 10,
+                  background: 'rgba(255,255,255,0.02)',
+                  border: '1px solid rgba(42,47,69,0.4)',
+                  position: 'relative',
+                }}
+              >
+                {/* Clickable area: avatar + name — navigates to /account */}
+                <NavLink
+                  to="/account"
+                  onClick={closeMobile}
+                  title="Account settings"
+                  style={({ isActive }) => ({
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 10,
+                    flex: 1,
+                    minWidth: 0,
+                    textDecoration: 'none',
+                    borderRadius: 7,
+                    padding: '2px 4px',
+                    margin: '-2px -4px',
+                    background: isActive ? 'rgba(59,130,246,0.08)' : 'transparent',
+                    transition: 'background 0.15s',
+                    cursor: 'pointer',
+                  })}
+                  onMouseEnter={(e) => {
+                    const el = e.currentTarget as HTMLAnchorElement;
+                    if (!el.classList.contains('active')) {
+                      el.style.background = 'rgba(255,255,255,0.05)';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    const el = e.currentTarget as HTMLAnchorElement;
+                    if (!el.classList.contains('active')) {
+                      el.style.background = 'transparent';
+                    }
+                  }}
+                >
+                  {/* Avatar */}
+                  <div style={{ position: 'relative', flexShrink: 0 }}>
+                    <div
+                      style={{
+                        width: 30,
+                        height: 30,
+                        borderRadius: '50%',
+                        background: 'linear-gradient(135deg, rgba(59,130,246,0.30) 0%, rgba(59,130,246,0.15) 100%)',
+                        border: '1px solid rgba(59,130,246,0.3)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontSize: '0.7rem',
+                        fontWeight: 700,
+                        color: '#60a5fa',
+                        letterSpacing: '0.02em',
+                        textTransform: 'uppercase',
+                      }}
+                      aria-hidden="true"
+                    >
+                      {displayName.charAt(0) || '?'}
+                    </div>
+                  </div>
+
+                  {/* Name + context label */}
+                  <div style={{ minWidth: 0 }}>
+                    <div
+                      style={{
+                        fontSize: '0.8rem',
+                        fontWeight: 600,
+                        color: '#94a3b8',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                        lineHeight: 1.3,
+                      }}
+                    >
+                      {displayName}
+                    </div>
+                    <div
+                      style={{
+                        fontSize: '0.65rem',
+                        color: '#334155',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                        marginTop: 1,
+                      }}
+                    >
+                      {contextLabel ?? displayEmail}
+                    </div>
+                  </div>
+                </NavLink>
+
+                {/* Sign out */}
+                <button
+                  type="button"
+                  onClick={logout}
+                  title="Sign out"
+                  aria-label="Sign out"
+                  style={{
+                    flexShrink: 0,
+                    width: 26,
+                    height: 26,
+                    borderRadius: 7,
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    fontSize: '0.7rem',
-                    fontWeight: 700,
-                    color: '#60a5fa',
-                    letterSpacing: '0.02em',
-                    textTransform: 'uppercase',
+                    background: 'transparent',
+                    border: '1px solid rgba(42,47,69,0.5)',
+                    color: '#475569',
+                    cursor: 'pointer',
+                    transition: 'color 0.15s, background 0.15s, border-color 0.15s',
+                    padding: 0,
                   }}
-                  aria-hidden="true"
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.color = '#f87171';
+                    e.currentTarget.style.background = 'rgba(239,68,68,0.08)';
+                    e.currentTarget.style.borderColor = 'rgba(239,68,68,0.25)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.color = '#475569';
+                    e.currentTarget.style.background = 'transparent';
+                    e.currentTarget.style.borderColor = 'rgba(42,47,69,0.5)';
+                  }}
                 >
-                  {displayName.charAt(0) || '?'}
-                </div>
+                  <IconSignOut />
+                </button>
               </div>
+            </div>
+          </>
+        )}
 
-              {/* Name + context label */}
-              <div style={{ minWidth: 0 }}>
-                <div
-                  style={{
-                    fontSize: '0.8rem',
-                    fontWeight: 600,
-                    color: '#94a3b8',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                    lineHeight: 1.3,
-                  }}
-                >
-                  {displayName}
-                </div>
-                <div
-                  style={{
-                    fontSize: '0.65rem',
-                    color: '#334155',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                    marginTop: 1,
-                  }}
-                >
-                  {contextLabel ?? displayEmail}
-                </div>
-              </div>
-            </NavLink>
-
-            {/* Sign out */}
-            <button
-              type="button"
-              onClick={logout}
-              title="Sign out"
-              aria-label="Sign out"
-              style={{
-                flexShrink: 0,
-                width: 26,
-                height: 26,
-                borderRadius: 7,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                background: 'transparent',
-                border: '1px solid rgba(42,47,69,0.5)',
-                color: '#475569',
-                cursor: 'pointer',
-                transition: 'color 0.15s, background 0.15s, border-color 0.15s',
-                padding: 0,
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.color = '#f87171';
-                e.currentTarget.style.background = 'rgba(239,68,68,0.08)';
-                e.currentTarget.style.borderColor = 'rgba(239,68,68,0.25)';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.color = '#475569';
-                e.currentTarget.style.background = 'transparent';
-                e.currentTarget.style.borderColor = 'rgba(42,47,69,0.5)';
-              }}
-            >
-              <IconSignOut />
-            </button>
-          </div>
-        </div>
+        {/* ── Unauthenticated: compact login form ──────────── */}
+        {!isAuthenticated && <SidebarLoginForm />}
       </aside>
     </>
   );

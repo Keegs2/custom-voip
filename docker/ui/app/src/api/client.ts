@@ -92,12 +92,13 @@ export async function apiRequest<T>(
   });
 
   // 401 means the token is missing, expired, or invalid. Clear it and bounce
-  // the user to the login page. The replace() avoids polluting browser history.
+  // the user to the homepage (login form lives in the sidebar). The replace()
+  // avoids polluting browser history.
   if (response.status === 401) {
     localStorage.removeItem(AUTH_TOKEN_KEY);
-    window.location.replace('/login');
+    window.location.replace('/');
     // Throw so any in-flight promise chains stop cleanly.
-    throw new ApiError(401, 'Session expired. Please log in again.');
+    throw new ApiError(401, 'Session expired. Please sign in again.');
   }
 
   if (!response.ok) {

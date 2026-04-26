@@ -1,16 +1,26 @@
-import { Navigate, useLocation } from 'react-router-dom';
+import { Navigate, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import type { ReactNode } from 'react';
 
 interface RequireAuthProps {
-  children: ReactNode;
+  /** When provided, renders children (wrapper usage). Omit to use as a layout route. */
+  children?: ReactNode;
 }
 
 /**
- * Wraps protected routes. While the initial token validation is running a
- * full-page spinner is shown to prevent a flash of the login redirect. Once
- * loading completes, unauthenticated users are sent to /login with the
- * intended path preserved in location state so LoginPage can redirect back.
+ * Guards protected routes. Supports two usage patterns:
+ *
+ * 1. Layout route (preferred for grouped routes):
+ *    <Route element={<RequireAuth />}>
+ *      <Route path="rcf" element={<RcfPage />} />
+ *    </Route>
+ *
+ * 2. Wrapper (legacy, for standalone routes):
+ *    <RequireAuth><SomePage /></RequireAuth>
+ *
+ * While the initial token validation is running, a full-page spinner is shown
+ * to prevent a flash of redirect. Unauthenticated users are sent to / (the
+ * public homepage) rather than a separate login page.
  */
 export function RequireAuth({ children }: RequireAuthProps) {
   const { isAuthenticated, isLoading } = useAuth();
@@ -21,7 +31,14 @@ export function RequireAuth({ children }: RequireAuthProps) {
   }
 
   if (!isAuthenticated) {
-    return <Navigate to="/login" state={{ from: location }} replace />;
+    // Redirect to the homepage — the login form lives in the sidebar there.
+    // Preserve the intended destination so the app can navigate there post-login.
+    return <Navigate to="/" state={{ from: location }} replace />;
+  }
+
+  // Layout route: render nested routes via Outlet
+  if (!children) {
+    return <Outlet />;
   }
 
   return <>{children}</>;
