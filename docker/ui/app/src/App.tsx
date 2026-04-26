@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useParams } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
 import { RequireAuth } from './components/auth/RequireAuth';
 import { RequireAdmin } from './components/auth/RequireAdmin';
@@ -29,6 +29,12 @@ import { UserDetailPage } from './pages/admin/UserDetailPage';
 import { CallQualityPage } from './pages/CallQualityPage';
 import { AccountPage } from './pages/AccountPage';
 
+/** Redirects /admin/user/:userId → /admin/customers/users/:userId */
+function UserDetailRedirect() {
+  const { userId } = useParams<{ userId: string }>();
+  return <Navigate to={`/admin/customers/users/${userId}`} replace />;
+}
+
 export function App() {
   return (
     <BrowserRouter>
@@ -58,32 +64,12 @@ export function App() {
             <Route path="call-quality" element={<CallQualityPage />} />
             <Route path="account"          element={<AccountPage />} />
 
-            {/* DID Search — admin-only, standalone (not nested inside AdminPage tabs) */}
-            <Route
-              path="admin/did-search"
-              element={
-                <RequireAdmin>
-                  <DIDSearchPage />
-                </RequireAdmin>
-              }
-            />
-
-            {/* User 360 View — admin-only support tool */}
+            {/* Redirects from old standalone paths to their new tab locations */}
+            <Route path="admin/did-search" element={<Navigate to="/admin/platform/dids" replace />} />
+            <Route path="admin/user" element={<Navigate to="/admin/customers/users" replace />} />
             <Route
               path="admin/user/:userId"
-              element={
-                <RequireAdmin>
-                  <UserDetailPage />
-                </RequireAdmin>
-              }
-            />
-            <Route
-              path="admin/user"
-              element={
-                <RequireAdmin>
-                  <UserDetailPage />
-                </RequireAdmin>
-              }
+              element={<UserDetailRedirect />}
             />
 
             {/* Customer account page — outside AdminPage wrapper for clean layout */}
@@ -105,9 +91,11 @@ export function App() {
                 </RequireAdmin>
               }
             >
-              <Route index            element={<Navigate to="customers" replace />} />
-              <Route path="customers" element={<CustomersAdminPage />} />
-              <Route path="trunks"    element={<TrunksAdminPage />} />
+              <Route index                      element={<Navigate to="customers" replace />} />
+              <Route path="customers"           element={<CustomersAdminPage />} />
+              <Route path="trunks"              element={<TrunksAdminPage />} />
+              <Route path="customers/users"     element={<UserDetailPage />} />
+              <Route path="customers/users/:userId" element={<UserDetailPage />} />
             </Route>
 
             {/* Platform Management — nested under PlatformManagementPage tab shell */}
@@ -125,6 +113,7 @@ export function App() {
               <Route path="rates"    element={<RatesAdminPage />} />
               <Route path="tiers"    element={<TiersAdminPage />} />
               <Route path="sipp"     element={<SippAdminPage />} />
+              <Route path="dids"     element={<DIDSearchPage />} />
             </Route>
           </Route>
 

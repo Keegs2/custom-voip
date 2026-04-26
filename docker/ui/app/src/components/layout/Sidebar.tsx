@@ -400,7 +400,7 @@ export function Sidebar() {
     const path = location.pathname;
 
     const productPaths = productNavItems.map((i) => i.to);
-    const adminPaths   = ['/admin', '/call-quality', '/admin/did-search', '/admin/user', '/admin/platform', '/troubleshooting'];
+    const adminPaths   = ['/admin', '/call-quality', '/admin/platform', '/troubleshooting'];
     const docPaths     = docNavItems.map((i) => i.to);
     const inProducts = productPaths.some((p) => path === p || path.startsWith(p + '/'));
     const inAdmin    = adminPaths.some((p) => path === p || path.startsWith(p + '/'));
@@ -440,12 +440,10 @@ export function Sidebar() {
 
   /* ── Admin items ───────────────────────────────────────── */
 
-  const customersItem: NavItemDef        = { label: 'Customer Management', to: '/admin/customers',   color: '#60a5fa', icon: <IconAdmin /> };
-  const platformItem: NavItemDef         = { label: 'Platform Management', to: '/admin/platform',    color: '#60a5fa', icon: <Server size={15} strokeWidth={1.7} /> };
-  const callQualityItem: NavItemDef      = { label: 'Call Quality',        to: '/call-quality',      color: '#22c55e', icon: <IconSignal size={17} /> };
-  const didLookupItem: NavItemDef        = { label: 'DID Management',      to: '/admin/did-search',  color: '#60a5fa', icon: <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.7} style={{ width: 15, height: 15 }}><circle cx="8.5" cy="8.5" r="5" /><path d="m13 13 3.5 3.5" strokeLinecap="round" /><path d="M6.5 7.5c.5-.8 1.3-1 2-1" strokeLinecap="round" /></svg> };
-  const userLookupItem: NavItemDef       = { label: 'User Lookup',         to: '/admin/user',        color: '#c084fc', icon: <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.7} style={{ width: 15, height: 15 }}><circle cx="8" cy="6" r="3.5" /><path d="M2 17c0-3 2.5-5 6-5" strokeLinecap="round" /><circle cx="14.5" cy="14.5" r="3" /><path d="m17.5 17.5 1.5 1.5" strokeLinecap="round" /></svg> };
-  const troubleItem: NavItemDef          = { label: 'Troubleshooting',     to: '/troubleshooting',   color: '#fbbf24', icon: <IconTroubleshoot size={17} /> };
+  const customersItem: NavItemDef   = { label: 'Customer Management', to: '/admin/customers', color: '#60a5fa', icon: <IconAdmin /> };
+  const platformItem: NavItemDef    = { label: 'Platform Management', to: '/admin/platform',  color: '#60a5fa', icon: <Server size={15} strokeWidth={1.7} /> };
+  const callQualityItem: NavItemDef = { label: 'Call Quality',        to: '/call-quality',    color: '#22c55e', icon: <IconSignal size={17} /> };
+  const troubleItem: NavItemDef     = { label: 'Troubleshooting',     to: '/troubleshooting', color: '#fbbf24', icon: <IconTroubleshoot size={17} /> };
 
   /* ─────────────────────────────────────────────────────── */
 
@@ -684,10 +682,8 @@ export function Sidebar() {
                 {isAdmin && (
                   <>
                     <SubGroupLabel label="Customers" />
-                    <SidebarNavItem item={customersItem}  onNavigate={closeMobile} small />
-                    <SidebarNavItem item={didLookupItem}  onNavigate={closeMobile} small />
-                    <SidebarNavItem item={userLookupItem} onNavigate={closeMobile} small />
-                    <SidebarNavItem item={platformItem}   onNavigate={closeMobile} small />
+                    <SidebarNavItem item={customersItem} onNavigate={closeMobile} small />
+                    <SidebarNavItem item={platformItem}  onNavigate={closeMobile} small />
                   </>
                 )}
 

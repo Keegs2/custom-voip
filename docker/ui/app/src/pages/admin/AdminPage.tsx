@@ -6,8 +6,9 @@ interface AdminTab {
 }
 
 const adminTabs: AdminTab[] = [
-  { label: 'Customers',       to: '/admin/customers' },
-  { label: 'Customer Trunks', to: '/admin/trunks'    },
+  { label: 'Customers',       to: '/admin/customers'       },
+  { label: 'Customer Trunks', to: '/admin/trunks'          },
+  { label: 'User Lookup',     to: '/admin/customers/users' },
 ];
 
 const ACCENT = '#3b82f6';

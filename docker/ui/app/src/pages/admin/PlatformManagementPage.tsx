@@ -11,6 +11,7 @@ const platformTabs: PlatformTab[] = [
   { label: 'Rates',          to: '/admin/platform/rates'    },
   { label: 'Tiers',          to: '/admin/platform/tiers'    },
   { label: 'Testing',        to: '/admin/platform/sipp'     },
+  { label: 'DID Search',     to: '/admin/platform/dids'     },
 ];
 
 const ACCENT = '#3b82f6';
