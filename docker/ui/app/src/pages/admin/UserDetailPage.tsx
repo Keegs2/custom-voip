@@ -3,7 +3,9 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiRequest } from '../../api/client';
 import { listUsers } from '../../api/auth';
+import { listCustomers } from '../../api/customers';
 import type { User } from '../../types/auth';
+import type { Customer as PlatformCustomer } from '../../types/customer';
 import { Badge } from '../../components/ui/Badge';
 import { Spinner } from '../../components/ui/Spinner';
 import { fmt, fmtDuration } from '../../utils/format';
@@ -2268,18 +2270,24 @@ function AllUsersTable({ users, searchTerm, onSelectUser }: AllUsersTableProps) 
 
 interface UserLookupPanelProps {
   onSelectUser: (userId: number) => void;
+  customerId?: number | null;
 }
 
-function UserLookupPanel({ onSelectUser }: UserLookupPanelProps) {
+function UserLookupPanel({ onSelectUser, customerId }: UserLookupPanelProps) {
   // ALL hooks above any early returns (React #310)
   const [searchTerm, setSearchTerm] = useState('');
 
-  const { data: users, isLoading, isError, error } = useQuery({
+  const { data: allUsers, isLoading, isError, error } = useQuery({
     queryKey: ['all-users'],
     queryFn: listUsers,
     staleTime: 30_000,
     retry: 1,
   });
+
+  // When a customerId is provided, filter to only that customer's users
+  const users = customerId != null
+    ? (allUsers ?? []).filter((u) => u.customer_id === customerId)
+    : allUsers;
 
   return (
     <div
@@ -2468,27 +2476,324 @@ function UserLookupPanel({ onSelectUser }: UserLookupPanelProps) {
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
+// ─── Customer Picker Table ────────────────────────────────────────────────────
+
+const CUSTOMER_PAGE_SIZE = 25;
+const CUSTOMER_COL_COUNT = 7;
+
+const pickerTdStyle: React.CSSProperties = {
+  padding: '13px 16px',
+  borderBottom: '1px solid rgba(42,47,69,0.45)',
+  verticalAlign: 'middle',
+};
+
+function accountTypeBadge(type: PlatformCustomer['account_type']) {
+  return <Badge variant={type}>{type.toUpperCase()}</Badge>;
+}
+
+function statusBadge(status: PlatformCustomer['status']) {
+  if (status === 'active') return <Badge variant="active">Active</Badge>;
+  if (status === 'suspended') return <Badge variant="suspended">Suspended</Badge>;
+  return <Badge variant="closed">Closed</Badge>;
+}
+
+function gradeBadge(grade: PlatformCustomer['traffic_grade']) {
+  return <Badge variant={grade}>{grade}</Badge>;
+}
+
+interface CustomerPickerTableProps {
+  onSelectCustomer: (customer: PlatformCustomer) => void;
+}
+
+function CustomerPickerTable({ onSelectCustomer }: CustomerPickerTableProps) {
+  // ALL hooks above any early returns (React #310)
+  const [offset, setOffset] = useState(0);
+  const [search, setSearch] = useState('');
+  const [committedSearch, setCommittedSearch] = useState('');
+
+  const { data, isLoading, isError } = useQuery({
+    queryKey: ['customers-user-picker', { search: committedSearch, offset }],
+    queryFn: () => listCustomers({ search: committedSearch, limit: CUSTOMER_PAGE_SIZE, offset }),
+  });
+
+  function handleSearch(e: React.FormEvent) {
+    e.preventDefault();
+    setOffset(0);
+    setCommittedSearch(search);
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+      {/* Search toolbar */}
+      <form
+        onSubmit={handleSearch}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 12,
+          background: 'linear-gradient(135deg, rgba(30,33,48,0.9) 0%, rgba(19,21,29,0.95) 100%)',
+          border: '1px solid rgba(42,47,69,0.6)',
+          borderRadius: 12,
+          padding: '16px 20px',
+        }}
+      >
+        <input
+          type="search"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search customers…"
+          style={{
+            fontSize: '0.85rem',
+            padding: '8px 14px',
+            height: 36,
+            borderRadius: 8,
+            border: '1px solid rgba(42,47,69,0.8)',
+            background: 'rgba(13,15,21,0.8)',
+            color: '#e2e8f0',
+            outline: 'none',
+            transition: 'border-color 0.15s, box-shadow 0.15s',
+            flex: 1,
+            maxWidth: 400,
+          }}
+          onFocus={(e) => {
+            e.currentTarget.style.borderColor = '#3b82f6';
+            e.currentTarget.style.boxShadow = '0 0 0 3px rgba(59,130,246,0.15)';
+          }}
+          onBlur={(e) => {
+            e.currentTarget.style.borderColor = 'rgba(42,47,69,0.8)';
+            e.currentTarget.style.boxShadow = 'none';
+          }}
+        />
+        <button
+          type="submit"
+          style={{
+            flexShrink: 0,
+            padding: '8px 16px',
+            borderRadius: 8,
+            border: '1px solid rgba(42,47,69,0.8)',
+            background: 'rgba(255,255,255,0.05)',
+            color: '#94a3b8',
+            fontSize: '0.82rem',
+            fontWeight: 600,
+            cursor: 'pointer',
+            fontFamily: 'inherit',
+            transition: 'background 0.15s, color 0.15s',
+          }}
+          onMouseEnter={(e) => {
+            (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.1)';
+            (e.currentTarget as HTMLButtonElement).style.color = '#e2e8f0';
+          }}
+          onMouseLeave={(e) => {
+            (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.05)';
+            (e.currentTarget as HTMLButtonElement).style.color = '#94a3b8';
+          }}
+        >
+          Search
+        </button>
+      </form>
+
+      {/* Loading */}
+      {isLoading && (
+        <div className="flex items-center gap-2.5 text-[#718096] py-12">
+          <Spinner /> Loading customers…
+        </div>
+      )}
+
+      {/* Error */}
+      {isError && (
+        <div
+          style={{
+            padding: '16px 20px',
+            borderRadius: 12,
+            background: 'rgba(239,68,68,0.08)',
+            border: '1px solid rgba(239,68,68,0.2)',
+            color: '#f87171',
+            fontSize: '0.875rem',
+          }}
+        >
+          Failed to load customers.
+        </div>
+      )}
+
+      {/* Table */}
+      {data && (
+        <>
+          <div
+            style={{
+              borderRadius: 12,
+              border: '1px solid rgba(42,47,69,0.6)',
+              overflow: 'hidden',
+              background: 'linear-gradient(135deg, rgba(26,29,39,0.95) 0%, rgba(15,17,23,1) 100%)',
+            }}
+          >
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr style={{ borderBottom: '1px solid rgba(42,47,69,0.6)', background: 'rgba(0,0,0,0.15)' }}>
+                    {['ID', 'Name', 'Type', 'Balance', 'Status', 'Grade', 'Created'].map((col) => (
+                      <th
+                        key={col}
+                        style={{
+                          padding: '10px 16px',
+                          textAlign: 'left',
+                          fontSize: '0.6rem',
+                          fontWeight: 700,
+                          color: '#334155',
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.1em',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {col}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {(data.items ?? []).length === 0 ? (
+                    <tr>
+                      <td
+                        colSpan={CUSTOMER_COL_COUNT}
+                        style={{
+                          padding: '48px 16px',
+                          textAlign: 'center',
+                          color: '#718096',
+                          fontSize: '0.875rem',
+                        }}
+                      >
+                        No customers found.
+                      </td>
+                    </tr>
+                  ) : (
+                    (data.items ?? []).map((customer) => (
+                      <tr
+                        key={customer.id}
+                        onClick={() => onSelectCustomer(customer)}
+                        style={{ transition: 'background 0.15s', cursor: 'pointer' }}
+                        onMouseEnter={(e) => {
+                          (e.currentTarget as HTMLTableRowElement).style.background = 'rgba(255,255,255,0.035)';
+                        }}
+                        onMouseLeave={(e) => {
+                          (e.currentTarget as HTMLTableRowElement).style.background = 'transparent';
+                        }}
+                      >
+                        <td style={pickerTdStyle}>
+                          <span style={{ color: '#4a5568', fontFamily: 'monospace', fontSize: '0.78rem' }}>
+                            #{customer.id}
+                          </span>
+                        </td>
+                        <td style={pickerTdStyle}>
+                          <span style={{ color: '#e2e8f0', fontWeight: 600, fontSize: '0.875rem' }}>
+                            {customer.name}
+                          </span>
+                        </td>
+                        <td style={pickerTdStyle}>{accountTypeBadge(customer.account_type)}</td>
+                        <td style={pickerTdStyle}>
+                          <span
+                            style={{
+                              color: customer.balance < 0 ? '#f87171' : '#e2e8f0',
+                              fontVariantNumeric: 'tabular-nums',
+                              fontSize: '0.875rem',
+                              fontWeight: customer.balance < 0 ? 600 : 400,
+                            }}
+                          >
+                            ${customer.balance.toFixed(2)}
+                          </span>
+                        </td>
+                        <td style={pickerTdStyle}>{statusBadge(customer.status)}</td>
+                        <td style={pickerTdStyle}>{gradeBadge(customer.traffic_grade)}</td>
+                        <td style={{ ...pickerTdStyle, color: '#4a5568', fontSize: '0.82rem' }}>
+                          {customer.created_at
+                            ? new Date(customer.created_at).toLocaleDateString()
+                            : '--'}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Load more */}
+          {(data.items ?? []).length + offset < (data.total ?? 0) && (
+            <div style={{ textAlign: 'center', paddingBottom: 8 }}>
+              <button
+                type="button"
+                onClick={() => setOffset((o) => o + CUSTOMER_PAGE_SIZE)}
+                style={{
+                  padding: '8px 20px',
+                  borderRadius: 8,
+                  border: '1px solid rgba(42,47,69,0.6)',
+                  background: 'rgba(255,255,255,0.04)',
+                  color: '#60a5fa',
+                  fontSize: '0.82rem',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  fontFamily: 'inherit',
+                  transition: 'background 0.15s, color 0.15s',
+                }}
+                onMouseEnter={(e) => {
+                  (e.currentTarget as HTMLButtonElement).style.background = 'rgba(96,165,250,0.1)';
+                }}
+                onMouseLeave={(e) => {
+                  (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.04)';
+                }}
+              >
+                Load more
+              </button>
+              <span style={{ marginLeft: 12, fontSize: '0.78rem', color: '#4a5568' }}>
+                Showing {(data.items ?? []).length + offset} of {data.total ?? 0}
+              </span>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+// ─── Page ─────────────────────────────────────────────────────────────────────
+
 export function UserDetailPage() {
   // ALL hooks must be declared before any early returns (React #310)
   const { userId: userIdParam } = useParams<{ userId: string }>();
   const navigate = useNavigate();
 
   const urlUserId = userIdParam ? parseInt(userIdParam, 10) : null;
+  // Deep-link via URL (:userId) goes straight to 360 view with no customer context
   const [selectedUserId, setSelectedUserId] = useState<number | null>(
     urlUserId && !Number.isNaN(urlUserId) ? urlUserId : null,
   );
+  const [selectedCustomer, setSelectedCustomer] = useState<PlatformCustomer | null>(null);
+
+  function handleSelectCustomer(customer: PlatformCustomer) {
+    setSelectedCustomer(customer);
+    setSelectedUserId(null);
+  }
 
   function handleSelectUser(id: number) {
     setSelectedUserId(id);
-    navigate(`/admin/user/${id}`, { replace: true });
+    navigate(`/admin/customers/users/${id}`, { replace: true });
   }
 
-  function handleBackToList() {
+  function handleBackToUsers() {
     setSelectedUserId(null);
-    navigate('/admin/user', { replace: true });
+    navigate('/admin/customers/users', { replace: true });
   }
 
+  function handleBackToCustomers() {
+    setSelectedUserId(null);
+    setSelectedCustomer(null);
+    navigate('/admin/customers/users', { replace: true });
+  }
+
+  // When a :userId is in the URL we go straight to 360 view — skip both pickers
   const show360View = selectedUserId != null;
+  // Show the user list when a customer is selected (and not viewing a specific user)
+  const showUserList = !show360View && selectedCustomer != null;
+  // Show the customer picker when nothing is selected and no URL param
+  const showCustomerPicker = !show360View && selectedCustomer == null;
 
   return (
     <div style={{ paddingTop: 8 }}>
@@ -2547,23 +2852,25 @@ export function UserDetailPage() {
             marginRight: 'auto',
           }}
         >
-          All platform users. Filter by name, email, role, customer, or status. Click any row for a full 360 view.
+          {showCustomerPicker
+            ? 'Select a customer to browse their users.'
+            : 'Filter by name, email, role, or status. Click any row for a full 360 view.'}
         </p>
       </div>
 
-      {/* ── All Users Table (hidden when 360 view is active) ── */}
-      {!show360View && (
-        <UserLookupPanel onSelectUser={handleSelectUser} />
+      {/* ── State 1: Customer picker ────────────────────────── */}
+      {showCustomerPicker && (
+        <CustomerPickerTable onSelectCustomer={handleSelectCustomer} />
       )}
 
-      {/* ── 360 View ─────────────────────────────────────────── */}
-      {show360View && (
+      {/* ── State 2: User list for selected customer ─────────── */}
+      {showUserList && (
         <>
-          {/* Back button */}
-          <div style={{ marginBottom: 16 }}>
+          {/* Back to customers */}
+          <div style={{ marginBottom: 20 }}>
             <button
               type="button"
-              onClick={handleBackToList}
+              onClick={handleBackToCustomers}
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
@@ -2583,7 +2890,71 @@ export function UserDetailPage() {
               <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={2} style={{ width: 13, height: 13 }}>
                 <path d="M10 3L5 8l5 5" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
-              Back to user list
+              Back to customers
+            </button>
+          </div>
+
+          {/* Customer subheading */}
+          <div style={{ marginBottom: 20 }}>
+            <span
+              style={{
+                fontSize: '0.65rem',
+                fontWeight: 700,
+                color: '#a855f7',
+                textTransform: 'uppercase',
+                letterSpacing: '0.1em',
+              }}
+            >
+              Customer
+            </span>
+            <h2
+              style={{
+                margin: '4px 0 0',
+                fontSize: '1.05rem',
+                fontWeight: 700,
+                color: '#e2e8f0',
+                letterSpacing: '-0.01em',
+              }}
+            >
+              {selectedCustomer.name}
+            </h2>
+          </div>
+
+          <UserLookupPanel
+            onSelectUser={handleSelectUser}
+            customerId={selectedCustomer.id}
+          />
+        </>
+      )}
+
+      {/* ── State 3: 360 View ────────────────────────────────── */}
+      {show360View && (
+        <>
+          {/* Back button — goes to user list if we have a customer, else to customers */}
+          <div style={{ marginBottom: 16 }}>
+            <button
+              type="button"
+              onClick={selectedCustomer != null ? handleBackToUsers : handleBackToCustomers}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                background: 'transparent',
+                border: 'none',
+                color: '#60a5fa',
+                fontSize: '0.8rem',
+                fontWeight: 600,
+                cursor: 'pointer',
+                padding: '4px 0',
+                fontFamily: 'inherit',
+              }}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = '#93c5fd'; }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = '#60a5fa'; }}
+            >
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={2} style={{ width: 13, height: 13 }}>
+                <path d="M10 3L5 8l5 5" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              {selectedCustomer != null ? `Back to ${selectedCustomer.name} users` : 'Back to customers'}
             </button>
           </div>
           <User360View userId={selectedUserId!} />
