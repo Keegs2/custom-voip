@@ -108,7 +108,7 @@ interface AccordionSectionProps {
   id: string;
   accent: string;
   icon: React.ReactNode;
-  title: string;
+  title: React.ReactNode;
   subtitle: string;
   children: React.ReactNode;
   defaultOpen?: boolean;
