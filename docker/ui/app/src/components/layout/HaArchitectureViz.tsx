@@ -13,17 +13,17 @@ import { type CSSProperties, useMemo } from 'react';
  *    Trunk      Primary (active)     └─ Granite West:  [SBC-1][SBC-2] → [Keystone] ──┤→ [LA]
  *               Hot Backup (standby)                                              └→ [Backup]
  *
- * Failover simulation — an 80-second CSS keyframe cycle drives five scenarios:
- *   0–8s    Normal operation
- *   8–16s   SBC-2 in Granite Central fails → traffic reroutes through SBC-1
- *  16–24s   Normal operation
- *  24–32s   Granite West datacenter fails → traffic reroutes to East + Central
- *  32–40s   Normal operation
- *  40–48s   Dallas trunk fails → outbound reroutes to LA + Backup
- *  48–56s   Normal operation
- *  56–64s   SBC-1 in Granite East fails → traffic reroutes through SBC-2
- *  64–72s   Normal operation
- *  72–80s   Primary Key Distributor fails → Hot Backup takes over
+ * Failover simulation — a 50-second CSS keyframe cycle drives five scenarios:
+ *   0–5s    Normal operation
+ *   5–10s   SBC-2 in Granite Central fails → traffic reroutes through SBC-1
+ *  10–15s   Normal operation
+ *  15–20s   Granite West datacenter fails → traffic reroutes to East + Central
+ *  20–25s   Normal operation
+ *  25–30s   Dallas trunk fails → outbound reroutes to LA + Backup
+ *  30–35s   Normal operation
+ *  35–40s   SBC-1 in Granite East fails → traffic reroutes through SBC-2
+ *  40–45s   Normal operation
+ *  45–50s   Primary Key Distributor fails → Hot Backup takes over
  *
  * The two Key Distributors represent redundant GCP Global Load Balancers
  * with independent anycast VIPs sharing the same SBC backends.
@@ -63,8 +63,8 @@ const TERM_Y = [100, 195, 290] as const;  // Dallas, LA, Backup
 
 // Key Distributor y-positions — stacked vertically at the NLB column.
 // Primary is above centre, backup is below. Both converge toward the NLB x column.
-const KD_PRIMARY_Y = 175;  // primary — slightly above the centre row (was 195)
-const KD_BACKUP_Y  = 218;  // backup  — below primary, clearly distinct
+const KD_PRIMARY_Y = 160;  // primary — above centre row, clear of backup
+const KD_BACKUP_Y  = 235;  // backup  — 75px below primary, clear visual separation
 
 /* ─── SVG path helpers ───────────────────────────────────────────────── */
 
@@ -132,28 +132,29 @@ interface PathDef {
 /* ─── Path definitions ───────────────────────────────────────────────── */
 
 // Stage 1→2: Dual inbound trunks → Primary Key Distributor
-// Trunk 1 (upper, y=165) and Trunk 2 (lower, y=225) fan into primary KD at KD_PRIMARY_Y.
+// Trunk 1 (upper, y=155) and Trunk 2 (lower, y=240) fan into primary KD at KD_PRIMARY_Y.
+// Centre of the KD pair: (160+235)/2 = 197.5 ≈ 198. Trunks are 85px apart, centred on 198.
 const PATH_INBOUND1_NLB: PathDef = {
   id: 'in1-nlb',
   group: 'normal',
-  d: quadPath(COL.inbound + 20, 165, (COL.inbound + COL.nlb) / 2, 162, COL.nlb - 26, KD_PRIMARY_Y),
+  d: quadPath(COL.inbound + 20, 155, (COL.inbound + COL.nlb) / 2, 152, COL.nlb - 26, KD_PRIMARY_Y),
 };
 const PATH_INBOUND2_NLB: PathDef = {
   id: 'in2-nlb',
   group: 'normal',
-  d: quadPath(COL.inbound + 20, 225, (COL.inbound + COL.nlb) / 2, 228, COL.nlb - 26, KD_PRIMARY_Y),
+  d: quadPath(COL.inbound + 20, 240, (COL.inbound + COL.nlb) / 2, 243, COL.nlb - 26, KD_PRIMARY_Y),
 };
 
 // Stage 1→2 (backup): Dual inbound trunks → Backup Key Distributor (reroute-kd only)
 const PATH_INBOUND1_BACKUP: PathDef = {
   id: 'in1-bkd',
   group: 'reroute-kd',
-  d: quadPath(COL.inbound + 20, 165, (COL.inbound + COL.nlb) / 2, 180, COL.nlb - 26, KD_BACKUP_Y),
+  d: quadPath(COL.inbound + 20, 155, (COL.inbound + COL.nlb) / 2, 170, COL.nlb - 26, KD_BACKUP_Y),
 };
 const PATH_INBOUND2_BACKUP: PathDef = {
   id: 'in2-bkd',
   group: 'reroute-kd',
-  d: quadPath(COL.inbound + 20, 225, (COL.inbound + COL.nlb) / 2, 235, COL.nlb - 26, KD_BACKUP_Y),
+  d: quadPath(COL.inbound + 20, 240, (COL.inbound + COL.nlb) / 2, 248, COL.nlb - 26, KD_BACKUP_Y),
 };
 
 // Stage 2→3: Primary NLB → SBC-1 and SBC-2 for each location
@@ -324,92 +325,92 @@ function makePackets(
 
 const ALL_PACKETS: PacketConfig[] = [
   // ── Stage 1: Inbound — fire hose of carrier traffic ────────────────────
-  ...makePackets('in1-nlb', 6, 0.8, 'normal', false, 0.0,  12, false),
-  ...makePackets('in2-nlb', 5, 0.8, 'normal', false, 0.4,  12, false),
+  ...makePackets('in1-nlb', 6, 0.65, 'normal', false, 0.0,  12, false),
+  ...makePackets('in2-nlb', 5, 0.65, 'normal', false, 0.3,  12, false),
 
   // ── Stage 2: Primary KD → SBCs ─────────────────────────────────────────
-  ...makePackets('nlb-e1', 3, 0.6, 'sbc1-east',    false, 0.0,  13, false),
-  ...makePackets('nlb-e2', 3, 0.6, 'normal',        false, 0.2,  13, false),
-  ...makePackets('nlb-c1', 3, 0.6, 'normal',        false, 0.1,  13, false),
-  ...makePackets('nlb-c2', 3, 0.6, 'sbc2-central',  false, 0.3,  13, false),
-  ...makePackets('nlb-w1', 3, 0.6, 'west-loc',      false, 0.15, 13, false),
-  ...makePackets('nlb-w2', 3, 0.6, 'west-loc',      false, 0.35, 13, false),
+  ...makePackets('nlb-e1', 3, 0.5, 'sbc1-east',    false, 0.0,  13, false),
+  ...makePackets('nlb-e2', 3, 0.5, 'normal',        false, 0.2,  13, false),
+  ...makePackets('nlb-c1', 3, 0.5, 'normal',        false, 0.1,  13, false),
+  ...makePackets('nlb-c2', 3, 0.5, 'sbc2-central',  false, 0.3,  13, false),
+  ...makePackets('nlb-w1', 3, 0.5, 'west-loc',      false, 0.15, 13, false),
+  ...makePackets('nlb-w2', 3, 0.5, 'west-loc',      false, 0.35, 13, false),
 
   // ── Stage 3: SBC → Keystone ─────────────────────────────────────────────
-  ...makePackets('s1ks-e', 3, 0.4, 'sbc1-east',    false, 0.05, 14, true),
-  ...makePackets('s2ks-e', 2, 0.4, 'normal',        false, 0.10, 14, true),
+  ...makePackets('s1ks-e', 3, 0.35, 'sbc1-east',    false, 0.05, 14, true),
+  ...makePackets('s2ks-e', 2, 0.35, 'normal',        false, 0.10, 14, true),
 
-  ...makePackets('s1ks-c', 2, 0.4, 'normal',        false, 0.08, 14, true),
-  ...makePackets('s2ks-c', 3, 0.4, 'sbc2-central',  false, 0.18, 14, true),
+  ...makePackets('s1ks-c', 2, 0.35, 'normal',        false, 0.08, 14, true),
+  ...makePackets('s2ks-c', 3, 0.35, 'sbc2-central',  false, 0.18, 14, true),
 
-  ...makePackets('s1ks-w', 3, 0.4, 'west-loc',      false, 0.03, 14, true),
-  ...makePackets('s2ks-w', 2, 0.4, 'west-loc',      false, 0.13, 14, true),
+  ...makePackets('s1ks-w', 3, 0.35, 'west-loc',      false, 0.03, 14, true),
+  ...makePackets('s2ks-w', 2, 0.35, 'west-loc',      false, 0.13, 14, true),
 
   // ── Stage 4: Keystone → Termination ─────────────────────────────────────
-  ...makePackets('e-t0', 2, 0.6, 'term-dallas', true,  0.00, 14, true),
-  ...makePackets('e-t1', 2, 0.6, 'normal',      true,  0.08, 14, true),
-  ...makePackets('e-t2', 2, 0.6, 'normal',      true,  0.20, 14, true),
+  ...makePackets('e-t0', 2, 0.5, 'term-dallas', true,  0.00, 14, true),
+  ...makePackets('e-t1', 2, 0.5, 'normal',      true,  0.08, 14, true),
+  ...makePackets('e-t2', 2, 0.5, 'normal',      true,  0.20, 14, true),
 
-  ...makePackets('c-t0', 2, 0.6, 'term-dallas', true,  0.10, 14, true),
-  ...makePackets('c-t1', 2, 0.6, 'normal',      true,  0.05, 14, true),
-  ...makePackets('c-t2', 2, 0.6, 'normal',      true,  0.15, 14, true),
+  ...makePackets('c-t0', 2, 0.5, 'term-dallas', true,  0.10, 14, true),
+  ...makePackets('c-t1', 2, 0.5, 'normal',      true,  0.05, 14, true),
+  ...makePackets('c-t2', 2, 0.5, 'normal',      true,  0.15, 14, true),
 
   // w-t0 hides during both west-loc AND dallas failure
-  ...makePackets('w-t0', 2, 0.6, 'west-loc-or-dallas', true,  0.05, 14, true),
-  ...makePackets('w-t1', 2, 0.6, 'west-loc',            true,  0.15, 14, true),
-  ...makePackets('w-t2', 2, 0.6, 'west-loc',            true,  0.25, 14, true),
+  ...makePackets('w-t0', 2, 0.5, 'west-loc-or-dallas', true,  0.05, 14, true),
+  ...makePackets('w-t1', 2, 0.5, 'west-loc',            true,  0.15, 14, true),
+  ...makePackets('w-t2', 2, 0.5, 'west-loc',            true,  0.25, 14, true),
 
   // ── Reroute packets: only appear during their specific failure event ──
 
   // SBC-2 Central fails → SBC-1 Central absorbs extra load
-  ...makePackets('s1ks-c', 3, 0.4, 'reroute-sbc2central', false, 0.1, 14, true),
-  ...makePackets('nlb-c1', 3, 0.6, 'reroute-sbc2central', false, 0.3, 13, false),
+  ...makePackets('s1ks-c', 3, 0.35, 'reroute-sbc2central', false, 0.1, 14, true),
+  ...makePackets('nlb-c1', 3, 0.5,  'reroute-sbc2central', false, 0.3, 13, false),
 
   // West datacenter fails → East and Central absorb extra load
-  ...makePackets('nlb-e1', 3, 0.6, 'reroute-west', false, 0.1,  13, false),
-  ...makePackets('nlb-c1', 3, 0.6, 'reroute-west', false, 0.4,  13, false),
-  ...makePackets('s1ks-e', 3, 0.4, 'reroute-west', false, 0.15, 14, true),
-  ...makePackets('s1ks-c', 3, 0.4, 'reroute-west', false, 0.35, 14, true),
-  ...makePackets('e-t1',   2, 0.6, 'reroute-west', true,  0.10, 14, true),
-  ...makePackets('c-t1',   2, 0.6, 'reroute-west', true,  0.30, 14, true),
+  ...makePackets('nlb-e1', 3, 0.5,  'reroute-west', false, 0.1,  13, false),
+  ...makePackets('nlb-c1', 3, 0.5,  'reroute-west', false, 0.4,  13, false),
+  ...makePackets('s1ks-e', 3, 0.35, 'reroute-west', false, 0.15, 14, true),
+  ...makePackets('s1ks-c', 3, 0.35, 'reroute-west', false, 0.35, 14, true),
+  ...makePackets('e-t1',   2, 0.5,  'reroute-west', true,  0.10, 14, true),
+  ...makePackets('c-t1',   2, 0.5,  'reroute-west', true,  0.30, 14, true),
 
   // Dallas fails → LA and Backup absorb extra load
-  ...makePackets('e-t1', 2, 0.6, 'reroute-dallas', true, 0.05, 14, true),
-  ...makePackets('e-t2', 2, 0.6, 'reroute-dallas', true, 0.20, 14, true),
-  ...makePackets('c-t1', 2, 0.6, 'reroute-dallas', true, 0.10, 14, true),
-  ...makePackets('c-t2', 2, 0.6, 'reroute-dallas', true, 0.25, 14, true),
+  ...makePackets('e-t1', 2, 0.5, 'reroute-dallas', true, 0.05, 14, true),
+  ...makePackets('e-t2', 2, 0.5, 'reroute-dallas', true, 0.20, 14, true),
+  ...makePackets('c-t1', 2, 0.5, 'reroute-dallas', true, 0.10, 14, true),
+  ...makePackets('c-t2', 2, 0.5, 'reroute-dallas', true, 0.25, 14, true),
 
   // SBC-1 East fails → SBC-2 East absorbs extra load
-  ...makePackets('s2ks-e', 3, 0.4, 'reroute-sbc1east', false, 0.1, 14, true),
-  ...makePackets('nlb-e2', 3, 0.6, 'reroute-sbc1east', false, 0.3, 13, false),
+  ...makePackets('s2ks-e', 3, 0.35, 'reroute-sbc1east', false, 0.1, 14, true),
+  ...makePackets('nlb-e2', 3, 0.5,  'reroute-sbc1east', false, 0.3, 13, false),
 
   // Primary KD fails → Backup KD takes over (all 6 backup paths light up)
-  ...makePackets('in1-bkd', 6, 0.8, 'reroute-kd', false, 0.0,  12, false),
-  ...makePackets('in2-bkd', 5, 0.8, 'reroute-kd', false, 0.4,  12, false),
-  ...makePackets('bkd-e1',  3, 0.6, 'reroute-kd', false, 0.0,  13, false),
-  ...makePackets('bkd-e2',  3, 0.6, 'reroute-kd', false, 0.2,  13, false),
-  ...makePackets('bkd-c1',  3, 0.6, 'reroute-kd', false, 0.1,  13, false),
-  ...makePackets('bkd-c2',  3, 0.6, 'reroute-kd', false, 0.3,  13, false),
-  ...makePackets('bkd-w1',  3, 0.6, 'reroute-kd', false, 0.15, 13, false),
-  ...makePackets('bkd-w2',  3, 0.6, 'reroute-kd', false, 0.35, 13, false),
+  ...makePackets('in1-bkd', 6, 0.65, 'reroute-kd', false, 0.0,  12, false),
+  ...makePackets('in2-bkd', 5, 0.65, 'reroute-kd', false, 0.3,  12, false),
+  ...makePackets('bkd-e1',  3, 0.5,  'reroute-kd', false, 0.0,  13, false),
+  ...makePackets('bkd-e2',  3, 0.5,  'reroute-kd', false, 0.2,  13, false),
+  ...makePackets('bkd-c1',  3, 0.5,  'reroute-kd', false, 0.1,  13, false),
+  ...makePackets('bkd-c2',  3, 0.5,  'reroute-kd', false, 0.3,  13, false),
+  ...makePackets('bkd-w1',  3, 0.5,  'reroute-kd', false, 0.15, 13, false),
+  ...makePackets('bkd-w2',  3, 0.5,  'reroute-kd', false, 0.35, 13, false),
 ];
 
-/* ─── Failover timing (master 80-second cycle) ───────────────────────── */
+/* ─── Failover timing (master 50-second cycle) ───────────────────────── */
 /**
- * t = time in seconds within the 80s cycle
- * 1s = 1.25%  |  8s = 10%
+ * t = time in seconds within the 50s cycle
+ * 1s = 2%  |  5s = 10%
  *
  * Schedule:
- *   0–8s    (0–10%)    Normal
- *   8–16s   (10–20%)   SBC-2 Central fails
- *   16–24s  (20–30%)   Normal
- *   24–32s  (30–40%)   West datacenter fails
- *   32–40s  (40–50%)   Normal
- *   40–48s  (50–60%)   Dallas trunk fails
- *   48–56s  (60–70%)   Normal
- *   56–64s  (70–80%)   SBC-1 East fails
- *   64–72s  (80–90%)   Normal
- *   72–80s  (90–100%)  Primary Key Distributor fails → Backup takes over
+ *   0–5s    (0–10%)    Normal
+ *   5–10s   (10–20%)   SBC-2 Central fails
+ *   10–15s  (20–30%)   Normal
+ *   15–20s  (30–40%)   West datacenter fails
+ *   20–25s  (40–50%)   Normal
+ *   25–30s  (50–60%)   Dallas trunk fails
+ *   30–35s  (60–70%)   Normal
+ *   35–40s  (70–80%)   SBC-1 East fails
+ *   40–45s  (80–90%)   Normal
+ *   45–50s  (90–100%)  Primary Key Distributor fails → Backup takes over
  */
 
 /* ─── Component ──────────────────────────────────────────────────────── */
@@ -431,9 +432,9 @@ export function HaArchitectureViz() {
 }`,
     ).join('\n');
 
-    // 2. Group visibility keyframes — all on the 80s master cycle.
+    // 2. Group visibility keyframes — all on the 50s master cycle.
     //
-    // Percentages (80s base):
+    // Percentages (50s base):
     //   SBC-2 Central  : 10%–20%
     //   West datacenter: 30%–40%
     //   Dallas trunk   : 50%–60%
@@ -563,7 +564,7 @@ export function HaArchitectureViz() {
         ? `${uid}-pkt-${path.id}, ${visAnim}`
         : `${uid}-pkt-${path.id}`;
       const animDurs = visAnim
-        ? `${pkt.duration}s, 80s`
+        ? `${pkt.duration}s, 50s`
         : `${pkt.duration}s`;
       const animDels = visAnim
         ? `${pkt.delay}s, 0s`
@@ -594,96 +595,76 @@ export function HaArchitectureViz() {
 
     // 3. Node visibility animations (red-glow pulsing during failure)
     //
-    // Failure windows (80s cycle):
-    //   sbc2-central : 10%–20%   (8s)
-    //   west-loc     : 30%–40%   (8s)
-    //   term-dallas  : 50%–60%   (8s)
-    //   sbc1-east    : 70%–80%   (8s)
-    //   primary-kd   : 90%–100%  (8s)
+    // Failure windows (50s cycle):
+    //   sbc2-central : 10%–20%   (5s)
+    //   west-loc     : 30%–40%   (5s)
+    //   term-dallas  : 50%–60%   (5s)
+    //   sbc1-east    : 70%–80%   (5s)
+    //   primary-kd   : 90%–100%  (5s)
     //
-    // Pulse cadence: each 1.25% = 1s. Pulses alternate every 1.25% (1s half-period →
-    // 2s full pulse cycle), giving ~4 full pulses per 8s failure window.
-    //
-    // For the 80s cycle the pulse steps shift accordingly:
-    //   SBC-2 Central window 10%–20%  → steps at 10, 11.25, 12.5, 13.75, 15, 16.25, 17.5, 18.75, 19.5
-    //   West window          30%–40%  → steps at 30, 31.25, 32.5, 33.75, 35, 36.25, 37.5, 38.75, 39.5
-    //   Dallas window        50%–60%  → steps at 50, 51.25, 52.5, 53.75, 55, 56.25, 57.5, 58.75, 59.5
-    //   SBC-1 East window    70%–80%  → steps at 70, 71.25, 72.5, 73.75, 75, 76.25, 77.5, 78.75, 79.5
-    //   Primary KD window    90%–100% → steps at 90, 91.25, 92.5, 93.75, 95, 96.25, 97.5, 98.75, 99.5
+    // Pulse cadence: 3 smooth pulses per 10% failure window using clean red
+    // drop-shadows only — no sepia/hue-rotate distortion.
+    //   Pulse steps per window (e.g. 10%–20%):
+    //   10.5% DIM → 12% PEAK → 14% DIM → 16% PEAK → 18% DIM → 19.5% PEAK (recover)
 
-    const F_DIM  = 'drop-shadow(0 0 8px rgba(239,68,68,0.50)) drop-shadow(0 0 24px rgba(239,68,68,0.25)) sepia(1) hue-rotate(320deg) brightness(0.65)';
-    const F_PEAK = 'drop-shadow(0 0 14px rgba(239,68,68,0.90)) drop-shadow(0 0 36px rgba(239,68,68,0.55)) drop-shadow(0 0 60px rgba(239,68,68,0.20)) sepia(1) hue-rotate(320deg) brightness(0.75)';
-    const OP_FAIL_DIM  = 0.45;
-    const OP_FAIL_PEAK = 0.55;
+    const F_DIM  = 'drop-shadow(0 0 6px rgba(220,38,38,0.35)) drop-shadow(0 0 18px rgba(220,38,38,0.15))';
+    const F_PEAK = 'drop-shadow(0 0 10px rgba(220,38,38,0.55)) drop-shadow(0 0 28px rgba(220,38,38,0.25))';
+    const OP_FAIL_DIM  = 0.50;
+    const OP_FAIL_PEAK = 0.62;
 
     const nodeKf = `
 @keyframes ${uid}-node-sbc2central {
   0%, 9.9%    { opacity: 1; filter: none; }
-  10.6%       { opacity: ${OP_FAIL_DIM};  filter: ${F_DIM};  }
-  11.25%      { opacity: ${OP_FAIL_PEAK}; filter: ${F_PEAK}; }
-  12.5%       { opacity: ${OP_FAIL_DIM};  filter: ${F_DIM};  }
-  13.75%      { opacity: ${OP_FAIL_PEAK}; filter: ${F_PEAK}; }
-  15%         { opacity: ${OP_FAIL_DIM};  filter: ${F_DIM};  }
-  16.25%      { opacity: ${OP_FAIL_PEAK}; filter: ${F_PEAK}; }
-  17.5%       { opacity: ${OP_FAIL_DIM};  filter: ${F_DIM};  }
-  18.75%      { opacity: ${OP_FAIL_PEAK}; filter: ${F_PEAK}; }
-  19.5%       { opacity: ${OP_FAIL_DIM};  filter: ${F_DIM};  }
+  10.5%       { opacity: ${OP_FAIL_DIM};  filter: ${F_DIM};  }
+  12%         { opacity: ${OP_FAIL_PEAK}; filter: ${F_PEAK}; }
+  14%         { opacity: ${OP_FAIL_DIM};  filter: ${F_DIM};  }
+  16%         { opacity: ${OP_FAIL_PEAK}; filter: ${F_PEAK}; }
+  18%         { opacity: ${OP_FAIL_DIM};  filter: ${F_DIM};  }
+  19.5%       { opacity: ${OP_FAIL_PEAK}; filter: ${F_PEAK}; }
   20.2%       { opacity: 1; filter: none; }
   100%        { opacity: 1; filter: none; }
 }
 @keyframes ${uid}-node-westloc {
   0%, 29.9%   { opacity: 1; filter: none; }
-  30.6%       { opacity: ${OP_FAIL_DIM};  filter: ${F_DIM};  }
-  31.25%      { opacity: ${OP_FAIL_PEAK}; filter: ${F_PEAK}; }
-  32.5%       { opacity: ${OP_FAIL_DIM};  filter: ${F_DIM};  }
-  33.75%      { opacity: ${OP_FAIL_PEAK}; filter: ${F_PEAK}; }
-  35%         { opacity: ${OP_FAIL_DIM};  filter: ${F_DIM};  }
-  36.25%      { opacity: ${OP_FAIL_PEAK}; filter: ${F_PEAK}; }
-  37.5%       { opacity: ${OP_FAIL_DIM};  filter: ${F_DIM};  }
-  38.75%      { opacity: ${OP_FAIL_PEAK}; filter: ${F_PEAK}; }
-  39.5%       { opacity: ${OP_FAIL_DIM};  filter: ${F_DIM};  }
+  30.5%       { opacity: ${OP_FAIL_DIM};  filter: ${F_DIM};  }
+  32%         { opacity: ${OP_FAIL_PEAK}; filter: ${F_PEAK}; }
+  34%         { opacity: ${OP_FAIL_DIM};  filter: ${F_DIM};  }
+  36%         { opacity: ${OP_FAIL_PEAK}; filter: ${F_PEAK}; }
+  38%         { opacity: ${OP_FAIL_DIM};  filter: ${F_DIM};  }
+  39.5%       { opacity: ${OP_FAIL_PEAK}; filter: ${F_PEAK}; }
   40.2%       { opacity: 1; filter: none; }
   100%        { opacity: 1; filter: none; }
 }
 @keyframes ${uid}-node-termdallas {
   0%, 49.9%   { opacity: 1; filter: none; }
-  50.6%       { opacity: ${OP_FAIL_DIM};  filter: ${F_DIM};  }
-  51.25%      { opacity: ${OP_FAIL_PEAK}; filter: ${F_PEAK}; }
-  52.5%       { opacity: ${OP_FAIL_DIM};  filter: ${F_DIM};  }
-  53.75%      { opacity: ${OP_FAIL_PEAK}; filter: ${F_PEAK}; }
-  55%         { opacity: ${OP_FAIL_DIM};  filter: ${F_DIM};  }
-  56.25%      { opacity: ${OP_FAIL_PEAK}; filter: ${F_PEAK}; }
-  57.5%       { opacity: ${OP_FAIL_DIM};  filter: ${F_DIM};  }
-  58.75%      { opacity: ${OP_FAIL_PEAK}; filter: ${F_PEAK}; }
-  59.5%       { opacity: ${OP_FAIL_DIM};  filter: ${F_DIM};  }
+  50.5%       { opacity: ${OP_FAIL_DIM};  filter: ${F_DIM};  }
+  52%         { opacity: ${OP_FAIL_PEAK}; filter: ${F_PEAK}; }
+  54%         { opacity: ${OP_FAIL_DIM};  filter: ${F_DIM};  }
+  56%         { opacity: ${OP_FAIL_PEAK}; filter: ${F_PEAK}; }
+  58%         { opacity: ${OP_FAIL_DIM};  filter: ${F_DIM};  }
+  59.5%       { opacity: ${OP_FAIL_PEAK}; filter: ${F_PEAK}; }
   60.2%       { opacity: 1; filter: none; }
   100%        { opacity: 1; filter: none; }
 }
 @keyframes ${uid}-node-sbc1east {
   0%, 69.9%   { opacity: 1; filter: none; }
-  70.6%       { opacity: ${OP_FAIL_DIM};  filter: ${F_DIM};  }
-  71.25%      { opacity: ${OP_FAIL_PEAK}; filter: ${F_PEAK}; }
-  72.5%       { opacity: ${OP_FAIL_DIM};  filter: ${F_DIM};  }
-  73.75%      { opacity: ${OP_FAIL_PEAK}; filter: ${F_PEAK}; }
-  75%         { opacity: ${OP_FAIL_DIM};  filter: ${F_DIM};  }
-  76.25%      { opacity: ${OP_FAIL_PEAK}; filter: ${F_PEAK}; }
-  77.5%       { opacity: ${OP_FAIL_DIM};  filter: ${F_DIM};  }
-  78.75%      { opacity: ${OP_FAIL_PEAK}; filter: ${F_PEAK}; }
-  79.5%       { opacity: ${OP_FAIL_DIM};  filter: ${F_DIM};  }
+  70.5%       { opacity: ${OP_FAIL_DIM};  filter: ${F_DIM};  }
+  72%         { opacity: ${OP_FAIL_PEAK}; filter: ${F_PEAK}; }
+  74%         { opacity: ${OP_FAIL_DIM};  filter: ${F_DIM};  }
+  76%         { opacity: ${OP_FAIL_PEAK}; filter: ${F_PEAK}; }
+  78%         { opacity: ${OP_FAIL_DIM};  filter: ${F_DIM};  }
+  79.5%       { opacity: ${OP_FAIL_PEAK}; filter: ${F_PEAK}; }
   80%         { opacity: 1; filter: none; }
   100%        { opacity: 1; filter: none; }
 }
 @keyframes ${uid}-node-kdprimary {
   0%, 89.9%   { opacity: 1; filter: none; }
-  90.6%       { opacity: ${OP_FAIL_DIM};  filter: ${F_DIM};  }
-  91.25%      { opacity: ${OP_FAIL_PEAK}; filter: ${F_PEAK}; }
-  92.5%       { opacity: ${OP_FAIL_DIM};  filter: ${F_DIM};  }
-  93.75%      { opacity: ${OP_FAIL_PEAK}; filter: ${F_PEAK}; }
-  95%         { opacity: ${OP_FAIL_DIM};  filter: ${F_DIM};  }
-  96.25%      { opacity: ${OP_FAIL_PEAK}; filter: ${F_PEAK}; }
-  97.5%       { opacity: ${OP_FAIL_DIM};  filter: ${F_DIM};  }
-  98.75%      { opacity: ${OP_FAIL_PEAK}; filter: ${F_PEAK}; }
-  99.5%       { opacity: ${OP_FAIL_DIM};  filter: ${F_DIM};  }
+  90.5%       { opacity: ${OP_FAIL_DIM};  filter: ${F_DIM};  }
+  92%         { opacity: ${OP_FAIL_PEAK}; filter: ${F_PEAK}; }
+  94%         { opacity: ${OP_FAIL_DIM};  filter: ${F_DIM};  }
+  96%         { opacity: ${OP_FAIL_PEAK}; filter: ${F_PEAK}; }
+  98%         { opacity: ${OP_FAIL_DIM};  filter: ${F_DIM};  }
+  99.5%       { opacity: ${OP_FAIL_PEAK}; filter: ${F_PEAK}; }
   100%        { opacity: 1; filter: none; }
 }
 @keyframes ${uid}-node-kdbackup {
@@ -693,25 +674,25 @@ export function HaArchitectureViz() {
   100%        { opacity: 0.48; filter: none; }
 }`;
 
-    // 4. Node CSS classes (80s cycle)
+    // 4. Node CSS classes (50s cycle)
     const nodeRules = `
 .${uid}-node-sbc2central {
-  animation: ${uid}-node-sbc2central 80s linear infinite;
+  animation: ${uid}-node-sbc2central 50s linear infinite;
 }
 .${uid}-node-westloc {
-  animation: ${uid}-node-westloc 80s linear infinite;
+  animation: ${uid}-node-westloc 50s linear infinite;
 }
 .${uid}-node-termdallas {
-  animation: ${uid}-node-termdallas 80s linear infinite;
+  animation: ${uid}-node-termdallas 50s linear infinite;
 }
 .${uid}-node-sbc1east {
-  animation: ${uid}-node-sbc1east 80s linear infinite;
+  animation: ${uid}-node-sbc1east 50s linear infinite;
 }
 .${uid}-node-kdprimary {
-  animation: ${uid}-node-kdprimary 80s linear infinite;
+  animation: ${uid}-node-kdprimary 50s linear infinite;
 }
 .${uid}-node-kdbackup {
-  animation: ${uid}-node-kdbackup 80s step-start infinite;
+  animation: ${uid}-node-kdbackup 50s step-start infinite;
 }`;
 
     // 5. Primary KD layer wrapper — hides entire primary routing layer during 90-100%
@@ -732,10 +713,10 @@ export function HaArchitectureViz() {
 
     const kdLayerRules = `
 .${uid}-kd-primary-layer {
-  animation: ${uid}-kd-primary-layer 80s step-start infinite;
+  animation: ${uid}-kd-primary-layer 50s step-start infinite;
 }
 .${uid}-kd-backup-layer {
-  animation: ${uid}-kd-backup-layer 80s step-start infinite;
+  animation: ${uid}-kd-backup-layer 50s step-start infinite;
 }`;
 
     // 6. Status indicator animations (80s cycle, step-start for crisp switches)
@@ -797,13 +778,13 @@ export function HaArchitectureViz() {
 }`;
 
     const statusRules = `
-.${uid}-status-normal    { animation: ${uid}-status-normal    80s step-start infinite; }
-.${uid}-status-sbc2c     { animation: ${uid}-status-sbc2c     80s step-start infinite; opacity: 0; }
-.${uid}-status-west      { animation: ${uid}-status-west      80s step-start infinite; opacity: 0; }
-.${uid}-status-dallas    { animation: ${uid}-status-dallas    80s step-start infinite; opacity: 0; }
-.${uid}-status-sbc1e     { animation: ${uid}-status-sbc1e     80s step-start infinite; opacity: 0; }
-.${uid}-status-kdprimary { animation: ${uid}-status-kdprimary 80s step-start infinite; opacity: 0; }
-.${uid}-alert-halo       { animation: ${uid}-alert-halo-pulse 0.9s ease-out infinite; }`;
+.${uid}-status-normal    { animation: ${uid}-status-normal    50s step-start infinite; }
+.${uid}-status-sbc2c     { animation: ${uid}-status-sbc2c     50s step-start infinite; opacity: 0; }
+.${uid}-status-west      { animation: ${uid}-status-west      50s step-start infinite; opacity: 0; }
+.${uid}-status-dallas    { animation: ${uid}-status-dallas    50s step-start infinite; opacity: 0; }
+.${uid}-status-sbc1e     { animation: ${uid}-status-sbc1e     50s step-start infinite; opacity: 0; }
+.${uid}-status-kdprimary { animation: ${uid}-status-kdprimary 50s step-start infinite; opacity: 0; }
+.${uid}-alert-halo       { animation: ${uid}-alert-halo-pulse 0.75s ease-out infinite; }`;
 
     return [
       pathKf, groupKf, packetRules,
@@ -814,39 +795,41 @@ export function HaArchitectureViz() {
   }, [uid]);
 
   return (
-    <div
-      style={{
-        width: '100%',
-        maxWidth: 1560,
-        margin: '0 auto',
-        marginTop: 40,
-        marginBottom: 48,
-        background: 'rgba(19, 21, 29, 0.70)',
-        backdropFilter: 'blur(10px)',
-        WebkitBackdropFilter: 'blur(10px)',
-        border: '1px solid rgba(59,130,246,0.12)',
-        borderRadius: 20,
-        padding: '24px 32px 20px',
-        boxShadow: '0 4px 24px -8px rgba(0,0,0,0.50)',
-        overflow: 'hidden',
-        position: 'relative',
-      }}
-    >
-      {/* Section label */}
+    <>
+      {/* Prominent heading above the animation card */}
       <div
         style={{
-          fontSize: '0.62rem',
+          fontSize: '1.1rem',
           fontWeight: 700,
-          letterSpacing: '0.14em',
+          letterSpacing: '0.12em',
           textTransform: 'uppercase',
           color: '#3b82f6',
-          marginBottom: 8,
-          opacity: 0.75,
+          textShadow: '0 0 20px rgba(59,130,246,0.3)',
+          width: '100%',
+          maxWidth: 1560,
+          margin: '40px auto 12px',
         }}
       >
-        High Availability Architecture
+        High Availability Simulation
       </div>
 
+      <div
+        style={{
+          width: '100%',
+          maxWidth: 1560,
+          margin: '0 auto',
+          marginBottom: 48,
+          background: 'rgba(19, 21, 29, 0.70)',
+          backdropFilter: 'blur(10px)',
+          WebkitBackdropFilter: 'blur(10px)',
+          border: '1px solid rgba(59,130,246,0.12)',
+          borderRadius: 20,
+          padding: '24px 32px 20px',
+          boxShadow: '0 4px 24px -8px rgba(0,0,0,0.50)',
+          overflow: 'hidden',
+          position: 'relative',
+        }}
+      >
       <style dangerouslySetInnerHTML={{ __html: css }} />
 
       {/* Status indicator — HTML element above the SVG, centered */}
@@ -858,7 +841,7 @@ export function HaArchitectureViz() {
         height="auto"
         preserveAspectRatio="xMidYMid meet"
         style={{ display: 'block' }}
-        aria-label="Keystone: inbound trunks route through a Primary Key Distributor (GCP Global Load Balancer) — with a Hot Backup Key Distributor on standby — to three Granite locations, each with dual Signal Keys and a Keystone Engine, terminating via Dallas, LA, and Backup PoP trunks. An 80-second animation cycles through five failover scenarios including Primary Key Distributor failure where the Hot Backup automatically takes over."
+        aria-label="Keystone: inbound trunks route through a Primary Key Distributor (GCP Global Load Balancer) — with a Hot Backup Key Distributor on standby — to three Granite locations, each with dual Signal Keys and a Keystone Engine, terminating via Dallas, LA, and Backup PoP trunks. A 50-second animation cycles through five failover scenarios including Primary Key Distributor failure where the Hot Backup automatically takes over."
       >
         <defs>
           {/* Grid background pattern */}
@@ -1114,7 +1097,7 @@ export function HaArchitectureViz() {
         {/* Dual redundant inbound trunks — stacked vertically */}
         <text
           x={COL.inbound}
-          y={146}
+          y={136}
           textAnchor="middle"
           fontSize="6"
           fontFamily="'SF Mono', 'Fira Code', 'Consolas', monospace"
@@ -1124,8 +1107,8 @@ export function HaArchitectureViz() {
         >
           INBOUND
         </text>
-        <InboundTrunkNode uid={uid} cy={165} label="Trunk 1" />
-        <InboundTrunkNode uid={uid} cy={225} label="Trunk 2" />
+        <InboundTrunkNode uid={uid} cy={155} label="Trunk 1" />
+        <InboundTrunkNode uid={uid} cy={240} label="Trunk 2" />
 
         {/* Primary and Backup Key Distributor nodes */}
         <NlbNode uid={uid} cy={KD_PRIMARY_Y} isBackup={false} nodeClass={`${uid}-node-kdprimary`} />
@@ -1160,7 +1143,8 @@ export function HaArchitectureViz() {
           LIVE INFRASTRUCTURE
         </text>
       </svg>
-    </div>
+      </div>
+    </>
   );
 }
 
