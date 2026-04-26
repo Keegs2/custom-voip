@@ -138,6 +138,8 @@ services:
       - DB_USER=${DB_USER:-freeswitch}
       - DB_PASS=${DB_PASS:-fs_secret}
       - HOMER_IP=${HOMER_IP:-127.0.0.1}
+      - HEP_CAPTURE_ID=${HEP_CAPTURE_ID:-100}
+      - SBC_ID=${SBC_ID:-east-sbc-1}
     extra_hosts:
       - "freeswitch:127.0.0.1"
     volumes:

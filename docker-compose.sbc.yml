@@ -22,6 +22,8 @@ services:
       - DB_USER=${DB_USER:-freeswitch}
       - DB_PASS=${DB_PASS}
       - HOMER_IP=${HOMER_IP}
+      - HEP_CAPTURE_ID=${HEP_CAPTURE_ID:-100}
+      - SBC_ID=${SBC_ID:-east-sbc-1}
     volumes:
       - ./docker/kamailio/kamailio.cfg:/etc/kamailio/kamailio.cfg.tmpl:ro
       - ./docker/kamailio/dispatcher.list:/etc/kamailio/dispatcher.list.tmpl:ro

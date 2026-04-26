@@ -12,37 +12,47 @@ for both SIP signaling and RTP media. No cross-zone RTP traffic ever occurs.
 ## Architecture Overview
 
 ```
-                          BANDWIDTH CARRIER
-                   (Account 9900717, Peer 1162116)
-                   Termination Hosts (priority order):
-                   1. 34.24.133.82   (East VIP)
-                   2. <west-vip>     (West VIP)
-                   3. <central-vip>  (Central VIP)
-                              │
-         ┌────────────────────┼────────────────────┐
-         │                    │                    │
-    US-EAST1             US-WEST1            US-CENTRAL1
-    South Carolina       Oregon              Iowa
-    (DEPLOYED)           (Phase 2)           (Phase 3)
-         │                    │                    │
-   ┌─────┴──────┐      ┌─────┴──────┐      ┌─────┴──────┐
-   │ NLB (VIP)  │      │ NLB (VIP)  │      │ NLB (VIP)  │
-   │34.24.133.82│      │ <west-vip> │      │<central-vip>│
-   └──┬──────┬──┘      └──┬──────┬──┘      └──┬──────┬──┘
-      │      │            │      │            │      │
-   ┌──┴──┐┌──┴──┐     ┌──┴──┐┌──┴──┐     ┌──┴──┐┌──┴──┐
-   │SBC-1││SBC-2│     │SBC-1││SBC-2│     │SBC-1││SBC-2│
-   │ KAM ││ KAM │     │ KAM ││ KAM │     │ KAM ││ KAM │
-   └──┬──┘└──┬──┘     └──┬──┘└──┬──┘     └──┬──┘└──┬──┘
-      └───┬──┘           └───┬──┘           └───┬──┘
-          │                  │                  │
-      ┌───┴───┐          ┌───┴───┐          ┌───┴───┐
-      │  FS   │          │  FS   │          │  FS   │
-      │+Redis │          │+Redis │          │+Redis │
-      └───┬───┘          └───┬───┘          └───┬───┘
-          │                  │                  │
-          │     VPC Internal Routing            │
-          └──────────┬───────┴──────────────────┘
+               BANDWIDTH CARRIER (Origination)
+              (Account 9900717, Peer 1162116)
+               Dallas PoP         LA PoP
+            67.231.2.12      216.82.238.134
+                   \              /
+                    \            /
+             ┌───────────────────────────┐
+             │  GCP Global External LB   │
+             │  (Geo Load Balancer)      │
+             │  Single Anycast VIP       │
+             │  <geo-vip>                │
+             │  Premium Tier Networking  │
+             └─────┬─────────┬─────────┬─┘
+                   │         │         │
+         ┌─────────┘         │         └─────────┐
+         │                   │                   │
+    GRANITE EAST        GRANITE CENTRAL      GRANITE WEST
+    us-east1-b          us-central1-b        us-west1-b
+    South Carolina      Iowa                 Oregon
+    (DEPLOYED)          (Phase 3)            (Phase 2)
+         │                   │                   │
+   ┌─────┴──────┐     ┌─────┴──────┐      ┌─────┴──────┐
+   │east  │east  │     │cntrl │cntrl │     │west  │west  │
+   │sbc-1 │sbc-2 │     │sbc-1 │sbc-2 │     │sbc-1 │sbc-2 │
+   │ KAM  │ KAM  │     │ KAM  │ KAM  │     │ KAM  │ KAM  │
+   └──┬───┘──┬───┘     └──┬───┘──┬───┘     └──┬───┘──┬───┘
+      └───┬──┘            └───┬──┘            └───┬──┘
+          │                   │                   │
+      ┌───┴───┐          ┌───┴───┐           ┌───┴───┐
+      │  FS   │          │  FS   │           │  FS   │
+      │+Redis │          │+Redis │           │+Redis │
+      └───┬───┘          └───┬───┘           └───┬───┘
+          │                   │                   │
+          │      Outbound (Termination)           │
+          │      via nearest Bandwidth PoP        │
+          │                   │                   │
+          │         Dallas PoP    LA PoP          │
+          │         67.231.2.12   216.82.238.134   │
+          │                   │                   │
+          │      VPC Internal Routing             │
+          └──────────┬────────┴───────────────────┘
                      │
                ┌─────┴─────┐    ┌───────────┐
                │ PG Primary │    │ Services  │
@@ -59,15 +69,24 @@ for both SIP signaling and RTP media. No cross-zone RTP traffic ever occurs.
         └──────────┘  └──────────┘
 ```
 
+### Call Flow Stages (matches Granite Keystone HA animation)
+
+| Stage | Animation Name | Component | Description |
+|-------|---------------|-----------|-------------|
+| 1. Origination | Inbound Trunks | Bandwidth Dallas + LA PoPs | Dual carrier trunks deliver calls |
+| 2. Distribution | Key Distributor | Geo Load Balancer | Single anycast VIP routes to nearest healthy region |
+| 3. Processing | Signal Keys + Keystone Engine | Kamailio SBC pair + FreeSWITCH | Per-region call processing, RTP stays in-zone |
+| 4. Termination | Dallas / LA / Backup PoP | Bandwidth outbound | Each region sends outbound via nearest carrier PoP |
+
 ---
 
 ## Region Selection
 
 | Zone | GCP Region | GCP Zone | Bandwidth Proximity | Role |
 |------|-----------|----------|---------------------|------|
-| **East** | us-east1 (South Carolina) | us-east1-b | Dallas PoP ~20ms, Atlanta ~10ms | Primary (DEPLOYED) |
-| **West** | us-west1 (Oregon) | us-west1-b | LA PoP (216.82.238.134) ~15ms | Secondary |
-| **Central** | us-central1 (Iowa) | us-central1-b | Equidistant both PoPs ~25ms | Tertiary / DR |
+| **East** | us-east1 (South Carolina) | us-east1-b | Dallas PoP ~20ms, Atlanta ~10ms | Active (DEPLOYED) |
+| **West** | us-west1 (Oregon) | us-west1-b | LA PoP (216.82.238.134) ~15ms | Active (Phase 2) |
+| **Central** | us-central1 (Iowa) | us-central1-b | Equidistant both PoPs ~25ms | Active (Phase 3) |
 
 **Inter-region latency:**
 
@@ -105,15 +124,42 @@ VPC: default (existing)
 | FreeSWITCH | 10.142.0.102 | 10.138.0.102 | 10.128.0.102 |
 | PG Replica | 10.142.0.103 (primary) | 10.138.0.103 | 10.128.0.103 |
 
-### Per-Zone NLB
+### Geo Load Balancer (Key Distributor)
 
-Each zone has its own External Passthrough Network Load Balancer:
+Single Global External Passthrough Network Load Balancer with one anycast VIP.
+All inbound SIP from Bandwidth hits one IP; GCP's Premium Tier edge network routes
+each packet to the nearest healthy region. No per-region VIPs. No Bandwidth
+priority failover. GCP handles geographic distribution and failover transparently.
 
-| Zone | VIP | Backend Group | Health Check |
-|------|-----|---------------|-------------|
-| East | 34.24.133.82 (deployed) | sbc-group-east | TCP 5060, 5s, 3 threshold |
-| West | TBD (reserve in Phase 2) | sbc-group-west | TCP 5060, 5s, 3 threshold |
-| Central | TBD (reserve in Phase 3) | sbc-group-central | TCP 5060, 5s, 3 threshold |
+**GCP Product:** Global External Passthrough Network Load Balancer (Premium Tier)
+
+| Property | Value |
+|----------|-------|
+| **VIP** | Single anycast IP (TBD — reserve global static IP) |
+| **Protocol** | UDP + TCP (dual forwarding rules on port 5060) |
+| **Backend Service** | Global, with instance groups in 3 regions |
+| **Session Affinity** | CLIENT_IP (in-dialog SIP stays on same SBC) |
+| **Health Check** | TCP 5060, 5s interval, 3-failure threshold |
+| **Routing** | Nearest healthy region based on Bandwidth source PoP |
+
+**Backend Instance Groups** (one per region, 2 SBCs each):
+
+| Region | Instance Group | Members | Health Check |
+|--------|---------------|---------|-------------|
+| East | sbc-group-east | east-sbc-1, east-sbc-2 | TCP 5060 |
+| West | sbc-group-west | west-sbc-1, west-sbc-2 | TCP 5060 |
+| Central | sbc-group-central | central-sbc-1, central-sbc-2 | TCP 5060 |
+
+**How it routes Bandwidth traffic:**
+
+- Bandwidth Dallas PoP (67.231.2.12) → GCP edge → nearest healthy region (likely East or Central)
+- Bandwidth LA PoP (216.82.238.134) → GCP edge → nearest healthy region (likely West)
+- If a region is fully down (both SBCs unhealthy) → auto-reroute to next nearest region
+- CLIENT_IP affinity ensures in-dialog SIP (BYE, re-INVITE) returns to the same SBC
+
+**Current (East-only POC):** Regional External Passthrough NLB with VIP 34.24.133.82.
+Will be replaced by the global LB when Phase 2 deploys. East regional LB stays as
+an intermediate step until the global LB is provisioned with backends in 2+ regions.
 
 ### Firewall Rules (VPC-wide, all zones)
 
@@ -201,50 +247,61 @@ If Redis fails: DID lookups fall through to PostgreSQL (+5-10ms per call). No ca
 
 ## Bandwidth Carrier Configuration
 
-### Single SIP Peer, Multiple Termination Hosts
+### Single SIP Peer, Single Termination Host
 
-All DIDs stay on SIP peer 1162116. Bandwidth routes inbound calls by priority:
+All DIDs stay on SIP peer 1162116. Bandwidth sends all inbound calls to one IP —
+the Geo LB anycast VIP. GCP handles geographic distribution, not Bandwidth.
+No priority failover on the Bandwidth side.
 
 ```
 SIP Peer: 1162116 (GraniteTelecommunicationsLLC_O3)
-  Termination Hosts:
-    Priority 1: 34.24.133.82   (East VIP)
-    Priority 2: <west-vip>      (West VIP)
-    Priority 3: <central-vip>   (Central VIP)
+  Termination Host:
+    <geo-vip>   (Single Global Anycast VIP — all regions)
 
-  Origination Hosts (outbound):
-    34.24.133.82    (East VIP)
-    <west-vip>       (West VIP)
-    <central-vip>    (Central VIP)
-    + all 6 SBC public IPs
+  Origination Hosts (outbound — SBCs send directly to Bandwidth):
+    <geo-vip>                    (Global VIP — in SIP headers)
+    + all 6 SBC public IPs      (actual packet source IPs)
 ```
 
-### Bandwidth Failover Behavior
+**Why all 6 SBC public IPs in origination:** Outbound INVITEs from Kamailio leave
+from the SBC's own external IP (not the VIP). Bandwidth must whitelist these IPs
+to accept outbound traffic. The VIP is in SIP headers (From, Contact, Via) so
+in-dialog responses route back through the Geo LB.
 
-- 503 from NLB → immediate retry to next priority host
-- Timeout (32s) → retry to next priority host
-- 480/486 → NOT a failover trigger (valid busy response)
+### Failover Behavior
 
-### Per-Zone Carrier PoP Selection
+Failover is handled by GCP, not Bandwidth:
 
-Each zone's Kamailio prefers the nearest Bandwidth signaling proxy:
+| Failure | Who Detects | Recovery Time | Behavior |
+|---------|------------|---------------|----------|
+| Single SBC | Geo LB health check | ~15s | Route to other SBC in same region |
+| Entire region | Geo LB health check | ~15s | Route to next nearest healthy region |
+| Bandwidth 503 | N/A (transparent) | Instant | Never reaches Bandwidth — GCP only sends to healthy backends |
 
-| Zone | X-Carrier=standard (primary) | X-Carrier=premium (secondary) |
-|------|------------------------------|-------------------------------|
-| East | 67.231.2.12 (Dallas) | 216.82.238.134 (LA) |
-| West | 216.82.238.134 (LA) | 67.231.2.12 (Dallas) |
-| Central | 67.231.2.12 (Dallas) | 216.82.238.134 (LA) |
+Bandwidth no longer needs to handle failover. It always sends to the single VIP,
+and GCP guarantees the packet reaches a healthy SBC.
 
-Requires 2 new env vars per zone: `BANDWIDTH_PRIMARY_IP`, `BANDWIDTH_SECONDARY_IP`.
+### Per-Region Carrier PoP Selection (Outbound Termination)
+
+Each region's Kamailio sends outbound calls to the nearest Bandwidth signaling proxy.
+Configured via `BANDWIDTH_PRIMARY_IP` / `BANDWIDTH_SECONDARY_IP` env vars per zone.
+
+| Region | X-Carrier=standard (primary) | X-Carrier=premium (failover) |
+|--------|------------------------------|------------------------------|
+| East | 67.231.2.12 (Dallas, ~20ms) | 216.82.238.134 (LA) |
+| West | 216.82.238.134 (LA, ~15ms) | 67.231.2.12 (Dallas) |
+| Central | 67.231.2.12 (Dallas, ~25ms) | 216.82.238.134 (LA) |
+
+Requires 2 env vars per zone: `BANDWIDTH_PRIMARY_IP`, `BANDWIDTH_SECONDARY_IP`.
 
 ---
 
 ## Per-Zone Environment Variables
 
-### SBC .env (per zone)
+### SBC .env (per zone, per SBC instance)
 
 ```bash
-EXTERNAL_SIP_IP=<zone_vip>              # Zone's NLB VIP
+EXTERNAL_SIP_IP=<geo-vip>              # Global Geo LB anycast VIP (same for ALL SBCs)
 FREESWITCH_IP=<zone_fs_internal_ip>     # Zone's local FS
 DB_HOST=<zone_pg_ip>                    # Local PG (primary or replica)
 DB_PORT=6432
@@ -253,7 +310,24 @@ DB_PASS=<STRONG_FS_DB_PASSWORD>
 HOMER_IP=10.142.0.103                   # Centralized Homer in East
 BANDWIDTH_PRIMARY_IP=<nearest_bw_pop>   # NEW: nearest Bandwidth PoP
 BANDWIDTH_SECONDARY_IP=<far_bw_pop>     # NEW: far Bandwidth PoP
+SBC_ID=<region>-sbc-<n>                 # e.g. east-sbc-1, west-sbc-2
+HEP_CAPTURE_ID=<see table below>       # Unique per-SBC Homer capture ID
 ```
+
+#### SBC Identity & Homer Capture ID Mapping
+
+Single Homer instance receives HEP from all 6 SBCs. Each needs a unique capture_id.
+
+| Region | SBC | SBC_ID | HEP_CAPTURE_ID |
+|--------|-----|--------|----------------|
+| East | 1 | `east-sbc-1` | 100 |
+| East | 2 | `east-sbc-2` | 101 |
+| West | 1 | `west-sbc-1` | 110 |
+| West | 2 | `west-sbc-2` | 111 |
+| Central | 1 | `central-sbc-1` | 120 |
+| Central | 2 | `central-sbc-2` | 121 |
+
+SBC_ID is stamped as `X-SBC-ID` header on all INVITEs heading to FreeSWITCH (visible in CDRs as `sip_h_X-SBC-ID` and in Homer SIP traces). Stripped before traffic leaves the platform (TO_CARRIER and PBX delivery paths).
 
 ### FreeSWITCH .env (per zone)
 
@@ -291,32 +365,46 @@ TEST_MODE=false
 
 ## Failover Scenarios
 
-### Single SBC failure (e.g., East SBC-1 dies)
+All failover is demonstrated in the Granite Keystone HA animation on the platform homepage
+(HaArchitectureViz component — 64-second cycle showing 4 failure modes).
 
-- NLB detects in 15s, routes to SBC-2
-- ~50% active calls on SBC-1 are lost
-- New calls unaffected after 15s
+### Single SBC failure (e.g., east-sbc-2 dies)
+
+- Geo LB health check detects in ~15s, removes from backend
+- ~50% of active calls on that SBC are lost (in-progress RTP unaffected, SIP signaling lost)
+- New calls route to the healthy SBC in the same region
+- **Animation: Signal Key failure** — traffic reroutes through the other Signal Key
 
 ### FreeSWITCH failure (zone FS dies)
 
-- Kamailio dispatcher detects in 15s, returns 503 to Bandwidth
-- ALL active calls in zone are lost
-- Bandwidth fails over to next priority VIP (immediate on 503)
-- New calls route to next zone within seconds
+- Kamailio dispatcher detects in ~15s, both SBCs return 503
+- Geo LB sees both SBCs returning errors, marks region unhealthy
+- ALL active calls in that zone are lost
+- New calls automatically route to the next nearest healthy region
+- **Animation: Entire datacenter failure** — traffic redistributes to remaining locations
 
-### Entire zone failure
+### Entire zone failure (all VMs in a region)
 
-- Bandwidth timeout to zone VIP (~32s) or 503 (immediate)
-- ALL active calls in zone are lost
-- New calls route to next priority zone
-- Automatic, no manual intervention
+- Geo LB detects all backends unhealthy in ~15s
+- ALL active calls in that zone are lost
+- GCP automatically routes new traffic to next nearest healthy region
+- No Bandwidth configuration change needed — single VIP stays the same
+- **Animation: Datacenter failure** — same visualization
+
+### Carrier trunk failure (e.g., Dallas PoP down)
+
+- Kamailio CARRIER_FAILURE route detects 503/408 from primary Bandwidth IP
+- Retries on secondary Bandwidth IP (e.g., LA PoP)
+- Active calls on Dallas trunk may drop; new calls use LA PoP
+- **Animation: Dallas trunk failure** — outbound reroutes to LA + Backup
 
 ### PostgreSQL primary failure
 
-- Active calls: unaffected
-- New calls: work for cached DIDs (5-min TTL)
-- Provisioning: stops until manual replica promotion
-- Recovery: 15-30 min manual, or ~30s with Patroni (Phase 2)
+- Active calls: unaffected (already bridged, no DB needed)
+- New calls: work for cached DIDs (Redis, 5-min TTL). Uncached DIDs fail.
+- Provisioning: all writes fail, API returns 503
+- Recovery: manually promote a replica (`pg_ctl promote`), update DB_HOST. ~15-30 min.
+- Phase 2: add Patroni for automatic failover (~30 seconds)
 
 ---
 
@@ -343,10 +431,10 @@ TEST_MODE=false
 | PG Replica VMs (e2-standard-4) | 2 | $194 |
 | Persistent disks (50-100GB SSD each) | 13 | $150 |
 | Static external IPs | ~9 | $0 (attached) |
-| Network LBs (3 zones) | 3 | $120 |
+| Global Geo LB (1 anycast VIP) | 1 | $50 |
 | Cross-region egress | | $100 |
-| **Total** | **13 VMs** | **~$1,843/month** |
-| **With 1-year CUDs** | | **~$1,400/month** |
+| **Total** | **13 VMs** | **~$1,773/month** |
+| **With 1-year CUDs** | | **~$1,350/month** |
 
 Current 4-VM (East only) cost: ~$450/month.
 
@@ -354,59 +442,79 @@ Current 4-VM (East only) cost: ~$450/month.
 
 ## Implementation Phases
 
-### Phase 1: East Zone — COMPLETE ✓
+### Phase 1: East Zone (POC) — COMPLETE ✓
 
-- 4 VMs deployed in us-east1-b
-- NLB operational (34.24.133.82)
-- Bandwidth configured with VIP
+- 4 VMs deployed in us-east1-b (2 SBCs + 1 FS + 1 Services)
+- Regional NLB operational (34.24.133.82) — interim until Geo LB
+- Bandwidth configured with East VIP
 - PostgreSQL bare + PgBouncer running
 - API, UI, Homer operational
+- SBC_ID / HEP_CAPTURE_ID templating ready (east-sbc-1=100, east-sbc-2=101)
 
-### Phase 2: West Zone (Weeks 1-3)
+### Phase 2: West Zone + Geo Load Balancer (Weeks 1-3)
 
-1. Deploy PG streaming replica in us-west1-b with PgBouncer
-2. Reserve static IPs for 2 SBCs + 1 FS in us-west1-b
-3. Reserve static IP for West NLB VIP
-4. Deploy VMs from instance templates (same Docker images, zone-specific .env)
-5. Create NLB (sbc-group-west, sbc-backend-west, forwarding rules)
-6. Request Bandwidth IP whitelisting for West VIP + SBC IPs (1-5 business day lead time)
-7. Add West VIP as Priority 2 termination host in Bandwidth
-8. Add `BANDWIDTH_PRIMARY_IP` / `BANDWIDTH_SECONDARY_IP` env vars to Kamailio entrypoint
-9. Test: inbound calls via West, outbound calls from West, failover East→West
-10. SIPp load test at target CPS
+**Geo LB provisioning (do first — long lead items):**
+1. Reserve global static anycast IP for Geo LB VIP
+2. Create Global External Passthrough NLB with Premium Tier networking
+3. Create global backend service with CLIENT_IP affinity, TCP 5060 health check
+4. Add East instance group (sbc-group-east) as first backend
+5. Verify East traffic works through Geo LB VIP (test alongside regional NLB)
+6. Request Bandwidth IP whitelisting for Geo LB VIP (1-5 business day lead time)
+
+**West zone deployment:**
+7. Deploy PG streaming replica in us-west1-b with PgBouncer
+8. Reserve static IPs for 2 SBCs + 1 FS in us-west1-b
+9. Deploy VMs from instance templates (same Docker images, zone-specific .env)
+10. Configure .env: SBC_ID=west-sbc-{1,2}, HEP_CAPTURE_ID=110/111, BANDWIDTH_PRIMARY_IP=216.82.238.134
+11. Create West instance group (sbc-group-west), add to Geo LB backend service
+12. Request Bandwidth whitelisting for West SBC public IPs (origination)
+13. Add `BANDWIDTH_PRIMARY_IP` / `BANDWIDTH_SECONDARY_IP` env vars to Kamailio entrypoint
+
+**Cutover:**
+14. Update Bandwidth termination host: replace East VIP with Geo LB VIP
+15. Update all East SBC .env: EXTERNAL_SIP_IP → Geo LB VIP (rebuild containers)
+16. Test: inbound calls via Geo LB to both regions, outbound from each region
+17. Decommission East regional NLB (no longer needed)
+18. SIPp load test at target CPS per region
 
 ### Phase 3: Central Zone (Weeks 3-5)
 
-Repeat Phase 2 for us-central1-b:
-1. PG replica + PgBouncer
-2. 3 VMs (2 SBCs + 1 FS)
-3. NLB + VIP
-4. Bandwidth whitelisting + Priority 3 termination host
-5. Full 3-zone failover testing: kill each zone, verify calls route to remaining zones
+1. Deploy PG streaming replica in us-central1-b with PgBouncer
+2. Reserve static IPs for 2 SBCs + 1 FS in us-central1-b
+3. Deploy VMs (same Docker images, zone-specific .env)
+4. Configure .env: SBC_ID=central-sbc-{1,2}, HEP_CAPTURE_ID=120/121, BANDWIDTH_PRIMARY_IP=67.231.2.12
+5. Create Central instance group (sbc-group-central), add to Geo LB backend service
+6. Request Bandwidth whitelisting for Central SBC public IPs (origination)
+7. Full 3-region failover testing:
+   - Kill one SBC per region → verify intra-region failover
+   - Kill all SBCs in one region → verify cross-region reroute via Geo LB
+   - Kill carrier trunk → verify Kamailio failover to secondary PoP
+8. Verify Homer receives HEP from all 6 SBCs with distinct capture_ids
 
 ### Phase 4: Hardening (Weeks 5-8)
 
 1. Per-zone Internal LB for FS→SBC outbound failover
-2. Zone-aware ESL routing in FastAPI
-3. Per-zone Homer capture_id templating (East=100, West=110, Central=120)
-4. Cloud Monitoring agents + alerting (NLB health, FS status, PG replication lag)
-5. Database backup verification (test restore from replica)
-6. Runbook: all failover procedures documented
-7. Security: Secret Manager for credentials, IAM review
+2. Zone-aware ESL routing in FastAPI (originate calls on correct zone's FS)
+3. ~~Per-zone Homer capture_id templating~~ **DONE** — SBC_ID and HEP_CAPTURE_ID env vars in entrypoint.sh and compose files. Naming: `{region}-sbc-{n}`, capture IDs: East=100/101, West=110/111, Central=120/121
+4. Cloud Monitoring agents + alerting (Geo LB health, FS status, PG replication lag)
+5. Homer dashboard: per-SBC call volume, per-region call distribution
+6. Database backup verification (test restore from replica)
+7. Runbook: all failover procedures documented (including Geo LB backend drain)
+8. Security: Secret Manager for credentials, IAM review
 
 ### Phase 5: Optimization (Weeks 9-12)
 
 1. Evaluate Patroni for automatic PG failover
 2. Consider Cloud SQL migration if DBA overhead warrants it
 3. Per-zone API deployment if needed for call-path features
-4. Load testing: SIPp at 500 CPS per zone
+4. Load testing: SIPp at 500 CPS per zone (1500 CPS total platform)
 5. Right-size VMs based on observed utilization
-6. Committed use discounts
+6. Committed use discounts (1-year CUDs on stable fleet)
 
 ### Phase 6: VxRail Decommission (Month 3-24)
 
 1. Identify remaining VxRail dependencies (if any)
-2. Verify GCP 3-zone HA covers all DR scenarios
+2. Verify GCP 3-region HA covers all DR scenarios
 3. Migrate DNS records
 4. Remove VxRail carrier whitelists
 5. Decommission VxRail after 3-month burn-in
@@ -417,15 +525,19 @@ Repeat Phase 2 for us-central1-b:
 
 ### IP Assignment
 
-| VM | Internal IP | External IP | Role |
-|---|---|---|---|
-| poc-custom-voip | 10.142.0.100 | 34.74.71.32 | SBC-1 (Kamailio) |
-| kam-g2 | 10.142.0.101 | 35.243.136.35 | SBC-2 (Kamailio) |
-| fs-media | 10.142.0.102 | 34.139.119.135 | FreeSWITCH + Redis |
-| services | 10.142.0.103 | 34.26.57.37 | PG Primary + API + UI + Homer |
-| **VIP (NLB)** | — | **34.24.133.82** | SBC floating IP |
+| VM | Internal IP | External IP | SBC_ID | HEP_CAPTURE_ID |
+|---|---|---|---|---|
+| poc-custom-voip | 10.142.0.100 | 34.74.71.32 | east-sbc-1 | 100 |
+| kam-g2 | 10.142.0.101 | 35.243.136.35 | east-sbc-2 | 101 |
+| fs-media | 10.142.0.102 | 34.139.119.135 | — | — |
+| services | 10.142.0.103 | 34.26.57.37 | — | — |
+| **VIP (Regional NLB)** | — | **34.24.133.82** | — | — |
+| **VIP (Geo LB)** | — | **TBD** | — | — |
 
-### NLB Components
+**Note:** Regional NLB (34.24.133.82) is interim. Will be replaced by Geo LB VIP
+in Phase 2. At cutover, all SBC EXTERNAL_SIP_IP values switch to the Geo LB VIP.
+
+### Current NLB Components (to be replaced by Geo LB)
 
 ```
 Health Check:    sbc-health-check (TCP 5060, 5s interval, regional us-east1)
@@ -441,9 +553,12 @@ Forwarding Rule: sbc-vip-tcp (34.24.133.82, TCP:5060)
 # SBCs — dispatcher health
 sudo docker logs voip-kamailio --tail 5  # Should show OPTIONS 200 OK
 
-# SBCs — VIP templating
-sudo docker exec voip-kamailio grep "ADVERTISE_IP" /etc/kamailio/kamailio.cfg | head -1
-# Should show: 34.24.133.82
+# SBCs — VIP and SBC_ID templating
+sudo docker exec voip-kamailio grep "ADVERTISE_IP\|hep_capture_id\|X-SBC-ID" /etc/kamailio/kamailio.cfg | head -3
+
+# SBCs — verify SBC identity in startup log
+sudo docker logs voip-kamailio 2>&1 | grep "config templated"
+# Should show: SBC_ID=east-sbc-1 (or east-sbc-2), HEP_ID=100 (or 101)
 
 # FS — sofia profiles
 sudo docker exec voip-freeswitch sh -c '/usr/local/freeswitch/bin/fs_cli -p $ESL_PASSWORD -x "sofia status"'
@@ -451,8 +566,11 @@ sudo docker exec voip-freeswitch sh -c '/usr/local/freeswitch/bin/fs_cli -p $ESL
 # Services — API health
 curl -s http://localhost:8088/health
 
-# NLB — backend health
+# NLB — backend health (regional, until Geo LB cutover)
 gcloud compute backend-services get-health sbc-backend --region=us-east1
+
+# Geo LB — backend health (after Phase 2 cutover)
+# gcloud compute backend-services get-health sbc-backend-global --global
 ```
 
 ### Rollback
@@ -463,5 +581,5 @@ sudo git checkout Full-System
 sudo docker compose down
 sudo docker compose build
 sudo docker compose up -d
-# Update Bandwidth back to 34.74.71.32
+# Update Bandwidth termination host back to 34.74.71.32
 ```
