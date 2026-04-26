@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Shield, Zap, Globe, Activity, PhoneForwarded, Phone, Code, Voicemail } from 'lucide-react';
+import { Shield, Zap, Globe, Activity, PhoneForwarded, Phone, Code, Voicemail, ArrowRight } from 'lucide-react';
 import { HaArchitectureViz } from '../components/layout/HaArchitectureViz';
+import { useAuth } from '../contexts/AuthContext';
 
 /* ─── Capability card data ───────────────────────────────── */
 
@@ -176,12 +177,27 @@ function CapabilityCardEl({ card }: { card: CapabilityCard }) {
 
 /* ─── ProductCardEl ──────────────────────────────────────── */
 
-function ProductCardEl({ card }: { card: ProductCard }) {
+interface ProductCardElProps {
+  card: ProductCard;
+  /**
+   * When provided and the card is the RCF tile, clicking fires this callback
+   * instead of navigating. Used to open the Request Access form for unauthenticated
+   * visitors — avoids a silent redirect to /login.
+   */
+  onRequestAccess?: () => void;
+}
+
+function ProductCardEl({ card, onRequestAccess }: ProductCardElProps) {
   const [hovered, setHovered] = useState(false);
   const navigate = useNavigate();
 
   function handleClick() {
-    if (card.active && card.route) {
+    if (!card.active) return;
+    if (onRequestAccess) {
+      onRequestAccess();
+      return;
+    }
+    if (card.route) {
       navigate(card.route);
     }
   }
@@ -416,9 +432,97 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
   );
 }
 
+/* ─── Request Access CTA ─────────────────────────────────── */
+
+function RequestAccessCta() {
+  const [hovered, setHovered] = useState(false);
+
+  function handleClick() {
+    window.dispatchEvent(new Event('open-access-request'));
+  }
+
+  return (
+    <div
+      style={{
+        width: '100%',
+        maxWidth: 1400,
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        paddingTop: 40,
+        paddingBottom: 40,
+        marginBottom: 8,
+        borderTop: '1px solid rgba(59,130,246,0.08)',
+        borderBottom: '1px solid rgba(59,130,246,0.08)',
+      }}
+    >
+      <p
+        style={{
+          fontSize: '0.72rem',
+          color: '#475569',
+          letterSpacing: '0.04em',
+          marginBottom: 16,
+          textTransform: 'uppercase',
+          fontWeight: 600,
+        }}
+      >
+        Carrier-grade call forwarding, ready to deploy
+      </p>
+
+      <button
+        type="button"
+        onClick={handleClick}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 8,
+          padding: '14px 36px',
+          borderRadius: 12,
+          border: 'none',
+          background: hovered
+            ? 'linear-gradient(135deg, #60a5fa 0%, #3b82f6 100%)'
+            : 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
+          color: '#fff',
+          fontSize: '0.9rem',
+          fontWeight: 700,
+          cursor: 'pointer',
+          letterSpacing: '-0.01em',
+          boxShadow: hovered
+            ? '0 0 28px -4px rgba(59,130,246,0.55), 0 8px 24px -8px rgba(0,0,0,0.4)'
+            : '0 4px 20px -6px rgba(59,130,246,0.35), 0 4px 16px -4px rgba(0,0,0,0.3)',
+          transform: hovered ? 'scale(1.02)' : 'scale(1)',
+          transition: 'all 0.2s ease',
+        }}
+      >
+        Request Access
+        <ArrowRight size={16} strokeWidth={2.5} />
+      </button>
+
+      <p
+        style={{
+          fontSize: '0.7rem',
+          color: '#334155',
+          marginTop: 14,
+          letterSpacing: '0.01em',
+        }}
+      >
+        A Granite solution engineer will respond within 1 business day.
+      </p>
+    </div>
+  );
+}
+
 /* ─── Page ───────────────────────────────────────────────── */
 
 export function DashboardPage() {
+  const { isAuthenticated } = useAuth();
+
+  function openRequestAccess() {
+    window.dispatchEvent(new Event('open-access-request'));
+  }
+
   return (
     <div style={{ minHeight: '100vh' }}>
       {/* Page content — single column, centered */}
@@ -543,7 +647,17 @@ export function DashboardPage() {
             }}
           >
             {PRODUCT_CARDS.map((card) => (
-              <ProductCardEl key={card.title} card={card} />
+              <ProductCardEl
+                key={card.title}
+                card={card}
+                onRequestAccess={
+                  // Only the active RCF tile needs special behavior for unauthenticated visitors.
+                  // Authenticated users navigate normally — no callback provided.
+                  !isAuthenticated && card.active && card.route === '/rcf'
+                    ? openRequestAccess
+                    : undefined
+                }
+              />
             ))}
           </div>
         </div>
@@ -557,6 +671,18 @@ export function DashboardPage() {
         >
           <HaArchitectureViz />
         </div>
+
+        {/* ──────────────────────────────────────────────────── */}
+        {/* REQUEST ACCESS CTA — unauthenticated only            */}
+        {/* ──────────────────────────────────────────────────── */}
+        {!isAuthenticated && (
+          <div
+            className="animate-fade-in-up animation-delay-200"
+            style={{ width: '100%', maxWidth: 1400 }}
+          >
+            <RequestAccessCta />
+          </div>
+        )}
 
         {/* ──────────────────────────────────────────────────── */}
         {/* PLATFORM CAPABILITIES — 2×2 glass-morphism grid     */}

@@ -1,4 +1,4 @@
-import { useState, useCallback, type FormEvent, type CSSProperties } from 'react';
+import { useState, useCallback, useEffect, type FormEvent, type CSSProperties } from 'react';
 import { ChevronLeft, ChevronRight, CheckCircle, Send } from 'lucide-react';
 
 /* ─── Types ───────────────────────────────────────────────── */
@@ -704,6 +704,15 @@ export function AccessRequestForm() {
   const [headerHovered, setHeaderHovered] = useState(false);
 
   const TOTAL_STEPS = 3; // Step 0: Contact, Step 1: RCF Requirements, Step 2: Review
+
+  // Listen for the 'open-access-request' custom event dispatched by the dashboard
+  // when an unauthenticated user clicks the RCF tile or the CTA button. This avoids
+  // prop drilling through AppLayout → Sidebar → AccessRequestForm.
+  useEffect(() => {
+    function handleOpen() { setExpanded(true); }
+    window.addEventListener('open-access-request', handleOpen);
+    return () => window.removeEventListener('open-access-request', handleOpen);
+  }, []);
 
   const handleChange = useCallback((field: keyof FormData, value: string) => {
     setFormData((prev) => ({ ...prev, [field]: value }));

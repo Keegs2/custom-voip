@@ -799,18 +799,46 @@ export function HaArchitectureViz() {
       {/* Prominent heading above the animation card */}
       <div
         style={{
-          fontSize: '1.1rem',
-          fontWeight: 700,
-          letterSpacing: '0.12em',
-          textTransform: 'uppercase',
-          color: '#3b82f6',
-          textShadow: '0 0 20px rgba(59,130,246,0.3)',
           width: '100%',
           maxWidth: 1560,
-          margin: '40px auto 12px',
+          margin: '40px auto 16px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 14,
         }}
       >
-        High Availability Simulation
+        {/* Left rule */}
+        <div
+          style={{
+            flex: 1,
+            height: 1,
+            background: 'linear-gradient(90deg, transparent, rgba(59,130,246,0.30))',
+          }}
+        />
+
+        <span
+          style={{
+            fontSize: '0.75rem',
+            fontWeight: 700,
+            letterSpacing: '0.18em',
+            textTransform: 'uppercase',
+            color: '#3b82f6',
+            textShadow: '0 0 24px rgba(59,130,246,0.45)',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          High Availability Simulation
+        </span>
+
+        {/* Right rule */}
+        <div
+          style={{
+            flex: 1,
+            height: 1,
+            background: 'linear-gradient(90deg, rgba(59,130,246,0.30), transparent)',
+          }}
+        />
       </div>
 
       <div
