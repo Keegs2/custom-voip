@@ -2796,68 +2796,7 @@ export function UserDetailPage() {
   const showCustomerPicker = !show360View && selectedCustomer == null;
 
   return (
-    <div style={{ paddingTop: 8 }}>
-      {/* ── Page Header ──────────────────────────────────────── */}
-      <div
-        style={{
-          marginBottom: 32,
-          paddingTop: 8,
-          paddingBottom: 28,
-          borderBottom: '1px solid rgba(42,47,69,0.6)',
-          textAlign: 'center',
-        }}
-      >
-        {/* Icon badge */}
-        <div
-          style={{
-            width: 48,
-            height: 48,
-            borderRadius: 14,
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            background: 'linear-gradient(135deg, rgba(168,85,247,0.2) 0%, rgba(168,85,247,0.1) 100%)',
-            border: '1px solid rgba(168,85,247,0.3)',
-            color: '#c084fc',
-            marginBottom: 14,
-          }}
-          aria-hidden="true"
-        >
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} style={{ width: 24, height: 24 }}>
-            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" strokeLinecap="round" strokeLinejoin="round" />
-            <circle cx="12" cy="7" r="4" />
-          </svg>
-        </div>
-
-        <h1
-          style={{
-            fontSize: '1.5rem',
-            fontWeight: 800,
-            letterSpacing: '-0.02em',
-            color: '#e2e8f0',
-            lineHeight: 1.15,
-            margin: '0 0 6px',
-          }}
-        >
-          User Lookup
-        </h1>
-        <p
-          style={{
-            fontSize: '0.85rem',
-            color: '#718096',
-            marginTop: 4,
-            lineHeight: 1.6,
-            maxWidth: 520,
-            marginLeft: 'auto',
-            marginRight: 'auto',
-          }}
-        >
-          {showCustomerPicker
-            ? 'Select a customer to browse their users.'
-            : 'Filter by name, email, role, or status. Click any row for a full 360 view.'}
-        </p>
-      </div>
-
+    <div style={{ paddingTop: 4 }}>
       {/* ── State 1: Customer picker ────────────────────────── */}
       {showCustomerPicker && (
         <CustomerPickerTable onSelectCustomer={handleSelectCustomer} />
