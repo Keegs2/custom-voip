@@ -6,6 +6,7 @@ import { SippPresetGrid } from './SippPresetGrid';
 import { SippCustomForm } from './SippCustomForm';
 import { SippResults } from './SippResults';
 import { SippHistory, type HistoryEntry } from './SippHistory';
+import { SbcDistribution } from './SbcDistribution';
 import type { SippRunConfig, SippRunResponse } from '../../types/sipp';
 
 export function SippTab() {
@@ -87,6 +88,9 @@ export function SippTab() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+      {/* Live SBC distribution — operator watches this while running failover tests */}
+      <SbcDistribution />
+
       {/* Preset grid section */}
       <div>
         <div

@@ -9,8 +9,9 @@ RUN apt-get update && \
 # Install Python dependencies
 RUN pip install --no-cache-dir fastapi uvicorn
 
-# Copy the API script
+# Copy the API script and custom SIPp scenarios
 COPY sipp_api.py /app/sipp_api.py
+COPY scenarios/ /app/scenarios/
 WORKDIR /app
 
 EXPOSE 8001

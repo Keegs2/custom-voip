@@ -36,6 +36,7 @@ services:
       - BANDWIDTH_SIP_PEER_ID=${BANDWIDTH_SIP_PEER_ID:-1162116}
       - TEST_MODE=${TEST_MODE:-false}
       - ENABLE_DOCS=${ENABLE_DOCS:-true}
+      - SIPP_SERVICE_URL=http://localhost:8001
     ports:
       - "8088:8000"
     networks:
@@ -137,6 +138,19 @@ services:
     networks:
       - services-network
     restart: unless-stopped
+
+  # SIPp — SIP load/failover testing via HTTP API
+  # Uses host networking to reach the NLB VIP (34.24.133.82) directly.
+  # The services VM IP (10.142.0.103) is in GCE_INTERNAL_NETWORK so
+  # Kamailio trusts it automatically and routes as test traffic to FS.
+  sipp:
+    build: ./docker/sipp
+    container_name: voip-sipp
+    network_mode: host
+    environment:
+      - SIPP_TARGET_HOST=34.24.133.82
+      - SIPP_TARGET_PORT=5060
+    restart: "no"
 
 networks:
   services-network:

@@ -279,6 +279,11 @@ async def _process_cdr_body(body: dict) -> dict:
         if bridge_uuid is not None:
             bridge_uuid = str(bridge_uuid)[:64]
 
+        # ---- SBC tracking -------------------------------------------------
+        sbc_id = variables.get("sip_h_X-SBC-ID")
+        if sbc_id is not None:
+            sbc_id = str(sbc_id)[:30]
+
         # ---- Logging: summarize what we extracted -------------------------
         extracted = []
         dropped = []
@@ -303,6 +308,7 @@ async def _process_cdr_body(body: dict) -> dict:
             "sip_hangup_disposition": sip_hangup_disposition,
             "sip_user_agent": sip_user_agent,
             "network_addr": network_addr, "bridge_uuid": bridge_uuid,
+            "sbc_id": sbc_id,
             "trunk_id": trunk_id, "carrier_used": carrier_used,
             "answer_time": answer_time, "sip_code": sip_code,
         }
@@ -349,7 +355,8 @@ async def _process_cdr_body(body: dict) -> dict:
                 read_rate, write_rate,
                 sip_from_user, sip_to_user,
                 hangup_cause_q850, sip_hangup_disposition,
-                sip_user_agent, network_addr, bridge_uuid
+                sip_user_agent, network_addr, bridge_uuid,
+                sbc_id
             )
             SELECT
                 $1::varchar,  $2::int,       $3::varchar,  $4::int,       $5::varchar,
@@ -370,7 +377,8 @@ async def _process_cdr_body(body: dict) -> dict:
                 $40::int,     $41::int,
                 $42::varchar, $43::varchar,
                 $44::smallint, $45::varchar,
-                $46::varchar, $47::varchar, $48::varchar
+                $46::varchar, $47::varchar, $48::varchar,
+                $49::varchar
             WHERE NOT EXISTS (
                 SELECT 1 FROM cdrs WHERE uuid = $1::varchar
             )
@@ -423,6 +431,7 @@ async def _process_cdr_body(body: dict) -> dict:
             sip_user_agent,         # $46 sip_user_agent (str | None)
             network_addr,           # $47 network_addr (str | None)
             bridge_uuid,            # $48 bridge_uuid (str | None)
+            sbc_id,                 # $49 sbc_id (str | None)
         )
 
         if result and "INSERT 0 0" in result:
@@ -564,6 +573,7 @@ async def query_cdrs(
     product_type: Optional[str] = None,
     direction: Optional[str] = None,
     destination: Optional[str] = None,
+    sbc_id: Optional[str] = None,
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
     rated_only: bool = False,
@@ -593,7 +603,7 @@ async def query_cdrs(
                rtp_audio_in_mean_interval,
                sip_from_user, sip_to_user, hangup_cause_q850,
                sip_hangup_disposition, sip_user_agent,
-               network_addr, bridge_uuid
+               network_addr, bridge_uuid, sbc_id
         FROM cdrs
         WHERE start_time >= $1 AND start_time <= $2
     """
@@ -623,6 +633,11 @@ async def query_cdrs(
     if destination:
         query += f" AND destination LIKE ${idx}"
         values.append(f"{destination}%")
+        idx += 1
+
+    if sbc_id:
+        query += f" AND sbc_id = ${idx}"
+        values.append(sbc_id)
         idx += 1
 
     if rated_only:
@@ -737,7 +752,7 @@ async def get_cdr(cdr_uuid: str):
                read_rate, write_rate,
                sip_from_user, sip_to_user, hangup_cause_q850,
                sip_hangup_disposition, sip_user_agent,
-               network_addr, bridge_uuid
+               network_addr, bridge_uuid, sbc_id
         FROM cdrs WHERE uuid = $1
         """,
         cdr_uuid

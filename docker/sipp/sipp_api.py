@@ -28,9 +28,11 @@ _lock = asyncio.Lock()
 _running_process: Optional[asyncio.subprocess.Process] = None
 _last_test_time: Optional[str] = None
 
-# Hardcoded target host -- never let the caller choose the SIP destination IP
-SIPP_TARGET_HOST = "freeswitch"
-SIPP_TARGET_PORT = 5080
+# Target host — configurable via env vars so we can point at the NLB VIP for
+# failover testing instead of hitting FreeSWITCH directly.  Never let the
+# *caller* choose the destination; it comes from the environment only.
+SIPP_TARGET_HOST = os.getenv("SIPP_TARGET_HOST", "freeswitch")
+SIPP_TARGET_PORT = int(os.getenv("SIPP_TARGET_PORT", "5080"))
 STAT_FILE = "/tmp/sipp_stat.csv"
 
 # ---------------------------------------------------------------------------
@@ -73,6 +75,13 @@ PRESETS: list[dict] = [
         "description": "Maximum rate test to find the CPS ceiling",
         "defaults": {"target": "9196", "rate": 300, "calls": 3000, "timeout": 60, "duration": 0},
     },
+    {
+        "id": "failover",
+        "name": "SBC Failover Test",
+        "description": "Sustained low-rate calls through the NLB to test SBC failover distribution. "
+                       "Sends 1 CPS for 5 minutes — monitor SBC distribution, then stop/start an SBC to observe failover.",
+        "defaults": {"target": "9196", "rate": 1, "calls": 300, "timeout": 300, "duration": 2000},
+    },
 ]
 
 PRESET_MAP = {p["id"]: p for p in PRESETS}
@@ -106,8 +115,8 @@ class RunRequest(BaseModel):
     @field_validator("timeout")
     @classmethod
     def validate_timeout(cls, v: Optional[int]) -> Optional[int]:
-        if v is not None and not (5 <= v <= 120):
-            raise ValueError("timeout must be between 5 and 120")
+        if v is not None and not (5 <= v <= 600):
+            raise ValueError("timeout must be between 5 and 600")
         return v
 
     @field_validator("duration")
@@ -335,8 +344,8 @@ async def run_test(req: RunRequest) -> RunResponse:
         raise HTTPException(status_code=400, detail="rate must be between 1 and 500")
     if not (1 <= config.calls <= 10000):
         raise HTTPException(status_code=400, detail="calls must be between 1 and 10000")
-    if not (5 <= config.timeout <= 120):
-        raise HTTPException(status_code=400, detail="timeout must be between 5 and 120")
+    if not (5 <= config.timeout <= 600):
+        raise HTTPException(status_code=400, detail="timeout must be between 5 and 600")
     if not (0 <= config.duration <= 30000):
         raise HTTPException(status_code=400, detail="duration must be between 0 and 30000")
 
@@ -353,10 +362,17 @@ async def run_test(req: RunRequest) -> RunResponse:
         except FileNotFoundError:
             pass
 
-        # Build SIPp command -- target host is hardcoded for safety
+        # Build SIPp command -- target host comes from env vars for safety
+        # Failover preset uses a custom scenario with SDP and proper call teardown;
+        # all other presets use the built-in uac scenario.
+        if req.preset == "failover":
+            scenario_args = ["-sf", "/app/scenarios/uac_short_call.xml"]
+        else:
+            scenario_args = ["-sn", "uac"]
+
         cmd = [
             "sipp",
-            "-sn", "uac",
+            *scenario_args,
             f"{SIPP_TARGET_HOST}:{SIPP_TARGET_PORT}",
             "-s", config.target,
             "-m", str(config.calls),
