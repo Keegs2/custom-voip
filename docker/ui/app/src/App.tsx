@@ -72,16 +72,6 @@ export function App() {
               element={<UserDetailRedirect />}
             />
 
-            {/* Customer account page — outside AdminPage wrapper for clean layout */}
-            <Route
-              path="admin/customers/:customerId"
-              element={
-                <RequireAdmin>
-                  <CustomerAccountPage />
-                </RequireAdmin>
-              }
-            />
-
             {/* Customer Management — nested under AdminPage tab shell */}
             <Route
               path="admin"
@@ -91,11 +81,12 @@ export function App() {
                 </RequireAdmin>
               }
             >
-              <Route index                      element={<Navigate to="customers" replace />} />
-              <Route path="customers"           element={<CustomersAdminPage />} />
-              <Route path="trunks"              element={<TrunksAdminPage />} />
-              <Route path="customers/users"     element={<UserDetailPage />} />
-              <Route path="customers/users/:userId" element={<UserDetailPage />} />
+              <Route index                              element={<Navigate to="customers" replace />} />
+              <Route path="customers"                   element={<CustomersAdminPage />} />
+              <Route path="customers/:customerId"       element={<CustomerAccountPage />} />
+              <Route path="trunks"                      element={<TrunksAdminPage />} />
+              <Route path="customers/users"             element={<UserDetailPage />} />
+              <Route path="customers/users/:userId"     element={<UserDetailPage />} />
             </Route>
 
             {/* Platform Management — nested under PlatformManagementPage tab shell */}

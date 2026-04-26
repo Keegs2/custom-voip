@@ -220,7 +220,18 @@ export function AdminPage() {
       </div>
 
       {/* ── Page content ── */}
-      <Outlet />
+      <style>{`
+        @keyframes adminTabFadeIn {
+          from { opacity: 0; transform: translateY(6px); }
+          to   { opacity: 1; transform: translateY(0);   }
+        }
+      `}</style>
+      <div
+        key={location.pathname}
+        style={{ animation: 'adminTabFadeIn 0.25s ease both' }}
+      >
+        <Outlet />
+      </div>
     </div>
   );
 }
