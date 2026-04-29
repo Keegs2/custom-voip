@@ -151,8 +151,10 @@
     <!-- MEDIA HANDLING                              -->
     <!-- ============================================ -->
 
-    <!-- Disable SDP Offer/Answer (SOA) engine on the carrier-facing profile.
-         SOA is disabled per-call via sip_enable_soa=false (exported in Lua).
+    <!-- SDP Offer/Answer (SOA) engine: Left ENABLED at profile level.
+         RCF calls use proxy_media=true with SOA enabled (default) so FS
+         generates its own SDP for both legs. Other products (API, Trunk)
+         may disable SOA per-call via sip_enable_soa=false in bridge strings.
          disable-soa is NOT a valid sofia profile parameter. -->
 
     <!-- User-Agent -->

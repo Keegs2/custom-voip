@@ -92,11 +92,12 @@
     <!-- Greedy codec negotiation - prefer our list over remote -->
     <param name="inbound-codec-negotiation" value="greedy"/>
 
-    <!-- Late codec negotiation DISABLED — not needed with bypass_media.
-         RCF uses bypass_media=true + sip_enable_soa=false (per SignalWire docs)
-         which takes FS out of the RTP path entirely and passes SDP through
-         untouched between Bandwidth endpoints. -->
-    <param name="inbound-late-negotiation" value="false"/>
+    <!-- Late codec negotiation ENABLED to fix Bandwidth 183/200 SOA error.
+         With late negotiation, FS defers A-leg SDP answer until B-leg
+         completes. The B-leg 183 SDP is noted but since A-leg isn't
+         answered yet, the 200 OK SDP is processed as THE answer.
+         Trade-off: no early media passthrough (local ringback only). -->
+    <param name="inbound-late-negotiation" value="true"/>
 
     <!-- ============================================ -->
     <!-- DTMF CONFIGURATION                          -->
