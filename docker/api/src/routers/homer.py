@@ -30,10 +30,15 @@ ALIAS_PATHS = ["/api/v3/mapping/alias", "/api/v3/alias"]
 # Canonical alias set — the single source of truth for the platform
 # ---------------------------------------------------------------------------
 CANONICAL_ALIASES: list[dict[str, Any]] = [
-    {"alias": "Bandwidth Dallas", "ip": "67.231.2.12", "port": 5060},
-    {"alias": "Bandwidth LA", "ip": "216.82.238.134", "port": 5060},
-    {"alias": "Bandwidth Orig", "ip": "67.231.9.142", "port": 5060},
-    {"alias": "Bandwidth Orig 2", "ip": "67.231.13.185", "port": 5060},
+    # Bandwidth TC4 - GraniteTelecommunicationsLLC_03
+    {"alias": "Bandwidth TC4 (DAL)", "ip": "67.231.2.12", "port": 5060},
+    {"alias": "Bandwidth TC4 (LA)", "ip": "216.82.238.134", "port": 5060},
+    # Bandwidth TC1 - GraniteTelecommunicationsLLC_01 (Default)
+    {"alias": "Bandwidth TC1 (NY)", "ip": "67.231.9.142", "port": 5060},
+    {"alias": "Bandwidth TC1 (ATL)", "ip": "67.231.13.185", "port": 5060},
+    # Bandwidth TC2 - GraniteTelecommunicationsLLC_02
+    {"alias": "Bandwidth TC2 (DAL)", "ip": "67.231.1.188", "port": 5060},
+    {"alias": "Bandwidth TC2 (LA)", "ip": "67.231.4.138", "port": 5060},
     {"alias": "NLB VIP (East)", "ip": "34.24.133.82", "port": 5060},
     {"alias": "SBC-1 East", "ip": "34.74.71.32", "port": 5060},
     {"alias": "SBC-1 East (Int)", "ip": "10.142.0.100", "port": 5060},

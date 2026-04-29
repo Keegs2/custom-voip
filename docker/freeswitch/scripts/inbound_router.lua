@@ -422,12 +422,19 @@ freeswitch.consoleLog("ERR", ">>> STEP 4: Routing product_type=" .. tostring(pro
 
 if product_type == "rcf" then
     -- Remote Call Forwarding - Bridge to destination
-    -- RCF product always routes via carrier_standard (low-CPS trunk, standard rates)
-    -- traffic_grade is used as a secondary factor for priority within the same trunk
-    local carrier = "standard"
+    -- RCF always terminates through Trunk Config 4 (carrier="standard").
+    -- Kamailio sets X-Inbound-TC header for logging/Homer visibility, but
+    -- outbound carrier selection is fixed to TC4 until all trunk groups are
+    -- provisioned for our IPs on the Bandwidth side.
+    -- To enable trunk-affinity routing later, read X-Inbound-TC and map to carrier:
+    --   local inbound_tc = get_var("sip_h_X-Inbound-TC", ""):match("^%s*(.-)%s*$") or ""
+    --   if inbound_tc == "tc1" then carrier = "tc1" elseif inbound_tc == "tc2" then carrier = "tc2" end
+    local inbound_tc = get_var("sip_h_X-Inbound-TC", "")
+    inbound_tc = inbound_tc:match("^%s*(.-)%s*$") or ""
+    local carrier = "standard"  -- TC4 only — do not change until Bandwidth provisions all TCs
     freeswitch.consoleLog("INFO", string.format(
-        "[inbound_router] Routing via carrier_%s (product: rcf, traffic_grade: %s)\n",
-        carrier, traffic_grade
+        "[inbound_router] Routing via carrier=%s (inbound_tc=%s, product: rcf, traffic_grade: %s)\n",
+        carrier, inbound_tc, traffic_grade
     ))
 
     local is_local_test = get_var("is_local_test", "false")
@@ -598,23 +605,29 @@ if product_type == "rcf" then
     local bridge_result = get_var("bridge_result", "")
     local last_bridge_hangup = get_var("last_bridge_hangup_cause", "")
 
-    -- If PSTN bridge failed, try backup carrier as failover
+    -- If PSTN bridge failed, try backup carrier (TC4 LA via Kamailio failover).
+    -- RCF terminates through TC4 only. "backup" tells Kamailio to use TC4 Dallas
+    -- as the initial target; Kamailio's CARRIER_FAILURE handles the actual
+    -- Dallas<->LA failover within TC4.
     if not is_local_forward and bridge_result ~= "SUCCESS" then
+        local failover_carrier = "backup"
+
         freeswitch.consoleLog("INFO", string.format(
-            "[inbound_router] Primary bridge failed for RCF (cause=%s), trying carrier_backup (product: rcf)\n",
-            last_bridge_hangup
+            "[inbound_router] Primary bridge failed for RCF (cause=%s), trying failover carrier=%s (product: rcf)\n",
+            last_bridge_hangup, failover_carrier
         ))
-        set_var("carrier_used", "carrier_backup")
+        set_var("carrier_used", "carrier_" .. failover_carrier)
 
         -- Channel variables (outbound_caller_id_*, effective_caller_id_*,
         -- sip_h_Diversion, sip_h_X-Original-CID, sip_h_Remote-Party-ID)
         -- persist on the session from the primary bridge attempt above.
         -- Only the X-Carrier header changes for the failover carrier.
         local failover_dial = string.format(
-            "{ignore_early_media=false,call_timeout=%d,sip_h_X-Carrier=backup" ..
+            "{ignore_early_media=false,call_timeout=%d,sip_h_X-Carrier=%s" ..
             ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true" ..
             "}sofia/external/%s@%s:5060",
             ring_timeout,
+            failover_carrier,
             forward_to,
             sbc_proxy_ip
         )

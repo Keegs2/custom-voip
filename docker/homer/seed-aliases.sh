@@ -98,11 +98,17 @@ fi
 
 # Each line: alias|ip|port
 ALIASES=(
-  # Bandwidth carrier IPs
-  "Bandwidth Dallas|67.231.2.12|5060"
-  "Bandwidth LA|216.82.238.134|5060"
-  "Bandwidth Orig|67.231.9.142|5060"
-  "Bandwidth Orig 2|67.231.13.185|5060"
+  # Bandwidth TC4 - GraniteTelecommunicationsLLC_03
+  "Bandwidth TC4 (DAL)|67.231.2.12|5060"
+  "Bandwidth TC4 (LA)|216.82.238.134|5060"
+
+  # Bandwidth TC1 - GraniteTelecommunicationsLLC_01 (Default)
+  "Bandwidth TC1 (NY)|67.231.9.142|5060"
+  "Bandwidth TC1 (ATL)|67.231.13.185|5060"
+
+  # Bandwidth TC2 - GraniteTelecommunicationsLLC_02
+  "Bandwidth TC2 (DAL)|67.231.1.188|5060"
+  "Bandwidth TC2 (LA)|67.231.4.138|5060"
 
   # GCP Network Load Balancer
   "NLB VIP East|34.24.133.82|5060"

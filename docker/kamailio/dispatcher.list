@@ -77,6 +77,24 @@
 3 sip:216.82.238.134:5060 0 0 weight=100;duid=bw-la-premium
 
 # ============================================================
+# Group 4: Bandwidth TC1 - GraniteTelecommunicationsLLC_01 (Default)
+# ============================================================
+# TC1 signaling IPs: New York and Atlanta.
+# Same keepalive/health-monitoring purpose as Groups 2-3.
+# NOT used for call routing — actual routing is in route[TO_CARRIER].
+4 sip:67.231.9.142:5060 0 0 weight=100;duid=bw-tc1-ny
+4 sip:67.231.13.185:5060 0 0 weight=100;duid=bw-tc1-atl
+
+# ============================================================
+# Group 5: Bandwidth TC2 - GraniteTelecommunicationsLLC_02
+# ============================================================
+# TC2 signaling IPs: Dallas and Los Angeles.
+# Same keepalive/health-monitoring purpose as Groups 2-3.
+# NOT used for call routing — actual routing is in route[TO_CARRIER].
+5 sip:67.231.1.188:5060 0 0 weight=100;duid=bw-tc2-dal
+5 sip:67.231.4.138:5060 0 0 weight=100;duid=bw-tc2-la
+
+# ============================================================
 # Notes:
 # ============================================================
 # - Kamailio will probe each destination every ds_ping_interval seconds
