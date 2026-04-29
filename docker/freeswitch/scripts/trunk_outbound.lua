@@ -513,12 +513,12 @@ set_var("transfer_ringback", "%(2000,4000,440,480)")
 -- NOT from the B-leg channel variables set in the bridge {} block.
 -- Setting it here ensures FS does not run SDP offer/answer processing
 -- sip_enable_soa=false disables SDP Offer/Answer engine. Must be exported.
-pcall(function() session:execute("export", "sip_enable_soa=false") end)
+-- sip_enable_soa=false is in B-leg bridge string only
 
 -- Build dial string using external profile to ensure public IP in Via/Contact/SDP.
 -- X-Carrier tells Kamailio which Bandwidth IP to route to.
 local dial_string = string.format(
-    "{ignore_early_media=false,disable_soa=true,call_timeout=60,sip_h_X-Carrier=standard" ..
+    "{ignore_early_media=false,sip_enable_soa=false,call_timeout=60,sip_h_X-Carrier=standard" ..
     ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true}sofia/external/%s@" .. sbc_proxy_ip .. ":5060",
     normalized_dest:gsub("^%+", "")  -- Remove + for carrier (carrier-dependent)
 )
@@ -563,7 +563,7 @@ if bridge_result ~= "SUCCESS" then
     set_var("carrier_used", "carrier_backup")
 
     local failover_dial = string.format(
-        "{ignore_early_media=false,disable_soa=true,call_timeout=60,sip_h_X-Carrier=backup" ..
+        "{ignore_early_media=false,sip_enable_soa=false,call_timeout=60,sip_h_X-Carrier=backup" ..
         ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true}sofia/external/%s@" .. sbc_proxy_ip .. ":5060",
         normalized_dest:gsub("^%+", "")
     )

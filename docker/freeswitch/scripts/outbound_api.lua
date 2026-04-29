@@ -177,7 +177,7 @@ set_var("carrier_used", gateway)
 -- NOT from the B-leg channel variables set in the bridge {} block.
 -- Setting it here ensures FS does not run SDP offer/answer processing
 -- sip_enable_soa=false disables SDP Offer/Answer engine. Must be exported.
-pcall(function() session:execute("export", "sip_enable_soa=false") end)
+-- sip_enable_soa=false is in B-leg bridge string only
 
 -- ============================================
 -- STEP 5: Execute Call / Bridge
@@ -250,7 +250,7 @@ else
     -- The internal profile does NOT apply ext-sip-ip to outbound calls.
     -- X-Carrier tells Kamailio which Bandwidth IP to route to.
     local dial_string = string.format(
-        "{origination_caller_id_number=%s,call_timeout=%d,ignore_early_media=false,disable_soa=true,sip_h_X-Carrier=premium" ..
+        "{origination_caller_id_number=%s,call_timeout=%d,ignore_early_media=false,sip_enable_soa=false,sip_h_X-Carrier=premium" ..
         ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true}sofia/external/%s@" .. sbc_proxy_ip .. ":5060",
         from_did ~= "" and from_did or "anonymous",
         call_timeout,
@@ -294,7 +294,7 @@ else
             ))
 
             dial_string = string.format(
-                "{origination_caller_id_number=%s,call_timeout=%d,disable_soa=true,sip_h_X-Carrier=backup" ..
+                "{origination_caller_id_number=%s,call_timeout=%d,sip_enable_soa=false,sip_h_X-Carrier=backup" ..
                 ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true}sofia/external/%s@" .. sbc_proxy_ip .. ":5060",
                 from_did ~= "" and from_did or "anonymous",
                 call_timeout,
