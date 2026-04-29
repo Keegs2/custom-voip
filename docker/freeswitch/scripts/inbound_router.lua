@@ -585,13 +585,8 @@ if product_type == "rcf" then
         pcall(function() session:execute("export", "origination_caller_id_number=" .. outbound_did) end)
         pcall(function() session:execute("export", "origination_caller_id_name=" .. outbound_did) end)
 
-        -- Disable SOA on B-leg ONLY (nolocal: prefix = B-leg only, not A-leg).
-        -- Every other script in the codebase has sip_enable_soa=false.
-        -- Without this, SOA errors on 200 OK when 183 already had SDP.
-        pcall(function() session:execute("export", "nolocal:sip_enable_soa=false") end)
-
         dial_string = string.format(
-            "{ignore_early_media=false,sip_enable_soa=false,call_timeout=%d,sip_h_X-Carrier=%s" ..
+            "{ignore_early_media=false,call_timeout=%d,sip_h_X-Carrier=%s" ..
             ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true" ..
             "}sofia/external/%s@%s:5060",
             ring_timeout,
