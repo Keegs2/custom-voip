@@ -96,7 +96,7 @@
          With proxy_media=true and ignore_early_media=false, FS handles
          the 183 SDP as early media setup. The 200 OK SDP updates the
          established session. This is the production-proven pattern. -->
-    <param name="inbound-late-negotiation" value="false"/>
+    <param name="inbound-late-negotiation" value="true"/>
 
     <!-- ============================================ -->
     <!-- DTMF CONFIGURATION                          -->
