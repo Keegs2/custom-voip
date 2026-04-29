@@ -560,14 +560,16 @@ if product_type == "rcf" then
                 "<sip:" .. original_caller_number .. "@" .. external_sip_ip .. ">;party=calling;privacy=off;screen=yes")
         end
 
-        -- Simplified bridge string -- no origination_caller_id_number override needed.
-        -- FreeSWITCH uses outbound_caller_id_* for the SIP From header
-        -- and effective_caller_id_* for caller ID presentation to the called party.
-        -- Both were set via setVariable above (FusionPBX pattern).
+        -- origination_caller_id_number in the {} block forces the B-leg From
+        -- header to the RCF DID. setVariable on the A-leg does NOT propagate
+        -- to B-leg bridges — it must be in the dial string for carrier auth.
         dial_string = string.format(
-            "{ignore_early_media=false,call_timeout=%d,sip_h_X-Carrier=%s" ..
+            "{origination_caller_id_number=%s,origination_caller_id_name=%s" ..
+            ",ignore_early_media=false,call_timeout=%d,sip_h_X-Carrier=%s" ..
             ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true" ..
             "}sofia/external/%s@%s:5060",
+            outbound_did,
+            outbound_did,
             ring_timeout,
             carrier,
             forward_to,
@@ -623,9 +625,12 @@ if product_type == "rcf" then
         -- persist on the session from the primary bridge attempt above.
         -- Only the X-Carrier header changes for the failover carrier.
         local failover_dial = string.format(
-            "{ignore_early_media=false,call_timeout=%d,sip_h_X-Carrier=%s" ..
+            "{origination_caller_id_number=%s,origination_caller_id_name=%s" ..
+            ",ignore_early_media=false,call_timeout=%d,sip_h_X-Carrier=%s" ..
             ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true" ..
             "}sofia/external/%s@%s:5060",
+            outbound_did,
+            outbound_did,
             ring_timeout,
             failover_carrier,
             forward_to,
