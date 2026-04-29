@@ -458,23 +458,22 @@ if product_type == "rcf" then
     set_var("call_timeout", tostring(ring_timeout))
 
     -- ================================================================
-    -- Media anchoring and early media (ringback) configuration
+    -- Media handling: bypass_media + sip_enable_soa=false
     -- ================================================================
-    -- FreeSWITCH MUST stay in the RTP media path for both legs (B2BUA mode).
-    -- proxy_media=true keeps FS in the media path while allowing codec
-    -- passthrough (no transcoding unless needed). This is critical because:
-    --   1. FS needs to relay RTP between Bandwidth (A-leg) and Bandwidth (B-leg)
-    --   2. Without media anchoring, RTP would need to flow directly between
-    --      the two Bandwidth endpoints, which they won't do (no direct path)
-    --   3. SDP in both directions must contain FS's public IP (ext-rtp-ip)
+    -- Per SignalWire docs: bypass_media=true takes FS out of the RTP path.
+    -- SDP passes through untouched between Bandwidth's origination and
+    -- termination endpoints. RTP flows directly between them (both are
+    -- on Bandwidth's network and can reach each other).
     --
-    -- ringback: Generates local ringback tone on the A-leg while waiting for
-    -- the B-leg to answer. This ensures the caller hears ringing even if
-    -- Bandwidth doesn't send 183 Session Progress with SDP (early media).
-    -- If the B-leg DOES send early media (183+SDP), ignore_early_media=false
-    -- in the bridge string means FS will pass that through instead.
+    -- sip_enable_soa=false disables FS's SDP Offer/Answer engine so
+    -- the SDP exchange is transparent. This avoids the SOA error when
+    -- Bandwidth sends SDP in both 183 and 200 OK.
     --
-    set_var("proxy_media", "true")
+    -- Ref: https://developer.signalwire.com/freeswitch/Channel-Variables-Catalog/sip_enable_soa_16353179/
+    --
+    -- ringback: local tone while B-leg rings.
+    set_var("bypass_media", "true")
+    pcall(function() session:execute("export", "sip_enable_soa=false") end)
     set_var("ringback", "%(2000,4000,440,480)")
     set_var("transfer_ringback", "%(2000,4000,440,480)")
 

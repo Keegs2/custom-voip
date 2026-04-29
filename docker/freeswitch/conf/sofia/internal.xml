@@ -92,13 +92,10 @@
     <!-- Greedy codec negotiation - prefer our list over remote -->
     <param name="inbound-codec-negotiation" value="greedy"/>
 
-    <!-- Late codec negotiation DISABLED for B2BUA/RCF call forwarding.
-         With proxy_media=true (set in Lua), FreeSWITCH needs to answer
-         the A-leg codec negotiation immediately so it can set up the
-         media path and generate ringback. Late negotiation delays the
-         SDP answer which prevents early media/ringback from flowing.
-         For RCF (our primary use case), codecs are PCMU/PCMA on both
-         sides so late negotiation provides no benefit. -->
+    <!-- Late codec negotiation DISABLED — not needed with bypass_media.
+         RCF uses bypass_media=true + sip_enable_soa=false (per SignalWire docs)
+         which takes FS out of the RTP path entirely and passes SDP through
+         untouched between Bandwidth endpoints. -->
     <param name="inbound-late-negotiation" value="false"/>
 
     <!-- ============================================ -->
