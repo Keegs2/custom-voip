@@ -15,7 +15,7 @@ from db.redis_client import init_redis, close_redis
 from routers import (
     rcf, calls, trunks, cdrs, customers, health,
     auth, search, number_inventory,
-    carriers, rates, tiers, sipp, sbc,
+    carriers, rates, tiers, sipp, sbc, homer,
 )
 from middleware.auth import JWTAuthMiddleware
 
@@ -117,6 +117,8 @@ app.include_router(sipp.router, prefix="/v1/sipp", tags=["SIPp"])
 app.include_router(sipp.router, prefix="/sipp", tags=["SIPp"])
 app.include_router(sbc.router, prefix="/v1/sbc", tags=["SBC"])
 app.include_router(sbc.router, prefix="/sbc", tags=["SBC"])
+app.include_router(homer.router, prefix="/v1/homer", tags=["Homer"])
+app.include_router(homer.router, prefix="/homer", tags=["Homer"])
 
 
 @app.get("/")

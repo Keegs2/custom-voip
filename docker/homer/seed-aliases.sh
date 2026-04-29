@@ -98,16 +98,34 @@ fi
 
 # Each line: alias|ip|port
 ALIASES=(
-  "Bandwidth Dallas (Term)|67.231.2.12|5060"
-  "Bandwidth LA (Term)|216.82.238.134|5060"
-  "Bandwidth Origination|67.231.9.142|5060"
-  "Bandwidth Origination 2|67.231.13.185|5060"
-  "Kamailio SBC|0.0.0.0|5060"
-  "Kamailio SBC (Public)|34.74.71.32|5060"
-  "FreeSWITCH External|10.142.0.100|5090"
-  "FreeSWITCH Internal|10.142.0.100|5080"
-  "FreeSWITCH External (Public)|34.74.71.32|5090"
-  "FreeSWITCH Internal (Public)|34.74.71.32|5080"
+  # Bandwidth carrier IPs
+  "Bandwidth Dallas|67.231.2.12|5060"
+  "Bandwidth LA|216.82.238.134|5060"
+  "Bandwidth Orig|67.231.9.142|5060"
+  "Bandwidth Orig 2|67.231.13.185|5060"
+
+  # GCP Network Load Balancer
+  "NLB VIP East|34.24.133.82|5060"
+
+  # SBC-1 East (Kamailio)
+  "SBC-1 East|10.142.0.100|5060"
+  "SBC-1 East Public|34.74.71.32|5060"
+
+  # SBC-2 East (Kamailio)
+  "SBC-2 East|10.142.0.101|5060"
+  "SBC-2 East Public|35.243.136.35|5060"
+
+  # FreeSWITCH East (Media Server)
+  "FS East Internal|10.142.0.102|5080"
+  "FS East External|10.142.0.102|5090"
+  "FS East Public|34.139.119.135|5080"
+
+  # Services East (PostgreSQL, API, Homer)
+  "Services East|10.142.0.103|5060"
+  "Services East Public|34.26.57.37|5060"
+
+  # Kamailio local capture address
+  "Kamailio Local|0.0.0.0|5060"
 )
 
 echo "Creating ${#ALIASES[@]} aliases ..."
