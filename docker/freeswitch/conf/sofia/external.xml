@@ -152,27 +152,8 @@
     <!-- ============================================ -->
 
     <!-- Disable SDP Offer/Answer (SOA) engine on the carrier-facing profile.
-         CRITICAL for carrier interop: PSTN carriers (including Bandwidth) send
-         SDP in both 183 Session Progress (early media/ringback) and 200 OK
-         (call answered). FreeSWITCH's SOA engine processes the 183 SDP as the
-         answer, then rejects the 200 OK SDP as a duplicate answer ("multiple
-         answers received, error processing SDP answer"). This causes no-audio
-         even though the SIP-level call setup succeeds.
-
-         disable-soa=true at the profile level bypasses the SOA engine for ALL
-         calls on this profile, passing SDP through transparently. This is the
-         correct fix because:
-           1. All outbound carrier calls go through the external profile
-           2. Every PSTN carrier sends SDP in both 183 and 200 OK
-           3. Per-call disable_soa in bridge {} blocks does NOT work reliably
-              from Lua scripts because the SOA engine reads the variable from
-              the A-leg session context, not the B-leg channel variables
-           4. Profile-level disable-soa is the canonical FreeSWITCH approach
-              for carrier-facing profiles
-
-         Compatible with proxy_media=true: FS still relays RTP (stays in the
-         media path) but does not interpret or modify SDP negotiation. -->
-    <param name="disable-soa" value="true"/>
+         SOA is disabled per-call via sip_enable_soa=false (exported in Lua).
+         disable-soa is NOT a valid sofia profile parameter. -->
 
     <!-- User-Agent -->
     <param name="user-agent-string" value="VoicePlatform/1.0"/>

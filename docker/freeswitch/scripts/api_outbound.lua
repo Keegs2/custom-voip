@@ -323,9 +323,8 @@ set_var("call_reference", call_reference)
 -- The SOA engine reads this variable from the A-leg session context,
 -- NOT from the B-leg channel variables set in the bridge {} block.
 -- Setting it here ensures FS does not run SDP offer/answer processing
--- when the B-leg 183/200 OK SDP arrives. Belt-and-suspenders with the
--- profile-level disable-soa in external.xml.
-set_var("disable_soa", "true")
+-- sip_enable_soa=false disables SDP Offer/Answer engine. Must be exported.
+pcall(function() session:execute("export", "sip_enable_soa=false") end)
 
 -- Caller ID handling
 local outbound_caller_id = caller_id

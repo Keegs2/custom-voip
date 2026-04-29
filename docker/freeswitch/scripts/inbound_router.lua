@@ -490,11 +490,11 @@ if product_type == "rcf" then
 
     -- disable_soa on the A-leg session: CRITICAL for carrier interop.
     -- The SOA engine reads this variable from the A-leg session context,
-    -- NOT from the B-leg channel variables set in the bridge {} block.
-    -- Setting it here ensures FS does not run SDP offer/answer processing
-    -- when the B-leg 183/200 OK SDP arrives. Belt-and-suspenders with the
-    -- profile-level disable-soa in external.xml.
-    set_var("disable_soa", "true")
+    -- sip_enable_soa=false disables FreeSWITCH's SDP Offer/Answer engine,
+    -- allowing SDP from both 183 and 200 OK to pass through untouched.
+    -- MUST be export (not set) so it propagates to the B-leg channel.
+    -- Ref: https://developer.signalwire.com/freeswitch/Channel-Variables-Catalog/sip_enable_soa_16353179/
+    pcall(function() session:execute("export", "sip_enable_soa=false") end)
 
     local dial_string
 
@@ -768,7 +768,7 @@ elseif product_type == "trunk" then
         set_var("continue_on_fail", "true")
 
         -- disable_soa on the A-leg session (same as RCF section above)
-        set_var("disable_soa", "true")
+        pcall(function() session:execute("export", "sip_enable_soa=false") end)
 
         -- Caller ID: pass the original caller through to the PBX
         local original_caller = get_var("sip_from_user", caller_id)
