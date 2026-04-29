@@ -92,12 +92,11 @@
     <!-- Greedy codec negotiation - prefer our list over remote -->
     <param name="inbound-codec-negotiation" value="greedy"/>
 
-    <!-- Late codec negotiation ENABLED to fix Bandwidth 183/200 SOA error.
-         With late negotiation, FS defers A-leg SDP answer until B-leg
-         completes. The B-leg 183 SDP is noted but since A-leg isn't
-         answered yet, the 200 OK SDP is processed as THE answer.
-         Trade-off: no early media passthrough (local ringback only). -->
-    <param name="inbound-late-negotiation" value="true"/>
+    <!-- Late codec negotiation DISABLED — matches Full-System branch.
+         With proxy_media=true and ignore_early_media=false, FS handles
+         the 183 SDP as early media setup. The 200 OK SDP updates the
+         established session. This is the production-proven pattern. -->
+    <param name="inbound-late-negotiation" value="false"/>
 
     <!-- ============================================ -->
     <!-- DTMF CONFIGURATION                          -->
