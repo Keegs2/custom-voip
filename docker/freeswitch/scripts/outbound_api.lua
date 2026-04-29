@@ -172,6 +172,14 @@ freeswitch.consoleLog("INFO", string.format(
 
 set_var("carrier_used", gateway)
 
+-- disable_soa on the A-leg session: CRITICAL for carrier interop.
+-- The SOA engine reads this variable from the A-leg session context,
+-- NOT from the B-leg channel variables set in the bridge {} block.
+-- Setting it here ensures FS does not run SDP offer/answer processing
+-- when the B-leg 183/200 OK SDP arrives. Belt-and-suspenders with the
+-- profile-level disable-soa in external.xml.
+set_var("disable_soa", "true")
+
 -- ============================================
 -- STEP 5: Execute Call / Bridge
 -- ============================================

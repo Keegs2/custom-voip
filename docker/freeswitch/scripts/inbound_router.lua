@@ -488,6 +488,14 @@ if product_type == "rcf" then
     set_var("ringback", "%(2000,4000,440,480)")
     set_var("transfer_ringback", "%(2000,4000,440,480)")
 
+    -- disable_soa on the A-leg session: CRITICAL for carrier interop.
+    -- The SOA engine reads this variable from the A-leg session context,
+    -- NOT from the B-leg channel variables set in the bridge {} block.
+    -- Setting it here ensures FS does not run SDP offer/answer processing
+    -- when the B-leg 183/200 OK SDP arrives. Belt-and-suspenders with the
+    -- profile-level disable-soa in external.xml.
+    set_var("disable_soa", "true")
+
     local dial_string
 
     -- ================================================================
@@ -758,6 +766,9 @@ elseif product_type == "trunk" then
         set_var("transfer_ringback", "%(2000,4000,440,480)")
         set_var("hangup_after_bridge", "true")
         set_var("continue_on_fail", "true")
+
+        -- disable_soa on the A-leg session (same as RCF section above)
+        set_var("disable_soa", "true")
 
         -- Caller ID: pass the original caller through to the PBX
         local original_caller = get_var("sip_from_user", caller_id)

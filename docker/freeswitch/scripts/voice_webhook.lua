@@ -736,6 +736,12 @@ local function execute_dial(verb)
     set_var("continue_on_fail", "true")
     set_var("hangup_after_bridge", "false")
 
+    -- disable_soa on the A-leg session: CRITICAL for carrier interop.
+    -- The SOA engine reads this variable from the A-leg session context,
+    -- NOT from the B-leg channel variables set in the bridge {} block.
+    -- Belt-and-suspenders with the profile-level disable-soa in external.xml.
+    set_var("disable_soa", "true")
+
     -- RFC 4028 session timers: export to B-leg so mod_sofia includes
     -- Session-Expires and Min-SE in the outbound INVITE.
     -- CRITICAL: set_var() only sets on the A-leg. export via session:execute
