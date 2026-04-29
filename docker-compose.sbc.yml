@@ -17,6 +17,7 @@ services:
     environment:
       - EXTERNAL_SIP_IP=${EXTERNAL_SIP_IP}
       - FREESWITCH_IP=${FREESWITCH_IP}
+      - FS_PUBLIC_IP=${FS_PUBLIC_IP}
       - DB_HOST=${DB_HOST}
       - DB_PORT=${DB_PORT:-6432}
       - DB_USER=${DB_USER:-freeswitch}

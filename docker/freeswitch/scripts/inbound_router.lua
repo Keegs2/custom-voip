@@ -473,6 +473,17 @@ if product_type == "rcf" then
     -- Bandwidth doesn't send 183 Session Progress with SDP (early media).
     -- If the B-leg DOES send early media (183+SDP), ignore_early_media=false
     -- in the bridge string means FS will pass that through instead.
+    --
+    -- disable_soa=true on the B-leg: CRITICAL for carrier interop.
+    -- Bandwidth sends SDP in both 183 Session Progress (early media /
+    -- PSTN ringback) and 200 OK (call answered). FreeSWITCH's SOA
+    -- (SDP Offer/Answer) engine processes the 183 SDP as the answer,
+    -- then rejects the 200 OK SDP as a duplicate answer ("multiple
+    -- answers received"). This causes no-audio even though SIP-level
+    -- call setup succeeds. disable_soa=true bypasses FS's SOA engine
+    -- for the B-leg so both 183 and 200 OK SDP are passed through
+    -- transparently. This is standard behavior — every PSTN carrier
+    -- sends SDP in both 183 and 200 OK.
     set_var("proxy_media", "true")
     set_var("ringback", "%(2000,4000,440,480)")
     set_var("transfer_ringback", "%(2000,4000,440,480)")
@@ -563,9 +574,13 @@ if product_type == "rcf" then
         -- origination_caller_id_number in the {} block forces the B-leg From
         -- header to the RCF DID. setVariable on the A-leg does NOT propagate
         -- to B-leg bridges — it must be in the dial string for carrier auth.
+        --
+        -- disable_soa=true: bypass FS's SDP offer/answer engine on the B-leg.
+        -- Without this, FS rejects the 200 OK SDP when 183 already had SDP,
+        -- causing no-audio. See media anchoring comment block above.
         dial_string = string.format(
             "{origination_caller_id_number=%s,origination_caller_id_name=%s" ..
-            ",ignore_early_media=false,call_timeout=%d,sip_h_X-Carrier=%s" ..
+            ",ignore_early_media=false,disable_soa=true,call_timeout=%d,sip_h_X-Carrier=%s" ..
             ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true" ..
             "}sofia/external/%s@%s:5060",
             outbound_did,
@@ -626,7 +641,7 @@ if product_type == "rcf" then
         -- Only the X-Carrier header changes for the failover carrier.
         local failover_dial = string.format(
             "{origination_caller_id_number=%s,origination_caller_id_name=%s" ..
-            ",ignore_early_media=false,call_timeout=%d,sip_h_X-Carrier=%s" ..
+            ",ignore_early_media=false,disable_soa=true,call_timeout=%d,sip_h_X-Carrier=%s" ..
             ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true" ..
             "}sofia/external/%s@%s:5060",
             outbound_did,
@@ -757,7 +772,7 @@ elseif product_type == "trunk" then
         set_var("sip_h_X-PBX-Dest", pbx_ip)
 
         local dial_string = string.format(
-            "{ignore_early_media=false,call_timeout=60" ..
+            "{ignore_early_media=false,disable_soa=true,call_timeout=60" ..
             ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true" ..
             "}sofia/external/%s@%s:5060",
             bridge_did,
