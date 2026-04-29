@@ -474,27 +474,9 @@ if product_type == "rcf" then
     -- If the B-leg DOES send early media (183+SDP), ignore_early_media=false
     -- in the bridge string means FS will pass that through instead.
     --
-    -- sip_enable_soa=false on the B-leg: CRITICAL for carrier interop.
-    -- Bandwidth sends SDP in both 183 Session Progress (early media /
-    -- PSTN ringback) and 200 OK (call answered). FreeSWITCH's SOA
-    -- (SDP Offer/Answer) engine processes the 183 SDP as the answer,
-    -- then rejects the 200 OK SDP as a duplicate answer ("multiple
-    -- answers received"). This causes no-audio even though SIP-level
-    -- call setup succeeds. sip_enable_soa=false bypasses FS's SOA engine
-    -- for the B-leg so both 183 and 200 OK SDP are passed through
-    -- transparently. This is standard behavior — every PSTN carrier
-    -- sends SDP in both 183 and 200 OK.
     set_var("proxy_media", "true")
     set_var("ringback", "%(2000,4000,440,480)")
     set_var("transfer_ringback", "%(2000,4000,440,480)")
-
-    -- disable_soa on the A-leg session: CRITICAL for carrier interop.
-    -- The SOA engine reads this variable from the A-leg session context,
-    -- sip_enable_soa=false is set in the B-leg bridge string {} block ONLY.
-    -- This disables SOA on the B-leg (so 183+200 SDP both pass through)
-    -- while keeping SOA active on the A-leg (so FS generates proper SDP
-    -- with its own IP, keeping itself in the RTP media path).
-    -- Ref: https://developer.signalwire.com/freeswitch/Channel-Variables-Catalog/sip_enable_soa_16353179/
 
     local dial_string
 
@@ -579,20 +561,17 @@ if product_type == "rcf" then
                 "<sip:" .. original_caller_number .. "@" .. external_sip_ip .. ">;party=calling;privacy=off;screen=yes")
         end
 
-        -- origination_caller_id_number in the {} block forces the B-leg From
-        -- header to the RCF DID. setVariable on the A-leg does NOT propagate
-        -- to B-leg bridges — it must be in the dial string for carrier auth.
-        --
-        -- sip_enable_soa=false: bypass FS's SDP offer/answer engine on the B-leg.
-        -- Without this, FS rejects the 200 OK SDP when 183 already had SDP,
-        -- causing no-audio. See media anchoring comment block above.
+        -- Export caller ID to B-leg so Bandwidth sees the RCF DID in the From header.
+        -- session:setVariable only sets on the A-leg; export propagates to the bridge.
+        -- This keeps the bridge string clean (matching the working Full-System pattern)
+        -- while still getting the RCF DID into the outbound INVITE for carrier auth.
+        pcall(function() session:execute("export", "origination_caller_id_number=" .. outbound_did) end)
+        pcall(function() session:execute("export", "origination_caller_id_name=" .. outbound_did) end)
+
         dial_string = string.format(
-            "{origination_caller_id_number=%s,origination_caller_id_name=%s" ..
-            ",ignore_early_media=false,sip_enable_soa=false,call_timeout=%d,sip_h_X-Carrier=%s" ..
+            "{ignore_early_media=false,call_timeout=%d,sip_h_X-Carrier=%s" ..
             ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true" ..
             "}sofia/external/%s@%s:5060",
-            outbound_did,
-            outbound_did,
             ring_timeout,
             carrier,
             forward_to,
@@ -645,15 +624,13 @@ if product_type == "rcf" then
 
         -- Channel variables (outbound_caller_id_*, effective_caller_id_*,
         -- sip_h_Diversion, sip_h_X-Original-CID, sip_h_Remote-Party-ID)
-        -- persist on the session from the primary bridge attempt above.
+        -- and exported origination_caller_id_* persist on the session from
+        -- the primary bridge attempt above.
         -- Only the X-Carrier header changes for the failover carrier.
         local failover_dial = string.format(
-            "{origination_caller_id_number=%s,origination_caller_id_name=%s" ..
-            ",ignore_early_media=false,sip_enable_soa=false,call_timeout=%d,sip_h_X-Carrier=%s" ..
+            "{ignore_early_media=false,call_timeout=%d,sip_h_X-Carrier=%s" ..
             ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true" ..
             "}sofia/external/%s@%s:5060",
-            outbound_did,
-            outbound_did,
             ring_timeout,
             failover_carrier,
             forward_to,
@@ -767,8 +744,6 @@ elseif product_type == "trunk" then
         set_var("hangup_after_bridge", "true")
         set_var("continue_on_fail", "true")
 
-        -- sip_enable_soa=false is in the B-leg bridge string {} block only
-
         -- Caller ID: pass the original caller through to the PBX
         local original_caller = get_var("sip_from_user", caller_id)
         set_var("effective_caller_id_number", original_caller)
@@ -782,7 +757,7 @@ elseif product_type == "trunk" then
         set_var("sip_h_X-PBX-Dest", pbx_ip)
 
         local dial_string = string.format(
-            "{ignore_early_media=false,sip_enable_soa=false,call_timeout=60" ..
+            "{ignore_early_media=false,call_timeout=60" ..
             ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true" ..
             "}sofia/external/%s@%s:5060",
             bridge_did,
