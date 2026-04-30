@@ -22,6 +22,7 @@ DB_PASS="${DB_PASS:-fs_secret}"
 HOMER_IP="${HOMER_IP:-127.0.0.1}"
 HEP_CAPTURE_ID="${HEP_CAPTURE_ID:-100}"
 SBC_ID="${SBC_ID:-east-sbc-1}"
+SBC_INTERNAL_IP="${SBC_INTERNAL_IP:-127.0.0.1}"
 
 # FS_PUBLIC_IP: FreeSWITCH VM's own public IP for RTP media.
 # Used in SDP body rewrites. Different from EXTERNAL_SIP_IP (NLB VIP) because
@@ -43,8 +44,9 @@ sed -i "s|__DB_PASS__|${DB_PASS}|g" "$CONFIG"
 sed -i "s|__HOMER_IP__|${HOMER_IP}|g" "$CONFIG"
 sed -i "s|__HEP_CAPTURE_ID__|${HEP_CAPTURE_ID}|g" "$CONFIG"
 sed -i "s|__SBC_ID__|${SBC_ID}|g" "$CONFIG"
+sed -i "s|__SBC_INTERNAL_IP__|${SBC_INTERNAL_IP}|g" "$CONFIG"
 
-echo "Kamailio config templated: ADVERTISE_IP=${EXTERNAL_SIP_IP}, FS=${FREESWITCH_IP}, FS_PUBLIC_IP=${FS_PUBLIC_IP}, DB=${DB_HOST}:${DB_PORT}, Homer=${HOMER_IP}, HEP_ID=${HEP_CAPTURE_ID}, SBC_ID=${SBC_ID}"
+echo "Kamailio config templated: ADVERTISE_IP=${EXTERNAL_SIP_IP}, FS=${FREESWITCH_IP}, FS_PUBLIC_IP=${FS_PUBLIC_IP}, DB=${DB_HOST}:${DB_PORT}, Homer=${HOMER_IP}, HEP_ID=${HEP_CAPTURE_ID}, SBC_ID=${SBC_ID}, SBC_INTERNAL_IP=${SBC_INTERNAL_IP}"
 
 # Start Kamailio with all original arguments
 exec /usr/sbin/kamailio "$@"
