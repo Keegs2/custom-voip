@@ -228,7 +228,15 @@ async def _process_cdr_body(body: dict) -> dict:
         jitter_min_ms = _safe_float(variables.get("rtp_audio_in_jitter_min_variance"))
         jitter_max_ms = _safe_float(variables.get("rtp_audio_in_jitter_max_variance"))
         rtp_mean_interval = _safe_float(variables.get("rtp_audio_in_mean_interval"))
-        jitter_avg_ms = rtp_mean_interval  # mean interval as avg jitter proxy
+        # Compute average jitter from min/max variance (actual network jitter).
+        # rtp_audio_in_mean_interval is the packet interval (always ~ptime),
+        # NOT jitter — it was incorrectly used as jitter proxy before.
+        if jitter_min_ms is not None and jitter_max_ms is not None:
+            jitter_avg_ms = round((jitter_min_ms + jitter_max_ms) / 2, 3)
+        elif jitter_max_ms is not None:
+            jitter_avg_ms = jitter_max_ms
+        else:
+            jitter_avg_ms = jitter_min_ms  # None if both are None
         packet_loss_count = _safe_int(variables.get("rtp_audio_in_skip_packet_count"))
         packet_total_count = _safe_int(variables.get("rtp_audio_in_media_packet_count"))
 
