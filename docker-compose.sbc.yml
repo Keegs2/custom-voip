@@ -25,6 +25,7 @@ services:
       - HOMER_IP=${HOMER_IP}
       - HEP_CAPTURE_ID=${HEP_CAPTURE_ID:-100}
       - SBC_ID=${SBC_ID:-east-sbc-1}
+      - SBC_INTERNAL_IP=${SBC_INTERNAL_IP}
     volumes:
       - ./docker/kamailio/kamailio.cfg:/etc/kamailio/kamailio.cfg.tmpl:ro
       - ./docker/kamailio/dispatcher.list:/etc/kamailio/dispatcher.list.tmpl:ro
