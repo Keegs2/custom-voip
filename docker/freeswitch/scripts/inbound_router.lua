@@ -648,12 +648,12 @@ if product_type == "rcf" then
         }
 
         for i, attempt in ipairs(bridge_attempts) do
-            -- originate_timeout=8: abort if no SIP response (100 Trying)
+            -- originate_timeout=3: abort if no SIP response (100 Trying)
             -- within 5 seconds — detects unreachable SBC quickly so we can
             -- fail over to the next attempt without waiting 30+ seconds.
             -- call_timeout: how long to wait for answer once ringing starts.
             local attempt_dial = string.format(
-                "{ignore_early_media=false,originate_timeout=8,call_timeout=%d,sip_h_X-Carrier=%s" ..
+                "{ignore_early_media=false,originate_timeout=3,call_timeout=%d,sip_h_X-Carrier=%s" ..
                 ",sip_h_X-CID=%s" ..
                 ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true" ..
                 "}sofia/external/%s@%s:5060",
