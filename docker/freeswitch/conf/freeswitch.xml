@@ -68,6 +68,7 @@
   <!-- Homer SIP capture endpoint and SBC proxy IP for multi-VM deployment -->
   <X-PRE-PROCESS cmd="exec-set" data="homer_ip=echo ${HOMER_IP:-127.0.0.1}"/>
   <X-PRE-PROCESS cmd="exec-set" data="sbc_proxy_ip=echo ${SBC_PROXY_IP:-127.0.0.1}"/>
+  <X-PRE-PROCESS cmd="exec-set" data="sbc_proxy_ip_failover=echo ${SBC_PROXY_IP_FAILOVER:-${SBC_PROXY_IP:-127.0.0.1}}"/>
 
   <!-- ============================================ -->
   <!-- DATABASE CONFIGURATION (PostgreSQL via PgBouncer) -->

@@ -90,6 +90,7 @@ end
 -- These replace hardcoded IPs so each VM gets the correct addresses
 local external_sip_ip = os.getenv("EXTERNAL_SIP_IP") or "auto"
 local sbc_proxy_ip = os.getenv("SBC_PROXY_IP") or "127.0.0.1"
+local sbc_proxy_ip_failover = os.getenv("SBC_PROXY_IP_FAILOVER") or sbc_proxy_ip
 
 -- Get call details
 local uuid = get_var("uuid", "unknown")
@@ -592,21 +593,9 @@ if product_type == "rcf" then
         pcall(function() session:execute("export", "origination_caller_id_number=" .. outbound_did) end)
         pcall(function() session:execute("export", "origination_caller_id_name=" .. outbound_did) end)
 
-        dial_string = string.format(
-            "{ignore_early_media=false,call_timeout=%d,sip_h_X-Carrier=%s" ..
-            ",sip_h_X-CID=%s" ..
-            ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true" ..
-            "}sofia/external/%s@%s:5060",
-            ring_timeout,
-            carrier,
-            uuid,
-            forward_to,
-            sbc_proxy_ip
-        )
-
         freeswitch.consoleLog("INFO", string.format(
-            "[%s] RCF Bridge (PSTN): %s -> %s via proxy (carrier=%s, pass_cid=%s)\n",
-            uuid, normalized_did, forward_to, carrier, tostring(pass_caller_id)
+            "[%s] RCF Bridge (PSTN): %s -> %s via proxy (carrier=%s, pass_cid=%s, failover_sbc=%s)\n",
+            uuid, normalized_did, forward_to, carrier, tostring(pass_caller_id), sbc_proxy_ip_failover
         ))
     end
 
@@ -627,52 +616,83 @@ if product_type == "rcf" then
     pcall(function() session:execute("export", "sip_minimum_session_expires=90") end)
     pcall(function() session:execute("export", "enable_timer=true") end)
 
-    pcall(function()
-        session:execute("bridge", dial_string)
-    end)
+    -- ================================================================
+    -- SBC + Carrier failover: 4 bridge attempts for PSTN routing
+    -- ================================================================
+    -- For local extensions, there is only the single dial_string built above.
+    -- For PSTN, we try all combinations of SBC (primary/failover) and
+    -- carrier (standard/backup) before giving up:
+    --   1. Primary SBC  + primary carrier  (standard)
+    --   2. Failover SBC + primary carrier  (standard)
+    --   3. Primary SBC  + failover carrier (backup)
+    --   4. Failover SBC + failover carrier (backup)
+    --
+    -- Channel variables (outbound_caller_id_*, effective_caller_id_*,
+    -- sip_h_Diversion, sip_h_X-Original-CID, sip_h_Remote-Party-ID)
+    -- and exported origination_caller_id_* persist on the session across
+    -- all bridge attempts. Only X-Carrier and the SBC IP change per attempt.
+    -- ================================================================
 
-    -- Check if bridge succeeded
+    if is_local_forward then
+        -- Local extension: single bridge attempt (no SBC/carrier failover)
+        pcall(function()
+            session:execute("bridge", dial_string)
+        end)
+    else
+        -- PSTN: 4-attempt SBC + carrier failover loop
+        local bridge_attempts = {
+            { sbc = sbc_proxy_ip,          carrier = "standard", label = "primary SBC + primary carrier" },
+            { sbc = sbc_proxy_ip_failover, carrier = "standard", label = "failover SBC + primary carrier" },
+            { sbc = sbc_proxy_ip,          carrier = "backup",   label = "primary SBC + failover carrier" },
+            { sbc = sbc_proxy_ip_failover, carrier = "backup",   label = "failover SBC + failover carrier" },
+        }
+
+        for i, attempt in ipairs(bridge_attempts) do
+            local attempt_dial = string.format(
+                "{ignore_early_media=false,call_timeout=%d,sip_h_X-Carrier=%s" ..
+                ",sip_h_X-CID=%s" ..
+                ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true" ..
+                "}sofia/external/%s@%s:5060",
+                ring_timeout,
+                attempt.carrier,
+                uuid,
+                forward_to,
+                attempt.sbc
+            )
+
+            set_var("carrier_used", "carrier_" .. attempt.carrier)
+
+            freeswitch.consoleLog("INFO", string.format(
+                "[%s] RCF bridge attempt %d/4 (%s): %s -> %s@%s carrier=%s\n",
+                uuid, i, attempt.label, normalized_did, forward_to, attempt.sbc, attempt.carrier
+            ))
+
+            pcall(function()
+                session:execute("bridge", attempt_dial)
+            end)
+
+            -- Check if bridge succeeded
+            local bridge_result = get_var("bridge_result", "")
+            local last_bridge_hangup = get_var("last_bridge_hangup_cause", "")
+
+            if bridge_result == "SUCCESS" then
+                freeswitch.consoleLog("INFO", string.format(
+                    "[%s] RCF bridge attempt %d/4 succeeded (%s)\n",
+                    uuid, i, attempt.label
+                ))
+                break
+            end
+
+            freeswitch.consoleLog("INFO", string.format(
+                "[%s] RCF bridge attempt %d/4 failed (%s): cause=%s\n",
+                uuid, i, attempt.label, last_bridge_hangup
+            ))
+        end
+    end
+
+    -- Final result check (covers both local and PSTN paths)
     local bridge_result = get_var("bridge_result", "")
     local last_bridge_hangup = get_var("last_bridge_hangup_cause", "")
-
-    -- If PSTN bridge failed, try backup carrier (TC4 LA via Kamailio failover).
-    -- RCF terminates through TC4 only. "backup" tells Kamailio to use TC4 Dallas
-    -- as the initial target; Kamailio's CARRIER_FAILURE handles the actual
-    -- Dallas<->LA failover within TC4.
-    if not is_local_forward and bridge_result ~= "SUCCESS" then
-        local failover_carrier = "backup"
-
-        freeswitch.consoleLog("INFO", string.format(
-            "[inbound_router] Primary bridge failed for RCF (cause=%s), trying failover carrier=%s (product: rcf)\n",
-            last_bridge_hangup, failover_carrier
-        ))
-        set_var("carrier_used", "carrier_" .. failover_carrier)
-
-        -- Channel variables (outbound_caller_id_*, effective_caller_id_*,
-        -- sip_h_Diversion, sip_h_X-Original-CID, sip_h_Remote-Party-ID)
-        -- and exported origination_caller_id_* persist on the session from
-        -- the primary bridge attempt above.
-        -- Only the X-Carrier header changes for the failover carrier.
-        local failover_dial = string.format(
-            "{ignore_early_media=false,call_timeout=%d,sip_h_X-Carrier=%s" ..
-            ",sip_h_X-CID=%s" ..
-            ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true" ..
-            "}sofia/external/%s@%s:5060",
-            ring_timeout,
-            failover_carrier,
-            uuid,
-            forward_to,
-            sbc_proxy_ip
-        )
-
-        pcall(function()
-            session:execute("bridge", failover_dial)
-        end)
-
-        -- Re-check after failover attempt
-        bridge_result = get_var("bridge_result", "")
-        last_bridge_hangup = get_var("last_bridge_hangup_cause", "")
-    end
 
     -- If all bridge attempts failed, hangup with NORMAL_TEMPORARY_FAILURE (SIP 503)
     -- instead of falling through to the dialplan's 404 which would mask the real issue.
