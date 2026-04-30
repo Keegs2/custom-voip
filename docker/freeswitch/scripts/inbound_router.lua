@@ -92,6 +92,18 @@ local external_sip_ip = os.getenv("EXTERNAL_SIP_IP") or "auto"
 local sbc_proxy_ip = os.getenv("SBC_PROXY_IP") or "127.0.0.1"
 local sbc_proxy_ip_failover = os.getenv("SBC_PROXY_IP_FAILOVER") or sbc_proxy_ip
 
+-- Quick TCP health check: detect unreachable SBC in <1 second
+-- instead of waiting for SIP timeout (10-32 seconds).
+local function is_sbc_reachable(ip, port)
+    local ok, socket = pcall(require, "socket")
+    if not ok then return true end  -- fail open if luasocket unavailable
+    local tcp = socket.tcp()
+    tcp:settimeout(1)
+    local result = tcp:connect(ip, port or 5060)
+    tcp:close()
+    return result ~= nil
+end
+
 -- Get call details
 local uuid = get_var("uuid", "unknown")
 local did = get_var("destination_number", "")
@@ -648,32 +660,37 @@ if product_type == "rcf" then
         }
 
         for i, attempt in ipairs(bridge_attempts) do
-            -- originate_timeout=10: abort if no SIP response (100 Trying)
-            -- within 5 seconds — detects unreachable SBC quickly so we can
-            -- fail over to the next attempt without waiting 30+ seconds.
-            -- call_timeout: how long to wait for answer once ringing starts.
-            local attempt_dial = string.format(
-                "{ignore_early_media=false,originate_timeout=10,call_timeout=%d,sip_h_X-Carrier=%s" ..
-                ",sip_h_X-CID=%s" ..
-                ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true" ..
-                "}sofia/external/%s@%s:5060",
-                ring_timeout,
-                attempt.carrier,
-                uuid,
-                forward_to,
-                attempt.sbc
-            )
+            -- TCP pre-check: detect dead SBC in <1 second instead of
+            -- waiting for SIP timeout. Skip unreachable SBCs instantly.
+            if not is_sbc_reachable(attempt.sbc, 5060) then
+                freeswitch.consoleLog("WARNING", string.format(
+                    "[%s] RCF bridge attempt %d/4 SKIPPED — SBC %s unreachable (%s)\n",
+                    uuid, i, attempt.sbc, attempt.label
+                ))
+            else
+                local attempt_dial = string.format(
+                    "{ignore_early_media=false,call_timeout=%d,sip_h_X-Carrier=%s" ..
+                    ",sip_h_X-CID=%s" ..
+                    ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true" ..
+                    "}sofia/external/%s@%s:5060",
+                    ring_timeout,
+                    attempt.carrier,
+                    uuid,
+                    forward_to,
+                    attempt.sbc
+                )
 
-            set_var("carrier_used", "carrier_" .. attempt.carrier)
+                set_var("carrier_used", "carrier_" .. attempt.carrier)
 
-            freeswitch.consoleLog("INFO", string.format(
-                "[%s] RCF bridge attempt %d/4 (%s): %s -> %s@%s carrier=%s\n",
-                uuid, i, attempt.label, normalized_did, forward_to, attempt.sbc, attempt.carrier
-            ))
+                freeswitch.consoleLog("INFO", string.format(
+                    "[%s] RCF bridge attempt %d/4 (%s): %s -> %s@%s carrier=%s\n",
+                    uuid, i, attempt.label, normalized_did, forward_to, attempt.sbc, attempt.carrier
+                ))
 
-            pcall(function()
-                session:execute("bridge", attempt_dial)
-            end)
+                pcall(function()
+                    session:execute("bridge", attempt_dial)
+                end)
+            end
 
             -- Check if bridge succeeded
             local bridge_result = get_var("bridge_result", "")
