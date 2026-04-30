@@ -25,6 +25,7 @@ import { SippAdminPage } from './pages/admin/SippAdminPage';
 import { TrunksAdminPage } from './pages/admin/TrunksAdminPage';
 import { DIDSearchPage } from './pages/admin/DIDSearchPage';
 import { UserDetailPage } from './pages/admin/UserDetailPage';
+import { OnboardingAdminPage } from './pages/admin/OnboardingAdminPage';
 import { CallQualityPage } from './pages/CallQualityPage';
 import { AccountPage } from './pages/AccountPage';
 
@@ -79,6 +80,7 @@ export function App() {
                 }
               >
                 <Route index                              element={<Navigate to="customers" replace />} />
+                <Route path="onboarding"                  element={<OnboardingAdminPage />} />
                 <Route path="customers"                   element={<CustomersAdminPage />} />
                 <Route path="customers/:customerId"       element={<CustomerAccountPage />} />
                 <Route path="trunks"                      element={<TrunksAdminPage />} />

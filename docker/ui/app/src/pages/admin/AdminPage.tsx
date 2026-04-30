@@ -6,6 +6,7 @@ interface AdminTab {
 }
 
 const adminTabs: AdminTab[] = [
+  { label: 'Onboarding',      to: '/admin/onboarding'      },
   { label: 'Customers',       to: '/admin/customers'       },
   { label: 'Customer Trunks', to: '/admin/trunks'          },
   { label: 'User Lookup',     to: '/admin/customers/users' },

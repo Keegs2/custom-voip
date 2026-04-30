@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect, type FormEvent, type CSSProperties } from 'react';
 import { ChevronLeft, ChevronRight, CheckCircle, Send } from 'lucide-react';
+import { submitOnboardingRequest } from '../../api/onboarding';
 
 /* ─── Types ───────────────────────────────────────────────── */
 
@@ -701,6 +702,7 @@ export function AccessRequestForm() {
   const [errors, setErrors]               = useState<FieldErrors>({});
   const [submitted, setSubmitted]         = useState(false);
   const [isSubmitting, setIsSubmitting]   = useState(false);
+  const [submitError, setSubmitError]     = useState<string | null>(null);
   const [headerHovered, setHeaderHovered] = useState(false);
 
   const TOTAL_STEPS = 3; // Step 0: Contact, Step 1: RCF Requirements, Step 2: Review
@@ -740,20 +742,28 @@ export function AccessRequestForm() {
     setStep((s) => s - 1);
   }, []);
 
-  const handleSubmit = useCallback(() => {
-    const payload = {
-      ...formData,
-      submitted_at: new Date().toISOString(),
-    };
-    // eslint-disable-next-line no-console
-    console.log('[AccessRequest] Form submitted:', JSON.stringify(payload, null, 2));
-
+  const handleSubmit = useCallback(async () => {
     setIsSubmitting(true);
-    // Simulate a brief network delay so the UI feedback feels real
-    setTimeout(() => {
-      setIsSubmitting(false);
+    setSubmitError(null);
+    try {
+      await submitOnboardingRequest({
+        company_name: formData.company_name,
+        contact_name: formData.contact_name,
+        email: formData.email,
+        phone: formData.phone,
+        did_count: formData.did_count,
+        porting: formData.porting,
+        current_carrier: formData.current_carrier || undefined,
+        forwarding_setup: formData.forwarding_setup,
+        monthly_volume: formData.monthly_volume,
+        timeline: formData.timeline,
+      });
       setSubmitted(true);
-    }, 600);
+    } catch (err) {
+      setSubmitError(err instanceof Error ? err.message : 'Submission failed. Please try again.');
+    } finally {
+      setIsSubmitting(false);
+    }
   }, [formData]);
 
   const handleReset = useCallback(() => {
@@ -873,6 +883,12 @@ export function AccessRequestForm() {
                   )}
                   {step === 2 && (
                     <Step2 data={formData} />
+                  )}
+
+                  {submitError && (
+                    <p style={{ ...errorStyle, marginTop: 10, textAlign: 'center' }}>
+                      {submitError}
+                    </p>
                   )}
 
                   <NavButtons

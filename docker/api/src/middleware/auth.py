@@ -42,6 +42,10 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
         if path.startswith("/freeswitch/"):
             return await call_next(request)
 
+        # Allow unauthenticated POST to onboarding intake (public form submission)
+        if path in ("/v1/onboarding", "/onboarding") and request.method == "POST":
+            return await call_next(request)
+
         # Exempt FreeSWITCH ingest endpoints (called without auth over Docker network)
         if path.endswith("/cdrs/ingest") or path.endswith("/cdrs/ingest/bulk"):
             return await call_next(request)
