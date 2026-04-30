@@ -249,6 +249,7 @@ services:
       - "HEPLIFYSERVER_DBADDR=homer-db:5432"
       - "HEPLIFYSERVER_DBUSER=root"
       - "HEPLIFYSERVER_DBPASS=${HOMER_DB_PASS:-homerSeven}"
+      - "HEPLIFYSERVER_ALEGIDS=X-CID"
       - "HEPLIFYSERVER_LOGLVL=info"
       - "HEPLIFYSERVER_LOGSTD=true"
     depends_on:

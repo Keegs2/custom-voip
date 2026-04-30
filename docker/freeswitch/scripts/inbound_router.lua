@@ -594,10 +594,12 @@ if product_type == "rcf" then
 
         dial_string = string.format(
             "{ignore_early_media=false,call_timeout=%d,sip_h_X-Carrier=%s" ..
+            ",sip_h_X-CID=%s" ..
             ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true" ..
             "}sofia/external/%s@%s:5060",
             ring_timeout,
             carrier,
+            uuid,
             forward_to,
             sbc_proxy_ip
         )
@@ -653,10 +655,12 @@ if product_type == "rcf" then
         -- Only the X-Carrier header changes for the failover carrier.
         local failover_dial = string.format(
             "{ignore_early_media=false,call_timeout=%d,sip_h_X-Carrier=%s" ..
+            ",sip_h_X-CID=%s" ..
             ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true" ..
             "}sofia/external/%s@%s:5060",
             ring_timeout,
             failover_carrier,
+            uuid,
             forward_to,
             sbc_proxy_ip
         )

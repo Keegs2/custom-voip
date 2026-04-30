@@ -122,8 +122,8 @@ ALIASES=(
   "SBC-2 East Public|35.243.136.35|5060"
 
   # FreeSWITCH East (Media Server)
-  "FS East Internal|10.142.0.102|5080"
-  "FS East External|10.142.0.102|5090"
+  "FS East Internal|192.168.10.2|5080"
+  "FS East External|192.168.10.2|5090"
   "FS East Public|34.139.119.135|5080"
 
   # Services East (PostgreSQL, API, Homer)

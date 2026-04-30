@@ -44,7 +44,7 @@ CANONICAL_ALIASES: list[dict[str, Any]] = [
     {"alias": "SBC-1 East (Int)", "ip": "10.142.0.100", "port": 5060},
     {"alias": "SBC-2 East", "ip": "35.243.136.35", "port": 5060},
     {"alias": "SBC-2 East (Int)", "ip": "10.142.0.101", "port": 5060},
-    {"alias": "FreeSWITCH East", "ip": "10.142.0.102", "port": 5080},
+    {"alias": "FreeSWITCH East", "ip": "192.168.10.2", "port": 5080},
     {"alias": "FreeSWITCH East (Ext)", "ip": "34.139.119.135", "port": 5080},
     {"alias": "Services East", "ip": "10.142.0.103", "port": 5432},
     {"alias": "Services East (Ext)", "ip": "34.26.57.37", "port": 9080},

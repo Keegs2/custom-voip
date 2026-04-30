@@ -251,9 +251,11 @@ else
     -- X-Carrier tells Kamailio which Bandwidth IP to route to.
     local dial_string = string.format(
         "{origination_caller_id_number=%s,call_timeout=%d,ignore_early_media=false,sip_enable_soa=false,sip_h_X-Carrier=premium" ..
+        ",sip_h_X-CID=%s" ..
         ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true}sofia/external/%s@" .. sbc_proxy_ip .. ":5060",
         from_did ~= "" and from_did or "anonymous",
         call_timeout,
+        uuid,
         normalized_dest:gsub("^%+", "")
     )
 
@@ -295,9 +297,11 @@ else
 
             dial_string = string.format(
                 "{origination_caller_id_number=%s,call_timeout=%d,sip_enable_soa=false,sip_h_X-Carrier=backup" ..
+                ",sip_h_X-CID=%s" ..
                 ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true}sofia/external/%s@" .. sbc_proxy_ip .. ":5060",
                 from_did ~= "" and from_did or "anonymous",
                 call_timeout,
+                uuid,
                 normalized_dest:gsub("^%+", "")
             )
 

@@ -519,7 +519,9 @@ set_var("transfer_ringback", "%(2000,4000,440,480)")
 -- X-Carrier tells Kamailio which Bandwidth IP to route to.
 local dial_string = string.format(
     "{ignore_early_media=false,sip_enable_soa=false,call_timeout=60,sip_h_X-Carrier=standard" ..
+    ",sip_h_X-CID=%s" ..
     ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true}sofia/external/%s@" .. sbc_proxy_ip .. ":5060",
+    uuid,
     normalized_dest:gsub("^%+", "")  -- Remove + for carrier (carrier-dependent)
 )
 
@@ -564,7 +566,9 @@ if bridge_result ~= "SUCCESS" then
 
     local failover_dial = string.format(
         "{ignore_early_media=false,sip_enable_soa=false,call_timeout=60,sip_h_X-Carrier=backup" ..
+        ",sip_h_X-CID=%s" ..
         ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true}sofia/external/%s@" .. sbc_proxy_ip .. ":5060",
+        uuid,
         normalized_dest:gsub("^%+", "")
     )
 
