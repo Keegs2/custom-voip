@@ -27,9 +27,395 @@ async function updateRcfPassCallerId(id: number, pass_caller_id: boolean): Promi
   return apiRequest('PATCH', `/rcf/${id}`, { pass_caller_id });
 }
 
-// ─── CardCallerIdToggle ──────────────────────────────────────────────────────
+// ─── GreenToggle ──────────────────────────────────────────────────────────────
+// Compact on/off toggle using the RCF green accent.
 
-function CardCallerIdToggle({ entry, canEdit }: { entry: RcfEntry; canEdit: boolean }) {
+function GreenToggle({
+  checked,
+  disabled,
+  pending,
+  onChange,
+  title,
+}: {
+  checked: boolean;
+  disabled: boolean;
+  pending: boolean;
+  onChange: () => void;
+  title?: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      disabled={disabled || pending}
+      onClick={onChange}
+      title={title}
+      style={{
+        position: 'relative',
+        display: 'inline-flex',
+        alignItems: 'center',
+        width: 36,
+        height: 20,
+        borderRadius: 10,
+        border: `1px solid ${checked ? 'rgba(74,222,128,0.55)' : 'rgba(255,255,255,0.10)'}`,
+        background: checked
+          ? 'linear-gradient(135deg, #22c55e 0%, #16a34a 100%)'
+          : 'rgba(255,255,255,0.06)',
+        cursor: disabled || pending ? 'not-allowed' : 'pointer',
+        transition: 'background 0.22s ease, border-color 0.22s ease, box-shadow 0.22s',
+        opacity: pending ? 0.55 : 1,
+        flexShrink: 0,
+        padding: 0,
+        outline: 'none',
+        boxShadow: checked ? '0 0 8px rgba(74,222,128,0.35)' : 'none',
+      }}
+    >
+      <span
+        style={{
+          position: 'absolute',
+          left: checked ? 18 : 2,
+          width: 14,
+          height: 14,
+          borderRadius: '50%',
+          background: '#fff',
+          boxShadow: '0 1px 4px rgba(0,0,0,0.45)',
+          transition: 'left 0.22s ease',
+        }}
+      />
+    </button>
+  );
+}
+
+// ─── StatusBadge ──────────────────────────────────────────────────────────────
+
+function StatusBadge({ enabled, pending }: { enabled: boolean; pending: boolean }) {
+  const color = enabled ? '#4ade80' : '#ef4444';
+  const bg = enabled ? 'rgba(74,222,128,0.12)' : 'rgba(239,68,68,0.12)';
+  const border = enabled ? 'rgba(74,222,128,0.28)' : 'rgba(239,68,68,0.28)';
+  const label = pending ? '…' : enabled ? 'Active' : 'Disabled';
+
+  return (
+    <span
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 5,
+        fontSize: '0.62rem',
+        fontWeight: 700,
+        color,
+        background: bg,
+        border: `1px solid ${border}`,
+        borderRadius: 20,
+        padding: '3px 9px',
+        letterSpacing: '0.06em',
+        textTransform: 'uppercase',
+        whiteSpace: 'nowrap',
+        transition: 'color 0.2s, background 0.2s, border-color 0.2s',
+      }}
+    >
+      <span
+        style={{
+          width: 5,
+          height: 5,
+          borderRadius: '50%',
+          background: color,
+          flexShrink: 0,
+          boxShadow: `0 0 5px ${color}`,
+          display: 'inline-block',
+        }}
+      />
+      {label}
+    </span>
+  );
+}
+
+// ─── ForwardToDisplay ─────────────────────────────────────────────────────────
+// The large, clickable forwarding destination. Clicking switches to edit mode.
+
+interface ForwardToDisplayProps {
+  entry: RcfEntry;
+  pendingValue: string;
+  canEdit: boolean;
+  onPendingChange: (did: string, value: string) => void;
+}
+
+function ForwardToDisplay({ entry, pendingValue, canEdit, onPendingChange }: ForwardToDisplayProps) {
+  // ALL hooks unconditionally at the top (rules-of-hooks)
+  const queryClient = useQueryClient();
+  const { toastOk, toastErr } = useToast();
+  const [editing, setEditing] = useState(false);
+  const [savedFlash, setSavedFlash] = useState(false);
+  const [hovered, setHovered] = useState(false);
+
+  const isDirty = pendingValue !== entry.forward_to && pendingValue !== '';
+
+  const mutation = useMutation({
+    mutationFn: (newValue: string) => updateRcfForwardTo(entry.did, newValue.trim()),
+    onSuccess: (_data, newValue) => {
+      void queryClient.invalidateQueries({ queryKey: ['rcf'] });
+      onPendingChange(entry.did, newValue.trim());
+      setEditing(false);
+      setSavedFlash(true);
+      setTimeout(() => setSavedFlash(false), 1800);
+      toastOk(`Saved — calls to ${fmt(entry.did)} now ring ${fmt(newValue.trim())}`);
+    },
+    onError: (error: Error) => toastErr(error.message ?? 'Failed to save'),
+  });
+
+  const handleSave = useCallback(() => {
+    const trimmed = pendingValue.trim();
+    if (!trimmed) { toastErr('Destination cannot be empty'); return; }
+    mutation.mutate(trimmed);
+  }, [pendingValue, mutation, toastErr]);
+
+  const handleCancel = useCallback(() => {
+    onPendingChange(entry.did, entry.forward_to);
+    setEditing(false);
+  }, [entry.did, entry.forward_to, onPendingChange]);
+
+  // Editing mode — inline input replaces the display number
+  if (editing && canEdit) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <input
+          type="tel"
+          value={pendingValue}
+          autoFocus
+          placeholder="+1XXXXXXXXXX"
+          disabled={mutation.isPending}
+          onChange={(e) => onPendingChange(entry.did, e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') { e.preventDefault(); handleSave(); }
+            if (e.key === 'Escape') handleCancel();
+          }}
+          style={{
+            width: '100%',
+            boxSizing: 'border-box',
+            fontSize: '1.3rem',
+            fontWeight: 700,
+            fontFamily: 'monospace',
+            letterSpacing: '0.02em',
+            padding: '10px 14px',
+            borderRadius: 10,
+            border: `1px solid ${isDirty ? 'rgba(74,222,128,0.6)' : 'rgba(74,222,128,0.3)'}`,
+            background: 'rgba(15,17,23,0.90)',
+            color: '#4ade80',
+            outline: 'none',
+            boxShadow: isDirty
+              ? '0 0 0 3px rgba(74,222,128,0.14)'
+              : '0 0 0 2px rgba(74,222,128,0.08)',
+            opacity: mutation.isPending ? 0.55 : 1,
+            transition: 'border-color 0.15s, box-shadow 0.15s',
+          }}
+        />
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button
+            type="button"
+            disabled={!isDirty || mutation.isPending}
+            onMouseDown={(e) => { e.preventDefault(); handleSave(); }}
+            style={{
+              flex: 1,
+              padding: '8px 0',
+              borderRadius: 8,
+              border: 'none',
+              background: isDirty && !mutation.isPending
+                ? 'linear-gradient(135deg, #22c55e 0%, #16a34a 100%)'
+                : 'rgba(74,222,128,0.15)',
+              color: isDirty && !mutation.isPending ? '#fff' : 'rgba(74,222,128,0.4)',
+              fontSize: '0.78rem',
+              fontWeight: 700,
+              cursor: isDirty && !mutation.isPending ? 'pointer' : 'not-allowed',
+              fontFamily: 'inherit',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 6,
+              boxShadow: isDirty && !mutation.isPending ? '0 2px 10px rgba(34,197,94,0.35)' : 'none',
+              transition: 'background 0.15s, color 0.15s',
+              letterSpacing: '-0.01em',
+            }}
+          >
+            {mutation.isPending ? <Spinner size="xs" /> : 'Save'}
+          </button>
+          <button
+            type="button"
+            onMouseDown={(e) => { e.preventDefault(); handleCancel(); }}
+            style={{
+              padding: '8px 16px',
+              borderRadius: 8,
+              border: '1px solid rgba(255,255,255,0.08)',
+              background: 'rgba(255,255,255,0.04)',
+              color: '#64748b',
+              fontSize: '0.78rem',
+              fontWeight: 500,
+              cursor: 'pointer',
+              fontFamily: 'inherit',
+              transition: 'color 0.15s',
+            }}
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Display mode — the large green number, clickable to edit
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 10,
+        cursor: canEdit ? 'pointer' : 'default',
+        minWidth: 0,
+      }}
+      onMouseEnter={() => { if (canEdit) setHovered(true); }}
+      onMouseLeave={() => setHovered(false)}
+      onClick={() => { if (canEdit) setEditing(true); }}
+      title={canEdit ? 'Click to change forwarding destination' : undefined}
+    >
+      <span
+        style={{
+          fontSize: '1.32rem',
+          fontWeight: 800,
+          fontFamily: 'monospace',
+          letterSpacing: '0.02em',
+          color: savedFlash ? '#86efac' : '#4ade80',
+          textShadow: savedFlash
+            ? '0 0 16px rgba(74,222,128,0.45)'
+            : '0 0 12px rgba(74,222,128,0.22)',
+          transition: 'color 0.25s, text-shadow 0.25s',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+          flex: 1,
+          minWidth: 0,
+        }}
+      >
+        {fmt(entry.forward_to)}
+      </span>
+      {canEdit && (
+        <span
+          style={{
+            flexShrink: 0,
+            opacity: hovered ? 1 : 0,
+            transition: 'opacity 0.18s',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: 26,
+            height: 26,
+            borderRadius: 7,
+            background: hovered ? 'rgba(74,222,128,0.12)' : 'transparent',
+            border: hovered ? '1px solid rgba(74,222,128,0.24)' : '1px solid transparent',
+          }}
+        >
+          <svg
+            viewBox="0 0 16 16"
+            fill="none"
+            stroke="#4ade80"
+            strokeWidth={1.8}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            style={{ width: 12, height: 12 }}
+          >
+            <path d="M11.5 2.5a1.414 1.414 0 0 1 2 2L5 13H2v-3L11.5 2.5z" />
+          </svg>
+        </span>
+      )}
+    </div>
+  );
+}
+
+// ─── StatPill ─────────────────────────────────────────────────────────────────
+// A small info chip for the settings row at the bottom of the card.
+
+function StatPill({
+  icon,
+  label,
+  value,
+  onClick,
+  active,
+  clickable,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: string;
+  onClick?: () => void;
+  active?: boolean;
+  clickable?: boolean;
+}) {
+  const [hovered, setHovered] = useState(false);
+  const isInteractive = clickable && !!onClick;
+
+  return (
+    <button
+      type="button"
+      onClick={isInteractive ? onClick : undefined}
+      disabled={!isInteractive}
+      onMouseEnter={() => { if (isInteractive) setHovered(true); }}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        gap: 3,
+        padding: '8px 10px',
+        borderRadius: 10,
+        border: active
+          ? '1px solid rgba(74,222,128,0.28)'
+          : `1px solid ${hovered && isInteractive ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.06)'}`,
+        background: active
+          ? 'rgba(74,222,128,0.08)'
+          : hovered && isInteractive
+          ? 'rgba(255,255,255,0.04)'
+          : 'rgba(255,255,255,0.02)',
+        cursor: isInteractive ? 'pointer' : 'default',
+        fontFamily: 'inherit',
+        transition: 'border-color 0.15s, background 0.15s',
+        flex: '1 1 0',
+        minWidth: 0,
+        outline: 'none',
+      }}
+    >
+      <span style={{ color: active ? '#4ade80' : '#475569', display: 'flex', alignItems: 'center' }}>
+        {icon}
+      </span>
+      <span
+        style={{
+          fontSize: '0.62rem',
+          fontWeight: 700,
+          color: active ? '#4ade80' : '#e2e8f0',
+          whiteSpace: 'nowrap',
+          letterSpacing: '0.01em',
+          lineHeight: 1.2,
+        }}
+      >
+        {value}
+      </span>
+      <span
+        style={{
+          fontSize: '0.55rem',
+          fontWeight: 600,
+          color: '#334155',
+          textTransform: 'uppercase',
+          letterSpacing: '0.08em',
+          whiteSpace: 'nowrap',
+        }}
+      >
+        {label}
+      </span>
+    </button>
+  );
+}
+
+// ─── CallerIdPill ─────────────────────────────────────────────────────────────
+// Clickable StatPill wired to the pass_caller_id toggle.
+
+function CallerIdPill({ entry, canEdit }: { entry: RcfEntry; canEdit: boolean }) {
+  // ALL hooks unconditionally at the top
   const queryClient = useQueryClient();
   const { toastOk, toastErr } = useToast();
 
@@ -37,7 +423,11 @@ function CardCallerIdToggle({ entry, canEdit }: { entry: RcfEntry; canEdit: bool
     mutationFn: (pass: boolean) => updateRcfPassCallerId(entry.id, pass),
     onSuccess: (_, pass) => {
       void queryClient.invalidateQueries({ queryKey: ['rcf'] });
-      toastOk(pass ? `Caller ID pass-through enabled for ${fmt(entry.did)}` : `Caller ID will show ${fmt(entry.did)} instead`);
+      toastOk(
+        pass
+          ? `Caller ID pass-through enabled for ${fmt(entry.did)}`
+          : `Caller ID will show ${fmt(entry.did)} instead`,
+      );
     },
     onError: (err: Error) => toastErr(err.message ?? 'Failed to update'),
   });
@@ -46,153 +436,34 @@ function CardCallerIdToggle({ entry, canEdit }: { entry: RcfEntry; canEdit: bool
   const pending = mutation.isPending;
 
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-      <button
-        type="button"
-        role="switch"
-        aria-checked={passthrough}
-        disabled={!canEdit || pending}
-        onClick={() => { if (canEdit && !pending) mutation.mutate(!passthrough); }}
-        title={canEdit ? (passthrough ? 'Showing original caller ID — click to show your DID' : 'Showing your DID — click to pass through original caller ID') : 'Caller ID setting'}
-        style={{
-          position: 'relative',
-          display: 'inline-flex',
-          alignItems: 'center',
-          width: 34,
-          height: 20,
-          borderRadius: 10,
-          border: `1px solid ${passthrough ? 'rgba(59,130,246,0.55)' : 'rgba(255,255,255,0.12)'}`,
-          background: passthrough
-            ? 'linear-gradient(135deg, rgba(59,130,246,0.5) 0%, rgba(59,130,246,0.35) 100%)'
-            : 'rgba(255,255,255,0.06)',
-          cursor: canEdit ? 'pointer' : 'not-allowed',
-          transition: 'background 0.2s, border-color 0.2s, box-shadow 0.2s',
-          flexShrink: 0,
-          padding: 0,
-          outline: 'none',
-          boxShadow: passthrough ? '0 0 6px rgba(59,130,246,0.3)' : 'none',
-          opacity: pending ? 0.5 : 1,
-        }}
-      >
-        <span
-          style={{
-            position: 'absolute',
-            left: passthrough ? 16 : 2,
-            width: 14,
-            height: 14,
-            borderRadius: '50%',
-            background: '#fff',
-            boxShadow: '0 1px 3px rgba(0,0,0,0.4)',
-            transition: 'left 0.2s ease',
-          }}
-        />
-      </button>
-      <span style={{ fontSize: '0.68rem', color: passthrough ? '#60a5fa' : '#475569', fontWeight: 500 }}>
-        {passthrough ? 'Caller ID: Pass-through' : 'Caller ID: Show DID'}
-      </span>
-    </div>
-  );
-}
-
-// ─── CardEnableToggle ─────────────────────────────────────────────────────────
-
-function CardEnableToggle({
-  entry,
-  canEdit,
-}: {
-  entry: RcfEntry;
-  canEdit: boolean;
-}) {
-  const queryClient = useQueryClient();
-  const { toastOk, toastErr } = useToast();
-
-  const mutation = useMutation({
-    mutationFn: (enabled: boolean) => updateRcfEnabled(entry.id, enabled),
-    onSuccess: (_, enabled) => {
-      void queryClient.invalidateQueries({ queryKey: ['rcf'] });
-      toastOk(enabled ? `${fmt(entry.did)} enabled` : `${fmt(entry.did)} disabled`);
-    },
-    onError: (err: Error) => toastErr(err.message ?? 'Failed to update'),
-  });
-
-  const enabled = entry.enabled;
-  const pending = mutation.isPending;
-
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-      <button
-        type="button"
-        role="switch"
-        aria-checked={enabled}
-        disabled={!canEdit || pending}
-        onClick={() => { if (canEdit && !pending) mutation.mutate(!enabled); }}
-        title={canEdit ? (enabled ? 'Click to disable' : 'Click to enable') : undefined}
-        style={{
-          position: 'relative',
-          display: 'inline-flex',
-          alignItems: 'center',
-          width: 40,
-          height: 22,
-          borderRadius: 11,
-          border: `1px solid ${enabled ? 'rgba(59,130,246,0.55)' : 'rgba(255,255,255,0.12)'}`,
-          background: enabled
-            ? 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)'
-            : 'rgba(255,255,255,0.06)',
-          cursor: canEdit && !pending ? 'pointer' : 'not-allowed',
-          transition: 'background 0.22s ease, border-color 0.22s ease, box-shadow 0.22s',
-          opacity: pending ? 0.55 : 1,
-          flexShrink: 0,
-          padding: 0,
-          outline: 'none',
-          boxShadow: enabled ? '0 0 10px rgba(59,130,246,0.38)' : 'none',
-        }}
-      >
-        <span
-          style={{
-            position: 'absolute',
-            left: enabled ? 20 : 2,
-            width: 16,
-            height: 16,
-            borderRadius: '50%',
-            background: '#fff',
-            boxShadow: '0 1px 4px rgba(0,0,0,0.45)',
-            transition: 'left 0.22s ease',
-          }}
-        />
-      </button>
-      <span
-        style={{
-          fontSize: '0.72rem',
-          fontWeight: 700,
-          color: enabled ? '#60a5fa' : '#475569',
-          textTransform: 'uppercase',
-          letterSpacing: '0.05em',
-          transition: 'color 0.2s',
-        }}
-      >
-        {pending ? '…' : enabled ? 'Active' : 'Disabled'}
-      </span>
-    </div>
+    <StatPill
+      icon={
+        <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" style={{ width: 13, height: 13 }}>
+          <path d="M2 3a1.5 1.5 0 0 1 1.5-1.5h1.75a.5.5 0 0 1 .47.33l1 3a.5.5 0 0 1-.25.61L5 6.2a7.5 7.5 0 0 0 2.8 2.8l1.37-1.5a.5.5 0 0 1 .61-.25l3 1a.5.5 0 0 1 .32.47V10.5A1.5 1.5 0 0 1 11.5 12H11C5.477 12 1 7.523 1 2V2" />
+        </svg>
+      }
+      label="Caller ID"
+      value={passthrough ? 'Pass-thru' : 'Show DID'}
+      active={passthrough}
+      clickable={canEdit && !pending}
+      onClick={() => { if (canEdit && !pending) mutation.mutate(!passthrough); }}
+    />
   );
 }
 
 // ─── RcfNameField ─────────────────────────────────────────────────────────────
+// Small editable label above the DID number. Only shown when a name exists,
+// or when canEdit is true (shows placeholder).
 
-function RcfNameField({
-  entry,
-  canEdit,
-}: {
-  entry: RcfEntry;
-  canEdit: boolean;
-}) {
+function RcfNameField({ entry, canEdit }: { entry: RcfEntry; canEdit: boolean }) {
+  // ALL hooks unconditionally at the top
   const queryClient = useQueryClient();
   const { toastErr } = useToast();
-
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(entry.name ?? '');
-
-  // Sync when external data changes (only when not actively editing)
   const [prevName, setPrevName] = useState(entry.name);
+
+  // Sync external changes when not editing
   if (entry.name !== prevName) {
     setPrevName(entry.name);
     if (!editing) setValue(entry.name ?? '');
@@ -210,8 +481,7 @@ function RcfNameField({
   function handleSave() {
     const trimmed = value.trim();
     const newName = trimmed === '' ? null : trimmed;
-    const currentName = entry.name ?? null;
-    if (newName === currentName) { setEditing(false); return; }
+    if (newName === (entry.name ?? null)) { setEditing(false); return; }
     mutation.mutate(newName);
   }
 
@@ -220,30 +490,35 @@ function RcfNameField({
     setEditing(false);
   }
 
+  // Read-only: only show if there is a name
   if (!canEdit) {
     if (!entry.name) return null;
     return (
-      <div
+      <span
         style={{
-          fontSize: '1rem',
-          fontWeight: 700,
-          color: '#e2e8f0',
-          letterSpacing: '-0.01em',
-          marginBottom: 4,
-          lineHeight: 1.3,
+          fontSize: '0.70rem',
+          fontWeight: 600,
+          color: '#64748b',
+          letterSpacing: '0.03em',
+          whiteSpace: 'nowrap',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          display: 'block',
         }}
       >
         {entry.name}
-      </div>
+      </span>
     );
   }
 
   if (editing) {
     return (
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4, flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
         <input
           type="text"
           value={value}
+          autoFocus
+          placeholder="Add label..."
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === 'Enter') { e.preventDefault(); handleSave(); }
@@ -251,24 +526,19 @@ function RcfNameField({
           }}
           onBlur={handleCancel}
           disabled={mutation.isPending}
-          autoFocus
-          placeholder="Add label..."
           style={{
             flex: 1,
-            minWidth: 80,
-            fontSize: '0.95rem',
-            fontWeight: 700,
-            color: '#e2e8f0',
-            letterSpacing: '-0.01em',
-            lineHeight: 1.3,
+            fontSize: '0.70rem',
+            fontWeight: 600,
+            color: '#94a3b8',
             background: 'rgba(15,17,23,0.85)',
-            border: '1px solid rgba(59,130,246,0.55)',
-            borderRadius: 7,
+            border: '1px solid rgba(74,222,128,0.40)',
+            borderRadius: 5,
             outline: 'none',
-            padding: '4px 9px',
+            padding: '3px 7px',
             fontFamily: 'inherit',
             opacity: mutation.isPending ? 0.5 : 1,
-            boxShadow: '0 0 0 3px rgba(59,130,246,0.12)',
+            letterSpacing: '0.03em',
           }}
         />
         <button
@@ -276,194 +546,189 @@ function RcfNameField({
           onMouseDown={(e) => { e.preventDefault(); handleSave(); }}
           disabled={mutation.isPending}
           style={{
-            fontSize: '0.65rem',
+            fontSize: '0.60rem',
             fontWeight: 700,
-            padding: '5px 11px',
-            borderRadius: 5,
+            padding: '3px 9px',
+            borderRadius: 4,
             border: 'none',
-            background: mutation.isPending
-              ? 'rgba(59,130,246,0.3)'
-              : 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
+            background: 'linear-gradient(135deg, #22c55e 0%, #16a34a 100%)',
             color: '#fff',
             cursor: mutation.isPending ? 'not-allowed' : 'pointer',
-            flexShrink: 0,
             lineHeight: 1,
             opacity: mutation.isPending ? 0.6 : 1,
-          }}
-        >
-          {mutation.isPending ? '…' : 'Save'}
-        </button>
-        <button
-          type="button"
-          onMouseDown={(e) => { e.preventDefault(); handleCancel(); }}
-          style={{
-            fontSize: '0.65rem',
-            fontWeight: 500,
-            padding: '5px 9px',
-            borderRadius: 5,
-            border: 'none',
-            background: 'transparent',
-            color: '#718096',
-            cursor: 'pointer',
             flexShrink: 0,
-            lineHeight: 1,
           }}
         >
-          Cancel
+          {mutation.isPending ? '…' : 'OK'}
         </button>
       </div>
     );
   }
 
   return (
-    <div
+    <span
       onClick={() => setEditing(true)}
-      title="Click to set a name for this number"
+      title="Click to set a label for this number"
       style={{
-        display: 'block',
-        width: '100%',
-        fontSize: value.trim() ? '0.95rem' : '0.82rem',
-        fontWeight: value.trim() ? 700 : 400,
-        color: value.trim() ? '#e2e8f0' : '#3b4560',
+        fontSize: '0.70rem',
+        fontWeight: 600,
+        color: value.trim() ? '#64748b' : '#253042',
         fontStyle: value.trim() ? 'normal' : 'italic',
-        letterSpacing: value.trim() ? '-0.01em' : 'normal',
-        lineHeight: 1.3,
-        padding: '3px 0',
+        letterSpacing: '0.03em',
         cursor: 'pointer',
-        marginBottom: 4,
-        borderBottom: '1px dashed rgba(59,130,246,0.22)',
+        whiteSpace: 'nowrap',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        display: 'block',
+        paddingBottom: 1,
+        borderBottom: '1px dashed rgba(74,222,128,0.18)',
+        transition: 'color 0.15s, border-color 0.15s',
       }}
     >
       {value.trim() || 'Add label...'}
-    </div>
+    </span>
   );
 }
 
 // ─── RcfCard ──────────────────────────────────────────────────────────────────
 
 export function RcfCard({ entry, pendingValue, onPendingChange }: RcfCardProps) {
+  // ALL hooks unconditionally at the top (rules-of-hooks)
   const queryClient = useQueryClient();
   const { toastOk, toastErr } = useToast();
   const { user } = useAuth();
+  const [cardHovered, setCardHovered] = useState(false);
+
   const canEdit = user?.role !== 'readonly';
 
-  const [savedFlash, setSavedFlash] = useState(false);
-  const [hovered, setHovered] = useState(false);
-  const [fwdFocused, setFwdFocused] = useState(false);
-
-  const isDirty = pendingValue !== entry.forward_to && pendingValue !== '';
-  const isEmpty = pendingValue.trim() === '';
-
-  const mutation = useMutation({
-    mutationFn: (newValue: string) => updateRcfForwardTo(entry.did, newValue.trim()),
-    onSuccess: (_data, newValue) => {
+  const enableMutation = useMutation({
+    mutationFn: (enabled: boolean) => updateRcfEnabled(entry.id, enabled),
+    onSuccess: (_, enabled) => {
       void queryClient.invalidateQueries({ queryKey: ['rcf'] });
-      onPendingChange(entry.did, newValue.trim());
-      setSavedFlash(true);
-      setTimeout(() => setSavedFlash(false), 1800);
-      toastOk(`Saved — calls to ${fmt(entry.did)} now ring ${fmt(newValue.trim())}`);
+      toastOk(enabled ? `${fmt(entry.did)} enabled` : `${fmt(entry.did)} disabled`);
     },
-    onError: (error: Error) => toastErr(error.message ?? 'Failed to save'),
+    onError: (err: Error) => toastErr(err.message ?? 'Failed to update'),
   });
 
-  const handleSave = useCallback(() => {
-    const trimmed = pendingValue.trim();
-    if (!trimmed) {
-      toastErr('Destination cannot be empty');
-      return;
-    }
-    mutation.mutate(trimmed);
-  }, [pendingValue, mutation, toastErr]);
+  const enabled = entry.enabled;
+  const enablePending = enableMutation.isPending;
 
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLInputElement>) => {
-      if (e.key === 'Enter') handleSave();
-    },
-    [handleSave],
-  );
+  // ── Layout constants ──────────────────────────────────────────────────────────
+  const GREEN = '#4ade80';
+  const GREEN_DIM = 'rgba(74,222,128,0.22)';
 
   return (
     <div
       style={{
         position: 'relative',
-        background: 'rgba(19, 21, 29, 0.72)',
-        backdropFilter: 'blur(10px)',
-        WebkitBackdropFilter: 'blur(10px)',
+        background: 'linear-gradient(160deg, rgba(22,26,37,0.96) 0%, rgba(15,17,23,0.98) 100%)',
+        backdropFilter: 'blur(12px)',
+        WebkitBackdropFilter: 'blur(12px)',
         border: `1px solid ${
-          savedFlash
-            ? 'rgba(59,130,246,0.5)'
-            : hovered
-            ? 'rgba(59,130,246,0.30)'
-            : 'rgba(59,130,246,0.12)'
+          cardHovered
+            ? 'rgba(74,222,128,0.22)'
+            : enabled
+            ? 'rgba(74,222,128,0.12)'
+            : 'rgba(42,47,69,0.6)'
         }`,
-        borderRadius: 18,
-        padding: '24px 24px 22px',
+        borderRadius: 20,
         overflow: 'hidden',
         transition: 'border-color 0.25s ease, box-shadow 0.25s ease',
-        boxShadow: hovered
-          ? '0 0 0 1px rgba(59,130,246,0.14), 0 16px 40px -10px rgba(0,0,0,0.55)'
-          : savedFlash
-          ? '0 0 20px rgba(59,130,246,0.25), 0 4px 20px rgba(0,0,0,0.35)'
-          : '0 4px 20px -4px rgba(0,0,0,0.4)',
+        boxShadow: cardHovered
+          ? `0 0 0 1px ${GREEN_DIM}, 0 20px 48px -12px rgba(0,0,0,0.60), 0 0 32px -8px rgba(74,222,128,0.08)`
+          : '0 4px 24px -6px rgba(0,0,0,0.50)',
       }}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
+      onMouseEnter={() => setCardHovered(true)}
+      onMouseLeave={() => setCardHovered(false)}
     >
-      {/* Top accent line — animates brighter on hover and save */}
+      {/* Top accent line — green tint, brighter on hover */}
       <div
         style={{
           position: 'absolute',
           top: 0,
-          left: 28,
-          right: 28,
-          height: 2,
-          background: 'linear-gradient(90deg, transparent, rgba(59,130,246,0.75), transparent)',
-          opacity: savedFlash ? 1 : hovered ? 0.7 : 0.25,
+          left: 32,
+          right: 32,
+          height: 1,
+          background: `linear-gradient(90deg, transparent, ${GREEN}55, transparent)`,
+          opacity: cardHovered ? 1 : 0.35,
           transition: 'opacity 0.25s ease',
-          borderRadius: '0 0 2px 2px',
         }}
       />
 
-      {/* Card header: name (editable) + DID + enable toggle */}
+      {/* Ambient glow — subtle green radial in the top-left corner */}
       <div
         style={{
-          display: 'flex',
-          alignItems: 'flex-start',
-          justifyContent: 'space-between',
-          gap: 12,
-          marginBottom: 20,
+          position: 'absolute',
+          top: -30,
+          left: -30,
+          width: 160,
+          height: 160,
+          borderRadius: '50%',
+          background: `radial-gradient(circle, rgba(74,222,128,0.06) 0%, transparent 70%)`,
+          pointerEvents: 'none',
         }}
-      >
-        <div style={{ minWidth: 0, flex: 1 }}>
-          {/* Editable name label */}
-          <RcfNameField entry={entry} canEdit={canEdit} />
+      />
 
-          {/* Customer label for admin multi-customer view */}
-          {entry.customer_name && user?.role === 'admin' && (
-            <div
-              style={{
-                fontSize: '0.68rem',
-                fontWeight: 600,
-                color: '#3b82f6',
-                opacity: 0.7,
-                marginBottom: 6,
-                letterSpacing: '0.04em',
-                textTransform: 'uppercase',
-              }}
-            >
-              {entry.customer_name}
-            </div>
-          )}
+      {/* ── Card body ─────────────────────────────────────────────────────────── */}
+      <div style={{ padding: '20px 22px 18px', display: 'flex', flexDirection: 'column', gap: 0 }}>
 
-          {/* DID — prominent monospace */}
+        {/* ── Row 1: Status badge + enable toggle ─────────────────────────────── */}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            marginBottom: 16,
+          }}
+        >
+          <StatusBadge enabled={enabled} pending={enablePending} />
+
+          {/* Toggle — right side, small and unobtrusive */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {entry.customer_name && user?.role === 'admin' && (
+              <span
+                style={{
+                  fontSize: '0.60rem',
+                  fontWeight: 700,
+                  color: '#475569',
+                  background: 'rgba(74,222,128,0.07)',
+                  border: '1px solid rgba(74,222,128,0.14)',
+                  borderRadius: 5,
+                  padding: '2px 7px',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.07em',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {entry.customer_name}
+              </span>
+            )}
+            <GreenToggle
+              checked={enabled}
+              disabled={!canEdit}
+              pending={enablePending}
+              onChange={() => { if (canEdit && !enablePending) enableMutation.mutate(!enabled); }}
+              title={canEdit ? (enabled ? 'Click to disable' : 'Click to enable') : undefined}
+            />
+          </div>
+        </div>
+
+        {/* ── Row 2: Source DID ───────────────────────────────────────────────── */}
+        <div style={{ marginBottom: 14 }}>
+          {/* Optional label above the DID */}
+          <div style={{ marginBottom: 4 }}>
+            <RcfNameField entry={entry} canEdit={canEdit} />
+          </div>
+
+          {/* The DID number — large, primary text */}
           <div
             style={{
-              fontSize: '1.15rem',
-              fontWeight: 700,
-              color: '#e2e8f0',
-              lineHeight: 1.25,
+              fontSize: '1.45rem',
+              fontWeight: 800,
               fontFamily: 'monospace',
-              letterSpacing: '0.02em',
+              letterSpacing: '0.01em',
+              color: '#e2e8f0',
+              lineHeight: 1.15,
               whiteSpace: 'nowrap',
               overflow: 'hidden',
               textOverflow: 'ellipsis',
@@ -471,172 +736,120 @@ export function RcfCard({ entry, pendingValue, onPendingChange }: RcfCardProps) 
           >
             {fmt(entry.did)}
           </div>
-          <div
-            style={{
-              fontSize: '0.68rem',
-              fontFamily: 'monospace',
-              color: '#334155',
-              marginTop: 3,
-              letterSpacing: '0.01em',
-            }}
-          >
-            {entry.did}
-          </div>
         </div>
 
-        {/* Enable toggle — top right */}
-        <div style={{ flexShrink: 0, marginTop: 2 }}>
-          <CardEnableToggle entry={entry} canEdit={canEdit} />
-        </div>
-      </div>
-
-      {/* Forward-to field */}
-      <div>
-        <label
-          htmlFor={`rcf-fwd-${entry.id}`}
+        {/* ── Row 3: Routing arrow divider ────────────────────────────────────── */}
+        <div
           style={{
             display: 'flex',
             alignItems: 'center',
-            gap: 5,
-            fontSize: '0.62rem',
-            fontWeight: 700,
-            color: '#475569',
-            textTransform: 'uppercase',
-            letterSpacing: '0.1em',
-            marginBottom: 8,
+            gap: 8,
+            marginBottom: 10,
           }}
         >
-          <svg
-            viewBox="0 0 16 16"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth={1.8}
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            style={{ width: 11, height: 11, color: '#3b82f6', opacity: 0.7 }}
-          >
-            <path d="M14 10c0 .74-.16 1.44-.45 2.07C12.8 13.8 11.01 15 9 15H3a2 2 0 0 1-2-2V3a2 2 0 0 1 2-2h1.5" />
-            <path d="M14 6V2h-4" />
-            <path d="M10 6 14 2" />
-          </svg>
-          Forward Calls To
-        </label>
-
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <input
-            id={`rcf-fwd-${entry.id}`}
-            type="tel"
-            value={pendingValue}
-            placeholder="+1XXXXXXXXXX"
-            onChange={(e) => onPendingChange(entry.did, e.target.value)}
-            onKeyDown={handleKeyDown}
-            onFocus={() => setFwdFocused(true)}
-            onBlur={() => setFwdFocused(false)}
-            disabled={mutation.isPending || !canEdit}
+          {/* Left rule */}
+          <div
             style={{
               flex: 1,
-              minWidth: 0,
-              fontSize: '0.9rem',
-              padding: '9px 13px',
-              borderRadius: 9,
-              fontFamily: 'monospace',
-              letterSpacing: '0.02em',
-              border: `1px solid ${
-                savedFlash
-                  ? 'rgba(59,130,246,0.6)'
-                  : isDirty || fwdFocused
-                  ? 'rgba(59,130,246,0.5)'
-                  : 'rgba(59,130,246,0.15)'
-              }`,
-              background: 'rgba(15,17,23,0.75)',
-              color: '#e2e8f0',
-              outline: 'none',
-              transition: 'border-color 0.2s, box-shadow 0.2s',
-              boxShadow: savedFlash
-                ? '0 0 0 3px rgba(59,130,246,0.18)'
-                : isDirty || fwdFocused
-                ? '0 0 0 3px rgba(59,130,246,0.12)'
-                : 'none',
-              opacity: mutation.isPending || !canEdit ? 0.6 : 1,
+              height: 1,
+              background: 'linear-gradient(90deg, transparent, rgba(74,222,128,0.22))',
             }}
           />
 
-          {canEdit && (
-            <button
-              type="button"
-              disabled={!isDirty || isEmpty || mutation.isPending}
-              onClick={handleSave}
+          {/* Arrow + label */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 5,
+              padding: '3px 10px',
+              borderRadius: 20,
+              background: 'rgba(74,222,128,0.06)',
+              border: '1px solid rgba(74,222,128,0.14)',
+              flexShrink: 0,
+            }}
+          >
+            <svg
+              viewBox="0 0 18 10"
+              fill="none"
+              style={{ width: 18, height: 10 }}
+            >
+              {/* Arrow shaft */}
+              <line x1="1" y1="5" x2="14" y2="5" stroke={GREEN} strokeWidth={1.5} strokeLinecap="round" />
+              {/* Arrowhead */}
+              <path d="M11 2l3 3-3 3" stroke={GREEN} strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" fill="none" />
+            </svg>
+            <span
               style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 5,
-                fontSize: '0.75rem',
+                fontSize: '0.55rem',
                 fontWeight: 700,
-                padding: '9px 16px',
-                borderRadius: 9,
-                border: 'none',
-                background:
-                  isDirty && !isEmpty && !mutation.isPending
-                    ? 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)'
-                    : 'rgba(59,130,246,0.18)',
-                color: isDirty && !isEmpty && !mutation.isPending ? '#fff' : 'rgba(255,255,255,0.35)',
-                cursor: isDirty && !isEmpty && !mutation.isPending ? 'pointer' : 'not-allowed',
-                flexShrink: 0,
-                lineHeight: 1,
-                transition: 'background 0.18s, color 0.18s',
-                boxShadow:
-                  isDirty && !isEmpty && !mutation.isPending
-                    ? '0 2px 10px rgba(59,130,246,0.35)'
-                    : 'none',
+                color: 'rgba(74,222,128,0.65)',
+                textTransform: 'uppercase',
+                letterSpacing: '0.12em',
+                whiteSpace: 'nowrap',
               }}
             >
-              {mutation.isPending ? <Spinner size="xs" /> : 'Save'}
-            </button>
-          )}
+              Forwards to
+            </span>
+          </div>
+
+          {/* Right rule */}
+          <div
+            style={{
+              flex: 1,
+              height: 1,
+              background: 'linear-gradient(90deg, rgba(74,222,128,0.22), transparent)',
+            }}
+          />
         </div>
 
-        {/* Caller ID toggle + info */}
-        <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <CardCallerIdToggle entry={entry} canEdit={canEdit} />
-          <InfoNote>
-            Ring timeout: {entry.ring_timeout != null ? `${entry.ring_timeout}s` : '30s'}
-          </InfoNote>
+        {/* ── Row 4: Forwarding destination ───────────────────────────────────── */}
+        <div style={{ marginBottom: 20 }}>
+          <ForwardToDisplay
+            entry={entry}
+            pendingValue={pendingValue}
+            canEdit={canEdit}
+            onPendingChange={onPendingChange}
+          />
+        </div>
+
+        {/* ── Row 5: Settings stat pills ──────────────────────────────────────── */}
+        <div
+          style={{
+            display: 'flex',
+            gap: 6,
+            paddingTop: 14,
+            borderTop: '1px solid rgba(255,255,255,0.04)',
+          }}
+        >
+          {/* Caller ID pill */}
+          <CallerIdPill entry={entry} canEdit={canEdit} />
+
+          {/* Ring timeout pill */}
+          <StatPill
+            icon={
+              <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" style={{ width: 13, height: 13 }}>
+                <circle cx="7" cy="7" r="5.5" />
+                <path d="M7 4v3l1.8 1.8" />
+              </svg>
+            }
+            label="Timeout"
+            value={entry.ring_timeout != null ? `${entry.ring_timeout}s` : '30s'}
+          />
+
+          {/* Failover pill */}
+          <StatPill
+            icon={
+              <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" style={{ width: 13, height: 13 }}>
+                <path d="M7 1v3l2-2M9 2a5.5 5.5 0 1 1-4.5 0" />
+              </svg>
+            }
+            label="Failover"
+            value={entry.failover_to ? fmt(entry.failover_to) : 'None'}
+            active={!!entry.failover_to}
+          />
         </div>
       </div>
-    </div>
-  );
-}
-
-function InfoNote({ children }: { children: React.ReactNode }) {
-  return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 6,
-        fontSize: '0.71rem',
-        color: '#475569',
-      }}
-    >
-      <span
-        style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          width: 14,
-          height: 14,
-          borderRadius: '50%',
-          border: '1px solid rgba(59,130,246,0.25)',
-          fontSize: '0.52rem',
-          fontWeight: 700,
-          flexShrink: 0,
-          color: '#3b82f6',
-          opacity: 0.65,
-        }}
-      >
-        i
-      </span>
-      <span>{children}</span>
     </div>
   );
 }
