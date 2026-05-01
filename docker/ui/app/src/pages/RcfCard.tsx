@@ -426,14 +426,13 @@ function StatPill({
   );
 }
 
-// ─── CallerIdRow ──────────────────────────────────────────────────────────────
-// Full-width caller ID setting with clear description and toggle.
+// ─── CallerIdPill ─────────────────────────────────────────────────────────────
+// Clickable StatPill wired to the pass_caller_id toggle.
 
-function CallerIdRow({ entry, canEdit }: { entry: RcfEntry; canEdit: boolean }) {
+function CallerIdPill({ entry, canEdit }: { entry: RcfEntry; canEdit: boolean }) {
   // ALL hooks unconditionally at the top
   const queryClient = useQueryClient();
   const { toastOk, toastErr } = useToast();
-  const [hovered, setHovered] = useState(false);
 
   const mutation = useMutation({
     mutationFn: (pass: boolean) => updateRcfPassCallerId(entry.id, pass),
@@ -450,127 +449,21 @@ function CallerIdRow({ entry, canEdit }: { entry: RcfEntry; canEdit: boolean }) 
 
   const passthrough = entry.pass_caller_id;
   const pending = mutation.isPending;
-  const interactive = canEdit && !pending;
 
   return (
-    <button
-      type="button"
-      disabled={!interactive}
-      onClick={() => { if (interactive) mutation.mutate(!passthrough); }}
-      onMouseEnter={() => { if (interactive) setHovered(true); }}
-      onMouseLeave={() => setHovered(false)}
-      style={{
-        width: '100%',
-        display: 'flex',
-        alignItems: 'center',
-        gap: 12,
-        padding: '12px 14px',
-        marginBottom: 10,
-        borderRadius: 10,
-        border: passthrough
-          ? '1px solid rgba(74,222,128,0.25)'
-          : `1px solid ${hovered && interactive ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.06)'}`,
-        background: passthrough
-          ? 'rgba(74,222,128,0.06)'
-          : hovered && interactive
-          ? 'rgba(255,255,255,0.03)'
-          : 'rgba(255,255,255,0.015)',
-        cursor: interactive ? 'pointer' : 'default',
-        fontFamily: 'inherit',
-        textAlign: 'left',
-        outline: 'none',
-        transition: 'border-color 0.15s, background 0.15s',
-        borderTop: '1px solid rgba(255,255,255,0.04)',
-      }}
-    >
-      {/* Icon */}
-      <div
-        style={{
-          width: 32,
-          height: 32,
-          borderRadius: 8,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          background: passthrough ? 'rgba(74,222,128,0.12)' : 'rgba(71,85,105,0.15)',
-          border: passthrough ? '1px solid rgba(74,222,128,0.2)' : '1px solid rgba(71,85,105,0.2)',
-          flexShrink: 0,
-          transition: 'background 0.15s, border-color 0.15s',
-        }}
-      >
-        <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round"
-          style={{ width: 15, height: 15, color: passthrough ? '#4ade80' : '#475569' }}>
+    <StatPill
+      icon={
+        <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" style={{ width: 13, height: 13 }}>
           <path d="M2 3a1.5 1.5 0 0 1 1.5-1.5h1.75a.5.5 0 0 1 .47.33l1 3a.5.5 0 0 1-.25.61L5 6.2a7.5 7.5 0 0 0 2.8 2.8l1.37-1.5a.5.5 0 0 1 .61-.25l3 1a.5.5 0 0 1 .32.47V10.5A1.5 1.5 0 0 1 11.5 12H11C5.477 12 1 7.523 1 2V2" />
         </svg>
-      </div>
-
-      {/* Text */}
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
-          <span style={{
-            fontSize: '0.78rem',
-            fontWeight: 700,
-            color: passthrough ? '#4ade80' : '#e2e8f0',
-            transition: 'color 0.15s',
-          }}>
-            {passthrough ? 'Caller ID: Pass-through' : 'Caller ID: Show DID'}
-          </span>
-          {interactive && (
-            <span style={{
-              fontSize: '0.58rem',
-              fontWeight: 600,
-              color: passthrough ? 'rgba(74,222,128,0.45)' : 'rgba(148,163,184,0.45)',
-              border: passthrough ? '1px solid rgba(74,222,128,0.15)' : '1px solid rgba(148,163,184,0.15)',
-              borderRadius: 4,
-              padding: '1px 5px',
-              letterSpacing: '0.03em',
-            }}>
-              click to change
-            </span>
-          )}
-        </div>
-        <span style={{
-          fontSize: '0.7rem',
-          color: '#475569',
-          lineHeight: 1.4,
-        }}>
-          {passthrough
-            ? "The original caller's number is shown to the recipient"
-            : `Your DID (${fmt(entry.did)}) is shown to the recipient`
-          }
-        </span>
-      </div>
-
-      {/* Toggle indicator */}
-      <div
-        style={{
-          width: 36,
-          height: 20,
-          borderRadius: 10,
-          background: passthrough
-            ? 'linear-gradient(135deg, #22c55e, #4ade80)'
-            : 'rgba(71,85,105,0.35)',
-          position: 'relative',
-          flexShrink: 0,
-          transition: 'background 0.2s',
-          border: passthrough ? '1px solid rgba(74,222,128,0.3)' : '1px solid rgba(71,85,105,0.3)',
-        }}
-      >
-        <div
-          style={{
-            position: 'absolute',
-            top: 2,
-            left: passthrough ? 17 : 2,
-            width: 14,
-            height: 14,
-            borderRadius: '50%',
-            background: '#fff',
-            boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
-            transition: 'left 0.2s',
-          }}
-        />
-      </div>
-    </button>
+      }
+      label="Caller ID"
+      value={passthrough ? 'Pass-thru' : 'Show DID'}
+      hint={canEdit ? 'click to toggle' : undefined}
+      active={passthrough}
+      clickable={canEdit && !pending}
+      onClick={() => { if (canEdit && !pending) mutation.mutate(!passthrough); }}
+    />
   );
 }
 
@@ -936,17 +829,17 @@ export function RcfCard({ entry, pendingValue, onPendingChange }: RcfCardProps) 
           />
         </div>
 
-        {/* ── Row 5: Caller ID setting (full-width) ────────────────────────── */}
-        <CallerIdRow entry={entry} canEdit={canEdit} />
-
-        {/* ── Row 6: Timeout + Failover stat pills ──────────────────────────── */}
+        {/* ── Row 5: Settings stat pills ──────────────────────────────────────── */}
         <div
           style={{
             display: 'flex',
             gap: 6,
-            paddingTop: 10,
+            paddingTop: 14,
+            borderTop: '1px solid rgba(255,255,255,0.04)',
           }}
         >
+          {/* Caller ID pill */}
+          <CallerIdPill entry={entry} canEdit={canEdit} />
 
           {/* Ring timeout pill */}
           <StatPill
