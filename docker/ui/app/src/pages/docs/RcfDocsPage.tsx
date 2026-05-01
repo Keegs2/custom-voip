@@ -89,6 +89,49 @@ function ManagingRcfSection() {
   );
 }
 
+/* ─── DID Management ────────────────────────────────────── */
+
+function DIDManagementSection() {
+  return (
+    <AccordionSection
+      id="did-management"
+      accent={GREEN}
+      icon={<Phone size={18} />}
+      title="DID Management"
+      subtitle="Request new numbers, view your inventory, and release numbers you no longer need."
+    >
+      <H3>Your numbers</H3>
+      <P>
+        The <strong style={{ color: C.text }}>Your Numbers</strong> tab lists every DID assigned to your account along with its current status. Active numbers are ready to forward calls.
+      </P>
+
+      <H3>Requesting a new number</H3>
+      <P>
+        Open the <strong style={{ color: C.text }}>Available Numbers</strong> tab, filter by area code, exchange, or state, then click <strong style={{ color: C.text }}>Request</strong> next to any number you want. Each listing shows the city, state, and rate center.
+      </P>
+
+      <H3>Pending requests</H3>
+      <P>
+        Requested numbers appear in the <strong style={{ color: C.text }}>Pending</strong> tab while awaiting admin approval. Once approved, the number moves into your active inventory automatically.
+      </P>
+
+      <H3>Releasing a number</H3>
+      <P>
+        To return a number you no longer need, click <strong style={{ color: C.text }}>Release</strong> on the number's card. It is removed from your account and returned to the available pool immediately.
+      </P>
+
+      <H3>Filtering available numbers</H3>
+      <P>
+        Use the filter bar to narrow results by NPA (area code), NXX (exchange), state, or keyword. Filters can be combined to quickly find numbers in a specific city or region.
+      </P>
+
+      <Callout accent={GREEN}>
+        Requested numbers require admin approval before they appear in your RCF lineup. Contact your administrator if a request has been pending for an extended period.
+      </Callout>
+    </AccordionSection>
+  );
+}
+
 /* ─── Need Help? ─────────────────────────────────────────── */
 
 function SupportSection() {
@@ -144,6 +187,7 @@ export function RcfDocsPage() {
         <div style={{ maxWidth: 1080, margin: '0 auto' }}>
           <GettingStartedSection />
           <ManagingRcfSection />
+          <DIDManagementSection />
           <SupportSection />
         </div>
       </div>
