@@ -581,27 +581,35 @@ function RcfNameField({ entry, canEdit }: { entry: RcfEntry; canEdit: boolean })
     );
   }
 
+  const hasName = !!value.trim();
+
   return (
     <span
       onClick={() => setEditing(true)}
-      title="Click to set a label for this number"
+      title="Click to edit this label"
       style={{
         fontSize: '0.70rem',
         fontWeight: 600,
-        color: value.trim() ? '#64748b' : '#253042',
-        fontStyle: value.trim() ? 'normal' : 'italic',
+        color: hasName ? '#64748b' : '#334155',
+        fontStyle: hasName ? 'normal' : 'italic',
         letterSpacing: '0.03em',
         cursor: 'pointer',
         whiteSpace: 'nowrap',
         overflow: 'hidden',
         textOverflow: 'ellipsis',
-        display: 'block',
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 5,
         paddingBottom: 1,
         borderBottom: '1px dashed rgba(74,222,128,0.18)',
         transition: 'color 0.15s, border-color 0.15s',
       }}
     >
-      {value.trim() || 'Add label...'}
+      {hasName ? value.trim() : 'Name this line — click to edit'}
+      <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth={1.4} strokeLinecap="round" strokeLinejoin="round"
+        style={{ width: 10, height: 10, color: 'rgba(74,222,128,0.4)', flexShrink: 0 }}>
+        <path d="M8.5 1.5l2 2L4 10H2v-2L8.5 1.5z" />
+      </svg>
     </span>
   );
 }
