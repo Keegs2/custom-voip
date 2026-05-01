@@ -288,6 +288,126 @@ function RcfForwardInput({
   );
 }
 
+// Inline editable max_channels field for a single RCF row
+function RcfMaxChannelsInput({
+  entry,
+  customerId,
+}: {
+  entry: RcfEntry;
+  customerId: number;
+}) {
+  const qc = useQueryClient();
+  const { toastOk, toastErr } = useToast();
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(String(entry.max_channels));
+
+  // Sync when entry refreshes (not while editing)
+  const [prevChannels, setPrevChannels] = useState(entry.max_channels);
+  if (entry.max_channels !== prevChannels) {
+    setPrevChannels(entry.max_channels);
+    if (!editing) setValue(String(entry.max_channels));
+  }
+
+  const mutation = useMutation({
+    mutationFn: (n: number) => updateRcfEntry(entry.id, { max_channels: n }),
+    onSuccess: (_data, n) => {
+      qc.invalidateQueries({ queryKey: ['customerRcf', customerId] });
+      toastOk(
+        n === 0
+          ? `Concurrent call limit removed for ${entry.did}`
+          : `Max ${n} concurrent calls set for ${entry.did}`,
+      );
+      setEditing(false);
+    },
+    onError: (err: Error) => toastErr(err.message),
+  });
+
+  function handleSave() {
+    const n = parseInt(value, 10);
+    if (isNaN(n) || n < 0 || n > 100) {
+      toastErr('Enter a number 0–100 (0 = no limit)');
+      return;
+    }
+    if (n === entry.max_channels) { setEditing(false); return; }
+    mutation.mutate(n);
+  }
+
+  function handleCancel() {
+    setValue(String(entry.max_channels));
+    setEditing(false);
+  }
+
+  if (editing) {
+    return (
+      <div
+        style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <input
+          type="number"
+          min={0}
+          max={100}
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') { e.preventDefault(); handleSave(); }
+            if (e.key === 'Escape') handleCancel();
+            e.stopPropagation();
+          }}
+          onBlur={handleCancel}
+          disabled={mutation.isPending}
+          autoFocus
+          style={{
+            ...darkInput,
+            width: 64,
+            textAlign: 'center',
+            borderColor: 'rgba(59,130,246,0.7)',
+            boxShadow: '0 0 0 3px rgba(59,130,246,0.15)',
+            opacity: mutation.isPending ? 0.5 : 1,
+          }}
+        />
+        <button
+          type="button"
+          onMouseDown={(e) => { e.preventDefault(); handleSave(); }}
+          disabled={mutation.isPending}
+          style={{ ...inlineSaveBtn, opacity: mutation.isPending ? 0.6 : 1 }}
+        >
+          {mutation.isPending ? '…' : 'Save'}
+        </button>
+        <button
+          type="button"
+          onMouseDown={(e) => { e.preventDefault(); handleCancel(); }}
+          style={inlineCancelBtn}
+        >
+          Cancel
+        </button>
+      </div>
+    );
+  }
+
+  // View mode — click to enter edit mode
+  return (
+    <div
+      onClick={(e) => { e.stopPropagation(); setEditing(true); }}
+      title="Click to set concurrent call limit (0 = no limit)"
+      style={{
+        ...darkInput,
+        display: 'inline-flex',
+        alignItems: 'center',
+        width: 80,
+        cursor: 'pointer',
+        userSelect: 'none',
+        color: entry.max_channels > 0 ? '#4ade80' : '#4a5568',
+        borderColor: entry.max_channels > 0 ? 'rgba(74,222,128,0.35)' : 'rgba(42,47,69,0.7)',
+        fontStyle: entry.max_channels === 0 ? 'italic' : 'normal',
+        fontSize: '0.78rem',
+      }}
+    >
+      {entry.max_channels === 0 ? 'No Limit' : String(entry.max_channels)}
+    </div>
+  );
+}
+
 // A single RCF entry rendered as a card row
 function RcfEntryRow({
   entry,
@@ -370,6 +490,23 @@ function RcfEntryRow({
           Forward To
         </div>
         <RcfForwardInput entry={entry} customerId={customerId} />
+      </div>
+
+      {/* Max Channels */}
+      <div style={{ flexShrink: 0 }}>
+        <div
+          style={{
+            fontSize: '0.6rem',
+            fontWeight: 700,
+            color: '#4a5568',
+            textTransform: 'uppercase',
+            letterSpacing: '0.7px',
+            marginBottom: 5,
+          }}
+        >
+          Max Calls
+        </div>
+        <RcfMaxChannelsInput entry={entry} customerId={customerId} />
       </div>
 
       {/* Right: Status + actions */}

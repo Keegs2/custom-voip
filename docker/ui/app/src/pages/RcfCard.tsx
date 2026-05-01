@@ -969,8 +969,8 @@ export function RcfCard({ entry, pendingValue, onPendingChange }: RcfCardProps) 
             active={!!entry.failover_to}
           />
 
-          {/* Max channels pill */}
-          <MaxChannelsPill entry={entry} canEdit={canEdit} />
+          {/* Max channels pill — admin-only editing; non-admins see the value read-only */}
+          <MaxChannelsPill entry={entry} canEdit={user?.role === 'admin'} />
         </div>
       </div>
     </div>
