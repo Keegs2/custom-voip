@@ -149,9 +149,16 @@ export function AdminPage() {
           aria-label="Customer management sections"
         >
           {adminTabs.map((tab) => {
-            const isActive =
+            // Exact match, or sub-path match — but exclude cases where
+            // a longer tab path is a better match (e.g. /admin/customers
+            // should not match when /admin/customers/users is the actual tab).
+            const hasMoreSpecificTab = adminTabs.some(
+              (other) => other !== tab && other.to.startsWith(tab.to + '/') && location.pathname.startsWith(other.to),
+            );
+            const isActive = !hasMoreSpecificTab && (
               location.pathname === tab.to ||
-              location.pathname.startsWith(tab.to + '/');
+              location.pathname.startsWith(tab.to + '/')
+            );
 
             return (
               <NavLink

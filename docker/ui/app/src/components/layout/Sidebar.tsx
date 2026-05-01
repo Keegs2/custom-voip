@@ -19,6 +19,8 @@ interface NavItemDef {
   icon: React.ReactNode;
   accountTypes?: string[];
   adminOnly?: boolean;
+  /** Custom active-match function. When provided, overrides NavLink's default isActive. */
+  isActiveFn?: (pathname: string) => boolean;
 }
 
 /* ─── Nav item definitions ────────────────────────────────── */
@@ -327,78 +329,88 @@ interface SidebarNavItemProps {
 }
 
 function SidebarNavItem({ item, onNavigate, small }: SidebarNavItemProps) {
+  const location = useLocation();
+  const customActive = item.isActiveFn ? item.isActiveFn(location.pathname) : undefined;
+
   return (
     <NavLink
       to={item.to}
+      end={!item.isActiveFn}
       onClick={onNavigate}
       className="block no-underline"
-      style={({ isActive }) => ({
-        display: 'flex',
-        alignItems: 'center',
-        gap: small ? 8 : 10,
-        padding: small ? '5px 10px 5px 14px' : '7px 10px',
-        borderRadius: 10,
-        overflow: 'hidden',
-        fontSize: small ? '0.76rem' : '0.825rem',
-        fontWeight: isActive ? 600 : 500,
-        letterSpacing: '-0.01em',
-        cursor: 'pointer',
-        userSelect: 'none',
-        transition: 'background 0.15s, color 0.15s, border-color 0.15s, box-shadow 0.15s',
-        textDecoration: 'none',
-        color: isActive ? '#f1f5f9' : '#64748b',
-        background: isActive
-          ? `linear-gradient(135deg, ${item.color}22 0%, ${item.color}10 100%)`
-          : 'transparent',
-        border: isActive
-          ? `1px solid ${item.color}40`
-          : '1px solid transparent',
-        boxShadow: isActive
-          ? `0 2px 12px -4px ${item.color}40`
-          : 'none',
-      })}
+      style={({ isActive: routerActive }) => {
+        const isActive = customActive ?? routerActive;
+        return {
+          display: 'flex',
+          alignItems: 'center',
+          gap: small ? 8 : 10,
+          padding: small ? '5px 10px 5px 14px' : '7px 10px',
+          borderRadius: 10,
+          overflow: 'hidden',
+          fontSize: small ? '0.76rem' : '0.825rem',
+          fontWeight: isActive ? 600 : 500,
+          letterSpacing: '-0.01em',
+          cursor: 'pointer',
+          userSelect: 'none',
+          transition: 'background 0.15s, color 0.15s, border-color 0.15s, box-shadow 0.15s',
+          textDecoration: 'none',
+          color: isActive ? '#f1f5f9' : '#64748b',
+          background: isActive
+            ? `linear-gradient(135deg, ${item.color}22 0%, ${item.color}10 100%)`
+            : 'transparent',
+          border: isActive
+            ? `1px solid ${item.color}40`
+            : '1px solid transparent',
+          boxShadow: isActive
+            ? `0 2px 12px -4px ${item.color}40`
+            : 'none',
+        };
+      }}
     >
-      {({ isActive }) => (
-        <>
-          <span
-            style={{
-              width: small ? 24 : 28,
-              height: small ? 24 : 28,
-              borderRadius: small ? 6 : 7,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              flexShrink: 0,
-              background: isActive
-                ? `linear-gradient(135deg, ${item.color}30 0%, ${item.color}18 100%)`
-                : 'rgba(255,255,255,0.04)',
-              border: isActive
-                ? `1px solid ${item.color}40`
-                : '1px solid rgba(255,255,255,0.06)',
-              color: isActive ? item.color : '#475569',
-              transition: 'background 0.15s, border-color 0.15s, color 0.15s',
-            }}
-          >
-            {item.icon}
-          </span>
-          <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {item.label}
-          </span>
-          {/* Active dot */}
-          {isActive && (
+      {({ isActive: routerActive }) => {
+        const isActive = customActive ?? routerActive;
+        return (
+          <>
             <span
               style={{
-                width: 5,
-                height: 5,
-                borderRadius: '50%',
-                background: item.color,
+                width: small ? 24 : 28,
+                height: small ? 24 : 28,
+                borderRadius: small ? 6 : 7,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
                 flexShrink: 0,
-                boxShadow: `0 0 6px ${item.color}`,
+                background: isActive
+                  ? `linear-gradient(135deg, ${item.color}30 0%, ${item.color}18 100%)`
+                  : 'rgba(255,255,255,0.04)',
+                border: isActive
+                  ? `1px solid ${item.color}40`
+                  : '1px solid rgba(255,255,255,0.06)',
+                color: isActive ? item.color : '#475569',
+                transition: 'background 0.15s, border-color 0.15s, color 0.15s',
               }}
-            />
-          )}
-        </>
-      )}
+            >
+              {item.icon}
+            </span>
+            <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {item.label}
+            </span>
+            {/* Active dot */}
+            {isActive && (
+              <span
+                style={{
+                  width: 5,
+                  height: 5,
+                  borderRadius: '50%',
+                  background: item.color,
+                  flexShrink: 0,
+                  boxShadow: `0 0 6px ${item.color}`,
+                }}
+              />
+            )}
+          </>
+        );
+      }}
     </NavLink>
   );
 }
@@ -617,8 +629,14 @@ export function Sidebar() {
 
   /* ── Admin items ───────────────────────────────────────── */
 
-  const customersItem: NavItemDef   = { label: 'Customer Management', to: '/admin/customers', color: '#60a5fa', icon: <IconAdmin /> };
-  const platformItem: NavItemDef    = { label: 'Platform Management', to: '/admin/platform',  color: '#60a5fa', icon: <Server size={15} strokeWidth={1.7} /> };
+  const customersItem: NavItemDef   = {
+    label: 'Customer Management', to: '/admin/customers', color: '#60a5fa', icon: <IconAdmin />,
+    isActiveFn: (p) => p.startsWith('/admin') && !p.startsWith('/admin/platform'),
+  };
+  const platformItem: NavItemDef    = {
+    label: 'Platform Management', to: '/admin/platform', color: '#60a5fa', icon: <Server size={15} strokeWidth={1.7} />,
+    isActiveFn: (p) => p.startsWith('/admin/platform'),
+  };
   const callQualityItem: NavItemDef = { label: 'Call Quality',        to: '/call-quality',    color: '#22c55e', icon: <IconSignal size={17} /> };
   const troubleItem: NavItemDef     = { label: 'Troubleshooting',     to: '/troubleshooting', color: '#fbbf24', icon: <IconTroubleshoot size={17} /> };
 
