@@ -957,18 +957,6 @@ export function RcfCard({ entry, pendingValue, onPendingChange }: RcfCardProps) 
             value={entry.ring_timeout != null ? `${entry.ring_timeout}s` : '30s'}
           />
 
-          {/* Failover pill */}
-          <StatPill
-            icon={
-              <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" style={{ width: 13, height: 13 }}>
-                <path d="M7 1v3l2-2M9 2a5.5 5.5 0 1 1-4.5 0" />
-              </svg>
-            }
-            label="Failover"
-            value={entry.failover_to ? fmt(entry.failover_to) : 'None'}
-            active={!!entry.failover_to}
-          />
-
           {/* Max channels pill — always read-only on the RCF page; editable only on admin account page */}
           <MaxChannelsPill entry={entry} canEdit={false} />
         </div>
