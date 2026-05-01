@@ -6,10 +6,10 @@ import type { RcfEntry } from '../types/rcf';
 import { RcfCard } from './RcfCard';
 import { useAuth } from '../contexts/AuthContext';
 import { AdminCustomerSelector } from '../components/AdminCustomerSelector';
-import { fmt, fmtDuration } from '../utils/format';
+import { fmt } from '../utils/format';
 import { apiRequest } from '../api/client';
 import { useToast } from '../components/ui/Toast';
-import { searchCdrs, getCdrSummary } from '../api/cdrs';
+import { searchCdrs } from '../api/cdrs';
 import type { Cdr } from '../types/cdr';
 import { listAvailableDids, listMyDids, requestDid, unassignDid } from '../api/didInventory';
 import type { DidInventoryItem } from '../types/didInventory';
@@ -938,7 +938,7 @@ function SearchEmptyState({ query, onClear }: { query: string; onClear: () => vo
 
 // ─── Tab types ────────────────────────────────────────────────────────────────
 
-type DashboardTab = 'numbers' | 'activity' | 'quality' | 'dids';
+type DashboardTab = 'numbers' | 'activity' | 'dids';
 
 // ─── Time helpers ─────────────────────────────────────────────────────────────
 
@@ -1022,16 +1022,6 @@ function TabBar({ active, onChange }: TabBarProps) {
         </svg>
       ),
     },
-    {
-      id: 'quality',
-      label: 'Quality',
-      icon: (
-        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.8} style={{ width: 13, height: 13 }}>
-          <circle cx="8" cy="8" r="6" />
-          <path d="M8 5v3l2 2" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      ),
-    },
   ];
 
   return (
@@ -1111,7 +1101,75 @@ interface CallActivityTabProps {
   customerId: number | undefined;
 }
 
+/** Compute aggregate quality stats from a list of CDRs. */
+function computeQualityStats(cdrs: Cdr[]) {
+  let answered = 0;
+  let mosSum = 0;
+  let mosCount = 0;
+
+  for (const cdr of cdrs) {
+    if (cdr.answer_time != null && cdr.duration_seconds > 0) {
+      answered++;
+    }
+    if (cdr.mos != null) {
+      mosSum += cdr.mos;
+      mosCount++;
+    }
+  }
+
+  const total = cdrs.length;
+  const successRate = total > 0 ? (answered / total) * 100 : null;
+  const avgMos = mosCount > 0 ? mosSum / mosCount : null;
+
+  return { total, answered, successRate, avgMos };
+}
+
+/** Build daily quality summary for the last 7 days. */
+function buildDailyDots(cdrs: Cdr[]): { date: string; label: string; color: string; tooltip: string }[] {
+  const byDate = new Map<string, { mosSum: number; mosCount: number; total: number; answered: number }>();
+
+  for (const cdr of cdrs) {
+    const key = cdr.start_time.slice(0, 10);
+    const bucket = byDate.get(key) ?? { mosSum: 0, mosCount: 0, total: 0, answered: 0 };
+    bucket.total++;
+    if (cdr.answer_time != null && cdr.duration_seconds > 0) bucket.answered++;
+    if (cdr.mos != null) { bucket.mosSum += cdr.mos; bucket.mosCount++; }
+    byDate.set(key, bucket);
+  }
+
+  const result: { date: string; label: string; color: string; tooltip: string }[] = [];
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    const key = d.toISOString().slice(0, 10);
+    const label = d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+    const b = byDate.get(key);
+
+    if (!b || b.total === 0) {
+      result.push({ date: key, label, color: '#1e293b', tooltip: `${label}: No calls` });
+      continue;
+    }
+
+    const asr = (b.answered / b.total) * 100;
+    const avgMos = b.mosCount > 0 ? b.mosSum / b.mosCount : null;
+
+    let color = '#22c55e';
+    if (asr < 85 || (avgMos != null && avgMos < 3)) color = '#ef4444';
+    else if (asr < 95 || (avgMos != null && avgMos < 4)) color = '#f59e0b';
+
+    const mosStr = avgMos != null ? `, MOS ${avgMos.toFixed(1)}` : '';
+    result.push({
+      date: key,
+      label,
+      color,
+      tooltip: `${label}: ${b.total} calls, ${asr.toFixed(0)}% success${mosStr}`,
+    });
+  }
+  return result;
+}
+
 function CallActivityTab({ customerId }: CallActivityTabProps) {
+  // ALL hooks unconditionally at top — rules of hooks
   const [activitySearch, setActivitySearch] = useState('');
 
   const { data, isLoading, isError } = useQuery({
@@ -1129,6 +1187,10 @@ function CallActivityTab({ customerId }: CallActivityTabProps) {
   });
 
   const allCalls = data?.items ?? [];
+
+  const stats = useMemo(() => computeQualityStats(allCalls), [allCalls]);
+  const dailyDots = useMemo(() => buildDailyDots(allCalls), [allCalls]);
+
   const calls = useMemo(() => {
     if (!activitySearch.trim()) return allCalls;
     const q = activitySearch.trim().toLowerCase();
@@ -1147,6 +1209,29 @@ function CallActivityTab({ customerId }: CallActivityTabProps) {
     });
   }, [allCalls, activitySearch]);
 
+  // Colour thresholds for stat cards
+  const successColor =
+    stats.successRate == null ? '#4a5568'
+    : stats.successRate >= 95 ? '#22c55e'
+    : stats.successRate >= 85 ? '#f59e0b'
+    : '#ef4444';
+
+  const avgMosColor =
+    stats.avgMos == null ? '#4a5568'
+    : stats.avgMos >= 4.0 ? '#22c55e'
+    : stats.avgMos >= 3.0 ? '#f59e0b'
+    : '#ef4444';
+
+  // 7-day trend summary
+  const dotsWithData = dailyDots.filter((d) => d.color !== '#1e293b');
+  const hasProblems = dotsWithData.some((d) => d.color === '#ef4444');
+  const hasWarnings = dotsWithData.some((d) => d.color === '#f59e0b');
+  const trendSummary =
+    dotsWithData.length === 0 ? 'No data for last 7 days'
+    : hasProblems ? 'Some days had call quality issues'
+    : hasWarnings ? 'Most days were good with minor variations'
+    : 'All excellent — everything is running smoothly';
+
   if (isLoading) {
     return (
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, justifyContent: 'center', padding: '64px 0', color: '#64748b' }}>
@@ -1164,7 +1249,7 @@ function CallActivityTab({ customerId }: CallActivityTabProps) {
     );
   }
 
-  if (calls.length === 0) {
+  if (allCalls.length === 0) {
     return (
       <div
         style={{
@@ -1211,1072 +1296,116 @@ function CallActivityTab({ customerId }: CallActivityTabProps) {
   }
 
   return (
-    <div
-      style={{
-        background: 'rgba(19,21,29,0.68)',
-        backdropFilter: 'blur(10px)',
-        WebkitBackdropFilter: 'blur(10px)',
-        border: '1px solid rgba(59,130,246,0.12)',
-        borderRadius: 16,
-        overflow: 'hidden',
-        boxShadow: '0 8px 32px -8px rgba(0,0,0,0.45)',
-      }}
-    >
-      <div
-        style={{
-          padding: '14px 20px',
-          borderBottom: '1px solid rgba(59,130,246,0.08)',
-          display: 'flex',
-          alignItems: 'center',
-          gap: 12,
-          flexWrap: 'wrap',
-        }}
-      >
-        <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
-          Recent Calls
-        </span>
-        <div
-          style={{
-            flex: 1,
-            minWidth: 200,
-            position: 'relative',
-          }}
-        >
-          <svg viewBox="0 0 20 20" fill="currentColor" style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', width: 14, height: 14, color: '#334155' }}>
-            <path fillRule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clipRule="evenodd" />
-          </svg>
-          <input
-            type="text"
-            value={activitySearch}
-            onChange={(e) => setActivitySearch(e.target.value)}
-            placeholder="Filter by number, date, cause..."
-            style={{
-              width: '100%',
-              padding: '7px 12px 7px 30px',
-              fontSize: '0.8rem',
-              color: '#e2e8f0',
-              background: 'rgba(15,17,23,0.5)',
-              border: '1px solid rgba(59,130,246,0.12)',
-              borderRadius: 10,
-              outline: 'none',
-              transition: 'border-color 0.2s, box-shadow 0.2s',
-            }}
-            onFocus={(e) => {
-              e.currentTarget.style.borderColor = 'rgba(59,130,246,0.4)';
-              e.currentTarget.style.boxShadow = '0 0 0 3px rgba(59,130,246,0.10)';
-            }}
-            onBlur={(e) => {
-              e.currentTarget.style.borderColor = 'rgba(59,130,246,0.12)';
-              e.currentTarget.style.boxShadow = 'none';
-            }}
-          />
-        </div>
-        <span
-          style={{
-            fontSize: '0.68rem',
-            fontWeight: 600,
-            color: '#3b82f6',
-            background: 'rgba(59,130,246,0.10)',
-            border: '1px solid rgba(59,130,246,0.20)',
-            borderRadius: 20,
-            padding: '2px 9px',
-            flexShrink: 0,
-          }}
-        >
-          {calls.length}{activitySearch.trim() ? ` of ${allCalls.length}` : ''} shown
-        </span>
-      </div>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
 
-      <div style={{ overflowX: 'auto' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 680 }}>
-          <thead>
-            <tr style={{ background: 'rgba(59,130,246,0.04)', borderBottom: '1px solid rgba(59,130,246,0.10)' }}>
-              {['Time', 'From', 'To (DID)', 'Forwarded To', 'Duration', 'Status', 'Quality'].map((h) => (
-                <th
-                  key={h}
-                  style={{
-                    padding: '11px 14px',
-                    textAlign: 'left',
-                    fontSize: '0.6rem',
-                    fontWeight: 700,
-                    color: '#475569',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.11em',
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  {h}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {calls.map((cdr, idx) => {
-              const status = callStatusInfo(cdr);
-              const quality = mosLabel(cdr.mos);
-              return (
-                <tr
-                  key={cdr.uuid}
-                  style={{
-                    borderBottom: idx < calls.length - 1 ? '1px solid rgba(59,130,246,0.05)' : 'none',
-                    animation: `fadeInUp 0.3s ease both`,
-                    animationDelay: `${Math.min(idx * 30, 300)}ms`,
-                  }}
-                >
-                  {/* Time */}
-                  <td style={{ padding: '12px 14px', whiteSpace: 'nowrap' }}>
-                    <span style={{ fontSize: '0.78rem', color: '#64748b', fontVariantNumeric: 'tabular-nums' }}>
-                      {timeAgo(cdr.start_time)}
-                    </span>
-                  </td>
-
-                  {/* From */}
-                  <td style={{ padding: '12px 14px' }}>
-                    <span style={{ fontSize: '0.82rem', color: '#94a3b8', fontFamily: 'monospace', fontWeight: 500 }}>
-                      {fmt(cdr.caller_id)}
-                    </span>
-                  </td>
-
-                  {/* To (DID) */}
-                  <td style={{ padding: '12px 14px' }}>
-                    <span style={{ fontSize: '0.82rem', color: '#60a5fa', fontFamily: 'monospace', fontWeight: 600 }}>
-                      {fmt(cdr.destination)}
-                    </span>
-                  </td>
-
-                  {/* Forwarded To */}
-                  <td style={{ padding: '12px 14px' }}>
-                    <span style={{ fontSize: '0.78rem', color: '#64748b', fontFamily: 'monospace' }}>
-                      {cdr.carrier_used ? fmt(cdr.carrier_used) : '—'}
-                    </span>
-                  </td>
-
-                  {/* Duration */}
-                  <td style={{ padding: '12px 14px', whiteSpace: 'nowrap' }}>
-                    <span style={{ fontSize: '0.82rem', color: '#94a3b8', fontVariantNumeric: 'tabular-nums' }}>
-                      {cdr.duration_seconds > 0 ? fmtDuration(cdr.duration_seconds) : '—'}
-                    </span>
-                  </td>
-
-                  {/* Status badge */}
-                  <td style={{ padding: '12px 14px' }}>
-                    <span
-                      style={{
-                        fontSize: '0.68rem',
-                        fontWeight: 700,
-                        color: status.color,
-                        background: status.bg,
-                        borderRadius: 20,
-                        padding: '3px 9px',
-                        whiteSpace: 'nowrap',
-                        letterSpacing: '0.02em',
-                      }}
-                    >
-                      {status.label}
-                    </span>
-                  </td>
-
-                  {/* Quality dot */}
-                  <td style={{ padding: '12px 14px' }}>
-                    {cdr.mos != null ? (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <span
-                          style={{
-                            width: 8,
-                            height: 8,
-                            borderRadius: '50%',
-                            background: quality.dot,
-                            flexShrink: 0,
-                            boxShadow: `0 0 6px ${quality.dot}`,
-                            display: 'inline-block',
-                          }}
-                        />
-                        <span style={{ fontSize: '0.72rem', color: quality.color, fontWeight: 600 }}>
-                          {quality.text}
-                        </span>
-                      </div>
-                    ) : (
-                      <span style={{ fontSize: '0.72rem', color: '#334155' }}>—</span>
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
-
-// ─── Quality helpers ──────────────────────────────────────────────────────────
-
-/** Format raw bytes into a human-readable KB / MB string. */
-function fmtBytes(bytes: number): string {
-  if (bytes >= 1_048_576) return `${(bytes / 1_048_576).toFixed(1)} MB`;
-  if (bytes >= 1_024) return `${(bytes / 1_024).toFixed(1)} KB`;
-  return `${bytes} B`;
-}
-
-/** Format seconds as mm:ss (e.g. 90 → "1:30"). */
-function fmtMmSs(seconds: number): string {
-  const m = Math.floor(seconds / 60);
-  const s = seconds % 60;
-  return `${m}:${s.toString().padStart(2, '0')}`;
-}
-
-/** Relative timestamp — how long ago a call started. */
-function relativeTime(isoString: string): string {
-  const diffMs = Date.now() - new Date(isoString).getTime();
-  const mins = Math.floor(diffMs / 60_000);
-  if (mins < 1) return 'just now';
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  const days = Math.floor(hrs / 24);
-  return `${days}d ago`;
-}
-
-/** Return green/amber/red for MOS thresholds. */
-function mosColor(mos: number | null | undefined): string {
-  if (mos == null) return '#475569';
-  if (mos >= 4) return '#22c55e';
-  if (mos >= 3) return '#f59e0b';
-  return '#ef4444';
-}
-
-/** Return green/amber/red for quality_pct thresholds. */
-function qualityPctColor(pct: number | null | undefined): string {
-  if (pct == null) return '#475569';
-  if (pct >= 90) return '#22c55e';
-  if (pct >= 70) return '#f59e0b';
-  return '#ef4444';
-}
-
-/** Return green/amber/red for packet loss percentage (lower = better). */
-function packetLossColor(pct: number | null | undefined): string {
-  if (pct == null) return '#475569';
-  if (pct < 1) return '#22c55e';
-  if (pct <= 3) return '#f59e0b';
-  return '#ef4444';
-}
-
-/** Return green/amber/red for jitter avg in ms (lower = better). */
-function jitterColor(ms: number | null | undefined): string {
-  if (ms == null) return '#475569';
-  if (ms < 20) return '#22c55e';
-  if (ms <= 50) return '#f59e0b';
-  return '#ef4444';
-}
-
-/** Return green/amber/red for R-Factor (higher = better). */
-function rFactorColor(r: number | null | undefined): string {
-  if (r == null) return '#475569';
-  if (r >= 80) return '#22c55e';
-  if (r >= 70) return '#f59e0b';
-  return '#ef4444';
-}
-
-/** Render a single metric row inside an expanded detail group. */
-function MetricRow({
-  label,
-  value,
-  color,
-  sub,
-}: {
-  label: string;
-  value: string;
-  color?: string;
-  sub?: string;
-}) {
-  const na = value === '—' || value === 'N/A';
-  return (
-    <div
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 2,
-        padding: '9px 0',
-        borderBottom: '1px solid rgba(255,255,255,0.04)',
-      }}
-    >
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, justifyContent: 'space-between', flexWrap: 'wrap' }}>
-        <span style={{ fontSize: '0.73rem', color: '#64748b', flexShrink: 0 }}>{label}</span>
-        <span
-          style={{
-            fontSize: '0.82rem',
-            fontWeight: 600,
-            color: na ? '#334155' : (color ?? '#e2e8f0'),
-            fontVariantNumeric: 'tabular-nums',
-            textAlign: 'right',
-          }}
-        >
-          {value}
-        </span>
-      </div>
-      {sub && (
-        <span style={{ fontSize: '0.68rem', color: '#475569', lineHeight: 1.4 }}>{sub}</span>
-      )}
-    </div>
-  );
-}
-
-/** A glass-morphism group card inside the expanded detail panel. */
-function DetailGroup({
-  title,
-  accent,
-  children,
-}: {
-  title: string;
-  accent: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div
-      style={{
-        background: 'rgba(19,21,29,0.70)',
-        backdropFilter: 'blur(10px)',
-        WebkitBackdropFilter: 'blur(10px)',
-        border: `1px solid ${accent}22`,
-        borderRadius: 12,
-        padding: '14px 16px',
-        position: 'relative',
-        overflow: 'hidden',
-      }}
-    >
-      {/* Top accent line */}
-      <div
-        style={{
-          position: 'absolute',
-          top: 0,
-          left: 20,
-          right: 20,
-          height: 2,
-          background: `linear-gradient(90deg, transparent, ${accent}55, transparent)`,
-        }}
-      />
-      <div
-        style={{
-          fontSize: '0.60rem',
-          fontWeight: 700,
-          color: accent,
-          textTransform: 'uppercase',
-          letterSpacing: '0.12em',
-          marginBottom: 6,
-          opacity: 0.85,
-        }}
-      >
-        {title}
-      </div>
-      {children}
-    </div>
-  );
-}
-
-/** Full expanded detail panel for a single CDR row. */
-function CdrDetailPanel({ cdr }: { cdr: Cdr }) {
-  const na = '—';
-  const fmtNum = (v: number | null | undefined, decimals = 1) =>
-    v != null ? v.toFixed(decimals) : na;
-  const fmtPct = (v: number | null | undefined) =>
-    v != null ? `${v.toFixed(2)}%` : na;
-  const fmtMs = (v: number | null | undefined) =>
-    v != null ? `${v.toFixed(1)} ms` : na;
-  const fmtBytesOrNa = (v: number | null | undefined) =>
-    v != null ? fmtBytes(v) : na;
-  const fmtCount = (v: number | null | undefined) =>
-    v != null ? v.toLocaleString() : na;
-  const fmtStr = (v: string | null | undefined) =>
-    v != null && v !== '' ? v : na;
-
-  return (
-    <div
-      style={{
-        padding: '16px 4px 8px',
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
-        gap: 12,
-      }}
-    >
-      {/* Group 1: Voice Quality Scores */}
-      <DetailGroup title="Voice Quality Scores" accent="#22c55e">
-        <MetricRow
-          label="MOS (Mean Opinion Score)"
-          value={cdr.mos != null ? cdr.mos.toFixed(2) : na}
-          color={mosColor(cdr.mos)}
-          sub="1–5 scale. 4+ = excellent HD clarity. Below 3 = degraded."
-        />
-        <MetricRow
-          label="Quality Score"
-          value={fmtPct(cdr.quality_pct)}
-          color={qualityPctColor(cdr.quality_pct)}
-          sub="Overall call quality percentage. 90%+ is excellent."
-        />
-        <MetricRow
-          label="R-Factor"
-          value={fmtNum(cdr.r_factor, 1)}
-          color={rFactorColor(cdr.r_factor)}
-          sub="ITU-T G.107. 80+ = high quality. 70–80 = acceptable. Below 70 = poor."
-        />
-        <MetricRow
-          label="Flaw Count"
-          value={fmtCount(cdr.flaw_total)}
-          sub="Detected audio impairments. 0 = perfect."
-        />
-      </DetailGroup>
-
-      {/* Group 2: Packet Performance */}
-      <DetailGroup title="Packet Performance" accent="#3b82f6">
-        <MetricRow
-          label="Packet Loss"
-          value={fmtPct(cdr.packet_loss_pct)}
-          color={packetLossColor(cdr.packet_loss_pct)}
-          sub="<1% = excellent. 1–3% = acceptable. >3% = degraded."
-        />
-        <MetricRow label="Packets Lost" value={fmtCount(cdr.packet_loss_count)} />
-        <MetricRow label="Total Packets" value={fmtCount(cdr.packet_total_count)} />
-        <MetricRow
-          label="Packets Sent"
-          value={fmtCount(cdr.rtp_audio_out_packet_count)}
-          sub="Total RTP packets transmitted to carrier."
-        />
-        <MetricRow
-          label="Packets Received"
-          value={fmtCount(cdr.rtp_audio_in_packet_count)}
-          sub="Total RTP packets received from carrier."
-        />
-      </DetailGroup>
-
-      {/* Group 3: Jitter Analysis */}
-      <DetailGroup title="Jitter Analysis" accent="#f59e0b">
-        <MetricRow
-          label="Average Jitter"
-          value={fmtMs(cdr.jitter_avg_ms)}
-          color={jitterColor(cdr.jitter_avg_ms)}
-          sub="<20 ms = excellent. 20–50 ms = acceptable. >50 ms = poor."
-        />
-        <MetricRow label="Min Jitter" value={fmtMs(cdr.jitter_min_ms)} />
-        <MetricRow
-          label="Max Jitter"
-          value={fmtMs(cdr.jitter_max_ms)}
-          sub="Peak jitter — indicates worst-case moments in the call."
-        />
-        <MetricRow
-          label="Burst Rate"
-          value={fmtNum(cdr.rtp_audio_in_jitter_burst_rate, 4)}
-          sub="Frequency of jitter spikes. Lower is better."
-        />
-        <MetricRow
-          label="Loss Rate"
-          value={fmtNum(cdr.rtp_audio_in_jitter_loss_rate, 4)}
-          sub="Rate of jitter-induced packet loss."
-        />
-      </DetailGroup>
-
-      {/* Group 4: Media Stream Details */}
-      <DetailGroup title="Media Stream" accent="#a78bfa">
-        <MetricRow
-          label="Inbound Audio (raw)"
-          value={fmtBytesOrNa(cdr.rtp_audio_in_raw_bytes)}
-          sub="Total bytes received from carrier."
-        />
-        <MetricRow label="Inbound Media" value={fmtBytesOrNa(cdr.rtp_audio_in_media_bytes)} />
-        <MetricRow
-          label="Outbound Audio (raw)"
-          value={fmtBytesOrNa(cdr.rtp_audio_out_raw_bytes)}
-          sub="Total bytes sent to carrier."
-        />
-        <MetricRow label="Outbound Media" value={fmtBytesOrNa(cdr.rtp_audio_out_media_bytes)} />
-        <MetricRow
-          label="Mean Packet Interval"
-          value={fmtMs(cdr.rtp_audio_in_mean_interval)}
-          sub="Avg time between packets. ~20 ms is ideal for G.711."
-        />
-        <MetricRow label="Read Codec" value={fmtStr(cdr.read_codec)} sub="Incoming audio codec (e.g., PCMU, PCMA)." />
-        <MetricRow label="Write Codec" value={fmtStr(cdr.write_codec)} sub="Outgoing audio codec." />
-      </DetailGroup>
-
-      {/* Group 5: Call Details */}
-      <DetailGroup title="Call Details" accent="#64748b">
-        <MetricRow
-          label="Hangup Cause"
-          value={fmtStr(cdr.hangup_cause)}
-          sub="NORMAL_CLEARING = clean hangup by either party."
-        />
-        <MetricRow
-          label="SIP Response Code"
-          value={cdr.sip_code != null ? String(cdr.sip_code) : na}
-          sub="200 = success. 486 = busy. 404 = not found."
-        />
-        <MetricRow
-          label="Carrier Used"
-          value={fmtStr(cdr.carrier_used)}
-          sub="Termination trunk that handled this call."
-        />
-      </DetailGroup>
-    </div>
-  );
-}
-
-/** A single row in the per-call quality table. */
-function CallQualityTableRow({
-  cdr,
-  isExpanded,
-  onToggle,
-}: {
-  cdr: Cdr;
-  isExpanded: boolean;
-  onToggle: () => void;
-}) {
-  const mc = mosColor(cdr.mos);
-  const qc = qualityPctColor(cdr.quality_pct);
-
-  return (
-    <>
-      {/* Main row */}
-      <tr
-        onClick={onToggle}
-        style={{
-          cursor: 'pointer',
-          background: isExpanded ? 'rgba(59,130,246,0.07)' : 'transparent',
-          transition: 'background 0.15s',
-          borderBottom: isExpanded ? 'none' : '1px solid rgba(255,255,255,0.04)',
-        }}
-        onMouseEnter={(e) => {
-          if (!isExpanded) (e.currentTarget as HTMLTableRowElement).style.background = 'rgba(255,255,255,0.03)';
-        }}
-        onMouseLeave={(e) => {
-          (e.currentTarget as HTMLTableRowElement).style.background = isExpanded ? 'rgba(59,130,246,0.07)' : 'transparent';
-        }}
-      >
-        {/* Time */}
-        <td style={{ padding: '10px 12px', fontSize: '0.78rem', color: '#64748b', whiteSpace: 'nowrap' }}>
-          {relativeTime(cdr.start_time)}
-        </td>
-        {/* DID */}
-        <td style={{ padding: '10px 12px', fontSize: '0.80rem', color: '#94a3b8', whiteSpace: 'nowrap' }}>
-          {fmt(cdr.destination)}
-        </td>
-        {/* Duration */}
-        <td style={{ padding: '10px 12px', fontSize: '0.80rem', color: '#94a3b8', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
-          {fmtMmSs(cdr.duration_seconds)}
-        </td>
-        {/* MOS */}
-        <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
-          {cdr.mos != null ? (
-            <span
-              style={{
-                display: 'inline-block',
-                padding: '2px 8px',
-                borderRadius: 6,
-                fontSize: '0.78rem',
-                fontWeight: 700,
-                fontVariantNumeric: 'tabular-nums',
-                background: `${mc}18`,
-                color: mc,
-                border: `1px solid ${mc}33`,
-              }}
-            >
-              {cdr.mos.toFixed(2)}
-            </span>
-          ) : (
-            <span style={{ fontSize: '0.78rem', color: '#334155' }}>—</span>
-          )}
-        </td>
-        {/* Quality % */}
-        <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
-          {cdr.quality_pct != null ? (
-            <span
-              style={{
-                display: 'inline-block',
-                padding: '2px 8px',
-                borderRadius: 6,
-                fontSize: '0.78rem',
-                fontWeight: 700,
-                fontVariantNumeric: 'tabular-nums',
-                background: `${qc}18`,
-                color: qc,
-                border: `1px solid ${qc}33`,
-              }}
-            >
-              {cdr.quality_pct.toFixed(2)}%
-            </span>
-          ) : (
-            <span style={{ fontSize: '0.78rem', color: '#334155' }}>—</span>
-          )}
-        </td>
-        {/* Expand arrow */}
-        <td style={{ padding: '10px 12px', textAlign: 'right', width: 36 }}>
-          <svg
-            viewBox="0 0 16 16"
-            fill="none"
-            stroke="#475569"
-            strokeWidth={2}
-            strokeLinecap="round"
-            style={{
-              width: 14,
-              height: 14,
-              transform: isExpanded ? 'rotate(180deg)' : 'rotate(0deg)',
-              transition: 'transform 0.2s',
-              display: 'inline-block',
-            }}
-          >
-            <path d="M3 6l5 5 5-5" />
-          </svg>
-        </td>
-      </tr>
-
-      {/* Expanded detail row */}
-      {isExpanded && (
-        <tr>
-          <td
-            colSpan={6}
-            style={{
-              padding: '0 12px 16px',
-              background: 'rgba(59,130,246,0.04)',
-              borderBottom: '1px solid rgba(59,130,246,0.12)',
-            }}
-          >
-            <CdrDetailPanel cdr={cdr} />
-          </td>
-        </tr>
-      )}
-    </>
-  );
-}
-
-// ─── QualityTab ───────────────────────────────────────────────────────────────
-
-interface QualityTabProps {
-  customerId: number | undefined;
-}
-
-/** Compute aggregate quality stats from a list of CDRs. */
-function computeQualityStats(cdrs: Cdr[]) {
-  let answered = 0;
-  let mosSum = 0;
-  let mosCount = 0;
-  let durSum = 0;
-  let durCount = 0;
-
-  for (const cdr of cdrs) {
-    if (cdr.answer_time != null && cdr.duration_seconds > 0) {
-      answered++;
-      durSum += cdr.duration_seconds;
-      durCount++;
-    }
-    if (cdr.mos != null) {
-      mosSum += cdr.mos;
-      mosCount++;
-    }
-  }
-
-  const total = cdrs.length;
-  const successRate = total > 0 ? (answered / total) * 100 : null;
-  const avgMos = mosCount > 0 ? mosSum / mosCount : null;
-  const avgDurSec = durCount > 0 ? durSum / durCount : null;
-
-  return { total, answered, successRate, avgMos, avgDurSec };
-}
-
-/** Build daily quality summary for the last 7 days. */
-function buildDailyDots(cdrs: Cdr[]): { date: string; label: string; color: string; tooltip: string }[] {
-  const byDate = new Map<string, { mosSum: number; mosCount: number; total: number; answered: number }>();
-
-  for (const cdr of cdrs) {
-    const key = cdr.start_time.slice(0, 10);
-    const bucket = byDate.get(key) ?? { mosSum: 0, mosCount: 0, total: 0, answered: 0 };
-    bucket.total++;
-    if (cdr.answer_time != null && cdr.duration_seconds > 0) bucket.answered++;
-    if (cdr.mos != null) { bucket.mosSum += cdr.mos; bucket.mosCount++; }
-    byDate.set(key, bucket);
-  }
-
-  const result: { date: string; label: string; color: string; tooltip: string }[] = [];
-  for (let i = 6; i >= 0; i--) {
-    const d = new Date();
-    d.setDate(d.getDate() - i);
-    const key = d.toISOString().slice(0, 10);
-    const label = d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
-    const b = byDate.get(key);
-
-    if (!b || b.total === 0) {
-      result.push({ date: key, label, color: '#1e293b', tooltip: `${label}: No calls` });
-      continue;
-    }
-
-    const asr = (b.answered / b.total) * 100;
-    const avgMos = b.mosCount > 0 ? b.mosSum / b.mosCount : null;
-
-    let color = '#22c55e'; // green by default
-    if (asr < 85 || (avgMos != null && avgMos < 3)) color = '#ef4444';
-    else if (asr < 95 || (avgMos != null && avgMos < 4)) color = '#f59e0b';
-
-    const mosStr = avgMos != null ? `, MOS ${avgMos.toFixed(1)}` : '';
-    result.push({
-      date: key,
-      label,
-      color,
-      tooltip: `${label}: ${b.total} calls, ${asr.toFixed(0)}% success${mosStr}`,
-    });
-  }
-  return result;
-}
-
-interface BigMetricCardProps {
-  label: string;
-  sublabel: string;
-  value: string;
-  valueColor: string;
-  accent: string;
-  children?: React.ReactNode;
-  delay?: number;
-}
-
-function BigMetricCard({ label, sublabel, value, valueColor, accent, children, delay = 0 }: BigMetricCardProps) {
-  return (
-    <div
-      style={{
-        flex: '1 1 220px',
-        minWidth: 0,
-        background: 'linear-gradient(145deg, rgba(26,29,39,0.95) 0%, rgba(19,21,29,0.98) 100%)',
-        backdropFilter: 'blur(12px)',
-        WebkitBackdropFilter: 'blur(12px)',
-        border: `1px solid ${accent}22`,
-        borderRadius: 18,
-        padding: '24px 24px 20px',
-        position: 'relative',
-        overflow: 'hidden',
-        boxShadow: `0 8px 32px -8px rgba(0,0,0,0.55), 0 0 0 1px ${accent}0a`,
-        animation: 'fadeInUp 0.4s ease both',
-        animationDelay: `${delay}ms`,
-      }}
-    >
-      {/* Accent glow in corner */}
-      <div
-        style={{
-          position: 'absolute',
-          top: -40,
-          right: -40,
-          width: 130,
-          height: 130,
-          borderRadius: '50%',
-          background: `radial-gradient(circle, ${accent}18 0%, transparent 70%)`,
-          pointerEvents: 'none',
-        }}
-      />
-      {/* Top accent line */}
-      <div
-        style={{
-          position: 'absolute',
-          top: 0,
-          left: 32,
-          right: 32,
-          height: 2,
-          background: `linear-gradient(90deg, transparent, ${accent}60, transparent)`,
-          borderRadius: '0 0 2px 2px',
-        }}
-      />
-
-      <div style={{ fontSize: '0.6rem', fontWeight: 700, color: accent, textTransform: 'uppercase', letterSpacing: '0.12em', opacity: 0.8, marginBottom: 10 }}>
-        {label}
-      </div>
-
-      <div
-        style={{
-          fontSize: 'clamp(2rem, 4vw, 2.8rem)',
-          fontWeight: 900,
-          color: valueColor,
-          letterSpacing: '-0.04em',
-          lineHeight: 1,
-          marginBottom: 6,
-          fontVariantNumeric: 'tabular-nums',
-          textShadow: `0 0 32px ${valueColor}55`,
-        }}
-      >
-        {value}
-      </div>
-
-      {children && <div style={{ marginBottom: 8 }}>{children}</div>}
-
-      <div style={{ fontSize: '0.75rem', color: '#64748b', lineHeight: 1.5, marginTop: 4 }}>
-        {sublabel}
-      </div>
-    </div>
-  );
-}
-
-/** Horizontal bar showing a percentage, e.g. for call success rate. */
-function PercentBar({ pct, color }: { pct: number; color: string }) {
-  return (
-    <div
-      style={{
-        height: 6,
-        background: 'rgba(255,255,255,0.06)',
-        borderRadius: 4,
-        overflow: 'hidden',
-        marginTop: 8,
-        marginBottom: 2,
-      }}
-    >
-      <div
-        style={{
-          height: '100%',
-          width: `${Math.min(pct, 100)}%`,
-          background: `linear-gradient(90deg, ${color}aa, ${color})`,
-          borderRadius: 4,
-          transition: 'width 0.6s ease',
-          boxShadow: `0 0 8px ${color}66`,
-        }}
-      />
-    </div>
-  );
-}
-
-/** Simple 5-star MOS rating display. */
-function MosStars({ mos }: { mos: number }) {
-  const filled = Math.round(mos); // MOS 1-5 maps naturally to 1-5 filled stars
-  return (
-    <div style={{ display: 'flex', gap: 3, marginTop: 8, marginBottom: 2 }}>
-      {[1, 2, 3, 4, 5].map((i) => (
-        <svg
-          key={i}
-          viewBox="0 0 16 16"
-          fill={i <= filled ? '#f59e0b' : 'none'}
-          stroke={i <= filled ? '#f59e0b' : '#1e293b'}
-          strokeWidth={1.5}
-          style={{ width: 14, height: 14 }}
-        >
-          <path d="M8 1.5l1.8 3.6 4 .6-2.9 2.8.7 3.9L8 10.5l-3.6 1.9.7-3.9L2.2 5.7l4-.6z" />
-        </svg>
-      ))}
-    </div>
-  );
-}
-
-function QualityTab({ customerId }: QualityTabProps) {
-  const { data: summaryData, isLoading: summaryLoading } = useQuery({
-    queryKey: ['rcf-summary', customerId],
-    queryFn: () => getCdrSummary({ customer_id: customerId }),
-    staleTime: 120_000,
-  });
-
-  const { data: cdrData, isLoading: cdrLoading } = useQuery({
-    queryKey: ['rcf-quality-cdrs', customerId],
-    queryFn: () =>
-      searchCdrs({
-        customer_id: customerId,
-        product_type: 'rcf',
-        limit: 500,
-        sort_by: 'start_time',
-        sort_dir: 'desc',
-      }),
-    staleTime: 120_000,
-  });
-
-  // Expanded row state — tracks which CDR uuid is expanded (null = none)
-  const [expandedRowUuid, setExpandedRowUuid] = useState<string | null>(null);
-
-  const isLoading = summaryLoading || cdrLoading;
-  const cdrs = cdrData?.items ?? [];
-  const stats = useMemo(() => computeQualityStats(cdrs), [cdrs]);
-  const dailyDots = useMemo(() => buildDailyDots(cdrs), [cdrs]);
-
-  // Only show CDRs that have at least some quality data in the table
-  const qualityCdrs = useMemo(
-    () => cdrs.filter((c) => c.mos != null || c.quality_pct != null || c.packet_loss_pct != null),
-    [cdrs],
-  );
-
-  // Aggregate total calls from summary rows
-  const summaryRows = summaryData?.summary ?? [];
-  const totalCallsFromSummary = summaryRows.reduce((acc, r) => acc + r.total_calls, 0);
-  const totalCalls = totalCallsFromSummary > 0 ? totalCallsFromSummary : stats.total;
-
-  // Toggle expanded row — only one open at a time
-  const handleToggleRow = useCallback((uuid: string) => {
-    setExpandedRowUuid((prev) => (prev === uuid ? null : uuid));
-  }, []);
-
-  if (isLoading) {
-    return (
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, justifyContent: 'center', padding: '64px 0', color: '#64748b' }}>
-        <Spinner size="sm" />
-        <span style={{ fontSize: '0.875rem' }}>Loading quality data…</span>
-      </div>
-    );
-  }
-
-  if (cdrs.length === 0 && totalCalls === 0) {
-    return (
-      <div
-        style={{
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          padding: '80px 24px',
-          gap: 18,
-          textAlign: 'center',
-          background: 'rgba(19,21,29,0.65)',
-          backdropFilter: 'blur(8px)',
-          WebkitBackdropFilter: 'blur(8px)',
-          border: '1px solid rgba(59,130,246,0.10)',
-          borderRadius: 20,
-        }}
-      >
-        <div
-          style={{
-            width: 72,
-            height: 72,
-            borderRadius: 18,
-            background: 'linear-gradient(135deg, rgba(59,130,246,0.14) 0%, rgba(59,130,246,0.06) 100%)',
-            border: '1px solid rgba(59,130,246,0.22)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            boxShadow: '0 0 24px rgba(59,130,246,0.12)',
-          }}
-        >
-          <svg viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth={1.4} style={{ width: 38, height: 38, opacity: 0.65 }}>
-            <circle cx="12" cy="12" r="9" />
-            <path d="M12 8v4l3 3" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </div>
-        <div>
-          <p style={{ color: '#94a3b8', fontSize: '1rem', fontWeight: 600, margin: '0 0 8px' }}>
-            No calls yet
-          </p>
-          <p style={{ color: '#475569', fontSize: '0.84rem', margin: 0, lineHeight: 1.65, maxWidth: 420 }}>
-            Once calls start flowing, your quality dashboard will light up here with real-time health metrics.
-          </p>
-        </div>
-      </div>
-    );
-  }
-
-  // Determine colour thresholds
-  const successRate = stats.successRate;
-  const successColor =
-    successRate == null ? '#4a5568'
-    : successRate >= 95 ? '#22c55e'
-    : successRate >= 85 ? '#f59e0b'
-    : '#ef4444';
-
-  const avgMos = stats.avgMos;
-  const mosColor =
-    avgMos == null ? '#4a5568'
-    : avgMos >= 4.0 ? '#22c55e'
-    : avgMos >= 3.0 ? '#f59e0b'
-    : '#ef4444';
-
-  const mosQualWord =
-    avgMos == null ? '—'
-    : avgMos >= 4.0 ? 'Excellent'
-    : avgMos >= 3.5 ? 'Good'
-    : avgMos >= 3.0 ? 'Fair'
-    : 'Poor';
-
-  const avgDurStr = stats.avgDurSec != null ? fmtDuration(Math.round(stats.avgDurSec)) : '—';
-
-  // 7-day trend summary
-  const dotsWithData = dailyDots.filter((d) => d.color !== '#1e293b');
-  const hasProblems = dotsWithData.some((d) => d.color === '#ef4444');
-  const hasWarnings = dotsWithData.some((d) => d.color === '#f59e0b');
-  const trendSummary =
-    dotsWithData.length === 0 ? 'No data for last 7 days'
-    : hasProblems ? 'Some days had call quality issues — check the dots below'
-    : hasWarnings ? 'Most days were good with minor variations'
-    : 'All excellent — everything is running smoothly';
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-
-      {/* ── Big metric cards ────────────────────────────────── */}
-      <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+      {/* ── Quality stat cards ─────────────────────────────────── */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14 }}>
 
         {/* Card 1: Call Success Rate */}
-        <BigMetricCard
-          label="Call Success Rate"
-          sublabel="of calls connected successfully"
-          value={successRate != null ? `${successRate.toFixed(1)}%` : '—'}
-          valueColor={successColor}
-          accent={successColor}
-          delay={0}
+        <div
+          style={{
+            background: 'rgba(19,21,29,0.72)',
+            backdropFilter: 'blur(12px)',
+            WebkitBackdropFilter: 'blur(12px)',
+            border: `1px solid ${successColor}22`,
+            borderRadius: 16,
+            padding: '20px 22px',
+            position: 'relative',
+            overflow: 'hidden',
+            boxShadow: `0 8px 32px -8px rgba(0,0,0,0.5), 0 0 0 1px ${successColor}0a`,
+          }}
         >
-          {successRate != null && (
-            <PercentBar pct={successRate} color={successColor} />
-          )}
-        </BigMetricCard>
+          <div style={{ position: 'absolute', top: -36, right: -36, width: 110, height: 110, borderRadius: '50%', background: `radial-gradient(circle, ${successColor}18 0%, transparent 70%)`, pointerEvents: 'none' }} />
+          <div style={{ position: 'absolute', top: 0, left: 28, right: 28, height: 2, background: `linear-gradient(90deg, transparent, ${successColor}55, transparent)` }} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+            <div style={{ width: 32, height: 32, borderRadius: 8, background: `${successColor}18`, border: `1px solid ${successColor}33`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <svg viewBox="0 0 16 16" fill="none" stroke={successColor} strokeWidth={2} style={{ width: 15, height: 15 }}>
+                <path d="M2 8l4 4 8-8" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </div>
+            <span style={{ fontSize: '0.6rem', fontWeight: 700, color: successColor, textTransform: 'uppercase', letterSpacing: '0.12em', opacity: 0.85 }}>
+              Call Success Rate
+            </span>
+          </div>
+          <div style={{ fontSize: 'clamp(1.8rem, 3.5vw, 2.4rem)', fontWeight: 900, color: successColor, letterSpacing: '-0.04em', lineHeight: 1, marginBottom: 4, fontVariantNumeric: 'tabular-nums', textShadow: `0 0 28px ${successColor}44` }}>
+            {stats.successRate != null ? `${stats.successRate.toFixed(1)}%` : '—'}
+          </div>
+          <div style={{ fontSize: '0.73rem', color: '#64748b', lineHeight: 1.5 }}>
+            of calls connected successfully
+          </div>
+        </div>
 
-        {/* Card 2: Voice Quality */}
-        <BigMetricCard
-          label="Voice Clarity (MOS)"
-          sublabel={`Average voice quality — ${mosQualWord} on the 1–5 scale`}
-          value={avgMos != null ? avgMos.toFixed(1) : '—'}
-          valueColor={mosColor}
-          accent={mosColor}
-          delay={80}
+        {/* Card 2: Voice Clarity (MOS) */}
+        <div
+          style={{
+            background: 'rgba(19,21,29,0.72)',
+            backdropFilter: 'blur(12px)',
+            WebkitBackdropFilter: 'blur(12px)',
+            border: `1px solid ${avgMosColor}22`,
+            borderRadius: 16,
+            padding: '20px 22px',
+            position: 'relative',
+            overflow: 'hidden',
+            boxShadow: `0 8px 32px -8px rgba(0,0,0,0.5), 0 0 0 1px ${avgMosColor}0a`,
+          }}
         >
-          {avgMos != null && <MosStars mos={avgMos} />}
-        </BigMetricCard>
+          <div style={{ position: 'absolute', top: -36, right: -36, width: 110, height: 110, borderRadius: '50%', background: `radial-gradient(circle, ${avgMosColor}18 0%, transparent 70%)`, pointerEvents: 'none' }} />
+          <div style={{ position: 'absolute', top: 0, left: 28, right: 28, height: 2, background: `linear-gradient(90deg, transparent, ${avgMosColor}55, transparent)` }} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+            <div style={{ width: 32, height: 32, borderRadius: 8, background: `${avgMosColor}18`, border: `1px solid ${avgMosColor}33`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <svg viewBox="0 0 16 16" fill="none" stroke={avgMosColor} strokeWidth={1.8} style={{ width: 15, height: 15 }}>
+                <path d="M2 10c0-3.3 2.7-6 6-6s6 2.7 6 6" strokeLinecap="round" />
+                <circle cx="8" cy="10" r="1.5" fill={avgMosColor} stroke="none" />
+              </svg>
+            </div>
+            <span style={{ fontSize: '0.6rem', fontWeight: 700, color: avgMosColor, textTransform: 'uppercase', letterSpacing: '0.12em', opacity: 0.85 }}>
+              Voice Clarity (MOS)
+            </span>
+          </div>
+          <div style={{ fontSize: 'clamp(1.8rem, 3.5vw, 2.4rem)', fontWeight: 900, color: avgMosColor, letterSpacing: '-0.04em', lineHeight: 1, marginBottom: 4, fontVariantNumeric: 'tabular-nums', textShadow: `0 0 28px ${avgMosColor}44` }}>
+            {stats.avgMos != null ? stats.avgMos.toFixed(1) : '—'}
+          </div>
+          <div style={{ fontSize: '0.73rem', color: '#64748b', lineHeight: 1.5 }}>
+            average voice quality, 1–5 scale
+          </div>
+        </div>
 
         {/* Card 3: Total Calls */}
-        <BigMetricCard
-          label="Total Calls"
-          sublabel="calls tracked in this period"
-          value={totalCalls.toLocaleString()}
-          valueColor="#60a5fa"
-          accent="#3b82f6"
-          delay={160}
-        />
-
-        {/* Card 4: Avg Duration */}
-        <BigMetricCard
-          label="Avg Call Length"
-          sublabel="average time per connected call"
-          value={avgDurStr}
-          valueColor="#a78bfa"
-          accent="#7c3aed"
-          delay={240}
-        />
-      </div>
-
-      {/* ── Plain-English explainer ────────────────────────── */}
-      <div
-        style={{
-          background: 'rgba(59,130,246,0.04)',
-          border: '1px solid rgba(59,130,246,0.10)',
-          borderRadius: 14,
-          padding: '18px 22px',
-          display: 'flex',
-          gap: 28,
-          flexWrap: 'wrap',
-        }}
-      >
-        <div style={{ flex: '1 1 200px', minWidth: 0 }}>
-          <div style={{ fontSize: '0.68rem', fontWeight: 700, color: '#3b82f6', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 5 }}>
-            What is Voice Clarity?
+        <div
+          style={{
+            background: 'rgba(19,21,29,0.72)',
+            backdropFilter: 'blur(12px)',
+            WebkitBackdropFilter: 'blur(12px)',
+            border: '1px solid rgba(59,130,246,0.18)',
+            borderRadius: 16,
+            padding: '20px 22px',
+            position: 'relative',
+            overflow: 'hidden',
+            boxShadow: '0 8px 32px -8px rgba(0,0,0,0.5), 0 0 0 1px rgba(59,130,246,0.05)',
+          }}
+        >
+          <div style={{ position: 'absolute', top: -36, right: -36, width: 110, height: 110, borderRadius: '50%', background: 'radial-gradient(circle, rgba(59,130,246,0.14) 0%, transparent 70%)', pointerEvents: 'none' }} />
+          <div style={{ position: 'absolute', top: 0, left: 28, right: 28, height: 2, background: 'linear-gradient(90deg, transparent, rgba(59,130,246,0.5), transparent)' }} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+            <div style={{ width: 32, height: 32, borderRadius: 8, background: 'rgba(59,130,246,0.14)', border: '1px solid rgba(59,130,246,0.28)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <svg viewBox="0 0 16 16" fill="none" stroke="#60a5fa" strokeWidth={1.8} style={{ width: 15, height: 15 }}>
+                <path d="M3 5a2 2 0 0 1 2-2h1.28a.8.8 0 0 1 .758.547l.6 1.797a.8.8 0 0 1-.401.968l-.903.452a8.833 8.833 0 0 0 4.413 4.413l.452-.903a.8.8 0 0 1 .968-.401l1.797.6A.8.8 0 0 1 14 11.72V13a2 2 0 0 1-2 2h-.4C5.87 15 1 10.13 1 4.4V4a1 1 0 0 1 1-1h1z" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </div>
+            <span style={{ fontSize: '0.6rem', fontWeight: 700, color: '#60a5fa', textTransform: 'uppercase', letterSpacing: '0.12em', opacity: 0.85 }}>
+              Total Calls
+            </span>
           </div>
-          <p style={{ fontSize: '0.81rem', color: '#94a3b8', margin: 0, lineHeight: 1.65 }}>
-            A score from 1–5 measuring how natural voices sound on your calls.{' '}
-            <strong style={{ color: '#22c55e' }}>4+ is excellent</strong> — like talking in the same room.{' '}
-            Below 3 means callers may notice choppy or muffled audio.
-          </p>
-        </div>
-        <div style={{ flex: '1 1 200px', minWidth: 0 }}>
-          <div style={{ fontSize: '0.68rem', fontWeight: 700, color: '#3b82f6', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 5 }}>
-            What is Call Success Rate?
+          <div style={{ fontSize: 'clamp(1.8rem, 3.5vw, 2.4rem)', fontWeight: 900, color: '#60a5fa', letterSpacing: '-0.04em', lineHeight: 1, marginBottom: 4, fontVariantNumeric: 'tabular-nums', textShadow: '0 0 28px rgba(96,165,250,0.4)' }}>
+            {stats.total.toLocaleString()}
           </div>
-          <p style={{ fontSize: '0.81rem', color: '#94a3b8', margin: 0, lineHeight: 1.65 }}>
-            The percentage of calls that connected and were answered.{' '}
-            <strong style={{ color: '#22c55e' }}>95%+ means your system is running great.</strong>{' '}
-            A lower number could indicate routing issues worth investigating.
-          </p>
+          <div style={{ fontSize: '0.73rem', color: '#64748b', lineHeight: 1.5 }}>
+            calls tracked in this period
+          </div>
         </div>
       </div>
 
-      {/* ── 7-day quality trend ────────────────────────────── */}
+      {/* ── 7-day quality trend ────────────────────────────────── */}
       <div
         style={{
           background: 'rgba(19,21,29,0.68)',
@@ -2284,48 +1413,37 @@ function QualityTab({ customerId }: QualityTabProps) {
           WebkitBackdropFilter: 'blur(10px)',
           border: '1px solid rgba(59,130,246,0.10)',
           borderRadius: 14,
-          padding: '20px 22px',
+          padding: '16px 20px',
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 18, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
           <span style={{ fontSize: '0.68rem', fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
             Last 7 Days
           </span>
-          <span style={{ fontSize: '0.79rem', color: '#64748b', flex: 1 }}>
+          <span style={{ fontSize: '0.77rem', color: '#64748b', flex: 1 }}>
             {trendSummary}
           </span>
         </div>
 
-        <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'flex-end' }}>
           {dailyDots.map((d) => (
             <div
               key={d.date}
               title={d.tooltip}
-              style={{
-                flex: '1 1 0',
-                minWidth: 32,
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                gap: 6,
-                cursor: 'default',
-              }}
+              style={{ flex: '1 1 0', minWidth: 28, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5, cursor: 'default' }}
             >
               <div
                 style={{
                   width: '100%',
-                  height: 28,
-                  borderRadius: 6,
-                  background: d.color === '#1e293b'
-                    ? 'rgba(30,41,59,0.4)'
-                    : d.color,
-                  boxShadow: d.color !== '#1e293b' ? `0 0 12px ${d.color}55` : 'none',
+                  height: 24,
+                  borderRadius: 5,
+                  background: d.color === '#1e293b' ? 'rgba(30,41,59,0.4)' : d.color,
+                  boxShadow: d.color !== '#1e293b' ? `0 0 10px ${d.color}55` : 'none',
                   opacity: d.color === '#1e293b' ? 0.4 : 0.85,
-                  transition: 'opacity 0.2s',
                   border: `1px solid ${d.color}33`,
                 }}
               />
-              <span style={{ fontSize: '0.55rem', color: '#334155', textAlign: 'center', letterSpacing: '-0.01em', whiteSpace: 'nowrap' }}>
+              <span style={{ fontSize: '0.52rem', color: '#334155', textAlign: 'center', whiteSpace: 'nowrap' }}>
                 {new Date(d.date + 'T12:00:00').toLocaleDateString(undefined, { weekday: 'short' })}
               </span>
             </div>
@@ -2333,7 +1451,7 @@ function QualityTab({ customerId }: QualityTabProps) {
         </div>
 
         {/* Legend */}
-        <div style={{ display: 'flex', gap: 16, marginTop: 14, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 14, marginTop: 12, flexWrap: 'wrap' }}>
           {[
             { color: '#22c55e', label: 'Excellent' },
             { color: '#f59e0b', label: 'Attention' },
@@ -2341,145 +1459,195 @@ function QualityTab({ customerId }: QualityTabProps) {
             { color: '#1e293b', label: 'No calls' },
           ].map((l) => (
             <div key={l.label} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-              <div style={{ width: 8, height: 8, borderRadius: 2, background: l.color, opacity: l.color === '#1e293b' ? 0.4 : 0.85 }} />
-              <span style={{ fontSize: '0.68rem', color: '#475569' }}>{l.label}</span>
+              <div style={{ width: 7, height: 7, borderRadius: 2, background: l.color, opacity: l.color === '#1e293b' ? 0.4 : 0.85 }} />
+              <span style={{ fontSize: '0.66rem', color: '#475569' }}>{l.label}</span>
             </div>
           ))}
         </div>
       </div>
 
-      {/* ── Detailed Call Quality Metrics table ────────────────── */}
+      {/* ── Recent calls table ─────────────────────────────────── */}
       <div
         style={{
-          background: 'rgba(19,21,29,0.72)',
+          background: 'rgba(19,21,29,0.68)',
           backdropFilter: 'blur(10px)',
           WebkitBackdropFilter: 'blur(10px)',
-          border: '1px solid rgba(59,130,246,0.10)',
+          border: '1px solid rgba(59,130,246,0.12)',
           borderRadius: 16,
           overflow: 'hidden',
+          boxShadow: '0 8px 32px -8px rgba(0,0,0,0.45)',
         }}
       >
-        {/* Section header */}
         <div
           style={{
-            padding: '16px 20px',
-            borderBottom: '1px solid rgba(59,130,246,0.10)',
+            padding: '14px 20px',
+            borderBottom: '1px solid rgba(59,130,246,0.08)',
             display: 'flex',
             alignItems: 'center',
             gap: 12,
             flexWrap: 'wrap',
           }}
         >
-          <div>
-            <div
-              style={{
-                fontSize: '0.68rem',
-                fontWeight: 700,
-                color: '#3b82f6',
-                textTransform: 'uppercase',
-                letterSpacing: '0.12em',
-                marginBottom: 3,
-              }}
-            >
-              Detailed Call Quality Metrics
-            </div>
-            <div style={{ fontSize: '0.78rem', color: '#64748b' }}>
-              Recent calls with quality data — click any row to expand full metrics
-            </div>
-          </div>
-          {qualityCdrs.length > 0 && (
-            <span
-              style={{
-                marginLeft: 'auto',
-                fontSize: '0.72rem',
-                color: '#475569',
-                background: 'rgba(59,130,246,0.08)',
-                border: '1px solid rgba(59,130,246,0.15)',
-                borderRadius: 6,
-                padding: '3px 10px',
-              }}
-            >
-              {qualityCdrs.length} call{qualityCdrs.length !== 1 ? 's' : ''}
-            </span>
-          )}
-        </div>
-
-        {qualityCdrs.length === 0 ? (
-          <div
-            style={{
-              padding: '40px 24px',
-              textAlign: 'center',
-              color: '#475569',
-              fontSize: '0.82rem',
-            }}
-          >
-            No calls with quality metrics found in the current window.
-          </div>
-        ) : (
-          <div style={{ overflowX: 'auto' }}>
-            <table
+          <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+            Recent Calls
+          </span>
+          <div style={{ flex: 1, minWidth: 200, position: 'relative' }}>
+            <svg viewBox="0 0 20 20" fill="currentColor" style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', width: 14, height: 14, color: '#334155' }}>
+              <path fillRule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clipRule="evenodd" />
+            </svg>
+            <input
+              type="text"
+              value={activitySearch}
+              onChange={(e) => setActivitySearch(e.target.value)}
+              placeholder="Filter by number, date, cause..."
               style={{
                 width: '100%',
-                borderCollapse: 'collapse',
-                fontSize: '0.82rem',
+                padding: '7px 12px 7px 30px',
+                fontSize: '0.8rem',
+                color: '#e2e8f0',
+                background: 'rgba(15,17,23,0.5)',
+                border: '1px solid rgba(59,130,246,0.12)',
+                borderRadius: 10,
+                outline: 'none',
+                transition: 'border-color 0.2s, box-shadow 0.2s',
               }}
-            >
-              {/* Table header */}
-              <thead>
-                <tr
-                  style={{
-                    background: 'rgba(59,130,246,0.08)',
-                    borderBottom: '1px solid rgba(59,130,246,0.15)',
-                  }}
-                >
-                  {(['Time', 'DID', 'Duration', 'MOS', 'Quality', ''] as const).map((h) => (
-                    <th
-                      key={h}
-                      style={{
-                        padding: '10px 12px',
-                        textAlign: h === '' ? 'right' : 'left',
-                        fontSize: '0.65rem',
-                        fontWeight: 700,
-                        color: '#3b82f6',
-                        textTransform: 'uppercase',
-                        letterSpacing: '0.10em',
-                        whiteSpace: 'nowrap',
-                        userSelect: 'none',
-                      }}
-                    >
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-
-              <tbody>
-                {qualityCdrs.slice(0, 50).map((cdr) => (
-                  <CallQualityTableRow
-                    key={cdr.uuid}
-                    cdr={cdr}
-                    isExpanded={expandedRowUuid === cdr.uuid}
-                    onToggle={() => handleToggleRow(cdr.uuid)}
-                  />
-                ))}
-              </tbody>
-            </table>
-
-            {qualityCdrs.length > 50 && (
-              <div
-                style={{
-                  padding: '12px 20px',
-                  fontSize: '0.75rem',
-                  color: '#475569',
-                  borderTop: '1px solid rgba(255,255,255,0.04)',
-                  textAlign: 'center',
-                }}
-              >
-                Showing the 50 most recent calls with quality data. Older records are available in the CDR export.
-              </div>
-            )}
+              onFocus={(e) => {
+                e.currentTarget.style.borderColor = 'rgba(59,130,246,0.4)';
+                e.currentTarget.style.boxShadow = '0 0 0 3px rgba(59,130,246,0.10)';
+              }}
+              onBlur={(e) => {
+                e.currentTarget.style.borderColor = 'rgba(59,130,246,0.12)';
+                e.currentTarget.style.boxShadow = 'none';
+              }}
+            />
           </div>
-        )}
+          <span
+            style={{
+              fontSize: '0.68rem',
+              fontWeight: 600,
+              color: '#3b82f6',
+              background: 'rgba(59,130,246,0.10)',
+              border: '1px solid rgba(59,130,246,0.20)',
+              borderRadius: 20,
+              padding: '2px 9px',
+              flexShrink: 0,
+            }}
+          >
+            {calls.length}{activitySearch.trim() ? ` of ${allCalls.length}` : ''} shown
+          </span>
+        </div>
+
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 580 }}>
+            <thead>
+              <tr style={{ background: 'rgba(59,130,246,0.04)', borderBottom: '1px solid rgba(59,130,246,0.10)' }}>
+                {['Time', 'From', 'To (DID)', 'Forwarded To', 'Status', 'Quality'].map((h) => (
+                  <th
+                    key={h}
+                    style={{
+                      padding: '11px 14px',
+                      textAlign: 'left',
+                      fontSize: '0.6rem',
+                      fontWeight: 700,
+                      color: '#475569',
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.11em',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {calls.map((cdr, idx) => {
+                const status = callStatusInfo(cdr);
+                const quality = mosLabel(cdr.mos);
+                return (
+                  <tr
+                    key={cdr.uuid}
+                    style={{
+                      borderBottom: idx < calls.length - 1 ? '1px solid rgba(59,130,246,0.05)' : 'none',
+                      animation: 'fadeInUp 0.3s ease both',
+                      animationDelay: `${Math.min(idx * 30, 300)}ms`,
+                    }}
+                  >
+                    {/* Time */}
+                    <td style={{ padding: '12px 14px', whiteSpace: 'nowrap' }}>
+                      <span style={{ fontSize: '0.78rem', color: '#64748b', fontVariantNumeric: 'tabular-nums' }}>
+                        {timeAgo(cdr.start_time)}
+                      </span>
+                    </td>
+
+                    {/* From */}
+                    <td style={{ padding: '12px 14px' }}>
+                      <span style={{ fontSize: '0.82rem', color: '#94a3b8', fontFamily: 'monospace', fontWeight: 500 }}>
+                        {fmt(cdr.caller_id)}
+                      </span>
+                    </td>
+
+                    {/* To (DID) */}
+                    <td style={{ padding: '12px 14px' }}>
+                      <span style={{ fontSize: '0.82rem', color: '#60a5fa', fontFamily: 'monospace', fontWeight: 600 }}>
+                        {fmt(cdr.destination)}
+                      </span>
+                    </td>
+
+                    {/* Forwarded To */}
+                    <td style={{ padding: '12px 14px' }}>
+                      <span style={{ fontSize: '0.78rem', color: '#64748b', fontFamily: 'monospace' }}>
+                        {cdr.carrier_used ? fmt(cdr.carrier_used) : '—'}
+                      </span>
+                    </td>
+
+                    {/* Status badge */}
+                    <td style={{ padding: '12px 14px' }}>
+                      <span
+                        style={{
+                          fontSize: '0.68rem',
+                          fontWeight: 700,
+                          color: status.color,
+                          background: status.bg,
+                          borderRadius: 20,
+                          padding: '3px 9px',
+                          whiteSpace: 'nowrap',
+                          letterSpacing: '0.02em',
+                        }}
+                      >
+                        {status.label}
+                      </span>
+                    </td>
+
+                    {/* Quality dot */}
+                    <td style={{ padding: '12px 14px' }}>
+                      {cdr.mos != null ? (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <span
+                            style={{
+                              width: 8,
+                              height: 8,
+                              borderRadius: '50%',
+                              background: quality.dot,
+                              flexShrink: 0,
+                              boxShadow: `0 0 6px ${quality.dot}`,
+                              display: 'inline-block',
+                            }}
+                          />
+                          <span style={{ fontSize: '0.72rem', color: quality.color, fontWeight: 600 }}>
+                            {quality.text}
+                          </span>
+                        </div>
+                      ) : (
+                        <span style={{ fontSize: '0.72rem', color: '#334155' }}>—</span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );
@@ -4719,11 +3887,6 @@ export function RcfPage() {
       {/* ── Call Activity Tab ────────────────────────────────── */}
       {activeTab === 'activity' && (
         <CallActivityTab customerId={customerId} />
-      )}
-
-      {/* ── Quality Tab ──────────────────────────────────────── */}
-      {activeTab === 'quality' && (
-        <QualityTab customerId={customerId} />
       )}
 
       {/* ── DID Management Tab ───────────────────────────────── */}
