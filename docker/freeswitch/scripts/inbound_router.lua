@@ -547,6 +547,10 @@ if product_type == "rcf" then
     session:setVariable("outbound_caller_id_name", outbound_did)
 
     local outbound_original_cid = to_10digit(original_caller_number)
+    -- E.164 versions for SIP identity headers (PAI, RPID, Diversion)
+    -- Carriers require +1 prefix per E.164; bare 10-digit leaks into PAI otherwise
+    local e164_original_cid = normalize_did(original_caller_number)
+    local e164_did = normalize_did(normalized_did)
     if pass_caller_id then
         -- Preserve original caller ID so the called party sees who is calling
         session:setVariable("effective_caller_id_number", outbound_original_cid)
@@ -561,7 +565,13 @@ if product_type == "rcf" then
     session:setVariable("sip_h_Diversion", "<sip:" .. outbound_did .. "@" .. external_sip_ip .. ">;reason=unconditional")
 
     -- X-Original-CID: Kamailio reads this to build P-Asserted-Identity
-    session:setVariable("sip_h_X-Original-CID", outbound_original_cid)
+    -- Uses E.164 (+1XXXXXXXXXX) format. When pass_caller_id=true, this is the
+    -- original caller's number; when false, it's the RCF DID itself.
+    if pass_caller_id then
+        session:setVariable("sip_h_X-Original-CID", e164_original_cid)
+    else
+        session:setVariable("sip_h_X-Original-CID", e164_did)
+    end
 
     freeswitch.consoleLog("INFO", string.format(
         "[inbound_router] CID setup (FusionPBX-style): outbound_cid=%s effective_cid=%s original=%s pass=%s\n",
@@ -596,10 +606,13 @@ if product_type == "rcf" then
         set_var("carrier_used", "carrier_" .. carrier)
 
         -- Remote-Party-ID: backup CID presentation mechanism for carriers
-        -- that don't support P-Asserted-Identity
+        -- that don't support P-Asserted-Identity. Uses E.164 format.
         if pass_caller_id then
             session:setVariable("sip_h_Remote-Party-ID",
-                "<sip:" .. original_caller_number .. "@" .. external_sip_ip .. ">;party=calling;privacy=off;screen=yes")
+                "<sip:" .. e164_original_cid .. "@" .. external_sip_ip .. ">;party=calling;privacy=off;screen=yes")
+        else
+            session:setVariable("sip_h_Remote-Party-ID",
+                "<sip:" .. e164_did .. "@" .. external_sip_ip .. ">;party=calling;privacy=off;screen=yes")
         end
 
         -- Export caller ID to B-leg for Bandwidth From header auth.
