@@ -87,7 +87,8 @@ async def originate_call(
     # appears in Via, Contact, and SDP headers on outbound INVITEs.
     # The internal profile does NOT apply ext-sip-ip to outbound calls.
     # Determine carrier for X-Carrier header (Kamailio routes to correct Bandwidth IP)
-    carrier = "premium" if traffic_grade == "premium" else "standard"
+    # All products now use the same 2-carrier model: primary (Dallas) / secondary (LA)
+    carrier = "primary"
 
     vars_str = ",".join([
         f"origination_uuid={uuid}",

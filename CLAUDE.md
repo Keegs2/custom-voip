@@ -160,7 +160,7 @@ Record-Route: <sip:SBC_INTERNAL_IP:5060;lr>    ← inner: what FS sees, routes t
 FreeSWITCH implements SBC health detection and multi-carrier failover in `inbound_router.lua`:
 
 1. **TCP pre-check:** Before bridging, FS opens a TCP socket to the SBC on port 5060. If the connection fails, the SBC is marked dead in < 1 second. This avoids the 30-second SIP timeout waiting for a dead SBC.
-2. **4-attempt failover loop:** 2 SBCs × 2 carriers = 4 bridge attempts. Order: SBC1+primary carrier → SBC1+backup carrier → SBC2+primary → SBC2+backup.
+2. **4-attempt failover loop:** 2 SBCs × 2 carriers = 4 bridge attempts. Order: SBC1+primary carrier (Dallas) → SBC2+primary carrier (Dallas) → SBC1+secondary carrier (LA) → SBC2+secondary carrier (LA).
 3. **originate_timeout=10s:** This timeout includes carrier PDD (Post-Dial Delay), not just the SBC's response time. It's the total time allowed for the carrier to send back a provisional response.
 
 ### SIP Header Handling — What Works and What Doesn't
@@ -183,7 +183,7 @@ Bandwidth sometimes sends `Session-Expires: 30` in 200 OK (below RFC 4028 minimu
 ### Bandwidth Carrier Behaviors
 
 - **Duplicate INVITEs:** Bandwidth sends the same inbound call from multiple edge proxies simultaneously (different source IPs, different Call-IDs, same From/To). Kamailio deduplicates via `bw_dedup` htable (key=FromUser::ToUser, TTL=3s), responding 482 Merged to duplicates.
-- **Carrier IPs:** Dallas 67.231.2.12 (primary, standard/backup), Los Angeles 216.82.238.134 (premium). X-Carrier header from FS tells Kamailio which to use.
+- **Carrier IPs:** Dallas 67.231.2.12 (primary), Los Angeles 216.82.238.134 (secondary). X-Carrier header from FS tells Kamailio which to use.
 - **422 handling:** If Bandwidth rejects with 422 (Session Interval Too Small), Kamailio retries with Session-Expires: 3600, Min-SE: 900.
 - **5xx failover:** On 500/503/408/480/404 from primary carrier IP, Kamailio fails over to alternate Bandwidth IP (flag 8 prevents infinite loop).
 
@@ -192,7 +192,7 @@ Bandwidth sometimes sends `Session-Expires: 30` in 200 OK (below RFC 4028 minimu
 - **No proxy_media in RCF path.** Default media mode works correctly. proxy_media was removed after the Cloud NAT fix resolved the actual audio issue.
 - **No sip_enable_soa=false.** SOA stays enabled for proper B-leg media setup. The "duplicate SDP answer" in 200 OK is cosmetic in default media mode.
 - **183 SDP passthrough works.** PSTN ringback flows through naturally in default media mode. No special handling needed.
-- **Gateway syntax deprecated.** All outbound bridges use `sofia/external/dest@proxy:5060` with X-Carrier header. The old `sofia/gateway/carrier/dest` syntax produced corrupted Contact headers (`sip:gw+carrier_standard@...`).
+- **Gateway syntax deprecated.** All outbound bridges use `sofia/external/dest@proxy:5060` with X-Carrier header. The old `sofia/gateway/carrier/dest` syntax produced corrupted Contact headers (`sip:gw+carrier_primary@...`).
 - **Redis disabled in inbound_router.lua (RCF-V1).** The redis-lua library has connection pooling issues inside mod_lua's threading model. Velocity/fraud checks are disabled. Calls route via PostgreSQL lookup only.
 - **mod_local_stream disabled.** Requires `local_stream.conf.xml` which doesn't exist. When xml_curl can't reach the API during startup, the missing config causes CRIT abort. RCF uses `silence_stream://-1` instead.
 

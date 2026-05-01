@@ -121,9 +121,8 @@ Context: public (all calls enter public dialplan context)
 
 **Gateways:**
 All carrier gateways are DISABLED (commented out). Outbound calls use `sofia/external/dest@proxy` with `X-Carrier` header instead. The deprecated gateway definitions are kept as documentation of Bandwidth trunk configurations:
-- `carrier_standard` -> Dallas 67.231.2.12 (low-CPS, standard rates)
-- `carrier_premium` -> LA 216.82.238.134 (high-CPS, negotiated rates)
-- `carrier_backup` -> Dallas 67.231.2.12 (failover)
+- `carrier_primary` -> Dallas 67.231.2.12 (primary carrier for all products)
+- `carrier_secondary` -> LA 216.82.238.134 (secondary/failover carrier)
 - `test_echo` -> Loopback (still active, for testing)
 
 **Multi-Tenant Domain Handling:**
@@ -241,7 +240,7 @@ Single file containing three contexts:
 For local Zoiper testing only. Contains:
 1. **test_rcf_did** -- `555XXXX` pattern transfers to public context for Lua routing
 2. **echo_test_default** -- `9196` echo test
-3. **default_outbound** -- PSTN calls from registered users. Normalizes to E.164, runs `lookup_user_did.lua` for caller ID, bridges via `sofia/external/dest@sbc_proxy_ip:5060` with X-Carrier header. Primary=standard, failover=premium.
+3. **default_outbound** -- PSTN calls from registered users. Normalizes to E.164, runs `lookup_user_did.lua` for caller ID, bridges via `sofia/external/dest@sbc_proxy_ip:5060` with X-Carrier header. Primary=primary (Dallas), failover=secondary (LA).
 
 ### Context: `public` (carrier/external traffic)
 

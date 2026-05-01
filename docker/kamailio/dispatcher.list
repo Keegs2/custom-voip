@@ -48,10 +48,10 @@
 # 1 sip:freeswitch-3:5080 0 0 weight=100;maxload=2000;duid=fs-tertiary
 
 # ============================================================
-# Group 2: Bandwidth Standard Carrier (Dallas)
+# Group 2: Bandwidth Primary (Dallas)
 # ============================================================
-# Bandwidth Dallas signaling IP for standard/backup trunks.
-# Mapped from X-Carrier: standard | backup in route[TO_CARRIER].
+# Bandwidth Dallas signaling IP — primary carrier for all products.
+# Mapped from X-Carrier: primary in route[TO_CARRIER].
 #
 # PURPOSE: Dispatcher sends periodic SIP OPTIONS to this IP
 # (controlled by ds_ping_interval). This serves two functions:
@@ -66,15 +66,15 @@
 # NOTE: This group is for probing/keepalive ONLY. Actual outbound
 # call routing to Bandwidth is handled by route[TO_CARRIER] using
 # $rd/$du directly — NOT via ds_select_dst on this group.
-2 sip:67.231.2.12:5060 0 0 weight=100;duid=bw-dallas-standard
+2 sip:67.231.2.12:5060 0 0 weight=100;duid=bw-dallas-primary
 
 # ============================================================
-# Group 3: Bandwidth Premium Carrier (Los Angeles)
+# Group 3: Bandwidth Secondary (LA)
 # ============================================================
-# Bandwidth LA signaling IP for premium/high-CPS trunk.
-# Mapped from X-Carrier: premium in route[TO_CARRIER].
+# Bandwidth LA signaling IP — secondary/failover carrier for all products.
+# Mapped from X-Carrier: secondary in route[TO_CARRIER].
 # Same keepalive/health-monitoring purpose as Group 2.
-3 sip:216.82.238.134:5060 0 0 weight=100;duid=bw-la-premium
+3 sip:216.82.238.134:5060 0 0 weight=100;duid=bw-la-secondary
 
 # ============================================================
 # Group 4: Bandwidth TC1 - GraniteTelecommunicationsLLC_01 (Default)

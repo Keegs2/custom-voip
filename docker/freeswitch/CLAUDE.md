@@ -139,7 +139,7 @@ Also needs `SYS_NICE` capability for real-time scheduling.
 
 8. **Session timer export**: Channel variables must be `export`ed (not just `set`) to propagate to the B-leg. Without this, Bandwidth tears down calls after Session-Expires (30s) because FreeSWITCH doesn't send refresh re-INVITEs.
 
-9. **Gateway syntax deprecated**: All outbound bridges use `sofia/external/dest@proxy` instead of `sofia/gateway/carrier/dest`. The gateway syntax produced corrupted Contact headers (`sip:gw+carrier_standard@...`).
+9. **Gateway syntax deprecated**: All outbound bridges use `sofia/external/dest@proxy` instead of `sofia/gateway/carrier/dest`. The gateway syntax produced corrupted Contact headers (`sip:gw+carrier_primary@...`).
 
 ## Volumes (docker-compose.media.yml)
 

@@ -61,7 +61,7 @@
       Verto/WebRTC users dial PSTN numbers. We normalize to E.164,
       bridge through the external profile (public IP in SDP/Via/Contact)
       to Kamailio SBC on 127.0.0.1:5060. X-Carrier header selects
-      the Bandwidth trunk: standard (Dallas) or premium (LA) failover.
+      the Bandwidth trunk: primary (Dallas) or secondary (LA) failover.
     -->
     <extension name="default_outbound">
       <!-- Match 10-digit, 11-digit (1+10), or +1 prefixed numbers -->
@@ -101,12 +101,12 @@
         <!-- Session timer vars in {} block ensure B-leg has them even if export fails -->
         <!-- sip_enable_soa=false: bypass FS SDP offer/answer engine on B-leg so carrier
              183 (early media) + 200 OK (answered) SDP both pass through correctly -->
-        <action application="set" data="sip_h_X-Carrier=standard"/>
+        <action application="set" data="sip_h_X-Carrier=primary"/>
         <action application="bridge" data="{sip_enable_soa=false,sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true}sofia/external/${e164_dest}@${sbc_proxy_ip}:5060"/>
 
         <!-- Failover: Bandwidth LA via Kamailio -->
-        <action application="log" data="WARNING PSTN primary failed (${bridge_hangup_cause}), trying premium carrier"/>
-        <action application="set" data="sip_h_X-Carrier=premium"/>
+        <action application="log" data="WARNING PSTN primary failed (${bridge_hangup_cause}), trying secondary carrier"/>
+        <action application="set" data="sip_h_X-Carrier=secondary"/>
         <action application="bridge" data="{sip_enable_soa=false,sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true}sofia/external/${e164_dest}@${sbc_proxy_ip}:5060"/>
 
         <!-- Both carriers failed -->
@@ -405,11 +405,11 @@
         <!-- Route to emergency carrier via Kamailio proxy using external profile -->
         <!-- External profile ensures public IP in Via/Contact/SDP headers -->
         <!-- X-Carrier header tells Kamailio which Bandwidth IP to use -->
-        <action application="set" data="sip_h_X-Carrier=standard"/>
+        <action application="set" data="sip_h_X-Carrier=primary"/>
         <action application="bridge" data="{sip_enable_soa=false}sofia/external/911@${sbc_proxy_ip}:5060"/>
 
-        <!-- If bridge fails, try backup -->
-        <action application="set" data="sip_h_X-Carrier=premium"/>
+        <!-- If bridge fails, try secondary carrier -->
+        <action application="set" data="sip_h_X-Carrier=secondary"/>
         <action application="bridge" data="{sip_enable_soa=false}sofia/external/911@${sbc_proxy_ip}:5060"/>
 
         <!-- Absolute last resort -->

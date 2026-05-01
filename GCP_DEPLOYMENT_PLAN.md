@@ -286,7 +286,7 @@ and GCP guarantees the packet reaches a healthy SBC.
 Each region's Kamailio sends outbound calls to the nearest Bandwidth signaling proxy.
 Configured via `BANDWIDTH_PRIMARY_IP` / `BANDWIDTH_SECONDARY_IP` env vars per zone.
 
-| Region | X-Carrier=standard (primary) | X-Carrier=premium (failover) |
+| Region | X-Carrier=primary | X-Carrier=secondary (failover) |
 |--------|------------------------------|------------------------------|
 | East | 67.231.2.12 (Dallas, ~20ms) | 216.82.238.134 (LA) |
 | West | 216.82.238.134 (LA, ~15ms) | 67.231.2.12 (Dallas) |

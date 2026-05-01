@@ -128,9 +128,9 @@ This is read by WITHINDIALOG to route in-dialog requests to the correct FS SIP p
 9-step process for outbound call setup:
 
 1. **Carrier selection**: Read `X-Carrier` header from FreeSWITCH:
-   - `standard` or `backup` -> 67.231.2.12 (Dallas)
-   - `premium` -> 216.82.238.134 (Los Angeles)
-   - Default (no header) -> Dallas
+   - `primary` -> 67.231.2.12 (Dallas)
+   - `secondary` -> 216.82.238.134 (Los Angeles)
+   - Default (no header) -> Dallas (primary)
    - Remove `X-Carrier` before sending to carrier.
 
 2. **From/To domain rewrite**: `$fd` = public IP, `$td` = carrier IP.
@@ -284,7 +284,7 @@ FreeSWITCH (10.142.0.100:5080) - internal profile
 FreeSWITCH (10.142.0.100:5090) - external profile
   |
   | INVITE sip:+15551234567@34.74.71.32:5060
-  | Headers: X-Carrier: standard, X-Original-CID: +18005559999
+  | Headers: X-Carrier: primary, X-Original-CID: +18005559999
   | UA: VoicePlatform/1.0
   v
 Kamailio (34.74.71.32:5060)
@@ -292,7 +292,7 @@ Kamailio (34.74.71.32:5060)
   - UA matches "VoicePlatform" -> outbound path
   - NO record_route() yet (deferred for msg_apply_changes)
   - route[TO_CARRIER]:
-    1. X-Carrier=standard -> carrier_ip=67.231.2.12
+    1. X-Carrier=primary -> carrier_ip=67.231.2.12
     2. $fd=34.74.71.32, $td=67.231.2.12
     3. Strip all FS headers, add clean Contact
     4. msg_apply_changes(), then record_route()

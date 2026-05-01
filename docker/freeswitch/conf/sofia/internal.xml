@@ -337,7 +337,7 @@
 
     All Lua scripts and the ESL client now use sofia/external/dest@proxy
     instead of sofia/gateway/carrier/dest. This eliminates the corrupted
-    Contact header (sip:gw+carrier_standard@...) and orphaned Via
+    Contact header (sip:gw+carrier_primary@...) and orphaned Via
     parameter fragments that the gateway bridge syntax produced.
 
     How outbound routing works now:
@@ -347,9 +347,8 @@
          - The EXTERNAL profile is used because the internal profile does
            NOT apply ext-sip-ip to outbound calls
       2. X-Carrier header tells Kamailio which Bandwidth IP to route to:
-         - X-Carrier: standard -> Bandwidth Dallas 67.231.2.12
-         - X-Carrier: premium  -> Bandwidth LA 216.82.238.134
-         - X-Carrier: backup   -> Bandwidth Dallas 67.231.2.12 (failover)
+         - X-Carrier: primary   -> Bandwidth Dallas 67.231.2.12
+         - X-Carrier: secondary -> Bandwidth LA 216.82.238.134
       3. Kamailio's route[TO_CARRIER] reads X-Carrier, sets $rd/$du,
          does topology hiding, and relays to Bandwidth.
 
@@ -359,12 +358,12 @@
   <gateways>
     <!--
       Bandwidth Trunk Configuration 4 - GraniteTelecommunicationsLLC_O3
-      Low-CPS trunk for RCF and SIP Trunk customers. Standard carrier rates.
+      Primary carrier for all products (RCF, Trunk, API).
       Signaling: Dallas proxy 67.231.2.12:5060
-      Mapped to X-Carrier: standard
+      Mapped to X-Carrier: primary
     -->
     <!-- DISABLED: Outbound calls now use sofia/external/dest@proxy with X-Carrier header
-    <gateway name="carrier_standard">
+    <gateway name="carrier_primary">
       <param name="proxy" value="172.28.0.1"/>
       <param name="port" value="5060"/>
       <param name="realm" value="172.28.0.1"/>
@@ -377,29 +376,12 @@
 
     <!--
       Bandwidth Trunk Configuration 4 - GraniteTelecommunicationsLLC_O3
-      High-CPS trunk for API Calling customers. Individually negotiated rates.
+      Secondary/failover carrier for all products (RCF, Trunk, API).
       Signaling: Los Angeles proxy 216.82.238.134:5060
-      Mapped to X-Carrier: premium
+      Mapped to X-Carrier: secondary
     -->
     <!-- DISABLED: Outbound calls now use sofia/external/dest@proxy with X-Carrier header
-    <gateway name="carrier_premium">
-      <param name="proxy" value="172.28.0.1"/>
-      <param name="port" value="5060"/>
-      <param name="realm" value="172.28.0.1"/>
-      <param name="register" value="false"/>
-      <param name="caller-id-in-from" value="true"/>
-      <param name="codec-prefs" value="PCMU,PCMA"/>
-      <param name="enabled" value="true"/>
-    </gateway>
-    -->
-
-    <!--
-      Bandwidth Trunk Configuration 4 - GraniteTelecommunicationsLLC_O3
-      Failover gateway for both trunks. Dallas proxy 67.231.2.12:5060
-      Mapped to X-Carrier: backup
-    -->
-    <!-- DISABLED: Outbound calls now use sofia/external/dest@proxy with X-Carrier header
-    <gateway name="carrier_backup">
+    <gateway name="carrier_secondary">
       <param name="proxy" value="172.28.0.1"/>
       <param name="port" value="5060"/>
       <param name="realm" value="172.28.0.1"/>

@@ -21,7 +21,7 @@
 
     <variables>
       <variable name="record_stereo" value="true"/>
-      <variable name="default_gateway" value="carrier_standard"/>
+      <variable name="default_gateway" value="carrier_primary"/>
       <variable name="default_areacode" value=""/>
       <variable name="transfer_fallback_extension" value="operator"/>
     </variables>

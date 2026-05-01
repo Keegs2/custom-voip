@@ -79,10 +79,10 @@ inbound_router.lua (product_type == "rcf"):
      - sip_h_Remote-Party-ID = original caller (backup CID mechanism)
   4. Export RFC 4028 session timers to B-leg (sip_session_timeout=1800, min=90)
   5. Bridge: sofia/external/{forward_to}@{sbc_proxy_ip}:5060
-     - X-Carrier=standard header tells Kamailio -> Bandwidth Dallas (67.231.2.12)
+     - X-Carrier=primary header tells Kamailio -> Bandwidth Dallas (67.231.2.12)
      - Uses EXTERNAL profile so Via/Contact/SDP get public IP
   6. If bridge fails, failover:
-     - X-Carrier=backup -> same Bandwidth Dallas (failover)
+     - X-Carrier=secondary -> Bandwidth LA (216.82.238.134)
   7. If all bridges fail -> NORMAL_TEMPORARY_FAILURE (SIP 503)
      - lua_routed=true prevents dialplan from masking with 404
   |
@@ -136,8 +136,8 @@ Call flow:
 6. [If Redis available] Acquire channel (concurrent call limit via Redis sorted set)
 7. [If Redis available] Velocity check (CPM/daily limits)
 8. Set caller ID: outbound_caller_id = trunk DID (carrier auth), effective_caller_id = PBX original
-9. Bridge via `sofia/external/dest@sbc_proxy_ip:5060` with X-Carrier=standard
-10. Failover with X-Carrier=backup if primary fails
+9. Bridge via `sofia/external/dest@sbc_proxy_ip:5060` with X-Carrier=primary
+10. Failover with X-Carrier=secondary if primary fails
 11. Set `api_hangup_hook=lua channel_release.lua` for channel cleanup
 
 ### api_outbound.lua
@@ -152,8 +152,8 @@ Call flow:
 5. Get per-call fee from tier (starter=$0.01, professional=$0.008, enterprise=$0.005)
 6. [If Redis] Velocity check with higher API limits (300 CPM, 5000 daily)
 7. If webhook_url set: hand off to voice_webhook.lua (TwiML engine)
-8. If no webhook: bridge via `sofia/external/dest@sbc_proxy_ip:5060` with X-Carrier=premium
-9. Failover with X-Carrier=backup
+8. If no webhook: bridge via `sofia/external/dest@sbc_proxy_ip:5060` with X-Carrier=primary
+9. Failover with X-Carrier=secondary
 
 ### outbound_api.lua
 
@@ -326,9 +326,9 @@ cdrs              (uuid, customer_id, product_type, trunk_id, direction, caller_
 
 | Product Type | X-Carrier Header | Bandwidth Endpoint | Failover |
 |---|---|---|---|
-| RCF | standard | Dallas 67.231.2.12 | backup (same Dallas) |
-| API Calling | premium | LA 216.82.238.134 | backup (Dallas) |
-| Trunk | standard | Dallas 67.231.2.12 | backup (same Dallas) |
+| RCF | primary | Dallas 67.231.2.12 | secondary (LA 216.82.238.134) |
+| API Calling | primary | Dallas 67.231.2.12 | secondary (LA 216.82.238.134) |
+| Trunk | primary | Dallas 67.231.2.12 | secondary (LA 216.82.238.134) |
 
 All outbound bridges: `sofia/external/{dest}@{sbc_proxy_ip}:5060` with `sip_h_X-Carrier={carrier}`. Kamailio reads X-Carrier in `route[TO_CARRIER]` to set `$rd` / `$du`.
 

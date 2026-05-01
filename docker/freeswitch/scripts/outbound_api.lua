@@ -161,9 +161,9 @@ end
 -- ============================================
 -- STEP 4: Select Carrier Gateway
 -- ============================================
--- API calls ALWAYS use carrier_premium (high-CPS trunk, negotiated rates)
+-- API calls use carrier_primary (same carrier as all products in 2-carrier model)
 -- traffic_grade is retained as a secondary factor for priority within the trunk
-local gateway = "carrier_premium"
+local gateway = "carrier_primary"
 
 freeswitch.consoleLog("INFO", string.format(
     "[outbound_api] Routing via %s (product: api, traffic_grade: %s)\n",
@@ -250,7 +250,7 @@ else
     -- The internal profile does NOT apply ext-sip-ip to outbound calls.
     -- X-Carrier tells Kamailio which Bandwidth IP to route to.
     local dial_string = string.format(
-        "{origination_caller_id_number=%s,call_timeout=%d,ignore_early_media=false,sip_enable_soa=false,sip_h_X-Carrier=premium" ..
+        "{origination_caller_id_number=%s,call_timeout=%d,ignore_early_media=false,sip_enable_soa=false,sip_h_X-Carrier=primary" ..
         ",sip_h_X-CID=%s" ..
         ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true}sofia/external/%s@" .. sbc_proxy_ip .. ":5060",
         from_did ~= "" and from_did or "anonymous",
@@ -289,14 +289,14 @@ else
             uuid, get_var("originate_disposition", "unknown")
         ))
 
-        -- Try failover carrier (carrier_backup is the failover for all trunks)
-        if gateway ~= "carrier_backup" then
+        -- Try failover carrier (secondary = LA)
+        if gateway ~= "carrier_secondary" then
             freeswitch.consoleLog("INFO", string.format(
-                "[outbound_api] Primary bridge failed, trying carrier_backup (product: api)\n"
+                "[outbound_api] Primary bridge failed, trying carrier_secondary (product: api)\n"
             ))
 
             dial_string = string.format(
-                "{origination_caller_id_number=%s,call_timeout=%d,sip_enable_soa=false,sip_h_X-Carrier=backup" ..
+                "{origination_caller_id_number=%s,call_timeout=%d,sip_enable_soa=false,sip_h_X-Carrier=secondary" ..
                 ",sip_h_X-CID=%s" ..
                 ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true}sofia/external/%s@" .. sbc_proxy_ip .. ":5060",
                 from_did ~= "" and from_did or "anonymous",
@@ -305,7 +305,7 @@ else
                 normalized_dest:gsub("^%+", "")
             )
 
-            set_var("carrier_used", "carrier_backup")
+            set_var("carrier_used", "carrier_secondary")
 
             pcall(function()
                 session:execute("bridge", dial_string)

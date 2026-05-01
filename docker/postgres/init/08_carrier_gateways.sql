@@ -25,19 +25,17 @@ CREATE TABLE IF NOT EXISTS carrier_gateways (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Seed Bandwidth Trunk Configuration 4 gateways
+-- Seed Bandwidth Trunk Configuration 4 gateways (2-carrier model)
+-- Primary (Dallas) and Secondary (LA) — all products use the same routing.
 INSERT INTO carrier_gateways
     (gateway_name, display_name, description, sip_proxy, port, product_types, is_primary, is_failover, enabled)
 VALUES
-    ('carrier_standard', 'Bandwidth Standard (Dallas)',
-     'Low-CPS trunk for RCF and SIP Trunk customers via Kamailio SBC.',
-     '67.231.2.12', 5060, ARRAY['rcf','trunk'], true, false, true),
-    ('carrier_premium', 'Bandwidth Premium (LA)',
-     'High-CPS trunk for API Calling customers via Kamailio SBC.',
-     '216.82.238.134', 5060, ARRAY['api'], true, false, true),
-    ('carrier_backup', 'Bandwidth Backup (Dallas)',
-     'Failover gateway for both trunks.',
-     '67.231.2.12', 5060, ARRAY['rcf','trunk','api'], false, true, true)
+    ('carrier_primary', 'Bandwidth Primary (Dallas)',
+     'Primary carrier for all products (RCF, Trunk, API) via Kamailio SBC.',
+     '67.231.2.12', 5060, ARRAY['rcf','trunk','api'], true, false, true),
+    ('carrier_secondary', 'Bandwidth Secondary (LA)',
+     'Secondary/failover carrier for all products via Kamailio SBC.',
+     '216.82.238.134', 5060, ARRAY['rcf','trunk','api'], false, true, true)
 ON CONFLICT (gateway_name) DO NOTHING;
 
 -- Grant permissions

@@ -435,7 +435,7 @@ freeswitch.consoleLog("ERR", ">>> STEP 4: Routing product_type=" .. tostring(pro
 
 if product_type == "rcf" then
     -- Remote Call Forwarding - Bridge to destination
-    -- RCF always terminates through Trunk Config 4 (carrier="standard").
+    -- RCF terminates through the primary carrier (TC4 Dallas).
     -- Kamailio sets X-Inbound-TC header for logging/Homer visibility, but
     -- outbound carrier selection is fixed to TC4 until all trunk groups are
     -- provisioned for our IPs on the Bandwidth side.
@@ -444,7 +444,7 @@ if product_type == "rcf" then
     --   if inbound_tc == "tc1" then carrier = "tc1" elseif inbound_tc == "tc2" then carrier = "tc2" end
     local inbound_tc = get_var("sip_h_X-Inbound-TC", "")
     inbound_tc = inbound_tc:match("^%s*(.-)%s*$") or ""
-    local carrier = "standard"  -- TC4 only — do not change until Bandwidth provisions all TCs
+    local carrier = "primary"  -- TC4 only — do not change until Bandwidth provisions all TCs
     freeswitch.consoleLog("INFO", string.format(
         "[inbound_router] Routing via carrier=%s (inbound_tc=%s, product: rcf, traffic_grade: %s)\n",
         carrier, inbound_tc, traffic_grade
@@ -632,12 +632,12 @@ if product_type == "rcf" then
     -- SBC + Carrier failover: 4 bridge attempts for PSTN routing
     -- ================================================================
     -- For local extensions, there is only the single dial_string built above.
-    -- For PSTN, we try all combinations of SBC (primary/failover) and
-    -- carrier (standard/backup) before giving up:
-    --   1. Primary SBC  + primary carrier  (standard)
-    --   2. Failover SBC + primary carrier  (standard)
-    --   3. Primary SBC  + failover carrier (backup)
-    --   4. Failover SBC + failover carrier (backup)
+    -- For PSTN, we try all combinations of SBC (SBC-1/SBC-2) and
+    -- carrier (primary/secondary) before giving up:
+    --   1. SBC-1 + primary carrier   (Dallas)
+    --   2. SBC-2 + primary carrier   (Dallas)
+    --   3. SBC-1 + secondary carrier (LA)
+    --   4. SBC-2 + secondary carrier (LA)
     --
     -- Channel variables (outbound_caller_id_*, effective_caller_id_*,
     -- sip_h_Diversion, sip_h_X-Original-CID, sip_h_Remote-Party-ID)
@@ -653,10 +653,10 @@ if product_type == "rcf" then
     else
         -- PSTN: 4-attempt SBC + carrier failover loop
         local bridge_attempts = {
-            { sbc = sbc_proxy_ip,          carrier = "standard", label = "primary SBC + primary carrier" },
-            { sbc = sbc_proxy_ip_failover, carrier = "standard", label = "failover SBC + primary carrier" },
-            { sbc = sbc_proxy_ip,          carrier = "backup",   label = "primary SBC + failover carrier" },
-            { sbc = sbc_proxy_ip_failover, carrier = "backup",   label = "failover SBC + failover carrier" },
+            { sbc = sbc_proxy_ip,          carrier = "primary",   label = "SBC-1 + primary carrier (Dallas)" },
+            { sbc = sbc_proxy_ip_failover, carrier = "primary",   label = "SBC-2 + primary carrier (Dallas)" },
+            { sbc = sbc_proxy_ip,          carrier = "secondary", label = "SBC-1 + secondary carrier (LA)" },
+            { sbc = sbc_proxy_ip_failover, carrier = "secondary", label = "SBC-2 + secondary carrier (LA)" },
         }
 
         for i, attempt in ipairs(bridge_attempts) do
@@ -730,13 +730,13 @@ if product_type == "rcf" then
 
 elseif product_type == "api" then
     -- API Calling - Execute webhook-driven voice control via voice_webhook.lua
-    -- API product always routes via carrier_premium (high-CPS trunk, negotiated rates)
+    -- API product routes via primary carrier (same as all products in 2-carrier model)
     -- traffic_grade is used as a secondary factor for priority within the same trunk
     freeswitch.consoleLog("INFO", string.format(
-        "[inbound_router] Routing via carrier_premium (product: api, traffic_grade: %s)\n",
+        "[inbound_router] Routing via carrier_primary (product: api, traffic_grade: %s)\n",
         traffic_grade
     ))
-    set_var("carrier_gateway", "carrier_premium")
+    set_var("carrier_gateway", "carrier_primary")
 
     if voice_url then
         set_var("voice_url", voice_url)

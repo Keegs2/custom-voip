@@ -751,9 +751,9 @@ local function execute_dial(verb)
     -- Build dial strings for all targets
     -- Multiple targets are separated by | for sequential or , for simultaneous
     local dial_strings = {}
-    -- Webhook-driven calls are always API product -> use carrier_premium (high-CPS trunk)
+    -- Webhook-driven calls are always API product -> use carrier_primary
     -- traffic_grade is retained as a secondary factor for priority within the trunk
-    local gateway = "carrier_premium"
+    local gateway = "carrier_primary"
     log_info(uuid, string.format(
         "Dial: using gateway %s (product: api, traffic_grade: %s)",
         gateway, get_var("traffic_grade", "standard")
@@ -782,7 +782,7 @@ local function execute_dial(verb)
             -- X-Carrier tells Kamailio which Bandwidth IP to route to
             local dial_number = clean_target:gsub("^%+", "")
             table.insert(dial_strings, string.format(
-                "{call_timeout=%d,ignore_early_media=false,sip_enable_soa=false,sip_h_X-Carrier=premium" ..
+                "{call_timeout=%d,ignore_early_media=false,sip_enable_soa=false,sip_h_X-Carrier=primary" ..
                 ",sip_h_X-CID=%s" ..
                 ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true}sofia/external/%s@" .. sbc_proxy_ip .. ":5060",
                 dial_timeout, uuid, dial_number

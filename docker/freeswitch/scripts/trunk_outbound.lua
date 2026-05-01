@@ -435,8 +435,8 @@ end
 -- ============================================
 -- STEP 8: Build and Execute Bridge
 -- ============================================
--- Trunk calls ALWAYS use carrier_standard (low-CPS trunk, standard rates)
-local gateway = "carrier_standard"
+-- Trunk calls use carrier_primary (Dallas, same carrier as all products)
+local gateway = "carrier_primary"
 
 freeswitch.consoleLog("INFO", string.format(
     "[trunk_outbound] Routing via %s (product: trunk, traffic_grade: %s)\n",
@@ -518,7 +518,7 @@ set_var("transfer_ringback", "%(2000,4000,440,480)")
 -- Build dial string using external profile to ensure public IP in Via/Contact/SDP.
 -- X-Carrier tells Kamailio which Bandwidth IP to route to.
 local dial_string = string.format(
-    "{ignore_early_media=false,sip_enable_soa=false,call_timeout=60,sip_h_X-Carrier=standard" ..
+    "{ignore_early_media=false,sip_enable_soa=false,call_timeout=60,sip_h_X-Carrier=primary" ..
     ",sip_h_X-CID=%s" ..
     ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true}sofia/external/%s@" .. sbc_proxy_ip .. ":5060",
     uuid,
@@ -560,12 +560,12 @@ if bridge_result ~= "SUCCESS" then
         uuid, bridge_result, last_bridge_hangup
     ))
 
-    -- Try failover carrier
-    freeswitch.consoleLog("INFO", "[" .. uuid .. "] Trying failover carrier\n")
-    set_var("carrier_used", "carrier_backup")
+    -- Try failover carrier (secondary = LA)
+    freeswitch.consoleLog("INFO", "[" .. uuid .. "] Trying secondary carrier (LA)\n")
+    set_var("carrier_used", "carrier_secondary")
 
     local failover_dial = string.format(
-        "{ignore_early_media=false,sip_enable_soa=false,call_timeout=60,sip_h_X-Carrier=backup" ..
+        "{ignore_early_media=false,sip_enable_soa=false,call_timeout=60,sip_h_X-Carrier=secondary" ..
         ",sip_h_X-CID=%s" ..
         ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true}sofia/external/%s@" .. sbc_proxy_ip .. ":5060",
         uuid,

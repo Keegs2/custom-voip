@@ -28,7 +28,7 @@ INSERT INTO cdrs (uuid, customer_id, product_type, direction, caller_id, destina
                   start_time, end_time, duration_ms, hangup_cause, carrier_used, traffic_grade)
 VALUES ('test-rating-$(date +%s)', 1, 'rcf', 'outbound', '+15551234567', '+14155551234',
         NOW() - INTERVAL '5 minutes', NOW() - INTERVAL '3 minutes', 120000, 'NORMAL_CLEARING',
-        'carrier_standard', 'standard')
+        'carrier_primary', 'standard')
 RETURNING uuid;
 "
 echo ""
