@@ -336,6 +336,7 @@ function StatPill({
   icon,
   label,
   value,
+  hint,
   onClick,
   active,
   clickable,
@@ -343,6 +344,7 @@ function StatPill({
   icon: React.ReactNode;
   label: string;
   value: string;
+  hint?: string;
   onClick?: () => void;
   active?: boolean;
   clickable?: boolean;
@@ -407,6 +409,19 @@ function StatPill({
       >
         {label}
       </span>
+      {hint && (
+        <span
+          style={{
+            fontSize: '0.5rem',
+            color: active ? 'rgba(74,222,128,0.5)' : 'rgba(148,163,184,0.4)',
+            fontStyle: 'italic',
+            marginTop: 1,
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {hint}
+        </span>
+      )}
     </button>
   );
 }
@@ -444,6 +459,7 @@ function CallerIdPill({ entry, canEdit }: { entry: RcfEntry; canEdit: boolean })
       }
       label="Caller ID"
       value={passthrough ? 'Pass-thru' : 'Show DID'}
+      hint={canEdit ? 'click to toggle' : undefined}
       active={passthrough}
       clickable={canEdit && !pending}
       onClick={() => { if (canEdit && !pending) mutation.mutate(!passthrough); }}
