@@ -10,9 +10,6 @@ import {
   Database,
   Phone,
   Zap,
-  Webhook,
-  Upload,
-  ShieldAlert,
   Server,
 } from 'lucide-react';
 
