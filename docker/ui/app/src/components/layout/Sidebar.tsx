@@ -7,7 +7,7 @@ import {
   IconRCF, IconTrunk, IconAPI, IconIVR, IconDocs,
   IconAdmin, IconSignal, IconTroubleshoot,
 } from '../icons/ProductIcons';
-import { Package, Shield, ChevronDown, Clock, Eye, EyeOff, Server, BookOpen, Plug } from 'lucide-react';
+import { Package, Shield, ChevronDown, Clock, Eye, EyeOff, Server, BookOpen } from 'lucide-react';
 import { AccessRequestForm } from './AccessRequestForm';
 
 /* ─── Types ───────────────────────────────────────────────── */
@@ -30,9 +30,8 @@ const allProductNavItems: NavItemDef[] = [
 /* ─── Documentation nav items ─────────────────────────────── */
 
 const docNavItems: NavItemDef[] = [
-  { label: 'RCF Docs',     icon: <IconRCF size={18} />,   to: '/docs/rcf',         color: '#4ade80' },
-  { label: 'API Reference',icon: <IconDocs size={18} />,  to: '/docs/api',         color: '#3b82f6' },
-  { label: 'Integration',  icon: <Plug size={18} strokeWidth={1.6} />, to: '/docs/integration', color: '#f59e0b' },
+  { label: 'RCF Guide',     icon: <IconRCF size={18} />,  to: '/docs/rcf', color: '#4ade80' },
+  { label: 'API Reference', icon: <IconDocs size={18} />, to: '/docs/api', color: '#3b82f6' },
 ];
 
 /* ─── Coming Soon item definitions ───────────────────────── */

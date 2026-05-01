@@ -1,5 +1,5 @@
 /**
- * RCF Documentation — user guide for Remote Call Forwarding customers.
+ * RCF User Guide — customer-facing documentation for Granite Keystone RCF.
  *
  * Covers: Getting Started, Managing Numbers, Forwarding, Enable/Disable,
  * Caller ID, Ring Timeout/Failover, Call Quality, Troubleshooting.
@@ -30,119 +30,126 @@ import {
 
 const GREEN = '#4ade80';
 
-/* ─── Getting Started (always visible) ──────────────────── */
+/* ─── Getting Started ────────────────────────────────────── */
 
 function GettingStartedSection() {
   return (
-    <div
-      style={{
-        background: `linear-gradient(135deg, ${C.surface} 0%, ${C.surfaceAlt} 100%)`,
-        border: `1px solid ${C.border}`,
-        borderRadius: 14,
-        overflow: 'hidden',
-        marginBottom: 28,
-      }}
+    <AccordionSection
+      id="getting-started"
+      accent={GREEN}
+      icon={<LogIn size={18} />}
+      title="Getting Started"
+      subtitle="What Granite Keystone RCF is, how to log in, and a quick start checklist."
+      defaultOpen
     >
-      {/* Top accent line */}
-      <div
-        style={{
-          height: 2,
-          background: `linear-gradient(90deg, transparent, ${GREEN}, transparent)`,
-          opacity: 0.45,
-        }}
-      />
+      <P>
+        Granite Keystone Remote Call Forwarding lets you route inbound calls from your business numbers to any destination. Manage forwarding rules, monitor call quality, and troubleshoot — all from one portal.
+      </P>
 
-      <div style={{ padding: '28px 32px' }}>
-        {/* Header */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 24 }}>
+      <H3>How to log in</H3>
+      <P>
+        Your administrator provides your credentials (email address and password). Navigate to your portal URL in a web browser and sign in. If you have forgotten your password, contact your administrator or Granite support to have it reset.
+      </P>
+
+      <H3>Portal overview</H3>
+      <P>
+        The left sidebar gives you access to all features. For RCF customers, the available pages are:
+      </P>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 20 }}>
+        {[
+          {
+            icon: <Phone size={15} />,
+            title: 'RCF',
+            body: 'Manage your call forwarding numbers — view, edit destinations, enable/disable, and configure ring timeout and failover.',
+          },
+          {
+            icon: <BarChart2 size={15} />,
+            title: 'Call Quality',
+            body: 'Monitor MOS scores, jitter, packet loss, and R-factor across your calls. Identify quality trends and investigate complaints.',
+          },
+          {
+            icon: <HelpCircle size={15} />,
+            title: 'Troubleshooting',
+            body: 'Access the built-in Homer SIP capture tool for packet-level inspection of call signaling when issues need deep investigation.',
+          },
+          {
+            icon: <UserCheck size={15} />,
+            title: 'Account',
+            body: 'Update your display name and password. Accessible from the user profile area at the bottom of the sidebar.',
+          },
+        ].map(({ icon, title, body }) => (
           <div
+            key={title}
             style={{
-              width: 38,
-              height: 38,
+              padding: '14px 16px',
               borderRadius: 10,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              background: `linear-gradient(135deg, ${GREEN}20 0%, ${GREEN}08 100%)`,
-              border: `1px solid ${GREEN}30`,
-              color: GREEN,
-              flexShrink: 0,
+              background: `${GREEN}08`,
+              border: `1px solid ${GREEN}20`,
             }}
           >
-            <LogIn size={18} />
-          </div>
-          <div>
-            <h2
-              style={{
-                fontSize: '1rem',
-                fontWeight: 700,
-                color: C.text,
-                margin: 0,
-                letterSpacing: '-0.01em',
-              }}
-            >
-              Getting Started
-            </h2>
-            <p style={{ margin: 0, fontSize: '0.8rem', color: C.textMuted }}>
-              Logging in and navigating the Granite Keystone portal
-            </p>
-          </div>
-        </div>
-
-        <P>
-          The Granite Keystone portal is your self-service hub for managing Remote Call Forwarding (RCF) numbers. Everything you need — number management, call quality monitoring, and troubleshooting tools — is accessible directly from the sidebar.
-        </P>
-
-        <H3>Logging in</H3>
-        <P>
-          Navigate to your portal URL and sign in with the email address and password provided by your Granite account team. If you have forgotten your password, contact your administrator or Granite support to have your credentials reset.
-        </P>
-
-        <H3>What you can do in this portal</H3>
-
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 20 }}>
-          {[
-            {
-              icon: <Phone size={16} />,
-              title: 'Manage Numbers',
-              body: 'View all your RCF numbers, change forwarding destinations, and enable or disable individual numbers in real time.',
-            },
-            {
-              icon: <BarChart2 size={16} />,
-              title: 'Monitor Call Quality',
-              body: 'Track MOS scores, jitter, and packet loss for your calls. Identify quality issues before they impact your business.',
-            },
-            {
-              icon: <HelpCircle size={16} />,
-              title: 'Troubleshoot Issues',
-              body: 'Access the built-in SIP capture tool (Homer) to inspect call signaling in detail if calls are not connecting as expected.',
-            },
-          ].map(({ icon, title, body }) => (
-            <div
-              key={title}
-              style={{
-                padding: '16px',
-                borderRadius: 10,
-                background: `${GREEN}08`,
-                border: `1px solid ${GREEN}20`,
-              }}
-            >
-              <div style={{ color: GREEN, marginBottom: 8 }}>{icon}</div>
-              <div style={{ fontSize: '0.85rem', fontWeight: 700, color: C.text, marginBottom: 6 }}>
-                {title}
-              </div>
-              <div style={{ fontSize: '0.81rem', color: C.textMuted, lineHeight: 1.6 }}>
-                {body}
-              </div>
+            <div style={{ color: GREEN, marginBottom: 8 }}>{icon}</div>
+            <div style={{ fontSize: '0.84rem', fontWeight: 700, color: C.text, marginBottom: 5 }}>
+              {title}
             </div>
-          ))}
-        </div>
-
-        <Callout accent={GREEN}>
-          All the features described in this guide are accessible from the left sidebar. Use the <strong style={{ color: C.text }}>RCF</strong> page to manage your numbers, <strong style={{ color: C.text }}>Call Quality</strong> to monitor performance, and <strong style={{ color: C.text }}>Troubleshooting</strong> for deep SIP diagnostics.
-        </Callout>
+            <div style={{ fontSize: '0.81rem', color: C.textMuted, lineHeight: 1.6 }}>
+              {body}
+            </div>
+          </div>
+        ))}
       </div>
-    </div>
+
+      <H3>Quick start checklist</H3>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 20 }}>
+        {[
+          { step: '1', text: 'Log in with the credentials provided by your administrator.' },
+          { step: '2', text: 'Navigate to the RCF page using the left sidebar.' },
+          { step: '3', text: 'Confirm your numbers are listed and the Status column shows them as enabled.' },
+          { step: '4', text: 'Verify the Forward To column shows the correct destination for each number.' },
+          { step: '5', text: 'Place a test call to one of your DIDs and confirm it reaches the expected destination.' },
+        ].map(({ step, text }) => (
+          <div
+            key={step}
+            style={{
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: 12,
+              padding: '12px 16px',
+              borderRadius: 8,
+              background: 'rgba(13,17,23,0.45)',
+              border: `1px solid ${C.borderSubtle}`,
+            }}
+          >
+            <div
+              style={{
+                width: 24,
+                height: 24,
+                borderRadius: '50%',
+                background: `${GREEN}18`,
+                border: `1px solid ${GREEN}35`,
+                color: GREEN,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '0.72rem',
+                fontWeight: 800,
+                flexShrink: 0,
+                fontFamily: 'monospace',
+              }}
+            >
+              {step}
+            </div>
+            <div style={{ fontSize: '0.83rem', color: C.textMuted, lineHeight: 1.65, paddingTop: 2 }}>
+              {text}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <Callout accent={GREEN}>
+        All features described in this guide are accessible from the left sidebar. Use <strong style={{ color: C.text }}>RCF</strong> to manage your numbers, <strong style={{ color: C.text }}>Call Quality</strong> to monitor performance, and <strong style={{ color: C.text }}>Troubleshooting</strong> for deep SIP diagnostics.
+      </Callout>
+    </AccordionSection>
   );
 }
 
@@ -215,6 +222,10 @@ function ManagingNumbersSection() {
               {
                 col: 'Pass Caller ID',
                 desc: "Whether the original caller's number is passed through to the forwarding destination. See the Caller ID Settings section below for a full explanation.",
+              },
+              {
+                col: 'Ring Timeout',
+                desc: 'How many seconds the forwarded call rings at the destination before giving up or redirecting to the failover number.',
               },
             ].map((row, i) => (
               <tr
@@ -752,7 +763,7 @@ function TroubleshootingSection() {
         items={[
           {
             title: 'Still not working?',
-            body: 'If you have checked the above and calls are still not forwarding correctly, contact Granite support. Include the affected DID, the approximate time of the failed call, and any error information you can see in the Call Quality or Troubleshooting pages.',
+            body: 'If you have checked the above and calls are still not forwarding correctly, contact Granite support at solutions@granitenet.com. Include the affected DID, the approximate time of the failed call, and any error information visible in the Call Quality or Troubleshooting pages.',
           },
           {
             title: 'Tip: note the timestamps',
@@ -770,9 +781,9 @@ export function RcfDocsPage() {
   return (
     <div style={{ paddingTop: 20 }}>
       <PageHeaderCard
-        eyebrow="RCF Documentation"
-        title="RCF Documentation"
-        subtitle="Complete guide to Remote Call Forwarding on the Granite Keystone platform"
+        eyebrow="Customer Guide"
+        title="Granite Keystone RCF User Guide"
+        subtitle="Everything you need to manage your Remote Call Forwarding numbers from the Granite Keystone portal"
         accent={GREEN}
       />
 
@@ -791,3 +802,4 @@ export function RcfDocsPage() {
     </div>
   );
 }
+

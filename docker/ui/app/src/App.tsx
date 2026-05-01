@@ -10,7 +10,6 @@ import { TrunksPage } from './pages/TrunksPage';
 import { IvrBuilderPage } from './pages/IvrBuilderPage';
 import { RcfDocsPage } from './pages/docs/RcfDocsPage';
 import { ApiDocsPage } from './pages/docs/ApiDocsPage';
-import { IntegrationDocsPage } from './pages/docs/IntegrationDocsPage';
 import { TroubleshootingPage } from './pages/TroubleshootingPage';
 import { AdminPage } from './pages/admin/AdminPage';
 import { PlatformManagementPage } from './pages/admin/PlatformManagementPage';
@@ -58,7 +57,7 @@ export function App() {
               <Route path="documentation" element={<Navigate to="/docs/rcf" replace />} />
               <Route path="docs/rcf"         element={<RcfDocsPage />} />
               <Route path="docs/api"         element={<ApiDocsPage />} />
-              <Route path="docs/integration" element={<IntegrationDocsPage />} />
+              <Route path="docs/integration" element={<Navigate to="/docs/api" replace />} />
               <Route path="call-quality" element={<CallQualityPage />} />
               <Route path="account"          element={<AccountPage />} />
 
