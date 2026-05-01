@@ -55,7 +55,8 @@ async def init_redis():
                 # as unavailable rather than holding a broken handle.
                 await client.close()
                 client = None
-                raise
+                logger.warning("Continuing without Redis — all cache operations will be no-ops")
+                return
             logger.warning(
                 "Redis connection attempt %d/%d failed (%s), retrying in %ds...",
                 attempt, _REDIS_INIT_RETRIES, exc, _REDIS_INIT_BACKOFF_SEC,
