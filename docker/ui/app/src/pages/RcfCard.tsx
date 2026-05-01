@@ -27,6 +27,10 @@ async function updateRcfPassCallerId(id: number, pass_caller_id: boolean): Promi
   return apiRequest('PATCH', `/rcf/${id}`, { pass_caller_id });
 }
 
+async function updateRcfMaxChannels(id: number, max_channels: number): Promise<RcfEntry> {
+  return apiRequest('PATCH', `/rcf/${id}`, { max_channels });
+}
+
 // ─── GreenToggle ──────────────────────────────────────────────────────────────
 // Compact on/off toggle using the RCF green accent.
 
@@ -469,6 +473,96 @@ function CallerIdPill({ entry, canEdit }: { entry: RcfEntry; canEdit: boolean })
   );
 }
 
+// ─── MaxChannelsPill ─────────────────────────────────────────────────────────
+// Clickable stat pill that lets admins edit the per-DID concurrent call limit.
+
+function MaxChannelsPill({ entry, canEdit }: { entry: RcfEntry; canEdit: boolean }) {
+  // ALL hooks unconditionally at the top
+  const queryClient = useQueryClient();
+  const { toastOk, toastErr } = useToast();
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(String(entry.max_channels));
+
+  const mutation = useMutation({
+    mutationFn: (v: number) => updateRcfMaxChannels(entry.id, v),
+    onSuccess: (_, v) => {
+      void queryClient.invalidateQueries({ queryKey: ['rcf'] });
+      setEditing(false);
+      toastOk(v === 0 ? `Concurrent call limit removed for ${fmt(entry.did)}` : `Max ${v} concurrent calls set for ${fmt(entry.did)}`);
+    },
+    onError: (err: Error) => toastErr(err.message ?? 'Failed to update'),
+  });
+
+  if (editing && canEdit) {
+    return (
+      <div
+        style={{
+          flex: '1 1 0',
+          minWidth: 0,
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          gap: 4,
+          padding: '6px 8px',
+          borderRadius: 10,
+          border: '1px solid rgba(74,222,128,0.35)',
+          background: 'rgba(74,222,128,0.06)',
+        }}
+      >
+        <input
+          type="number"
+          min={0}
+          max={100}
+          autoFocus
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              const n = parseInt(value, 10);
+              if (!isNaN(n) && n >= 0 && n <= 100) mutation.mutate(n);
+            }
+            if (e.key === 'Escape') { setEditing(false); setValue(String(entry.max_channels)); }
+          }}
+          onBlur={() => { setEditing(false); setValue(String(entry.max_channels)); }}
+          style={{
+            width: 50,
+            textAlign: 'center',
+            fontSize: '0.72rem',
+            fontWeight: 700,
+            color: '#4ade80',
+            background: 'rgba(15,17,23,0.85)',
+            border: '1px solid rgba(74,222,128,0.35)',
+            borderRadius: 5,
+            padding: '3px 4px',
+            outline: 'none',
+            fontFamily: 'inherit',
+          }}
+        />
+        <span style={{ fontSize: '0.5rem', color: 'rgba(74,222,128,0.5)', fontStyle: 'italic' }}>
+          0 = no limit
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <StatPill
+      icon={
+        <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" style={{ width: 13, height: 13 }}>
+          <path d="M1 4h12M1 7h12M1 10h12" />
+        </svg>
+      }
+      label="Max Calls"
+      value={entry.max_channels === 0 ? 'No Limit' : String(entry.max_channels)}
+      hint={canEdit ? 'click to edit' : undefined}
+      active={entry.max_channels > 0}
+      clickable={canEdit && !mutation.isPending}
+      onClick={() => { if (canEdit) { setValue(String(entry.max_channels)); setEditing(true); } }}
+    />
+  );
+}
+
 // ─── RcfNameField ─────────────────────────────────────────────────────────────
 // Small editable label above the DID number. Only shown when a name exists,
 // or when canEdit is true (shows placeholder).
@@ -876,16 +970,7 @@ export function RcfCard({ entry, pendingValue, onPendingChange }: RcfCardProps) 
           />
 
           {/* Max channels pill */}
-          <StatPill
-            icon={
-              <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" style={{ width: 13, height: 13 }}>
-                <path d="M1 4h12M1 7h12M1 10h12" />
-              </svg>
-            }
-            label="Max Calls"
-            value={entry.max_channels === 0 ? 'No Limit' : String(entry.max_channels)}
-            active={entry.max_channels > 0}
-          />
+          <MaxChannelsPill entry={entry} canEdit={canEdit} />
         </div>
       </div>
     </div>
