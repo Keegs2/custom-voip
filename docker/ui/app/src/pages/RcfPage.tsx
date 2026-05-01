@@ -1004,21 +1004,21 @@ function TabBar({ active, onChange }: TabBarProps) {
       ),
     },
     {
+      id: 'activity',
+      label: 'Call Activity',
+      icon: (
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.8} style={{ width: 13, height: 13 }}>
+          <path d="M2 12 L4 8 L6 10 L9 5 L11 7 L14 3" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      ),
+    },
+    {
       id: 'dids',
       label: 'DID Management',
       icon: (
         <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.8} style={{ width: 13, height: 13 }}>
           <rect x="2" y="2" width="12" height="12" rx="2" />
           <path d="M5 8h6M8 5v6" strokeLinecap="round" />
-        </svg>
-      ),
-    },
-    {
-      id: 'activity',
-      label: 'Call Activity',
-      icon: (
-        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.8} style={{ width: 13, height: 13 }}>
-          <path d="M2 12 L4 8 L6 10 L9 5 L11 7 L14 3" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
       ),
     },
@@ -1106,10 +1106,12 @@ function computeQualityStats(cdrs: Cdr[]) {
   let answered = 0;
   let mosSum = 0;
   let mosCount = 0;
+  let durationSum = 0;
 
   for (const cdr of cdrs) {
     if (cdr.answer_time != null && cdr.duration_seconds > 0) {
       answered++;
+      durationSum += cdr.duration_seconds;
     }
     if (cdr.mos != null) {
       mosSum += cdr.mos;
@@ -1118,10 +1120,11 @@ function computeQualityStats(cdrs: Cdr[]) {
   }
 
   const total = cdrs.length;
-  const successRate = total > 0 ? (answered / total) * 100 : null;
+  const asr = total > 0 ? (answered / total) * 100 : null;
   const avgMos = mosCount > 0 ? mosSum / mosCount : null;
+  const acd = answered > 0 ? durationSum / answered : null;
 
-  return { total, answered, successRate, avgMos };
+  return { total, answered, asr, avgMos, acd };
 }
 
 /** Build daily quality summary for the last 7 days. */
@@ -1210,17 +1213,18 @@ function CallActivityTab({ customerId }: CallActivityTabProps) {
   }, [allCalls, activitySearch]);
 
   // Colour thresholds for stat cards
-  const successColor =
-    stats.successRate == null ? '#4a5568'
-    : stats.successRate >= 95 ? '#22c55e'
-    : stats.successRate >= 85 ? '#f59e0b'
-    : '#ef4444';
+  // ASR is informational (neutral blue) — we can't control answer rates
+  const asrColor = '#60a5fa';
 
+  // MOS is quality we measure — red/amber/green thresholds apply
   const avgMosColor =
     stats.avgMos == null ? '#4a5568'
     : stats.avgMos >= 4.0 ? '#22c55e'
     : stats.avgMos >= 3.0 ? '#f59e0b'
     : '#ef4444';
+
+  // ACD is informational (amber accent)
+  const acdColor = '#fbbf24';
 
   // 7-day trend summary
   const dotsWithData = dailyDots.filter((d) => d.color !== '#1e293b');
@@ -1299,109 +1303,80 @@ function CallActivityTab({ customerId }: CallActivityTabProps) {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
 
       {/* ── Quality stat cards ─────────────────────────────────── */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
 
-        {/* Card 1: Call Success Rate */}
-        <div
-          style={{
-            background: 'rgba(19,21,29,0.72)',
-            backdropFilter: 'blur(12px)',
-            WebkitBackdropFilter: 'blur(12px)',
-            border: `1px solid ${successColor}22`,
-            borderRadius: 16,
-            padding: '20px 22px',
-            position: 'relative',
-            overflow: 'hidden',
-            boxShadow: `0 8px 32px -8px rgba(0,0,0,0.5), 0 0 0 1px ${successColor}0a`,
-          }}
-        >
-          <div style={{ position: 'absolute', top: -36, right: -36, width: 110, height: 110, borderRadius: '50%', background: `radial-gradient(circle, ${successColor}18 0%, transparent 70%)`, pointerEvents: 'none' }} />
-          <div style={{ position: 'absolute', top: 0, left: 28, right: 28, height: 2, background: `linear-gradient(90deg, transparent, ${successColor}55, transparent)` }} />
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-            <div style={{ width: 32, height: 32, borderRadius: 8, background: `${successColor}18`, border: `1px solid ${successColor}33`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-              <svg viewBox="0 0 16 16" fill="none" stroke={successColor} strokeWidth={2} style={{ width: 15, height: 15 }}>
+        {/* Card 1: ASR (Answer Seizure Ratio) — informational, neutral blue */}
+        <div style={{ background: 'rgba(19,21,29,0.72)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', border: `1px solid ${asrColor}22`, borderRadius: 16, padding: '18px 18px', position: 'relative', overflow: 'hidden', boxShadow: `0 8px 32px -8px rgba(0,0,0,0.5), 0 0 0 1px ${asrColor}0a` }}>
+          <div style={{ position: 'absolute', top: -36, right: -36, width: 100, height: 100, borderRadius: '50%', background: `radial-gradient(circle, ${asrColor}18 0%, transparent 70%)`, pointerEvents: 'none' }} />
+          <div style={{ position: 'absolute', top: 0, left: 24, right: 24, height: 2, background: `linear-gradient(90deg, transparent, ${asrColor}55, transparent)` }} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+            <div style={{ width: 28, height: 28, borderRadius: 7, background: `${asrColor}18`, border: `1px solid ${asrColor}33`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <svg viewBox="0 0 16 16" fill="none" stroke={asrColor} strokeWidth={2} style={{ width: 13, height: 13 }}>
                 <path d="M2 8l4 4 8-8" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
             </div>
-            <span style={{ fontSize: '0.6rem', fontWeight: 700, color: successColor, textTransform: 'uppercase', letterSpacing: '0.12em', opacity: 0.85 }}>
-              Call Success Rate
-            </span>
+            <span style={{ fontSize: '0.55rem', fontWeight: 700, color: asrColor, textTransform: 'uppercase', letterSpacing: '0.12em', opacity: 0.85 }}>ASR</span>
           </div>
-          <div style={{ fontSize: 'clamp(1.8rem, 3.5vw, 2.4rem)', fontWeight: 900, color: successColor, letterSpacing: '-0.04em', lineHeight: 1, marginBottom: 4, fontVariantNumeric: 'tabular-nums', textShadow: `0 0 28px ${successColor}44` }}>
-            {stats.successRate != null ? `${stats.successRate.toFixed(1)}%` : '—'}
+          <div style={{ fontSize: 'clamp(1.5rem, 3vw, 2rem)', fontWeight: 900, color: asrColor, letterSpacing: '-0.04em', lineHeight: 1, marginBottom: 3, fontVariantNumeric: 'tabular-nums', textShadow: `0 0 28px ${asrColor}44` }}>
+            {stats.asr != null ? `${stats.asr.toFixed(1)}%` : '—'}
           </div>
-          <div style={{ fontSize: '0.73rem', color: '#64748b', lineHeight: 1.5 }}>
-            of calls connected successfully
-          </div>
+          <div style={{ fontSize: '0.68rem', color: '#64748b', lineHeight: 1.4 }}>answer seizure ratio</div>
         </div>
 
-        {/* Card 2: Voice Clarity (MOS) */}
-        <div
-          style={{
-            background: 'rgba(19,21,29,0.72)',
-            backdropFilter: 'blur(12px)',
-            WebkitBackdropFilter: 'blur(12px)',
-            border: `1px solid ${avgMosColor}22`,
-            borderRadius: 16,
-            padding: '20px 22px',
-            position: 'relative',
-            overflow: 'hidden',
-            boxShadow: `0 8px 32px -8px rgba(0,0,0,0.5), 0 0 0 1px ${avgMosColor}0a`,
-          }}
-        >
-          <div style={{ position: 'absolute', top: -36, right: -36, width: 110, height: 110, borderRadius: '50%', background: `radial-gradient(circle, ${avgMosColor}18 0%, transparent 70%)`, pointerEvents: 'none' }} />
-          <div style={{ position: 'absolute', top: 0, left: 28, right: 28, height: 2, background: `linear-gradient(90deg, transparent, ${avgMosColor}55, transparent)` }} />
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-            <div style={{ width: 32, height: 32, borderRadius: 8, background: `${avgMosColor}18`, border: `1px solid ${avgMosColor}33`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-              <svg viewBox="0 0 16 16" fill="none" stroke={avgMosColor} strokeWidth={1.8} style={{ width: 15, height: 15 }}>
+        {/* Card 2: Voice Clarity (MOS) — quality we measure, color-coded */}
+        <div style={{ background: 'rgba(19,21,29,0.72)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', border: `1px solid ${avgMosColor}22`, borderRadius: 16, padding: '18px 18px', position: 'relative', overflow: 'hidden', boxShadow: `0 8px 32px -8px rgba(0,0,0,0.5), 0 0 0 1px ${avgMosColor}0a` }}>
+          <div style={{ position: 'absolute', top: -36, right: -36, width: 100, height: 100, borderRadius: '50%', background: `radial-gradient(circle, ${avgMosColor}18 0%, transparent 70%)`, pointerEvents: 'none' }} />
+          <div style={{ position: 'absolute', top: 0, left: 24, right: 24, height: 2, background: `linear-gradient(90deg, transparent, ${avgMosColor}55, transparent)` }} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+            <div style={{ width: 28, height: 28, borderRadius: 7, background: `${avgMosColor}18`, border: `1px solid ${avgMosColor}33`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <svg viewBox="0 0 16 16" fill="none" stroke={avgMosColor} strokeWidth={1.8} style={{ width: 13, height: 13 }}>
                 <path d="M2 10c0-3.3 2.7-6 6-6s6 2.7 6 6" strokeLinecap="round" />
                 <circle cx="8" cy="10" r="1.5" fill={avgMosColor} stroke="none" />
               </svg>
             </div>
-            <span style={{ fontSize: '0.6rem', fontWeight: 700, color: avgMosColor, textTransform: 'uppercase', letterSpacing: '0.12em', opacity: 0.85 }}>
-              Voice Clarity (MOS)
-            </span>
+            <span style={{ fontSize: '0.55rem', fontWeight: 700, color: avgMosColor, textTransform: 'uppercase', letterSpacing: '0.12em', opacity: 0.85 }}>MOS</span>
           </div>
-          <div style={{ fontSize: 'clamp(1.8rem, 3.5vw, 2.4rem)', fontWeight: 900, color: avgMosColor, letterSpacing: '-0.04em', lineHeight: 1, marginBottom: 4, fontVariantNumeric: 'tabular-nums', textShadow: `0 0 28px ${avgMosColor}44` }}>
+          <div style={{ fontSize: 'clamp(1.5rem, 3vw, 2rem)', fontWeight: 900, color: avgMosColor, letterSpacing: '-0.04em', lineHeight: 1, marginBottom: 3, fontVariantNumeric: 'tabular-nums', textShadow: `0 0 28px ${avgMosColor}44` }}>
             {stats.avgMos != null ? stats.avgMos.toFixed(1) : '—'}
           </div>
-          <div style={{ fontSize: '0.73rem', color: '#64748b', lineHeight: 1.5 }}>
-            average voice quality, 1–5 scale
-          </div>
+          <div style={{ fontSize: '0.68rem', color: '#64748b', lineHeight: 1.4 }}>voice quality (1–5)</div>
         </div>
 
-        {/* Card 3: Total Calls */}
-        <div
-          style={{
-            background: 'rgba(19,21,29,0.72)',
-            backdropFilter: 'blur(12px)',
-            WebkitBackdropFilter: 'blur(12px)',
-            border: '1px solid rgba(59,130,246,0.18)',
-            borderRadius: 16,
-            padding: '20px 22px',
-            position: 'relative',
-            overflow: 'hidden',
-            boxShadow: '0 8px 32px -8px rgba(0,0,0,0.5), 0 0 0 1px rgba(59,130,246,0.05)',
-          }}
-        >
-          <div style={{ position: 'absolute', top: -36, right: -36, width: 110, height: 110, borderRadius: '50%', background: 'radial-gradient(circle, rgba(59,130,246,0.14) 0%, transparent 70%)', pointerEvents: 'none' }} />
-          <div style={{ position: 'absolute', top: 0, left: 28, right: 28, height: 2, background: 'linear-gradient(90deg, transparent, rgba(59,130,246,0.5), transparent)' }} />
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-            <div style={{ width: 32, height: 32, borderRadius: 8, background: 'rgba(59,130,246,0.14)', border: '1px solid rgba(59,130,246,0.28)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-              <svg viewBox="0 0 16 16" fill="none" stroke="#60a5fa" strokeWidth={1.8} style={{ width: 15, height: 15 }}>
+        {/* Card 3: Total Calls — informational blue */}
+        <div style={{ background: 'rgba(19,21,29,0.72)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', border: '1px solid rgba(59,130,246,0.18)', borderRadius: 16, padding: '18px 18px', position: 'relative', overflow: 'hidden', boxShadow: '0 8px 32px -8px rgba(0,0,0,0.5), 0 0 0 1px rgba(59,130,246,0.05)' }}>
+          <div style={{ position: 'absolute', top: -36, right: -36, width: 100, height: 100, borderRadius: '50%', background: 'radial-gradient(circle, rgba(59,130,246,0.14) 0%, transparent 70%)', pointerEvents: 'none' }} />
+          <div style={{ position: 'absolute', top: 0, left: 24, right: 24, height: 2, background: 'linear-gradient(90deg, transparent, rgba(59,130,246,0.5), transparent)' }} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+            <div style={{ width: 28, height: 28, borderRadius: 7, background: 'rgba(59,130,246,0.14)', border: '1px solid rgba(59,130,246,0.28)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <svg viewBox="0 0 16 16" fill="none" stroke="#60a5fa" strokeWidth={1.8} style={{ width: 13, height: 13 }}>
                 <path d="M3 5a2 2 0 0 1 2-2h1.28a.8.8 0 0 1 .758.547l.6 1.797a.8.8 0 0 1-.401.968l-.903.452a8.833 8.833 0 0 0 4.413 4.413l.452-.903a.8.8 0 0 1 .968-.401l1.797.6A.8.8 0 0 1 14 11.72V13a2 2 0 0 1-2 2h-.4C5.87 15 1 10.13 1 4.4V4a1 1 0 0 1 1-1h1z" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
             </div>
-            <span style={{ fontSize: '0.6rem', fontWeight: 700, color: '#60a5fa', textTransform: 'uppercase', letterSpacing: '0.12em', opacity: 0.85 }}>
-              Total Calls
-            </span>
+            <span style={{ fontSize: '0.55rem', fontWeight: 700, color: '#60a5fa', textTransform: 'uppercase', letterSpacing: '0.12em', opacity: 0.85 }}>Total Calls</span>
           </div>
-          <div style={{ fontSize: 'clamp(1.8rem, 3.5vw, 2.4rem)', fontWeight: 900, color: '#60a5fa', letterSpacing: '-0.04em', lineHeight: 1, marginBottom: 4, fontVariantNumeric: 'tabular-nums', textShadow: '0 0 28px rgba(96,165,250,0.4)' }}>
+          <div style={{ fontSize: 'clamp(1.5rem, 3vw, 2rem)', fontWeight: 900, color: '#60a5fa', letterSpacing: '-0.04em', lineHeight: 1, marginBottom: 3, fontVariantNumeric: 'tabular-nums', textShadow: '0 0 28px rgba(96,165,250,0.4)' }}>
             {stats.total.toLocaleString()}
           </div>
-          <div style={{ fontSize: '0.73rem', color: '#64748b', lineHeight: 1.5 }}>
-            calls tracked in this period
+          <div style={{ fontSize: '0.68rem', color: '#64748b', lineHeight: 1.4 }}>calls this period</div>
+        </div>
+
+        {/* Card 4: ACD (Average Call Duration) — informational amber */}
+        <div style={{ background: 'rgba(19,21,29,0.72)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', border: `1px solid ${acdColor}22`, borderRadius: 16, padding: '18px 18px', position: 'relative', overflow: 'hidden', boxShadow: `0 8px 32px -8px rgba(0,0,0,0.5), 0 0 0 1px ${acdColor}0a` }}>
+          <div style={{ position: 'absolute', top: -36, right: -36, width: 100, height: 100, borderRadius: '50%', background: `radial-gradient(circle, ${acdColor}18 0%, transparent 70%)`, pointerEvents: 'none' }} />
+          <div style={{ position: 'absolute', top: 0, left: 24, right: 24, height: 2, background: `linear-gradient(90deg, transparent, ${acdColor}55, transparent)` }} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+            <div style={{ width: 28, height: 28, borderRadius: 7, background: `${acdColor}18`, border: `1px solid ${acdColor}33`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <svg viewBox="0 0 16 16" fill="none" stroke={acdColor} strokeWidth={1.8} style={{ width: 13, height: 13 }}>
+                <circle cx="8" cy="8" r="6" />
+                <path d="M8 5v3l2 2" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </div>
+            <span style={{ fontSize: '0.55rem', fontWeight: 700, color: acdColor, textTransform: 'uppercase', letterSpacing: '0.12em', opacity: 0.85 }}>ACD</span>
           </div>
+          <div style={{ fontSize: 'clamp(1.5rem, 3vw, 2rem)', fontWeight: 900, color: acdColor, letterSpacing: '-0.04em', lineHeight: 1, marginBottom: 3, fontVariantNumeric: 'tabular-nums', textShadow: `0 0 28px ${acdColor}44` }}>
+            {stats.acd != null ? (stats.acd >= 60 ? `${Math.floor(stats.acd / 60)}m ${Math.round(stats.acd % 60)}s` : `${Math.round(stats.acd)}s`) : '—'}
+          </div>
+          <div style={{ fontSize: '0.68rem', color: '#64748b', lineHeight: 1.4 }}>avg call duration</div>
         </div>
       </div>
 
@@ -1541,7 +1516,7 @@ function CallActivityTab({ customerId }: CallActivityTabProps) {
           <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 580 }}>
             <thead>
               <tr style={{ background: 'rgba(59,130,246,0.04)', borderBottom: '1px solid rgba(59,130,246,0.10)' }}>
-                {['Time', 'From', 'To (DID)', 'Forwarded To', 'Status', 'Quality'].map((h) => (
+                {['Time', 'From', 'To (DID)', 'Carrier Trunk', 'Status', 'Quality'].map((h) => (
                   <th
                     key={h}
                     style={{
