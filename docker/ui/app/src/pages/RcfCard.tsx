@@ -267,6 +267,7 @@ function ForwardToDisplay({ entry, pendingValue, canEdit, onPendingChange }: For
       style={{
         display: 'flex',
         alignItems: 'center',
+        justifyContent: 'center',
         gap: 10,
         cursor: canEdit ? 'pointer' : 'default',
         minWidth: 0,
@@ -290,8 +291,6 @@ function ForwardToDisplay({ entry, pendingValue, canEdit, onPendingChange }: For
           overflow: 'hidden',
           textOverflow: 'ellipsis',
           whiteSpace: 'nowrap',
-          flex: 1,
-          minWidth: 0,
         }}
       >
         {fmt(entry.forward_to)}
@@ -712,13 +711,13 @@ export function RcfCard({ entry, pendingValue, onPendingChange }: RcfCardProps) 
             {entry.customer_name && user?.role === 'admin' && (
               <span
                 style={{
-                  fontSize: '0.60rem',
+                  fontSize: '0.68rem',
                   fontWeight: 700,
-                  color: '#475569',
-                  background: 'rgba(74,222,128,0.07)',
-                  border: '1px solid rgba(74,222,128,0.14)',
-                  borderRadius: 5,
-                  padding: '2px 7px',
+                  color: '#94a3b8',
+                  background: 'rgba(74,222,128,0.10)',
+                  border: '1px solid rgba(74,222,128,0.22)',
+                  borderRadius: 6,
+                  padding: '3px 10px',
                   textTransform: 'uppercase',
                   letterSpacing: '0.07em',
                   whiteSpace: 'nowrap',
@@ -738,9 +737,9 @@ export function RcfCard({ entry, pendingValue, onPendingChange }: RcfCardProps) 
         </div>
 
         {/* ── Row 2: Source DID ───────────────────────────────────────────────── */}
-        <div style={{ marginBottom: 14 }}>
+        <div style={{ marginBottom: 14, textAlign: 'center' }}>
           {/* Optional label above the DID */}
-          <div style={{ marginBottom: 4 }}>
+          <div style={{ marginBottom: 4, display: 'flex', justifyContent: 'center' }}>
             <RcfNameField entry={entry} canEdit={canEdit} />
           </div>
 
@@ -828,7 +827,7 @@ export function RcfCard({ entry, pendingValue, onPendingChange }: RcfCardProps) 
         </div>
 
         {/* ── Row 4: Forwarding destination ───────────────────────────────────── */}
-        <div style={{ marginBottom: 20 }}>
+        <div style={{ marginBottom: 20, textAlign: 'center' }}>
           <ForwardToDisplay
             entry={entry}
             pendingValue={pendingValue}
