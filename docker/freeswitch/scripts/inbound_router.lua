@@ -276,6 +276,7 @@ local function lookup_rcf()
                 pass_caller_id = rcf_db.pass_caller_id == "t" or rcf_db.pass_caller_id == true,
                 ring_timeout = tonumber(rcf_db.ring_timeout) or 30,
                 max_channels = tonumber(rcf_db.max_channels) or 0,
+                rcf_name = rcf_db.name or nil,
                 cache_hit = false
             }
         end
@@ -571,6 +572,13 @@ if product_type == "rcf" then
         session:setVariable("sip_h_X-Original-CID", e164_original_cid)
     else
         session:setVariable("sip_h_X-Original-CID", e164_did)
+    end
+
+    -- X-Original-CID-Name: Display name for P-Asserted-Identity
+    -- Uses the RCF line name configured in the portal (e.g. "Main Office")
+    local rcf_name = routing.rcf_name
+    if rcf_name and rcf_name ~= "" then
+        session:setVariable("sip_h_X-Original-CID-Name", rcf_name)
     end
 
     freeswitch.consoleLog("INFO", string.format(
