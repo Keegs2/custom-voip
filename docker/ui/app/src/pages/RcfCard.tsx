@@ -268,7 +268,7 @@ function ForwardToDisplay({ entry, pendingValue, canEdit, onPendingChange }: For
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        gap: 10,
+        position: 'relative',
         cursor: canEdit ? 'pointer' : 'default',
         minWidth: 0,
       }}
@@ -298,7 +298,10 @@ function ForwardToDisplay({ entry, pendingValue, canEdit, onPendingChange }: For
       {canEdit && (
         <span
           style={{
-            flexShrink: 0,
+            position: 'absolute',
+            right: 0,
+            top: '50%',
+            transform: 'translateY(-50%)',
             opacity: hovered ? 1 : 0,
             transition: 'opacity 0.18s',
             display: 'flex',
