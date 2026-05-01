@@ -278,7 +278,7 @@ function ForwardToDisplay({ entry, pendingValue, canEdit, onPendingChange }: For
     >
       <span
         style={{
-          fontSize: '1.32rem',
+          fontSize: '1.45rem',
           fontWeight: 800,
           fontFamily: 'monospace',
           letterSpacing: '0.02em',
