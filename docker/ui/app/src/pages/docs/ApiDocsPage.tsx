@@ -7,7 +7,6 @@
 import {
   Key,
   Code,
-  Database,
   Phone,
   Zap,
   Server,
@@ -69,7 +68,6 @@ function ApiGettingStartedSection() {
       icon={<Key size={18} />}
       title="Getting Started"
       subtitle="Authentication, base URL, quick example, rate limits, and error codes."
-      defaultOpen
     >
       <P>
         The Keystone API is RESTful and JSON-based. Every request to a protected endpoint must include
@@ -260,7 +258,6 @@ function ApiRcfSection() {
       icon={<Code size={18} />}
       title="RCF Endpoints"
       subtitle="Create, read, update, and delete Remote Call Forwarding numbers programmatically."
-      defaultOpen
     >
       <P>
         The RCF API lets you manage your forwarding numbers from any application or script. All
@@ -463,137 +460,7 @@ function ApiRcfSection() {
   );
 }
 
-/* ─── Section 3: CDR & Usage Endpoints ──────────────────── */
-
-function ApiCdrSection() {
-  return (
-    <AccordionSection
-      id="api-cdrs"
-      accent={BLUE}
-      icon={<Database size={18} />}
-      title="CDR & Usage Endpoints"
-      subtitle="Query call detail records and aggregated usage statistics. CDR data is retained for 90 days."
-    >
-      <P>
-        The CDR API provides access to raw call records and aggregated summary statistics for all
-        calls that have passed through your RCF numbers. Use it to build usage dashboards, generate
-        billing reconciliation reports, or investigate individual calls. CDR data is retained for{' '}
-        <strong style={{ color: C.text }}>90 days</strong> — export periodically for long-term storage.
-      </P>
-
-      {/* ── Search CDRs ──────────────────────────────── */}
-      <H3>Search call records</H3>
-      <Endpoint method="GET" path="/api/v1/cdrs" description="Return paginated call detail records matching the specified filters." />
-
-      <ParamTable
-        params={[
-          { name: 'customer_id',   type: 'integer', required: false, description: 'Scope results to a specific customer. Defaults to your own account.' },
-          { name: 'trunk_id',      type: 'integer', required: false, description: 'Filter to a specific trunk ID.' },
-          { name: 'product_type',  type: 'string',  required: false, description: 'Product type filter: rcf, api, or trunk.' },
-          { name: 'direction',     type: 'string',  required: false, description: 'Call direction: inbound or outbound.' },
-          { name: 'destination',   type: 'string',  required: false, description: 'Filter by destination number (partial match supported).' },
-          { name: 'start_date',    type: 'string',  required: false, description: 'ISO 8601 datetime (UTC). Only return calls starting on or after this time.' },
-          { name: 'end_date',      type: 'string',  required: false, description: 'ISO 8601 datetime (UTC). Only return calls starting before this time.' },
-          { name: 'limit',         type: 'integer', required: false, description: 'Maximum records to return. Default 50, max 500.' },
-          { name: 'offset',        type: 'integer', required: false, description: 'Records to skip for pagination. Default 0.' },
-        ]}
-      />
-
-      <ReqRes
-        request={`curl "https://your-portal-url/api/v1/cdrs?start_date=2026-04-01T00:00:00Z&end_date=2026-04-08T00:00:00Z&limit=2" \
-  -H "Authorization: Bearer <token>"`}
-        response={`{
-  "items": [
-    {
-      "id": "cdr-001",
-      "did": "+17745551234",
-      "caller": "+16175559999",
-      "forward_to": "+18005559999",
-      "direction": "inbound",
-      "duration": 142,
-      "answered": true,
-      "start_time": "2026-04-02T14:30:00Z",
-      "end_time": "2026-04-02T14:32:22Z",
-      "mos": 4.2,
-      "jitter": 12.4,
-      "packet_loss": 0.3,
-      "r_factor": 88
-    }
-  ],
-  "total": 418,
-  "offset": 0,
-  "limit": 2
-}`}
-      />
-
-      {/* ── CDR summary ──────────────────────────────── */}
-      <H3>Usage summary</H3>
-      <Endpoint method="GET" path="/api/v1/cdrs/summary" description="Return aggregated call statistics grouped by day, hour, or destination." />
-
-      <ParamTable
-        params={[
-          { name: 'customer_id', type: 'integer', required: false, description: 'Scope summary to a specific customer account.' },
-          { name: 'start_date',  type: 'string',  required: false, description: 'Start of the summary period (ISO 8601, UTC).' },
-          { name: 'end_date',    type: 'string',  required: false, description: 'End of the summary period (ISO 8601, UTC).' },
-          { name: 'did',         type: 'string',  required: false, description: 'Narrow the summary to a single DID.' },
-        ]}
-      />
-
-      <ReqRes
-        request={`curl "https://your-portal-url/api/v1/cdrs/summary?start_date=2026-04-01T00:00:00Z&end_date=2026-05-01T00:00:00Z" \
-  -H "Authorization: Bearer <token>"`}
-        response={`{
-  "total_calls": 1842,
-  "answered_calls": 1671,
-  "unanswered_calls": 171,
-  "asr": 90.7,
-  "total_duration_seconds": 237924,
-  "acd_seconds": 142,
-  "avg_mos": 4.18,
-  "avg_jitter": 14.2,
-  "avg_packet_loss": 0.4,
-  "avg_r_factor": 87.3,
-  "period_start": "2026-04-01T00:00:00Z",
-  "period_end": "2026-05-01T00:00:00Z"
-}`}
-      />
-
-      {/* ── Single CDR ───────────────────────────────── */}
-      <H3>Get a single CDR</H3>
-      <Endpoint method="GET" path="/api/v1/cdrs/{uuid}" description="Retrieve a single call detail record with full RTP quality metrics." />
-
-      <ParamTable
-        params={[
-          { name: 'uuid (path)', type: 'string', required: true, description: 'The UUID of the call record, as returned in the items array from the search endpoint.' },
-        ]}
-      />
-
-      <NoteCards
-        accent={BLUE}
-        items={[
-          {
-            title: 'ASR — Answer Seizure Ratio',
-            body: 'The percentage of calls that were answered. ASR = (answered / total) × 100. A healthy RCF deployment typically shows ASR above 85%.',
-          },
-          {
-            title: 'ACD — Average Call Duration',
-            body: 'The mean duration in seconds of answered calls. Unanswered calls (duration 0) are excluded from the ACD calculation.',
-          },
-          {
-            title: 'Quality fields may be null',
-            body: 'MOS, jitter, packet loss, and R-factor are only populated when RTP quality data is captured. Short or unanswered calls typically have null quality metrics.',
-          },
-          {
-            title: '90-day retention',
-            body: 'CDR data is retained for 90 days. Export via the summary or detail endpoints and store in your own data warehouse for long-term records.',
-          },
-        ]}
-      />
-    </AccordionSection>
-  );
-}
-
-/* ─── Section 4: Number Inventory Endpoints ─────────────── */
+/* ─── Section 3: Number Inventory Endpoints ─────────────── */
 
 function ApiNumbersSection() {
   return (
@@ -718,7 +585,7 @@ function ApiIntegrationSection() {
             step: '4',
             tag: 'Verify',
             title: 'Verify with a test call',
-            body: 'Place a call to your DID from a real phone and confirm it reaches the forwarding destination. Then GET /api/v1/cdrs to confirm the call record was captured with the expected quality metrics.',
+            body: 'Place a test call and verify it reaches the forwarding destination.',
           },
         ].map(({ step, tag, title, body }) => (
           <div
@@ -805,7 +672,7 @@ function ApiIntegrationSection() {
           },
           {
             event: 'call.ended',
-            desc: 'Fires when a call disconnects. Includes full CDR data: duration, MOS, jitter, packet loss, and R-factor.',
+            desc: 'Fires when a call disconnects. Includes call metadata and quality summary.',
           },
           {
             event: 'call.failover',
@@ -1037,7 +904,6 @@ export function ApiDocsPage() {
         <div style={{ maxWidth: 1080, margin: '0 auto' }}>
           <ApiGettingStartedSection />
           <ApiRcfSection />
-          <ApiCdrSection />
           <ApiNumbersSection />
           <ApiIntegrationSection />
         </div>

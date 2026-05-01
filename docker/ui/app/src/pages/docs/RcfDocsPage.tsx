@@ -2,7 +2,7 @@
  * RCF User Guide — customer-facing documentation for Granite Keystone RCF.
  *
  * Covers: Getting Started, Managing Numbers, Forwarding, Enable/Disable,
- * Caller ID, Ring Timeout/Failover, Call Quality, Troubleshooting.
+ * Caller ID, Ring Timeout/Failover, Support.
  */
 
 import {
@@ -10,7 +10,6 @@ import {
   ToggleLeft,
   UserCheck,
   PhoneOff,
-  BarChart2,
   HelpCircle,
   LogIn,
 } from 'lucide-react';
@@ -40,10 +39,9 @@ function GettingStartedSection() {
       icon={<LogIn size={18} />}
       title="Getting Started"
       subtitle="What Granite Keystone RCF is, how to log in, and a quick start checklist."
-      defaultOpen
     >
       <P>
-        Granite Keystone Remote Call Forwarding lets you route inbound calls from your business numbers to any destination. Manage forwarding rules, monitor call quality, and troubleshoot — all from one portal.
+        Granite Keystone Remote Call Forwarding lets you route inbound calls from your business numbers to any destination. Manage forwarding rules and view call activity — all from one portal.
       </P>
 
       <H3>How to log in</H3>
@@ -61,17 +59,7 @@ function GettingStartedSection() {
           {
             icon: <Phone size={15} />,
             title: 'RCF',
-            body: 'Manage your call forwarding numbers — view, edit destinations, enable/disable, and configure ring timeout and failover.',
-          },
-          {
-            icon: <BarChart2 size={15} />,
-            title: 'Call Quality',
-            body: 'Monitor MOS scores, jitter, packet loss, and R-factor across your calls. Identify quality trends and investigate complaints.',
-          },
-          {
-            icon: <HelpCircle size={15} />,
-            title: 'Troubleshooting',
-            body: 'Access the built-in Homer SIP capture tool for packet-level inspection of call signaling when issues need deep investigation.',
+            body: 'Manage your call forwarding numbers — view, edit destinations, enable/disable, and configure ring timeout and failover. Includes call activity summaries and quality overview.',
           },
           {
             icon: <UserCheck size={15} />,
@@ -147,7 +135,7 @@ function GettingStartedSection() {
       </div>
 
       <Callout accent={GREEN}>
-        All features described in this guide are accessible from the left sidebar. Use <strong style={{ color: C.text }}>RCF</strong> to manage your numbers, <strong style={{ color: C.text }}>Call Quality</strong> to monitor performance, and <strong style={{ color: C.text }}>Troubleshooting</strong> for deep SIP diagnostics.
+        All features described in this guide are accessible from the <strong style={{ color: C.text }}>RCF page</strong> in the left sidebar. Use the tabs on that page to manage numbers, view call activity, and browse available DIDs.
       </Callout>
     </AccordionSection>
   );
@@ -163,7 +151,6 @@ function ManagingNumbersSection() {
       icon={<Phone size={18} />}
       title="Managing Your Numbers"
       subtitle="View and understand your RCF number inventory — what each column means and how to find the number you need."
-      defaultOpen
     >
       <P>
         The <strong style={{ color: C.text }}>RCF page</strong> (accessible from the sidebar) shows all of your Remote Call Forwarding numbers in one place. Each row represents a single phone number that is configured to forward calls to a destination of your choice.
@@ -565,106 +552,28 @@ function FailoverSection() {
   );
 }
 
-/* ─── Call Quality Monitoring ────────────────────────────── */
+/* ─── Need Help? ─────────────────────────────────────────── */
 
-function CallQualitySection() {
+function SupportSection() {
   return (
     <AccordionSection
-      id="call-quality"
-      accent={GREEN}
-      icon={<BarChart2 size={18} />}
-      title="Call Quality Monitoring"
-      subtitle="Understand your call quality metrics — what MOS, jitter, and packet loss mean and how to read them."
-    >
-      <P>
-        The <strong style={{ color: C.text }}>Call Quality</strong> page (accessible from the sidebar) gives you a real-time and historical view of the quality of calls flowing through your RCF numbers. You can use this to spot trends, investigate complaints, and verify that a quality issue has been resolved.
-      </P>
-
-      <H3>Key metrics explained</H3>
-
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 20 }}>
-        {[
-          {
-            metric: 'MOS Score',
-            range: '1 – 5 scale',
-            what: 'Mean Opinion Score — the standard measure of perceived audio quality on a voice call. Think of it as a school grade: 5 is perfect, 4 is excellent, 3 is acceptable but noticeable degradation, below 3 is poor.',
-            good: '4.0 or above is considered excellent. Most well-configured RCF calls score between 4.0 and 4.5.',
-          },
-          {
-            metric: 'Jitter',
-            range: 'milliseconds (ms)',
-            what: 'Jitter measures how much the timing of audio packets varies as they travel across the network. High jitter causes the audio to sound choppy, robotic, or broken up.',
-            good: 'Below 20ms is good. Above 50ms will typically cause audible audio issues.',
-          },
-          {
-            metric: 'Packet Loss',
-            range: 'percentage (%)',
-            what: 'The percentage of audio packets that did not arrive at their destination. Even small amounts of packet loss can cause noticeable audio dropouts, clicks, or missing words.',
-            good: 'Below 1% is acceptable. Above 3% will typically cause significant audio degradation.',
-          },
-          {
-            metric: 'R-Factor',
-            range: '0 – 100 scale',
-            what: 'The R-Factor (also called E-Model score) is a composite quality score that accounts for delay, jitter, packet loss, and codec quality. It maps closely to MOS.',
-            good: 'Above 80 is considered good. Above 90 is excellent. Below 70 indicates a noticeable quality problem.',
-          },
-        ].map(({ metric, range, what, good }) => (
-          <div
-            key={metric}
-            style={{
-              padding: '16px 18px',
-              borderRadius: 10,
-              background: 'rgba(13,17,23,0.45)',
-              border: `1px solid ${C.borderSubtle}`,
-            }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
-              <div style={{ fontSize: '0.88rem', fontWeight: 700, color: C.text }}>
-                {metric}
-              </div>
-              <div style={{ fontSize: '0.72rem', color: C.textFaint, fontFamily: 'monospace' }}>
-                {range}
-              </div>
-            </div>
-            <div style={{ fontSize: '0.82rem', color: C.textMuted, lineHeight: 1.65, marginBottom: 8 }}>
-              {what}
-            </div>
-            <div style={{ fontSize: '0.79rem', color: GREEN, lineHeight: 1.5 }}>
-              Target: {good}
-            </div>
-          </div>
-        ))}
-      </div>
-
-      <Callout accent={GREEN}>
-        If you are seeing consistently low MOS scores or high packet loss on calls through a specific RCF number, the issue is most likely network-related between your forwarding destination and the carrier. Check with your network team or contact Granite support — the Call Quality page shows the data needed to diagnose it quickly.
-      </Callout>
-    </AccordionSection>
-  );
-}
-
-/* ─── Troubleshooting ────────────────────────────────────── */
-
-function TroubleshootingSection() {
-  return (
-    <AccordionSection
-      id="troubleshooting"
+      id="support"
       accent={GREEN}
       icon={<HelpCircle size={18} />}
-      title="Troubleshooting"
-      subtitle="Step-by-step guidance for the most common RCF issues, plus where to go for deeper diagnostics."
+      title="Need Help?"
+      subtitle="Common issues and how to contact Granite support."
     >
       <P>
-        Most issues with RCF numbers fall into a small number of categories. Start with the checklist below before escalating to support — many problems can be resolved in seconds directly from the portal.
+        Most issues with RCF numbers fall into a small number of categories. Work through the checklist below before contacting support — many problems can be resolved in seconds directly from the portal.
       </P>
 
-      <H3>Calls are not forwarding</H3>
+      <H3>Quick checks</H3>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 20 }}>
         {[
           {
             check: 'Is the number enabled?',
-            action: 'Open the RCF page and confirm the toggle for that DID is active (lit). If it is disabled, enable it — forwarding will resume immediately.',
+            action: 'Open the RCF page and confirm the toggle for that DID is active. If it is disabled, enable it — forwarding will resume immediately.',
           },
           {
             check: 'Is the forwarding destination correct?',
@@ -672,7 +581,7 @@ function TroubleshootingSection() {
           },
           {
             check: 'Is the destination reachable?',
-            action: 'Try calling the forwarding destination number directly from another phone. If that number is not reachable, the issue is at the destination — not with your RCF configuration.',
+            action: 'Try calling the forwarding destination directly from another phone. If that number is not reachable, the issue is at the destination — not with your RCF configuration.',
           },
         ].map(({ check, action }, i) => (
           <div
@@ -694,83 +603,9 @@ function TroubleshootingSection() {
         ))}
       </div>
 
-      <H3>One-way audio on calls</H3>
-      <P>
-        One-way audio (where one party can hear the other but not vice versa) is almost always a network or firewall issue, not a configuration issue in the portal. Here is how to diagnose it:
-      </P>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 20 }}>
-        {[
-          {
-            check: 'Check Call Quality metrics',
-            action: 'Open the Call Quality page and look at packet loss and jitter for recent calls on that number. High packet loss in one direction strongly indicates a firewall or NAT issue between your network and the carrier.',
-          },
-          {
-            check: 'Check for SIP signaling issues',
-            action: 'Open the Troubleshooting page (Homer SIP capture) to inspect the SIP dialog for the affected call. Look for mismatched SDP media addresses or missing RTP streams.',
-          },
-        ].map(({ check, action }, i) => (
-          <div
-            key={i}
-            style={{
-              padding: '14px 16px',
-              borderRadius: 8,
-              background: 'rgba(13,17,23,0.45)',
-              border: `1px solid ${C.borderSubtle}`,
-            }}
-          >
-            <div style={{ fontSize: '0.83rem', fontWeight: 700, color: C.text, marginBottom: 4 }}>
-              {check}
-            </div>
-            <div style={{ fontSize: '0.81rem', color: C.textMuted, lineHeight: 1.6 }}>
-              {action}
-            </div>
-          </div>
-        ))}
-      </div>
-
-      <H3>Using the Troubleshooting page (Homer)</H3>
-      <P>
-        The <strong style={{ color: C.text }}>Troubleshooting</strong> page in the sidebar opens the Homer SIP capture tool. Homer provides packet-level visibility into every SIP message exchanged during a call. It is intended for advanced users or network engineers investigating signaling-level issues such as:
-      </P>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 20 }}>
-        {[
-          'Calls connecting but immediately dropping',
-          'Registration failures',
-          'Calls not being delivered to the correct destination',
-          'Codec negotiation issues causing audio problems',
-          'Unusual SIP error codes (e.g. 503, 487, 486)',
-          'Latency or delay troubleshooting at the SIP layer',
-        ].map((item, i) => (
-          <div
-            key={i}
-            style={{
-              padding: '10px 14px',
-              borderRadius: 7,
-              background: 'rgba(13,17,23,0.45)',
-              border: `1px solid ${C.borderSubtle}`,
-              fontSize: '0.81rem',
-              color: C.textMuted,
-              lineHeight: 1.5,
-            }}
-          >
-            {item}
-          </div>
-        ))}
-      </div>
-
-      <NoteCards
-        accent={C.amber}
-        items={[
-          {
-            title: 'Still not working?',
-            body: 'If you have checked the above and calls are still not forwarding correctly, contact Granite support at solutions@granitenet.com. Include the affected DID, the approximate time of the failed call, and any error information visible in the Call Quality or Troubleshooting pages.',
-          },
-          {
-            title: 'Tip: note the timestamps',
-            body: 'When reporting an issue to support, note the exact time (with timezone) of a failed call. This lets the Granite team locate the call record and SIP trace quickly, which dramatically speeds up resolution.',
-          },
-        ]}
-      />
+      <Callout accent={GREEN}>
+        <strong style={{ color: C.text }}>Contact Granite support:</strong> Email <strong style={{ color: C.text }}>solutions@granitenet.com</strong> with the affected DID, the approximate time of the issue, and a brief description.
+      </Callout>
     </AccordionSection>
   );
 }
@@ -795,8 +630,7 @@ export function RcfDocsPage() {
           <EnableDisableSection />
           <CallerIdSection />
           <FailoverSection />
-          <CallQualitySection />
-          <TroubleshootingSection />
+          <SupportSection />
         </div>
       </div>
     </div>
