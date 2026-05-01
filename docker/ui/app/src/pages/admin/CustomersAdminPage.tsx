@@ -228,29 +228,34 @@ export function CustomersAdminPage() {
               <option value="premium">Premium</option>
               <option value="economy">Economy</option>
             </FormField>
-            <FormField
-              label="Credit Limit ($)"
-              type="number"
-              min="0"
-              step="0.01"
-              value={createForm.credit_limit}
-              onChange={(e) => updateCreateForm('credit_limit', (e.target as HTMLInputElement).value)}
-            />
-            <FormField
-              label="Daily Limit ($)"
-              type="number"
-              min="0"
-              step="0.01"
-              value={createForm.daily_limit}
-              onChange={(e) => updateCreateForm('daily_limit', (e.target as HTMLInputElement).value)}
-            />
-            <FormField
-              label="CPM Limit"
-              type="number"
-              min="0"
-              value={createForm.cpm_limit}
-              onChange={(e) => updateCreateForm('cpm_limit', (e.target as HTMLInputElement).value)}
-            />
+            {/* Billing / rate-limiting fields — hidden for RCF accounts */}
+            {createForm.account_type !== 'rcf' && (
+              <>
+                <FormField
+                  label="Credit Limit ($)"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={createForm.credit_limit}
+                  onChange={(e) => updateCreateForm('credit_limit', (e.target as HTMLInputElement).value)}
+                />
+                <FormField
+                  label="Daily Limit ($)"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={createForm.daily_limit}
+                  onChange={(e) => updateCreateForm('daily_limit', (e.target as HTMLInputElement).value)}
+                />
+                <FormField
+                  label="CPM Limit"
+                  type="number"
+                  min="0"
+                  value={createForm.cpm_limit}
+                  onChange={(e) => updateCreateForm('cpm_limit', (e.target as HTMLInputElement).value)}
+                />
+              </>
+            )}
           </div>
           {/* UCaaS add-on toggle — only relevant for api/trunk/hybrid */}
           {(createForm.account_type === 'api' || createForm.account_type === 'trunk' || createForm.account_type === 'hybrid') && (

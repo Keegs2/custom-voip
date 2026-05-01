@@ -784,27 +784,32 @@ function AccountDetailView({ customer, onEdit, onDelete }: AccountDetailViewProp
 
       {/* Account overview stat cards */}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14 }}>
-        <StatCard
-          label="Balance"
-          accent={customer.balance < 0 ? '#ef4444' : '#22c55e'}
-          value={
-            <span style={{ color: customer.balance < 0 ? '#f87171' : '#4ade80' }}>
-              ${customer.balance.toFixed(2)}
-            </span>
-          }
-        />
-        <StatCard
-          label="Credit Limit"
-          value={`$${customer.credit_limit.toFixed(2)}`}
-        />
-        <StatCard
-          label="Daily Limit"
-          value={customer.daily_limit != null ? `$${customer.daily_limit.toFixed(2)}` : '--'}
-        />
-        <StatCard
-          label="CPM Limit"
-          value={customer.cpm_limit != null ? String(customer.cpm_limit) : '--'}
-        />
+        {/* Balance, credit, and rate-limiting fields are meaningless for RCF accounts */}
+        {customer.account_type !== 'rcf' && (
+          <>
+            <StatCard
+              label="Balance"
+              accent={customer.balance < 0 ? '#ef4444' : '#22c55e'}
+              value={
+                <span style={{ color: customer.balance < 0 ? '#f87171' : '#4ade80' }}>
+                  ${customer.balance.toFixed(2)}
+                </span>
+              }
+            />
+            <StatCard
+              label="Credit Limit"
+              value={`$${customer.credit_limit.toFixed(2)}`}
+            />
+            <StatCard
+              label="Daily Limit"
+              value={customer.daily_limit != null ? `$${customer.daily_limit.toFixed(2)}` : '--'}
+            />
+            <StatCard
+              label="CPM Limit"
+              value={customer.cpm_limit != null ? String(customer.cpm_limit) : '--'}
+            />
+          </>
+        )}
         <StatCard
           label="Fraud Score"
           accent={customer.fraud_score > 70 ? '#ef4444' : '#3b82f6'}

@@ -275,6 +275,7 @@ local function lookup_rcf()
                 daily_limit = tonumber(rcf_db.daily_limit) or 500,
                 pass_caller_id = rcf_db.pass_caller_id == "t" or rcf_db.pass_caller_id == true,
                 ring_timeout = tonumber(rcf_db.ring_timeout) or 30,
+                max_channels = tonumber(rcf_db.max_channels) or 0,
                 cache_hit = false
             }
         end
@@ -627,6 +628,30 @@ if product_type == "rcf" then
     pcall(function() session:execute("export", "sip_session_timeout=1800") end)
     pcall(function() session:execute("export", "sip_minimum_session_expires=90") end)
     pcall(function() session:execute("export", "enable_timer=true") end)
+
+    -- ================================================================
+    -- Per-DID concurrent call limit (mod_hash, no Redis needed)
+    -- ================================================================
+    -- max_channels=0 means unlimited (default). When set >0, FreeSWITCH
+    -- tracks concurrent calls per DID using the in-memory hash backend.
+    -- If the limit is reached, the call is rejected with 486 Busy Here.
+    local max_concurrent = tonumber(routing.max_channels) or 0
+    if max_concurrent > 0 then
+        freeswitch.consoleLog("INFO", string.format(
+            "[inbound_router] Checking limit: DID %s, max %d concurrent\n",
+            normalized_did, max_concurrent
+        ))
+        session:execute("limit", "hash inbound " .. normalized_did .. " " .. tostring(max_concurrent) .. " !USER_BUSY")
+        -- If limit exceeded, session is already hung up with 486 Busy
+        -- Check if session is still active before continuing
+        if not session:ready() then
+            freeswitch.consoleLog("WARNING", string.format(
+                "[inbound_router] DID %s rejected — %d concurrent call limit reached\n",
+                normalized_did, max_concurrent
+            ))
+            return
+        end
+    end
 
     -- ================================================================
     -- SBC + Carrier failover: 4 bridge attempts for PSTN routing

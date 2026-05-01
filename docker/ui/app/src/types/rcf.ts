@@ -9,6 +9,7 @@ export interface RcfEntry {
   pass_caller_id: boolean;
   ring_timeout: number;
   failover_to?: string | null;
+  max_channels: number;
   created_at: string;
 }
 

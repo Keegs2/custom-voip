@@ -874,6 +874,18 @@ export function RcfCard({ entry, pendingValue, onPendingChange }: RcfCardProps) 
             value={entry.failover_to ? fmt(entry.failover_to) : 'None'}
             active={!!entry.failover_to}
           />
+
+          {/* Max channels pill */}
+          <StatPill
+            icon={
+              <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" style={{ width: 13, height: 13 }}>
+                <path d="M1 4h12M1 7h12M1 10h12" />
+              </svg>
+            }
+            label="Max Calls"
+            value={entry.max_channels === 0 ? 'No Limit' : String(entry.max_channels)}
+            active={entry.max_channels > 0}
+          />
         </div>
       </div>
     </div>

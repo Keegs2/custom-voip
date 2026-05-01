@@ -78,6 +78,7 @@ class RCFCreate(BaseModel):
     pass_caller_id: bool = True
     ring_timeout: int = 30
     failover_to: Optional[str] = None
+    max_channels: int = 0
 
     @field_validator('did')
     @classmethod
@@ -106,6 +107,14 @@ class RCFCreate(BaseModel):
             raise ValueError("ring_timeout must be between 5 and 120 seconds")
         return v
 
+    @field_validator('max_channels')
+    @classmethod
+    def validate_max_channels(cls, v: int) -> int:
+        """0 = unlimited, 1-100 = enforced concurrent call limit per DID."""
+        if v < 0 or v > 100:
+            raise ValueError("max_channels must be between 0 (unlimited) and 100")
+        return v
+
 
 class RCFUpdate(BaseModel):
     name: Optional[str] = None
@@ -114,6 +123,7 @@ class RCFUpdate(BaseModel):
     ring_timeout: Optional[int] = None
     failover_to: Optional[str] = None
     enabled: Optional[bool] = None
+    max_channels: Optional[int] = None
 
     @field_validator('forward_to')
     @classmethod
@@ -138,6 +148,14 @@ class RCFUpdate(BaseModel):
             raise ValueError("ring_timeout must be between 5 and 120 seconds")
         return v
 
+    @field_validator('max_channels')
+    @classmethod
+    def validate_max_channels(cls, v: Optional[int]) -> Optional[int]:
+        """0 = unlimited, 1-100 = enforced concurrent call limit per DID."""
+        if v is not None and (v < 0 or v > 100):
+            raise ValueError("max_channels must be between 0 (unlimited) and 100")
+        return v
+
 
 class RCFResponse(BaseModel):
     """Response model for RCF operations."""
@@ -149,6 +167,7 @@ class RCFResponse(BaseModel):
     enabled: bool
     ring_timeout: Optional[int] = None
     failover_to: Optional[str] = None
+    max_channels: int = 0
     customer_id: Optional[int] = None
     customer_name: Optional[str] = None
 
@@ -169,12 +188,12 @@ async def create_rcf(rcf: RCFCreate):
     try:
         result = await db.fetch_one(
             """
-            INSERT INTO rcf_numbers (customer_id, did, name, forward_to, pass_caller_id, ring_timeout, failover_to)
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
-            RETURNING id, did, name, forward_to, pass_caller_id, enabled, created_at
+            INSERT INTO rcf_numbers (customer_id, did, name, forward_to, pass_caller_id, ring_timeout, failover_to, max_channels)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            RETURNING id, did, name, forward_to, pass_caller_id, enabled, ring_timeout, failover_to, max_channels, created_at
             """,
             rcf.customer_id, rcf.did, rcf.name, rcf.forward_to, rcf.pass_caller_id,
-            rcf.ring_timeout, rcf.failover_to
+            rcf.ring_timeout, rcf.failover_to, rcf.max_channels
         )
         return dict(result)
     except Exception as e:
@@ -227,7 +246,7 @@ async def update_rcf(identifier: str, rcf: RCFUpdate) -> RCFResponse:
     query = f"""
         UPDATE rcf_numbers SET {', '.join(updates)}
         WHERE {where_clause}
-        RETURNING id, did, name, forward_to, pass_caller_id, enabled, ring_timeout, failover_to, customer_id
+        RETURNING id, did, name, forward_to, pass_caller_id, enabled, ring_timeout, failover_to, max_channels, customer_id
     """
 
     result = await db.fetch_one(query, *values)
@@ -253,6 +272,7 @@ async def update_rcf(identifier: str, rcf: RCFUpdate) -> RCFResponse:
         enabled=result["enabled"],
         ring_timeout=result["ring_timeout"],
         failover_to=result["failover_to"],
+        max_channels=result["max_channels"],
         customer_id=result["customer_id"],
         customer_name=customer["name"] if customer else None
     )
@@ -291,7 +311,8 @@ async def list_rcf(customer_id: Optional[int] = None, enabled: Optional[bool] = 
     """List RCF numbers with optional filters."""
     query = """
         SELECT r.id, r.did, r.name, r.forward_to, r.pass_caller_id, r.enabled,
-               r.ring_timeout, r.failover_to, r.customer_id, c.name as customer_name
+               r.ring_timeout, r.failover_to, r.max_channels, r.customer_id,
+               c.name as customer_name
         FROM rcf_numbers r
         JOIN customers c ON r.customer_id = c.id
         WHERE 1=1

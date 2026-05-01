@@ -224,7 +224,7 @@ function M.lookup_rcf(did)
 
     local sql = string.format([[
         SELECT r.forward_to, r.customer_id, r.pass_caller_id, r.ring_timeout,
-               c.traffic_grade, c.cpm_limit, c.daily_limit, c.status
+               r.max_channels, c.traffic_grade, c.cpm_limit, c.daily_limit, c.status
         FROM rcf_numbers r
         JOIN customers c ON r.customer_id = c.id
         WHERE r.did = %s AND r.enabled = true AND c.status = 'active'
