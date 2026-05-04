@@ -135,6 +135,10 @@ services:
       - "HEPLIFYSERVER_LOKICALLIDLABELS=true"
       - "HEPLIFYSERVER_FORCEALEGID=true"
       - "HEPLIFYSERVER_LOKIBULK=200"
+      - "HEPLIFYSERVER_SCRIPTENABLE=true"
+      - "HEPLIFYSERVER_SCRIPTFOLDER=/scripts"
+    volumes:
+      - ./docker/homer/scripts:/scripts:ro
     depends_on:
       clickhouse-server:
         condition: service_healthy

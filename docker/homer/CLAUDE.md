@@ -64,6 +64,7 @@ send HEP to port 9060 on the services VM. Only the backend storage and UI change
 | `grafana/provisioning/datasources/qryn.yml` | Auto-provisions qryn as Loki datasource in Grafana |
 | `grafana/provisioning/dashboards/dashboards.yml` | Auto-provisions dashboard directory in Grafana |
 | `grafana/dashboards/sip-search.json` | SIP search dashboard with logs, table, and flow diagram panels |
+| `scripts/ip-alias.lua` | heplify-server Lua script: rewrites HEP SrcIP/DstIP to friendly node names before Loki labels are generated |
 
 ## Key Configuration
 
@@ -72,6 +73,7 @@ send HEP to port 9060 on the services VM. Only the backend storage and UI change
 - **qryn** connects to ClickHouse on port 8123 (HTTP interface) with the default user (no password).
 - **Grafana** has anonymous viewer access enabled and serves from `/grafana/` subpath for reverse proxy compatibility.
 - **Flow panel plugin** (`qxip-flow-panel`) is installed at Grafana startup for SIP ladder diagrams.
+- **IP aliasing** via Lua script (`scripts/ip-alias.lua`). heplify-server's Lua engine calls `SetHEPField("SrcIP", name)` to rewrite raw IPs to friendly names (e.g. "SBC-1", "FreeSWITCH", "BW-DAL") before Loki label generation. This means `src_ip`/`dst_ip` labels carry friendly names with zero Grafana dashboard changes. To add or change aliases, edit the `aliases` table in `ip-alias.lua` and restart heplify-server.
 
 ## Accessing Homer 10
 
