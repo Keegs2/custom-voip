@@ -34,14 +34,18 @@ function displayUser(value: string): string {
 /** Format an ISO date string to a readable local datetime. */
 function fmtDateTime(iso: string): string {
   try {
-    return new Intl.DateTimeFormat('en-US', {
+    const d = new Date(iso);
+    const base = new Intl.DateTimeFormat('en-US', {
       month: 'short',
       day: 'numeric',
       hour: 'numeric',
       minute: '2-digit',
       second: '2-digit',
       hour12: true,
-    }).format(new Date(iso));
+    }).format(d);
+    // Append milliseconds for SIP message ordering precision
+    const ms = String(d.getMilliseconds()).padStart(3, '0');
+    return `${base}.${ms}`;
   } catch {
     return iso;
   }

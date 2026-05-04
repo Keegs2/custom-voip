@@ -10,6 +10,7 @@ export interface HomerSearchParams {
 
 export interface HomerSearchResult {
   timestamp: string;
+  timestamp_ns: number;
   from_user: string;
   to_user: string;
   callid: string;

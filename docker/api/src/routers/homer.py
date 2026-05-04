@@ -168,17 +168,21 @@ def _parse_loki_response(loki_data: dict) -> list[dict[str, Any]]:
         to_user = _extract_sip_user(to_label)
 
         for ts_ns_str, _log_line in stream.get("values", []):
-            # Convert nanosecond timestamp to ISO 8601
+            # Preserve nanosecond precision for sorting (SIP message order matters)
             try:
-                ts_seconds = int(ts_ns_str) / 1_000_000_000
+                ts_ns = int(ts_ns_str)
+                ts_seconds = ts_ns / 1_000_000_000
+                # Include milliseconds in the display timestamp
                 ts_iso = datetime.fromtimestamp(
                     ts_seconds, tz=timezone.utc
-                ).strftime("%Y-%m-%dT%H:%M:%SZ")
+                ).strftime("%Y-%m-%dT%H:%M:%S.") + f"{int((ts_ns % 1_000_000_000) / 1_000_000):03d}Z"
             except (ValueError, OSError):
+                ts_ns = 0
                 ts_iso = None
 
             results.append({
                 "timestamp": ts_iso,
+                "timestamp_ns": ts_ns,
                 "from_user": from_user,
                 "to_user": to_user,
                 "callid": labels.get("call_id", ""),
@@ -286,15 +290,15 @@ def _extract_callids(results: list[dict[str, Any]]) -> set[str]:
 
 
 def _deduplicate_results(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Deduplicate results by (timestamp, callid) and sort by timestamp."""
-    seen: set[tuple[str | None, str]] = set()
+    """Deduplicate results by (timestamp_ns, callid) and sort by nanosecond timestamp."""
+    seen: set[tuple[int, str]] = set()
     deduped: list[dict[str, Any]] = []
     for r in results:
-        key = (r.get("timestamp"), r.get("callid", ""))
+        key = (r.get("timestamp_ns", 0), r.get("callid", ""))
         if key not in seen:
             seen.add(key)
             deduped.append(r)
-    deduped.sort(key=lambda r: r.get("timestamp") or "")
+    deduped.sort(key=lambda r: r.get("timestamp_ns", 0))
     return deduped
 
 
@@ -337,9 +341,9 @@ async def search_sip_traces(
         # Step 1: Initial query
         initial_results = await _query_qryn(client, logql, start_ns, end_ns)
 
-        # Sort helper for early returns
+        # Sort helper for early returns — use nanosecond precision
         def _sorted(r: list) -> list:
-            r.sort(key=lambda x: x.get("timestamp") or "")
+            r.sort(key=lambda x: x.get("timestamp_ns", 0))
             return r
 
         # If no results or correlation disabled, return immediately
