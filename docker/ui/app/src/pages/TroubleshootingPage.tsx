@@ -259,9 +259,11 @@ function NoResultsState() {
 
 interface ResultsTableProps {
   results: HomerSearchResult[];
+  startTime: string;
+  endTime: string;
 }
 
-function ResultsTable({ results }: ResultsTableProps) {
+function ResultsTable({ results, startTime, endTime }: ResultsTableProps) {
   const thStyle: React.CSSProperties = {
     padding: '10px 14px',
     textAlign: 'left',
@@ -309,8 +311,10 @@ function ResultsTable({ results }: ResultsTableProps) {
           {results.map((row, idx) => {
             // Build Grafana deep-link with the Call-ID variable pre-filled.
             // The dashboard UID and variable name match the dashboard JSON from Phase 1.
-            // Deep link to Grafana SIP Search dashboard with Call-ID pre-filled
-            const grafanaLink = `/grafana/d/sip-search/sip-search?var-callid=${encodeURIComponent(row.callid)}&kiosk=tv`;
+            // Deep link to Grafana with Call-ID, phone number, and exact time range from our search
+            const fromMs = new Date(startTime).getTime();
+            const toMs = new Date(endTime).getTime();
+            const grafanaLink = `/grafana/d/sip-search/sip-search?var-callid=${encodeURIComponent(row.callid)}&var-phone_number=${encodeURIComponent(row.from_user.replace(/^\+/, ''))}&from=${fromMs}&to=${toMs}&kiosk=tv`;
 
             return (
               <tr
@@ -890,7 +894,7 @@ export function TroubleshootingPage() {
           )}
 
           {!isLoading && !isError && results.length > 0 && (
-            <ResultsTable results={results} />
+            <ResultsTable results={results} startTime={startTime} endTime={endTime} />
           )}
         </div>
       </div>
