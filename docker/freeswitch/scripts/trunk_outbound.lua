@@ -90,6 +90,10 @@ local destination = get_var("destination_number", "")
 local caller_id = get_var("caller_id_number", "")
 local sip_from_user = get_var("sip_from_user", "")
 local source_ip = get_var("sip_received_ip", get_var("network_addr", ""))
+
+-- Use the actual SIP Call-ID from the inbound INVITE for X-CID correlation.
+-- Allows Homer to correlate A-leg and B-leg captures. Fallback to uuid if not set.
+local sip_call_id = session:getVariable("sip_call_id") or uuid
 local trunk_id = get_var("trunk_id", nil)
 local customer_id_str = get_var("customer_id", nil)
 
@@ -521,7 +525,7 @@ local dial_string = string.format(
     "{ignore_early_media=false,sip_enable_soa=false,call_timeout=60,sip_h_X-Carrier=primary" ..
     ",sip_h_X-CID=%s" ..
     ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true}sofia/external/%s@" .. sbc_proxy_ip .. ":5060",
-    uuid,
+    sip_call_id,
     normalized_dest:gsub("^%+", "")  -- Remove + for carrier (carrier-dependent)
 )
 
@@ -568,7 +572,7 @@ if bridge_result ~= "SUCCESS" then
         "{ignore_early_media=false,sip_enable_soa=false,call_timeout=60,sip_h_X-Carrier=secondary" ..
         ",sip_h_X-CID=%s" ..
         ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true}sofia/external/%s@" .. sbc_proxy_ip .. ":5060",
-        uuid,
+        sip_call_id,
         normalized_dest:gsub("^%+", "")
     )
 

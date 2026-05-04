@@ -97,6 +97,10 @@ local caller_id = get_var("caller_id_number", "unknown")
 local destination = get_var("destination_number", "unknown")
 local customer_id = get_var("customer_id", "unknown")
 local voice_url = get_var("voice_url", nil)
+
+-- Use the actual SIP Call-ID from the inbound INVITE for X-CID correlation.
+-- Allows Homer to correlate A-leg and B-leg captures. Fallback to uuid if not set.
+local sip_call_id = session:getVariable("sip_call_id") or uuid
 local fallback_url = get_var("fallback_url", nil)
 local status_callback = get_var("status_callback", nil)
 local direction = get_var("direction", "inbound")
@@ -785,7 +789,7 @@ local function execute_dial(verb)
                 "{call_timeout=%d,ignore_early_media=false,sip_enable_soa=false,sip_h_X-Carrier=primary" ..
                 ",sip_h_X-CID=%s" ..
                 ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true}sofia/external/%s@" .. sbc_proxy_ip .. ":5060",
-                dial_timeout, uuid, dial_number
+                dial_timeout, sip_call_id, dial_number
             ))
         end
     end

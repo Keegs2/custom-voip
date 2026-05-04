@@ -95,6 +95,10 @@ local webhook_url = get_var("webhook_url", nil)
 local callback_url = get_var("callback_url", nil)
 local call_reference = get_var("call_reference", uuid)
 
+-- Use the actual SIP Call-ID from the inbound INVITE for X-CID correlation.
+-- Allows Homer to correlate A-leg and B-leg captures. Fallback to uuid if not set.
+local sip_call_id = session:getVariable("sip_call_id") or uuid
+
 freeswitch.consoleLog("INFO", string.format(
     "[%s] API Outbound: customer=%d to=%s caller_id=%s webhook=%s\n",
     uuid, customer_id or 0, destination, caller_id, tostring(webhook_url)
@@ -349,7 +353,7 @@ local dial_string = string.format(
     ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true}sofia/external/%s@" .. sbc_proxy_ip .. ":5060",
     outbound_caller_id,
     outbound_caller_name,
-    uuid,
+    sip_call_id,
     normalized_dest:gsub("^%+", "")  -- Remove + for carrier (carrier-dependent)
 )
 
@@ -433,7 +437,7 @@ else
                 ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true}sofia/external/%s@" .. sbc_proxy_ip .. ":5060",
                 outbound_caller_id,
                 outbound_caller_name,
-                uuid,
+                sip_call_id,
                 normalized_dest:gsub("^%+", "")
             )
 

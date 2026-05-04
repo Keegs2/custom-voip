@@ -130,6 +130,10 @@ services:
       - "HEPLIFYSERVER_LOGLVL=info"
       - "HEPLIFYSERVER_LOGSTD=true"
       - "HEPLIFYSERVER_DEDUP=false"
+      - "HEPLIFYSERVER_LOKIFROMTOLABELS=true"
+      - "HEPLIFYSERVER_LOKICALLIDLABELS=true"
+      - "HEPLIFYSERVER_FORCEALEGID=true"
+      - "HEPLIFYSERVER_LOKIBULK=200"
     depends_on:
       clickhouse-server:
         condition: service_healthy

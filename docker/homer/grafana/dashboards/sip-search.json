@@ -9,63 +9,76 @@
   "links": [],
   "panels": [
     {
-      "title": "SIP Search Filters",
-      "type": "text",
-      "gridPos": { "h": 2, "w": 24, "x": 0, "y": 0 },
       "id": 1,
+      "type": "text",
+      "title": "Instructions",
+      "gridPos": { "h": 3, "w": 24, "x": 0, "y": 0 },
       "options": {
         "mode": "markdown",
-        "content": "Use the variables above to filter by **Call-ID**, **From User**, or **To User**. Leave blank to show all SIP traffic in the selected time range."
-      }
-    },
-    {
-      "title": "SIP Messages Log",
-      "type": "logs",
-      "gridPos": { "h": 12, "w": 24, "x": 0, "y": 2 },
-      "id": 2,
-      "datasource": {
-        "type": "loki",
-        "uid": "qryn"
-      },
-      "targets": [
-        {
-          "expr": "{type=\"call\"} |~ \"$callid\" |~ \"$from_user\" |~ \"$to_user\"",
-          "refId": "A"
+        "content": "Enter a phone number (without +) or Call-ID to search. Both legs of forwarded calls are returned automatically.",
+        "code": {
+          "language": "plaintext",
+          "showLineNumbers": false,
+          "showMiniMap": false
         }
-      ],
-      "options": {
-        "showTime": true,
-        "showLabels": true,
-        "showCommonLabels": false,
-        "wrapLogMessage": true,
-        "prettifyLogMessage": false,
-        "enableLogDetails": true,
-        "dedupStrategy": "none",
-        "sortOrder": "Ascending"
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
       }
     },
     {
-      "title": "SIP Messages Table",
+      "id": 2,
       "type": "table",
-      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 14 },
-      "id": 3,
+      "title": "SIP Message Table",
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 3 },
       "datasource": {
         "type": "loki",
         "uid": "qryn"
       },
       "targets": [
         {
-          "expr": "{type=\"call\"} |~ \"$callid\" |~ \"$from_user\" |~ \"$to_user\" | json",
+          "expr": "{type=\"sip\"} |~ \"$phone_number\" |~ \"$callid\"",
           "refId": "A",
           "instant": false,
-          "range": true
+          "range": true,
+          "queryType": "range"
         }
       ],
       "transformations": [
         {
           "id": "extractFields",
           "options": {
-            "source": "Line"
+            "source": "labels",
+            "format": "auto"
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "id": true,
+              "tsNs": true,
+              "Line": true
+            },
+            "indexByName": {
+              "Time": 0,
+              "method": 1,
+              "response": 2,
+              "call_id": 3,
+              "src_ip": 4,
+              "dst_ip": 5,
+              "node": 6
+            },
+            "renameByName": {
+              "Time": "Time",
+              "method": "Method",
+              "response": "Response",
+              "call_id": "Call-ID",
+              "src_ip": "Source IP",
+              "dst_ip": "Destination IP",
+              "node": "Node"
+            }
           }
         }
       ],
@@ -73,30 +86,62 @@
         "defaults": {
           "custom": {
             "align": "auto",
-            "displayMode": "auto"
+            "displayMode": "auto",
+            "inspect": true,
+            "filterable": true
           }
         },
         "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "sortBy": [
+          {
+            "displayName": "Time",
+            "desc": false
+          }
+        ],
+        "cellHeight": "sm",
+        "footer": {
+          "show": false,
+          "reducer": ["count"],
+          "countRows": false,
+          "fields": ""
+        }
       }
     },
     {
-      "title": "SIP Flow Diagram",
+      "id": 3,
       "type": "qxip-flow-panel",
-      "gridPos": { "h": 14, "w": 24, "x": 0, "y": 24 },
-      "id": 4,
+      "title": "SIP Ladder Diagram",
+      "gridPos": { "h": 18, "w": 24, "x": 0, "y": 13 },
       "datasource": {
         "type": "loki",
         "uid": "qryn"
       },
       "targets": [
         {
-          "expr": "{type=\"call\"} |~ \"$callid\" | json",
+          "expr": "{type=\"sip\"} |~ \"$phone_number\" |~ \"$callid\"",
           "refId": "A",
           "instant": false,
-          "range": true
+          "range": true,
+          "queryType": "range"
         }
       ],
-      "options": {}
+      "options": {
+        "source": ["src_ip"],
+        "destination": ["dst_ip"],
+        "title": ["response"],
+        "aboveArrow": ["method"],
+        "belowArrow": ["protocol"],
+        "sortoption": "time_old",
+        "colorGenerator": ["call_id"],
+        "showbody": false
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      }
     }
   ],
   "schemaVersion": 39,
@@ -109,52 +154,31 @@
           "text": "",
           "value": ""
         },
+        "description": "Phone number to search for (without +)",
+        "hide": 0,
+        "label": "Phone Number",
+        "name": "phone_number",
+        "options": [
+          {
+            "selected": true,
+            "text": "",
+            "value": ""
+          }
+        ],
+        "query": "",
+        "skipUrlSync": false,
+        "type": "textbox"
+      },
+      {
+        "current": {
+          "selected": false,
+          "text": "",
+          "value": ""
+        },
         "description": "SIP Call-ID to search for",
         "hide": 0,
         "label": "Call-ID",
         "name": "callid",
-        "options": [
-          {
-            "selected": true,
-            "text": "",
-            "value": ""
-          }
-        ],
-        "query": "",
-        "skipUrlSync": false,
-        "type": "textbox"
-      },
-      {
-        "current": {
-          "selected": false,
-          "text": "",
-          "value": ""
-        },
-        "description": "From User (caller number)",
-        "hide": 0,
-        "label": "From User",
-        "name": "from_user",
-        "options": [
-          {
-            "selected": true,
-            "text": "",
-            "value": ""
-          }
-        ],
-        "query": "",
-        "skipUrlSync": false,
-        "type": "textbox"
-      },
-      {
-        "current": {
-          "selected": false,
-          "text": "",
-          "value": ""
-        },
-        "description": "To User (called number / DID)",
-        "hide": 0,
-        "label": "To User",
-        "name": "to_user",
         "options": [
           {
             "selected": true,

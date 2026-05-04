@@ -445,6 +445,12 @@ if product_type == "rcf" then
     --   local inbound_tc = get_var("sip_h_X-Inbound-TC", ""):match("^%s*(.-)%s*$") or ""
     --   if inbound_tc == "tc1" then carrier = "tc1" elseif inbound_tc == "tc2" then carrier = "tc2" end
     local inbound_tc = get_var("sip_h_X-Inbound-TC", "")
+
+    -- Use the actual SIP Call-ID from the inbound INVITE for X-CID correlation.
+    -- The uuid is FreeSWITCH's internal session ID which differs from the SIP Call-ID
+    -- that Homer/HEP captures on the A-leg. Using sip_call_id lets us correlate
+    -- A-leg and B-leg in Homer. Fallback to uuid if sip_call_id is not set.
+    local sip_call_id = session:getVariable("sip_call_id") or uuid
     inbound_tc = inbound_tc:match("^%s*(.-)%s*$") or ""
     local carrier = "primary"  -- TC4 only — do not change until Bandwidth provisions all TCs
     freeswitch.consoleLog("INFO", string.format(
@@ -721,7 +727,7 @@ if product_type == "rcf" then
                     "}sofia/external/%s@%s:5060",
                     ring_timeout,
                     attempt.carrier,
-                    uuid,
+                    sip_call_id,
                     forward_to,
                     attempt.sbc
                 )

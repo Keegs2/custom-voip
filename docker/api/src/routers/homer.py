@@ -9,6 +9,7 @@ No authentication required for qryn (no more Homer 7 JWT flow).
 import json
 import os
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Any, Optional
 
@@ -63,6 +64,7 @@ class HomerSearchRequest(BaseModel):
     call_id: Optional[str] = None
     start_time: str   # ISO 8601 datetime
     end_time: str      # ISO 8601 datetime
+    correlate: bool = True  # Enable A/B leg correlation
 
 
 # ---------------------------------------------------------------------------
@@ -84,11 +86,11 @@ def _build_logql_query(
 ) -> str:
     """Build a LogQL query for SIP trace search.
 
-    heplify-server pushes SIP data with label {type="call"} and JSON log
+    heplify-server pushes SIP data with label {type="sip"} and JSON log
     lines containing from_user, to_user, callid, method, src_ip, dst_ip,
     response, and node fields.
     """
-    query = '{type="call"}'
+    query = '{type="sip"}'
     filters: list[str] = []
 
     if from_user:
@@ -183,6 +185,83 @@ async def list_aliases(admin: dict = Depends(require_admin)):
     return {"aliases": CANONICAL_ALIASES}
 
 
+async def _query_qryn(
+    client: httpx.AsyncClient,
+    logql: str,
+    start_ns: int,
+    end_ns: int,
+    limit: int = 200,
+) -> list[dict[str, Any]]:
+    """Execute a LogQL query against qryn and return parsed results.
+
+    Raises HTTPException on connection or protocol errors.
+    """
+    params = {
+        "query": logql,
+        "start": str(start_ns),
+        "end": str(end_ns),
+        "limit": str(limit),
+    }
+
+    try:
+        resp = await client.get(
+            f"{QRYN_URL}/loki/api/v1/query_range",
+            params=params,
+        )
+    except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
+        logger.error("qryn unreachable at %s: %s", QRYN_URL, exc)
+        raise HTTPException(
+            status_code=503,
+            detail=f"qryn unreachable at {QRYN_URL}",
+        )
+    except httpx.ReadTimeout as exc:
+        logger.error("qryn query timed out: %s", exc)
+        raise HTTPException(
+            status_code=503,
+            detail="qryn query timed out",
+        )
+
+    if resp.status_code != 200:
+        logger.error(
+            "qryn query failed: HTTP %s — %s",
+            resp.status_code,
+            resp.text[:500],
+        )
+        raise HTTPException(
+            status_code=502,
+            detail=f"qryn query returned HTTP {resp.status_code}",
+        )
+
+    try:
+        loki_data = resp.json()
+    except Exception:
+        logger.error("qryn returned non-JSON response: %.500s", resp.text)
+        raise HTTPException(
+            status_code=502,
+            detail="qryn returned non-JSON response",
+        )
+
+    return _parse_loki_response(loki_data)
+
+
+def _extract_callids(results: list[dict[str, Any]]) -> set[str]:
+    """Extract unique non-empty call_id values from parsed results."""
+    return {r["callid"] for r in results if r.get("callid")}
+
+
+def _deduplicate_results(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Deduplicate results by (timestamp, callid) and sort by timestamp."""
+    seen: set[tuple[str | None, str]] = set()
+    deduped: list[dict[str, Any]] = []
+    for r in results:
+        key = (r.get("timestamp"), r.get("callid", ""))
+        if key not in seen:
+            seen.add(key)
+            deduped.append(r)
+    deduped.sort(key=lambda r: r.get("timestamp") or "")
+    return deduped
+
+
 @router.post("/search")
 async def search_sip_traces(
     body: HomerSearchRequest,
@@ -191,7 +270,9 @@ async def search_sip_traces(
     """Search SIP traces via qryn's Loki-compatible query_range API.
 
     Builds a LogQL query from the search parameters and queries qryn.
-    Returns normalized SIP trace records.
+    When correlation is enabled, performs two-step A/B leg correlation:
+    finds initial results, discovers related call legs via X-CID headers,
+    and returns all messages from all related legs.
     """
     if not body.from_user and not body.to_user and not body.call_id:
         raise HTTPException(
@@ -216,53 +297,58 @@ async def search_sip_traces(
             detail=f"Invalid timestamp format: {exc}",
         )
 
-    # Query qryn
-    params = {
-        "query": logql,
-        "start": str(start_ns),
-        "end": str(end_ns),
-        "limit": "200",
-    }
-
     async with httpx.AsyncClient(timeout=15.0) as client:
+        # Step 1: Initial query
+        initial_results = await _query_qryn(client, logql, start_ns, end_ns)
+
+        # If no results or correlation disabled, return immediately
+        if not initial_results or not body.correlate:
+            return {"data": initial_results}
+
+        known_callids = _extract_callids(initial_results)
+
+        if not known_callids or len(known_callids) > 20:
+            # Too many call_ids — skip correlation to avoid huge queries
+            if len(known_callids) > 20:
+                logger.info(
+                    "Skipping A/B correlation: %d call_ids exceeds limit of 20",
+                    len(known_callids),
+                )
+            return {"data": initial_results}
+
+        # Step 2: Correlation — search for X-CID headers containing our call IDs
+        # This finds B-leg messages that reference our A-leg call_ids
+        cid_patterns = "|".join(re.escape(cid) for cid in known_callids)
+        corr_query = f'{{type="sip"}} |~ "X-CID: ({cid_patterns})"'
+
         try:
-            resp = await client.get(
-                f"{QRYN_URL}/loki/api/v1/query_range",
-                params=params,
-            )
-        except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
-            logger.error("qryn unreachable at %s: %s", QRYN_URL, exc)
-            raise HTTPException(
-                status_code=503,
-                detail=f"qryn unreachable at {QRYN_URL}",
-            )
-        except httpx.ReadTimeout as exc:
-            logger.error("qryn query timed out: %s", exc)
-            raise HTTPException(
-                status_code=503,
-                detail="qryn query timed out",
-            )
+            corr_results = await _query_qryn(client, corr_query, start_ns, end_ns)
+        except HTTPException:
+            # Correlation query failed — return initial results without correlation
+            logger.warning("A/B correlation query failed, returning initial results only")
+            return {"data": initial_results}
 
-    if resp.status_code != 200:
-        logger.error(
-            "qryn query failed: HTTP %s — %s",
-            resp.status_code,
-            resp.text[:500],
-        )
-        raise HTTPException(
-            status_code=502,
-            detail=f"qryn query returned HTTP {resp.status_code}",
-        )
+        # Extract any NEW call_ids discovered from the correlated results
+        new_callids = _extract_callids(corr_results) - known_callids
 
-    try:
-        loki_data = resp.json()
-    except Exception:
-        logger.error("qryn returned non-JSON response: %.500s", resp.text)
-        raise HTTPException(
-            status_code=502,
-            detail="qryn returned non-JSON response",
-        )
+        if not new_callids:
+            # No new legs discovered — merge what we have and return
+            merged = initial_results + corr_results
+            return {"data": _deduplicate_results(merged)}
 
-    traces = _parse_loki_response(loki_data)
+        # Step 3: Final query — get ALL messages from all related legs
+        all_callids = known_callids | new_callids
+        cid_regex = "|".join(re.escape(cid) for cid in all_callids)
+        final_query = f'{{type="sip", call_id=~"{cid_regex}"}}'
 
-    return {"data": traces}
+        try:
+            final_results = await _query_qryn(client, final_query, start_ns, end_ns)
+        except HTTPException:
+            # Final query failed — merge initial + correlation results
+            logger.warning("Final correlation query failed, returning partial results")
+            merged = initial_results + corr_results
+            return {"data": _deduplicate_results(merged)}
+
+        # Merge all results and deduplicate
+        all_results = initial_results + corr_results + final_results
+        return {"data": _deduplicate_results(all_results)}

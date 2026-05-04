@@ -75,6 +75,10 @@ local webhook_url = get_var("webhook_url", "")
 local traffic_grade = get_var("traffic_grade", "standard")
 local call_timeout = tonumber(get_var("call_timeout", "60"))
 
+-- Use the actual SIP Call-ID from the inbound INVITE for X-CID correlation.
+-- Allows Homer to correlate A-leg and B-leg captures. Fallback to uuid if not set.
+local sip_call_id = session:getVariable("sip_call_id") or uuid
+
 freeswitch.consoleLog("INFO", string.format(
     "[%s] API Outbound: from=%s to=%s customer=%d webhook=%s\n",
     uuid, from_did, destination, customer_id, webhook_url ~= "" and "yes" or "no"
@@ -255,7 +259,7 @@ else
         ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true}sofia/external/%s@" .. sbc_proxy_ip .. ":5060",
         from_did ~= "" and from_did or "anonymous",
         call_timeout,
-        uuid,
+        sip_call_id,
         normalized_dest:gsub("^%+", "")
     )
 
@@ -301,7 +305,7 @@ else
                 ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true}sofia/external/%s@" .. sbc_proxy_ip .. ":5060",
                 from_did ~= "" and from_did or "anonymous",
                 call_timeout,
-                uuid,
+                sip_call_id,
                 normalized_dest:gsub("^%+", "")
             )
 
