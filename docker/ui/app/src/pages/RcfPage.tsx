@@ -965,21 +965,59 @@ function mosLabel(mos: number | null | undefined): { text: string; color: string
   return { text: 'Poor', color: '#ef4444', dot: '#ef4444' };
 }
 
-function callStatusInfo(cdr: Cdr): { label: string; bg: string; color: string } {
+function callStatusInfo(cdr: Cdr): { label: string; bg: string; color: string; border: string } {
+  const GREEN  = { bg: 'rgba(34,197,94,0.12)',  color: '#4ade80', border: '1px solid rgba(34,197,94,0.2)' };
+  const AMBER  = { bg: 'rgba(245,158,11,0.12)', color: '#f59e0b', border: '1px solid rgba(245,158,11,0.2)' };
+  const RED    = { bg: 'rgba(239,68,68,0.12)',   color: '#f87171', border: '1px solid rgba(239,68,68,0.2)' };
+  const BLUE   = { bg: 'rgba(59,130,246,0.12)',  color: '#60a5fa', border: '1px solid rgba(59,130,246,0.2)' };
+
+  const cause = (cdr.hangup_cause ?? '').toUpperCase();
+
+  // Answered calls (has answer_time and non-zero duration)
   if (cdr.answer_time != null && cdr.duration_seconds > 0) {
-    return { label: 'Answered', bg: 'rgba(59,130,246,0.12)', color: '#60a5fa' };
+    return { label: 'Answered', ...GREEN };
   }
-  const cause = (cdr.hangup_cause ?? '').toLowerCase();
-  if (cause.includes('no_answer') || cause.includes('no answer') || cause === 'originator_cancel') {
-    return { label: 'No Answer', bg: 'rgba(245,158,11,0.12)', color: '#f59e0b' };
+
+  // Map specific hangup causes to friendly labels
+  switch (cause) {
+    case 'ORIGINATOR_CANCEL':
+      return { label: 'Caller Hung Up', ...AMBER };
+    case 'NO_ANSWER':
+      return { label: 'No Answer', ...AMBER };
+    case 'USER_BUSY':
+      return { label: 'Busy', ...RED };
+    case 'CALL_REJECTED':
+      return { label: 'Rejected', ...RED };
+    case 'NORMAL_TEMPORARY_FAILURE':
+      return { label: 'Unavailable', ...RED };
+    case 'UNALLOCATED_NUMBER':
+      return { label: 'Invalid Number', ...RED };
+    case 'NO_ROUTE_DESTINATION':
+      return { label: 'No Route', ...RED };
+    case 'RECOVERY_ON_TIMER_EXPIRE':
+      return { label: 'Timed Out', ...RED };
+    case 'NORMAL_CLEARING':
+      // NORMAL_CLEARING without answer_time = very short call or signaling-only
+      if (cdr.answer_time == null) return { label: 'Not Connected', ...AMBER };
+      return { label: 'Answered', ...GREEN };
+    default:
+      break;
   }
+
+  // SIP error codes
   if (cdr.sip_code != null && cdr.sip_code >= 400) {
-    return { label: 'Failed', bg: 'rgba(239,68,68,0.12)', color: '#ef4444' };
+    if (cdr.sip_code === 486) return { label: 'Busy', ...RED };
+    if (cdr.sip_code === 487) return { label: 'Cancelled', ...AMBER };
+    if (cdr.sip_code === 603) return { label: 'Declined', ...RED };
+    return { label: 'Failed', ...RED };
   }
-  if (cdr.duration_seconds === 0 && cdr.answer_time == null) {
-    return { label: 'No Answer', bg: 'rgba(245,158,11,0.12)', color: '#f59e0b' };
+
+  // Fallback: no answer_time and zero duration = never connected
+  if (cdr.answer_time == null) {
+    return { label: 'No Answer', ...AMBER };
   }
-  return { label: 'Answered', bg: 'rgba(59,130,246,0.12)', color: '#60a5fa' };
+
+  return { label: 'Answered', ...BLUE };
 }
 
 // ─── TabBar ───────────────────────────────────────────────────────────────────
@@ -2390,6 +2428,7 @@ function CallActivityTab({ customerId }: CallActivityTabProps) {
                           fontWeight: 700,
                           color: status.color,
                           background: status.bg,
+                          border: status.border,
                           borderRadius: 20,
                           padding: '3px 9px',
                           whiteSpace: 'nowrap',
