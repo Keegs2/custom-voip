@@ -309,15 +309,15 @@ function ResultsTable({ results, startTime, endTime }: ResultsTableProps) {
         </thead>
         <tbody>
           {results.map((row, idx) => {
-            // Build Grafana deep-link with the Call-ID variable pre-filled.
-            // The dashboard UID and variable name match the dashboard JSON from Phase 1.
-            // Deep link to Grafana with Call-ID, phone number, and exact time range
+            // Deep link to Grafana with phone number and exact time range.
+            // We pass ONLY phone_number (not callid) because phone number search
+            // returns BOTH A-leg and B-leg SIP messages. Each leg has a different
+            // Call-ID, so passing a single callid would only match one leg.
             // Grafana URL params: from/to must be Unix milliseconds (integers)
             const fromMs = Math.floor(new Date(startTime).getTime());
             const toMs = Math.floor(new Date(endTime).getTime());
             const phoneNum = (row.from_user || '').replace(/^\+/, '');
             const params = new URLSearchParams({
-              'var-callid': row.callid,
               'var-phone_number': phoneNum,
               from: String(fromMs),
               to: String(toMs),

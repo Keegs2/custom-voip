@@ -38,7 +38,7 @@
       },
       "targets": [
         {
-          "expr": "{type=\"sip\"} |~ \"${callid}\" |~ \"${phone_number}\"",
+          "expr": "{type=\"sip\"} |~ \"${phone_number}\" |~ \"${callid}\"",
           "refId": "A",
           "instant": false,
           "range": true,
@@ -121,7 +121,7 @@
       },
       "targets": [
         {
-          "expr": "{type=\"sip\"} |~ \"${callid}\" |~ \"${phone_number}\"",
+          "expr": "{type=\"sip\"} |~ \"${phone_number}\" |~ \"${callid}\"",
           "refId": "A",
           "instant": false,
           "range": true,
