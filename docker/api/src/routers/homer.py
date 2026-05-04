@@ -22,7 +22,7 @@ router = APIRouter()
 # ---------------------------------------------------------------------------
 # Homer connection settings
 # ---------------------------------------------------------------------------
-HOMER_URL = os.getenv("HOMER_URL", "http://homer-webapp:9080")
+HOMER_URL = os.getenv("HOMER_URL", "http://homer-webapp:80")
 HOMER_USER = os.getenv("HOMER_USER", "admin")
 HOMER_PASS = os.getenv("HOMER_PASS", "sipcapture")
 
