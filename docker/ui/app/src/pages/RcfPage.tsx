@@ -1679,8 +1679,11 @@ function WeeklyChart({ days }: WeeklyChartProps) {
 }
 
 function CallActivityTab({ customerId }: CallActivityTabProps) {
-  // ALL hooks unconditionally at top — rules of hooks
+  // ALL hooks unconditionally at top — rules of hooks (#310 prevention)
   const [activitySearch, setActivitySearch] = useState('');
+  const [selectedDid, setSelectedDid] = useState<string | null>(null);
+  const [didDropdownOpen, setDidDropdownOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ['rcf-activity', customerId],
@@ -1696,15 +1699,41 @@ function CallActivityTab({ customerId }: CallActivityTabProps) {
     staleTime: 60_000,
   });
 
+  const { data: rcfData } = useQuery({
+    queryKey: ['rcf-dids', customerId],
+    queryFn: () => listRcf({ customer_id: customerId, limit: 500 }),
+    staleTime: 60_000,
+  });
+  const rcfEntries: RcfEntry[] = rcfData?.items ?? [];
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    if (!didDropdownOpen) return;
+    function handleClick(e: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setDidDropdownOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [didDropdownOpen]);
+
   const allCalls = data?.items ?? [];
 
-  const stats = useMemo(() => computeQualityStats(allCalls), [allCalls]);
-  const dailyDots = useMemo(() => buildDailyDots(allCalls), [allCalls]);
+  // Client-side DID filter — applies before search and stats
+  const filteredCalls = useMemo(() => {
+    if (!selectedDid) return allCalls;
+    return allCalls.filter((c) => c.destination === selectedDid);
+  }, [allCalls, selectedDid]);
 
+  const stats = useMemo(() => computeQualityStats(filteredCalls), [filteredCalls]);
+  const dailyDots = useMemo(() => buildDailyDots(filteredCalls), [filteredCalls]);
+
+  // Table rows: DID filter + search filter stacked
   const calls = useMemo(() => {
-    if (!activitySearch.trim()) return allCalls;
+    if (!activitySearch.trim()) return filteredCalls;
     const q = activitySearch.trim().toLowerCase();
-    return allCalls.filter((c) => {
+    return filteredCalls.filter((c) => {
       const fields = [
         c.caller_id,
         c.destination,
@@ -1717,7 +1746,13 @@ function CallActivityTab({ customerId }: CallActivityTabProps) {
       ];
       return fields.some((f) => f && f.toLowerCase().includes(q));
     });
-  }, [allCalls, activitySearch]);
+  }, [filteredCalls, activitySearch]);
+
+  // Selected DID label for display
+  const selectedEntry = rcfEntries.find((e) => e.did === selectedDid) ?? null;
+  const selectedLabel = selectedEntry
+    ? `${fmt(selectedEntry.did)}${selectedEntry.name ? ` — ${selectedEntry.name}` : ''}`
+    : null;
 
   // Colour thresholds for stat cards
   // ASR is informational (neutral blue) — we can't control answer rates
@@ -1798,6 +1833,305 @@ function CallActivityTab({ customerId }: CallActivityTabProps) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+
+      {/* ── DID Selector bar ───────────────────────────────────── */}
+      {rcfEntries.length > 0 && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 12,
+            background: 'rgba(19,21,29,0.72)',
+            backdropFilter: 'blur(12px)',
+            WebkitBackdropFilter: 'blur(12px)',
+            border: selectedDid
+              ? '1px solid rgba(74,222,128,0.28)'
+              : '1px solid rgba(42,47,69,0.6)',
+            borderRadius: 14,
+            padding: '12px 18px',
+            boxShadow: selectedDid
+              ? '0 0 0 1px rgba(74,222,128,0.08), 0 6px 24px -6px rgba(0,0,0,0.4)'
+              : '0 6px 24px -6px rgba(0,0,0,0.4)',
+            transition: 'border-color 0.2s, box-shadow 0.2s',
+            position: 'relative',
+          }}
+        >
+          {/* Left: icon + label */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+            <div
+              style={{
+                width: 26,
+                height: 26,
+                borderRadius: 7,
+                background: selectedDid ? 'rgba(74,222,128,0.14)' : 'rgba(59,130,246,0.10)',
+                border: selectedDid ? '1px solid rgba(74,222,128,0.28)' : '1px solid rgba(59,130,246,0.20)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                transition: 'background 0.2s, border-color 0.2s',
+                flexShrink: 0,
+              }}
+            >
+              <svg viewBox="0 0 16 16" fill="none" stroke={selectedDid ? '#4ade80' : '#60a5fa'} strokeWidth={1.7} style={{ width: 11, height: 11 }}>
+                <path d="M3 5a2 2 0 0 1 2-2h1.28a.8.8 0 0 1 .758.547l.6 1.797a.8.8 0 0 1-.401.968l-.903.452a8.833 8.833 0 0 0 4.413 4.413l.452-.903a.8.8 0 0 1 .968-.401l1.797.6A.8.8 0 0 1 14 11.72V13a2 2 0 0 1-2 2h-.4C5.87 15 1 10.13 1 4.4V4a1 1 0 0 1 1-1h1z" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </div>
+            <span style={{ fontSize: '0.68rem', fontWeight: 600, color: '#94a3b8', letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+              Viewing
+            </span>
+          </div>
+
+          {/* Centre: custom dropdown */}
+          <div ref={dropdownRef} style={{ position: 'relative', flex: 1, minWidth: 0 }}>
+            <button
+              type="button"
+              onClick={() => setDidDropdownOpen((o) => !o)}
+              style={{
+                width: '100%',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                padding: '7px 12px',
+                borderRadius: 10,
+                border: didDropdownOpen
+                  ? '1px solid rgba(74,222,128,0.55)'
+                  : selectedDid
+                    ? '1px solid rgba(74,222,128,0.30)'
+                    : '1px solid rgba(59,130,246,0.20)',
+                background: didDropdownOpen
+                  ? 'rgba(74,222,128,0.06)'
+                  : selectedDid
+                    ? 'rgba(74,222,128,0.05)'
+                    : 'rgba(15,17,23,0.5)',
+                cursor: 'pointer',
+                fontFamily: 'inherit',
+                boxShadow: didDropdownOpen ? '0 0 0 3px rgba(74,222,128,0.12)' : 'none',
+                transition: 'border-color 0.18s, background 0.18s, box-shadow 0.18s',
+                outline: 'none',
+                minWidth: 0,
+              }}
+            >
+              {/* Selected value */}
+              <span style={{ flex: 1, minWidth: 0, textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {selectedDid ? (
+                  <span style={{ fontSize: '0.84rem', fontWeight: 700, color: '#4ade80', fontFamily: 'monospace', letterSpacing: '0.01em' }}>
+                    {selectedLabel}
+                  </span>
+                ) : (
+                  <span style={{ fontSize: '0.84rem', fontWeight: 700, color: '#e2e8f0' }}>
+                    All Numbers
+                  </span>
+                )}
+              </span>
+              {/* Chevron */}
+              <svg
+                viewBox="0 0 16 16"
+                fill="none"
+                stroke={selectedDid ? '#4ade80' : '#64748b'}
+                strokeWidth={2}
+                style={{
+                  width: 12,
+                  height: 12,
+                  flexShrink: 0,
+                  transform: didDropdownOpen ? 'rotate(180deg)' : 'none',
+                  transition: 'transform 0.18s',
+                }}
+              >
+                <path d="M4 6l4 4 4-4" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+
+            {/* Dropdown panel */}
+            {didDropdownOpen && (
+              <div
+                style={{
+                  position: 'absolute',
+                  top: 'calc(100% + 6px)',
+                  left: 0,
+                  right: 0,
+                  zIndex: 200,
+                  background: 'rgba(15,17,23,0.97)',
+                  backdropFilter: 'blur(16px)',
+                  WebkitBackdropFilter: 'blur(16px)',
+                  border: '1px solid rgba(74,222,128,0.22)',
+                  borderRadius: 12,
+                  overflow: 'hidden',
+                  boxShadow: '0 16px 40px -8px rgba(0,0,0,0.7), 0 0 0 1px rgba(74,222,128,0.06)',
+                  animation: 'fadeInUp 0.12s ease',
+                }}
+              >
+                {/* All Numbers option */}
+                <button
+                  type="button"
+                  onClick={() => { setSelectedDid(null); setDidDropdownOpen(false); }}
+                  style={{
+                    width: '100%',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 10,
+                    padding: '11px 14px',
+                    border: 'none',
+                    borderBottom: '1px solid rgba(42,47,69,0.6)',
+                    background: !selectedDid ? 'rgba(74,222,128,0.08)' : 'transparent',
+                    cursor: 'pointer',
+                    fontFamily: 'inherit',
+                    textAlign: 'left',
+                    transition: 'background 0.14s',
+                  }}
+                  onMouseEnter={(e) => { if (selectedDid) e.currentTarget.style.background = 'rgba(255,255,255,0.03)'; }}
+                  onMouseLeave={(e) => { if (selectedDid) e.currentTarget.style.background = 'transparent'; }}
+                >
+                  <div
+                    style={{
+                      width: 28,
+                      height: 28,
+                      borderRadius: 7,
+                      background: !selectedDid ? 'rgba(74,222,128,0.18)' : 'rgba(255,255,255,0.05)',
+                      border: !selectedDid ? '1px solid rgba(74,222,128,0.35)' : '1px solid rgba(255,255,255,0.08)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      flexShrink: 0,
+                      transition: 'background 0.14s, border-color 0.14s',
+                    }}
+                  >
+                    <svg viewBox="0 0 16 16" fill="none" stroke={!selectedDid ? '#4ade80' : '#64748b'} strokeWidth={1.7} style={{ width: 11, height: 11 }}>
+                      <rect x="2" y="2" width="5" height="5" rx="1.2" />
+                      <rect x="9" y="2" width="5" height="5" rx="1.2" />
+                      <rect x="2" y="9" width="5" height="5" rx="1.2" />
+                      <rect x="9" y="9" width="5" height="5" rx="1.2" />
+                    </svg>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '0.84rem', fontWeight: 800, color: !selectedDid ? '#4ade80' : '#e2e8f0', letterSpacing: '-0.01em' }}>
+                      All Numbers
+                    </div>
+                    <div style={{ fontSize: '0.65rem', color: '#475569', marginTop: 1 }}>
+                      Aggregate data for all {rcfEntries.length} number{rcfEntries.length !== 1 ? 's' : ''}
+                    </div>
+                  </div>
+                  {!selectedDid && (
+                    <span style={{ marginLeft: 'auto', fontSize: '0.6rem', fontWeight: 700, color: '#4ade80', background: 'rgba(74,222,128,0.15)', border: '1px solid rgba(74,222,128,0.30)', borderRadius: 20, padding: '2px 8px', letterSpacing: '0.06em', textTransform: 'uppercase', flexShrink: 0 }}>
+                      Active
+                    </span>
+                  )}
+                </button>
+
+                {/* Individual DID options */}
+                <div style={{ maxHeight: 280, overflowY: 'auto' }}>
+                  {rcfEntries.map((entry) => {
+                    const isSelected = selectedDid === entry.did;
+                    return (
+                      <button
+                        key={entry.did}
+                        type="button"
+                        onClick={() => { setSelectedDid(entry.did); setDidDropdownOpen(false); }}
+                        style={{
+                          width: '100%',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 10,
+                          padding: '10px 14px',
+                          border: 'none',
+                          borderBottom: '1px solid rgba(42,47,69,0.35)',
+                          background: isSelected ? 'rgba(74,222,128,0.07)' : 'transparent',
+                          cursor: 'pointer',
+                          fontFamily: 'inherit',
+                          textAlign: 'left',
+                          transition: 'background 0.14s',
+                        }}
+                        onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = 'rgba(255,255,255,0.03)'; }}
+                        onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.background = 'transparent'; }}
+                      >
+                        {/* Status dot */}
+                        <span
+                          style={{
+                            width: 7,
+                            height: 7,
+                            borderRadius: '50%',
+                            background: entry.enabled ? '#4ade80' : '#ef4444',
+                            flexShrink: 0,
+                            boxShadow: entry.enabled ? '0 0 6px rgba(74,222,128,0.6)' : 'none',
+                            display: 'inline-block',
+                          }}
+                        />
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: '0.84rem', fontWeight: 700, color: isSelected ? '#4ade80' : '#e2e8f0', fontFamily: 'monospace', letterSpacing: '0.01em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {fmt(entry.did)}
+                          </div>
+                          {entry.name && (
+                            <div style={{ fontSize: '0.65rem', color: isSelected ? 'rgba(74,222,128,0.7)' : '#64748b', marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {entry.name}
+                            </div>
+                          )}
+                        </div>
+                        {isSelected && (
+                          <svg viewBox="0 0 16 16" fill="none" stroke="#4ade80" strokeWidth={2.2} style={{ width: 13, height: 13, flexShrink: 0 }}>
+                            <path d="M2 8l4 4 8-8" strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Right: count badge + clear button */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+            <span
+              style={{
+                fontSize: '0.65rem',
+                fontWeight: 700,
+                color: '#64748b',
+                background: 'rgba(255,255,255,0.04)',
+                border: '1px solid rgba(255,255,255,0.08)',
+                borderRadius: 20,
+                padding: '3px 9px',
+                whiteSpace: 'nowrap',
+                letterSpacing: '0.04em',
+              }}
+            >
+              {rcfEntries.length} number{rcfEntries.length !== 1 ? 's' : ''}
+            </span>
+            {selectedDid && (
+              <button
+                type="button"
+                onClick={() => setSelectedDid(null)}
+                title="Back to All Numbers"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  width: 26,
+                  height: 26,
+                  borderRadius: 7,
+                  border: '1px solid rgba(74,222,128,0.30)',
+                  background: 'rgba(74,222,128,0.08)',
+                  color: '#4ade80',
+                  cursor: 'pointer',
+                  padding: 0,
+                  transition: 'background 0.15s, border-color 0.15s',
+                  flexShrink: 0,
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = 'rgba(74,222,128,0.16)';
+                  e.currentTarget.style.borderColor = 'rgba(74,222,128,0.5)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = 'rgba(74,222,128,0.08)';
+                  e.currentTarget.style.borderColor = 'rgba(74,222,128,0.30)';
+                }}
+              >
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={2.2} style={{ width: 10, height: 10 }}>
+                  <path d="M4 4l8 8M12 4l-8 8" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* ── Quality stat cards ─────────────────────────────────── */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
@@ -1905,6 +2239,38 @@ function CallActivityTab({ customerId }: CallActivityTabProps) {
           <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
             Recent Calls
           </span>
+          {selectedDid && selectedLabel && (
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 5,
+                fontSize: '0.65rem',
+                fontWeight: 700,
+                color: '#4ade80',
+                background: 'rgba(74,222,128,0.10)',
+                border: '1px solid rgba(74,222,128,0.25)',
+                borderRadius: 20,
+                padding: '2px 8px 2px 6px',
+                whiteSpace: 'nowrap',
+                letterSpacing: '0.02em',
+                flexShrink: 0,
+              }}
+            >
+              <span
+                style={{
+                  width: 5,
+                  height: 5,
+                  borderRadius: '50%',
+                  background: '#4ade80',
+                  display: 'inline-block',
+                  flexShrink: 0,
+                  boxShadow: '0 0 5px rgba(74,222,128,0.7)',
+                }}
+              />
+              {selectedLabel}
+            </span>
+          )}
           <div style={{ flex: 1, minWidth: 200, position: 'relative' }}>
             <svg viewBox="0 0 20 20" fill="currentColor" style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', width: 14, height: 14, color: '#334155' }}>
               <path fillRule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clipRule="evenodd" />
@@ -1947,7 +2313,7 @@ function CallActivityTab({ customerId }: CallActivityTabProps) {
               flexShrink: 0,
             }}
           >
-            {calls.length}{activitySearch.trim() ? ` of ${allCalls.length}` : ''} shown
+            {calls.length}{(activitySearch.trim() || selectedDid) ? ` of ${allCalls.length}` : ''} shown
           </span>
         </div>
 
