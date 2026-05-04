@@ -309,13 +309,33 @@ function ResultsTable({ results, startTime, endTime }: ResultsTableProps) {
         </thead>
         <tbody>
           {results.map((row, idx) => {
-            // Deep link to Grafana using the RCF DID (destination/To number).
-            // The RCF DID appears in BOTH legs of a forwarded call:
-            //   A-leg: it's the To URI (destination being called)
-            //   B-leg: it's the From URI (caller ID for outbound)
-            // This naturally returns both legs from a single search.
-            const fromMs = Math.floor(new Date(startTime).getTime());
-            const toMs = Math.floor(new Date(endTime).getTime());
+            // Scope the Grafana deep link to this specific call by deriving a
+            // tight time window from the clicked Call-ID's own message timestamps.
+            //
+            // Two-leg call correlation: the API already merged both legs into
+            // `results`. The RCF DID appears in both:
+            //   A-leg: To URI (Bandwidth → FreeSWITCH)
+            //   B-leg: From URI (FreeSWITCH → Bandwidth)
+            // Searching by RCF DID within the tight window catches both legs
+            // without returning other calls to the same DID in the broader range.
+            const callMessages = results.filter((r) => r.callid === row.callid);
+            const callTimestamps = callMessages
+              .map((r) => r.timestamp_ns)
+              .filter((ts): ts is number => typeof ts === 'number' && ts > 0);
+
+            let fromMs: number;
+            let toMs: number;
+            if (callTimestamps.length > 0) {
+              // 5 s before first message, 60 s after last (B-leg may outlive A-leg)
+              fromMs = Math.floor(Math.min(...callTimestamps) / 1_000_000) - 5_000;
+              toMs = Math.floor(Math.max(...callTimestamps) / 1_000_000) + 60_000;
+            } else {
+              // Fallback: use the search form's time range
+              fromMs = Math.floor(new Date(startTime).getTime());
+              toMs = Math.floor(new Date(endTime).getTime());
+            }
+
+            // Strip leading + — Grafana variable expects bare digits
             const rcfDid = (row.to_user || '').replace(/^\+/, '');
             const params = new URLSearchParams({
               'var-phone_number': rcfDid,
