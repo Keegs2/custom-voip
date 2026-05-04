@@ -22,8 +22,12 @@
     <!-- Debug presence events (0=off) -->
     <param name="debug-presence" value="0"/>
 
-    <!-- SIP trace level (0=off) -->
-    <param name="tracelevel" value="0"/>
+    <!-- SIP trace level: required for HEP capture to function.
+         When set to 0, mod_sofia never fires the capture callback,
+         so sip-capture=yes on profiles has no effect and zero HEP
+         packets are generated. "SIP" enables SIP message tracing
+         without full debug verbosity. -->
+    <param name="tracelevel" value="SIP"/>
 
     <!-- Enable SIP capture via Homer/SIPCAPTURE (if using) -->
     <!-- <param name="capture-server" value="udp:192.168.1.100:9060"/> -->

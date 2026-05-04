@@ -309,16 +309,16 @@ function ResultsTable({ results, startTime, endTime }: ResultsTableProps) {
         </thead>
         <tbody>
           {results.map((row, idx) => {
-            // Deep link to Grafana with phone number and exact time range.
-            // We pass ONLY phone_number (not callid) because phone number search
-            // returns BOTH A-leg and B-leg SIP messages. Each leg has a different
-            // Call-ID, so passing a single callid would only match one leg.
-            // Grafana URL params: from/to must be Unix milliseconds (integers)
+            // Deep link to Grafana using the RCF DID (destination/To number).
+            // The RCF DID appears in BOTH legs of a forwarded call:
+            //   A-leg: it's the To URI (destination being called)
+            //   B-leg: it's the From URI (caller ID for outbound)
+            // This naturally returns both legs from a single search.
             const fromMs = Math.floor(new Date(startTime).getTime());
             const toMs = Math.floor(new Date(endTime).getTime());
-            const phoneNum = (row.from_user || '').replace(/^\+/, '');
+            const rcfDid = (row.to_user || '').replace(/^\+/, '');
             const params = new URLSearchParams({
-              'var-phone_number': phoneNum,
+              'var-phone_number': rcfDid,
               from: String(fromMs),
               to: String(toMs),
               kiosk: 'tv',
