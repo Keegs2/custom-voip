@@ -9,3 +9,4 @@ datasources:
     editable: false
     jsonData:
       maxLines: 1000
+      timeout: 120
