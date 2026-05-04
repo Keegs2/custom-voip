@@ -43,9 +43,9 @@ function fmtDateTime(iso: string): string {
       second: '2-digit',
       hour12: true,
     }).format(d);
-    // Append milliseconds for SIP message ordering precision
-    const ms = String(d.getMilliseconds()).padStart(3, '0');
-    return `${base}.${ms}`;
+    // Insert milliseconds before AM/PM for correct display: "10:42:31.352 AM"
+    const ms = '.' + String(d.getMilliseconds()).padStart(3, '0');
+    return base.replace(/(\d{2})\s*(AM|PM)/i, `$1${ms} $2`);
   } catch {
     return iso;
   }
@@ -309,8 +309,8 @@ function ResultsTable({ results }: ResultsTableProps) {
           {results.map((row, idx) => {
             // Build Grafana deep-link with the Call-ID variable pre-filled.
             // The dashboard UID and variable name match the dashboard JSON from Phase 1.
-            // Use Grafana directly on port 3000 to avoid nginx sub-path redirect issues
-            const grafanaLink = `${window.location.protocol}//${window.location.hostname}:3000/grafana/d/sip-search/sip-search?var-callid=${encodeURIComponent(row.callid)}`;
+            // Deep link to Grafana SIP Search dashboard with Call-ID pre-filled
+            const grafanaLink = `/grafana/d/sip-search/sip-search?var-callid=${encodeURIComponent(row.callid)}&kiosk=tv`;
 
             return (
               <tr
