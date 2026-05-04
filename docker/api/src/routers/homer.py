@@ -1,14 +1,17 @@
-"""Homer SIP capture alias management (admin only).
+"""Homer SIP capture — alias management and SIP trace search (admin only).
 
 Syncs IP-to-name aliases into Homer's REST API so ladder diagrams
-show human-readable labels instead of raw IPs.
+show human-readable labels instead of raw IPs.  Also proxies search
+requests to Homer's /api/v3/search/call/data for SIP trace lookup.
 """
 import os
 import logging
-from typing import Any
+from datetime import datetime, timezone
+from typing import Any, Optional
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 
 from auth.dependencies import require_admin
 
@@ -235,3 +238,110 @@ async def sync_aliases(admin: dict = Depends(require_admin)):
         "aliases": created,
         "errors": errors,
     }
+
+
+# ---------------------------------------------------------------------------
+# SIP trace search
+# ---------------------------------------------------------------------------
+
+class HomerSearchRequest(BaseModel):
+    from_user: Optional[str] = None
+    to_user: Optional[str] = None
+    call_id: Optional[str] = None
+    start_time: str   # ISO 8601 datetime
+    end_time: str      # ISO 8601 datetime
+
+
+def _iso_to_unix_ms(iso_str: str) -> int:
+    """Convert an ISO 8601 datetime string to Unix milliseconds."""
+    dt = datetime.fromisoformat(iso_str)
+    # If the caller sent a naive datetime, assume UTC
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return int(dt.timestamp() * 1000)
+
+
+@router.post("/search")
+async def search_sip_traces(
+    body: HomerSearchRequest,
+    admin: dict = Depends(require_admin),
+):
+    """Proxy a SIP trace search to Homer's /api/v3/search/call/data."""
+
+    if not body.from_user and not body.to_user and not body.call_id:
+        raise HTTPException(
+            status_code=400,
+            detail="At least one of from_user, to_user, or call_id is required",
+        )
+
+    # Build the search clause — only include non-empty fields
+    call_search: dict[str, str] = {}
+    if body.from_user:
+        call_search["from_user"] = body.from_user.lstrip("+")
+    if body.to_user:
+        call_search["to_user"] = body.to_user.lstrip("+")
+    if body.call_id:
+        call_search["callid"] = body.call_id
+
+    # Convert ISO timestamps to Unix milliseconds
+    try:
+        ts_from = _iso_to_unix_ms(body.start_time)
+        ts_to = _iso_to_unix_ms(body.end_time)
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid timestamp format: {exc}",
+        )
+
+    homer_payload = {
+        "param": {
+            "search": {
+                "1_call": call_search,
+            },
+            "location": {},
+            "transaction": {
+                "call": True,
+                "registration": False,
+                "rest": False,
+            },
+            "id": {},
+            "timezone": {
+                "value": -240,
+                "name": "America/New_York",
+            },
+        },
+        "timestamp": {
+            "from": ts_from,
+            "to": ts_to,
+        },
+    }
+
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        token = await _homer_auth(client)
+        headers = {"Authorization": f"Bearer {token}"}
+
+        try:
+            resp = await client.post(
+                f"{HOMER_URL}/api/v3/search/call/data",
+                json=homer_payload,
+                headers=headers,
+            )
+        except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
+            logger.error("Homer unreachable for search: %s", exc)
+            raise HTTPException(
+                status_code=503,
+                detail=f"Homer unreachable at {HOMER_URL}",
+            )
+
+    if resp.status_code != 200:
+        logger.error(
+            "Homer search failed: HTTP %s — %s",
+            resp.status_code,
+            resp.text[:500],
+        )
+        raise HTTPException(
+            status_code=502,
+            detail=f"Homer search returned HTTP {resp.status_code}",
+        )
+
+    return resp.json()
