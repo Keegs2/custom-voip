@@ -965,6 +965,15 @@ function mosLabel(mos: number | null | undefined): { text: string; color: string
   return { text: 'Poor', color: '#ef4444', dot: '#ef4444' };
 }
 
+function carrierDisplayName(carrier: string | null | undefined): string {
+  if (!carrier) return '—';
+  switch (carrier) {
+    case 'carrier_primary': return 'Bandwidth Dallas';
+    case 'carrier_secondary': return 'Bandwidth LA';
+    default: return carrier.replace(/^carrier_/, '').replace(/_/g, ' ');
+  }
+}
+
 function callStatusInfo(cdr: Cdr): { label: string; bg: string; color: string; border: string } {
   const GREEN  = { bg: 'rgba(34,197,94,0.12)',  color: '#4ade80', border: '1px solid rgba(34,197,94,0.2)' };
   const AMBER  = { bg: 'rgba(245,158,11,0.12)', color: '#f59e0b', border: '1px solid rgba(245,158,11,0.2)' };
@@ -2413,10 +2422,10 @@ function CallActivityTab({ customerId }: CallActivityTabProps) {
                       </span>
                     </td>
 
-                    {/* Forwarded To */}
+                    {/* Carrier Trunk */}
                     <td style={{ padding: '12px 14px' }}>
-                      <span style={{ fontSize: '0.78rem', color: '#64748b', fontFamily: 'monospace' }}>
-                        {cdr.carrier_used ? fmt(cdr.carrier_used) : '—'}
+                      <span style={{ fontSize: '0.78rem', color: '#64748b' }}>
+                        {carrierDisplayName(cdr.carrier_used)}
                       </span>
                     </td>
 
