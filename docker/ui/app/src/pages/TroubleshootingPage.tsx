@@ -305,7 +305,8 @@ function ResultsTable({ results }: ResultsTableProps) {
           {results.map((row, idx) => {
             // Build Grafana deep-link with the Call-ID variable pre-filled.
             // The dashboard UID and variable name match the dashboard JSON from Phase 1.
-            const grafanaLink = `/grafana/d/sip-search/sip-search?var-callid=${encodeURIComponent(row.callid)}`;
+            // Use Grafana directly on port 3000 to avoid nginx sub-path redirect issues
+            const grafanaLink = `${window.location.protocol}//${window.location.hostname}:3000/grafana/d/sip-search/sip-search?var-callid=${encodeURIComponent(row.callid)}`;
 
             return (
               <tr

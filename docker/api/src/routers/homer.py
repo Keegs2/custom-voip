@@ -337,9 +337,14 @@ async def search_sip_traces(
         # Step 1: Initial query
         initial_results = await _query_qryn(client, logql, start_ns, end_ns)
 
+        # Sort helper for early returns
+        def _sorted(r: list) -> list:
+            r.sort(key=lambda x: x.get("timestamp") or "")
+            return r
+
         # If no results or correlation disabled, return immediately
         if not initial_results or not body.correlate:
-            return {"data": initial_results}
+            return {"data": _sorted(initial_results)}
 
         known_callids = _extract_callids(initial_results)
 
@@ -350,7 +355,7 @@ async def search_sip_traces(
                     "Skipping A/B correlation: %d call_ids exceeds limit of 20",
                     len(known_callids),
                 )
-            return {"data": initial_results}
+            return {"data": _sorted(initial_results)}
 
         # Step 2: Correlation — search for X-CID headers containing our call IDs
         # This finds B-leg messages that reference our A-leg call_ids
@@ -362,7 +367,7 @@ async def search_sip_traces(
         except HTTPException:
             # Correlation query failed — return initial results without correlation
             logger.warning("A/B correlation query failed, returning initial results only")
-            return {"data": initial_results}
+            return {"data": _sorted(initial_results)}
 
         # Extract any NEW call_ids discovered from the correlated results
         new_callids = _extract_callids(corr_results) - known_callids
