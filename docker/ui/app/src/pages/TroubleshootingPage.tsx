@@ -1,4 +1,4 @@
-import { useState, useCallback, KeyboardEvent } from 'react';
+import { useState, useCallback, type KeyboardEvent } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { Sidebar } from '../components/layout/Sidebar';
 import { Spinner } from '../components/ui/Spinner';
