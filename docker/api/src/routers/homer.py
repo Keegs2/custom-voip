@@ -86,26 +86,36 @@ def _build_logql_query(
 ) -> str:
     """Build a LogQL query for SIP trace search.
 
-    heplify-server pushes SIP data with label {type="sip"} and JSON log
-    lines containing from_user, to_user, callid, method, src_ip, dst_ip,
-    response, and node fields.
+    heplify-server pushes SIP data with these Loki labels:
+      type, method, response, call_id, from, to, src_ip, dst_ip, node, etc.
+    The log line is the raw SIP message text (NOT JSON).
+
+    We use label selectors for call_id and regex on the raw SIP payload
+    for phone number matching (since the 'from'/'to' labels contain the
+    full SIP header value, not just the user part).
     """
-    query = '{type="sip"}'
-    filters: list[str] = []
+    # Start with label selectors
+    label_parts = ['type="sip"']
+
+    if call_id:
+        label_parts.append(f'call_id="{call_id}"')
+
+    query = "{" + ", ".join(label_parts) + "}"
+
+    # Phone number search uses regex on the raw SIP payload
+    # This matches the number anywhere in the message (From, To, RURI, PAI, etc.)
+    line_filters: list[str] = []
 
     if from_user:
         val = from_user.lstrip("+")
-        filters.append(f'| json | from_user=~".*{val}.*"')
+        line_filters.append(f'|~ "{val}"')
 
     if to_user:
         val = to_user.lstrip("+")
-        filters.append(f'| json | to_user=~".*{val}.*"')
+        line_filters.append(f'|~ "{val}"')
 
-    if call_id:
-        filters.append(f'| json | callid="{call_id}"')
-
-    if filters:
-        query += " " + " ".join(filters)
+    if line_filters:
+        query += " " + " ".join(line_filters)
 
     return query
 
@@ -113,14 +123,22 @@ def _build_logql_query(
 def _parse_loki_response(loki_data: dict) -> list[dict[str, Any]]:
     """Parse a Loki query_range response into normalized SIP trace records.
 
+    heplify-server stores SIP data with metadata in stream LABELS (not in
+    the log line, which is the raw SIP message text). We read from labels.
+
     Loki response shape:
     {
         "data": {
             "result": [
                 {
-                    "stream": {...labels...},
+                    "stream": {
+                        "type": "sip", "method": "INVITE", "response": "200",
+                        "call_id": "xxx", "src_ip": "1.2.3.4", "dst_ip": "5.6.7.8",
+                        "from": "<sip:user@host>", "to": "<sip:user@host>",
+                        "node": "100", ...
+                    },
                     "values": [
-                        ["timestamp_ns_string", "json_log_line"],
+                        ["timestamp_ns_string", "raw_sip_message"],
                         ...
                     ]
                 }
@@ -132,13 +150,24 @@ def _parse_loki_response(loki_data: dict) -> list[dict[str, Any]]:
 
     data = loki_data.get("data", {})
     for stream in data.get("result", []):
-        for ts_ns_str, log_line in stream.get("values", []):
-            try:
-                entry = json.loads(log_line)
-            except (json.JSONDecodeError, TypeError):
-                logger.warning("Failed to parse qryn log line: %.200s", log_line)
-                continue
+        labels = stream.get("stream", {})
 
+        # Extract status from labels
+        status_raw = labels.get("response")
+        try:
+            status = int(status_raw) if status_raw is not None else None
+        except (ValueError, TypeError):
+            # response might be a method name like "INVITE" for requests
+            status = None
+
+        # Extract user parts from SIP From/To labels
+        # Labels contain full header values like '<sip:+17818510289@host>;tag=xxx'
+        from_label = labels.get("from", "")
+        to_label = labels.get("to", "")
+        from_user = _extract_sip_user(from_label)
+        to_user = _extract_sip_user(to_label)
+
+        for ts_ns_str, _log_line in stream.get("values", []):
             # Convert nanosecond timestamp to ISO 8601
             try:
                 ts_seconds = int(ts_ns_str) / 1_000_000_000
@@ -148,26 +177,33 @@ def _parse_loki_response(loki_data: dict) -> list[dict[str, Any]]:
             except (ValueError, OSError):
                 ts_iso = None
 
-            # Extract status — could be "response" field (string or int)
-            status_raw = entry.get("response") or entry.get("status")
-            try:
-                status = int(status_raw) if status_raw is not None else None
-            except (ValueError, TypeError):
-                status = None
-
             results.append({
                 "timestamp": ts_iso,
-                "from_user": entry.get("from_user", ""),
-                "to_user": entry.get("to_user", ""),
-                "callid": entry.get("callid", ""),
-                "method": entry.get("method", ""),
-                "src_ip": entry.get("src_ip", ""),
-                "dst_ip": entry.get("dst_ip", ""),
+                "from_user": from_user,
+                "to_user": to_user,
+                "callid": labels.get("call_id", ""),
+                "method": labels.get("method", ""),
+                "src_ip": labels.get("src_ip", ""),
+                "dst_ip": labels.get("dst_ip", ""),
                 "status": status,
-                "node": entry.get("node", ""),
+                "node": labels.get("node", ""),
             })
 
     return results
+
+
+def _extract_sip_user(header_value: str) -> str:
+    """Extract the user part from a SIP From/To header value.
+
+    Input:  '<sip:+17818510289@67.231.13.185>;tag=gK080ee17c'
+    Output: '+17818510289'
+
+    Input:  '"MALDEN MA" <sip:+17818510289@host>'
+    Output: '+17818510289'
+    """
+    import re as _re
+    match = _re.search(r"sip:([^@>]+)@", header_value)
+    return match.group(1) if match else header_value
 
 
 # ---------------------------------------------------------------------------
