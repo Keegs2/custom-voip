@@ -9,15 +9,15 @@ export interface HomerSearchParams {
 }
 
 export interface HomerSearchResult {
-  id: number;
-  date: string;
+  timestamp: string;
   from_user: string;
   to_user: string;
   callid: string;
   method: string;
-  source_ip: string;
-  destination_ip: string;
-  status: number;
+  src_ip: string;
+  dst_ip: string;
+  status: number | null;
+  node?: string;
 }
 
 export async function searchSipTraces(

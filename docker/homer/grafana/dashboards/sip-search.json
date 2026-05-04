@@ -1,0 +1,180 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "title": "SIP Search Filters",
+      "type": "text",
+      "gridPos": { "h": 2, "w": 24, "x": 0, "y": 0 },
+      "id": 1,
+      "options": {
+        "mode": "markdown",
+        "content": "Use the variables above to filter by **Call-ID**, **From User**, or **To User**. Leave blank to show all SIP traffic in the selected time range."
+      }
+    },
+    {
+      "title": "SIP Messages Log",
+      "type": "logs",
+      "gridPos": { "h": 12, "w": 24, "x": 0, "y": 2 },
+      "id": 2,
+      "datasource": {
+        "type": "loki",
+        "uid": "qryn"
+      },
+      "targets": [
+        {
+          "expr": "{type=\"call\"} |~ \"$callid\" |~ \"$from_user\" |~ \"$to_user\"",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "showLabels": true,
+        "showCommonLabels": false,
+        "wrapLogMessage": true,
+        "prettifyLogMessage": false,
+        "enableLogDetails": true,
+        "dedupStrategy": "none",
+        "sortOrder": "Ascending"
+      }
+    },
+    {
+      "title": "SIP Messages Table",
+      "type": "table",
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 14 },
+      "id": 3,
+      "datasource": {
+        "type": "loki",
+        "uid": "qryn"
+      },
+      "targets": [
+        {
+          "expr": "{type=\"call\"} |~ \"$callid\" |~ \"$from_user\" |~ \"$to_user\" | json",
+          "refId": "A",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "transformations": [
+        {
+          "id": "extractFields",
+          "options": {
+            "source": "Line"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "displayMode": "auto"
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "title": "SIP Flow Diagram",
+      "type": "qxip-flow-panel",
+      "gridPos": { "h": 14, "w": 24, "x": 0, "y": 24 },
+      "id": 4,
+      "datasource": {
+        "type": "loki",
+        "uid": "qryn"
+      },
+      "targets": [
+        {
+          "expr": "{type=\"call\"} |~ \"$callid\" | json",
+          "refId": "A",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "options": {}
+    }
+  ],
+  "schemaVersion": 39,
+  "tags": ["homer", "sip", "voip"],
+  "templating": {
+    "list": [
+      {
+        "current": {
+          "selected": false,
+          "text": "",
+          "value": ""
+        },
+        "description": "SIP Call-ID to search for",
+        "hide": 0,
+        "label": "Call-ID",
+        "name": "callid",
+        "options": [
+          {
+            "selected": true,
+            "text": "",
+            "value": ""
+          }
+        ],
+        "query": "",
+        "skipUrlSync": false,
+        "type": "textbox"
+      },
+      {
+        "current": {
+          "selected": false,
+          "text": "",
+          "value": ""
+        },
+        "description": "From User (caller number)",
+        "hide": 0,
+        "label": "From User",
+        "name": "from_user",
+        "options": [
+          {
+            "selected": true,
+            "text": "",
+            "value": ""
+          }
+        ],
+        "query": "",
+        "skipUrlSync": false,
+        "type": "textbox"
+      },
+      {
+        "current": {
+          "selected": false,
+          "text": "",
+          "value": ""
+        },
+        "description": "To User (called number / DID)",
+        "hide": 0,
+        "label": "To User",
+        "name": "to_user",
+        "options": [
+          {
+            "selected": true,
+            "text": "",
+            "value": ""
+          }
+        ],
+        "query": "",
+        "skipUrlSync": false,
+        "type": "textbox"
+      }
+    ]
+  },
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "SIP Search",
+  "uid": "sip-search",
+  "version": 1
+}

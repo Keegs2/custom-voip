@@ -109,13 +109,36 @@ function MethodBadge({ method }: MethodBadgeProps) {
 // ─── Status badge ─────────────────────────────────────────────────────────────
 
 interface StatusBadgeProps {
-  status: number;
+  status: number | null;
 }
 
 function StatusBadge({ status }: StatusBadgeProps) {
   let bg: string;
   let color: string;
   let border: string;
+
+  if (status === null) {
+    bg = 'rgba(71,85,105,0.5)';
+    color = '#94a3b8';
+    border = 'rgba(71,85,105,0.4)';
+    return (
+      <span
+        style={{
+          display: 'inline-block',
+          padding: '2px 8px',
+          borderRadius: 4,
+          fontSize: '0.7rem',
+          fontWeight: 600,
+          fontFamily: 'ui-monospace, monospace',
+          background: bg,
+          color,
+          border: `1px solid ${border}`,
+        }}
+      >
+        —
+      </span>
+    );
+  }
 
   if (status >= 200 && status < 300) {
     bg = 'rgba(34,197,94,0.15)';
@@ -275,19 +298,19 @@ function ResultsTable({ results }: ResultsTableProps) {
             <th style={thStyle}>Source IP</th>
             <th style={thStyle}>Dest IP</th>
             <th style={thStyle}>Status</th>
+            <th style={thStyle}>Node</th>
           </tr>
         </thead>
         <tbody>
-          {results.map((row) => {
-            // Build Homer deep-link with the Call-ID pre-selected.
-            // Homer uses a hash-based router — the search param goes into the
-            // hash fragment so it survives the SPA navigation inside the iframe.
-            const homerLink = `/homer/#/calls/sip?search=${encodeURIComponent(row.callid)}`;
+          {results.map((row, idx) => {
+            // Build Grafana deep-link with the Call-ID variable pre-filled.
+            // The dashboard UID and variable name match the dashboard JSON from Phase 1.
+            const grafanaLink = `/grafana/d/sip-search/sip-search?var-callid=${encodeURIComponent(row.callid)}`;
 
             return (
               <tr
-                key={`${row.id}-${row.date}`}
-                onClick={() => window.open(homerLink, '_blank', 'noopener,noreferrer')}
+                key={`${row.callid}-${row.timestamp}-${idx}`}
+                onClick={() => window.open(grafanaLink, '_blank', 'noopener,noreferrer')}
                 style={{ cursor: 'pointer', transition: 'background 0.15s' }}
                 onMouseEnter={(e) => {
                   (e.currentTarget as HTMLTableRowElement).style.background =
@@ -298,7 +321,7 @@ function ResultsTable({ results }: ResultsTableProps) {
                 }}
               >
                 <td style={{ ...tdStyle, ...monoStyle, whiteSpace: 'nowrap' }}>
-                  {fmtDateTime(row.date)}
+                  {fmtDateTime(row.timestamp)}
                 </td>
                 <td style={tdStyle}>{displayUser(row.from_user)}</td>
                 <td style={tdStyle}>{displayUser(row.to_user)}</td>
@@ -318,10 +341,13 @@ function ResultsTable({ results }: ResultsTableProps) {
                 <td style={tdStyle}>
                   <MethodBadge method={row.method} />
                 </td>
-                <td style={{ ...tdStyle, ...monoStyle }}>{row.source_ip}</td>
-                <td style={{ ...tdStyle, ...monoStyle }}>{row.destination_ip}</td>
+                <td style={{ ...tdStyle, ...monoStyle }}>{row.src_ip}</td>
+                <td style={{ ...tdStyle, ...monoStyle }}>{row.dst_ip}</td>
                 <td style={tdStyle}>
                   <StatusBadge status={row.status} />
+                </td>
+                <td style={{ ...tdStyle, ...monoStyle, color: '#64748b' }}>
+                  {row.node ?? '—'}
                 </td>
               </tr>
             );
@@ -476,14 +502,14 @@ export function TroubleshootingPage() {
                 SIP Trace Search
               </h1>
               <p style={{ margin: '4px 0 0', fontSize: '0.8rem', color: '#64748b' }}>
-                Search Homer SIP capture by phone number, Call-ID, or date range
+                Search SIP traces by phone number, Call-ID, or date range
               </p>
             </div>
           </div>
 
-          {/* Open Full Homer link */}
+          {/* Open Grafana link */}
           <a
-            href="/homer/"
+            href="/grafana/"
             target="_blank"
             rel="noopener noreferrer"
             style={{
@@ -527,7 +553,7 @@ export function TroubleshootingPage() {
               <polyline points="15 3 21 3 21 9" />
               <line x1="10" y1="14" x2="21" y2="3" />
             </svg>
-            Open Full Homer
+            Open SIP Dashboard
           </a>
         </div>
 

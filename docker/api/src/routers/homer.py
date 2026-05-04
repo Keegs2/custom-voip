@@ -1,9 +1,12 @@
-"""Homer SIP capture — alias management and SIP trace search (admin only).
+"""Homer SIP capture — SIP trace search via qryn (Loki-compatible API).
 
-Syncs IP-to-name aliases into Homer's REST API so ladder diagrams
-show human-readable labels instead of raw IPs.  Also proxies search
-requests to Homer's /api/v3/search/call/data for SIP trace lookup.
+Homer 10 replaces the old homer-app Go backend with qryn, which exposes
+a Loki-compatible query API over ClickHouse.  heplify-server pushes SIP
+data as structured log entries queryable via LogQL.
+
+No authentication required for qryn (no more Homer 7 JWT flow).
 """
+import json
 import os
 import logging
 from datetime import datetime, timezone
@@ -20,17 +23,12 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 # ---------------------------------------------------------------------------
-# Homer connection settings
+# qryn connection
 # ---------------------------------------------------------------------------
-HOMER_URL = os.getenv("HOMER_URL", "http://homer-webapp:80")
-HOMER_USER = os.getenv("HOMER_USER", "admin")
-HOMER_PASS = os.getenv("HOMER_PASS", "sipcapture")
-
-# Homer 7 has two possible API mount points for aliases.  We try both.
-ALIAS_PATHS = ["/api/v3/mapping/alias", "/api/v3/alias"]
+QRYN_URL = os.getenv("QRYN_URL", "http://qryn:3100")
 
 # ---------------------------------------------------------------------------
-# Canonical alias set — the single source of truth for the platform
+# Canonical alias set — IP-to-name mapping for the platform
 # ---------------------------------------------------------------------------
 CANONICAL_ALIASES: list[dict[str, Any]] = [
     # Bandwidth TC4 - GraniteTelecommunicationsLLC_03
@@ -56,192 +54,7 @@ CANONICAL_ALIASES: list[dict[str, Any]] = [
 
 
 # ---------------------------------------------------------------------------
-# Homer HTTP helpers
-# ---------------------------------------------------------------------------
-
-async def _homer_auth(client: httpx.AsyncClient) -> str:
-    """Authenticate to Homer and return a JWT token.
-
-    Raises HTTPException(503) if Homer is unreachable or auth fails.
-    """
-    try:
-        resp = await client.post(
-            f"{HOMER_URL}/api/v3/auth",
-            json={"username": HOMER_USER, "password": HOMER_PASS},
-        )
-    except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
-        logger.error("Homer unreachable at %s: %s", HOMER_URL, exc)
-        raise HTTPException(status_code=503, detail=f"Homer unreachable at {HOMER_URL}")
-
-    if resp.status_code != 200:
-        logger.error("Homer auth failed: %s %s", resp.status_code, resp.text)
-        raise HTTPException(
-            status_code=503,
-            detail=f"Homer auth failed (HTTP {resp.status_code})",
-        )
-
-    data = resp.json()
-    token = data.get("token") or data.get("data", {}).get("token")
-    if not token:
-        logger.error("Homer auth response missing token: %s", data)
-        raise HTTPException(status_code=503, detail="Homer auth response missing token")
-
-    return token
-
-
-async def _homer_request(
-    client: httpx.AsyncClient,
-    method: str,
-    path: str,
-    token: str,
-    **kwargs: Any,
-) -> httpx.Response | None:
-    """Send a request to Homer, trying both alias API paths if needed.
-
-    Returns the first successful response, or None if both paths fail
-    with 404.  Re-raises connection errors as HTTPException(503).
-    """
-    headers = {"Authorization": f"Bearer {token}"}
-
-    for base_path in ALIAS_PATHS:
-        url = f"{HOMER_URL}{base_path}{path}"
-        try:
-            resp = await client.request(method, url, headers=headers, **kwargs)
-        except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
-            logger.error("Homer unreachable: %s", exc)
-            raise HTTPException(status_code=503, detail=f"Homer unreachable at {HOMER_URL}")
-
-        # 404 means this mount point doesn't exist — try the other one
-        if resp.status_code == 404:
-            continue
-
-        return resp
-
-    # Both paths returned 404
-    return None
-
-
-# ---------------------------------------------------------------------------
-# Endpoints
-# ---------------------------------------------------------------------------
-
-@router.get("/aliases")
-async def list_aliases(admin: dict = Depends(require_admin)):
-    """List current Homer aliases (proxy to Homer GET)."""
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        token = await _homer_auth(client)
-        resp = await _homer_request(client, "GET", "", token)
-
-    if resp is None:
-        raise HTTPException(status_code=503, detail="Homer alias endpoint not found at either API path")
-
-    if resp.status_code != 200:
-        raise HTTPException(
-            status_code=502,
-            detail=f"Homer returned HTTP {resp.status_code}: {resp.text[:500]}",
-        )
-
-    return resp.json()
-
-
-@router.post("/aliases/sync")
-async def sync_aliases(admin: dict = Depends(require_admin)):
-    """Idempotent sync: delete all Homer aliases, then create the canonical set.
-
-    Returns the list of aliases created and any errors encountered.
-    """
-    created: list[dict[str, Any]] = []
-    errors: list[str] = []
-
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        token = await _homer_auth(client)
-
-        # --- 1. Fetch existing aliases so we can delete them ---------------
-        resp = await _homer_request(client, "GET", "", token)
-
-        if resp is None:
-            raise HTTPException(
-                status_code=503,
-                detail="Homer alias endpoint not found at either API path",
-            )
-
-        if resp.status_code == 200:
-            body = resp.json()
-            # Homer wraps the list under "data" in some versions
-            existing = body if isinstance(body, list) else body.get("data", [])
-
-            for alias_rec in existing:
-                alias_id = alias_rec.get("id")
-                if alias_id is None:
-                    continue
-                del_resp = await _homer_request(
-                    client, "DELETE", f"/{alias_id}", token,
-                )
-                if del_resp is None or del_resp.status_code not in (200, 204):
-                    status = del_resp.status_code if del_resp else "no endpoint"
-                    msg = f"Failed to delete alias id={alias_id}: HTTP {status}"
-                    logger.warning(msg)
-                    errors.append(msg)
-                else:
-                    logger.info("Deleted Homer alias id=%s", alias_id)
-        else:
-            msg = f"Failed to list existing aliases: HTTP {resp.status_code}"
-            logger.warning(msg)
-            errors.append(msg)
-
-        # --- 2. Create the canonical aliases --------------------------------
-        for alias_def in CANONICAL_ALIASES:
-            payload = {
-                "alias": alias_def["alias"],
-                "ip": alias_def["ip"],
-                "port": alias_def["port"],
-                "mask": 32,
-                "captureID": "0",
-                "status": True,
-            }
-
-            create_resp = await _homer_request(
-                client, "POST", "", token, json=payload,
-            )
-
-            if create_resp is None:
-                msg = f"Failed to create alias '{alias_def['alias']}': no endpoint"
-                logger.error(msg)
-                errors.append(msg)
-                continue
-
-            if create_resp.status_code in (200, 201):
-                created.append(alias_def)
-                logger.info(
-                    "Created Homer alias: %s -> %s:%s",
-                    alias_def["alias"],
-                    alias_def["ip"],
-                    alias_def["port"],
-                )
-            else:
-                msg = (
-                    f"Failed to create alias '{alias_def['alias']}': "
-                    f"HTTP {create_resp.status_code}"
-                )
-                logger.warning(msg)
-                errors.append(msg)
-
-    logger.info(
-        "Homer alias sync complete: %d created, %d errors",
-        len(created),
-        len(errors),
-    )
-
-    return {
-        "synced": len(created),
-        "total": len(CANONICAL_ALIASES),
-        "aliases": created,
-        "errors": errors,
-    }
-
-
-# ---------------------------------------------------------------------------
-# SIP trace search
+# Request / response models
 # ---------------------------------------------------------------------------
 
 class HomerSearchRequest(BaseModel):
@@ -252,13 +65,122 @@ class HomerSearchRequest(BaseModel):
     end_time: str      # ISO 8601 datetime
 
 
-def _iso_to_unix_ms(iso_str: str) -> int:
-    """Convert an ISO 8601 datetime string to Unix milliseconds."""
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _iso_to_unix_ns(iso_str: str) -> int:
+    """Convert an ISO 8601 datetime string to Unix nanoseconds for Loki."""
     dt = datetime.fromisoformat(iso_str)
-    # If the caller sent a naive datetime, assume UTC
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
-    return int(dt.timestamp() * 1000)
+    return int(dt.timestamp() * 1_000_000_000)
+
+
+def _build_logql_query(
+    from_user: Optional[str],
+    to_user: Optional[str],
+    call_id: Optional[str],
+) -> str:
+    """Build a LogQL query for SIP trace search.
+
+    heplify-server pushes SIP data with label {type="call"} and JSON log
+    lines containing from_user, to_user, callid, method, src_ip, dst_ip,
+    response, and node fields.
+    """
+    query = '{type="call"}'
+    filters: list[str] = []
+
+    if from_user:
+        val = from_user.lstrip("+")
+        filters.append(f'| json | from_user=~".*{val}.*"')
+
+    if to_user:
+        val = to_user.lstrip("+")
+        filters.append(f'| json | to_user=~".*{val}.*"')
+
+    if call_id:
+        filters.append(f'| json | callid="{call_id}"')
+
+    if filters:
+        query += " " + " ".join(filters)
+
+    return query
+
+
+def _parse_loki_response(loki_data: dict) -> list[dict[str, Any]]:
+    """Parse a Loki query_range response into normalized SIP trace records.
+
+    Loki response shape:
+    {
+        "data": {
+            "result": [
+                {
+                    "stream": {...labels...},
+                    "values": [
+                        ["timestamp_ns_string", "json_log_line"],
+                        ...
+                    ]
+                }
+            ]
+        }
+    }
+    """
+    results: list[dict[str, Any]] = []
+
+    data = loki_data.get("data", {})
+    for stream in data.get("result", []):
+        for ts_ns_str, log_line in stream.get("values", []):
+            try:
+                entry = json.loads(log_line)
+            except (json.JSONDecodeError, TypeError):
+                logger.warning("Failed to parse qryn log line: %.200s", log_line)
+                continue
+
+            # Convert nanosecond timestamp to ISO 8601
+            try:
+                ts_seconds = int(ts_ns_str) / 1_000_000_000
+                ts_iso = datetime.fromtimestamp(
+                    ts_seconds, tz=timezone.utc
+                ).strftime("%Y-%m-%dT%H:%M:%SZ")
+            except (ValueError, OSError):
+                ts_iso = None
+
+            # Extract status — could be "response" field (string or int)
+            status_raw = entry.get("response") or entry.get("status")
+            try:
+                status = int(status_raw) if status_raw is not None else None
+            except (ValueError, TypeError):
+                status = None
+
+            results.append({
+                "timestamp": ts_iso,
+                "from_user": entry.get("from_user", ""),
+                "to_user": entry.get("to_user", ""),
+                "callid": entry.get("callid", ""),
+                "method": entry.get("method", ""),
+                "src_ip": entry.get("src_ip", ""),
+                "dst_ip": entry.get("dst_ip", ""),
+                "status": status,
+                "node": entry.get("node", ""),
+            })
+
+    return results
+
+
+# ---------------------------------------------------------------------------
+# Endpoints
+# ---------------------------------------------------------------------------
+
+@router.get("/aliases")
+async def list_aliases(admin: dict = Depends(require_admin)):
+    """Return the canonical IP-to-name alias mapping.
+
+    In Homer 10, aliases are not synced to a backend — this static list
+    is used by the frontend to map IPs to human-readable names in ladder
+    diagrams and trace views.
+    """
+    return {"aliases": CANONICAL_ALIASES}
 
 
 @router.post("/search")
@@ -266,82 +188,81 @@ async def search_sip_traces(
     body: HomerSearchRequest,
     admin: dict = Depends(require_admin),
 ):
-    """Proxy a SIP trace search to Homer's /api/v3/search/call/data."""
+    """Search SIP traces via qryn's Loki-compatible query_range API.
 
+    Builds a LogQL query from the search parameters and queries qryn.
+    Returns normalized SIP trace records.
+    """
     if not body.from_user and not body.to_user and not body.call_id:
         raise HTTPException(
             status_code=400,
             detail="At least one of from_user, to_user, or call_id is required",
         )
 
-    # Build the search clause — only include non-empty fields
-    call_search: dict[str, str] = {}
-    if body.from_user:
-        call_search["from_user"] = body.from_user.lstrip("+")
-    if body.to_user:
-        call_search["to_user"] = body.to_user.lstrip("+")
-    if body.call_id:
-        call_search["callid"] = body.call_id
+    # Build LogQL query
+    logql = _build_logql_query(
+        from_user=body.from_user,
+        to_user=body.to_user,
+        call_id=body.call_id,
+    )
 
-    # Convert ISO timestamps to Unix milliseconds
+    # Convert timestamps to Unix nanoseconds
     try:
-        ts_from = _iso_to_unix_ms(body.start_time)
-        ts_to = _iso_to_unix_ms(body.end_time)
+        start_ns = _iso_to_unix_ns(body.start_time)
+        end_ns = _iso_to_unix_ns(body.end_time)
     except (ValueError, TypeError) as exc:
         raise HTTPException(
             status_code=400,
             detail=f"Invalid timestamp format: {exc}",
         )
 
-    homer_payload = {
-        "param": {
-            "search": {
-                "1_call": call_search,
-            },
-            "location": {},
-            "transaction": {
-                "call": True,
-                "registration": False,
-                "rest": False,
-            },
-            "id": {},
-            "timezone": {
-                "value": -240,
-                "name": "America/New_York",
-            },
-        },
-        "timestamp": {
-            "from": ts_from,
-            "to": ts_to,
-        },
+    # Query qryn
+    params = {
+        "query": logql,
+        "start": str(start_ns),
+        "end": str(end_ns),
+        "limit": "200",
     }
 
     async with httpx.AsyncClient(timeout=15.0) as client:
-        token = await _homer_auth(client)
-        headers = {"Authorization": f"Bearer {token}"}
-
         try:
-            resp = await client.post(
-                f"{HOMER_URL}/api/v3/search/call/data",
-                json=homer_payload,
-                headers=headers,
+            resp = await client.get(
+                f"{QRYN_URL}/loki/api/v1/query_range",
+                params=params,
             )
         except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
-            logger.error("Homer unreachable for search: %s", exc)
+            logger.error("qryn unreachable at %s: %s", QRYN_URL, exc)
             raise HTTPException(
                 status_code=503,
-                detail=f"Homer unreachable at {HOMER_URL}",
+                detail=f"qryn unreachable at {QRYN_URL}",
+            )
+        except httpx.ReadTimeout as exc:
+            logger.error("qryn query timed out: %s", exc)
+            raise HTTPException(
+                status_code=503,
+                detail="qryn query timed out",
             )
 
     if resp.status_code != 200:
         logger.error(
-            "Homer search failed: HTTP %s — %s",
+            "qryn query failed: HTTP %s — %s",
             resp.status_code,
             resp.text[:500],
         )
         raise HTTPException(
             status_code=502,
-            detail=f"Homer search returned HTTP {resp.status_code}",
+            detail=f"qryn query returned HTTP {resp.status_code}",
         )
 
-    return resp.json()
+    try:
+        loki_data = resp.json()
+    except Exception:
+        logger.error("qryn returned non-JSON response: %.500s", resp.text)
+        raise HTTPException(
+            status_code=502,
+            detail="qryn returned non-JSON response",
+        )
+
+    traces = _parse_loki_response(loki_data)
+
+    return {"data": traces}
