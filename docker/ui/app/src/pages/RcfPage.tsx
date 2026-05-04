@@ -1832,7 +1832,7 @@ function CallActivityTab({ customerId }: CallActivityTabProps) {
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20, paddingBottom: 60 }}>
 
       {/* ── DID Selector bar ───────────────────────────────────── */}
       {rcfEntries.length > 0 && (
@@ -1854,6 +1854,7 @@ function CallActivityTab({ customerId }: CallActivityTabProps) {
               : '0 6px 24px -6px rgba(0,0,0,0.4)',
             transition: 'border-color 0.2s, box-shadow 0.2s',
             position: 'relative',
+            zIndex: 50,
           }}
         >
           {/* Left: icon + label */}
@@ -1949,7 +1950,7 @@ function CallActivityTab({ customerId }: CallActivityTabProps) {
                   top: 'calc(100% + 6px)',
                   left: 0,
                   right: 0,
-                  zIndex: 200,
+                  zIndex: 999,
                   background: 'rgba(15,17,23,0.97)',
                   backdropFilter: 'blur(16px)',
                   WebkitBackdropFilter: 'blur(16px)',
