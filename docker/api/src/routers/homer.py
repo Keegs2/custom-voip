@@ -120,11 +120,17 @@ def _build_logql_query(
     return query
 
 
-def _parse_loki_response(loki_data: dict) -> list[dict[str, Any]]:
+def _parse_loki_response(
+    loki_data: dict,
+    extract_xcid: bool = False,
+) -> list[dict[str, Any]]:
     """Parse a Loki query_range response into normalized SIP trace records.
 
     heplify-server stores SIP data with metadata in stream LABELS (not in
     the log line, which is the raw SIP message text). We read from labels.
+
+    When extract_xcid=True, parses the raw SIP body for X-CID headers to
+    support A/B leg correlation mapping.
 
     Loki response shape:
     {
@@ -146,6 +152,7 @@ def _parse_loki_response(loki_data: dict) -> list[dict[str, Any]]:
         }
     }
     """
+    _xcid_re = re.compile(r"X-CID:\s*(.+)", re.IGNORECASE) if extract_xcid else None
     results: list[dict[str, Any]] = []
 
     data = loki_data.get("data", {})
@@ -167,7 +174,7 @@ def _parse_loki_response(loki_data: dict) -> list[dict[str, Any]]:
         from_user = _extract_sip_user(from_label)
         to_user = _extract_sip_user(to_label)
 
-        for ts_ns_str, _log_line in stream.get("values", []):
+        for ts_ns_str, log_line in stream.get("values", []):
             # Preserve nanosecond precision for sorting (SIP message order matters)
             try:
                 ts_ns = int(ts_ns_str)
@@ -180,7 +187,7 @@ def _parse_loki_response(loki_data: dict) -> list[dict[str, Any]]:
                 ts_ns = 0
                 ts_iso = None
 
-            results.append({
+            record: dict[str, Any] = {
                 "timestamp": ts_iso,
                 "timestamp_ns": ts_ns,
                 "from_user": from_user,
@@ -191,7 +198,15 @@ def _parse_loki_response(loki_data: dict) -> list[dict[str, Any]]:
                 "dst_ip": labels.get("dst_ip", ""),
                 "status": status,
                 "node": labels.get("node", ""),
-            })
+            }
+
+            # Extract X-CID from raw SIP body for correlation mapping
+            if _xcid_re is not None and log_line:
+                m = _xcid_re.search(log_line)
+                if m:
+                    record["x_cid"] = m.group(1).strip()
+
+            results.append(record)
 
     return results
 
@@ -231,8 +246,12 @@ async def _query_qryn(
     start_ns: int,
     end_ns: int,
     limit: int = 200,
+    extract_xcid: bool = False,
 ) -> list[dict[str, Any]]:
     """Execute a LogQL query against qryn and return parsed results.
+
+    When extract_xcid=True, parses X-CID headers from the raw SIP body
+    to support A/B leg correlation mapping.
 
     Raises HTTPException on connection or protocol errors.
     """
@@ -281,7 +300,7 @@ async def _query_qryn(
             detail="qryn returned non-JSON response",
         )
 
-    return _parse_loki_response(loki_data)
+    return _parse_loki_response(loki_data, extract_xcid=extract_xcid)
 
 
 def _extract_callids(results: list[dict[str, Any]]) -> set[str]:
@@ -300,6 +319,46 @@ def _deduplicate_results(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
             deduped.append(r)
     deduped.sort(key=lambda r: r.get("timestamp_ns", 0))
     return deduped
+
+
+def _build_correlations(
+    known_callids: set[str],
+    corr_results: list[dict[str, Any]],
+) -> dict[str, list[str]]:
+    """Build a correlations map from the X-CID data in correlated results.
+
+    Each Call-ID maps to the full set of Call-IDs in its correlation group
+    (including itself). Both legs of a correlated pair point to the same list.
+
+    Uses the ``x_cid`` field extracted from B-leg SIP bodies during the
+    correlation query (extract_xcid=True). The X-CID value is the A-leg
+    Call-ID that the B-leg references.
+    """
+    # Map: B-leg Call-ID -> A-leg Call-ID (from X-CID header)
+    bleg_to_aleg: dict[str, str] = {}
+    for r in corr_results:
+        xcid = r.get("x_cid", "")
+        bleg_cid = r.get("callid", "")
+        if xcid and bleg_cid and xcid in known_callids and bleg_cid != xcid:
+            bleg_to_aleg[bleg_cid] = xcid
+
+    # Build correlation groups: A-leg -> set of all related Call-IDs
+    groups: dict[str, set[str]] = {}
+    for aleg_cid in known_callids:
+        groups.setdefault(aleg_cid, set()).add(aleg_cid)
+
+    for bleg_cid, aleg_cid in bleg_to_aleg.items():
+        groups.setdefault(aleg_cid, set()).add(aleg_cid)
+        groups[aleg_cid].add(bleg_cid)
+
+    # Build the final map: every Call-ID -> sorted list of its group
+    correlations: dict[str, list[str]] = {}
+    for aleg_cid, group in groups.items():
+        sorted_group = sorted(group)
+        for cid in group:
+            correlations[cid] = sorted_group
+
+    return correlations
 
 
 @router.post("/search")
@@ -348,7 +407,7 @@ async def search_sip_traces(
 
         # If no results or correlation disabled, return immediately
         if not initial_results or not body.correlate:
-            return {"data": _sorted(initial_results)}
+            return {"data": _sorted(initial_results), "correlations": {}}
 
         known_callids = _extract_callids(initial_results)
 
@@ -359,19 +418,30 @@ async def search_sip_traces(
                     "Skipping A/B correlation: %d call_ids exceeds limit of 20",
                     len(known_callids),
                 )
-            return {"data": _sorted(initial_results)}
+            return {"data": _sorted(initial_results), "correlations": {}}
 
         # Step 2: Correlation — search for X-CID headers containing our call IDs
-        # This finds B-leg messages that reference our A-leg call_ids
+        # This finds B-leg messages that reference our A-leg call_ids.
+        # extract_xcid=True parses X-CID from the raw SIP body so we can
+        # map each B-leg Call-ID back to its specific A-leg Call-ID.
         cid_patterns = "|".join(re.escape(cid) for cid in known_callids)
         corr_query = f'{{type="sip"}} |~ "X-CID: ({cid_patterns})"'
 
         try:
-            corr_results = await _query_qryn(client, corr_query, start_ns, end_ns)
+            corr_results = await _query_qryn(
+                client, corr_query, start_ns, end_ns, extract_xcid=True,
+            )
         except HTTPException:
             # Correlation query failed — return initial results without correlation
             logger.warning("A/B correlation query failed, returning initial results only")
-            return {"data": _sorted(initial_results)}
+            return {"data": _sorted(initial_results), "correlations": {}}
+
+        # Build the correlations map from X-CID data BEFORE stripping x_cid
+        correlations = _build_correlations(known_callids, corr_results)
+
+        # Strip x_cid from results — it's internal correlation data, not for the client
+        for r in corr_results:
+            r.pop("x_cid", None)
 
         # Extract any NEW call_ids discovered from the correlated results
         new_callids = _extract_callids(corr_results) - known_callids
@@ -379,7 +449,10 @@ async def search_sip_traces(
         if not new_callids:
             # No new legs discovered — merge what we have and return
             merged = initial_results + corr_results
-            return {"data": _deduplicate_results(merged)}
+            return {
+                "data": _deduplicate_results(merged),
+                "correlations": correlations,
+            }
 
         # Step 3: Final query — get ALL messages from all related legs
         all_callids = known_callids | new_callids
@@ -392,8 +465,14 @@ async def search_sip_traces(
             # Final query failed — merge initial + correlation results
             logger.warning("Final correlation query failed, returning partial results")
             merged = initial_results + corr_results
-            return {"data": _deduplicate_results(merged)}
+            return {
+                "data": _deduplicate_results(merged),
+                "correlations": correlations,
+            }
 
         # Merge all results and deduplicate
         all_results = initial_results + corr_results + final_results
-        return {"data": _deduplicate_results(all_results)}
+        return {
+            "data": _deduplicate_results(all_results),
+            "correlations": correlations,
+        }

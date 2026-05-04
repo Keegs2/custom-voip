@@ -259,11 +259,12 @@ function NoResultsState() {
 
 interface ResultsTableProps {
   results: HomerSearchResult[];
+  correlations: Record<string, string[]>;
   startTime: string;
   endTime: string;
 }
 
-function ResultsTable({ results, startTime, endTime }: ResultsTableProps) {
+function ResultsTable({ results, correlations, startTime, endTime }: ResultsTableProps) {
   const thStyle: React.CSSProperties = {
     padding: '10px 14px',
     textAlign: 'left',
@@ -309,17 +310,17 @@ function ResultsTable({ results, startTime, endTime }: ResultsTableProps) {
         </thead>
         <tbody>
           {results.map((row, idx) => {
-            // Scope the Grafana deep link to this specific call by deriving a
-            // tight time window from the clicked Call-ID's own message timestamps.
-            //
-            // Two-leg call correlation: the API already merged both legs into
-            // `results`. The RCF DID appears in both:
-            //   A-leg: To URI (Bandwidth → FreeSWITCH)
-            //   B-leg: From URI (FreeSWITCH → Bandwidth)
-            // Searching by RCF DID within the tight window catches both legs
-            // without returning other calls to the same DID in the broader range.
-            const callMessages = results.filter((r) => r.callid === row.callid);
-            const callTimestamps = callMessages
+            // Scope the Grafana deep link to exactly this call's SIP messages
+            // by passing ALL correlated Call-IDs (A-leg + B-leg) as a regex OR
+            // pattern. The API's correlations map tells us which Call-IDs belong
+            // to the same call via X-CID header analysis.
+            const relatedCallIds = correlations[row.callid] ?? [row.callid];
+            const callIdPattern = relatedCallIds.join('|');
+
+            // Gather timestamps from ALL correlated legs for the time window
+            const correlatedCids = new Set(relatedCallIds);
+            const callTimestamps = results
+              .filter((r) => correlatedCids.has(r.callid))
               .map((r) => r.timestamp_ns)
               .filter((ts): ts is number => typeof ts === 'number' && ts > 0);
 
@@ -335,10 +336,8 @@ function ResultsTable({ results, startTime, endTime }: ResultsTableProps) {
               toMs = Math.floor(new Date(endTime).getTime());
             }
 
-            // Strip leading + — Grafana variable expects bare digits
-            const rcfDid = (row.to_user || '').replace(/^\+/, '');
             const params = new URLSearchParams({
-              'var-phone_number': rcfDid,
+              'var-callid': callIdPattern,
               from: String(fromMs),
               to: String(toMs),
               kiosk: 'tv',
@@ -479,6 +478,7 @@ export function TroubleshootingPage() {
 
   // ── Derived values (after all hooks) ──
   const results = searchMutation.data?.data ?? [];
+  const correlations = searchMutation.data?.correlations ?? {};
   const isLoading = searchMutation.isPending;
   const isError = searchMutation.isError;
   const errorMessage = isError
@@ -923,7 +923,7 @@ export function TroubleshootingPage() {
           )}
 
           {!isLoading && !isError && results.length > 0 && (
-            <ResultsTable results={results} startTime={startTime} endTime={endTime} />
+            <ResultsTable results={results} correlations={correlations} startTime={startTime} endTime={endTime} />
           )}
         </div>
       </div>

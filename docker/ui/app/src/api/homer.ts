@@ -23,6 +23,6 @@ export interface HomerSearchResult {
 
 export async function searchSipTraces(
   params: HomerSearchParams,
-): Promise<{ data: HomerSearchResult[] }> {
+): Promise<{ data: HomerSearchResult[]; correlations: Record<string, string[]> }> {
   return apiRequest('POST', '/homer/search', params);
 }
