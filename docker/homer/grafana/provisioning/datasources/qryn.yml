@@ -1,6 +1,7 @@
 apiVersion: 1
 datasources:
   - name: qryn
+    uid: qryn
     type: loki
     access: proxy
     url: http://qryn:3100
