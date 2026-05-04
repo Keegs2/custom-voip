@@ -311,10 +311,19 @@ function ResultsTable({ results, startTime, endTime }: ResultsTableProps) {
           {results.map((row, idx) => {
             // Build Grafana deep-link with the Call-ID variable pre-filled.
             // The dashboard UID and variable name match the dashboard JSON from Phase 1.
-            // Deep link to Grafana with Call-ID, phone number, and exact time range from our search
-            const fromMs = new Date(startTime).getTime();
-            const toMs = new Date(endTime).getTime();
-            const grafanaLink = `/grafana/d/sip-search/sip-search?var-callid=${encodeURIComponent(row.callid)}&var-phone_number=${encodeURIComponent(row.from_user.replace(/^\+/, ''))}&from=${fromMs}&to=${toMs}&kiosk=tv`;
+            // Deep link to Grafana with Call-ID, phone number, and exact time range
+            // Grafana URL params: from/to must be Unix milliseconds (integers)
+            const fromMs = Math.floor(new Date(startTime).getTime());
+            const toMs = Math.floor(new Date(endTime).getTime());
+            const phoneNum = (row.from_user || '').replace(/^\+/, '');
+            const params = new URLSearchParams({
+              'var-callid': row.callid,
+              'var-phone_number': phoneNum,
+              from: String(fromMs),
+              to: String(toMs),
+              kiosk: 'tv',
+            });
+            const grafanaLink = `/grafana/d/sip-search/sip-search?${params.toString()}`;
 
             return (
               <tr
