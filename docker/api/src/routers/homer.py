@@ -129,8 +129,11 @@ def _parse_loki_response(
     heplify-server stores SIP data with metadata in stream LABELS (not in
     the log line, which is the raw SIP message text). We read from labels.
 
-    When extract_xcid=True, parses the raw SIP body for X-CID headers to
-    support A/B leg correlation mapping.
+    When extract_xcid=True, parses the raw SIP body for X-CID headers AND
+    the real Call-ID header to support A/B leg correlation mapping. The real
+    Call-ID is needed because heplify-server's FORCEALEGID=true overwrites
+    the call_id label of B-leg messages (those containing X-CID) with the
+    A-leg Call-ID, making the label unreliable for B-leg identification.
 
     Loki response shape:
     {
@@ -153,6 +156,10 @@ def _parse_loki_response(
     }
     """
     _xcid_re = re.compile(r"X-CID:\s*(.+)", re.IGNORECASE) if extract_xcid else None
+    # Match "Call-ID: value" in the raw SIP body. Must be at start of line.
+    # The Call-ID header value may contain @, -, alphanumeric, and dots.
+    # Use \S+ to avoid capturing trailing \r or whitespace.
+    _callid_re = re.compile(r"^Call-ID:\s*(\S+)", re.IGNORECASE | re.MULTILINE) if extract_xcid else None
     results: list[dict[str, Any]] = []
 
     data = loki_data.get("data", {})
@@ -203,11 +210,21 @@ def _parse_loki_response(
                 "raw_msg": log_line if log_line else None,
             }
 
-            # Extract X-CID from raw SIP body for correlation mapping
+            # Extract X-CID and real Call-ID from raw SIP body for correlation
             if _xcid_re is not None and log_line:
                 m = _xcid_re.search(log_line)
                 if m:
                     record["x_cid"] = m.group(1).strip()
+
+                # Extract the REAL Call-ID from the SIP body. This is needed
+                # because FORCEALEGID=true in heplify-server overwrites the
+                # call_id label with the X-CID value (A-leg Call-ID) for any
+                # message containing X-CID. The actual B-leg Call-ID is only
+                # available from the raw SIP message's Call-ID header.
+                if _callid_re is not None:
+                    cid_match = _callid_re.search(log_line)
+                    if cid_match:
+                        record["real_callid"] = cid_match.group(1).strip()
 
             results.append(record)
 
@@ -413,12 +430,20 @@ def _build_correlations(
     Uses the ``x_cid`` field extracted from B-leg SIP bodies during the
     correlation query (extract_xcid=True). The X-CID value is the A-leg
     Call-ID that the B-leg references.
+
+    IMPORTANT: heplify-server's FORCEALEGID=true overwrites the call_id label
+    of B-leg messages (those containing X-CID) with the A-leg Call-ID. This
+    means r["callid"] (from the label) is unreliable for B-leg identification.
+    We use r["real_callid"] (extracted from the raw SIP Call-ID header) instead,
+    falling back to r["callid"] if the raw extraction is unavailable.
     """
     # Map: B-leg Call-ID -> A-leg Call-ID (from X-CID header)
     bleg_to_aleg: dict[str, str] = {}
     for r in corr_results:
         xcid = r.get("x_cid", "")
-        bleg_cid = r.get("callid", "")
+        # Use the real Call-ID from the SIP body (not the Loki label which
+        # FORCEALEGID may have overwritten to the A-leg Call-ID)
+        bleg_cid = r.get("real_callid", "") or r.get("callid", "")
         if xcid and bleg_cid and xcid in known_callids and bleg_cid != xcid:
             bleg_to_aleg[bleg_cid] = xcid
 
@@ -519,11 +544,19 @@ async def search_sip_traces(
         # Build the correlations map from X-CID data BEFORE stripping x_cid
         correlations = _build_correlations(known_callids, corr_results)
 
-        # Strip x_cid from results — it's internal correlation data, not for the client
+        # Fix callid field and strip internal correlation fields.
+        # FORCEALEGID=true in heplify-server overwrites the call_id label of
+        # B-leg messages (those with X-CID) to the A-leg Call-ID. We must
+        # restore the real B-leg Call-ID (from the raw SIP body) so the
+        # frontend correctly groups messages by their actual call leg.
         for r in corr_results:
+            real_cid = r.pop("real_callid", None)
+            if real_cid and real_cid != r.get("callid", ""):
+                r["callid"] = real_cid
             r.pop("x_cid", None)
 
-        # Extract any NEW call_ids discovered from the correlated results
+        # Extract any NEW call_ids discovered from the correlated results.
+        # After the fix above, callid now reflects the real B-leg Call-ID.
         new_callids = _extract_callids(corr_results) - known_callids
 
         if not new_callids:
@@ -534,13 +567,17 @@ async def search_sip_traces(
                 "correlations": correlations,
             }
 
-        # Step 3: Final query — get ALL messages from all related legs
+        # Step 3: Final query — get ALL messages from all related legs.
+        # Use extract_xcid=True so we can fix callid for B-leg messages that
+        # had their call_id label overwritten by FORCEALEGID.
         all_callids = known_callids | new_callids
         cid_regex = "|".join(re.escape(cid) for cid in all_callids)
         final_query = f'{{type="sip", call_id=~"{cid_regex}"}}'
 
         try:
-            final_results = await _query_qryn(client, final_query, start_ns, end_ns)
+            final_results = await _query_qryn(
+                client, final_query, start_ns, end_ns, extract_xcid=True,
+            )
         except HTTPException:
             # Final query failed — merge initial + correlation results
             logger.warning("Final correlation query failed, returning partial results")
@@ -549,6 +586,13 @@ async def search_sip_traces(
                 "data": _deduplicate_results(merged),
                 "correlations": correlations,
             }
+
+        # Fix callid for any FORCEALEGID-affected messages in final results
+        for r in final_results:
+            real_cid = r.pop("real_callid", None)
+            if real_cid and real_cid != r.get("callid", ""):
+                r["callid"] = real_cid
+            r.pop("x_cid", None)
 
         # Merge all results and deduplicate
         all_results = initial_results + corr_results + final_results
