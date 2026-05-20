@@ -300,12 +300,18 @@ function discoverNodes(sorted: ReadonlyArray<HomerSearchResult>): string[] {
  * Orders nodes left-to-right by tracing the path of the call flow.
  *
  * Algorithm:
- * 1. Find the first INVITE request in the sorted messages
- * 2. Start from its src_ip (carrier ingress)
- * 3. Follow the INVITE chain: for each node placed, find the next INVITE
- *    where that node is the source, and place its destination next
- * 4. Repeat for the B-leg (different Call-ID)
- * 5. Append any remaining nodes not yet placed
+ * 1. Collect all INVITE requests (status === null), sorted chronologically
+ * 2. Walk the A-leg INVITEs in order, placing src_ip then dst_ip for each
+ *    — this naturally produces the correct chain even when intermediate
+ *    hops are invisible (e.g. NLB pass-through between SBC-VIP and SBC-1)
+ * 3. Repeat for B-leg INVITEs
+ * 4. Append any remaining nodes not yet placed
+ *
+ * Previous approach used traceInviteChain() which required each INVITE's
+ * src_ip to already be placed. That failed when SBC-VIP dispatched to
+ * SBC-1 (via NLB, no SIP message) and SBC-1 forwarded to FreeSWITCH —
+ * SBC-1 was never placed by the chain tracer, so FreeSWITCH could end up
+ * before SBC-1 in the column order.
  */
 function orderNodes(
   sorted: ReadonlyArray<HomerSearchResult>,
@@ -323,7 +329,7 @@ function orderNodes(
     }
   }
 
-  // Find all INVITE requests (status === null means request)
+  // Find all INVITE requests (status === null means request), already sorted by timestamp
   const invites = sorted.filter((m) => m.method === 'INVITE' && m.status === null);
 
   if (invites.length === 0) {
@@ -332,30 +338,29 @@ function orderNodes(
       place(name);
     }
   } else {
-    // Trace the A-leg INVITE chain
     const aLegInvites = invites.filter((m) => aLegCallIds.has(m.callid));
     const bLegInvites = invites.filter((m) => bLegCallIds.has(m.callid));
 
     // Use A-leg INVITEs first; if none classified as A-leg, use all
     const primaryInvites = aLegInvites.length > 0 ? aLegInvites : invites;
 
-    // Start with the first INVITE's source
-    const firstInvite = primaryInvites[0]!;
-    place(firstInvite.src_ip);
-    place(firstInvite.dst_ip);
-
-    // Follow the chain from the last placed node
-    traceInviteChain(primaryInvites, placed, place);
-
-    // Now trace the B-leg chain
-    if (bLegInvites.length > 0) {
-      const firstBLeg = bLegInvites[0]!;
-      place(firstBLeg.src_ip);
-      place(firstBLeg.dst_ip);
-      traceInviteChain(bLegInvites, placed, place);
+    // Walk each A-leg INVITE chronologically, placing src then dst.
+    // Because INVITEs are already sorted by timestamp, this produces:
+    //   INVITE #1 (BW-ATL → SBC-VIP): place BW-ATL, place SBC-VIP
+    //   INVITE #2 (SBC-1 → FreeSWITCH): place SBC-1, place FreeSWITCH
+    // Result: BW-ATL | SBC-VIP | SBC-1 | FreeSWITCH
+    for (const invite of primaryInvites) {
+      place(invite.src_ip);
+      place(invite.dst_ip);
     }
 
-    // Append any remaining nodes
+    // Walk B-leg INVITEs the same way
+    for (const invite of bLegInvites) {
+      place(invite.src_ip);
+      place(invite.dst_ip);
+    }
+
+    // Append any remaining nodes (e.g. nodes only seen in non-INVITE messages)
     for (const name of allNodeNames) {
       place(name);
     }
@@ -367,40 +372,6 @@ function orderNodes(
     role: classifyNodeRole(id),
     columnIndex,
   }));
-}
-
-/**
- * Traces INVITE requests to discover additional nodes in the call path.
- * For each unplaced destination that follows a placed source, adds it.
- */
-function traceInviteChain(
-  invites: ReadonlyArray<HomerSearchResult>,
-  placed: Set<string>,
-  place: (name: string) => void,
-): void {
-  // Multiple passes to handle chains of any depth
-  let changed = true;
-  let iterations = 0;
-  const maxIterations = invites.length + 1; // prevent infinite loops
-
-  while (changed && iterations < maxIterations) {
-    changed = false;
-    iterations++;
-
-    for (const invite of invites) {
-      // If the source is already placed but destination is not, place destination
-      if (placed.has(invite.src_ip) && !placed.has(invite.dst_ip)) {
-        place(invite.dst_ip);
-        changed = true;
-      }
-      // Also handle the reverse: if dst is placed but src isn't, place src before it
-      // (This handles cases where we discover a node that sent to an already-placed node)
-      if (!placed.has(invite.src_ip) && placed.has(invite.dst_ip)) {
-        place(invite.src_ip);
-        changed = true;
-      }
-    }
-  }
 }
 
 /**
