@@ -525,17 +525,22 @@ async def search_sip_traces(
                 )
             return {"data": _sorted(initial_results), "correlations": {}}
 
-        # Step 2: Correlation — search for X-CID headers containing our call IDs.
-        # This finds B-leg messages that reference our A-leg Call-IDs.
-        # extract_xcid=True parses X-CID from the raw SIP body so we can
-        # map each B-leg Call-ID back to its specific A-leg Call-ID.
-        cid_patterns = "|".join(re.escape(cid) for cid in known_callids)
-        corr_query = f'{{type="sip"}} |~ "X-CID: ({cid_patterns})"'
+        # Step 2: Correlation — search for X-CID headers to find B-leg messages.
+        # Use a simple "X-CID:" filter (not a complex regex with all Call-IDs)
+        # because qryn's RE2 engine chokes on large alternation patterns with
+        # escaped special characters (@, .) — returns 500 Internal Server Error.
+        # We filter by specific Call-ID in Python after fetching.
+        corr_query = '{type="sip"} |~ "X-CID:"'
 
         try:
             corr_results = await _query_qryn(
                 client, corr_query, start_ns, end_ns, extract_xcid=True,
             )
+            # Filter to only messages whose X-CID references one of our known Call-IDs
+            corr_results = [
+                r for r in corr_results
+                if r.get("x_cid", "") in known_callids
+            ]
         except HTTPException:
             # Correlation query failed — return initial results without correlation
             logger.warning("A/B correlation query failed, returning initial results only")
