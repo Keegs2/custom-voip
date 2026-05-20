@@ -172,7 +172,7 @@ function ColumnHeader({ node }: { node: LadderNode }) {
           marginBottom: 2,
         }}
       >
-        {node.id}
+        {node.displayLabel ?? node.id}
       </div>
       <div
         style={{

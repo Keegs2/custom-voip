@@ -52,14 +52,23 @@ export function computeLayout(
   // Step 3: Order nodes left-to-right following the call path
   const orderedNodes = orderNodes(sorted, nodeNames, aLegCallIds, bLegCallIds);
 
-  // Build column index lookup
-  const columnIndex = new Map<string, number>();
-  orderedNodes.forEach((node, idx) => {
-    columnIndex.set(node.id, idx);
-  });
-
   // Refine carrier-egress roles now that we have ordering context
   refineCarrierRoles(orderedNodes, sorted, aLegCallIds);
+
+  // Step 4.5: Split nodes that appear in both call legs into virtual A/B-leg columns.
+  // This creates a symmetric ladder: BW-ATL | SBC-VIP | SBC-1 (IN) | FS | SBC-1 (OUT) | BW-DAL
+  const { finalNodes, bLegColumnIndex } = splitDualLegNodes(
+    orderedNodes,
+    sorted,
+    aLegCallIds,
+    bLegCallIds,
+  );
+
+  // Build column index lookup (uses the final node list after splitting)
+  const columnIndex = new Map<string, number>();
+  finalNodes.forEach((node, idx) => {
+    columnIndex.set(node.id, idx);
+  });
 
   // Steps 5-8: Process each message
   const processedMessages: LadderMessage[] = [];
@@ -75,9 +84,9 @@ export function computeLayout(
     const isRetransmit = isRetransmission(msg, prevMessagesForRetransmit);
     prevMessagesForRetransmit.push(msg);
 
-    // Get column positions (default to 0 if somehow unknown)
-    const sourceCol = columnIndex.get(msg.src_ip) ?? 0;
-    const destCol = columnIndex.get(msg.dst_ip) ?? 0;
+    // Get column positions, using the B-leg virtual column when applicable
+    const sourceCol = resolveColumn(msg.src_ip, leg, columnIndex, bLegColumnIndex);
+    const destCol = resolveColumn(msg.dst_ip, leg, columnIndex, bLegColumnIndex);
 
     // Compute time delta from previous message
     let timeDeltaMs: number | null = null;
@@ -110,7 +119,7 @@ export function computeLayout(
       : null;
 
   return {
-    nodes: orderedNodes,
+    nodes: finalNodes,
     messages: processedMessages,
     aLegCallIds,
     bLegCallIds,
@@ -119,6 +128,151 @@ export function computeLayout(
 }
 
 // ─── Internal helpers ───────────────────────────────────────────────────────
+
+/**
+ * Suffix appended to a physical node ID to create its B-leg virtual node ID.
+ * Uses a double-underscore prefix to avoid collisions with real node names.
+ */
+const BLEG_SUFFIX = '__bleg';
+
+/**
+ * Detects nodes that participate in both A-leg and B-leg traffic and splits them
+ * into two virtual columns: one for A-leg messages and one for B-leg messages.
+ *
+ * Only SBC nodes (role='sbc') are candidates for splitting. Carrier nodes are
+ * already separate (BW-ATL vs BW-DAL) and FreeSWITCH is the B2BUA bridge that
+ * naturally sits in the center.
+ *
+ * The B-leg virtual node is inserted immediately after FreeSWITCH in the column
+ * order, producing the desired symmetric layout:
+ *   BW-ATL | SBC-VIP | SBC-1 | FreeSWITCH | SBC-1 | BW-DAL
+ *
+ * Returns the modified node list and a map from physical node ID to the B-leg
+ * virtual column index (used by resolveColumn to route B-leg messages).
+ */
+function splitDualLegNodes(
+  orderedNodes: LadderNode[],
+  sorted: ReadonlyArray<HomerSearchResult>,
+  aLegCallIds: Set<string>,
+  bLegCallIds: Set<string>,
+): { finalNodes: LadderNode[]; bLegColumnIndex: Map<string, number> } {
+  // Collect which physical node IDs appear in each leg
+  const aLegNodeIds = new Set<string>();
+  const bLegNodeIds = new Set<string>();
+
+  for (const msg of sorted) {
+    if (aLegCallIds.has(msg.callid)) {
+      aLegNodeIds.add(msg.src_ip);
+      aLegNodeIds.add(msg.dst_ip);
+    } else if (bLegCallIds.has(msg.callid)) {
+      bLegNodeIds.add(msg.src_ip);
+      bLegNodeIds.add(msg.dst_ip);
+    }
+  }
+
+  // Find nodes that appear in both legs AND are eligible for splitting (SBC only)
+  const nodesToSplit = new Set<string>();
+  for (const node of orderedNodes) {
+    if (
+      node.role === 'sbc' &&
+      aLegNodeIds.has(node.id) &&
+      bLegNodeIds.has(node.id)
+    ) {
+      nodesToSplit.add(node.id);
+    }
+  }
+
+  // If nothing to split, return the original list unchanged
+  if (nodesToSplit.size === 0) {
+    return { finalNodes: orderedNodes, bLegColumnIndex: new Map() };
+  }
+
+  // Find the index of the FreeSWITCH / media-server node (the B2BUA center point).
+  // B-leg virtual nodes go after this node.
+  const mediaIdx = orderedNodes.findIndex((n) => n.role === 'media-server');
+
+  // Build the new node list: A-leg nodes stay in their original positions (left of
+  // or at FreeSWITCH), B-leg virtual clones are inserted to the right of FreeSWITCH.
+  const finalNodes: LadderNode[] = [];
+  const bLegVirtualNodes: LadderNode[] = [];
+
+  for (const node of orderedNodes) {
+    finalNodes.push(node);
+
+    // After the media-server node, insert all B-leg virtual nodes.
+    // We collect them first from the nodes-to-split set, preserving their original
+    // order (which is the order they appear in the A-leg chain).
+    if (node.role === 'media-server') {
+      // Create B-leg virtual clones for each split node
+      for (const origNode of orderedNodes) {
+        if (nodesToSplit.has(origNode.id)) {
+          bLegVirtualNodes.push({
+            id: origNode.id + BLEG_SUFFIX,
+            displayLabel: origNode.id,
+            role: origNode.role,
+            columnIndex: -1, // will be reassigned below
+          });
+        }
+      }
+      // Insert in reverse order of the A-leg chain so they mirror correctly.
+      // In the A-leg chain: ... SBC-VIP | SBC-1 | FS
+      // In the B-leg chain: FS | SBC-1 | ... (mirrors right)
+      for (const vNode of bLegVirtualNodes) {
+        finalNodes.push(vNode);
+      }
+    }
+  }
+
+  // If there was no media-server node (unusual), append virtual nodes at the end
+  if (mediaIdx === -1) {
+    for (const origNode of orderedNodes) {
+      if (nodesToSplit.has(origNode.id)) {
+        finalNodes.push({
+          id: origNode.id + BLEG_SUFFIX,
+          displayLabel: origNode.id,
+          role: origNode.role,
+          columnIndex: -1,
+        });
+      }
+    }
+  }
+
+  // Reassign column indices
+  const bLegColumnIdx = new Map<string, number>();
+  for (let i = 0; i < finalNodes.length; i++) {
+    finalNodes[i]!.columnIndex = i;
+    // Track mapping from physical ID to B-leg virtual column index
+    const node = finalNodes[i]!;
+    if (node.id.endsWith(BLEG_SUFFIX)) {
+      const physicalId = node.id.slice(0, -BLEG_SUFFIX.length);
+      bLegColumnIdx.set(physicalId, i);
+    }
+  }
+
+  return { finalNodes, bLegColumnIndex: bLegColumnIdx };
+}
+
+/**
+ * Resolves the column index for a physical node ID, taking into account whether
+ * the message is A-leg or B-leg. For B-leg messages involving a split node, returns
+ * the B-leg virtual column index instead of the A-leg column.
+ */
+function resolveColumn(
+  physicalId: string,
+  leg: 'a' | 'b' | 'unknown',
+  columnIndex: Map<string, number>,
+  bLegColumnIndex: Map<string, number>,
+): number {
+  // For B-leg messages, check if this node has been split
+  if (leg === 'b') {
+    const bLegCol = bLegColumnIndex.get(physicalId);
+    if (bLegCol !== undefined) {
+      return bLegCol;
+    }
+  }
+  // Fall back to the standard (A-leg / unsplit) column
+  return columnIndex.get(physicalId) ?? 0;
+}
 
 /**
  * Collects all unique node names (src_ip and dst_ip values) from the message list.

@@ -20,8 +20,12 @@ export type NodeRole =
  * Names are pre-aliased by heplify-server — no IP resolution needed.
  */
 export interface LadderNode {
-  /** The aliased name: "BW-NY", "SBC-1", "FreeSWITCH", etc. */
+  /** The aliased name: "BW-NY", "SBC-1", "FreeSWITCH", etc.
+   *  For virtual (split) nodes, this is a unique internal ID like "SBC-1__bleg". */
   id: string;
+  /** Display label for the column header. Falls back to `id` when not set.
+   *  Virtual nodes use this to show the original name (e.g. "SBC-1") in the header. */
+  displayLabel?: string;
   /** Detected architectural role based on name patterns */
   role: NodeRole;
   /** Position in the diagram, left-to-right (0-based) */
