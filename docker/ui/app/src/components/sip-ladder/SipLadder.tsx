@@ -239,7 +239,7 @@ function CallSummary({ layout }: CallSummaryProps) {
 
   // Status badge color
   let statusBg = 'rgba(71,85,105,0.3)';
-  let statusColor = LADDER_COLORS.textMuted;
+  let statusColor: string = LADDER_COLORS.textMuted;
   let statusBorder = 'rgba(71,85,105,0.4)';
   if (finalStatus !== null) {
     if (finalStatus >= 200 && finalStatus < 300) {
