@@ -3,7 +3,7 @@ import type { HomerSearchResult } from '../../api/homer';
 import type { LadderLayout, LadderNode } from './sipLadderTypes';
 import { computeLayout } from './sipLadderLayout';
 import { LADDER_COLORS, formatTimeDelta } from './sipLadderUtils';
-import { SipMessageRow, COL_WIDTH, TIMESTAMP_COL_WIDTH } from './SipMessageRow';
+import { SipMessageRow, TIMESTAMP_COL_WIDTH } from './SipMessageRow';
 import { PacketDetailPanel } from './PacketDetailPanel';
 
 // ─── Design tokens ──────────────────────────────────────────────────────────
@@ -152,8 +152,6 @@ function ColumnHeader({ node }: { node: LadderNode }) {
   return (
     <th
       style={{
-        width: COL_WIDTH,
-        minWidth: COL_WIDTH,
         padding: '12px 8px 10px',
         textAlign: 'center',
         verticalAlign: 'top',
@@ -519,9 +517,6 @@ export function SipLadder({ messages, correlations }: SipLadderProps) {
     return <EmptyLadder />;
   }
 
-  // Compute total table width
-  const totalWidth = TIMESTAMP_COL_WIDTH + layout.nodes.length * COL_WIDTH;
-
   return (
     <div>
       {/* Call summary header */}
@@ -610,7 +605,7 @@ export function SipLadder({ messages, correlations }: SipLadderProps) {
           <table
             style={{
               borderCollapse: 'collapse',
-              minWidth: totalWidth,
+              width: '100%',
               tableLayout: 'fixed',
             }}
           >
@@ -618,7 +613,7 @@ export function SipLadder({ messages, correlations }: SipLadderProps) {
             <colgroup>
               <col style={{ width: TIMESTAMP_COL_WIDTH }} />
               {layout.nodes.map((node) => (
-                <col key={node.id} style={{ width: COL_WIDTH }} />
+                <col key={node.id} />
               ))}
             </colgroup>
 

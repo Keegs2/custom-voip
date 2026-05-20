@@ -16,8 +16,6 @@ import { formatTimeDelta, LADDER_COLORS } from './sipLadderUtils';
 // The label text is positioned on the arrow line using absolute positioning.
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Minimum column width in pixels */
-const COL_WIDTH = 140;
 /** Width of the timestamp column */
 const TIMESTAMP_COL_WIDTH = 90;
 
@@ -65,8 +63,6 @@ const timestampCellStyle: React.CSSProperties = {
 };
 
 const nodeCellStyle: React.CSSProperties = {
-  width: COL_WIDTH,
-  minWidth: COL_WIDTH,
   padding: 0,
   verticalAlign: 'middle',
   position: 'relative',
@@ -338,4 +334,4 @@ export function SipMessageRow({
   );
 }
 
-export { COL_WIDTH, TIMESTAMP_COL_WIDTH };
+export { TIMESTAMP_COL_WIDTH };
