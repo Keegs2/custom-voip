@@ -22,17 +22,25 @@
     <!-- Debug presence events (0=off) -->
     <param name="debug-presence" value="0"/>
 
-    <!-- SIP trace level: required for HEP capture to function.
-         When set to 0, mod_sofia never fires the capture callback,
-         so sip-capture=yes on profiles has no effect and zero HEP
-         packets are generated. "SIP" enables SIP message tracing
-         without full debug verbosity. -->
-    <param name="tracelevel" value="SIP"/>
+    <!-- SIP trace level for FreeSWITCH console/log output of SIP messages.
+         Valid values: console, alert, crit, err, warning, notice, info, debug.
+         This controls the FS log level at which SIP messages are printed.
+         It does NOT affect HEP capture (that's controlled by TPTAG_CAPT).
+         Set to "info" to see SIP traces in the log without full debug verbosity. -->
+    <param name="tracelevel" value="info"/>
 
-    <!-- Enable SIP capture globally — required for per-profile sip-capture=yes to work.
-         Without this, mod_sofia never sends HEP packets even with per-profile capture on. -->
-    <param name="capture-server" value="udp:$${homer_ip}:9060;hep=3;capture_id=100"/>
-    <param name="sip-capture" value="on"/>
+    <!-- HEP capture server for Homer SIP monitoring.
+         This is a GLOBAL setting — per-profile capture-server params are silently
+         ignored by mod_sofia (only global_settings capture-server is recognized).
+         The capture_id here applies to ALL profiles.
+
+         NOTE: To distinguish FS from Kamailio in Homer, use a different capture_id
+         than Kamailio (which uses 100). We use 200 for FreeSWITCH.
+
+         NOTE: sip-capture is NOT recognized in global_settings — it must be set
+         per-profile in each sofia profile's <settings> block.
+    -->
+    <param name="capture-server" value="udp:$${homer_ip}:9060;hep=3;capture_id=200"/>
 
     <!-- RFC compliance for multipart MIME -->
     <param name="rfc2833-pt" value="101"/>

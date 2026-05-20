@@ -48,10 +48,14 @@ Each SIP component sends HEP packets with a unique capture_id for identification
 | Source | capture_id | HEP Target | Config Location |
 |--------|-----------|------------|-----------------|
 | Kamailio SBC | 100 | $HOMER_IP:9060 UDP | kamailio.cfg (`siptrace` module) |
-| FreeSWITCH internal profile | 200 | $HOMER_IP:9060 UDP | sofia/internal.xml (`capture-server`) |
-| FreeSWITCH external profile | 201 | $HOMER_IP:9060 UDP | sofia/external.xml (`capture-server`) |
+| FreeSWITCH (all profiles) | 200 | $HOMER_IP:9060 UDP | sofia.conf.xml `global_settings` (`capture-server`) |
 
-**Multi-zone capture IDs:** East=100/200/201, West=110/210/211, Central=120/220/221.
+**NOTE:** mod_sofia only supports a single global capture-server with one capture_id.
+Per-profile capture-server params are silently ignored by FreeSWITCH (the config parser
+does not recognize `capture-server` in profile `<settings>`, only in `<global_settings>`).
+Both internal and external profiles share capture_id=200.
+
+**Multi-zone capture IDs:** East=100/200, West=110/210, Central=120/220.
 
 HEP sources (Kamailio and FreeSWITCH) are unchanged from Homer 7 -- they still
 send HEP to port 9060 on the services VM. Only the backend storage and UI changed.
