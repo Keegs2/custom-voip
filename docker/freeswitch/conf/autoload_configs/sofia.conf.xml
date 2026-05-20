@@ -29,8 +29,10 @@
          without full debug verbosity. -->
     <param name="tracelevel" value="SIP"/>
 
-    <!-- Enable SIP capture via Homer/SIPCAPTURE (if using) -->
-    <!-- <param name="capture-server" value="udp:192.168.1.100:9060"/> -->
+    <!-- Enable SIP capture globally — required for per-profile sip-capture=yes to work.
+         Without this, mod_sofia never sends HEP packets even with per-profile capture on. -->
+    <param name="capture-server" value="udp:$${homer_ip}:9060;hep=3;capture_id=100"/>
+    <param name="sip-capture" value="on"/>
 
     <!-- RFC compliance for multipart MIME -->
     <param name="rfc2833-pt" value="101"/>
