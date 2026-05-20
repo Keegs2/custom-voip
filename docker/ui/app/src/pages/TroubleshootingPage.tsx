@@ -233,65 +233,6 @@ function fmtCallDuration(seconds: number): string {
   return `${mins}m ${secs}s`;
 }
 
-// ─── Method badge ─────────────────────────────────────────────────────────────
-
-interface MethodBadgeProps {
-  method: string;
-}
-
-function MethodBadge({ method }: MethodBadgeProps) {
-  const upper = method.toUpperCase();
-
-  let bg = 'rgba(71,85,105,0.5)';
-  let color = '#94a3b8';
-  let border = 'rgba(71,85,105,0.4)';
-
-  if (upper === 'INVITE') {
-    bg = 'rgba(34,197,94,0.15)';
-    color = '#4ade80';
-    border = 'rgba(34,197,94,0.3)';
-  } else if (upper === 'BYE') {
-    bg = 'rgba(245,158,11,0.15)';
-    color = '#fbbf24';
-    border = 'rgba(245,158,11,0.3)';
-  } else if (upper === 'REGISTER') {
-    bg = 'rgba(59,130,246,0.15)';
-    color = '#60a5fa';
-    border = 'rgba(59,130,246,0.3)';
-  } else if (upper === 'CANCEL') {
-    bg = 'rgba(239,68,68,0.15)';
-    color = '#f87171';
-    border = 'rgba(239,68,68,0.3)';
-  } else if (upper === 'OPTIONS') {
-    bg = 'rgba(168,85,247,0.15)';
-    color = '#c084fc';
-    border = 'rgba(168,85,247,0.3)';
-  } else if (upper === 'ACK' || upper === 'PRACK') {
-    bg = 'rgba(6,182,212,0.15)';
-    color = '#22d3ee';
-    border = 'rgba(6,182,212,0.3)';
-  }
-
-  return (
-    <span
-      style={{
-        display: 'inline-block',
-        padding: '2px 8px',
-        borderRadius: 4,
-        fontSize: '0.7rem',
-        fontWeight: 600,
-        letterSpacing: '0.04em',
-        background: bg,
-        color,
-        border: `1px solid ${border}`,
-        fontFamily: 'ui-monospace, monospace',
-      }}
-    >
-      {upper}
-    </span>
-  );
-}
-
 // ─── Status badge ─────────────────────────────────────────────────────────────
 
 interface StatusBadgeProps {
