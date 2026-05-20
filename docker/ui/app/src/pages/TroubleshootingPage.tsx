@@ -1,4 +1,4 @@
-import { useState, useCallback, type KeyboardEvent } from 'react';
+import { useState, useCallback, useMemo, type KeyboardEvent } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { Sidebar } from '../components/layout/Sidebar';
 import { Spinner } from '../components/ui/Spinner';
@@ -54,6 +54,183 @@ function fmtDateTime(iso: string): string {
   } catch {
     return iso;
   }
+}
+
+// ─── Call grouping ───────────────────────────────────────────────────────────
+
+/** A single call represented by one row in the search results. */
+interface CallGroup {
+  /** The representative message (initial inbound INVITE, or earliest message) */
+  representative: HomerSearchResult;
+  /** All Call-IDs in this correlation group */
+  callIds: string[];
+  /** Every SIP message belonging to this call */
+  messages: HomerSearchResult[];
+  /** Final SIP response status (highest non-1xx response, or null) */
+  finalStatus: number | null;
+  /** Duration in seconds from first INVITE to last BYE, or null if unavailable */
+  durationSec: number | null;
+}
+
+/**
+ * Groups SIP messages into calls using the correlations map.
+ *
+ * The correlations map has Call-ID -> list of related Call-IDs. We build
+ * connected components (union-find style) so that A-leg and B-leg messages
+ * are merged into a single call group. Then we pick the best representative
+ * message for each group: the earliest INVITE request (status === null),
+ * falling back to the earliest message overall.
+ */
+function groupMessagesByCall(
+  results: HomerSearchResult[],
+  correlations: Record<string, string[]>,
+): CallGroup[] {
+  // Build union-find: map each Call-ID to its canonical group key
+  const parent = new Map<string, string>();
+
+  function find(id: string): string {
+    let root = id;
+    while (parent.has(root) && parent.get(root) !== root) {
+      root = parent.get(root)!;
+    }
+    // Path compression
+    let current = id;
+    while (current !== root) {
+      const next = parent.get(current) ?? current;
+      parent.set(current, root);
+      current = next;
+    }
+    return root;
+  }
+
+  function union(a: string, b: string): void {
+    const rootA = find(a);
+    const rootB = find(b);
+    if (rootA !== rootB) {
+      parent.set(rootB, rootA);
+    }
+  }
+
+  // Initialize each Call-ID as its own parent
+  for (const row of results) {
+    if (!parent.has(row.callid)) {
+      parent.set(row.callid, row.callid);
+    }
+  }
+
+  // Union correlated Call-IDs
+  for (const [cid, related] of Object.entries(correlations)) {
+    if (!parent.has(cid)) {
+      parent.set(cid, cid);
+    }
+    for (const relatedCid of related) {
+      if (!parent.has(relatedCid)) {
+        parent.set(relatedCid, relatedCid);
+      }
+      union(cid, relatedCid);
+    }
+  }
+
+  // Group messages by their root Call-ID
+  const groups = new Map<string, HomerSearchResult[]>();
+  for (const row of results) {
+    const root = find(row.callid);
+    const existing = groups.get(root);
+    if (existing) {
+      existing.push(row);
+    } else {
+      groups.set(root, [row]);
+    }
+  }
+
+  // Build CallGroup objects
+  const callGroups: CallGroup[] = [];
+  for (const [, messages] of groups) {
+    // Sort messages by timestamp (earliest first)
+    messages.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+
+    // Collect all unique Call-IDs in this group
+    const callIdSet = new Set<string>();
+    for (const msg of messages) {
+      callIdSet.add(msg.callid);
+    }
+    const callIds = Array.from(callIdSet);
+
+    // Find the representative: earliest INVITE request (status === null)
+    let representative = messages.find(
+      (m) => m.method.toUpperCase() === 'INVITE' && m.status === null,
+    );
+    // Fallback: just the earliest message
+    if (!representative) {
+      representative = messages[0];
+    }
+
+    // Determine the final call status: highest non-1xx response code in the group.
+    // This shows whether the call was answered (200), rejected (4xx/5xx), etc.
+    let finalStatus: number | null = null;
+    for (const msg of messages) {
+      if (msg.status !== null && msg.status >= 200) {
+        if (finalStatus === null || msg.status > finalStatus) {
+          finalStatus = msg.status;
+        }
+      }
+    }
+    // If we only have 1xx provisional responses, show the highest one
+    if (finalStatus === null) {
+      for (const msg of messages) {
+        if (msg.status !== null && msg.status >= 100 && msg.status < 200) {
+          if (finalStatus === null || msg.status > finalStatus) {
+            finalStatus = msg.status;
+          }
+        }
+      }
+    }
+
+    // Calculate duration: from first INVITE to the last BYE (or last message)
+    let durationSec: number | null = null;
+    const firstInvite = messages.find(
+      (m) => m.method.toUpperCase() === 'INVITE' && m.status === null,
+    );
+    const lastBye = [...messages]
+      .reverse()
+      .find((m) => m.method.toUpperCase() === 'BYE');
+    if (firstInvite && lastBye) {
+      const startNs = firstInvite.timestamp_ns;
+      const endNs = lastBye.timestamp_ns;
+      if (
+        typeof startNs === 'number' &&
+        typeof endNs === 'number' &&
+        startNs > 0 &&
+        endNs > 0
+      ) {
+        durationSec = Math.round((endNs - startNs) / 1_000_000_000);
+      }
+    }
+
+    callGroups.push({
+      representative,
+      callIds,
+      messages,
+      finalStatus,
+      durationSec,
+    });
+  }
+
+  // Sort call groups by representative timestamp (newest first for search results)
+  callGroups.sort((a, b) =>
+    b.representative.timestamp.localeCompare(a.representative.timestamp),
+  );
+
+  return callGroups;
+}
+
+/** Format seconds into a human-readable duration string. */
+function fmtCallDuration(seconds: number): string {
+  if (seconds < 0) return '—';
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  if (mins === 0) return `${secs}s`;
+  return `${mins}m ${secs}s`;
 }
 
 // ─── Method badge ─────────────────────────────────────────────────────────────
@@ -260,16 +437,83 @@ function NoResultsState() {
   );
 }
 
+// ─── Message count badge ─────────────────────────────────────────────────────
+
+interface MsgCountBadgeProps {
+  count: number;
+}
+
+function MsgCountBadge({ count }: MsgCountBadgeProps) {
+  return (
+    <span
+      style={{
+        display: 'inline-block',
+        padding: '2px 8px',
+        borderRadius: 10,
+        fontSize: '0.7rem',
+        fontWeight: 600,
+        fontFamily: 'ui-monospace, monospace',
+        background: 'rgba(59,130,246,0.12)',
+        color: '#60a5fa',
+        border: '1px solid rgba(59,130,246,0.25)',
+        whiteSpace: 'nowrap',
+      }}
+    >
+      {count} msg{count !== 1 ? 's' : ''}
+    </span>
+  );
+}
+
+// ─── Duration badge ──────────────────────────────────────────────────────────
+
+interface DurationBadgeProps {
+  seconds: number | null;
+}
+
+function DurationBadge({ seconds }: DurationBadgeProps) {
+  if (seconds === null) {
+    return (
+      <span
+        style={{
+          fontSize: '0.78rem',
+          fontFamily: 'ui-monospace, monospace',
+          color: '#475569',
+        }}
+      >
+        —
+      </span>
+    );
+  }
+
+  return (
+    <span
+      style={{
+        display: 'inline-block',
+        padding: '2px 8px',
+        borderRadius: 4,
+        fontSize: '0.7rem',
+        fontWeight: 600,
+        fontFamily: 'ui-monospace, monospace',
+        background: 'rgba(168,85,247,0.12)',
+        color: '#c084fc',
+        border: '1px solid rgba(168,85,247,0.25)',
+        whiteSpace: 'nowrap',
+      }}
+    >
+      {fmtCallDuration(seconds)}
+    </span>
+  );
+}
+
 // ─── Results table ────────────────────────────────────────────────────────────
 
 interface ResultsTableProps {
-  results: HomerSearchResult[];
-  correlations: Record<string, string[]>;
+  callGroups: CallGroup[];
   startTime: string;
   endTime: string;
 }
 
-function ResultsTable({ results, correlations, startTime, endTime }: ResultsTableProps) {
+function ResultsTable({ callGroups, startTime, endTime }: ResultsTableProps) {
   const thStyle: React.CSSProperties = {
     padding: '10px 14px',
     textAlign: 'left',
@@ -306,26 +550,26 @@ function ResultsTable({ results, correlations, startTime, endTime }: ResultsTabl
             <th style={thStyle}>From</th>
             <th style={thStyle}>To</th>
             <th style={thStyle}>Call-ID</th>
-            <th style={thStyle}>Method</th>
-            <th style={thStyle}>Source IP</th>
-            <th style={thStyle}>Dest IP</th>
-            <th style={thStyle}>Status</th>
+            <th style={thStyle}>Source</th>
+            <th style={thStyle}>Dest</th>
+            <th style={thStyle}>Result</th>
+            <th style={thStyle}>Duration</th>
+            <th style={thStyle}>Messages</th>
             <th style={thStyle}>Node</th>
           </tr>
         </thead>
         <tbody>
-          {results.map((row, idx) => {
+          {callGroups.map((group, idx) => {
+            const row = group.representative;
+
             // Scope the Grafana deep link to exactly this call's SIP messages
             // by passing ALL correlated Call-IDs (A-leg + B-leg) as a regex OR
             // pattern. The API's correlations map tells us which Call-IDs belong
             // to the same call via X-CID header analysis.
-            const relatedCallIds = correlations[row.callid] ?? [row.callid];
-            const callIdPattern = relatedCallIds.join('|');
+            const callIdPattern = group.callIds.join('|');
 
-            // Gather timestamps from ALL correlated legs for the time window
-            const correlatedCids = new Set(relatedCallIds);
-            const callTimestamps = results
-              .filter((r) => correlatedCids.has(r.callid))
+            // Gather timestamps from ALL messages in this call group for the time window
+            const callTimestamps = group.messages
               .map((r) => r.timestamp_ns)
               .filter((ts): ts is number => typeof ts === 'number' && ts > 0);
 
@@ -351,7 +595,7 @@ function ResultsTable({ results, correlations, startTime, endTime }: ResultsTabl
 
             return (
               <tr
-                key={`${row.callid}-${row.timestamp}-${idx}`}
+                key={`${row.callid}-${idx}`}
                 onClick={() => window.open(grafanaLink, '_blank', 'noopener,noreferrer')}
                 style={{ cursor: 'pointer', transition: 'background 0.15s' }}
                 onMouseEnter={(e) => {
@@ -361,6 +605,7 @@ function ResultsTable({ results, correlations, startTime, endTime }: ResultsTabl
                 onMouseLeave={(e) => {
                   (e.currentTarget as HTMLTableRowElement).style.background = '';
                 }}
+                title="Click to open full SIP ladder in Grafana"
               >
                 <td style={{ ...tdStyle, ...monoStyle, whiteSpace: 'nowrap' }}>
                   {fmtDateTime(row.timestamp)}
@@ -376,17 +621,20 @@ function ResultsTable({ results, correlations, startTime, endTime }: ResultsTabl
                     textOverflow: 'ellipsis',
                     whiteSpace: 'nowrap',
                   }}
-                  title={row.callid}
+                  title={group.callIds.join('\n')}
                 >
                   {row.callid}
-                </td>
-                <td style={tdStyle}>
-                  <MethodBadge method={row.method} />
                 </td>
                 <td style={{ ...tdStyle, ...monoStyle }}>{row.src_ip}</td>
                 <td style={{ ...tdStyle, ...monoStyle }}>{row.dst_ip}</td>
                 <td style={tdStyle}>
-                  <StatusBadge status={row.status} />
+                  <StatusBadge status={group.finalStatus} />
+                </td>
+                <td style={tdStyle}>
+                  <DurationBadge seconds={group.durationSec} />
+                </td>
+                <td style={tdStyle}>
+                  <MsgCountBadge count={group.messages.length} />
                 </td>
                 <td style={{ ...tdStyle, ...monoStyle, color: '#64748b' }}>
                   {row.node ?? '—'}
@@ -481,9 +729,18 @@ export function TroubleshootingPage() {
     [handleSearch],
   );
 
-  // ── Derived values (after all hooks) ──
+  // ── Memoised call grouping (hook — must stay above early returns) ──
   const results = searchMutation.data?.data ?? [];
   const correlations = searchMutation.data?.correlations ?? {};
+
+  const callGroups = useMemo(
+    () => groupMessagesByCall(results, correlations),
+    [results, correlations],
+  );
+
+  // ── Derived values (after all hooks) ──
+  const totalMessages = results.length;
+  const totalCalls = callGroups.length;
   const isLoading = searchMutation.isPending;
   const isError = searchMutation.isError;
   const errorMessage = isError
@@ -868,7 +1125,7 @@ export function TroubleshootingPage() {
             </span>
             {hasSearched && !isLoading && !isError && (
               <span style={{ fontSize: '0.78rem', color: '#475569' }}>
-                {results.length} {results.length === 1 ? 'trace' : 'traces'} found
+                {totalCalls} {totalCalls === 1 ? 'call' : 'calls'} found ({totalMessages} total messages)
               </span>
             )}
           </div>
@@ -927,8 +1184,8 @@ export function TroubleshootingPage() {
             <NoResultsState />
           )}
 
-          {!isLoading && !isError && results.length > 0 && (
-            <ResultsTable results={results} correlations={correlations} startTime={startTime} endTime={endTime} />
+          {!isLoading && !isError && callGroups.length > 0 && (
+            <ResultsTable callGroups={callGroups} startTime={startTime} endTime={endTime} />
           )}
         </div>
       </div>
