@@ -179,10 +179,12 @@ def _parse_loki_response(
             try:
                 ts_ns = int(ts_ns_str)
                 ts_seconds = ts_ns / 1_000_000_000
-                # Include milliseconds in the display timestamp
+                # Include microseconds (6 digits) in the display timestamp
+                # for correct SIP message ordering — milliseconds alone are
+                # insufficient when multiple messages arrive in the same ms
                 ts_iso = datetime.fromtimestamp(
                     ts_seconds, tz=timezone.utc
-                ).strftime("%Y-%m-%dT%H:%M:%S.") + f"{int((ts_ns % 1_000_000_000) / 1_000_000):03d}Z"
+                ).strftime("%Y-%m-%dT%H:%M:%S.") + f"{int((ts_ns % 1_000_000_000) / 1_000):06d}Z"
             except (ValueError, OSError):
                 ts_ns = 0
                 ts_iso = None

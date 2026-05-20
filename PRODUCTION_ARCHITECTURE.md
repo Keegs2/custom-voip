@@ -723,7 +723,47 @@ RCF-only deployment is substantially faster than a full UCaaS platform. No WebRT
 
 Features to add in subsequent releases, after RCF is stable in production:
 
-### Phase 2: SIP Trunking Product
+### Phase 2: Toll-Free (8XX) Multi-Carrier Expansion
+
+~22,000 RCF and Voicemail subscribers use toll-free (8XX) numbers (LCC 6 = '8XX Orig'). These cannot be migrated until multi-carrier inbound toll-free infrastructure is in place. Geographic DIDs migrate first on Bandwidth only.
+
+**Why multi-carrier:** Toll-free routing uses SMS/800 (TFN Registry) with LCO (Least Cost Origination) — the Customer Record routes each inbound call to the cheapest carrier based on the caller's origination. Single-carrier loses LCO savings and redundancy.
+
+**Required inbound toll-free carriers:**
+
+| Carrier | Notes |
+|---------|-------|
+| Inteliquent (Sinch) | Major toll-free carrier |
+| Lumen (CenturyLink/Level 3) | Tier 1 |
+| Verizon | Tier 1 |
+| AT&T | Tier 1 |
+| 382/Iristel | Canadian CLEC |
+| TBD | Possibly one more |
+
+All carrier contracts are through Granite Telecommunications. Direct trunk agreements exist on Granite's other systems.
+
+**RespOrg strategy:** Existing RespOrg ID is assigned to another Granite system. A new RespOrg ID may be needed for this platform to independently manage SMS/800 Customer Records and LCO routing tables.
+
+**Platform changes required:**
+
+1. **Kamailio multi-carrier ACL:** Expand from Bandwidth-only (2 IPs) to per-carrier trusted IP sets. Use `address` module or `htable` for scalable carrier identification.
+2. **Per-carrier dispatcher groups:** Each carrier gets its own dispatcher group in `dispatcher.list` for health monitoring and failover.
+3. **Per-carrier SIP normalization:** Each carrier has different SIP behaviors (Session-Expires, Via handling, codec preferences). REPLY_HANDLER and request processing may need per-carrier branches.
+4. **Carrier identification on inbound:** Kamailio must tag each inbound INVITE with the originating carrier (e.g., `X-Inbound-Carrier` header) for CDR attribution and debugging.
+5. **GCP firewall rules:** Each carrier's signaling and media IP ranges must be allowed on SBC VMs.
+6. **Homer/HEP labeling:** HEP capture should identify carrier per-leg for SIP debugging.
+
+**Architecture target:** 6 carrier interconnects (Bandwidth + 5 toll-free carriers). Design Kamailio carrier handling to be table-driven so adding a new carrier is a config change, not a code change.
+
+**Migration sequence:**
+1. Geographic DIDs migrate first (Bandwidth only) — **current phase**
+2. Establish SIP trunks with each toll-free carrier
+3. Obtain/provision new RespOrg ID
+4. Pilot: 10-50 toll-free numbers through Bandwidth to validate 8XX routing on the platform
+5. Configure LCO routing in SMS/800 Customer Records across all carriers
+6. Phased migration: low-volume TFNs first, high-volume utility hotlines last
+
+### Phase 3: SIP Trunking Product (was Phase 2)
 - Customer PBX registration and IP authentication via Kamailio
 - SIP TLS on port 5061 for trunk customers who require encrypted signaling
 - SRTP optional per-trunk (`rtp-secure-media=optional` as channel variable)
@@ -731,19 +771,19 @@ Features to add in subsequent releases, after RCF is stable in production:
 - Per-trunk CPS limits and channel limits in Redis
 - Customer-facing trunk provisioning in FastAPI
 
-### Phase 3: API Calling Product
+### Phase 4: API Calling Product
 - REST API for programmatic call origination (click-to-call, dialers)
 - Webhook CDR delivery for real-time call events
 - API key authentication and rate limiting in FastAPI
 - Call recording infrastructure (mod_record, object storage)
 
-### Phase 4: Observability Enhancements
+### Phase 5: Observability Enhancements
 - Homer SIP capture (HEP protocol from Kamailio and FreeSWITCH)
 - RTPEngine for media anchoring and SRTP-to-RTP transcryption
 - MOS/jitter/packet loss metrics from RTP stats
 - SIPp-based synthetic monitoring (canary calls)
 
-### Phase 5: UCaaS Features (for trunk/api/hybrid customers only)
+### Phase 6: UCaaS Features (for trunk/api/hybrid customers only)
 - mod_verto / WebRTC for browser-based softphone
 - WSS on port 8083, GSLB for WebRTC clients
 - SRTP mandatory for WebRTC legs
@@ -751,7 +791,7 @@ Features to add in subsequent releases, after RCF is stable in production:
 - React UI with Nginx reverse proxy
 - FreeSWITCH sizing upgrade to 32 vCPU / 64 GB for transcoding workload
 
-### Phase 6: Compliance
+### Phase 7: Compliance
 - E911 integration with Bandwidth E911 API (Kari's Law, RAY BAUM's Act)
 - Call recording retention (90 days hot, 7 years cold)
 - HIPAA/PCI compliance hardening if serving healthcare or financial customers

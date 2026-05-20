@@ -31,7 +31,9 @@ function displayUser(value: string): string {
   return looksLikePhone(value) ? fmt(value) : value;
 }
 
-/** Format an ISO date string to a readable local datetime. */
+/** Format an ISO date string to a readable local datetime with microsecond precision.
+ *  JavaScript Date only has millisecond precision, so we extract the fractional
+ *  seconds directly from the ISO string (e.g. "2026-05-20T06:44:42.123456Z"). */
 function fmtDateTime(iso: string): string {
   try {
     const d = new Date(iso);
@@ -43,9 +45,12 @@ function fmtDateTime(iso: string): string {
       second: '2-digit',
       hour12: true,
     }).format(d);
-    // Insert milliseconds before AM/PM for correct display: "10:42:31.352 AM"
-    const ms = '.' + String(d.getMilliseconds()).padStart(3, '0');
-    return base.replace(/(\d{2})\s*(AM|PM)/i, `$1${ms} $2`);
+    // Extract fractional seconds from the ISO string directly (up to 6 digits)
+    // since Date.getMilliseconds() truncates to 3 digits
+    const fracMatch = iso.match(/\.(\d+)Z?$/);
+    const frac = fracMatch ? fracMatch[1].padEnd(6, '0').slice(0, 6) : '000000';
+    const dotFrac = '.' + frac;
+    return base.replace(/(\d{2})\s*(AM|PM)/i, `$1${dotFrac} $2`);
   } catch {
     return iso;
   }

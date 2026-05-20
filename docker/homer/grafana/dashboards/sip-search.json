@@ -166,18 +166,31 @@
           }
         },
         {
+          "id": "convertFieldType",
+          "options": {
+            "conversions": [
+              {
+                "targetField": "tsNs",
+                "destinationType": "time",
+                "dateFormat": "YYYY"
+              }
+            ]
+          }
+        },
+        {
           "id": "organize",
           "options": {
             "excludeByName": {
               "id": true,
-              "tsNs": true,
+              "tsNs": false,
               "Line": true,
               "type": true,
               "job": true,
-              "hostname": true
+              "hostname": true,
+              "Time": true
             },
             "indexByName": {
-              "Time": 0,
+              "tsNs": 0,
               "method": 1,
               "response": 2,
               "call_id": 3,
@@ -186,10 +199,13 @@
               "dst_ip": 6,
               "dst_port": 7,
               "protocol": 8,
-              "node": 9
+              "node": 9,
+              "labels": 10,
+              "from": 11,
+              "to": 12
             },
             "renameByName": {
-              "Time": "Time",
+              "tsNs": "Time",
               "method": "Method",
               "response": "Response",
               "call_id": "Call-ID",
@@ -222,7 +238,11 @@
             "properties": [
               {
                 "id": "custom.width",
-                "value": 180
+                "value": 230
+              },
+              {
+                "id": "unit",
+                "value": "time:YYYY-MM-DD HH:mm:ss.SSS"
               }
             ]
           },
@@ -320,6 +340,7 @@
             "desc": false
           }
         ],
+        "frameIndex": -1,
         "cellHeight": "sm",
         "footer": {
           "show": true,
@@ -363,17 +384,17 @@
           "method"
         ],
         "belowArrow": [
-          "node"
+          "response"
         ],
         "details": [
-          "timestamp"
+          "call_id",
+          "node"
         ],
         "sourceLabel": [],
         "destinationLabel": [],
         "sortoption": "time_old",
         "colorGenerator": [
-          "call_id",
-          "type"
+          "call_id"
         ],
         "showbody": false
       },
