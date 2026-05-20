@@ -141,7 +141,7 @@
       "id": 2,
       "type": "table",
       "title": "SIP Messages",
-      "description": "Parsed SIP message table. Click a row to inspect the full message. Use column filters to narrow results.",
+      "description": "Parsed SIP message table with multi-node dedup. Messages captured by both Kamailio (node=100) and FreeSWITCH (node=200) are grouped into a single row with merged Node values. For precise timestamp-aware dedup, use the React UI (SIP Trace Search page).",
       "gridPos": { "h": 10, "w": 24, "x": 0, "y": 7 },
       "datasource": {
         "type": "loki",
@@ -166,6 +166,56 @@
           }
         },
         {
+          "id": "groupBy",
+          "options": {
+            "fields": {
+              "Time": {
+                "aggregations": ["first"],
+                "operation": "aggregate"
+              },
+              "call_id": {
+                "operation": "groupby"
+              },
+              "method": {
+                "operation": "groupby"
+              },
+              "response": {
+                "operation": "groupby"
+              },
+              "src_ip": {
+                "operation": "groupby"
+              },
+              "dst_ip": {
+                "operation": "groupby"
+              },
+              "src_port": {
+                "aggregations": ["first"],
+                "operation": "aggregate"
+              },
+              "dst_port": {
+                "aggregations": ["first"],
+                "operation": "aggregate"
+              },
+              "protocol": {
+                "aggregations": ["first"],
+                "operation": "aggregate"
+              },
+              "node": {
+                "aggregations": ["allValues"],
+                "operation": "aggregate"
+              },
+              "from": {
+                "aggregations": ["first"],
+                "operation": "aggregate"
+              },
+              "to": {
+                "aggregations": ["first"],
+                "operation": "aggregate"
+              }
+            }
+          }
+        },
+        {
           "id": "organize",
           "options": {
             "excludeByName": {
@@ -177,31 +227,31 @@
               "hostname": true
             },
             "indexByName": {
-              "Time": 0,
+              "Time (first)": 0,
               "method": 1,
               "response": 2,
               "call_id": 3,
               "src_ip": 4,
-              "src_port": 5,
+              "src_port (first)": 5,
               "dst_ip": 6,
-              "dst_port": 7,
-              "protocol": 8,
-              "node": 9,
+              "dst_port (first)": 7,
+              "protocol (first)": 8,
+              "node (allValues)": 9,
               "labels": 10,
-              "from": 11,
-              "to": 12
+              "from (first)": 11,
+              "to (first)": 12
             },
             "renameByName": {
-              "Time": "Time",
+              "Time (first)": "Time",
               "method": "Method",
               "response": "Response",
               "call_id": "Call-ID",
               "src_ip": "Source",
-              "src_port": "SPort",
+              "src_port (first)": "SPort",
               "dst_ip": "Destination",
-              "dst_port": "DPort",
-              "protocol": "Proto",
-              "node": "Node"
+              "dst_port (first)": "DPort",
+              "protocol (first)": "Proto",
+              "node (allValues)": "Node"
             }
           }
         }
@@ -410,7 +460,7 @@
         }
       ],
       "options": {
-        "dedupStrategy": "none",
+        "dedupStrategy": "signature",
         "enableLogDetails": true,
         "prettifyLogMessage": false,
         "showCommonLabels": false,

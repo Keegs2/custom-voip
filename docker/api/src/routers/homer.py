@@ -311,14 +311,91 @@ def _extract_callids(results: list[dict[str, Any]]) -> set[str]:
 
 
 def _deduplicate_results(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Deduplicate results by (timestamp_ns, callid) and sort by nanosecond timestamp."""
-    seen: set[tuple[int, str]] = set()
-    deduped: list[dict[str, Any]] = []
+    """Deduplicate SIP messages captured by multiple HEP nodes.
+
+    The same SIP message traversing between Kamailio (node=100) and
+    FreeSWITCH (node=200) is captured by both: once by the sender's
+    sip_trace/trace_flag and once by the receiver's mod_sofia HEP capture.
+    These are the same logical message but appear as separate Loki entries
+    with different node IDs and timestamps a few milliseconds apart.
+
+    Dedup strategy:
+      1. Group by (call_id, method, response, src_ip, dst_ip) — the "message
+         identity" fields that are identical for the same SIP message captured
+         at different points.
+      2. Within each group, cluster entries whose timestamps are within
+         DEDUP_WINDOW_NS of each other (same physical message, captured by
+         sender and receiver within a few ms).
+      3. For each cluster, keep the earliest entry and merge all node IDs
+         into a comma-separated string (e.g. "100,200").
+      4. Exact (timestamp_ns, callid) dedup is applied first to handle the
+         trivial case where the same query returns truly identical rows.
+
+    This preserves multi-node visibility (the node field shows which capture
+    points saw the message) while eliminating duplicate rows.
+    """
+    # Tunable: maximum time difference (in nanoseconds) between two captures
+    # of the same SIP message to consider them duplicates.  50ms accommodates
+    # VPC latency + heplify-server processing jitter.
+    DEDUP_WINDOW_NS = 50_000_000  # 50 ms
+
+    if not results:
+        return []
+
+    # --- Pass 1: exact dedup by (timestamp_ns, callid) -----------------------
+    # This removes truly identical rows from overlapping Loki queries (the
+    # correlation query may return rows already in the initial result set).
+    exact_seen: set[tuple[int, str]] = set()
+    unique: list[dict[str, Any]] = []
     for r in results:
         key = (r.get("timestamp_ns", 0), r.get("callid", ""))
-        if key not in seen:
-            seen.add(key)
-            deduped.append(r)
+        if key not in exact_seen:
+            exact_seen.add(key)
+            unique.append(r)
+
+    # --- Pass 2: semantic dedup by message identity + timestamp clustering ----
+    # Build groups keyed by the SIP message identity (everything that is the
+    # same for the sender and receiver capture of the same packet).
+    groups: dict[tuple[str, str, str, str, str], list[dict[str, Any]]] = {}
+    for r in unique:
+        gkey = (
+            r.get("callid", ""),
+            r.get("method", ""),
+            str(r.get("status", "") or ""),  # response code as string
+            r.get("src_ip", ""),
+            r.get("dst_ip", ""),
+        )
+        groups.setdefault(gkey, []).append(r)
+
+    deduped: list[dict[str, Any]] = []
+    for members in groups.values():
+        # Sort by timestamp within the group
+        members.sort(key=lambda r: r.get("timestamp_ns", 0))
+
+        # Cluster entries within DEDUP_WINDOW_NS of each other
+        clusters: list[list[dict[str, Any]]] = []
+        for entry in members:
+            ts = entry.get("timestamp_ns", 0)
+            if clusters and (ts - clusters[-1][0].get("timestamp_ns", 0)) <= DEDUP_WINDOW_NS:
+                clusters[-1].append(entry)
+            else:
+                clusters.append([entry])
+
+        # For each cluster, keep the earliest entry and merge node IDs
+        for cluster in clusters:
+            representative = cluster[0]  # earliest timestamp
+            # Collect all distinct node values from the cluster
+            nodes: list[str] = []
+            seen_nodes: set[str] = set()
+            for entry in cluster:
+                node_val = str(entry.get("node", ""))
+                if node_val and node_val not in seen_nodes:
+                    seen_nodes.add(node_val)
+                    nodes.append(node_val)
+            if nodes:
+                representative["node"] = ",".join(sorted(nodes))
+            deduped.append(representative)
+
     deduped.sort(key=lambda r: r.get("timestamp_ns", 0))
     return deduped
 
