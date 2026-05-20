@@ -6,7 +6,6 @@ data as structured log entries queryable via LogQL.
 
 No authentication required for qryn (no more Homer 7 JWT flow).
 """
-import json
 import os
 import logging
 import re
@@ -129,11 +128,10 @@ def _parse_loki_response(
     heplify-server stores SIP data with metadata in stream LABELS (not in
     the log line, which is the raw SIP message text). We read from labels.
 
-    When extract_xcid=True, parses the raw SIP body for X-CID headers AND
-    the real Call-ID header to support A/B leg correlation mapping. The real
-    Call-ID is needed because heplify-server's FORCEALEGID=true overwrites
-    the call_id label of B-leg messages (those containing X-CID) with the
-    A-leg Call-ID, making the label unreliable for B-leg identification.
+    When extract_xcid=True, parses the raw SIP body for X-CID headers to
+    support A/B leg correlation mapping. With FORCEALEGID=false in
+    heplify-server, the call_id label contains the real Call-ID for both
+    A-leg and B-leg messages, so no real_callid extraction is needed.
 
     Loki response shape:
     {
@@ -156,10 +154,6 @@ def _parse_loki_response(
     }
     """
     _xcid_re = re.compile(r"X-CID:\s*(.+)", re.IGNORECASE) if extract_xcid else None
-    # Match "Call-ID: value" in the raw SIP body. Must be at start of line.
-    # The Call-ID header value may contain @, -, alphanumeric, and dots.
-    # Use \S+ to avoid capturing trailing \r or whitespace.
-    _callid_re = re.compile(r"^Call-ID:\s*(\S+)", re.IGNORECASE | re.MULTILINE) if extract_xcid else None
     results: list[dict[str, Any]] = []
 
     data = loki_data.get("data", {})
@@ -210,21 +204,11 @@ def _parse_loki_response(
                 "raw_msg": log_line if log_line else None,
             }
 
-            # Extract X-CID and real Call-ID from raw SIP body for correlation
+            # Extract X-CID from raw SIP body for correlation
             if _xcid_re is not None and log_line:
                 m = _xcid_re.search(log_line)
                 if m:
                     record["x_cid"] = m.group(1).strip()
-
-                # Extract the REAL Call-ID from the SIP body. This is needed
-                # because FORCEALEGID=true in heplify-server overwrites the
-                # call_id label with the X-CID value (A-leg Call-ID) for any
-                # message containing X-CID. The actual B-leg Call-ID is only
-                # available from the raw SIP message's Call-ID header.
-                if _callid_re is not None:
-                    cid_match = _callid_re.search(log_line)
-                    if cid_match:
-                        record["real_callid"] = cid_match.group(1).strip()
 
             results.append(record)
 
@@ -431,20 +415,16 @@ def _build_correlations(
     correlation query (extract_xcid=True). The X-CID value is the A-leg
     Call-ID that the B-leg references.
 
-    IMPORTANT: heplify-server's FORCEALEGID=true overwrites the call_id label
-    of B-leg messages (those containing X-CID) with the A-leg Call-ID. This
-    means r["callid"] (from the label) is unreliable for B-leg identification.
-    We use r["real_callid"] (extracted from the raw SIP Call-ID header) instead,
-    falling back to r["callid"] if the raw extraction is unavailable.
+    With FORCEALEGID=false in heplify-server, the call_id label contains
+    the real Call-ID for both A-leg and B-leg messages, so r["callid"]
+    is reliable and no real_callid workaround is needed.
     """
     # Map: B-leg Call-ID -> A-leg Call-ID (from X-CID header)
     bleg_to_aleg: dict[str, str] = {}
     for r in corr_results:
         xcid = r.get("x_cid", "")
-        # Use the real Call-ID from the SIP body (not the Loki label which
-        # FORCEALEGID may have overwritten to the A-leg Call-ID)
-        bleg_cid = r.get("real_callid", "") or r.get("callid", "")
-        if xcid and bleg_cid and xcid in known_callids and bleg_cid != xcid:
+        bleg_cid = r.get("callid", "")
+        if xcid and bleg_cid and bleg_cid != xcid:
             bleg_to_aleg[bleg_cid] = xcid
 
     # Build correlation groups: A-leg -> set of all related Call-IDs
@@ -474,9 +454,22 @@ async def search_sip_traces(
     """Search SIP traces via qryn's Loki-compatible query_range API.
 
     Builds a LogQL query from the search parameters and queries qryn.
-    When correlation is enabled, performs two-step A/B leg correlation:
-    finds initial results, discovers related call legs via X-CID headers,
-    and returns all messages from all related legs.
+    When correlation is enabled, performs A/B leg correlation in 3 steps:
+
+    1. Initial phone number search (limit=500) finds both A-leg and B-leg
+       messages where the number appears in the SIP body.
+    2. Correlation query finds X-CID headers referencing known Call-IDs,
+       building a map of B-leg -> A-leg relationships.
+    3. Final query fetches ALL messages for ALL correlated Call-IDs using
+       precise call_id label selectors. This is the definitive result set
+       — it catches B-leg responses (100 Trying, 183, 200 OK) that don't
+       contain the phone number or X-CID header.
+
+    The final query ALWAYS runs when correlations are found, even if no
+    new Call-IDs were discovered. This is critical because the initial
+    phone-number regex query may truncate results at the limit, missing
+    some B-leg messages. The final call_id-based query is precise and
+    returns complete data for all legs.
     """
     if not body.from_user and not body.to_user and not body.call_id:
         raise HTTPException(
@@ -501,9 +494,16 @@ async def search_sip_traces(
             detail=f"Invalid timestamp format: {exc}",
         )
 
+    # Limits: 500 for initial phone-number search (8 calls x ~30 msgs = 240+),
+    # 1000 for the final call_id query which fetches both legs of all calls.
+    INITIAL_LIMIT = 500
+    FINAL_LIMIT = 1000
+
     async with httpx.AsyncClient(timeout=15.0) as client:
-        # Step 1: Initial query
-        initial_results = await _query_qryn(client, logql, start_ns, end_ns)
+        # Step 1: Initial query — phone number regex match
+        initial_results = await _query_qryn(
+            client, logql, start_ns, end_ns, limit=INITIAL_LIMIT,
+        )
 
         # Sort helper for early returns — use nanosecond precision
         def _sorted(r: list) -> list:
@@ -525,8 +525,8 @@ async def search_sip_traces(
                 )
             return {"data": _sorted(initial_results), "correlations": {}}
 
-        # Step 2: Correlation — search for X-CID headers containing our call IDs
-        # This finds B-leg messages that reference our A-leg call_ids.
+        # Step 2: Correlation — search for X-CID headers containing our call IDs.
+        # This finds B-leg messages that reference our A-leg Call-IDs.
         # extract_xcid=True parses X-CID from the raw SIP body so we can
         # map each B-leg Call-ID back to its specific A-leg Call-ID.
         cid_patterns = "|".join(re.escape(cid) for cid in known_callids)
@@ -544,39 +544,46 @@ async def search_sip_traces(
         # Build the correlations map from X-CID data BEFORE stripping x_cid
         correlations = _build_correlations(known_callids, corr_results)
 
-        # Fix callid field and strip internal correlation fields.
-        # FORCEALEGID=true in heplify-server overwrites the call_id label of
-        # B-leg messages (those with X-CID) to the A-leg Call-ID. We must
-        # restore the real B-leg Call-ID (from the raw SIP body) so the
-        # frontend correctly groups messages by their actual call leg.
+        # Strip internal correlation fields from corr_results
         for r in corr_results:
-            real_cid = r.pop("real_callid", None)
-            if real_cid and real_cid != r.get("callid", ""):
-                r["callid"] = real_cid
             r.pop("x_cid", None)
 
-        # Extract any NEW call_ids discovered from the correlated results.
-        # After the fix above, callid now reflects the real B-leg Call-ID.
+        # Collect any NEW call_ids discovered via correlation (B-leg IDs
+        # that weren't in the initial results, e.g. due to limit truncation).
         new_callids = _extract_callids(corr_results) - known_callids
 
-        if not new_callids:
-            # No new legs discovered — merge what we have and return
+        # Check if ANY correlations were actually found (i.e., any B-leg
+        # Call-ID was mapped to an A-leg Call-ID). This is the key check:
+        # even when new_callids is empty (both legs already in known_callids
+        # from the initial query), the initial results may be INCOMPLETE due
+        # to the query limit. B-leg responses (100 Trying, 183, 200 OK from
+        # carrier) don't contain the phone number, so they may have been
+        # truncated. The final query uses precise call_id label selectors
+        # and fetches ALL messages for all known legs.
+        has_correlations = any(
+            len(group) > 1 for group in correlations.values()
+        )
+
+        if not has_correlations:
+            # No A/B correlation found — merge what we have and return.
+            # All Call-IDs are independent calls, no B-legs to fetch.
             merged = initial_results + corr_results
             return {
                 "data": _deduplicate_results(merged),
                 "correlations": correlations,
             }
 
-        # Step 3: Final query — get ALL messages from all related legs.
-        # Use extract_xcid=True so we can fix callid for B-leg messages that
-        # had their call_id label overwritten by FORCEALEGID.
+        # Step 3: Final query — get ALL messages from all correlated legs.
+        # This uses call_id label selectors (not phone number regex), so it
+        # fetches every SIP message for each Call-ID including B-leg responses
+        # that don't contain the searched phone number.
         all_callids = known_callids | new_callids
         cid_regex = "|".join(re.escape(cid) for cid in all_callids)
         final_query = f'{{type="sip", call_id=~"{cid_regex}"}}'
 
         try:
             final_results = await _query_qryn(
-                client, final_query, start_ns, end_ns, extract_xcid=True,
+                client, final_query, start_ns, end_ns, limit=FINAL_LIMIT,
             )
         except HTTPException:
             # Final query failed — merge initial + correlation results
@@ -587,14 +594,10 @@ async def search_sip_traces(
                 "correlations": correlations,
             }
 
-        # Fix callid for any FORCEALEGID-affected messages in final results
-        for r in final_results:
-            real_cid = r.pop("real_callid", None)
-            if real_cid and real_cid != r.get("callid", ""):
-                r["callid"] = real_cid
-            r.pop("x_cid", None)
-
-        # Merge all results and deduplicate
+        # The final query is the definitive result set — it contains ALL
+        # messages for all Call-IDs. Merge with earlier results (dedup
+        # handles any overlap) to ensure nothing is lost if the final
+        # query itself hit its limit.
         all_results = initial_results + corr_results + final_results
         return {
             "data": _deduplicate_results(all_results),
