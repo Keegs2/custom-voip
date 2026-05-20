@@ -5,7 +5,15 @@ a Loki-compatible query API over ClickHouse.  heplify-server pushes SIP
 data as structured log entries queryable via LogQL.
 
 No authentication required for qryn (no more Homer 7 JWT flow).
+
+Call correlation (Step 3) queries ClickHouse directly instead of using
+LogQL regex alternation.  qryn's RE2 engine crashes with 500 errors on
+patterns like ``call_id=~"cid1|cid2|...|cid24"`` because SIP Call-IDs
+contain characters (@, ., -) that produce complex escaped alternations.
+ClickHouse SQL ``IN ('cid1','cid2',...)`` handles any number of values
+trivially with a single indexed lookup.
 """
+import json
 import os
 import logging
 import re
@@ -23,9 +31,18 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 # ---------------------------------------------------------------------------
-# qryn connection
+# qryn connection (LogQL queries for phone number search + X-CID discovery)
 # ---------------------------------------------------------------------------
 QRYN_URL = os.getenv("QRYN_URL", "http://qryn:3100")
+
+# ---------------------------------------------------------------------------
+# ClickHouse connection (direct SQL for multi-Call-ID fetch in Step 3)
+# ---------------------------------------------------------------------------
+# ClickHouse is on the same Docker bridge network (services-network) as the
+# API container.  Port 8123 is the HTTP interface.  The default user has no
+# password (configured in clickhouse-users.xml).
+CLICKHOUSE_URL = os.getenv("CLICKHOUSE_URL", "http://clickhouse-server:8123")
+CLICKHOUSE_DB = os.getenv("CLICKHOUSE_DB", "qryn")
 
 # ---------------------------------------------------------------------------
 # Canonical alias set — IP-to-name mapping for the platform
@@ -307,6 +324,157 @@ async def _query_qryn(
     return _parse_loki_response(loki_data, extract_xcid=extract_xcid)
 
 
+async def _query_clickhouse_by_callids(
+    client: httpx.AsyncClient,
+    call_ids: list[str],
+    start_ns: int,
+    end_ns: int,
+    limit: int = 2000,
+) -> list[dict[str, Any]]:
+    """Fetch all SIP messages for a set of Call-IDs via direct ClickHouse SQL.
+
+    This bypasses qryn's LogQL engine entirely for the multi-Call-ID fetch.
+    ClickHouse SQL ``WHERE val IN ('cid1','cid2',...)`` is indexed and handles
+    hundreds of values trivially -- no regex, no RE2, no 500 errors.
+
+    Query path:
+      time_series_gin (key='call_id', val IN (...)) -> get fingerprints
+      samples_v3 (fingerprint IN (...), timestamp range) -> get log entries
+      time_series (fingerprint) -> get labels (method, src_ip, dst_ip, etc.)
+
+    Returns the same record format as _parse_loki_response() for seamless
+    integration with the existing deduplication and correlation logic.
+    """
+    if not call_ids:
+        return []
+
+    # Build parameterized IN clause — ClickHouse HTTP interface uses
+    # query parameters for safe value injection, but for simplicity and
+    # because these are Call-ID strings from our own Loki labels (not user
+    # input), we use escaped string literals.  Call-IDs contain only
+    # printable ASCII (alphanumeric, @, ., -, _) so single-quote escaping
+    # is sufficient.
+    escaped_cids = ", ".join(
+        f"'{cid.replace(chr(39), chr(39)+chr(39))}'" for cid in call_ids
+    )
+
+    # Compute the date partition filter from the timestamp range.
+    # ClickHouse partitions samples_v3 by day; time_series_gin by date.
+    from_date = datetime.fromtimestamp(
+        start_ns / 1_000_000_000, tz=timezone.utc
+    ).strftime("%Y-%m-%d")
+
+    # qryn type constants: 1=logs, 2=metrics, 0=both.
+    # SIP data is stored as type=1 (logs).  Include type=0 (both) for safety.
+    sql = f"""
+        SELECT
+            s.timestamp_ns AS timestamp_ns,
+            s.string AS msg,
+            ts.labels AS labels
+        FROM {CLICKHOUSE_DB}.samples_v3 AS s
+        INNER JOIN {CLICKHOUSE_DB}.time_series AS ts
+            ON s.fingerprint = ts.fingerprint
+        WHERE s.fingerprint IN (
+            SELECT fingerprint
+            FROM {CLICKHOUSE_DB}.time_series_gin
+            WHERE key = 'call_id'
+              AND val IN ({escaped_cids})
+              AND date >= '{from_date}'
+              AND type IN (1, 0)
+        )
+          AND s.timestamp_ns >= {start_ns}
+          AND s.timestamp_ns < {end_ns}
+        ORDER BY s.timestamp_ns ASC
+        LIMIT {limit}
+        FORMAT JSONEachRow
+    """
+
+    try:
+        resp = await client.post(
+            CLICKHOUSE_URL,
+            content=sql.encode(),
+            headers={"Content-Type": "text/plain"},
+        )
+    except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
+        logger.error("ClickHouse unreachable at %s: %s", CLICKHOUSE_URL, exc)
+        raise HTTPException(
+            status_code=503,
+            detail=f"ClickHouse unreachable at {CLICKHOUSE_URL}",
+        )
+    except httpx.ReadTimeout as exc:
+        logger.error("ClickHouse query timed out: %s", exc)
+        raise HTTPException(status_code=503, detail="ClickHouse query timed out")
+
+    if resp.status_code != 200:
+        logger.error(
+            "ClickHouse query failed: HTTP %s — %s",
+            resp.status_code,
+            resp.text[:500],
+        )
+        raise HTTPException(
+            status_code=502,
+            detail=f"ClickHouse query returned HTTP {resp.status_code}",
+        )
+
+    # Parse JSONEachRow response — one JSON object per line
+    results: list[dict[str, Any]] = []
+    for line in resp.text.strip().splitlines():
+        if not line:
+            continue
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+
+        # Parse the labels JSON string from time_series
+        try:
+            labels = json.loads(row.get("labels", "{}"))
+        except (json.JSONDecodeError, TypeError):
+            labels = {}
+
+        ts_ns = int(row.get("timestamp_ns", 0))
+        log_line = row.get("msg", "")
+
+        # Extract status from labels (same logic as _parse_loki_response)
+        status_raw = labels.get("response")
+        try:
+            status = int(status_raw) if status_raw is not None else None
+        except (ValueError, TypeError):
+            status = None
+
+        # Extract user parts from SIP From/To labels
+        from_label = labels.get("from", "")
+        to_label = labels.get("to", "")
+        from_user = _extract_sip_user(from_label) if from_label else ""
+        to_user = _extract_sip_user(to_label) if to_label else ""
+
+        # Build timestamp ISO string with microsecond precision
+        try:
+            ts_seconds = ts_ns / 1_000_000_000
+            ts_iso = datetime.fromtimestamp(
+                ts_seconds, tz=timezone.utc
+            ).strftime("%Y-%m-%dT%H:%M:%S.") + f"{int((ts_ns % 1_000_000_000) / 1_000):06d}Z"
+        except (ValueError, OSError):
+            ts_iso = None
+
+        record: dict[str, Any] = {
+            "timestamp": ts_iso,
+            "timestamp_ns": ts_ns,
+            "from_user": from_user,
+            "to_user": to_user,
+            "callid": labels.get("call_id", ""),
+            "method": labels.get("method", ""),
+            "src_ip": labels.get("src_ip", ""),
+            "dst_ip": labels.get("dst_ip", ""),
+            "status": status,
+            "node": labels.get("node", ""),
+            "raw_msg": log_line if log_line else None,
+        }
+        results.append(record)
+
+    return results
+
+
 def _extract_callids(results: list[dict[str, Any]]) -> set[str]:
     """Extract unique non-empty call_id values from parsed results."""
     return {r["callid"] for r in results if r.get("callid")}
@@ -451,25 +619,26 @@ async def search_sip_traces(
     body: HomerSearchRequest,
     admin: dict = Depends(require_admin),
 ):
-    """Search SIP traces via qryn's Loki-compatible query_range API.
+    """Search SIP traces with A/B leg correlation.
 
     Builds a LogQL query from the search parameters and queries qryn.
     When correlation is enabled, performs A/B leg correlation in 3 steps:
 
-    1. Initial phone number search (limit=500) finds both A-leg and B-leg
-       messages where the number appears in the SIP body.
-    2. Correlation query finds X-CID headers referencing known Call-IDs,
-       building a map of B-leg -> A-leg relationships.
+    1. Initial phone number search (limit=500) via qryn LogQL finds both
+       A-leg and B-leg messages where the number appears in the SIP body.
+    2. Correlation query via qryn LogQL finds X-CID headers referencing
+       known Call-IDs, building a map of B-leg -> A-leg relationships.
     3. Final query fetches ALL messages for ALL correlated Call-IDs using
-       precise call_id label selectors. This is the definitive result set
-       — it catches B-leg responses (100 Trying, 183, 200 OK) that don't
-       contain the phone number or X-CID header.
+       a DIRECT ClickHouse SQL query with an IN clause. This bypasses
+       qryn's LogQL/RE2 engine entirely, avoiding the 500 errors that
+       occur with regex alternation patterns containing escaped SIP
+       Call-ID characters (@, ., -).
 
     The final query ALWAYS runs when correlations are found, even if no
     new Call-IDs were discovered. This is critical because the initial
     phone-number regex query may truncate results at the limit, missing
-    some B-leg messages. The final call_id-based query is precise and
-    returns complete data for all legs.
+    some B-leg messages. The ClickHouse SQL query is precise and returns
+    complete data for all legs via indexed fingerprint lookup.
     """
     if not body.from_user and not body.to_user and not body.call_id:
         raise HTTPException(
@@ -516,11 +685,14 @@ async def search_sip_traces(
 
         known_callids = _extract_callids(initial_results)
 
-        if not known_callids or len(known_callids) > 20:
-            # Too many call_ids — skip correlation to avoid huge queries
-            if len(known_callids) > 20:
+        if not known_callids or len(known_callids) > 50:
+            # Too many call_ids — skip correlation to avoid excessive queries.
+            # The ClickHouse IN clause can handle hundreds of values, but the
+            # X-CID correlation query in Step 2 still fetches ALL X-CID messages
+            # in the time window (expensive). Cap at 50 to keep Step 2 bounded.
+            if len(known_callids) > 50:
                 logger.info(
-                    "Skipping A/B correlation: %d call_ids exceeds limit of 20",
+                    "Skipping A/B correlation: %d call_ids exceeds limit of 50",
                     len(known_callids),
                 )
             return {"data": _sorted(initial_results), "correlations": {}}
@@ -579,20 +751,21 @@ async def search_sip_traces(
             }
 
         # Step 3: Final query — get ALL messages from all correlated legs.
-        # This uses call_id label selectors (not phone number regex), so it
-        # fetches every SIP message for each Call-ID including B-leg responses
-        # that don't contain the searched phone number.
+        # Uses direct ClickHouse SQL with an IN clause instead of qryn LogQL
+        # regex alternation.  SQL ``IN ('cid1','cid2',...,'cid24')`` is an
+        # indexed lookup that handles any number of Call-IDs trivially.
+        # This eliminates the 500 errors from qryn's RE2 engine choking on
+        # large escaped alternation patterns.
         all_callids = known_callids | new_callids
-        cid_regex = "|".join(re.escape(cid) for cid in all_callids)
-        final_query = f'{{type="sip", call_id=~"{cid_regex}"}}'
+        cid_list = sorted(all_callids)
 
         try:
-            final_results = await _query_qryn(
-                client, final_query, start_ns, end_ns, limit=FINAL_LIMIT,
+            final_results = await _query_clickhouse_by_callids(
+                client, cid_list, start_ns, end_ns, limit=FINAL_LIMIT,
             )
         except HTTPException:
-            # Final query failed — merge initial + correlation results
-            logger.warning("Final correlation query failed, returning partial results")
+            # ClickHouse query failed — merge initial + correlation results
+            logger.warning("ClickHouse correlation query failed, returning partial results")
             merged = initial_results + corr_results
             return {
                 "data": _deduplicate_results(merged),
