@@ -478,7 +478,12 @@ export function SipLadder({ messages, correlations }: SipLadderProps) {
 
   // Compute layout from messages
   const layout: LadderLayout = useMemo(
-    () => computeLayout(messages, correlations),
+    () => {
+      // Debug: log what the ladder receives
+      const uniqueCallIds = new Set(messages.map(m => m.callid));
+      console.log('[SipLadder] messages:', messages.length, 'unique Call-IDs:', [...uniqueCallIds], 'correlations:', correlations);
+      return computeLayout(messages, correlations);
+    },
     [messages, correlations],
   );
 
