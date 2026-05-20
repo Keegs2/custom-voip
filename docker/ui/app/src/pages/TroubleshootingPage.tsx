@@ -1,10 +1,11 @@
-import { useState, useCallback, useMemo, type KeyboardEvent } from 'react';
+import React, { useState, useCallback, useMemo, type KeyboardEvent } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { Sidebar } from '../components/layout/Sidebar';
 import { Spinner } from '../components/ui/Spinner';
 import { searchSipTraces } from '../api/homer';
 import type { HomerSearchParams, HomerSearchResult } from '../api/homer';
 import { fmt } from '../utils/format';
+import { SipLadder } from '../components/sip-ladder';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -450,11 +451,13 @@ function DurationBadge({ seconds }: DurationBadgeProps) {
 
 interface ResultsTableProps {
   callGroups: CallGroup[];
+  correlations: Record<string, string[]>;
   startTime: string;
   endTime: string;
 }
 
-function ResultsTable({ callGroups, startTime, endTime }: ResultsTableProps) {
+function ResultsTable({ callGroups, correlations, startTime, endTime }: ResultsTableProps) {
+  const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
   const thStyle: React.CSSProperties = {
     padding: '10px 14px',
     textAlign: 'left',
@@ -534,19 +537,25 @@ function ResultsTable({ callGroups, startTime, endTime }: ResultsTableProps) {
             });
             const grafanaLink = `/grafana/d/sip-search/sip-search?${params.toString()}`;
 
+            const isExpanded = expandedIdx === idx;
+
             return (
+              <React.Fragment key={`${row.callid}-${idx}`}>
               <tr
-                key={`${row.callid}-${idx}`}
-                onClick={() => window.open(grafanaLink, '_blank', 'noopener,noreferrer')}
-                style={{ cursor: 'pointer', transition: 'background 0.15s' }}
+                onClick={() => setExpandedIdx(isExpanded ? null : idx)}
+                style={{
+                  cursor: 'pointer',
+                  transition: 'background 0.15s',
+                  background: isExpanded ? 'rgba(59,130,246,0.08)' : undefined,
+                }}
                 onMouseEnter={(e) => {
-                  (e.currentTarget as HTMLTableRowElement).style.background =
+                  if (!isExpanded) (e.currentTarget as HTMLTableRowElement).style.background =
                     'rgba(59,130,246,0.06)';
                 }}
                 onMouseLeave={(e) => {
-                  (e.currentTarget as HTMLTableRowElement).style.background = '';
+                  if (!isExpanded) (e.currentTarget as HTMLTableRowElement).style.background = '';
                 }}
-                title="Click to open full SIP ladder in Grafana"
+                title="Click to expand SIP ladder"
               >
                 <td style={{ ...tdStyle, ...monoStyle, whiteSpace: 'nowrap' }}>
                   {fmtDateTime(row.timestamp)}
@@ -581,6 +590,46 @@ function ResultsTable({ callGroups, startTime, endTime }: ResultsTableProps) {
                   {row.node ?? '—'}
                 </td>
               </tr>
+              {isExpanded && (
+                <tr>
+                  <td colSpan={10} style={{ padding: 0, border: 'none' }}>
+                    <div style={{ padding: '0 8px 16px' }}>
+                      {/* Secondary action: open in Grafana */}
+                      <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '8px 8px 0' }}>
+                        <a
+                          href={grafanaLink}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 5,
+                            padding: '4px 10px',
+                            borderRadius: 6,
+                            border: '1px solid rgba(59,130,246,0.25)',
+                            background: 'rgba(59,130,246,0.06)',
+                            color: '#60a5fa',
+                            fontSize: '0.72rem',
+                            fontWeight: 500,
+                            textDecoration: 'none',
+                            transition: 'background 0.15s',
+                          }}
+                        >
+                          <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                            <polyline points="15 3 21 3 21 9" />
+                            <line x1="10" y1="14" x2="21" y2="3" />
+                          </svg>
+                          Open in Grafana
+                        </a>
+                      </div>
+                      <SipLadder messages={group.messages} correlations={correlations} />
+                    </div>
+                  </td>
+                </tr>
+              )}
+              </React.Fragment>
             );
           })}
         </tbody>
@@ -1126,7 +1175,7 @@ export function TroubleshootingPage() {
           )}
 
           {!isLoading && !isError && callGroups.length > 0 && (
-            <ResultsTable callGroups={callGroups} startTime={startTime} endTime={endTime} />
+            <ResultsTable callGroups={callGroups} correlations={correlations} startTime={startTime} endTime={endTime} />
           )}
         </div>
       </div>

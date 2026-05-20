@@ -200,6 +200,7 @@ def _parse_loki_response(
                 "dst_ip": labels.get("dst_ip", ""),
                 "status": status,
                 "node": labels.get("node", ""),
+                "raw_msg": log_line if log_line else None,
             }
 
             # Extract X-CID from raw SIP body for correlation mapping

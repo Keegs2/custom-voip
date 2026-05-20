@@ -19,6 +19,8 @@ export interface HomerSearchResult {
   dst_ip: string;
   status: number | null;
   node?: string;
+  /** Raw SIP message body (full headers + SDP) from the Loki log line */
+  raw_msg?: string | null;
 }
 
 export async function searchSipTraces(
