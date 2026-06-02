@@ -95,7 +95,24 @@ gcloud compute addresses list --regions=us-west1 --project=$PROJECT \
 
 > Assigned IPs: west-sbc-1-ip = `8.229.41.59` · west-sbc-2-ip = `136.117.230.166` · west-fs-ip = `8.229.177.165`
 
-## Step 3 — Geo Load Balancer (global, with East backend first) ⬜
+## Step 6 — Deploy & configure West stack ✅ (2026-06-02)
+West SBCs + FS deployed via repo pull + `apply-zone-env.sh` + rebuild. Both SBCs
+`healthy`, VIP `35.252.214.40` on `lo` (entrypoint, commit `b810be9`), Kamailio bound.
+West FS `RUNNING` with `Ext-RTP/SIP-IP=8.229.177.165`. Fixes along the way:
+- `bypass-vpn` tag was required on all egress VMs (added via `add-tags`) — see warning above.
+- Kamailio image was missing `iproute2` (commit `a3ef776`) — entrypoint loopback add needs `ip`.
+- East SBCs rebuilt to pick up the in-code loopback (reboot-hardened); test call confirmed.
+
+## Step 3 — West regional NLB (mirror East), then Bandwidth dual-VIP ⬜ NEXT
+**Decision (corrected):** GCP has NO global passthrough UDP NLB (canonical CLAUDE.md). Each
+zone gets its own **regional** external passthrough NLB VIP; Bandwidth is configured with
+BOTH regional VIPs on its inbound (origination) side for HA. Bandwidth termination
+(outbound) is IP-only — whitelist the West SBC public IPs (8.229.41.59, 136.117.230.166).
+West NLB VIP already reserved: `west-sbc-vip` = 35.252.214.40. Build a regional NLB
+(`west-sbc-group` + `west-sbc-backend` + `west-sbc-vip-udp/tcp`, TCP:5060 health check,
+CLIENT_IP affinity) mirroring East's `sbc-group`/`sbc-backend`/`sbc-vip-*`.
+- Tofu: `google_compute_region_backend_service.west_sbc`, `google_compute_region_health_check`,
+  `google_compute_forwarding_rule.west_sbc_{udp,tcp}`, `google_compute_instance_group.west_sbc`.
 Reserve global anycast VIP → global backend service (CLIENT_IP affinity, TCP:5060 health check)
 → add East instance group → validate East via VIP alongside regional NLB → whitelist VIP on
 Bandwidth (termination host). Commands captured here when executed.
