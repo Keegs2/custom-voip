@@ -84,13 +84,20 @@ EXPOSE 5060/udp 5060/tcp 5061/tcp
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD kamcmd -s unix:/var/run/kamailio/kamailio_ctl core.uptime || exit 1
 
-# Run as kamailio user for security
-USER kamailio
+# Run the entrypoint as root so it can add the NLB VIP to loopback
+# (`ip addr add` needs root even with NET_ADMIN). Kamailio itself does NOT run as
+# root: it drops to the kamailio user/group via the -u/-g CMD flags below, so the
+# SIP worker processes are unprivileged exactly as before (when USER kamailio was
+# set here). See entrypoint.sh for the loopback rationale.
+USER root
 
-# Entrypoint templates the config then exec's kamailio with CMD args
+# Entrypoint templates the config, adds the NLB VIP to loopback, then exec's
+# kamailio with CMD args
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 
 # Start Kamailio in foreground with debug output
 # -DD = don't daemonize, dump core on crash
 # -E = log to stderr
-CMD ["-DD", "-E", "-f", "/etc/kamailio/kamailio.cfg", "-M", "512", "-m", "16"]
+# -u/-g = drop privileges to the kamailio user/group (entrypoint runs as root for
+#         the loopback VIP add; Kamailio's workers must not stay root)
+CMD ["-DD", "-E", "-f", "/etc/kamailio/kamailio.cfg", "-M", "512", "-m", "16", "-u", "kamailio", "-g", "kamailio"]

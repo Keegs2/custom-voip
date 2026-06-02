@@ -14,6 +14,10 @@ services:
     build: ./docker/kamailio
     container_name: voip-kamailio
     network_mode: host
+    # NET_ADMIN: entrypoint adds the NLB VIP (EXTERNAL_SIP_IP) to the host
+    # loopback (`ip addr add`) — required for GCP passthrough-NLB backends.
+    cap_add:
+      - NET_ADMIN
     environment:
       - EXTERNAL_SIP_IP=${EXTERNAL_SIP_IP}
       - FREESWITCH_IP=${FREESWITCH_IP}

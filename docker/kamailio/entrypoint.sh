@@ -67,5 +67,30 @@ sed -i "s|__MEDIA_SUBNET__|${MEDIA_SUBNET}|g" "$CONFIG"
 
 echo "Kamailio config templated: ADVERTISE_IP=${EXTERNAL_SIP_IP}, FS=${FREESWITCH_IP}, FS_PUBLIC_IP=${FS_PUBLIC_IP}, DB=${DB_HOST}:${DB_PORT}, Homer=${HOMER_IP}, HEP_ID=${HEP_CAPTURE_ID}, SBC_ID=${SBC_ID}, SBC_INTERNAL_IP=${SBC_INTERNAL_IP}, BW_PRIMARY=${BANDWIDTH_PRIMARY_IP}, BW_SECONDARY=${BANDWIDTH_SECONDARY_IP}, INTERNAL_SUBNET=${INTERNAL_SUBNET}, MEDIA_SUBNET=${MEDIA_SUBNET}"
 
+# Add the NLB VIP (EXTERNAL_SIP_IP / ADVERTISE_IP) to the loopback interface.
+#
+# Why: GCP external passthrough Network Load Balancers deliver packets with the
+# destination still set to the NLB VIP. The VM kernel only accepts them if the
+# VIP is a local address, and Kamailio's `listen=udp:ADVERTISE_IP:5060` can only
+# bind to it if it is local too. Adding VIP/32 to `dev lo` satisfies both.
+#
+# This replaces the old, un-persisted manual `ip addr add` step that was run by
+# hand on each SBC VM (not in git, not in any systemd unit, not in instance
+# metadata). Doing it here makes the VIP survive reboot AND be present on freshly
+# cloned SBCs in new zones — no manual step required.
+#
+# Mirrors docker/freeswitch/entrypoint.sh. Requires the NET_ADMIN capability
+# (docker-compose.sbc.yml) and the entrypoint running as root (Dockerfile USER
+# root; Kamailio then drops to the kamailio user via the -u/-g CMD flags).
+# Idempotent: host-net loopback state persists across container restarts, so the
+# guard skips the add when the VIP is already present.
+VIP="${EXTERNAL_SIP_IP}"
+if ip addr show | grep -q "${VIP}"; then
+  echo "NLB VIP ${VIP} already on interface"
+else
+  echo "Adding ${VIP}/32 to loopback"
+  ip addr add "${VIP}/32" dev lo 2>/dev/null || true
+fi
+
 # Start Kamailio with all original arguments
 exec /usr/sbin/kamailio "$@"

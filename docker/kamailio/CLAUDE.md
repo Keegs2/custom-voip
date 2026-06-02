@@ -76,7 +76,35 @@ Kamailio's `#!substdef` and `modparam` do not support environment variables. The
 `SBC_INTERNAL_IP:5060` (this SBC's VPC IP, advertised as ADVERTISE_IP). Both UDP
 and TCP. A loopback listen on 127.0.0.1:5060 is added for `kamcmd`/health checks.
 
-**Flow**: `cp .tmpl -> .cfg` then `sed -i` replaces all `__PLACEHOLDER__` strings, then `exec /usr/sbin/kamailio "$@"` starts Kamailio with the CMD args.
+**Flow**: `cp .tmpl -> .cfg` then `sed -i` replaces all `__PLACEHOLDER__` strings,
+then the NLB VIP is added to loopback (see below), then `exec /usr/sbin/kamailio "$@"`
+starts Kamailio with the CMD args.
+
+**NLB VIP on loopback (self-healing, GCP passthrough-NLB requirement):** After
+templating, the entrypoint adds `EXTERNAL_SIP_IP` (the NLB VIP / `ADVERTISE_IP`) to
+the host loopback via `ip addr add EXTERNAL_SIP_IP/32 dev lo`. This is required
+because GCP external passthrough Network Load Balancers deliver packets with the
+destination still set to the VIP — the VM kernel only accepts them (and Kamailio
+can only bind `listen=udp:ADVERTISE_IP:5060`) if the VIP is a local address.
+
+- **Replaces the old manual step.** This used to be done by hand on each SBC VM and
+  was NOT persisted (not in git, not in any systemd unit, not in instance metadata),
+  so East SBCs lost the VIP on reboot and freshly-cloned West SBCs never had it.
+  Doing it in the entrypoint makes the VIP **survive reboot and re-clone** with no
+  manual step.
+- **Idempotent.** The block skips the add if the VIP is already on an interface
+  (`ip addr show | grep -q`). With host networking the loopback state persists
+  across container restarts, so a restart logs `NLB VIP <ip> already on interface`.
+- **Requires `NET_ADMIN`** (added to the `kamailio` service in
+  `docker-compose.sbc.yml`) **and a root entrypoint.** The Dockerfile now sets
+  `USER root` so the entrypoint can run `ip addr`; Kamailio then drops privileges
+  to the kamailio user/group via the `-u kamailio -g kamailio` CMD flags, so the
+  SIP worker processes remain unprivileged (same runtime user as before). This
+  mirrors how `docker/freeswitch/entrypoint.sh` handles its hairpin-NAT loopback add.
+- **Verify after pull+restart:** `docker logs voip-kamailio` shows
+  `Adding <VIP>/32 to loopback` (first run / fresh clone) or
+  `NLB VIP <VIP> already on interface` (restart), and `ip -br addr show lo` lists
+  the VIP. See also Gotcha 8.7 (GCE hairpin NAT uses the same loopback VIP).
 
 ## 4. Routing Logic Walkthrough
 
