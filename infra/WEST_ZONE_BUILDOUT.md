@@ -103,7 +103,13 @@ West FS `RUNNING` with `Ext-RTP/SIP-IP=8.229.177.165`. Fixes along the way:
 - Kamailio image was missing `iproute2` (commit `a3ef776`) — entrypoint loopback add needs `ip`.
 - East SBCs rebuilt to pick up the in-code loopback (reboot-hardened); test call confirmed.
 
-## Step 3 — West regional NLB (mirror East), then Bandwidth dual-VIP ⬜ NEXT
+## Step 3 — West regional NLB ✅ (2026-06-02) — Bandwidth dual-VIP ⬜ NEXT
+Built via `scripts/create-west-nlb.sh`: `west-sbc-health-check` (TCP 5060, regional),
+`west-sbc-group` (west-sbc-1/2), `west-sbc-backend` (EXTERNAL/UNSPECIFIED/CLIENT_IP),
+`west-sbc-vip-udp` + `west-sbc-vip-tcp` on `35.252.214.40`. Both SBCs `HEALTHY`. Mirrors
+East's `sbc-*`. (get-health shows `port: 80` cosmetically; real probe is TCP 5060.)
+**Remaining = Bandwidth dash:** termination (outbound) whitelist West SBC IPs 8.229.41.59 +
+136.117.230.166; origination (inbound) add VIP 35.252.214.40 alongside East 34.24.133.82 for HA.
 **Decision (corrected):** GCP has NO global passthrough UDP NLB (canonical CLAUDE.md). Each
 zone gets its own **regional** external passthrough NLB VIP; Bandwidth is configured with
 BOTH regional VIPs on its inbound (origination) side for HA. Bandwidth termination
