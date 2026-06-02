@@ -14,10 +14,12 @@ ClickHouse-backed architecture that scales better and uses Grafana for UI.
 
 | Container | Image | Port | Purpose |
 |-----------|-------|------|---------|
-| `voip-clickhouse` | clickhouse/clickhouse-server:latest | 8123 (internal) | Columnar DB for SIP capture data (replaces Homer 7 Postgres) |
+| `voip-clickhouse` | clickhouse/clickhouse-server:23.3-alpine | 8123 (internal) | Columnar DB for SIP capture data (replaces Homer 7 Postgres) |
 | `voip-qryn` | qxip/qryn:latest | 3100 (Loki API) | Loki-compatible API backed by ClickHouse (replaces homer-app backend) |
 | `voip-heplify-server` | ghcr.io/sipcapture/heplify-server | 9060 UDP/TCP, 9061 TCP | Receives HEP packets, pushes to qryn via Loki push API |
-| `voip-grafana` | grafana/grafana:latest | 3000 (HTTP) | Dashboards for SIP search and ladder diagrams (replaces homer-app Angular UI) |
+| `voip-grafana` | grafana/grafana-oss:10.4.3 | 3000 (HTTP) | Dashboards for SIP ladder diagrams (now a SECONDARY deep-link target, not the main UI) |
+
+Image tags are pinned in `docker-compose.services.yml` (ClickHouse `23.3-alpine`, Grafana `grafana-oss:10.4.3`). qryn and heplify-server track `:latest`.
 
 ## Architecture
 
@@ -38,8 +40,16 @@ Grafana (:3000)
 ```
 
 heplify-server receives HEP packets and pushes them to qryn's Loki-compatible
-push endpoint. qryn stores data in ClickHouse. Grafana queries qryn's Loki
-query API to display SIP traces, search results, and ladder diagrams.
+push endpoint. qryn stores data in ClickHouse.
+
+**Primary SIP-debug UI is the React app, not Grafana.** The customer-facing
+TroubleshootingPage (`docker/ui/app/src/pages/TroubleshootingPage.tsx`) POSTs to
+`/api/homer/search`, which nginx proxies to the FastAPI Homer router
+(`docker/api/src/routers/homer.py`, mounted at both `/homer` and `/v1/homer`).
+That router queries qryn (LogQL) for phone-number search + X-CID discovery, then
+queries ClickHouse **directly on port 8123** for the multi-Call-ID fetch (bypassing
+qryn's RE2 LogQL engine, which 500s on large regex alternations). Grafana is now a
+SECONDARY deep-link target for ad-hoc ladder inspection, not the main entry point.
 
 ## HEP Sources & Capture IDs
 
@@ -77,7 +87,8 @@ send HEP to port 9060 on the services VM. Only the backend storage and UI change
 - **qryn** connects to ClickHouse on port 8123 (HTTP interface) with the default user (no password).
 - **Grafana** has anonymous viewer access enabled and serves from `/grafana/` subpath for reverse proxy compatibility.
 - **Flow panel plugin** (`qxip-flow-panel`) is installed at Grafana startup for SIP ladder diagrams.
-- **IP aliasing** via Lua script (`scripts/ip-alias.lua`). heplify-server's Lua engine calls `SetHEPField("SrcIP", name)` to rewrite raw IPs to friendly names (e.g. "SBC-1", "FreeSWITCH", "BW-DAL") before Loki label generation. This means `src_ip`/`dst_ip` labels carry friendly names with zero Grafana dashboard changes. To add or change aliases, edit the `aliases` table in `ip-alias.lua` and restart heplify-server.
+- **IP aliasing** via Lua script (`scripts/ip-alias.lua`). heplify-server's Lua engine calls `SetHEPField("SrcIP", name)` to rewrite raw IPs to friendly names (e.g. "SBC-1", "FreeSWITCH", "Services") before Loki label generation. This means `src_ip`/`dst_ip` labels carry friendly names with zero Grafana dashboard changes. To add or change aliases, edit the `aliases` table in `ip-alias.lua` and restart heplify-server.
+  - **East-only hardcode:** the `aliases` table currently lists only East-zone IPs (SBC-1/SBC-2 VPC + external, FreeSWITCH VPC + external, Services, SBC-VIP). **Every new zone MUST add its SBC/FS IPs here** or the SIP ladder shows raw IPs instead of node names for that zone.
 
 ## Accessing Homer 10
 

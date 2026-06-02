@@ -21,6 +21,9 @@ Read this before touching any frontend code.
 | Class merging | `clsx` + `tailwind-merge` via `src/utils/cn.ts` |
 | Build check | `tsc -b && vite build` (TypeScript errors block the Docker build) |
 
+> Note: `class-variance-authority` is listed in `package.json` dependencies but is
+> currently **unused** — the codebase hand-rolls variant logic instead.
+
 Path alias: `@/` resolves to `src/` (configured in `vite.config.ts`).
 
 ---
@@ -29,38 +32,44 @@ Path alias: `@/` resolves to `src/` (configured in `vite.config.ts`).
 
 ### Multi-Stage Dockerfile (`docker/ui/Dockerfile`)
 
-**Stage 1 — homer-source** (`ghcr.io/sipcapture/homer-app`)
-Extracts the Homer SIP capture frontend. Patches its `index.html` to set
-`PREFIX: "/homer/"` so asset paths resolve correctly when served at `/homer/`.
+Two stages — no Homer frontend is built or bundled any more.
 
-**Stage 2 — build** (`node:20-alpine`)
+**Stage 1 — build** (`node:20-alpine`)
 ```
 npm ci
 npm run build   # tsc -b && vite build
 ```
 Output lands in `/app/dist`.
 
-**Stage 3 — nginx:alpine**
+**Stage 2 — nginx:alpine**
+- Removes the stock `default.conf`.
 - Generates a self-signed TLS cert at build time (10-year, `voiceplatform.local`).
   WebRTC (`getUserMedia`) requires HTTPS — both ports 80 and 443 are served.
 - Copies `nginx-maps.conf` as `00-maps.conf` (WebSocket upgrade map).
 - Copies `nginx.conf` as `rcf-ui.conf`.
 - Copies React `dist/` to `/usr/share/nginx/html`.
-- Copies Homer assets to `/usr/share/nginx/html/homer/`.
+
+> The old 3-stage build that extracted `ghcr.io/sipcapture/homer-app`, patched its
+> `index.html` to `PREFIX: "/homer/"`, and copied Homer assets into the image is
+> **gone**. SIP-trace troubleshooting is now a native React page (see
+> `TroubleshootingPage` + `components/sip-ladder/`) backed by the API's
+> `/homer/search` endpoint. Grafana provides the optional deep-link dashboard.
 
 ### nginx routing (`docker/ui/nginx.conf`)
 
-| Path | Destination |
-|---|---|
-| `/api/v3/*` | Homer backend (`homer-webapp:80`) — must be first |
-| `/api/ws/*` | FastAPI WebSocket (`api:8000`) with Upgrade headers |
-| `/api/sipp/*` | SIPp runner (`sipp:8001`) |
-| `/api/*` | FastAPI backend (`api:8000`), strips `/api` prefix |
-| `/docs`, `/redoc`, `/openapi.json` | FastAPI docs direct |
-| `/homer/` (exact) | Patched Homer `index.html` from disk |
-| `/homer/*` | Proxied to `homer-webapp:80` with `/homer/` stripped |
-| `/health` | FastAPI health, no logging |
-| `/*` | React SPA (`try_files $uri $uri/ /index.html`) |
+There is **no** `homer-webapp` upstream and **no** `/api/v3` or `/homer/` location.
+The route table, in nginx match order:
+
+| Path | Destination | Notes |
+|---|---|---|
+| `/grafana/*` | `grafana:3000` | Homer 10 / SIP visualization dashboard. Strips `X-Frame-Options` for embedding. Must come before `/api/`. |
+| `/ws/verto/*` | `http://10.142.0.100:8082/` | FreeSWITCH `mod_verto` WebSocket (wss→ws unwrap). **⚠ HARDCODED East SBC-1 IP (`10.142.0.100`)** — this is East-specific and would break in West/Central zones during multi-datacenter expansion. Needs to become an env-driven upstream. |
+| `/api/ws/*` | FastAPI WebSocket (`api:8000`) with Upgrade headers | strips `/api` prefix |
+| `/api/*` | FastAPI backend (`api:8000`), strips `/api` prefix | uses `$http_host` to preserve port |
+| `/docs`, `/redoc`, `/openapi.json` | FastAPI docs direct | |
+| `/api/sipp/*` | SIPp runner (`sipp:8001`), rewritten to `/sipp/*` | variable upstream (`resolver`) |
+| `/*` | React SPA (`try_files $uri $uri/ /index.html`) | |
+| `/health` (exact) | FastAPI health (`api:8000/health`), no logging | |
 
 ### Local development
 
@@ -95,32 +104,64 @@ QueryClient defaults:
 ### `src/App.tsx` — Route Map
 
 ```
-/login                    LoginPage          (public)
-/                         DashboardPage      (auth required, inside AppLayout)
+/login                    → redirect to /          (old bookmarks)
+/ (index)                 DashboardPage            (PUBLIC — outside RequireAuth, inside AppLayout)
+
+── inside AppLayout + RequireAuth (auth required) ──
 /rcf                      RcfPage
 /api-dids                 ApiDidsPage
 /trunks                   TrunksPage
 /ivr                      IvrBuilderPage
-/documentation            DocsPage
+/documentation            → redirect to /docs/rcf
+/docs/rcf                 RcfDocsPage
+/docs/api                 ApiDocsPage
+/docs/integration         → redirect to /docs/api
 /call-quality             CallQualityPage
 /account                  AccountPage
-/troubleshooting          TroubleshootingPage  (full-screen, no AppLayout)
 
-/admin                    AdminPage (tab shell, admin only)
-  /admin/customers        CustomersAdminPage
-  /admin/trunks           TrunksAdminPage
-  /admin/cdrs             CdrsAdminPage
-  /admin/rates            RatesAdminPage
-  /admin/tiers            TiersAdminPage
-  /admin/carriers         CarriersAdminPage
-  /admin/sipp             SippAdminPage
+  ── legacy redirects ──
+  /admin/did-search       → redirect to /admin/platform/dids
+  /admin/user             → redirect to /admin/customers/users
+  /admin/user/:userId     → redirect to /admin/customers/users/:userId
 
-/admin/customers/:id      CustomerAccountPage  (standalone, admin only)
-/admin/did-search         DIDSearchPage        (standalone, admin only)
-/admin/user               UserDetailPage       (standalone, admin only)
-/admin/user/:userId       UserDetailPage       (standalone, admin only)
+  ── Customer Management shell: AdminPage (tab shell, RequireAdmin) ──
+  /admin                          → redirect to /admin/customers (index)
+  /admin/onboarding               OnboardingAdminPage
+  /admin/customers                CustomersAdminPage
+  /admin/customers/:customerId    CustomerAccountPage
+  /admin/trunks                   TrunksAdminPage
+  /admin/customers/users          UserDetailPage
+  /admin/customers/users/:userId  UserDetailPage
+
+  ── Platform Management shell: PlatformManagementPage (tab shell, RequireAdmin) ──
+  /admin/platform                 → redirect to /admin/platform/carriers (index)
+  /admin/platform/carriers        CarriersAdminPage
+  /admin/platform/cdrs            CdrsAdminPage
+  /admin/platform/rates           RatesAdminPage
+  /admin/platform/tiers           TiersAdminPage
+  /admin/platform/sipp            SippAdminPage
+  /admin/platform/dids            DIDSearchPage
+
+── full-screen, outside AppLayout, RequireAuth ──
+/troubleshooting          TroubleshootingPage      (renders its own Sidebar)
+
 *                         → redirect to /
 ```
+
+**Key facts that bite:**
+- The **homepage (`DashboardPage`) is PUBLIC** — it lives outside `RequireAuth`.
+  Every other route requires authentication.
+- `/login` now just **redirects to `/`**. `LoginPage.tsx` still exists in
+  `src/pages/` but is **orphaned** — it is not referenced by any route. Login is
+  handled inline (see Auth section). Do not assume a `/login` page renders.
+- Admin is split into **two tab shells**: `AdminPage` at `/admin` (Customer
+  Management — onboarding, customers, customer 360, customer trunks, user lookup)
+  and `PlatformManagementPage` at `/admin/platform` (carriers, CDRs, rates, tiers,
+  SIPp testing, DID search). Both wrap their children in `RequireAdmin`.
+- There is **no `DocsPage`**. Docs are split into `docs/RcfDocsPage` and
+  `docs/ApiDocsPage` (shared bits in `docs/shared.tsx`).
+- `UserDetailRedirect` is a tiny helper component that forwards
+  `/admin/user/:userId` to `/admin/customers/users/:userId`.
 
 `AuthProvider` is intentionally **inside** `BrowserRouter` so it can call `useNavigate`.
 
@@ -153,18 +194,22 @@ Single context that owns all auth state. Exposed via `useAuth()`.
 4. On 401, clears token and stays unauthenticated.
 
 **Login:** calls `POST /auth/login`, stores JWT in `localStorage`, sets user in state.
+There is **no standalone login page** — the login form lives in the sidebar on the
+public homepage (`DashboardPage`). `LoginPage.tsx` still exists but is orphaned.
 
-**Logout:** clears localStorage, nulls state, navigates to `/login`.
+**Logout:** clears localStorage, nulls state, navigates to `/` (the public home).
 
 **401 interceptor in `src/api/client.ts`:** any API call that gets a 401 clears
-the token and calls `window.location.replace('/login')` as a safety net on top of
-the context-level handling.
+the token and calls `window.location.replace('/')` (the homepage with the sidebar
+login form) as a safety net on top of the context-level handling.
 
 ### `src/components/auth/RequireAuth.tsx`
 
-Wraps protected route subtrees. Shows a full-page spinner while `isLoading` is
-true (prevents flash of login redirect). On failure redirects to `/login` with
-`state.from` set so `LoginPage` can redirect back after authentication.
+Wraps protected route subtrees. Usable as a layout route (`<Outlet />`) or as a
+wrapper component (`children`). Shows a full-page spinner while `isLoading` is true
+(prevents flash of redirect). When unauthenticated, redirects to `/` (the public
+homepage, where the sidebar login form lives) with `state.from` set to the intended
+destination so the app can navigate there post-login.
 
 ### `src/components/auth/RequireAdmin.tsx`
 
@@ -232,6 +277,10 @@ return { items: raw.items ?? [], total: raw.total ?? raw.items?.length ?? 0 };
 | `documents.ts` | `/documents` | folders CRUD, document upload/download/update/delete, stats |
 | `sipp.ts` | `/sipp` | `listSippPresets`, `runSipp` |
 | `health.ts` | `/health` | `getHealth`, `getDetailedHealth` |
+| `homer.ts` | `/homer` | `searchSipTraces` — `POST /homer/search`, returns `{ data: HomerSearchResult[], correlations: Record<string, string[]> }`. Powers the Troubleshooting SIP-trace page. |
+| `didInventory.ts` | `/dids` (inventory) | `listDidInventory`, `listAvailableDids`, `getDidStats`, `listMyDids`, `syncDidInventory`, `assignDid`, `unassignDid`, `requestDid` |
+| `onboarding.ts` | `/onboarding` | `submitOnboardingRequest`, `listOnboardingRequests`, `getOnboardingRequest`, `verifyBilling`, `approveOnboarding`, `rejectOnboarding` |
+| `sbc.ts` | (SBC stats) | `getSbcStats(minutes)` — per-SBC call distribution for the admin `SbcDistribution` panel |
 
 ---
 
@@ -298,9 +347,10 @@ Currently a placeholder/coming-soon shell.
 Currently a placeholder/coming-soon shell. The IVR engine code
 (`src/pages/ivr/`) is complete but the page wrapper shows "Phase 2".
 
-**`DocsPage`** (`/documentation`)
-Static inline API documentation. No API calls. Self-contained reference with
-collapsible sections for auth, RCF, Trunks, API Calling.
+**`RcfDocsPage`** (`/docs/rcf`) and **`ApiDocsPage`** (`/docs/api`)
+Static inline documentation pages. No API calls. `/documentation` redirects to
+`/docs/rcf`; `/docs/integration` redirects to `/docs/api`. Shared layout helpers
+live in `pages/docs/shared.tsx`. There is no single `DocsPage`.
 
 **`CallQualityPage`** (`/call-quality`)
 Platform-wide SIP quality analysis. Sections: filter bar, stat cards (ASR, MOS,
@@ -308,9 +358,20 @@ packet loss, jitter, R-factor), trend charts, paginated CDR table, slide-out
 call detail panel. APIs: `GET /cdrs`, `GET /customers`, `GET /trunks`.
 
 **`TroubleshootingPage`** (`/troubleshooting`)
-Full-screen page (outside `AppLayout`) that renders Homer SIP capture in an
-iframe at `/homer/`. Renders its own `Sidebar` directly. Error state shown if
-Homer iframe fails to load.
+Full-screen page (outside `AppLayout`, renders its own `Sidebar`). This is a
+**native React SIP-trace search page** — there is no Homer iframe any more.
+
+- A search form (From, To, Call-ID, date range) calls `searchSipTraces()`
+  (`POST /api/homer/search` via `api/homer.ts`) using a React Query `useMutation`.
+- The returned `data` (flat `HomerSearchResult[]`) plus the `correlations` map
+  (Call-ID → related Call-IDs) are grouped into per-call rows via an in-component
+  **union-find** (`groupMessagesByCall`) so A-leg and B-leg messages merge into one
+  call. Each group computes a representative message, final status, and duration.
+- Results render as a table; expanding a row renders the custom **`<SipLadder>`**
+  diagram (see Components → SIP Ladder) for that call's messages.
+- Each row also offers an "Open in Grafana" deep link (`/grafana/d/sip-search/...`)
+  scoped to the call's correlated Call-IDs, and the header has an "Open SIP
+  Dashboard" link to `/grafana/`.
 
 **`AccountPage`** (`/account`)
 Profile page. Lets users update their display name and password via
@@ -319,9 +380,24 @@ Calls `refreshUser()` from `AuthContext` on success.
 
 ### Admin pages (require `RequireAdmin`)
 
-**`AdminPage`** (`/admin`)
-Tab shell. Renders a horizontal tab bar linking to the 7 admin sub-routes.
-Uses `<Outlet />` — does not render content itself.
+Admin is split into **two tab shells**, each a tab bar + `<Outlet />`:
+
+**`AdminPage`** (`/admin`) — **Customer Management** shell.
+Tabs: Onboarding, Customers, Customer Trunks, User Lookup. Index redirects to
+`/admin/customers`. Children: `OnboardingAdminPage`, `CustomersAdminPage`,
+`CustomerAccountPage` (`customers/:customerId`), `TrunksAdminPage`, `UserDetailPage`
+(`customers/users` and `customers/users/:userId`).
+
+**`PlatformManagementPage`** (`/admin/platform`) — **Platform Management** shell.
+Tabs: Carrier Trunks, CDRs, Rates, Tiers, Testing, DID Search. Index redirects to
+`/admin/platform/carriers`. Children: `CarriersAdminPage`, `CdrsAdminPage`,
+`RatesAdminPage`, `TiersAdminPage`, `SippAdminPage`, `DIDSearchPage` (`dids`).
+
+**`OnboardingAdminPage`** (`/admin/onboarding`)
+Customer onboarding request queue. Filter tabs by `OnboardingStatus`; verify
+billing, approve (with DID config), or reject requests. APIs: `onboarding.ts`
+(`listOnboardingRequests`, `verifyBilling`, `approveOnboarding`, `rejectOnboarding`)
++ `didInventory.ts` (`listAvailableDids`).
 
 **`CustomersAdminPage`** (`/admin/customers`)
 Searchable, paginated customer list (25 per page, load-more pattern). Inline
@@ -345,35 +421,39 @@ APIs: `GET /customers/:id`, `GET /rcf`, `GET /trunks`, `GET /api-dids`,
 Full trunk CRUD across all customers. Create, edit, delete trunks. Manage IPs
 and DIDs for each trunk inline. API: full `trunks` + `customers` APIs.
 
-**`CdrsAdminPage`** (`/admin/cdrs`) — thin wrapper around `CdrsTab`
+**`UserDetailPage`** (`/admin/customers/users`, `/admin/customers/users/:userId`)
+User search and 360 view. Shows user profile, presence status, call history,
+extension assignment, and quick admin actions. The legacy `/admin/user[/:userId]`
+paths redirect here.
+
+**`CdrsAdminPage`** (`/admin/platform/cdrs`) — thin wrapper around `CdrsTab`
 Full CDR search across all customers. Filter bar, stat bar, expandable rows,
 CSV export. APIs: `GET /cdrs`, `GET /cdrs/summary`.
 
-**`RatesAdminPage`** (`/admin/rates`) — thin wrapper around `RatesTab`
+**`RatesAdminPage`** (`/admin/platform/rates`) — thin wrapper around `RatesTab`
 Rate deck management. Add/edit/delete rates, margin analysis grid.
 APIs: `GET /rates`, `POST /rates`, `PATCH /rates/:id`, `DELETE /rates/:id`,
 `GET /rates/margins`.
 
-**`TiersAdminPage`** (`/admin/tiers`) — thin wrapper around `TiersTab`
+**`TiersAdminPage`** (`/admin/platform/tiers`) — thin wrapper around `TiersTab`
 Service tier management. APIs: `GET /tiers`, tier CRUD.
 
-**`CarriersAdminPage`** (`/admin/carriers`) — thin wrapper around `CarriersTab`
+**`CarriersAdminPage`** (`/admin/platform/carriers`) — thin wrapper around `CarriersTab`
 Carrier/gateway management. Each carrier card includes a live connectivity test.
 APIs: `GET /carriers`, carrier CRUD, `POST /carriers/:id/test`.
 
-**`SippAdminPage`** (`/admin/sipp`) — thin wrapper around `SippTab`
+**`SippAdminPage`** (`/admin/platform/sipp`) — thin wrapper around `SippTab`
 SIPp load-test runner. Preset grid, custom form, results with PASS/WARN/FAIL
 verdict. APIs: `GET /sipp/presets`, `POST /sipp/run`.
 
-**`DIDSearchPage`** (`/admin/did-search`)
-Cross-product DID lookup. Searches RCF, API, trunk, and UCaaS DIDs.
-Shows recent calls for the found DID. API: `GET /admin/did-search` (custom
-endpoint via `apiRequest`).
+**`DIDSearchPage`** (`/admin/platform/dids`)
+Cross-product DID lookup / inventory. The legacy `/admin/did-search` path
+redirects here. Uses `didInventory.ts`.
 
-**`UserDetailPage`** (`/admin/user`, `/admin/user/:userId`)
-User search and 360 view. Shows user profile, presence status, call history,
-extension assignment, and quick admin actions. APIs: `GET /admin/users/search`,
-`GET /admin/users/:id`, `GET /cdrs`.
+**`HomerAdminPage`** / **`HomerTab`** — **orphaned, not routed.**
+`HomerAdminPage` is a thin wrapper around `HomerTab`, which still renders a Homer
+iframe at `/homer/`. Neither is reachable from `App.tsx` — SIP troubleshooting now
+lives in the native `TroubleshootingPage`. Treat these as dead/legacy code.
 
 ---
 
@@ -430,11 +510,46 @@ toastErr(err.message);
 ```
 Toasts auto-dismiss after 4 seconds. They stack in the bottom-right corner.
 
+### SIP Ladder (`src/components/sip-ladder/`)
+
+The recently-shipped SIP ladder diagram used by `TroubleshootingPage` to visualize a
+correlated call's signaling. Public surface (via `index.ts`): the `<SipLadder>`
+component plus the `LadderLayout`, `LadderMessage`, `LadderNode` types.
+
+| File | What |
+|---|---|
+| `SipLadder.tsx` | Main component. Props: `{ messages: HomerSearchResult[], correlations: Record<string, string[]> }`. Renders endpoint columns (carrier / load balancer / SBC / media server) and time-ordered message arrows. Owns selected-packet state and node role labels/colors. |
+| `SipMessageRow.tsx` | One horizontal message row — arrow between source/dest columns, method/status label, retransmission and time-delta markers. Exports `TIMESTAMP_COL_WIDTH`. |
+| `PacketDetailPanel.tsx` | Inline packet inspector shown when a message is selected. Parses the raw SIP message (`raw_msg`) into start line, headers (highlighting important ones — Via, Record-Route, Contact, From/To, Call-ID, CSeq, Session-Expires…), and SDP (c=, m=, codecs, ports). |
+| `sipLadderLayout.ts` | `computeLayout()` — turns raw `HomerSearchResult[]` + correlations into a `LadderLayout` (ordered nodes, processed messages, A-leg/B-leg Call-ID sets, duration). Handles node ordering and B-leg column splitting. |
+| `sipLadderTypes.ts` | `NodeRole`, `LadderNode`, `LadderMessage`, `LadderLayout` types. |
+| `sipLadderUtils.ts` | `LADDER_COLORS` design tokens, `formatTimeDelta`, and related helpers. |
+| `sipUtils.ts` | SIP parsing helpers (method/status extraction, leg detection, retransmission detection). |
+| `index.ts` | Barrel export. |
+
+Node names are pre-aliased by heplify-server (e.g. "BW-NY", "SBC-1", "FreeSWITCH"),
+so no IP resolution happens in the frontend.
+
 ### Icons (`src/components/icons/ProductIcons.tsx`)
 
 Named wrappers around `lucide-react` icons. All accept `size?: number` (default 18).
 Available: `IconRCF`, `IconTrunk`, `IconAPI`, `IconIVR`, `IconDocs`, `IconAdmin`,
-`IconSignal`, `IconTroubleshoot`.
+`IconSignal`, `IconTroubleshoot`, `IconVoicemail`.
+
+### Entity cards
+
+Per-entity card components used in list/grid views. They render one record with
+inline edit/action affordances and live in the page directories (not `ui/`):
+
+| Component | Location | Renders |
+|---|---|---|
+| `RcfCard` | `pages/RcfCard.tsx` | One RCF entry, inline `forward_to` editing |
+| `TrunkCard` | `pages/TrunkCard.tsx` | One SIP trunk with IPs/DIDs/stats |
+| `ApiDidCard` | `pages/ApiDidCard.tsx` | One API DID |
+| `CarrierCard` | `pages/admin/CarrierCard.tsx` | One carrier + live connectivity test |
+| `TierCard` | `pages/admin/TierCard.tsx` | One service tier |
+| `CustomerExpandedView` | `pages/admin/CustomerExpandedView.tsx` | Inline expanded customer detail (RCF/API/trunk sections + add-credit) |
+| `SbcDistribution` | `pages/admin/SbcDistribution.tsx` | Live per-SBC call distribution panel (polls `getSbcStats`) |
 
 ### `AdminCustomerSelector`
 
@@ -463,6 +578,8 @@ All types live in `src/types/`. They map 1:1 to FastAPI Pydantic schemas.
 | `health.ts` | `HealthCheck`, `DetailedHealth`, `ComponentHealth`, `HealthStatus` |
 | `documents.ts` | `SharedDocument`, `DocumentFolder`, `DocumentStats`, `DocumentListResult`, `UploadProgress` |
 | `sipp.ts` | `SippPreset`, `SippRunConfig`, `SippRunResponse`, `SippResults`, `SippVerdict` |
+| `didInventory.ts` | `DidStatus`, `DidInventoryItem`, `DidStats`, `DidAssignRequest`, `DidInventoryListParams`, `DidInventoryListResponse`, `DidAvailableParams` |
+| `onboarding.ts` | `OnboardingStatus`, `OnboardingRequest`, `DIDConfigEntry`, `OnboardingSubmitPayload`, `ApprovePayload`, `ApproveResponse` |
 
 **`User.account_type`** controls what the authenticated user sees in the sidebar
 and on their pages. It is a nullable union: `'rcf' | 'api' | 'trunk' | 'hybrid' | 'ucaas' | null`.
@@ -546,7 +663,9 @@ This is the RCF-V1 production architecture. Know what is and is not available:
 - **SIP Trunks** (`account_type: 'trunk'`) — full management in admin, customer portal is a placeholder.
 - **Admin suite** — customers, trunks, CDRs, rates, tiers, carriers, SIPp, DID search, user lookup.
 - **Call Quality** — platform-wide CDR quality analysis with MOS/jitter/packet-loss metrics.
-- **Troubleshooting** — Homer SIP capture embedded in iframe.
+- **Troubleshooting** — native React SIP-trace search (`POST /homer/search`) with a
+  custom `<SipLadder>` diagram and inline packet-detail inspection. Grafana
+  (`/grafana/`) provides the optional deep-link dashboard. No Homer iframe.
 - **Documents** — shared document store with folder hierarchy.
 
 ### Phase 2 / Not yet customer-facing

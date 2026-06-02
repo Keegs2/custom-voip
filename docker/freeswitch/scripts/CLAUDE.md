@@ -69,7 +69,11 @@ inbound_router.lua executes:
 ```
 inbound_router.lua (product_type == "rcf"):
   |
-  1. Set media anchoring: proxy_media=true (B2BUA mode, FS stays in RTP path)
+  1. Media: DEFAULT media mode (FS stays in RTP path as B2BUA). The RCF bridge
+     dial strings do NOT set proxy_media — only the TRUNK path sets
+     proxy_media=true (see ~:862). (Note: a long comment block ~:482-526 in
+     the RCF path still discusses proxy_media, but no proxy_media var is set
+     on the RCF dial string — the comment is stale.)
   2. Set ringback tone: %(2000,4000,440,480) on A-leg while B-leg rings
   3. Caller ID handling (FusionPBX-style via setVariable, not dial string):
      - outbound_caller_id_number = RCF DID (10-digit, for Bandwidth auth in From header)
@@ -77,17 +81,30 @@ inbound_router.lua (product_type == "rcf"):
      - sip_h_Diversion = RCF DID with reason=unconditional
      - sip_h_X-Original-CID = original caller (Kamailio builds P-Asserted-Identity from this)
      - sip_h_Remote-Party-ID = original caller (backup CID mechanism)
-  4. Export RFC 4028 session timers to B-leg (sip_session_timeout=1800, min=90)
-  5. Bridge: sofia/external/{forward_to}@{sbc_proxy_ip}:5060
-     - X-Carrier=primary header tells Kamailio -> Bandwidth Dallas (67.231.2.12)
-     - Uses EXTERNAL profile so Via/Contact/SDP get public IP
-  6. If bridge fails, failover:
-     - X-Carrier=secondary -> Bandwidth LA (216.82.238.134)
-  7. If all bridges fail -> NORMAL_TEMPORARY_FAILURE (SIP 503)
+  4. Carrier is PINNED to "primary" (TC4 Dallas) at ~:455 regardless of the
+     inbound trunk. X-Inbound-TC (set by Kamailio) is read but its
+     trunk-affinity mapping to tc1/tc2 is present-but-commented — do not
+     change until Bandwidth provisions all TCs for our IPs.
+  5. 4-ATTEMPT SBC + carrier failover loop (~:707-763), NOT a simple 2-step:
+        attempt 1: SBC_PROXY_IP          + X-Carrier=primary   (SBC-1, Dallas)
+        attempt 2: SBC_PROXY_IP_FAILOVER + X-Carrier=primary   (SBC-2, Dallas)
+        attempt 3: SBC_PROXY_IP          + X-Carrier=secondary (SBC-1, LA)
+        attempt 4: SBC_PROXY_IP_FAILOVER + X-Carrier=secondary (SBC-2, LA)
+     - Each attempt runs a TCP reachability pre-check (is_sbc_reachable,
+       ~:97-105): opens a 1s TCP socket to the SBC:5060. If unreachable, the
+       attempt is SKIPPED instantly instead of waiting for the SIP timeout
+       (10-32s). Fails open if luasocket is unavailable.
+     - Per-attempt dial string (~:723-733) sets only ignore_early_media=false,
+       call_timeout, X-Carrier, X-CID (sip_call_id for Homer A/B correlation),
+       and RFC 4028 session timers (sip_session_timeout=1800, min=90).
+     - Loop breaks on bridge_result == "SUCCESS".
+     - Export RFC 4028 session timers to B-leg as well.
+     - Uses EXTERNAL profile so Via/Contact/SDP get public IP.
+  6. If all 4 attempts fail -> NORMAL_TEMPORARY_FAILURE (SIP 503)
      - lua_routed=true prevents dialplan from masking with 404
   |
-  Special case: forward_to matches ^10\d\d$ (local extension)
-     -> Bridge as user/{ext}@{domain} instead of PSTN
+  Special case: forward_to is a local extension (is_local_extension)
+     -> Single bridge attempt as user/{ext}@{domain} (no SBC/carrier failover)
 ```
 
 ---
@@ -114,6 +131,16 @@ Responsibilities:
 See "Complete Inbound Call Flow" above for full details.
 
 Key state: Redis is set to `nil` (RCF-V1 -- disabled due to threading issues). Only db_client is loaded.
+
+**RCF carrier/failover:** Carrier is pinned to `primary` (TC4 Dallas) at ~:455.
+The RCF PSTN bridge is a 4-attempt loop over `SBC_PROXY_IP` and
+`SBC_PROXY_IP_FAILOVER` × primary/secondary carrier, each guarded by a 1-second
+TCP reachability pre-check (`is_sbc_reachable`, ~:97-105). See "RCF Bridge
+Details" above. RCF uses DEFAULT media — it does NOT set `proxy_media`.
+
+**183 SDP note:** Kamailio now PASSES THROUGH carrier 183 SDP for PSTN early
+media (it no longer strips the 183 body). Any script comment implying the 183
+body is stripped is obsolete.
 
 **Database tables queried:**
 - `rcf_numbers` JOIN `customers` -- RCF DID lookup

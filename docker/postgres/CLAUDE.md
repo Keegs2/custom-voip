@@ -18,15 +18,19 @@ Scripts in `init/` run alphabetically on first database creation:
 | `01_extensions.sql` | TimescaleDB, pg_stat_statements, btree_gin. Creates `freeswitch` and `api` DB users. |
 | `02_schema_core.sql` | **Core tables:** `customers`, `rcf_numbers`, `sip_trunks`, `trunk_auth_ips`, `trunk_dids`. Hot-path indexes (hash indexes for O(1) DID lookup). |
 | `03_schema_api.sql` | API Calling: `api_credentials`, `api_dids`, `active_calls`. |
-| `04_schema_fraud.sql` | Fraud detection: `fraud_rules`, `high_risk_prefixes`, `customer_destination_whitelist`. Rate tables: `rate_tables`, `rates`, `customer_rate_assignments`. Includes `get_rate()` and `rate_cdr()` functions. |
-| `05_schema_cdr.sql` | CDR hypertable (TimescaleDB): `cdrs` with weekly partitioning, compression after 1 day, retention 90 days. Continuous aggregate `cdr_hourly_stats`. RTP quality metrics columns. |
-| `06_seed_data.sql` | Test customers, DIDs, trunks, rates. Test RCF: +15551234567 → +15559876543. |
-| `07_cps_tiers.sql` | CPS tier system: `cps_tiers`, `call_path_packages`, `cps_usage_log`. Triggers for auto-tier assignment and change logging. |
+| `04_schema_fraud.sql` | Fraud detection: `fraud_rules`, `high_risk_prefixes`, `customer_destination_whitelist`. Rate tables: `rate_tables`, `rates`, `customer_rate_assignments`. |
+| `05_schema_cdr.sql` | CDR hypertable (TimescaleDB): `cdrs` with weekly partitioning, compression after 1 day, retention 90 days. Continuous aggregate `cdr_hourly_stats`. RTP quality metrics columns. **Defines `get_rate()` (longest-prefix rate match) and `rate_cdr()` (rates a CDR) functions** (granted to freeswitch/api). |
+| `06_seed_data.sql` | **Rates only** (production baseline). Default rate table + sample US/UK rates. Test customers/DIDs/trunks were REMOVED for RCF-V1 production — that data now lives in `14_granite_accounts.sql`. No test RCF DID here. |
+| `07_cps_tiers.sql` | CPS tier system: `cps_tiers`, `cps_usage_log`, `cps_tier_changes` (tier-change audit log), `call_path_packages`. Triggers for auto-tier assignment and change logging. |
 | `08_carrier_gateways.sql` | `carrier_gateways` table. Seeds Bandwidth Dallas (67.231.2.12) and LA (216.82.238.134). |
 | `09_schema_users.sql` | `users` table for JWT auth. Seeds admin@customvoip.com / admin123. |
-| `11a_schema_did_assignment.sql` | UCaaS DID-to-extension mapping (Full-System branch feature). |
+| `11a_schema_did_assignment.sql` | UCaaS DID-to-extension mapping. **Non-functional on RCF-V1:** it `ALTER TABLE extensions` but the `extensions` table is created by `10_schema_ucaas.sql`, which does NOT exist on this branch. A fresh RCF-V1 init would FAIL on this script. Full-System branch only. |
 | `14_granite_accounts.sql` | **Production seed:** Granite Telephony customer, admin user, RCF DID +16174544217 → +17744045256. |
 | `16_cdr_detail_columns.sql` | Idempotent ALTER TABLE adding SIP detail columns to CDRs. |
+| `17_did_inventory.sql` | `did_inventory` table — tracks all Bandwidth DIDs and their assignment to customers/products (backs the number_inventory API). |
+| `18_sbc_id_column.sql` | Idempotent ALTER adding `cdrs.sbc_id VARCHAR(30)` + partial index, for SBC failover tracking (backs `/v1/sbc/stats`). |
+| `19_onboarding_requests.sql` | `onboarding_requests` table — backs the onboarding intake/approval router. |
+| `20_rcf_max_channels.sql` | Idempotent ALTER adding `rcf_numbers.max_channels INT DEFAULT 0` (0 = unlimited); FreeSWITCH enforces via limit_hash. |
 
 ## Hot-Path Tables (Call Setup)
 
@@ -39,11 +43,13 @@ These are queried on EVERY inbound call — must be fast:
 
 ## Database Users
 
-| User | Permissions | Used By |
-|------|------------|---------|
-| `voip` | Superuser (owner) | Schema migrations, admin |
-| `freeswitch` | SELECT on core tables, INSERT on cdrs | FreeSWITCH Lua scripts via PgBouncer |
-| `api` | ALL on most tables | FastAPI application |
+| User | Permissions | Used By | Created By |
+|------|------------|---------|-----------|
+| `voip` | Superuser (owner) | Schema migrations, admin | **Image `POSTGRES_USER`** — created by the Postgres entrypoint, NOT by init SQL |
+| `freeswitch` | SELECT on core tables, INSERT on cdrs | FreeSWITCH Lua scripts via PgBouncer | `01_extensions.sql` (`CREATE USER freeswitch`) |
+| `api` | ALL on most tables | FastAPI application | `01_extensions.sql` (`CREATE USER api`) |
+
+Note: `01_extensions.sql` only creates `freeswitch` and `api`. The `voip` superuser comes from the Docker image's `POSTGRES_USER` env (or is provisioned manually on the bare-metal production instance).
 
 ## PgBouncer Configuration
 
@@ -57,13 +63,24 @@ File: `pgbouncer.ini`
 
 **Critical:** asyncpg (used by FastAPI) must use `statement_cache_size=0` because PgBouncer transaction mode doesn't support prepared statements. This is configured in the API's `database.py`.
 
-## Multi-Zone Replication (Production)
+## Multi-Zone Replication — PLANNED (NOT implemented in this repo)
+
+> **Status: aspirational design only.** There is currently ZERO replication
+> configuration in `docker/postgres/`. No `primary_conninfo`, no replica role,
+> no standby tuning, no recovery/standby signal. `pgbouncer.ini` points at a
+> single host (`host=127.0.0.1 port=5432`). East runs as a standalone primary.
+> Read this section as the target design for the multi-datacenter expansion,
+> NOT as the current state. Do not assume replicas exist when reasoning about
+> failover or read routing today.
+
+Target design once the West/Central zones come online:
 
 - **Primary:** us-east1-b (services VM)
-- **Replicas:** us-west1-b, us-central1-b (streaming replication)
-- Each zone's FreeSWITCH reads from the local replica for DID lookups
+- **Replicas (planned):** us-west1-b, us-central1-b via streaming replication — must be configured (replica role, `primary_conninfo`, standby tuning) before any zone can read locally
+- Each zone's FreeSWITCH would read from the local replica for DID lookups
 - All writes (provisioning, CDRs) go to the primary
-- Replication lag: ~100-500ms (acceptable for routing data)
+- Expected replication lag: ~100-500ms (acceptable for routing data)
+- **Until configured:** all zones must reach the East primary directly for DID lookups (cross-zone DB traffic), which is the current behavior.
 
 ## Adding a New Table
 

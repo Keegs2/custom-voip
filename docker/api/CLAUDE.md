@@ -54,7 +54,7 @@ CMD: `uvicorn main:app --host 0.0.0.0 --port 8000 --workers 4 --loop uvloop --ht
 
 | Variable | Default | Description |
 |---|---|---|
-| `DATABASE_URL` | `postgresql://api:api_secret@host.docker.internal:6432/voip` | PgBouncer connection string |
+| `DATABASE_URL` | `postgresql://api:api_secret@postgres:6432/voip` | PgBouncer connection string (production `.env` overrides host to `host.docker.internal`) |
 | `REDIS_URL` | `redis://redis:6379` | Redis connection |
 | `FREESWITCH_ESL_HOST` | _(empty, required)_ | FreeSWITCH ESL IP (VPC IP of FS VM) |
 | `FREESWITCH_ESL_PORT` | `8021` | FreeSWITCH ESL port |
@@ -99,6 +99,7 @@ Redis is used for:
 - Decodes JWT claims and stores them on `request.state.user`
 - Exempt paths: `/auth/login`, `/v1/auth/login`, `/health`, `/health/detailed`, `/docs`, `/redoc`, `/openapi.json`, `/`
 - FreeSWITCH paths exempt: anything starting with `/freeswitch/`, or ending with `/cdrs/ingest` or `/cdrs/ingest/bulk`
+- Public onboarding exempt: `POST /v1/onboarding` and `POST /onboarding` (unauthenticated intake form submission). Only the POST method is exempt — GET/approve/reject still require admin.
 - WebSocket paths exempt: anything starting with `/ws/`
 - CORS preflight (`OPTIONS`) always passes through
 
@@ -120,7 +121,7 @@ Docker healthcheck: `curl -sf http://127.0.0.1:8000/health` every 15s.
 
 ### ESL Client (`services/esl_client.py`)
 Raw TCP socket connection to FreeSWITCH Event Socket (port 8021). Opens a new connection per command (no persistent connection). Supports:
-- `originate_call()` -- builds a `sofia/external/dest@proxy` originate command with channel variables for customer_id, product_type, traffic_grade, carrier routing
+- `originate_call()` -- builds a `sofia/external/dest@proxy` originate command with channel variables for customer_id, product_type, traffic_grade. The `X-Carrier` SIP header is hardcoded to `primary` (Dallas); `traffic_grade` is only passed as a channel var, it does NOT select the carrier.
 - `get_call_status()` -- `uuid_dump` to get live call state
 - `hangup_call()` -- `uuid_kill` with hangup cause
 - `transfer_call()` -- `uuid_transfer`
@@ -131,7 +132,7 @@ In `TEST_MODE=true`, originate uses `loopback/` instead of `sofia/external/`.
 ### CDR Ingest (`routers/cdrs.py`)
 FreeSWITCH `mod_json_cdr` POSTs CDRs to `/v1/cdrs/ingest` after each call. The endpoint:
 - Accepts `application/json`, `x-www-form-urlencoded` (mod_json_cdr encode-values mode), or raw body
-- Extracts 48+ fields from the FreeSWITCH JSON CDR structure including full RTP quality metrics
+- Extracts ~49 fields from the FreeSWITCH JSON CDR structure including full RTP quality metrics (the INSERT binds 49 positional params, `$1`–`$49`)
 - Handles duplicate detection via `WHERE NOT EXISTS (SELECT 1 FROM cdrs WHERE uuid = $1)`
 - Always returns 200 to prevent FreeSWITCH retry storms
 - No auth required (called over internal Docker network)
@@ -242,12 +243,78 @@ All endpoints are mounted at both `/v1/<path>` and `/<path>` (backward compatibi
 |---|---|---|---|
 | `GET` | `/v1/numbers/inventory` | Admin | Full DID inventory with filters and pagination |
 | `GET` | `/v1/numbers/stats` | Admin | Inventory summary stats (by status/product/state) |
-| `POST` | `/v1/numbers/sync` | Admin | Sync Bandwidth TN inventory into did_inventory table |
+| `POST` | `/v1/numbers/sync` | Admin | Sync Bandwidth TN inventory into did_inventory table (also reconciles product tables) |
+| `POST` | `/v1/numbers/reconcile` | Admin | Reconcile did_inventory against product tables (rcf/api/trunk) without hitting Bandwidth |
 | `POST` | `/v1/numbers/{did}/assign` | Admin | Assign DID to customer (creates product record) |
 | `POST` | `/v1/numbers/{did}/unassign` | Admin | Unassign DID (removes product record) |
 | `GET` | `/v1/numbers/available` | User | Browse available DIDs with filters |
 | `GET` | `/v1/numbers/my` | User | Customer's assigned numbers |
 | `POST` | `/v1/numbers/{did}/request` | User | Reserve a number for admin review |
+
+### Carriers (Admin only)
+Carrier gateway management — backed by `carrier_gateways` (Bandwidth Dallas/LA).
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/v1/carriers` | List carrier gateways |
+| `POST` | `/v1/carriers` | Create carrier gateway |
+| `GET` | `/v1/carriers/{carrier_id}` | Get carrier detail |
+| `PATCH` | `/v1/carriers/{carrier_id}` | Update carrier |
+| `DELETE` | `/v1/carriers/{carrier_id}` | Delete carrier |
+| `POST` | `/v1/carriers/{carrier_id}/test` | Probe carrier reachability |
+
+### Rates (Admin only)
+Rate table / rate entry management — backed by `rate_tables`, `rates`.
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/v1/rates` | List rate entries (filterable) |
+| `POST` | `/v1/rates` | Create rate entry |
+| `GET` | `/v1/rates/margins` | Margin analysis (rate vs cost) |
+| `GET` | `/v1/rates/lookup` | Longest-prefix rate lookup for a destination |
+| `GET` | `/v1/rates/{rate_id}` | Get rate entry |
+| `PATCH` | `/v1/rates/{rate_id}` | Update rate entry |
+| `DELETE` | `/v1/rates/{rate_id}` | Delete rate entry |
+
+### Tiers (Admin only)
+CPS tier management — backed by `cps_tiers`.
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/v1/tiers` | List all tiers |
+| `GET` | `/v1/tiers/trunk` | List trunk-type tiers |
+| `GET` | `/v1/tiers/api` | List api-type tiers |
+| `GET` | `/v1/tiers/{tier_id}` | Get tier |
+| `POST` | `/v1/tiers` | Create tier |
+| `PATCH` | `/v1/tiers/{tier_id}` | Update tier |
+| `DELETE` | `/v1/tiers/{tier_id}` | Delete tier |
+
+### SIPp (Admin only)
+SIPp load-test control. The runner service is not yet deployed — `POST /run` returns a mock result or 503.
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/v1/sipp/presets` | List load-test presets |
+| `POST` | `/v1/sipp/run` | Trigger a SIPp load test (mock/503 until runner deployed) |
+
+### SBC (Admin only)
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/v1/sbc/stats` | Per-SBC call distribution over last N minutes (reads `cdrs.sbc_id`) |
+
+### Homer (Admin only)
+SIP trace search via qryn (Loki-compatible API over ClickHouse). Homer 10 — no JWT flow to Homer itself; these endpoints require platform admin auth.
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/v1/homer/aliases` | Static IP-to-name alias map for ladder diagrams |
+| `POST` | `/v1/homer/search` | Search SIP traces with A/B-leg correlation (qryn LogQL + direct ClickHouse) |
+
+### Onboarding
+New-RCF-customer intake pipeline (`pending → billing_verified → approve → active`, or `rejected`). Backed by `onboarding_requests`.
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `POST` | `/v1/onboarding` | None | Public intake form submission |
+| `GET` | `/v1/onboarding` | Admin | List onboarding requests |
+| `GET` | `/v1/onboarding/{request_id}` | Admin | Get request detail |
+| `POST` | `/v1/onboarding/{request_id}/verify-billing` | Admin | Mark billing verified |
+| `POST` | `/v1/onboarding/{request_id}/approve` | Admin | Approve + provision (creates customer/user/RCF) |
+| `POST` | `/v1/onboarding/{request_id}/reject` | Admin | Reject request |
 
 ### Docs (when ENABLE_DOCS=true)
 | Method | Path | Description |

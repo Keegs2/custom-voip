@@ -110,10 +110,20 @@ GCP VPCs are global — subnets in different regions route automatically. No VPC
 
 ```
 VPC: default (existing)
-  Subnet: us-east1     10.142.0.0/20   (existing)
-  Subnet: us-west1     10.138.0.0/20   (new)
-  Subnet: us-central1  10.128.0.0/20   (new)
+  Subnet: us-east1     10.142.0.0/20    (existing)
+  Subnet: us-west1     10.138.0.0/20    (new)
+  Subnet: us-central1  10.128.0.0/20    (new)
+  Subnet: voip-media   192.168.10.0/24  (East FS — Cloud-NAT-excluded)
 ```
+
+**⚠️ Cloud NAT exclusion is mandatory for FreeSWITCH VMs.** GCP Cloud NAT on the
+`default` subnet replaces a VM's 1:1 external IP with a NAT-pool IP, which makes
+Bandwidth drop all RTP/SIP (source IP ≠ SDP-negotiated IP). The East FS lives on a
+dedicated `voip-media` subnet (`192.168.10.0/24`, internal IP **192.168.10.2**) that
+is **not** in the Cloud NAT router's list. **Every new zone's FS must do the same** —
+either a per-region `voip-media-{region}` subnet excluded from Cloud NAT, or the
+`bypass-vpn` network tag. SBC VMs use the `bypass-vpn` tag. See root `CLAUDE.md`,
+"GCP Cloud NAT Breaks VoIP".
 
 ### Per-Zone IP Allocation
 
@@ -121,8 +131,13 @@ VPC: default (existing)
 |------|----------------|------|---------|
 | SBC-1 | 10.142.0.100 | 10.138.0.100 | 10.128.0.100 |
 | SBC-2 | 10.142.0.101 | 10.138.0.101 | 10.128.0.101 |
-| FreeSWITCH | 10.142.0.102 | 10.138.0.102 | 10.128.0.102 |
+| FreeSWITCH | **192.168.10.2** (voip-media subnet) | TBD (per-region media subnet or bypass-vpn) | TBD (per-region media subnet or bypass-vpn) |
 | PG Replica | 10.142.0.103 (primary) | 10.138.0.103 | 10.128.0.103 |
+
+> **Note:** The East FS is on the Cloud-NAT-excluded `voip-media` subnet at
+> `192.168.10.2`, **not** `10.142.0.102`. West/Central FS VMs must likewise sit on a
+> Cloud-NAT-excluded subnet or carry the `bypass-vpn` tag (see the Cloud NAT warning
+> above) — do not place them at `10.138.0.102` / `10.128.0.102` on the default subnet.
 
 ### Geo Load Balancer (Key Distributor)
 
@@ -181,8 +196,8 @@ Each zone is identical: 3 VMs running the same Docker images with zone-specific 
 
 | VM Role | Machine Type | Count/Zone | Networking |
 |---------|-------------|------------|------------|
-| Kamailio SBC | e2-standard-4 | 2 | Host networking, static external IP |
-| FreeSWITCH + Redis | e2-standard-8 | 1 | Host networking, static external IP |
+| Kamailio SBC | e2-standard-4 | 2 | Host networking, static external IP, default subnet, `bypass-vpn` tag |
+| FreeSWITCH + Redis | e2-standard-8 | 1 | Host networking, static external IP, **Cloud-NAT-excluded media subnet** |
 
 ### Shared Services (Centralized in East)
 
@@ -301,18 +316,37 @@ Requires 2 env vars per zone: `BANDWIDTH_PRIMARY_IP`, `BANDWIDTH_SECONDARY_IP`.
 ### SBC .env (per zone, per SBC instance)
 
 ```bash
-EXTERNAL_SIP_IP=<geo-vip>              # Global Geo LB anycast VIP (same for ALL SBCs)
-FREESWITCH_IP=<zone_fs_internal_ip>     # Zone's local FS
+EXTERNAL_SIP_IP=<geo-vip>               # Global Geo LB anycast VIP (advertised; same for ALL SBCs)
+SBC_INTERNAL_IP=<this_sbc_vpc_ip>       # THIS SBC's own VPC IP — inner Record-Route, FS-facing listen, alias=
+FS_PUBLIC_IP=<zone_fs_public_ip>        # Zone FS public IP — SDP rewrite target (RTP bypasses the NLB)
+FREESWITCH_IP=<zone_fs_internal_ip>     # Zone's local FS (dispatcher target)
 DB_HOST=<zone_pg_ip>                    # Local PG (primary or replica)
 DB_PORT=6432
 DB_USER=freeswitch
 DB_PASS=<STRONG_FS_DB_PASSWORD>
 HOMER_IP=10.142.0.103                   # Centralized Homer in East
-BANDWIDTH_PRIMARY_IP=<nearest_bw_pop>   # NEW: nearest Bandwidth PoP
-BANDWIDTH_SECONDARY_IP=<far_bw_pop>     # NEW: far Bandwidth PoP
+BANDWIDTH_PRIMARY_IP=<nearest_bw_pop>   # Nearest Bandwidth PoP (East 67.231.2.12, West 216.82.238.134)
+BANDWIDTH_SECONDARY_IP=<far_bw_pop>     # Far Bandwidth PoP (failover)
+INTERNAL_SUBNET=<zone_vpc_subnet>       # This zone's VPC subnet (East 10.142.0.0/20, West 10.138.0.0/20)
+MEDIA_SUBNET=<zone_media_subnet>        # This zone's FS media subnet (East 192.168.10.0/24)
 SBC_ID=<region>-sbc-<n>                 # e.g. east-sbc-1, west-sbc-2
-HEP_CAPTURE_ID=<see table below>       # Unique per-SBC Homer capture ID
+HEP_CAPTURE_ID=<see table below>        # Unique per-SBC Homer capture ID
 ```
+
+> **All of these are now templated** in `entrypoint.sh` / `docker-compose.sbc.yml`, each
+> with an East default so an unset value reproduces current East behavior:
+> - `SBC_INTERNAL_IP` (`__SBC_INTERNAL_IP__`) powers the inner Record-Route, the
+>   FS-facing listen socket, and `alias=` — without it, in-dialog ACK/BYE behind the NLB breaks.
+> - `FS_PUBLIC_IP` (`__FS_PUBLIC_IP__`) is the SDP rewrite target because RTP bypasses the NLB.
+> - `BANDWIDTH_PRIMARY_IP`/`BANDWIDTH_SECONDARY_IP` (`__BANDWIDTH_PRIMARY_IP__`/
+>   `__BANDWIDTH_SECONDARY_IP__`) set this zone's carrier egress order — West sets primary=LA.
+>   Safe because every inbound trust check ORs both IPs (swap-invariant); only the egress order changes.
+> - `INTERNAL_SUBNET`/`MEDIA_SUBNET` (`__INTERNAL_SUBNET__`/`__MEDIA_SUBNET__`) are this zone's
+>   trusted internal CIDRs. Each zone trusts only its own internal + media subnet (per-zone self-containment).
+>
+> Validated with `kamailio -c` on both East (byte-identical to pre-change) and West templated configs.
+> **Set `MEDIA_SUBNET` to the real per-region media subnet you provision for West** — pick a
+> Cloud-NAT-excluded CIDR (it must not overlap East's `192.168.10.0/24`).
 
 #### SBC Identity & Homer Capture ID Mapping
 
@@ -344,10 +378,16 @@ REDIS_PORT=6379
 API_HOST=10.142.0.103                   # Centralized API in East
 API_PORT=8088
 HOMER_IP=10.142.0.103                   # Centralized Homer in East
-SBC_PROXY_IP=<zone_sbc1_internal_ip>    # Zone's primary SBC
+SBC_PROXY_IP=<zone_sbc1_internal_ip>          # Zone's primary SBC (outbound bridge target)
+SBC_PROXY_IP_FAILOVER=<zone_sbc2_internal_ip>  # Zone's secondary SBC (4-attempt failover)
 ESL_PASSWORD=<STRONG_ESL_PASSWORD>
 TEST_MODE=false
 ```
+
+> `SBC_PROXY_IP_FAILOVER` is templated in `docker-compose.media.yml` (defaults to
+> `SBC_PROXY_IP` if unset) and drives the 4-attempt SBC×carrier failover loop in
+> `inbound_router.lua`. Set it to the zone's second SBC so a dead primary SBC fails
+> over within the same zone.
 
 ---
 
@@ -356,7 +396,7 @@ TEST_MODE=false
 | Component | Changes Needed |
 |-----------|---------------|
 | **FreeSWITCH** | **Zero.** All values come from env vars already. |
-| **Kamailio** | **Minimal.** Add `BANDWIDTH_PRIMARY_IP` / `BANDWIDTH_SECONDARY_IP` env vars to entrypoint.sh templating. Replace hardcoded Bandwidth IPs in TO_CARRIER route. |
+| **Kamailio** | **Done.** `BANDWIDTH_PRIMARY_IP`/`BANDWIDTH_SECONDARY_IP` (carrier egress) and `INTERNAL_SUBNET`/`MEDIA_SUBNET` (trusted internal CIDRs) are now env-templated in entrypoint.sh, with East defaults. New zone only sets these in its `.env`. |
 | **Lua scripts** | **Zero.** DB_HOST, Redis, API all from env vars. |
 | **FastAPI** | **Phase 2.** Add zone-aware ESL routing for multi-zone call origination. |
 | **Docker images** | **Identical across zones.** Only .env files differ. |
@@ -529,7 +569,7 @@ Current 4-VM (East only) cost: ~$450/month.
 |---|---|---|---|---|
 | poc-custom-voip | 10.142.0.100 | 34.74.71.32 | east-sbc-1 | 100 |
 | kam-g2 | 10.142.0.101 | 35.243.136.35 | east-sbc-2 | 101 |
-| fs-media | 10.142.0.102 | 34.139.119.135 | — | — |
+| fs-media-v2 | 192.168.10.2 (voip-media subnet) | 34.139.119.135 | — | — |
 | services | 10.142.0.103 | 34.26.57.37 | — | — |
 | **VIP (Regional NLB)** | — | **34.24.133.82** | — | — |
 | **VIP (Geo LB)** | — | **TBD** | — | — |

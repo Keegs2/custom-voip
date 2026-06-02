@@ -30,7 +30,14 @@ src/
     trunks.py                # SIP trunk management + call path packages
     cdrs.py                  # CDR ingest (from FreeSWITCH) + query endpoints
     search.py                # Admin DID search, user search
-    number_inventory.py      # DID lifecycle management (inventory, assign, sync)
+    number_inventory.py      # DID lifecycle management (inventory, assign, sync, reconcile)
+    carriers.py              # Carrier gateway CRUD + reachability test (admin)
+    rates.py                 # Rate table / rate entry CRUD, margins, lookup (admin)
+    tiers.py                 # CPS tier CRUD (admin)
+    sipp.py                  # SIPp load-test presets + run (admin; runner not yet deployed)
+    sbc.py                   # Per-SBC call distribution stats from cdrs.sbc_id (admin)
+    homer.py                 # SIP trace search via qryn/ClickHouse (Homer 10) (admin)
+    onboarding.py            # New-customer intake pipeline (public POST + admin review)
   services/
     __init__.py
     esl_client.py            # FreeSWITCH ESL TCP client
@@ -114,8 +121,8 @@ CDR ingestion and querying. The largest router file.
   - Resolves fields from multiple locations: `variables` dict, `callflow[0].caller_profile`, top-level `core-uuid`
   - Cleans caller_id_number (handles SIP `"Display" <+1234>` format)
   - Computes R-factor from MOS using piecewise linear approximation
-  - Extracts 48 columns including full RTP quality metrics (jitter, packet loss, MOS, codec info)
-  - Explicit `::type` casts on all 48 INSERT parameters for asyncpg/PgBouncer compatibility
+  - Extracts ~49 columns including full RTP quality metrics (jitter, packet loss, MOS, codec info)
+  - Explicit `::type` casts on all INSERT parameters for asyncpg/PgBouncer compatibility (the INSERT binds 49 positional params, `$1`–`$49`)
   - Duplicate detection via `WHERE NOT EXISTS` (the cdrs table uses a composite PK for TimescaleDB)
   - Always returns 200 to prevent FreeSWITCH retry storms
 - **Query**: `GET /v1/cdrs` with filters (customer, trunk, product_type, direction, destination, date range, rated_only). Defaults to last 24 hours.
@@ -132,12 +139,33 @@ Admin-only search tools. Uses `require_admin` dependency on all endpoints.
 
 ### number_inventory.py
 Complete DID lifecycle management backed by the `did_inventory` table.
-- **Admin endpoints**: `GET /inventory` (paginated, filterable), `GET /stats` (counts by status/product/state), `POST /sync` (upsert from Bandwidth API), `POST /{did}/assign`, `POST /{did}/unassign`
+- **Admin endpoints**: `GET /inventory` (paginated, filterable), `GET /stats` (counts by status/product/state), `POST /sync` (upsert from Bandwidth API, then reconciles product tables), `POST /reconcile` (reconcile `did_inventory` against rcf/api/trunk product tables without calling Bandwidth — internal `_reconcile_product_tables()`), `POST /{did}/assign`, `POST /{did}/unassign`
 - **Customer endpoints**: `GET /available` (browse available DIDs), `GET /my` (customer's assigned numbers), `POST /{did}/request` (reserve a number for admin review)
 - Assign creates the product record (e.g., `rcf_numbers` row for RCF) inside a transaction
 - Unassign removes the product record and resets status to 'available'
 - Sync is idempotent: inserts new TNs as 'available', updates metadata on existing, flags removed TNs
 - All assignment changes invalidate relevant Redis caches and are logged
+
+### carriers.py
+Admin-only CRUD for `carrier_gateways` (Bandwidth Dallas/LA). `POST /{carrier_id}/test` probes carrier reachability.
+
+### rates.py
+Admin-only management of `rate_tables` / `rates`. Plus `GET /margins` (rate vs cost analysis) and `GET /lookup` (longest-prefix rate match for a destination).
+
+### tiers.py
+Admin-only CRUD for `cps_tiers`. Convenience filters `GET /trunk` and `GET /api` return tiers of that type.
+
+### sipp.py
+Admin-only SIPp load-test control. `GET /presets` lists scenarios; `POST /run` triggers a test. The SIPp runner service is not yet deployed, so `POST /run` returns a mock result or 503.
+
+### sbc.py
+Admin-only `GET /stats`: per-SBC call distribution over the last N minutes, aggregated from `cdrs.sbc_id` (the column added in `18_sbc_id_column.sql`). Used to monitor SBC failover/load-balancing health.
+
+### homer.py
+Admin-only SIP trace search for Homer 10. Queries qryn (Loki-compatible API over ClickHouse) — there is no Homer 7 JWT flow. `GET /aliases` returns a static IP-to-name map for ladder diagrams. `POST /search` runs a phone-number search and A/B-leg correlation; correlation (Step 3) queries ClickHouse directly via `IN (...)` because qryn's RE2 engine 500s on large Call-ID regex alternations.
+
+### onboarding.py
+New-RCF-customer intake pipeline (`pending → billing_verified → approve → active`, or `rejected`). Backed by `onboarding_requests`. `POST ""` is the **public, unauthenticated** intake form (exempted in middleware). All other endpoints (`GET`, `verify-billing`, `approve`, `reject`) require admin. Approve provisions customer/user/RCF records.
 
 ## Database Module (db/)
 
@@ -193,6 +221,7 @@ FastAPI `Depends` functions:
 Starlette `BaseHTTPMiddleware`. Exempt paths are hardcoded in `EXEMPT_PATHS` set. Also exempts:
 - `OPTIONS` requests (CORS preflight)
 - `/freeswitch/*` paths (FreeSWITCH internal endpoints)
+- `POST /v1/onboarding` and `POST /onboarding` (public intake form; GET/approve/reject still require admin)
 - Paths ending with `/cdrs/ingest` or `/cdrs/ingest/bulk`
 - `/ws/*` paths (WebSocket auth handled via query params)
 
@@ -214,7 +243,7 @@ Implements a raw TCP ESL client (no third-party ESL library). Each command opens
 All operations have 5-10 second timeouts. Returns None on any error.
 
 **Public functions**:
-- `originate_call(uuid, from_did, to, customer_id, traffic_grade, webhook_url, timeout)` -- builds an originate command with channel variables. Routes through `sofia/external/{to}@{sbc_proxy}:5060` so Kamailio applies `ext-sip-ip`. X-Carrier header set based on traffic_grade. In TEST_MODE, uses `loopback/`.
+- `originate_call(uuid, from_did, to, customer_id, traffic_grade, webhook_url, timeout)` -- builds an originate command with channel variables. Routes through `sofia/external/{to}@{sbc_proxy}:5060` so Kamailio applies `ext-sip-ip`. The `sip_h_X-Carrier` header is hardcoded to `primary` (Dallas) — all products use the same 2-carrier model and `traffic_grade` is only passed as a channel var, it does NOT select the carrier. In TEST_MODE, uses `loopback/`.
 - `get_call_status(call_id)` -- `uuid_dump`, parses key:value pairs
 - `hangup_call(call_id, cause)` -- `uuid_kill`
 - `transfer_call(call_id, destination)` -- `uuid_transfer`

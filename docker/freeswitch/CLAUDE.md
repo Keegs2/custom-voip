@@ -64,7 +64,13 @@ This solves the GCE hairpin NAT problem: when FreeSWITCH sends packets to its ow
 
 **Requires `NET_ADMIN` capability** in docker-compose.
 
-**IMPORTANT**: The Dockerfile ENTRYPOINT currently bypasses entrypoint.sh. The ENTRYPOINT points directly to `/usr/local/freeswitch/bin/freeswitch`. The entrypoint.sh is COPY'd but not used in the CMD/ENTRYPOINT chain. The loopback IP add may need to be done externally or the ENTRYPOINT needs updating.
+**IMPORTANT — entrypoint wiring**: The Dockerfile `ENTRYPOINT` is
+`/usr/local/freeswitch/bin/freeswitch` directly (line 342) — it does NOT invoke
+`entrypoint.sh`. The script is `COPY`'d into the image (line 333) but is never the
+image default. Therefore the loopback-IP hairpin fix in `entrypoint.sh` is wired
+via a **compose-level entrypoint override** (`docker-compose.media.yml`), not the
+image default. (The "Start FreeSWITCH via entrypoint" comment in the Dockerfile
+above line 342 is misleading — the actual ENTRYPOINT bypasses it.)
 
 ### CMD flags
 
@@ -88,7 +94,8 @@ FreeSWITCH runs with `network_mode: host` in docker-compose.media.yml. This is r
 |---|---|---|
 | `EXTERNAL_SIP_IP` | `auto-nat` | Public IP for Via/Contact/SDP headers. MUST be set in production. |
 | `EXTERNAL_RTP_IP` | `auto-nat` | Public IP for SDP c= line. Usually same as EXTERNAL_SIP_IP. |
-| `SBC_PROXY_IP` | `127.0.0.1` | Kamailio SBC IP. Outbound bridges go to sofia/external/dest@SBC_PROXY_IP:5060 |
+| `SBC_PROXY_IP` | `127.0.0.1` | Primary Kamailio SBC IP. Outbound bridges go to sofia/external/dest@SBC_PROXY_IP:5060 |
+| `SBC_PROXY_IP_FAILOVER` | `$SBC_PROXY_IP` | Secondary SBC IP for the 4-attempt failover loop in inbound_router.lua (freeswitch.xml:71 -> `sbc_proxy_ip_failover` global). Defaults to SBC_PROXY_IP if unset. |
 | `HOMER_IP` | `127.0.0.1` | Homer HEP capture endpoint IP |
 | `DB_HOST` | `postgres` | PostgreSQL host (via PgBouncer) |
 | `DB_PORT` | `6432` | PgBouncer port (NOT 5432) |
@@ -127,7 +134,7 @@ Also needs `SYS_NICE` capability for real-time scheduling.
 
 2. **mod_local_stream disabled**: It requires `local_stream.conf.xml` which doesn't exist. When xml_curl can't reach the API during startup, the missing config causes a CRIT abort. RCF uses `silence_stream://-1` for hold music instead.
 
-3. **mod_httapi and mod_http_cache disabled**: Same reason -- missing config files cause CRIT module load failure on the media VM where the API is unreachable.
+3. **mod_httapi and mod_http_cache: built-but-not-loaded**: The Dockerfile ENABLES them at build time (`sed` uncomments them in `build/modules.conf.in`, lines 129/131), so the modules exist in the image. But `modules.conf.xml` leaves their `<load>` lines commented (lines 83/92), so they are NOT loaded at runtime. They are not loaded because their configs would need to be served by xml_curl, which is unreachable during module load on the media VM. To enable, uncomment in `modules.conf.xml` AND provide reachable config.
 
 4. **NAT handling is critical**: Both internal and external profiles set `local-network-acl=loopback.auto` and `apply-nat-acl=rfc1918.auto`. This forces ext-sip-ip/ext-rtp-ip into SDP and SIP headers for ALL traffic except loopback. Without this, Docker 172.28.x.x IPs leak into SDP causing one-way audio.
 

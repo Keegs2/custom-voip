@@ -20,7 +20,8 @@ Every configurable value follows the same pattern -- set a default, then overrid
 **Network/NAT:**
 - `external_rtp_ip`, `external_sip_ip` -- Public IP for SDP and SIP headers. Default `auto-nat`, overridden by `EXTERNAL_RTP_IP`/`EXTERNAL_SIP_IP` env vars. Auto-nat fails in Docker (resolves to container IP).
 - `homer_ip` -- Homer HEP capture endpoint. From `HOMER_IP` env var.
-- `sbc_proxy_ip` -- Kamailio SBC address. From `SBC_PROXY_IP` env var.
+- `sbc_proxy_ip` -- Primary Kamailio SBC address. From `SBC_PROXY_IP` env var.
+- `sbc_proxy_ip_failover` -- Secondary SBC address for the inbound_router.lua 4-attempt failover loop (freeswitch.xml:71). From `SBC_PROXY_IP_FAILOVER` env var; falls back to `SBC_PROXY_IP` if unset.
 
 **SIP Ports:**
 - `internal_sip_port=5080` -- Receives from Kamailio
@@ -115,9 +116,13 @@ Context: public (all calls enter public dialplan context)
 - `rtp-secure-media=false` -- SRTP disabled for Bandwidth carrier interconnect
 
 **Homer SIP Capture:**
-- `capture-server=udp:$${homer_ip}:9060;hep=3;capture_id=200`
-- `sip-capture=yes`
-- Capture ID 200 distinguishes from Kamailio (100) in Homer ladder diagrams
+- The HEP endpoint and `capture_id=200` are set ONCE in `sofia.conf.xml`
+  `<global_settings>` `capture-server`. This is a GLOBAL-ONLY setting in mod_sofia.
+- Per-profile `capture-server` params are silently ignored by mod_sofia, so
+  per-profile capture IDs are impossible. BOTH the internal and external profiles
+  share `capture_id=200`. (Profiles may set only `sip-capture=yes/no` to
+  enable/disable capture, not the ID.)
+- Capture ID 200 distinguishes FreeSWITCH from Kamailio (100) in Homer ladder diagrams.
 
 **Gateways:**
 All carrier gateways are DISABLED (commented out). Outbound calls use `sofia/external/dest@proxy` with `X-Carrier` header instead. The deprecated gateway definitions are kept as documentation of Bandwidth trunk configurations:
@@ -138,10 +143,9 @@ Context: public
 
 **Key differences from internal:**
 - `ext-sip-ip` and `ext-rtp-ip` control outbound INVITE headers (this is WHY this profile exists)
-- `aggressive-nat-detection=false` -- Not needed; ext-ip handles addressing
-- `NDLB-force-rport=false`
+- `aggressive-nat-detection=false` and `NDLB-force-rport=false` -- Not needed; ext-ip handles addressing. The **internal** profile sets BOTH of these to `true` (for local Zoiper softphone testing where real NAT exists); the external profile leaves them `false`.
 - Session timers enabled with same values as internal (minimum-session-expires=90)
-- Homer capture-id=201 (distinct from internal profile's 200)
+- Homer capture is GLOBAL only (`capture_id=200` for both profiles, set in `sofia.conf.xml`); there is no per-profile capture_id.
 - No gateways defined -- bridges use `sofia/external/dest@proxy` syntax
 - `local-network-acl=loopback.auto` -- Same fix as internal. Without this, 172.28.0.1 (Kamailio) gets sip-ip in Contact instead of ext-sip-ip.
 
@@ -172,7 +176,7 @@ Loaded modules organized by purpose:
 
 ## acl.conf.xml
 
-Six ACL lists:
+Seven ACL lists:
 
 | ACL Name | Default | Purpose |
 |---|---|---|
@@ -241,6 +245,7 @@ For local Zoiper testing only. Contains:
 1. **test_rcf_did** -- `555XXXX` pattern transfers to public context for Lua routing
 2. **echo_test_default** -- `9196` echo test
 3. **default_outbound** -- PSTN calls from registered users. Normalizes to E.164, runs `lookup_user_did.lua` for caller ID, bridges via `sofia/external/dest@sbc_proxy_ip:5060` with X-Carrier header. Primary=primary (Dallas), failover=secondary (LA).
+4. **default_catchall** -- `.*` final fallback in the default context: logs the unmatched number, plays a reorder tone, and hangs up NO_ROUTE_DESTINATION.
 
 ### Context: `public` (carrier/external traffic)
 
@@ -258,7 +263,9 @@ Primary context. Processing order:
 
 4. **API product type**: Matches `product_type=api` AND `direction=outbound`. Alternative entry for API calls.
 
-5. **Trunk outbound from Kamailio**: Matches `sip_h_X-Trunk-ID` regex `^\s*\d+\s*$`. Copies X-Trunk-ID, X-Customer-ID, X-Max-Channels headers to channel variables. Runs `trunk_outbound.lua`.
+5. **Trunk header debug** (`continue=true`): Non-terminating `^(.*)$` extension that logs the inbound X-Trunk-ID header variants (debugging header casing). Falls through to the next extension.
+
+6. **Trunk outbound from Kamailio**: Matches `sip_h_X-Trunk-ID` regex `^\s*\d+\s*$`. Copies X-Trunk-ID, X-Customer-ID, X-Max-Channels headers to channel variables. Runs `trunk_outbound.lua`.
 
 6. **Trunk outbound legacy**: Matches `trunk_id` channel variable (set by earlier dialplan logic).
 
