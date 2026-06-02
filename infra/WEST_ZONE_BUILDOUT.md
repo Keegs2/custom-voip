@@ -25,10 +25,18 @@
 
 | Role | VM name | Internal IP | External IP (static) | Subnet | Tags | SBC_ID / HEP |
 |------|---------|-------------|----------------------|--------|------|--------------|
-| SBC-1 | `west-sbc-1` | 10.138.0.100 | `west-sbc-1-ip` = 8.229.41.59 | default (us-west1) | voip-sbc, lb-health-check | west-sbc-1 / 110 |
-| SBC-2 | `west-sbc-2` | 10.138.0.101 | `west-sbc-2-ip` = 136.117.230.166 | default (us-west1) | voip-sbc, lb-health-check | west-sbc-2 / 111 |
-| FreeSWITCH | `west-fs` | 192.168.20.2 | `west-fs-ip` = 8.229.177.165 | voip-media-west | voip-media | — |
-| PG replica | `west-db` | 10.138.0.103 | ephemeral | default (us-west1) | voip-services | — |
+| SBC-1 | `west-sbc-1` | 10.138.0.100 | `west-sbc-1-ip` = 8.229.41.59 | default (us-west1) | voip-sbc, lb-health-check, **bypass-vpn** | west-sbc-1 / 110 |
+| SBC-2 | `west-sbc-2` | 10.138.0.101 | `west-sbc-2-ip` = 136.117.230.166 | default (us-west1) | voip-sbc, lb-health-check, **bypass-vpn** | west-sbc-2 / 111 |
+| FreeSWITCH | `west-fs` | 192.168.20.2 | `west-fs-ip` = 8.229.177.165 | voip-media-west | voip-media, **bypass-vpn** | — |
+| PG replica | `west-db` | 10.138.0.103 | ephemeral | default (us-west1) | voip-services, **bypass-vpn** | — |
+
+> **⚠️ `bypass-vpn` is REQUIRED on every VM that needs internet/carrier egress.** The
+> `default` VPC has a leftover `0.0.0.0/0` route to a dead VPN tunnel; untagged VMs
+> black-hole all external traffic (can't reach Bandwidth OR github.com). The `bypass-vpn`
+> tag selects the direct-internet-gateway route. Add it at `gcloud compute instances create`
+> time (`--tags=voip-sbc,lb-health-check,bypass-vpn`). Remediate an existing VM with
+> `gcloud compute instances add-tags <vm> --zone=us-west1-b --tags=bypass-vpn`. (West VMs
+> were initially created without it on 2026-06-02 and timed out — fixed via add-tags.)
 | Geo LB VIP | — | — | global anycast (reserve) | — | — | — |
 
 Machine types (per `GCP_DEPLOYMENT_PLAN.md`): SBC `e2-standard-4`, FS `e2-standard-8`,
