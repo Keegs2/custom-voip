@@ -25,9 +25,9 @@
 
 | Role | VM name | Internal IP | External IP (static) | Subnet | Tags | SBC_ID / HEP |
 |------|---------|-------------|----------------------|--------|------|--------------|
-| SBC-1 | `west-sbc-1` | 10.138.0.100 | `west-sbc-1-ip` | default (us-west1) | voip-sbc, lb-health-check | west-sbc-1 / 110 |
-| SBC-2 | `west-sbc-2` | 10.138.0.101 | `west-sbc-2-ip` | default (us-west1) | voip-sbc, lb-health-check | west-sbc-2 / 111 |
-| FreeSWITCH | `west-fs` | 192.168.20.2 | `west-fs-ip` | voip-media-west | voip-media | — |
+| SBC-1 | `west-sbc-1` | 10.138.0.100 | `west-sbc-1-ip` = 8.229.41.59 | default (us-west1) | voip-sbc, lb-health-check | west-sbc-1 / 110 |
+| SBC-2 | `west-sbc-2` | 10.138.0.101 | `west-sbc-2-ip` = 136.117.230.166 | default (us-west1) | voip-sbc, lb-health-check | west-sbc-2 / 111 |
+| FreeSWITCH | `west-fs` | 192.168.20.2 | `west-fs-ip` = 8.229.177.165 | voip-media-west | voip-media | — |
 | PG replica | `west-db` | 10.138.0.103 | ephemeral | default (us-west1) | voip-services | — |
 | Geo LB VIP | — | — | global anycast (reserve) | — | — | — |
 
@@ -59,7 +59,10 @@ path (FS + Dallas + LA) all `AP`, backward-compat confirmed (East still BW_PRIMA
 multi-zone env-driven Kamailio config (`BANDWIDTH_PRIMARY_IP`/`SECONDARY_IP`, `INTERNAL_SUBNET`/
 `MEDIA_SUBNET`) ships with East defaults, so an unset value reproduces East behavior.
 
-## Step 2 — West network 🔄
+## Step 2 — West network ✅ (2026-06-02)
+Created `voip-media-west` (192.168.20.0/24) and reserved static IPs:
+west-sbc-1-ip=8.229.41.59, west-sbc-2-ip=136.117.230.166, west-fs-ip=8.229.177.165.
+
 
 ```bash
 PROJECT=rugged-night-193017
@@ -82,7 +85,7 @@ gcloud compute addresses list --regions=us-west1 --project=$PROJECT \
 - `west-sbc-1-ip` / `west-sbc-2-ip` / `west-fs-ip` → `google_compute_address.west_*` — import `projects/rugged-night-193017/regions/us-west1/addresses/<name>`
 - `default` (us-west1 subnet) → already exists; import as data source or existing `google_compute_subnetwork`.
 
-> Assigned IPs (fill in): west-sbc-1-ip = `____` · west-sbc-2-ip = `____` · west-fs-ip = `____`
+> Assigned IPs: west-sbc-1-ip = `8.229.41.59` · west-sbc-2-ip = `136.117.230.166` · west-fs-ip = `8.229.177.165`
 
 ## Step 3 — Geo Load Balancer (global, with East backend first) ⬜
 Reserve global anycast VIP → global backend service (CLIENT_IP affinity, TCP:5060 health check)
@@ -92,10 +95,27 @@ Bandwidth (termination host). Commands captured here when executed.
   `google_compute_backend_service` (global), `google_compute_health_check.sbc_5060`,
   `google_compute_global_forwarding_rule` (udp + tcp).
 
-## Step 4 — West VMs (clone machine images from East) ⬜
-Machine images from running East SBC + FS → instantiate `west-sbc-1/2`, `west-fs`, `west-db`
-with the tags/IPs/subnets above → replace `/opt/revup/.env` per role.
+## Step 4 — West VMs (clone machine images from East) ✅ (2026-06-02)
+Created machine images `east-sbc-image` / `east-fs-image` from the running East VMs, then
+instantiated `west-sbc-1` (10.138.0.100), `west-sbc-2` (10.138.0.101), `west-fs`
+(192.168.20.2) with the tags/IPs/subnets in the table above. `west-db` (Step 5) is a fresh
+build, not a clone. West NLB VIP reserved: `west-sbc-vip` = **35.252.214.40**.
 - Tofu: `google_compute_machine_image.east_sbc/east_fs`, `google_compute_instance.west_*`.
+
+### Step 4b — NLB VIP on loopback: NOW IN CODE (commit `b810be9`)
+GCP passthrough NLBs require the VIP on the backend's `dev lo`. This used to be a manual,
+**un-persisted** `ip addr add` on each SBC (would be lost on reboot; absent on clones). It is
+now done by `docker/kamailio/entrypoint.sh` (adds `${EXTERNAL_SIP_IP}/32` to `lo`,
+idempotent) with `NET_ADMIN` in `docker-compose.sbc.yml` and `USER root` + `-u/-g` drop in the
+Dockerfile. **No manual host step.** Pull + rebuild applies it; East is hardened by the same
+pull (its VIP is now persisted in code). Per-zone, only `/opt/revup/.env` is set on the VM
+(secrets + zone IPs — can't be committed).
+
+### West per-VM `.env` values (the only on-VM step)
+- **west-sbc-1:** EXTERNAL_SIP_IP=35.252.214.40, SBC_INTERNAL_IP=10.138.0.100, FS_PUBLIC_IP=8.229.177.165, FREESWITCH_IP=192.168.20.2, DB_HOST=10.142.0.103 (interim East primary → 10.138.0.103 after Step 5), HOMER_IP=10.142.0.103, HEP_CAPTURE_ID=110, SBC_ID=west-sbc-1, BANDWIDTH_PRIMARY_IP=216.82.238.134, BANDWIDTH_SECONDARY_IP=67.231.2.12, INTERNAL_SUBNET=10.138.0.0/20, MEDIA_SUBNET=192.168.20.0/24
+- **west-sbc-2:** same, but SBC_INTERNAL_IP=10.138.0.101, HEP_CAPTURE_ID=111, SBC_ID=west-sbc-2
+- **west-fs:** EXTERNAL_SIP_IP=8.229.177.165, EXTERNAL_RTP_IP=8.229.177.165, DB_HOST=10.142.0.103 (interim), API_HOST=10.142.0.103, HOMER_IP=10.142.0.103, SBC_PROXY_IP=10.138.0.100, SBC_PROXY_IP_FAILOVER=10.138.0.101, TEST_MODE=false
+- Keep inherited secrets (DB_PASS, ESL_PASSWORD) and DB_USER/DB_PORT/DB_NAME/REDIS_*/API_PORT as cloned from East.
 
 ## Step 5 — West PG streaming replica ⬜
 Bare-metal PostgreSQL replica of the East primary (replication slot + role on East, `pg_hba`
