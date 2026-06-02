@@ -26,6 +26,12 @@ services:
       - HEP_CAPTURE_ID=${HEP_CAPTURE_ID:-100}
       - SBC_ID=${SBC_ID:-east-sbc-1}
       - SBC_INTERNAL_IP=${SBC_INTERNAL_IP}
+      # Per-zone Bandwidth egress PoPs (East defaults; West swaps primary<->secondary)
+      - BANDWIDTH_PRIMARY_IP=${BANDWIDTH_PRIMARY_IP:-67.231.2.12}
+      - BANDWIDTH_SECONDARY_IP=${BANDWIDTH_SECONDARY_IP:-216.82.238.134}
+      # Per-zone trusted internal subnets (East defaults; West sets its own)
+      - INTERNAL_SUBNET=${INTERNAL_SUBNET:-10.142.0.0/20}
+      - MEDIA_SUBNET=${MEDIA_SUBNET:-192.168.10.0/24}
     volumes:
       - ./docker/kamailio/kamailio.cfg:/etc/kamailio/kamailio.cfg.tmpl:ro
       - ./docker/kamailio/dispatcher.list:/etc/kamailio/dispatcher.list.tmpl:ro

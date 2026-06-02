@@ -24,6 +24,21 @@ HEP_CAPTURE_ID="${HEP_CAPTURE_ID:-100}"
 SBC_ID="${SBC_ID:-east-sbc-1}"
 SBC_INTERNAL_IP="${SBC_INTERNAL_IP:-127.0.0.1}"
 
+# Per-zone Bandwidth egress PoPs. Defaults are the East values, so an East
+# redeploy WITHOUT these vars set is byte-identical to the pre-templating config.
+#   East:  PRIMARY=67.231.2.12 (Dallas), SECONDARY=216.82.238.134 (LA)
+#   West:  PRIMARY=216.82.238.134 (LA),  SECONDARY=67.231.2.12 (Dallas)
+# BANDWIDTH_IP_1 = primary (X-Carrier=primary), BANDWIDTH_IP_2 = secondary.
+BANDWIDTH_PRIMARY_IP="${BANDWIDTH_PRIMARY_IP:-67.231.2.12}"
+BANDWIDTH_SECONDARY_IP="${BANDWIDTH_SECONDARY_IP:-216.82.238.134}"
+
+# Per-zone trusted internal subnets (self-containment: each SBC trusts ONLY
+# its own VPC subnet + its own FS media subnet). Defaults are East values.
+#   East:  INTERNAL_SUBNET=10.142.0.0/20, MEDIA_SUBNET=192.168.10.0/24
+#   West:  INTERNAL_SUBNET=10.138.0.0/20, MEDIA_SUBNET=192.168.20.0/24
+INTERNAL_SUBNET="${INTERNAL_SUBNET:-10.142.0.0/20}"
+MEDIA_SUBNET="${MEDIA_SUBNET:-192.168.10.0/24}"
+
 # FS_PUBLIC_IP: FreeSWITCH VM's own public IP for RTP media.
 # Used in SDP body rewrites. Different from EXTERNAL_SIP_IP (NLB VIP) because
 # RTP goes directly to/from FS, not through the NLB.
@@ -45,8 +60,12 @@ sed -i "s|__HOMER_IP__|${HOMER_IP}|g" "$CONFIG"
 sed -i "s|__HEP_CAPTURE_ID__|${HEP_CAPTURE_ID}|g" "$CONFIG"
 sed -i "s|__SBC_ID__|${SBC_ID}|g" "$CONFIG"
 sed -i "s|__SBC_INTERNAL_IP__|${SBC_INTERNAL_IP}|g" "$CONFIG"
+sed -i "s|__BANDWIDTH_PRIMARY_IP__|${BANDWIDTH_PRIMARY_IP}|g" "$CONFIG"
+sed -i "s|__BANDWIDTH_SECONDARY_IP__|${BANDWIDTH_SECONDARY_IP}|g" "$CONFIG"
+sed -i "s|__INTERNAL_SUBNET__|${INTERNAL_SUBNET}|g" "$CONFIG"
+sed -i "s|__MEDIA_SUBNET__|${MEDIA_SUBNET}|g" "$CONFIG"
 
-echo "Kamailio config templated: ADVERTISE_IP=${EXTERNAL_SIP_IP}, FS=${FREESWITCH_IP}, FS_PUBLIC_IP=${FS_PUBLIC_IP}, DB=${DB_HOST}:${DB_PORT}, Homer=${HOMER_IP}, HEP_ID=${HEP_CAPTURE_ID}, SBC_ID=${SBC_ID}, SBC_INTERNAL_IP=${SBC_INTERNAL_IP}"
+echo "Kamailio config templated: ADVERTISE_IP=${EXTERNAL_SIP_IP}, FS=${FREESWITCH_IP}, FS_PUBLIC_IP=${FS_PUBLIC_IP}, DB=${DB_HOST}:${DB_PORT}, Homer=${HOMER_IP}, HEP_ID=${HEP_CAPTURE_ID}, SBC_ID=${SBC_ID}, SBC_INTERNAL_IP=${SBC_INTERNAL_IP}, BW_PRIMARY=${BANDWIDTH_PRIMARY_IP}, BW_SECONDARY=${BANDWIDTH_SECONDARY_IP}, INTERNAL_SUBNET=${INTERNAL_SUBNET}, MEDIA_SUBNET=${MEDIA_SUBNET}"
 
 # Start Kamailio with all original arguments
 exec /usr/sbin/kamailio "$@"
