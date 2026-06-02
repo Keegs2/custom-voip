@@ -78,9 +78,11 @@ RUN openssl req -x509 -newkey rsa:4096 -keyout /etc/kamailio/tls/kamailio.key \
 # SIP ports: 5060 (UDP/TCP), 5061 (TLS)
 EXPOSE 5060/udp 5060/tcp 5061/tcp
 
-# Health check using kamcmd
+# Health check using kamcmd over the ctl binrpc UNIX socket.
+# -s pins the socket path (matches the ctl "binrpc" modparam in kamailio.cfg and
+# kamcmd's compiled-in default /var/run/kamailio/kamailio_ctl; /var/run -> /run).
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD kamcmd core.uptime || exit 1
+    CMD kamcmd -s unix:/var/run/kamailio/kamailio_ctl core.uptime || exit 1
 
 # Run as kamailio user for security
 USER kamailio

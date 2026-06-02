@@ -48,7 +48,8 @@ services:
         soft: 65536
         hard: 65536
     healthcheck:
-      test: ["CMD", "kamcmd", "core.uptime"]
+      # Explicit -s pins the binrpc socket (matches ctl modparam + kamcmd default).
+      test: ["CMD", "kamcmd", "-s", "unix:/var/run/kamailio/kamailio_ctl", "core.uptime"]
       interval: 30s
       timeout: 10s
       start_period: 5s
