@@ -16,7 +16,7 @@ from routers import (
     rcf, calls, trunks, cdrs, customers, health,
     auth, search, number_inventory,
     carriers, rates, tiers, sipp, sbc, homer,
-    onboarding,
+    onboarding, freeswitch,
 )
 from middleware.auth import JWTAuthMiddleware
 
@@ -122,6 +122,11 @@ app.include_router(homer.router, prefix="/v1/homer", tags=["Homer"])
 app.include_router(homer.router, prefix="/homer", tags=["Homer"])
 app.include_router(onboarding.router, prefix="/v1/onboarding", tags=["Onboarding"])
 app.include_router(onboarding.router, prefix="/onboarding", tags=["Onboarding"])
+
+# FreeSWITCH mod_xml_curl gateway. Mounted at /freeswitch (auth-exempt in
+# middleware). Always returns HTTP 200 + the FreeSWITCH "not found" XML so
+# mod_xml_curl never logs a per-call HTTP 404 error.
+app.include_router(freeswitch.router, prefix="/freeswitch", tags=["FreeSWITCH"])
 
 
 @app.get("/")

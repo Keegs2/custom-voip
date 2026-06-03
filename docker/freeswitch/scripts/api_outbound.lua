@@ -417,14 +417,15 @@ else
         session:execute("bridge", dial_string)
     end)
 
-    -- Check if bridge succeeded
-    local bridge_result = get_var("bridge_result", "")
-    local hangup_cause_var = get_var("originate_disposition", get_var("hangup_cause", ""))
+    -- Check if bridge succeeded. originate_disposition is the authoritative
+    -- FreeSWITCH variable ("SUCCESS" on connect, a failure cause otherwise).
+    -- bridge_result is NOT a real channel variable and must never be trusted.
+    local disposition = get_var("originate_disposition", "")
 
-    if bridge_result ~= "SUCCESS" then
+    if disposition ~= "SUCCESS" and session:ready() then
         freeswitch.consoleLog("WARNING", string.format(
-            "[%s] API Bridge failed: result=%s cause=%s\n",
-            uuid, bridge_result, hangup_cause_var
+            "[%s] API Bridge failed: disposition=%s cause=%s\n",
+            uuid, disposition, get_var("last_bridge_hangup_cause", disposition)
         ))
 
         -- Try failover carrier (secondary = LA)

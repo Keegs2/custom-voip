@@ -97,7 +97,7 @@ inbound_router.lua (product_type == "rcf"):
      - Per-attempt dial string (~:723-733) sets only ignore_early_media=false,
        call_timeout, X-Carrier, X-CID (sip_call_id for Homer A/B correlation),
        and RFC 4028 session timers (sip_session_timeout=1800, min=90).
-     - Loop breaks on bridge_result == "SUCCESS".
+     - Loop breaks on `originate_disposition == "SUCCESS"` (the real FS bridge-result variable; `bridge_result` is NOT a channel variable and must never be used). `carrier_used` is set per attempt, so breaking on success records the winning carrier.
      - Export RFC 4028 session timers to B-leg as well.
      - Uses EXTERNAL profile so Via/Contact/SDP get public IP.
   6. If all 4 attempts fail -> NORMAL_TEMPORARY_FAILURE (SIP 503)

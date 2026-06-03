@@ -802,11 +802,12 @@ local function execute_dial(verb)
         session:execute("bridge", combined_dial)
     end)
 
-    -- Check dial result
+    -- Check dial result. originate_disposition is the authoritative FreeSWITCH
+    -- variable ("SUCCESS" on connect, a failure cause otherwise). The old
+    -- bridge_result read was a no-op (not a real channel variable) and is gone.
     local dial_status = get_var("originate_disposition", "")
-    local bridge_result = get_var("bridge_result", "")
 
-    log_info(uuid, string.format("Dial result: disposition=%s bridge=%s", dial_status, bridge_result))
+    log_info(uuid, string.format("Dial result: disposition=%s", dial_status))
 
     -- If there's an action URL, POST the result
     if dial_action then

@@ -284,13 +284,15 @@ else
         session:execute("bridge", dial_string)
     end)
 
-    -- Check if bridge succeeded
-    local bridge_result = get_var("bridge_result", "")
+    -- Check if bridge succeeded. originate_disposition is the authoritative
+    -- FreeSWITCH variable ("SUCCESS" on connect, a failure cause otherwise).
+    -- bridge_result is NOT a real channel variable and must never be trusted.
+    local disposition = get_var("originate_disposition", "")
 
-    if bridge_result ~= "SUCCESS" then
+    if disposition ~= "SUCCESS" and session:ready() then
         freeswitch.consoleLog("WARNING", string.format(
             "[%s] Bridge failed: %s\n",
-            uuid, get_var("originate_disposition", "unknown")
+            uuid, disposition ~= "" and disposition or "unknown"
         ))
 
         -- Try failover carrier (secondary = LA)

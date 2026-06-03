@@ -407,8 +407,26 @@
   <!-- ============================================ -->
   <!-- DOMAIN HANDLING                             -->
   <!-- ============================================ -->
+  <!--
+    RCF-V1: parse="false" — do NOT parse the directory per request.
+
+    WHY: With parse="true", mod_sofia performs a directory lookup for the
+    request domain on inbound INVITEs (to load per-domain user_data/variables).
+    On the media VM the only xml_curl binding is "directory" (pointed at the
+    API's /freeswitch/directory endpoint), which has no entry for carrier
+    traffic and returns HTTP 404. That produced a per-call error:
+        [ERR] mod_xml_curl.c:319 Received HTTP error 404 trying to fetch
+              http://API:8088/freeswitch/directory
+    RCF inbound is IP-trusted carrier traffic in the public context with
+    auth-calls=false — it never needs a user/directory lookup, so the 404 was
+    pure noise masquerading as an error on every call.
+
+    parse="false" + alias="false" matches the external profile and eliminates
+    the per-call directory fetch. Static directory users (test extensions
+    1001-1003 in directory/default.xml) are still loaded for local Zoiper
+    registration; only the per-request domain PARSE is disabled here.
+  -->
   <domains>
-    <!-- Accept all domain requests (B2BUA mode) -->
-    <domain name="all" alias="true" parse="true"/>
+    <domain name="all" alias="false" parse="false"/>
   </domains>
 </profile>

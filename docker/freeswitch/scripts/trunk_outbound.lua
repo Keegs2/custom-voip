@@ -554,14 +554,17 @@ pcall(function()
     session:execute("bridge", dial_string)
 end)
 
--- Check if bridge succeeded
-local bridge_result = get_var("bridge_result", "")
-local last_bridge_hangup = get_var("last_bridge_hangup_cause", get_var("originate_disposition", ""))
+-- Check if bridge succeeded. originate_disposition is the authoritative
+-- FreeSWITCH variable: "SUCCESS" on a connected bridge, a failure cause
+-- (USER_BUSY, NO_ROUTE_DESTINATION, RECOVERY_ON_TIMER_EXPIRE, ...) otherwise.
+-- (bridge_result is NOT a real channel variable and must never be trusted.)
+local disposition = get_var("originate_disposition", "")
+local last_bridge_hangup = get_var("last_bridge_hangup_cause", disposition)
 
-if bridge_result ~= "SUCCESS" then
+if disposition ~= "SUCCESS" and session:ready() then
     freeswitch.consoleLog("WARNING", string.format(
-        "[%s] Primary bridge failed: result=%s cause=%s\n",
-        uuid, bridge_result, last_bridge_hangup
+        "[%s] Primary bridge failed: disposition=%s cause=%s\n",
+        uuid, disposition, last_bridge_hangup
     ))
 
     -- Try failover carrier (secondary = LA)
@@ -581,15 +584,15 @@ if bridge_result ~= "SUCCESS" then
     end)
 
     -- Re-check after failover
-    bridge_result = get_var("bridge_result", "")
-    last_bridge_hangup = get_var("last_bridge_hangup_cause", "")
+    disposition = get_var("originate_disposition", "")
+    last_bridge_hangup = get_var("last_bridge_hangup_cause", disposition)
 end
 
 -- If all bridges failed, return 503 (DID was found, carrier unreachable)
-if bridge_result ~= "SUCCESS" then
+if disposition ~= "SUCCESS" then
     freeswitch.consoleLog("WARNING", string.format(
-        "[%s] All bridges failed for trunk %s -> %s (last_cause=%s)\n",
-        uuid, trunk_id, normalized_dest, last_bridge_hangup
+        "[%s] All bridges failed for trunk %s -> %s (disposition=%s last_cause=%s)\n",
+        uuid, trunk_id, normalized_dest, disposition, last_bridge_hangup
     ))
     hangup("NORMAL_TEMPORARY_FAILURE",
         "[" .. uuid .. "] Trunk bridge failed, returning 503 (carrier unreachable)")

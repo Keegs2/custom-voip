@@ -1,4 +1,3 @@
-freeswitch.consoleLog("ERR", ">>> inbound_router.lua STARTING <<<\n")
 -- Inbound Call Router - High Performance Implementation
 -- Handles RCF, API DID, and Trunk DID routing with caching
 --
@@ -45,9 +44,13 @@ end
 -- API layer (pre-call webhook). For now, RCF calls route without
 -- velocity rate-limiting.
 local redis = nil
-freeswitch.consoleLog("INFO", ">>> redis=DISABLED (RCF-V1) Loading db_client <<<\n")
+freeswitch.consoleLog("DEBUG", "[inbound_router] redis=DISABLED (RCF-V1), loading db_client\n")
 local db = load_module("db_client")
-freeswitch.consoleLog("ERR", ">>> db=" .. tostring(db ~= nil) .. " Modules loaded <<<\n")
+if not db then
+    freeswitch.consoleLog("ERR", "[inbound_router] db_client failed to load — DID lookups will fail\n")
+else
+    freeswitch.consoleLog("DEBUG", "[inbound_router] Modules loaded (db_client ready)\n")
+end
 
 -- Ensure session exists
 if not session then
@@ -131,8 +134,8 @@ if original_caller_name == "" or original_caller_name == nil then
     original_caller_name = original_caller_number
 end
 
-freeswitch.consoleLog("ERR", string.format(
-    ">>> [%s] DID=%s CallerID=%s IP=%s <<<\n",
+freeswitch.consoleLog("INFO", string.format(
+    "[%s] Inbound: DID=%s CallerID=%s IP=%s\n",
     uuid, did, caller_id, source_ip
 ))
 freeswitch.consoleLog("INFO", string.format(
@@ -324,7 +327,7 @@ local function lookup_trunk_did()
     return nil
 end
 
-freeswitch.consoleLog("ERR", ">>> STEP 2: DID lookup for " .. tostring(normalized_did) .. " <<<\n")
+freeswitch.consoleLog("DEBUG", "[" .. uuid .. "] STEP 2: DID lookup for " .. tostring(normalized_did) .. "\n")
 -- RCF-V1: Execute lookups in order: RCF -> API -> Trunk
 -- UCaaS extension routing removed — not needed for RCF-only deployment
 local routing = lookup_rcf()
@@ -345,7 +348,7 @@ if not routing then
     return
 end
 
-freeswitch.consoleLog("ERR", ">>> ROUTING FOUND: type=" .. tostring(routing.product_type) .. " <<<\n")
+freeswitch.consoleLog("DEBUG", "[" .. uuid .. "] Routing found: type=" .. tostring(routing.product_type) .. "\n")
 -- Extract routing data
 product_type = routing.product_type
 customer_id = routing.customer_id
@@ -359,9 +362,9 @@ voice_url = routing.voice_url
 fallback_url = routing.fallback_url
 trunk_id = routing.trunk_id
 
-freeswitch.consoleLog("ERR", string.format(
-    ">>> EXTRACTED: type=%s customer=%s trunk=%s grade=%s <<<\n",
-    tostring(product_type), tostring(customer_id), tostring(trunk_id), tostring(traffic_grade)
+freeswitch.consoleLog("DEBUG", string.format(
+    "[%s] Extracted: type=%s customer=%s trunk=%s grade=%s\n",
+    uuid, tostring(product_type), tostring(customer_id), tostring(trunk_id), tostring(traffic_grade)
 ))
 
 -- Set channel variables for CDR and downstream processing
@@ -433,7 +436,7 @@ local function get_domain()
     return domain
 end
 
-freeswitch.consoleLog("ERR", ">>> STEP 4: Routing product_type=" .. tostring(product_type) .. " <<<\n")
+freeswitch.consoleLog("DEBUG", "[" .. uuid .. "] STEP 4: Routing product_type=" .. tostring(product_type) .. "\n")
 
 if product_type == "rcf" then
     -- Remote Call Forwarding - Bridge to destination
@@ -712,6 +715,8 @@ if product_type == "rcf" then
         }
 
         for i, attempt in ipairs(bridge_attempts) do
+            local attempted = false
+
             -- TCP pre-check: detect dead SBC in <1 second instead of
             -- waiting for SIP timeout. Skip unreachable SBCs instantly.
             if not is_sbc_reachable(attempt.sbc, 5060) then
@@ -720,6 +725,7 @@ if product_type == "rcf" then
                     uuid, i, attempt.sbc, attempt.label
                 ))
             else
+                attempted = true
                 local attempt_dial = string.format(
                     "{ignore_early_media=false,call_timeout=%d,sip_h_X-Carrier=%s" ..
                     ",sip_h_X-CID=%s" ..
@@ -732,6 +738,10 @@ if product_type == "rcf" then
                     attempt.sbc
                 )
 
+                -- Label the CDR with the carrier we are about to try. If this
+                -- attempt connects we break immediately below, so carrier_used
+                -- reflects the WINNING attempt. On failure the next iteration
+                -- overwrites it before its own bridge.
                 set_var("carrier_used", "carrier_" .. attempt.carrier)
 
                 freeswitch.consoleLog("INFO", string.format(
@@ -744,36 +754,54 @@ if product_type == "rcf" then
                 end)
             end
 
-            -- Check if bridge succeeded
-            local bridge_result = get_var("bridge_result", "")
-            local last_bridge_hangup = get_var("last_bridge_hangup_cause", "")
+            -- Determine whether THIS bridge connected. originate_disposition is
+            -- the authoritative FreeSWITCH variable: it is set to "SUCCESS" after
+            -- a connected bridge, or to a failure cause (USER_BUSY,
+            -- NO_ROUTE_DESTINATION, RECOVERY_ON_TIMER_EXPIRE, etc.) otherwise.
+            -- (bridge_result is NOT a real channel variable — never trust it.)
+            -- We only inspect disposition for attempts that actually ran a bridge;
+            -- a skipped (unreachable-SBC) attempt leaves the previous attempt's
+            -- disposition in place and must not be misread as success.
+            if attempted then
+                local disposition = get_var("originate_disposition", "")
+                if disposition == "SUCCESS" then
+                    freeswitch.consoleLog("INFO", string.format(
+                        "[%s] RCF bridge attempt %d/4 succeeded (%s)\n",
+                        uuid, i, attempt.label
+                    ))
+                    break
+                end
 
-            if bridge_result == "SUCCESS" then
                 freeswitch.consoleLog("INFO", string.format(
-                    "[%s] RCF bridge attempt %d/4 succeeded (%s)\n",
-                    uuid, i, attempt.label
+                    "[%s] RCF bridge attempt %d/4 failed (%s): cause=%s\n",
+                    uuid, i, attempt.label,
+                    get_var("last_bridge_hangup_cause", disposition)
                 ))
-                break
             end
 
-            freeswitch.consoleLog("INFO", string.format(
-                "[%s] RCF bridge attempt %d/4 failed (%s): cause=%s\n",
-                uuid, i, attempt.label, last_bridge_hangup
-            ))
+            -- If continue_on_fail tore the A-leg down (e.g. caller hung up
+            -- mid-failover), stop trying — the session is gone.
+            if not session:ready() then
+                break
+            end
         end
     end
 
-    -- Final result check (covers both local and PSTN paths)
-    local bridge_result = get_var("bridge_result", "")
+    -- Final result check (covers both local and PSTN paths).
+    -- originate_disposition == "SUCCESS" means a B-leg connected at some point;
+    -- the call has since completed normally via hangup_after_bridge.
+    local disposition = get_var("originate_disposition", "")
     local last_bridge_hangup = get_var("last_bridge_hangup_cause", "")
 
-    -- If all bridge attempts failed, hangup with NORMAL_TEMPORARY_FAILURE (SIP 503)
-    -- instead of falling through to the dialplan's 404 which would mask the real issue.
-    -- The DID WAS found -- the carrier bridge just couldn't complete.
-    if bridge_result ~= "SUCCESS" then
+    -- If NO attempt ever connected, hangup with NORMAL_TEMPORARY_FAILURE (SIP 503)
+    -- instead of falling through to the dialplan's 404 which would mask the real
+    -- issue. The DID WAS found -- the carrier bridge just couldn't complete.
+    -- NOTE: a session that is no longer ready but DID connect (disposition
+    -- SUCCESS) is a normal completed call, not a failure.
+    if disposition ~= "SUCCESS" then
         freeswitch.consoleLog("WARNING", string.format(
-            "[%s] All bridges failed for RCF DID %s -> %s (last_cause=%s)\n",
-            uuid, normalized_did, forward_to, last_bridge_hangup
+            "[%s] All bridges failed for RCF DID %s -> %s (disposition=%s last_cause=%s)\n",
+            uuid, normalized_did, forward_to, disposition, last_bridge_hangup
         ))
         hangup("NORMAL_TEMPORARY_FAILURE",
             "[" .. uuid .. "] RCF bridge failed, returning 503 (DID was found, carrier unreachable)")
@@ -821,21 +849,19 @@ elseif product_type == "api" then
             session:execute("lua", "voice_webhook.lua")
         end)
     else
-        freeswitch.consoleLog("ERR", "[" .. uuid .. "] API DID without voice_url\n")
+        freeswitch.consoleLog("ERR", "[" .. uuid .. "] API DID has no voice_url configured — rejecting\n")
         hangup("NORMAL_TEMPORARY_FAILURE")
     end
 
 elseif product_type == "trunk" then
-    freeswitch.consoleLog("ERR", ">>> TRUNK INBOUND SECTION REACHED <<<\n")
     -- SIP Trunk inbound — route call to customer's PBX
     -- Look up the customer's authorized IP(s) and bridge to their PBX
-    freeswitch.consoleLog("ERR", string.format(
-        ">>> Trunk inbound: trunk_id=%s did=%s <<<\n",
+    freeswitch.consoleLog("DEBUG", string.format(
+        "[%s] Trunk inbound: trunk_id=%s did=%s\n",
         uuid, tostring(trunk_id), normalized_did
     ))
 
     -- Get customer PBX endpoint IPs
-    freeswitch.consoleLog("ERR", ">>> Looking up endpoint IPs for trunk " .. tostring(trunk_id) .. " <<<\n")
     local endpoint_ips = nil
     if db then
         local lookup_ok, lookup_result = pcall(function()
@@ -844,16 +870,22 @@ elseif product_type == "trunk" then
         if lookup_ok then
             endpoint_ips = lookup_result
         else
-            freeswitch.consoleLog("ERR", ">>> DB lookup CRASHED: " .. tostring(lookup_result) .. " <<<\n")
+            freeswitch.consoleLog("ERR", string.format(
+                "[%s] Trunk endpoint IP lookup failed for trunk %s: %s\n",
+                uuid, tostring(trunk_id), tostring(lookup_result)
+            ))
         end
     else
-        freeswitch.consoleLog("ERR", ">>> DB module is nil! <<<\n")
+        freeswitch.consoleLog("ERR", "[" .. uuid .. "] db_client unavailable — cannot look up trunk endpoints\n")
     end
 
-    freeswitch.consoleLog("ERR", ">>> endpoint_ips=" .. tostring(endpoint_ips) .. " count=" .. tostring(endpoint_ips and #endpoint_ips or 0) .. " <<<\n")
+    freeswitch.consoleLog("DEBUG", string.format(
+        "[%s] Trunk endpoint lookup: count=%d\n",
+        uuid, (endpoint_ips and #endpoint_ips or 0)
+    ))
 
     if not endpoint_ips or #endpoint_ips == 0 then
-        freeswitch.consoleLog("ERR", string.format(
+        freeswitch.consoleLog("WARNING", string.format(
             "[%s] No endpoint IPs found for trunk %s\n", uuid, tostring(trunk_id)
         ))
         hangup("NO_ROUTE_DESTINATION", "[" .. uuid .. "] No PBX endpoint configured for trunk")
@@ -885,18 +917,24 @@ elseif product_type == "trunk" then
             sbc_proxy_ip
         )
 
-        freeswitch.consoleLog("ERR", ">>> BRIDGE (via SBC): " .. dial_string .. " X-PBX-Dest=" .. pbx_ip .. " <<<\n")
+        freeswitch.consoleLog("INFO", string.format(
+            "[%s] Trunk inbound bridge (via SBC): %s X-PBX-Dest=%s\n",
+            uuid, dial_string, pbx_ip
+        ))
 
         -- Mark as lua-routed
         set_var("lua_routed", "true")
 
         session:execute("bridge", dial_string)
 
-        -- Check bridge result
-        local hangup_cause = get_var("bridge_hangup_cause", get_var("hangup_cause", ""))
-        if hangup_cause ~= "" and hangup_cause ~= "NORMAL_CLEARING" and hangup_cause ~= "SUCCESS" then
+        -- Check bridge result. originate_disposition is the authoritative
+        -- success/failure indicator ("SUCCESS" on connect, a failure cause
+        -- otherwise). bridge_result is NOT a real variable and is never used.
+        local disposition = get_var("originate_disposition", "")
+        if disposition ~= "" and disposition ~= "SUCCESS" then
             freeswitch.consoleLog("WARNING", string.format(
-                "[%s] Trunk inbound bridge failed: %s\n", uuid, hangup_cause
+                "[%s] Trunk inbound bridge failed: disposition=%s last_cause=%s\n",
+                uuid, disposition, get_var("last_bridge_hangup_cause", "")
             ))
         end
     end
