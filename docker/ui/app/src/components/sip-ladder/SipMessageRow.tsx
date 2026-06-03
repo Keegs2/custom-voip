@@ -100,7 +100,16 @@ export function SipMessageRow({
   if (hideRetransmissions && message.isRetransmission) return null;
   if (hide100Trying && message.original.status === 100) return null;
 
-  const { sourceCol, destCol, color, label, isRetransmission: isRetrans, direction, timeDeltaMs } = message;
+  const {
+    sourceCol,
+    destCol,
+    color,
+    label,
+    isRetransmission: isRetrans,
+    direction,
+    timeDeltaMs,
+    directionInferred,
+  } = message;
   const numCols = nodes.length;
 
   // Determine the column range the arrow spans
@@ -229,7 +238,14 @@ export function SipMessageRow({
                         : 0     // Extend to right edge
                       : 0,     // Middle cell: full width
                   height: 2,
-                  background: color,
+                  // Solid for wire-confirmed direction; dashed when the direction
+                  // was inferred from SIP semantics (collapsed HEP src/dst).
+                  ...(directionInferred
+                    ? {
+                        background: 'none',
+                        backgroundImage: `repeating-linear-gradient(90deg, ${color} 0px, ${color} 5px, transparent 5px, transparent 9px)`,
+                      }
+                    : { background: color }),
                   zIndex: 1,
                 }}
               />
@@ -301,6 +317,23 @@ export function SipMessageRow({
                     }}
                   >
                     retrans
+                  </span>
+                )}
+                {directionInferred && (
+                  <span
+                    title="Direction inferred from SIP headers (wire src/dst aliased to one node)"
+                    style={{
+                      fontSize: '0.58rem',
+                      fontWeight: 600,
+                      color: LADDER_COLORS.textFaint,
+                      fontStyle: 'italic',
+                      border: `1px solid ${LADDER_COLORS.borderLight}`,
+                      borderRadius: 3,
+                      padding: '0 3px',
+                      letterSpacing: '0.02em',
+                    }}
+                  >
+                    inferred
                   </span>
                 )}
               </div>

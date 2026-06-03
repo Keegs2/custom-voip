@@ -64,6 +64,7 @@ case "$ROLE" in
     upsert HOMER_IP               "$HOMER_IP"
     upsert SBC_PROXY_IP           10.138.0.100        # west-sbc-1 (outbound bridge target)
     upsert SBC_PROXY_IP_FAILOVER  10.138.0.101        # west-sbc-2 (4-attempt failover)
+    upsert HEP_CAPTURE_ID         210                 # West FS Homer capture ID (East FS=200, Central=220)
     upsert TEST_MODE              false
     ;;
   *)

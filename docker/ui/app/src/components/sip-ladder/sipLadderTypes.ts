@@ -59,6 +59,14 @@ export interface LadderMessage {
   leg: 'a' | 'b' | 'unknown';
   /** Milliseconds elapsed since the previous message (null for the first message) */
   timeDeltaMs: number | null;
+  /**
+   * True when the wire-level HEP src/dst collapsed to a single column (or were
+   * otherwise ambiguous) and the arrow direction had to be inferred from SIP
+   * semantics (request-URI / Via chain) rather than read directly off the wire.
+   * The row renders these with a subtle "inferred" marker so operators know the
+   * direction is derived, not captured. A message is NEVER rendered as a bare dot.
+   */
+  directionInferred: boolean;
 }
 
 // ─── Complete layout ────────────────────────────────────────────────────────

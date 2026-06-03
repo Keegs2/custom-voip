@@ -141,7 +141,7 @@
       "id": 2,
       "type": "table",
       "title": "SIP Messages",
-      "description": "Parsed SIP message table with multi-node dedup. Messages captured by both Kamailio (node=100) and FreeSWITCH (node=200) are grouped into a single row with merged Node values. For precise timestamp-aware dedup, use the React UI (SIP Trace Search page).",
+      "description": "Parsed SIP message table with multi-node dedup. Messages captured by both Kamailio and FreeSWITCH are grouped into a single row with merged Node values. Capture IDs are per-zone: East SBC=100/101, East FreeSWITCH=200; West SBC=110/111, West FreeSWITCH=210; Central SBC=120/121, Central FreeSWITCH=220. The Node column shows which capture point(s) saw each message, so you can tell zones apart. For precise timestamp-aware dedup, use the React UI (SIP Trace Search page).",
       "gridPos": { "h": 10, "w": 24, "x": 0, "y": 7 },
       "datasource": {
         "type": "loki",

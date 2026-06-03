@@ -35,12 +35,16 @@
          The capture_id here applies to ALL profiles.
 
          NOTE: To distinguish FS from Kamailio in Homer, use a different capture_id
-         than Kamailio (which uses 100). We use 200 for FreeSWITCH.
+         than Kamailio (which uses 100/110/120 per zone). FreeSWITCH uses 200/210/220
+         per zone (East/West/Central), set via the hep_capture_id global var
+         (freeswitch.xml, from HEP_CAPTURE_ID env). It MUST be unique per zone so the
+         ladder can tell which zone's FS captured a message — a hardcoded 200 would
+         make every zone's FreeSWITCH collide.
 
          NOTE: sip-capture is NOT recognized in global_settings — it must be set
          per-profile in each sofia profile's <settings> block.
     -->
-    <param name="capture-server" value="udp:$${homer_ip}:9060;hep=3;capture_id=200"/>
+    <param name="capture-server" value="udp:$${homer_ip}:9060;hep=3;capture_id=$${hep_capture_id}"/>
 
     <!-- RFC compliance for multipart MIME -->
     <param name="rfc2833-pt" value="101"/>

@@ -214,6 +214,7 @@ def _parse_loki_response(
                 "to_user": to_user,
                 "callid": labels.get("call_id", ""),
                 "method": labels.get("method", ""),
+                "cseq": _extract_cseq(log_line),
                 "src_ip": labels.get("src_ip", ""),
                 "dst_ip": labels.get("dst_ip", ""),
                 "status": status,
@@ -244,6 +245,25 @@ def _extract_sip_user(header_value: str) -> str:
     import re as _re
     match = _re.search(r"sip:([^@>]+)@", header_value)
     return match.group(1) if match else header_value
+
+
+_CSEQ_RE = re.compile(r"^CSeq:\s*(\d+)\s+(\w+)", re.IGNORECASE | re.MULTILINE)
+
+
+def _extract_cseq(raw_msg: Optional[str]) -> str:
+    """Extract the CSeq value (e.g. ``1 INVITE``) from a raw SIP message.
+
+    CSeq is mandatory in every SIP message (RFC 3261 §8.1.1.5), so it is a
+    reliable component of the per-message identity used by deduplication.
+    Returns an empty string when the message is absent or unparseable.
+
+    Input:  'CSeq: 102 INVITE\\r\\n'
+    Output: '102 INVITE'
+    """
+    if not raw_msg:
+        return ""
+    m = _CSEQ_RE.search(raw_msg)
+    return f"{m.group(1)} {m.group(2).upper()}" if m else ""
 
 
 # ---------------------------------------------------------------------------
@@ -464,6 +484,7 @@ async def _query_clickhouse_by_callids(
             "to_user": to_user,
             "callid": labels.get("call_id", ""),
             "method": labels.get("method", ""),
+            "cseq": _extract_cseq(log_line),
             "src_ip": labels.get("src_ip", ""),
             "dst_ip": labels.get("dst_ip", ""),
             "status": status,
@@ -480,29 +501,79 @@ def _extract_callids(results: list[dict[str, Any]]) -> set[str]:
     return {r["callid"] for r in results if r.get("callid")}
 
 
+def _is_directional(record: dict[str, Any]) -> bool:
+    """True when a record has a real, drawable hop (distinct src and dst).
+
+    The HEP capture path rewrites SrcIP/DstIP to friendly node names via the
+    heplify-server ``ip-alias.lua`` script (see docker/homer/CLAUDE.md).  Many
+    distinct underlying IPs collapse to the SAME alias — e.g. the SBC's VPC IP,
+    its external IP and the NLB VIP all map to "SBC-1 East"; FreeSWITCH's
+    internal and external IPs both map to "FreeSWITCH East".  When a single
+    capture sees both ends of a message resolve to the same node name (a
+    self/loopback capture, or an alias collapse), ``src_ip == dst_ip`` and the
+    ladder cannot draw an arrow — it renders an orphan dot.
+
+    A record is directional only when both endpoints are present AND distinct.
+    """
+    src = (record.get("src_ip") or "").strip()
+    dst = (record.get("dst_ip") or "").strip()
+    return bool(src) and bool(dst) and src != dst
+
+
+def _message_identity(record: dict[str, Any]) -> tuple[str, str, str, str]:
+    """Direction-AGNOSTIC identity of one logical SIP message.
+
+    Deliberately EXCLUDES src_ip/dst_ip so that the multiple captures of the
+    SAME physical message (taken at different nodes, possibly with a collapsed
+    self-capture where src==dst) all land in one group and can be reconciled
+    to a single directional row.  Identity uses the fields that are invariant
+    across capture points: Call-ID, method, response code, and CSeq.
+
+    CSeq distinguishes an initial INVITE from a re-INVITE and a request from
+    its same-method retransmissions/responses within a dialog, so genuinely
+    different messages are NOT collapsed together.
+    """
+    return (
+        record.get("callid", ""),
+        record.get("method", ""),
+        str(record.get("status", "") or ""),  # response code as string
+        record.get("cseq", ""),
+    )
+
+
 def _deduplicate_results(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Deduplicate SIP messages captured by multiple HEP nodes.
 
-    The same SIP message traversing between Kamailio (node=100) and
-    FreeSWITCH (node=200) is captured by both: once by the sender's
-    sip_trace/trace_flag and once by the receiver's mod_sofia HEP capture.
-    These are the same logical message but appear as separate Loki entries
-    with different node IDs and timestamps a few milliseconds apart.
+    The same SIP message traversing between Kamailio (capture_id=100) and
+    FreeSWITCH (capture_id=200) is captured by both: once on the sender's HEP
+    trace and once on the receiver's.  These are the same logical message but
+    appear as separate entries with different node IDs and timestamps a few
+    milliseconds apart.  A capture may also collapse to ``src_ip == dst_ip``
+    when the heplify alias script maps both endpoints to the same node name —
+    such a row is non-directional and must never be the survivor of a group if
+    a directional twin exists (otherwise the ladder renders an orphan dot).
 
     Dedup strategy:
-      1. Group by (call_id, method, response, src_ip, dst_ip) — the "message
-         identity" fields that are identical for the same SIP message captured
-         at different points.
-      2. Within each group, cluster entries whose timestamps are within
-         DEDUP_WINDOW_NS of each other (same physical message, captured by
-         sender and receiver within a few ms).
-      3. For each cluster, keep the earliest entry and merge all node IDs
-         into a comma-separated string (e.g. "100,200").
-      4. Exact (timestamp_ns, callid) dedup is applied first to handle the
-         trivial case where the same query returns truly identical rows.
+      1. Exact dedup by (timestamp_ns, callid, method, status) — removes truly
+         identical rows returned by overlapping queries.  The key includes
+         method+status so two genuinely different messages that happen to share
+         a timestamp are never silently dropped.
+      2. Group by a DIRECTION-AGNOSTIC message identity (callid, method,
+         status, cseq) so every capture of one physical message — including a
+         collapsed src==dst self-capture — lands in the same group.
+      3. Within each group, cluster entries within DEDUP_WINDOW_NS of each
+         other (same physical message seen by sender and receiver within a few
+         ms; a re-INVITE or retransmit with the same identity far apart in time
+         stays a separate cluster).
+      4. For each cluster, elect the survivor by PREFERRING a directional
+         capture (src != dst).  Among directional captures pick the earliest;
+         only if NO directional capture exists do we keep a src==dst row (so a
+         message is never lost entirely, but a drawable hop always wins).  Node
+         IDs from the whole cluster are merged into the survivor.
 
-    This preserves multi-node visibility (the node field shows which capture
-    points saw the message) while eliminating duplicate rows.
+    Guarantees: genuine duplicates collapse to one row; the survivor carries a
+    distinct, directional src/dst whenever ANY capture of that message did; a
+    src==dst row is emitted only when it is the sole capture of the message.
     """
     # Tunable: maximum time difference (in nanoseconds) between two captures
     # of the same SIP message to consider them duplicates.  50ms accommodates
@@ -512,37 +583,36 @@ def _deduplicate_results(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
     if not results:
         return []
 
-    # --- Pass 1: exact dedup by (timestamp_ns, callid) -----------------------
-    # This removes truly identical rows from overlapping Loki queries (the
-    # correlation query may return rows already in the initial result set).
-    exact_seen: set[tuple[int, str]] = set()
+    # --- Pass 1: exact dedup ------------------------------------------------
+    # Remove truly identical rows from overlapping queries (the correlation
+    # query may return rows already in the initial result set).  method+status
+    # are in the key so distinct messages sharing a timestamp are NOT dropped.
+    exact_seen: set[tuple[int, str, str, str]] = set()
     unique: list[dict[str, Any]] = []
     for r in results:
-        key = (r.get("timestamp_ns", 0), r.get("callid", ""))
+        key = (
+            r.get("timestamp_ns", 0),
+            r.get("callid", ""),
+            r.get("method", ""),
+            str(r.get("status", "") or ""),
+        )
         if key not in exact_seen:
             exact_seen.add(key)
             unique.append(r)
 
-    # --- Pass 2: semantic dedup by message identity + timestamp clustering ----
-    # Build groups keyed by the SIP message identity (everything that is the
-    # same for the sender and receiver capture of the same packet).
-    groups: dict[tuple[str, str, str, str, str], list[dict[str, Any]]] = {}
+    # --- Pass 2: group by direction-agnostic message identity ----------------
+    groups: dict[tuple[str, str, str, str], list[dict[str, Any]]] = {}
     for r in unique:
-        gkey = (
-            r.get("callid", ""),
-            r.get("method", ""),
-            str(r.get("status", "") or ""),  # response code as string
-            r.get("src_ip", ""),
-            r.get("dst_ip", ""),
-        )
-        groups.setdefault(gkey, []).append(r)
+        groups.setdefault(_message_identity(r), []).append(r)
 
     deduped: list[dict[str, Any]] = []
     for members in groups.values():
         # Sort by timestamp within the group
         members.sort(key=lambda r: r.get("timestamp_ns", 0))
 
-        # Cluster entries within DEDUP_WINDOW_NS of each other
+        # Cluster entries within DEDUP_WINDOW_NS of each other.  Anchor the
+        # window on the cluster's first timestamp so a long run of captures
+        # spaced < window apart doesn't merge a later re-INVITE/retransmit.
         clusters: list[list[dict[str, Any]]] = []
         for entry in members:
             ts = entry.get("timestamp_ns", 0)
@@ -551,10 +621,15 @@ def _deduplicate_results(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
             else:
                 clusters.append([entry])
 
-        # For each cluster, keep the earliest entry and merge node IDs
+        # For each cluster, elect a directional survivor and merge node IDs.
         for cluster in clusters:
-            representative = cluster[0]  # earliest timestamp
-            # Collect all distinct node values from the cluster
+            directional = [e for e in cluster if _is_directional(e)]
+            # Prefer a directional capture (earliest); fall back to the
+            # earliest non-directional capture only if none is directional.
+            representative = directional[0] if directional else cluster[0]
+
+            # Collect all distinct node values from the entire cluster so the
+            # survivor still shows every capture point that saw the message.
             nodes: list[str] = []
             seen_nodes: set[str] = set()
             for entry in cluster:

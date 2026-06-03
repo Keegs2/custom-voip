@@ -67,6 +67,11 @@
 
   <!-- Homer SIP capture endpoint and SBC proxy IP for multi-VM deployment -->
   <X-PRE-PROCESS cmd="exec-set" data="homer_ip=echo ${HOMER_IP:-127.0.0.1}"/>
+  <!-- HEP capture_id for Homer ladder zone differentiation.
+       Per-zone: East FreeSWITCH=200, West=210, Central=220 (Kamailio uses 100/110/120).
+       MUST be unique per zone or the ladder cannot tell which zone's FS captured
+       a message. Default 200 (East). Override via HEP_CAPTURE_ID env var. -->
+  <X-PRE-PROCESS cmd="exec-set" data="hep_capture_id=echo ${HEP_CAPTURE_ID:-200}"/>
   <X-PRE-PROCESS cmd="exec-set" data="sbc_proxy_ip=echo ${SBC_PROXY_IP:-127.0.0.1}"/>
   <X-PRE-PROCESS cmd="exec-set" data="sbc_proxy_ip_failover=echo ${SBC_PROXY_IP_FAILOVER:-${SBC_PROXY_IP:-127.0.0.1}}"/>
 
