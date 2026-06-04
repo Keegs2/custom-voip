@@ -215,6 +215,7 @@ def _parse_loki_response(
                 "callid": labels.get("call_id", ""),
                 "method": labels.get("method", ""),
                 "cseq": _extract_cseq(log_line),
+                "via_branch": _extract_via_branch(log_line),
                 "src_ip": labels.get("src_ip", ""),
                 "dst_ip": labels.get("dst_ip", ""),
                 "status": status,
@@ -264,6 +265,51 @@ def _extract_cseq(raw_msg: Optional[str]) -> str:
         return ""
     m = _CSEQ_RE.search(raw_msg)
     return f"{m.group(1)} {m.group(2).upper()}" if m else ""
+
+
+# Matches the FIRST (topmost) Via / v header line.  SIP allows the compact
+# form ``v:`` and header names are case-insensitive (RFC 3261 §7.3.3).  We
+# capture the header value up to the end of the (possibly line-folded) header
+# so a ``branch=`` param wrapped onto a continuation line is still found.
+_VIA_RE = re.compile(
+    r"^(?:Via|v)\s*:(?P<value>.*(?:\r?\n[ \t].*)*)",
+    re.IGNORECASE | re.MULTILINE,
+)
+# The branch param within a Via value.  Per RFC 3261 the param name is
+# case-insensitive; the token runs until the next param/comma/whitespace.
+_VIA_BRANCH_RE = re.compile(r";\s*branch\s*=\s*([^;,\s]+)", re.IGNORECASE)
+
+
+def _extract_via_branch(raw_msg: Optional[str]) -> str:
+    """Extract the ``branch`` param of the TOPMOST Via header.
+
+    The topmost Via branch is the per-HOP fingerprint of a SIP transaction:
+    every proxy that forwards a request pushes its own Via (with a fresh
+    ``branch=z9hG4bK...``) onto the top of the stack, and responses echo the
+    request's Via stack so the topmost branch on the way back identifies the
+    same hop.  It is therefore:
+
+      * UNIQUE per proxy hop (BW→SBC, SBC→FS, FS→SBC, SBC→carrier each differ),
+        so distinct hops of one logical request are never collapsed; AND
+      * IDENTICAL when the same on-wire message is HEP-captured at both the
+        sender (egress) and receiver (ingress), so those genuine duplicates
+        still merge.
+
+    Handles the compact ``v:`` form, case-insensitive header name, and a
+    ``branch=`` param folded onto a Via line continuation.  Returns "" when no
+    topmost Via branch can be parsed (the caller falls back to a src/dst/ts
+    identity so the hop is never silently dropped).
+
+    Input:  'Via: SIP/2.0/UDP 10.0.0.1:5060;branch=z9hG4bK-abc;rport\\r\\n'
+    Output: 'z9hG4bK-abc'
+    """
+    if not raw_msg:
+        return ""
+    via = _VIA_RE.search(raw_msg)
+    if not via:
+        return ""
+    m = _VIA_BRANCH_RE.search(via.group("value"))
+    return m.group(1).strip() if m else ""
 
 
 # ---------------------------------------------------------------------------
@@ -485,6 +531,7 @@ async def _query_clickhouse_by_callids(
             "callid": labels.get("call_id", ""),
             "method": labels.get("method", ""),
             "cseq": _extract_cseq(log_line),
+            "via_branch": _extract_via_branch(log_line),
             "src_ip": labels.get("src_ip", ""),
             "dst_ip": labels.get("dst_ip", ""),
             "status": status,
@@ -520,24 +567,45 @@ def _is_directional(record: dict[str, Any]) -> bool:
     return bool(src) and bool(dst) and src != dst
 
 
-def _message_identity(record: dict[str, Any]) -> tuple[str, str, str, str]:
-    """Direction-AGNOSTIC identity of one logical SIP message.
+def _message_identity(record: dict[str, Any]) -> tuple[Any, ...]:
+    """Direction-AGNOSTIC identity of one logical SIP message ON ONE HOP.
 
-    Deliberately EXCLUDES src_ip/dst_ip so that the multiple captures of the
-    SAME physical message (taken at different nodes, possibly with a collapsed
-    self-capture where src==dst) all land in one group and can be reconciled
-    to a single directional row.  Identity uses the fields that are invariant
-    across capture points: Call-ID, method, response code, and CSeq.
+    Deliberately EXCLUDES src_ip/dst_ip (when a topmost Via branch is present)
+    so that the multiple captures of the SAME on-wire message — taken at the
+    sender (egress) and the receiver (ingress), possibly with a collapsed
+    self-capture where src==dst — all land in one group and reconcile to a
+    single directional row.
 
-    CSeq distinguishes an initial INVITE from a re-INVITE and a request from
-    its same-method retransmissions/responses within a dialog, so genuinely
-    different messages are NOT collapsed together.
+    The discriminator is the TOPMOST Via branch (``branch=z9hG4bK...`` of the
+    first Via header), NOT CSeq.  CSeq is INVARIANT as a request traverses
+    proxies (RFC 3261 §8.1.1.5: the CSeq is copied verbatim when a proxy
+    forwards a request), so keying on CSeq merged every genuinely-distinct
+    proxy HOP of one request — BW→SBC, SBC→FS, FS→SBC, SBC→carrier — into a
+    single row and dropped the rest of the ladder.  The topmost Via branch is
+    unique per hop (each proxy adds its own Via/branch) yet identical for the
+    two captures of the same hop, so hops are preserved while same-hop dupes
+    still merge.
+
+    FALLBACK: if no topmost Via branch can be parsed (rare for valid SIP), we
+    refuse to merge by including (src_ip, dst_ip, timestamp_ns) in the identity
+    — a possibly-duplicate row is acceptable, a silently-dropped hop is not.
     """
-    return (
+    via_branch = record.get("via_branch", "") or _extract_via_branch(
+        record.get("raw_msg")
+    )
+    base = (
         record.get("callid", ""),
         record.get("method", ""),
         str(record.get("status", "") or ""),  # response code as string
-        record.get("cseq", ""),
+    )
+    if via_branch:
+        return base + (via_branch,)
+    # No parseable topmost Via branch: never merge this hop away.
+    return base + (
+        "",
+        record.get("src_ip", ""),
+        record.get("dst_ip", ""),
+        record.get("timestamp_ns", 0),
     )
 
 
@@ -558,9 +626,12 @@ def _deduplicate_results(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
          identical rows returned by overlapping queries.  The key includes
          method+status so two genuinely different messages that happen to share
          a timestamp are never silently dropped.
-      2. Group by a DIRECTION-AGNOSTIC message identity (callid, method,
-         status, cseq) so every capture of one physical message — including a
-         collapsed src==dst self-capture — lands in the same group.
+      2. Group by a DIRECTION-AGNOSTIC, PER-HOP message identity (callid,
+         method, status, topmost Via branch) so every capture of one physical
+         on-wire message — including a collapsed src==dst self-capture — lands
+         in the same group, while distinct proxy hops of one request (which
+         share callid/method/status/CSeq but differ in topmost Via branch)
+         stay in SEPARATE groups and are all preserved.
       3. Within each group, cluster entries within DEDUP_WINDOW_NS of each
          other (same physical message seen by sender and receiver within a few
          ms; a re-INVITE or retransmit with the same identity far apart in time
@@ -600,8 +671,8 @@ def _deduplicate_results(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
             exact_seen.add(key)
             unique.append(r)
 
-    # --- Pass 2: group by direction-agnostic message identity ----------------
-    groups: dict[tuple[str, str, str, str], list[dict[str, Any]]] = {}
+    # --- Pass 2: group by direction-agnostic, per-hop message identity -------
+    groups: dict[tuple[Any, ...], list[dict[str, Any]]] = {}
     for r in unique:
         groups.setdefault(_message_identity(r), []).append(r)
 

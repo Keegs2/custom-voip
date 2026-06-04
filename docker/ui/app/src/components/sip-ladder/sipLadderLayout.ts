@@ -190,26 +190,46 @@ function splitDualLegNodes(
     }
   }
 
-  // Find nodes that appear in both legs AND are eligible for splitting (SBC only)
+  // Determine the media-server pivot up front — split eligibility for un-aliased
+  // (unknown-role) nodes is positional, so we need to know where the B2BUA sits.
+  const mediaPivotIdx = orderedNodes.findIndex((n) => n.role === 'media-server');
+
+  // Find nodes that appear in both legs AND are eligible for splitting.
+  //
+  // Primary case: role === 'sbc'. A Kamailio instance bridges both legs and must
+  // appear as a left (A-leg, ingress) column AND a right (B-leg, egress) column.
+  //
+  // Defensive case (graceful degradation): a node whose role is 'unknown' — e.g. a
+  // raw-IP fallback for an SBC that heplify has not aliased yet — that ALSO appears
+  // in both legs AND sits strictly to the LEFT of the media server. Such a node is
+  // structurally an in-path proxy and must split the same way, otherwise its B-leg
+  // messages collapse onto its A-leg column and render as wrong-column arrows. We
+  // restrict to the left-of-media position so a stray dual-leg carrier/services node
+  // (which sits at an edge, not between carrier and FS) is never mis-split.
   const nodesToSplit = new Set<string>();
-  for (const node of orderedNodes) {
-    if (
-      node.role === 'sbc' &&
-      aLegNodeIds.has(node.id) &&
-      bLegNodeIds.has(node.id)
-    ) {
+  orderedNodes.forEach((node, idx) => {
+    const inBothLegs = aLegNodeIds.has(node.id) && bLegNodeIds.has(node.id);
+    if (!inBothLegs) return;
+
+    if (node.role === 'sbc') {
+      nodesToSplit.add(node.id);
+      return;
+    }
+
+    // Defensive: un-aliased in-path proxy left of the B2BUA center.
+    if (node.role === 'unknown' && mediaPivotIdx >= 0 && idx < mediaPivotIdx) {
       nodesToSplit.add(node.id);
     }
-  }
+  });
 
   // If nothing to split, return the original list unchanged
   if (nodesToSplit.size === 0) {
     return { finalNodes: orderedNodes, bLegColumnIndex: new Map() };
   }
 
-  // Find the index of the FreeSWITCH / media-server node (the B2BUA center point).
-  // B-leg virtual nodes go after this node.
-  const mediaIdx = orderedNodes.findIndex((n) => n.role === 'media-server');
+  // Index of the FreeSWITCH / media-server node (the B2BUA center point).
+  // B-leg virtual nodes go after this node. Reuses the pivot found above.
+  const mediaIdx = mediaPivotIdx;
 
   // Build the new node list: A-leg nodes stay in their original positions (left of
   // or at FreeSWITCH), B-leg virtual clones are inserted to the right of FreeSWITCH.

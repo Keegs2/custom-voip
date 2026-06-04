@@ -218,38 +218,56 @@ export function isRetransmission(
 /**
  * Classifies a node's architectural role from its aliased name.
  *
- * Name patterns (from heplify-server Lua alias script):
- *   "BW-*"        → carrier (ingress or egress, determined by context)
- *   "*VIP*"       → sbc-vip (NLB virtual IP)
- *   "SBC-*"       → sbc (individual Kamailio instance)
- *   "FreeSWITCH"  → media-server
- *   "FS*"         → media-server
- *   anything else → unknown
+ * Names are aliased by the heplify-server Lua script and may carry a zone prefix
+ * (or any other prefix/suffix) once multi-datacenter expansion lands. Matching is
+ * therefore done by SUBSTRING, not by prefix, so zone-qualified aliases like
+ * "West-SBC-1", "Central-FreeSWITCH", or "West-SBC-VIP" resolve to the same role
+ * as their un-prefixed East counterparts.
  *
- * Note: carrier-ingress vs carrier-egress cannot be determined from the name
- * alone — it depends on which direction the first INVITE travels. This function
- * returns 'carrier-ingress' as a default for carrier nodes; the layout engine
- * refines egress classification using call flow context.
+ * Precedence is critical — the checks are ordered most-specific first so a name
+ * that matches several patterns lands on the right role:
+ *
+ *   1. VIP      → 'sbc-vip'         e.g. "SBC-VIP", "West-SBC-VIP"
+ *                 (MUST precede the SBC check; every VIP name also contains "SBC")
+ *   2. BW       → 'carrier-ingress' e.g. "BW-NY", "BW-DAL", "BW-TC2-LA"
+ *                 (refined to 'carrier-egress' by the layout engine via call flow)
+ *   3. SBC      → 'sbc'             e.g. "SBC-1", "West-SBC-2"
+ *   4. media    → 'media-server'    e.g. "FreeSWITCH", "West-FreeSWITCH",
+ *                                        "FS", "FS-1", "media-FS"
+ *   5. anything else (incl. raw-IP fallbacks for un-aliased nodes, and the
+ *      "Services" / "West-Services" host) → 'unknown'
+ *
+ * Note on the media match: we test for "FREESWITCH" first, then for the standalone
+ * "FS" token guarded by word boundaries ("FS" at the start, end, or delimited by
+ * a non-alphanumeric on both sides). The guard prevents false positives like
+ * "Services" (no standalone "FS") while still catching "FS-1" or "media-FS".
  */
 export function classifyNodeRole(name: string): NodeRole {
   const upper = name.toUpperCase();
 
-  if (upper.startsWith('BW-') || upper === 'BW') {
-    return 'carrier-ingress'; // Refined to carrier-egress by layout engine
-  }
-
+  // 1. VIP — most specific. "West-SBC-VIP" must resolve here, not at the SBC check.
   if (upper.includes('VIP')) {
     return 'sbc-vip';
   }
 
-  if (upper.startsWith('SBC-') || upper === 'SBC') {
+  // 2. Carrier (Bandwidth). All carrier aliases are "BW" / "BW-*" / "*-BW-*".
+  //    Refined to 'carrier-egress' by the layout engine using call-flow direction.
+  if (upper === 'BW' || /(^|[^A-Z0-9])BW($|[^A-Z0-9])/.test(upper)) {
+    return 'carrier-ingress';
+  }
+
+  // 3. SBC — any name carrying the "SBC" token (zone-prefixed or not).
+  if (upper.includes('SBC')) {
     return 'sbc';
   }
 
-  if (upper === 'FREESWITCH' || upper.startsWith('FS')) {
+  // 4. Media server — FreeSWITCH (full word) or a standalone "FS" token.
+  //    The word-boundary guard keeps "Services" / "West-Services" out.
+  if (upper.includes('FREESWITCH') || /(^|[^A-Z0-9])FS($|[^A-Z0-9])/.test(upper)) {
     return 'media-server';
   }
 
+  // 5. Everything else — including literal-IP fallbacks for un-aliased nodes.
   return 'unknown';
 }
 
