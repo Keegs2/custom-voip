@@ -50,7 +50,10 @@ services:
           cpus: '0.5'
           memory: 256M
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8000/health || exit 1"]
+      # NOTE: the runtime image has NO curl (python:3.12-slim + libffi8 only) —
+      # a curl-based probe fails on exec, marking the container permanently
+      # unhealthy regardless of app state. Probe with the image's own Python.
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=4).status==200 else 1)"]
       interval: 15s
       timeout: 5s
       start_period: 10s
