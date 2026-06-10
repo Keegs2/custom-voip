@@ -5,6 +5,7 @@ Uses redis-py async for high-performance caching and real-time data
 import asyncio
 import os
 import logging
+import time
 from typing import Optional
 import redis.asyncio as redis
 
@@ -13,9 +14,19 @@ logger = logging.getLogger(__name__)
 # Redis client
 client: Optional[redis.Redis] = None
 
-# Retry configuration for init_redis()
+# Retry configuration for init_redis() — generous loop is for app STARTUP
+# only (called from main.py lifespan). Request-path re-init (get_client)
+# uses a single fast attempt instead.
 _REDIS_INIT_RETRIES = 5
 _REDIS_INIT_BACKOFF_SEC = 2
+
+# Request-path re-init guard: when Redis is down, do not re-attempt a
+# connection more than once per cooldown window, and never let concurrent
+# requests stampede (single-flight via lock).
+_REINIT_COOLDOWN_SEC = 60
+_REINIT_CONNECT_TIMEOUT_SEC = 2
+_last_reinit_attempt: float = 0.0
+_reinit_lock = asyncio.Lock()
 
 
 async def init_redis():
@@ -73,10 +84,62 @@ async def close_redis():
         logger.info("Redis connection closed")
 
 
-async def get_client() -> redis.Redis:
-    """Get Redis client."""
-    if not client:
-        await init_redis()
+async def _try_reinit() -> None:
+    """Single fast reconnect attempt for the request path.
+
+    One attempt, short (2s) connect timeout — NOT the 5-attempt startup loop
+    in init_redis(). Fail-open: leaves `client` as None on failure.
+    """
+    global client
+    redis_url = os.getenv("REDIS_URL", "redis://redis:6379")
+    candidate = redis.from_url(
+        redis_url,
+        encoding="utf-8",
+        decode_responses=True,
+        max_connections=50,
+        retry_on_timeout=True,
+        socket_connect_timeout=_REINIT_CONNECT_TIMEOUT_SEC,
+        socket_timeout=5,
+    )
+    try:
+        await asyncio.wait_for(candidate.ping(), timeout=_REINIT_CONNECT_TIMEOUT_SEC)
+        client = candidate
+        logger.info(f"Redis reconnected: {redis_url}")
+    except Exception as exc:
+        try:
+            await candidate.close()
+        except Exception:
+            pass
+        logger.warning(
+            "Redis re-init attempt failed (%s) — next attempt in %ds, cache stays fail-open",
+            str(exc) or type(exc).__name__, _REINIT_COOLDOWN_SEC,
+        )
+
+
+async def get_client() -> Optional[redis.Redis]:
+    """Get Redis client. Returns None when Redis is unavailable.
+
+    Non-blocking-safe for request paths: when the client is down, re-init is
+    attempted at most once per _REINIT_COOLDOWN_SEC seconds, single-flight
+    (concurrent callers don't stampede), with a single short connection
+    attempt (~2s worst case) instead of the full startup retry loop.
+    """
+    global _last_reinit_attempt
+    if client:
+        return client
+    if time.monotonic() - _last_reinit_attempt < _REINIT_COOLDOWN_SEC:
+        return None
+    if _reinit_lock.locked():
+        # Another request is already attempting re-init — don't pile up.
+        return client
+    async with _reinit_lock:
+        # Re-check under the lock: another caller may have just finished.
+        if client:
+            return client
+        if time.monotonic() - _last_reinit_attempt < _REINIT_COOLDOWN_SEC:
+            return None
+        _last_reinit_attempt = time.monotonic()
+        await _try_reinit()
     return client
 
 
