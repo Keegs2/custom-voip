@@ -30,6 +30,12 @@ export interface LadderNode {
   role: NodeRole;
   /** Position in the diagram, left-to-right (0-based) */
   columnIndex: number;
+  /**
+   * Set on SBC columns that were split into A-leg / B-leg virtual columns.
+   * Drives the distinct "SBC · A-LEG" / "SBC · B-LEG" header sublabels so the
+   * two SBC columns are never visually ambiguous. Unset for unsplit nodes.
+   */
+  legTag?: 'a' | 'b';
 }
 
 // ─── Processed message ──────────────────────────────────────────────────────
@@ -55,6 +61,19 @@ export interface LadderMessage {
   label: string;
   /** Whether this message is an RFC 3261 retransmission */
   isRetransmission: boolean;
+  /**
+   * SBC internal hop: a self-hop / re-traversal copy of an in-dialog request
+   * through the SBC's own VIP (API `hairpin` flag, or src === dst fallback).
+   * Rendered as a self-loop glyph on the SBC column, hidden by default.
+   */
+  isHairpin: boolean;
+  /**
+   * True when this row's display position was adjusted for SIP causality —
+   * either flagged by the API (`ts_corrected`) or moved by the client-side
+   * defensive causality pass on old-format (seq-less) data. The timestamp
+   * gutter shows a tilde so engineers know the position is derived.
+   */
+  tsCorrected: boolean;
   /** Which call leg this message belongs to */
   leg: 'a' | 'b' | 'unknown';
   /** Milliseconds elapsed since the previous message (null for the first message) */

@@ -18,13 +18,46 @@ export interface HomerSearchResult {
   src_ip: string;
   dst_ip: string;
   status: number | null;
+  /** HEP capture node id(s), e.g. "100" (Kamailio) / "200" (FreeSWITCH) */
   node?: string;
+  /** CSeq value, e.g. "102 INVITE" — extracted server-side from the raw message */
+  cseq?: string;
+  /** Topmost Via branch — per-hop transaction fingerprint (server-side dedup key) */
+  via_branch?: string;
+  /**
+   * True for self-hop / re-traversal copies of in-dialog requests through the
+   * SBC's own VIP (src == dst == SBC-VIP loopback captures). Rendered as a
+   * self-loop glyph, hidden by default. Absent on old/cached responses.
+   */
+  hairpin?: boolean;
+  /**
+   * True when the API adjusted this row's display position for SIP causality
+   * (the stored capture timestamp was corrupted, e.g. ingest-stamped 15-20ms
+   * late). Absent on old/cached responses.
+   */
+  ts_corrected?: boolean;
+  /**
+   * AUTHORITATIVE display order (0..n-1) computed by the API pipeline.
+   * When present on every row, the ladder sorts by it instead of timestamps.
+   * Absent on old/cached responses — the UI then falls back to timestamp
+   * sort plus a defensive causality pass.
+   */
+  seq?: number;
   /** Raw SIP message body (full headers + SDP) from the Loki log line */
   raw_msg?: string | null;
 }
 
+export interface HomerSearchResponse {
+  data: HomerSearchResult[];
+  correlations: Record<string, string[]>;
+  /** Present (true) when the X-CID correlation window was truncated */
+  correlation_truncated?: boolean;
+  /** Pipeline diagnostics (e.g. timestamp-corruption notices) — show unobtrusively */
+  pipeline_warnings?: string[];
+}
+
 export async function searchSipTraces(
   params: HomerSearchParams,
-): Promise<{ data: HomerSearchResult[]; correlations: Record<string, string[]> }> {
+): Promise<HomerSearchResponse> {
   return apiRequest('POST', '/homer/search', params);
 }

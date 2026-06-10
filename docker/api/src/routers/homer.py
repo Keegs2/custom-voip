@@ -26,6 +26,21 @@ from pydantic import BaseModel
 
 from auth.dependencies import require_admin
 
+# Pure (stdlib-only) post-processing pipeline: dedup, SIP-causality ordering,
+# hairpin marking, seq assignment.  Lives in a separate module so unit tests
+# can exercise it without fastapi/httpx/auth installed.  Re-imported here so
+# this router's public surface is unchanged.
+from .homer_pipeline import (
+    _deduplicate_results,
+    _extract_cseq,
+    _extract_sip_user,
+    _extract_via_branch,
+    _finalize_pipeline,
+    _is_directional,
+    _message_identity,
+    _ns_to_iso,
+)
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
@@ -196,14 +211,10 @@ def _parse_loki_response(
             # Preserve nanosecond precision for sorting (SIP message order matters)
             try:
                 ts_ns = int(ts_ns_str)
-                ts_seconds = ts_ns / 1_000_000_000
-                # Include microseconds (6 digits) in the display timestamp
-                # for correct SIP message ordering — milliseconds alone are
-                # insufficient when multiple messages arrive in the same ms
-                ts_iso = datetime.fromtimestamp(
-                    ts_seconds, tz=timezone.utc
-                ).strftime("%Y-%m-%dT%H:%M:%S.") + f"{int((ts_ns % 1_000_000_000) / 1_000):06d}Z"
-            except (ValueError, OSError):
+                # µs precision (6 digits) in the display timestamp — ms alone
+                # are insufficient when multiple messages share a millisecond.
+                ts_iso = _ns_to_iso(ts_ns)
+            except (ValueError, TypeError):
                 ts_ns = 0
                 ts_iso = None
 
@@ -234,82 +245,9 @@ def _parse_loki_response(
     return results
 
 
-def _extract_sip_user(header_value: str) -> str:
-    """Extract the user part from a SIP From/To header value.
-
-    Input:  '<sip:+17818510289@67.231.13.185>;tag=gK080ee17c'
-    Output: '+17818510289'
-
-    Input:  '"MALDEN MA" <sip:+17818510289@host>'
-    Output: '+17818510289'
-    """
-    import re as _re
-    match = _re.search(r"sip:([^@>]+)@", header_value)
-    return match.group(1) if match else header_value
-
-
-_CSEQ_RE = re.compile(r"^CSeq:\s*(\d+)\s+(\w+)", re.IGNORECASE | re.MULTILINE)
-
-
-def _extract_cseq(raw_msg: Optional[str]) -> str:
-    """Extract the CSeq value (e.g. ``1 INVITE``) from a raw SIP message.
-
-    CSeq is mandatory in every SIP message (RFC 3261 §8.1.1.5), so it is a
-    reliable component of the per-message identity used by deduplication.
-    Returns an empty string when the message is absent or unparseable.
-
-    Input:  'CSeq: 102 INVITE\\r\\n'
-    Output: '102 INVITE'
-    """
-    if not raw_msg:
-        return ""
-    m = _CSEQ_RE.search(raw_msg)
-    return f"{m.group(1)} {m.group(2).upper()}" if m else ""
-
-
-# Matches the FIRST (topmost) Via / v header line.  SIP allows the compact
-# form ``v:`` and header names are case-insensitive (RFC 3261 §7.3.3).  We
-# capture the header value up to the end of the (possibly line-folded) header
-# so a ``branch=`` param wrapped onto a continuation line is still found.
-_VIA_RE = re.compile(
-    r"^(?:Via|v)\s*:(?P<value>.*(?:\r?\n[ \t].*)*)",
-    re.IGNORECASE | re.MULTILINE,
-)
-# The branch param within a Via value.  Per RFC 3261 the param name is
-# case-insensitive; the token runs until the next param/comma/whitespace.
-_VIA_BRANCH_RE = re.compile(r";\s*branch\s*=\s*([^;,\s]+)", re.IGNORECASE)
-
-
-def _extract_via_branch(raw_msg: Optional[str]) -> str:
-    """Extract the ``branch`` param of the TOPMOST Via header.
-
-    The topmost Via branch is the per-HOP fingerprint of a SIP transaction:
-    every proxy that forwards a request pushes its own Via (with a fresh
-    ``branch=z9hG4bK...``) onto the top of the stack, and responses echo the
-    request's Via stack so the topmost branch on the way back identifies the
-    same hop.  It is therefore:
-
-      * UNIQUE per proxy hop (BW→SBC, SBC→FS, FS→SBC, SBC→carrier each differ),
-        so distinct hops of one logical request are never collapsed; AND
-      * IDENTICAL when the same on-wire message is HEP-captured at both the
-        sender (egress) and receiver (ingress), so those genuine duplicates
-        still merge.
-
-    Handles the compact ``v:`` form, case-insensitive header name, and a
-    ``branch=`` param folded onto a Via line continuation.  Returns "" when no
-    topmost Via branch can be parsed (the caller falls back to a src/dst/ts
-    identity so the hop is never silently dropped).
-
-    Input:  'Via: SIP/2.0/UDP 10.0.0.1:5060;branch=z9hG4bK-abc;rport\\r\\n'
-    Output: 'z9hG4bK-abc'
-    """
-    if not raw_msg:
-        return ""
-    via = _VIA_RE.search(raw_msg)
-    if not via:
-        return ""
-    m = _VIA_BRANCH_RE.search(via.group("value"))
-    return m.group(1).strip() if m else ""
+# NOTE: _extract_sip_user / _extract_cseq / _extract_via_branch and the whole
+# dedup + causality-ordering pipeline live in routers/homer_pipeline.py
+# (pure stdlib, unit-testable without fastapi) and are imported above.
 
 
 # ---------------------------------------------------------------------------
@@ -432,22 +370,34 @@ async def _query_clickhouse_by_callids(
 
     # qryn type constants: 1=logs, 2=metrics, 0=both.
     # SIP data is stored as type=1 (logs).  Include type=0 (both) for safety.
+    #
+    # CRITICAL — the time_series side of the JOIN MUST be pre-filtered by the
+    # same gin fingerprint subquery.  ClickHouse hash-joins by loading the
+    # ENTIRE right-hand table into memory: the previous unfiltered
+    # ``INNER JOIN time_series`` shape OOM'd production at the 1.86 GiB query
+    # memory limit (verified 2026-06-10 on the services VM).  Pre-filtering
+    # the joined subselect with the indexed gin lookup keeps the right side
+    # to the handful of fingerprints belonging to the requested Call-IDs.
+    gin_subquery = f"""SELECT fingerprint
+            FROM {CLICKHOUSE_DB}.time_series_gin
+            WHERE key = 'call_id'
+              AND val IN ({escaped_cids})
+              AND date >= '{from_date}'
+              AND type IN (1, 0)"""
+
     sql = f"""
         SELECT
             s.timestamp_ns AS timestamp_ns,
             s.string AS msg,
             ts.labels AS labels
         FROM {CLICKHOUSE_DB}.samples_v3 AS s
-        INNER JOIN {CLICKHOUSE_DB}.time_series AS ts
+        INNER JOIN (
+            SELECT fingerprint, labels
+            FROM {CLICKHOUSE_DB}.time_series
+            WHERE fingerprint IN ({gin_subquery})
+        ) AS ts
             ON s.fingerprint = ts.fingerprint
-        WHERE s.fingerprint IN (
-            SELECT fingerprint
-            FROM {CLICKHOUSE_DB}.time_series_gin
-            WHERE key = 'call_id'
-              AND val IN ({escaped_cids})
-              AND date >= '{from_date}'
-              AND type IN (1, 0)
-        )
+        WHERE s.fingerprint IN ({gin_subquery})
           AND s.timestamp_ns >= {start_ns}
           AND s.timestamp_ns < {end_ns}
         ORDER BY s.timestamp_ns ASC
@@ -515,13 +465,7 @@ async def _query_clickhouse_by_callids(
         to_user = _extract_sip_user(to_label) if to_label else ""
 
         # Build timestamp ISO string with microsecond precision
-        try:
-            ts_seconds = ts_ns / 1_000_000_000
-            ts_iso = datetime.fromtimestamp(
-                ts_seconds, tz=timezone.utc
-            ).strftime("%Y-%m-%dT%H:%M:%S.") + f"{int((ts_ns % 1_000_000_000) / 1_000):06d}Z"
-        except (ValueError, OSError):
-            ts_iso = None
+        ts_iso = _ns_to_iso(ts_ns)
 
         record: dict[str, Any] = {
             "timestamp": ts_iso,
@@ -546,174 +490,6 @@ async def _query_clickhouse_by_callids(
 def _extract_callids(results: list[dict[str, Any]]) -> set[str]:
     """Extract unique non-empty call_id values from parsed results."""
     return {r["callid"] for r in results if r.get("callid")}
-
-
-def _is_directional(record: dict[str, Any]) -> bool:
-    """True when a record has a real, drawable hop (distinct src and dst).
-
-    The HEP capture path rewrites SrcIP/DstIP to friendly node names via the
-    heplify-server ``ip-alias.lua`` script (see docker/homer/CLAUDE.md).  Many
-    distinct underlying IPs collapse to the SAME alias — e.g. the SBC's VPC IP,
-    its external IP and the NLB VIP all map to "SBC-1 East"; FreeSWITCH's
-    internal and external IPs both map to "FreeSWITCH East".  When a single
-    capture sees both ends of a message resolve to the same node name (a
-    self/loopback capture, or an alias collapse), ``src_ip == dst_ip`` and the
-    ladder cannot draw an arrow — it renders an orphan dot.
-
-    A record is directional only when both endpoints are present AND distinct.
-    """
-    src = (record.get("src_ip") or "").strip()
-    dst = (record.get("dst_ip") or "").strip()
-    return bool(src) and bool(dst) and src != dst
-
-
-def _message_identity(record: dict[str, Any]) -> tuple[Any, ...]:
-    """Direction-AGNOSTIC identity of one logical SIP message ON ONE HOP.
-
-    Deliberately EXCLUDES src_ip/dst_ip (when a topmost Via branch is present)
-    so that the multiple captures of the SAME on-wire message — taken at the
-    sender (egress) and the receiver (ingress), possibly with a collapsed
-    self-capture where src==dst — all land in one group and reconcile to a
-    single directional row.
-
-    The discriminator is the TOPMOST Via branch (``branch=z9hG4bK...`` of the
-    first Via header), NOT CSeq.  CSeq is INVARIANT as a request traverses
-    proxies (RFC 3261 §8.1.1.5: the CSeq is copied verbatim when a proxy
-    forwards a request), so keying on CSeq merged every genuinely-distinct
-    proxy HOP of one request — BW→SBC, SBC→FS, FS→SBC, SBC→carrier — into a
-    single row and dropped the rest of the ladder.  The topmost Via branch is
-    unique per hop (each proxy adds its own Via/branch) yet identical for the
-    two captures of the same hop, so hops are preserved while same-hop dupes
-    still merge.
-
-    FALLBACK: if no topmost Via branch can be parsed (rare for valid SIP), we
-    refuse to merge by including (src_ip, dst_ip, timestamp_ns) in the identity
-    — a possibly-duplicate row is acceptable, a silently-dropped hop is not.
-    """
-    via_branch = record.get("via_branch", "") or _extract_via_branch(
-        record.get("raw_msg")
-    )
-    base = (
-        record.get("callid", ""),
-        record.get("method", ""),
-        str(record.get("status", "") or ""),  # response code as string
-    )
-    if via_branch:
-        return base + (via_branch,)
-    # No parseable topmost Via branch: never merge this hop away.
-    return base + (
-        "",
-        record.get("src_ip", ""),
-        record.get("dst_ip", ""),
-        record.get("timestamp_ns", 0),
-    )
-
-
-def _deduplicate_results(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Deduplicate SIP messages captured by multiple HEP nodes.
-
-    The same SIP message traversing between Kamailio (capture_id=100) and
-    FreeSWITCH (capture_id=200) is captured by both: once on the sender's HEP
-    trace and once on the receiver's.  These are the same logical message but
-    appear as separate entries with different node IDs and timestamps a few
-    milliseconds apart.  A capture may also collapse to ``src_ip == dst_ip``
-    when the heplify alias script maps both endpoints to the same node name —
-    such a row is non-directional and must never be the survivor of a group if
-    a directional twin exists (otherwise the ladder renders an orphan dot).
-
-    Dedup strategy:
-      1. Exact dedup by (timestamp_ns, callid, method, status) — removes truly
-         identical rows returned by overlapping queries.  The key includes
-         method+status so two genuinely different messages that happen to share
-         a timestamp are never silently dropped.
-      2. Group by a DIRECTION-AGNOSTIC, PER-HOP message identity (callid,
-         method, status, topmost Via branch) so every capture of one physical
-         on-wire message — including a collapsed src==dst self-capture — lands
-         in the same group, while distinct proxy hops of one request (which
-         share callid/method/status/CSeq but differ in topmost Via branch)
-         stay in SEPARATE groups and are all preserved.
-      3. Within each group, cluster entries within DEDUP_WINDOW_NS of each
-         other (same physical message seen by sender and receiver within a few
-         ms; a re-INVITE or retransmit with the same identity far apart in time
-         stays a separate cluster).
-      4. For each cluster, elect the survivor by PREFERRING a directional
-         capture (src != dst).  Among directional captures pick the earliest;
-         only if NO directional capture exists do we keep a src==dst row (so a
-         message is never lost entirely, but a drawable hop always wins).  Node
-         IDs from the whole cluster are merged into the survivor.
-
-    Guarantees: genuine duplicates collapse to one row; the survivor carries a
-    distinct, directional src/dst whenever ANY capture of that message did; a
-    src==dst row is emitted only when it is the sole capture of the message.
-    """
-    # Tunable: maximum time difference (in nanoseconds) between two captures
-    # of the same SIP message to consider them duplicates.  50ms accommodates
-    # VPC latency + heplify-server processing jitter.
-    DEDUP_WINDOW_NS = 50_000_000  # 50 ms
-
-    if not results:
-        return []
-
-    # --- Pass 1: exact dedup ------------------------------------------------
-    # Remove truly identical rows from overlapping queries (the correlation
-    # query may return rows already in the initial result set).  method+status
-    # are in the key so distinct messages sharing a timestamp are NOT dropped.
-    exact_seen: set[tuple[int, str, str, str]] = set()
-    unique: list[dict[str, Any]] = []
-    for r in results:
-        key = (
-            r.get("timestamp_ns", 0),
-            r.get("callid", ""),
-            r.get("method", ""),
-            str(r.get("status", "") or ""),
-        )
-        if key not in exact_seen:
-            exact_seen.add(key)
-            unique.append(r)
-
-    # --- Pass 2: group by direction-agnostic, per-hop message identity -------
-    groups: dict[tuple[Any, ...], list[dict[str, Any]]] = {}
-    for r in unique:
-        groups.setdefault(_message_identity(r), []).append(r)
-
-    deduped: list[dict[str, Any]] = []
-    for members in groups.values():
-        # Sort by timestamp within the group
-        members.sort(key=lambda r: r.get("timestamp_ns", 0))
-
-        # Cluster entries within DEDUP_WINDOW_NS of each other.  Anchor the
-        # window on the cluster's first timestamp so a long run of captures
-        # spaced < window apart doesn't merge a later re-INVITE/retransmit.
-        clusters: list[list[dict[str, Any]]] = []
-        for entry in members:
-            ts = entry.get("timestamp_ns", 0)
-            if clusters and (ts - clusters[-1][0].get("timestamp_ns", 0)) <= DEDUP_WINDOW_NS:
-                clusters[-1].append(entry)
-            else:
-                clusters.append([entry])
-
-        # For each cluster, elect a directional survivor and merge node IDs.
-        for cluster in clusters:
-            directional = [e for e in cluster if _is_directional(e)]
-            # Prefer a directional capture (earliest); fall back to the
-            # earliest non-directional capture only if none is directional.
-            representative = directional[0] if directional else cluster[0]
-
-            # Collect all distinct node values from the entire cluster so the
-            # survivor still shows every capture point that saw the message.
-            nodes: list[str] = []
-            seen_nodes: set[str] = set()
-            for entry in cluster:
-                node_val = str(entry.get("node", ""))
-                if node_val and node_val not in seen_nodes:
-                    seen_nodes.add(node_val)
-                    nodes.append(node_val)
-            if nodes:
-                representative["node"] = ",".join(sorted(nodes))
-            deduped.append(representative)
-
-    deduped.sort(key=lambda r: r.get("timestamp_ns", 0))
-    return deduped
 
 
 def _build_correlations(
@@ -785,6 +561,40 @@ async def search_sip_traces(
     phone-number regex query may truncate results at the limit, missing
     some B-leg messages. The ClickHouse SQL query is precise and returns
     complete data for all legs via indexed fingerprint lookup.
+
+    RESPONSE CONTRACT (the UI builds the SIP ladder to this — all additions
+    are backward-compatible / additive):
+
+    Top level:
+      data                  [message]  — in AUTHORITATIVE display order
+      correlations          {callid: [callid]}  — unchanged
+      pipeline_warnings     [str]      — e.g. "2 messages reordered for SIP
+                            causality", "13 ingest-stamped rows detected";
+                            empty list when the pipeline saw nothing unusual
+      correlation_truncated true       — only present when Step 2 truncated
+
+    Per message (in addition to the existing fields timestamp, timestamp_ns,
+    from_user, to_user, callid, method, cseq, via_branch, src_ip, dst_ip,
+    status, node, raw_msg — all unchanged):
+      node          str  — HEP capture id(s); "100" (Kamailio) / "200"
+                    (FreeSWITCH), comma-joined ("100,200") when the same wire
+                    message was captured by multiple nodes
+      hairpin       bool — genuine loopback wire packet (src==dst, the SBC
+                    sending to itself via the NLB VIP) or an intermediate
+                    re-traversal copy detected via duplicated own-Via.  KEPT
+                    in data; the UI collapses/toggles them.
+      ts_corrected  bool — the stored timestamp is ingest-stamped/late and
+                    the message was repositioned to satisfy SIP causality;
+                    the raw timestamp/timestamp_ns fields are NOT altered
+      seq           int  — authoritative display order, 0..n-1, unique,
+                    ascending; data is returned sorted by seq
+
+    Display order is derived from hard SIP-causality rules (a response never
+    precedes its request at the same hop; a forwarded request copy at hop N+1
+    never precedes hop N; ACK never precedes the 2xx it acknowledges) with
+    stored timestamps as the tiebreak — ingest-stamped rows carry timestamps
+    15-20 ms late, so timestamp order alone is NOT trustworthy (see
+    tests/fixtures/homer_ground_truth_20260610.md).
     """
     if not body.from_user and not body.to_user and not body.call_id:
         raise HTTPException(
@@ -824,14 +634,23 @@ async def search_sip_traces(
             client, logql, start_ns, end_ns, limit=INITIAL_LIMIT,
         )
 
-        # Sort helper for early returns — use nanosecond precision
-        def _sorted(r: list) -> list:
-            r.sort(key=lambda x: x.get("timestamp_ns", 0))
-            return r
+        # Every return path runs the full post-processing pipeline (dedup,
+        # SIP-causality ordering, hairpin marking, seq assignment) so the UI
+        # receives the same per-message contract regardless of which path
+        # produced the data.
+        def _respond(results: list, correlations: dict, truncated: bool = False) -> dict:
+            data, pipeline_warnings = _finalize_pipeline(results)
+            return {
+                "data": data,
+                "correlations": correlations,
+                "pipeline_warnings": pipeline_warnings,
+                # Additive, backward-compatible: only present when True.
+                **({"correlation_truncated": True} if truncated else {}),
+            }
 
         # If no results or correlation disabled, return immediately
         if not initial_results or not body.correlate:
-            return {"data": _sorted(initial_results), "correlations": {}}
+            return _respond(initial_results, {})
 
         known_callids = _extract_callids(initial_results)
 
@@ -845,7 +664,7 @@ async def search_sip_traces(
                     "Skipping A/B correlation: %d call_ids exceeds limit of 50",
                     len(known_callids),
                 )
-            return {"data": _sorted(initial_results), "correlations": {}}
+            return _respond(initial_results, {})
 
         # Step 2: Correlation — search for X-CID headers to find B-leg messages.
         # Use a simple "X-CID:" filter (not a complex regex with all Call-IDs)
@@ -879,7 +698,7 @@ async def search_sip_traces(
         except HTTPException:
             # Correlation query failed — return initial results without correlation
             logger.warning("A/B correlation query failed, returning initial results only")
-            return {"data": _sorted(initial_results), "correlations": {}}
+            return _respond(initial_results, {})
 
         # Build the correlations map from X-CID data BEFORE stripping x_cid
         correlations = _build_correlations(known_callids, corr_results)
@@ -907,13 +726,11 @@ async def search_sip_traces(
         if not has_correlations:
             # No A/B correlation found — merge what we have and return.
             # All Call-IDs are independent calls, no B-legs to fetch.
-            merged = initial_results + corr_results
-            return {
-                "data": _deduplicate_results(merged),
-                "correlations": correlations,
-                # Additive, backward-compatible: only present when True.
-                **({"correlation_truncated": True} if correlation_truncated else {}),
-            }
+            return _respond(
+                initial_results + corr_results,
+                correlations,
+                truncated=correlation_truncated,
+            )
 
         # Step 3: Final query — get ALL messages from all correlated legs.
         # Uses direct ClickHouse SQL with an IN clause instead of qryn LogQL
@@ -931,20 +748,15 @@ async def search_sip_traces(
         except HTTPException:
             # ClickHouse query failed — merge initial + correlation results
             logger.warning("ClickHouse correlation query failed, returning partial results")
-            merged = initial_results + corr_results
-            return {
-                "data": _deduplicate_results(merged),
-                "correlations": correlations,
-                **({"correlation_truncated": True} if correlation_truncated else {}),
-            }
+            return _respond(
+                initial_results + corr_results,
+                correlations,
+                truncated=correlation_truncated,
+            )
 
         # The final query is the definitive result set — it contains ALL
         # messages for all Call-IDs. Merge with earlier results (dedup
         # handles any overlap) to ensure nothing is lost if the final
         # query itself hit its limit.
         all_results = initial_results + corr_results + final_results
-        return {
-            "data": _deduplicate_results(all_results),
-            "correlations": correlations,
-            **({"correlation_truncated": True} if correlation_truncated else {}),
-        }
+        return _respond(all_results, correlations, truncated=correlation_truncated)

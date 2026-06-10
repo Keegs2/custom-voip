@@ -149,6 +149,14 @@ function FilterBtn({ active, label, count, onClick }: FilterBtnProps) {
 function ColumnHeader({ node }: { node: LadderNode }) {
   const roleColor = getRoleColor(node.role);
 
+  // Split SBC columns get distinct A-leg / B-leg sublabels so the two "SBC-1"
+  // headers are never ambiguous. All other roles keep their standard sublabel
+  // (CARRIER (IN) / CARRIER (OUT) / LOAD BALANCER / MEDIA SERVER / SBC).
+  const roleLabel =
+    node.role === 'sbc' && node.legTag
+      ? `SBC · ${node.legTag === 'a' ? 'A' : 'B'}-LEG`
+      : getRoleLabel(node.role);
+
   return (
     <th
       style={{
@@ -184,7 +192,7 @@ function ColumnHeader({ node }: { node: LadderNode }) {
           opacity: 0.8,
         }}
       >
-        {getRoleLabel(node.role)}
+        {roleLabel}
       </div>
       {/* Column guide line */}
       <div
@@ -466,13 +474,18 @@ interface SipLadderProps {
   messages: HomerSearchResult[];
   /** Call-ID correlation map (Call-ID -> related Call-IDs) */
   correlations: Record<string, string[]>;
+  /** Optional pipeline diagnostics from the API (timestamp corruption, etc.) */
+  pipelineWarnings?: string[];
 }
 
-export function SipLadder({ messages, correlations }: SipLadderProps) {
+export function SipLadder({ messages, correlations, pipelineWarnings }: SipLadderProps) {
   // ── ALL hooks unconditionally at the top (React rules of hooks) ──
   const [expandedMessageId, setExpandedMessageId] = useState<string | null>(null);
   const [hide100Trying, setHide100Trying] = useState(false);
   const [hideRetransmissions, setHideRetransmissions] = useState(false);
+  // SBC internal hops (hairpin VIP re-traversals) are noise for most
+  // troubleshooting — hidden by default, toggleable like retransmissions.
+  const [hideHairpins, setHideHairpins] = useState(true);
 
   // Compute layout from messages
   const layout: LadderLayout = useMemo(
@@ -480,7 +493,7 @@ export function SipLadder({ messages, correlations }: SipLadderProps) {
     [messages, correlations],
   );
 
-  // Count retransmissions and 100 Trying for filter badges
+  // Count retransmissions / 100 Trying / hairpins for filter badges
   const retransmissionCount = useMemo(
     () => layout.messages.filter((m) => m.isRetransmission).length,
     [layout.messages],
@@ -491,13 +504,19 @@ export function SipLadder({ messages, correlations }: SipLadderProps) {
     [layout.messages],
   );
 
+  const hairpinCount = useMemo(
+    () => layout.messages.filter((m) => m.isHairpin).length,
+    [layout.messages],
+  );
+
   const visibleCount = useMemo(() => {
     return layout.messages.filter((m) => {
       if (hideRetransmissions && m.isRetransmission) return false;
       if (hide100Trying && m.original.status === 100) return false;
+      if (hideHairpins && m.isHairpin) return false;
       return true;
     }).length;
-  }, [layout.messages, hideRetransmissions, hide100Trying]);
+  }, [layout.messages, hideRetransmissions, hide100Trying, hideHairpins]);
 
   // Toggle message expansion
   const handleToggleExpand = useCallback((messageId: string) => {
@@ -507,9 +526,11 @@ export function SipLadder({ messages, correlations }: SipLadderProps) {
   // Filter toggles
   const handleToggle100 = useCallback(() => setHide100Trying((p) => !p), []);
   const handleToggleRetrans = useCallback(() => setHideRetransmissions((p) => !p), []);
+  const handleToggleHairpins = useCallback(() => setHideHairpins((p) => !p), []);
   const handleShowAll = useCallback(() => {
     setHide100Trying(false);
     setHideRetransmissions(false);
+    setHideHairpins(false);
   }, []);
 
   // ── Early returns AFTER all hooks ──
@@ -519,6 +540,52 @@ export function SipLadder({ messages, correlations }: SipLadderProps) {
 
   return (
     <div>
+      {/* Pipeline warnings (unobtrusive, only when the API reports them) */}
+      {pipelineWarnings && pipelineWarnings.length > 0 && (
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 4,
+            padding: '8px 14px',
+            marginBottom: 12,
+            borderRadius: 8,
+            border: '1px solid rgba(245,158,11,0.2)',
+            background: 'rgba(245,158,11,0.05)',
+          }}
+        >
+          {pipelineWarnings.map((warning, idx) => (
+            <div
+              key={idx}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                fontSize: '0.72rem',
+                color: '#d6a354',
+              }}
+            >
+              <svg
+                width={12}
+                height={12}
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                style={{ flexShrink: 0 }}
+              >
+                <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                <line x1={12} y1={9} x2={12} y2={13} />
+                <line x1={12} y1={17} x2={12.01} y2={17} />
+              </svg>
+              {warning}
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* Call summary header */}
       <CallSummary layout={layout} />
 
@@ -561,7 +628,13 @@ export function SipLadder({ messages, correlations }: SipLadderProps) {
             count={retransmissionCount}
             onClick={handleToggleRetrans}
           />
-          {(hide100Trying || hideRetransmissions) && (
+          <FilterBtn
+            active={hideHairpins}
+            label={hideHairpins ? 'Show SBC internal hops' : 'Hide SBC internal hops'}
+            count={hairpinCount}
+            onClick={handleToggleHairpins}
+          />
+          {(hide100Trying || hideRetransmissions || hideHairpins) && (
             <FilterBtn active={false} label="Show All" onClick={handleShowAll} />
           )}
           <span
@@ -666,6 +739,7 @@ export function SipLadder({ messages, correlations }: SipLadderProps) {
                     onToggleExpand={handleToggleExpand}
                     hideRetransmissions={hideRetransmissions}
                     hide100Trying={hide100Trying}
+                    hideHairpins={hideHairpins}
                     numCols={layout.nodes.length}
                   />
                 );
@@ -687,6 +761,7 @@ interface MessageRowWithDetailProps {
   onToggleExpand: (messageId: string) => void;
   hideRetransmissions: boolean;
   hide100Trying: boolean;
+  hideHairpins: boolean;
   numCols: number;
 }
 
@@ -697,6 +772,7 @@ function MessageRowWithDetail({
   onToggleExpand,
   hideRetransmissions,
   hide100Trying,
+  hideHairpins,
   numCols,
 }: MessageRowWithDetailProps) {
   // ALL hooks at the top
@@ -707,7 +783,8 @@ function MessageRowWithDetail({
   // Check visibility (must match SipMessageRow logic)
   const isHidden =
     (hideRetransmissions && message.isRetransmission) ||
-    (hide100Trying && message.original.status === 100);
+    (hide100Trying && message.original.status === 100) ||
+    (hideHairpins && message.isHairpin);
 
   if (isHidden) return null;
 
@@ -720,6 +797,7 @@ function MessageRowWithDetail({
         onToggleExpand={onToggleExpand}
         hideRetransmissions={hideRetransmissions}
         hide100Trying={hide100Trying}
+        hideHairpins={hideHairpins}
       />
       {isExpanded && message.original.raw_msg && (
         <tr>

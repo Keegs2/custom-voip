@@ -81,6 +81,8 @@ interface SipMessageRowProps {
   hideRetransmissions: boolean;
   /** Whether 100 Trying is hidden */
   hide100Trying: boolean;
+  /** Whether SBC internal hops (hairpins) are hidden — hidden by default */
+  hideHairpins: boolean;
 }
 
 export function SipMessageRow({
@@ -90,6 +92,7 @@ export function SipMessageRow({
   onToggleExpand,
   hideRetransmissions,
   hide100Trying,
+  hideHairpins,
 }: SipMessageRowProps) {
   // ALL hooks unconditionally at the top (React rules of hooks)
   const handleClick = useCallback(() => {
@@ -99,6 +102,7 @@ export function SipMessageRow({
   // Early returns AFTER all hooks
   if (hideRetransmissions && message.isRetransmission) return null;
   if (hide100Trying && message.original.status === 100) return null;
+  if (hideHairpins && message.isHairpin) return null;
 
   const {
     sourceCol,
@@ -106,6 +110,8 @@ export function SipMessageRow({
     color,
     label,
     isRetransmission: isRetrans,
+    isHairpin,
+    tsCorrected,
     direction,
     timeDeltaMs,
     directionInferred,
@@ -116,7 +122,9 @@ export function SipMessageRow({
   const minCol = Math.min(sourceCol, destCol);
   const maxCol = Math.max(sourceCol, destCol);
 
-  // Build the timestamp display
+  // Build the timestamp display. Causally-corrected rows (and negative deltas,
+  // which only appear around corrected rows) get a tilde so engineers know the
+  // displayed position is derived, not the raw capture timestamp.
   let timestampDisplay: string;
   if (timeDeltaMs === null) {
     // First message — show absolute time
@@ -132,8 +140,13 @@ export function SipMessageRow({
     } catch {
       timestampDisplay = '';
     }
+  } else if (timeDeltaMs < 0) {
+    timestampDisplay = `~${formatTimeDelta(timeDeltaMs)}`;
   } else {
     timestampDisplay = `+${formatTimeDelta(timeDeltaMs)}`;
+  }
+  if (tsCorrected && !timestampDisplay.startsWith('~')) {
+    timestampDisplay = `~${timestampDisplay}`;
   }
 
   // Row opacity for retransmissions
@@ -162,7 +175,12 @@ export function SipMessageRow({
       title={message.original.raw_msg ? 'Click to view packet details' : undefined}
     >
       {/* Timestamp cell */}
-      <td style={timestampCellStyle}>{timestampDisplay}</td>
+      <td
+        style={timestampCellStyle}
+        title={tsCorrected ? 'Timestamp corrected for SIP causality' : undefined}
+      >
+        {timestampDisplay}
+      </td>
 
       {/* Node columns */}
       {Array.from({ length: numCols }, (_, colIdx) => {
@@ -193,7 +211,8 @@ export function SipMessageRow({
               }}
             />
 
-            {/* Self-message indicator (same source and dest) */}
+            {/* Self-loop glyph: hairpin / SBC internal hop (same source and dest).
+                A small U-turn loop on the column instead of a spanning arrow. */}
             {isSelfMessage && isSource && (
               <div
                 style={{
@@ -201,14 +220,30 @@ export function SipMessageRow({
                   left: '50%',
                   top: '50%',
                   transform: 'translate(-50%, -50%)',
-                  width: 8,
-                  height: 8,
-                  borderRadius: '50%',
-                  background: color,
                   zIndex: 2,
+                  display: 'flex',
+                  opacity: isHairpin ? 0.75 : 1,
                 }}
-                title={label}
-              />
+                title={
+                  isHairpin
+                    ? `${label} — SBC internal hop (re-traversal through own VIP)`
+                    : label
+                }
+              >
+                <svg width={18} height={16} viewBox="0 0 18 16" style={{ display: 'block' }}>
+                  {/* loop: out of the column line, around, and back */}
+                  <path
+                    d="M 5 13 V 6 A 4.5 4.5 0 0 1 14 6 V 10"
+                    fill="none"
+                    stroke={color}
+                    strokeWidth={1.6}
+                  />
+                  {/* arrowhead pointing back down at the column */}
+                  <polygon points="11,10 17,10 14,15" fill={color} />
+                  {/* origin dot on the column line */}
+                  <circle cx={5} cy={13} r={2} fill={color} />
+                </svg>
+              </div>
             )}
 
             {/* Arrow line rendering */}
@@ -339,14 +374,14 @@ export function SipMessageRow({
               </div>
             )}
 
-            {/* For self-messages, show label above the dot */}
+            {/* For self-messages, show label above the loop glyph */}
             {isSelfMessage && isSource && (
               <div
                 style={{
                   position: 'absolute',
                   top: '50%',
                   left: '50%',
-                  transform: 'translate(-50%, -120%)',
+                  transform: 'translate(-50%, -150%)',
                   whiteSpace: 'nowrap',
                   fontSize: '0.68rem',
                   fontWeight: 600,
@@ -355,9 +390,28 @@ export function SipMessageRow({
                   zIndex: 3,
                   pointerEvents: 'none',
                   textShadow: `0 0 8px ${LADDER_COLORS.bg}, 0 0 4px ${LADDER_COLORS.bg}`,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 4,
                 }}
               >
                 {label}
+                {isHairpin && (
+                  <span
+                    style={{
+                      fontSize: '0.58rem',
+                      fontWeight: 600,
+                      color: LADDER_COLORS.textFaint,
+                      fontStyle: 'italic',
+                      border: `1px solid ${LADDER_COLORS.borderLight}`,
+                      borderRadius: 3,
+                      padding: '0 3px',
+                      letterSpacing: '0.02em',
+                    }}
+                  >
+                    internal hop
+                  </span>
+                )}
               </div>
             )}
           </td>

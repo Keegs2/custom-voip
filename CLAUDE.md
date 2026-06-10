@@ -151,7 +151,8 @@ Record-Route: <sip:SBC_INTERNAL_IP:5060;lr>    ← inner: what FS sees, routes t
 ```
 
 - **Why:** Without the inner RR, the B-leg ACK from Bandwidth arrives at the NLB VIP, gets load-balanced to a random SBC, and that SBC has no dialog state for this call → ACK dropped → call fails.
-- **Implementation:** `record_route_preset("ADVERTISE_IP:5060;lr", "SBC_INTERNAL_IP:5060;lr")` in TO_CARRIER route.
+- **Implementation:** `record_route_preset("ADVERTISE_IP:5060;lr", "SBC_INTERNAL_IP:5060;r2=on;lr")` in TO_CARRIER route (A-leg uses reversed argument order with the same `;r2=on` on the SBC_INTERNAL entry).
+- **`;r2=on` is REQUIRED on the SBC_INTERNAL entry (and ONLY there).** Kamailio's rr module consumes the second own-Route in one `loose_route()` pass only when the first consumed Route carries the `r2` param. Without it, FS-originated in-dialog requests (ACK/BYE) pop only the inner Route, then physically send to the VIP — the SBC's own loopback — causing a real wire hairpin, a second Kamailio traversal, and a duplicate Via. Never put `r2=on` on the VIP entry: Bandwidth's in-dialog requests must pop ONLY the VIP at whichever SBC the NLB picks, leaving the inner Route intact to reach the dialog-owning SBC.
 - **Requires:** `SBC_INTERNAL_IP` env var set per-SBC in `.env` + passed through `docker-compose.sbc.yml`.
 - **Requires:** `alias=SBC_INTERNAL_IP:5060` in Kamailio config so `loose_route()` recognizes the inner RR address as local. Without this, Kamailio doesn't match the inner RR and creates an infinite routing loop for ACKs.
 

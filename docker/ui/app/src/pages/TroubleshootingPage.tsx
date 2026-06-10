@@ -452,11 +452,13 @@ function DurationBadge({ seconds }: DurationBadgeProps) {
 interface ResultsTableProps {
   callGroups: CallGroup[];
   correlations: Record<string, string[]>;
+  /** Pipeline diagnostics from the API — surfaced above each expanded ladder */
+  pipelineWarnings: string[];
   startTime: string;
   endTime: string;
 }
 
-function ResultsTable({ callGroups, correlations, startTime, endTime }: ResultsTableProps) {
+function ResultsTable({ callGroups, correlations, pipelineWarnings, startTime, endTime }: ResultsTableProps) {
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
   const thStyle: React.CSSProperties = {
     padding: '10px 14px',
@@ -624,7 +626,11 @@ function ResultsTable({ callGroups, correlations, startTime, endTime }: ResultsT
                           Open in Grafana
                         </a>
                       </div>
-                      <SipLadder messages={group.messages} correlations={correlations} />
+                      <SipLadder
+                        messages={group.messages}
+                        correlations={correlations}
+                        pipelineWarnings={pipelineWarnings}
+                      />
                     </div>
                   </td>
                 </tr>
@@ -722,6 +728,7 @@ export function TroubleshootingPage() {
   // ── Memoised call grouping (hook — must stay above early returns) ──
   const results = searchMutation.data?.data ?? [];
   const correlations = searchMutation.data?.correlations ?? {};
+  const pipelineWarnings = searchMutation.data?.pipeline_warnings ?? [];
 
   const callGroups = useMemo(
     () => groupMessagesByCall(results, correlations),
@@ -1175,7 +1182,7 @@ export function TroubleshootingPage() {
           )}
 
           {!isLoading && !isError && callGroups.length > 0 && (
-            <ResultsTable callGroups={callGroups} correlations={correlations} startTime={startTime} endTime={endTime} />
+            <ResultsTable callGroups={callGroups} correlations={correlations} pipelineWarnings={pipelineWarnings} startTime={startTime} endTime={endTime} />
           )}
         </div>
       </div>

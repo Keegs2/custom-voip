@@ -15,15 +15,20 @@ import { extractSIPInfo } from './sipUtils';
  * Computes the complete ladder layout from raw Homer messages and correlation data.
  *
  * This is the core layout engine. It:
- * 1. Discovers unique nodes from src_ip/dst_ip values
- * 2. Classifies each node's architectural role
- * 3. Orders nodes left-to-right following the call's actual path
- * 4. Classifies messages by call leg (A vs B)
- * 5. Detects retransmissions
- * 6. Computes inter-message time deltas
- * 7. Assigns colors and labels
+ * 1. Orders messages — by the API's authoritative `seq` when present, else by
+ *    timestamp with a defensive SIP-causality pass (responses never above
+ *    their request)
+ * 2. Discovers unique nodes from src_ip/dst_ip values
+ * 3. Classifies each node's architectural role
+ * 4. Orders nodes left-to-right by FIXED platform topology rank
+ *    (carrier-in → VIP → SBC → FS → SBC(B) → carrier-out); chronology only
+ *    breaks ties
+ * 5. Classifies messages by call leg (A vs B)
+ * 6. Detects retransmissions and hairpin (SBC self-hop) rows
+ * 7. Computes inter-message time deltas
+ * 8. Assigns colors and labels
  *
- * @param messages      Raw HomerSearchResult array (will be sorted by timestamp_ns)
+ * @param messages      Raw HomerSearchResult array
  * @param correlations  Map of Call-ID → related Call-IDs (from API)
  */
 export function computeLayout(
@@ -41,20 +46,21 @@ export function computeLayout(
     };
   }
 
-  // Sort messages chronologically by nanosecond timestamp
-  const sorted = [...messages].sort((a, b) => a.timestamp_ns - b.timestamp_ns);
+  // Step 1: Order messages. `seq` (when present on every row) is the
+  // AUTHORITATIVE display order computed by the API pipeline. Old-format
+  // data falls back to timestamp sort + a defensive causality pass.
+  const { sorted, causallyMoved } = orderMessages(messages);
 
-  // Step 1+2: Discover and classify nodes
+  // Step 2: Discover nodes (in display order — first appearance is the tiebreak)
   const nodeNames = discoverNodes(sorted);
 
-  // Step 4: Classify call legs (needed before ordering for carrier-egress detection)
+  // Step 5 (early): Classify call legs (needed for carrier in/out detection)
   const { aLegCallIds, bLegCallIds } = classifyCallLegs(sorted, correlations);
 
-  // Step 3: Order nodes left-to-right following the call path
+  // Steps 3+4: Order nodes left-to-right by topology rank. Carrier roles
+  // (ingress vs egress) are resolved from call-flow direction BEFORE ranking
+  // so timestamp corruption can never push carrier-in right of the media server.
   const orderedNodes = orderNodes(sorted, nodeNames, aLegCallIds, bLegCallIds);
-
-  // Refine carrier-egress roles now that we have ordering context
-  refineCarrierRoles(orderedNodes, sorted, aLegCallIds);
 
   // Step 4.5: Split nodes that appear in both call legs into virtual A/B-leg columns.
   // This creates a symmetric ladder: BW-ATL | SBC-VIP | SBC-1 (IN) | FS | SBC-1 (OUT) | BW-DAL
@@ -95,17 +101,30 @@ export function computeLayout(
     const isRetransmit = isRetransmission(msg, prevMessagesForRetransmit);
     prevMessagesForRetransmit.push(msg);
 
-    // Resolve a true directional arrow for this message. Primary signal is the
-    // wire-level HEP src→dst; when that collapses to one column, SIP semantics
-    // (request-URI / Via chain) decide the peer and direction. Guarantees that
-    // sourceCol !== destCol — no message ever renders as a bare dot.
-    const resolved = resolveMessageDirection(msg, leg, {
+    const ctx: ResolveContext = {
       columnIndex,
       bLegColumnIndex,
       hostColumnIndex,
       mediaCol,
       nodeCount: finalNodes.length,
-    });
+    };
+
+    // Hairpin detection: the API marks self-hop / VIP re-traversal copies of
+    // in-dialog requests with `hairpin: true`; for old-format data, a row whose
+    // wire src and dst collapsed to the SAME node is the fallback signal.
+    // Hairpins render as a self-loop glyph on one column — never a spanning
+    // arrow — so they bypass directional resolution entirely.
+    const isHairpin =
+      msg.hairpin === true || (!!msg.src_ip && msg.src_ip === msg.dst_ip);
+
+    // Resolve a true directional arrow for this message. Primary signal is the
+    // wire-level HEP src→dst; when that collapses to one column, SIP semantics
+    // (request-URI / Via chain) decide the peer and direction. Guarantees that
+    // sourceCol !== destCol for non-hairpin rows — no message ever renders as
+    // a bare dot.
+    const resolved = isHairpin
+      ? resolveHairpinColumn(msg, leg, ctx)
+      : resolveMessageDirection(msg, leg, ctx);
 
     // Compute time delta from previous message
     let timeDeltaMs: number | null = null;
@@ -126,17 +145,26 @@ export function computeLayout(
       color,
       label: formatMessageLabel(msg),
       isRetransmission: isRetransmit,
+      isHairpin,
+      tsCorrected: msg.ts_corrected === true || causallyMoved.has(msg),
       leg,
       timeDeltaMs,
       directionInferred: resolved.inferred,
     });
   }
 
-  // Calculate overall call duration
-  const callDurationMs =
-    sorted.length >= 2
-      ? (sorted[sorted.length - 1]!.timestamp_ns - sorted[0]!.timestamp_ns) / 1_000_000
-      : null;
+  // Calculate overall call duration. Display order may be causally corrected,
+  // so use min/max timestamps rather than first/last rows.
+  let callDurationMs: number | null = null;
+  if (sorted.length >= 2) {
+    let minTs = Number.POSITIVE_INFINITY;
+    let maxTs = Number.NEGATIVE_INFINITY;
+    for (const m of sorted) {
+      if (m.timestamp_ns < minTs) minTs = m.timestamp_ns;
+      if (m.timestamp_ns > maxTs) maxTs = m.timestamp_ns;
+    }
+    callDurationMs = (maxTs - minTs) / 1_000_000;
+  }
 
   return {
     nodes: finalNodes,
@@ -148,6 +176,144 @@ export function computeLayout(
 }
 
 // ─── Internal helpers ───────────────────────────────────────────────────────
+
+/** Result of the message-ordering pass. */
+interface OrderedMessages {
+  /** Messages in final display order. */
+  sorted: HomerSearchResult[];
+  /** Rows the client-side causality pass moved (old-format data only). */
+  causallyMoved: Set<HomerSearchResult>;
+}
+
+/**
+ * Orders messages for display.
+ *
+ * NEW-format data: when EVERY row carries a numeric `seq`, that is the
+ * authoritative display order computed by the API pipeline (it has already
+ * corrected corrupted capture timestamps for SIP causality) — sort by it.
+ *
+ * OLD-format data (cached / pre-upgrade responses): sort by timestamp_ns,
+ * then run a defensive causality pass so a response never renders above the
+ * request it answers (stored timestamps can be 15-20ms late on large packets,
+ * which historically put "100 Trying" above its INVITE).
+ */
+function orderMessages(messages: ReadonlyArray<HomerSearchResult>): OrderedMessages {
+  const allHaveSeq = messages.every(
+    (m) => typeof m.seq === 'number' && Number.isFinite(m.seq),
+  );
+
+  if (allHaveSeq) {
+    return {
+      sorted: [...messages].sort((a, b) => a.seq! - b.seq!),
+      causallyMoved: new Set(),
+    };
+  }
+
+  const byTimestamp = [...messages].sort((a, b) => a.timestamp_ns - b.timestamp_ns);
+  return enforceCausality(byTimestamp);
+}
+
+/**
+ * SIP transaction key for the causality pass: Call-ID + CSeq. The CSeq value
+ * ("102 INVITE") is invariant across proxy hops (RFC 3261 §8.1.1.5), so every
+ * hop of one request and all its responses share a key. Falls back to the
+ * method label when the API didn't extract a CSeq — degradation is safe (a
+ * response with an unmatched key is simply left in timestamp order).
+ */
+function transactionKey(msg: HomerSearchResult): string {
+  const cseq = (msg.cseq ?? '').trim();
+  return `${msg.callid}|${cseq || msg.method}`;
+}
+
+/**
+ * Defensive causality pass for old-format (seq-less) data: within the same
+ * Call-ID + CSeq transaction, a response row must never render above its
+ * request. Violations are fixed MINIMALLY — the offending response rows are
+ * deferred and re-inserted immediately after the transaction's first request,
+ * preserving their relative order. Everything else keeps timestamp order.
+ */
+function enforceCausality(byTimestamp: HomerSearchResult[]): OrderedMessages {
+  // Which transactions have a request row at all (responses without one are
+  // never moved — there is nothing to anchor them to).
+  const hasRequest = new Set<string>();
+  for (const m of byTimestamp) {
+    if (m.status === null) hasRequest.add(transactionKey(m));
+  }
+
+  const out: HomerSearchResult[] = [];
+  const causallyMoved = new Set<HomerSearchResult>();
+  const seenRequest = new Set<string>();
+  const deferred = new Map<string, HomerSearchResult[]>();
+
+  for (const m of byTimestamp) {
+    const key = transactionKey(m);
+
+    if (m.status === null) {
+      // Request row — emit, then flush any responses that arrived "before" it.
+      out.push(m);
+      if (!seenRequest.has(key)) {
+        seenRequest.add(key);
+        const waiting = deferred.get(key);
+        if (waiting) {
+          for (const w of waiting) {
+            out.push(w);
+            causallyMoved.add(w);
+          }
+          deferred.delete(key);
+        }
+      }
+    } else if (seenRequest.has(key) || !hasRequest.has(key)) {
+      // Response whose request already rendered (or has no request) — in place.
+      out.push(m);
+    } else {
+      // Response stored BEFORE its request (corrupted timestamp) — defer.
+      const waiting = deferred.get(key);
+      if (waiting) waiting.push(m);
+      else deferred.set(key, [m]);
+    }
+  }
+
+  // Safety net: flush anything still deferred (cannot happen when hasRequest
+  // is consistent, but a silently dropped row is never acceptable).
+  for (const waiting of deferred.values()) {
+    for (const w of waiting) out.push(w);
+  }
+
+  return { sorted: out, causallyMoved };
+}
+
+/**
+ * Resolves the single column a hairpin (SBC self-hop) row sits on. Hairpins
+ * are captured as src == dst (the SBC sending through its own VIP), so there
+ * is no arrow to draw — just a self-loop glyph on the most meaningful column:
+ *
+ *  - B-leg hairpins happen on the egress side of the bridge; anchor them on
+ *    the B-leg SBC virtual column when one exists.
+ *  - Otherwise anchor on whichever wire endpoint resolves to a column.
+ *  - Last resort: the leg-appropriate side of the media server.
+ */
+function resolveHairpinColumn(
+  msg: HomerSearchResult,
+  leg: 'a' | 'b' | 'unknown',
+  ctx: ResolveContext,
+): ResolvedDirection {
+  let col: number | undefined;
+
+  if (leg === 'b' && ctx.bLegColumnIndex.size > 0) {
+    col = Math.min(...ctx.bLegColumnIndex.values());
+  }
+  if (col === undefined) {
+    col = resolveColumn(msg.src_ip, leg, ctx.columnIndex, ctx.bLegColumnIndex);
+  }
+  if (col === undefined) {
+    col = resolveColumn(msg.dst_ip, leg, ctx.columnIndex, ctx.bLegColumnIndex);
+  }
+  if (col === undefined) {
+    col = fallbackAnchorByLeg(leg, ctx);
+  }
+
+  return { sourceCol: col, destCol: col, inferred: false };
+}
 
 /**
  * Suffix appended to a physical node ID to create its B-leg virtual node ID.
@@ -227,6 +393,14 @@ function splitDualLegNodes(
     return { finalNodes: orderedNodes, bLegColumnIndex: new Map() };
   }
 
+  // Tag the physical (left/ingress) half of every split node as the A-leg
+  // column so the header renders "SBC · A-LEG" vs the clone's "SBC · B-LEG".
+  for (const node of orderedNodes) {
+    if (nodesToSplit.has(node.id)) {
+      node.legTag = 'a';
+    }
+  }
+
   // Index of the FreeSWITCH / media-server node (the B2BUA center point).
   // B-leg virtual nodes go after this node. Reuses the pivot found above.
   const mediaIdx = mediaPivotIdx;
@@ -251,6 +425,7 @@ function splitDualLegNodes(
             displayLabel: origNode.id,
             role: origNode.role,
             columnIndex: -1, // will be reassigned below
+            legTag: 'b',
           });
         }
       }
@@ -272,6 +447,7 @@ function splitDualLegNodes(
           displayLabel: origNode.id,
           role: origNode.role,
           columnIndex: -1,
+          legTag: 'b',
         });
       }
     }
@@ -649,21 +825,41 @@ function discoverNodes(sorted: ReadonlyArray<HomerSearchResult>): string[] {
 }
 
 /**
- * Orders nodes left-to-right by tracing the path of the call flow.
+ * Fixed topology rank for each architectural role. The platform topology is
+ * KNOWN and constant: carrier-in → SBC-VIP (NLB) → SBC (A-leg) → FreeSWITCH →
+ * SBC (B-leg, inserted by the dual-leg split) → carrier-out. Columns are
+ * ordered by this rank FIRST; chronology (first appearance) only breaks ties
+ * between nodes of the same rank (e.g. two carrier-in edge proxies).
+ *
+ * This makes column order immune to capture-timestamp corruption: a late
+ * stored timestamp on the carrier INVITE can no longer push the carrier-in
+ * or VIP columns right of the media server.
+ */
+const TOPOLOGY_RANK: Record<NodeRole, number> = {
+  'carrier-ingress': 0,
+  'sbc-vip': 1,
+  sbc: 2,
+  'media-server': 3,
+  // B-leg SBC virtual columns are inserted between media-server and
+  // carrier-egress by splitDualLegNodes (rank-driven placement).
+  'carrier-egress': 4,
+  unknown: 99, // adjacency-placed, never rank-sorted
+};
+
+/**
+ * Orders nodes left-to-right — topology-first.
  *
  * Algorithm:
- * 1. Collect all INVITE requests (status === null), sorted chronologically
- * 2. Walk the A-leg INVITEs in order, placing src_ip then dst_ip for each
- *    — this naturally produces the correct chain even when intermediate
- *    hops are invisible (e.g. NLB pass-through between SBC-VIP and SBC-1)
- * 3. Repeat for B-leg INVITEs
- * 4. Append any remaining nodes not yet placed
- *
- * Previous approach used traceInviteChain() which required each INVITE's
- * src_ip to already be placed. That failed when SBC-VIP dispatched to
- * SBC-1 (via NLB, no SIP message) and SBC-1 forwarded to FreeSWITCH —
- * SBC-1 was never placed by the chain tracer, so FreeSWITCH could end up
- * before SBC-1 in the column order.
+ * 1. Classify every node's role from its heplify alias (zone-aware substring
+ *    matching handles West/Central prefixes).
+ * 2. Resolve carrier in/out from CALL FLOW, not timestamps: a carrier that
+ *    sources an A-leg INVITE is ingress; one that receives a B-leg INVITE
+ *    (or appears only in B-leg traffic) is egress.
+ * 3. Sort known-role nodes by TOPOLOGY_RANK; chronological first appearance
+ *    breaks ties within a rank.
+ * 4. Insert unknown/un-aliased nodes (raw IPs) by first-appearance adjacency:
+ *    next to the peer of their first directional message — before the peer
+ *    when the unknown node was the sender (upstream), after it otherwise.
  */
 function orderNodes(
   sorted: ReadonlyArray<HomerSearchResult>,
@@ -671,68 +867,117 @@ function orderNodes(
   aLegCallIds: Set<string>,
   bLegCallIds: Set<string>,
 ): LadderNode[] {
-  const placed = new Set<string>();
-  const ordered: string[] = [];
+  // Step 1: base role classification
+  const roleById = new Map<string, NodeRole>();
+  for (const name of allNodeNames) {
+    roleById.set(name, classifyNodeRole(name));
+  }
 
-  function place(name: string): void {
-    if (!placed.has(name)) {
-      placed.add(name);
-      ordered.push(name);
+  // Step 2: carrier in/out from call-flow direction
+  const aLegInviteSrcs = new Set<string>();
+  const bLegInviteDsts = new Set<string>();
+  const aLegNodes = new Set<string>();
+  const bLegNodes = new Set<string>();
+  for (const msg of sorted) {
+    const isInviteReq = msg.method === 'INVITE' && msg.status === null;
+    if (aLegCallIds.has(msg.callid)) {
+      aLegNodes.add(msg.src_ip);
+      aLegNodes.add(msg.dst_ip);
+      if (isInviteReq) aLegInviteSrcs.add(msg.src_ip);
+    } else if (bLegCallIds.has(msg.callid)) {
+      bLegNodes.add(msg.src_ip);
+      bLegNodes.add(msg.dst_ip);
+      if (isInviteReq) bLegInviteDsts.add(msg.dst_ip);
     }
   }
 
-  // Find all INVITE requests (status === null means request), already sorted by timestamp
-  const invites = sorted.filter((m) => m.method === 'INVITE' && m.status === null);
-
-  if (invites.length === 0) {
-    // No INVITEs at all — fall back to discovery order
-    for (const name of allNodeNames) {
-      place(name);
+  for (const name of allNodeNames) {
+    if (!isCarrierRole(roleById.get(name)!)) continue;
+    // Precedence: sourcing an A-leg INVITE is the strongest ingress signal
+    // (the same Bandwidth edge can appear on both legs — ingress wins, as
+    // the previous role-refinement pass also did).
+    if (aLegInviteSrcs.has(name) || aLegNodes.has(name)) {
+      roleById.set(name, 'carrier-ingress');
+    } else if (bLegInviteDsts.has(name) || bLegNodes.has(name)) {
+      roleById.set(name, 'carrier-egress');
     }
-  } else {
-    const aLegInvites = invites.filter((m) => aLegCallIds.has(m.callid));
-    const bLegInvites = invites.filter((m) => bLegCallIds.has(m.callid));
+    // Neither leg (unclassified traffic only): keep the default ingress.
+  }
 
-    // Use A-leg INVITEs first; if none classified as A-leg, use all
-    const primaryInvites = aLegInvites.length > 0 ? aLegInvites : invites;
+  // Step 3: rank-sort known-role nodes; first appearance breaks ties
+  const firstAppearance = new Map<string, number>();
+  allNodeNames.forEach((name, idx) => firstAppearance.set(name, idx));
 
-    // Walk each A-leg INVITE chronologically, placing src then dst.
-    // Because INVITEs are already sorted by timestamp, this produces:
-    //   INVITE #1 (BW-ATL → SBC-VIP): place BW-ATL, place SBC-VIP
-    //   INVITE #2 (SBC-1 → FreeSWITCH): place SBC-1, place FreeSWITCH
-    // Result: BW-ATL | SBC-VIP | SBC-1 | FreeSWITCH
-    for (const invite of primaryInvites) {
-      place(invite.src_ip);
-      place(invite.dst_ip);
-    }
+  const ordered: string[] = allNodeNames
+    .filter((name) => roleById.get(name) !== 'unknown')
+    .sort((a, b) => {
+      const rankDiff = TOPOLOGY_RANK[roleById.get(a)!] - TOPOLOGY_RANK[roleById.get(b)!];
+      if (rankDiff !== 0) return rankDiff;
+      return firstAppearance.get(a)! - firstAppearance.get(b)!;
+    });
 
-    // Walk B-leg INVITEs the same way
-    for (const invite of bLegInvites) {
-      place(invite.src_ip);
-      place(invite.dst_ip);
-    }
+  // Step 4: adjacency-place unknown nodes (raw IPs heplify hasn't aliased)
+  const pending = allNodeNames.filter((name) => roleById.get(name) === 'unknown');
+  let progress = true;
+  while (progress && pending.length > 0) {
+    progress = false;
+    for (let i = 0; i < pending.length; i++) {
+      const id = pending[i]!;
+      // First directional message involving this node tells us its neighbour.
+      const firstMsg =
+        sorted.find(
+          (m) => (m.src_ip === id || m.dst_ip === id) && m.src_ip !== m.dst_ip,
+        ) ?? sorted.find((m) => m.src_ip === id || m.dst_ip === id);
+      if (!firstMsg) continue;
 
-    // Append any remaining nodes (e.g. nodes only seen in non-INVITE messages)
-    for (const name of allNodeNames) {
-      place(name);
+      const peer = firstMsg.src_ip === id ? firstMsg.dst_ip : firstMsg.src_ip;
+      const peerIdx = ordered.indexOf(peer);
+      if (peerIdx === -1) continue; // peer not placed yet — retry next round
+
+      // Sender sits upstream (left) of its receiver.
+      const insertAt = firstMsg.src_ip === id ? peerIdx : peerIdx + 1;
+      ordered.splice(insertAt, 0, id);
+      pending.splice(i, 1);
+      progress = true;
+      break;
     }
   }
+  // Anything still unplaced (isolated self-traffic, peerless) goes at the end.
+  for (const id of pending) ordered.push(id);
 
   // Build LadderNode objects with column indices
   return ordered.map((id, columnIndex) => ({
     id,
-    role: classifyNodeRole(id),
+    role: roleById.get(id)!,
     columnIndex,
   }));
 }
 
 /**
+ * Scores an INVITE request as a candidate for the PRIMARY (A-leg) INVITE.
+ * Lower is better. The A-leg always enters the platform from the carrier /
+ * load-balancer side, while the B-leg is originated by the FreeSWITCH B2BUA —
+ * so the source node's role is a far stronger signal than its (possibly
+ * corrupted) capture timestamp.
+ */
+function primaryInviteScore(msg: HomerSearchResult): number {
+  const role = classifyNodeRole(msg.src_ip);
+  if (role === 'carrier-ingress' || role === 'carrier-egress') return 0; // carrier-sourced
+  if (role === 'sbc-vip') return 1;
+  if (role === 'media-server') return 3; // B2BUA-originated = B-leg
+  return 2; // sbc / unknown
+}
+
+/**
  * Classifies Call-IDs into A-leg and B-leg sets using the correlation map.
  *
- * The first Call-ID seen in the earliest INVITE is the A-leg.
- * Any Call-IDs correlated to it (via the correlations map) are B-leg.
- * Call-IDs not in any correlation group remain classified by position:
- * if they share src/dst with the A-leg Call-ID's messages, they're A-leg.
+ * The primary (A-leg) Call-ID comes from the best A-leg INVITE candidate:
+ * topology-scored first (carrier-sourced beats VIP beats SBC beats B2BUA),
+ * display order breaking ties — NOT raw chronology alone, which inherits
+ * corrupted capture timestamps. Any Call-IDs correlated to it (via the
+ * correlations map) are B-leg. Call-IDs not in any correlation group remain
+ * classified by position: if they share src/dst with the A-leg Call-ID's
+ * messages, they're A-leg.
  */
 function classifyCallLegs(
   sorted: ReadonlyArray<HomerSearchResult>,
@@ -741,8 +986,18 @@ function classifyCallLegs(
   const aLegCallIds = new Set<string>();
   const bLegCallIds = new Set<string>();
 
-  // Find the first INVITE to determine the primary A-leg Call-ID
-  const firstInvite = sorted.find((m) => m.method === 'INVITE' && m.status === null);
+  // Find the best primary-INVITE candidate (topology score, then order)
+  let firstInvite: HomerSearchResult | undefined;
+  let bestScore = Number.POSITIVE_INFINITY;
+  for (const m of sorted) {
+    if (m.method !== 'INVITE' || m.status !== null) continue;
+    const score = primaryInviteScore(m);
+    if (score < bestScore) {
+      bestScore = score;
+      firstInvite = m;
+      if (score === 0) break; // carrier-sourced — cannot do better
+    }
+  }
 
   if (!firstInvite) {
     // No INVITE found — treat all messages as unknown (put first callid in A-leg)
@@ -794,47 +1049,6 @@ function classifyCallLegs(
   }
 
   return { aLegCallIds, bLegCallIds };
-}
-
-/**
- * Refines carrier node roles: the carrier that sends the first A-leg INVITE
- * is "carrier-ingress"; carriers that receive B-leg INVITEs are "carrier-egress".
- */
-function refineCarrierRoles(
-  nodes: LadderNode[],
-  sorted: ReadonlyArray<HomerSearchResult>,
-  aLegCallIds: Set<string>,
-): void {
-  // Find the source of the first A-leg INVITE (this is carrier-ingress)
-  const firstALegInvite = sorted.find(
-    (m) => m.method === 'INVITE' && m.status === null && aLegCallIds.has(m.callid),
-  );
-
-  const ingressNodeId = firstALegInvite?.src_ip;
-
-  // Find nodes that are destinations of B-leg INVITEs (these are carrier-egress)
-  const egressNodeIds = new Set<string>();
-  for (const msg of sorted) {
-    if (msg.method === 'INVITE' && msg.status === null && !aLegCallIds.has(msg.callid)) {
-      // This is a B-leg INVITE — its final destination might be a carrier-egress
-      const destNode = nodes.find((n) => n.id === msg.dst_ip);
-      if (destNode && isCarrierRole(destNode.role)) {
-        egressNodeIds.add(msg.dst_ip);
-      }
-    }
-  }
-
-  // Apply refined roles
-  for (const node of nodes) {
-    if (!isCarrierRole(node.role)) continue;
-
-    if (node.id === ingressNodeId) {
-      node.role = 'carrier-ingress';
-    } else if (egressNodeIds.has(node.id)) {
-      node.role = 'carrier-egress';
-    }
-    // If neither, keep the default carrier-ingress from classifyNodeRole
-  }
 }
 
 /**

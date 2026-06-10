@@ -10,7 +10,7 @@ Kamailio acts as the Session Border Controller (SBC) for the RCF-V1 voice platfo
 - **NAT keepalive**: Dispatcher sends OPTIONS probes every 5 seconds to Bandwidth IPs, keeping the GCE UDP NAT pinhole open (GCE has a 30-second UDP idle timeout).
 - **SIP trunk IP authentication**: Queries PostgreSQL to authenticate customer PBX source IPs against the `trunk_auth_ips` table, with per-trunk CPS rate limiting.
 - **Session timer management**: Adds RFC 4028 headers (Session-Expires, Min-SE) on outbound INVITEs and normalizes carrier replies so FreeSWITCH always sees a value it will honor.
-- **HEP capture**: Sends all SIP messages to Homer via HEP3 for troubleshooting (capture ID from `HEP_CAPTURE_ID`, default 100).
+- **HEP capture**: Sends all SIP messages to Homer via HEP3 for troubleshooting (capture ID from `HEP_CAPTURE_ID`, default 100). Exactly-once model: `sip_trace()` in request_route (received request) + `setflag(22)` transaction tracing (forwarded branches, received replies, relayed/local replies via tm callbacks; sl replies via SL callback). reply_route traces ONLY transaction-less (statelessly forwarded) replies — an unconditional `sip_trace()` there duplicates every received reply.
 - **Carrier failover**: Multi-IP, multi-trunk failover (500/503/408/480/404). Each Bandwidth trunk config (TC1/TC2/TC4) has two IPs; on failure Kamailio fails over within the trunk (flag 8, one retry), then cross-trunk to TC4 Dallas as a last resort (flag 9 guards against loops). See route[CARRIER_FAILURE].
 
 Kamailio does NOT handle media. RTP flows directly between Bandwidth and FreeSWITCH. There is no RTPEngine or RTPProxy.
@@ -284,7 +284,7 @@ Called ONLY for inbound traffic from Bandwidth and re-INVITEs from external sour
 
 ### 4.9 reply_route and onreply_route[REPLY_HANDLER]
 
-**reply_route** (global): Traces all replies to Homer. Does NOT call `fix_nated_contact()` (FS already uses correct public IPs). Drops late 100 Trying.
+**reply_route** (global): Traces ONLY stateless (transaction-less) replies to Homer via `if (!t_check_trans()) sip_trace();` — transaction-matched replies are already traced once by the siptrace tm callbacks armed in request_route (an unconditional `sip_trace()` here produced the historical node-100 duplicate rows). Side effect: 200s to dispatcher's own OPTIONS keepalives are no longer traced (noise reduction). Does NOT call `fix_nated_contact()` (FS already uses correct public IPs). Drops late 100 Trying.
 
 **REPLY_HANDLER** (per-transaction): Fires for 1xx and 2xx replies.
 - **183 SDP is PASSED THROUGH** (not stripped). Carrier 183 Session Progress with
@@ -519,11 +519,15 @@ Bandwidth sometimes sends `Session-Expires: 30` in 200 OK (below RFC minimum of 
 
 `enable_double_rr=1` is set and BOTH legs use `record_route_preset()` with two URIs:
 ```
-Record-Route: <sip:ADVERTISE_IP:5060;lr>        (outer = NLB VIP, what Bandwidth sees)
-Record-Route: <sip:SBC_INTERNAL_IP:5060;lr>     (inner = this SBC's VPC IP)
+Record-Route: <sip:ADVERTISE_IP:5060;lr>          (outer = NLB VIP, what Bandwidth sees)
+Record-Route: <sip:SBC_INTERNAL_IP:5060;r2=on;lr> (inner = this SBC's VPC IP)
 ```
-- **TO_CARRIER (B-leg, FS->carrier):** `record_route_preset("ADVERTISE_IP:5060;lr", "SBC_INTERNAL_IP:5060;lr")` — outer first.
-- **A-leg (Bandwidth->FS, in request_route):** `record_route_preset("SBC_INTERNAL_IP:5060;lr", "ADVERTISE_IP:5060;lr")` — REVERSED order, because Kamailio's RR insertion direction means the reversal yields the correct outer(VIP)/inner(SBC) roles for the inbound direction.
+- **TO_CARRIER (B-leg, FS->carrier):** `record_route_preset("ADVERTISE_IP:5060;lr", "SBC_INTERNAL_IP:5060;r2=on;lr")` — outer first.
+- **A-leg (Bandwidth->FS, in request_route):** `record_route_preset("SBC_INTERNAL_IP:5060;r2=on;lr", "ADVERTISE_IP:5060;lr")` — REVERSED order, because Kamailio's RR insertion direction means the reversal yields the correct outer(VIP)/inner(SBC) roles for the inbound direction.
+
+**The `;r2=on` marker (hairpin fix):** `r2=on` is the rr module's native double-RR pair marker (record.c `RR_R2`). With `enable_double_rr=1`, when `loose_route()` pops an own Route carrying `r2`, it ALSO consumes the next Route and forces the send socket to that URI's listen socket (loose.c `after_loose`/`is_2rr`). It goes on the **FS-facing (SBC_INTERNAL) entry ONLY**:
+- FS-side in-dialog ACK/BYE (Route: SBC_INTERNAL;r2, VIP) → both Routes consumed in ONE traversal, request relayed straight to the carrier from the VIP socket with ONE SBC Via. Without it, the leftover VIP Route made the SBC send the request TO ITSELF over loopback (the VIP is a local address), reprocess it, and stack a second own Via on the carrier-bound BYE.
+- The VIP (outer) entry must NOT carry `r2`: carrier-side in-dialog requests pop the VIP Route first, and the intact SBC_INTERNAL Route is what forwards an NLB-misdelivered request to the dialog-owning SBC.
 
 **Why the inner RR:** GCE's NLB is pass-through and stateless. Without the inner
 SBC_INTERNAL_IP record-route, Bandwidth's in-dialog ACK/BYE would hit the NLB VIP,

@@ -112,7 +112,10 @@ services:
 
   # Heplify Server — receives HEP packets from Kamailio/FreeSWITCH, pushes to qryn
   heplify-server:
-    image: ghcr.io/sipcapture/heplify-server
+    # Pinned (was untagged :latest — silent-upgrade drift risk on every pull).
+    # 1.60.3 is the current upstream release (2026-05-12) and contains the
+    # LOKIALLOWOUTOFORDER option required below (remotelog/loki.go).
+    image: ghcr.io/sipcapture/heplify-server:1.60.3
     container_name: voip-heplify-server
     ports:
       - "9060:9060"
@@ -135,6 +138,19 @@ services:
       - "HEPLIFYSERVER_LOKICALLIDLABELS=true"
       - "HEPLIFYSERVER_FORCEALEGID=false"
       - "HEPLIFYSERVER_LOKIBULK=200"
+      # CRITICAL — preserve HEP capture timestamps. heplify-server's Loki
+      # output (remotelog/loki.go) keeps a single global lastPktTime and,
+      # when AllowOutOfOrder is false (default), REPLACES the timestamp of
+      # any packet that arrives out of timestamp order with time.Now():
+      #     if lastPktTime.After(curPktTime) { curPktTime = time.Now() }
+      # That guard exists for genuine Grafana Loki (which used to reject
+      # out-of-order pushes). Our backend is qryn/ClickHouse, which accepts
+      # out-of-order writes natively, so the guard only corrupts data: one
+      # late/reordered HEP packet (e.g. a fragmented ~2KB INVITE) poisons
+      # lastPktTime and cascades ingest-time stamps (full-ns entropy,
+      # 15-20ms late) onto subsequent in-time packets — the "INVITE sorts
+      # after its own 100 Trying" SIP-ladder corruption.
+      - "HEPLIFYSERVER_LOKIALLOWOUTOFORDER=true"
       - "HEPLIFYSERVER_SCRIPTENABLE=true"
       - "HEPLIFYSERVER_SCRIPTFOLDER=/scripts"
     volumes:

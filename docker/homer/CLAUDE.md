@@ -16,10 +16,10 @@ ClickHouse-backed architecture that scales better and uses Grafana for UI.
 |-----------|-------|------|---------|
 | `voip-clickhouse` | clickhouse/clickhouse-server:23.3-alpine | 8123 (internal) | Columnar DB for SIP capture data (replaces Homer 7 Postgres) |
 | `voip-qryn` | qxip/qryn:latest | 3100 (Loki API) | Loki-compatible API backed by ClickHouse (replaces homer-app backend) |
-| `voip-heplify-server` | ghcr.io/sipcapture/heplify-server | 9060 UDP/TCP, 9061 TCP | Receives HEP packets, pushes to qryn via Loki push API |
+| `voip-heplify-server` | ghcr.io/sipcapture/heplify-server:1.60.3 | 9060 UDP/TCP, 9061 TCP | Receives HEP packets, pushes to qryn via Loki push API |
 | `voip-grafana` | grafana/grafana-oss:10.4.3 | 3000 (HTTP) | Dashboards for SIP ladder diagrams (now a SECONDARY deep-link target, not the main UI) |
 
-Image tags are pinned in `docker-compose.services.yml` (ClickHouse `23.3-alpine`, Grafana `grafana-oss:10.4.3`). qryn and heplify-server track `:latest`.
+Image tags are pinned in `docker-compose.services.yml` (ClickHouse `23.3-alpine`, Grafana `grafana-oss:10.4.3`, heplify-server `1.60.3`). qryn tracks `:latest`.
 
 ## Architecture
 
@@ -83,6 +83,7 @@ send HEP to port 9060 on the services VM. Only the backend storage and UI change
 ## Key Configuration
 
 - **heplify-server** uses `DBSHEMA=mock` and `DBDRIVER=mock` -- it does NOT write to a database directly. Instead it pushes to qryn's Loki push endpoint (`LOKIURL`).
+- **`LOKIALLOWOUTOFORDER=true` is REQUIRED.** heplify-server's Loki client (remotelog/loki.go) keeps a single global `lastPktTime`; with the default `false`, any HEP packet arriving out of timestamp order gets its timestamp REPLACED with `time.Now()` (and poisons `lastPktTime`, cascading onto subsequent packets). Symptom: rows with full-nanosecond entropy, 15-20ms late, INVITEs sorting after their own 100 Trying in the ladder. Real HEP capture timestamps are µs precision (stored ns values end in `000`). The guard exists for genuine Grafana Loki; qryn/ClickHouse accepts out-of-order writes, so disabling the guard is safe here.
 - **ALEGIDS=X-CID** is preserved for call leg correlation (Kamailio sets X-CID header).
 - **qryn** connects to ClickHouse on port 8123 (HTTP interface) with the default user (no password).
 - **Grafana** has anonymous viewer access enabled and serves from `/grafana/` subpath for reverse proxy compatibility.
