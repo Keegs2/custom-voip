@@ -1,6 +1,17 @@
 -- API Outbound Handler - API Calling Product Outbound Calls
 local sbc_proxy_ip = os.getenv("SBC_PROXY_IP") or "127.0.0.1"
 local external_sip_ip = os.getenv("EXTERNAL_SIP_IP") or "auto"
+
+-- Per-attempt progress timeout in seconds (progress_timeout on each carrier
+-- attempt). Fails the attempt only if NO provisional response (180/183)
+-- arrives within N seconds (bounds PDD); once ringing starts the call may
+-- ring up to call_timeout. Tunable via BRIDGE_PROGRESS_TIMEOUT in
+-- /opt/revup/.env. Default 10 per CLAUDE.md.
+local bridge_progress_timeout = tonumber(os.getenv("BRIDGE_PROGRESS_TIMEOUT") or "")
+if not bridge_progress_timeout or bridge_progress_timeout < 1 then
+    bridge_progress_timeout = 10
+end
+bridge_progress_timeout = math.floor(bridge_progress_timeout)
 -- Handles outbound calls originated via ESL/API with full tier enforcement
 --
 -- Call Flow:
@@ -348,11 +359,12 @@ end
 -- The internal profile does NOT apply ext-sip-ip to outbound calls.
 -- X-Carrier tells Kamailio which Bandwidth IP to route to.
 local dial_string = string.format(
-    "{origination_caller_id_number=%s,origination_caller_id_name=%s,call_timeout=60,ignore_early_media=false,sip_enable_soa=false,sip_h_X-Carrier=primary" ..
+    "{origination_caller_id_number=%s,origination_caller_id_name=%s,progress_timeout=%d,call_timeout=60,ignore_early_media=false,sip_enable_soa=false,sip_h_X-Carrier=primary" ..
     ",sip_h_X-CID=%s" ..
     ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true}sofia/external/%s@" .. sbc_proxy_ip .. ":5060",
     outbound_caller_id,
     outbound_caller_name,
+    bridge_progress_timeout,
     sip_call_id,
     normalized_dest:gsub("^%+", "")  -- Remove + for carrier (carrier-dependent)
 )
@@ -433,11 +445,12 @@ else
             freeswitch.consoleLog("INFO", "[" .. uuid .. "] Trying secondary carrier (LA)\n")
 
             dial_string = string.format(
-                "{origination_caller_id_number=%s,origination_caller_id_name=%s,call_timeout=60,sip_enable_soa=false,sip_h_X-Carrier=secondary" ..
+                "{origination_caller_id_number=%s,origination_caller_id_name=%s,progress_timeout=%d,call_timeout=60,sip_enable_soa=false,sip_h_X-Carrier=secondary" ..
                 ",sip_h_X-CID=%s" ..
                 ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true}sofia/external/%s@" .. sbc_proxy_ip .. ":5060",
                 outbound_caller_id,
                 outbound_caller_name,
+                bridge_progress_timeout,
                 sip_call_id,
                 normalized_dest:gsub("^%+", "")
             )

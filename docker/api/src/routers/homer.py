@@ -810,8 +810,12 @@ async def search_sip_traces(
         )
 
     # Limits: 500 for initial phone-number search (8 calls x ~30 msgs = 240+),
+    # 1000 for the X-CID correlation query in Step 2 (it fetches EVERY X-CID
+    # message in the window and filters in Python, so the default limit of 200
+    # was easily truncated on busy windows -- consistent with FINAL_LIMIT),
     # 1000 for the final call_id query which fetches both legs of all calls.
     INITIAL_LIMIT = 500
+    CORRELATION_LIMIT = 1000
     FINAL_LIMIT = 1000
 
     async with httpx.AsyncClient(timeout=15.0) as client:
@@ -850,10 +854,23 @@ async def search_sip_traces(
         # We filter by specific Call-ID in Python after fetching.
         corr_query = '{type="sip"} |~ "X-CID:"'
 
+        correlation_truncated = False
         try:
             corr_results = await _query_qryn(
-                client, corr_query, start_ns, end_ns, extract_xcid=True,
+                client, corr_query, start_ns, end_ns,
+                limit=CORRELATION_LIMIT, extract_xcid=True,
             )
+            # Truncation check BEFORE the Python-side filter: if qryn returned
+            # exactly the limit, there were likely more X-CID messages in the
+            # window that we never saw, so some B-leg -> A-leg mappings may be
+            # missing from the correlation map.
+            if len(corr_results) >= CORRELATION_LIMIT:
+                correlation_truncated = True
+                logger.warning(
+                    "A/B correlation may be incomplete: X-CID query returned "
+                    "%d results (limit=%d), correlation window truncated",
+                    len(corr_results), CORRELATION_LIMIT,
+                )
             # Filter to only messages whose X-CID references one of our known Call-IDs
             corr_results = [
                 r for r in corr_results
@@ -894,6 +911,8 @@ async def search_sip_traces(
             return {
                 "data": _deduplicate_results(merged),
                 "correlations": correlations,
+                # Additive, backward-compatible: only present when True.
+                **({"correlation_truncated": True} if correlation_truncated else {}),
             }
 
         # Step 3: Final query — get ALL messages from all correlated legs.
@@ -916,6 +935,7 @@ async def search_sip_traces(
             return {
                 "data": _deduplicate_results(merged),
                 "correlations": correlations,
+                **({"correlation_truncated": True} if correlation_truncated else {}),
             }
 
         # The final query is the definitive result set — it contains ALL
@@ -926,4 +946,5 @@ async def search_sip_traces(
         return {
             "data": _deduplicate_results(all_results),
             "correlations": correlations,
+            **({"correlation_truncated": True} if correlation_truncated else {}),
         }

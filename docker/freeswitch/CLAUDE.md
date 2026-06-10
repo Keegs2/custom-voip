@@ -108,6 +108,7 @@ FreeSWITCH runs with `network_mode: host` in docker-compose.media.yml. This is r
 | `API_PORT` | `8000` | FastAPI server port |
 | `ESL_PASSWORD` | `ClueCon` | Event Socket password. CHANGE IN PRODUCTION. |
 | `TEST_MODE` | `false` | When true, plays tone instead of bridging to carrier |
+| `BRIDGE_PROGRESS_TIMEOUT` | `10` | Per-attempt `progress_timeout` (seconds) on carrier bridges — max wait for a provisional response (180/183) before failing over. Do NOT replace with originate_timeout (caps time-to-answer incl. ring). |
 
 ## Health Check
 
@@ -142,7 +143,7 @@ Also needs `SYS_NICE` capability for real-time scheduling.
 
 6. **Lua package path**: mod_lua adds script-directory as a searcher, which breaks `require("redis")` because it tries to read the scripts directory as a file. All scripts prepend explicit luarocks paths and use `loadfile()` instead of `require()` for local modules.
 
-7. **Redis disabled in inbound_router.lua (RCF-V1)**: The redis-lua library has connection pooling issues inside mod_lua's threading model. Velocity/fraud checks are disabled. Calls route without rate limiting.
+7. **Redis code removed from inbound_router.lua (RCF-V1)**: The redis-lua library has connection pooling issues inside mod_lua's threading model. The route cache, fraud prefix check, and velocity limiting were deleted from the script (old code in git history; re-adding needs a synchronous client). Calls route via PostgreSQL only. trunk_outbound/api_outbound still load redis fail-open.
 
 8. **Session timer export**: Channel variables must be `export`ed (not just `set`) to propagate to the B-leg. Without this, Bandwidth tears down calls after Session-Expires (30s) because FreeSWITCH doesn't send refresh re-INVITEs.
 

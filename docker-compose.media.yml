@@ -35,6 +35,11 @@ services:
       - SBC_PROXY_IP_FAILOVER=${SBC_PROXY_IP_FAILOVER:-${SBC_PROXY_IP}}
       - ESL_PASSWORD=${ESL_PASSWORD}
       - TEST_MODE=${TEST_MODE:-false}
+      # Per-attempt progress timeout (seconds) for SBC/carrier failover loops:
+      # fail the attempt only if NO provisional response (180/183) arrives within
+      # N seconds (bounds PDD); once ringing starts the call may ring to call_timeout.
+      # Default 10 per CLAUDE.md — tune after live testing.
+      - BRIDGE_PROGRESS_TIMEOUT=${BRIDGE_PROGRESS_TIMEOUT:-10}
     volumes:
       - ./docker/freeswitch/conf:/usr/local/freeswitch/conf
       - ./docker/freeswitch/scripts:/usr/local/freeswitch/scripts

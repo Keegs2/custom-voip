@@ -49,15 +49,15 @@ inbound_router.lua executes:
   1. Extract call details (DID, caller ID, source IP)
   2. Preserve original caller ID from sip_from_user (before FS modifies it)
   3. Normalize DID to E.164 (+1XXXXXXXXXX)
-  4. [DISABLED in RCF-V1] Check caller prefix against Redis fraud database
-  5. DID lookup cascade:
-     a. RCF: Redis cache (rcf:{did} hash) -> PostgreSQL (rcf_numbers JOIN customers)
+  4. DID lookup cascade (PostgreSQL only — the Redis route cache, fraud
+     prefix check, and velocity limiting were REMOVED in RCF-V1; old code
+     is in git history, re-adding needs a synchronous Redis client):
+     a. RCF: PostgreSQL (rcf_numbers JOIN customers)
      b. API DID: PostgreSQL (api_dids JOIN customers)
      c. Trunk DID: PostgreSQL (trunk_dids JOIN sip_trunks JOIN customers)
-  6. If no match -> UNALLOCATED_NUMBER (SIP 404)
-  7. Set channel variables: customer_id, product_type, traffic_grade, trunk_id
-  8. [DISABLED in RCF-V1] Velocity/rate limiting via Redis
-  9. Route based on product_type:
+  5. If no match -> UNALLOCATED_NUMBER (SIP 404)
+  6. Set channel variables: customer_id, product_type, traffic_grade, trunk_id
+  7. Route based on product_type:
      |
      |-- "rcf" -> Bridge to forward_to number via carrier
      |-- "api" -> Answer, then execute voice_webhook.lua
@@ -90,12 +90,19 @@ inbound_router.lua (product_type == "rcf"):
         attempt 2: SBC_PROXY_IP_FAILOVER + X-Carrier=primary   (SBC-2, Dallas)
         attempt 3: SBC_PROXY_IP          + X-Carrier=secondary (SBC-1, LA)
         attempt 4: SBC_PROXY_IP_FAILOVER + X-Carrier=secondary (SBC-2, LA)
-     - Each attempt runs a TCP reachability pre-check (is_sbc_reachable,
-       ~:97-105): opens a 1s TCP socket to the SBC:5060. If unreachable, the
-       attempt is SKIPPED instantly instead of waiting for the SIP timeout
-       (10-32s). Fails open if luasocket is unavailable.
-     - Per-attempt dial string (~:723-733) sets only ignore_early_media=false,
-       call_timeout, X-Carrier, X-CID (sip_call_id for Homer A/B correlation),
+     - Each attempt runs a CACHED TCP reachability pre-check (sbc_tcp_probe +
+       is_sbc_reachable): opens a 1s TCP socket to the SBC:5060. If
+       unreachable, the attempt is SKIPPED instantly instead of waiting for
+       the SIP timeout. Results are cached process-wide via FreeSWITCH
+       global variables (key sbc_health_<ip>, value up|down:<epoch>):
+       reachable cached 30s, unreachable cached 10s, INFO log on state
+       transitions. Fails open (with a WARNING log) if luasocket is
+       unavailable; fail-open results are never cached.
+     - Per-attempt dial string sets ignore_early_media=false, call_timeout,
+       progress_timeout (env BRIDGE_PROGRESS_TIMEOUT, default 10 — bounds
+       carrier PDD only; ringing then continues to call_timeout. NEVER use
+       originate_timeout here: it caps time-to-ANSWER including ring time),
+       X-Carrier, X-CID (sip_call_id for Homer A/B correlation),
        and RFC 4028 session timers (sip_session_timeout=1800, min=90).
      - Loop breaks on `originate_disposition == "SUCCESS"` (the real FS bridge-result variable; `bridge_result` is NOT a channel variable and must never be used). `carrier_used` is set per attempt, so breaking on success records the winning carrier.
      - Export RFC 4028 session timers to B-leg as well.
@@ -130,13 +137,14 @@ Responsibilities:
 
 See "Complete Inbound Call Flow" above for full details.
 
-Key state: Redis is set to `nil` (RCF-V1 -- disabled due to threading issues). Only db_client is loaded.
+Key state: Redis code is fully REMOVED (RCF-V1 -- redis-lua threading issues; old code in git history). Only db_client is loaded.
 
-**RCF carrier/failover:** Carrier is pinned to `primary` (TC4 Dallas) at ~:455.
+**RCF carrier/failover:** Carrier is pinned to `primary` (TC4 Dallas).
 The RCF PSTN bridge is a 4-attempt loop over `SBC_PROXY_IP` and
-`SBC_PROXY_IP_FAILOVER` × primary/secondary carrier, each guarded by a 1-second
-TCP reachability pre-check (`is_sbc_reachable`, ~:97-105). See "RCF Bridge
-Details" above. RCF uses DEFAULT media — it does NOT set `proxy_media`.
+`SBC_PROXY_IP_FAILOVER` × primary/secondary carrier, each guarded by a cached
+1-second TCP reachability pre-check (`is_sbc_reachable` — 30s up / 10s down
+cache via FS global variables). See "RCF Bridge Details" above. RCF uses
+DEFAULT media — it does NOT set `proxy_media`.
 
 **183 SDP note:** Kamailio now PASSES THROUGH carrier 183 SDP for PSTN early
 media (it no longer strips the 183 body). Any script comment implying the 183

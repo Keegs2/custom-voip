@@ -82,8 +82,10 @@
 # TC1 signaling IPs: New York and Atlanta.
 # Same keepalive/health-monitoring purpose as Groups 2-3.
 # NOT used for call routing — actual routing is in route[TO_CARRIER].
-4 sip:67.231.9.142:5060 0 0 weight=100;duid=bw-tc1-ny
-4 sip:67.231.13.185:5060 0 0 weight=100;duid=bw-tc1-atl
+# IPs templated by entrypoint.sh from BANDWIDTH_TC1_NY / BANDWIDTH_TC1_ATL
+# (defaults: 67.231.9.142 / 67.231.13.185 — same values as before templating).
+4 sip:__BANDWIDTH_TC1_NY__:5060 0 0 weight=100;duid=bw-tc1-ny
+4 sip:__BANDWIDTH_TC1_ATL__:5060 0 0 weight=100;duid=bw-tc1-atl
 
 # ============================================================
 # Group 5: Bandwidth TC2 - GraniteTelecommunicationsLLC_02
@@ -91,8 +93,10 @@
 # TC2 signaling IPs: Dallas and Los Angeles.
 # Same keepalive/health-monitoring purpose as Groups 2-3.
 # NOT used for call routing — actual routing is in route[TO_CARRIER].
-5 sip:67.231.1.188:5060 0 0 weight=100;duid=bw-tc2-dal
-5 sip:67.231.4.138:5060 0 0 weight=100;duid=bw-tc2-la
+# IPs templated by entrypoint.sh from BANDWIDTH_TC2_DAL / BANDWIDTH_TC2_LA
+# (defaults: 67.231.1.188 / 67.231.4.138 — same values as before templating).
+5 sip:__BANDWIDTH_TC2_DAL__:5060 0 0 weight=100;duid=bw-tc2-dal
+5 sip:__BANDWIDTH_TC2_LA__:5060 0 0 weight=100;duid=bw-tc2-la
 
 # ============================================================
 # Notes:

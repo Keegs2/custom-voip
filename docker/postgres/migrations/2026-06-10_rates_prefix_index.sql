@@ -1,0 +1,33 @@
+-- Migration: ensure the rate-lookup composite index exists on production.
+--
+-- Why: get_rate(rate_table_id, destination) in 05_schema_cdr.sql does a
+-- longest-prefix match (p_destination LIKE r.prefix || '%') for every CDR
+-- rating.  Without idx_rates_table_prefix the planner seq-scans the rates
+-- table on every rating call.  The index restricts the scan to the rows of
+-- the customer's rate table via rate_table_id equality (the LIKE pattern is
+-- built from the prefix COLUMN, so the pattern match itself cannot use an
+-- index -- the win is the rate_table_id restriction + index-ordered prefix
+-- access).  This index is in 04_schema_fraud.sql for fresh databases; init
+-- scripts only run on first initdb, so existing production databases must
+-- apply it via this migration.
+--
+-- Idempotent: CREATE INDEX CONCURRENTLY IF NOT EXISTS is a no-op when the
+-- index already exists.  CONCURRENTLY avoids locking rates against writes.
+-- NOTE: CONCURRENTLY cannot run inside a transaction block -- run this file
+-- with plain psql -f (autocommit per statement), never with psql -1.
+--
+-- Production (services VM, bare-metal PostgreSQL on the host, DB 'voip'):
+--
+--   sudo -u postgres psql -d voip -f /opt/revup/docker/postgres/migrations/2026-06-10_rates_prefix_index.sql
+--
+-- Verify afterwards (also confirms the hash index idx_rcf_did_lookup on
+-- rcf_numbers.did, the hot-path DID lookup index, is present):
+--
+--   sudo -u postgres psql -d voip -c "SELECT tablename, indexname, indexdef FROM pg_indexes WHERE tablename IN ('rcf_numbers', 'rates') ORDER BY tablename, indexname;"
+--
+-- Expected: rates has idx_rates_prefix and idx_rates_table_prefix;
+-- rcf_numbers has idx_rcf_did_lookup (USING hash), idx_rcf_did_enabled,
+-- and idx_rcf_customer.
+
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_rates_table_prefix
+    ON rates (rate_table_id, prefix text_pattern_ops);

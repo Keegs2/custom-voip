@@ -98,7 +98,7 @@ Each VM has its own `.env` file at `/opt/revup/.env`. The `.env` is NOT in git �
 2. NLB routes to healthy SBC (Kamailio)
 3. Kamailio: topology hiding, rate limiting, dispatch to FreeSWITCH :5080
 4. FreeSWITCH: Lua `inbound_router.lua` runs
-5. Lua: Redis cache check → PostgreSQL DID lookup → get forward_to number
+5. Lua: PostgreSQL DID lookup → get forward_to number
 6. FreeSWITCH: bridge via `sofia/external/$forward_to@$SBC_PROXY_IP:5060`
 7. Kamailio: reads X-Carrier header → routes to Bandwidth Dallas or LA
 8. Bandwidth: delivers call to destination PSTN number
@@ -159,9 +159,9 @@ Record-Route: <sip:SBC_INTERNAL_IP:5060;lr>    ← inner: what FS sees, routes t
 
 FreeSWITCH implements SBC health detection and multi-carrier failover in `inbound_router.lua`:
 
-1. **TCP pre-check:** Before bridging, FS opens a TCP socket to the SBC on port 5060. If the connection fails, the SBC is marked dead in < 1 second. This avoids the 30-second SIP timeout waiting for a dead SBC.
+1. **TCP pre-check (cached):** Before bridging, FS opens a TCP socket to the SBC on port 5060. If the connection fails, the SBC is marked dead in < 1 second. This avoids the 30-second SIP timeout waiting for a dead SBC. Probe results are cached process-wide via FreeSWITCH global variables: reachable cached 30s, unreachable cached 10s (so a recovered SBC returns within 10s). Steady state is ~2 probes per SBC per minute instead of up to 4 socket opens per call.
 2. **4-attempt failover loop:** 2 SBCs × 2 carriers = 4 bridge attempts. Order: SBC1+primary carrier (Dallas) → SBC2+primary carrier (Dallas) → SBC1+secondary carrier (LA) → SBC2+secondary carrier (LA).
-3. **originate_timeout=10s:** This timeout includes carrier PDD (Post-Dial Delay), not just the SBC's response time. It's the total time allowed for the carrier to send back a provisional response.
+3. **progress_timeout=10s:** This timeout bounds carrier PDD (Post-Dial Delay) — the total time allowed for the carrier to send back a provisional response (180/183). Once ringing starts, the call may ring up to call_timeout. Env-tunable via `BRIDGE_PROGRESS_TIMEOUT` (default 10). Do NOT use `originate_timeout` here — it caps total time-to-ANSWER including ring time, which cancels still-ringing forwarded calls.
 
 ### SIP Header Handling — What Works and What Doesn't
 
@@ -193,7 +193,7 @@ Bandwidth sometimes sends `Session-Expires: 30` in 200 OK (below RFC 4028 minimu
 - **No sip_enable_soa=false.** SOA stays enabled for proper B-leg media setup. The "duplicate SDP answer" in 200 OK is cosmetic in default media mode.
 - **183 SDP passthrough works.** PSTN ringback flows through naturally in default media mode. No special handling needed.
 - **Gateway syntax deprecated.** All outbound bridges use `sofia/external/dest@proxy:5060` with X-Carrier header. The old `sofia/gateway/carrier/dest` syntax produced corrupted Contact headers (`sip:gw+carrier_primary@...`).
-- **Redis disabled in inbound_router.lua (RCF-V1).** The redis-lua library has connection pooling issues inside mod_lua's threading model. Velocity/fraud checks are disabled. Calls route via PostgreSQL lookup only.
+- **Redis code removed from inbound_router.lua (RCF-V1).** The redis-lua library has connection pooling issues inside mod_lua's threading model. The Redis route cache, fraud prefix check, and velocity limiting were deleted (not just disabled) — calls route via PostgreSQL lookup only. Re-adding requires a synchronous Redis client; the old code is in git history. trunk_outbound/api_outbound still load redis_client fail-open.
 - **mod_local_stream disabled.** Requires `local_stream.conf.xml` which doesn't exist. When xml_curl can't reach the API during startup, the missing config causes CRIT abort. RCF uses `silence_stream://-1` instead.
 
 ### GCE Hairpin NAT
@@ -249,6 +249,9 @@ These env vars are set per-VM in `/opt/revup/.env`. Getting any of them wrong br
 | `HOMER_IP` | `10.142.0.103` | Services VM IP — HEP capture destination |
 | `DB_HOST` | `10.142.0.103` | Services VM IP — trunk auth SQL |
 | `DB_PORT` | `6432` | PgBouncer port |
+| `BW_CPS_LIMIT` | `100` (default) | Optional — per-carrier-IP inbound CPS backstop (`bw_cps` htable, 503 + Retry-After when exceeded) |
+| `TESTING_IP` | (unset) | Optional — trusted SIPp test source IP. UNSET in production (defaults to 255.255.255.255 = disabled) |
+| `BANDWIDTH_TC1_NY` etc. | (defaults) | Optional — TC1/TC2 PoP IPs (`BANDWIDTH_TC1_NY/TC1_ATL/TC2_DAL/TC2_LA`), env-templated with East defaults |
 
 ### Media VM (FreeSWITCH + Redis)
 | Variable | Example | Purpose |
@@ -260,6 +263,7 @@ These env vars are set per-VM in `/opt/revup/.env`. Getting any of them wrong br
 | `DB_HOST` | `10.142.0.103` | Services VM IP — DID lookups |
 | `DB_PORT` | `6432` | PgBouncer port |
 | `ESL_PASSWORD` | (secret) | Event Socket password — must match API config |
+| `BRIDGE_PROGRESS_TIMEOUT` | `10` (default) | Optional — per-attempt carrier PDD bound (progress_timeout) in the failover loop |
 
 ### Services VM (API + UI + Homer)
 | Variable | Example | Purpose |

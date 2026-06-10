@@ -408,7 +408,9 @@ so a dead SBC is detected in < 1s instead of waiting out the SIP timeout:
 4. SBC_PROXY_IP_FAILOVER + secondary carrier
 ```
 
-`originate_timeout=10s` per attempt includes carrier Post-Dial Delay. Bridges use
+`progress_timeout=10s` per attempt bounds carrier Post-Dial Delay (fails the
+attempt only if no 180/183 arrives; ringing may continue to call_timeout —
+env-tunable via `BRIDGE_PROGRESS_TIMEOUT`). Bridges use
 `sofia/external/$dest@$SBC:5060` with the `X-Carrier` header (the old
 `sofia/gateway/...` syntax is deprecated — it produced corrupted Contact headers).
 

@@ -153,10 +153,6 @@ Bare-metal PostgreSQL replica of the East primary (replication slot + role on Ea
 for `10.138.0.0/20`, `pg_basebackup`, standby tuning on `west-db`), local PgBouncer on
 `west-db:6432`. (Not OpenTofu-managed — secrets/PG live outside IaC; document procedure here.)
 
-## Step 6 — Deploy & configure West stack ⬜
-Per-role `.env` (West values: `BANDWIDTH_PRIMARY_IP=216.82.238.134`, `INTERNAL_SUBNET=10.138.0.0/20`,
-`MEDIA_SUBNET=192.168.20.0/24`, `SBC_ID`/`HEP_CAPTURE_ID` per table) → compose up per VM.
-
 ## Step 7 — Validate West in isolation ⬜
 Test call directly through a West SBC → FS → Bandwidth (LA primary); confirm in Homer the
 egress goes to `216.82.238.134` first and `X-Inbound-TC: tc4`.

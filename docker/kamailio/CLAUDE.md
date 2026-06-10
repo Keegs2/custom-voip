@@ -70,6 +70,12 @@ Kamailio's `#!substdef` and `modparam` do not support environment variables. The
 | `__BANDWIDTH_SECONDARY_IP__` | `BANDWIDTH_SECONDARY_IP` | 216.82.238.134 | This zone's SECONDARY Bandwidth PoP (BANDWIDTH_IP_2, `X-Carrier=secondary`). East=LA, West=Dallas. |
 | `__INTERNAL_SUBNET__` | `INTERNAL_SUBNET` | 10.142.0.0/20 | This zone's trusted VPC subnet (GCE_INTERNAL_NETWORK). East=10.142.0.0/20, West=10.138.0.0/20. |
 | `__MEDIA_SUBNET__` | `MEDIA_SUBNET` | 192.168.10.0/24 | This zone's trusted FreeSWITCH media subnet (VOIP_SUBNET). East=192.168.10.0/24, West=192.168.20.0/24. |
+| `__TESTING_IP__` | `TESTING_IP` | 255.255.255.255 (= disabled) | Trusted SIPp test source. Default can never match a real unicast source — leave unset in production. |
+| `__BW_CPS_LIMIT__` | `BW_CPS_LIMIT` | 100 | Per-Bandwidth-IP inbound CPS flood backstop (`bw_cps` htable). |
+| `__BANDWIDTH_TC1_NY__` | `BANDWIDTH_TC1_NY` | 67.231.9.142 | TC1 New York PoP. Templated into kamailio.cfg AND dispatcher.list (group 4). |
+| `__BANDWIDTH_TC1_ATL__` | `BANDWIDTH_TC1_ATL` | 67.231.13.185 | TC1 Atlanta PoP. Templated into kamailio.cfg AND dispatcher.list (group 4). |
+| `__BANDWIDTH_TC2_DAL__` | `BANDWIDTH_TC2_DAL` | 67.231.1.188 | TC2 Dallas PoP. Templated into kamailio.cfg AND dispatcher.list (group 5). |
+| `__BANDWIDTH_TC2_LA__` | `BANDWIDTH_TC2_LA` | 67.231.4.138 | TC2 Los Angeles PoP. Templated into kamailio.cfg AND dispatcher.list (group 5). |
 
 **Dual listen sockets:** the entrypoint templates a carrier-facing listen on
 `ADVERTISE_IP:5060` (NLB VIP, advertised as itself) AND an FS-facing listen on
@@ -194,10 +200,11 @@ This is read by WITHINDIALOG to route in-dialog requests to the correct FS SIP p
    - Remove `X-Carrier` before sending to carrier.
    - **Per-zone (env-driven):** `BANDWIDTH_IP_1`/`BANDWIDTH_IP_2` are now templated
      from `BANDWIDTH_PRIMARY_IP`/`BANDWIDTH_SECONDARY_IP` (default = East Dallas/LA).
-     West swaps them so each zone egresses to its nearest PoP first. The OTHER
-     fixed-PoP carrier IPs (TC1 NY/ATL, TC2 DAL/LA) remain HARDCODED `#!define`s
-     (`BANDWIDTH_TC*`, kamailio.cfg ~:101-106) — adding/changing those still
-     requires a config edit + rebuild. The full TC1/TC2 second IPs (ATL, LA) are
+     West swaps them so each zone egresses to its nearest PoP first. The fixed-PoP
+     carrier IPs (TC1 NY/ATL, TC2 DAL/LA) are ALSO env-driven now —
+     `BANDWIDTH_TC1_NY`/`BANDWIDTH_TC1_ATL`/`BANDWIDTH_TC2_DAL`/`BANDWIDTH_TC2_LA`,
+     templated into both kamailio.cfg and dispatcher.list with the current
+     production IPs as defaults. The full TC1/TC2 second IPs (ATL, LA) are
      used only in failover, below.
 
 2. **From/To domain rewrite**: `$fd` = public IP, `$td` = carrier IP.
@@ -355,6 +362,12 @@ Set in `.env` file on each SBC VM. Passed via `docker-compose.sbc.yml`.
 | `BANDWIDTH_SECONDARY_IP` | No (default 216.82.238.134) | 67.231.2.12 | This zone's secondary Bandwidth PoP → `BANDWIDTH_IP_2` (`X-Carrier=secondary`). East=LA, West=Dallas. |
 | `INTERNAL_SUBNET` | No (default 10.142.0.0/20) | 10.138.0.0/20 | This zone's trusted VPC subnet → `GCE_INTERNAL_NETWORK`. |
 | `MEDIA_SUBNET` | No (default 192.168.10.0/24) | 192.168.20.0/24 | This zone's trusted FS media subnet → `VOIP_SUBNET`. |
+| `BW_CPS_LIMIT` | No (default 100) | 100 | Per-carrier-IP inbound CPS backstop. New INVITEs from a Bandwidth IP above this rate get 503 + Retry-After: 5 (`bw_cps` htable, fixed 1s window). Flood protection, not a traffic shaper. |
+| `TESTING_IP` | No (default 255.255.255.255 = disabled) | 72.74.134.146 | Trusted SIPp test source IP. Leave UNSET in production — the default can never match a real source. |
+| `BANDWIDTH_TC1_NY` | No (default 67.231.9.142) | — | TC1 New York PoP (`X-Carrier=tc1`, in-trunk failover, dispatcher group 4 keepalive). |
+| `BANDWIDTH_TC1_ATL` | No (default 67.231.13.185) | — | TC1 Atlanta PoP (TC1 in-trunk failover target, dispatcher group 4 keepalive). |
+| `BANDWIDTH_TC2_DAL` | No (default 67.231.1.188) | — | TC2 Dallas PoP (`X-Carrier=tc2`, in-trunk failover, dispatcher group 5 keepalive). |
+| `BANDWIDTH_TC2_LA` | No (default 67.231.4.138) | — | TC2 Los Angeles PoP (TC2 in-trunk failover target, dispatcher group 5 keepalive). |
 
 ## 7. SIP Call Flows
 
@@ -369,6 +382,7 @@ Kamailio (34.74.71.32:5060)
   - Flag 5 set (trusted: Bandwidth IP)
   - Skip rate limiting
   - Bandwidth dedup check (bw_dedup htable, 3s TTL)
+  - Per-carrier-IP CPS backstop (bw_cps htable, BW_CPS_LIMIT/s, 503 if exceeded)
   - NAT detect (force_rport, fix_nated_contact)
   - dlg_manage(), $dlg_var(fs_port) = "5080"
   - record_route() (Kamailio stays in signaling path)
@@ -539,14 +553,17 @@ The `topoh.so` module is explicitly disabled. It conflicts with the manual heade
 
 ### Adding a New Carrier IP / Trunk Config
 
-The TC4 primary/secondary PoPs (`BANDWIDTH_IP_1`/`BANDWIDTH_IP_2`) are env-driven
-per zone via `BANDWIDTH_PRIMARY_IP`/`BANDWIDTH_SECONDARY_IP`. The other fixed-PoP
-carrier IPs (TC1 NY/ATL, TC2 DAL/LA) are still hardcoded `#!define`s
-(kamailio.cfg ~:101-106). To add a NEW carrier IP that is not one of these:
+ALL Bandwidth carrier IPs are now env-driven: the TC4 primary/secondary PoPs via
+`BANDWIDTH_PRIMARY_IP`/`BANDWIDTH_SECONDARY_IP`, and the fixed-PoP TC1/TC2 IPs via
+`BANDWIDTH_TC1_NY`/`BANDWIDTH_TC1_ATL`/`BANDWIDTH_TC2_DAL`/`BANDWIDTH_TC2_LA`
+(entrypoint templates them into both kamailio.cfg AND dispatcher.list, defaults =
+current production IPs). To add a NEW carrier IP that is not one of these:
 
-1. Add a `#!define` in the Global Parameters section:
+1. Add a `#!define` with a `__PLACEHOLDER__` in the Global Parameters section and
+   the matching default + sed line in entrypoint.sh (follow the `BANDWIDTH_TC*`
+   precedent):
    ```
-   #!define BANDWIDTH_TCx_NEW "1.2.3.4"
+   #!define BANDWIDTH_TCx_NEW "__BANDWIDTH_TCx_NEW__"
    ```
 2. Trust is already covered by the Bandwidth `#!define` nets (67.231.0.0/16,
    216.82.224.0/19) in the flag-5 block; add a new net only if the IP is outside those.
@@ -579,6 +596,7 @@ Modify the `#!define` values at the top of the config:
 - `SCANNER_THRESHOLD` (default 5): Max failed auth attempts.
 - `OPTIONS_FLOOD_THRESHOLD` (default 20): Max OPTIONS/second before blocking.
 - INVITE flood threshold is hardcoded at 30/minute in route[SCANNER_DETECT].
+- `BW_CPS_LIMIT` is env-driven (NOT a `#!define` edit) — set it in the SBC's `.env`.
 
 ### Adding a FreeSWITCH Instance
 

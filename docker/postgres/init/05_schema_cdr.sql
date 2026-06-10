@@ -145,6 +145,13 @@ SELECT add_continuous_aggregate_policy('cdr_hourly_stats',
 );
 
 -- Function for efficient rate lookup (longest prefix match)
+-- Index dependency: idx_rates_table_prefix ON rates(rate_table_id, prefix
+-- text_pattern_ops) in 04_schema_fraud.sql.  The LIKE pattern here is built
+-- from the COLUMN (p_destination LIKE r.prefix || '%'), so no index can serve
+-- the pattern match itself -- the composite index restricts the scan to the
+-- rate table's rows (rate_table_id equality) instead of seq-scanning all
+-- rates.  For existing production databases, apply
+-- docker/postgres/migrations/2026-06-10_rates_prefix_index.sql.
 CREATE OR REPLACE FUNCTION get_rate(p_rate_table_id INT, p_destination VARCHAR)
 RETURNS TABLE(rate_per_min DECIMAL, cost_per_min DECIMAL, connection_fee DECIMAL, min_duration INT, increment INT, prefix VARCHAR)
 LANGUAGE SQL STABLE

@@ -1,6 +1,17 @@
 -- Trunk Outbound Handler - SIP Trunk Customer Outbound Calls
 local sbc_proxy_ip = os.getenv("SBC_PROXY_IP") or "127.0.0.1"
 local external_sip_ip = os.getenv("EXTERNAL_SIP_IP") or "auto"
+
+-- Per-attempt progress timeout in seconds (progress_timeout on each carrier
+-- attempt). Fails the attempt only if NO provisional response (180/183)
+-- arrives within N seconds (bounds PDD); once ringing starts the call may
+-- ring up to call_timeout. Tunable via BRIDGE_PROGRESS_TIMEOUT in
+-- /opt/revup/.env. Default 10 per CLAUDE.md.
+local bridge_progress_timeout = tonumber(os.getenv("BRIDGE_PROGRESS_TIMEOUT") or "")
+if not bridge_progress_timeout or bridge_progress_timeout < 1 then
+    bridge_progress_timeout = 10
+end
+bridge_progress_timeout = math.floor(bridge_progress_timeout)
 -- Handles outbound calls from customer PBXs through SIP trunks to PSTN
 --
 -- Call Flow:
@@ -522,9 +533,10 @@ set_var("transfer_ringback", "%(2000,4000,440,480)")
 -- Build dial string using external profile to ensure public IP in Via/Contact/SDP.
 -- X-Carrier tells Kamailio which Bandwidth IP to route to.
 local dial_string = string.format(
-    "{ignore_early_media=false,sip_enable_soa=false,call_timeout=60,sip_h_X-Carrier=primary" ..
+    "{ignore_early_media=false,sip_enable_soa=false,progress_timeout=%d,call_timeout=60,sip_h_X-Carrier=primary" ..
     ",sip_h_X-CID=%s" ..
     ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true}sofia/external/%s@" .. sbc_proxy_ip .. ":5060",
+    bridge_progress_timeout,
     sip_call_id,
     normalized_dest:gsub("^%+", "")  -- Remove + for carrier (carrier-dependent)
 )
@@ -572,9 +584,10 @@ if disposition ~= "SUCCESS" and session:ready() then
     set_var("carrier_used", "carrier_secondary")
 
     local failover_dial = string.format(
-        "{ignore_early_media=false,sip_enable_soa=false,call_timeout=60,sip_h_X-Carrier=secondary" ..
+        "{ignore_early_media=false,sip_enable_soa=false,progress_timeout=%d,call_timeout=60,sip_h_X-Carrier=secondary" ..
         ",sip_h_X-CID=%s" ..
         ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true}sofia/external/%s@" .. sbc_proxy_ip .. ":5060",
+        bridge_progress_timeout,
         sip_call_id,
         normalized_dest:gsub("^%+", "")
     )

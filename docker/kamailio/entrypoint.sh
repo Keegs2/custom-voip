@@ -39,6 +39,29 @@ BANDWIDTH_SECONDARY_IP="${BANDWIDTH_SECONDARY_IP:-216.82.238.134}"
 INTERNAL_SUBNET="${INTERNAL_SUBNET:-10.142.0.0/20}"
 MEDIA_SUBNET="${MEDIA_SUBNET:-192.168.10.0/24}"
 
+# TESTING_IP: trusted external testing source (SIPp NLB failover tests).
+# SECURITY: disabled by default. When unset/empty, substitute 255.255.255.255
+# — a broadcast address that can never match a real unicast SIP source, so
+# the trusted-source check for it is inert. Set explicitly ONLY while testing.
+TESTING_IP="${TESTING_IP:-255.255.255.255}"
+
+# BW_CPS_LIMIT: inbound flood backstop — max NEW initial INVITEs per second
+# per Bandwidth source IP. Default 100 is well above normal per-PoP traffic
+# (backstop, not a traffic shaper), so unset = no behavior change for
+# legitimate load.
+BW_CPS_LIMIT="${BW_CPS_LIMIT:-100}"
+
+# Bandwidth TC1/TC2 trunk-config signaling IPs (fixed PoPs, same for every
+# zone today — NOT swapped per zone like PRIMARY/SECONDARY). Env-driven for
+# maintainability; defaults are the long-standing production values, so an
+# unset var produces a byte-identical config and dispatcher.list.
+#   TC1 - GraniteTelecommunicationsLLC_01: New York + Atlanta
+#   TC2 - GraniteTelecommunicationsLLC_02: Dallas + Los Angeles
+BANDWIDTH_TC1_NY="${BANDWIDTH_TC1_NY:-67.231.9.142}"
+BANDWIDTH_TC1_ATL="${BANDWIDTH_TC1_ATL:-67.231.13.185}"
+BANDWIDTH_TC2_DAL="${BANDWIDTH_TC2_DAL:-67.231.1.188}"
+BANDWIDTH_TC2_LA="${BANDWIDTH_TC2_LA:-67.231.4.138}"
+
 # FS_PUBLIC_IP: FreeSWITCH VM's own public IP for RTP media.
 # Used in SDP body rewrites. Different from EXTERNAL_SIP_IP (NLB VIP) because
 # RTP goes directly to/from FS, not through the NLB.
@@ -64,6 +87,14 @@ sed -i "s|__BANDWIDTH_PRIMARY_IP__|${BANDWIDTH_PRIMARY_IP}|g" "$CONFIG"
 sed -i "s|__BANDWIDTH_SECONDARY_IP__|${BANDWIDTH_SECONDARY_IP}|g" "$CONFIG"
 sed -i "s|__INTERNAL_SUBNET__|${INTERNAL_SUBNET}|g" "$CONFIG"
 sed -i "s|__MEDIA_SUBNET__|${MEDIA_SUBNET}|g" "$CONFIG"
+sed -i "s|__TESTING_IP__|${TESTING_IP}|g" "$CONFIG"
+sed -i "s|__BW_CPS_LIMIT__|${BW_CPS_LIMIT}|g" "$CONFIG"
+# TC1/TC2 IPs appear in BOTH kamailio.cfg (#!define + routing/failover) and
+# dispatcher.list (keepalive groups 4-5) — template both from the same vars.
+sed -i "s|__BANDWIDTH_TC1_NY__|${BANDWIDTH_TC1_NY}|g" "$CONFIG" "$DISPATCH"
+sed -i "s|__BANDWIDTH_TC1_ATL__|${BANDWIDTH_TC1_ATL}|g" "$CONFIG" "$DISPATCH"
+sed -i "s|__BANDWIDTH_TC2_DAL__|${BANDWIDTH_TC2_DAL}|g" "$CONFIG" "$DISPATCH"
+sed -i "s|__BANDWIDTH_TC2_LA__|${BANDWIDTH_TC2_LA}|g" "$CONFIG" "$DISPATCH"
 
 echo "Kamailio config templated: ADVERTISE_IP=${EXTERNAL_SIP_IP}, FS=${FREESWITCH_IP}, FS_PUBLIC_IP=${FS_PUBLIC_IP}, DB=${DB_HOST}:${DB_PORT}, Homer=${HOMER_IP}, HEP_ID=${HEP_CAPTURE_ID}, SBC_ID=${SBC_ID}, SBC_INTERNAL_IP=${SBC_INTERNAL_IP}, BW_PRIMARY=${BANDWIDTH_PRIMARY_IP}, BW_SECONDARY=${BANDWIDTH_SECONDARY_IP}, INTERNAL_SUBNET=${INTERNAL_SUBNET}, MEDIA_SUBNET=${MEDIA_SUBNET}"
 

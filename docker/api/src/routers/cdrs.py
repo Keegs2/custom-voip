@@ -99,6 +99,24 @@ def _get_callflow_caller_profile(body: dict) -> dict:
     return {}
 
 
+def _extract_uuid_best_effort(body: dict) -> Optional[str]:
+    """Best-effort uuid extraction from a raw CDR body for error reporting.
+
+    Mirrors the resolution order used in _process_cdr_body
+    (variables -> core-uuid -> callflow caller_profile) so bulk-ingest
+    failure entries can identify WHICH CDR failed even when processing
+    rejected it.  Returns None when nothing is extractable.  Never raises.
+    """
+    try:
+        variables = body.get("variables", {}) or {}
+        uuid = variables.get("uuid") or body.get("core-uuid")
+        if not uuid:
+            uuid = _get_callflow_caller_profile(body).get("uuid")
+        return str(uuid) if uuid else None
+    except Exception:
+        return None
+
+
 def _clean_caller_id_number(raw: str | None) -> str | None:
     """Extract a clean phone number from a possibly SIP-formatted caller ID.
 
@@ -158,14 +176,30 @@ async def _process_cdr_body(body: dict) -> dict:
         direction = str(variables.get("direction", "inbound"))
         product_type = str(variables.get("product_type", "trunk"))
 
-        # destination_number: prefer variables, fall back to callflow caller_profile
-        destination = variables.get("destination_number")
-        if not destination:
-            destination = caller_profile.get("destination_number")
+        # destination_number: prefer variables, fall back to callflow
+        # caller_profile.  Resolution ORDER is unchanged; a wrong destination
+        # means wrong rating/billing, so divergence between the two sources
+        # and any fallback resolution are logged at WARNING (was DEBUG --
+        # invisible in production).
+        dest_from_vars = variables.get("destination_number")
+        dest_from_callflow = caller_profile.get("destination_number")
+        destination = dest_from_vars
+        if destination:
+            if dest_from_callflow and str(dest_from_callflow) != str(destination):
+                logger.warning(
+                    "CDR ingest: destination_number mismatch for uuid=%s: "
+                    "variables=%r vs callflow caller_profile=%r -- using "
+                    "variables value (verify rating/billing destination)",
+                    call_uuid, dest_from_vars, dest_from_callflow,
+                )
+        else:
+            destination = dest_from_callflow
             if destination:
-                logger.debug(
-                    "CDR ingest: destination_number resolved from callflow "
-                    "caller_profile for uuid=%s", call_uuid,
+                logger.warning(
+                    "CDR ingest: destination_number missing from variables "
+                    "for uuid=%s; resolved from callflow caller_profile "
+                    "fallback=%r (verify rating/billing destination)",
+                    call_uuid, destination,
                 )
         if not destination:
             logger.warning("CDR ingest: missing destination_number for uuid=%s", call_uuid)
@@ -190,10 +224,34 @@ async def _process_cdr_body(body: dict) -> dict:
         trunk_id = _safe_int(variables.get("trunk_id"))
 
         # caller_id_number: prefer callflow (clean number), fall back to
-        # variables (may contain SIP display name format), then clean it
-        caller_id = caller_profile.get("caller_id_number")
+        # variables (may contain SIP display name format), then clean it.
+        # Resolution ORDER is unchanged; fallback/divergence is logged at
+        # WARNING (same silent-fallback pattern as destination_number above).
+        cid_from_callflow = caller_profile.get("caller_id_number")
+        cid_from_vars = variables.get("caller_id_number")
+        caller_id = cid_from_callflow
         if not caller_id:
-            caller_id = variables.get("caller_id_number")
+            caller_id = cid_from_vars
+            if caller_id:
+                logger.warning(
+                    "CDR ingest: caller_id_number missing from callflow "
+                    "caller_profile for uuid=%s; resolved from variables "
+                    "fallback=%r", call_uuid, cid_from_vars,
+                )
+        elif cid_from_vars:
+            # Compare CLEANED values: variables routinely carries the SIP
+            # display format (e.g. '"NAME" <+1555...>') for the same number,
+            # which is not a real divergence.
+            cleaned_callflow_cid = _clean_caller_id_number(cid_from_callflow)
+            cleaned_vars_cid = _clean_caller_id_number(cid_from_vars)
+            if (cleaned_callflow_cid and cleaned_vars_cid
+                    and cleaned_callflow_cid != cleaned_vars_cid):
+                logger.warning(
+                    "CDR ingest: caller_id_number mismatch for uuid=%s: "
+                    "callflow caller_profile=%r vs variables=%r -- using "
+                    "callflow value",
+                    call_uuid, cid_from_callflow, cid_from_vars,
+                )
         caller_id = _clean_caller_id_number(caller_id)
 
         answer_time = _epoch_to_timestamp(variables.get("answer_epoch"))
@@ -508,7 +566,18 @@ async def ingest_cdr_bulk(request: Request):
 
     Accepts a JSON array of CDR objects (each one a full FreeSWITCH JSON CDR).
     Processes each CDR independently -- individual failures do not block others.
-    Always returns 200 with a summary of results.
+    Always returns 200 with a summary of results (same contract as the single
+    /ingest endpoint: errors are reported in the body, never via status code).
+
+    Response shape:
+      - ok / duplicate / error / total: aggregate counts (unchanged).
+      - failed: one entry per failed CDR -> {index, uuid, error}, so a caller
+        can retry exactly the items that failed.  uuid is best-effort (null
+        when not extractable from a malformed CDR).  Not truncated; each
+        error string is capped at 500 chars, bounding the worst case
+        (1000 items) to well under 1 MB.
+      - errors: legacy alias of failed using the historical per-entry key
+        "detail" instead of "error"; kept for backward compatibility.
 
     Usage from the VM to re-ingest fallback files:
 
@@ -539,33 +608,43 @@ async def ingest_cdr_bulk(request: Request):
             "detail": f"batch too large: {len(body)} CDRs (max {MAX_BULK_CDRS})",
         }
 
-    results = {"ok": 0, "duplicate": 0, "error": 0, "total": len(body), "errors": []}
+    # Cap each error string rather than truncating the list: with max 1000
+    # CDRs per batch the worst-case payload stays bounded, and the caller
+    # gets a complete per-item failure list for targeted retry.
+    MAX_ERROR_DETAIL_CHARS = 500
+
+    results = {"ok": 0, "duplicate": 0, "error": 0, "total": len(body)}
+    failed: list[dict] = []
 
     for i, cdr_body in enumerate(body):
         if not isinstance(cdr_body, dict):
             logger.warning("CDR bulk ingest: item %d is not a dict, skipping", i)
             results["error"] += 1
-            results["errors"].append({"index": i, "detail": "not a JSON object"})
+            failed.append({"index": i, "uuid": None, "error": "not a JSON object"})
             continue
 
         result = await _process_cdr_body(cdr_body)
         status = result.get("status", "error")
-        if status in results:
+        if status in ("ok", "duplicate", "error"):
             results[status] += 1
         else:
             results["error"] += 1
+            status = "error"
 
         if status == "error":
-            results["errors"].append({
+            failed.append({
                 "index": i,
-                "uuid": result.get("uuid"),
-                "detail": result.get("detail"),
+                "uuid": result.get("uuid") or _extract_uuid_best_effort(cdr_body),
+                "error": str(result.get("detail") or "unknown error")[:MAX_ERROR_DETAIL_CHARS],
             })
 
-    # Truncate error details to avoid massive responses
-    if len(results["errors"]) > 50:
-        results["errors"] = results["errors"][:50]
-        results["errors_truncated"] = True
+    results["failed"] = failed
+    # Legacy field: same entries with the historical "detail" key, kept for
+    # backward compatibility (previously truncated to 50 -- no longer).
+    results["errors"] = [
+        {"index": f["index"], "uuid": f["uuid"], "detail": f["error"]}
+        for f in failed
+    ]
 
     logger.info(
         "CDR bulk ingest: processed %d CDRs (ok=%d, duplicate=%d, error=%d)",

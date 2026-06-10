@@ -331,7 +331,15 @@ INTERNAL_SUBNET=<zone_vpc_subnet>       # This zone's VPC subnet (East 10.142.0.
 MEDIA_SUBNET=<zone_media_subnet>        # This zone's FS media subnet (East 192.168.10.0/24)
 SBC_ID=<region>-sbc-<n>                 # e.g. east-sbc-1, west-sbc-2
 HEP_CAPTURE_ID=<see table below>        # Unique per-SBC Homer capture ID
+# Optional (defaults preserve current behavior — usually leave unset):
+# BW_CPS_LIMIT=100                      # Inbound CPS flood backstop per Bandwidth IP (503 above this)
+# TESTING_IP=                           # Trusted SIPp test source. UNSET in prod (disabled by default)
+# BANDWIDTH_TC1_NY / TC1_ATL / TC2_DAL / TC2_LA  # Fixed TC1/TC2 PoPs (defaults = production IPs)
 ```
+
+Media VM additionally supports (optional): `BRIDGE_PROGRESS_TIMEOUT=10` — per-attempt
+`progress_timeout` (max seconds to wait for carrier 180/183 before failing over to the
+next SBC/carrier; ringing then continues to call_timeout).
 
 > **All of these are now templated** in `entrypoint.sh` / `docker-compose.sbc.yml`, each
 > with an East default so an unset value reproduces current East behavior:

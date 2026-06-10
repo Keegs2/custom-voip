@@ -1,13 +1,12 @@
 -- Inbound Call Router - High Performance Implementation
--- Handles RCF, API DID, and Trunk DID routing with caching
+-- Handles RCF, API DID, and Trunk DID routing
 --
 -- Call Flow:
 -- 1. Get call details from session
 -- 2. Normalize DID to E.164
--- 3. Check caller ID against fraud prefixes
--- 4. Lookup DID: RCF (cache then DB) -> API DID -> Trunk DID
--- 5. Apply velocity/rate limits
--- 6. Route based on product type
+-- 3. Lookup DID: RCF -> API DID -> Trunk DID (PostgreSQL)
+-- 4. Route based on product type
+--    (Redis fraud/velocity/cache removed in RCF-V1 — see note below)
 --
 -- Error Handling:
 -- - All lookups wrapped in pcall
@@ -37,13 +36,16 @@ local function load_module(name)
     return result
 end
 
--- RCF-V1: Redis velocity checks disabled. The redis-lua library has
--- connection pooling issues inside mod_lua's threading model that can
--- cause intermittent call failures. Velocity/fraud checks will be
--- re-enabled in Phase 2 with a more robust Redis client or via the
--- API layer (pre-call webhook). For now, RCF calls route without
--- velocity rate-limiting.
-local redis = nil
+-- ================================================================
+-- Redis caching/velocity/fraud checks REMOVED in RCF-V1
+-- ================================================================
+-- The redis-lua library has connection pooling issues inside
+-- mod_lua's threading model that caused intermittent call failures.
+-- The Redis-backed RCF route cache, caller-prefix fraud check, and
+-- CPM/daily velocity limiting were removed from this script — calls
+-- route via PostgreSQL lookup only. Re-adding Redis here requires a
+-- synchronous client that is safe under mod_lua threading; see git
+-- history for the old code paths.
 freeswitch.consoleLog("DEBUG", "[inbound_router] redis=DISABLED (RCF-V1), loading db_client\n")
 local db = load_module("db_client")
 if not db then
@@ -95,16 +97,107 @@ local external_sip_ip = os.getenv("EXTERNAL_SIP_IP") or "auto"
 local sbc_proxy_ip = os.getenv("SBC_PROXY_IP") or "127.0.0.1"
 local sbc_proxy_ip_failover = os.getenv("SBC_PROXY_IP_FAILOVER") or sbc_proxy_ip
 
--- Quick TCP health check: detect unreachable SBC in <1 second
--- instead of waiting for SIP timeout (10-32 seconds).
-local function is_sbc_reachable(ip, port)
+-- Per-attempt progress timeout in seconds (progress_timeout on each failover
+-- attempt). Fails the attempt only if NO provisional response (180/183)
+-- arrives from the carrier within N seconds — once ringing starts, the call
+-- may ring up to the normal call_timeout. Fast-failover knob for a
+-- dead-but-TCP-alive SBC or unresponsive carrier (bounds PDD). Tunable via
+-- BRIDGE_PROGRESS_TIMEOUT in /opt/revup/.env (passed through
+-- docker-compose.media.yml). Default 10 per CLAUDE.md.
+local bridge_progress_timeout = tonumber(os.getenv("BRIDGE_PROGRESS_TIMEOUT") or "")
+if not bridge_progress_timeout or bridge_progress_timeout < 1 then
+    bridge_progress_timeout = 10
+end
+bridge_progress_timeout = math.floor(bridge_progress_timeout)
+
+-- ================================================================
+-- SBC TCP health pre-check with cross-call result caching
+-- ================================================================
+-- A TCP connect to the SBC on :5060 detects a dead SBC in <1 second
+-- instead of waiting for the SIP timeout (10-32 seconds). Probing on
+-- every bridge attempt of every call costs up to 4 socket opens (and
+-- up to 4s of probe latency worst case) per call, so probe results
+-- are cached process-wide in FreeSWITCH global variables
+-- (freeswitch.get/setGlobalVariable — shared across all mod_lua
+-- sessions and safe under mod_lua threading).
+--
+-- Cache entry: "sbc_health_<ip>" = "<up|down>:<epoch>"
+--   "up"   trusted for 30s (healthy SBC probed at most ~2x/minute)
+--   "down" trusted for 10s (a recovered SBC comes back fast)
+-- On expiry the next call re-probes and refreshes the entry. Only
+-- the probe is cached — the 4-attempt failover loop is unchanged.
+local SBC_HEALTH_UP_TTL = 30
+local SBC_HEALTH_DOWN_TTL = 10
+
+local luasocket_warned = false  -- warn once per call, not once per attempt
+
+-- Raw TCP probe. Returns true/false, or nil if luasocket is unavailable
+-- (unknown — caller fails open and the result is NOT cached).
+local function sbc_tcp_probe(ip, port)
     local ok, socket = pcall(require, "socket")
-    if not ok then return true end  -- fail open if luasocket unavailable
+    if not ok then
+        -- A broken/missing luasocket silently disables the fast-failover
+        -- pre-check. Make it visible instead of failing open silently.
+        if not luasocket_warned then
+            freeswitch.consoleLog("WARNING", string.format(
+                "[inbound_router] luasocket unavailable (%s) — SBC TCP pre-check disabled, failing open\n",
+                tostring(socket)
+            ))
+            luasocket_warned = true
+        end
+        return nil
+    end
     local tcp = socket.tcp()
     tcp:settimeout(1)
     local result = tcp:connect(ip, port or 5060)
     tcp:close()
     return result ~= nil
+end
+
+local function is_sbc_reachable(ip, port)
+    local cache_key = "sbc_health_" .. ip
+    local now = os.time()
+
+    -- Check cache
+    local cached_status, cached_ts = nil, nil
+    local cached = freeswitch.getGlobalVariable(cache_key)
+    if cached and cached ~= "" then
+        local status, ts = cached:match("^(%a+):(%d+)$")
+        cached_status = status
+        cached_ts = tonumber(ts)
+    end
+
+    if cached_status and cached_ts then
+        local ttl = (cached_status == "up") and SBC_HEALTH_UP_TTL or SBC_HEALTH_DOWN_TTL
+        local age = now - cached_ts
+        if age >= 0 and age < ttl then
+            freeswitch.consoleLog("DEBUG", string.format(
+                "[inbound_router] SBC health cache hit: %s is %s (age=%ds)\n",
+                ip, cached_status, age
+            ))
+            return cached_status == "up"
+        end
+    end
+
+    -- Cache miss or expired: do the real TCP probe and refresh
+    local probe = sbc_tcp_probe(ip, port)
+    if probe == nil then
+        return true  -- luasocket unavailable: fail open, do not cache
+    end
+
+    local new_status = probe and "up" or "down"
+    if cached_status and cached_status ~= new_status then
+        freeswitch.consoleLog("INFO", string.format(
+            "[inbound_router] SBC %s health transition: %s -> %s\n",
+            ip, cached_status, new_status
+        ))
+    elseif not cached_status and new_status == "down" then
+        freeswitch.consoleLog("INFO", string.format(
+            "[inbound_router] SBC %s health: down (first probe)\n", ip
+        ))
+    end
+    freeswitch.setGlobalVariable(cache_key, string.format("%s:%d", new_status, now))
+    return probe
 end
 
 -- Get call details
@@ -192,33 +285,9 @@ local normalized_did = normalize_did(did)
 freeswitch.consoleLog("DEBUG", "[" .. uuid .. "] Normalized DID: " .. normalized_did .. "\n")
 
 -- ============================================
--- STEP 1: Fraud Prevention - Check caller ID prefix
+-- STEP 1: DID Lookup - RCF, API, or Trunk
 -- ============================================
-local is_risky, risk_level, risk_prefix = false, "", ""
-
-if redis then
-    is_risky, risk_level, risk_prefix = redis.check_prefix(caller_id)
-    if is_risky and risk_level == "blocked" then
-        freeswitch.consoleLog("WARNING", string.format(
-            "[%s] BLOCKED caller from high-risk prefix: %s (matched: %s)\n",
-            uuid, caller_id, risk_prefix
-        ))
-        set_var("fraud_score", "100")
-        set_var("blocked_reason", "high_risk_caller_prefix")
-        hangup("CALL_REJECTED")
-        return
-    elseif is_risky then
-        freeswitch.consoleLog("INFO", string.format(
-            "[%s] High-risk caller prefix detected: %s (level: %s)\n",
-            uuid, risk_prefix, risk_level
-        ))
-        set_var("fraud_score", risk_level == "critical" and "80" or "50")
-    end
-end
-
--- ============================================
--- STEP 2: DID Lookup - RCF, API, or Trunk
--- ============================================
+-- (Caller-prefix fraud check removed with Redis in RCF-V1 — see note at top.)
 local product_type = nil
 local customer_id = nil
 local forward_to = nil
@@ -231,43 +300,12 @@ local fallback_url = nil
 local trunk_id = nil
 local pass_caller_id = true
 
--- Try RCF lookup (cache first, then DB)
+-- Try RCF lookup (PostgreSQL)
 local function lookup_rcf()
-    -- Try cache
-    if redis then
-        local rcf_cache = redis.get_rcf_cache(normalized_did)
-        if rcf_cache then
-            freeswitch.consoleLog("DEBUG", "[" .. uuid .. "] RCF cache hit\n")
-            return {
-                product_type = "rcf",
-                customer_id = tonumber(rcf_cache.customer_id),
-                forward_to = rcf_cache.forward_to,
-                traffic_grade = rcf_cache.traffic_grade or "standard",
-                pass_caller_id = rcf_cache.pass_caller_id == "1",
-                ring_timeout = tonumber(rcf_cache.ring_timeout) or 30,
-                cache_hit = true
-            }
-        end
-    end
-
-    -- Try database
     if db then
         local rcf_db = db.lookup_rcf(normalized_did)
         if rcf_db then
             freeswitch.consoleLog("DEBUG", "[" .. uuid .. "] RCF DB hit\n")
-
-            -- Cache for future calls
-            if redis then
-                redis.set_rcf_cache(
-                    normalized_did,
-                    rcf_db.forward_to,
-                    rcf_db.customer_id,
-                    rcf_db.pass_caller_id == "t" or rcf_db.pass_caller_id == true,
-                    rcf_db.traffic_grade,
-                    rcf_db.ring_timeout,
-                    300  -- 5 minute TTL
-                )
-            end
 
             return {
                 product_type = "rcf",
@@ -327,7 +365,7 @@ local function lookup_trunk_did()
     return nil
 end
 
-freeswitch.consoleLog("DEBUG", "[" .. uuid .. "] STEP 2: DID lookup for " .. tostring(normalized_did) .. "\n")
+freeswitch.consoleLog("DEBUG", "[" .. uuid .. "] STEP 1: DID lookup for " .. tostring(normalized_did) .. "\n")
 -- RCF-V1: Execute lookups in order: RCF -> API -> Trunk
 -- UCaaS extension routing removed — not needed for RCF-only deployment
 local routing = lookup_rcf()
@@ -375,49 +413,11 @@ if trunk_id then
     set_var("trunk_id", tostring(trunk_id))
 end
 
--- ============================================
--- STEP 3: Velocity/Rate Limiting
--- ============================================
--- TEMPORARILY DISABLED: Redis velocity check — Redis unreachable from mod_lua
--- Will re-enable once Redis connectivity is fixed
-if false then -- redis and customer_id
-    -- Wrap entire velocity check in pcall to guarantee fail-open behavior.
-    -- If Redis is unreachable or any error occurs, the call MUST proceed.
-    -- Only a definitive velocity limit breach (CPM_EXCEEDED, DAILY_LIMIT_EXCEEDED)
-    -- should reject the call.
-    local vel_ok, velocity_ok, velocity_reason = pcall(function()
-        return redis.velocity_check(customer_id, cpm_limit, 0, daily_limit, 0.01)
-    end)
-
-    if vel_ok and velocity_ok == false then
-        -- velocity_check returned false explicitly -- a real rate limit hit
-        -- Only reject for actual limit violations, NOT for Redis errors
-        if velocity_reason and velocity_reason ~= "REDIS_ERROR"
-           and velocity_reason ~= "REDIS_CONNECTION_FAILED" then
-            freeswitch.consoleLog("WARNING", string.format(
-                "[%s] Velocity check FAILED: customer=%s reason=%s\n",
-                uuid, tostring(customer_id), tostring(velocity_reason)
-            ))
-            set_var("blocked_reason", velocity_reason)
-            hangup("CALL_REJECTED")
-            return
-        else
-            freeswitch.consoleLog("WARNING", string.format(
-                "[%s] Velocity check Redis unavailable (reason=%s), failing OPEN\n",
-                uuid, tostring(velocity_reason)
-            ))
-        end
-    elseif not vel_ok then
-        -- pcall caught an exception -- fail open
-        freeswitch.consoleLog("WARNING", string.format(
-            "[%s] Velocity check exception (failing OPEN): %s\n",
-            uuid, tostring(velocity_ok)
-        ))
-    end
-end
+-- (Velocity/CPM rate limiting removed with Redis in RCF-V1 — see note at top.
+--  Per-DID concurrent call limits still apply below via mod_hash.)
 
 -- ============================================
--- STEP 4: Route Based on Product Type
+-- STEP 2: Route Based on Product Type
 -- ============================================
 
 -- Helper: Check if forward_to is a local extension
@@ -436,7 +436,7 @@ local function get_domain()
     return domain
 end
 
-freeswitch.consoleLog("DEBUG", "[" .. uuid .. "] STEP 4: Routing product_type=" .. tostring(product_type) .. "\n")
+freeswitch.consoleLog("DEBUG", "[" .. uuid .. "] STEP 2: Routing product_type=" .. tostring(product_type) .. "\n")
 
 if product_type == "rcf" then
     -- Remote Call Forwarding - Bridge to destination
@@ -726,11 +726,17 @@ if product_type == "rcf" then
                 ))
             else
                 attempted = true
+                -- progress_timeout bounds carrier PDD: the attempt fails over
+                -- to the next SBC+carrier combination only if NO provisional
+                -- response (180/183) arrives within N seconds. Once ringing
+                -- starts, the call may ring up to call_timeout (the ring time
+                -- allowed for this attempt). Env-tunable per CLAUDE.md.
                 local attempt_dial = string.format(
-                    "{ignore_early_media=false,call_timeout=%d,sip_h_X-Carrier=%s" ..
+                    "{ignore_early_media=false,progress_timeout=%d,call_timeout=%d,sip_h_X-Carrier=%s" ..
                     ",sip_h_X-CID=%s" ..
                     ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true" ..
                     "}sofia/external/%s@%s:5060",
+                    bridge_progress_timeout,
                     ring_timeout,
                     attempt.carrier,
                     sip_call_id,

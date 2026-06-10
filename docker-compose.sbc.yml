@@ -36,6 +36,16 @@ services:
       # Per-zone trusted internal subnets (East defaults; West sets its own)
       - INTERNAL_SUBNET=${INTERNAL_SUBNET:-10.142.0.0/20}
       - MEDIA_SUBNET=${MEDIA_SUBNET:-192.168.10.0/24}
+      # Trusted external testing source (SIPp). SECURITY: disabled unless
+      # explicitly set — entrypoint substitutes 255.255.255.255 when empty.
+      - TESTING_IP=${TESTING_IP:-}
+      # Inbound carrier CPS flood backstop (new INVITEs/sec per Bandwidth IP)
+      - BW_CPS_LIMIT=${BW_CPS_LIMIT:-100}
+      # Bandwidth TC1/TC2 trunk-config signaling IPs (fixed PoPs, all zones)
+      - BANDWIDTH_TC1_NY=${BANDWIDTH_TC1_NY:-67.231.9.142}
+      - BANDWIDTH_TC1_ATL=${BANDWIDTH_TC1_ATL:-67.231.13.185}
+      - BANDWIDTH_TC2_DAL=${BANDWIDTH_TC2_DAL:-67.231.1.188}
+      - BANDWIDTH_TC2_LA=${BANDWIDTH_TC2_LA:-67.231.4.138}
     volumes:
       - ./docker/kamailio/kamailio.cfg:/etc/kamailio/kamailio.cfg.tmpl:ro
       - ./docker/kamailio/dispatcher.list:/etc/kamailio/dispatcher.list.tmpl:ro
