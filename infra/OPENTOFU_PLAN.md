@@ -1508,7 +1508,7 @@ all:
           sbc_id: east-sbc-1
           hep_capture_id: 100
           external_sip_ip: 34.24.133.82  # VIP
-          freeswitch_ip: 10.142.0.102
+          freeswitch_ip: 192.168.10.2
           bandwidth_primary_ip: 67.231.2.12
           bandwidth_secondary_ip: 216.82.238.134
         east-sbc-2:
@@ -1516,7 +1516,7 @@ all:
           sbc_id: east-sbc-2
           hep_capture_id: 101
           external_sip_ip: 34.24.133.82  # VIP
-          freeswitch_ip: 10.142.0.102
+          freeswitch_ip: 192.168.10.2
           bandwidth_primary_ip: 67.231.2.12
           bandwidth_secondary_ip: 216.82.238.134
 
@@ -1532,7 +1532,7 @@ all:
       hosts:
         east-services:
           ansible_host: 34.26.57.37
-          freeswitch_esl_host: 10.142.0.102
+          freeswitch_esl_host: 192.168.10.2
 ```
 
 ### 12.3 Role: Common (all VMs)
