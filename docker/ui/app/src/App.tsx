@@ -1,7 +1,10 @@
-import { BrowserRouter, Routes, Route, Navigate, useParams } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, Outlet, useParams } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
+import { SoftphoneProvider } from './contexts/SoftphoneContext';
+import { ChatProvider } from './contexts/ChatContext';
 import { RequireAuth } from './components/auth/RequireAuth';
 import { RequireAdmin } from './components/auth/RequireAdmin';
+import { RequireUcaas } from './components/auth/RequireUcaas';
 import { AppLayout } from './components/layout/AppLayout';
 import { DashboardPage } from './pages/DashboardPage';
 import { RcfPage } from './pages/RcfPage';
@@ -27,6 +30,12 @@ import { UserDetailPage } from './pages/admin/UserDetailPage';
 import { OnboardingAdminPage } from './pages/admin/OnboardingAdminPage';
 import { CallQualityPage } from './pages/CallQualityPage';
 import { AccountPage } from './pages/AccountPage';
+// UCaaS communications pages — gated to ucaas/hybrid accounts via Sidebar nav (C-10).
+import { CommunicationsPage } from './pages/CommunicationsPage';
+import { ChatPage } from './pages/ChatPage';
+import { ConferencePage } from './pages/ConferencePage';
+import { DocumentsPage } from './pages/DocumentsPage';
+import { VoicemailPage } from './pages/VoicemailPage';
 
 /** Redirects /admin/user/:userId → /admin/customers/users/:userId */
 function UserDetailRedirect() {
@@ -39,6 +48,12 @@ export function App() {
     <BrowserRouter>
       {/* AuthProvider is inside BrowserRouter so it can call useNavigate */}
       <AuthProvider>
+        {/* SoftphoneProvider is inside AuthProvider so it can read auth state.
+            For non-UCaaS (e.g. rcf) users the backend returns no WebRTC
+            credentials, so the softphone stays dormant and renders nothing. */}
+        <SoftphoneProvider>
+        {/* ChatProvider is inside SoftphoneProvider — both depend on auth. */}
+        <ChatProvider>
         <Routes>
           {/* Redirect old /login bookmarks to the homepage */}
           <Route path="login" element={<Navigate to="/" replace />} />
@@ -60,6 +75,26 @@ export function App() {
               <Route path="docs/integration" element={<Navigate to="/docs/api" replace />} />
               <Route path="call-quality" element={<CallQualityPage />} />
               <Route path="account"          element={<AccountPage />} />
+
+              {/* UCaaS communications — only surfaced in the sidebar for
+                  ucaas/hybrid accounts (Sidebar gating, C-10). RCF customers
+                  get no nav entry and no softphone chrome. The RequireUcaas
+                  guard additionally blocks direct-URL access: an rcf (or any
+                  non-UCaaS) user typing /chat, /conference, etc. is redirected
+                  to the dashboard and renders ZERO UCaaS content. */}
+              <Route
+                element={
+                  <RequireUcaas>
+                    <Outlet />
+                  </RequireUcaas>
+                }
+              >
+                <Route path="communications"  element={<CommunicationsPage />} />
+                <Route path="chat"            element={<ChatPage />} />
+                <Route path="conference"      element={<ConferencePage />} />
+                <Route path="documents"       element={<DocumentsPage />} />
+                <Route path="voicemail"        element={<VoicemailPage />} />
+              </Route>
 
               {/* Redirects from old standalone paths to their new tab locations */}
               <Route path="admin/did-search" element={<Navigate to="/admin/platform/dids" replace />} />
@@ -120,6 +155,8 @@ export function App() {
           {/* Catch-all redirect to home */}
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
+        </ChatProvider>
+        </SoftphoneProvider>
       </AuthProvider>
     </BrowserRouter>
   );

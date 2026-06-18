@@ -12,12 +12,18 @@ redis>=5.0.0
 
 # Validation and serialization
 pydantic>=2.5.0
+# UCaaS config models (settings) — restored with the UCaaS routers
+pydantic-settings>=2.1.0
 
 # Fast JSON (10x faster than standard json)
 orjson>=3.9.0
 
 # HTTP client for webhooks
 httpx>=0.26.0
+# UCaaS async HTTP + FreeSWITCH ESL client (webrtc/voicemail; switchio replaces
+# greenswitch in Phase 5 — kept for now so the UCaaS routers import cleanly)
+aiohttp>=3.9.0
+greenswitch>=0.0.5
 
 # Authentication
 python-jose[cryptography]>=3.3.0

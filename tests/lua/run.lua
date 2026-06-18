@@ -16,6 +16,7 @@ local Shim = dofile(this_dir .. "busted_shim.lua")
 local specs = {
     "spec/normalization_spec.lua",
     "spec/inbound_router_spec.lua",
+    "spec/ucaas_inbound_spec.lua",
     "spec/trunk_outbound_spec.lua",
 }
 

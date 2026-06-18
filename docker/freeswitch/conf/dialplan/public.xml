@@ -27,11 +27,196 @@
   <context name="default">
 
     <!-- ============================================ -->
-    <!-- RCF-V1: Default context stripped.            -->
-    <!-- No local extensions, voicemail, conferencing,-->
-    <!-- or valet parking. RCF customers never see    -->
-    <!-- UCaaS/chat/voicemail/IVR features.           -->
+    <!-- UCaaS local features (unified graft).        -->
+    <!-- These extensions only fire for REGISTERED     -->
+    <!-- UCaaS/Verto users dialing short codes / star  -->
+    <!-- codes. Carrier RCF traffic uses E.164 in the  -->
+    <!-- public context and never matches these, so    -->
+    <!-- RCF customers see zero UCaaS surface. Account- -->
+    <!-- type gating is enforced at the UI/provisioning -->
+    <!-- layer, not the dialplan.                       -->
     <!-- ============================================ -->
+
+    <!-- ============================================ -->
+    <!-- MULTI-TENANT LOCAL EXTENSION DIALING         -->
+    <!-- ============================================ -->
+    <!--
+      When a registered UCaaS user dials another extension, we must route
+      within their customer namespace.  The variable ${customer_domain} is
+      set during registration by mod_xml_curl (e.g., customer_5.voiceplatform.local).
+      If not set, we fall back to $${domain} for legacy test extensions.
+    -->
+
+    <!-- Local extension dialing: short codes 2-6 digits (multi-tenant) -->
+    <!-- Matches any 2-6 digit extension within the caller's customer domain -->
+    <!--
+      IMPORTANT: Bridge order is verto.rtc/ THEN user/ (pipe failover).
+      Verto/WebRTC clients register via mod_verto's WebSocket, NOT via sofia SIP.
+      "user/" does a sofia registration lookup and fails instantly for Verto-only
+      users, causing immediate voicemail. "verto.rtc/" reaches the Verto endpoint
+      directly. The pipe "|" provides sequential failover: try Verto first, then
+      SIP, so both Verto and SIP clients are reachable.
+    -->
+    <extension name="local_extension">
+      <condition field="destination_number" expression="^(\d{2,6})$">
+        <!-- Debug: log all domain-related variables to find the right one -->
+        <action application="log" data="INFO EXT-DIAL: caller=${caller_id_number} dest=$1 customer_domain=${customer_domain} domain_name=${domain_name} sip_from_host=${sip_from_host} verto_profile_domain=${verto_profile_domain} domain=${domain}"/>
+        <action application="set" data="hangup_after_bridge=true"/>
+        <action application="set" data="call_timeout=30"/>
+        <action application="set" data="continue_on_fail=true"/>
+        <!-- Set the dialed extension for voicemail fallback -->
+        <action application="set" data="dialed_extension=$1"/>
+        <!-- Resolve the target domain: try multiple variable names.
+             mod_verto sets domain_name from the user's login domain.
+             customer_domain may be set by mod_xml_curl directory handler.
+             Fall back to global domain as last resort. -->
+        <action application="set" data="target_domain=${customer_domain:-${domain_name:-${sip_from_host:-$${domain}}}}"/>
+        <action application="log" data="INFO EXT-DIAL: resolved target_domain=${target_domain}"/>
+        <!-- Ring via Verto first (WebRTC), then SIP fallback -->
+        <action application="bridge" data="{ignore_early_media=false,call_timeout=30}verto.rtc/$1@${target_domain}|user/$1@${target_domain}"/>
+        <!-- If no answer, busy, or not registered: send to voicemail -->
+        <action application="log" data="INFO Extension $1 unavailable, sending to voicemail"/>
+        <action application="answer"/>
+        <action application="sleep" data="1000"/>
+        <action application="voicemail" data="default ${target_domain} ${dialed_extension}"/>
+      </condition>
+    </extension>
+
+    <!-- ============================================ -->
+    <!-- VOICEMAIL CHECK (*97)                       -->
+    <!-- ============================================ -->
+    <!-- Registered users dial *97 to check their own voicemail -->
+    <extension name="voicemail_check">
+      <condition field="destination_number" expression="^\*97$">
+        <action application="log" data="INFO Voicemail check: ${caller_id_number} (domain=${customer_domain:-$${domain}})"/>
+        <action application="set" data="target_domain=${customer_domain:-$${domain}}"/>
+        <action application="answer"/>
+        <action application="sleep" data="1000"/>
+        <action application="voicemail" data="check default ${target_domain} ${caller_id_number}"/>
+      </condition>
+    </extension>
+
+    <!-- ============================================ -->
+    <!-- CONFERENCE ROOMS (*88XX)                    -->
+    <!-- ============================================ -->
+    <!--
+      Multi-tenant, PIN-protected, video-enabled conference rooms.
+
+      Dial patterns:
+        *8801     - Join conference room 01 (video, no PIN)
+        *880199   - Join conference room 01 with PIN 99
+        *88XXYYYY - Room XX with PIN YYYY (2-4 digit PIN)
+
+      Multi-tenant isolation:
+        Each customer's conferences are namespaced by customer_id extracted
+        from ${customer_domain} (set by mod_xml_curl during Verto registration).
+        Customer A's *8801 -> room_5_01@video
+        Customer B's *8801 -> room_3_01@video
+        These are completely separate conferences.
+
+      Video:
+        Using the "video" profile with VP8 mux compositing. The conference
+        app handles answering the Verto channel internally. Do NOT add an
+        explicit answer app before the conference app, as it blocks forever
+        on Verto/WebRTC channels waiting for ICE that never completes.
+
+      PIN protection:
+        If a PIN is provided in the dial string, the conference application's
+        built-in PIN check is used via the +flags{pin} syntax.
+        The PIN is passed inline: conference room_X_XX+PIN@video
+    -->
+    <!-- Conference with PIN: *88{room}{pin} where room=2-4 digits, pin=2-4 digits -->
+    <!-- PIN variant must be before the no-PIN variant so it matches first -->
+    <extension name="conference_room_pin">
+      <condition field="destination_number" expression="^\*88(\d{2,4})P(\d{2,4})$">
+        <action application="log" data="INFO Conference join with PIN: ${caller_id_number} -> room $1 (pin provided, domain=${customer_domain})"/>
+
+        <!-- Multi-tenant: namespace conference by customer -->
+        <!-- ${customer_domain} is set by mod_xml_curl during registration -->
+        <!-- Extract customer_id: customer_5.voiceplatform.local -> 5 -->
+        <!-- Use sip_from_host as fallback if customer_domain is not set -->
+        <action application="set" data="conf_domain=${customer_domain:-${sip_from_host}}"/>
+        <action application="set" data="conf_customer_id=${regex(${conf_domain}|customer_(\d+)|%1)}"/>
+        <!-- Fallback to 0 if regex didn't match (legacy/test extensions) -->
+        <action application="set" data="conf_customer_id=${conf_customer_id:-0}"/>
+        <action application="log" data="INFO Conference tenant: conf_domain=${conf_domain} conf_customer_id=${conf_customer_id}"/>
+
+        <!--
+          Verto/WebRTC video conference — DO NOT use explicit answer before conference.
+
+          The conference application handles answering the channel internally. For
+          Verto/WebRTC channels, the explicit answer app sends verto.media with an
+          SDP answer and then BLOCKS waiting for ICE completion. If the conference
+          video canvas is not yet initialized (first participant), the SDP answer
+          may be incomplete or the video negotiation may fail, causing answer to
+          block forever (channel stuck in EARLY state).
+
+          The conference app answers the channel as part of adding the member. It
+          handles the full SDP negotiation including video m-lines correctly because
+          it knows the conference's codec requirements at answer time. This avoids
+          the blocking answer problem entirely.
+
+          video-mode=mux in the @video profile composites all participant video
+          streams into a single canvas using VP8. Requires:
+          - mod_av loaded (VP8 decode/encode for canvas compositing)
+          - conference_layouts.conf.xml properly formatted and loaded
+          - VP8 in the Verto profile codec string (already configured)
+        -->
+
+        <!-- Join video conference with PIN protection -->
+        <!-- +flags{speak} ensures all members get the speak flag on join.
+             Without this, passthrough video mode can strip speak from non-floor
+             members, causing one-way audio (they hear but are not heard). -->
+        <action application="conference" data="room_${conf_customer_id}_$1+$2@video+flags{speak}"/>
+      </condition>
+    </extension>
+
+    <!-- Conference without PIN: *88{room} where room=2-4 digits -->
+    <extension name="conference_room">
+      <condition field="destination_number" expression="^\*88(\d{2,4})$">
+        <action application="log" data="INFO Conference join: ${caller_id_number} -> room $1 (domain=${customer_domain})"/>
+
+        <!-- Multi-tenant: namespace conference by customer -->
+        <action application="set" data="conf_domain=${customer_domain:-${sip_from_host}}"/>
+        <action application="set" data="conf_customer_id=${regex(${conf_domain}|customer_(\d+)|%1)}"/>
+        <action application="set" data="conf_customer_id=${conf_customer_id:-0}"/>
+        <action application="log" data="INFO Conference tenant: conf_domain=${conf_domain} conf_customer_id=${conf_customer_id}"/>
+
+        <!--
+          Verto/WebRTC video conference — see conference_room_pin for full explanation.
+          DO NOT use explicit answer before conference. The conference app handles
+          answering internally, which avoids the Verto answer blocking issue.
+        -->
+
+        <!-- Join video conference (no PIN) -->
+        <!-- Force speak flag via channel variable — +flags{speak} in the data
+             string is not reliable in passthrough video mode because mod_conference
+             strips speak from non-floor members after join. Setting the channel
+             variable before entering ensures the member keeps speak. -->
+        <action application="set" data="conference_member_flags=speak"/>
+        <action application="conference" data="room_${conf_customer_id}_$1@video+flags{speak}"/>
+      </condition>
+    </extension>
+
+    <!-- ============================================ -->
+    <!-- VALET PARKING (*58XX park, *59XX retrieve)  -->
+    <!-- ============================================ -->
+    <!-- Dial *5801 to park a call in slot 01, *5901 to retrieve it -->
+    <extension name="valet_park">
+      <condition field="destination_number" expression="^\*58(\d{2})$">
+        <action application="log" data="INFO Valet park: ${caller_id_number} -> slot $1"/>
+        <action application="answer"/>
+        <action application="valet_park" data="valet_lot $1"/>
+      </condition>
+    </extension>
+
+    <extension name="valet_unpark">
+      <condition field="destination_number" expression="^\*59(\d{2})$">
+        <action application="log" data="INFO Valet retrieve: ${caller_id_number} -> slot $1"/>
+        <action application="answer"/>
+        <action application="valet_park" data="valet_lot $1"/>
+      </condition>
+    </extension>
 
     <!-- Test RCF DIDs: 555XXXX pattern -->
     <!-- Routes through Lua for dynamic RCF lookup -->
@@ -203,6 +388,39 @@
       <condition field="destination_number" expression="^9197$">
         <action application="answer"/>
         <action application="playback" data="tone_stream://%(10000,0,1000);loops=-1"/>
+      </condition>
+    </extension>
+
+    <!-- ============================================ -->
+    <!-- LOCAL EXTENSION DIALING (Registered Users) -->
+    <!-- ============================================ -->
+    <!--
+      Allows registered users to call each other by extension.
+      Multi-tenant: uses the caller's customer_domain so extensions
+      are resolved within the correct customer namespace.
+      Falls back to $${domain} for legacy test extensions (1001-1003).
+
+      SECURITY: This only works for registered users because:
+      - External carriers don't send short-digit numbers
+      - The bridge uses user/ which requires registration lookup
+    -->
+    <extension name="local_extension_public">
+      <condition field="destination_number" expression="^(\d{2,6})$">
+        <action application="log" data="INFO EXT-DIAL (public): caller=${caller_id_number} dest=$1 customer_domain=${customer_domain} domain_name=${domain_name}"/>
+        <action application="set" data="hangup_after_bridge=true"/>
+        <action application="set" data="call_timeout=30"/>
+        <action application="set" data="continue_on_fail=true"/>
+        <action application="set" data="dialed_extension=$1"/>
+        <action application="set" data="target_domain=${customer_domain:-${domain_name:-${sip_from_host:-$${domain}}}}"/>
+        <action application="log" data="INFO EXT-DIAL (public): resolved target_domain=${target_domain}"/>
+        <!-- Ring via Verto first (WebRTC), then SIP fallback.
+             See local_extension in default context for full explanation. -->
+        <action application="bridge" data="{ignore_early_media=false,call_timeout=30}verto.rtc/$1@${target_domain}|user/$1@${target_domain}"/>
+        <!-- If no answer, busy, or not registered: send to voicemail -->
+        <action application="log" data="INFO Extension $1 unavailable, sending to voicemail"/>
+        <action application="answer"/>
+        <action application="sleep" data="1000"/>
+        <action application="voicemail" data="default ${target_domain} ${dialed_extension}"/>
       </condition>
     </extension>
 

@@ -363,7 +363,7 @@ UCaaS conference uses.
 ## Progress Tracker
 
 - [x] Phase 0 — Safety Net & RCF Characterization  ✅ 34 char tests + 40 lessons guards + 33 TwiML fixtures, all green & PM-verified
-- [ ] Phase 1 — UNIFY: restore UCaaS onto RCF-V1
+- [x] Phase 1 — UNIFY: restore UCaaS onto RCF-V1  ✅ 55 files restored + grafted; hardening intact (43 char + 40 guards green); ucaas branch activated + bug fixed; RCF gated. Deferred to live env: postgres init dry-run, FS image build, live call test
 - [ ] Phase 2 — Lua Refactor (behavior-preserving)
 - [ ] Phase 3 — Harden Programmable-Voice Engine
 - [ ] Phase 4 — Harden Restored UCaaS Features

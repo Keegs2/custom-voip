@@ -1,5 +1,6 @@
 import { Outlet } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
+import { SoftphoneWidget } from '../softphone/SoftphoneWidget';
 
 export function AppLayout() {
   return (
@@ -18,6 +19,10 @@ export function AppLayout() {
           <Outlet />
         </div>
       </main>
+
+      {/* Softphone overlay — self-gates on hasUcaas (renders null for rcf and
+          any account with no WebRTC extension), so RCF sees zero UCaaS chrome. */}
+      <SoftphoneWidget />
     </div>
   );
 }

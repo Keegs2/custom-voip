@@ -13,6 +13,7 @@ local M = {}
 --   cfg.rcf            : table returned by lookup_rcf (or nil)
 --   cfg.api_did        : table returned by lookup_api_did (or nil)
 --   cfg.trunk_did      : table returned by lookup_trunk_did (or nil)
+--   cfg.extension_did  : table returned by lookup_extension_did (or nil)
 --   cfg.endpoint_ips   : array returned by get_trunk_endpoint_ips
 --   cfg.trunk_by_ip    : table returned by lookup_trunk_by_ip
 function M.new_db(cfg)
@@ -33,6 +34,13 @@ function M.new_db(cfg)
     function db.lookup_trunk_did(did)
         cfg.last_trunk_did = did
         return cfg.trunk_did
+    end
+
+    -- UCaaS extension-by-DID lookup (extensions.assigned_did). Returns a row
+    -- with extension / customer_id / display_name, or nil for "not found".
+    function db.lookup_extension_did(did)
+        cfg.last_extension_did = did
+        return cfg.extension_did
     end
 
     function db.lookup_trunk_by_ip(ip)

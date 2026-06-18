@@ -4,8 +4,10 @@ Stripped to RCF-only services for RCF-V1 deployment
 """
 import os
 import time
+import asyncio
+import orjson
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, ORJSONResponse
 from starlette.middleware.cors import CORSMiddleware
 import logging
@@ -17,7 +19,12 @@ from routers import (
     auth, search, number_inventory,
     carriers, rates, tiers, sipp, sbc, homer,
     onboarding, freeswitch,
+    # UCaaS routers (restored on top of the RCF-V1 base — additive)
+    ivr, api_dids, extensions, presence, voicemail, webrtc,
 )
+from routers.chat import router as chat_router
+from routers.conference import router as conference_router
+from routers.documents import router as documents_router
 from middleware.auth import JWTAuthMiddleware
 
 # Configure logging
@@ -41,10 +48,28 @@ async def lifespan(app: FastAPI):
     await init_redis()
     logger.info("Redis connection initialized")
 
+    # UCaaS WebSocket fanout background tasks (presence + chat). These are
+    # independent of the always-200 health path (health.py never touches them),
+    # and each self-reconnects with backoff if Redis drops (see risk C-8).
+    presence_task = asyncio.create_task(_presence_subscriber())
+    logger.info("Presence WebSocket subscriber started")
+    chat_task = asyncio.create_task(_chat_subscriber())
+    logger.info("Chat WebSocket subscriber started")
+    presence_cleanup_task = asyncio.create_task(_presence_ttl_cleanup())
+    logger.info("Presence TTL cleanup task started")
+
     yield
 
     # Cleanup
     logger.info("Shutting down...")
+    presence_task.cancel()
+    chat_task.cancel()
+    presence_cleanup_task.cancel()
+    for task in (presence_task, chat_task, presence_cleanup_task):
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
     await close_db()
     await close_redis()
 
@@ -123,6 +148,30 @@ app.include_router(homer.router, prefix="/homer", tags=["Homer"])
 app.include_router(onboarding.router, prefix="/v1/onboarding", tags=["Onboarding"])
 app.include_router(onboarding.router, prefix="/onboarding", tags=["Onboarding"])
 
+# ---------------------------------------------------------------------------
+# UCaaS routers (restored additively on the RCF-V1 base). Mounted at both
+# /v1/<prefix> and the bare prefix, matching the rest of the API. RCF customers
+# never see these features (gated at the UI/account-type layer).
+# ---------------------------------------------------------------------------
+app.include_router(ivr.router, prefix="/v1/ivr", tags=["IVR Builder"])
+app.include_router(ivr.router, prefix="/ivr", tags=["IVR Builder"])
+app.include_router(api_dids.router, prefix="/v1/api-dids", tags=["API DIDs"])
+app.include_router(api_dids.router, prefix="/api-dids", tags=["API DIDs"])
+app.include_router(extensions.router, prefix="/v1/extensions", tags=["Extensions"])
+app.include_router(extensions.router, prefix="/extensions", tags=["Extensions"])
+app.include_router(presence.router, prefix="/v1/presence", tags=["Presence"])
+app.include_router(presence.router, prefix="/presence", tags=["Presence"])
+app.include_router(voicemail.router, prefix="/v1/voicemail", tags=["Voicemail"])
+app.include_router(voicemail.router, prefix="/voicemail", tags=["Voicemail"])
+app.include_router(webrtc.router, prefix="/v1/webrtc", tags=["WebRTC"])
+app.include_router(webrtc.router, prefix="/webrtc", tags=["WebRTC"])
+app.include_router(chat_router, prefix="/v1/chat", tags=["Chat"])
+app.include_router(chat_router, prefix="/chat", tags=["Chat"])
+app.include_router(conference_router, prefix="/v1/conferences", tags=["Conferences"])
+app.include_router(conference_router, prefix="/conferences", tags=["Conferences"])
+app.include_router(documents_router, prefix="/v1/documents", tags=["Documents"])
+app.include_router(documents_router, prefix="/documents", tags=["Documents"])
+
 # FreeSWITCH mod_xml_curl gateway. Mounted at /freeswitch (auth-exempt in
 # middleware). Always returns HTTP 200 + the FreeSWITCH "not found" XML so
 # mod_xml_curl never logs a per-call HTTP 404 error.
@@ -132,6 +181,321 @@ app.include_router(freeswitch.router, prefix="/freeswitch", tags=["FreeSWITCH"])
 @app.get("/")
 async def root():
     return {"message": "RCF Platform API", "version": "1.0.0"}
+
+
+# ---------------------------------------------------------------------------
+# WebSocket: Real-time presence updates
+# ---------------------------------------------------------------------------
+
+class PresenceConnectionManager:
+    """Manages WebSocket connections for presence pub/sub fanout.
+
+    Each connection is tagged with the user's customer_id so updates
+    are only sent to users within the same customer scope. Admin
+    connections (customer_id=None) receive all updates.
+    """
+
+    def __init__(self):
+        # Map of websocket -> {"customer_id": int|None, "user_id": int}
+        self.active: dict[WebSocket, dict] = {}
+
+    async def connect(self, websocket: WebSocket, user_info: dict):
+        await websocket.accept()
+        self.active[websocket] = user_info
+
+    def disconnect(self, websocket: WebSocket):
+        self.active.pop(websocket, None)
+
+    async def broadcast(self, message: dict):
+        """Send a presence update to all connections that should see it."""
+        source_customer_id = message.get("customer_id")
+        payload = orjson.dumps(message)
+
+        stale: list[WebSocket] = []
+        for ws, info in self.active.items():
+            # Admin (customer_id=None) sees everything;
+            # otherwise must match the source customer
+            if info["customer_id"] is not None and info["customer_id"] != source_customer_id:
+                continue
+            try:
+                await ws.send_bytes(payload)
+            except Exception:
+                stale.append(ws)
+
+        for ws in stale:
+            self.disconnect(ws)
+
+
+presence_manager = PresenceConnectionManager()
+
+
+async def _presence_subscriber():
+    """Background task: subscribe to Redis presence channel and fan out."""
+    from db.redis_client import get_client
+
+    while True:
+        try:
+            rc = await get_client()
+            pubsub = rc.pubsub()
+            await pubsub.subscribe("presence:updates")
+
+            async for msg in pubsub.listen():
+                if msg["type"] != "message":
+                    continue
+                try:
+                    data = orjson.loads(msg["data"])
+                    await presence_manager.broadcast(data)
+                except Exception:
+                    logging.getLogger(__name__).debug(
+                        "Failed to broadcast presence message", exc_info=True
+                    )
+
+        except asyncio.CancelledError:
+            break
+        except Exception:
+            logging.getLogger(__name__).warning(
+                "Presence subscriber reconnecting in 2s", exc_info=True
+            )
+            await asyncio.sleep(2)
+
+
+async def _presence_ttl_cleanup():
+    """Background task: every 30 seconds, find presence rows that have gone
+    stale (updated_at older than 60s) and flip them to 'offline'.
+
+    Publishes each status change to Redis so WebSocket subscribers get
+    real-time notification of the transition.
+    """
+    from db.database import fetch_all, execute
+    from db.redis_client import get_client
+
+    while True:
+        try:
+            await asyncio.sleep(30)
+
+            # Find and update stale rows in one atomic UPDATE .. RETURNING
+            stale_rows = await fetch_all(
+                """UPDATE presence_status
+                   SET status = 'offline', updated_at = NOW()
+                   WHERE status != 'offline'
+                     AND updated_at < NOW() - INTERVAL '60 seconds'
+                   RETURNING user_id""",
+            )
+
+            if not stale_rows:
+                continue
+
+            logger.info(
+                "Presence TTL cleanup: set %d stale user(s) to offline",
+                len(stale_rows),
+            )
+
+            # Publish each transition to Redis for WebSocket fanout
+            try:
+                rc = await get_client()
+                for row in stale_rows:
+                    # Look up customer_id for proper WebSocket scoping
+                    user_row = await fetch_all(
+                        "SELECT customer_id FROM users WHERE id = $1",
+                        row["user_id"],
+                    )
+                    customer_id = user_row[0]["customer_id"] if user_row else None
+
+                    payload = orjson.dumps({
+                        "user_id": row["user_id"],
+                        "status": "offline",
+                        "status_message": None,
+                        "updated_at": None,
+                        "customer_id": customer_id,
+                    }).decode()
+                    await rc.publish("presence:updates", payload)
+            except Exception:
+                logger.warning(
+                    "Failed to publish stale-presence updates to Redis",
+                    exc_info=True,
+                )
+
+        except asyncio.CancelledError:
+            break
+        except Exception:
+            logger.warning(
+                "Presence TTL cleanup error, retrying in 30s", exc_info=True
+            )
+
+
+@app.websocket("/ws/presence")
+async def presence_websocket(websocket: WebSocket):
+    """Real-time presence updates over WebSocket.
+
+    Authentication: pass the JWT as a query parameter:
+        ws://host/ws/presence?token=<jwt>
+
+    After connecting, the server pushes presence change events as JSON:
+        {"user_id": 1, "status": "busy", "status_message": "In a meeting", ...}
+    """
+    from auth.security import decode_access_token
+    from jose import JWTError
+
+    token = websocket.query_params.get("token")
+    if not token:
+        await websocket.close(code=4001, reason="Missing token query parameter")
+        return
+
+    try:
+        claims = decode_access_token(token)
+    except JWTError:
+        await websocket.close(code=4003, reason="Invalid or expired token")
+        return
+
+    user_info = {
+        "user_id": int(claims["sub"]),
+        "customer_id": claims.get("customer_id"),  # None for admins
+    }
+    # Admins have customer_id=None which means "see everything"
+    if claims.get("role") == "admin":
+        user_info["customer_id"] = None
+
+    await presence_manager.connect(websocket, user_info)
+    try:
+        # Keep connection alive; client can send pings or text (ignored)
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    finally:
+        presence_manager.disconnect(websocket)
+
+
+# ---------------------------------------------------------------------------
+# WebSocket: Real-time chat messaging
+# ---------------------------------------------------------------------------
+
+class ChatConnectionManager:
+    """Manages WebSocket connections for chat message fanout.
+
+    A user can have multiple active connections (e.g. multiple browser tabs).
+    Messages are sent to all connections belonging to a participant of the
+    conversation.
+    """
+
+    def __init__(self):
+        # Map of user_id -> set of (websocket, customer_id)
+        self.connections: dict[int, set[tuple[WebSocket, int | None]]] = {}
+        # Reverse map for fast disconnect
+        self._ws_to_user: dict[WebSocket, int] = {}
+
+    async def connect(self, websocket: WebSocket, user_id: int, customer_id: int | None):
+        await websocket.accept()
+        if user_id not in self.connections:
+            self.connections[user_id] = set()
+        self.connections[user_id].add((websocket, customer_id))
+        self._ws_to_user[websocket] = user_id
+
+    def disconnect(self, websocket: WebSocket):
+        user_id = self._ws_to_user.pop(websocket, None)
+        if user_id is not None and user_id in self.connections:
+            self.connections[user_id] = {
+                (ws, cid) for ws, cid in self.connections[user_id] if ws is not websocket
+            }
+            if not self.connections[user_id]:
+                del self.connections[user_id]
+
+    async def broadcast_to_user(self, user_id: int, data: bytes):
+        """Send raw bytes to all connections of a user."""
+        conns = self.connections.get(user_id)
+        if not conns:
+            return
+        stale: list[WebSocket] = []
+        for ws, _cid in conns:
+            try:
+                await ws.send_bytes(data)
+            except Exception:
+                stale.append(ws)
+        for ws in stale:
+            self.disconnect(ws)
+
+
+chat_manager = ChatConnectionManager()
+
+
+async def _chat_subscriber():
+    """Background task: subscribe to Redis chat channels and fan out to
+    connected WebSocket clients."""
+    from db.redis_client import get_client
+
+    while True:
+        try:
+            rc = await get_client()
+            pubsub = rc.pubsub()
+            await pubsub.subscribe("chat:events", "chat:typing")
+
+            async for msg in pubsub.listen():
+                if msg["type"] != "message":
+                    continue
+                try:
+                    data = orjson.loads(msg["data"])
+
+                    # Both channels include participant_user_ids for targeting
+                    participant_ids = data.get("participant_user_ids", [])
+                    payload = orjson.dumps(data)
+
+                    for uid in participant_ids:
+                        await chat_manager.broadcast_to_user(uid, payload)
+
+                except Exception:
+                    logging.getLogger(__name__).debug(
+                        "Failed to broadcast chat message", exc_info=True
+                    )
+
+        except asyncio.CancelledError:
+            break
+        except Exception:
+            logging.getLogger(__name__).warning(
+                "Chat subscriber reconnecting in 2s", exc_info=True
+            )
+            await asyncio.sleep(2)
+
+
+@app.websocket("/ws/chat")
+async def chat_websocket(websocket: WebSocket):
+    """Real-time chat updates over WebSocket.
+
+    Authentication: pass the JWT as a query parameter:
+        ws://host/ws/chat?token=<jwt>
+
+    After connecting, the server pushes chat events as JSON:
+        {"type": "new_message", "conversation_id": 1, "message": {...}, ...}
+        {"type": "typing", "conversation_id": 1, "user_id": 5, ...}
+        {"type": "read_receipt", ...}
+        {"type": "message_edited", ...}
+        {"type": "message_deleted", ...}
+    """
+    from auth.security import decode_access_token
+    from jose import JWTError
+
+    token = websocket.query_params.get("token")
+    if not token:
+        await websocket.close(code=4001, reason="Missing token query parameter")
+        return
+
+    try:
+        claims = decode_access_token(token)
+    except JWTError:
+        await websocket.close(code=4003, reason="Invalid or expired token")
+        return
+
+    user_id = int(claims["sub"])
+    customer_id = claims.get("customer_id")
+
+    await chat_manager.connect(websocket, user_id, customer_id)
+    try:
+        # Keep connection alive; client can send pings or text (ignored)
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    finally:
+        chat_manager.disconnect(websocket)
 
 
 # ---------------------------------------------------------------------------

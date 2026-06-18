@@ -141,11 +141,11 @@
     <!-- <load module="mod_unimrcp"/> --> <!-- For ASR/TTS via MRCP -->
 
     <!-- ============================================ -->
-    <!-- CONFERENCING (disabled — RCF-V1 only)      -->
+    <!-- CONFERENCING (UCaaS — unified)              -->
     <!-- ============================================ -->
 
-    <!-- RCF-V1: conferencing not needed for remote call forwarding -->
-    <!-- <load module="mod_conference"/> -->
+    <!-- UCaaS conferencing rooms (*88XX). conference.conf.xml ships on unified. -->
+    <load module="mod_conference"/>
 
     <!-- ============================================ -->
     <!-- DATABASE                                    -->
@@ -161,11 +161,11 @@
     <!-- <load module="mod_odbc_query"/> -->
 
     <!-- ============================================ -->
-    <!-- VOICEMAIL (disabled — RCF-V1 only)          -->
+    <!-- VOICEMAIL (UCaaS — unified)                 -->
     <!-- ============================================ -->
 
-    <!-- RCF-V1: voicemail not needed for remote call forwarding -->
-    <!-- <load module="mod_voicemail"/> -->
+    <!-- UCaaS voicemail (*97 check + per-ext deposit). voicemail.conf.xml ships on unified. -->
+    <load module="mod_voicemail"/>
 
     <!-- ============================================ -->
     <!-- RECORDING                                   -->
@@ -184,15 +184,15 @@
     <!-- SIP REFER handling -->
     <!-- <load module="mod_sofia" data="refer"/> --> <!-- Built into mod_sofia -->
 
-    <!-- RCF-V1: video not needed for remote call forwarding -->
-    <!-- <load module="mod_av"/> -->
+    <!-- UCaaS: mod_av provides VP8/H264 for conference video-mode=mux compositing -->
+    <load module="mod_av"/>
 
-    <!-- RCF-V1: WebRTC not needed for remote call forwarding -->
-    <!-- <load module="mod_rtc"/> -->
-    <!-- <load module="mod_verto"/> -->
+    <!-- UCaaS: WebRTC endpoints (mod_verto WSS softphone + mod_rtc media) -->
+    <load module="mod_rtc"/>
+    <load module="mod_verto"/>
 
-    <!-- RCF-V1: call parking not needed for remote call forwarding -->
-    <!-- <load module="mod_valet_parking"/> -->
+    <!-- UCaaS: call parking (*58XX park / *59XX retrieve). valet_parking.conf.xml ships on unified. -->
+    <load module="mod_valet_parking"/>
 
     <!-- ============================================ -->
     <!-- MONITORING                                  -->

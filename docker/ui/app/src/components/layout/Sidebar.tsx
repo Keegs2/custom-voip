@@ -2,12 +2,16 @@ import { useState, useEffect, useCallback, type FormEvent } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { cn } from '../../utils/cn';
 import { useAuth } from '../../contexts/AuthContext';
+import { useSoftphone } from '../../contexts/SoftphoneContext';
+import { useChat } from '../../contexts/ChatContext';
+import { PresenceIndicator } from '../softphone/PresenceIndicator';
+import type { PresenceStatus } from '../../types/softphone';
 import { ApiError } from '../../api/client';
 import {
   IconRCF, IconTrunk, IconAPI, IconIVR, IconDocs,
-  IconAdmin, IconSignal, IconTroubleshoot,
+  IconAdmin, IconSignal, IconTroubleshoot, IconVoicemail,
 } from '../icons/ProductIcons';
-import { Package, Shield, ChevronDown, Clock, Eye, EyeOff, Server, BookOpen } from 'lucide-react';
+import { Package, Shield, ChevronDown, Clock, Eye, EyeOff, Server, BookOpen, FolderOpen, MessageCircle } from 'lucide-react';
 import { AccessRequestForm } from './AccessRequestForm';
 
 /* ─── Types ───────────────────────────────────────────────── */
@@ -27,6 +31,32 @@ interface NavItemDef {
 
 const allProductNavItems: NavItemDef[] = [
   { label: 'RCF', icon: <IconRCF size={18} />, to: '/rcf', color: '#4ade80', accountTypes: ['rcf', 'hybrid'] },
+];
+
+/* ─── UCaaS Communications nav items ──────────────────────────
+ * EVERY item is tagged accountTypes: ['ucaas', 'hybrid'] so the shared
+ * account-type filter (passesAccountType) excludes them for `rcf` accounts.
+ * The whole group is additionally gated on `hasUcaas` at render time, so an
+ * `rcf` customer can never see any of this surface (C-10 / feedback_rcf_simplicity).
+ */
+const COMMS_ACCOUNT_TYPES = ['ucaas', 'hybrid'];
+
+const allCommsNavItems: NavItemDef[] = [
+  { label: 'Communications', icon: <MessageCircle size={16} strokeWidth={1.9} />, to: '/communications', color: '#38bdf8', accountTypes: COMMS_ACCOUNT_TYPES },
+  { label: 'Chat',           icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} style={{ width: 15, height: 15 }}><path d="M8.625 12a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H8.25m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H12m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 0 1-2.555-.337A5.972 5.972 0 0 1 5.41 20.97a5.969 5.969 0 0 1-.474-.065 4.48 4.48 0 0 0 .978-2.025c.09-.457-.133-.901-.467-1.226C3.93 16.178 3 14.189 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25Z" strokeLinecap="round" strokeLinejoin="round" /></svg>, to: '/chat', color: '#60a5fa', accountTypes: COMMS_ACCOUNT_TYPES },
+  { label: 'Meetings',       icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} style={{ width: 15, height: 15 }}><path d="m15.75 10.5 4.72-4.72a.75.75 0 0 1 1.28.53v11.38a.75.75 0 0 1-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 0 0 2.25-2.25v-9a2.25 2.25 0 0 0-2.25-2.25h-9A2.25 2.25 0 0 0 2.25 7.5v9a2.25 2.25 0 0 0 2.25 2.25Z" strokeLinecap="round" strokeLinejoin="round" /></svg>, to: '/conference', color: '#4ade80', accountTypes: COMMS_ACCOUNT_TYPES },
+  { label: 'Documents',      icon: <FolderOpen size={14} strokeWidth={1.8} />, to: '/documents', color: '#fbbf24', accountTypes: COMMS_ACCOUNT_TYPES },
+  { label: 'Voicemail',      icon: <IconVoicemail size={15} />, to: '/voicemail', color: '#818cf8', accountTypes: COMMS_ACCOUNT_TYPES },
+];
+
+/* ─── Presence config ─────────────────────────────────────── */
+
+const PRESENCE_OPTIONS: { value: PresenceStatus; label: string; color: string }[] = [
+  { value: 'available', label: 'Available',      color: '#22c55e' },
+  { value: 'away',      label: 'Away',           color: '#f59e0b' },
+  { value: 'busy',      label: 'Busy',           color: '#ef4444' },
+  { value: 'dnd',       label: 'Do Not Disturb', color: '#ef4444' },
+  { value: 'offline',   label: 'Appear Offline', color: '#64748b' },
 ];
 
 /* ─── Documentation nav items ─────────────────────────────── */
@@ -326,9 +356,12 @@ interface SidebarNavItemProps {
   item: NavItemDef;
   onNavigate?: () => void;
   small?: boolean;
+  /** Unread count badge (UCaaS comms items). Hidden when 0/undefined. */
+  badge?: number;
+  badgeColor?: string;
 }
 
-function SidebarNavItem({ item, onNavigate, small }: SidebarNavItemProps) {
+function SidebarNavItem({ item, onNavigate, small, badge, badgeColor }: SidebarNavItemProps) {
   const location = useLocation();
   const customActive = item.isActiveFn ? item.isActiveFn(location.pathname) : undefined;
 
@@ -395,8 +428,28 @@ function SidebarNavItem({ item, onNavigate, small }: SidebarNavItemProps) {
             <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {item.label}
             </span>
-            {/* Active dot */}
-            {isActive && (
+            {/* Unread badge takes precedence over the active dot */}
+            {badge !== undefined && badge > 0 ? (
+              <span
+                style={{
+                  minWidth: 17,
+                  height: 17,
+                  borderRadius: 9,
+                  background: badgeColor ?? '#3b82f6',
+                  color: '#fff',
+                  fontSize: '0.575rem',
+                  fontWeight: 700,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  padding: '0 4px',
+                  flexShrink: 0,
+                  letterSpacing: '0.02em',
+                }}
+              >
+                {badge > 99 ? '99+' : badge}
+              </span>
+            ) : isActive ? (
               <span
                 style={{
                   width: 5,
@@ -407,7 +460,7 @@ function SidebarNavItem({ item, onNavigate, small }: SidebarNavItemProps) {
                   boxShadow: `0 0 6px ${item.color}`,
                 }}
               />
-            )}
+            ) : null}
           </>
         );
       }}
@@ -555,10 +608,12 @@ export function Sidebar() {
   // derived values, conditionals, or early returns — React tracks hooks by
   // call order and will throw error #310 if the count changes between renders.
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [showPresenceMenu, setShowPresenceMenu] = useState(false);
   const [groupOpen, setGroupOpen] = useState<Record<string, boolean>>(() => {
     const stored = loadGroupState();
     return {
       products:          stored.products          ?? true,
+      communications:    stored.communications    ?? true,
       comingSoon:        stored.comingSoon        ?? false,
       documentation:     stored.documentation     ?? true,
       administration:    stored.administration    ?? false,
@@ -567,40 +622,64 @@ export function Sidebar() {
   const navigate = useNavigate();
   const location = useLocation();
   const { user, isAuthenticated, isAdmin, isActualAdmin, customerViewMode, toggleCustomerView, logout } = useAuth();
+  // UCaaS context hooks — providers wrap the whole app, so these are always
+  // available (even when unauthenticated). Declared unconditionally at the top
+  // alongside the other hooks to satisfy the React rules-of-hooks (#310).
+  const { presence, setPresence, unreadVoicemailCount, credentials } = useSoftphone();
+  const { totalUnread: unreadChatCount } = useChat();
 
   /* ── Access flags ──────────────────────────────────────── */
 
   const isSupport = user?.role === 'readonly';
   const showAdmin = isAdmin || isSupport;
 
-  /* ── Product items filtered by role/account_type ───────── */
+  // UCaaS gating. RCF accounts are explicitly excluded: `account_type === 'rcf'`
+  // fails both clauses, so hasUcaas is always false for an RCF customer. This is
+  // the primary guard behind C-10 (RCF must see zero UCaaS surface).
+  const hasUcaas =
+    user?.account_type === 'ucaas' ||
+    (user?.account_type !== 'rcf' && user?.ucaas_enabled === true);
 
-  const productNavItems = allProductNavItems.filter((item) => {
+  /* ── Shared account-type predicate ─────────────────────── */
+
+  const passesAccountType = (item: NavItemDef): boolean => {
     if (isAdmin || isSupport) return true;
     if (item.adminOnly) return false;
     if (item.accountTypes && user?.account_type) {
       return item.accountTypes.includes(user.account_type);
     }
     return !item.accountTypes;
-  });
+  };
+
+  /* ── Product items filtered by role/account_type ───────── */
+
+  const productNavItems = allProductNavItems.filter(passesAccountType);
+
+  // Comms items are double-gated: the per-item accountTypes filter below, plus
+  // the `hasUcaas` group guard at render time. Both exclude `rcf`.
+  const commsNavItems = allCommsNavItems.filter(passesAccountType);
 
   // Auto-expand group when current route lives inside it
   useEffect(() => {
     const path = location.pathname;
 
     const productPaths = productNavItems.map((i) => i.to);
+    const commPaths    = ['/communications', '/chat', '/conference', '/documents', '/voicemail'];
     const adminPaths   = ['/admin', '/call-quality', '/admin/platform', '/troubleshooting'];
     const docPaths     = docNavItems.map((i) => i.to);
     const inProducts = productPaths.some((p) => path === p || path.startsWith(p + '/'));
+    const inComms    = commPaths.some((p) => path === p || path.startsWith(p + '/'));
     const inAdmin    = adminPaths.some((p) => path === p || path.startsWith(p + '/'));
     const inDocs     = docPaths.some((p) => path === p || path.startsWith(p + '/'));
 
     setGroupOpen((prev) => {
       const next = { ...prev };
       if (inProducts && !prev.products)       next.products       = true;
+      if (inComms    && !prev.communications) next.communications = true;
       if (inAdmin    && !prev.administration) next.administration = true;
       if (inDocs     && !prev.documentation)  next.documentation  = true;
       if (next.products       === prev.products &&
+          next.communications === prev.communications &&
           next.administration === prev.administration &&
           next.documentation  === prev.documentation) {
         return prev;
@@ -853,6 +932,53 @@ export function Sidebar() {
               ))}
             </CollapsibleGroup>
 
+            {/* ── GROUP 1.5: Communications (UCaaS only) ────── */}
+            {/* Gated on hasUcaas (false for rcf) AND every item is filtered by
+                accountTypes: ['ucaas','hybrid']. RCF → group never rendered. */}
+            {hasUcaas && commsNavItems.length > 0 && (
+              <>
+                <div style={{ height: 6 }} />
+                <CollapsibleGroup
+                  id="communications"
+                  label="Communications"
+                  icon={<MessageCircle size={11} strokeWidth={2.5} />}
+                  isOpen={groupOpen.communications}
+                  onToggle={toggleGroup}
+                >
+                  {commsNavItems.map((item) => {
+                    if (item.to === '/voicemail') {
+                      // Voicemail only appears once the user has a provisioned
+                      // WebRTC extension (credentials present).
+                      if (!credentials) return null;
+                      return (
+                        <SidebarNavItem
+                          key={item.to}
+                          item={item}
+                          onNavigate={closeMobile}
+                          small
+                          badge={unreadVoicemailCount}
+                          badgeColor="#ef4444"
+                        />
+                      );
+                    }
+                    if (item.to === '/chat') {
+                      return (
+                        <SidebarNavItem
+                          key={item.to}
+                          item={item}
+                          onNavigate={closeMobile}
+                          small
+                          badge={unreadChatCount}
+                          badgeColor="#3b82f6"
+                        />
+                      );
+                    }
+                    return <SidebarNavItem key={item.to} item={item} onNavigate={closeMobile} small />;
+                  })}
+                </CollapsibleGroup>
+              </>
+            )}
+
             {/* ── GROUP 2: Coming Soon ──────────────────────── */}
             <div style={{ height: 6 }} />
             <CollapsibleGroup
@@ -1051,7 +1177,7 @@ export function Sidebar() {
                     }
                   }}
                 >
-                  {/* Avatar */}
+                  {/* Avatar + presence dot (presence is UCaaS-only) */}
                   <div style={{ position: 'relative', flexShrink: 0 }}>
                     <div
                       style={{
@@ -1073,6 +1199,82 @@ export function Sidebar() {
                     >
                       {displayName.charAt(0) || '?'}
                     </div>
+
+                    {/* Presence indicator + status picker — only for UCaaS accounts */}
+                    {hasUcaas && (
+                      <button
+                        type="button"
+                        onClick={(e) => { e.preventDefault(); e.stopPropagation(); setShowPresenceMenu((v) => !v); }}
+                        aria-label="Change presence status"
+                        aria-haspopup="listbox"
+                        aria-expanded={showPresenceMenu}
+                        style={{
+                          position: 'absolute',
+                          bottom: -1,
+                          right: -1,
+                          background: 'transparent',
+                          border: 'none',
+                          padding: 0,
+                          cursor: 'pointer',
+                          display: 'flex',
+                        }}
+                      >
+                        <PresenceIndicator status={presence} size={9} />
+                      </button>
+                    )}
+
+                    {/* Presence dropdown */}
+                    {showPresenceMenu && hasUcaas && (
+                      <div
+                        style={{
+                          position: 'absolute',
+                          bottom: 36,
+                          left: 0,
+                          background: '#1e2435',
+                          border: '1px solid rgba(255,255,255,0.10)',
+                          borderRadius: 10,
+                          boxShadow: '0 -8px 24px rgba(0,0,0,0.6)',
+                          zIndex: 200,
+                          minWidth: 164,
+                          overflow: 'hidden',
+                        }}
+                        role="listbox"
+                        aria-label="Presence status"
+                      >
+                        {PRESENCE_OPTIONS.map((opt) => (
+                          <button
+                            key={opt.value}
+                            type="button"
+                            role="option"
+                            aria-selected={presence === opt.value}
+                            onClick={(e) => {
+                              e.preventDefault();
+                              void setPresence(opt.value);
+                              setShowPresenceMenu(false);
+                            }}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 8,
+                              width: '100%',
+                              padding: '8px 12px',
+                              background: presence === opt.value ? 'rgba(255,255,255,0.06)' : 'transparent',
+                              border: 'none',
+                              color: '#e2e8f0',
+                              fontSize: '0.8rem',
+                              cursor: 'pointer',
+                              textAlign: 'left',
+                              transition: 'background 0.12s',
+                            }}
+                            onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.08)'; }}
+                            onMouseLeave={(e) => { e.currentTarget.style.background = presence === opt.value ? 'rgba(255,255,255,0.06)' : 'transparent'; }}
+                          >
+                            <span style={{ width: 8, height: 8, borderRadius: '50%', background: opt.color, flexShrink: 0 }} />
+                            {opt.label}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
 
                   {/* Name + context label */}
