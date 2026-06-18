@@ -166,20 +166,20 @@ def test_api_esl_uses_freeswitch_esl_password_env():
     )
 
 
-@pytest.mark.xfail(
-    reason="Phase 4 tracked item: esl_client.py falls back to the well-known "
-           "default 'ClueCon' when FREESWITCH_ESL_PASSWORD is unset. CLAUDE.md "
-           "(freeswitch): 'Default is ClueCon (well-known). MUST be changed.' "
-           "This xfail flips to xpass when the insecure default is removed.",
-    strict=False,
-)
 def test_esl_password_has_no_insecure_default():
-    """Tracks the insecure ESL default. Currently FAILS (xfail) because the code
-    still defaults to 'ClueCon'; Phase 4 should remove the default so a missing
-    secret fails loudly instead of silently using a public password."""
+    """Phase 4 (DONE): the insecure ESL default 'ClueCon' was removed.
+
+    esl_client.py must read FREESWITCH_ESL_PASSWORD from env with NO fallback to
+    the well-known public default — a missing secret fails loudly instead of
+    silently authenticating with a password every FreeSWITCH ships with."""
     src = _read(ESL_PY)
     assert not re.search(r'getenv\(\s*"FREESWITCH_ESL_PASSWORD"\s*,\s*"ClueCon"', src), (
         "esl_client still defaults FREESWITCH_ESL_PASSWORD to 'ClueCon'"
+    )
+    # And no CODE path (ignoring docstrings/comments) may hardcode the default.
+    code = _strip_docs_and_comments(src)
+    assert '"ClueCon"' not in code and "'ClueCon'" not in code, (
+        "esl_client still references the insecure 'ClueCon' default in code"
     )
 
 

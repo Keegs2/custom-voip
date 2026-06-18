@@ -1,4 +1,4 @@
-# FreeSWITCH Configuration -- RCF-V1
+# FreeSWITCH Configuration -- Unified (RCF foundation + UCaaS)
 
 ## freeswitch.xml -- Master Configuration
 
@@ -41,8 +41,14 @@ Every configurable value follows the same pattern -- set a default, then overrid
 **API Server:**
 - `api_host`, `api_port` (8000) -- From `API_HOST`/`API_PORT` env vars
 
-**ESL:**
-- `esl_password` -- Default `ClueCon`, override via `ESL_PASSWORD` env var. CHANGE IN PRODUCTION.
+**ESL (Phase 4 — no ClueCon):**
+- `esl_password` -- exec-set from `ESL_PASSWORD`; dev fallback `fs_esl_dev_pw` (NEVER `ClueCon`). Consumed by `event_socket.conf.xml` as `$${esl_password}`. entrypoint.sh hard-fails on a literal `ClueCon`. CHANGE IN PRODUCTION.
+
+**WebRTC TLS (mod_verto):**
+- `verto_tls_pem` / `verto_tls_chain` -- exec-set from `VERTO_TLS_PEM`/`VERTO_TLS_CHAIN`; dev defaults are the self-signed `conf/tls/wss.pem` / `conf/tls/wss.crt`. Referenced by `verto.conf.xml` `secure-combined`/`secure-chain`.
+
+**Recording/voicemail storage (Phase 4 — shared spool):**
+- `recordings_dir=/media/spool/recordings` (was `/var/lib/freeswitch/recordings`). `voicemail.conf.xml` `storage-dir=/media/spool/voicemail/`. entrypoint.sh symlinks the in-image `/var/lib/freeswitch/{voicemail,recordings}` onto the spool. The API uploads both to object storage.
 
 **Codecs:**
 - `global_codec_prefs=PCMU,PCMA,G722,speex`
@@ -160,13 +166,14 @@ Loaded modules organized by purpose:
 | Logging | mod_console, mod_logfile | mod_syslog |
 | Codecs | mod_opus, mod_g729, mod_amr, mod_spandsp | (G.711 built-in) |
 | Dialplan | mod_dialplan_xml | mod_dialplan_asterisk |
-| Endpoints | mod_sofia, mod_loopback | mod_verto, mod_rtc |
+| Endpoints | mod_sofia, mod_loopback, mod_verto, mod_rtc | -- |
 | Scripting | mod_lua | mod_v8 |
-| HTTP/API | mod_event_socket, mod_xml_curl, mod_curl | mod_httapi, mod_http_cache |
+| HTTP/API | mod_event_socket, mod_xml_curl, mod_curl | mod_httapi, mod_http_cache (built, not loaded) |
 | CDR | mod_cdr_csv, mod_json_cdr | mod_cdr_sqlite, mod_cdr_pg_csv |
 | Audio | mod_tone_stream, mod_sndfile, mod_native_file, mod_shout, mod_say_en | mod_local_stream, mod_flite |
 | Database | mod_db, mod_hash | mod_odbc_query |
-| Disabled UCaaS | -- | mod_conference, mod_voicemail, mod_valet_parking, mod_av |
+| UCaaS (loaded) | mod_conference, mod_av, mod_voicemail, mod_valet_parking | -- |
+| UCaaS (built, not loaded) | -- | mod_callcenter, mod_spy |
 
 **Why mod_local_stream is disabled:** It requires `local_stream.conf.xml`. When xml_curl can't reach the API (startup or media VM), the missing config causes CRIT abort. RCF uses `silence_stream://` instead.
 
@@ -239,9 +246,15 @@ Retries: 2 (with 2s delay)
 
 Single file containing three contexts:
 
-### Context: `default` (registered users)
+### Context: `default` (registered users + UCaaS local features)
 
-For local Zoiper testing only. Contains:
+For registered UCaaS/Verto users and local testing. UCaaS local features (unified
+graft) fire ONLY for registered users dialing short/star codes — carrier RCF
+traffic uses E.164 in the `public` context and never matches them. Contains:
+- **local_extension** -- 2-6 digit dialing, multi-tenant (`verto.rtc/...|user/...`), voicemail on no-answer
+- **voicemail_check** -- `*97` (mod_voicemail check, storage on `/media/spool/voicemail`)
+- **conference_room / conference_room_pin** -- `*88<room>[P<pin>]` (mod_conference, `@video` profile, customer-namespaced rooms)
+- **valet_park / valet_unpark** -- `*58XX` / `*59XX` (mod_valet_parking)
 1. **test_rcf_did** -- `555XXXX` pattern transfers to public context for Lua routing
 2. **echo_test_default** -- `9196` echo test
 3. **default_outbound** -- PSTN calls from registered users. Normalizes to E.164, runs `lookup_user_did.lua` for caller ID, bridges via `sofia/external/dest@sbc_proxy_ip:5060` with X-Carrier header. Primary=primary (Dallas), failover=secondary (LA).
@@ -294,7 +307,7 @@ Static directory for local testing. Domain: `$${domain}` (voiceplatform.local).
 Three test extensions pre-configured:
 - 1001, 1002, 1003 -- password `test1234`
 - Context: `default`
-- Voicemail enabled (but mod_voicemail disabled in RCF-V1)
+- Voicemail enabled (mod_voicemail IS loaded on the unified image)
 
 The dial-string template uses `${sofia_contact(*/${dialed_user}@${dialed_domain})}` for reaching registered users.
 

@@ -370,13 +370,15 @@ UCaaS conference uses.
 
 **2026-06-18 — Phase 3 verified live:** fresh init 01→22 clean (pgcrypto + customers.webhook_signing_secret 64-hex for cust 1/5); lib/xml.lua + lib/hmac_sha256.lua + api_voice.lua load in real mod_lua; HMAC KAT byte-identical Lua↔Python (+Lu6H/...); shell-injection neutralized (shq adversarial test). New env: WEBHOOK_HTTP_TIMEOUT, WEBHOOK_MAX_ATTEMPTS, WEBHOOK_BACKOFF_MS, WEBHOOK_ALLOW_HTTP.
 
+**2026-06-18 — Phase 4 verified live:** fresh init 01→23 clean; MinIO buckets auto-created (recordings/voicemail/uploads); presigned put→GET round-trip; coturn up (realm voip.local); FS entrypoint runs (spool symlinks + loopback), ESL=fs_esl_dev_pw works & ClueCon REJECTED, verto ws:8082/wss:8083 RUNNING, no CRIT; API healthy; webrtc creds mint coturn HMAC-SHA1 TURN creds; voicemail/ingest JWT-exempt (200); 2 IDOR holes (api_dids+ivr) fixed, 18 cross-tenant attempts denied; uploads reject 415/413. New infra: minio+coturn services, media_spool volume, STORAGE_*/TURN_* env.
+
 ## Progress Tracker
 
 - [x] Phase 0 — Safety Net & RCF Characterization  ✅ 34 char tests + 40 lessons guards + 33 TwiML fixtures, all green & PM-verified
 - [x] Phase 1 — UNIFY: restore UCaaS onto RCF-V1  ✅ 55 files restored + grafted; hardening intact (43 char + 40 guards green); ucaas branch activated + bug fixed; RCF gated. Deferred to live env: postgres init dry-run, FS image build, live call test
 - [x] Phase 2 — Lua Refactor (behavior-preserving)  ✅ inbound_router 1071→500 (thin dispatcher); handlers/{rcf,trunk,ucaas} + lib/{dialstring,caller_id,session_timer,sbc} extracted; 66 char tests + 40 guards green; guards re-targeted structure-flexibly; outbound_api kept (live via ESL)
 - [x] Phase 3 — Harden Programmable-Voice Engine  ✅ real pure-Lua XML parser (9 known-bugs fixed) + HMAC-SHA256 webhook signing (KAT byte-identical Lua↔Python) + HTTPS enforce + record-warning + robust fetch; injection-safe curl transport (adversarially verified); 80 twiml/66 lua/51 lessons+signing green; live mod_lua + init-22 verified
-- [ ] Phase 4 — Harden Restored UCaaS Features
+- [x] Phase 4 — Harden Restored UCaaS Features  ✅ S3-compatible object storage (MinIO/GCS) for vm+recordings+uploads; coturn TURN + env-driven WebRTC TLS; upload security (type/size/sanitize/AV-hook); ESL ClueCon KILLED (entrypoint hard-fails); 2 critical IDOR holes fixed (api_dids+ivr) + 22-assert tenant-isolation suite; CLAUDE.md docs refreshed
 - [ ] Phase 5 — ESL Control Plane (switchio)
 - [ ] Phase 6 — Media Plane + Record/Stream + Recording
 - [ ] Phase 7 — Net-New TwiML Verbs

@@ -9,8 +9,10 @@
   - Execute dialplan actions
   - Collect real-time statistics
 
-  Password should be set via environment variable in production:
-  ${ESL_PASSWORD:-DefaultChangeMe2024}
+  Password (Phase 4 — no ClueCon): the <param name="password"> below reads the
+  $${esl_password} global, which freeswitch.xml templates from the ESL_PASSWORD
+  env var via X-PRE-PROCESS exec-set at parse time (dev fallback fs_esl_dev_pw,
+  NEVER ClueCon). entrypoint.sh additionally hard-fails on a literal "ClueCon".
 -->
 <configuration name="event_socket.conf" description="Event Socket">
   <settings>
@@ -22,13 +24,8 @@
     <param name="listen-ip" value="0.0.0.0"/>
     <param name="listen-port" value="8021"/>
 
-    <!--
-      SECURITY: Change this password in production!
-      Use environment variable: ${ESL_PASSWORD}
-      Or mount a secrets file
-
-      The default "ClueCon" password is well-known and DANGEROUS
-    -->
+    <!-- Env-driven (see header). SECURITY: set a strong ESL_PASSWORD in .env
+         for production. The well-known "ClueCon" default is refused at startup. -->
     <param name="password" value="$${esl_password}"/>
 
     <!-- ACL for network-level access control -->

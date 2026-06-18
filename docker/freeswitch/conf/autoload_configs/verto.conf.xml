@@ -36,11 +36,13 @@
       <param name="bind-local" value="$${local_ip_v4}:8082"/>
       <param name="bind-local" value="$${local_ip_v4}:8083" secure="true"/>
 
-      <!-- TLS certificate configuration -->
-      <!-- Combined PEM file: certificate + private key concatenated -->
-      <param name="secure-combined" value="/usr/local/freeswitch/conf/tls/wss.pem"/>
-      <!-- Chain file (same as cert for self-signed) -->
-      <param name="secure-chain" value="/usr/local/freeswitch/conf/tls/agent.crt"/>
+      <!-- TLS certificate configuration (env-driven via freeswitch.xml globals).
+           Combined PEM = certificate + private key concatenated ($${verto_tls_pem}).
+           Chain = cert/CA chain ($${verto_tls_chain}). Dev defaults are the
+           self-signed pair under conf/tls/ (wss.pem / wss.crt). PRODUCTION:
+           mount CA-issued certs and set VERTO_TLS_PEM / VERTO_TLS_CHAIN. -->
+      <param name="secure-combined" value="$${verto_tls_pem}"/>
+      <param name="secure-chain" value="$${verto_tls_chain}"/>
 
       <!--
         Multi-tenant: Do NOT force a single registration domain.

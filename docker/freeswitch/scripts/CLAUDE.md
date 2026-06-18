@@ -1,8 +1,24 @@
-# FreeSWITCH Lua Scripts -- RCF-V1
+# FreeSWITCH Lua Scripts -- Unified (RCF foundation + UCaaS)
 
 ## Overview
 
 All call routing logic lives in Lua scripts executed by mod_lua. FreeSWITCH's XML dialplan sets variables and delegates to Lua for dynamic routing decisions. Scripts query PostgreSQL (via luasql-postgres) and optionally Redis (via redis-lua) for DID lookups, customer validation, rate limiting, and fraud prevention.
+
+**Phase 2 refactor (behavior-preserving):** `inbound_router.lua` is now a **thin
+dispatcher** (~500 lines, down from ~1071). It resolves the DID and dispatches to
+a per-product handler. Product logic lives in `handlers/{rcf,trunk,ucaas,api_voice}.lua`;
+shared primitives live in `lib/{e164,caller_id,dialstring,session_timer,sbc,xml,hmac_sha256,vm_notify}.lua`.
+Zero behavior change for the RCF/trunk/API SIP paths is proven against the Phase 0
+golden baseline and the `tests/lua/spec` characterization suite (66 tests).
+
+**Phase 3 (programmable voice):** the TwiML engine `voice_webhook.lua` was RENAMED
+to `handlers/api_voice.lua`, its fragile regex XML parser was replaced with a real
+pure-Lua parser (`lib/xml.lua`), and every customer webhook is signed with
+HMAC-SHA256 (`X-Revup-Signature`, `lib/hmac_sha256.lua`).
+
+**Phase 4 (UCaaS hardening):** voicemail/recordings write to the shared
+`/media/spool` volume; `handlers/ucaas.lua` POSTs deposit metadata to the API via
+`lib/vm_notify.lua`.
 
 ## Critical: mod_lua Module Loading Workaround
 
@@ -45,24 +61,29 @@ Dialplan public context matches destination_number pattern
   |-- inbound_handler: if destination matches ^(\+?1?\d{10,15})$ -> inbound_router.lua
   |
   v
-inbound_router.lua executes:
+inbound_router.lua (THIN DISPATCHER) executes:
   1. Extract call details (DID, caller ID, source IP)
   2. Preserve original caller ID from sip_from_user (before FS modifies it)
-  3. Normalize DID to E.164 (+1XXXXXXXXXX)
+  3. Normalize DID to E.164 via lib/e164.lua (+1XXXXXXXXXX)
   4. DID lookup cascade (PostgreSQL only — the Redis route cache, fraud
      prefix check, and velocity limiting were REMOVED in RCF-V1; old code
      is in git history, re-adding needs a synchronous Redis client):
      a. RCF: PostgreSQL (rcf_numbers JOIN customers)
      b. API DID: PostgreSQL (api_dids JOIN customers)
      c. Trunk DID: PostgreSQL (trunk_dids JOIN sip_trunks JOIN customers)
+     d. UCaaS extension: PostgreSQL (extensions.assigned_did)  ← restored
   5. If no match -> UNALLOCATED_NUMBER (SIP 404)
   6. Set channel variables: customer_id, product_type, traffic_grade, trunk_id
-  7. Route based on product_type:
+  7. Build a routing context (ctx) and dispatch to the matching handler:
      |
-     |-- "rcf" -> Bridge to forward_to number via carrier
-     |-- "api" -> Answer, then execute voice_webhook.lua
-     |-- "trunk" -> Bridge to customer PBX via Kamailio
+     |-- "rcf"   -> handlers/rcf.lua    (4-attempt SBC/carrier failover bridge)
+     |-- "api"   -> handlers/api_voice.lua (TwiML engine; answer + execute)
+     |-- "trunk" -> handlers/trunk.lua  (bridge to customer PBX via Kamailio)
+     |-- "ucaas" -> handlers/ucaas.lua  (DID -> extension -> voicemail fallback)
 ```
+
+The dispatcher loads each handler with the same `loadfile()` pattern as `lib/`
+modules (rooted at `scripts/handlers/`); each handler returns a `function(ctx)`.
 
 ### RCF Bridge Details
 
@@ -186,40 +207,75 @@ Call flow:
 4. [If Redis] CPS check with API tier limits (25/50/100+ CPS via redis_cps)
 5. Get per-call fee from tier (starter=$0.01, professional=$0.008, enterprise=$0.005)
 6. [If Redis] Velocity check with higher API limits (300 CPM, 5000 daily)
-7. If webhook_url set: hand off to voice_webhook.lua (TwiML engine)
+7. If webhook_url set: hand off to handlers/api_voice.lua (TwiML engine)
 8. If no webhook: bridge via `sofia/external/dest@sbc_proxy_ip:5060` with X-Carrier=primary
 9. Failover with X-Carrier=secondary
 
 ### outbound_api.lua
 
-**Legacy/alternative outbound API handler.** Similar to api_outbound.lua but simpler:
-- Uses `require()` instead of `loadfile()` (may fail due to mod_lua path issue)
-- No tier-aware CPS checking
-- Supports webhook handoff to voice_webhook.lua
-- Falls back to simple bridge
+**LIVE — ESL-originate outbound API handler.** Reached from the `outbound_api`
+dialplan extension when the API originates a call via ESL (`outbound_api=true`).
+Kept (not deleted) because it is on the live ESL path. Simpler than
+api_outbound.lua: no tier-aware CPS, supports webhook handoff to
+`handlers/api_voice.lua`, falls back to a simple bridge. Loads `redis_client`
+fail-open.
 
-### voice_webhook.lua
+### handlers/api_voice.lua  (was voice_webhook.lua)
 
-**TwiML-compatible XML execution engine** for API calling product.
+**TwiML-compatible XML execution engine** for the API Calling / IVR products.
+Renamed from `voice_webhook.lua` in Phase 2; hardened in Phase 3.
 
 Supports these verbs: Say, Play, Gather, Dial, Hangup, Pause, Redirect, Reject.
 
 Flow:
 1. Build payload from session variables (caller, destination, customer_id, direction)
-2. HTTP POST to customer's voice_url with call details (form-encoded)
-3. Parse XML response (custom parser, not libxml -- handles `<Response>` root with verb children)
-4. Execute verbs sequentially:
-   - `<Say>` -- Text-to-speech (mod_say_en or tone fallback)
-   - `<Play>` -- Audio file playback (URL or local file)
-   - `<Gather>` -- DTMF collection with nested Say/Play prompts; posts digits to action URL
-   - `<Dial>` -- Bridge to number via external profile + Kamailio
-   - `<Hangup>` -- End call
-   - `<Pause>` -- Sleep
-   - `<Redirect>` -- Fetch new instructions from URL (up to 10 depth)
-   - `<Reject>` -- Reject with reason
-5. POST to status_callback URL when call ends
+2. **Signed HTTP POST** to the customer's voice_url with call details. Every
+   request carries an `X-Revup-Signature: sha256=<hmac>` header computed by
+   `lib/hmac_sha256.lua` over the URL + sorted params, keyed by the per-customer
+   `customers.webhook_signing_secret`. KAT-verified byte-identical to the
+   Python verifier. HTTPS is enforced (set `WEBHOOK_ALLOW_HTTP=true` to permit
+   `http://` in dev).
+3. **Parse the XML response with `lib/xml.lua`** — a real pure-Lua parser that
+   decodes entities, handles escaped quotes/CDATA and arbitrary nesting, and
+   rejects malformed input loudly (replaces the old fragile/ReDoS-prone regex
+   parser).
+4. Execute verbs sequentially (Say/Play/Gather/Dial/Hangup/Pause/Redirect/Reject;
+   Gather/Redirect may recurse up to depth 10).
+5. POST to the status_callback URL when the call ends.
 
-Uses `session:execute("curl", ...)` for HTTP requests with 5s timeout. Supports relative URL resolution against base voice_url.
+**Transport:** system `curl` via `io.popen` with injection-safe single-quote
+shell quoting (mod_curl cannot set the custom signature header). Env-tunable:
+`WEBHOOK_HTTP_TIMEOUT` (default 5s), `WEBHOOK_MAX_ATTEMPTS` (3), `WEBHOOK_BACKOFF_MS`
+(200, doubles per retry), `WEBHOOK_ALLOW_HTTP` (dev only).
+
+### handlers/rcf.lua
+
+The `product_type == "rcf"` branch extracted from the old monolithic router.
+Owns the RCF PSTN bridge: caller-ID/Diversion/PAI setup, ringback, and the
+**4-attempt SBC + carrier failover loop** with the cached TCP reachability
+pre-check. See "RCF Bridge Details" above (that logic now lives here). Uses
+lib/dialstring, lib/caller_id, lib/session_timer, lib/sbc.
+
+### handlers/trunk.lua
+
+The `product_type == "trunk"` inbound branch — bridges an inbound trunk DID to
+the customer PBX endpoints (`trunk_auth_ips`). (Outbound trunk origination stays
+in `trunk_outbound.lua`.)
+
+### handlers/ucaas.lua
+
+The `product_type == "ucaas"` branch: an inbound DID that resolves only to a
+UCaaS extension (`extensions.assigned_did`) bridges to that extension via
+`verto.rtc/<ext>@customer_<id>...|user/<ext>@customer_<id>...` (Verto first, SIP
+fallback) on the customer-scoped domain. Bridge success is decided by
+`originate_disposition == "SUCCESS"` (the real FS var — `bridge_result` is NOT a
+channel var; using it would drop answered calls to voicemail). On failure/no-answer
+it records a voicemail (tones + `record` app) to
+`/var/lib/freeswitch/voicemail/<domain>/<ext>/` — which entrypoint.sh symlinks
+onto `/media/spool/voicemail` (shared storage). It then POSTs deposit metadata
+(extension, customer_id, caller, duration, spool storage_path) to the API
+`POST /v1/voicemail/ingest` via `lib/vm_notify.lua` — fire-and-forget, fail-open,
+and skipped cleanly when `API_HOST` is unset (e.g. the Lua unit harness).
 
 ### lookup_user_did.lua
 
@@ -227,9 +283,10 @@ Uses `session:execute("curl", ...)` for HTTP requests with 5s timeout. Supports 
 
 Queries `extensions.assigned_did` for the calling extension number. Sets `effective_caller_id_number` to the user's DID so the carrier receives a valid number instead of "1001". Falls back to platform default DID `+17743260301`.
 
-### xml_handler.lua
+### xml_handler.lua — DELETED
 
-**Dynamic dialplan generator.** Called by FreeSWITCH when looking up dialplan (if configured). Returns a basic XML dialplan that routes everything to `inbound_router.lua`. This is a fallback mechanism; the static dialplan in `public.xml` is the primary routing path.
+Removed in Phase 2 (was an unused dynamic-dialplan generator; the static
+`public.xml` is the only routing path). `grep` confirms no references remain.
 
 ### channel_release.lua
 
@@ -336,6 +393,19 @@ Trunk max CPS hard cap: 10. Must upgrade to API for higher.
 | `record_call(account_id, type)` | Records a call for CPS tracking without checking limits. |
 
 **Has its own Redis connection** (separate from redis_client.lua). Both maintain independent connection state.
+
+### Phase 2/3/4 shared libraries (loaded via `loadfile()`)
+
+| Module | Purpose |
+|---|---|
+| `lib/e164.lua` | Single source of truth for E.164 normalization (`normalize_did`, `to_10digit`). Replaced the inline copies duplicated across the old monolith. |
+| `lib/caller_id.lua` | FusionPBX-style caller-ID/Diversion/PAI/Remote-Party-ID setup for outbound bridges. |
+| `lib/dialstring.lua` | Builds the `sofia/external/<dest>@<sbc>:5060` dial strings + `{...}` channel-var prefixes (session timers, SOA, X-Carrier). |
+| `lib/session_timer.lua` | RFC 4028 session-timer channel vars (`sip_session_timeout=1800`, `min=90`), exported to the B-leg. |
+| `lib/sbc.lua` | Cached TCP reachability pre-check (`sbc_tcp_probe`/`is_sbc_reachable`, 30s up / 10s down cache via FS globals) + the SBC/carrier failover attempt ordering. Fails open (WARNING) if luasocket is unavailable. |
+| `lib/xml.lua` | **Real pure-Lua XML parser** for the TwiML engine (Phase 3). Decodes entities, escaped quotes, CDATA, arbitrary nesting; rejects malformed loudly. Replaced the regex parser (closed the ReDoS risk). |
+| `lib/hmac_sha256.lua` | Pure-Lua HMAC-SHA256 for webhook signing (`X-Revup-Signature`). KAT byte-identical to the API's Python verifier. |
+| `lib/vm_notify.lua` | POSTs voicemail-deposit metadata to the API `POST /v1/voicemail/ingest` (system curl via io.popen, injection-safe quoting, fail-open). Skipped when `API_HOST` is unset. Env: `VM_NOTIFY_TIMEOUT` (default 5s). |
 
 ---
 

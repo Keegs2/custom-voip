@@ -50,6 +50,11 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
         if path.endswith("/cdrs/ingest") or path.endswith("/cdrs/ingest/bulk"):
             return await call_next(request)
 
+        # Exempt the voicemail deposit ingest (FreeSWITCH lib/vm_notify.lua POSTs
+        # unauthenticated over the Docker network, same pattern as CDR ingest).
+        if path.endswith("/voicemail/ingest"):
+            return await call_next(request)
+
         # WebSocket connections authenticate via query param, not header
         if path.startswith("/ws/"):
             return await call_next(request)

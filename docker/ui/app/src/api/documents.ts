@@ -1,4 +1,5 @@
 import { apiRequest } from './client';
+import { validateUpload, DOCUMENT_UPLOAD_CONSTRAINTS } from '../lib/uploadValidation';
 import type {
   DocumentFolder,
   SharedDocument,
@@ -67,6 +68,13 @@ export async function uploadDocument(
   options: { folder_id?: number | null; description?: string; tags?: string[] } = {},
   onProgress?: (pct: number) => void,
 ): Promise<SharedDocument> {
+  // Client-side guard mirroring the server (documents.py): reject oversized or
+  // disallowed files before opening the request. The server still re-validates.
+  const validation = validateUpload(file, DOCUMENT_UPLOAD_CONSTRAINTS);
+  if (!validation.ok) {
+    return Promise.reject(new Error(validation.error));
+  }
+
   const token = localStorage.getItem('auth_token');
   const formData = new FormData();
   formData.append('file', file);

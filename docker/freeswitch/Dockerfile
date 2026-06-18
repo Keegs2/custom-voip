@@ -286,12 +286,17 @@ COPY --from=builder /usr/local/share/lua /usr/local/share/lua
 # Update library cache
 RUN ldconfig
 
-# Create necessary directories
+# Create necessary directories.
+# /var/lib/freeswitch/{voicemail,recordings} are symlinked onto the shared
+# /media/spool volume at runtime by entrypoint.sh (Phase 4 storage handoff);
+# they are created here so the image is valid even when run without the volume.
 RUN mkdir -p /var/log/freeswitch/cdr-csv \
     && mkdir -p /var/lib/freeswitch/recordings \
     && mkdir -p /var/lib/freeswitch/storage \
     && mkdir -p /var/lib/freeswitch/db \
     && mkdir -p /var/lib/freeswitch/voicemail \
+    && mkdir -p /media/spool/voicemail \
+    && mkdir -p /media/spool/recordings \
     && mkdir -p /usr/local/freeswitch/scripts/lib \
     && mkdir -p /usr/local/freeswitch/conf/tls \
     && mkdir -p /etc/freeswitch
@@ -351,11 +356,16 @@ EXPOSE 16384-49151/udp
 COPY entrypoint.sh /usr/local/freeswitch/entrypoint.sh
 RUN chmod +x /usr/local/freeswitch/entrypoint.sh
 
-# Start FreeSWITCH via entrypoint (adds loopback IP, then exec's freeswitch).
-# Must specify all of: -conf, -log, -db together.
+# Start FreeSWITCH via entrypoint.sh, which performs three repo-encoded host
+# config steps then `exec`s the freeswitch binary as PID 1:
+#   1. add the public IP to loopback (GCE hairpin NAT fix),
+#   2. refuse the well-known ClueCon ESL password (Phase 4),
+#   3. symlink voicemail/recordings onto the shared /media/spool volume (Phase 4).
+# The CMD below is passed through to freeswitch via `exec "$@"`.
+#
 # CRITICAL: Do NOT use -nonat here. The -nonat flag disables ext-rtp-ip and
 # ext-sip-ip processing, causing SDP to contain Docker internal IPs (172.28.x.x)
 # instead of the public IP. Bandwidth would send RTP to an unreachable address.
 # NAT traversal via ext-rtp-ip/ext-sip-ip is essential in Docker environments.
-ENTRYPOINT ["/usr/local/freeswitch/bin/freeswitch"]
+ENTRYPOINT ["/usr/local/freeswitch/entrypoint.sh"]
 CMD ["-nf", "-conf", "/usr/local/freeswitch/conf", "-log", "/var/log/freeswitch", "-db", "/var/lib/freeswitch/db", "-scripts", "/usr/local/freeswitch/scripts"]

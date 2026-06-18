@@ -12,12 +12,16 @@ from typing import Optional, List
 
 import orjson
 from fastapi import APIRouter, HTTPException, Depends, Query, UploadFile, File
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel, field_validator
 
 from db import database as db
 from db.redis_client import get_client
 from auth.dependencies import get_current_user
+from services import storage
+from services.upload_security import (
+    validate_upload, UploadRejected, CHAT_MAX_FILE_SIZE,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +29,7 @@ router = APIRouter()
 
 CHAT_EVENTS_CHANNEL = "chat:events"
 CHAT_TYPING_CHANNEL = "chat:typing"
-UPLOAD_ROOT = "/data/chat-uploads"
+ATTACHMENT_URL_TTL = int(os.getenv("CHAT_ATTACHMENT_URL_TTL", "3600"))
 
 
 # ---------------------------------------------------------------------------
@@ -741,19 +745,36 @@ async def upload_file(
     # For storage path, use the conversation's customer_id (always non-null)
     storage_customer_id = conv["customer_id"]
 
-    # Build storage path
-    file_uuid = uuid.uuid4().hex
-    safe_filename = file.filename or "upload"
-    storage_dir = os.path.join(UPLOAD_ROOT, str(storage_customer_id))
-    os.makedirs(storage_dir, exist_ok=True)
-    stored_name = f"{file_uuid}_{safe_filename}"
-    storage_path = os.path.join(storage_dir, stored_name)
-
-    # Write file to disk
+    # Read + run the upload-security gate: size limit, content-type allowlist,
+    # filename sanitisation (no path traversal), and the pluggable AV scan.
     contents = await file.read()
     file_size = len(contents)
-    with open(storage_path, "wb") as f:
-        f.write(contents)
+    try:
+        safe_filename = validate_upload(
+            content_type=file.content_type,
+            size=file_size,
+            max_size=CHAT_MAX_FILE_SIZE,
+            data=contents,
+            filename=file.filename,
+        )
+    except UploadRejected as e:
+        raise HTTPException(status_code=e.status_code, detail=e.detail)
+
+    # Tenant-scoped object key in the voip-uploads bucket.
+    file_uuid = uuid.uuid4().hex
+    object_key = storage.tenant_key(
+        int(storage_customer_id), "chat", str(conversation_id),
+        f"{file_uuid}_{safe_filename}",
+    )
+    try:
+        storage.put_file(
+            storage.BUCKET_UPLOADS, object_key, contents,
+            file.content_type or "application/octet-stream",
+        )
+    except storage.StorageError:
+        logger.exception("Chat upload storage failure for conv %s", conversation_id)
+        raise HTTPException(status_code=503, detail="Storage temporarily unavailable")
+    storage_path = object_key
 
     # If no message_id provided, create a file/image message automatically
     if message_id is None:
@@ -806,11 +827,24 @@ async def serve_file(attachment_id: int, user: dict = Depends(get_current_user))
 
     await _verify_participant(row["conversation_id"], user_id)
 
-    if not os.path.isfile(row["storage_path"]):
-        raise HTTPException(status_code=404, detail="File not found on disk")
+    path = row["storage_path"]
 
-    return FileResponse(
-        path=row["storage_path"],
-        filename=row["filename"],
-        media_type=row["mime_type"] or "application/octet-stream",
-    )
+    # Legacy rows stored an on-disk path; serve directly if present.
+    if path and path.startswith("/"):
+        if not os.path.isfile(path):
+            raise HTTPException(status_code=404, detail="File not found on disk")
+        return FileResponse(
+            path=path,
+            filename=row["filename"],
+            media_type=row["mime_type"] or "application/octet-stream",
+        )
+
+    # Object-storage key: redirect to a short-lived presigned URL.
+    try:
+        url = storage.presigned_get_url(
+            storage.BUCKET_UPLOADS, path, ttl=ATTACHMENT_URL_TTL
+        )
+    except storage.StorageError:
+        logger.exception("Failed to presign chat attachment %s", attachment_id)
+        raise HTTPException(status_code=503, detail="Storage temporarily unavailable")
+    return RedirectResponse(url=url, status_code=307)

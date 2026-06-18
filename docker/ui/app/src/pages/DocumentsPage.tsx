@@ -55,6 +55,11 @@ import {
   deleteDocument,
   getDocumentStats,
 } from '../api/documents';
+import {
+  validateUpload,
+  DOCUMENT_UPLOAD_CONSTRAINTS,
+  MAX_DOCUMENT_SIZE_BYTES,
+} from '../lib/uploadValidation';
 // Auth enforced by RequireAuth route wrapper
 import type {
   DocumentFolder,
@@ -1010,7 +1015,7 @@ function DropZone({ onFiles }: DropZoneProps) {
           Drop files here or <span style={{ color: '#60a5fa' }}>browse</span>
         </div>
         <div style={{ fontSize: '0.78rem', color: '#334155' }}>
-          Any file type · Multiple files supported
+          Up to {Math.round(MAX_DOCUMENT_SIZE_BYTES / (1024 * 1024))} MB per file · Multiple files supported
         </div>
       </div>
       <input ref={inputRef} type="file" multiple style={{ display: 'none' }} onChange={handleChange} />
@@ -1476,15 +1481,23 @@ export function DocumentsPage() {
   /* ── Upload ─────────────────────────────────────────────── */
 
   const handleFiles = useCallback(async (files: File[]) => {
-    const entries: UploadProgress[] = files.map((f) => ({
-      file: f, progress: 0, status: 'pending',
-    }));
+    // Validate every file up front. Invalid files enter the queue already in the
+    // 'error' state with a clear message and are never sent to the server — this
+    // is the inline, before-upload UX guard (the server still re-validates).
+    const entries: UploadProgress[] = files.map((f) => {
+      const validation = validateUpload(f, DOCUMENT_UPLOAD_CONSTRAINTS);
+      return validation.ok
+        ? { file: f, progress: 0, status: 'pending' as const }
+        : { file: f, progress: 0, status: 'error' as const, error: validation.error };
+    });
     setUploadQueue((prev) => [...prev, ...entries]);
     const startIndex = uploadQueue.length;
 
     await Promise.all(
       files.map(async (file, i) => {
         const queueIndex = startIndex + i;
+        // Skip files that failed client-side validation — already marked 'error'.
+        if (entries[i].status === 'error') return;
         setUploadQueue((prev) => {
           const next = [...prev];
           next[queueIndex] = { ...next[queueIndex], status: 'uploading', progress: 0 };

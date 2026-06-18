@@ -1,4 +1,5 @@
 import { apiRequest } from './client';
+import { validateUpload, CHAT_ATTACHMENT_CONSTRAINTS } from '../lib/uploadValidation';
 import type { Attachment, Conversation, Message } from '../types/chat';
 
 /**
@@ -108,6 +109,13 @@ export async function getUnreadCount(): Promise<number> {
  * Upload a file attachment. Returns the stored Attachment record with a URL.
  */
 export async function uploadFile(file: File): Promise<Attachment> {
+  // Client-side guard mirroring the server: reject oversized or disallowed
+  // attachments before sending. The server remains the source of truth.
+  const validation = validateUpload(file, CHAT_ATTACHMENT_CONSTRAINTS);
+  if (!validation.ok) {
+    throw new Error(validation.error);
+  }
+
   const token = localStorage.getItem('auth_token');
   const formData = new FormData();
   formData.append('file', file);

@@ -110,11 +110,16 @@
   <X-PRE-PROCESS cmd="exec-set" data="api_port=echo ${API_PORT:-8000}"/>
 
   <!-- ============================================ -->
-  <!-- EVENT SOCKET PASSWORD                       -->
+  <!-- EVENT SOCKET PASSWORD (Phase 4 — no ClueCon) -->
   <!-- ============================================ -->
-  <!-- SECURITY: Change this in production! -->
-  <X-PRE-PROCESS cmd="set" data="esl_password=ClueCon"/>
-  <X-PRE-PROCESS cmd="exec-set" data="esl_password=echo ${ESL_PASSWORD:-ClueCon}"/>
+  <!-- Env-templated at parse time via exec-set: event_socket.conf.xml reads
+       $${esl_password}. The well-known public default "ClueCon" is NOT used
+       anywhere — the dev fallback is fs_esl_dev_pw (matches docker-compose and
+       the API's FREESWITCH_ESL_PASSWORD). entrypoint.sh additionally HARD-FAILS
+       if ESL_PASSWORD is literally "ClueCon". SECURITY: set a strong
+       ESL_PASSWORD in .env for production. -->
+  <X-PRE-PROCESS cmd="set" data="esl_password=fs_esl_dev_pw"/>
+  <X-PRE-PROCESS cmd="exec-set" data="esl_password=echo ${ESL_PASSWORD:-fs_esl_dev_pw}"/>
 
   <!-- ============================================ -->
   <!-- CODEC PREFERENCES                           -->
@@ -127,10 +132,24 @@
   <!-- ============================================ -->
   <X-PRE-PROCESS cmd="set" data="tls_cert_dir=/etc/freeswitch/tls"/>
 
+  <!-- WebRTC (mod_verto WSS) TLS material. Env-driven so production can mount
+       CA-issued certs and point at them without editing verto.conf.xml. Dev
+       default = the self-signed pair under conf/tls/ (wss.pem = cert+key,
+       wss.crt = cert/chain). PRODUCTION: mount real certs and set
+       VERTO_TLS_PEM (cert+privkey concatenated) and VERTO_TLS_CHAIN. -->
+  <X-PRE-PROCESS cmd="set" data="verto_tls_pem=/usr/local/freeswitch/conf/tls/wss.pem"/>
+  <X-PRE-PROCESS cmd="exec-set" data="verto_tls_pem=echo ${VERTO_TLS_PEM:-/usr/local/freeswitch/conf/tls/wss.pem}"/>
+  <X-PRE-PROCESS cmd="set" data="verto_tls_chain=/usr/local/freeswitch/conf/tls/wss.crt"/>
+  <X-PRE-PROCESS cmd="exec-set" data="verto_tls_chain=echo ${VERTO_TLS_CHAIN:-/usr/local/freeswitch/conf/tls/wss.crt}"/>
+
   <!-- ============================================ -->
   <!-- RECORDING CONFIGURATION                     -->
   <!-- ============================================ -->
-  <X-PRE-PROCESS cmd="set" data="recordings_dir=/var/lib/freeswitch/recordings"/>
+  <!-- Recordings (conference + future standalone) write to the shared
+       /media/spool volume so the API can upload them to object storage and any
+       media node can serve them (Phase 4 HA storage). The in-image path
+       /var/lib/freeswitch/recordings is symlinked onto this by entrypoint.sh. -->
+  <X-PRE-PROCESS cmd="set" data="recordings_dir=/media/spool/recordings"/>
 
   <!-- ============================================ -->
   <!-- DEFAULT TIMEOUTS                            -->

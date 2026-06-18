@@ -141,6 +141,38 @@ return function(ctx)
             freeswitch.consoleLog("INFO", string.format(
                 "[%s] Voicemail recorded: %s\n", uuid, vm_file
             ))
+
+            -- Notify the API so it uploads the spooled WAV to object storage and
+            -- creates the voicemails row. vm_file lives under
+            -- /var/lib/freeswitch/voicemail, which entrypoint.sh symlinks onto
+            -- the shared /media/spool volume — send the API the spool path it
+            -- reads from its own mount. Fire-and-forget, fully fail-open: a
+            -- notify failure never affects the call (the file is already on the
+            -- shared spool). Skipped cleanly when API_HOST is unset (unit harness).
+            if os.getenv("API_HOST") then
+                local notify_chunk = loadfile(
+                    "/usr/local/freeswitch/scripts/lib/vm_notify.lua")
+                if notify_chunk then
+                    local okmod, vm_notify = pcall(notify_chunk)
+                    if okmod and vm_notify then
+                        local spool_path = vm_file:gsub(
+                            "^/var/lib/freeswitch/voicemail", "/media/spool/voicemail")
+                        local dur_ms = tonumber(ctx.get_var("record_ms", ""))
+                        if not dur_ms then
+                            local secs = tonumber(ctx.get_var("record_seconds", ""))
+                            if secs then dur_ms = secs * 1000 end
+                        end
+                        pcall(vm_notify.notify, {
+                            extension    = ext,
+                            customer_id  = customer_id,
+                            caller_id    = original_caller_number,
+                            caller_name  = original_caller_name,
+                            duration_ms  = dur_ms,
+                            storage_path = spool_path,
+                        })
+                    end
+                end
+            end
         end)
     end
 end

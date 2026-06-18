@@ -99,10 +99,14 @@ services:
       - HOMER_IP=${HOMER_IP:-127.0.0.1}
       - SBC_PROXY_IP=${SBC_PROXY_IP:-127.0.0.1}
       - TEST_MODE=${TEST_MODE:-false}
+      # ESL password env-driven (entrypoint templates event_socket.conf). Dev
+      # default is explicit and NOT ClueCon; must match the API's value.
+      - ESL_PASSWORD=${FREESWITCH_ESL_PASSWORD:-fs_esl_dev_pw}
     volumes:
       - ./docker/freeswitch/conf:/usr/local/freeswitch/conf
       - ./docker/freeswitch/scripts:/usr/local/freeswitch/scripts
       - freeswitch_logs:/var/log/freeswitch
+      - media_spool:/media/spool   # FS writes vm/recordings here; API uploads to object storage
     cap_add:
       - NET_ADMIN
       - SYS_NICE
@@ -174,7 +178,9 @@ services:
       - REDIS_URL=redis://redis:6379
       - FREESWITCH_ESL_HOST=${FREESWITCH_ESL_HOST:-127.0.0.1}
       - FREESWITCH_ESL_PORT=${FREESWITCH_ESL_PORT:-8021}
-      - FREESWITCH_ESL_PASSWORD=${FREESWITCH_ESL_PASSWORD:-ClueCon}
+      # ESL password: explicit dev default, NOT the well-known ClueCon.
+      # esl_client.py no longer hardcodes a ClueCon fallback (Phase 4).
+      - FREESWITCH_ESL_PASSWORD=${FREESWITCH_ESL_PASSWORD:-fs_esl_dev_pw}
       - JWT_SECRET_KEY=${JWT_SECRET_KEY}
       - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:8080,http://localhost:8443}
       - SBC_PROXY_IP=${SBC_PROXY_IP:-127.0.0.1}
@@ -183,8 +189,25 @@ services:
       - BANDWIDTH_API_CLIENT_SECRET=${BANDWIDTH_API_CLIENT_SECRET:-}
       - BANDWIDTH_ACCOUNT_ID=${BANDWIDTH_ACCOUNT_ID:-9900717}
       - BANDWIDTH_SIP_PEER_ID=${BANDWIDTH_SIP_PEER_ID:-1162116}
+      # Phase 4 — object storage (S3-compatible; MinIO locally, GCS/S3 in prod)
+      - STORAGE_ENDPOINT_URL=${STORAGE_ENDPOINT_URL:-http://minio:9000}
+      - STORAGE_ACCESS_KEY=${MINIO_ROOT_USER:-minioadmin}
+      - STORAGE_SECRET_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
+      - STORAGE_REGION=${STORAGE_REGION:-us-east-1}
+      - STORAGE_FORCE_PATH_STYLE=${STORAGE_FORCE_PATH_STYLE:-true}
+      - STORAGE_BUCKET_RECORDINGS=${STORAGE_BUCKET_RECORDINGS:-voip-recordings}
+      - STORAGE_BUCKET_VOICEMAIL=${STORAGE_BUCKET_VOICEMAIL:-voip-voicemail}
+      - STORAGE_BUCKET_UPLOADS=${STORAGE_BUCKET_UPLOADS:-voip-uploads}
+      # Phase 4 — TURN/STUN for WebRTC (coturn); webrtc.py mints time-limited creds
+      - TURN_HOST=${TURN_HOST:-localhost}
+      - TURN_PORT=${TURN_PORT:-3478}
+      - TURN_TLS_PORT=${TURN_TLS_PORT:-5349}
+      - TURN_SECRET=${TURN_SECRET:-dev-turn-secret-change-me}
+      - TURN_REALM=${TURN_REALM:-voip.local}
     ports:
       - "${API_PORT:-8088}:8000"
+    volumes:
+      - media_spool:/media/spool   # reads FS-written vm/recordings, uploads to object storage
     networks:
       - voip-network
     deploy:
@@ -283,6 +306,44 @@ services:
       - voip-network
     restart: unless-stopped
 
+  # Object storage (S3-compatible) — voicemail, call/conference recordings, uploads.
+  # Local/dev = MinIO; production points the same S3 client at GCS/S3 via STORAGE_* env.
+  minio:
+    image: minio/minio:latest
+    container_name: voip-minio
+    command: server /data --console-address ":9001"
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER:-minioadmin}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-minioadmin}
+    ports:
+      - "${MINIO_API_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - minio_data:/data
+    networks:
+      - voip-network
+    healthcheck:
+      test: ["CMD-SHELL", "mc ready local 2>/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  # TURN/STUN (coturn) — WebRTC/Verto media relay for clients behind symmetric NAT.
+  # Shares TURN_SECRET with the API (webrtc.py mints time-limited TURN credentials).
+  coturn:
+    image: coturn/coturn:latest
+    container_name: voip-coturn
+    network_mode: host
+    volumes:
+      - ./docker/coturn/turnserver.conf:/etc/coturn/turnserver.conf:ro
+    environment:
+      - TURN_SECRET=${TURN_SECRET:-dev-turn-secret-change-me}
+      - TURN_REALM=${TURN_REALM:-voip.local}
+    command: ["-c", "/etc/coturn/turnserver.conf"]
+    restart: unless-stopped
+
 networks:
   voip-network:
     driver: bridge
@@ -298,4 +359,8 @@ volumes:
   freeswitch_logs:
     driver: local
   homer_db_data:
+    driver: local
+  minio_data:
+    driver: local
+  media_spool:
     driver: local

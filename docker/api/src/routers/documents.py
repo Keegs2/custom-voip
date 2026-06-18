@@ -12,18 +12,22 @@ import uuid
 from typing import Optional, List
 
 from fastapi import APIRouter, HTTPException, Depends, Query, UploadFile, File, Form
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel, field_validator
 
 from db import database as db
 from auth.dependencies import get_current_user, get_customer_filter
+from services import storage
+from services.upload_security import (
+    validate_upload, UploadRejected, DOCUMENTS_MAX_FILE_SIZE,
+)
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-UPLOAD_ROOT = "/data/shared-documents"
-MAX_FILE_SIZE = int(os.environ.get("DOCUMENTS_MAX_FILE_SIZE", 50 * 1024 * 1024))  # 50MB default
+MAX_FILE_SIZE = DOCUMENTS_MAX_FILE_SIZE  # env-tunable via DOCUMENTS_MAX_FILE_SIZE
+DOCUMENT_URL_TTL = int(os.getenv("DOCUMENT_URL_TTL", "3600"))
 
 
 # ---------------------------------------------------------------------------
@@ -68,15 +72,6 @@ class UpdateDocument(BaseModel):
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-def _sanitize_filename(filename: str) -> str:
-    """Remove path separators and null bytes from a filename."""
-    name = os.path.basename(filename)
-    name = name.replace("\x00", "")
-    if not name:
-        name = "upload"
-    return name
-
 
 async def _resolve_customer_id(user: dict, customer_filter: int | None) -> int:
     """Return the customer_id to scope queries to.
@@ -396,28 +391,34 @@ async def upload_document(
     if folder_id is not None:
         await _verify_folder_ownership(folder_id, customer_id)
 
-    # Read file contents and enforce size limit
+    # Read contents and run the upload-security gate: size limit, content-type
+    # allowlist, filename sanitisation (no traversal), and the pluggable AV scan.
     contents = await file.read()
     file_size = len(contents)
-    if file_size > MAX_FILE_SIZE:
-        raise HTTPException(
-            status_code=413,
-            detail=f"File too large. Maximum size is {MAX_FILE_SIZE // (1024 * 1024)}MB",
+    try:
+        safe_filename = validate_upload(
+            content_type=file.content_type,
+            size=file_size,
+            max_size=MAX_FILE_SIZE,
+            data=contents,
+            filename=file.filename,
         )
-    if file_size == 0:
-        raise HTTPException(status_code=400, detail="Empty file")
+    except UploadRejected as e:
+        raise HTTPException(status_code=e.status_code, detail=e.detail)
 
-    # Build storage path
-    safe_filename = _sanitize_filename(file.filename or "upload")
+    # Tenant-scoped object key in the voip-uploads bucket.
     file_uuid = uuid.uuid4().hex
     stored_name = f"{file_uuid}_{safe_filename}"
-    storage_dir = os.path.join(UPLOAD_ROOT, str(customer_id))
-    os.makedirs(storage_dir, exist_ok=True)
-    storage_path = os.path.join(storage_dir, stored_name)
-
-    # Write file to disk
-    with open(storage_path, "wb") as f:
-        f.write(contents)
+    object_key = storage.tenant_key(int(customer_id), "documents", stored_name)
+    try:
+        storage.put_file(
+            storage.BUCKET_UPLOADS, object_key, contents,
+            file.content_type or "application/octet-stream",
+        )
+    except storage.StorageError:
+        logger.exception("Document upload storage failure for customer %s", customer_id)
+        raise HTTPException(status_code=503, detail="Storage temporarily unavailable")
+    storage_path = object_key
 
     # Parse tags
     tag_list = None
@@ -519,14 +520,27 @@ async def download_document(
     customer_id = await _resolve_customer_id(user, customer_filter)
     doc = await _verify_document_ownership(doc_id, customer_id)
 
-    if not os.path.isfile(doc["storage_path"]):
-        raise HTTPException(status_code=404, detail="File not found on disk")
+    path = doc["storage_path"]
 
-    return FileResponse(
-        path=doc["storage_path"],
-        filename=doc["original_filename"],
-        media_type=doc["mime_type"] or "application/octet-stream",
-    )
+    # Legacy on-disk rows: serve directly.
+    if path and path.startswith("/"):
+        if not os.path.isfile(path):
+            raise HTTPException(status_code=404, detail="File not found on disk")
+        return FileResponse(
+            path=path,
+            filename=doc["original_filename"],
+            media_type=doc["mime_type"] or "application/octet-stream",
+        )
+
+    # Object-storage key: redirect to a short-lived presigned URL.
+    try:
+        url = storage.presigned_get_url(
+            storage.BUCKET_UPLOADS, path, ttl=DOCUMENT_URL_TTL
+        )
+    except storage.StorageError:
+        logger.exception("Failed to presign document %s", doc_id)
+        raise HTTPException(status_code=503, detail="Storage temporarily unavailable")
+    return RedirectResponse(url=url, status_code=307)
 
 
 @router.put("/{doc_id}")
@@ -597,11 +611,15 @@ async def delete_document(
     customer_id = await _resolve_customer_id(user, customer_filter)
     doc = await _verify_document_ownership(doc_id, customer_id)
 
-    # Remove file from disk (best-effort)
+    # Remove the backing object (best-effort).
+    path = doc["storage_path"]
     try:
-        if os.path.isfile(doc["storage_path"]):
-            os.remove(doc["storage_path"])
-    except OSError:
-        logger.warning("Failed to remove file from disk: %s", doc["storage_path"], exc_info=True)
+        if path and path.startswith("/"):
+            if os.path.isfile(path):
+                os.remove(path)
+        elif path:
+            storage.delete(storage.BUCKET_UPLOADS, path)
+    except (OSError, storage.StorageError):
+        logger.warning("Failed to remove document object: %s", path, exc_info=True)
 
     await db.execute("DELETE FROM shared_documents WHERE id = $1", doc_id)

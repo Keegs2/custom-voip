@@ -15,11 +15,25 @@ ESL_HOST = os.getenv("FREESWITCH_ESL_HOST", "")
 if not ESL_HOST:
     logger.warning("FREESWITCH_ESL_HOST not set — ESL commands will fail")
 ESL_PORT = int(os.getenv("FREESWITCH_ESL_PORT", "8021"))
-ESL_PASSWORD = os.getenv("FREESWITCH_ESL_PASSWORD", "ClueCon")
+# No insecure default: the well-known "ClueCon" password must never be a
+# silent fallback. The secret is required from the environment; if it is unset
+# ESL commands fail loudly (see _send_esl_command) instead of authenticating
+# with a public default. (Phase 4 — must match the FS container's ESL_PASSWORD.)
+ESL_PASSWORD = os.getenv("FREESWITCH_ESL_PASSWORD")
+if not ESL_PASSWORD:
+    logger.warning(
+        "FREESWITCH_ESL_PASSWORD not set — ESL commands will fail until it is "
+        "configured (no default password is assumed)"
+    )
 
 
 async def _send_esl_command(command: str) -> Optional[str]:
     """Send a command to FreeSWITCH via ESL."""
+    if not ESL_PASSWORD:
+        logger.error(
+            "Cannot send ESL command: FREESWITCH_ESL_PASSWORD is not configured"
+        )
+        return None
     try:
         reader, writer = await asyncio.wait_for(
             asyncio.open_connection(ESL_HOST, ESL_PORT),

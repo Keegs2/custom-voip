@@ -48,6 +48,21 @@ async def lifespan(app: FastAPI):
     await init_redis()
     logger.info("Redis connection initialized")
 
+    # Ensure object-storage buckets exist (voicemail / recordings / uploads).
+    # Runs in a thread so the blocking boto3 startup retry loop does not stall
+    # the event loop. Storage being unavailable degrades media features but must
+    # not crash the API, so failures are logged, not fatal.
+    try:
+        from services import storage
+        await asyncio.to_thread(storage.ensure_buckets)
+        logger.info("Object storage buckets ensured")
+    except Exception:
+        logger.warning(
+            "Object storage bucket initialization failed — media upload/serve "
+            "features will be degraded until storage is reachable",
+            exc_info=True,
+        )
+
     # UCaaS WebSocket fanout background tasks (presence + chat). These are
     # independent of the always-200 health path (health.py never touches them),
     # and each self-reconnects with backoff if Redis drops (see risk C-8).

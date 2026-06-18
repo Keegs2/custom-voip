@@ -4,6 +4,10 @@ Returns Verto login credentials and ICE server configuration so the
 browser-based softphone can connect to FreeSWITCH.
 """
 import os
+import time
+import hmac
+import base64
+import hashlib
 import logging
 from fastapi import APIRouter, HTTPException, Depends, Request
 
@@ -18,27 +22,60 @@ router = APIRouter()
 VERTO_WS_URL = os.getenv("VERTO_WS_URL", "ws://localhost:8082")
 SIP_DOMAIN = os.getenv("SIP_DOMAIN", "voiceplatform.local")
 
-# STUN / TURN configuration
-STUN_SERVER = os.getenv("STUN_SERVER", "stun:stun.l.google.com:19302")
-TURN_SERVER = os.getenv("TURN_SERVER", "")  # e.g. "turn:turn.example.com:3478"
-TURN_USERNAME = os.getenv("TURN_USERNAME", "")
-TURN_PASSWORD = os.getenv("TURN_PASSWORD", "")
+# TURN / STUN — coturn `use-auth-secret` (REST) scheme. The coturn server is
+# configured with the SAME TURN_SECRET (telephony agent), so it can verify the
+# time-limited credentials we mint here without any shared user database.
+TURN_HOST = os.getenv("TURN_HOST", "")
+TURN_PORT = os.getenv("TURN_PORT", "3478")
+TURN_TLS_PORT = os.getenv("TURN_TLS_PORT", "5349")
+TURN_SECRET = os.getenv("TURN_SECRET", "")
+TURN_REALM = os.getenv("TURN_REALM", "")
+# Lifetime of a minted TURN credential (seconds). Default 12h covers a long
+# softphone session; the browser re-fetches /credentials to refresh.
+TURN_TTL = int(os.getenv("TURN_TTL", str(12 * 3600)))
 
 
-def _build_ice_servers() -> list[dict]:
-    """Build the ICE servers list from environment configuration."""
-    servers = []
+def _build_ice_servers(user_id: int) -> list[dict]:
+    """Build the ICE servers list using coturn time-limited REST credentials.
 
-    if STUN_SERVER:
-        servers.append({"urls": STUN_SERVER})
+    coturn `use-auth-secret` scheme:
+      username   = "<unix_expiry>:<user_id>"
+      credential = base64( HMAC_SHA1(TURN_SECRET, username) )
 
-    if TURN_SERVER:
-        turn_entry: dict = {"urls": TURN_SERVER}
-        if TURN_USERNAME:
-            turn_entry["username"] = TURN_USERNAME
-        if TURN_PASSWORD:
-            turn_entry["credential"] = TURN_PASSWORD
+    STUN is always advertised (works for cone NATs); TURN/TURNS are added only
+    when TURN_HOST + TURN_SECRET are configured — STUN-only fails behind
+    symmetric NAT, so production MUST set these.
+    """
+    servers: list[dict] = []
+
+    if TURN_HOST:
+        servers.append({"urls": f"stun:{TURN_HOST}:{TURN_PORT}"})
+
+    if TURN_HOST and TURN_SECRET:
+        expiry = int(time.time()) + TURN_TTL
+        username = f"{expiry}:{user_id}"
+        credential = base64.b64encode(
+            hmac.new(
+                TURN_SECRET.encode("utf-8"),
+                username.encode("utf-8"),
+                hashlib.sha1,
+            ).digest()
+        ).decode("ascii")
+
+        turn_entry: dict = {
+            "urls": [
+                f"turn:{TURN_HOST}:{TURN_PORT}?transport=udp",
+                f"turns:{TURN_HOST}:{TURN_TLS_PORT}?transport=tcp",
+            ],
+            "username": username,
+            "credential": credential,
+        }
         servers.append(turn_entry)
+    elif TURN_HOST:
+        logger.warning(
+            "TURN_HOST set but TURN_SECRET missing — serving STUN only; "
+            "calls behind symmetric NAT will fail"
+        )
 
     return servers
 
@@ -118,6 +155,8 @@ async def get_webrtc_credentials(request: Request, user: dict = Depends(get_curr
     else:
         ws_url = VERTO_WS_URL
 
+    ice_servers = _build_ice_servers(user_id)
+
     return {
         "ws_url": ws_url,
         "login": login,
@@ -126,5 +165,8 @@ async def get_webrtc_credentials(request: Request, user: dict = Depends(get_curr
         "extension": ext["extension"],
         "extension_id": ext["id"],
         "customer_domain": customer_domain,
-        "ice_servers": _build_ice_servers(),
+        # Both keys returned: snake_case for existing clients, camelCase
+        # `iceServers` for the standard RTCPeerConnection config shape.
+        "ice_servers": ice_servers,
+        "iceServers": ice_servers,
     }

@@ -20,6 +20,10 @@ orjson>=3.9.0
 
 # HTTP client for webhooks
 httpx>=0.26.0
+
+# Object storage (S3-compatible: MinIO locally, S3/GCS in prod) — Phase 4
+# voicemail / conference recordings / file uploads
+boto3>=1.34.0
 # UCaaS async HTTP + FreeSWITCH ESL client (webrtc/voicemail; switchio replaces
 # greenswitch in Phase 5 — kept for now so the UCaaS routers import cleanly)
 aiohttp>=3.9.0

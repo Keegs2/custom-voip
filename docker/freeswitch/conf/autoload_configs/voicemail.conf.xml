@@ -3,10 +3,13 @@
   mod_voicemail Configuration - UCaaS Voicemail System
   Provides voicemail storage, retrieval, and MWI notifications.
 
-  Storage:
-  - Local filesystem at /var/lib/freeswitch/voicemail/
-  - Messages stored as WAV files, one directory per mailbox
-  - In production, consider shared storage (NFS/S3) for HA
+  Storage (Phase 4 — shared HA storage):
+  - Shared /media/spool/voicemail/ volume (also mounted in the API container).
+  - Messages stored as WAV files, one directory per <domain>/<mailbox>.
+  - The API uploads deposited messages from this spool to object storage; FS
+    self-recorded deposits (handlers/ucaas.lua) write the same tree (via the
+    /var/lib/freeswitch/voicemail -> /media/spool/voicemail symlink in
+    entrypoint.sh) and POST metadata to the API voicemail ingest endpoint.
 
   Feature Codes (defined in dialplan):
   - *97: Check voicemail (own mailbox)
@@ -50,8 +53,9 @@
       <!-- Sends SIP NOTIFY to registered phones when new messages arrive -->
       <param name="notify-mailto" value=""/>
 
-      <!-- Storage location -->
-      <param name="storage-dir" value="/var/lib/freeswitch/voicemail/"/>
+      <!-- Storage location — shared media spool (Phase 4). The API reads/uploads
+           from here; *97 retrieval and ucaas.lua deposits share this tree. -->
+      <param name="storage-dir" value="/media/spool/voicemail/"/>
 
       <!-- Recording settings -->
       <param name="record-silence-threshold" value="200"/>

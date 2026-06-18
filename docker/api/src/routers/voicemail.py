@@ -3,6 +3,8 @@
 Provides voicemail listing, read/unread tracking, deletion, and an
 unauthenticated ingest endpoint for FreeSWITCH to deposit new messages.
 """
+import os
+import uuid
 import logging
 from fastapi import APIRouter, HTTPException, Depends, Request, Query
 from pydantic import BaseModel
@@ -11,10 +13,14 @@ from datetime import datetime
 
 from db import database as db
 from auth.dependencies import get_current_user, get_customer_filter
+from services import storage
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+# Default lifetime for presigned voicemail-audio URLs (seconds).
+VOICEMAIL_URL_TTL = int(os.getenv("VOICEMAIL_URL_TTL", "3600"))
 
 
 # ---------------------------------------------------------------------------
@@ -131,6 +137,42 @@ async def get_voicemail(
     return await _verify_voicemail_access(voicemail_id, extension_id)
 
 
+@router.get("/{voicemail_id}/audio")
+async def get_voicemail_audio_url(
+    voicemail_id: int,
+    user: dict = Depends(get_current_user),
+):
+    """Return a short-lived presigned URL to stream/download the voicemail audio.
+
+    The audio lives in the voip-voicemail bucket under a tenant-scoped key
+    (stored in voicemails.storage_path). A presigned GET keeps the object
+    private — the browser never sees storage credentials.
+    """
+    extension_id = await _get_user_extension_id(user)
+    vm = await _verify_voicemail_access(voicemail_id, extension_id)
+
+    key = vm.get("storage_path")
+    if not key:
+        raise HTTPException(status_code=404, detail="No audio for this voicemail")
+
+    # Legacy/local-path rows (pre-object-storage) cannot be presigned.
+    if key.startswith("/"):
+        raise HTTPException(
+            status_code=409,
+            detail="Voicemail audio is not in object storage",
+        )
+
+    try:
+        url = storage.presigned_get_url(
+            storage.BUCKET_VOICEMAIL, key, ttl=VOICEMAIL_URL_TTL
+        )
+    except storage.StorageError:
+        logger.exception("Failed to presign voicemail %s", voicemail_id)
+        raise HTTPException(status_code=503, detail="Storage temporarily unavailable")
+
+    return {"url": url, "expires_in": VOICEMAIL_URL_TTL}
+
+
 @router.put("/{voicemail_id}/read")
 async def mark_voicemail_read(
     voicemail_id: int,
@@ -215,6 +257,42 @@ async def ingest_voicemail(request: Request):
 
         extension_id = ext_row["id"]
 
+        # FreeSWITCH writes the recording to the shared spool volume
+        # (/media/spool/...). Upload it to the voip-voicemail bucket under a
+        # tenant-scoped key so any media node can serve it via presigned URL.
+        # storage_path persisted is the OBJECT KEY (not the local path).
+        local_path = body.get("storage_path")
+        object_key = None
+        if local_path and os.path.isfile(local_path):
+            try:
+                basename = os.path.basename(local_path)
+                object_key = storage.tenant_key(
+                    int(customer_id),
+                    "voicemail",
+                    f"ext_{extension_id}",
+                    f"{uuid.uuid4().hex}_{basename}",
+                )
+                ext = os.path.splitext(basename)[1].lower()
+                content_type = "audio/wav" if ext in (".wav", "") else "application/octet-stream"
+                storage.put_file(
+                    storage.BUCKET_VOICEMAIL, object_key, local_path, content_type
+                )
+                # Best-effort: remove the spool copy after a successful upload.
+                try:
+                    os.remove(local_path)
+                except OSError:
+                    pass
+            except Exception:
+                logger.exception(
+                    "Voicemail ingest: object-storage upload failed for %s; "
+                    "persisting local path as fallback", local_path,
+                )
+                object_key = None
+
+        # Store the object key when uploaded; otherwise fall back to whatever
+        # path FS provided so the deposit is never lost.
+        stored_path = object_key or local_path
+
         row = await db.fetch_one(
             """INSERT INTO voicemails
                    (extension_id, caller_id, caller_name, duration_ms,
@@ -225,7 +303,7 @@ async def ingest_voicemail(request: Request):
             body.get("caller_id"),
             body.get("caller_name"),
             body.get("duration_ms"),
-            body.get("storage_path"),
+            stored_path,
             body.get("transcription"),
         )
 

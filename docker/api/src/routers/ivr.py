@@ -9,16 +9,31 @@ import logging
 from xml.etree.ElementTree import Element, SubElement, tostring
 from xml.dom.minidom import parseString
 
-from fastapi import APIRouter, HTTPException, Request, Form
+from fastapi import APIRouter, HTTPException, Request, Form, Depends
 from fastapi.responses import Response
 from pydantic import BaseModel
 from typing import Optional, Any
 
 from db import database as db
+from auth.dependencies import get_current_user, get_customer_filter
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+async def _get_owned_flow(flow_id: int, customer_filter: int | None) -> dict:
+    """Fetch an IVR flow enforcing tenant isolation. 404 if it does not exist
+    OR belongs to another customer (no cross-tenant existence leak)."""
+    row = await db.fetch_one(
+        "SELECT id, customer_id, did, flow_config, is_active FROM ivr_flows WHERE id = $1",
+        flow_id,
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="IVR flow not found")
+    if customer_filter is not None and row["customer_id"] != customer_filter:
+        raise HTTPException(status_code=404, detail="IVR flow not found")
+    return dict(row)
 
 # ---------------------------------------------------------------------------
 # Table bootstrap
@@ -28,23 +43,44 @@ _table_created = False
 
 
 async def _ensure_table():
-    """Create the ivr_flows table if it does not already exist."""
+    """Ensure the ivr_flows table exists.
+
+    The runtime DB role (``api``) has no CREATE privilege on schema ``public``
+    (least privilege), and Postgres checks CREATE privilege BEFORE the
+    ``IF NOT EXISTS`` existence shortcut — so an unconditional CREATE TABLE 500s
+    even when the table already exists (provisioned by a schema migration).
+
+    We therefore probe with ``to_regclass`` first and only attempt the CREATE
+    when the table is genuinely absent, swallowing a privilege error with a
+    clear log instead of failing the request.
+    """
     global _table_created
     if _table_created:
         return
-    await db.execute("""
-        CREATE TABLE IF NOT EXISTS ivr_flows (
-            id SERIAL PRIMARY KEY,
-            customer_id INT NOT NULL REFERENCES customers(id),
-            did VARCHAR(20),
-            name VARCHAR(100) NOT NULL,
-            flow_config JSONB NOT NULL,
-            is_active BOOLEAN DEFAULT true,
-            created_at TIMESTAMPTZ DEFAULT NOW(),
-            updated_at TIMESTAMPTZ DEFAULT NOW()
+    exists = await db.fetch_one("SELECT to_regclass('public.ivr_flows') AS t")
+    if exists and exists["t"] is not None:
+        _table_created = True
+        return
+    try:
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS ivr_flows (
+                id SERIAL PRIMARY KEY,
+                customer_id INT NOT NULL REFERENCES customers(id),
+                did VARCHAR(20),
+                name VARCHAR(100) NOT NULL,
+                flow_config JSONB NOT NULL,
+                is_active BOOLEAN DEFAULT true,
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                updated_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        """)
+        _table_created = True
+    except Exception:
+        logger.exception(
+            "ivr_flows table is missing and could not be auto-created "
+            "(runtime role lacks CREATE on schema public). Provision it via a "
+            "schema migration."
         )
-    """)
-    _table_created = True
 
 
 # ---------------------------------------------------------------------------
@@ -246,8 +282,9 @@ async def list_ivr_flows(
     did: Optional[str] = None,
     limit: int = 100,
     offset: int = 0,
+    customer_filter: int | None = Depends(get_customer_filter),
 ):
-    """List all IVR flows with optional filters."""
+    """List IVR flows. Non-admins are scoped to their own customer."""
     await _ensure_table()
 
     query = """
@@ -259,7 +296,12 @@ async def list_ivr_flows(
     values: list[Any] = []
     idx = 1
 
-    if customer_id is not None:
+    # Enforce tenant scoping for non-admins; admins may filter by customer_id.
+    if customer_filter is not None:
+        query += f" AND customer_id = ${idx}"
+        values.append(customer_filter)
+        idx += 1
+    elif customer_id is not None:
         query += f" AND customer_id = ${idx}"
         values.append(customer_id)
         idx += 1
@@ -284,14 +326,23 @@ async def list_ivr_flows(
 
 
 @router.post("")
-async def create_ivr_flow(flow: IVRFlowCreate):
-    """Create a new IVR flow."""
+async def create_ivr_flow(
+    flow: IVRFlowCreate,
+    customer_filter: int | None = Depends(get_customer_filter),
+):
+    """Create a new IVR flow. Non-admins may only create within their own
+    customer; the payload's customer_id is forced to the caller's."""
     await _ensure_table()
+
+    customer_id = flow.customer_id
+    if customer_filter is not None:
+        customer_id = customer_filter
+        flow.customer_id = customer_filter
 
     # Verify customer exists
     customer = await db.fetch_one(
         "SELECT id, status FROM customers WHERE id = $1",
-        flow.customer_id,
+        customer_id,
     )
     if not customer:
         raise HTTPException(status_code=404, detail="Customer not found")
@@ -320,9 +371,13 @@ async def create_ivr_flow(flow: IVRFlowCreate):
 
 
 @router.get("/{flow_id}")
-async def get_ivr_flow(flow_id: int):
-    """Get a single IVR flow by ID."""
+async def get_ivr_flow(
+    flow_id: int,
+    customer_filter: int | None = Depends(get_customer_filter),
+):
+    """Get a single IVR flow by ID (tenant-scoped)."""
     await _ensure_table()
+    await _get_owned_flow(flow_id, customer_filter)
 
     result = await db.fetch_one(
         """
@@ -341,9 +396,14 @@ async def get_ivr_flow(flow_id: int):
 
 
 @router.put("/{flow_id}")
-async def update_ivr_flow(flow_id: int, flow: IVRFlowUpdate):
-    """Update an IVR flow (name, did, flow_config, is_active)."""
+async def update_ivr_flow(
+    flow_id: int,
+    flow: IVRFlowUpdate,
+    customer_filter: int | None = Depends(get_customer_filter),
+):
+    """Update an IVR flow (name, did, flow_config, is_active) — tenant-scoped."""
     await _ensure_table()
+    await _get_owned_flow(flow_id, customer_filter)
 
     updates = []
     values: list[Any] = []
@@ -387,17 +447,15 @@ async def update_ivr_flow(flow_id: int, flow: IVRFlowUpdate):
 
 
 @router.delete("/{flow_id}")
-async def delete_ivr_flow(flow_id: int):
-    """Delete an IVR flow."""
+async def delete_ivr_flow(
+    flow_id: int,
+    customer_filter: int | None = Depends(get_customer_filter),
+):
+    """Delete an IVR flow (tenant-scoped)."""
     await _ensure_table()
 
-    # Fetch to check existence and clear DID linkage
-    existing = await db.fetch_one(
-        "SELECT id, did FROM ivr_flows WHERE id = $1",
-        flow_id,
-    )
-    if not existing:
-        raise HTTPException(status_code=404, detail="IVR flow not found")
+    # Tenant-scoped fetch to check existence and clear DID linkage
+    existing = await _get_owned_flow(flow_id, customer_filter)
 
     # Clear voice_url on the linked DID
     if existing["did"]:
@@ -418,16 +476,13 @@ async def delete_ivr_flow(flow_id: int):
 # ---------------------------------------------------------------------------
 
 @router.get("/{flow_id}/xml")
-async def get_ivr_xml(flow_id: int):
-    """Generate and return the TwiML XML for the root flow."""
+async def get_ivr_xml(
+    flow_id: int,
+    customer_filter: int | None = Depends(get_customer_filter),
+):
+    """Generate and return the TwiML XML for the root flow (tenant-scoped)."""
     await _ensure_table()
-
-    result = await db.fetch_one(
-        "SELECT id, flow_config FROM ivr_flows WHERE id = $1",
-        flow_id,
-    )
-    if not result:
-        raise HTTPException(status_code=404, detail="IVR flow not found")
+    result = await _get_owned_flow(flow_id, customer_filter)
 
     flow_config = result["flow_config"]
     if isinstance(flow_config, str):
@@ -438,16 +493,14 @@ async def get_ivr_xml(flow_id: int):
 
 
 @router.get("/{flow_id}/xml/{digit}")
-async def get_ivr_branch_xml(flow_id: int, digit: str):
-    """Return XML for a specific Gather branch (digit or 'timeout')."""
+async def get_ivr_branch_xml(
+    flow_id: int,
+    digit: str,
+    customer_filter: int | None = Depends(get_customer_filter),
+):
+    """Return XML for a specific Gather branch (digit or 'timeout') — scoped."""
     await _ensure_table()
-
-    result = await db.fetch_one(
-        "SELECT id, flow_config FROM ivr_flows WHERE id = $1",
-        flow_id,
-    )
-    if not result:
-        raise HTTPException(status_code=404, detail="IVR flow not found")
+    result = await _get_owned_flow(flow_id, customer_filter)
 
     flow_config = result["flow_config"]
     if isinstance(flow_config, str):

@@ -1,8 +1,10 @@
-# FreeSWITCH Docker Build -- RCF-V1 Production
+# FreeSWITCH Docker Build -- Unified (UCaaS on the hardened RCF foundation)
 
 ## What This Is
 
-FreeSWITCH media server for the RevUp voice platform. Stripped to Remote Call Forwarding (RCF) only -- no UCaaS, WebRTC, voicemail, conferencing, or IVR. Runs as a B2BUA bridging inbound DID calls to outbound PSTN destinations through Bandwidth carriers via a Kamailio SBC.
+FreeSWITCH media server for the RevUp voice platform. This is the **unified** image: the production-hardened RCF/trunk/API SIP foundation (record-route/`r2=on`, Cloud NAT, SBC failover, session timers — all intact) **plus the restored UCaaS stack** (WebRTC softphone via mod_verto/mod_rtc, conferencing via mod_conference/mod_av, voicemail via mod_voicemail, call parking via mod_valet_parking). It runs as a B2BUA bridging inbound DID calls to outbound PSTN destinations through Bandwidth carriers via a Kamailio SBC, AND terminates WebRTC/extension traffic for UCaaS accounts.
+
+**RCF simplicity rule still holds at the product layer:** RCF customers never see UCaaS features — gating is enforced at the API/UI/provisioning layer, not the dialplan. Carrier RCF traffic uses E.164 in the `public` context and never matches the UCaaS short/star codes in the `default` context.
 
 ## Architecture Position
 
@@ -38,8 +40,10 @@ Lua libraries installed via luarocks:
 - `luasql-postgres` -- PostgreSQL driver for DID lookups
 
 Module selection in `build/modules.conf.in` via sed substitutions:
-- **Enabled**: mod_lua, mod_sofia, mod_xml_curl, mod_json_cdr, mod_event_socket, mod_opus, mod_g729, mod_amr, mod_spandsp, mod_dptools, mod_commands, mod_dialplan_xml, mod_curl, mod_shout, mod_sndfile, mod_tone_stream, mod_say_en, mod_db, mod_hash, mod_loopback, mod_cdr_csv, mod_console, mod_logfile, mod_native_file
-- **Explicitly disabled** (commented out from defaults): mod_conference, mod_av, mod_png, mod_verto, mod_rtc, mod_voicemail, mod_callcenter, mod_valet_parking, mod_spy
+- **Core RCF/SIP** (built + loaded): mod_lua, mod_sofia, mod_xml_curl, mod_json_cdr, mod_event_socket, mod_opus, mod_g729, mod_amr, mod_spandsp, mod_dptools, mod_commands, mod_dialplan_xml, mod_curl, mod_shout, mod_sndfile, mod_tone_stream, mod_say_en, mod_db, mod_hash, mod_loopback, mod_cdr_csv, mod_console, mod_logfile, mod_native_file
+- **UCaaS** (built in the Dockerfile AND loaded in `modules.conf.xml`): mod_conference, mod_av (VP8/H264 for video), mod_verto (WebRTC WSS), mod_rtc (WebRTC media), mod_voicemail, mod_valet_parking
+- **Built but NOT loaded** (compiled in the Dockerfile, no `<load>` in `modules.conf.xml`): mod_callcenter, mod_spy (reserved for future call-center/monitoring; enable by adding a `<load>` line + config), mod_httapi, mod_http_cache (need xml_curl-served config, unreachable at module-load on the media VM)
+- **Still disabled** (would CRIT-abort without local config): mod_local_stream — RCF/UCaaS use `silence_stream://`/`tone_stream://` instead
 
 ### Stage 2: Runtime (`debian:bookworm-slim`)
 
@@ -54,23 +58,31 @@ Key runtime packages include `iproute2` (for the loopback IP hack in entrypoint.
 
 ### entrypoint.sh
 
-Adds the public IP (`EXTERNAL_SIP_IP`) to the loopback interface before starting FreeSWITCH:
+**The Dockerfile `ENTRYPOINT` IS `entrypoint.sh`** (Phase 4 — previously the
+ENTRYPOINT was the freeswitch binary directly and the script never ran, leaving
+the loopback hack latent-dead; that is fixed). `entrypoint.sh` does three
+repo-encoded host-config steps, then `exec`s the freeswitch binary as PID 1 with
+the CMD args:
 
-```sh
-ip addr add "${PUBLIC_IP}/32" dev lo
-```
+1. **GCE hairpin NAT** — adds the public IP (`EXTERNAL_SIP_IP`) to loopback:
+   `ip addr add "${PUBLIC_IP}/32" dev lo`. So when FreeSWITCH sends packets to
+   its own public IP (ACK/BYE to Kamailio's Record-Route address), they are
+   delivered locally instead of dropped by GCE's fabric. **Requires `NET_ADMIN`.**
+   No-op when `EXTERNAL_SIP_IP` is unset/`auto-nat`/`127.0.0.1` (local dev).
+2. **ESL password hardening (kill ClueCon)** — HARD-FAILS (`exit 1`) if
+   `ESL_PASSWORD` is literally `ClueCon`; warns if unset (FS then falls back to
+   the freeswitch.xml dev default `fs_esl_dev_pw`); `export`s the validated value
+   so the `esl_password` X-PRE-PROCESS templating sees exactly what we checked.
+3. **Shared media spool** — `mkdir -p /media/spool/{voicemail,recordings}` and
+   symlinks `/var/lib/freeswitch/{voicemail,recordings}` onto them, so every
+   voicemail/recording artifact lands on the shared `media_spool` volume the API
+   uploads to object storage from. (handlers/ucaas.lua keeps its in-image
+   `/var/lib/...` record path — pinned by a characterization test — and the
+   symlink makes it physically resolve to the spool.)
 
-This solves the GCE hairpin NAT problem: when FreeSWITCH sends packets to its own public IP (e.g., ACK/BYE to Kamailio's Record-Route address), they are delivered locally instead of being dropped by GCE's network fabric.
-
-**Requires `NET_ADMIN` capability** in docker-compose.
-
-**IMPORTANT — entrypoint wiring**: The Dockerfile `ENTRYPOINT` is
-`/usr/local/freeswitch/bin/freeswitch` directly (line 342) — it does NOT invoke
-`entrypoint.sh`. The script is `COPY`'d into the image (line 333) but is never the
-image default. Therefore the loopback-IP hairpin fix in `entrypoint.sh` is wired
-via a **compose-level entrypoint override** (`docker-compose.media.yml`), not the
-image default. (The "Start FreeSWITCH via entrypoint" comment in the Dockerfile
-above line 342 is misleading — the actual ENTRYPOINT bypasses it.)
+Because this is the image ENTRYPOINT, BOTH the local compose and
+`docker-compose.media.yml` get all three steps with no compose-level entrypoint
+override needed.
 
 ### CMD flags
 
@@ -106,9 +118,12 @@ FreeSWITCH runs with `network_mode: host` in docker-compose.media.yml. This is r
 | `REDIS_PORT` | `6379` | Redis port |
 | `API_HOST` | `api` | FastAPI server host (for xml_curl and json_cdr) |
 | `API_PORT` | `8000` | FastAPI server port |
-| `ESL_PASSWORD` | `ClueCon` | Event Socket password. CHANGE IN PRODUCTION. |
+| `ESL_PASSWORD` | `fs_esl_dev_pw` | Event Socket password. Templated into `event_socket.conf.xml` via the `esl_password` X-PRE-PROCESS global. **NEVER `ClueCon`** — entrypoint.sh refuses that literal. Must match the API's `FREESWITCH_ESL_PASSWORD`. Set a strong value in `.env` for production. |
 | `TEST_MODE` | `false` | When true, plays tone instead of bridging to carrier |
 | `BRIDGE_PROGRESS_TIMEOUT` | `10` | Per-attempt `progress_timeout` (seconds) on carrier bridges — max wait for a provisional response (180/183) before failing over. Do NOT replace with originate_timeout (caps time-to-answer incl. ring). |
+| `VERTO_TLS_PEM` | `conf/tls/wss.pem` | mod_verto WSS cert+privkey (combined PEM). Env-driven global `verto_tls_pem`. PRODUCTION: mount a CA-issued cert and set this. |
+| `VERTO_TLS_CHAIN` | `conf/tls/wss.crt` | mod_verto WSS cert/CA chain. Env-driven global `verto_tls_chain`. |
+| `VM_NOTIFY_TIMEOUT` | `5` | curl `--max-time` (seconds) for the voicemail-deposit notify POST (lib/vm_notify.lua). |
 
 ## Health Check
 
@@ -131,7 +146,11 @@ Also needs `SYS_NICE` capability for real-time scheduling.
 
 ## Key Gotchas
 
-1. **ESL password**: Default is `ClueCon` (well-known). MUST be changed via `ESL_PASSWORD` env var in production.
+1. **ESL password (no ClueCon)**: `event_socket.conf.xml` reads `$${esl_password}`, templated from `ESL_PASSWORD` by a freeswitch.xml `X-PRE-PROCESS exec-set` at parse time. Dev default is `fs_esl_dev_pw` (NOT ClueCon). `entrypoint.sh` HARD-FAILS if `ESL_PASSWORD=ClueCon`. The dev `.env` carried `FREESWITCH_ESL_PASSWORD=ClueCon` historically — that MUST be a strong value (it feeds both FS `ESL_PASSWORD` and the API's `FREESWITCH_ESL_PASSWORD`, which no longer has a ClueCon fallback). `fs_cli` (and the compose healthcheck) must pass `-p $ESL_PASSWORD`.
+
+   **Storage handoff (Phase 4)**: Voicemail and recordings write to the shared `/media/spool` volume (also mounted in the API container), which the API uploads to object storage. `mod_voicemail` `storage-dir=/media/spool/voicemail/`; `$${recordings_dir}=/media/spool/recordings`. `entrypoint.sh` also symlinks the in-image `/var/lib/freeswitch/{voicemail,recordings}` onto the spool so legacy/self-recorded paths land there too. handlers/ucaas.lua POSTs deposit metadata to the API `POST /v1/voicemail/ingest` via lib/vm_notify.lua (fail-open).
+
+   **WebRTC needs TURN**: STUN-only fails behind symmetric NAT. The sibling `coturn` service (`docker/coturn/turnserver.conf`) provides the TURN relay; the API mints time-limited credentials from the shared `TURN_SECRET`. Verto WSS TLS cert paths are env-driven (`VERTO_TLS_PEM`/`VERTO_TLS_CHAIN`, dev self-signed under `conf/tls/`).
 
 2. **mod_local_stream disabled**: It requires `local_stream.conf.xml` which doesn't exist. When xml_curl can't reach the API during startup, the missing config causes a CRIT abort. RCF uses `silence_stream://-1` for hold music instead.
 
@@ -149,11 +168,12 @@ Also needs `SYS_NICE` capability for real-time scheduling.
 
 9. **Gateway syntax deprecated**: All outbound bridges use `sofia/external/dest@proxy` instead of `sofia/gateway/carrier/dest`. The gateway syntax produced corrupted Contact headers (`sip:gw+carrier_primary@...`).
 
-## Volumes (docker-compose.media.yml)
+## Volumes
 
-- `./docker/freeswitch/conf` mounted to `/usr/local/freeswitch/conf` (config hot-reload)
+- `./docker/freeswitch/conf` mounted to `/usr/local/freeswitch/conf` (config hot-reload; note this OVERLAYS the Dockerfile-generated TLS certs with the repo's `conf/tls/`, so runtime Verto certs are the committed `wss.pem`/`wss.crt`)
 - `./docker/freeswitch/scripts` mounted to `/usr/local/freeswitch/scripts` (script hot-reload)
 - `freeswitch_logs` named volume at `/var/log/freeswitch`
+- `media_spool` shared volume at `/media/spool` (voicemail + recordings; ALSO mounted in the API container, which uploads from it to object storage). Present in the local `docker-compose.yml`; add the equivalent on the media VM.
 
 ## Network Ports
 
@@ -164,6 +184,8 @@ Also needs `SYS_NICE` capability for real-time scheduling.
 | 5081 | TCP | Internal TLS (disabled) |
 | 5090 | UDP/TCP | External SIP profile (outbound to Kamailio/carriers) |
 | 8021 | TCP | Event Socket (ESL) |
+| 8082 | TCP | mod_verto WebSocket (ws) — UCaaS softphone/conference signaling |
+| 8083 | TCP | mod_verto secure WebSocket (wss) — TLS via `$${verto_tls_pem}` |
 | 16384-49151 | UDP | RTP media (32K ports for ~10K concurrent B2BUA calls) |
 
 ## File Layout

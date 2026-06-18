@@ -6,6 +6,7 @@ per-customer (multi-tenant).
 
 FreeSWITCH conference naming: room_{customer_id}_{room_number}
 """
+import os
 import logging
 from datetime import datetime, timezone
 from typing import Optional, List
@@ -16,10 +17,17 @@ from pydantic import BaseModel, field_validator
 from db import database as db
 from auth.dependencies import get_current_user, get_customer_filter
 from services.esl_client import _send_esl_command
+from services import storage
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+# Shared spool volume mounted in BOTH the api and freeswitch containers. FS
+# writes the conference recording here; the API reads it back on stop and
+# uploads to object storage. Env-tunable for non-default mounts.
+SPOOL_ROOT = os.getenv("MEDIA_SPOOL_ROOT", "/media/spool")
+RECORDING_URL_TTL = int(os.getenv("RECORDING_URL_TTL", "3600"))
 
 
 # ---------------------------------------------------------------------------
@@ -748,14 +756,19 @@ async def start_recording(
 ):
     """Start recording a live conference via ESL.
 
-    Recording path: /data/recordings/conferences/{customer_id}/{fs_room_name}_{timestamp}.wav
+    FreeSWITCH writes the WAV to the shared spool volume
+    (/media/spool/recordings/conferences/{customer_id}/...) which the API reads
+    back on stop and uploads to object storage.
     """
     conf = await _get_conference_active(conference_id, customer_filter)
     customer_id = conf["customer_id"]
     fs_name = _fs_room_name(customer_id, conf["room_number"])
 
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    recording_path = f"/data/recordings/conferences/{customer_id}/{fs_name}_{timestamp}.wav"
+    recording_path = os.path.join(
+        SPOOL_ROOT, "recordings", "conferences", str(customer_id),
+        f"{fs_name}_{timestamp}.wav",
+    )
 
     response = await _send_esl_command(f"conference {fs_name} record {recording_path}")
 
@@ -789,6 +802,8 @@ async def stop_recording(
     conf = await _get_conference_active(conference_id, customer_filter)
     fs_name = _fs_room_name(conf["customer_id"], conf["room_number"])
 
+    customer_id = conf["customer_id"]
+
     # The 'norecord' command stops all recordings for the conference
     response = await _send_esl_command(f"conference {fs_name} norecord all")
 
@@ -798,13 +813,114 @@ async def stop_recording(
             detail=f"Failed to stop recording: {response or 'ESL timeout'}",
         )
 
-    # Close the most recent open session for this conference
     now = datetime.now(timezone.utc)
-    await db.execute(
-        """UPDATE conference_sessions
-           SET ended_at = $1
-           WHERE conference_id = $2 AND ended_at IS NULL""",
-        now, conference_id,
+
+    # Find the most recent open session and upload its (FS-written) WAV from the
+    # shared spool to the voip-recordings bucket under a tenant-scoped key.
+    session = await db.fetch_one(
+        """SELECT id, recording_path FROM conference_sessions
+           WHERE conference_id = $1 AND ended_at IS NULL
+           ORDER BY started_at DESC LIMIT 1""",
+        conference_id,
     )
 
-    return {"status": "recording_stopped"}
+    object_key = None
+    if session and session["recording_path"]:
+        local_path = session["recording_path"]
+        if os.path.isfile(local_path):
+            try:
+                basename = os.path.basename(local_path)
+                object_key = storage.tenant_key(
+                    int(customer_id), "conferences", str(conference_id), basename
+                )
+                storage.put_file(
+                    storage.BUCKET_RECORDINGS, object_key, local_path, "audio/wav"
+                )
+                try:
+                    os.remove(local_path)
+                except OSError:
+                    pass
+            except Exception:
+                logger.exception(
+                    "Conference %s: recording upload failed for %s",
+                    conference_id, local_path,
+                )
+                object_key = None
+
+    # Close the session, persisting the object key in recording_path when we
+    # uploaded it (otherwise leave the local path as a fallback).
+    if session:
+        if object_key:
+            await db.execute(
+                "UPDATE conference_sessions SET ended_at = $1, recording_path = $2 WHERE id = $3",
+                now, object_key, session["id"],
+            )
+        else:
+            await db.execute(
+                "UPDATE conference_sessions SET ended_at = $1 WHERE id = $2",
+                now, session["id"],
+            )
+    else:
+        # No tracked session row — still close any stragglers defensively.
+        await db.execute(
+            """UPDATE conference_sessions SET ended_at = $1
+               WHERE conference_id = $2 AND ended_at IS NULL""",
+            now, conference_id,
+        )
+
+    return {
+        "status": "recording_stopped",
+        "session_id": session["id"] if session else None,
+        "recording_key": object_key,
+    }
+
+
+@router.get("/{conference_id}/recordings")
+async def list_recordings(
+    conference_id: int,
+    customer_filter: int | None = Depends(get_customer_filter),
+):
+    """List recorded sessions for a conference (tenant-scoped)."""
+    await _get_conference(conference_id, customer_filter)
+    rows = await db.fetch_all(
+        """SELECT id, conference_id, started_at, ended_at, recording_path,
+                  participant_count
+           FROM conference_sessions
+           WHERE conference_id = $1 AND recording_path IS NOT NULL
+           ORDER BY started_at DESC""",
+        conference_id,
+    )
+    return [dict(r) for r in rows]
+
+
+@router.get("/{conference_id}/recordings/{session_id}/url")
+async def get_recording_url(
+    conference_id: int,
+    session_id: int,
+    customer_filter: int | None = Depends(get_customer_filter),
+):
+    """Return a short-lived presigned URL for a conference recording."""
+    await _get_conference(conference_id, customer_filter)
+
+    session = await db.fetch_one(
+        "SELECT id, recording_path FROM conference_sessions WHERE id = $1 AND conference_id = $2",
+        session_id, conference_id,
+    )
+    if not session or not session["recording_path"]:
+        raise HTTPException(status_code=404, detail="Recording not found")
+
+    key = session["recording_path"]
+    if key.startswith("/"):
+        raise HTTPException(
+            status_code=409, detail="Recording is not in object storage",
+        )
+
+    try:
+        url = storage.presigned_get_url(
+            storage.BUCKET_RECORDINGS, key, ttl=RECORDING_URL_TTL
+        )
+    except storage.StorageError:
+        logger.exception("Failed to presign recording %s", session_id)
+        raise HTTPException(status_code=503, detail="Storage temporarily unavailable")
+
+    return {"url": url, "expires_in": RECORDING_URL_TTL}
