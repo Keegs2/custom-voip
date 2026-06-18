@@ -51,10 +51,13 @@ CREATE TABLE IF NOT EXISTS conference_schedules (
 CREATE INDEX IF NOT EXISTS idx_conf_sched_conference
     ON conference_schedules(conference_id, start_time);
 
--- Find all upcoming schedules across a customer (for dashboard)
+-- Find all upcoming schedules across a customer (for dashboard).
+-- NOTE: plain index, NOT a partial index with `WHERE start_time > NOW()` — NOW()
+-- is STABLE (not IMMUTABLE), which Postgres rejects in an index predicate
+-- ("functions in index predicate must be marked IMMUTABLE") and aborts init.
+-- A plain b-tree on start_time still serves "WHERE start_time > now()" range scans.
 CREATE INDEX IF NOT EXISTS idx_conf_sched_start
-    ON conference_schedules(start_time)
-    WHERE start_time > NOW();
+    ON conference_schedules(start_time);
 
 -- ---------------------------------------------------------------------------
 -- Track who is invited to conferences
