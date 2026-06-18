@@ -360,6 +360,14 @@ UCaaS conference uses.
 | OPEN — storage backend | TBD @ Phase 4 | S3-compatible vs NFS for voicemail/recordings HA |
 | OPEN — TTS engine | TBD @ Phase 7 | keep flite vs higher-quality engine |
 
+
+## Live Verification Log
+
+**2026-06-18 — Phases 0-2 verified on local Docker stack:**
+- Postgres: fresh init 01→20 clean (fixed 2 init-abort bugs: NOW()-in-index, demo-reset); 13 UCaaS tables; Granite DID +16174544217 seed; ucaas account_type CHECK.
+- FreeSWITCH: mod_verto/conference/voicemail/av/rtc/valet loaded, no CRIT; refactored handlers/+lib/ load in real mod_lua; verto ws:8082/wss:8083 + sofia internal:5080/external:5090 RUNNING.
+- API: /health ok (db+redis); 229 routes incl. all 9 UCaaS routers; WS presence/chat subscribers running.
+
 ## Progress Tracker
 
 - [x] Phase 0 — Safety Net & RCF Characterization  ✅ 34 char tests + 40 lessons guards + 33 TwiML fixtures, all green & PM-verified
