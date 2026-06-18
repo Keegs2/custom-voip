@@ -1,0 +1,28 @@
+{
+  "name": "frag_singlequote_attr",
+  "classification": "correct",
+  "description": "Single-quoted attribute value is supported by the parser.",
+  "ideal": "",
+  "base_url": "https://voice.example.com/ivr/voice",
+  "input_xml": "<Response><Play loop='2'>https://cdn.example.com/x.wav</Play></Response>",
+  "expected_parse": {
+    "ok": true,
+    "verbs": [
+      {
+        "verb": "Play",
+        "attrs": {
+          "loop": "2"
+        },
+        "text": "https://cdn.example.com/x.wav",
+        "children": []
+      }
+    ]
+  },
+  "expected_trace": [
+    {
+      "action": "play",
+      "url": "https://cdn.example.com/x.wav",
+      "loop": 2
+    }
+  ]
+}

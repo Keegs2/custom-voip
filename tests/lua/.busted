@@ -1,0 +1,11 @@
+-- busted configuration. Run `busted` from the repo root.
+return {
+  _all = {
+    ROOT = { "tests/lua/spec" },
+    pattern = "_spec",
+    lpath = "tests/lua/?.lua;tests/lua/?/init.lua",
+  },
+  default = {
+    verbose = true,
+  },
+}

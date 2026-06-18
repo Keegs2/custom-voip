@@ -1,0 +1,26 @@
+{
+  "name": "play_basic",
+  "classification": "correct",
+  "description": "Play an audio URL, default loop=1.",
+  "ideal": "",
+  "base_url": "https://voice.example.com/ivr/voice",
+  "input_xml": "<Response><Play>https://cdn.example.com/welcome.wav</Play></Response>",
+  "expected_parse": {
+    "ok": true,
+    "verbs": [
+      {
+        "verb": "Play",
+        "attrs": {},
+        "text": "https://cdn.example.com/welcome.wav",
+        "children": []
+      }
+    ]
+  },
+  "expected_trace": [
+    {
+      "action": "play",
+      "url": "https://cdn.example.com/welcome.wav",
+      "loop": 1
+    }
+  ]
+}

@@ -1,0 +1,60 @@
+{
+  "name": "frag_grandchild_in_say",
+  "classification": "known-bug",
+  "description": "FRAGILE: grandchild element inside a Gather>Say prompt leaks into text.",
+  "ideal": "2-level nesting only: a <Pause/> grandchild inside <Gather><Say>...</Say> leaks into the Say's TEXT as literal markup ('Menu <Pause/> end'). The Pause is neither executed nor stripped; flite would speak the angle brackets. A correct engine would treat Pause as its own action or strip it.",
+  "base_url": "https://voice.example.com/ivr/voice",
+  "input_xml": "<Response><Gather numDigits=\"1\" action=\"/k\"><Say>Menu <Pause/> end</Say></Gather></Response>",
+  "expected_parse": {
+    "ok": true,
+    "verbs": [
+      {
+        "verb": "Gather",
+        "attrs": {
+          "action": "/k",
+          "numDigits": "1"
+        },
+        "text": "",
+        "children": [
+          {
+            "verb": "Say",
+            "attrs": {},
+            "text": "Menu <Pause/> end"
+          }
+        ]
+      }
+    ]
+  },
+  "expected_trace": [
+    {
+      "action": "gather",
+      "numDigits": 1,
+      "timeout": 5,
+      "finishOnKey": "#",
+      "method": "POST",
+      "prompts": [
+        {
+          "prompt": "say",
+          "text": "Menu <Pause/> end"
+        }
+      ],
+      "action_url": "https://voice.example.com/k",
+      "on_digits": {
+        "http": {
+          "method": "POST",
+          "url": "https://voice.example.com/k",
+          "params": {
+            "CallSid": "<call_sid>",
+            "AccountSid": "<customer_id>",
+            "From": "<from>",
+            "To": "<to>",
+            "CallStatus": "in-progress",
+            "Direction": "<direction>",
+            "Digits": "<digits>"
+          }
+        },
+        "then": "execute returned instructions, stop current list"
+      }
+    }
+  ]
+}

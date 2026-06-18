@@ -1,0 +1,45 @@
+{
+  "name": "dial_number_children",
+  "classification": "correct",
+  "description": "Dial with <Number> children and a callerId attribute.",
+  "ideal": "",
+  "base_url": "https://voice.example.com/ivr/voice",
+  "input_xml": "<Response><Dial callerId=\"+15550001111\"><Number>+15551112222</Number><Number>+15553334444</Number></Dial></Response>",
+  "expected_parse": {
+    "ok": true,
+    "verbs": [
+      {
+        "verb": "Dial",
+        "attrs": {
+          "callerId": "+15550001111"
+        },
+        "text": "",
+        "children": [
+          {
+            "verb": "Number",
+            "attrs": {},
+            "text": "+15551112222"
+          },
+          {
+            "verb": "Number",
+            "attrs": {},
+            "text": "+15553334444"
+          }
+        ]
+      }
+    ]
+  },
+  "expected_trace": [
+    {
+      "action": "dial",
+      "targets": [
+        "+15551112222",
+        "+15553334444"
+      ],
+      "callerId": "+15550001111",
+      "timeout": 30,
+      "record": null,
+      "action_url": null
+    }
+  ]
+}

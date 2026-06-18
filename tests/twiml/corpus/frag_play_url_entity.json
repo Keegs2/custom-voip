@@ -1,0 +1,26 @@
+{
+  "name": "frag_play_url_entity",
+  "classification": "known-bug",
+  "description": "FRAGILE: &amp; in a Play URL is not decoded -> malformed fetch URL.",
+  "ideal": "&amp; in a Play URL stays literal, so the playback URL becomes '...?a=1&amp;b=2' instead of '...?a=1&b=2' -> broken query string.",
+  "base_url": "https://voice.example.com/ivr/voice",
+  "input_xml": "<Response><Play>https://cdn.example.com/a.wav?a=1&amp;b=2</Play></Response>",
+  "expected_parse": {
+    "ok": true,
+    "verbs": [
+      {
+        "verb": "Play",
+        "attrs": {},
+        "text": "https://cdn.example.com/a.wav?a=1&amp;b=2",
+        "children": []
+      }
+    ]
+  },
+  "expected_trace": [
+    {
+      "action": "play",
+      "url": "https://cdn.example.com/a.wav?a=1&amp;b=2",
+      "loop": 1
+    }
+  ]
+}

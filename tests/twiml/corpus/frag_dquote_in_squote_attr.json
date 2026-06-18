@@ -1,0 +1,30 @@
+{
+  "name": "frag_dquote_in_squote_attr",
+  "classification": "correct",
+  "description": "FRAGILE: embedded double-quote inside a single-quoted attribute is preserved correctly (the double-quote attr pass does not falsely match).",
+  "ideal": "",
+  "base_url": "https://voice.example.com/ivr/voice",
+  "input_xml": "<Response><Say voice='a\"b'>Hi</Say></Response>",
+  "expected_parse": {
+    "ok": true,
+    "verbs": [
+      {
+        "verb": "Say",
+        "attrs": {
+          "voice": "a\"b"
+        },
+        "text": "Hi",
+        "children": []
+      }
+    ]
+  },
+  "expected_trace": [
+    {
+      "action": "say",
+      "text": "Hi",
+      "voice": "a\"b",
+      "language": "en",
+      "loop": 1
+    }
+  ]
+}

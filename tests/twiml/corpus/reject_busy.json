@@ -1,0 +1,29 @@
+{
+  "name": "reject_busy",
+  "classification": "correct",
+  "description": "Reject reason=busy -> 486 Busy Here.",
+  "ideal": "",
+  "base_url": "https://voice.example.com/ivr/voice",
+  "input_xml": "<Response><Reject reason=\"busy\"/></Response>",
+  "expected_parse": {
+    "ok": true,
+    "verbs": [
+      {
+        "verb": "Reject",
+        "attrs": {
+          "reason": "busy"
+        },
+        "text": "",
+        "children": []
+      }
+    ]
+  },
+  "expected_trace": [
+    {
+      "action": "reject",
+      "reason": "busy",
+      "sip": "486 Busy Here",
+      "stops_here": true
+    }
+  ]
+}

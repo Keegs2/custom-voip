@@ -1,0 +1,13 @@
+{
+  "name": "empty_response",
+  "classification": "correct",
+  "description": "<Response></Response> -> zero verbs, engine hangs up gracefully.",
+  "ideal": "",
+  "base_url": "https://voice.example.com/ivr/voice",
+  "input_xml": "<Response></Response>",
+  "expected_parse": {
+    "ok": true,
+    "verbs": []
+  },
+  "expected_trace": []
+}

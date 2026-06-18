@@ -1,0 +1,51 @@
+{
+  "name": "dial_with_action",
+  "classification": "correct",
+  "description": "Dial with action URL -> posts DialCallStatus/DialCallDuration after bridge.",
+  "ideal": "",
+  "base_url": "https://voice.example.com/ivr/voice",
+  "input_xml": "<Response><Dial action=\"/dialed\" timeout=\"20\">+15551234567</Dial></Response>",
+  "expected_parse": {
+    "ok": true,
+    "verbs": [
+      {
+        "verb": "Dial",
+        "attrs": {
+          "action": "/dialed",
+          "timeout": "20"
+        },
+        "text": "+15551234567",
+        "children": []
+      }
+    ]
+  },
+  "expected_trace": [
+    {
+      "action": "dial",
+      "targets": [
+        "+15551234567"
+      ],
+      "callerId": null,
+      "timeout": 20,
+      "record": null,
+      "action_url": "https://voice.example.com/dialed"
+    },
+    {
+      "http": {
+        "method": "POST",
+        "url": "https://voice.example.com/dialed",
+        "params": {
+          "CallSid": "<call_sid>",
+          "AccountSid": "<customer_id>",
+          "From": "<from>",
+          "To": "<to>",
+          "CallStatus": "in-progress",
+          "Direction": "<direction>",
+          "DialCallStatus": "<dial_status>",
+          "DialCallDuration": "<dial_duration>"
+        }
+      },
+      "stops_here": true
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "name": "say_attributes",
+  "classification": "correct",
+  "description": "Say with explicit voice, language, loop attributes.",
+  "ideal": "",
+  "base_url": "https://voice.example.com/ivr/voice",
+  "input_xml": "<Response><Say voice=\"slt\" language=\"es\" loop=\"2\">Hola mundo</Say></Response>",
+  "expected_parse": {
+    "ok": true,
+    "verbs": [
+      {
+        "verb": "Say",
+        "attrs": {
+          "language": "es",
+          "loop": "2",
+          "voice": "slt"
+        },
+        "text": "Hola mundo",
+        "children": []
+      }
+    ]
+  },
+  "expected_trace": [
+    {
+      "action": "say",
+      "text": "Hola mundo",
+      "voice": "slt",
+      "language": "es",
+      "loop": 2
+    }
+  ]
+}

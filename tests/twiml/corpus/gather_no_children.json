@@ -1,0 +1,37 @@
+{
+  "name": "gather_no_children",
+  "classification": "correct",
+  "description": "Gather with no prompt children; collects digits with finishOnKey=*.",
+  "ideal": "",
+  "base_url": "https://voice.example.com/ivr/voice",
+  "input_xml": "<Response><Gather numDigits=\"4\" finishOnKey=\"*\" timeout=\"8\"/></Response>",
+  "expected_parse": {
+    "ok": true,
+    "verbs": [
+      {
+        "verb": "Gather",
+        "attrs": {
+          "finishOnKey": "*",
+          "numDigits": "4",
+          "timeout": "8"
+        },
+        "text": "",
+        "children": []
+      }
+    ]
+  },
+  "expected_trace": [
+    {
+      "action": "gather",
+      "numDigits": 4,
+      "timeout": 8,
+      "finishOnKey": "*",
+      "method": "POST",
+      "prompts": [],
+      "action_url": null,
+      "on_digits": {
+        "store_channel_var": "gathered_digits"
+      }
+    }
+  ]
+}

@@ -1,0 +1,41 @@
+{
+  "name": "redirect_absolute",
+  "classification": "correct",
+  "description": "Redirect to an absolute URL -> used verbatim.",
+  "ideal": "",
+  "base_url": "https://voice.example.com/ivr/voice",
+  "input_xml": "<Response><Redirect>https://other.example.com/flow</Redirect></Response>",
+  "expected_parse": {
+    "ok": true,
+    "verbs": [
+      {
+        "verb": "Redirect",
+        "attrs": {},
+        "text": "https://other.example.com/flow",
+        "children": []
+      }
+    ]
+  },
+  "expected_trace": [
+    {
+      "action": "redirect",
+      "url": "https://other.example.com/flow",
+      "method": "POST"
+    },
+    {
+      "http": {
+        "method": "POST",
+        "url": "https://other.example.com/flow",
+        "params": {
+          "CallSid": "<call_sid>",
+          "AccountSid": "<customer_id>",
+          "From": "<from>",
+          "To": "<to>",
+          "CallStatus": "in-progress",
+          "Direction": "<direction>"
+        }
+      },
+      "stops_here": true
+    }
+  ]
+}

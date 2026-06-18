@@ -1,0 +1,28 @@
+{
+  "name": "say_basic",
+  "classification": "correct",
+  "description": "Say with default voice(kal)/language(en)/loop(1).",
+  "ideal": "",
+  "base_url": "https://voice.example.com/ivr/voice",
+  "input_xml": "<Response><Say>Hello world</Say></Response>",
+  "expected_parse": {
+    "ok": true,
+    "verbs": [
+      {
+        "verb": "Say",
+        "attrs": {},
+        "text": "Hello world",
+        "children": []
+      }
+    ]
+  },
+  "expected_trace": [
+    {
+      "action": "say",
+      "text": "Hello world",
+      "voice": "kal",
+      "language": "en",
+      "loop": 1
+    }
+  ]
+}

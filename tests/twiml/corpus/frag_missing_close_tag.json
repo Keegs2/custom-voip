@@ -1,0 +1,41 @@
+{
+  "name": "frag_missing_close_tag",
+  "classification": "known-bug",
+  "description": "FRAGILE: missing close tag -> Say text dropped, Hangup survives.",
+  "ideal": "Unclosed <Say> (no </Say>): parser logs 'missing closing tag, treating as self-closing', so the Say loses its 'Hello' text entirely, but the following <Hangup/> is still recognized. A correct engine would either error or recover the text.",
+  "base_url": "https://voice.example.com/ivr/voice",
+  "input_xml": "<Response><Say>Hello<Hangup/></Response>",
+  "expected_parse": {
+    "ok": true,
+    "verbs": [
+      {
+        "verb": "Say",
+        "attrs": {},
+        "text": "",
+        "children": []
+      },
+      {
+        "verb": "Hangup",
+        "attrs": {},
+        "text": "",
+        "children": []
+      }
+    ]
+  },
+  "expected_trace": [
+    {
+      "action": "say",
+      "text": "",
+      "voice": "kal",
+      "language": "en",
+      "loop": 1,
+      "skipped_empty": true
+    },
+    {
+      "action": "hangup",
+      "reason": "NORMAL_CLEARING",
+      "fs_cause": "NORMAL_CLEARING",
+      "stops_here": true
+    }
+  ]
+}

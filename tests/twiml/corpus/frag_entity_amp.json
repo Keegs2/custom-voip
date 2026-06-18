@@ -1,0 +1,28 @@
+{
+  "name": "frag_entity_amp",
+  "classification": "known-bug",
+  "description": "FRAGILE: named XML entity in Say text is left undecoded.",
+  "ideal": "XML entity &amp; is NOT decoded; the engine speaks the literal text 'Tom &amp; Jerry' (flite says 'amp'). A correct engine would decode to 'Tom & Jerry'.",
+  "base_url": "https://voice.example.com/ivr/voice",
+  "input_xml": "<Response><Say>Tom &amp; Jerry</Say></Response>",
+  "expected_parse": {
+    "ok": true,
+    "verbs": [
+      {
+        "verb": "Say",
+        "attrs": {},
+        "text": "Tom &amp; Jerry",
+        "children": []
+      }
+    ]
+  },
+  "expected_trace": [
+    {
+      "action": "say",
+      "text": "Tom &amp; Jerry",
+      "voice": "kal",
+      "language": "en",
+      "loop": 1
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "name": "frag_unquoted_attr",
+  "classification": "known-bug",
+  "description": "FRAGILE: unquoted attribute value silently ignored -> default used.",
+  "ideal": "An unquoted attribute value (length=3) is NOT captured (regex requires quotes), so Pause falls back to length=1. A correct engine would parse unquoted values or reject them explicitly.",
+  "base_url": "https://voice.example.com/ivr/voice",
+  "input_xml": "<Response><Pause length=3/></Response>",
+  "expected_parse": {
+    "ok": true,
+    "verbs": [
+      {
+        "verb": "Pause",
+        "attrs": {},
+        "text": "",
+        "children": []
+      }
+    ]
+  },
+  "expected_trace": [
+    {
+      "action": "pause",
+      "length": 1
+    }
+  ]
+}

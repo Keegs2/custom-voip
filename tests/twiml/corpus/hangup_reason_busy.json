@@ -1,0 +1,29 @@
+{
+  "name": "hangup_reason_busy",
+  "classification": "correct",
+  "description": "Hangup reason=busy maps to USER_BUSY.",
+  "ideal": "",
+  "base_url": "https://voice.example.com/ivr/voice",
+  "input_xml": "<Response><Hangup reason=\"busy\"/></Response>",
+  "expected_parse": {
+    "ok": true,
+    "verbs": [
+      {
+        "verb": "Hangup",
+        "attrs": {
+          "reason": "busy"
+        },
+        "text": "",
+        "children": []
+      }
+    ]
+  },
+  "expected_trace": [
+    {
+      "action": "hangup",
+      "reason": "busy",
+      "fs_cause": "USER_BUSY",
+      "stops_here": true
+    }
+  ]
+}

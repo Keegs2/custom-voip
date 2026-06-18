@@ -1,0 +1,80 @@
+{
+  "name": "gather_multi_prompt",
+  "classification": "correct",
+  "description": "Gather with Play + Pause + Say prompt children (all three prompt kinds).",
+  "ideal": "",
+  "base_url": "https://voice.example.com/ivr/voice",
+  "input_xml": "<Response><Gather numDigits=\"1\" action=\"/k\"><Play>https://cdn.example.com/menu.wav</Play><Pause length=\"2\"/><Say>or stay on the line</Say></Gather></Response>",
+  "expected_parse": {
+    "ok": true,
+    "verbs": [
+      {
+        "verb": "Gather",
+        "attrs": {
+          "action": "/k",
+          "numDigits": "1"
+        },
+        "text": "",
+        "children": [
+          {
+            "verb": "Play",
+            "attrs": {},
+            "text": "https://cdn.example.com/menu.wav"
+          },
+          {
+            "verb": "Pause",
+            "attrs": {
+              "length": "2"
+            },
+            "text": ""
+          },
+          {
+            "verb": "Say",
+            "attrs": {},
+            "text": "or stay on the line"
+          }
+        ]
+      }
+    ]
+  },
+  "expected_trace": [
+    {
+      "action": "gather",
+      "numDigits": 1,
+      "timeout": 5,
+      "finishOnKey": "#",
+      "method": "POST",
+      "prompts": [
+        {
+          "prompt": "play",
+          "url": "https://cdn.example.com/menu.wav"
+        },
+        {
+          "prompt": "pause",
+          "length": 2
+        },
+        {
+          "prompt": "say",
+          "text": "or stay on the line"
+        }
+      ],
+      "action_url": "https://voice.example.com/k",
+      "on_digits": {
+        "http": {
+          "method": "POST",
+          "url": "https://voice.example.com/k",
+          "params": {
+            "CallSid": "<call_sid>",
+            "AccountSid": "<customer_id>",
+            "From": "<from>",
+            "To": "<to>",
+            "CallStatus": "in-progress",
+            "Direction": "<direction>",
+            "Digits": "<digits>"
+          }
+        },
+        "then": "execute returned instructions, stop current list"
+      }
+    }
+  ]
+}

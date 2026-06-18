@@ -1,0 +1,31 @@
+{
+  "name": "dial_text_number",
+  "classification": "correct",
+  "description": "Dial a single number from text content.",
+  "ideal": "",
+  "base_url": "https://voice.example.com/ivr/voice",
+  "input_xml": "<Response><Dial>+15551234567</Dial></Response>",
+  "expected_parse": {
+    "ok": true,
+    "verbs": [
+      {
+        "verb": "Dial",
+        "attrs": {},
+        "text": "+15551234567",
+        "children": []
+      }
+    ]
+  },
+  "expected_trace": [
+    {
+      "action": "dial",
+      "targets": [
+        "+15551234567"
+      ],
+      "callerId": null,
+      "timeout": 30,
+      "record": null,
+      "action_url": null
+    }
+  ]
+}

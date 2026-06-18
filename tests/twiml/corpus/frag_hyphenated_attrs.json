@@ -1,0 +1,36 @@
+{
+  "name": "frag_hyphenated_attrs",
+  "classification": "known-bug",
+  "description": "FRAGILE: hyphenated attribute names captured as wrong attrs.",
+  "ideal": "Hyphenated attribute names are mis-parsed: 'num-digits' is captured as a bogus attr 'digits' (suffix after the hyphen) and 'finish-on-key' as 'key'. numDigits/finishOnKey never get set, so the engine uses defaults (numDigits=128, finishOnKey='#'). TwiML uses camelCase, but this documents the silent mis-capture. A correct engine would ignore unknown attrs cleanly.",
+  "base_url": "https://voice.example.com/ivr/voice",
+  "input_xml": "<Response><Gather num-digits=\"4\" finish-on-key=\"#\"/></Response>",
+  "expected_parse": {
+    "ok": true,
+    "verbs": [
+      {
+        "verb": "Gather",
+        "attrs": {
+          "digits": "4",
+          "key": "#"
+        },
+        "text": "",
+        "children": []
+      }
+    ]
+  },
+  "expected_trace": [
+    {
+      "action": "gather",
+      "numDigits": 128,
+      "timeout": 5,
+      "finishOnKey": "#",
+      "method": "POST",
+      "prompts": [],
+      "action_url": null,
+      "on_digits": {
+        "store_channel_var": "gathered_digits"
+      }
+    }
+  ]
+}

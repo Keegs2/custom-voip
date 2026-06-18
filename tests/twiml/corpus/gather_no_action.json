@@ -1,0 +1,48 @@
+{
+  "name": "gather_no_action",
+  "classification": "correct",
+  "description": "Gather without action URL -> digits stored in channel var, falls through.",
+  "ideal": "",
+  "base_url": "https://voice.example.com/ivr/voice",
+  "input_xml": "<Response><Gather numDigits=\"2\"/><Say>done</Say></Response>",
+  "expected_parse": {
+    "ok": true,
+    "verbs": [
+      {
+        "verb": "Gather",
+        "attrs": {
+          "numDigits": "2"
+        },
+        "text": "",
+        "children": []
+      },
+      {
+        "verb": "Say",
+        "attrs": {},
+        "text": "done",
+        "children": []
+      }
+    ]
+  },
+  "expected_trace": [
+    {
+      "action": "gather",
+      "numDigits": 2,
+      "timeout": 5,
+      "finishOnKey": "#",
+      "method": "POST",
+      "prompts": [],
+      "action_url": null,
+      "on_digits": {
+        "store_channel_var": "gathered_digits"
+      }
+    },
+    {
+      "action": "say",
+      "text": "done",
+      "voice": "kal",
+      "language": "en",
+      "loop": 1
+    }
+  ]
+}

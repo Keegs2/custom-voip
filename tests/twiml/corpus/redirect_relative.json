@@ -1,0 +1,41 @@
+{
+  "name": "redirect_relative",
+  "classification": "correct",
+  "description": "Redirect to a relative URL -> resolved against base.",
+  "ideal": "",
+  "base_url": "https://voice.example.com/ivr/voice",
+  "input_xml": "<Response><Redirect>/menu</Redirect></Response>",
+  "expected_parse": {
+    "ok": true,
+    "verbs": [
+      {
+        "verb": "Redirect",
+        "attrs": {},
+        "text": "/menu",
+        "children": []
+      }
+    ]
+  },
+  "expected_trace": [
+    {
+      "action": "redirect",
+      "url": "https://voice.example.com/menu",
+      "method": "POST"
+    },
+    {
+      "http": {
+        "method": "POST",
+        "url": "https://voice.example.com/menu",
+        "params": {
+          "CallSid": "<call_sid>",
+          "AccountSid": "<customer_id>",
+          "From": "<from>",
+          "To": "<to>",
+          "CallStatus": "in-progress",
+          "Direction": "<direction>"
+        }
+      },
+      "stops_here": true
+    }
+  ]
+}

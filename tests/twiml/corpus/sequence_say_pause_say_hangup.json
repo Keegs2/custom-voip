@@ -1,0 +1,65 @@
+{
+  "name": "sequence_say_pause_say_hangup",
+  "classification": "correct",
+  "description": "Multi-verb ordered sequence; Hangup terminates the list.",
+  "ideal": "",
+  "base_url": "https://voice.example.com/ivr/voice",
+  "input_xml": "<Response><Say>One</Say><Pause length=\"1\"/><Say>Two</Say><Hangup/></Response>",
+  "expected_parse": {
+    "ok": true,
+    "verbs": [
+      {
+        "verb": "Say",
+        "attrs": {},
+        "text": "One",
+        "children": []
+      },
+      {
+        "verb": "Pause",
+        "attrs": {
+          "length": "1"
+        },
+        "text": "",
+        "children": []
+      },
+      {
+        "verb": "Say",
+        "attrs": {},
+        "text": "Two",
+        "children": []
+      },
+      {
+        "verb": "Hangup",
+        "attrs": {},
+        "text": "",
+        "children": []
+      }
+    ]
+  },
+  "expected_trace": [
+    {
+      "action": "say",
+      "text": "One",
+      "voice": "kal",
+      "language": "en",
+      "loop": 1
+    },
+    {
+      "action": "pause",
+      "length": 1
+    },
+    {
+      "action": "say",
+      "text": "Two",
+      "voice": "kal",
+      "language": "en",
+      "loop": 1
+    },
+    {
+      "action": "hangup",
+      "reason": "NORMAL_CLEARING",
+      "fs_cause": "NORMAL_CLEARING",
+      "stops_here": true
+    }
+  ]
+}

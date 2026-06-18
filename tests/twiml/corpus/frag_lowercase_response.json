@@ -1,0 +1,13 @@
+{
+  "name": "frag_lowercase_response",
+  "classification": "known-bug",
+  "description": "FRAGILE: lowercase <response> root -> total parse failure.",
+  "ideal": "A lowercase <response> root is not recognized (parser is case-sensitive on the root only) and the whole document fails to parse ('No <Response> root element found'). Documented so Phase 3 can decide whether to accept case-insensitive roots.",
+  "base_url": "https://voice.example.com/ivr/voice",
+  "input_xml": "<response><Say>hi</Say></response>",
+  "expected_parse": {
+    "ok": false,
+    "error": "No <Response> root element found"
+  },
+  "expected_trace": []
+}

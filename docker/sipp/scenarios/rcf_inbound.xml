@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!--
+  rcf_inbound.xml — SIPp UAC modelling a Bandwidth INBOUND call to an RCF DID.
+
+  Product: RCF (Remote Call Forwarding).
+
+  Ladder modelled (CLAUDE.md "Call Flow (RCF)"):
+    SIPp (acts as Bandwidth)  ->  SBC VIP :5060  ->  FreeSWITCH :5080
+      INVITE  sip:<RCF_DID>@<VIP>
+      100 Trying        (Kamailio auto_inv_100 / FS)
+      180 / 183         (B-leg ringback while FreeSWITCH bridges to forward_to)
+      200 OK            (forwarded party answered)
+      ACK
+      ... media ...
+      BYE / 200 OK
+
+  This is a SIGNALLING smoke test. SIPp sends a PCMU SDP so FreeSWITCH sets up
+  a real B2BUA media leg, but no RTP is validated here (use Homer for media).
+
+  Run (DID must exist in rcf_numbers and forward_to must answer — see README):
+    sipp <VIP>:5060 -sf /app/scenarios/rcf_inbound.xml \
+         -s 16174544217 -d 3000 -m 1 -trace_err
+  where -s is the RCF DID (To user) and -d is the hold time in ms.
+-->
+<scenario name="RCF inbound to SBC -> FreeSWITCH">
+
+  <!-- INVITE with PCMU SDP. From is presented as a PSTN caller. -->
+  <send retrans="500">
+    <![CDATA[
+      INVITE sip:[service]@[remote_ip]:[remote_port] SIP/2.0
+      Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch]
+      From: "PSTN Caller" <sip:15558675309@[local_ip]:[local_port]>;tag=[pid]SIPpTag00[call_number]
+      To: <sip:[service]@[remote_ip]:[remote_port]>
+      Call-ID: [call_id]
+      CSeq: 1 INVITE
+      Contact: <sip:15558675309@[local_ip]:[local_port]>
+      Max-Forwards: 70
+      Supported: timer
+      Session-Expires: 1800;refresher=uac
+      Min-SE: 90
+      User-Agent: SIPp-RCF-Inbound
+      Content-Type: application/sdp
+      Content-Length: [len]
+
+      v=0
+      o=sipp 53655765 2353687637 IN IP[local_ip_type] [local_ip]
+      s=SIPp Call
+      c=IN IP[media_ip_type] [media_ip]
+      t=0 0
+      m=audio [media_port] RTP/AVP 0
+      a=rtpmap:0 PCMU/8000
+    ]]>
+  </send>
+
+  <recv response="100" optional="true" />
+  <recv response="180" optional="true" />
+  <recv response="183" optional="true" />
+
+  <!-- Forwarded party answered. rtd marks round-trip start. -->
+  <recv response="200" rtd="true" />
+
+  <send>
+    <![CDATA[
+      ACK sip:[service]@[remote_ip]:[remote_port] SIP/2.0
+      Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch]
+      From: "PSTN Caller" <sip:15558675309@[local_ip]:[local_port]>;tag=[pid]SIPpTag00[call_number]
+      To: <sip:[service]@[remote_ip]:[remote_port]>[peer_tag_param]
+      Call-ID: [call_id]
+      CSeq: 1 ACK
+      Contact: <sip:15558675309@[local_ip]:[local_port]>
+      Max-Forwards: 70
+      Content-Length: 0
+    ]]>
+  </send>
+
+  <!-- Talk time (-d ms). -->
+  <pause />
+
+  <send retrans="500">
+    <![CDATA[
+      BYE sip:[service]@[remote_ip]:[remote_port] SIP/2.0
+      Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch]
+      From: "PSTN Caller" <sip:15558675309@[local_ip]:[local_port]>;tag=[pid]SIPpTag00[call_number]
+      To: <sip:[service]@[remote_ip]:[remote_port]>[peer_tag_param]
+      Call-ID: [call_id]
+      CSeq: 2 BYE
+      Contact: <sip:15558675309@[local_ip]:[local_port]>
+      Max-Forwards: 70
+      Content-Length: 0
+    ]]>
+  </send>
+
+  <recv response="200" />
+
+  <ResponseTimeRepartition value="10, 50, 100, 200, 500, 1000, 2000" />
+  <CallLengthRepartition value="10, 100, 500, 1000, 5000" />
+
+</scenario>

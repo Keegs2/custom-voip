@@ -1,0 +1,27 @@
+{
+  "name": "hangup_basic",
+  "classification": "correct",
+  "description": "Bare Hangup -> NORMAL_CLEARING, stops execution.",
+  "ideal": "",
+  "base_url": "https://voice.example.com/ivr/voice",
+  "input_xml": "<Response><Hangup/></Response>",
+  "expected_parse": {
+    "ok": true,
+    "verbs": [
+      {
+        "verb": "Hangup",
+        "attrs": {},
+        "text": "",
+        "children": []
+      }
+    ]
+  },
+  "expected_trace": [
+    {
+      "action": "hangup",
+      "reason": "NORMAL_CLEARING",
+      "fs_cause": "NORMAL_CLEARING",
+      "stops_here": true
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "name": "pause_default",
+  "classification": "correct",
+  "description": "Pause with no length -> defaults to 1 second.",
+  "ideal": "",
+  "base_url": "https://voice.example.com/ivr/voice",
+  "input_xml": "<Response><Pause/></Response>",
+  "expected_parse": {
+    "ok": true,
+    "verbs": [
+      {
+        "verb": "Pause",
+        "attrs": {},
+        "text": "",
+        "children": []
+      }
+    ]
+  },
+  "expected_trace": [
+    {
+      "action": "pause",
+      "length": 1
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "name": "self_closing_response",
+  "classification": "correct",
+  "description": "<Response/> self-closing -> zero verbs.",
+  "ideal": "",
+  "base_url": "https://voice.example.com/ivr/voice",
+  "input_xml": "<Response/>",
+  "expected_parse": {
+    "ok": true,
+    "verbs": []
+  },
+  "expected_trace": []
+}

@@ -1,0 +1,61 @@
+{
+  "name": "gather_with_say_prompt",
+  "classification": "correct",
+  "description": "Gather with a nested Say prompt and an action URL (the canonical IVR case).",
+  "ideal": "",
+  "base_url": "https://voice.example.com/ivr/voice",
+  "input_xml": "<Response><Gather numDigits=\"1\" action=\"/handle-key\" timeout=\"5\"><Say>Press 1 for sales</Say></Gather></Response>",
+  "expected_parse": {
+    "ok": true,
+    "verbs": [
+      {
+        "verb": "Gather",
+        "attrs": {
+          "action": "/handle-key",
+          "numDigits": "1",
+          "timeout": "5"
+        },
+        "text": "",
+        "children": [
+          {
+            "verb": "Say",
+            "attrs": {},
+            "text": "Press 1 for sales"
+          }
+        ]
+      }
+    ]
+  },
+  "expected_trace": [
+    {
+      "action": "gather",
+      "numDigits": 1,
+      "timeout": 5,
+      "finishOnKey": "#",
+      "method": "POST",
+      "prompts": [
+        {
+          "prompt": "say",
+          "text": "Press 1 for sales"
+        }
+      ],
+      "action_url": "https://voice.example.com/handle-key",
+      "on_digits": {
+        "http": {
+          "method": "POST",
+          "url": "https://voice.example.com/handle-key",
+          "params": {
+            "CallSid": "<call_sid>",
+            "AccountSid": "<customer_id>",
+            "From": "<from>",
+            "To": "<to>",
+            "CallStatus": "in-progress",
+            "Direction": "<direction>",
+            "Digits": "<digits>"
+          }
+        },
+        "then": "execute returned instructions, stop current list"
+      }
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "name": "reject_default",
+  "classification": "correct",
+  "description": "Bare Reject -> 403 Forbidden.",
+  "ideal": "",
+  "base_url": "https://voice.example.com/ivr/voice",
+  "input_xml": "<Response><Reject/></Response>",
+  "expected_parse": {
+    "ok": true,
+    "verbs": [
+      {
+        "verb": "Reject",
+        "attrs": {},
+        "text": "",
+        "children": []
+      }
+    ]
+  },
+  "expected_trace": [
+    {
+      "action": "reject",
+      "reason": "rejected",
+      "sip": "403 Forbidden",
+      "stops_here": true
+    }
+  ]
+}

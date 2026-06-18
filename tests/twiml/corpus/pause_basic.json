@@ -1,0 +1,27 @@
+{
+  "name": "pause_basic",
+  "classification": "correct",
+  "description": "Pause with explicit length=3.",
+  "ideal": "",
+  "base_url": "https://voice.example.com/ivr/voice",
+  "input_xml": "<Response><Pause length=\"3\"/></Response>",
+  "expected_parse": {
+    "ok": true,
+    "verbs": [
+      {
+        "verb": "Pause",
+        "attrs": {
+          "length": "3"
+        },
+        "text": "",
+        "children": []
+      }
+    ]
+  },
+  "expected_trace": [
+    {
+      "action": "pause",
+      "length": 3
+    }
+  ]
+}

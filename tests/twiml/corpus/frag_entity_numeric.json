@@ -1,0 +1,28 @@
+{
+  "name": "frag_entity_numeric",
+  "classification": "known-bug",
+  "description": "FRAGILE: numeric XML entity in Say text is left undecoded.",
+  "ideal": "Numeric entity &#123; ('{') is NOT decoded; speaks literal '&#123;'. A correct engine would decode numeric character references.",
+  "base_url": "https://voice.example.com/ivr/voice",
+  "input_xml": "<Response><Say>Press &#123; now</Say></Response>",
+  "expected_parse": {
+    "ok": true,
+    "verbs": [
+      {
+        "verb": "Say",
+        "attrs": {},
+        "text": "Press &#123; now",
+        "children": []
+      }
+    ]
+  },
+  "expected_trace": [
+    {
+      "action": "say",
+      "text": "Press &#123; now",
+      "voice": "kal",
+      "language": "en",
+      "loop": 1
+    }
+  ]
+}

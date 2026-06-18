@@ -362,7 +362,7 @@ UCaaS conference uses.
 
 ## Progress Tracker
 
-- [ ] Phase 0 — Safety Net & RCF Characterization
+- [x] Phase 0 — Safety Net & RCF Characterization  ✅ 34 char tests + 40 lessons guards + 33 TwiML fixtures, all green & PM-verified
 - [ ] Phase 1 — UNIFY: restore UCaaS onto RCF-V1
 - [ ] Phase 2 — Lua Refactor (behavior-preserving)
 - [ ] Phase 3 — Harden Programmable-Voice Engine
