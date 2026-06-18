@@ -254,7 +254,8 @@ function M.lookup_api_did(did)
 
     local sql = string.format([[
         SELECT a.voice_url, a.fallback_url, a.customer_id,
-               c.traffic_grade, c.cpm_limit, c.daily_limit, c.status
+               c.traffic_grade, c.cpm_limit, c.daily_limit, c.status,
+               c.webhook_signing_secret
         FROM api_dids a
         JOIN customers c ON a.customer_id = c.id
         WHERE a.did = %s AND a.enabled = true AND c.status = 'active'

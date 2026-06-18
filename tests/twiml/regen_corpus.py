@@ -78,10 +78,9 @@ CASES = [
      "Redirect to an absolute URL -> used verbatim.",
      "<Response><Redirect>https://other.example.com/flow</Redirect></Response>"),
 
-    ("redirect_method_get", "known-bug",
-     "method=GET is parsed but the engine ALWAYS POSTs (http_post is hardcoded). "
-     "A correct engine would issue an HTTP GET when method='GET'.",
-     "Redirect with method=GET attribute (parsed, but engine still POSTs).",
+    ("redirect_method_get", "correct", "",
+     "Redirect with method=GET: the engine now HONORS the method attribute and "
+     "issues an HTTP GET (params in the query string) instead of always POSTing.",
      '<Response><Redirect method="GET">/menu</Redirect></Response>'),
 
     ("gather_with_say_prompt", "correct", "",
@@ -131,24 +130,20 @@ CASES = [
      "<Response/> self-closing -> zero verbs.",
      "<Response/>"),
 
-    # ---- KNOWN-FRAGILE inputs (characterization for Phase 3) -------------
-    ("frag_entity_amp", "known-bug",
-     "XML entity &amp; is NOT decoded; the engine speaks the literal text "
-     "'Tom &amp; Jerry' (flite says 'amp'). A correct engine would decode to "
-     "'Tom & Jerry'.",
-     "FRAGILE: named XML entity in Say text is left undecoded.",
+    # ---- Previously-fragile inputs, now FIXED in Phase 3 -----------------
+    ("frag_entity_amp", "correct", "",
+     "Named XML entity &amp; in Say text is now decoded to '&' "
+     "(the real parser decodes entities). Engine speaks 'Tom & Jerry'.",
      "<Response><Say>Tom &amp; Jerry</Say></Response>"),
 
-    ("frag_entity_numeric", "known-bug",
-     "Numeric entity &#123; ('{') is NOT decoded; speaks literal '&#123;'. "
-     "A correct engine would decode numeric character references.",
-     "FRAGILE: numeric XML entity in Say text is left undecoded.",
+    ("frag_entity_numeric", "correct", "",
+     "Numeric character references are now decoded: &#123; -> '{' "
+     "(decimal and &#x7B; hex both supported). Engine speaks 'Press { now'.",
      "<Response><Say>Press &#123; now</Say></Response>"),
 
-    ("frag_play_url_entity", "known-bug",
-     "&amp; in a Play URL stays literal, so the playback URL becomes "
-     "'...?a=1&amp;b=2' instead of '...?a=1&b=2' -> broken query string.",
-     "FRAGILE: &amp; in a Play URL is not decoded -> malformed fetch URL.",
+    ("frag_play_url_entity", "correct", "",
+     "&amp; in a Play URL is now decoded, so the playback URL is the correct "
+     "'...?a=1&b=2' with a valid query string.",
      "<Response><Play>https://cdn.example.com/a.wav?a=1&amp;b=2</Play></Response>"),
 
     ("frag_singlequote_attr", "correct", "",
@@ -160,46 +155,53 @@ CASES = [
      "preserved correctly (the double-quote attr pass does not falsely match).",
      "<Response><Say voice='a\"b'>Hi</Say></Response>"),
 
-    ("frag_grandchild_in_say", "known-bug",
-     "2-level nesting only: a <Pause/> grandchild inside <Gather><Say>...</Say> "
-     "leaks into the Say's TEXT as literal markup ('Menu <Pause/> end'). The "
-     "Pause is neither executed nor stripped; flite would speak the angle "
-     "brackets. A correct engine would treat Pause as its own action or strip it.",
-     "FRAGILE: grandchild element inside a Gather>Say prompt leaks into text.",
+    ("frag_grandchild_in_say", "correct", "",
+     "Arbitrary nesting: a <Pause/> grandchild inside <Gather><Say>...</Say> is "
+     "now STRIPPED from the Say's text (the surrounding text is preserved: "
+     "'Menu  end'). The inline element no longer leaks as literal markup.",
      "<Response><Gather numDigits=\"1\" action=\"/k\">"
      "<Say>Menu <Pause/> end</Say></Gather></Response>"),
 
-    ("frag_missing_close_tag", "known-bug",
-     "Unclosed <Say> (no </Say>): parser logs 'missing closing tag, treating "
-     "as self-closing', so the Say loses its 'Hello' text entirely, but the "
-     "following <Hangup/> is still recognized. A correct engine would either "
-     "error or recover the text.",
-     "FRAGILE: missing close tag -> Say text dropped, Hangup survives.",
+    ("frag_missing_close_tag", "correct", "",
+     "Unclosed <Say> (no </Say>) is now rejected LOUDLY by the real parser "
+     "(mismatched closing tag), so the engine takes the fallback path instead of "
+     "silently dropping text. Malformed XML must never execute partial behavior.",
      "<Response><Say>Hello<Hangup/></Response>"),
 
-    ("frag_hyphenated_attrs", "known-bug",
-     "Hyphenated attribute names are mis-parsed: 'num-digits' is captured as a "
-     "bogus attr 'digits' (suffix after the hyphen) and 'finish-on-key' as 'key'. "
-     "numDigits/finishOnKey never get set, so the engine uses defaults "
-     "(numDigits=128, finishOnKey='#'). TwiML uses camelCase, but this documents "
-     "the silent mis-capture. A correct engine would ignore unknown attrs cleanly.",
-     "FRAGILE: hyphenated attribute names captured as wrong attrs.",
+    ("frag_hyphenated_attrs", "correct", "",
+     "Hyphenated attribute names are now parsed CLEANLY as their real names "
+     "(num-digits / finish-on-key). They are simply not TwiML-recognized "
+     "(camelCase numDigits/finishOnKey), so the engine ignores them and uses "
+     "defaults — no more silent mis-capture into bogus attr names.",
      '<Response><Gather num-digits="4" finish-on-key="#"/></Response>'),
 
-    ("frag_unquoted_attr", "known-bug",
-     "An unquoted attribute value (length=3) is NOT captured (regex requires "
-     "quotes), so Pause falls back to length=1. A correct engine would parse "
-     "unquoted values or reject them explicitly.",
-     "FRAGILE: unquoted attribute value silently ignored -> default used.",
+    ("frag_unquoted_attr", "correct", "",
+     "An unquoted attribute value (length=3) is now REJECTED explicitly (XML "
+     "requires quoted values) -> loud parse error + fallback path, rather than a "
+     "silent default. Decision: reject malformed rather than guess.",
      "<Response><Pause length=3/></Response>"),
 
-    ("frag_lowercase_response", "known-bug",
-     "A lowercase <response> root is not recognized (parser is case-sensitive "
-     "on the root only) and the whole document fails to parse ('No <Response> "
-     "root element found'). Documented so Phase 3 can decide whether to accept "
-     "case-insensitive roots.",
-     "FRAGILE: lowercase <response> root -> total parse failure.",
+    ("frag_lowercase_response", "correct", "",
+     "DECISION: TwiML is case-sensitive on the root element, so a lowercase "
+     "<response> root is rejected LOUDLY (parse error + fallback path) rather "
+     "than silently mis-handled. Lowercase verb elements still parse fine and are "
+     "skipped gracefully by the executor; only the root is enforced.",
      "<response><Say>hi</Say></response>"),
+
+    # ---- Remaining genuine gaps (characterization for FUTURE phases) -----
+    ("frag_record_verb", "known-bug",
+     "Standalone <Record> is a Phase 6 feature. Today the engine parses it fine "
+     "but warns loudly and skips (no recording is made / no media artifact). "
+     "Phase 6 will implement real recording and resolve this.",
+     "FUTURE: <Record> verb parses but recording is not yet implemented (Phase 6).",
+     '<Response><Record maxLength="20"/></Response>'),
+
+    ("frag_dial_sip_child", "known-bug",
+     "A <Dial> with a <Sip> child parses correctly, but the executor only dials "
+     "<Number> children today, so this Dial resolves to NO target (skipped). "
+     "Phase 7 adds <Sip>/<Client> Dial children.",
+     "FUTURE: <Dial><Sip> child parses but is not yet dialed (Phase 7).",
+     '<Response><Dial><Sip>sip:alice@example.com</Sip></Dial></Response>'),
 ]
 
 

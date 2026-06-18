@@ -1,8 +1,10 @@
 """Customer management endpoints."""
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Optional
 from db import database as db
+from auth.dependencies import require_admin
+from services.webhook_signing import generate_secret
 
 router = APIRouter()
 
@@ -15,6 +17,7 @@ class CustomerCreate(BaseModel):
     daily_limit: float = 500
     cpm_limit: int = 60
     ucaas_enabled: bool = False  # UCaaS add-on for api/trunk/hybrid customers
+    webhook_signing_secret: Optional[str] = None  # auto-generated if not provided
 
 
 class CustomerUpdate(BaseModel):
@@ -67,14 +70,19 @@ async def create_customer(customer: CustomerCreate):
     """Create a new customer."""
     # UCaaS account type always has UCaaS enabled implicitly
     ucaas_flag = True if customer.account_type == "ucaas" else customer.ucaas_enabled
+    # Every customer gets a webhook signing secret so the programmable-voice
+    # engine can always sign callbacks. Caller may supply one (e.g. migration),
+    # otherwise mint a fresh 256-bit secret.
+    signing_secret = customer.webhook_signing_secret or generate_secret()
     result = await db.fetch_one(
         """
-        INSERT INTO customers (name, account_type, credit_limit, traffic_grade, daily_limit, cpm_limit, ucaas_enabled)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        INSERT INTO customers (name, account_type, credit_limit, traffic_grade, daily_limit, cpm_limit, ucaas_enabled, webhook_signing_secret)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         RETURNING id, name, account_type, balance, status, traffic_grade, ucaas_enabled, created_at
         """,
         customer.name, customer.account_type, customer.credit_limit,
-        customer.traffic_grade, customer.daily_limit, customer.cpm_limit, ucaas_flag
+        customer.traffic_grade, customer.daily_limit, customer.cpm_limit, ucaas_flag,
+        signing_secret
     )
     return dict(result)
 
@@ -168,6 +176,61 @@ async def get_balance(customer_id: int):
     if not result:
         raise HTTPException(status_code=404, detail="Customer not found")
     return dict(result)
+
+
+@router.get("/{customer_id}/webhook-secret")
+async def get_webhook_secret(customer_id: int, admin: dict = Depends(require_admin)):
+    """Return the customer's webhook signing secret (admin only).
+
+    Used by an operator to share the secret with the customer so they can verify
+    the `X-Revup-Signature` header on programmable-voice webhook callbacks.
+    """
+    result = await db.fetch_one(
+        "SELECT id, webhook_signing_secret FROM customers WHERE id = $1",
+        customer_id,
+    )
+    if not result:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    secret = result["webhook_signing_secret"]
+    if not secret:
+        # Self-heal: a customer predating the migration backfill (should not
+        # happen on a fresh init) — mint and persist one now.
+        secret = generate_secret()
+        await db.execute(
+            "UPDATE customers SET webhook_signing_secret = $1, updated_at = NOW() WHERE id = $2",
+            secret, customer_id,
+        )
+    return {
+        "customer_id": result["id"],
+        "webhook_signing_secret": secret,
+        "signature_header": "X-Revup-Signature",
+    }
+
+
+@router.post("/{customer_id}/webhook-secret/rotate")
+async def rotate_webhook_secret(customer_id: int, admin: dict = Depends(require_admin)):
+    """Rotate (regenerate) the customer's webhook signing secret (admin only).
+
+    Returns the NEW secret. After rotation, callbacks are signed with the new
+    secret immediately — the customer must update their verifier in lockstep.
+    """
+    new_secret = generate_secret()
+    result = await db.fetch_one(
+        """
+        UPDATE customers SET webhook_signing_secret = $1, updated_at = NOW()
+        WHERE id = $2
+        RETURNING id, webhook_signing_secret
+        """,
+        new_secret, customer_id,
+    )
+    if not result:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    return {
+        "customer_id": result["id"],
+        "webhook_signing_secret": result["webhook_signing_secret"],
+        "signature_header": "X-Revup-Signature",
+        "rotated": True,
+    }
 
 
 @router.post("/{customer_id}/credit")

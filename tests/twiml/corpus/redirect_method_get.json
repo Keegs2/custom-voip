@@ -1,8 +1,8 @@
 {
   "name": "redirect_method_get",
-  "classification": "known-bug",
-  "description": "Redirect with method=GET attribute (parsed, but engine still POSTs).",
-  "ideal": "method=GET is parsed but the engine ALWAYS POSTs (http_post is hardcoded). A correct engine would issue an HTTP GET when method='GET'.",
+  "classification": "correct",
+  "description": "Redirect with method=GET: the engine now HONORS the method attribute and issues an HTTP GET (params in the query string) instead of always POSTing.",
+  "ideal": "",
   "base_url": "https://voice.example.com/ivr/voice",
   "input_xml": "<Response><Redirect method=\"GET\">/menu</Redirect></Response>",
   "expected_parse": {
@@ -26,7 +26,7 @@
     },
     {
       "http": {
-        "method": "POST",
+        "method": "GET",
         "url": "https://voice.example.com/menu",
         "params": {
           "CallSid": "<call_sid>",

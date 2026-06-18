@@ -264,7 +264,10 @@ local function lookup_api_did()
             cpm_limit = tonumber(api_did.cpm_limit) or 60,
             daily_limit = tonumber(api_did.daily_limit) or 500,
             voice_url = api_did.voice_url,
-            fallback_url = api_did.fallback_url
+            fallback_url = api_did.fallback_url,
+            -- Per-customer webhook signing secret (api_dids JOIN customers).
+            -- Empty string / nil means "unsigned" — the engine warns and POSTs unsigned.
+            webhook_signing_secret = api_did.webhook_signing_secret
         }
     end
 
@@ -348,6 +351,7 @@ pass_caller_id = routing.pass_caller_id
 ring_timeout = routing.ring_timeout or 30
 voice_url = routing.voice_url
 fallback_url = routing.fallback_url
+local webhook_signing_secret = routing.webhook_signing_secret
 trunk_id = routing.trunk_id
 
 freeswitch.consoleLog("DEBUG", string.format(
@@ -446,6 +450,11 @@ elseif product_type == "api" then
         set_var("voice_url", voice_url)
         if fallback_url then
             set_var("fallback_url", fallback_url)
+        end
+        -- Pass the per-customer webhook signing secret to the TwiML engine so it
+        -- can add X-Revup-Signature to every outbound webhook POST/GET.
+        if webhook_signing_secret and webhook_signing_secret ~= "" then
+            set_var("webhook_signing_secret", webhook_signing_secret)
         end
         set_var("direction", "inbound")
 

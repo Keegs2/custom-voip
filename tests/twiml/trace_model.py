@@ -182,11 +182,17 @@ def approximate_trace(verbs: list, base_url: str) -> list:
                 trace.append({"action": "redirect", "skipped_empty": True})
                 continue
             url = resolve_url(text, base_url)
-            trace.append({"action": "redirect", "url": url, "method": attrs.get("method", "POST")})
-            # Engine ALWAYS POSTs (http_post), regardless of the method attr.
-            trace.append({"http": {"method": "POST", "url": url, "params": dict(_BASE_PARAMS)}})
+            method = "GET" if attrs.get("method") == "GET" else "POST"
+            trace.append({"action": "redirect", "url": url, "method": method})
+            # Phase 3: the engine now HONORS the method attribute (GET vs POST).
+            trace.append({"http": {"method": method, "url": url, "params": dict(_BASE_PARAMS)}})
             trace[-1]["stops_here"] = True
             break
+
+        elif name == "Record":
+            # Standalone recording is Phase 6: the engine warns loudly and skips
+            # (it does NOT silently no-op an advertised verb).
+            trace.append({"action": "record", "unsupported": True})
 
         elif name == "Gather":
             # Children are played as prompts (Say/Play/Pause); other child verbs

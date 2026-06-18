@@ -1,0 +1,36 @@
+{
+  "name": "frag_dial_sip_child",
+  "classification": "known-bug",
+  "description": "FUTURE: <Dial><Sip> child parses but is not yet dialed (Phase 7).",
+  "ideal": "A <Dial> with a <Sip> child parses correctly, but the executor only dials <Number> children today, so this Dial resolves to NO target (skipped). Phase 7 adds <Sip>/<Client> Dial children.",
+  "base_url": "https://voice.example.com/ivr/voice",
+  "input_xml": "<Response><Dial><Sip>sip:alice@example.com</Sip></Dial></Response>",
+  "expected_parse": {
+    "ok": true,
+    "verbs": [
+      {
+        "verb": "Dial",
+        "attrs": {},
+        "text": "",
+        "children": [
+          {
+            "verb": "Sip",
+            "attrs": {},
+            "text": "sip:alice@example.com"
+          }
+        ]
+      }
+    ]
+  },
+  "expected_trace": [
+    {
+      "action": "dial",
+      "targets": [],
+      "callerId": null,
+      "timeout": 30,
+      "record": null,
+      "action_url": null,
+      "skipped_no_targets": true
+    }
+  ]
+}

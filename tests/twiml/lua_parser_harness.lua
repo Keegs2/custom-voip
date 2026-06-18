@@ -34,8 +34,8 @@ local f = assert(io.open(engine_path, "r"))
 local src = f:read("*a")
 f:close()
 
-local START_MARKER = "local function parse_attributes"
-local END_MARKER = "local api = freeswitch.API()"
+local START_MARKER = "-- BEGIN PARSER SECTION"
+local END_MARKER = "-- END PARSER SECTION"
 
 local s = src:find(START_MARKER, 1, true)
 local e = src:find(END_MARKER, 1, true)
@@ -45,13 +45,28 @@ if not s or not e or e <= s then
 end
 
 local section = src:sub(s, e - 1)
-local chunk_src = section .. "\nreturn parse_xml, parse_attributes\n"
+local chunk_src = section .. "\nreturn parse_xml\n"
 
--- Sandbox env: provide stdlib via __index, plus the two engine-local symbols
--- the parser closes over (log_warning, uuid). The stubs are inert.
+-- The production parser loads lib/xml.lua via loadfile() at an absolute container
+-- path; here we load the SAME file from the repo (alongside the engine) and inject
+-- it as the upvalue `xml_lib` the sliced section closes over. So the real parser
+-- AND the real vendored XML library both run for real in this harness.
+local lib_path = engine_path:gsub("handlers[/\\]api_voice%.lua$", "lib/xml.lua")
+local xml_chunk, xerr = loadfile(lib_path)
+if not xml_chunk then
+    io.write('{"ok":false,"error":"could not load lib/xml.lua: ' .. tostring(xerr):gsub('"', "'") .. '"}')
+    os.exit(0)
+end
+local xml_lib = xml_chunk()
+
+-- Sandbox env: provide stdlib via __index, plus the engine-local symbols the
+-- parser closes over (xml_lib + inert log/uuid stubs).
 local env = setmetatable({
+    xml_lib = xml_lib,
     log_warning = function() end,
     log_debug = function() end,
+    log_err = function() end,
+    log_info = function() end,
     uuid = "harness",
 }, { __index = _G })
 

@@ -368,12 +368,14 @@ UCaaS conference uses.
 - FreeSWITCH: mod_verto/conference/voicemail/av/rtc/valet loaded, no CRIT; refactored handlers/+lib/ load in real mod_lua; verto ws:8082/wss:8083 + sofia internal:5080/external:5090 RUNNING.
 - API: /health ok (db+redis); 229 routes incl. all 9 UCaaS routers; WS presence/chat subscribers running.
 
+**2026-06-18 — Phase 3 verified live:** fresh init 01→22 clean (pgcrypto + customers.webhook_signing_secret 64-hex for cust 1/5); lib/xml.lua + lib/hmac_sha256.lua + api_voice.lua load in real mod_lua; HMAC KAT byte-identical Lua↔Python (+Lu6H/...); shell-injection neutralized (shq adversarial test). New env: WEBHOOK_HTTP_TIMEOUT, WEBHOOK_MAX_ATTEMPTS, WEBHOOK_BACKOFF_MS, WEBHOOK_ALLOW_HTTP.
+
 ## Progress Tracker
 
 - [x] Phase 0 — Safety Net & RCF Characterization  ✅ 34 char tests + 40 lessons guards + 33 TwiML fixtures, all green & PM-verified
 - [x] Phase 1 — UNIFY: restore UCaaS onto RCF-V1  ✅ 55 files restored + grafted; hardening intact (43 char + 40 guards green); ucaas branch activated + bug fixed; RCF gated. Deferred to live env: postgres init dry-run, FS image build, live call test
 - [x] Phase 2 — Lua Refactor (behavior-preserving)  ✅ inbound_router 1071→500 (thin dispatcher); handlers/{rcf,trunk,ucaas} + lib/{dialstring,caller_id,session_timer,sbc} extracted; 66 char tests + 40 guards green; guards re-targeted structure-flexibly; outbound_api kept (live via ESL)
-- [ ] Phase 3 — Harden Programmable-Voice Engine
+- [x] Phase 3 — Harden Programmable-Voice Engine  ✅ real pure-Lua XML parser (9 known-bugs fixed) + HMAC-SHA256 webhook signing (KAT byte-identical Lua↔Python) + HTTPS enforce + record-warning + robust fetch; injection-safe curl transport (adversarially verified); 80 twiml/66 lua/51 lessons+signing green; live mod_lua + init-22 verified
 - [ ] Phase 4 — Harden Restored UCaaS Features
 - [ ] Phase 5 — ESL Control Plane (switchio)
 - [ ] Phase 6 — Media Plane + Record/Stream + Recording

@@ -1,8 +1,8 @@
 {
   "name": "frag_grandchild_in_say",
-  "classification": "known-bug",
-  "description": "FRAGILE: grandchild element inside a Gather>Say prompt leaks into text.",
-  "ideal": "2-level nesting only: a <Pause/> grandchild inside <Gather><Say>...</Say> leaks into the Say's TEXT as literal markup ('Menu <Pause/> end'). The Pause is neither executed nor stripped; flite would speak the angle brackets. A correct engine would treat Pause as its own action or strip it.",
+  "classification": "correct",
+  "description": "Arbitrary nesting: a <Pause/> grandchild inside <Gather><Say>...</Say> is now STRIPPED from the Say's text (the surrounding text is preserved: 'Menu  end'). The inline element no longer leaks as literal markup.",
+  "ideal": "",
   "base_url": "https://voice.example.com/ivr/voice",
   "input_xml": "<Response><Gather numDigits=\"1\" action=\"/k\"><Say>Menu <Pause/> end</Say></Gather></Response>",
   "expected_parse": {
@@ -19,7 +19,7 @@
           {
             "verb": "Say",
             "attrs": {},
-            "text": "Menu <Pause/> end"
+            "text": "Menu  end"
           }
         ]
       }
@@ -35,7 +35,7 @@
       "prompts": [
         {
           "prompt": "say",
-          "text": "Menu <Pause/> end"
+          "text": "Menu  end"
         }
       ],
       "action_url": "https://voice.example.com/k",

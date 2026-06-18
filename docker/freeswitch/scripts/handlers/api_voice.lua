@@ -28,7 +28,10 @@ package.path = "/usr/local/share/lua/5.3/?.lua;/usr/local/share/lua/5.3/?/init.l
 package.cpath = "/usr/local/lib/lua/5.3/?.so;/usr/local/lib/lua/5.3/?/?.so;/usr/lib/lua/5.3/?.so;/usr/lib/lua/5.3/?/?.so;" .. (package.cpath or "")
 
 local LOG_PREFIX = "[voice_webhook]"
-local HTTP_TIMEOUT = 5       -- seconds
+local HTTP_TIMEOUT = tonumber(os.getenv("WEBHOOK_HTTP_TIMEOUT")) or 5  -- seconds, env-tunable
+local HTTP_MAX_ATTEMPTS = tonumber(os.getenv("WEBHOOK_MAX_ATTEMPTS")) or 3  -- total tries per URL
+local HTTP_BACKOFF_MS = tonumber(os.getenv("WEBHOOK_BACKOFF_MS")) or 200    -- base backoff, doubles each retry
+local ALLOW_HTTP = (os.getenv("WEBHOOK_ALLOW_HTTP") == "true")  -- dev only: permit non-HTTPS webhooks
 local MAX_REDIRECT_DEPTH = 10 -- prevent infinite redirect loops
 local GATHER_DEFAULT_TIMEOUT = 5  -- seconds
 local DIAL_DEFAULT_TIMEOUT = 30   -- seconds
@@ -52,6 +55,31 @@ end
 local function log_warning(uuid, msg)
     freeswitch.consoleLog("WARNING", string.format("%s [%s] %s\n", LOG_PREFIX, uuid, msg))
 end
+
+-- ============================================
+-- Vendored pure-Lua libs (loaded via loadfile() — mod_lua cpath is fragile;
+-- see scripts/CLAUDE.md gotcha #10, mirrors lib/db_client loading)
+-- ============================================
+
+local function load_lib(name)
+    local path = "/usr/local/freeswitch/scripts/lib/" .. name .. ".lua"
+    local chunk, lerr = loadfile(path)
+    if not chunk then
+        freeswitch.consoleLog("ERR", string.format(
+            "%s failed to loadfile %s: %s\n", LOG_PREFIX, path, tostring(lerr)))
+        return nil
+    end
+    local ok, mod = pcall(chunk)
+    if not ok then
+        freeswitch.consoleLog("ERR", string.format(
+            "%s failed to initialize %s: %s\n", LOG_PREFIX, name, tostring(mod)))
+        return nil
+    end
+    return mod
+end
+
+local xml_lib = load_lib("xml")           -- real XML parser (replaces regex parser)
+local hmac_lib = load_lib("hmac_sha256")  -- HMAC-SHA256 for webhook signing
 
 -- ============================================
 -- Session helpers
@@ -105,6 +133,11 @@ local fallback_url = get_var("fallback_url", nil)
 local status_callback = get_var("status_callback", nil)
 local direction = get_var("direction", "inbound")
 local call_start_time = os.time()
+
+-- Per-customer webhook signing secret (set by inbound_router api branch from the
+-- api_dids JOIN customers lookup). When present, every outbound webhook POST/GET
+-- carries an X-Revup-Signature header the customer can verify.
+local webhook_signing_secret = get_var("webhook_signing_secret", nil)
 
 log_info(uuid, string.format(
     "Webhook engine starting: from=%s to=%s customer=%s direction=%s voice_url=%s",
@@ -169,264 +202,270 @@ end
 -- ============================================
 -- XML Parser
 -- ============================================
--- Simple XML parser for TwiML-style flat/shallow XML.
--- Handles <Response> root with verb elements, attributes, text content,
--- and one level of nesting (e.g., Gather containing Say/Play).
+-- TwiML layer over lib/xml.lua (the vendored pure-Lua XML parser). This replaces
+-- the old regex parser. It flattens the parsed DOM into the verb tree the
+-- executor consumes: top-level <Response> children become verbs, each verb's
+-- direct text is its `text`, and each verb's element children become `children`
+-- (inline grandchildren elements are STRIPPED from the text, fixing the old
+-- grandchild-leak bug). Entities/CDATA/quotes/nesting are all handled by xml.lua.
+-- Malformed input returns nil + a clear error so the caller takes the fallback
+-- path instead of silently executing wrong behavior.
 
-local function parse_attributes(attr_string)
-    local attrs = {}
-    if not attr_string or attr_string == "" then
-        return attrs
-    end
-    -- Match attribute="value" or attribute='value'
-    for key, value in attr_string:gmatch('(%w+)%s*=%s*"([^"]*)"') do
-        attrs[key] = value
-    end
-    for key, value in attr_string:gmatch("(%w+)%s*=%s*'([^']*)'") do
-        attrs[key] = value
-    end
-    return attrs
-end
-
+-- BEGIN PARSER SECTION
+-- (Sliced verbatim by tests/twiml/lua_parser_harness.lua. Keep this region
+--  self-contained except for the injected upvalue `xml_lib`.)
 local function parse_xml(xml_string)
     if not xml_string or xml_string == "" then
         return nil, "Empty XML string"
     end
+    if not xml_lib then
+        return nil, "XML library unavailable"
+    end
 
-    -- Remove XML declaration if present
-    xml_string = xml_string:gsub("<%?xml[^?]*%?>", "")
+    local root, perr = xml_lib.parse(xml_string)
+    if not root then
+        return nil, "malformed XML: " .. tostring(perr)
+    end
 
-    -- Remove comments
-    xml_string = xml_string:gsub("<!%-%-.-%--%>", "")
+    -- TwiML is case-sensitive on the root element: it must be exactly <Response>.
+    if root.tag ~= "Response" then
+        return nil, "No <Response> root element found (got <" .. tostring(root.tag) .. ">)"
+    end
 
-    -- Trim whitespace
-    xml_string = xml_string:match("^%s*(.-)%s*$")
-
-    -- Check for <Response> root element
-    local response_content = xml_string:match("<Response%s*>(.-)</Response>")
-    if not response_content then
-        -- Try self-closing or case variations
-        response_content = xml_string:match("<Response%s*/>")
-        if response_content then
-            return {}  -- Empty response
-        end
-        return nil, "No <Response> root element found"
+    local function trim(s)
+        return (tostring(s or ""):gsub("^%s*(.-)%s*$", "%1"))
     end
 
     local verbs = {}
-
-    -- Pattern to match top-level elements inside <Response>
-    -- We need to handle both self-closing tags and tags with content (including nested tags)
-    local pos = 1
-    while pos <= #response_content do
-        -- Skip whitespace and text outside tags
-        local tag_start = response_content:find("<", pos)
-        if not tag_start then break end
-
-        -- Extract the tag name and attributes
-        -- Match opening tag: <TagName attr1="val1" attr2="val2">
-        local tag_end_pos = response_content:find(">", tag_start)
-        if not tag_end_pos then break end
-
-        local tag_content = response_content:sub(tag_start + 1, tag_end_pos - 1)
-
-        -- Check for self-closing tag: <TagName attrs/>
-        local is_self_closing = tag_content:match("/$")
-        if is_self_closing then
-            tag_content = tag_content:sub(1, -2)  -- Remove trailing /
-        end
-
-        -- Extract tag name and attribute string
-        local tag_name, attr_str = tag_content:match("^(%w+)%s*(.*)")
-        if not tag_name then
-            pos = tag_end_pos + 1
-            goto continue
-        end
-
-        -- Skip closing tags
-        if response_content:sub(tag_start + 1, tag_start + 1) == "/" then
-            pos = tag_end_pos + 1
-            goto continue
-        end
-
-        local verb = {
-            verb = tag_name,
-            attrs = parse_attributes(attr_str),
-            text = "",
-            children = {}
-        }
-
-        if is_self_closing then
-            table.insert(verbs, verb)
-            pos = tag_end_pos + 1
-        else
-            -- Find the matching closing tag
-            -- For verbs that can have children (Gather, Dial), we need to parse nested elements
-            local close_pattern = "</" .. tag_name .. ">"
-            local close_start, close_end = response_content:find(close_pattern, tag_end_pos + 1)
-
-            if not close_start then
-                -- Malformed XML - treat as self-closing
-                log_warning(uuid, "Missing closing tag for <" .. tag_name .. ">, treating as self-closing")
-                table.insert(verbs, verb)
-                pos = tag_end_pos + 1
-            else
-                local inner = response_content:sub(tag_end_pos + 1, close_start - 1)
-
-                -- Check if inner content has child elements
-                if inner:match("<(%w+)") then
-                    -- Parse children (one level deep)
-                    local child_pos = 1
-                    while child_pos <= #inner do
-                        -- Capture text before next child tag
-                        local child_tag_start = inner:find("<", child_pos)
-                        if not child_tag_start then
-                            -- Remaining text
-                            local remaining = inner:sub(child_pos):match("^%s*(.-)%s*$")
-                            if remaining ~= "" then
-                                verb.text = (verb.text ~= "" and verb.text .. " " or "") .. remaining
-                            end
-                            break
-                        end
-
-                        -- Text before this child
-                        local text_before = inner:sub(child_pos, child_tag_start - 1):match("^%s*(.-)%s*$")
-                        if text_before and text_before ~= "" then
-                            verb.text = (verb.text ~= "" and verb.text .. " " or "") .. text_before
-                        end
-
-                        local child_tag_end = inner:find(">", child_tag_start)
-                        if not child_tag_end then break end
-
-                        local child_tag_raw = inner:sub(child_tag_start + 1, child_tag_end - 1)
-
-                        -- Skip closing tags
-                        if child_tag_raw:sub(1, 1) == "/" then
-                            child_pos = child_tag_end + 1
-                            goto continue_child
-                        end
-
-                        local child_self_closing = child_tag_raw:match("/$")
-                        if child_self_closing then
-                            child_tag_raw = child_tag_raw:sub(1, -2)
-                        end
-
-                        local child_name, child_attr_str = child_tag_raw:match("^(%w+)%s*(.*)")
-                        if not child_name then
-                            child_pos = child_tag_end + 1
-                            goto continue_child
-                        end
-
-                        local child = {
-                            verb = child_name,
-                            attrs = parse_attributes(child_attr_str),
-                            text = ""
-                        }
-
-                        if child_self_closing then
-                            table.insert(verb.children, child)
-                            child_pos = child_tag_end + 1
-                        else
-                            local child_close = "</" .. child_name .. ">"
-                            local cc_start, cc_end = inner:find(child_close, child_tag_end + 1)
-                            if cc_start then
-                                child.text = inner:sub(child_tag_end + 1, cc_start - 1):match("^%s*(.-)%s*$")
-                                table.insert(verb.children, child)
-                                child_pos = cc_end + 1
-                            else
-                                table.insert(verb.children, child)
-                                child_pos = child_tag_end + 1
-                            end
-                        end
-
-                        ::continue_child::
-                    end
-                else
-                    -- Plain text content
-                    verb.text = inner:match("^%s*(.-)%s*$")
+    for _, child in ipairs(root.kids) do
+        if type(child) == "table" then
+            -- Element children of this verb (Gather>Say/Play/Pause, Dial>Number, ...)
+            local elem_kids = {}
+            for _, gk in ipairs(child.kids) do
+                if type(gk) == "table" then
+                    elem_kids[#elem_kids + 1] = gk
                 end
-
-                table.insert(verbs, verb)
-                pos = close_end + 1
             end
-        end
 
-        ::continue::
+            local verb = {
+                verb = child.tag,
+                attrs = child.attrs,
+                text = trim(xml_lib.direct_text(child)),
+                children = {},
+            }
+
+            for _, gk in ipairs(elem_kids) do
+                table.insert(verb.children, {
+                    verb = gk.tag,
+                    attrs = gk.attrs,
+                    text = trim(xml_lib.direct_text(gk)),
+                })
+            end
+
+            table.insert(verbs, verb)
+        end
     end
 
     return verbs, nil
 end
+-- END PARSER SECTION
 
 -- ============================================
--- HTTP request via FreeSWITCH API curl
+-- HTTP request via the system curl binary
 -- ============================================
+-- We shell out to /usr/bin/curl (present in the FS image) rather than mod_curl's
+-- `curl` API because that API cannot set a custom REQUEST header — and the
+-- webhook-signing contract requires the X-Revup-Signature header on every POST.
+-- All interpolated values are single-quote shell-escaped (shq) to prevent
+-- command injection from customer-controlled URLs/params.
 
-local api = freeswitch.API()
+-- Safe POSIX shell single-quoting: wrap in '...' and replace ' with '\''.
+local function shq(s)
+    return "'" .. tostring(s):gsub("'", "'\\''") .. "'"
+end
 
--- Fetch instructions from a webhook URL via HTTP POST
--- Returns: xml_string, error_string
-local function http_post(url, params)
+-- HTTPS enforcement: reject non-https webhook/action URLs unless WEBHOOK_ALLOW_HTTP=true.
+local function url_is_allowed(url)
     if not url or url == "" then
-        return nil, "Empty URL"
+        return false, "empty URL"
     end
+    if url:match("^https://") then
+        return true
+    end
+    if url:match("^http://") then
+        if ALLOW_HTTP then
+            log_warning(uuid, "WEBHOOK_ALLOW_HTTP=true — permitting non-HTTPS webhook URL: " .. url)
+            return true
+        end
+        return false, "non-HTTPS webhook URL refused (set WEBHOOK_ALLOW_HTTP=true for dev): " .. url
+    end
+    return false, "unsupported URL scheme: " .. url
+end
 
-    local body = build_form_body(params)
-
-    log_debug(uuid, string.format("HTTP POST %s body=%s", url, body))
-
-    -- Use FreeSWITCH curl API: curl url [options]
-    -- Format: curl <url> content-type application/x-www-form-urlencoded post <data>
-    local curl_cmd = string.format(
-        "curl %s content-type application/x-www-form-urlencoded timeout %d post '%s'",
-        url, HTTP_TIMEOUT, body
-    )
-
-    local ok, response = pcall(function()
-        return api:executeString(curl_cmd)
+-- Compute the Twilio-style HMAC-SHA256 signature for a webhook request.
+--   POST: signing_string = url .. concat(sorted "key"..value over POST params)
+--   GET:  signing_string = full url including the query string (no param concat)
+-- Returns base64 signature, or nil if no secret/lib (caller POSTs unsigned).
+local function compute_signature(url, params, method)
+    if not webhook_signing_secret or webhook_signing_secret == "" then
+        return nil
+    end
+    if not hmac_lib then
+        log_warning(uuid, "hmac lib unavailable — sending webhook UNSIGNED")
+        return nil
+    end
+    local signing_string
+    if method == "GET" then
+        signing_string = url
+    else
+        local keys = {}
+        for k in pairs(params or {}) do keys[#keys + 1] = k end
+        table.sort(keys)
+        local parts = { url }
+        for _, k in ipairs(keys) do
+            parts[#parts + 1] = k .. tostring(params[k])
+        end
+        signing_string = table.concat(parts)
+    end
+    local ok, sig = pcall(function()
+        return hmac_lib.sign(webhook_signing_secret, signing_string)
     end)
+    if not ok then
+        log_err(uuid, "signature computation failed: " .. tostring(sig))
+        return nil
+    end
+    return sig
+end
 
-    if not ok or not response then
-        return nil, "curl execution failed: " .. tostring(response)
+-- Single HTTP request. method = "POST" (default) or "GET". Returns body, err.
+local function http_request(url, params, method)
+    method = (method == "GET") and "GET" or "POST"
+
+    local allowed, why = url_is_allowed(url)
+    if not allowed then
+        return nil, why
     end
 
-    -- FreeSWITCH curl API returns the response body directly
-    -- On error it may return an empty string or error message
+    local final_url = url
+    local body = nil
+    if method == "GET" then
+        local qs = build_form_body(params)
+        if qs ~= "" then
+            final_url = url .. (url:find("?", 1, true) and "&" or "?") .. qs
+        end
+    else
+        body = build_form_body(params)
+    end
+
+    -- Sign: POST signs over base url + sorted params; GET over the full URL.
+    local signature = compute_signature(method == "GET" and final_url or url, params, method)
+
+    local argv = { "curl", "-sS", "--max-time", tostring(HTTP_TIMEOUT), "-X", method }
+    if method ~= "GET" then
+        argv[#argv + 1] = "-H"
+        argv[#argv + 1] = "Content-Type: application/x-www-form-urlencoded"
+        argv[#argv + 1] = "--data-binary"
+        argv[#argv + 1] = body or ""
+    end
+    if signature then
+        argv[#argv + 1] = "-H"
+        argv[#argv + 1] = "X-Revup-Signature: " .. signature
+    end
+    argv[#argv + 1] = final_url
+
+    local quoted = {}
+    for i, a in ipairs(argv) do quoted[i] = shq(a) end
+    local cmd = table.concat(quoted, " ") .. " 2>/dev/null"
+
+    log_debug(uuid, string.format("HTTP %s %s signed=%s", method, final_url, tostring(signature ~= nil)))
+
+    local fh = io.popen(cmd, "r")
+    if not fh then
+        return nil, "io.popen failed for curl"
+    end
+    local response = fh:read("*a") or ""
+    local ok_close, _, code = fh:close()
+
     if response == "" then
-        return nil, "Empty response from webhook"
+        return nil, string.format("empty response from webhook (curl exit=%s)", tostring(code))
     end
 
     log_debug(uuid, string.format("HTTP response length=%d", #response))
-
     return response, nil
 end
 
--- ============================================
--- Fetch and parse instructions from a webhook URL
--- Includes retry logic: retry once on failure
--- ============================================
+-- Best-effort sleep between retries (bounded backoff). No-op if unavailable.
+local function backoff_sleep(ms)
+    pcall(function()
+        if freeswitch.msleep then
+            freeswitch.msleep(ms)
+        end
+    end)
+end
 
-local function fetch_instructions(url, params)
-    -- First attempt
-    local response, err = http_post(url, params)
-    if not response then
-        log_warning(uuid, "Webhook fetch failed (attempt 1): " .. tostring(err) .. " - retrying")
-        -- Retry once
-        response, err = http_post(url, params)
-        if not response then
-            log_err(uuid, "Webhook fetch failed (attempt 2): " .. tostring(err))
+-- POST/GET a URL with bounded retry + exponential backoff. Returns body, err.
+local function http_with_retry(url, params, method)
+    local err
+    local response
+    for attempt = 1, HTTP_MAX_ATTEMPTS do
+        response, err = http_request(url, params, method)
+        if response then
+            if attempt > 1 then
+                log_info(uuid, string.format("Webhook fetch succeeded on attempt %d: %s", attempt, url))
+            end
+            return response, nil
+        end
+        -- Do not retry a hard policy rejection (e.g. non-HTTPS) — it will never succeed.
+        if err and (err:find("refused", 1, true) or err:find("unsupported URL", 1, true) or err:find("empty URL", 1, true)) then
             return nil, err
         end
+        if attempt < HTTP_MAX_ATTEMPTS then
+            local delay = HTTP_BACKOFF_MS * (2 ^ (attempt - 1))
+            log_warning(uuid, string.format(
+                "Webhook fetch failed (attempt %d/%d): %s — retrying in %dms",
+                attempt, HTTP_MAX_ATTEMPTS, tostring(err), delay))
+            backoff_sleep(delay)
+        end
     end
+    log_err(uuid, string.format("Webhook fetch failed after %d attempts: %s", HTTP_MAX_ATTEMPTS, tostring(err)))
+    return nil, err
+end
 
-    -- Parse the XML
+-- ============================================
+-- Fetch and parse instructions from a webhook URL.
+-- Applies fallback_url to ANY action URL (not just the initial fetch): if the
+-- primary URL fails after retries, try the configured fallback_url before giving
+-- up. `method` ("POST"/"GET") is honored per the verb's method attribute.
+-- ============================================
+
+-- Fetch + parse a single URL (with transport retry). Returns verbs, err.
+local function fetch_and_parse(url, params, method)
+    local response, err = http_with_retry(url, params, method)
+    if not response then
+        return nil, err
+    end
+    -- Real parser. Malformed XML is a hard failure (never execute wrong behavior).
     local verbs, parse_err = parse_xml(response)
     if not verbs then
-        log_err(uuid, "XML parse failed: " .. tostring(parse_err) .. " | raw=" .. response:sub(1, 500))
+        log_err(uuid, "XML parse failed for " .. tostring(url) .. ": " .. tostring(parse_err) ..
+            " | raw=" .. response:sub(1, 500))
         return nil, "XML parse error: " .. tostring(parse_err)
     end
-
     log_info(uuid, string.format("Parsed %d verb(s) from %s", #verbs, url))
     return verbs, nil
+end
+
+local function fetch_instructions(url, params, method)
+    local verbs, err = fetch_and_parse(url, params, method)
+
+    -- Fallback URL applies to EVERY action fetch (Gather/Dial/Redirect + initial),
+    -- and covers BOTH transport failure and a primary that returns malformed XML.
+    if not verbs and fallback_url and fallback_url ~= "" and fallback_url ~= url then
+        log_warning(uuid, "Primary webhook failed (" .. tostring(err) .. "), trying fallback_url: " .. fallback_url)
+        verbs, err = fetch_and_parse(fallback_url, params, method)
+    end
+
+    return verbs, err
 end
 
 -- Build the standard webhook parameters for a request
@@ -588,7 +627,7 @@ local function execute_gather(verb)
     local timeout = tonumber(verb.attrs.timeout) or GATHER_DEFAULT_TIMEOUT
     local finish_on_key = verb.attrs.finishOnKey or "#"
     local action_url = verb.attrs.action or nil
-    local method = verb.attrs.method or "POST"
+    local method = (verb.attrs.method == "GET") and "GET" or "POST"
 
     -- Resolve action URL against current base
     if action_url then
@@ -667,7 +706,7 @@ local function execute_gather(verb)
         log_info(uuid, string.format("Gather: posting digits='%s' to %s", digits, action_url))
 
         local params = build_webhook_params({ Digits = digits })
-        local new_verbs, err = fetch_instructions(action_url, params)
+        local new_verbs, err = fetch_instructions(action_url, params, method)
 
         if new_verbs then
             -- Update the base URL for relative URL resolution in the new instruction set
@@ -700,7 +739,17 @@ local function execute_dial(verb)
     local dial_caller_id = verb.attrs.callerId or nil
     local dial_timeout = tonumber(verb.attrs.timeout) or DIAL_DEFAULT_TIMEOUT
     local dial_action = verb.attrs.action or nil
+    local dial_method = (verb.attrs.method == "GET") and "GET" or "POST"
     local dial_record = verb.attrs.record or nil
+
+    -- Recording is NOT yet implemented (standalone recording is Phase 6). Do NOT
+    -- silently ignore an advertised attribute — warn loudly so operators know the
+    -- requested recording did not happen.
+    if dial_record and dial_record ~= "" and dial_record ~= "false" and dial_record ~= "do-not-record" then
+        log_warning(uuid, string.format(
+            "Dial record=\"%s\" requested but call recording is NOT yet supported (pending Phase 6) — proceeding WITHOUT recording",
+            tostring(dial_record)))
+    end
 
     -- Resolve action URL
     if dial_action then
@@ -827,7 +876,7 @@ local function execute_dial(verb)
             DialCallDuration = tostring(math.floor(tonumber(dial_duration) / 1000))
         })
 
-        local new_verbs, err = fetch_instructions(dial_action, params)
+        local new_verbs, err = fetch_instructions(dial_action, params, dial_method)
         if new_verbs then
             local saved_base = current_base_url
             current_base_url = dial_action
@@ -845,7 +894,7 @@ end
 -- ============================================
 local function execute_redirect(verb)
     local redirect_url = verb.text or ""
-    local method = verb.attrs.method or "POST"
+    local method = (verb.attrs.method == "GET") and "GET" or "POST"
 
     if redirect_url == "" then
         log_warning(uuid, "Redirect verb with empty URL, skipping")
@@ -864,7 +913,7 @@ local function execute_redirect(verb)
     log_info(uuid, string.format("Redirect: url=%s method=%s depth=%d", redirect_url, method, redirect_depth))
 
     local params = build_webhook_params()
-    local new_verbs, err = fetch_instructions(redirect_url, params)
+    local new_verbs, err = fetch_instructions(redirect_url, params, method)
 
     if new_verbs then
         local saved_base = current_base_url
@@ -912,6 +961,10 @@ execute_verbs = function(verbs)
             elseif verb.verb == "Reject" then
                 execute_reject(verb)
                 result = "stop"
+            elseif verb.verb == "Record" then
+                -- Standalone recording is Phase 6. Do not silently no-op an
+                -- advertised verb — warn loudly and continue.
+                log_warning(uuid, "<Record> verb is NOT yet supported (pending Phase 6) — skipping, no recording made")
             else
                 log_warning(uuid, "Unknown verb: " .. tostring(verb.verb) .. ", skipping")
             end
@@ -971,9 +1024,10 @@ local function send_status_callback()
     log_info(uuid, string.format("Status callback: url=%s status=%s duration=%d",
         status_callback, call_status, call_duration))
 
-    -- Fire and forget - don't block on status callback
+    -- Fire and forget - don't block on status callback. Signed like every other
+    -- webhook POST; HTTPS-enforced via http_request.
     local ok, err = pcall(function()
-        http_post(status_callback, params)
+        http_request(status_callback, params, "POST")
     end)
 
     if not ok then
@@ -1007,27 +1061,18 @@ local function main()
     -- Set initial base URL for relative URL resolution
     current_base_url = voice_url
 
-    -- Fetch initial instructions from the voice URL
+    -- Fetch initial instructions from the voice URL. fetch_instructions already
+    -- applies fallback_url internally (covering transport failure AND a primary
+    -- that returns malformed XML), so no separate fallback retry is needed here.
     local params = build_webhook_params({ CallStatus = "ringing" })
     local verbs, err = fetch_instructions(voice_url, params)
 
     if not verbs then
-        log_err(uuid, "Failed to fetch initial instructions: " .. tostring(err))
-
-        -- Try fallback URL if available
-        if fallback_url and fallback_url ~= "" then
-            log_info(uuid, "Trying fallback URL: " .. fallback_url)
-            current_base_url = fallback_url
-            verbs, err = fetch_instructions(fallback_url, params)
-        end
-
-        if not verbs then
-            log_err(uuid, "All webhook URLs failed, hanging up")
-            play_error_tone()
-            pcall(function() session:hangup("NORMAL_TEMPORARY_FAILURE") end)
-            send_status_callback()
-            return
-        end
+        log_err(uuid, "All webhook URLs failed (" .. tostring(err) .. "), hanging up")
+        play_error_tone()
+        pcall(function() session:hangup("NORMAL_TEMPORARY_FAILURE") end)
+        send_status_callback()
+        return
     end
 
     -- Execute the verb list

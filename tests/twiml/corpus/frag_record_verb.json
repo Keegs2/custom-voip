@@ -1,0 +1,27 @@
+{
+  "name": "frag_record_verb",
+  "classification": "known-bug",
+  "description": "FUTURE: <Record> verb parses but recording is not yet implemented (Phase 6).",
+  "ideal": "Standalone <Record> is a Phase 6 feature. Today the engine parses it fine but warns loudly and skips (no recording is made / no media artifact). Phase 6 will implement real recording and resolve this.",
+  "base_url": "https://voice.example.com/ivr/voice",
+  "input_xml": "<Response><Record maxLength=\"20\"/></Response>",
+  "expected_parse": {
+    "ok": true,
+    "verbs": [
+      {
+        "verb": "Record",
+        "attrs": {
+          "maxLength": "20"
+        },
+        "text": "",
+        "children": []
+      }
+    ]
+  },
+  "expected_trace": [
+    {
+      "action": "record",
+      "unsupported": true
+    }
+  ]
+}
