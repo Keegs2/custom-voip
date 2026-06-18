@@ -15,6 +15,11 @@ local Shim = dofile(this_dir .. "busted_shim.lua")
 
 local specs = {
     "spec/normalization_spec.lua",
+    "spec/e164_spec.lua",
+    "spec/dialstring_spec.lua",
+    "spec/caller_id_spec.lua",
+    "spec/session_timer_spec.lua",
+    "spec/sbc_spec.lua",
     "spec/inbound_router_spec.lua",
     "spec/ucaas_inbound_spec.lua",
     "spec/trunk_outbound_spec.lua",

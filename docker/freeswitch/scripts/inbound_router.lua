@@ -1,12 +1,21 @@
--- Inbound Call Router - High Performance Implementation
--- Handles RCF, API DID, and Trunk DID routing
+-- Inbound Call Router - THIN DISPATCHER
+-- Handles RCF, API DID, Trunk DID and UCaaS extension routing.
 --
 -- Call Flow:
 -- 1. Get call details from session
 -- 2. Normalize DID to E.164
--- 3. Lookup DID: RCF -> API DID -> Trunk DID (PostgreSQL)
--- 4. Route based on product type
+-- 3. Lookup DID cascade: RCF -> API -> Trunk -> UCaaS extension (PostgreSQL)
+-- 4. Build a routing context (ctx) and dispatch to the matching handler:
+--      rcf   -> handlers/rcf.lua
+--      api   -> handlers/api_voice.lua (TwiML engine, via session:execute lua)
+--      trunk -> handlers/trunk.lua
+--      ucaas -> handlers/ucaas.lua
 --    (Redis fraud/velocity/cache removed in RCF-V1 — see note below)
+--
+-- This file used to contain every product's bridge logic inline. Phase 2 split
+-- those branches into handlers/ and the shared bridge plumbing into lib/
+-- (sbc, dialstring, caller_id, session_timer). This dispatcher only resolves
+-- the DID and hands a context to the right handler — ZERO behavior change.
 --
 -- Error Handling:
 -- - All lookups wrapped in pcall
@@ -36,6 +45,24 @@ local function load_module(name)
     return result
 end
 
+-- Load a product handler from handlers/. Same proven loadfile() pattern as
+-- load_module (CLAUDE.md gotcha #10) but rooted at scripts/handlers/. Each
+-- handler module returns a `function(ctx)` the dispatcher calls.
+local function load_handler(name)
+    local path = "/usr/local/freeswitch/scripts/handlers/" .. name .. ".lua"
+    local func, err = loadfile(path)
+    if not func then
+        freeswitch.consoleLog("ERR", "[inbound_router] Failed to load handler " .. name .. ": " .. tostring(err) .. "\n")
+        return nil
+    end
+    local ok, result = pcall(func)
+    if not ok then
+        freeswitch.consoleLog("ERR", "[inbound_router] Failed to execute handler " .. name .. ": " .. tostring(result) .. "\n")
+        return nil
+    end
+    return result
+end
+
 -- ================================================================
 -- Redis caching/velocity/fraud checks REMOVED in RCF-V1
 -- ================================================================
@@ -53,6 +80,25 @@ if not db then
 else
     freeswitch.consoleLog("DEBUG", "[inbound_router] Modules loaded (db_client ready)\n")
 end
+
+-- E.164 normalization helpers — single source of truth in lib/e164.lua
+-- (replaces the formerly-inline normalize_did / to_10digit copies).
+local e164 = load_module("e164")
+if not e164 then
+    freeswitch.consoleLog("ERR", "[inbound_router] e164 failed to load — number normalization will fail\n")
+end
+
+-- Shared bridge plumbing extracted in Phase 2 (behavior-preserving). These are
+-- passed to the product handlers via ctx so each handler builds identical dial
+-- strings / headers / session-timer exports as the prior inline code.
+--   sbc          : TCP reachability pre-check + 4-attempt SBC×carrier failover loop
+--   dialstring   : sofia/external/<dest>@<proxy>:5060 builder
+--   caller_id    : Diversion / Remote-Party-ID header-value formatters
+--   session_timer: RFC 4028 BRIDGE_OPTS fragment + B-leg export()
+local sbc = load_module("sbc")
+local dialstring = load_module("dialstring")
+local caller_id = load_module("caller_id")
+local session_timer = load_module("session_timer")
 
 -- Ensure session exists
 if not session then
@@ -110,100 +156,13 @@ if not bridge_progress_timeout or bridge_progress_timeout < 1 then
 end
 bridge_progress_timeout = math.floor(bridge_progress_timeout)
 
--- ================================================================
--- SBC TCP health pre-check with cross-call result caching
--- ================================================================
--- A TCP connect to the SBC on :5060 detects a dead SBC in <1 second
--- instead of waiting for the SIP timeout (10-32 seconds). Probing on
--- every bridge attempt of every call costs up to 4 socket opens (and
--- up to 4s of probe latency worst case) per call, so probe results
--- are cached process-wide in FreeSWITCH global variables
--- (freeswitch.get/setGlobalVariable — shared across all mod_lua
--- sessions and safe under mod_lua threading).
---
--- Cache entry: "sbc_health_<ip>" = "<up|down>:<epoch>"
---   "up"   trusted for 30s (healthy SBC probed at most ~2x/minute)
---   "down" trusted for 10s (a recovered SBC comes back fast)
--- On expiry the next call re-probes and refreshes the entry. Only
--- the probe is cached — the 4-attempt failover loop is unchanged.
-local SBC_HEALTH_UP_TTL = 30
-local SBC_HEALTH_DOWN_TTL = 10
-
-local luasocket_warned = false  -- warn once per call, not once per attempt
-
--- Raw TCP probe. Returns true/false, or nil if luasocket is unavailable
--- (unknown — caller fails open and the result is NOT cached).
-local function sbc_tcp_probe(ip, port)
-    local ok, socket = pcall(require, "socket")
-    if not ok then
-        -- A broken/missing luasocket silently disables the fast-failover
-        -- pre-check. Make it visible instead of failing open silently.
-        if not luasocket_warned then
-            freeswitch.consoleLog("WARNING", string.format(
-                "[inbound_router] luasocket unavailable (%s) — SBC TCP pre-check disabled, failing open\n",
-                tostring(socket)
-            ))
-            luasocket_warned = true
-        end
-        return nil
-    end
-    local tcp = socket.tcp()
-    tcp:settimeout(1)
-    local result = tcp:connect(ip, port or 5060)
-    tcp:close()
-    return result ~= nil
-end
-
-local function is_sbc_reachable(ip, port)
-    local cache_key = "sbc_health_" .. ip
-    local now = os.time()
-
-    -- Check cache
-    local cached_status, cached_ts = nil, nil
-    local cached = freeswitch.getGlobalVariable(cache_key)
-    if cached and cached ~= "" then
-        local status, ts = cached:match("^(%a+):(%d+)$")
-        cached_status = status
-        cached_ts = tonumber(ts)
-    end
-
-    if cached_status and cached_ts then
-        local ttl = (cached_status == "up") and SBC_HEALTH_UP_TTL or SBC_HEALTH_DOWN_TTL
-        local age = now - cached_ts
-        if age >= 0 and age < ttl then
-            freeswitch.consoleLog("DEBUG", string.format(
-                "[inbound_router] SBC health cache hit: %s is %s (age=%ds)\n",
-                ip, cached_status, age
-            ))
-            return cached_status == "up"
-        end
-    end
-
-    -- Cache miss or expired: do the real TCP probe and refresh
-    local probe = sbc_tcp_probe(ip, port)
-    if probe == nil then
-        return true  -- luasocket unavailable: fail open, do not cache
-    end
-
-    local new_status = probe and "up" or "down"
-    if cached_status and cached_status ~= new_status then
-        freeswitch.consoleLog("INFO", string.format(
-            "[inbound_router] SBC %s health transition: %s -> %s\n",
-            ip, cached_status, new_status
-        ))
-    elseif not cached_status and new_status == "down" then
-        freeswitch.consoleLog("INFO", string.format(
-            "[inbound_router] SBC %s health: down (first probe)\n", ip
-        ))
-    end
-    freeswitch.setGlobalVariable(cache_key, string.format("%s:%d", new_status, now))
-    return probe
-end
+-- The SBC TCP health pre-check + reachability cache + 4-attempt failover loop
+-- now live in lib/sbc.lua (loaded above). They were inline here before Phase 2.
 
 -- Get call details
 local uuid = get_var("uuid", "unknown")
 local did = get_var("destination_number", "")
-local caller_id = get_var("caller_id_number", "")
+local caller_id_number = get_var("caller_id_number", "")
 local caller_id_name = get_var("caller_id_name", "")
 local sip_from_user = get_var("sip_from_user", "")
 local sip_from_display = get_var("sip_from_display", "")
@@ -215,7 +174,7 @@ local source_ip = get_var("sip_received_ip", get_var("network_addr", ""))
 -- it comes directly from the From header of the inbound INVITE and is not modified
 -- by dialplan processing. Fall back to caller_id_number if sip_from_user is empty
 -- or matches the DID (which means the carrier put the DID in From, not the caller).
-local original_caller_number = caller_id
+local original_caller_number = caller_id_number
 if sip_from_user ~= "" and sip_from_user ~= did then
     original_caller_number = sip_from_user
 end
@@ -229,7 +188,7 @@ end
 
 freeswitch.consoleLog("INFO", string.format(
     "[%s] Inbound: DID=%s CallerID=%s IP=%s\n",
-    uuid, did, caller_id, source_ip
+    uuid, did, caller_id_number, source_ip
 ))
 freeswitch.consoleLog("INFO", string.format(
     "[%s] Original caller preserved: number=%s name=%s\n",
@@ -242,58 +201,23 @@ if did == "" then
     return
 end
 
--- Convert E.164 or 11-digit number to 10-digit format for carrier delivery
-local function to_10digit(number)
-    if not number or number == "" then return number end
-    local digits = number:gsub("[^%d]", "")
-    if #digits == 11 and digits:sub(1, 1) == "1" then
-        return digits:sub(2)
-    elseif #digits == 10 then
-        return digits
-    end
-    return digits
-end
-
--- Normalize DID to E.164 format
-local function normalize_did(number)
-    -- Remove any non-digit characters except +
-    local clean = number:gsub("[^%d+]", "")
-
-    -- If starts with +, keep as-is
-    if clean:match("^%+") then
-        return clean
-    end
-
-    -- Get digit count (Lua patterns don't support {n} quantifiers)
-    local digit_count = #clean
-
-    -- If 10 digits (US), prepend +1
-    if digit_count == 10 and clean:match("^%d+$") then
-        return "+1" .. clean
-    end
-
-    -- If 11 digits starting with 1 (US), prepend +
-    if digit_count == 11 and clean:match("^1%d+$") then
-        return "+" .. clean
-    end
-
-    -- Otherwise, assume needs + prefix
-    return "+" .. clean
-end
+-- E.164 helpers now live in lib/e164.lua (single source of truth). Bind locals
+-- so the rest of this script (and the normalization characterization tests)
+-- reference the same names as before, byte-for-byte equivalent behavior.
+local to_10digit = e164.to_10digit
+local normalize_did = e164.normalize_did
 
 local normalized_did = normalize_did(did)
 freeswitch.consoleLog("DEBUG", "[" .. uuid .. "] Normalized DID: " .. normalized_did .. "\n")
 
 -- ============================================
--- STEP 1: DID Lookup - RCF, API, or Trunk
+-- STEP 1: DID Lookup - RCF, API, Trunk or UCaaS Extension
 -- ============================================
 -- (Caller-prefix fraud check removed with Redis in RCF-V1 — see note at top.)
 local product_type = nil
 local customer_id = nil
 local forward_to = nil
 local traffic_grade = "standard"
-local cpm_limit = 60
-local daily_limit = 500
 local ring_timeout = 30
 local voice_url = nil
 local fallback_url = nil
@@ -420,8 +344,6 @@ product_type = routing.product_type
 customer_id = routing.customer_id
 forward_to = routing.forward_to
 traffic_grade = routing.traffic_grade or "standard"
-cpm_limit = routing.cpm_limit or 60
-daily_limit = routing.daily_limit or 500
 pass_caller_id = routing.pass_caller_id
 ring_timeout = routing.ring_timeout or 30
 voice_url = routing.voice_url
@@ -442,20 +364,13 @@ if trunk_id then
 end
 
 -- (Velocity/CPM rate limiting removed with Redis in RCF-V1 — see note at top.
---  Per-DID concurrent call limits still apply below via mod_hash.)
+--  Per-DID concurrent call limits still apply in handlers/rcf.lua via mod_hash.)
 
 -- ============================================
--- STEP 2: Route Based on Product Type
+-- STEP 2: Dispatch Based on Product Type
 -- ============================================
 
--- Helper: Check if forward_to is a local extension
--- Local extensions are 4 digits starting with 10xx (e.g., 1001, 1002, 1003)
-local function is_local_extension(number)
-    if not number then return false end
-    return number:match("^10%d%d$") ~= nil
-end
-
--- Helper: Get domain for local routing
+-- Helper: Get domain for local routing (used by rcf local-forward + ucaas).
 local function get_domain()
     local domain = get_var("domain", nil)
     if not domain then
@@ -464,386 +379,61 @@ local function get_domain()
     return domain
 end
 
-freeswitch.consoleLog("DEBUG", "[" .. uuid .. "] STEP 2: Routing product_type=" .. tostring(product_type) .. "\n")
+-- Routing context handed to every handler. Carries the session + helpers, the
+-- resolved routing data, env-derived addressing, the e164 helpers, and the
+-- shared lib modules. Handlers read only what they need.
+local ctx = {
+    session = session,
+    get_var = get_var,
+    set_var = set_var,
+    hangup = hangup,
+    db = db,
+
+    uuid = uuid,
+    normalized_did = normalized_did,
+    caller_id_number = caller_id_number,
+    original_caller_number = original_caller_number,
+    original_caller_name = original_caller_name,
+
+    routing = routing,
+    product_type = product_type,
+    customer_id = customer_id,
+    forward_to = forward_to,
+    traffic_grade = traffic_grade,
+    ring_timeout = ring_timeout,
+    pass_caller_id = pass_caller_id,
+    trunk_id = trunk_id,
+
+    to_10digit = to_10digit,
+    normalize_did = normalize_did,
+
+    external_sip_ip = external_sip_ip,
+    sbc_proxy_ip = sbc_proxy_ip,
+    sbc_proxy_ip_failover = sbc_proxy_ip_failover,
+    bridge_progress_timeout = bridge_progress_timeout,
+
+    get_domain = get_domain,
+
+    sbc = sbc,
+    dialstring = dialstring,
+    caller_id = caller_id,
+    session_timer = session_timer,
+}
+
+freeswitch.consoleLog("DEBUG", "[" .. uuid .. "] STEP 2: Dispatching product_type=" .. tostring(product_type) .. "\n")
 
 if product_type == "rcf" then
-    -- Remote Call Forwarding - Bridge to destination
-    -- RCF terminates through the primary carrier (TC4 Dallas).
-    -- Kamailio sets X-Inbound-TC header for logging/Homer visibility, but
-    -- outbound carrier selection is fixed to TC4 until all trunk groups are
-    -- provisioned for our IPs on the Bandwidth side.
-    -- To enable trunk-affinity routing later, read X-Inbound-TC and map to carrier:
-    --   local inbound_tc = get_var("sip_h_X-Inbound-TC", ""):match("^%s*(.-)%s*$") or ""
-    --   if inbound_tc == "tc1" then carrier = "tc1" elseif inbound_tc == "tc2" then carrier = "tc2" end
-    local inbound_tc = get_var("sip_h_X-Inbound-TC", "")
-
-    -- Use the actual SIP Call-ID from the inbound INVITE for X-CID correlation.
-    -- The uuid is FreeSWITCH's internal session ID which differs from the SIP Call-ID
-    -- that Homer/HEP captures on the A-leg. Using sip_call_id lets us correlate
-    -- A-leg and B-leg in Homer. Fallback to uuid if sip_call_id is not set.
-    local sip_call_id = session:getVariable("sip_call_id") or uuid
-    inbound_tc = inbound_tc:match("^%s*(.-)%s*$") or ""
-    local carrier = "primary"  -- TC4 only — do not change until Bandwidth provisions all TCs
-    freeswitch.consoleLog("INFO", string.format(
-        "[inbound_router] Routing via carrier=%s (inbound_tc=%s, product: rcf, traffic_grade: %s)\n",
-        carrier, inbound_tc, traffic_grade
-    ))
-
-    local is_local_test = get_var("is_local_test", "false")
-    local is_local_forward = is_local_extension(forward_to)
-
-    -- Check for test mode
-    local test_mode = os.getenv("TEST_MODE")
-    if test_mode == "true" and not is_local_forward then
-        freeswitch.consoleLog("INFO", "[" .. uuid .. "] TEST MODE: Would forward to " .. forward_to .. "\n")
-        pcall(function()
-            session:answer()
-            session:execute("playback", "tone_stream://%(1000,0,600)")
-            session:sleep(2000)
-            session:hangup("NORMAL_CLEARING")
-        end)
-        return
-    end
-
-    -- Set bridge parameters
-    set_var("forward_to", forward_to)
-    set_var("call_timeout", tostring(ring_timeout))
-
-    -- ================================================================
-    -- Media handling: proxy_media (lightweight RTP relay)
-    -- ================================================================
-    -- WHY NOT bypass_media:
-    --   bypass_media=true takes FS out of the RTP path entirely by
-    --   sending re-INVITEs to BOTH legs after answer to swap SDPs so
-    --   RTP flows directly between endpoints. This FAILS in our
-    --   architecture because:
-    --
-    --   1. Re-INVITEs from FS go through Kamailio, which rewrites
-    --      SDP (replacing private IPs with FS_PUBLIC_IP) and Contact
-    --      headers. The SDP swap requires untouched SDP pass-through
-    --      which Kamailio's topology hiding breaks.
-    --
-    --   2. sip_enable_soa=false (needed with bypass_media to avoid
-    --      SOA errors on 183+200 double SDP) disables the very SOA
-    --      engine that drives the re-INVITE SDP swap. Result: bridge
-    --      "succeeds" momentarily but no media path is established,
-    --      causing immediate silent disconnect (empty last_cause).
-    --
-    --   3. Even if re-INVITEs worked, Kamailio's Contact rewriting
-    --      (replacing FS Contact with Kamailio's address) would
-    --      confuse the endpoint addressing for subsequent requests.
-    --
-    -- WHY proxy_media:
-    --   proxy_media=true keeps FS in the RTP path as a lightweight
-    --   relay (no transcoding, just packet forwarding). Both legs
-    --   negotiate SDP with FS's public IP. No re-INVITEs needed.
-    --   RTP path: Bandwidth-A -> FS -> Bandwidth-B (minimal overhead
-    --   since FS just forwards packets without decoding).
-    --
-    --   SOA stays ENABLED (default), which is required for FS to
-    --   set up the B-leg RTP media channel. Bandwidth sends SDP in
-    --   both 183 and 200 OK (duplicate answer), but Kamailio's
-    --   REPLY_HANDLER strips the 183 SDP body, forwarding it as a
-    --   bodyless provisional (like 180 Ringing). The 200 OK SDP
-    --   passes through intact as the FIRST and ONLY answer SOA
-    --   processes, avoiding the duplicate answer error. FS plays
-    --   local ringback (from the ringback variable below) while
-    --   waiting for the 200 OK. Do NOT set sip_enable_soa=false —
-    --   it disables the SOA engine entirely and FS never sets up
-    --   B-leg media.
-    --
-    -- ringback: local tone while B-leg rings (generated by FS since
-    --   FS is in the media path with proxy_media).
-    set_var("ringback", "%(2000,4000,440,480)")
-    set_var("transfer_ringback", "%(2000,4000,440,480)")
-
-    local dial_string
-
-    -- ================================================================
-    -- Caller ID handling: FusionPBX-style approach
-    -- ================================================================
-    -- FusionPBX uses channel variables (setVariable) instead of dial-string
-    -- overrides. This is cleaner and more reliable because:
-    --   1. outbound_caller_id_number -> SIP From header (carrier auth)
-    --   2. effective_caller_id_number -> caller ID presentation to called party
-    --   3. These are DIFFERENT from origination_caller_id_number
-    --
-    -- By using setVariable on the session, the variables apply to the bridge
-    -- without needing to pack everything into the dial string {} block.
-    --
-    -- SIP headers produced (after Kamailio processing):
-    --   From: <sip:RCF_DID@public_ip>           (via outbound_caller_id_number)
-    --   P-Asserted-Identity: <sip:orig@ip>       (via X-Original-CID -> Kamailio)
-    --   Remote-Party-ID: <sip:orig@ip>           (via sip_h_Remote-Party-ID)
-    --   Diversion: <sip:RCF_DID@ip>;reason=unconditional
-    -- ================================================================
-
-    -- Set outbound caller ID for carrier authorization (SIP From header).
-    -- Bandwidth requires the RCF DID in 10-digit format for termination auth.
-    local outbound_did = to_10digit(normalized_did)
-    session:setVariable("outbound_caller_id_number", outbound_did)
-    session:setVariable("outbound_caller_id_name", outbound_did)
-
-    local outbound_original_cid = to_10digit(original_caller_number)
-    -- E.164 versions for SIP identity headers (PAI, RPID, Diversion)
-    -- Carriers require +1 prefix per E.164; bare 10-digit leaks into PAI otherwise
-    local e164_original_cid = normalize_did(original_caller_number)
-    local e164_did = normalize_did(normalized_did)
-    if pass_caller_id then
-        -- Preserve original caller ID so the called party sees who is calling
-        session:setVariable("effective_caller_id_number", outbound_original_cid)
-        session:setVariable("effective_caller_id_name", original_caller_name)
+    -- Remote Call Forwarding -> handlers/rcf.lua
+    local handler = load_handler("rcf")
+    if handler then
+        handler(ctx)
     else
-        -- Override: called party sees the RCF DID, not the original caller
-        session:setVariable("effective_caller_id_number", outbound_did)
-        session:setVariable("effective_caller_id_name", outbound_did)
-    end
-
-    -- Diversion header indicates the call was forwarded and from which number
-    session:setVariable("sip_h_Diversion", "<sip:" .. outbound_did .. "@" .. external_sip_ip .. ">;reason=unconditional")
-
-    -- X-Original-CID: Kamailio reads this to build P-Asserted-Identity
-    -- Uses E.164 (+1XXXXXXXXXX) format. When pass_caller_id=true, this is the
-    -- original caller's number; when false, it's the RCF DID itself.
-    if pass_caller_id then
-        session:setVariable("sip_h_X-Original-CID", e164_original_cid)
-    else
-        session:setVariable("sip_h_X-Original-CID", e164_did)
-    end
-
-    -- X-Original-CID-Name: Display name for P-Asserted-Identity
-    -- Uses the RCF line name configured in the portal (e.g. "Main Office")
-    local rcf_name = routing.rcf_name
-    if rcf_name and rcf_name ~= "" then
-        session:setVariable("sip_h_X-Original-CID-Name", rcf_name)
-    end
-
-    freeswitch.consoleLog("INFO", string.format(
-        "[inbound_router] CID setup (FusionPBX-style): outbound_cid=%s effective_cid=%s original=%s pass=%s\n",
-        normalized_did,
-        pass_caller_id and original_caller_number or normalized_did,
-        original_caller_number,
-        tostring(pass_caller_id)
-    ))
-
-    if is_local_forward then
-        -- LOCAL EXTENSION ROUTING
-        -- Forward to a registered user (e.g., 1001, 1002, 1003)
-        local domain = get_domain()
-        set_var("carrier_used", "local")
-
-        -- Build dial string for local user (CID handling is simpler for local)
-        dial_string = string.format(
-            "{ignore_early_media=false,call_timeout=%d}user/%s@%s",
-            ring_timeout, forward_to, domain
-        )
-
-        freeswitch.consoleLog("INFO", string.format(
-            "[%s] RCF Bridge (LOCAL): %s -> user/%s@%s\n",
-            uuid, normalized_did, forward_to, domain
-        ))
-    else
-        -- PSTN/CARRIER ROUTING via Kamailio proxy (no gateway syntax)
-        -- Using sofia/external/dest@proxy ensures the outbound INVITE uses
-        -- ext-sip-ip (public IP from EXTERNAL_SIP_IP) in Via, Contact, and SDP.
-        -- The internal profile does NOT apply ext-sip-ip to outbound calls.
-        -- X-Carrier header tells Kamailio which Bandwidth IP to use.
-        set_var("carrier_used", "carrier_" .. carrier)
-
-        -- Remote-Party-ID: backup CID presentation mechanism for carriers
-        -- that don't support P-Asserted-Identity. Uses E.164 format.
-        if pass_caller_id then
-            session:setVariable("sip_h_Remote-Party-ID",
-                "<sip:" .. e164_original_cid .. "@" .. external_sip_ip .. ">;party=calling;privacy=off;screen=yes")
-        else
-            session:setVariable("sip_h_Remote-Party-ID",
-                "<sip:" .. e164_did .. "@" .. external_sip_ip .. ">;party=calling;privacy=off;screen=yes")
-        end
-
-        -- Export caller ID to B-leg for Bandwidth From header auth.
-        pcall(function() session:execute("export", "origination_caller_id_number=" .. outbound_did) end)
-        pcall(function() session:execute("export", "origination_caller_id_name=" .. outbound_did) end)
-
-        freeswitch.consoleLog("INFO", string.format(
-            "[%s] RCF Bridge (PSTN): %s -> %s via proxy (carrier=%s, pass_cid=%s, failover_sbc=%s)\n",
-            uuid, normalized_did, forward_to, carrier, tostring(pass_caller_id), sbc_proxy_ip_failover
-        ))
-    end
-
-    -- Ensure clean call teardown when bridge ends
-    set_var("hangup_after_bridge", "true")
-    -- Set bridge failure handling for failover
-    set_var("continue_on_fail", "true")
-    -- Mark that the DID was found and Lua is handling routing
-    -- This prevents the dialplan fallback 404 from masking bridge failures
-    set_var("lua_routed", "true")
-
-    -- RFC 4028 session timers: export to B-leg so mod_sofia includes
-    -- Session-Expires and Min-SE in the outbound INVITE.
-    -- CRITICAL: set_var() only sets on the A-leg. export via session:execute
-    -- marks the variable for propagation to the B-leg channel.
-    -- Belt-and-suspenders: these are also included in the bridge {} blocks.
-    pcall(function() session:execute("export", "sip_session_timeout=1800") end)
-    pcall(function() session:execute("export", "sip_minimum_session_expires=90") end)
-    pcall(function() session:execute("export", "enable_timer=true") end)
-
-    -- ================================================================
-    -- Per-DID concurrent call limit (mod_hash, no Redis needed)
-    -- ================================================================
-    -- max_channels=0 means unlimited (default). When set >0, FreeSWITCH
-    -- tracks concurrent calls per DID using the in-memory hash backend.
-    -- If the limit is reached, the call is rejected with 486 Busy Here.
-    local max_concurrent = tonumber(routing.max_channels) or 0
-    if max_concurrent > 0 then
-        freeswitch.consoleLog("INFO", string.format(
-            "[inbound_router] Checking limit: DID %s, max %d concurrent\n",
-            normalized_did, max_concurrent
-        ))
-        session:execute("limit", "hash inbound " .. normalized_did .. " " .. tostring(max_concurrent) .. " !USER_BUSY")
-        -- If limit exceeded, session is already hung up with 486 Busy
-        -- Check if session is still active before continuing
-        if not session:ready() then
-            freeswitch.consoleLog("WARNING", string.format(
-                "[inbound_router] DID %s rejected — %d concurrent call limit reached\n",
-                normalized_did, max_concurrent
-            ))
-            return
-        end
-    end
-
-    -- ================================================================
-    -- SBC + Carrier failover: 4 bridge attempts for PSTN routing
-    -- ================================================================
-    -- For local extensions, there is only the single dial_string built above.
-    -- For PSTN, we try all combinations of SBC (SBC-1/SBC-2) and
-    -- carrier (primary/secondary) before giving up:
-    --   1. SBC-1 + primary carrier   (Dallas)
-    --   2. SBC-2 + primary carrier   (Dallas)
-    --   3. SBC-1 + secondary carrier (LA)
-    --   4. SBC-2 + secondary carrier (LA)
-    --
-    -- Channel variables (outbound_caller_id_*, effective_caller_id_*,
-    -- sip_h_Diversion, sip_h_X-Original-CID, sip_h_Remote-Party-ID)
-    -- and exported origination_caller_id_* persist on the session across
-    -- all bridge attempts. Only X-Carrier and the SBC IP change per attempt.
-    -- ================================================================
-
-    if is_local_forward then
-        -- Local extension: single bridge attempt (no SBC/carrier failover)
-        pcall(function()
-            session:execute("bridge", dial_string)
-        end)
-    else
-        -- PSTN: 4-attempt SBC + carrier failover loop
-        local bridge_attempts = {
-            { sbc = sbc_proxy_ip,          carrier = "primary",   label = "SBC-1 + primary carrier (Dallas)" },
-            { sbc = sbc_proxy_ip_failover, carrier = "primary",   label = "SBC-2 + primary carrier (Dallas)" },
-            { sbc = sbc_proxy_ip,          carrier = "secondary", label = "SBC-1 + secondary carrier (LA)" },
-            { sbc = sbc_proxy_ip_failover, carrier = "secondary", label = "SBC-2 + secondary carrier (LA)" },
-        }
-
-        for i, attempt in ipairs(bridge_attempts) do
-            local attempted = false
-
-            -- TCP pre-check: detect dead SBC in <1 second instead of
-            -- waiting for SIP timeout. Skip unreachable SBCs instantly.
-            if not is_sbc_reachable(attempt.sbc, 5060) then
-                freeswitch.consoleLog("WARNING", string.format(
-                    "[%s] RCF bridge attempt %d/4 SKIPPED — SBC %s unreachable (%s)\n",
-                    uuid, i, attempt.sbc, attempt.label
-                ))
-            else
-                attempted = true
-                -- progress_timeout bounds carrier PDD: the attempt fails over
-                -- to the next SBC+carrier combination only if NO provisional
-                -- response (180/183) arrives within N seconds. Once ringing
-                -- starts, the call may ring up to call_timeout (the ring time
-                -- allowed for this attempt). Env-tunable per CLAUDE.md.
-                local attempt_dial = string.format(
-                    "{ignore_early_media=false,progress_timeout=%d,call_timeout=%d,sip_h_X-Carrier=%s" ..
-                    ",sip_h_X-CID=%s" ..
-                    ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true" ..
-                    "}sofia/external/%s@%s:5060",
-                    bridge_progress_timeout,
-                    ring_timeout,
-                    attempt.carrier,
-                    sip_call_id,
-                    forward_to,
-                    attempt.sbc
-                )
-
-                -- Label the CDR with the carrier we are about to try. If this
-                -- attempt connects we break immediately below, so carrier_used
-                -- reflects the WINNING attempt. On failure the next iteration
-                -- overwrites it before its own bridge.
-                set_var("carrier_used", "carrier_" .. attempt.carrier)
-
-                freeswitch.consoleLog("INFO", string.format(
-                    "[%s] RCF bridge attempt %d/4 (%s): %s -> %s@%s carrier=%s\n",
-                    uuid, i, attempt.label, normalized_did, forward_to, attempt.sbc, attempt.carrier
-                ))
-
-                pcall(function()
-                    session:execute("bridge", attempt_dial)
-                end)
-            end
-
-            -- Determine whether THIS bridge connected. originate_disposition is
-            -- the authoritative FreeSWITCH variable: it is set to "SUCCESS" after
-            -- a connected bridge, or to a failure cause (USER_BUSY,
-            -- NO_ROUTE_DESTINATION, RECOVERY_ON_TIMER_EXPIRE, etc.) otherwise.
-            -- (bridge_result is NOT a real channel variable — never trust it.)
-            -- We only inspect disposition for attempts that actually ran a bridge;
-            -- a skipped (unreachable-SBC) attempt leaves the previous attempt's
-            -- disposition in place and must not be misread as success.
-            if attempted then
-                local disposition = get_var("originate_disposition", "")
-                if disposition == "SUCCESS" then
-                    freeswitch.consoleLog("INFO", string.format(
-                        "[%s] RCF bridge attempt %d/4 succeeded (%s)\n",
-                        uuid, i, attempt.label
-                    ))
-                    break
-                end
-
-                freeswitch.consoleLog("INFO", string.format(
-                    "[%s] RCF bridge attempt %d/4 failed (%s): cause=%s\n",
-                    uuid, i, attempt.label,
-                    get_var("last_bridge_hangup_cause", disposition)
-                ))
-            end
-
-            -- If continue_on_fail tore the A-leg down (e.g. caller hung up
-            -- mid-failover), stop trying — the session is gone.
-            if not session:ready() then
-                break
-            end
-        end
-    end
-
-    -- Final result check (covers both local and PSTN paths).
-    -- originate_disposition == "SUCCESS" means a B-leg connected at some point;
-    -- the call has since completed normally via hangup_after_bridge.
-    local disposition = get_var("originate_disposition", "")
-    local last_bridge_hangup = get_var("last_bridge_hangup_cause", "")
-
-    -- If NO attempt ever connected, hangup with NORMAL_TEMPORARY_FAILURE (SIP 503)
-    -- instead of falling through to the dialplan's 404 which would mask the real
-    -- issue. The DID WAS found -- the carrier bridge just couldn't complete.
-    -- NOTE: a session that is no longer ready but DID connect (disposition
-    -- SUCCESS) is a normal completed call, not a failure.
-    if disposition ~= "SUCCESS" then
-        freeswitch.consoleLog("WARNING", string.format(
-            "[%s] All bridges failed for RCF DID %s -> %s (disposition=%s last_cause=%s)\n",
-            uuid, normalized_did, forward_to, disposition, last_bridge_hangup
-        ))
-        hangup("NORMAL_TEMPORARY_FAILURE",
-            "[" .. uuid .. "] RCF bridge failed, returning 503 (DID was found, carrier unreachable)")
-        return
+        freeswitch.consoleLog("ERR", "[" .. uuid .. "] rcf handler unavailable — rejecting\n")
+        hangup("NORMAL_TEMPORARY_FAILURE")
     end
 
 elseif product_type == "api" then
-    -- API Calling - Execute webhook-driven voice control via voice_webhook.lua
+    -- API Calling - Execute webhook-driven voice control via handlers/api_voice.lua
     -- API product routes via primary carrier (same as all products in 2-carrier model)
     -- traffic_grade is used as a secondary factor for priority within the same trunk
     freeswitch.consoleLog("INFO", string.format(
@@ -876,11 +466,10 @@ elseif product_type == "api" then
             session:answer()
         end)
 
-        -- Execute the webhook engine script
-        -- This loads and runs voice_webhook.lua which handles the full
-        -- TwiML-compatible XML fetch/parse/execute loop
+        -- Execute the webhook engine script (handlers/api_voice.lua — the TwiML
+        -- engine; handles the full TwiML-compatible XML fetch/parse/execute loop)
         pcall(function()
-            session:execute("lua", "voice_webhook.lua")
+            session:execute("lua", "handlers/api_voice.lua")
         end)
     else
         freeswitch.consoleLog("ERR", "[" .. uuid .. "] API DID has no voice_url configured — rejecting\n")
@@ -888,208 +477,23 @@ elseif product_type == "api" then
     end
 
 elseif product_type == "ucaas" then
-    -- UCaaS Extension DID - Route inbound call to user's extension
-    local ext = routing.extension
-    local display = routing.display_name or ("Extension " .. ext)
-
-    -- Multi-tenant: build customer-specific domain from customer_id.
-    -- Extensions register under customer_{id}.voiceplatform.local (e.g.,
-    -- 100@customer_13.voiceplatform.local). The global domain (voiceplatform.local)
-    -- will NOT resolve the user because mod_xml_curl scopes lookups by the
-    -- customer domain extracted from the SIP request.
-    local base_domain = get_domain()
-    local customer_domain = string.format("customer_%s.%s", tostring(customer_id), base_domain)
-
-    freeswitch.consoleLog("INFO", string.format(
-        "[%s] UCaaS inbound: DID %s -> ext %s (%s) @ %s\n",
-        uuid, normalized_did, ext, display, customer_domain
-    ))
-
-    -- Media anchoring and ringback (same pattern as RCF local)
-    set_var("proxy_media", "true")
-    set_var("ringback", "%(2000,4000,440,480)")
-    set_var("transfer_ringback", "%(2000,4000,440,480)")
-    set_var("hangup_after_bridge", "true")
-    set_var("continue_on_fail", "true")
-
-    -- Preserve original caller ID for the called extension to see
-    set_var("effective_caller_id_number", original_caller_number)
-    set_var("effective_caller_id_name", original_caller_name)
-
-    -- Mark as lua-routed so the dialplan fallback doesn't return 404
-    set_var("lua_routed", "true")
-
-    -- Verto (WebRTC) users don't appear in sofia registrations — they connect
-    -- via mod_verto's WebSocket.  "user/" does a sofia lookup and fails.
-    -- "verto.rtc/" reaches the Verto endpoint directly.  Fall back to "user/"
-    -- for any future SIP-registered extensions.
-    local dial_string = string.format(
-        "{ignore_early_media=false,call_timeout=30}verto.rtc/%s@%s|user/%s@%s",
-        ext, customer_domain, ext, customer_domain
-    )
-
-    freeswitch.consoleLog("INFO", string.format(
-        "[%s] UCaaS Bridge: %s -> verto.rtc/%s@%s (fallback user/)\n",
-        uuid, normalized_did, ext, customer_domain
-    ))
-
-    pcall(function()
-        session:execute("bridge", dial_string)
-    end)
-
-    -- Determine bridge success the authoritative FreeSWITCH way, exactly as the
-    -- rcf branch does. originate_disposition is set to "SUCCESS" after a
-    -- connected bridge, or to a failure cause (USER_BUSY, NO_USER_RESPONSE,
-    -- NORMAL_TEMPORARY_FAILURE, etc.) otherwise. `bridge_result` is NOT a real
-    -- FreeSWITCH channel variable — reading it always returns "" so a
-    -- successfully ANSWERED call would wrongly fall through to voicemail.
-    local disposition = get_var("originate_disposition", "")
-    local last_bridge_hangup = get_var("last_bridge_hangup_cause", "")
-
-    if disposition ~= "SUCCESS" then
-        -- Extension unavailable (not registered, busy, rejected, etc.)
-        -- Record a voicemail directly: play a brief tone sequence, beep, record.
-        -- We bypass mod_voicemail's phrase-macro flow (which needs full sound
-        -- packs for a good UX) and handle recording ourselves, then deposit
-        -- the file where mod_voicemail can pick it up for retrieval later.
-        freeswitch.consoleLog("INFO", string.format(
-            "[%s] UCaaS bridge failed (cause=%s), recording voicemail for ext %s@%s\n",
-            uuid, last_bridge_hangup, ext, customer_domain
-        ))
-        pcall(function()
-            if not session:ready() then return end
-            session:answer()
-            session:sleep(500)
-
-            -- "The person at extension <ext> is not available."
-            -- Three ascending tones = universal "not available" signal
-            session:execute("playback", "tone_stream://%(200,80,500);%(200,80,650);%(200,0,800)")
-            session:sleep(800)
-
-            -- "Please leave a message after the tone."
-            -- Two short tones = "get ready"
-            session:execute("playback", "tone_stream://%(150,100,700);%(150,0,700)")
-            session:sleep(600)
-
-            -- BEEP — start recording
-            session:execute("playback", "tone_stream://%(1000,0,640)")
-
-            -- Record to mod_voicemail's storage directory so *97 retrieval works.
-            -- Format: /var/lib/freeswitch/voicemail/<domain>/<ext>/msg_<uuid>.wav
-            local vm_dir = string.format(
-                "/var/lib/freeswitch/voicemail/%s/%s",
-                customer_domain, ext
-            )
-            session:execute("set", "playback_terminators=#")
-            os.execute("mkdir -p " .. vm_dir)
-            local vm_file = string.format("%s/msg_%s.wav", vm_dir, uuid)
-
-            freeswitch.consoleLog("INFO", string.format(
-                "[%s] Recording voicemail to %s (max 300s, silence detect 200/3)\n",
-                uuid, vm_file
-            ))
-
-            -- record <file> <max_seconds> <silence_threshold> <silence_hits>
-            session:execute("record", vm_file .. " 300 200 3")
-
-            -- Confirmation beep
-            if session:ready() then
-                session:execute("playback", "tone_stream://%(100,0,800)")
-                session:sleep(300)
-                session:execute("playback", "tone_stream://%(200,80,600);%(200,0,400)")
-            end
-
-            freeswitch.consoleLog("INFO", string.format(
-                "[%s] Voicemail recorded: %s\n", uuid, vm_file
-            ))
-        end)
+    -- UCaaS Extension DID -> handlers/ucaas.lua
+    local handler = load_handler("ucaas")
+    if handler then
+        handler(ctx)
+    else
+        freeswitch.consoleLog("ERR", "[" .. uuid .. "] ucaas handler unavailable — rejecting\n")
+        hangup("NORMAL_TEMPORARY_FAILURE")
     end
-
 
 elseif product_type == "trunk" then
-    -- SIP Trunk inbound — route call to customer's PBX
-    -- Look up the customer's authorized IP(s) and bridge to their PBX
-    freeswitch.consoleLog("DEBUG", string.format(
-        "[%s] Trunk inbound: trunk_id=%s did=%s\n",
-        uuid, tostring(trunk_id), normalized_did
-    ))
-
-    -- Get customer PBX endpoint IPs
-    local endpoint_ips = nil
-    if db then
-        local lookup_ok, lookup_result = pcall(function()
-            return db.get_trunk_endpoint_ips(trunk_id)
-        end)
-        if lookup_ok then
-            endpoint_ips = lookup_result
-        else
-            freeswitch.consoleLog("ERR", string.format(
-                "[%s] Trunk endpoint IP lookup failed for trunk %s: %s\n",
-                uuid, tostring(trunk_id), tostring(lookup_result)
-            ))
-        end
+    -- SIP Trunk inbound -> handlers/trunk.lua
+    local handler = load_handler("trunk")
+    if handler then
+        handler(ctx)
     else
-        freeswitch.consoleLog("ERR", "[" .. uuid .. "] db_client unavailable — cannot look up trunk endpoints\n")
-    end
-
-    freeswitch.consoleLog("DEBUG", string.format(
-        "[%s] Trunk endpoint lookup: count=%d\n",
-        uuid, (endpoint_ips and #endpoint_ips or 0)
-    ))
-
-    if not endpoint_ips or #endpoint_ips == 0 then
-        freeswitch.consoleLog("WARNING", string.format(
-            "[%s] No endpoint IPs found for trunk %s\n", uuid, tostring(trunk_id)
-        ))
-        hangup("NO_ROUTE_DESTINATION", "[" .. uuid .. "] No PBX endpoint configured for trunk")
-    else
-        -- Media anchoring and ringback (same as RCF)
-        set_var("proxy_media", "true")
-        set_var("ringback", "%(2000,4000,440,480)")
-        set_var("transfer_ringback", "%(2000,4000,440,480)")
-        set_var("hangup_after_bridge", "true")
-        set_var("continue_on_fail", "true")
-
-        -- Caller ID: pass the original caller through to the PBX
-        local original_caller = get_var("sip_from_user", caller_id)
-        set_var("effective_caller_id_number", original_caller)
-
-        -- Build dial string to customer PBX through Kamailio SBC
-        -- Same pattern as RCF: FS -> Kamailio (sbc_proxy_ip:5060) -> PBX
-        -- X-PBX-Dest header tells Kamailio where to relay the call
-        local bridge_did = normalized_did:gsub("^%+", "")
-        local pbx_ip = endpoint_ips[1]
-
-        set_var("sip_h_X-PBX-Dest", pbx_ip)
-
-        local dial_string = string.format(
-            "{ignore_early_media=false,sip_enable_soa=false,call_timeout=60" ..
-            ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true" ..
-            "}sofia/external/%s@%s:5060",
-            bridge_did,
-            sbc_proxy_ip
-        )
-
-        freeswitch.consoleLog("INFO", string.format(
-            "[%s] Trunk inbound bridge (via SBC): %s X-PBX-Dest=%s\n",
-            uuid, dial_string, pbx_ip
-        ))
-
-        -- Mark as lua-routed
-        set_var("lua_routed", "true")
-
-        session:execute("bridge", dial_string)
-
-        -- Check bridge result. originate_disposition is the authoritative
-        -- success/failure indicator ("SUCCESS" on connect, a failure cause
-        -- otherwise). bridge_result is NOT a real variable and is never used.
-        local disposition = get_var("originate_disposition", "")
-        if disposition ~= "" and disposition ~= "SUCCESS" then
-            freeswitch.consoleLog("WARNING", string.format(
-                "[%s] Trunk inbound bridge failed: disposition=%s last_cause=%s\n",
-                uuid, disposition, get_var("last_bridge_hangup_cause", "")
-            ))
-        end
+        freeswitch.consoleLog("ERR", "[" .. uuid .. "] trunk handler unavailable — rejecting\n")
+        hangup("NORMAL_TEMPORARY_FAILURE")
     end
 end
 

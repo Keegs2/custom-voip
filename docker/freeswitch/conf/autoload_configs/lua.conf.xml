@@ -37,10 +37,12 @@
     <!-- ============================================ -->
     <!-- XML HANDLER (Dynamic Dialplan)              -->
     <!-- ============================================ -->
-    <!-- If you need dynamic dialplan lookup, enable these -->
-    <!-- We use static XML dialplan with Lua app execution instead -->
-    <!-- <param name="xml-handler-script" value="xml_handler.lua"/> -->
-    <!-- <param name="xml-handler-bindings" value="dialplan"/> -->
+    <!-- We use a static XML dialplan (dialplan/public.xml) with Lua app
+         execution (inbound_router.lua) instead of a dynamic xml-handler-script.
+         The former xml_handler.lua was deleted in the Phase 2 refactor — it was
+         dead code (this binding was never enabled). To add dynamic dialplan
+         lookup later, define a handler script and set xml-handler-script /
+         xml-handler-bindings here. -->
 
   </settings>
 

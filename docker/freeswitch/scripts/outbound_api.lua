@@ -107,7 +107,12 @@ if destination == "" then
     return
 end
 
--- Normalize destination to E.164
+-- Normalize destination to E.164.
+-- DELIBERATELY KEPT INLINE (not lib/e164.normalize_destination): this copy
+-- intentionally DIVERGES — it lacks the `011` international-prefix -> "+" branch
+-- that lib/e164 has. Migrating it would silently change 011 dialing behavior on
+-- this legacy ESL-originated path. Candidate for a future *deliberate*
+-- consolidation with api_outbound.lua, not a mechanical refactor.
 local function normalize_destination(number)
     local clean = number:gsub("[^%d+*#]", "")
     if clean:match("^%+") then
@@ -253,9 +258,10 @@ if webhook_url ~= "" then
     end
 
     -- Execute the webhook engine script
-    -- voice_webhook.lua handles the full TwiML-compatible XML fetch/parse/execute loop
+    -- handlers/api_voice.lua (renamed from voice_webhook.lua) handles the full
+    -- TwiML-compatible XML fetch/parse/execute loop
     pcall(function()
-        session:execute("lua", "voice_webhook.lua")
+        session:execute("lua", "handlers/api_voice.lua")
     end)
 
 else

@@ -54,16 +54,46 @@ local function make_env(opts)
     env.package = { path = "", cpath = "", loaded = {} }
 
     -- load_module(name) does loadfile(".../lib/<name>.lua") then pcall(fn).
-    -- Intercept loadfile to hand back a chunk that returns the mock module.
+    -- Intercept loadfile so module loading resolves under the harness:
+    --   1. If a mock is supplied in opts.modules, hand back a chunk returning it.
+    --   2. Modules in MOCK_ONLY (redis_client / redis_cps / db_client) that are
+    --      NOT mocked behave like a missing file — preserving the deterministic
+    --      fail-open (Redis absent) / db-required-mock contract the specs rely on.
+    --   3. Any OTHER module name (the pure lib/ + handlers/ files: e164,
+    --      caller_id, dialstring, sbc, ...) is loaded FOR REAL off disk, mapped
+    --      from the in-container script path to this repo's scripts dir, and run
+    --      inside this same sandbox _ENV. This is the "find new files" loading
+    --      adjustment so newly-extracted lib modules are exercised as shipped.
     local modules = opts.modules or {}
+    local MOCK_ONLY = { redis_client = true, redis_cps = true, db_client = true }
+
+    -- Map a production container path (/usr/local/freeswitch/scripts/...) to the
+    -- corresponding file in this repo's scripts dir.
+    local function to_repo_path(path)
+        local rel = path:match("/usr/local/freeswitch/scripts/(.*)$")
+        if rel then return M.scripts_dir .. rel end
+        return path
+    end
+
     env.loadfile = function(path)
         local name = path:match("([^/]+)%.lua$")
         if name and modules[name] ~= nil then
             local mod = modules[name]
             return function() return mod end
         end
-        -- Not mocked -> behave like a missing file (load_module logs + returns nil).
-        return nil, "mocked harness: no module for " .. tostring(path)
+        if name and MOCK_ONLY[name] then
+            -- Not mocked -> behave like a missing file (load_module logs + nil).
+            return nil, "mocked harness: no module for " .. tostring(path)
+        end
+        -- Load the real file (pure lib/ + handlers/ modules) in this sandbox.
+        local repo_path = to_repo_path(path)
+        local fh = io.open(repo_path, "r")
+        if not fh then
+            return nil, "mocked harness: no file for " .. tostring(path)
+        end
+        local src = fh:read("*a")
+        fh:close()
+        return load(src, "@" .. repo_path, "t", env)
     end
 
     -- require: socket is deliberately unavailable so the SBC TCP pre-check

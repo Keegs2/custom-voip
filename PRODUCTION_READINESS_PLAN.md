@@ -364,7 +364,7 @@ UCaaS conference uses.
 
 - [x] Phase 0 — Safety Net & RCF Characterization  ✅ 34 char tests + 40 lessons guards + 33 TwiML fixtures, all green & PM-verified
 - [x] Phase 1 — UNIFY: restore UCaaS onto RCF-V1  ✅ 55 files restored + grafted; hardening intact (43 char + 40 guards green); ucaas branch activated + bug fixed; RCF gated. Deferred to live env: postgres init dry-run, FS image build, live call test
-- [ ] Phase 2 — Lua Refactor (behavior-preserving)
+- [x] Phase 2 — Lua Refactor (behavior-preserving)  ✅ inbound_router 1071→500 (thin dispatcher); handlers/{rcf,trunk,ucaas} + lib/{dialstring,caller_id,session_timer,sbc} extracted; 66 char tests + 40 guards green; guards re-targeted structure-flexibly; outbound_api kept (live via ESL)
 - [ ] Phase 3 — Harden Programmable-Voice Engine
 - [ ] Phase 4 — Harden Restored UCaaS Features
 - [ ] Phase 5 — ESL Control Plane (switchio)

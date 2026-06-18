@@ -61,6 +61,19 @@ local redis = load_module("redis_client")
 local redis_cps = load_module("redis_cps")
 local db = load_module("db_client")
 
+-- E.164 normalization helpers — single source of truth in lib/e164.lua
+-- (replaces the formerly-inline normalize_destination copy).
+local e164 = load_module("e164")
+if not e164 then
+    freeswitch.consoleLog("ERR", "[api_outbound] Failed to load e164 — number normalization will fail\n")
+end
+
+-- Shared bridge plumbing (Phase 2, behavior-preserving): the sofia/external
+-- dial-string builder and the RFC 4028 session-timer fragment+export. Output is
+-- byte-for-byte the prior inline strings.
+local dialstring = load_module("dialstring")
+local session_timer = load_module("session_timer")
+
 -- Ensure session exists
 if not session then
     freeswitch.consoleLog("ERR", "[api_outbound] No session object - cannot process API outbound call\n")
@@ -135,26 +148,9 @@ if destination == "" then
     return
 end
 
--- Normalize destination to E.164
-local function normalize_destination(number)
-    local clean = number:gsub("[^%d+*#]", "")
-    if clean:match("^%+") then
-        return clean
-    end
-    -- Get digit count (Lua patterns don't support {n} quantifiers)
-    local digit_count = #clean
-    if digit_count == 10 and clean:match("^%d+$") then
-        return "+1" .. clean
-    end
-    if digit_count == 11 and clean:match("^1%d+$") then
-        return "+" .. clean
-    end
-    if clean:match("^011") then
-        -- International format, convert to +
-        return "+" .. clean:gsub("^011", "")
-    end
-    return "+" .. clean
-end
+-- E.164 destination normalization now lives in lib/e164.lua (single source of
+-- truth). Behavior is byte-for-byte equivalent to the former inline copy.
+local normalize_destination = e164.normalize_destination
 
 local normalized_dest = normalize_destination(destination)
 freeswitch.consoleLog("DEBUG", "[" .. uuid .. "] Normalized destination: " .. normalized_dest .. "\n")
@@ -358,16 +354,11 @@ end
 -- (public IP 34.74.71.32) in Via, Contact, and SDP headers.
 -- The internal profile does NOT apply ext-sip-ip to outbound calls.
 -- X-Carrier tells Kamailio which Bandwidth IP to route to.
-local dial_string = string.format(
-    "{origination_caller_id_number=%s,origination_caller_id_name=%s,progress_timeout=%d,call_timeout=60,ignore_early_media=false,sip_enable_soa=false,sip_h_X-Carrier=primary" ..
-    ",sip_h_X-CID=%s" ..
-    ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true}sofia/external/%s@" .. sbc_proxy_ip .. ":5060",
-    outbound_caller_id,
-    outbound_caller_name,
-    bridge_progress_timeout,
-    sip_call_id,
-    normalized_dest:gsub("^%+", "")  -- Remove + for carrier (carrier-dependent)
-)
+local dest_digits = normalized_dest:gsub("^%+", "")  -- Remove + for carrier (carrier-dependent)
+local dial_string = dialstring.bridge(string.format(
+    "origination_caller_id_number=%s,origination_caller_id_name=%s,progress_timeout=%d,call_timeout=60,ignore_early_media=false,sip_enable_soa=false,sip_h_X-Carrier=primary,sip_h_X-CID=%s,%s",
+    outbound_caller_id, outbound_caller_name, bridge_progress_timeout, sip_call_id, session_timer.BRIDGE_OPTS
+), dest_digits, sbc_proxy_ip)
 
 freeswitch.consoleLog("INFO", string.format(
     "[%s] API Bridge: customer=%d to=%s via %s (caller_id=%s, tier=%s, fee=$%.4f)\n",
@@ -383,9 +374,7 @@ set_var("hangup_after_bridge", "true")
 -- CRITICAL: set_var() only sets on the A-leg. export via session:execute
 -- marks the variable for propagation to the B-leg channel.
 -- Belt-and-suspenders: these are also included in the bridge {} blocks.
-pcall(function() session:execute("export", "sip_session_timeout=1800") end)
-pcall(function() session:execute("export", "sip_minimum_session_expires=90") end)
-pcall(function() session:execute("export", "enable_timer=true") end)
+session_timer.export(session)
 
 -- Store webhook URLs for potential callbacks
 if webhook_url then
@@ -418,9 +407,10 @@ if webhook_url then
     ))
 
     -- Execute the webhook engine script
-    -- voice_webhook.lua handles the full TwiML-compatible XML fetch/parse/execute loop
+    -- handlers/api_voice.lua (renamed from voice_webhook.lua) handles the full
+    -- TwiML-compatible XML fetch/parse/execute loop
     pcall(function()
-        session:execute("lua", "voice_webhook.lua")
+        session:execute("lua", "handlers/api_voice.lua")
     end)
 else
     -- No webhook - simple bridge to destination
@@ -444,16 +434,10 @@ else
         if gateway ~= "carrier_secondary" then
             freeswitch.consoleLog("INFO", "[" .. uuid .. "] Trying secondary carrier (LA)\n")
 
-            dial_string = string.format(
-                "{origination_caller_id_number=%s,origination_caller_id_name=%s,progress_timeout=%d,call_timeout=60,sip_enable_soa=false,sip_h_X-Carrier=secondary" ..
-                ",sip_h_X-CID=%s" ..
-                ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true}sofia/external/%s@" .. sbc_proxy_ip .. ":5060",
-                outbound_caller_id,
-                outbound_caller_name,
-                bridge_progress_timeout,
-                sip_call_id,
-                normalized_dest:gsub("^%+", "")
-            )
+            dial_string = dialstring.bridge(string.format(
+                "origination_caller_id_number=%s,origination_caller_id_name=%s,progress_timeout=%d,call_timeout=60,sip_enable_soa=false,sip_h_X-Carrier=secondary,sip_h_X-CID=%s,%s",
+                outbound_caller_id, outbound_caller_name, bridge_progress_timeout, sip_call_id, session_timer.BRIDGE_OPTS
+            ), dest_digits, sbc_proxy_ip)
 
             set_var("carrier_used", "carrier_secondary")
 

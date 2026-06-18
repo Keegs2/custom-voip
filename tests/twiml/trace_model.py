@@ -36,7 +36,7 @@ from pathlib import Path
 
 ENGINE_PATH = (
     Path(__file__).resolve().parents[2]
-    / "docker" / "freeswitch" / "scripts" / "voice_webhook.lua"
+    / "docker" / "freeswitch" / "scripts" / "handlers" / "api_voice.lua"
 )
 HARNESS_PATH = Path(__file__).resolve().parent / "lua_parser_harness.lua"
 

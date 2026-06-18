@@ -60,6 +60,23 @@ local redis = load_module("redis_client")
 local redis_cps = load_module("redis_cps")
 local db = load_module("db_client")
 
+-- E.164 normalization helpers — single source of truth in lib/e164.lua
+-- (replaces the formerly-inline normalize_destination / to_10digit /
+-- normalize_did copies).
+local e164 = load_module("e164")
+if not e164 then
+    freeswitch.consoleLog("ERR", "Failed to load e164 — number normalization will fail\n")
+end
+
+-- Shared bridge plumbing (Phase 2, behavior-preserving): the sofia/external
+-- dial-string builder, the RFC 4028 session-timer fragment+export, and the
+-- Diversion header formatter. Output is byte-for-byte the prior inline code.
+-- NOTE: named cid_lib (not caller_id) — `caller_id` is taken below by the
+-- caller's number variable.
+local dialstring = load_module("dialstring")
+local session_timer = load_module("session_timer")
+local cid_lib = load_module("caller_id")
+
 -- Ensure session exists
 if not session then
     freeswitch.consoleLog("ERR", "No session object - cannot process outbound trunk call\n")
@@ -163,52 +180,12 @@ if destination == "" then
     return
 end
 
--- Normalize destination to E.164
-local function normalize_destination(number)
-    local clean = number:gsub("[^%d+*#]", "")
-    if clean:match("^%+") then
-        return clean
-    end
-    local digit_count = #clean
-    if digit_count == 10 and clean:match("^%d+$") then
-        return "+1" .. clean
-    end
-    if digit_count == 11 and clean:match("^1%d+$") then
-        return "+" .. clean
-    end
-    if clean:match("^011") then
-        return "+" .. clean:gsub("^011", "")
-    end
-    return "+" .. clean
-end
-
--- Convert E.164 to 10-digit format for carrier delivery
-local function to_10digit(number)
-    if not number or number == "" then return number end
-    local digits = number:gsub("[^%d]", "")
-    if #digits == 11 and digits:sub(1, 1) == "1" then
-        return digits:sub(2)
-    elseif #digits == 10 then
-        return digits
-    end
-    return digits
-end
-
--- Normalize a number to E.164 for database comparison
-local function normalize_did(number)
-    local clean = number:gsub("[^%d+]", "")
-    if clean:match("^%+") then
-        return clean
-    end
-    local digit_count = #clean
-    if digit_count == 10 and clean:match("^%d+$") then
-        return "+1" .. clean
-    end
-    if digit_count == 11 and clean:match("^1%d+$") then
-        return "+" .. clean
-    end
-    return "+" .. clean
-end
+-- E.164 helpers now live in lib/e164.lua (single source of truth). Bind locals
+-- so the rest of this script (and the normalization characterization tests)
+-- reference the same names as before, byte-for-byte equivalent behavior.
+local normalize_destination = e164.normalize_destination
+local to_10digit = e164.to_10digit
+local normalize_did = e164.normalize_did
 
 local normalized_dest = normalize_destination(destination)
 freeswitch.consoleLog("DEBUG", "[" .. uuid .. "] Normalized destination: " .. normalized_dest .. "\n")
@@ -506,8 +483,7 @@ end
 session:setVariable("sip_h_X-Original-CID", original_cid or outbound_did_10)
 
 -- Diversion header: indicates the call originated from a trunk DID
-session:setVariable("sip_h_Diversion",
-    "<sip:" .. outbound_did_10 .. "@" .. external_sip_ip .. ">;reason=unconditional")
+session:setVariable("sip_h_Diversion", cid_lib.diversion(outbound_did_10, external_sip_ip))
 
 freeswitch.consoleLog("INFO", string.format(
     "[trunk_outbound] CID setup: outbound_cid=%s effective_cid=%s original_pbx=%s\n",
@@ -531,15 +507,14 @@ set_var("transfer_ringback", "%(2000,4000,440,480)")
 -- sip_enable_soa=false is in B-leg bridge string only
 
 -- Build dial string using external profile to ensure public IP in Via/Contact/SDP.
--- X-Carrier tells Kamailio which Bandwidth IP to route to.
-local dial_string = string.format(
-    "{ignore_early_media=false,sip_enable_soa=false,progress_timeout=%d,call_timeout=60,sip_h_X-Carrier=primary" ..
-    ",sip_h_X-CID=%s" ..
-    ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true}sofia/external/%s@" .. sbc_proxy_ip .. ":5060",
-    bridge_progress_timeout,
-    sip_call_id,
-    normalized_dest:gsub("^%+", "")  -- Remove + for carrier (carrier-dependent)
-)
+-- X-Carrier tells Kamailio which Bandwidth IP to route to. The sofia/external
+-- skeleton comes from lib/dialstring; the session-timer fragment from
+-- lib/session_timer — byte-for-byte the prior inline string.
+local dest_digits = normalized_dest:gsub("^%+", "")  -- Remove + for carrier (carrier-dependent)
+local dial_string = dialstring.bridge(string.format(
+    "ignore_early_media=false,sip_enable_soa=false,progress_timeout=%d,call_timeout=60,sip_h_X-Carrier=primary,sip_h_X-CID=%s,%s",
+    bridge_progress_timeout, sip_call_id, session_timer.BRIDGE_OPTS
+), dest_digits, sbc_proxy_ip)
 
 freeswitch.consoleLog("INFO", string.format(
     "[%s] Trunk Bridge: trunk=%s -> %s via %s (outbound_cid=%s, effective_cid=%s)\n",
@@ -557,9 +532,7 @@ set_var("lua_routed", "true")
 -- CRITICAL: set_var() only sets on the A-leg. export via session:execute
 -- marks the variable for propagation to the B-leg channel.
 -- Belt-and-suspenders: these are also included in the bridge {} blocks.
-pcall(function() session:execute("export", "sip_session_timeout=1800") end)
-pcall(function() session:execute("export", "sip_minimum_session_expires=90") end)
-pcall(function() session:execute("export", "enable_timer=true") end)
+session_timer.export(session)
 
 -- Execute bridge
 pcall(function()
@@ -583,14 +556,10 @@ if disposition ~= "SUCCESS" and session:ready() then
     freeswitch.consoleLog("INFO", "[" .. uuid .. "] Trying secondary carrier (LA)\n")
     set_var("carrier_used", "carrier_secondary")
 
-    local failover_dial = string.format(
-        "{ignore_early_media=false,sip_enable_soa=false,progress_timeout=%d,call_timeout=60,sip_h_X-Carrier=secondary" ..
-        ",sip_h_X-CID=%s" ..
-        ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true}sofia/external/%s@" .. sbc_proxy_ip .. ":5060",
-        bridge_progress_timeout,
-        sip_call_id,
-        normalized_dest:gsub("^%+", "")
-    )
+    local failover_dial = dialstring.bridge(string.format(
+        "ignore_early_media=false,sip_enable_soa=false,progress_timeout=%d,call_timeout=60,sip_h_X-Carrier=secondary,sip_h_X-CID=%s,%s",
+        bridge_progress_timeout, sip_call_id, session_timer.BRIDGE_OPTS
+    ), dest_digits, sbc_proxy_ip)
 
     pcall(function()
         session:execute("bridge", failover_dial)
