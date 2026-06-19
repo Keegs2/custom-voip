@@ -51,3 +51,19 @@ export interface CallFlowUpdate {
 export interface CallFlowPublish {
   compiled: unknown;
 }
+
+/** One row in a flow's published-version history (newest first). */
+export interface FlowVersion {
+  version: number;
+  published_at: string;
+}
+
+/** Full snapshot of a single published version (View/restore source). */
+export interface FlowVersionDetail {
+  version: number;
+  /** The editable graph captured at publish time. */
+  flow_graph: CallFlowDoc;
+  /** Compiled, product-native artifact captured at publish time. */
+  compiled: unknown;
+  published_at: string;
+}

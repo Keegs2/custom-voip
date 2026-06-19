@@ -10,6 +10,11 @@
  *   PUT    /call-flows/{id}                     -> CallFlow
  *   POST   /call-flows/{id}/publish             -> CallFlow
  *   DELETE /call-flows/{id}                     -> void
+ *
+ * Version history (admin-only, built in parallel):
+ *   GET    /call-flows/{id}/versions                  -> { items, total }
+ *   GET    /call-flows/{id}/versions/{version}        -> FlowVersionDetail
+ *   POST   /call-flows/{id}/versions/{version}/restore -> CallFlow (now draft)
  */
 import { apiRequest } from './client';
 import type {
@@ -18,10 +23,17 @@ import type {
   CallFlowListParams,
   CallFlowPublish,
   CallFlowUpdate,
+  FlowVersion,
+  FlowVersionDetail,
 } from '../types/callFlow';
 
 export interface CallFlowListResponse {
   items: CallFlow[];
+  total: number;
+}
+
+export interface FlowVersionListResponse {
+  items: FlowVersion[];
   total: number;
 }
 
@@ -71,4 +83,39 @@ export async function publishCallFlow(
 
 export async function deleteCallFlow(id: number): Promise<void> {
   return apiRequest('DELETE', `/call-flows/${id}`);
+}
+
+/* ── Version history ──────────────────────────────────────────────────────── */
+
+/** List a flow's published versions (newest first). Normalised to {items,total}. */
+export async function listFlowVersions(
+  id: number,
+): Promise<FlowVersionListResponse> {
+  const raw = await apiRequest<FlowVersion[] | FlowVersionListResponse>(
+    'GET',
+    `/call-flows/${id}/versions`,
+  );
+  if (Array.isArray(raw)) {
+    return { items: raw, total: raw.length };
+  }
+  return {
+    items: raw.items ?? [],
+    total: raw.total ?? raw.items?.length ?? 0,
+  };
+}
+
+/** Fetch a single version's full snapshot (flow_graph + compiled). */
+export async function getFlowVersion(
+  id: number,
+  version: number,
+): Promise<FlowVersionDetail> {
+  return apiRequest('GET', `/call-flows/${id}/versions/${version}`);
+}
+
+/** Restore a version: backend clones it into a new draft and returns the flow. */
+export async function restoreFlowVersion(
+  id: number,
+  version: number,
+): Promise<CallFlow> {
+  return apiRequest('POST', `/call-flows/${id}/versions/${version}/restore`);
 }

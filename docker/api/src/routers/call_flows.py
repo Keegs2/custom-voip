@@ -621,6 +621,29 @@ async def publish_call_flow(
                 compiled_json, sink_ref, flow_id,
             )
 
+            # Snapshot this publish into call_flow_versions (migration 31) inside
+            # the SAME transaction so a snapshot exists iff the publish committed.
+            # Product-agnostic: every product records history here. `version` is a
+            # per-flow monotonic publish counter (independent of call_flows.version,
+            # which counts draft revisions). flow_graph + compiled are read back
+            # from the row just updated above — call_flows.compiled now holds the
+            # freshly published artifact — so no extra marshalling and the snapshot
+            # is guaranteed to match what went live.
+            await conn.execute(
+                """
+                INSERT INTO call_flow_versions (flow_id, version, flow_graph, compiled)
+                SELECT
+                    $1::int,
+                    (SELECT COALESCE(MAX(version), 0) + 1
+                       FROM call_flow_versions WHERE flow_id = $1::int),
+                    flow_graph,
+                    compiled
+                FROM call_flows
+                WHERE id = $1::int
+                """,
+                flow_id,
+            )
+
     # After commit, invalidate the FreeSWITCH RCF route cache exactly like
     # rcf.py (update_rcf, rcf.py:335) so the new forward_to is picked up on the
     # next call. No-op when Redis is unavailable.
@@ -628,6 +651,106 @@ async def publish_call_flow(
         await cache.invalidate_rcf_cache(did)
         logger.info("publish flow %s: rcf cache invalidated for did=%s", flow_id, did)
 
+    return _serialize(row)
+
+
+# ---------------------------------------------------------------------------
+# Version history (publish snapshots — migration 31)
+# ---------------------------------------------------------------------------
+
+@router.get("/{flow_id}/versions")
+async def list_call_flow_versions(
+    flow_id: int,
+    admin: dict = Depends(require_admin),
+):
+    """List a flow's publish snapshots, newest first (metadata only — no graph).
+
+    Each row is one past publish of this flow. `version` is the per-flow
+    monotonic publish counter. Returns ``{items: [{version, published_at}],
+    total}``. An empty list is returned for a flow that exists but has never
+    been published (and also for a non-existent flow — listing is read-only).
+    """
+    rows = await db.fetch_all(
+        """
+        SELECT version, published_at, COUNT(*) OVER() AS total_count
+        FROM call_flow_versions
+        WHERE flow_id = $1
+        ORDER BY version DESC
+        """,
+        flow_id,
+    )
+    total = rows[0]["total_count"] if rows else 0
+    items = [{"version": r["version"], "published_at": r["published_at"]} for r in rows]
+    return {"items": items, "total": total}
+
+
+@router.get("/{flow_id}/versions/{version}")
+async def get_call_flow_version(
+    flow_id: int,
+    version: int,
+    admin: dict = Depends(require_admin),
+):
+    """Fetch a single publish snapshot — the full flow_graph + compiled artifact
+    exactly as they were published under this version. 404 if absent."""
+    row = await db.fetch_one(
+        """
+        SELECT version, flow_graph, compiled, published_at
+        FROM call_flow_versions
+        WHERE flow_id = $1 AND version = $2
+        """,
+        flow_id, version,
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Call flow version not found")
+    out = dict(row)
+    for field in ("flow_graph", "compiled"):
+        val = out.get(field)
+        if isinstance(val, str):
+            out[field] = json.loads(val)
+    return out
+
+
+@router.post("/{flow_id}/versions/{version}/restore")
+async def restore_call_flow_version(
+    flow_id: int,
+    version: int,
+    admin: dict = Depends(require_admin),
+):
+    """Restore a past publish snapshot back onto the editable flow.
+
+    Loads the snapshot's ``flow_graph`` (and ``compiled``) back onto the
+    ``call_flows`` row, sets ``status='draft'``, and bumps ``call_flows.version``
+    (the draft-revision counter) — exactly like an ordinary draft edit. This is a
+    DRAFT action: it does NOT touch the live product sink. The runtime keeps
+    serving whatever was last published until the operator re-publishes this
+    restored draft. Done in a transaction so the read of the snapshot and the
+    write to call_flows are atomic. Returns the updated CallFlow.
+    """
+    # Qualify the RETURNING projection with the call_flows alias `c`: the
+    # UPDATE ... FROM join shares column names (id/version/flow_graph/compiled)
+    # with call_flow_versions, so unqualified names would be ambiguous. asyncpg
+    # still names the returned columns by their base name, so _serialize works.
+    returning_cols = ", ".join(f"c.{col.strip()}" for col in _COLUMNS.split(","))
+    pool = await db.get_pool()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                f"""
+                UPDATE call_flows c
+                SET flow_graph = v.flow_graph,
+                    compiled = v.compiled,
+                    status = 'draft',
+                    version = c.version + 1,
+                    updated_at = now()
+                FROM call_flow_versions v
+                WHERE c.id = $1 AND v.flow_id = $1 AND v.version = $2
+                RETURNING {returning_cols}
+                """,
+                flow_id, version,
+            )
+    if not row:
+        # Either the flow or the requested version does not exist.
+        raise HTTPException(status_code=404, detail="Call flow version not found")
     return _serialize(row)
 
 

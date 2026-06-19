@@ -34,6 +34,7 @@ import { Modal } from '../../components/ui/Modal';
 import { AdminCustomerSelector } from '../../components/AdminCustomerSelector';
 import { useToast } from '../../components/ui/ToastContext';
 import { ApiError } from '../../api/client';
+import { FlowHistoryModal } from './FlowHistoryModal';
 
 function entryDid(entry: EntryBinding): string {
   return entry.kind === 'did' ? entry.did : '';
@@ -73,6 +74,7 @@ export function FlowToolbar() {
   const queryClient = useQueryClient();
   const [previewOpen, setPreviewOpen] = useState(false);
   const [newOpen, setNewOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
 
   // List + invalidate flows for the CURRENT product only.
   const queryKey = ['call-flows', { product }] as const;
@@ -270,6 +272,15 @@ export function FlowToolbar() {
       <Button variant="ghost" size="sm" onClick={() => redo()} disabled={!canRedo}>Redo</Button>
       <Button variant="ghost" size="sm" onClick={() => setNewOpen(true)}>New</Button>
       <Button variant="ghost" size="sm" onClick={() => setPreviewOpen(true)}>Preview</Button>
+      <Button
+        variant="ghost"
+        size="sm"
+        disabled={docId == null}
+        title={docId == null ? 'Save the flow to enable version history' : undefined}
+        onClick={() => setHistoryOpen(true)}
+      >
+        History
+      </Button>
       <Button variant="primary" size="sm" loading={saveMutation.isPending} onClick={() => saveMutation.mutate()}>
         Save
       </Button>
@@ -282,6 +293,8 @@ export function FlowToolbar() {
       >
         Publish
       </Button>
+
+      <FlowHistoryModal open={historyOpen} onClose={() => setHistoryOpen(false)} flowId={docId ?? null} />
 
       <Modal open={previewOpen} onClose={() => setPreviewOpen(false)} title="Compiled artifact" maxWidth="max-w-2xl">
         <pre
