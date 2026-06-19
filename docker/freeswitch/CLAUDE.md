@@ -42,8 +42,9 @@ Lua libraries installed via luarocks:
 Module selection in `build/modules.conf.in` via sed substitutions:
 - **Core RCF/SIP** (built + loaded): mod_lua, mod_sofia, mod_xml_curl, mod_json_cdr, mod_event_socket, mod_opus, mod_g729, mod_amr, mod_spandsp, mod_dptools, mod_commands, mod_dialplan_xml, mod_curl, mod_shout, mod_sndfile, mod_tone_stream, mod_say_en, mod_db, mod_hash, mod_loopback, mod_cdr_csv, mod_console, mod_logfile, mod_native_file
 - **UCaaS** (built in the Dockerfile AND loaded in `modules.conf.xml`): mod_conference, mod_av (VP8/H264 for video), mod_verto (WebRTC WSS), mod_rtc (WebRTC media), mod_voicemail, mod_valet_parking
+- **Call queues** (Phase 7, built + loaded): **mod_fifo** — named dynamic FIFO queues powering the TwiML `<Enqueue>`/`<Dial><Queue>` verbs. Already in the FreeSWITCH default module set (no Dockerfile change needed); enabled via a `<load>` line in `modules.conf.xml` + a minimal `fifo.conf.xml`. Chosen over the also-built `mod_callcenter` because callcenter's agent/tier model is far heavier than Twilio queue semantics need. Queues are created on demand and tenant-namespaced `fifo_<customer_id>_<name>`.
 - **Media plane** (Phase 6, built + loaded): **mod_audio_stream** — forks call audio (L16) to a WebSocket for AI/transcription; powers the `<Stream>`/`<Connect><Stream>` TwiML verbs via the `uuid_audio_stream` API. NOT a SignalWire core module: cloned from `github.com/amigniter/mod_audio_stream` and CMake-built against the installed FreeSWITCH (see "mod_audio_stream build" below). Standalone/`<Record>` recording needs NO extra module — it uses the core `record`/`record_session` apps (mod_dptools).
-- **Built but NOT loaded** (compiled in the Dockerfile, no `<load>` in `modules.conf.xml`): mod_callcenter, mod_spy (reserved for future call-center/monitoring; enable by adding a `<load>` line + config), mod_httapi, mod_http_cache (need xml_curl-served config, unreachable at module-load on the media VM)
+- **Built but NOT loaded** (compiled in the Dockerfile, no `<load>` in `modules.conf.xml`): mod_callcenter (superseded for TwiML queues by the lighter mod_fifo — see "Call queues"; still available for a future agent/tier ACD), mod_spy (reserved for future call-center/monitoring; enable by adding a `<load>` line + config), mod_httapi, mod_http_cache (need xml_curl-served config, unreachable at module-load on the media VM)
 - **Still disabled** (would CRIT-abort without local config): mod_local_stream — RCF/UCaaS use `silence_stream://`/`tone_stream://` instead
 
 #### mod_audio_stream build (Phase 6)
@@ -156,6 +157,10 @@ FreeSWITCH runs with `network_mode: host` in docker-compose.media.yml. This is r
 | `RECORD_DEFAULT_MAXLEN` | `3600` | Phase 6. Default `<Record>` maxLength (seconds) when the verb omits it. |
 | `REC_NOTIFY_TIMEOUT` | `5` | Phase 6. curl `--max-time` (seconds) for the recordings-ingest notify POST (lib/rec_notify.lua). |
 | `STREAM_SAMPLE_RATE` | `8000` | Phase 6. Sample rate passed to `uuid_audio_stream` for `<Stream>`/`<Connect><Stream>` (mod_audio_stream wants numeric `8000`/`16000`). |
+| `TTS_ENGINE` | `flite` | Phase 7. `<Say>` TTS engine. The speak app is `<engine>\|<voice>\|<text>`, so set this to any other speak engine (e.g. a future Piper via `tts_commandline`, or a cloud engine) to swap TTS with NO code change. |
+| `TTS_DEFAULT_VOICE` | `slt` | Phase 7. flite voice used when `<Say>` omits `voice` (or the requested voice can't be mapped). flite ships kal/kal16/awb/rms/slt. |
+| `CONF_AUDIO_PROFILE` | `default` | Phase 7. mod_conference profile for `<Conference>` (audio). |
+| `CONF_VIDEO_PROFILE` | `video` | Phase 7. mod_conference profile used when `<Conference>` carries a `video` attribute. |
 
 ## Health Check
 
@@ -201,6 +206,12 @@ Also needs `SYS_NICE` capability for real-time scheduling.
 9. **Gateway syntax deprecated**: All outbound bridges use `sofia/external/dest@proxy` instead of `sofia/gateway/carrier/dest`. The gateway syntax produced corrupted Contact headers (`sip:gw+carrier_primary@...`).
 
 10. **Recording & streaming (Phase 6)**: `<Record>` and `<Dial record>` use CORE FreeSWITCH (`record` / `record_session`) — NO extra module — writing tenant-scoped WAVs to `/media/spool/recordings/customer_<id>/<uuid>.wav` on the shared spool, then POSTing metadata to the API `POST /v1/recordings/ingest` via `lib/rec_notify.lua` (fail-open; on Docker Desktop FS→API is unreachable, which is an expected clean no-op — prod works). `<Stream>`/`<Connect><Stream>` use the BUILT mod_audio_stream (`uuid_audio_stream`); when absent the verb warns loudly (no silent no-op) so `<Record>` is never blocked on streaming. Recording info (`RecordingUrl`/`RecordingSid`) flows into status/action callbacks.
+
+11. **`<Conference>` verb contract (Phase 7)**: a programmatic `<Conference name="X">` for customer C joins the **existing** mod_conference room **`conf_<C>_<sanitized X>`** (lowercase, every non-alnum char → `_`). This `conf_` namespace is DISTINCT from the UCaaS `*88XX` dialplan rooms (`room_<cid>_<n>`) and is the SHARED CONTRACT the API's `conference.py` uses to drive ESL control (`conference <room> list|mute|kick`) and tenant-scoped listing on programmatically-created rooms. Conferencing is NOT rebuilt — the verb just exposes the already-built mod_conference. The conference app blocks until the member leaves. Twilio nests `<Conference>` in `<Dial>`; a top-level `<Conference>` is also accepted.
+
+12. **Call queues (Phase 7)**: TwiML `<Enqueue>`/`<Dial><Queue>` use **mod_fifo** (already built; loaded via `modules.conf.xml` + minimal `fifo.conf.xml`). Queues are dynamic + tenant-scoped (`fifo_<cid>_<name>`). **Limitation:** mod_fifo's `in` app blocks the caller, so Twilio's waitUrl-driven TwiML and a mid-wait `<Leave>` cannot run during the wait — `waitUrl` is used only as hold music and `<Leave>` works only as a top-level document-ender. Full `<Leave>`/waitUrl parity would need mod_callcenter's non-blocking wait-loop or a DTMF abort key.
+
+13. **TTS is pluggable (Phase 7 — OPEN DECISION)**: `<Say>` uses `flite` (offline, built-in) by default but the engine is a drop-in hook via `TTS_ENGINE` (speak app = `<engine>|<voice>|<text>`). `voice`/`language` map to flite voices; SSML/`<speak>` markup is stripped so it is never read literally (not a full SSML engine). **Recommendation:** for higher quality without a cloud dependency, add **Piper** (neural, offline, MIT) behind `mod_tts_commandline` and set `TTS_ENGINE` accordingly — no engine code change. Cloud (Polly/Google) is possible via `mod_unimrcp`/`mod_polly` but adds a network dependency + per-char cost; deferred. Final engine choice is the PM/user's call (Decision Log: "OPEN — TTS engine").
 
 ## Volumes
 

@@ -45,6 +45,97 @@ local RECORD_DEFAULT_TIMEOUT = 5  -- seconds of silence to auto-stop
 local STREAM_SAMPLE_RATE = os.getenv("STREAM_SAMPLE_RATE") or "8000"
 
 -- ============================================
+-- TTS (Phase 7) — pluggable <Say> engine
+-- ============================================
+-- The <Say> verb speaks via a configurable TTS engine. `flite` is the offline
+-- default (built into the image). The engine is a DROP-IN HOOK: set TTS_ENGINE
+-- to any mod_*/speak engine name (e.g. a future `tts_commandline` wrapping Piper,
+-- or a cloud engine via mod_unimrcp/mod_polly) WITHOUT touching this code — the
+-- speak app is invoked as `<engine>|<voice>|<text>`. TTS_DEFAULT_VOICE picks the
+-- flite voice when the TwiML omits one. See docker/freeswitch/CLAUDE.md "TTS".
+local TTS_ENGINE = os.getenv("TTS_ENGINE") or "flite"
+local TTS_DEFAULT_VOICE = os.getenv("TTS_DEFAULT_VOICE") or "slt"
+
+-- Map a Twilio-ish voice/language to a flite voice. flite ships: kal, kal16,
+-- awb (Scottish male), rms (US male), slt (US female). Twilio's voice tokens
+-- (man/woman/alice/Polly.*) and BCP-47 languages don't exist in flite, so we map
+-- to the closest flite voice. For non-flite engines the raw voice is passed
+-- through (the engine maps it). Returns the engine-appropriate voice string.
+local FLITE_VOICE_MAP = {
+    ["man"]   = "rms",  ["male"] = "rms",
+    ["woman"] = "slt",  ["female"] = "slt",
+    ["alice"] = "slt",
+    ["kal"]   = "kal",  ["kal16"] = "kal16",
+    ["awb"]   = "awb",  ["rms"] = "rms",   ["slt"] = "slt",
+}
+
+local function map_tts_voice(voice, language)
+    -- Non-flite engines own their voice catalog: pass the requested voice through.
+    if TTS_ENGINE ~= "flite" then
+        return voice or TTS_DEFAULT_VOICE
+    end
+    if not voice or voice == "" then
+        -- A language hint with no voice: en male-ish default, else the configured default.
+        return TTS_DEFAULT_VOICE
+    end
+    local key = tostring(voice):lower()
+    -- Twilio "Polly.Joanna" / "Google.en-US-Wavenet-D" → strip vendor prefix, then
+    -- fall back to the configured default (flite can't render those exact voices).
+    if FLITE_VOICE_MAP[key] then
+        return FLITE_VOICE_MAP[key]
+    end
+    -- Gendered guess from a vendor voice name when we can infer it.
+    if key:find("joanna") or key:find("salli") or key:find("kendra")
+        or key:find("woman") or key:find("female") then
+        return "slt"
+    end
+    if key:find("matthew") or key:find("joey") or key:find("man") then
+        return "rms"
+    end
+    return TTS_DEFAULT_VOICE
+end
+
+-- Strip SSML so markup is NEVER read literally. We are not a full SSML engine;
+-- we remove tags (<speak>, <break>, <prosody>, <say-as>, ...) and decode the
+-- five XML entities, leaving the plain spoken text. <break>/<say-as> nuances are
+-- intentionally dropped (documented limitation) — correctness over fidelity.
+local function strip_ssml(text)
+    if not text or text == "" then return text end
+    -- Only do work if it actually looks like markup.
+    if not text:find("<", 1, true) then return text end
+    local t = text
+    -- <break .../> and <break></break> → a small spoken pause (comma).
+    t = t:gsub("<%s*[bB][rR][eE][aA][kK][^>]*/?>", ", ")
+    -- Drop every remaining tag (opening, closing, self-closing).
+    t = t:gsub("<%s*/?%s*[%w:_%-]+[^>]*>", " ")
+    -- Decode the standard XML entities that survive in text nodes.
+    t = t:gsub("&lt;", "<"):gsub("&gt;", ">"):gsub("&quot;", '"')
+         :gsub("&apos;", "'"):gsub("&amp;", "&")
+    -- Collapse whitespace introduced by tag removal.
+    t = t:gsub("%s+", " "):gsub("^%s*(.-)%s*$", "%1")
+    return t
+end
+
+-- ============================================
+-- Conference / Queue (Phase 7) naming + config
+-- ============================================
+-- SHARED CONTRACT (python conference.py relies on this): a programmatic
+-- <Conference name="X"> for customer C joins the FreeSWITCH room
+-- `conf_<C>_<sanitized X>` (lowercase, every non-alnum char → "_"). This distinct
+-- `conf_` namespace lets the API's tenant-scoped ESL control (`conference <room>
+-- list|mute|kick`) operate on programmatically-created rooms.
+local CONF_PROFILE_AUDIO = os.getenv("CONF_AUDIO_PROFILE") or "default"
+local CONF_PROFILE_VIDEO = os.getenv("CONF_VIDEO_PROFILE") or "video"
+
+local function sanitize_token(s)
+    s = tostring(s or ""):lower()
+    s = s:gsub("[^%a%d]", "_")          -- non-alnum → _
+    s = s:gsub("_+", "_"):gsub("^_+", ""):gsub("_+$", "")
+    if s == "" then s = "default" end
+    return s
+end
+
+-- ============================================
 -- Logging helpers
 -- ============================================
 
@@ -636,28 +727,33 @@ end
 -- <Say> verb
 -- ============================================
 local function execute_say(verb)
-    local text = verb.text or ""
+    local raw = verb.text or ""
+    -- SSML safety: if the customer sent <speak>...</speak> or inline SSML tags,
+    -- strip them so the engine never reads markup aloud (Phase 7).
+    local text = strip_ssml(raw)
     if text == "" then
         log_warning(uuid, "Say verb with empty text, skipping")
         return
     end
 
-    local voice = verb.attrs.voice or "kal"
     local language = verb.attrs.language or "en"
+    -- Map the Twilio-ish voice/language to the configured TTS engine's voice.
+    local voice = map_tts_voice(verb.attrs.voice, language)
     local loop = tonumber(verb.attrs.loop) or 1
 
-    log_info(uuid, string.format("Say: text='%s' voice=%s lang=%s loop=%d",
-        text:sub(1, 80), voice, language, loop))
+    log_info(uuid, string.format("Say: engine=%s text='%s' voice=%s lang=%s loop=%d%s",
+        TTS_ENGINE, text:sub(1, 80), voice, language, loop,
+        (raw ~= text) and " (SSML stripped)" or ""))
 
     for i = 1, loop do
         if not session_ready() then break end
         local ok, err = pcall(function()
-            -- Try mod_flite TTS first (most common in FreeSWITCH)
-            session:execute("speak", "flite|" .. voice .. "|" .. text)
+            -- Pluggable engine: <engine>|<voice>|<text>. Swap engines via TTS_ENGINE.
+            session:execute("speak", TTS_ENGINE .. "|" .. voice .. "|" .. text)
         end)
         if not ok then
-            log_warning(uuid, "speak (flite) failed: " .. tostring(err) .. " - trying fallback")
-            -- Fallback: use say application
+            log_warning(uuid, "speak (" .. TTS_ENGINE .. ") failed: " .. tostring(err) .. " - trying fallback")
+            -- Fallback: the say module (number/letter pronunciation, no TTS engine).
             pcall(function()
                 session:execute("playback", "say:" .. language .. ":PRONOUNCED:" .. text)
             end)
@@ -856,6 +952,184 @@ local function execute_gather(verb)
 end
 
 -- ============================================
+-- Conference / Queue naming (customer-scoped; needs `customer_id` upvalue)
+-- ============================================
+
+-- conf_<cid>_<sanitized name> — the SHARED CONTRACT room name the API controls.
+local function conference_room_name(name)
+    local cust = sanitize_token(customer_id)
+    return string.format("conf_%s_%s", cust, sanitize_token(name))
+end
+
+-- fifo_<cid>_<sanitized name> — tenant-scoped FIFO queue name (mod_fifo).
+local function queue_name(name)
+    local cust = sanitize_token(customer_id)
+    return string.format("fifo_%s_%s", cust, sanitize_token(name))
+end
+
+-- Forward declaration: <Dial><Queue> dequeues; defined with the queue verbs below.
+local execute_dial_queue
+
+-- ============================================
+-- <Dial> child builders: <Sip> and <Client>  (Phase 7)
+-- ============================================
+
+-- <Sip>sip:user@host</Sip> -> a sofia dial string. External URIs go out the
+-- `external` profile (public IP in Via/Contact/SDP); URIs targeting our own
+-- internal domain use the `internal` profile. Optional username/password on the
+-- <Sip> element become sip_auth_username/sip_auth_password for digest auth.
+local function build_sip_dialstring(child, dial_timeout)
+    local uri = (child.text or ""):gsub("^%s*(.-)%s*$", "%1")
+    if uri == "" then return nil end
+    -- Accept "sip:user@host", "sips:...", or bare "user@host".
+    if not uri:match("^sips?:") then
+        uri = "sip:" .. uri
+    end
+    local a = child.attrs or {}
+    local host = uri:match("@([^;>%s]+)") or ""
+    -- Internal if it targets our platform domain; else the carrier-facing profile.
+    local domain = get_var("domain", nil) or os.getenv("DOMAIN") or "voiceplatform.local"
+    local profile = (host == domain or host:match("%.?" .. domain:gsub("%.", "%%.") .. "$"))
+        and "internal" or "external"
+
+    local vars = {
+        string.format("call_timeout=%d", dial_timeout),
+        "ignore_early_media=false",
+        "sip_enable_soa=false",
+        "sip_session_timeout=1800",
+        "sip_minimum_session_expires=90",
+        "enable_timer=true",
+        string.format("sip_h_X-CID=%s", sip_call_id),
+    }
+    if a.username and a.username ~= "" then
+        vars[#vars + 1] = "sip_auth_username=" .. a.username
+    end
+    if a.password and a.password ~= "" then
+        vars[#vars + 1] = "sip_auth_password=" .. a.password
+    end
+    return string.format("{%s}sofia/%s/%s", table.concat(vars, ","), profile, uri)
+end
+
+-- <Client>identity</Client> -> bridge to a registered Verto/WebRTC client (or a
+-- SIP-registered extension as fallback), mirroring handlers/ucaas.lua's string.
+-- Customer-scoped domain so identities never collide across tenants.
+local function build_client_dialstring(identity, dial_timeout)
+    identity = (identity or ""):gsub("^%s*(.-)%s*$", "%1")
+    if identity == "" then return nil end
+    local base_domain = get_var("domain", nil) or os.getenv("DOMAIN") or "voiceplatform.local"
+    local cust_domain = string.format("customer_%s.%s", tostring(customer_id), base_domain)
+    return string.format(
+        "{ignore_early_media=false,call_timeout=%d}verto.rtc/%s@%s|user/%s@%s",
+        dial_timeout, identity, cust_domain, identity, cust_domain
+    )
+end
+
+-- ============================================
+-- <Conference> verb (Twilio nests it in <Dial>; we also accept it top-level)
+-- ============================================
+-- Joins the customer-scoped mod_conference room conf_<cid>_<name>. The conference
+-- app BLOCKS until the member leaves (hangup / kicked / # control), so this owns
+-- the call for its lifetime. Attribute map (Twilio -> mod_conference):
+--   muted=true               -> +flags{mute}
+--   startConferenceOnEnter   -> default true; false -> +flags{wait-mod} (hold until a moderator joins)
+--   endConferenceOnExit=true -> +flags{endconf|moderator} (conf ends when this member leaves)
+--   beep                     -> conference_enter_sound/exit_sound channel vars (true|false|onEnter|onExit)
+--   waitUrl/waitMethod       -> conference_moh_sound (MOH while alone; URL or silence)
+--   maxParticipants          -> conference_max_members channel var
+--   record                   -> conference_auto_record=<spool wav>; notify ingest kind="conference"
+--   video                    -> use the @video profile instead of @default
+local function execute_conference(verb)
+    local name = verb.text or ""
+    if name == "" then
+        log_warning(uuid, "Conference verb with no room name, skipping")
+        return nil
+    end
+    local a = verb.attrs or {}
+    local profile = (a.video and a.video ~= "" and a.video ~= "false")
+        and CONF_PROFILE_VIDEO or CONF_PROFILE_AUDIO
+    local room = conference_room_name(name)
+
+    -- Build the +flags{...} set.
+    local flags = { "speak" }  -- mirror public.xml: keep speak in passthrough video
+    if a.muted == "true" or a.muted == "1" then flags[#flags + 1] = "mute" end
+    -- startConferenceOnEnter defaults to true (Twilio). false => wait for a moderator.
+    if a.startConferenceOnEnter == "false" then flags[#flags + 1] = "wait-mod" end
+    if a.endConferenceOnExit == "true" then
+        flags[#flags + 1] = "endconf"
+        flags[#flags + 1] = "moderator"
+    end
+    local flag_str = "+flags{" .. table.concat(flags, "|") .. "}"
+
+    -- beep: enter/exit tones. Twilio accepts true/false/onEnter/onExit.
+    local beep = a.beep or "true"
+    if beep == "false" then
+        set_var("conference_enter_sound", "")
+        set_var("conference_exit_sound", "")
+    elseif beep == "onEnter" then
+        set_var("conference_exit_sound", "")
+    elseif beep == "onExit" then
+        set_var("conference_enter_sound", "")
+    end
+
+    -- waitUrl: MOH while alone. A real URL is played by mod_shout; otherwise silence.
+    local wait_url = a.waitUrl
+    if wait_url and wait_url ~= "" then
+        set_var("conference_moh_sound", wait_url)
+    else
+        set_var("conference_moh_sound", "silence_stream://-1")
+    end
+
+    -- maxParticipants
+    local max_p = tonumber(a.maxParticipants)
+    if max_p and max_p > 0 then
+        set_var("conference_max_members", tostring(max_p))
+    end
+
+    -- record: auto-record the whole conference to the tenant spool.
+    local do_record = a.record and a.record ~= "" and a.record ~= "false"
+        and a.record ~= "do-not-record"
+    local rec_uuid, rec_spool
+    if do_record then
+        rec_uuid = new_recording_uuid()
+        rec_spool = recording_spool_path(rec_uuid)
+        set_var("conference_auto_record", rec_spool)
+        log_info(uuid, string.format("Conference record -> %s (uuid=%s)", rec_spool, rec_uuid))
+    end
+
+    -- The caller's media must be flowing before joining (Twilio answers first).
+    if direction == "inbound" then
+        pcall(function()
+            local answered = false
+            pcall(function() answered = session:answered() end)
+            if not answered then session:answer() end
+        end)
+    end
+
+    local data = string.format("%s@%s%s", room, profile, flag_str)
+    log_info(uuid, string.format(
+        "Conference: name='%s' -> room=%s profile=%s flags=%s waitUrl=%s max=%s",
+        name, room, profile, table.concat(flags, "|"),
+        tostring(wait_url), tostring(max_p)))
+
+    -- conference app blocks until the member leaves.
+    pcall(function()
+        session:execute("conference", data)
+    end)
+
+    -- Teardown: notify the recording ingest if we recorded.
+    if do_record and rec_spool then
+        local rec_dur = tonumber(get_var("conference_record_ms", ""))
+            or tonumber(get_var("billmsec", "0")) or 0
+        local rec_url = notify_recording(rec_uuid, rec_spool, rec_dur, "conference") or rec_spool
+        set_var("RecordingUrl", rec_url)
+        set_var("RecordingSid", rec_uuid)
+    end
+
+    -- The member has left the conference. Twilio continues to the next verb.
+    return nil
+end
+
+-- ============================================
 -- <Dial> verb
 -- ============================================
 local function execute_dial(verb)
@@ -879,11 +1153,39 @@ local function execute_dial(verb)
         dial_action = resolve_url(dial_action, current_base_url)
     end
 
-    -- Check for <Number> children
+    -- Twilio nests <Conference>/<Queue> inside <Dial>. If present, that child owns
+    -- the verb (you cannot also dial a PSTN number in the same <Dial>).
+    if verb.children and #verb.children > 0 then
+        for _, child in ipairs(verb.children) do
+            if child.verb == "Conference" then
+                return execute_conference(child)
+            elseif child.verb == "Queue" then
+                return execute_dial_queue(child, verb)
+            end
+        end
+    end
+
+    -- Collect dial targets from <Number>/<Sip>/<Client> children (and bare text).
+    -- Each entry is a pre-built FreeSWITCH dial string; multiple entries ring
+    -- SEQUENTIALLY (joined by "|" below). dial_targets holds the human label for
+    -- logging only.
+    local dial_strings_explicit = {}  -- Sip/Client (already full dial strings)
     if verb.children and #verb.children > 0 then
         for _, child in ipairs(verb.children) do
             if child.verb == "Number" and child.text and child.text ~= "" then
                 table.insert(dial_targets, child.text)
+            elseif child.verb == "Sip" and child.text and child.text ~= "" then
+                local ds = build_sip_dialstring(child, dial_timeout)
+                if ds then
+                    table.insert(dial_strings_explicit, ds)
+                    table.insert(dial_targets, child.text)
+                end
+            elseif child.verb == "Client" and child.text and child.text ~= "" then
+                local ds = build_client_dialstring(child.text, dial_timeout)
+                if ds then
+                    table.insert(dial_strings_explicit, ds)
+                    table.insert(dial_targets, "client:" .. child.text)
+                end
             end
         end
     end
@@ -936,6 +1238,11 @@ local function execute_dial(verb)
     ))
 
     for _, target in ipairs(dial_targets) do
+        -- Sip/Client targets are pre-built (dial_strings_explicit); skip them here
+        -- so the number-cleaner below never mangles a SIP URI / client identity.
+        if target:match("^sip:") or target:match("^client:") then
+            goto continue_target
+        end
         local clean_target = target:gsub("[^%d+*#]", "")
 
         -- Check if target is a local extension (4 digits starting with 10xx)
@@ -964,6 +1271,17 @@ local function execute_dial(verb)
                 dial_timeout, sip_call_id, dial_number
             ))
         end
+        ::continue_target::
+    end
+
+    -- Append pre-built Sip/Client dial strings (in document order, after numbers).
+    for _, ds in ipairs(dial_strings_explicit) do
+        table.insert(dial_strings, ds)
+    end
+
+    if #dial_strings == 0 then
+        log_warning(uuid, "Dial: no resolvable targets after building dial strings, skipping")
+        return
     end
 
     local combined_dial = table.concat(dial_strings, "|")
@@ -1224,6 +1542,131 @@ local function execute_connect(verb)
 end
 
 -- ============================================
+-- <Enqueue> / <Leave> / <Dial><Queue>  (Phase 7 — mod_fifo call queues)
+-- ============================================
+-- We use mod_fifo (already built into the image): named dynamic FIFOs map 1:1 to
+-- Twilio's <Enqueue>name + <Dial><Queue>name. Queues are tenant-scoped
+-- (fifo_<cid>_<name>). The agent side (<Dial><Queue>) dequeues the
+-- longest-waiting caller.
+--
+-- DOCUMENTED LIMITATION: Twilio's <Leave> (and waitUrl-driven re-prompting) work
+-- by executing TwiML WHILE the caller waits. mod_fifo's `in` app BLOCKS the caller
+-- until an agent dequeues them or they hang up, so we cannot run a waitUrl TwiML
+-- document mid-wait or honor a <Leave> emitted from one. waitUrl is therefore used
+-- only as hold music (a real audio URL is streamed; otherwise silence). <Leave>
+-- reached as a top-level verb (caller not currently blocked in a FIFO) simply ends
+-- the current document. See docker/freeswitch/CLAUDE.md "Call queues".
+
+local function execute_enqueue(verb)
+    local name = verb.text or ""
+    if name == "" then
+        log_warning(uuid, "Enqueue verb with no queue name, skipping")
+        return nil
+    end
+    local a = verb.attrs or {}
+    local qname = queue_name(name)
+    local wait_url = a.waitUrl
+    local moh = (wait_url and wait_url ~= "") and wait_url or "silence_stream://-1"
+    local action_url = a.action and resolve_url(a.action, current_base_url) or nil
+    local method = (a.method == "GET") and "GET" or "POST"
+
+    -- Answer so the caller hears hold music while queued.
+    if direction == "inbound" then
+        pcall(function()
+            local answered = false
+            pcall(function() answered = session:answered() end)
+            if not answered then session:answer() end
+        end)
+    end
+
+    log_info(uuid, string.format(
+        "Enqueue: name='%s' -> fifo=%s moh=%s action=%s",
+        name, qname, moh, tostring(action_url)))
+
+    -- `fifo <name> in undef <music>` blocks until an agent dequeues us / we hang up.
+    pcall(function()
+        session:execute("fifo", string.format("%s in undef %s", qname, moh))
+    end)
+
+    -- Dequeued (or abandoned). QueueResult mirrors Twilio's action callback.
+    local fifo_status = get_var("fifo_status", "")
+    local queue_result = (fifo_status == "DONE") and "bridged"
+        or (fifo_status == "ABORT") and "leave" or "hangup"
+    log_info(uuid, string.format("Enqueue done: fifo_status=%s QueueResult=%s",
+        tostring(fifo_status), queue_result))
+
+    if action_url then
+        local params = build_webhook_params({
+            QueueResult = queue_result,
+            QueueSid    = qname,
+            QueueTime   = get_var("fifo_target_seconds", "0"),
+        })
+        local new_verbs, err = fetch_instructions(action_url, params, method)
+        if new_verbs then
+            local saved_base = current_base_url
+            current_base_url = action_url
+            execute_verbs(new_verbs)
+            current_base_url = saved_base
+            return "stop"
+        else
+            log_err(uuid, "Failed to fetch Enqueue action URL: " .. tostring(err))
+        end
+    end
+    return nil
+end
+
+local function execute_leave(verb)
+    -- Best-effort: end the current document so the caller proceeds past the queue.
+    -- Cannot interrupt an in-progress <Enqueue> wait in the FIFO model (see note).
+    log_info(uuid, "Leave: exiting current TwiML document (queue-leave semantics)")
+    return "stop"
+end
+
+-- <Dial><Queue>name</Queue></Dial> — agent side: bridge to the longest-waiting
+-- caller in the queue. `fifo <name> out nowait` connects immediately if a caller
+-- is waiting; otherwise it returns and we fall through (optionally to action URL).
+execute_dial_queue = function(queue_child, dial_verb)
+    local name = queue_child.text or ""
+    if name == "" then
+        log_warning(uuid, "Dial>Queue with no queue name, skipping")
+        return nil
+    end
+    local qname = queue_name(name)
+    local action_url = dial_verb.attrs.action
+        and resolve_url(dial_verb.attrs.action, current_base_url) or nil
+    local method = (dial_verb.attrs.method == "GET") and "GET" or "POST"
+
+    log_info(uuid, string.format("Dial>Queue: name='%s' -> fifo=%s out", name, qname))
+
+    set_var("continue_on_fail", "true")
+    set_var("hangup_after_bridge", "false")
+    pcall(function()
+        session:execute("fifo", string.format("%s out nowait", qname))
+    end)
+
+    local fifo_status = get_var("fifo_status", "")
+    log_info(uuid, string.format("Dial>Queue done: fifo_status=%s", tostring(fifo_status)))
+
+    if action_url then
+        local params = build_webhook_params({
+            DialCallStatus = (fifo_status == "DONE") and "completed" or "no-answer",
+            QueueSid       = qname,
+        })
+        local new_verbs, err = fetch_instructions(action_url, params, method)
+        if new_verbs then
+            local saved_base = current_base_url
+            current_base_url = action_url
+            execute_verbs(new_verbs)
+            current_base_url = saved_base
+            return "stop"
+        else
+            log_err(uuid, "Failed to fetch Dial>Queue action URL: " .. tostring(err))
+        end
+    end
+    return nil
+end
+
+-- ============================================
 -- Main verb execution loop
 -- ============================================
 
@@ -1262,6 +1705,12 @@ execute_verbs = function(verbs)
                 execute_stream(verb)
             elseif verb.verb == "Connect" then
                 result = execute_connect(verb)
+            elseif verb.verb == "Conference" then
+                result = execute_conference(verb)
+            elseif verb.verb == "Enqueue" then
+                result = execute_enqueue(verb)
+            elseif verb.verb == "Leave" then
+                result = execute_leave(verb)
             else
                 log_warning(uuid, "Unknown verb: " .. tostring(verb.verb) .. ", skipping")
             end

@@ -358,7 +358,8 @@ UCaaS conference uses.
 | Webhook security | **HMAC-SHA256 + HTTPS** | Twilio-parity; lets customers verify authenticity |
 | Refactor safety | **characterize-then-refactor** | behavior-preservation proven against golden baseline |
 | OPEN — storage backend | TBD @ Phase 4 | S3-compatible vs NFS for voicemail/recordings HA |
-| OPEN — TTS engine | TBD @ Phase 7 | keep flite vs higher-quality engine |
+| Queue module (Phase 7) | **mod_fifo** | `<Enqueue>name`/`<Dial><Queue>name` map 1:1 to mod_fifo's named dynamic FIFOs. mod_fifo is ALREADY built (FreeSWITCH default set) — zero Dockerfile change, just a `<load>` + minimal `fifo.conf.xml`. Chosen over the also-built `mod_callcenter`, whose agent/tier ACD model is far heavier than TwiML queue semantics need. mod_callcenter remains built for a future agent-based ACD. KNOWN LIMITATION: mod_fifo's `in` app blocks the caller, so Twilio's waitUrl-TwiML and mid-wait `<Leave>` are not supported (waitUrl = hold music only; `<Leave>` only ends a top-level document). |
+| OPEN — TTS engine (Phase 7) | **flite default; engine now PLUGGABLE; recommend Piper** | Kept flite as the offline default but made `<Say>` engine-swappable via `TTS_ENGINE` (speak app = `<engine>\|<voice>\|<text>`) with voice/language mapping + SSML stripping — NO heavy cloud dep added. Recommendation for higher quality with no cloud dependency: **Piper** (neural, offline, MIT) behind `mod_tts_commandline`, selected purely via env. Cloud (Polly/Google via mod_unimrcp/mod_polly) is possible but adds network dependency + per-char cost. **Final engine choice deferred to PM/user** — the hook is in place so it is a config decision, not a code change. |
 
 
 ## Live Verification Log
@@ -374,6 +375,31 @@ UCaaS conference uses.
 
 **2026-06-18 — Phase 5 verified live (ESL control plane):** switchio REJECTED (only PyPI alphas 0.1.0a0/0.1.0a1; latest uses `@asyncio.coroutine` removed in py3.11 + undeclared `six` — cannot import on py3.12; proven in FS netns) → extended our OWN persistent asyncio ESL client. ONE pattern now: single inbound connection multiplexes event consumption (live-call registry) + api/bgapi commands; calls.py/trunks.py/conference.py all route through it (grep: 1 `open_connection` in esl_client.py, 1 `class ESLClient`). FastAPI lifespan starts the supervised consumer (exp backoff 1→2→4…30s, never blocks/crashes startup). `/health` gained an informational `esl` field (connected/last_event_ts/reconnects) that is NOT part of the health verdict. Event-confirmed live-modify on `/v1/calls/{id}/update` (hangup/transfer/redirect/dtmf — confirmed by observing the resulting CHANNEL event). `get_call_status` reads the event-derived registry first, falls back to `uuid_dump`. Tests: 16 new unit (registry transitions/waiter/backoff/graceful-degrade) + in-FS-netns integration (real FS: bgapi originate → CHANNEL_CREATE→ANSWER→event-confirmed HANGUP cause=NORMAL_CLEARING; fs_cli-originated channel independently observed dest=9999; FS-restart reconnect: down→2/4/8/16s backoff→reconnected). Full gate 64 passed/3 skipped; API stays HEALTHY through 3× FS restarts (connected:false, never crashes — DD host-net/bridge isolation). greenswitch removed from requirements.txt.
 
+**2026-06-18 — Phase 7 verified live (net-new TwiML verbs, FreeSWITCH side):**
+All work in `docker/freeswitch/**` + `tests/twiml`. `<Conference>` (Twilio Dial-nested
+and top-level) joins the ALREADY-BUILT mod_conference room `conf_<cid>_<sanitized name>`
+(SHARED CONTRACT for conference.py ESL control) on the `default`/`video` profile;
+attribute map muted→`+flags{mute}`, startConferenceOnEnter=false→`wait-mod`,
+endConferenceOnExit=true→`endconf|moderator`, beep→enter/exit-sound vars,
+waitUrl→`conference_moh_sound`, maxParticipants→`conference_max_members`,
+record→`conference_auto_record` + ingest `kind="conference"`. `<Dial>` now bridges
+`<Sip>` (external vs internal profile auto-select by host; optional username/password
+→ `sip_auth_*`), `<Client>` (`verto.rtc/<id>@customer_<cid>...|user/...`, mirrors
+handlers/ucaas.lua), plus nested `<Conference>`/`<Queue>`; multiple children ring
+SEQUENTIALLY (`|`). `<Enqueue>`/`<Leave>`/`<Dial><Queue>` via **mod_fifo** (already
+built — zero Dockerfile change; loaded + minimal `fifo.conf.xml`; tenant-scoped
+`fifo_<cid>_<name>`); documented limitation: blocking `in` app ⇒ no waitUrl-TwiML /
+mid-wait `<Leave>`. `<Say>` TTS made pluggable via `TTS_ENGINE` (speak
+`<engine>|<voice>|<text>`) + voice/language→flite-voice map + SSML/`<speak>`
+stripping; Piper recommended, choice deferred (Decision Log). Corpus +14 fixtures
+(Conference/Sip/Client/Enqueue/Queue + a `<Leave>` known-bug), `frag_dial_sip_child`
+flipped known-bug→correct. **Gate green:** `make test-lua` 66, `pytest tests/lessons`
+44 (+4 skip), `pytest tests/twiml` **106**. FS image: `module_exists` mod_fifo/
+mod_conference/mod_verto/mod_audio_stream all `true`, sofia internal:5080/external:5090
+RUNNING, NO CRIT. Live conference: two loopback legs originated into `conf_1_test` →
+`conference conf_1_test list count` = **2**. Sip/Client dial strings printed from the
+REAL engine builder code (external/internal profile select, auth vars, verto fallback).
+
 ## Progress Tracker
 
 - [x] Phase 0 — Safety Net & RCF Characterization  ✅ 34 char tests + 40 lessons guards + 33 TwiML fixtures, all green & PM-verified
@@ -383,6 +409,6 @@ UCaaS conference uses.
 - [x] Phase 4 — Harden Restored UCaaS Features  ✅ S3-compatible object storage (MinIO/GCS) for vm+recordings+uploads; coturn TURN + env-driven WebRTC TLS; upload security (type/size/sanitize/AV-hook); ESL ClueCon KILLED (entrypoint hard-fails); 2 critical IDOR holes fixed (api_dids+ivr) + 22-assert tenant-isolation suite; CLAUDE.md docs refreshed
 - [x] Phase 5 — ESL Control Plane  ✅ switchio rejected (py3.12-incompatible alpha) → OWN persistent asyncio consumer+command client; ONE ESL pattern; live-call registry from real FS events; event-confirmed live-modify (hangup/transfer/redirect/dtmf); supervised reconnect/backoff + /health esl field; 16 unit + in-netns integration (originate→CREATE→ANSWER→confirmed HANGUP, fs_cli observe, FS-restart reconnect) all green; API stays healthy when FS unreachable
 - [x] Phase 6 — Media Plane + Record/Stream + Recording  ✅ <Record>/<Dial record> via core FS → shared spool → object storage; mod_audio_stream BUILT+LOADED + <Stream>/<Connect>; WS media consumer + pluggable STT hook; recordings table/ingest/presigned-serve, tenant-scoped; 86 twiml/181 pytest green
-- [ ] Phase 7 — Net-New TwiML Verbs
+- [x] Phase 7 — Net-New TwiML Verbs  ✅ `<Conference>` (Dial-nested + top-level) joins the EXISTING mod_conference via the shared `conf_<cid>_<name>` contract (muted/beep/start-on-enter/end-on-exit/waitUrl/maxParticipants/record→ingest kind=conference); `<Dial>` gains `<Sip>` (external/internal profile select + auth vars), `<Client>` (verto.rtc|user fallback, mirrors ucaas.lua), `<Conference>`, `<Queue>` children (multi-child = sequential ring); `<Enqueue>`/`<Leave>`/`<Dial><Queue>` via mod_fifo (already built; tenant-scoped fifo_<cid>_<name>; documented blocking-`in` limitation on mid-wait `<Leave>`/waitUrl); pluggable TTS (`TTS_ENGINE` hook, voice/lang map, SSML strip) — Piper recommended, choice deferred. Gate: 66 lua + 44 lessons + 106 twiml green; FS builds, mod_fifo+mod_conference+verto WSS+audio_stream load NO CRIT; live conf_1_test = 2 members; Sip/Client dial strings verified from real engine code
 - [ ] Phase 8 — UI for Net-New Services
 - [ ] Phase 9 — PM Verification & Sign-off

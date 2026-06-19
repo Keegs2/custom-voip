@@ -206,6 +206,18 @@
     <load module="mod_valet_parking"/>
 
     <!-- ============================================ -->
+    <!-- CALL QUEUES (Phase 7 — programmable voice)  -->
+    <!-- ============================================ -->
+    <!-- mod_fifo: named dynamic FIFO queues. Powers the TwiML <Enqueue>name +
+         <Dial><Queue>name verbs (handlers/api_voice.lua). Already built into the
+         image (FreeSWITCH default module set); needs only this <load> + the
+         minimal fifo.conf.xml. Chosen over mod_callcenter (also built, not loaded)
+         because callcenter's agent/tier model is far heavier than TwiML queue
+         semantics need. Queues are created dynamically and tenant-namespaced
+         (fifo_<customer_id>_<name>); no pre-provisioned queues are required. -->
+    <load module="mod_fifo"/>
+
+    <!-- ============================================ -->
     <!-- MONITORING                                  -->
     <!-- ============================================ -->
 

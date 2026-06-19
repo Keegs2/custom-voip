@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  mod_fifo Configuration — Phase 7 programmable-voice call queues.
+
+  The TwiML engine (handlers/api_voice.lua) creates queues DYNAMICALLY at call
+  time: <Enqueue>name (caller side, `fifo <q> in`) and <Dial><Queue>name (agent
+  side, `fifo <q> out nowait`). Queue names are tenant-scoped:
+  fifo_<customer_id>_<sanitized name>.
+
+  Because every queue is created on demand, NO static <fifo> definitions are
+  needed here. This file exists only so mod_fifo loads cleanly with explicit,
+  documented settings (and never CRIT-aborts on a missing config). Add a static
+  <fifo name="..."> block below only if you want a pre-warmed/persistent queue.
+-->
+<configuration name="fifo.conf" description="FIFO Configuration">
+  <settings>
+    <!-- Delete dynamically-created queues from the DB once they drain empty, so
+         per-call programmable queues do not accumulate. -->
+    <param name="delete-all-outbound-member-on-startup" value="false"/>
+  </settings>
+
+  <!-- No static fifos: all queues are dynamic (created by the fifo app on first
+       in/out). Example of a persistent queue, left commented:
+  <fifos>
+    <fifo name="example" importance="0">
+    </fifo>
+  </fifos>
+  -->
+</configuration>

@@ -1,0 +1,30 @@
+{
+  "name": "enqueue_basic",
+  "classification": "correct",
+  "description": "Phase 7: <Enqueue>name joins the tenant-scoped mod_fifo queue fifo_<cid>_<name> (caller side, blocks until dequeued). waitUrl is hold music. With no action it falls through after dequeue.",
+  "ideal": "",
+  "base_url": "https://voice.example.com/ivr/voice",
+  "input_xml": "<Response><Enqueue waitUrl=\"https://cdn.example.com/wait.wav\">support</Enqueue></Response>",
+  "expected_parse": {
+    "ok": true,
+    "verbs": [
+      {
+        "verb": "Enqueue",
+        "attrs": {
+          "waitUrl": "https://cdn.example.com/wait.wav"
+        },
+        "text": "support",
+        "children": []
+      }
+    ]
+  },
+  "expected_trace": [
+    {
+      "action": "enqueue",
+      "queue": "fifo_<customer_id>_support",
+      "waitUrl": "https://cdn.example.com/wait.wav",
+      "action_url": null,
+      "blocks": true
+    }
+  ]
+}

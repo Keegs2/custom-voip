@@ -1,0 +1,41 @@
+{
+  "name": "dial_sip_auth",
+  "classification": "correct",
+  "description": "Phase 7: <Sip> with username/password attributes adds digest-auth channel vars (sip_auth_username/sip_auth_password) to the bridge.",
+  "ideal": "",
+  "base_url": "https://voice.example.com/ivr/voice",
+  "input_xml": "<Response><Dial><Sip username=\"u1\" password=\"p1\">sip:pbx@10.0.0.9</Sip></Dial></Response>",
+  "expected_parse": {
+    "ok": true,
+    "verbs": [
+      {
+        "verb": "Dial",
+        "attrs": {},
+        "text": "",
+        "children": [
+          {
+            "verb": "Sip",
+            "attrs": {
+              "password": "p1",
+              "username": "u1"
+            },
+            "text": "sip:pbx@10.0.0.9"
+          }
+        ]
+      }
+    ]
+  },
+  "expected_trace": [
+    {
+      "action": "dial",
+      "targets": [],
+      "callerId": null,
+      "timeout": 30,
+      "record": null,
+      "action_url": null,
+      "sip": [
+        "sip:pbx@10.0.0.9"
+      ]
+    }
+  ]
+}

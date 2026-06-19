@@ -1,0 +1,48 @@
+{
+  "name": "enqueue_with_action",
+  "classification": "correct",
+  "description": "Phase 7: <Enqueue> with an action URL POSTs QueueResult/QueueSid/QueueTime after dequeue, executes the returned TwiML, then stops.",
+  "ideal": "",
+  "base_url": "https://voice.example.com/ivr/voice",
+  "input_xml": "<Response><Enqueue action=\"/queue-done\">support</Enqueue></Response>",
+  "expected_parse": {
+    "ok": true,
+    "verbs": [
+      {
+        "verb": "Enqueue",
+        "attrs": {
+          "action": "/queue-done"
+        },
+        "text": "support",
+        "children": []
+      }
+    ]
+  },
+  "expected_trace": [
+    {
+      "action": "enqueue",
+      "queue": "fifo_<customer_id>_support",
+      "waitUrl": null,
+      "action_url": "https://voice.example.com/queue-done",
+      "blocks": true
+    },
+    {
+      "http": {
+        "method": "POST",
+        "url": "https://voice.example.com/queue-done",
+        "params": {
+          "CallSid": "<call_sid>",
+          "AccountSid": "<customer_id>",
+          "From": "<from>",
+          "To": "<to>",
+          "CallStatus": "in-progress",
+          "Direction": "<direction>",
+          "QueueResult": "<queue_result>",
+          "QueueSid": "fifo_<customer_id>_support",
+          "QueueTime": "<queue_time>"
+        }
+      },
+      "stops_here": true
+    }
+  ]
+}

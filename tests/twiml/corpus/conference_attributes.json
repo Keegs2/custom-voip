@@ -1,0 +1,52 @@
+{
+  "name": "conference_attributes",
+  "classification": "correct",
+  "description": "Phase 7: <Conference> attributes map to mod_conference: muted->+flags{mute}, startConferenceOnEnter=false->wait-mod, endConferenceOnExit=true->endconf+moderator, beep/waitUrl/maxParticipants/record all honored.",
+  "ideal": "",
+  "base_url": "https://voice.example.com/ivr/voice",
+  "input_xml": "<Response><Dial><Conference muted=\"true\" beep=\"false\" startConferenceOnEnter=\"false\" endConferenceOnExit=\"true\" maxParticipants=\"10\" waitUrl=\"https://cdn.example.com/hold.wav\" record=\"record-from-start\">support</Conference></Dial></Response>",
+  "expected_parse": {
+    "ok": true,
+    "verbs": [
+      {
+        "verb": "Dial",
+        "attrs": {},
+        "text": "",
+        "children": [
+          {
+            "verb": "Conference",
+            "attrs": {
+              "beep": "false",
+              "endConferenceOnExit": "true",
+              "maxParticipants": "10",
+              "muted": "true",
+              "record": "record-from-start",
+              "startConferenceOnEnter": "false",
+              "waitUrl": "https://cdn.example.com/hold.wav"
+            },
+            "text": "support"
+          }
+        ]
+      }
+    ]
+  },
+  "expected_trace": [
+    {
+      "action": "conference",
+      "room": "conf_<customer_id>_support",
+      "profile": "default",
+      "flags": [
+        "speak",
+        "mute",
+        "wait-mod",
+        "endconf",
+        "moderator"
+      ],
+      "beep": "false",
+      "waitUrl": "https://cdn.example.com/hold.wav",
+      "maxParticipants": 10,
+      "record": true,
+      "blocks": true
+    }
+  ]
+}

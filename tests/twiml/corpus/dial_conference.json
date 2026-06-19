@@ -1,0 +1,40 @@
+{
+  "name": "dial_conference",
+  "classification": "correct",
+  "description": "Phase 7: <Dial><Conference>room</Conference></Dial> joins the customer-scoped mod_conference room conf_<cid>_room (the SHARED CONTRACT the API controls). Blocks until the member leaves, then continues.",
+  "ideal": "",
+  "base_url": "https://voice.example.com/ivr/voice",
+  "input_xml": "<Response><Dial><Conference>SalesTeam</Conference></Dial></Response>",
+  "expected_parse": {
+    "ok": true,
+    "verbs": [
+      {
+        "verb": "Dial",
+        "attrs": {},
+        "text": "",
+        "children": [
+          {
+            "verb": "Conference",
+            "attrs": {},
+            "text": "SalesTeam"
+          }
+        ]
+      }
+    ]
+  },
+  "expected_trace": [
+    {
+      "action": "conference",
+      "room": "conf_<customer_id>_salesteam",
+      "profile": "default",
+      "flags": [
+        "speak"
+      ],
+      "beep": "true",
+      "waitUrl": null,
+      "maxParticipants": null,
+      "record": false,
+      "blocks": true
+    }
+  ]
+}

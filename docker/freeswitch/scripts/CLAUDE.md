@@ -227,7 +227,60 @@ Renamed from `voice_webhook.lua` in Phase 2; hardened in Phase 3; media plane
 (record/stream) added in Phase 6.
 
 Supports these verbs: Say, Play, Gather, Dial, Hangup, Pause, Redirect, Reject,
-**Record, Stream, Connect** (Phase 6).
+**Record, Stream, Connect** (Phase 6), **Conference, Enqueue, Leave** (Phase 7).
+`<Dial>` accepts `<Number>`, **`<Sip>`, `<Client>`, `<Conference>`, `<Queue>`**
+children (Phase 7).
+
+**Phase 7 — `<Conference>`** (Twilio nests it in `<Dial>`; a top-level
+`<Conference>` is also accepted). Joins the **existing** `mod_conference` (not a
+new module) room **`conf_<customer_id>_<sanitized name>`** — lowercase, every
+non-alnum char → `_`. This `conf_` namespace is the SHARED CONTRACT the API's
+`conference.py` relies on so its ESL control (`conference <room> list|mute|kick`)
+and tenant-scoped listing work on programmatically-created rooms. Joins via
+`session:execute("conference", "conf_<cid>_<name>@<profile>+flags{...}")` using
+the `default` audio profile (or the `video` profile when a `video` attribute is
+set). Attribute map: `muted`→`+flags{mute}`; `startConferenceOnEnter=false`→
+`wait-mod`; `endConferenceOnExit=true`→`endconf|moderator`; `beep`
+(`true|false|onEnter|onExit`)→`conference_enter_sound`/`conference_exit_sound`
+channel vars; `waitUrl`(+`waitMethod`)→`conference_moh_sound` (a real audio URL is
+streamed by mod_shout, else `silence_stream://-1`); `maxParticipants`→
+`conference_max_members`; `record`→`conference_auto_record=<spool wav>` then notify
+the ingest with `kind="conference"` (`lib/rec_notify.lua`). The conference app
+blocks until the member leaves; on teardown it sets `RecordingUrl`/`RecordingSid`.
+
+**Phase 7 — `<Dial><Sip>` / `<Dial><Client>`:**
+- `<Sip>sip:user@host</Sip>` → `{...session-timers,sip_h_X-CID}sofia/external/<uri>`
+  (carrier-facing profile), or `sofia/internal/<uri>` when the URI host is our own
+  platform domain. A bare `user@host` is prefixed with `sip:`. Optional
+  `username`/`password` attributes add `sip_auth_username`/`sip_auth_password`.
+- `<Client>identity</Client>` → `verto.rtc/<id>@customer_<cid>.<domain>|user/<id>@customer_<cid>.<domain>`
+  (Verto first, SIP fallback — mirrors `handlers/ucaas.lua`).
+- Multiple `<Number>`/`<Sip>`/`<Client>` children ring **sequentially** (joined by
+  `|`: numbers first, then Sip/Client in document order). Simring (`,`) is a
+  one-character change but not enabled by default.
+
+**Phase 7 — `<Enqueue>` / `<Leave>` / `<Dial><Queue>` (mod_fifo call queues):**
+uses **mod_fifo** (already built into the image; chosen over the also-built-but-
+heavier `mod_callcenter`). Queues are dynamic and tenant-scoped
+**`fifo_<customer_id>_<name>`**. `<Enqueue>name` runs `fifo <q> in undef <moh>`
+(caller side; `waitUrl` is hold music, else silence) and BLOCKS until an agent
+dequeues or the caller hangs up; an `action` URL then receives
+`QueueResult`/`QueueSid`/`QueueTime`. `<Dial><Queue>name` runs `fifo <q> out
+nowait` (agent side) to bridge the longest-waiting caller.
+**Documented limitation:** mod_fifo's `in` app blocks, so Twilio's waitUrl-driven
+TwiML and a mid-wait `<Leave>` cannot run during the wait. `<Leave>` reached as a
+top-level verb simply ends the current document; it cannot interrupt an in-progress
+`<Enqueue>`. A non-blocking queue (mod_callcenter wait-loop) or a DTMF abort key
+would be required for full `<Leave>`/waitUrl parity.
+
+**Phase 7 — TTS (`<Say>`):** `flite` stays the offline default. The engine is now
+PLUGGABLE via `TTS_ENGINE` (default `flite`): the speak app is invoked as
+`<engine>|<voice>|<text>`, so a higher-quality engine drops in with no code change.
+`voice`/`language` are mapped to flite voices (man→rms, woman/alice→slt, vendor
+voice names guessed by gender, else `TTS_DEFAULT_VOICE`); for non-flite engines the
+requested voice is passed through. `<Say>` now strips SSML/`<speak>` markup so tags
+are never read literally (it is NOT a full SSML engine — `<break>`→comma pause, all
+other tags dropped). See the Decision Log + docker/freeswitch/CLAUDE.md "TTS".
 
 **Phase 6 — `<Record>` (standalone recording):** uses CORE FreeSWITCH (no extra
 module) — the `record` app. Writes a WAV to the tenant-scoped shared spool

@@ -1,0 +1,25 @@
+{
+  "name": "leave_in_queue_model",
+  "classification": "known-bug",
+  "description": "FUTURE: mid-wait <Leave>/waitUrl TwiML would need a non-blocking queue (e.g. mod_callcenter with a wait-loop) or a DTMF abort key mapped to fifo exit.",
+  "ideal": "<Leave> is accepted as a top-level verb and ends the current document, but it CANNOT interrupt an in-progress <Enqueue> wait: mod_fifo's `in` app blocks the caller until an agent dequeues them. Twilio's waitUrl-driven <Leave> (running TwiML mid-wait) is not supported in the FIFO model.",
+  "base_url": "https://voice.example.com/ivr/voice",
+  "input_xml": "<Response><Leave/></Response>",
+  "expected_parse": {
+    "ok": true,
+    "verbs": [
+      {
+        "verb": "Leave",
+        "attrs": {},
+        "text": "",
+        "children": []
+      }
+    ]
+  },
+  "expected_trace": [
+    {
+      "action": "leave",
+      "stops_here": true
+    }
+  ]
+}

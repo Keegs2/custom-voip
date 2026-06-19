@@ -213,6 +213,7 @@ def env():
     data = {
         "tokenA": _token(secret, uidA, cidA, f"a-{tag}@example.com"),
         "tokenB": _token(secret, uidB, cidB, f"b-{tag}@example.com"),
+        "cidA": cidA, "cidB": cidB,
         "confA": confA, "confB": confB,
         "vmB": vmB, "convB": convB, "docB": docB, "didB": didB, "flowB": flowB,
         "recB": recB,
@@ -282,6 +283,31 @@ def test_cross_tenant_conference_update_denied(env):
 
 def test_cross_tenant_conference_delete_denied(env):
     r = requests.delete(f"{API_BASE}/v1/conferences/{env['confB']}", headers=_hA(env))
+    assert r.status_code in DENIED, r.text
+
+
+# The conference_id-keyed live controls derive the FS room from a DB conference
+# scoped by customer_id (_get_conference_active), so a cross-tenant id is denied
+# BEFORE any ESL call — same room-ownership guarantee as the room-name controls.
+def test_cross_tenant_conference_kick_denied(env):
+    r = requests.post(
+        f"{API_BASE}/v1/conferences/{env['confB']}/kick/1", headers=_hA(env)
+    )
+    assert r.status_code in DENIED, r.text
+
+
+def test_cross_tenant_conference_mute_denied(env):
+    r = requests.post(
+        f"{API_BASE}/v1/conferences/{env['confB']}/mute/1",
+        headers=_hA(env), json={"mute": True},
+    )
+    assert r.status_code in DENIED, r.text
+
+
+def test_cross_tenant_conference_record_denied(env):
+    r = requests.post(
+        f"{API_BASE}/v1/conferences/{env['confB']}/record/start", headers=_hA(env)
+    )
     assert r.status_code in DENIED, r.text
 
 
@@ -414,3 +440,61 @@ def test_recording_list_excludes_other_tenant(env):
     assert r.status_code == 200, r.text
     ids = {row.get("id") for row in r.json()}
     assert env["recB"] not in ids
+
+
+# --- Live FreeSWITCH conferences (Phase 7) — programmatic conf_<C>_* rooms ---
+# These rooms (TwiML <Conference>) have NO row in the conferences table; tenant
+# ownership is enforced purely from the room-name prefix conf_<customer_id>_.
+# A must not VIEW or CONTROL a conf_<B>_* room. The tenant gate runs before any
+# ESL call, so these deny correctly even though FreeSWITCH ESL is unreachable on
+# Docker Desktop (synthetic/named room — no live conference required locally).
+def _conf_b_room(env) -> str:
+    return f"conf_{env['cidB']}_sales"
+
+
+def test_cross_tenant_live_conference_view_denied(env):
+    r = requests.get(
+        f"{API_BASE}/v1/conferences/live/{_conf_b_room(env)}", headers=_hA(env)
+    )
+    assert r.status_code in DENIED, r.text
+
+
+def test_cross_tenant_live_conference_kick_denied(env):
+    r = requests.post(
+        f"{API_BASE}/v1/conferences/live/{_conf_b_room(env)}/kick/3", headers=_hA(env)
+    )
+    assert r.status_code in DENIED, r.text
+
+
+def test_cross_tenant_live_conference_mute_denied(env):
+    r = requests.post(
+        f"{API_BASE}/v1/conferences/live/{_conf_b_room(env)}/mute/3",
+        headers=_hA(env), json={"mute": True},
+    )
+    assert r.status_code in DENIED, r.text
+
+
+def test_live_conference_list_scoped_to_tenant(env):
+    """A's live list must be a clean 200 (degraded-empty when ESL is down on
+    Docker Desktop, NOT a 500) and must never expose B's room — every visible
+    room must belong to A."""
+    r = requests.get(f"{API_BASE}/v1/conferences/live", headers=_hA(env))
+    assert r.status_code == 200, r.text
+    body = r.json()
+    rooms = body.get("conferences", [])
+    names = {c.get("fs_room_name") for c in rooms}
+    assert _conf_b_room(env) not in names
+    for c in rooms:
+        assert c.get("customer_id") == env["cidA"], c
+
+
+def test_own_live_conference_control_passes_tenant_gate(env):
+    """Positive control: A controlling its OWN conf_<A>_* room passes the tenant
+    gate (proves the cross-tenant deny isn't a blanket 404). With ESL unreachable
+    locally it degrades to 400 — never a 403/404 ownership denial, never a 500."""
+    room = f"conf_{env['cidA']}_sales"
+    r = requests.post(
+        f"{API_BASE}/v1/conferences/live/{room}/kick/3", headers=_hA(env)
+    )
+    assert r.status_code not in (403, 404), r.text
+    assert r.status_code != 500, r.text

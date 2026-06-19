@@ -217,13 +217,76 @@ CASES = [
      "so execution stops there.",
      '<Response><Connect><Stream url="wss://ai.example.com/ws"/></Connect></Response>'),
 
-    # ---- Remaining genuine gaps (characterization for FUTURE phases) -----
-    ("frag_dial_sip_child", "known-bug",
-     "A <Dial> with a <Sip> child parses correctly, but the executor only dials "
-     "<Number> children today, so this Dial resolves to NO target (skipped). "
-     "Phase 7 adds <Sip>/<Client> Dial children.",
-     "FUTURE: <Dial><Sip> child parses but is not yet dialed (Phase 7).",
+    # ---- Phase 7: net-new verbs — Conference / Dial Sip+Client / Enqueue ---
+    ("dial_sip_child", "correct", "",
+     "Phase 7: <Dial><Sip> now bridges to the SIP URI via the external profile "
+     "(sofia/external/sip:...). Previously a known-bug no-op.",
      '<Response><Dial><Sip>sip:alice@example.com</Sip></Dial></Response>'),
+
+    ("dial_sip_auth", "correct", "",
+     "Phase 7: <Sip> with username/password attributes adds digest-auth channel "
+     "vars (sip_auth_username/sip_auth_password) to the bridge.",
+     '<Response><Dial><Sip username="u1" password="p1">sip:pbx@10.0.0.9</Sip>'
+     '</Dial></Response>'),
+
+    ("dial_client_child", "correct", "",
+     "Phase 7: <Dial><Client> bridges to a registered Verto/WebRTC client "
+     "(verto.rtc/<id>@customer_<cid>... with user/ SIP fallback), mirroring the "
+     "UCaaS extension bridge.",
+     '<Response><Dial><Client>agent7</Client></Dial></Response>'),
+
+    ("dial_sip_and_number", "correct", "",
+     "Phase 7: a <Dial> with both a <Number> and a <Sip> child rings them "
+     "SEQUENTIALLY (FreeSWITCH '|' failover order: numbers first, then Sip/Client).",
+     '<Response><Dial timeout="25"><Number>+15551234567</Number>'
+     '<Sip>sip:bob@example.com</Sip></Dial></Response>'),
+
+    ("dial_conference", "correct", "",
+     "Phase 7: <Dial><Conference>room</Conference></Dial> joins the customer-scoped "
+     "mod_conference room conf_<cid>_room (the SHARED CONTRACT the API controls). "
+     "Blocks until the member leaves, then continues.",
+     '<Response><Dial><Conference>SalesTeam</Conference></Dial></Response>'),
+
+    ("conference_toplevel", "correct", "",
+     "Phase 7: a top-level <Conference> is also accepted (lenient). Name is "
+     "sanitized (lowercase, non-alnum -> _) into conf_<cid>_<name>.",
+     '<Response><Conference>Test Room 1</Conference></Response>'),
+
+    ("conference_attributes", "correct", "",
+     "Phase 7: <Conference> attributes map to mod_conference: muted->+flags{mute}, "
+     "startConferenceOnEnter=false->wait-mod, endConferenceOnExit=true->endconf+"
+     "moderator, beep/waitUrl/maxParticipants/record all honored.",
+     '<Response><Dial><Conference muted="true" beep="false" '
+     'startConferenceOnEnter="false" endConferenceOnExit="true" '
+     'maxParticipants="10" waitUrl="https://cdn.example.com/hold.wav" '
+     'record="record-from-start">support</Conference></Dial></Response>'),
+
+    ("enqueue_basic", "correct", "",
+     "Phase 7: <Enqueue>name joins the tenant-scoped mod_fifo queue "
+     "fifo_<cid>_<name> (caller side, blocks until dequeued). waitUrl is hold "
+     "music. With no action it falls through after dequeue.",
+     '<Response><Enqueue waitUrl="https://cdn.example.com/wait.wav">support</Enqueue>'
+     '</Response>'),
+
+    ("enqueue_with_action", "correct", "",
+     "Phase 7: <Enqueue> with an action URL POSTs QueueResult/QueueSid/QueueTime "
+     "after dequeue, executes the returned TwiML, then stops.",
+     '<Response><Enqueue action="/queue-done">support</Enqueue></Response>'),
+
+    ("dial_queue", "correct", "",
+     "Phase 7: <Dial><Queue>name (agent side) dequeues the longest-waiting caller "
+     "from fifo_<cid>_<name> via `fifo <q> out nowait`.",
+     '<Response><Dial><Queue>support</Queue></Dial></Response>'),
+
+    # ---- Remaining documented gap (characterization) ---------------------
+    ("leave_in_queue_model", "known-bug",
+     "<Leave> is accepted as a top-level verb and ends the current document, but "
+     "it CANNOT interrupt an in-progress <Enqueue> wait: mod_fifo's `in` app blocks "
+     "the caller until an agent dequeues them. Twilio's waitUrl-driven <Leave> "
+     "(running TwiML mid-wait) is not supported in the FIFO model.",
+     "FUTURE: mid-wait <Leave>/waitUrl TwiML would need a non-blocking queue (e.g. "
+     "mod_callcenter with a wait-loop) or a DTMF abort key mapped to fifo exit.",
+     '<Response><Leave/></Response>'),
 ]
 
 

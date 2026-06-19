@@ -1,0 +1,32 @@
+{
+  "name": "dial_queue",
+  "classification": "correct",
+  "description": "Phase 7: <Dial><Queue>name (agent side) dequeues the longest-waiting caller from fifo_<cid>_<name> via `fifo <q> out nowait`.",
+  "ideal": "",
+  "base_url": "https://voice.example.com/ivr/voice",
+  "input_xml": "<Response><Dial><Queue>support</Queue></Dial></Response>",
+  "expected_parse": {
+    "ok": true,
+    "verbs": [
+      {
+        "verb": "Dial",
+        "attrs": {},
+        "text": "",
+        "children": [
+          {
+            "verb": "Queue",
+            "attrs": {},
+            "text": "support"
+          }
+        ]
+      }
+    ]
+  },
+  "expected_trace": [
+    {
+      "action": "dial_queue",
+      "queue": "fifo_<customer_id>_support",
+      "action_url": null
+    }
+  ]
+}

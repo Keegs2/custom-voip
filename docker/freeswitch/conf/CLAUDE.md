@@ -173,7 +173,8 @@ Loaded modules organized by purpose:
 | Audio | mod_tone_stream, mod_sndfile, mod_native_file, mod_shout, mod_say_en | mod_local_stream, mod_flite |
 | Database | mod_db, mod_hash | mod_odbc_query |
 | UCaaS (loaded) | mod_conference, mod_av, mod_voicemail, mod_valet_parking | -- |
-| UCaaS (built, not loaded) | -- | mod_callcenter, mod_spy |
+| Call queues (loaded) | mod_fifo (Phase 7 — `<Enqueue>`/`<Dial><Queue>`; needs `fifo.conf.xml`) | -- |
+| UCaaS (built, not loaded) | -- | mod_callcenter (superseded by mod_fifo for TwiML queues), mod_spy |
 
 **Why mod_local_stream is disabled:** It requires `local_stream.conf.xml`. When xml_curl can't reach the API (startup or media VM), the missing config causes CRIT abort. RCF uses `silence_stream://` instead.
 

@@ -1,0 +1,47 @@
+{
+  "name": "dial_sip_and_number",
+  "classification": "correct",
+  "description": "Phase 7: a <Dial> with both a <Number> and a <Sip> child rings them SEQUENTIALLY (FreeSWITCH '|' failover order: numbers first, then Sip/Client).",
+  "ideal": "",
+  "base_url": "https://voice.example.com/ivr/voice",
+  "input_xml": "<Response><Dial timeout=\"25\"><Number>+15551234567</Number><Sip>sip:bob@example.com</Sip></Dial></Response>",
+  "expected_parse": {
+    "ok": true,
+    "verbs": [
+      {
+        "verb": "Dial",
+        "attrs": {
+          "timeout": "25"
+        },
+        "text": "",
+        "children": [
+          {
+            "verb": "Number",
+            "attrs": {},
+            "text": "+15551234567"
+          },
+          {
+            "verb": "Sip",
+            "attrs": {},
+            "text": "sip:bob@example.com"
+          }
+        ]
+      }
+    ]
+  },
+  "expected_trace": [
+    {
+      "action": "dial",
+      "targets": [
+        "+15551234567"
+      ],
+      "callerId": null,
+      "timeout": 25,
+      "record": null,
+      "action_url": null,
+      "sip": [
+        "sip:bob@example.com"
+      ]
+    }
+  ]
+}

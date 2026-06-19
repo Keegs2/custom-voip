@@ -1,0 +1,34 @@
+{
+  "name": "conference_toplevel",
+  "classification": "correct",
+  "description": "Phase 7: a top-level <Conference> is also accepted (lenient). Name is sanitized (lowercase, non-alnum -> _) into conf_<cid>_<name>.",
+  "ideal": "",
+  "base_url": "https://voice.example.com/ivr/voice",
+  "input_xml": "<Response><Conference>Test Room 1</Conference></Response>",
+  "expected_parse": {
+    "ok": true,
+    "verbs": [
+      {
+        "verb": "Conference",
+        "attrs": {},
+        "text": "Test Room 1",
+        "children": []
+      }
+    ]
+  },
+  "expected_trace": [
+    {
+      "action": "conference",
+      "room": "conf_<customer_id>_test_room_1",
+      "profile": "default",
+      "flags": [
+        "speak"
+      ],
+      "beep": "true",
+      "waitUrl": null,
+      "maxParticipants": null,
+      "record": false,
+      "blocks": true
+    }
+  ]
+}

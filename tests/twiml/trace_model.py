@@ -107,6 +107,42 @@ def _int(attrs: dict, key: str, default: int) -> int:
         return default
 
 
+def _sanitize_token(s: str) -> str:
+    """Mirror sanitize_token() in api_voice.lua: lowercase, non-alnum -> _."""
+    s = (s or "").lower()
+    s = re.sub(r"[^a-z0-9]", "_", s)
+    s = re.sub(r"_+", "_", s).strip("_")
+    return s or "default"
+
+
+def _conference_step(attrs: dict, name: str) -> dict:
+    """Re-state execute_conference(): build the room name + flag set. The customer
+    id is runtime-dynamic, so the room is templated with the <customer_id> token
+    (matching the conf_<C>_<sanitized X> shared contract)."""
+    video = attrs.get("video")
+    profile = "video" if (video and video not in ("", "false")) else "default"
+    flags = ["speak"]
+    if attrs.get("muted") in ("true", "1"):
+        flags.append("mute")
+    if attrs.get("startConferenceOnEnter") == "false":
+        flags.append("wait-mod")
+    if attrs.get("endConferenceOnExit") == "true":
+        flags += ["endconf", "moderator"]
+    max_p = _int(attrs, "maxParticipants", 0)
+    rec = attrs.get("record")
+    return {
+        "action": "conference",
+        "room": f"conf_<customer_id>_{_sanitize_token(name)}",
+        "profile": profile,
+        "flags": flags,
+        "beep": attrs.get("beep", "true"),
+        "waitUrl": attrs.get("waitUrl"),
+        "maxParticipants": max_p or None,
+        "record": bool(rec and rec not in ("", "false", "do-not-record")),
+        "blocks": True,
+    }
+
+
 _HANGUP_REASON_MAP = {
     "completed": "NORMAL_CLEARING",
     "busy": "USER_BUSY",
@@ -300,11 +336,72 @@ def approximate_trace(verbs: list, base_url: str) -> list:
                 step["on_digits"] = {"store_channel_var": "gathered_digits"}
             trace.append(step)
 
+        elif name == "Conference":
+            # Top-level <Conference>: joins the room, blocks until the member
+            # leaves, then continues (execute_conference returns nil).
+            trace.append(_conference_step(attrs, text))
+
+        elif name == "Enqueue":
+            qname = f"fifo_<customer_id>_{_sanitize_token(text)}"
+            action_url = attrs.get("action")
+            resolved_action = resolve_url(action_url, base_url) if action_url else None
+            method = "GET" if attrs.get("method") == "GET" else "POST"
+            trace.append({
+                "action": "enqueue",
+                "queue": qname,
+                "waitUrl": attrs.get("waitUrl"),
+                "action_url": resolved_action,
+                "blocks": True,
+            })
+            if resolved_action:
+                trace.append({"http": {
+                    "method": method,
+                    "url": resolved_action,
+                    "params": {
+                        **_BASE_PARAMS,
+                        "QueueResult": "<queue_result>",
+                        "QueueSid": qname,
+                        "QueueTime": "<queue_time>",
+                    },
+                }, "stops_here": True})
+                break
+
+        elif name == "Leave":
+            trace.append({"action": "leave", "stops_here": True})
+            break
+
         elif name == "Dial":
+            # Twilio nests <Conference>/<Queue> in <Dial>; those children own the verb.
+            conf_child = next((c for c in children if c.get("verb") == "Conference"), None)
+            queue_child = next((c for c in children if c.get("verb") == "Queue"), None)
+            if conf_child is not None:
+                trace.append(_conference_step(conf_child.get("attrs", {}), conf_child.get("text", "")))
+                continue
+            if queue_child is not None:
+                qname = f"fifo_<customer_id>_{_sanitize_token(queue_child.get('text', ''))}"
+                action_url = attrs.get("action")
+                resolved_action = resolve_url(action_url, base_url) if action_url else None
+                trace.append({"action": "dial_queue", "queue": qname, "action_url": resolved_action})
+                if resolved_action:
+                    trace.append({"http": {
+                        "method": "POST",
+                        "url": resolved_action,
+                        "params": {**_BASE_PARAMS, "DialCallStatus": "<dial_status>", "QueueSid": qname},
+                    }, "stops_here": True})
+                    break
+                continue
+
             targets = []
+            sip_targets = []
+            client_targets = []
             for c in children:
-                if c.get("verb") == "Number" and c.get("text"):
+                cv = c.get("verb")
+                if cv == "Number" and c.get("text"):
                     targets.append(c.get("text"))
+                elif cv == "Sip" and c.get("text"):
+                    sip_targets.append(c.get("text"))
+                elif cv == "Client" and c.get("text"):
+                    client_targets.append(c.get("text"))
             if text:
                 targets.append(text)
             action_url = attrs.get("action")
@@ -317,7 +414,13 @@ def approximate_trace(verbs: list, base_url: str) -> list:
                 "record": attrs.get("record"),
                 "action_url": resolved_action,
             }
-            if not targets:
+            # Only emit sip/client keys when present, so number-only Dial fixtures
+            # keep their committed shape.
+            if sip_targets:
+                step["sip"] = sip_targets
+            if client_targets:
+                step["client"] = client_targets
+            if not targets and not sip_targets and not client_targets:
                 step["skipped_no_targets"] = True
             trace.append(step)
             if resolved_action:

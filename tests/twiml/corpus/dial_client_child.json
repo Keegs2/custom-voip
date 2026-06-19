@@ -1,0 +1,38 @@
+{
+  "name": "dial_client_child",
+  "classification": "correct",
+  "description": "Phase 7: <Dial><Client> bridges to a registered Verto/WebRTC client (verto.rtc/<id>@customer_<cid>... with user/ SIP fallback), mirroring the UCaaS extension bridge.",
+  "ideal": "",
+  "base_url": "https://voice.example.com/ivr/voice",
+  "input_xml": "<Response><Dial><Client>agent7</Client></Dial></Response>",
+  "expected_parse": {
+    "ok": true,
+    "verbs": [
+      {
+        "verb": "Dial",
+        "attrs": {},
+        "text": "",
+        "children": [
+          {
+            "verb": "Client",
+            "attrs": {},
+            "text": "agent7"
+          }
+        ]
+      }
+    ]
+  },
+  "expected_trace": [
+    {
+      "action": "dial",
+      "targets": [],
+      "callerId": null,
+      "timeout": 30,
+      "record": null,
+      "action_url": null,
+      "client": [
+        "agent7"
+      ]
+    }
+  ]
+}

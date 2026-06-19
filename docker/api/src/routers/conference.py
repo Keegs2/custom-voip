@@ -16,8 +16,15 @@ from pydantic import BaseModel, field_validator
 
 from db import database as db
 from auth.dependencies import get_current_user, get_customer_filter
-from services.esl_client import _send_esl_command
+from services.esl_client import _send_esl_command, get_esl_client
 from services import storage
+from services.conference_rooms import (
+    parse_conference_json_list,
+    scope_conferences,
+    room_owner_customer_id,
+    room_visible,
+    is_safe_room_name,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -268,6 +275,135 @@ async def create_conference(
     result = dict(row)
     result["fs_room_name"] = _fs_room_name(customer_id, next_room)
     return result
+
+
+# ---------------------------------------------------------------------------
+# Live / active FreeSWITCH conferences (tenant-scoped by room-name prefix)
+# ---------------------------------------------------------------------------
+#
+# These endpoints expose ACTIVE conferences on the media server — including the
+# programmable-voice ``conf_<customer_id>_<sanitized_name>`` rooms created by the
+# TwiML ``<Conference>`` verb, which have NO row in the ``conferences`` table.
+# Tenant ownership is therefore enforced ENTIRELY from the room-name prefix via
+# ``services.conference_rooms`` (admin => customer_filter None => sees all).
+#
+# NOTE on route ordering: these MUST be declared BEFORE ``/{conference_id}`` —
+# otherwise FastAPI tries to coerce the literal "live" segment into the int
+# ``conference_id`` path param and 422s.
+#
+# NOTE on local env: on Docker Desktop the bridge API container cannot reach
+# host-net FreeSWITCH over ESL, so ``_send_esl_command`` returns None. The parser
+# degrades to an empty list and these endpoints return cleanly (200 / empty),
+# never a 500.
+
+
+def _assert_room_owned(room_name: str, customer_filter: int | None) -> None:
+    """Tenant gate for room-name-keyed control. 404 (not 403) so we never leak
+    the existence of another tenant's room — mirrors ``_get_conference``. Also
+    rejects unsafe names (would otherwise allow ESL command injection)."""
+    if not is_safe_room_name(room_name) or not room_visible(room_name, customer_filter):
+        raise HTTPException(status_code=404, detail="Conference not found")
+
+
+def _require_member_id(member_id: str) -> str:
+    """Conference member ids are numeric. Reject anything else before it reaches
+    an ESL command line."""
+    if not member_id.isdigit():
+        raise HTTPException(status_code=400, detail="member_id must be numeric")
+    return member_id
+
+
+@router.get("/live")
+async def list_live_conferences(
+    customer_filter: int | None = Depends(get_customer_filter),
+):
+    """List ACTIVE FreeSWITCH conferences (UCaaS ``room_*`` + programmable
+    ``conf_*``), tenant-scoped by the room-name prefix. Non-admins see only their
+    own customer's rooms; admins see all.
+
+    Degrades gracefully when ESL is unreachable: returns an empty list with
+    ``esl_connected=false`` — never a 500.
+    """
+    raw = await _send_esl_command("conference json_list")
+    parsed = parse_conference_json_list(raw)
+    conferences = scope_conferences(parsed, customer_filter)
+    return {
+        "esl_connected": get_esl_client().connected,
+        "count": len(conferences),
+        "conferences": conferences,
+    }
+
+
+@router.get("/live/{room_name}")
+async def get_live_conference(
+    room_name: str,
+    customer_filter: int | None = Depends(get_customer_filter),
+):
+    """Live status for a single FS room by name (tenant-scoped by prefix)."""
+    _assert_room_owned(room_name, customer_filter)
+    raw = await _send_esl_command("conference json_list")
+    match = next(
+        (c for c in parse_conference_json_list(raw) if c["name"] == room_name), None
+    )
+    if match is None:
+        return {
+            "fs_room_name": room_name,
+            "customer_id": room_owner_customer_id(room_name),
+            "is_active": False,
+            "member_count": 0,
+            "members": [],
+            "recording": False,
+        }
+    return {
+        "fs_room_name": room_name,
+        "customer_id": room_owner_customer_id(room_name),
+        "is_active": match["member_count"] > 0,
+        "member_count": match["member_count"],
+        "members": match["members"],
+        "recording": match["recording"],
+    }
+
+
+@router.post("/live/{room_name}/kick/{member_id}")
+async def kick_live_member(
+    room_name: str,
+    member_id: str,
+    customer_filter: int | None = Depends(get_customer_filter),
+):
+    """Kick a member from a live FS room by NAME (tenant-scoped by prefix).
+
+    The tenant gate runs BEFORE any ESL call, so a cross-tenant attempt is 404
+    even when FreeSWITCH is unreachable.
+    """
+    _assert_room_owned(room_name, customer_filter)
+    _require_member_id(member_id)
+    response = await _send_esl_command(f"conference {room_name} kick {member_id}")
+    if not response or "-ERR" in response:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Failed to kick member: {response or 'ESL unavailable'}",
+        )
+    return {"status": "kicked", "fs_room_name": room_name, "member_id": member_id}
+
+
+@router.post("/live/{room_name}/mute/{member_id}")
+async def mute_live_member(
+    room_name: str,
+    member_id: str,
+    body: MuteAction = MuteAction(),
+    customer_filter: int | None = Depends(get_customer_filter),
+):
+    """Mute/unmute a member in a live FS room by NAME (tenant-scoped by prefix)."""
+    _assert_room_owned(room_name, customer_filter)
+    _require_member_id(member_id)
+    action = "mute" if body.mute else "unmute"
+    response = await _send_esl_command(f"conference {room_name} {action} {member_id}")
+    if not response or "-ERR" in response:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Failed to {action} member: {response or 'ESL unavailable'}",
+        )
+    return {"status": action + "d", "fs_room_name": room_name, "member_id": member_id}
 
 
 @router.get("/{conference_id}")
