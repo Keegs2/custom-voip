@@ -8,11 +8,13 @@
  *  - `conference` → ivrCompiler (a conference flow IS an IVR tree with a
  *                   `conference` node → `{nodes:[...]}`)
  *  - `rcf`        → rcfCompiler (FLAT `{forward_to, …}` → `rcf_numbers` columns)
+ *  - `ucaas`      → ucaasCompiler (FLAT ring-plan → `extensions.ring_plan`)
  */
 import type { CallFlowDoc, ProductKind } from '../model/types';
 import type { FlowCompiler, ValidationResult } from './types';
 import { ivrCompiler } from './ivr';
 import { rcfCompiler } from './rcf';
+import { ucaasCompiler } from './ucaas';
 
 /** Compilers keyed by product. Partial until every product is implemented. */
 export const compilers: Partial<Record<ProductKind, FlowCompiler<unknown>>> = {
@@ -23,6 +25,8 @@ export const compilers: Partial<Record<ProductKind, FlowCompiler<unknown>>> = {
   conference: ivrCompiler as FlowCompiler<unknown>,
   // rcf compiles to the flat rcf_numbers shape (not a node tree).
   rcf: rcfCompiler as FlowCompiler<unknown>,
+  // ucaas compiles to the flat find-me/follow-me ring plan (extensions.ring_plan).
+  ucaas: ucaasCompiler as FlowCompiler<unknown>,
 };
 
 export function getCompiler(product: ProductKind): FlowCompiler<unknown> | undefined {

@@ -359,6 +359,117 @@ export function NodeConfigPanel() {
           </>
         )}
 
+        {/* UCaaS find-me/follow-me ring plan. */}
+        {config.type === 'ringGroup' && (
+          <>
+            <FormField
+              as="select"
+              label="Ring strategy"
+              value={config.strategy}
+              onChange={(e) => set({ strategy: e.target.value as 'sequential' | 'parallel' })}
+              hint={
+                config.strategy === 'sequential'
+                  ? 'Ring each destination in order, one at a time.'
+                  : 'Ring all destinations at once; first to answer wins.'
+              }
+            >
+              <option value="sequential">Sequential (one at a time)</option>
+              <option value="parallel">Parallel (all at once)</option>
+            </FormField>
+            <FormField
+              label="Ring timeout (s)"
+              type="number"
+              min={5}
+              value={String(config.ringTimeout)}
+              onChange={(e) => set({ ringTimeout: num(e.target.value) ?? 30 })}
+              hint="Overall time to ring before the fallback is used."
+            />
+
+            <div>
+              <div style={legsHeader}>Destinations (in ring order)</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {config.legs.map((leg, i) => (
+                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={legIndex}>{i + 1}</span>
+                    <input
+                      style={{ ...legInput, flex: 1 }}
+                      value={leg.to}
+                      placeholder="+16175551234 or 1001"
+                      onChange={(e) => set({ legs: config.legs.map((l, j) => (j === i ? { ...l, to: e.target.value } : l)) })}
+                    />
+                    <input
+                      style={{ ...legInput, width: 56 }}
+                      type="number"
+                      min={1}
+                      value={leg.timeout === undefined ? '' : String(leg.timeout)}
+                      placeholder="s"
+                      title="Per-leg ring time (optional)"
+                      onChange={(e) =>
+                        set({ legs: config.legs.map((l, j) => (j === i ? { ...l, timeout: num(e.target.value) } : l)) })
+                      }
+                    />
+                    <button
+                      type="button"
+                      style={legBtn}
+                      disabled={i === 0}
+                      title="Move up"
+                      onClick={() => set({ legs: swap(config.legs, i, i - 1) })}
+                    >
+                      ↑
+                    </button>
+                    <button
+                      type="button"
+                      style={legBtn}
+                      disabled={i === config.legs.length - 1}
+                      title="Move down"
+                      onClick={() => set({ legs: swap(config.legs, i, i + 1) })}
+                    >
+                      ↓
+                    </button>
+                    <button
+                      type="button"
+                      style={{ ...legBtn, color: '#ef4444' }}
+                      title="Remove destination"
+                      onClick={() => set({ legs: config.legs.filter((_, j) => j !== i) })}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+              </div>
+              <button
+                type="button"
+                style={addLegBtn}
+                onClick={() => set({ legs: [...config.legs, { to: '' }] })}
+              >
+                + Add destination
+              </button>
+            </div>
+          </>
+        )}
+
+        {config.type === 'voicemail' && (
+          <>
+            <FormField
+              as="textarea"
+              label="Greeting"
+              value={config.greeting ?? ''}
+              onChange={(e) => set({ greeting: e.target.value })}
+              placeholder="You've reached … please leave a message."
+              hint="Optional spoken greeting before the beep."
+            />
+            <FormField
+              label="Mailbox"
+              value={config.mailbox ?? ''}
+              onChange={(e) => set({ mailbox: e.target.value })}
+              placeholder="(optional — defaults to the extension)"
+            />
+            <p style={{ fontSize: '0.74rem', color: '#94a3b8' }}>
+              Terminal fallback — the caller is sent to voicemail if no one answers.
+            </p>
+          </>
+        )}
+
         {config.type === 'hangup' && (
           <p style={{ fontSize: '0.74rem', color: '#94a3b8' }}>Ends the call. No configuration.</p>
         )}
@@ -381,5 +492,67 @@ const checkboxRow: React.CSSProperties = {
   gap: 8,
   fontSize: '0.76rem',
   color: '#cbd5e1',
+  cursor: 'pointer',
+};
+
+/** Return a copy of `arr` with the items at `i` and `j` swapped (no-op if out of range). */
+function swap<T>(arr: T[], i: number, j: number): T[] {
+  if (i < 0 || j < 0 || i >= arr.length || j >= arr.length) return arr;
+  const next = arr.slice();
+  [next[i], next[j]] = [next[j], next[i]];
+  return next;
+}
+
+const legsHeader: React.CSSProperties = {
+  fontSize: '0.68rem',
+  fontWeight: 700,
+  color: '#4a5568',
+  textTransform: 'uppercase',
+  letterSpacing: '0.05em',
+  marginBottom: 6,
+};
+
+const legIndex: React.CSSProperties = {
+  width: 18,
+  textAlign: 'center',
+  fontSize: '0.7rem',
+  fontWeight: 700,
+  color: '#64748b',
+  flexShrink: 0,
+};
+
+const legInput: React.CSSProperties = {
+  height: 30,
+  padding: '0 8px',
+  borderRadius: 7,
+  fontSize: '0.76rem',
+  color: '#e2e8f0',
+  background: '#1e2130',
+  border: '1px solid #2a2f45',
+  outline: 'none',
+};
+
+const legBtn: React.CSSProperties = {
+  width: 26,
+  height: 30,
+  borderRadius: 7,
+  fontSize: '0.78rem',
+  fontWeight: 700,
+  color: '#94a3b8',
+  background: 'rgba(26,29,39,0.9)',
+  border: '1px solid rgba(42,47,69,0.8)',
+  cursor: 'pointer',
+  flexShrink: 0,
+};
+
+const addLegBtn: React.CSSProperties = {
+  marginTop: 8,
+  padding: '6px 10px',
+  borderRadius: 8,
+  fontSize: '0.74rem',
+  fontWeight: 700,
+  color: '#34d399',
+  background: 'rgba(52,211,153,0.12)',
+  border: '1px solid rgba(52,211,153,0.4)',
   cursor: 'pointer',
 };

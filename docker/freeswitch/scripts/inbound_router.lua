@@ -309,7 +309,13 @@ local function lookup_extension_did()
             product_type = "ucaas",
             customer_id = tonumber(ext_did.customer_id),
             extension = ext_did.extension,
-            display_name = ext_did.display_name
+            display_name = ext_did.display_name,
+            -- ring_plan: parsed find-me/follow-me plan (Lua table) or nil. When
+            -- present, handlers/ucaas.lua runs the multi-leg ring; when nil it
+            -- keeps the legacy single-extension bridge (backward compatible).
+            -- db_client.lookup_extension_did already parsed the JSONB and
+            -- guarantees this is either a well-formed table or nil.
+            ring_plan = ext_did.ring_plan
         }
     end
 

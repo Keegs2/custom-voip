@@ -40,7 +40,7 @@ const CONFIG_FACTORIES: { [K in NodeType]: () => ConfigForType<K> } = {
     timeout: 5,
   }),
   dial: () => ({ type: 'dial', number: '', timeout: 30 }),
-  ringGroup: () => ({ type: 'ringGroup', members: [], strategy: 'simul', timeout: 30 }),
+  ringGroup: () => ({ type: 'ringGroup', strategy: 'sequential', ringTimeout: 30, legs: [{ to: '' }] }),
   schedule: () => ({ type: 'schedule', tz: 'America/New_York', rules: [] }),
   condition: () => ({ type: 'condition', conditions: [] }),
   record: () => ({ type: 'record', maxLength: 60, playBeep: true }),

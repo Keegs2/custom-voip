@@ -60,6 +60,16 @@ export interface ScheduleRule {
   end?: string;
 }
 
+/**
+ * One ordered destination in a find-me/follow-me ring plan (`ringGroup` node).
+ * `to` is a PSTN/SIP destination; the optional per-leg `timeout` overrides the
+ * group `ringTimeout` for that leg (used by the `sequential` strategy).
+ */
+export interface RingLeg {
+  to: string;
+  timeout?: number;
+}
+
 /** Branch predicate carried on an edge (e.g. condition / %-split arms). */
 export interface EdgeCondition {
   /** What the runtime compares — caller id, a variable, a random %-split, … */
@@ -107,9 +117,12 @@ export type NodeConfig =
     }
   | {
       type: 'ringGroup';
-      members: string[];
-      strategy: 'simul' | 'sequential';
-      timeout: number;
+      /** Ring legs in order; `sequential` rings them one-by-one, `parallel` all at once. */
+      strategy: 'sequential' | 'parallel';
+      /** Group ring timeout (seconds). Compiles to `ring_timeout`. */
+      ringTimeout: number;
+      /** Ordered destinations. Each compiles to a `legs[]` entry `{to, timeout?}`. */
+      legs: RingLeg[];
     }
   | { type: 'schedule'; tz: string; rules: ScheduleRule[] }
   | { type: 'condition'; conditions: EdgeCondition[] }

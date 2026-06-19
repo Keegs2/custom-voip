@@ -21,7 +21,7 @@ export const MENU_TIMEOUT = 'timeout';
 export const MENU_NOMATCH = 'noMatch';
 
 /** Nodes that end the call leg — no outgoing/source handle. */
-const TERMINAL_TYPES: ReadonlySet<NodeType> = new Set<NodeType>(['hangup', 'reject']);
+const TERMINAL_TYPES: ReadonlySet<NodeType> = new Set<NodeType>(['hangup', 'reject', 'voicemail']);
 
 export function isTerminalType(type: NodeType | undefined): boolean {
   return type !== undefined && TERMINAL_TYPES.has(type);

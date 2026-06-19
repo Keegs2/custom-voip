@@ -31,6 +31,38 @@ end
 
 local M = {}
 
+-- Lazy JSON decoder (lib/json.lua). Only the UCaaS extension lookup needs it
+-- (to parse the extensions.ring_plan JSONB column), so it is loaded on first
+-- use via the same loadfile() pattern the dispatcher uses for lib modules
+-- (CLAUDE.md gotcha #10 — require() is broken under mod_lua). Cached after the
+-- first successful load; a load failure is non-fatal (ring_plan just stays nil
+-- and the caller degrades to the legacy single-bridge path).
+local _json = nil
+local _json_tried = false
+local function get_json()
+    if _json then return _json end
+    if _json_tried then return nil end
+    _json_tried = true
+    for _, path in ipairs({
+        "/usr/local/freeswitch/scripts/lib/json.lua",
+        "/usr/share/freeswitch/scripts/lib/json.lua",
+    }) do
+        local chunk = loadfile(path)
+        if chunk then
+            local ok, mod = pcall(chunk)
+            if ok and type(mod) == "table" and mod.decode then
+                _json = mod
+                return _json
+            end
+        end
+    end
+    if freeswitch and freeswitch.consoleLog then
+        freeswitch.consoleLog("WARN",
+            "lib/json.lua not loadable; ring_plan parsing disabled (single-bridge fallback)\n")
+    end
+    return nil
+end
+
 -- Connection pool state
 local env = nil
 local conn = nil
@@ -575,8 +607,11 @@ function M.lookup_extension_did(did)
         return nil
     end
 
+    -- ring_plan is JSONB; cast to ::text so luasql hands it back as a string we
+    -- can parse with lib/json.lua. The backend owns/writes this column (UCaaS
+    -- find-me/follow-me); we only READ it here. NULL when no ring plan exists.
     local sql = string.format([[
-        SELECT e.extension, e.customer_id, e.display_name
+        SELECT e.extension, e.customer_id, e.display_name, e.ring_plan::text AS ring_plan
         FROM extensions e
         WHERE e.assigned_did = %s AND e.status = 'active'
         LIMIT 1
@@ -590,6 +625,32 @@ function M.lookup_extension_did(did)
 
     local row = cursor:fetch({}, "a")
     cursor:close()
+
+    -- Parse the ring_plan JSONB text into a Lua table. A nil/empty/"null"
+    -- column means "no ring plan" -> ring_plan = nil -> caller keeps the legacy
+    -- single-extension bridge. A malformed plan is logged and treated as nil
+    -- (fail-safe: a bad plan must NEVER abort the call), so handlers/ucaas.lua
+    -- always receives either a well-formed table or nil.
+    if row then
+        local raw = row.ring_plan
+        row.ring_plan = nil
+        if raw and type(raw) == "string" then
+            local trimmed = raw:gsub("^%s*(.-)%s*$", "%1")
+            if trimmed ~= "" and trimmed ~= "null" then
+                local json = get_json()
+                if json then
+                    local parsed, perr = json.decode(trimmed)
+                    if type(parsed) == "table" then
+                        row.ring_plan = parsed
+                    else
+                        freeswitch.consoleLog("WARN", string.format(
+                            "Extension %s has unparseable ring_plan (%s) — using single-bridge fallback\n",
+                            tostring(row.extension), tostring(perr)))
+                    end
+                end
+            end
+        end
+    end
 
     return row
 end

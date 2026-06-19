@@ -373,6 +373,55 @@ async def publish_call_flow(
                     "(sink_ref=%s)",
                     flow_id, did, forward_to, sink_ref,
                 )
+            elif product == "ucaas":
+                # UCaaS Find-Me/Follow-Me sink = the extension's ring_plan column
+                # (migration 28). The compiled artifact is the FLAT ring plan
+                # (CALL_FLOW_BUILDER_PLAN §12 contract, snake_case keys exactly):
+                #   {strategy, ring_timeout, legs:[{to, timeout?}], fallback}
+                # The FreeSWITCH Lua reads extensions.ring_plan per call (PG, no
+                # Redis cache for extensions today) so there is NO cache step.
+                if not did:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="entry DID is required to publish a ucaas flow",
+                    )
+                # Resolve the target extension by the entry DID. The DID must
+                # already be assigned to an extension (extensions.assigned_did).
+                ext_row = await conn.fetchrow(
+                    "SELECT id FROM extensions WHERE assigned_did = $1", did,
+                )
+                if ext_row is None:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"no extension is assigned DID {did}; "
+                               "assign the DID to an extension before publishing",
+                    )
+                ext_id = ext_row["id"]
+
+                # Validate the compiled ring plan: strategy + non-empty legs.
+                strategy = body.compiled.get("strategy")
+                if strategy not in ("sequential", "parallel"):
+                    raise HTTPException(
+                        status_code=400,
+                        detail="compiled.strategy must be 'sequential' or 'parallel'",
+                    )
+                legs = body.compiled.get("legs")
+                if not isinstance(legs, list) or len(legs) == 0:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="compiled.legs must be a non-empty array",
+                    )
+
+                await conn.execute(
+                    "UPDATE extensions SET ring_plan = $1::jsonb WHERE id = $2",
+                    compiled_json, ext_id,
+                )
+                sink_ref = ext_id
+                logger.info(
+                    "publish flow %s: extensions.ring_plan set did=%s ext_id=%s "
+                    "strategy=%s legs=%d (sink_ref=%s)",
+                    flow_id, did, ext_id, strategy, len(legs), sink_ref,
+                )
             # else: other non-IVR products — no sink write yet (P2+ TODO).
             # compiled is still persisted on call_flows below so it is not lost.
 

@@ -1,8 +1,9 @@
 /**
  * Shared telephony step node — covers every linear IVR verb (say, play, pause,
- * dial, record, redirect, reject, hangup, conference). A dark-palette card with
- * a target handle (top) and, unless the verb is terminal (hangup/reject), a
- * single `next` source handle (bottom).
+ * dial, record, redirect, reject, hangup, conference) plus the UCaaS
+ * find-me/follow-me verbs (ringGroup, voicemail). A dark-palette card with a
+ * target handle (top) and, unless the verb is terminal (hangup/reject/voicemail),
+ * a single `next` source handle (bottom).
  *
  * `menu` is NOT rendered here — it has per-digit handles (see MenuNode).
  *
@@ -38,6 +39,12 @@ function summarize(config: NodeConfig): string {
       return 'End call';
     case 'conference':
       return config.room ? `room "${config.room}"` : '(no room)';
+    case 'ringGroup': {
+      const live = config.legs.filter((l) => l.to.trim()).length;
+      return `${config.strategy} · ${live} dest${live === 1 ? '' : 's'}`;
+    }
+    case 'voicemail':
+      return config.mailbox ? `mailbox ${config.mailbox}` : 'Leave a message';
     default:
       return '';
   }

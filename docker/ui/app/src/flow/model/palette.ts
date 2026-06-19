@@ -26,6 +26,8 @@ export const NODE_META: Record<string, NodeMeta> = {
   pause: { label: 'Pause', accent: '#64748b', glyph: '⏸', blurb: 'Wait N seconds' },
   menu: { label: 'Menu', accent: '#c084fc', glyph: '#', blurb: 'Gather digits, branch per key' },
   dial: { label: 'Dial', accent: '#4ade80', glyph: '☎', blurb: 'Forward to a destination' },
+  ringGroup: { label: 'Ring Group', accent: '#34d399', glyph: '⇉', blurb: 'Find-me/follow-me ring plan' },
+  voicemail: { label: 'Voicemail', accent: '#f59e0b', glyph: '✉', blurb: 'Send caller to voicemail' },
   record: { label: 'Record', accent: '#f472b6', glyph: '⏺', blurb: 'Record the caller' },
   redirect: { label: 'Redirect', accent: '#22d3ee', glyph: '↪', blurb: 'Hand control to another flow/URL' },
   reject: { label: 'Reject', accent: '#ef4444', glyph: '⊘', blurb: 'Reject the call' },
@@ -68,14 +70,23 @@ export const CONFERENCE_PALETTE: NodeType[] = ['say', 'play', 'conference', 'han
 export const RCF_PALETTE: NodeType[] = ['dial', 'hangup'];
 
 /**
+ * UCaaS palette (plan §3, find-me/follow-me): an extension's ring plan — ring a
+ * group of destinations, then fall back to voicemail / forward / hangup. `entry`
+ * is auto-created (one per flow), so it is not listed here. Deliberately focused:
+ * a ringGroup + the three terminal fallbacks, nothing else.
+ */
+export const UCAAS_PALETTE: NodeType[] = ['ringGroup', 'voicemail', 'dial', 'hangup'];
+
+/**
  * Per-product palette. The palette IS the product gate (plan §0.1 decision 2):
  * a product can only express what its palette exposes.
  *
  *  - `ivr` / `api`: the full IVR verb set (same palette + compiler).
  *  - `conference`: greeting + join a room.
  *  - `rcf`: forward + hangup only.
- *  - `trunk` / `ucaas`: not surfaced in the product selector yet; minimal stubs
- *    so the record is total and type-safe.
+ *  - `ucaas`: find-me/follow-me ring plan (ringGroup + voicemail/forward/hangup).
+ *  - `trunk`: not surfaced in the product selector yet; minimal stub so the
+ *    record is total and type-safe.
  */
 export const PALETTE_BY_PRODUCT: Record<ProductKind, NodeType[]> = {
   ivr: IVR_PALETTE,
@@ -83,7 +94,7 @@ export const PALETTE_BY_PRODUCT: Record<ProductKind, NodeType[]> = {
   conference: CONFERENCE_PALETTE,
   rcf: RCF_PALETTE,
   trunk: ['dial', 'reject', 'hangup'],
-  ucaas: ['say', 'play', 'dial', 'conference', 'hangup'],
+  ucaas: UCAAS_PALETTE,
 };
 
 /** The ordered palette a product exposes for dragging onto the canvas. */
@@ -102,4 +113,4 @@ export const PRODUCT_LABELS: Record<ProductKind, string> = {
 };
 
 /** Products offered when creating a NEW flow (Task 1). */
-export const SELECTABLE_PRODUCTS: ProductKind[] = ['ivr', 'api', 'rcf', 'conference'];
+export const SELECTABLE_PRODUCTS: ProductKind[] = ['ivr', 'api', 'rcf', 'conference', 'ucaas'];
