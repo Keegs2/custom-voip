@@ -6,14 +6,16 @@
  * The IVR telephony verbs render real nodes: `entry` (EntryFlowNode), `menu`
  * (MenuNode, per-digit handles), and every linear verb (StepNode). The UCaaS
  * find-me/follow-me verbs (`ringGroup`, `voicemail`) also render via StepNode.
- * Node types that belong to other products (answer/schedule/condition/queue/
- * webhook/goto) keep the generic placeholder until their product ships.
+ * The rich-RCF two-way branch verbs (`schedule`, `condition`) render via
+ * BranchNode (two labelled source handles). Node types that belong to other
+ * products (answer/queue/webhook/goto) keep the generic placeholder.
  */
 import type { NodeTypes } from '@xyflow/react';
 import { GenericFlowNode } from './nodes/GenericFlowNode';
 import { EntryFlowNode } from './nodes/EntryFlowNode';
 import { StepNode } from './nodes/StepNode';
 import { MenuNode } from './nodes/MenuNode';
+import { BranchNode } from './nodes/BranchNode';
 
 export const nodeTypes: NodeTypes = {
   entry: EntryFlowNode,
@@ -34,10 +36,11 @@ export const nodeTypes: NodeTypes = {
   route: StepNode,
   // IVR branching verb.
   menu: MenuNode,
+  // Rich-RCF two-way branch verbs (time-of-day, caller-ID).
+  schedule: BranchNode,
+  condition: BranchNode,
   // Other products — placeholder for now.
   answer: GenericFlowNode,
-  schedule: GenericFlowNode,
-  condition: GenericFlowNode,
   queue: GenericFlowNode,
   webhook: GenericFlowNode,
   goto: GenericFlowNode,

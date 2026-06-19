@@ -279,9 +279,15 @@ function M.lookup_rcf(did)
         return nil
     end
 
+    -- routing_plan is JSONB; cast to ::text so luasql hands it back as a string
+    -- we can parse with lib/json.lua. The backend owns/writes this column (the
+    -- Call Flow Builder's RICH RCF artifact — ordered match rules + fallback);
+    -- we only READ it here. NULL when no rich plan exists -> handlers/rcf.lua
+    -- keeps the legacy single-forward_to bridge (backward compatible).
     local sql = string.format([[
         SELECT r.forward_to, r.customer_id, r.pass_caller_id, r.ring_timeout,
-               r.max_channels, r.name, c.traffic_grade, c.cpm_limit, c.daily_limit, c.status
+               r.max_channels, r.name, r.routing_plan::text AS routing_plan,
+               c.traffic_grade, c.cpm_limit, c.daily_limit, c.status
         FROM rcf_numbers r
         JOIN customers c ON r.customer_id = c.id
         WHERE r.did = %s AND r.enabled = true AND c.status = 'active'
@@ -296,6 +302,15 @@ function M.lookup_rcf(did)
 
     local row = cursor:fetch({}, "a")
     cursor:close()
+
+    -- Parse the routing_plan JSONB text into a Lua table (or nil). A nil/empty/
+    -- "null"/malformed plan -> row.routing_plan = nil -> handlers/rcf.lua keeps
+    -- the legacy single-forward path (fail-safe: a bad plan must NEVER abort the
+    -- LIVE RCF call path). Shared decoder with the trunk/extension plan columns.
+    if row then
+        row.routing_plan = decode_jsonb_column(
+            row.routing_plan, "rcf " .. tostring(clean_did) .. " routing_plan")
+    end
 
     return row
 end

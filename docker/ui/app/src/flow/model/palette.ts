@@ -26,7 +26,9 @@ export const NODE_META: Record<string, NodeMeta> = {
   pause: { label: 'Pause', accent: '#64748b', glyph: '⏸', blurb: 'Wait N seconds' },
   menu: { label: 'Menu', accent: '#c084fc', glyph: '#', blurb: 'Gather digits, branch per key' },
   dial: { label: 'Dial', accent: '#4ade80', glyph: '☎', blurb: 'Forward to a destination' },
-  ringGroup: { label: 'Ring Group', accent: '#34d399', glyph: '⇉', blurb: 'Find-me/follow-me ring plan' },
+  ringGroup: { label: 'Ring Group', accent: '#34d399', glyph: '⇉', blurb: 'Ring several destinations' },
+  schedule: { label: 'Schedule', accent: '#fbbf24', glyph: '◷', blurb: 'Branch by time of day' },
+  condition: { label: 'Condition', accent: '#f59e0b', glyph: '⎇', blurb: 'Branch by caller ID' },
   route: { label: 'Route', accent: '#fbbf24', glyph: '⌥', blurb: 'Deliver to trunk PBX endpoints' },
   voicemail: { label: 'Voicemail', accent: '#f59e0b', glyph: '✉', blurb: 'Send caller to voicemail' },
   record: { label: 'Record', accent: '#f472b6', glyph: '⏺', blurb: 'Record the caller' },
@@ -64,11 +66,16 @@ export const IVR_PALETTE: NodeType[] = [
 export const CONFERENCE_PALETTE: NodeType[] = ['say', 'play', 'conference', 'hangup'];
 
 /**
- * RCF palette (plan §0.1 / §12): RCF stays simple — a single forward
- * destination, nothing else. `entry` is auto-created. NO menu/say/conference and
- * NO second-destination/failover node (`rcf_numbers.failover_to` is dead code).
+ * RCF palette — DUAL-MODE (plan §3 rich-RCF).
+ *
+ * RCF stays SIMPLE by default: a flow that is just `dial` + `hangup` compiles to
+ * the flat `rcf_numbers` artifact (a single forward destination), exactly as
+ * before. Adding any of the advanced verbs — `ringGroup` (multi-destination /
+ * failover), `schedule` (time-of-day), `condition` (caller-ID), `voicemail`
+ * (fallback) — flips the compiler into RICH mode and emits a `routing_plan`.
+ * The palette IS the gate: these are the only verbs RCF can express.
  */
-export const RCF_PALETTE: NodeType[] = ['dial', 'hangup'];
+export const RCF_PALETTE: NodeType[] = ['dial', 'ringGroup', 'schedule', 'condition', 'voicemail', 'hangup'];
 
 /**
  * UCaaS palette (plan §3, find-me/follow-me): an extension's ring plan — ring a

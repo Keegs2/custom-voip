@@ -68,6 +68,36 @@ def _serialize(row: Any) -> dict:
     return out
 
 
+def _first_leg_dest(rule: Any) -> Optional[str]:
+    """Best-effort extract a destination string from a rich-RCF rule's first
+    ring leg, used only to satisfy rcf_numbers.forward_to NOT NULL on INSERT.
+
+    The rich contract is ``{match, ring}``; ``ring`` may carry the leg(s) as a
+    bare string, a list of strings, a list of ``{to,...}`` objects, or an object
+    with a ``legs`` list. Returns the first usable ``to`` string or None when no
+    destination can be derived (caller falls back to a sentinel).
+    """
+    if not isinstance(rule, dict):
+        return None
+    ring = rule.get("ring")
+    candidates: list = []
+    if isinstance(ring, str):
+        candidates = [ring]
+    elif isinstance(ring, list):
+        candidates = ring
+    elif isinstance(ring, dict):
+        legs = ring.get("legs")
+        candidates = legs if isinstance(legs, list) else [ring]
+    for leg in candidates:
+        if isinstance(leg, str) and leg:
+            return leg
+        if isinstance(leg, dict):
+            to = leg.get("to")
+            if isinstance(to, str) and to:
+                return to
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Pydantic models (inline, Pydantic V2)
 # ---------------------------------------------------------------------------
@@ -322,12 +352,24 @@ async def publish_call_flow(
                         )
             elif product == "rcf":
                 # RCF sink = the existing rcf_numbers row the FreeSWITCH Lua
-                # already reads. The compiled artifact is FLAT (CALL_FLOW_BUILDER
-                # _PLAN §12): {forward_to, ring_timeout?, pass_caller_id?,
-                # max_channels?}. NO failover_to — §12 verified rcf_numbers.
-                # failover_to is DEAD code the Lua never reads, so it is never
-                # written here. RCF stays simple (§0.1): forward + ring-timeout +
-                # pass-CID + concurrent-cap only.
+                # already reads. DUAL-MODE publish (CALL_FLOW_BUILDER_PLAN §12):
+                #
+                #  - SIMPLE (compiled has `forward_to`, NO `rules` key): the FLAT
+                #    artifact {forward_to, ring_timeout?, pass_caller_id?,
+                #    max_channels?}. Writes the flat columns AND sets
+                #    routing_plan = NULL so the runtime takes the legacy single-
+                #    forward path. RCF stays simple (§0.1): forward + ring-timeout
+                #    + pass-CID + concurrent-cap only. NO failover_to — §12
+                #    verified rcf_numbers.failover_to is DEAD code (never read).
+                #
+                #  - RICH (compiled has a `rules` key): the rich artifact
+                #    {rules:[{match,ring}], fallback:{type,to?}} (snake_case) is
+                #    stored verbatim in rcf_numbers.routing_plan (migration 30).
+                #    A non-NULL routing_plan tells the runtime to evaluate the
+                #    ordered rules instead of forward_to.
+                #
+                # Mode is detected purely by the presence of the `rules` key, per
+                # the frontend/telephony contract.
                 if not did:
                     raise HTTPException(
                         status_code=400,
@@ -338,41 +380,99 @@ async def publish_call_flow(
                         status_code=400,
                         detail="customer_id is required to publish an rcf flow",
                     )
-                forward_to = body.compiled.get("forward_to")
-                if not forward_to:
-                    raise HTTPException(
-                        status_code=400,
-                        detail="compiled.forward_to is required to publish an rcf flow",
-                    )
-                # Defaults mirror rcf.py / the rcf_numbers column defaults.
-                ring_timeout = body.compiled.get("ring_timeout", 30)
-                pass_caller_id = body.compiled.get("pass_caller_id", True)
-                max_channels = body.compiled.get("max_channels", 0)
 
-                rcf_row = await conn.fetchrow(
-                    """
-                    INSERT INTO rcf_numbers
-                        (did, customer_id, name, forward_to, ring_timeout,
-                         pass_caller_id, max_channels)
-                    VALUES ($1, $2::int, $3, $4, $5::int, $6::bool, $7::int)
-                    ON CONFLICT (did) DO UPDATE SET
-                        forward_to = EXCLUDED.forward_to,
-                        ring_timeout = EXCLUDED.ring_timeout,
-                        pass_caller_id = EXCLUDED.pass_caller_id,
-                        max_channels = EXCLUDED.max_channels,
-                        customer_id = EXCLUDED.customer_id,
-                        name = EXCLUDED.name
-                    RETURNING id
-                    """,
-                    did, customer_id, name, forward_to, ring_timeout,
-                    pass_caller_id, max_channels,
-                )
-                sink_ref = rcf_row["id"]
-                logger.info(
-                    "publish flow %s: rcf_numbers upsert did=%s -> forward_to=%s "
-                    "(sink_ref=%s)",
-                    flow_id, did, forward_to, sink_ref,
-                )
+                is_rich = "rules" in body.compiled
+
+                if not is_rich:
+                    # ---- SIMPLE MODE -------------------------------------------
+                    forward_to = body.compiled.get("forward_to")
+                    if not forward_to:
+                        raise HTTPException(
+                            status_code=400,
+                            detail="compiled.forward_to is required to publish a simple rcf flow",
+                        )
+                    # Defaults mirror rcf.py / the rcf_numbers column defaults.
+                    ring_timeout = body.compiled.get("ring_timeout", 30)
+                    pass_caller_id = body.compiled.get("pass_caller_id", True)
+                    max_channels = body.compiled.get("max_channels", 0)
+
+                    # routing_plan is explicitly forced to NULL on both INSERT and
+                    # CONFLICT so re-publishing a DID as simple clears any prior
+                    # rich plan and the runtime resumes the legacy forward path.
+                    rcf_row = await conn.fetchrow(
+                        """
+                        INSERT INTO rcf_numbers
+                            (did, customer_id, name, forward_to, ring_timeout,
+                             pass_caller_id, max_channels, routing_plan)
+                        VALUES ($1, $2::int, $3, $4, $5::int, $6::bool, $7::int, NULL)
+                        ON CONFLICT (did) DO UPDATE SET
+                            forward_to = EXCLUDED.forward_to,
+                            ring_timeout = EXCLUDED.ring_timeout,
+                            pass_caller_id = EXCLUDED.pass_caller_id,
+                            max_channels = EXCLUDED.max_channels,
+                            customer_id = EXCLUDED.customer_id,
+                            name = EXCLUDED.name,
+                            routing_plan = NULL
+                        RETURNING id
+                        """,
+                        did, customer_id, name, forward_to, ring_timeout,
+                        pass_caller_id, max_channels,
+                    )
+                    sink_ref = rcf_row["id"]
+                    logger.info(
+                        "publish flow %s: rcf_numbers SIMPLE upsert did=%s -> "
+                        "forward_to=%s (sink_ref=%s)",
+                        flow_id, did, forward_to, sink_ref,
+                    )
+                else:
+                    # ---- RICH MODE ---------------------------------------------
+                    # Validate: rules is a non-empty list and fallback is present.
+                    rules = body.compiled.get("rules")
+                    if not isinstance(rules, list) or len(rules) == 0:
+                        raise HTTPException(
+                            status_code=400,
+                            detail="compiled.rules must be a non-empty array",
+                        )
+                    fallback = body.compiled.get("fallback")
+                    if not isinstance(fallback, dict):
+                        raise HTTPException(
+                            status_code=400,
+                            detail="compiled.fallback object is required for a rich rcf flow",
+                        )
+
+                    # rcf_numbers.forward_to is NOT NULL (02_schema_core.sql:31),
+                    # so an INSERT must supply a value even though the runtime
+                    # ignores it whenever routing_plan IS NOT NULL. DECISION:
+                    #   - INSERT: derive a placeholder destination from the first
+                    #     rule's first ring leg (best-effort) so the row is valid
+                    #     and human-legible; fall back to "see_routing_plan" if no
+                    #     destination can be extracted from the rule shape.
+                    #   - CONFLICT: do NOT touch forward_to — keep whatever the
+                    #     row already had (the column is omitted from DO UPDATE),
+                    #     since routing_plan now drives routing.
+                    placeholder = _first_leg_dest(rules[0]) or "see_routing_plan"
+
+                    rcf_row = await conn.fetchrow(
+                        """
+                        INSERT INTO rcf_numbers
+                            (did, customer_id, name, forward_to, routing_plan)
+                        VALUES ($1, $2::int, $3, $4, $5::jsonb)
+                        ON CONFLICT (did) DO UPDATE SET
+                            routing_plan = EXCLUDED.routing_plan,
+                            customer_id = EXCLUDED.customer_id,
+                            name = EXCLUDED.name
+                        RETURNING id
+                        """,
+                        did, customer_id, name, placeholder, compiled_json,
+                    )
+                    sink_ref = rcf_row["id"]
+                    logger.info(
+                        "publish flow %s: rcf_numbers RICH upsert did=%s -> "
+                        "routing_plan rules=%d fallback=%s (forward_to placeholder=%s, "
+                        "sink_ref=%s)",
+                        flow_id, did, len(rules), fallback.get("type"),
+                        placeholder, sink_ref,
+                    )
             elif product == "ucaas":
                 # UCaaS Find-Me/Follow-Me sink = the extension's ring_plan column
                 # (migration 28). The compiled artifact is the FLAT ring plan

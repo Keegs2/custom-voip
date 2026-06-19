@@ -20,6 +20,51 @@ export const MENU_DIGIT_KEYS = [
 export const MENU_TIMEOUT = 'timeout';
 export const MENU_NOMATCH = 'noMatch';
 
+/* ─── Rich-RCF branch handles (schedule / condition) ───────────────────── */
+
+/** `schedule` node — positive (caller is inside the time window) branch. */
+export const SCHEDULE_IN = 'inWindow';
+/** `schedule` node — negative (outside the window) branch. */
+export const SCHEDULE_ELSE = 'otherwise';
+
+/** `condition` node — positive (caller-ID predicate matched) branch. */
+export const COND_MATCH = 'match';
+/** `condition` node — negative (predicate did not match) branch. */
+export const COND_NOMATCH = 'noMatch';
+
+/** One labelled source handle on a two-way branch node. */
+export interface BranchHandle {
+  handle: string;
+  label: string;
+  /** The "guard satisfied" branch (the rule's action); the other is the fall-through. */
+  positive: boolean;
+}
+
+/**
+ * The ordered source handles for a two-way branch node (`schedule`/`condition`),
+ * or `null` for any other node type. Shared by the canvas `BranchNode` and the
+ * RCF rich compiler so the handle ids never drift between render and compile.
+ */
+export function branchHandles(type: NodeType | undefined): BranchHandle[] | null {
+  if (type === 'schedule') {
+    return [
+      { handle: SCHEDULE_IN, label: 'In window', positive: true },
+      { handle: SCHEDULE_ELSE, label: 'Otherwise', positive: false },
+    ];
+  }
+  if (type === 'condition') {
+    return [
+      { handle: COND_MATCH, label: 'Match', positive: true },
+      { handle: COND_NOMATCH, label: 'No match', positive: false },
+    ];
+  }
+  return null;
+}
+
+export function isBranchType(type: NodeType | undefined): boolean {
+  return type === 'schedule' || type === 'condition';
+}
+
 /** Nodes that end the call leg — no outgoing/source handle. */
 const TERMINAL_TYPES: ReadonlySet<NodeType> = new Set<NodeType>(['hangup', 'reject', 'voicemail']);
 

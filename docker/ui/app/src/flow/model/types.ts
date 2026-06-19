@@ -49,16 +49,23 @@ export type NodeType =
 
 /* ─── Per-node config (discriminated union keyed on `type`) ─────────────── */
 
-/** Time-of-day / holiday rule used by `schedule` nodes. */
-export interface ScheduleRule {
-  /** Stable id so the matching outgoing edge handle can reference it. */
-  id: string;
-  label?: string;
-  /** 0–6 (Sun–Sat); empty = every day. */
-  days?: number[];
-  /** "HH:MM" 24h local-to-`tz`. */
-  start?: string;
-  end?: string;
+/**
+ * Day-of-week codes used by the `schedule` node's `days` array. Lower-case,
+ * three-letter, Monday-first — compiled verbatim into the rich routing-plan
+ * `match.schedule.days`.
+ */
+export type DayCode = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun';
+
+/**
+ * Caller-ID predicate used by the `condition` node. At least one of `prefix`
+ * (number begins with) or `equals` (exact match) drives the branch. Compiled
+ * to the rich routing-plan `match.caller_id` (snake_case) by the RCF compiler.
+ */
+export interface CallerIdMatch {
+  /** Number begins with this digit string (e.g. "+1617"). */
+  prefix?: string;
+  /** Number equals this exactly (E.164). */
+  equals?: string;
 }
 
 /**
@@ -148,8 +155,22 @@ export type NodeConfig =
       /** Ordered PBX endpoints. Each compiles to an `endpoints[]` entry `{to, timeout?}`. */
       endpoints: RouteEndpoint[];
     }
-  | { type: 'schedule'; tz: string; rules: ScheduleRule[] }
-  | { type: 'condition'; conditions: EdgeCondition[] }
+  | {
+      type: 'schedule';
+      /** Days the window is active (empty = no day → never in-window). */
+      days: DayCode[];
+      /** "HH:MM" 24h, local to `tz`. Inclusive window start. */
+      start: string;
+      /** "HH:MM" 24h, local to `tz`. Exclusive window end. */
+      end: string;
+      /** IANA timezone the window is evaluated in (e.g. "America/New_York"). */
+      tz: string;
+    }
+  | {
+      type: 'condition';
+      /** Caller-ID predicate; compiles to `match.caller_id`. */
+      callerId: CallerIdMatch;
+    }
   | {
       type: 'record';
       maxLength?: number;

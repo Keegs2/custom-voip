@@ -103,6 +103,10 @@ local session_timer = load_module("session_timer")
 -- used by both the UCaaS find-me/follow-me path and the trunk multi-endpoint
 -- delivery path (handlers/ucaas.lua, handlers/trunk.lua).
 local multileg = load_module("multileg")
+-- Shared time-of-day / day-of-week matcher used by the RICH RCF routing_plan
+-- `match.schedule` conditions (handlers/rcf.lua). Side-effect-free; product-
+-- agnostic so trunk/IVR can reuse it for time-based branching later.
+local schedule = load_module("schedule")
 
 -- Ensure session exists
 if not session then
@@ -246,6 +250,14 @@ local function lookup_rcf()
                 ring_timeout = tonumber(rcf_db.ring_timeout) or 30,
                 max_channels = tonumber(rcf_db.max_channels) or 0,
                 rcf_name = rcf_db.name or nil,
+                -- routing_plan: parsed RICH RCF plan (Lua table) or nil. When
+                -- present, handlers/rcf.lua evaluates the ordered match rules
+                -- (schedule / caller-id) and rings each rule's leg(s); when nil
+                -- it keeps the legacy single-forward_to bridge (backward
+                -- compatible — this protects the LIVE Granite call path).
+                -- db_client.lookup_rcf already parsed the JSONB and guarantees
+                -- this is either a well-formed table or nil.
+                routing_plan = rcf_db.routing_plan,
                 cache_hit = false
             }
         end
@@ -440,6 +452,7 @@ local ctx = {
     caller_id = caller_id,
     session_timer = session_timer,
     multileg = multileg,
+    schedule = schedule,
 }
 
 freeswitch.consoleLog("DEBUG", "[" .. uuid .. "] STEP 2: Dispatching product_type=" .. tostring(product_type) .. "\n")

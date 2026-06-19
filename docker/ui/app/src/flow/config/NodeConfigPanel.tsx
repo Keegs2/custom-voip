@@ -11,9 +11,32 @@ import { FormField } from '../../components/ui/FormField';
 import { Button } from '../../components/ui/Button';
 import { NODE_META } from '../model/palette';
 import { MENU_DIGIT_KEYS } from '../canvas/handles';
-import type { NodeConfig, NodeType } from '../model/types';
+import type { DayCode, NodeConfig, NodeType } from '../model/types';
 
 const VOICES = ['default', 'male', 'female', 'woman', 'man'];
+
+/** Day-of-week toggles for the `schedule` node (Monday-first). */
+const DAY_OPTIONS: { code: DayCode; short: string }[] = [
+  { code: 'mon', short: 'Mon' },
+  { code: 'tue', short: 'Tue' },
+  { code: 'wed', short: 'Wed' },
+  { code: 'thu', short: 'Thu' },
+  { code: 'fri', short: 'Fri' },
+  { code: 'sat', short: 'Sat' },
+  { code: 'sun', short: 'Sun' },
+];
+
+/** Common US timezones offered for the `schedule` node window. */
+const TIMEZONES = [
+  'America/New_York',
+  'America/Chicago',
+  'America/Denver',
+  'America/Phoenix',
+  'America/Los_Angeles',
+  'America/Anchorage',
+  'Pacific/Honolulu',
+  'UTC',
+];
 
 export function NodeConfigPanel() {
   // Hooks first — React #310.
@@ -536,6 +559,93 @@ export function NodeConfigPanel() {
                 + Add endpoint
               </button>
             </div>
+          </>
+        )}
+
+        {/* Rich-RCF time-of-day branch. */}
+        {config.type === 'schedule' && (
+          <>
+            <div>
+              <div style={legsHeader}>Active days</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+                {DAY_OPTIONS.map((d) => {
+                  const on = config.days.includes(d.code);
+                  return (
+                    <button
+                      key={d.code}
+                      type="button"
+                      onClick={() =>
+                        set({
+                          days: on
+                            ? config.days.filter((x) => x !== d.code)
+                            : DAY_OPTIONS.filter((o) => o.code === d.code || config.days.includes(o.code)).map((o) => o.code),
+                        })
+                      }
+                      style={{
+                        width: 34,
+                        height: 28,
+                        borderRadius: 6,
+                        fontSize: '0.7rem',
+                        fontWeight: 700,
+                        color: on ? '#fbbf24' : '#94a3b8',
+                        background: on ? 'rgba(251,191,36,0.14)' : 'rgba(26,29,39,0.9)',
+                        border: `1px solid ${on ? 'rgba(251,191,36,0.5)' : 'rgba(42,47,69,0.8)'}`,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      {d.short}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <FormField
+                label="Start (HH:MM)"
+                type="time"
+                value={config.start}
+                onChange={(e) => set({ start: e.target.value })}
+              />
+              <FormField
+                label="End (HH:MM)"
+                type="time"
+                value={config.end}
+                onChange={(e) => set({ end: e.target.value })}
+              />
+            </div>
+            <FormField as="select" label="Timezone" value={config.tz} onChange={(e) => set({ tz: e.target.value })}>
+              {TIMEZONES.map((tz) => (
+                <option key={tz} value={tz}>{tz}</option>
+              ))}
+            </FormField>
+            <p style={{ fontSize: '0.72rem', color: '#94a3b8', lineHeight: 1.5 }}>
+              Calls inside this window take the “In window” branch; all others take
+              “Otherwise”.
+            </p>
+          </>
+        )}
+
+        {/* Rich-RCF caller-ID branch. */}
+        {config.type === 'condition' && (
+          <>
+            <FormField
+              label="Caller ID starts with"
+              value={config.callerId.prefix ?? ''}
+              onChange={(e) => set({ callerId: { ...config.callerId, prefix: e.target.value } })}
+              placeholder="+1617"
+              hint="Match any caller whose number begins with these digits."
+            />
+            <FormField
+              label="Caller ID equals"
+              value={config.callerId.equals ?? ''}
+              onChange={(e) => set({ callerId: { ...config.callerId, equals: e.target.value } })}
+              placeholder="+16175551234"
+              hint="Match one exact caller number. Provide a prefix and/or an exact match."
+            />
+            <p style={{ fontSize: '0.72rem', color: '#94a3b8', lineHeight: 1.5 }}>
+              Matching callers take the “Match” branch; everyone else takes “No
+              match”.
+            </p>
           </>
         )}
 
