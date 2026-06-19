@@ -45,12 +45,21 @@ export function nodeAccent(type: NodeType | undefined): string {
   return (type && NODE_META[type]?.accent) || DEFAULT_ACCENT;
 }
 
-/** Ordered IVR palette (entry excluded — auto-created, one per flow). */
+/**
+ * Ordered IVR palette (entry excluded — auto-created, one per flow).
+ *
+ * `schedule` (time-of-day) and `condition` (caller-ID) are the two branch verbs
+ * shared with rich-RCF/trunk. In the IVR product they compile to tree nodes whose
+ * `branches` carry the two outcome sub-sequences the runtime resolves at render
+ * time (see `compile/ivr.ts`).
+ */
 export const IVR_PALETTE: NodeType[] = [
   'say',
   'play',
   'pause',
   'menu',
+  'schedule',
+  'condition',
   'dial',
   'record',
   'redirect',

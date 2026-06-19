@@ -60,6 +60,15 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
         if path.endswith("/recordings/ingest"):
             return await call_next(request)
 
+        # Exempt the hosted IVR/programmable-voice webhook. FreeSWITCH's
+        # api_voice.lua fetches a DID's flow TwiML from /ivr/webhook/{id} (set as
+        # the DID's voice_url) WITHOUT a JWT — same FS-internal pattern as the
+        # ingest endpoints above. Without this, every IVR/API/conference flow 401s
+        # on a real call. (The admin preview /ivr/{id}/xml stays auth-required.)
+        # HARDENING (future): require an INGEST_SHARED_SECRET header here too.
+        if "/ivr/webhook/" in path:
+            return await call_next(request)
+
         # WebSocket connections authenticate via query param, not header
         if path.startswith("/ws/"):
             return await call_next(request)

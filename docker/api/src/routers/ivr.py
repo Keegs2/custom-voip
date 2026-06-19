@@ -6,6 +6,10 @@ in the UI without running their own webhook server.
 """
 import json
 import logging
+import os
+import re
+from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 from xml.etree.ElementTree import Element, SubElement, tostring
 from xml.dom.minidom import parseString
 
@@ -102,17 +106,261 @@ class IVRFlowUpdate(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Server-side branch resolution (schedule + condition nodes)
+# ---------------------------------------------------------------------------
+#
+# The IVR runtime (docker/freeswitch/scripts/handlers/api_voice.lua) executes
+# TwiML and has NO native time-of-day or variable branch verb. So `schedule` and
+# `condition` nodes are NOT rendered as XML elements — they are resolved here, at
+# render time, and ONLY the chosen branch's child nodes are inlined into the
+# output. FreeSWITCH never sees a <Schedule>/<Condition> element.
+#
+# The schedule matcher below mirrors the semantics of the Lua matcher in
+# docker/freeswitch/scripts/lib/schedule.lua (day-of-week filter, [start, end)
+# exclusive window, overnight wrap, all-day) but resolves the timezone with
+# stdlib `zoneinfo` for DST-accurate wall-clock conversion instead of the Lua
+# offset table.
+
+# weekday() index (0=Mon .. 6=Sun) -> 3-letter abbreviation.
+_DAY_ABBRS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+_VALID_DAYS = set(_DAY_ABBRS)
+
+# "HH" or "HH:MM" (minutes optional). Hour 0..24, minute 0..59 validated below.
+_HM_RE = re.compile(r"^\s*(\d{1,2})(?::(\d{1,2}))?\s*$")
+
+# Fixed numeric UTC offset: "-05:00", "+0530", "-8", "+5".
+_OFFSET_RE = re.compile(r"^([+-])(\d{1,2}):?(\d{2})?$")
+
+_warned_tz: set = set()  # warn once per unknown tz name (per process)
+
+# Test seam guard: when truthy (default), an `X-Eval-Now` header or `?now=` ISO
+# param overrides the schedule-evaluation instant. See _eval_now().
+_ALLOW_EVAL_NOW = os.getenv("IVR_ALLOW_EVAL_NOW", "true").lower() in ("1", "true", "yes", "on")
+
+
+def _resolve_tz(tz: Any):
+    """Resolve a tz descriptor to a tzinfo. IANA name via zoneinfo, or a fixed
+    numeric offset string ("±HH:MM"/"±HHMM"/"±H"). Missing/empty/"UTC" -> UTC.
+    An unknown IANA name degrades to UTC with a one-time warning (a typo yields
+    server/UTC time rather than crashing the render), matching schedule.lua."""
+    if tz is None or tz == "" or tz == "UTC":
+        return timezone.utc
+    if isinstance(tz, str):
+        m = _OFFSET_RE.match(tz)
+        if m:
+            sign, hh, mm = m.group(1), int(m.group(2)), int(m.group(3) or 0)
+            delta = timedelta(hours=hh, minutes=mm)
+            return timezone(-delta if sign == "-" else delta)
+        try:
+            return ZoneInfo(tz)
+        except Exception:
+            if tz not in _warned_tz:
+                _warned_tz.add(tz)
+                logger.warning("IVR schedule: unknown tz %r — falling back to UTC", tz)
+            return timezone.utc
+    return timezone.utc
+
+
+def _parse_hm(s: Any) -> Optional[int]:
+    """Parse "HH:MM" (or a bare "HH") into minutes since midnight, else None."""
+    if not isinstance(s, str):
+        return None
+    m = _HM_RE.match(s)
+    if not m:
+        return None
+    h = int(m.group(1))
+    mm = int(m.group(2)) if m.group(2) is not None else 0
+    if h < 0 or h > 24 or mm < 0 or mm > 59:
+        return None
+    return h * 60 + mm
+
+
+def _day_set_of(days: Any) -> Optional[set]:
+    """Build the allowed-weekday set from a schedule's `days`, or None for "every
+    day" (omitted/empty, or nothing parseable — lenient, like schedule.lua)."""
+    if not isinstance(days, (list, tuple)) or len(days) == 0:
+        return None
+    out = set()
+    for d in days:
+        key = str(d).strip().lower()[:3]
+        if key in _VALID_DAYS:
+            out.add(key)
+    return out or None
+
+
+def _day_allowed(day_set: Optional[set], wday: int) -> bool:
+    if day_set is None:
+        return True
+    return _DAY_ABBRS[wday] in day_set
+
+
+def _schedule_matches(cfg: Any, now: datetime) -> bool:
+    """Return True when *now* falls inside the recurring weekly window in *cfg*
+    (a schedule node's ``config``). Mirrors docker/freeswitch/scripts/lib/
+    schedule.lua:matches().
+
+    cfg fields (all optional):
+      days  : list of weekday abbreviations ("mon".."sun"); omitted/empty = every day
+      start : "HH:MM" window open  (local wall-clock in tz)
+      end   : "HH:MM" window close (local wall-clock, EXCLUSIVE)
+      tz    : IANA name ("America/New_York") or "±HH:MM" offset; omitted = UTC
+
+    Overnight windows (start > end) wrap midnight: the evening portion
+    (cur >= start) belongs to the start day's weekday; the early-morning portion
+    (cur < end) belongs to the PREVIOUS weekday. start == end (or both omitted)
+    is all-day; only the day-of-week filter applies. A non-dict cfg means "no
+    restriction" -> always True.
+    """
+    if not isinstance(cfg, dict):
+        return True
+
+    tz = _resolve_tz(cfg.get("tz"))
+    if now.tzinfo is None:                      # be defensive: treat naive as UTC
+        now = now.replace(tzinfo=timezone.utc)
+    lt = now.astimezone(tz)                      # local wall-clock breakdown
+
+    day_set = _day_set_of(cfg.get("days"))
+    cur = lt.hour * 60 + lt.minute
+    wday = lt.weekday()                          # 0=Mon .. 6=Sun
+
+    smin = _parse_hm(cfg.get("start"))
+    emin = _parse_hm(cfg.get("end"))
+
+    # No usable time bounds -> all-day; only the day filter applies.
+    if smin is None and emin is None:
+        return _day_allowed(day_set, wday)
+
+    if smin is None:
+        smin = 0                                 # only `end` given -> from midnight
+    if emin is None:
+        emin = 24 * 60                           # only `start` given -> to end of day
+
+    if smin == emin:
+        # Degenerate / explicit all-day window.
+        return _day_allowed(day_set, wday)
+
+    if emin > smin:
+        # Same-day window: [start, end) — end is exclusive.
+        if cur < smin or cur >= emin:
+            return False
+        return _day_allowed(day_set, wday)
+
+    # Overnight window (start > end): wraps midnight.
+    if cur >= smin:
+        # Evening portion belongs to today's weekday.
+        return _day_allowed(day_set, wday)
+    if cur < emin:
+        # Early-morning portion belongs to the PREVIOUS weekday.
+        return _day_allowed(day_set, (wday - 1) % 7)
+    return False
+
+
+def _caller_matches(cfg: Any, caller: Optional[str]) -> bool:
+    """Match the caller number against a condition node's caller_id constraints.
+
+    cfg["caller_id"] may carry "prefix" (startswith) and/or "equals" (exact).
+    Every constraint that is present must hold (AND). When NO caller number is
+    available (e.g. the unauthenticated `/ivr/{id}/xml` preview endpoint), a
+    condition can never match -> returns False so the flow takes `nomatch`.
+    An empty/absent caller_id block matches any present caller (a bare
+    "any caller" branch).
+    """
+    if caller is None:
+        return False
+    num = caller.strip()
+    cid = cfg.get("caller_id") if isinstance(cfg, dict) else None
+    if not isinstance(cid, dict):
+        return True
+    equals = cid.get("equals")
+    if equals is not None and num != str(equals).strip():
+        return False
+    prefix = cid.get("prefix")
+    if prefix is not None and not num.startswith(str(prefix).strip()):
+        return False
+    return True
+
+
+def _eval_now(request: Request) -> datetime:
+    """Resolve the tz-aware instant used to evaluate `schedule` nodes.
+
+    Defaults to the server's current UTC time. TEST SEAM (guarded by env
+    IVR_ALLOW_EVAL_NOW, default on): an `X-Eval-Now` header or `?now=` ISO-8601
+    query param overrides it so schedule branches are deterministically testable.
+    The override is read-only — it only selects which already-authored branch
+    renders, never mutates state — and FreeSWITCH never sends it, so it is
+    harmless in production (set IVR_ALLOW_EVAL_NOW=false to disable entirely).
+    A naive ISO value is assumed UTC."""
+    if _ALLOW_EVAL_NOW:
+        raw = request.headers.get("X-Eval-Now") or request.query_params.get("now")
+        if raw:
+            try:
+                dt = datetime.fromisoformat(raw)
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                return dt
+            except ValueError:
+                logger.warning(
+                    "IVR: invalid X-Eval-Now/now value %r — using server time", raw
+                )
+    return datetime.now(timezone.utc)
+
+
+def _caller_from_form(form) -> Optional[str]:
+    """Pull the caller number from a FreeSWITCH/Twilio-style POST body.
+
+    api_voice.lua posts Twilio-style params (From = caller_id_number); accept the
+    raw FreeSWITCH channel-var name and a couple of fallbacks too."""
+    for key in ("From", "Caller-Caller-ID-Number", "caller_id_number"):
+        v = form.get(key)
+        if v:
+            return str(v)
+    return None
+
+
+# ---------------------------------------------------------------------------
 # XML generation
 # ---------------------------------------------------------------------------
 
-def _node_to_xml(parent: Element, node: dict, flow_id: int) -> None:
+def _node_to_xml(
+    parent: Element,
+    node: dict,
+    flow_id: int,
+    caller: Optional[str] = None,
+    now: Optional[datetime] = None,
+) -> None:
     """Convert a single IVR node dict into XML elements under *parent*.
 
     Supported node types: say, play, dial, gather, hangup, pause, redirect,
     record, reject, conference.
+
+    Additive branch node types resolved SERVER-SIDE (no element reaches the
+    runtime — the chosen branch's children are inlined into *parent* exactly as
+    a normal node sequence):
+      schedule  -> evaluate config against *now* (caller's tz); recurse
+                   branches["in"] (in-window) or branches["out"].
+      condition -> match *caller* against config.caller_id; recurse
+                   branches["match"] or branches["nomatch"].
+    *caller* is the caller number (None on the no-caller preview endpoint, which
+    forces `nomatch`). *now* is the tz-aware evaluation instant (defaults to the
+    server's current UTC time when None).
     """
     ntype = node.get("type", "").lower()
     config = node.get("config", {})
+
+    if ntype == "schedule":
+        branches = node.get("branches", {}) or {}
+        eval_now = now if now is not None else datetime.now(timezone.utc)
+        chosen = "in" if _schedule_matches(config, eval_now) else "out"
+        for child in (branches.get(chosen) or []):
+            _node_to_xml(parent, child, flow_id, caller, now)
+        return
+
+    if ntype == "condition":
+        branches = node.get("branches", {}) or {}
+        chosen = "match" if _caller_matches(config, caller) else "nomatch"
+        for child in (branches.get(chosen) or []):
+            _node_to_xml(parent, child, flow_id, caller, now)
+        return
 
     if ntype == "say":
         el = SubElement(parent, "Say")
@@ -155,7 +403,7 @@ def _node_to_xml(parent: Element, node: dict, flow_id: int) -> None:
                 el.set(attr, str(config[attr]))
         # Nested prompt verbs inside the Gather
         for prompt_node in node.get("prompt", []):
-            _node_to_xml(el, prompt_node, flow_id)
+            _node_to_xml(el, prompt_node, flow_id, caller, now)
 
     elif ntype == "pause":
         el = SubElement(parent, "Pause")
@@ -220,11 +468,19 @@ def _node_to_xml(parent: Element, node: dict, flow_id: int) -> None:
         logger.warning(f"Unknown IVR node type: {ntype}")
 
 
-def generate_xml(flow_config: dict, flow_id: int) -> str:
-    """Walk the node tree in *flow_config* and produce TwiML-compatible XML."""
+def generate_xml(
+    flow_config: dict,
+    flow_id: int,
+    caller: Optional[str] = None,
+    now: Optional[datetime] = None,
+) -> str:
+    """Walk the node tree in *flow_config* and produce TwiML-compatible XML.
+
+    *caller* / *now* are threaded into the render so schedule/condition nodes
+    resolve to a single branch (see _node_to_xml)."""
     root = Element("Response")
     for node in flow_config.get("nodes", []):
-        _node_to_xml(root, node, flow_id)
+        _node_to_xml(root, node, flow_id, caller, now)
     raw = tostring(root, encoding="unicode")
     try:
         pretty = parseString(raw).toprettyxml(indent="  ")
@@ -236,11 +492,19 @@ def generate_xml(flow_config: dict, flow_id: int) -> str:
         return '<?xml version="1.0" encoding="UTF-8"?>\n' + raw + "\n"
 
 
-def generate_branch_xml(branch_nodes: list, flow_id: int) -> str:
-    """Generate XML for a list of nodes belonging to a Gather branch."""
+def generate_branch_xml(
+    branch_nodes: list,
+    flow_id: int,
+    caller: Optional[str] = None,
+    now: Optional[datetime] = None,
+) -> str:
+    """Generate XML for a list of nodes belonging to a Gather branch.
+
+    *caller* / *now* are threaded so any schedule/condition nodes nested inside
+    the branch resolve correctly (see _node_to_xml)."""
     root = Element("Response")
     for node in branch_nodes:
-        _node_to_xml(root, node, flow_id)
+        _node_to_xml(root, node, flow_id, caller, now)
     raw = tostring(root, encoding="unicode")
     try:
         pretty = parseString(raw).toprettyxml(indent="  ")
@@ -525,9 +789,15 @@ async def delete_ivr_flow(
 @router.get("/{flow_id}/xml")
 async def get_ivr_xml(
     flow_id: int,
+    request: Request,
     customer_filter: int | None = Depends(get_customer_filter),
 ):
-    """Generate and return the TwiML XML for the root flow (tenant-scoped)."""
+    """Generate and return the TwiML XML for the root flow (tenant-scoped).
+
+    This is a PREVIEW endpoint with no live caller, so `condition` nodes always
+    resolve to their `nomatch` branch. `schedule` nodes evaluate against the
+    current server time, or against the `X-Eval-Now` header / `?now=` ISO param
+    test seam (see _eval_now) for deterministic previews."""
     await _ensure_table()
     result = await _get_owned_flow(flow_id, customer_filter)
 
@@ -535,7 +805,7 @@ async def get_ivr_xml(
     if isinstance(flow_config, str):
         flow_config = json.loads(flow_config)
 
-    xml_str = generate_xml(flow_config, flow_id)
+    xml_str = generate_xml(flow_config, flow_id, caller=None, now=_eval_now(request))
     return Response(content=xml_str, media_type="application/xml")
 
 
@@ -543,9 +813,13 @@ async def get_ivr_xml(
 async def get_ivr_branch_xml(
     flow_id: int,
     digit: str,
+    request: Request,
     customer_filter: int | None = Depends(get_customer_filter),
 ):
-    """Return XML for a specific Gather branch (digit or 'timeout') — scoped."""
+    """Return XML for a specific Gather branch (digit or 'timeout') — scoped.
+
+    Preview endpoint: no live caller, so nested `condition` nodes resolve to
+    `nomatch`; `schedule` nodes use server time or the _eval_now test seam."""
     await _ensure_table()
     result = await _get_owned_flow(flow_id, customer_filter)
 
@@ -566,7 +840,9 @@ async def get_ivr_branch_xml(
             detail=f"No branch found for digit '{digit}'"
         )
 
-    xml_str = generate_branch_xml(branch_nodes, flow_id)
+    xml_str = generate_branch_xml(
+        branch_nodes, flow_id, caller=None, now=_eval_now(request)
+    )
     return Response(content=xml_str, media_type="application/xml")
 
 
@@ -601,20 +877,30 @@ async def ivr_webhook(
     if isinstance(flow_config, str):
         flow_config = json.loads(flow_config)
 
+    # Evaluation context threaded into the render so schedule/condition nodes
+    # resolve server-side: the live caller number (From) and "now".
+    now = _eval_now(request)
+    caller = None
+
     # Parse form body (Twilio-style POST) or query params
     digits = None
     try:
         form = await request.form()
         digits = form.get("Digits")
+        caller = _caller_from_form(form)
         # Also pick up gather_id from form if not in query string
         if not gather_id:
             gather_id = form.get("gather_id")
     except Exception:
         pass
 
+    # Fall back to query params (e.g. From in the action URL) when absent.
+    if caller is None:
+        caller = request.query_params.get("From")
+
     if digits is None:
         # No digits — return the root flow XML
-        xml_str = generate_xml(flow_config, flow_id)
+        xml_str = generate_xml(flow_config, flow_id, caller=caller, now=now)
         return Response(content=xml_str, media_type="application/xml")
 
     # Digits present — find the matching Gather branch
@@ -630,7 +916,7 @@ async def ivr_webhook(
             f"IVR {flow_id}: Gather node not found (gather_id={gather_id})"
         )
         # Fallback: replay the root flow
-        xml_str = generate_xml(flow_config, flow_id)
+        xml_str = generate_xml(flow_config, flow_id, caller=caller, now=now)
         return Response(content=xml_str, media_type="application/xml")
 
     branches = gather_node.get("branches", {})
@@ -645,10 +931,10 @@ async def ivr_webhook(
             f"IVR {flow_id}: No branch for digit '{digits}' in gather {gather_id}"
         )
         # Replay the root flow as fallback
-        xml_str = generate_xml(flow_config, flow_id)
+        xml_str = generate_xml(flow_config, flow_id, caller=caller, now=now)
         return Response(content=xml_str, media_type="application/xml")
 
-    xml_str = generate_branch_xml(branch_nodes, flow_id)
+    xml_str = generate_branch_xml(branch_nodes, flow_id, caller=caller, now=now)
     return Response(content=xml_str, media_type="application/xml")
 
 
@@ -659,8 +945,12 @@ async def ivr_webhook_get(
     request: Request,
     gather_id: Optional[str] = None,
     Digits: Optional[str] = None,
+    From: Optional[str] = None,
 ):
-    """GET variant of the webhook for platforms that use GET requests."""
+    """GET variant of the webhook for platforms that use GET requests.
+
+    `From` (caller number) and the _eval_now seam are threaded so schedule/
+    condition nodes resolve server-side, same as the POST variant."""
     await _ensure_table()
 
     result = await db.fetch_one(
@@ -676,8 +966,11 @@ async def ivr_webhook_get(
     if isinstance(flow_config, str):
         flow_config = json.loads(flow_config)
 
+    now = _eval_now(request)
+    caller = From
+
     if Digits is None:
-        xml_str = generate_xml(flow_config, flow_id)
+        xml_str = generate_xml(flow_config, flow_id, caller=caller, now=now)
         return Response(content=xml_str, media_type="application/xml")
 
     nodes = flow_config.get("nodes", [])
@@ -687,7 +980,7 @@ async def ivr_webhook_get(
         gather_node = _find_first_gather(nodes)
 
     if not gather_node:
-        xml_str = generate_xml(flow_config, flow_id)
+        xml_str = generate_xml(flow_config, flow_id, caller=caller, now=now)
         return Response(content=xml_str, media_type="application/xml")
 
     branches = gather_node.get("branches", {})
@@ -696,8 +989,8 @@ async def ivr_webhook_get(
         branch_nodes = branches.get("default") or branches.get("timeout")
 
     if branch_nodes is None:
-        xml_str = generate_xml(flow_config, flow_id)
+        xml_str = generate_xml(flow_config, flow_id, caller=caller, now=now)
         return Response(content=xml_str, media_type="application/xml")
 
-    xml_str = generate_branch_xml(branch_nodes, flow_id)
+    xml_str = generate_branch_xml(branch_nodes, flow_id, caller=caller, now=now)
     return Response(content=xml_str, media_type="application/xml")

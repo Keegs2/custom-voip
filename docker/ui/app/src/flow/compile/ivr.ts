@@ -24,10 +24,15 @@
 import type { CallFlowDoc, FlowEdge, FlowNode, NodeConfig } from '../model/types';
 import type { FlowCompiler, ValidationIssue, ValidationResult } from './types';
 import {
+  COND_MATCH,
+  COND_NOMATCH,
   MENU_NOMATCH,
   MENU_TIMEOUT,
   NEXT_HANDLE,
+  SCHEDULE_ELSE,
+  SCHEDULE_IN,
   handleToBranchKey,
+  isBranchType,
   isDigitHandle,
   isTerminalType,
 } from '../canvas/handles';
@@ -43,7 +48,11 @@ export type CompiledType =
   | 'redirect'
   | 'reject'
   | 'hangup'
-  | 'conference';
+  | 'conference'
+  // Branch verbs — the backend resolves which sub-sequence to render at
+  // request time (schedule: time-of-day window; condition: caller-ID predicate).
+  | 'schedule'
+  | 'condition';
 
 export interface CompiledNode {
   id: string;
@@ -86,6 +95,11 @@ function nextTarget(graph: Graph, id: string): string | undefined {
     (e) => e.sourceHandle == null || e.sourceHandle === NEXT_HANDLE,
   );
   return seq?.target;
+}
+
+/** The target node id reached from a specific source handle (branch), if any. */
+function targetIdByHandle(graph: Graph, id: string, handle: string): string | undefined {
+  return graph.out.get(id)?.find((e) => e.sourceHandle === handle)?.target;
 }
 
 /** Drop undefined / null / empty-string values so the artifact stays tidy. */
@@ -162,6 +176,56 @@ function compileGather(
 }
 
 /**
+ * Compile a `schedule` / `condition` branch node into its runtime tree node.
+ *
+ * The two outcome branches are compiled by the SAME recursive `walkChain` used
+ * for Gather branches, so each branch can itself be an arbitrary sub-flow
+ * (say → menu → …). The backend evaluates the guard at render time and renders
+ * the matching branch:
+ *
+ *   schedule  → branches: { in:  <SCHEDULE_IN subtree>,  out:     <SCHEDULE_ELSE subtree> }
+ *   condition → branches: { match: <COND_MATCH subtree>, nomatch: <COND_NOMATCH subtree> }
+ *
+ * `config` is emitted in the pinned snake_case contract (`caller_id`) even
+ * though the model config arm stays camelCase (`callerId`) like every other node.
+ */
+function compileBranch(
+  graph: Graph,
+  node: FlowNode,
+  visiting: ReadonlySet<string>,
+): CompiledNode {
+  const c = node.data.config as NodeConfig;
+
+  if (c.type === 'schedule') {
+    return {
+      id: node.id,
+      type: 'schedule',
+      config: clean({ days: c.days, start: c.start, end: c.end, tz: c.tz }),
+      branches: {
+        in: walkChain(graph, targetIdByHandle(graph, node.id, SCHEDULE_IN), visiting),
+        out: walkChain(graph, targetIdByHandle(graph, node.id, SCHEDULE_ELSE), visiting),
+      },
+    };
+  }
+
+  // condition
+  const caller_id: { prefix?: string; equals?: string } = {};
+  if (c.type === 'condition') {
+    if (c.callerId.prefix?.trim()) caller_id.prefix = c.callerId.prefix.trim();
+    if (c.callerId.equals?.trim()) caller_id.equals = c.callerId.equals.trim();
+  }
+  return {
+    id: node.id,
+    type: 'condition',
+    config: { caller_id },
+    branches: {
+      match: walkChain(graph, targetIdByHandle(graph, node.id, COND_MATCH), visiting),
+      nomatch: walkChain(graph, targetIdByHandle(graph, node.id, COND_NOMATCH), visiting),
+    },
+  };
+}
+
+/**
  * Walk a linear `next` chain from `startId`, folding leading Say/Play/Pause
  * runs into a following Gather's prompt. `visiting` guards against loops on a
  * single path; branches fork with a fresh copy so convergence is allowed.
@@ -199,6 +263,11 @@ function walkChain(
     for (const p of promptBuf) out.push(compileLeaf(p));
     promptBuf = [];
 
+    if (isBranchType(t)) {
+      out.push(compileBranch(graph, node, local));
+      break; // A branch node terminates the linear flow (its branches continue it).
+    }
+
     out.push(compileLeaf(node));
     if (isTerminalType(t)) break;
     currentId = nextTarget(graph, currentId);
@@ -220,6 +289,9 @@ export function compileIvr(doc: CallFlowDoc): IvrArtifact {
 }
 
 /* ─── Validation (plan §6.1) ───────────────────────────────────────────── */
+
+/** 24h "HH:MM" — shared with the rich-RCF/trunk schedule validators. */
+const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 export function validateIvr(doc: CallFlowDoc): ValidationResult {
   const issues: ValidationIssue[] = [];
@@ -310,6 +382,37 @@ export function validateIvr(doc: CallFlowDoc): ValidationResult {
 
     if (n.type === 'conference' && c.type === 'conference' && !c.room.trim()) {
       issues.push({ severity: 'error', message: 'Conference node needs a room name.', nodeId: n.id });
+    }
+
+    // Branch verbs (schedule / condition) — well-formedness + branch wiring.
+    if (c.type === 'schedule') {
+      if (c.days.length === 0) {
+        issues.push({ severity: 'error', message: 'Schedule needs at least one active day.', nodeId: n.id });
+      }
+      if (!HHMM.test(c.start) || !HHMM.test(c.end)) {
+        issues.push({ severity: 'error', message: 'Schedule needs a valid start and end time (HH:MM).', nodeId: n.id });
+      }
+      if (!c.tz.trim()) {
+        issues.push({ severity: 'error', message: 'Schedule needs a timezone.', nodeId: n.id });
+      }
+      if (!targetIdByHandle(graph, n.id, SCHEDULE_IN)) {
+        issues.push({ severity: 'warning', message: 'Schedule “In window” branch is not connected — it routes nowhere.', nodeId: n.id });
+      }
+      if (!targetIdByHandle(graph, n.id, SCHEDULE_ELSE)) {
+        issues.push({ severity: 'warning', message: 'Schedule “Otherwise” branch is not connected — it routes nowhere.', nodeId: n.id });
+      }
+    }
+
+    if (c.type === 'condition') {
+      if (!c.callerId.prefix?.trim() && !c.callerId.equals?.trim()) {
+        issues.push({ severity: 'error', message: 'Condition needs a caller-ID prefix or an exact match.', nodeId: n.id });
+      }
+      if (!targetIdByHandle(graph, n.id, COND_MATCH)) {
+        issues.push({ severity: 'warning', message: 'Condition “Match” branch is not connected — it routes nowhere.', nodeId: n.id });
+      }
+      if (!targetIdByHandle(graph, n.id, COND_NOMATCH)) {
+        issues.push({ severity: 'warning', message: 'Condition “No match” branch is not connected — it routes nowhere.', nodeId: n.id });
+      }
     }
 
     // 4) Terminal coverage — a non-terminal step that "falls off the end".
