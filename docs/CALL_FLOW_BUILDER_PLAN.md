@@ -656,3 +656,29 @@ this is the difference between "a canvas" and "best-in-class."
 - Flow modeling — [Twilio Flow Definition](https://www.twilio.com/docs/studio/rest-api/v2/flow-definition),
   [Twilio Widget Library](https://www.twilio.com/docs/studio/widget-library),
   [Twilio Flow/Widget JSON Schemas](https://www.twilio.com/docs/studio/rest-api/v2/schemas)
+
+---
+
+## 12. VERIFIED EXECUTION TRUTH (audited 2026-06-19, telephony + backend experts, PM-verified)
+
+A read-only runtime+API audit established what each product can ACTUALLY execute
+(evidence in `api_voice.lua`, `inbound_router.lua`, `handlers/*.lua`, the routers +
+init SQL). This supersedes assumptions in §2.4/§3/§7 where they conflict.
+
+| Product | Executes as a flow today? | Real verb reach | Sink | Reach |
+|---|---|---|---|---|
+| IVR | Yes — `api_voice.lua` TwiML engine | Say/Play/Pause/Gather/Dial(+Sip/Client/Conf/Queue)/Record/Stream/Connect/Conference/Enqueue/Leave/Redirect/Reject/Hangup — but `ivr.py` only EMITS a subset; no native condition/schedule | `ivr_flows.flow_config` | Cheap (S) — widen compiler |
+| API | Yes — same engine (webhook + ESL originate) | full engine | `api_dids.voice_url` + `ivr_flows.flow_config` | Cheap (S) |
+| RCF | Minimal — `handlers/rcf.lua` single bridge | forward, ring-timeout, pass-CID, concurrent-cap, local-ext. **failover = SBC×carrier to SAME number; `rcf_numbers.failover_to` is DEAD (never read)** | `rcf_numbers` cols | Minimal now (S–M wire publish); rich = new Lua+schema (L) |
+| Trunk (inbound) | Partial — bridges `endpoint_ips[1]` | single bridge only | none (no ruleset table) | Net-new runtime+table (L) |
+| Conferencing | No inbound product | `<Conference>` only INSIDE an api/IVR flow (engine supports; IVR compiler doesn't emit) | none for inbound DID | Cheap as IVR `<Conference>` (S); first-class DID→conf (M) |
+| UCaaS | Partial — single-ext bridge + VM fallback | one extension; **no find-me/follow-me** | `extensions` cols (forward_on_* not even read) | simple forward (S); FMFM = new table+Lua (L) |
+
+### Corrections to earlier sections
+- **`rcf_numbers.failover_to` is dead code** — runtime never reads it; RCF "failover" is carrier/SBC redundancy to the same number. The minimal RCF palette is forward + ring-timeout + pass-CID + concurrent-cap (NOT second-destination).
+- **Conferencing has no inbound DID product** — cheapest real path is an IVR flow emitting `<Conference>` (the engine already executes it; only the IVR compiler must learn to emit it).
+- **P0 publish bug:** `call_flows.py` publish writes `ivr_flows`/`sink_ref` but does NOT repoint the DID `voice_url` → published flow is unreachable. Fix = call existing `ivr.py:_update_did_voice_url` on publish. First task of P1.
+
+### Reframed reach (two tiers)
+- **Cheap — engine already executes:** IVR, API, RCF-minimal, Conferencing-as-IVR-flow.
+- **Net-new runtime epics (build execution first, telephony + backend):** trunk inbound routing, UCaaS find-me/follow-me, rich-RCF + `condition`/`schedule` branch primitive.
