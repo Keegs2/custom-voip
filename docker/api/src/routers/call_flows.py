@@ -292,6 +292,30 @@ async def publish_call_flow(
                         customer_id, did, name, compiled_json,
                     )
                     sink_ref = new_sink["id"]
+
+                # P1 FIX (verified P0 bug): repoint the bound DID's voice_url at
+                # the IVR webhook so a freshly published ivr/api flow is actually
+                # reachable. Mirrors ivr.py:_update_did_voice_url EXACTLY (same
+                # URL format) so inbound routing behaves identically. Done inside
+                # this same transaction. ivr DIDs may have no api_dids row →
+                # UPDATE 0 → log + skip (never 500).
+                if did:
+                    webhook_url = f"http://api:8000/ivr/webhook/{sink_ref}"
+                    upd = await conn.execute(
+                        "UPDATE api_dids SET voice_url = $1 WHERE did = $2",
+                        webhook_url, did,
+                    )
+                    if upd == "UPDATE 0":
+                        logger.info(
+                            "publish flow %s: DID %s has no api_dids row; "
+                            "voice_url not repointed (sink_ref=%s)",
+                            flow_id, did, sink_ref,
+                        )
+                    else:
+                        logger.info(
+                            "publish flow %s: DID %s voice_url -> %s",
+                            flow_id, did, webhook_url,
+                        )
             # else: non-IVR products — no sink write yet (P2+ TODO). compiled is
             # still persisted on call_flows below so the artifact is not lost.
 

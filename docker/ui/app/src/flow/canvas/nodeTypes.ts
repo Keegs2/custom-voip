@@ -3,31 +3,38 @@
  * STABLE module-level object (React Flow re-renders hard if its identity
  * changes between renders — plan §8).
  *
- * P0 wires every domain node type to one of two generic placeholder components
- * (entry → EntryFlowNode, everything else → GenericFlowNode). P1 replaces these
- * with the real per-type telephony nodes (SayNode, MenuNode, DialNode, …).
+ * The IVR telephony verbs render real nodes: `entry` (EntryFlowNode), `menu`
+ * (MenuNode, per-digit handles), and every linear verb (StepNode). Node types
+ * that belong to other products (answer/ringGroup/schedule/condition/voicemail/
+ * queue/webhook/goto) keep the generic placeholder until their product ships.
  */
 import type { NodeTypes } from '@xyflow/react';
 import { GenericFlowNode } from './nodes/GenericFlowNode';
 import { EntryFlowNode } from './nodes/EntryFlowNode';
+import { StepNode } from './nodes/StepNode';
+import { MenuNode } from './nodes/MenuNode';
 
 export const nodeTypes: NodeTypes = {
   entry: EntryFlowNode,
+  // IVR linear verbs.
+  say: StepNode,
+  play: StepNode,
+  pause: StepNode,
+  dial: StepNode,
+  record: StepNode,
+  redirect: StepNode,
+  reject: StepNode,
+  hangup: StepNode,
+  conference: StepNode,
+  // IVR branching verb.
+  menu: MenuNode,
+  // Other products — placeholder for now.
   answer: GenericFlowNode,
-  say: GenericFlowNode,
-  play: GenericFlowNode,
-  pause: GenericFlowNode,
-  menu: GenericFlowNode,
-  dial: GenericFlowNode,
   ringGroup: GenericFlowNode,
   schedule: GenericFlowNode,
   condition: GenericFlowNode,
-  record: GenericFlowNode,
   voicemail: GenericFlowNode,
-  conference: GenericFlowNode,
   queue: GenericFlowNode,
   webhook: GenericFlowNode,
   goto: GenericFlowNode,
-  reject: GenericFlowNode,
-  hangup: GenericFlowNode,
 };

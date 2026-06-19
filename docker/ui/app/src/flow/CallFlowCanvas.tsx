@@ -1,11 +1,10 @@
 /**
- * <CallFlowCanvas> — the React Flow host (P0 scaffold).
+ * <CallFlowCanvas> — the React Flow host.
  *
  * Renders the live `nodes`/`edges` from the flow store onto a pan/zoom canvas
- * with Background, MiniMap and Controls, styled to the app's dark palette. A
- * small in-canvas Panel proves the store + undo/redo end-to-end (add a node,
- * connect handles, undo, redo, reset). The real palette / config panel /
- * validation surfaces are P1.
+ * with Background, MiniMap and Controls (dark palette). Accepts palette drops
+ * (HTML5 DnD → `screenToFlowPosition` → `addNode`) and validates connections
+ * (no edges into the Entry node; entry/menu fan-out is allowed).
  *
  * React #310: every hook is declared unconditionally at the top of each
  * component, before any early return.
@@ -18,51 +17,18 @@ import {
   BackgroundVariant,
   MiniMap,
   Controls,
-  Panel,
+  useReactFlow,
   type OnMove,
+  type IsValidConnection,
   type NodeMouseHandler,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { useFlowStore, useFlowTemporal } from './store/flowStore';
+import { useFlowStore } from './store/flowStore';
 import { nodeTypes } from './canvas/nodeTypes';
+import { nodeAccent } from './model/palette';
+import { PALETTE_DND_MIME } from './palette/NodePalette';
 import type { RFNode } from './store/serialize';
 import type { NodeType } from './model/types';
-
-/* ─── Toolbar button ───────────────────────────────────────────────────── */
-
-function ToolButton({
-  onClick,
-  disabled,
-  children,
-}: {
-  onClick: () => void;
-  disabled?: boolean;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      style={{
-        padding: '5px 10px',
-        borderRadius: 8,
-        fontSize: '0.72rem',
-        fontWeight: 600,
-        letterSpacing: '-0.01em',
-        color: disabled ? '#475569' : '#cbd5e1',
-        background: 'rgba(26,29,39,0.9)',
-        border: '1px solid rgba(42,47,69,0.8)',
-        cursor: disabled ? 'not-allowed' : 'pointer',
-        transition: 'border-color 0.15s, color 0.15s',
-      }}
-    >
-      {children}
-    </button>
-  );
-}
-
-/* ─── Inner canvas (inside ReactFlowProvider) ──────────────────────────── */
 
 function CanvasInner() {
   // All hooks first — React #310.
@@ -72,15 +38,9 @@ function CanvasInner() {
   const onEdgesChange = useFlowStore((s) => s.onEdgesChange);
   const onConnect = useFlowStore((s) => s.onConnect);
   const addNode = useFlowStore((s) => s.addNode);
-  const removeNode = useFlowStore((s) => s.removeNode);
   const setSelected = useFlowStore((s) => s.setSelected);
   const setViewport = useFlowStore((s) => s.setViewport);
-  const reset = useFlowStore((s) => s.reset);
-
-  const undo = useFlowTemporal((s) => s.undo);
-  const redo = useFlowTemporal((s) => s.redo);
-  const canUndo = useFlowTemporal((s) => s.pastStates.length > 0);
-  const canRedo = useFlowTemporal((s) => s.futureStates.length > 0);
+  const { screenToFlowPosition } = useReactFlow();
 
   const handleNodeClick = useCallback<NodeMouseHandler<RFNode>>(
     (_event, node) => setSelected(node.id),
@@ -91,17 +51,34 @@ function CanvasInner() {
     (_event, viewport) => setViewport(viewport),
     [setViewport],
   );
-  const handleAdd = useCallback(
-    (type: NodeType) => {
-      // Drop near the canvas centre with a little jitter so stacked adds are visible.
-      addNode(type, { x: 200 + Math.random() * 240, y: 220 + Math.random() * 160 });
+
+  const handleDragOver = useCallback((event: React.DragEvent) => {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+  }, []);
+
+  const handleDrop = useCallback(
+    (event: React.DragEvent) => {
+      event.preventDefault();
+      const type = event.dataTransfer.getData(PALETTE_DND_MIME) as NodeType;
+      if (!type) return;
+      const position = screenToFlowPosition({ x: event.clientX, y: event.clientY });
+      const node = addNode(type, position);
+      setSelected(node.id);
     },
-    [addNode],
+    [addNode, screenToFlowPosition, setSelected],
   );
-  const handleDeleteSelected = useCallback(() => {
-    const selectedId = useFlowStore.getState().selectedId;
-    if (selectedId) removeNode(selectedId);
-  }, [removeNode]);
+
+  // Connections may never terminate on the Entry node (it is source-only) and
+  // a node may not connect to itself.
+  const isValidConnection = useCallback<IsValidConnection>(
+    (conn) => {
+      if (conn.source === conn.target) return false;
+      const target = useFlowStore.getState().nodes.find((n) => n.id === conn.target);
+      return target?.type !== 'entry';
+    },
+    [],
+  );
 
   return (
     <ReactFlow
@@ -114,8 +91,12 @@ function CanvasInner() {
       onNodeClick={handleNodeClick}
       onPaneClick={handlePaneClick}
       onMoveEnd={handleMoveEnd}
+      onDrop={handleDrop}
+      onDragOver={handleDragOver}
+      isValidConnection={isValidConnection}
       colorMode="dark"
       fitView
+      deleteKeyCode={['Backspace', 'Delete']}
       proOptions={{ hideAttribution: true }}
       style={{ background: '#0f1117' }}
     >
@@ -125,31 +106,12 @@ function CanvasInner() {
         zoomable
         style={{ background: '#13151d', border: '1px solid rgba(42,47,69,0.8)' }}
         maskColor="rgba(15,17,23,0.6)"
-        nodeColor="#3b82f6"
+        nodeColor={(n) => nodeAccent(n.type as NodeType)}
       />
       <Controls />
-
-      <Panel position="top-left">
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', maxWidth: 360 }}>
-          <ToolButton onClick={() => handleAdd('say')}>+ Say</ToolButton>
-          <ToolButton onClick={() => handleAdd('menu')}>+ Menu</ToolButton>
-          <ToolButton onClick={() => handleAdd('dial')}>+ Dial</ToolButton>
-          <ToolButton onClick={() => handleAdd('hangup')}>+ Hangup</ToolButton>
-          <ToolButton onClick={handleDeleteSelected}>Delete</ToolButton>
-          <ToolButton onClick={() => undo()} disabled={!canUndo}>
-            Undo
-          </ToolButton>
-          <ToolButton onClick={() => redo()} disabled={!canRedo}>
-            Redo
-          </ToolButton>
-          <ToolButton onClick={reset}>Reset</ToolButton>
-        </div>
-      </Panel>
     </ReactFlow>
   );
 }
-
-/* ─── Public component ─────────────────────────────────────────────────── */
 
 export function CallFlowCanvas() {
   return (

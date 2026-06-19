@@ -6,6 +6,7 @@
 import { memo } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import type { RFNode } from '../../store/serialize';
+import { NEXT_HANDLE } from '../handles';
 
 const ACCENT = '#22d3ee';
 
@@ -45,6 +46,7 @@ function EntryFlowNodeImpl({ data, selected }: NodeProps<RFNode>) {
 
       <Handle
         type="source"
+        id={NEXT_HANDLE}
         position={Position.Bottom}
         style={{ background: ACCENT, width: 9, height: 9, border: 'none' }}
       />

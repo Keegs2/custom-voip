@@ -50,11 +50,15 @@ export interface FlowState {
   /* Typed graph mutations */
   addNode: (type: NodeType, position: { x: number; y: number }) => RFNode;
   updateNodeConfig: (id: string, patch: Partial<NodeConfig>) => void;
+  updateNodeLabel: (id: string, label: string) => void;
   removeNode: (id: string) => void;
   connectEdge: (connection: Connection) => void;
   removeEdge: (id: string) => void;
   setViewport: (viewport: Viewport) => void;
   setSelected: (id: string | null) => void;
+
+  /* Document metadata (name, entry binding, customer, persisted id/status). */
+  patchDoc: (patch: Partial<CallFlowDoc>) => void;
 
   /* Lifecycle */
   loadDoc: (doc: CallFlowDoc) => void;
@@ -98,7 +102,18 @@ export const useFlowStore = create<FlowState>()(
 
       onConnect: (connection) =>
         set({
-          edges: addEdge<RFEdge>({ ...connection, id: newId() }, get().edges),
+          // A source handle drives a single outcome — replace any existing edge
+          // leaving the same source+handle so the compiled chain is deterministic.
+          edges: addEdge<RFEdge>(
+            { ...connection, id: newId() },
+            get().edges.filter(
+              (e) =>
+                !(
+                  e.source === connection.source &&
+                  (e.sourceHandle ?? null) === (connection.sourceHandle ?? null)
+                ),
+            ),
+          ),
         }),
 
       addNode: (type, position) => {
@@ -123,6 +138,13 @@ export const useFlowStore = create<FlowState>()(
           ),
         }),
 
+      updateNodeLabel: (id, label) =>
+        set({
+          nodes: get().nodes.map((n) =>
+            n.id === id ? { ...n, data: { ...n.data, label } } : n,
+          ),
+        }),
+
       removeNode: (id) =>
         set({
           nodes: get().nodes.filter((n) => n.id !== id),
@@ -133,7 +155,16 @@ export const useFlowStore = create<FlowState>()(
 
       connectEdge: (connection) =>
         set({
-          edges: addEdge<RFEdge>({ ...connection, id: newId() }, get().edges),
+          edges: addEdge<RFEdge>(
+            { ...connection, id: newId() },
+            get().edges.filter(
+              (e) =>
+                !(
+                  e.source === connection.source &&
+                  (e.sourceHandle ?? null) === (connection.sourceHandle ?? null)
+                ),
+            ),
+          ),
         }),
 
       removeEdge: (id) =>
@@ -143,6 +174,8 @@ export const useFlowStore = create<FlowState>()(
         set({ doc: { ...get().doc, viewport } }),
 
       setSelected: (id) => set({ selectedId: id }),
+
+      patchDoc: (patch) => set({ doc: { ...get().doc, ...patch } }),
 
       loadDoc: (doc) => {
         const graph = serialize(doc);

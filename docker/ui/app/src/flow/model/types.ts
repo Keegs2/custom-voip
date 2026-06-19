@@ -42,6 +42,7 @@ export type NodeType =
   | 'queue'
   | 'webhook' // HTTP call out, branch on response
   | 'goto' // jump to another node (loops, shared subtrees)
+  | 'redirect' // TwiML <Redirect> — hand control to another URL/flow
   | 'reject'
   | 'hangup';
 
@@ -79,7 +80,18 @@ export type NodeConfig =
   | { type: 'say'; text: string; voice: string; language?: string }
   | { type: 'play'; url: string; loop?: number }
   | { type: 'pause'; seconds: number }
-  | { type: 'menu'; numDigits: number; timeout: number; finishOnKey?: string }
+  | {
+      type: 'menu';
+      /** Spoken/played menu prompt, compiled into a Say inside the <Gather>. */
+      prompt?: string;
+      voice?: string;
+      /** Enabled option keys ('0'-'9','*','#') — each gets a source handle. */
+      digits: string[];
+      /** Digits to collect before submitting (TwiML numDigits). */
+      numDigits?: number;
+      timeout: number;
+      finishOnKey?: string;
+    }
   | {
       type: 'dial';
       number: string;
@@ -95,12 +107,27 @@ export type NodeConfig =
     }
   | { type: 'schedule'; tz: string; rules: ScheduleRule[] }
   | { type: 'condition'; conditions: EdgeCondition[] }
-  | { type: 'record'; maxLength?: number; playBeep?: boolean }
+  | {
+      type: 'record';
+      maxLength?: number;
+      playBeep?: boolean;
+      finishOnKey?: string;
+      transcribe?: boolean;
+    }
   | { type: 'voicemail'; greeting?: string; mailbox?: string }
-  | { type: 'conference'; room: string; muted?: boolean }
+  | {
+      type: 'conference';
+      room: string;
+      muted?: boolean;
+      beep?: boolean;
+      waitForModerator?: boolean;
+      maxParticipants?: number;
+      record?: boolean;
+    }
   | { type: 'queue'; name: string; timeout?: number }
   | { type: 'webhook'; url: string; method?: 'GET' | 'POST' }
   | { type: 'goto'; targetNodeId: string }
+  | { type: 'redirect'; url: string; method?: 'GET' | 'POST' }
   | { type: 'reject'; reason?: string }
   | { type: 'hangup' };
 

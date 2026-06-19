@@ -109,7 +109,7 @@ def _node_to_xml(parent: Element, node: dict, flow_id: int) -> None:
     """Convert a single IVR node dict into XML elements under *parent*.
 
     Supported node types: say, play, dial, gather, hangup, pause, redirect,
-    record, reject.
+    record, reject, conference.
     """
     ntype = node.get("type", "").lower()
     config = node.get("config", {})
@@ -182,6 +182,39 @@ def _node_to_xml(parent: Element, node: dict, flow_id: int) -> None:
         el = SubElement(parent, "Reject")
         if config.get("reason"):
             el.set("reason", config["reason"])
+
+    elif ntype == "conference":
+        # Joins the existing mod_conference room conf_<customer_id>_<sanitized
+        # name>. api_voice.lua:execute_conference parses ONLY these attributes
+        # (see ~:1052-1100): muted, startConferenceOnEnter, endConferenceOnExit,
+        # beep, waitUrl, maxParticipants, record, video. The room name is the
+        # element text. We pass through only what the runtime reads.
+        el = SubElement(parent, "Conference")
+
+        def _twiml_val(v):
+            # JSON booleans from the builder must render lowercase: api_voice.lua
+            # checks `== "true"`, and str(True) would be "True".
+            if isinstance(v, bool):
+                return "true" if v else "false"
+            return str(v)
+
+        for attr in ("muted", "startConferenceOnEnter", "endConferenceOnExit",
+                      "beep", "waitUrl", "maxParticipants", "record", "video"):
+            if config.get(attr) is not None:
+                el.set(attr, _twiml_val(config[attr]))
+        # The builder's friendly `waitForModerator` maps to the TwiML attr the
+        # runtime actually reads: startConferenceOnEnter="false" (wait-mod flag).
+        if str(config.get("waitForModerator", "")).lower() in ("true", "1"):
+            el.set("startConferenceOnEnter", "false")
+        # Room name = element text. The builder emits it under `room`; keep the
+        # name/roomName/text fallbacks for hand-authored flows.
+        el.text = str(
+            config.get("room")
+            or config.get("name")
+            or config.get("roomName")
+            or config.get("text")
+            or ""
+        )
 
     else:
         logger.warning(f"Unknown IVR node type: {ntype}")

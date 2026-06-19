@@ -10,6 +10,8 @@ import { ivrCompiler } from './ivr';
 /** Compilers keyed by product. Partial until every product is implemented. */
 export const compilers: Partial<Record<ProductKind, FlowCompiler<unknown>>> = {
   ivr: ivrCompiler as FlowCompiler<unknown>,
+  // api reuses the IVR (webhook TwiML) compiler — same nested-tree sink.
+  api: ivrCompiler as FlowCompiler<unknown>,
 };
 
 export function getCompiler(product: ProductKind): FlowCompiler<unknown> | undefined {

@@ -1,34 +1,32 @@
 /**
- * Call Flow Builder route (P0 scaffold). Hosts the node-graph canvas. This is
- * the future home of the universal call flow builder (CALL_FLOW_BUILDER_PLAN.md)
- * that will eventually replace the legacy `pages/ivr/` tree builder — but the
- * legacy IVR route stays intact until P1.
+ * Call Flow Builder route. Hosts the node-graph IVR editor (the universal
+ * builder from CALL_FLOW_BUILDER_PLAN.md). Admin-gated (RequireAdmin in
+ * App.tsx). The legacy `pages/ivr/` tree builder stays intact for now.
  *
- * Admin-gated (RequireAdmin in App.tsx). React #310: all hooks unconditionally
- * at the top.
+ * React #310: no hooks here; the stateful work lives inside the shell panes.
  */
 import { PageHeader } from '../components/layout/PageHeader';
-import { CallFlowCanvas } from '../flow/CallFlowCanvas';
+import { FlowBuilderShell } from '../flow/FlowBuilderShell';
 
 export function CallFlowBuilderPage() {
   return (
-    <div>
+    <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0 }}>
       <PageHeader
         title="Call Flow Builder"
-        subtitle="Node-graph editor for call-handling logic (preview)."
+        subtitle="Design IVR call-handling logic on a node graph, then publish to the live runtime."
       />
 
       <div
         style={{
-          height: 'calc(100vh - 220px)',
-          minHeight: 560,
+          height: 'calc(100vh - 200px)',
+          minHeight: 600,
           borderRadius: 16,
           overflow: 'hidden',
           border: '1px solid rgba(42,47,69,0.6)',
           background: '#0f1117',
         }}
       >
-        <CallFlowCanvas />
+        <FlowBuilderShell />
       </div>
     </div>
   );
