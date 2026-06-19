@@ -246,7 +246,9 @@ async def get_inventory(
     query += f" ORDER BY d.did LIMIT ${idx} OFFSET ${idx + 1}"
     values.extend([limit, offset])
 
-    rows = await db.fetch_all(query, *values)
+    # Read-only: inventory/ownership reads go to the inventory pool (replica
+    # when INVENTORY_READ_URL is set, otherwise the primary).
+    rows = await db.fetch_all_inventory(query, *values)
     total = rows[0]["total_count"] if rows else 0
 
     items = []
@@ -261,21 +263,22 @@ async def get_inventory(
 @router.get("/stats")
 async def get_stats(admin: dict = Depends(require_admin)):
     """Summary statistics for the DID inventory. Admin only."""
+    # Read-only: inventory/ownership reads go to the inventory pool.
     # Status breakdown
-    status_rows = await db.fetch_all(
+    status_rows = await db.fetch_all_inventory(
         "SELECT status, COUNT(*) AS cnt FROM did_inventory GROUP BY status"
     )
     by_status = {r["status"]: r["cnt"] for r in status_rows}
 
     # Product breakdown (only assigned DIDs)
-    product_rows = await db.fetch_all(
+    product_rows = await db.fetch_all_inventory(
         "SELECT product_type, COUNT(*) AS cnt FROM did_inventory "
         "WHERE product_type IS NOT NULL GROUP BY product_type"
     )
     by_product = {r["product_type"]: r["cnt"] for r in product_rows}
 
     # State breakdown (top 10)
-    state_rows = await db.fetch_all(
+    state_rows = await db.fetch_all_inventory(
         "SELECT state, COUNT(*) AS cnt FROM did_inventory "
         "WHERE state IS NOT NULL AND state != '' "
         "GROUP BY state ORDER BY cnt DESC LIMIT 10"
@@ -665,7 +668,8 @@ async def get_available(
     query += f" ORDER BY did LIMIT ${idx} OFFSET ${idx + 1}"
     values.extend([limit, offset])
 
-    rows = await db.fetch_all(query, *values)
+    # Read-only: inventory/ownership reads go to the inventory pool.
+    rows = await db.fetch_all_inventory(query, *values)
     total = rows[0]["total_count"] if rows else 0
 
     items = []
@@ -694,7 +698,8 @@ async def get_my_numbers(
     customer_id = customer_filter
     if customer_id is None:
         # Admin: show all assigned DIDs from did_inventory + product tables
-        rows = await db.fetch_all(
+        # Read-only: inventory/ownership reads go to the inventory pool.
+        rows = await db.fetch_all_inventory(
             """
             SELECT did, product_type, status, city, state,
                    assigned_at, notes, customer_id, customer_name
@@ -745,7 +750,8 @@ async def get_my_numbers(
             """
         )
     else:
-        rows = await db.fetch_all(
+        # Read-only: inventory/ownership reads go to the inventory pool.
+        rows = await db.fetch_all_inventory(
             """
             SELECT did, product_type, status, city, state,
                    assigned_at, notes, customer_id, customer_name

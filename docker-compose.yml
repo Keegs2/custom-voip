@@ -190,6 +190,14 @@ services:
       # Through PgBouncer (6432), matching production — exercises the transaction-mode
       # pooling path the code targets (statement_cache_size=0 + ::type casts).
       - DATABASE_URL=postgresql://${API_DB_USER:-api}:${API_DB_PASS:-api_secret}@postgres:6432/${DB_NAME:-voip}
+      # Shared DID inventory (Phases 2-3). INVENTORY_READ_URL points the DID
+      # inventory READ paths at a prod read-replica; empty -> falls back to the
+      # primary DATABASE_URL (no-op, today's behavior). DEPLOY_ENV identifies
+      # this box (the sandbox) for the routing reconciliation guard; the guard
+      # rejects configuring a DID the shared inventory owns in another env.
+      - INVENTORY_READ_URL=${INVENTORY_READ_URL:-}
+      - DEPLOY_ENV=${DEPLOY_ENV:-sandbox}
+      - INVENTORY_GUARD_ENFORCE=${INVENTORY_GUARD_ENFORCE:-true}
       - REDIS_URL=redis://redis:6379
       # NOTE: on Docker Desktop (Mac/Win), host-networked FreeSWITCH is NOT reachable
       # from this bridge container — API<->FS (ESL, xml_curl, CDR, vm_notify) only works

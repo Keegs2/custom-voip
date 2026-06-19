@@ -1,4 +1,5 @@
 """RCF (Remote Call Forwarding) endpoints."""
+import os
 import re
 import logging
 from fastapi import APIRouter, HTTPException
@@ -9,6 +10,66 @@ from db import redis_client as cache
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+# --- Reconciliation guard configuration ------------------------------------
+# DEPLOY_ENV identifies which environment this API instance serves. The guard
+# refuses to configure routing for a DID the shared inventory has allocated to
+# a different environment (e.g. configuring a prod-owned DID in the sandbox).
+DEPLOY_ENV = (os.getenv("DEPLOY_ENV", "prod").strip().lower() or "prod")
+
+# Escape hatch: set INVENTORY_GUARD_ENFORCE=false to disable the guard entirely
+# (e.g. if a replica hiccup ever causes trouble). Default on.
+INVENTORY_GUARD_ENFORCE = (
+    os.getenv("INVENTORY_GUARD_ENFORCE", "true").strip().lower()
+    not in ("false", "0", "no", "off")
+)
+
+
+async def _enforce_allocation_guard(did: str) -> None:
+    """Reject configuring routing for a DID owned by a different environment.
+
+    Reads did_inventory via the INVENTORY pool (the replica/source-of-truth when
+    INVENTORY_READ_URL is set, otherwise the primary). Decision table:
+
+      - guard disabled (INVENTORY_GUARD_ENFORCE=false) -> ALLOW (debug log)
+      - inventory lookup errors (replica unreachable)  -> ALLOW (fail open + warn)
+      - no inventory row for the DID                    -> ALLOW (untracked/local DID)
+      - row.allocated_env == DEPLOY_ENV                 -> ALLOW
+      - row.allocated_env != DEPLOY_ENV                 -> REJECT (HTTP 409)
+    """
+    if not INVENTORY_GUARD_ENFORCE:
+        logger.debug(
+            "Inventory allocation guard disabled (INVENTORY_GUARD_ENFORCE=false); allowing did=%s",
+            did,
+        )
+        return
+
+    try:
+        row = await db.fetch_one_inventory(
+            "SELECT allocated_env FROM did_inventory WHERE did = $1", did
+        )
+    except Exception as e:
+        # Never let a replica/inventory hiccup block provisioning — fail open.
+        logger.warning(
+            "Inventory allocation guard lookup failed for did=%s (%s); failing open (allow)",
+            did, e,
+        )
+        return
+
+    if not row:
+        # Untracked DID: not in the shared inventory, so we cannot enforce
+        # ownership (covers seeded/local scratch DIDs). Allow.
+        return
+
+    allocated_env = row["allocated_env"]
+    if allocated_env != DEPLOY_ENV:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"DID {did} is allocated to environment '{allocated_env}'; "
+                f"cannot configure routing in '{DEPLOY_ENV}'."
+            ),
+        )
 
 # E.164 pattern: + followed by 1-15 digits
 E164_PATTERN = re.compile(r'^\+[1-9]\d{1,14}$')
@@ -185,6 +246,10 @@ async def create_rcf(rcf: RCFCreate):
     if customer["status"] != "active":
         raise HTTPException(status_code=400, detail="Customer is not active")
 
+    # Reconciliation guard: refuse if the shared inventory allocates this DID
+    # to a different environment. rcf.did is already validated to E.164.
+    await _enforce_allocation_guard(rcf.did)
+
     try:
         result = await db.fetch_one(
             """
@@ -230,6 +295,19 @@ async def update_rcf(identifier: str, rcf: RCFUpdate) -> RCFResponse:
 
     if not update_data:
         raise HTTPException(status_code=400, detail="No fields to update")
+
+    # Reconciliation guard: resolve the DID this routing change targets, then
+    # refuse if the shared inventory allocates it to a different environment.
+    # Identifier may be a numeric rcf_numbers.id or the E.164 DID itself.
+    if identifier.isdigit():
+        existing = await db.fetch_one(
+            "SELECT did FROM rcf_numbers WHERE id = $1", int(identifier)
+        )
+        guard_did = existing["did"] if existing else None
+    else:
+        guard_did = identifier
+    if guard_did:
+        await _enforce_allocation_guard(guard_did)
 
     for field, value in update_data.items():
         updates.append(f"{field} = ${idx}")

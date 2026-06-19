@@ -1,7 +1,15 @@
 # Shared DID Inventory — Single Source of Truth + Read-Replica Consumers
 
-Status: **PLAN ONLY** (no changes applied). Design for making every environment
-(and, later, every zone) agree on DID ownership without separate databases drifting.
+Status: **Phases 2–3 IMPLEMENTED + verified** (2026-06-19); Phases 1, 4, 5 pending.
+Design for making every environment (and, later, every zone) agree on DID
+ownership without separate databases drifting.
+
+> Phases 2–3 (API dual-engine `INVENTORY_READ_URL`, `did_inventory.allocated_env`
+> migration, and the `rcf` reconciliation guard) are built and end-to-end verified
+> on a local stack: dual-pool falls back to primary when unset (no-op), the guard
+> returns 409 cross-env / allows on match / allows untracked DIDs, and the migration
+> applies idempotently. They are **dormant until** `INVENTORY_READ_URL` points at a
+> replica (Phase 1) — current behavior is unchanged.
 
 ## Goal
 
@@ -106,13 +114,19 @@ routing/CDR access stays on the primary/local engine. asyncpg keeps
 
 ## Phased implementation
 
-| Phase | What | Touches prod? | Who |
-|---|---|---|---|
-| 1 | Create East **read replica** (wal_level=replica, repl slot+user, standby, pg_hba) | Yes (config reload) | infra runbook (you run on VMs) |
-| 2 | API dual-engine: add `INVENTORY_READ_URL`, route `did_inventory` reads to it (fallback = primary) | No (no-op until set) | code (I write, test locally) |
-| 3 | `did_inventory.allocated_env` migration + reconciliation guard in prod & sandbox APIs | Yes (additive, idempotent) | code + migration |
-| 4 | Point sandbox `INVENTORY_READ_URL` at the replica; stop standalone inventory seeding in sandbox | No (sandbox only) | config |
-| 5 | (Future) per-zone replicas for West/Central FS/Kam reads | Yes (per zone) | infra |
+| Phase | What | Touches prod? | Who | Status |
+|---|---|---|---|---|
+| 1 | Create East **read replica** (wal_level=replica, repl slot+user, standby, pg_hba) | Yes (config reload) | infra runbook (you run on VMs) | TODO |
+| 2 | API dual-engine: add `INVENTORY_READ_URL`, route `did_inventory` reads to it (fallback = primary) | No (no-op until set) | code | **DONE + verified** |
+| 3 | `did_inventory.allocated_env` migration + reconciliation guard in prod & sandbox APIs | Yes (additive, idempotent) | code + migration | **DONE + verified** |
+| 4 | Point sandbox `INVENTORY_READ_URL` at the replica; stop standalone inventory seeding in sandbox | No (sandbox only) | config | TODO (after Phase 1) |
+| 5 | (Future) per-zone replicas for West/Central FS/Kam reads | Yes (per zone) | infra | TODO |
+
+**Apply-to-existing-DBs note:** the `allocated_env` migration (`24_did_allocation.sql`)
+only runs on a fresh `initdb`. For the already-provisioned prod + sandbox DBs, hand-apply
+it once: `sudo docker exec -i voip-postgres psql -U voip -d voip < docker/postgres/init/24_did_allocation.sql`
+(idempotent). On prod, also set the test DID(s) to `allocated_env='sandbox'` so the
+sandbox is allowed to route them once Phase 1/4 wire the replica.
 
 Phases 2–3 are safe to build first (gated behind env vars, no prod impact) so the
 code is ready and locally tested before the replica exists.

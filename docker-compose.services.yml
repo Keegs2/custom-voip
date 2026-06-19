@@ -24,6 +24,14 @@ services:
       - "host.docker.internal:host-gateway"
     environment:
       - DATABASE_URL=${DATABASE_URL:-postgresql://api:api_secret@host.docker.internal:6432/voip}
+      # Shared DID inventory (Phases 2-3). On prod, INVENTORY_READ_URL is normally
+      # empty so inventory reads stay on the local primary (this box IS the source
+      # of truth); empty -> falls back to DATABASE_URL. DEPLOY_ENV=prod drives the
+      # routing reconciliation guard (rejects configuring a DID the shared
+      # inventory has allocated to a different environment).
+      - INVENTORY_READ_URL=${INVENTORY_READ_URL:-}
+      - DEPLOY_ENV=${DEPLOY_ENV:-prod}
+      - INVENTORY_GUARD_ENFORCE=${INVENTORY_GUARD_ENFORCE:-true}
       - REDIS_URL=${REDIS_URL}
       - FREESWITCH_ESL_HOST=${FREESWITCH_ESL_HOST}
       - FREESWITCH_ESL_PORT=${FREESWITCH_ESL_PORT:-8021}
