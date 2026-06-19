@@ -428,6 +428,31 @@ services:
     command: ["-c", "/etc/coturn/turnserver.conf"]
     restart: unless-stopped
 
+  # Postgres physical read-replica (hot standby) of the PROD primary — the
+  # shared DID-inventory source of truth (Phase 1). Opt-in via the "replica"
+  # profile so a normal `docker compose up` never touches it:
+  #   docker compose --profile replica up -d --build postgres-replica
+  # Requires REPL_PASSWORD + REPLICA_PRIMARY_HOST in .env (see infra/replica/README.md).
+  # Self-bootstraps from prod via pg_basebackup on first run; read-only thereafter.
+  postgres-replica:
+    build: ./docker/postgres-replica
+    container_name: voip-postgres-replica
+    profiles: ["replica"]
+    environment:
+      - PGDATA=/var/lib/postgresql/data
+      - PRIMARY_HOST=${REPLICA_PRIMARY_HOST:?set REPLICA_PRIMARY_HOST (prod VPC IP) in .env}
+      - PRIMARY_PORT=${REPLICA_PRIMARY_PORT:-5432}
+      - REPL_USER=${REPL_USER:-replicator}
+      - REPL_PASSWORD=${REPL_PASSWORD:?set REPL_PASSWORD in .env}
+      - REPL_SLOT=${REPL_SLOT:-sandbox_replica}
+    volumes:
+      - postgres_replica_data:/var/lib/postgresql/data
+    ports:
+      - "6433:5432"   # read-only standby (distinct from the local writable PG)
+    networks:
+      - voip-network
+    restart: unless-stopped
+
 networks:
   voip-network:
     driver: bridge
@@ -437,6 +462,8 @@ networks:
 
 volumes:
   postgres_data:
+    driver: local
+  postgres_replica_data:
     driver: local
   redis_data:
     driver: local

@@ -116,7 +116,7 @@ routing/CDR access stays on the primary/local engine. asyncpg keeps
 
 | Phase | What | Touches prod? | Who | Status |
 |---|---|---|---|---|
-| 1 | Create East **read replica** (wal_level=replica, repl slot+user, standby, pg_hba) | Yes (config reload) | infra runbook (you run on VMs) | TODO |
+| 1 | Create East **read replica** — repo-encoded self-bootstrapping standby + prod enablement (reload only, NO restart) | Yes (reload) | `infra/replica/` (built + verified; you run the runbook) | **BUILT + verified; awaiting prod enablement** |
 | 2 | API dual-engine: add `INVENTORY_READ_URL`, route `did_inventory` reads to it (fallback = primary) | No (no-op until set) | code | **DONE + verified** |
 | 3 | `did_inventory.allocated_env` migration + reconciliation guard in prod & sandbox APIs | Yes (additive, idempotent) | code + migration | **DONE + verified** |
 | 4 | Point sandbox `INVENTORY_READ_URL` at the replica; stop standalone inventory seeding in sandbox | No (sandbox only) | config | TODO (after Phase 1) |
