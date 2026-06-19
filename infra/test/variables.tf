@@ -54,9 +54,19 @@ variable "machine_type" {
 }
 
 variable "network_tags" {
-  description = "bypass-vpn is REQUIRED on the default subnet (Cloud NAT trap); voip-test scopes the firewall rules."
+  description = <<-EOT
+    Tag-REUSE so the test box INHERITS existing prod firewall rules instead of
+    duplicating them:
+      - voip-sbc    -> allow-ssh-iap (IAP SSH), voip-sip-inbound (5060 Bandwidth+office),
+                       voip-internal, voip-health-check, voip-sipp-local
+      - voip-media  -> allow-ssh-iap (IAP SSH), voip-rtp (16384-49151), voip-internal
+      - bypass-vpn  -> REQUIRED on the default subnet (Cloud NAT trap)
+      - voip-test   -> carries ONLY the net-new WebRTC/UI rule in main.tf
+    (We deliberately omit voip-services so we do NOT inherit the world-open
+     voip-web-admin rule — the test box's UI/API is office-scoped via voip-test.)
+  EOT
   type        = list(string)
-  default     = ["bypass-vpn", "voip-test"]
+  default     = ["bypass-vpn", "voip-sbc", "voip-media", "voip-test"]
 }
 
 # --- Firewall source scoping ------------------------------------------------
