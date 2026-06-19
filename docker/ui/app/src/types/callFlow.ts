@@ -67,3 +67,64 @@ export interface FlowVersionDetail {
   compiled: unknown;
   published_at: string;
 }
+
+/* ── Simulate ─────────────────────────────────────────────────────────────── */
+
+/** Request body for `POST /call-flows/{id}/simulate`. */
+export interface SimulateRequest {
+  /** Test caller ID (E.164). Omitted → backend uses an anonymous caller. */
+  caller_id?: string;
+  /** ISO-8601 instant to evaluate time-of-day rules against. Omitted → now. */
+  now?: string;
+}
+
+/** `result` for ivr / api / conference — a compiled TwiML document. */
+export interface SimulateTwiml {
+  kind: 'twiml';
+  xml: string;
+}
+
+/**
+ * `result` for rcf / trunk — a routing decision. The shape is intentionally
+ * loose: rcf carries `matched_rule`/`ring`/`forward_to`/`fallback`, trunk
+ * carries `endpoints`/`strategy`/`timeout`. All optional so one renderer covers
+ * both without the backend pinning every field.
+ */
+export interface SimulateRoute {
+  kind: 'route';
+  matched_rule?: number | null;
+  ring?: Record<string, unknown> | null;
+  forward_to?: string | null;
+  fallback?: Record<string, unknown> | null;
+  endpoints?: unknown[] | null;
+  strategy?: string | null;
+  timeout?: number | null;
+}
+
+/** `result` for ucaas — a find-me/follow-me ring plan. */
+export interface SimulateRing {
+  kind: 'ring';
+  strategy: string;
+  legs: unknown[];
+  fallback: Record<string, unknown>;
+}
+
+/**
+ * The `result` field. Discriminated on `kind`, but a defensive fallback keeps
+ * the UI from crashing if the backend ever returns an unknown shape.
+ */
+export type SimulateResultBody =
+  | SimulateTwiml
+  | SimulateRoute
+  | SimulateRing
+  | { kind?: string; [key: string]: unknown };
+
+/** Response body for `POST /call-flows/{id}/simulate`. */
+export interface SimulateResult {
+  /** Product the compiled artifact was simulated as (e.g. `rcf`, `ivr`). */
+  product: string;
+  /** Product-specific decision — see `SimulateResultBody`. */
+  result: SimulateResultBody;
+  /** Ordered, human-readable explanation of how the decision was reached. */
+  trace: string[];
+}

@@ -35,6 +35,7 @@ import { AdminCustomerSelector } from '../../components/AdminCustomerSelector';
 import { useToast } from '../../components/ui/ToastContext';
 import { ApiError } from '../../api/client';
 import { FlowHistoryModal } from './FlowHistoryModal';
+import { FlowSimulateModal } from './FlowSimulateModal';
 
 function entryDid(entry: EntryBinding): string {
   return entry.kind === 'did' ? entry.did : '';
@@ -75,6 +76,7 @@ export function FlowToolbar() {
   const [previewOpen, setPreviewOpen] = useState(false);
   const [newOpen, setNewOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [simulateOpen, setSimulateOpen] = useState(false);
 
   // List + invalidate flows for the CURRENT product only.
   const queryKey = ['call-flows', { product }] as const;
@@ -281,6 +283,15 @@ export function FlowToolbar() {
       >
         History
       </Button>
+      <Button
+        variant="ghost"
+        size="sm"
+        disabled={docId == null}
+        title={docId == null ? 'Save the flow to enable simulation' : undefined}
+        onClick={() => setSimulateOpen(true)}
+      >
+        Simulate
+      </Button>
       <Button variant="primary" size="sm" loading={saveMutation.isPending} onClick={() => saveMutation.mutate()}>
         Save
       </Button>
@@ -295,6 +306,7 @@ export function FlowToolbar() {
       </Button>
 
       <FlowHistoryModal open={historyOpen} onClose={() => setHistoryOpen(false)} flowId={docId ?? null} />
+      <FlowSimulateModal open={simulateOpen} onClose={() => setSimulateOpen(false)} flowId={docId ?? null} />
 
       <Modal open={previewOpen} onClose={() => setPreviewOpen(false)} title="Compiled artifact" maxWidth="max-w-2xl">
         <pre

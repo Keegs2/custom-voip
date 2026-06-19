@@ -290,6 +290,59 @@ def _caller_matches(cfg: Any, caller: Optional[str]) -> bool:
     return True
 
 
+# ---------------------------------------------------------------------------
+# First-match routing-rule evaluator (mirrors lib/rules.lua)
+# ---------------------------------------------------------------------------
+#
+# Shared, side-effect-free rule selection for RICH routing plans (rich RCF
+# routing_plan, rich trunk route_plan). It is the EXACT Python mirror of the Lua
+# evaluator the runtime uses (docker/freeswitch/scripts/lib/rules.lua): given an
+# ORDERED list of rules and an evaluation context, return the FIRST rule whose
+# `match` applies (document order, first match wins), or (None, None) if none do.
+#
+# A rule's `match` (snake_case, every field optional — the Call Flow Builder's
+# compiled artifact):
+#   match = null | <scalar>                       -> CATCH-ALL (always applies)
+#   match = { schedule  = {days,start,end,tz},    -> time-of-day window
+#             caller_id = {prefix?, equals?} }     -> caller-number condition
+# Both predicates reuse the SAME matchers the IVR runtime uses: schedule via
+# `_schedule_matches` (the byte-for-byte semantics of lib/schedule.lua) and
+# caller via `_caller_matches`. A `match` that is None / not a dict is a
+# catch-all (how a plan expresses its trailing "default" rule).
+
+def _rule_matches(rule: Any, caller: Optional[str], now: datetime) -> bool:
+    """Does this rule's ``match`` apply for (caller, now)? Mirrors
+    lib/rules.lua:rule_matches — None/non-dict match = catch-all; a present
+    ``schedule`` must pass ``_schedule_matches`` AND a present ``caller_id`` must
+    pass ``_caller_matches`` (AND of whichever predicates are present)."""
+    if not isinstance(rule, dict):
+        return False
+    m = rule.get("match")
+    if not isinstance(m, dict):
+        return True                                  # None/scalar = catch-all
+    if m.get("schedule") is not None:
+        if not _schedule_matches(m.get("schedule"), now):
+            return False
+    # _caller_matches reads m["caller_id"] itself, so pass the whole match dict
+    # (same shape the runtime's caller predicate consumes).
+    if m.get("caller_id") is not None:
+        if not _caller_matches(m, caller):
+            return False
+    return True
+
+
+def _first_match(rules: Any, caller: Optional[str], now: datetime):
+    """Return ``(rule, index)`` for the FIRST rule whose ``match`` applies in
+    document order, or ``(None, None)`` when none do. ``index`` is 0-based (the
+    position in *rules*). Mirrors lib/rules.lua:first_match."""
+    if not isinstance(rules, list):
+        return None, None
+    for i, rule in enumerate(rules):
+        if _rule_matches(rule, caller, now):
+            return rule, i
+    return None, None
+
+
 def _eval_now(request: Request) -> datetime:
     """Resolve the tz-aware instant used to evaluate `schedule` nodes.
 

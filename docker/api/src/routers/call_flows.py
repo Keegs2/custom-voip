@@ -18,6 +18,7 @@ casts (PgBouncer transaction mode → ``statement_cache_size=0``).
 """
 import json
 import logging
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Response
@@ -26,6 +27,9 @@ from pydantic import BaseModel, field_validator
 from db import database as db
 from db import redis_client as cache
 from auth.dependencies import require_admin
+# REUSE the exact matchers + TwiML renderer the live runtime uses — do NOT
+# reimplement schedule/caller/first-match logic here (see ivr.py).
+from routers.ivr import _first_match, generate_xml
 
 logger = logging.getLogger(__name__)
 
@@ -652,6 +656,260 @@ async def publish_call_flow(
         logger.info("publish flow %s: rcf cache invalidated for did=%s", flow_id, did)
 
     return _serialize(row)
+
+
+# ---------------------------------------------------------------------------
+# Flow simulator (dry-run rule/branch resolution — admin-only, read-only)
+# ---------------------------------------------------------------------------
+#
+# Given a hypothetical caller + instant, resolve which rule/branch a flow's
+# stored ``compiled`` artifact would fire WITHOUT placing a real call. It reuses
+# the EXACT matchers the live runtime uses — schedule/caller via ivr.py's
+# _schedule_matches/_caller_matches (through _first_match, which mirrors
+# lib/rules.lua) and the TwiML via ivr.py's generate_xml — so the dry run agrees
+# with production by construction.
+
+
+class CallFlowSimulate(BaseModel):
+    caller_id: Optional[str] = None
+    now: Optional[str] = None  # ISO-8601; default = server's current UTC time
+
+
+def _parse_now(raw: Optional[str]) -> datetime:
+    """Parse the body's ISO-8601 ``now`` (naive -> UTC), default current UTC."""
+    if not raw:
+        return datetime.now(timezone.utc)
+    try:
+        dt = datetime.fromisoformat(raw)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail=f"invalid ISO-8601 now: {raw!r}")
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+def _leg_dests(legs: Any) -> list[str]:
+    """Best-effort flatten ring/endpoint legs to destination strings for traces.
+    Accepts a bare string, a list of strings, or a list of ``{to,...}`` objects."""
+    if isinstance(legs, str):
+        return [legs]
+    out: list[str] = []
+    if isinstance(legs, list):
+        for leg in legs:
+            if isinstance(leg, str) and leg:
+                out.append(leg)
+            elif isinstance(leg, dict):
+                to = leg.get("to")
+                if isinstance(to, str) and to:
+                    out.append(to)
+    return out
+
+
+def _schedule_label(sched: Any) -> Optional[str]:
+    if not isinstance(sched, dict):
+        return None
+    days = sched.get("days")
+    if isinstance(days, list) and days:
+        days_s = ",".join(str(d).strip().capitalize()[:3] for d in days)
+    else:
+        days_s = "every day"
+    start, end = sched.get("start"), sched.get("end")
+    tz = sched.get("tz") or "UTC"
+    if start or end:
+        return f"{days_s} {start or '00:00'}-{end or '24:00'} {tz}"
+    return f"{days_s} all-day {tz}"
+
+
+def _caller_label(cid: Any) -> Optional[str]:
+    if not isinstance(cid, dict):
+        return None
+    bits = []
+    if cid.get("equals") is not None:
+        bits.append(f"caller=={cid['equals']}")
+    if cid.get("prefix") is not None:
+        bits.append(f"caller startswith {cid['prefix']}")
+    return " & ".join(bits) if bits else None
+
+
+def _match_label(match: Any) -> str:
+    """Human label for a rule's ``match`` (mirrors what _rule_matches tests)."""
+    if not isinstance(match, dict):
+        return "catch-all"
+    labels = []
+    sl = _schedule_label(match.get("schedule"))
+    if sl:
+        labels.append(sl)
+    cl = _caller_label(match.get("caller_id"))
+    if cl:
+        labels.append(cl)
+    return "; ".join(labels) if labels else "catch-all"
+
+
+def _fallback_label(fb: Any) -> str:
+    if not isinstance(fb, dict):
+        return "none"
+    to = fb.get("to")
+    return f"{fb.get('type')} {to}" if to else str(fb.get("type"))
+
+
+def _rule_trace(rules: list, caller: Optional[str], now: datetime, idx: Optional[int]) -> list[str]:
+    """Per-rule MATCH/SKIP lines, up to and including the matched rule (first
+    match wins — later rules are never evaluated by the runtime, so they are not
+    listed). When nothing matched, every rule is shown as SKIP."""
+    now_s = now.isoformat()
+    cid_s = caller if caller else "(none)"
+    last = idx if idx is not None else len(rules) - 1
+    lines = []
+    for i, rule in enumerate(rules):
+        if i > last:
+            break
+        verdict = "MATCH" if i == idx else "SKIP"
+        label = _match_label(rule.get("match") if isinstance(rule, dict) else None)
+        lines.append(
+            f"Rule {i + 1} [{label}]: now={now_s}, caller={cid_s} -> {verdict}"
+        )
+    return lines
+
+
+@router.post("/{flow_id}/simulate")
+async def simulate_call_flow(
+    flow_id: int,
+    body: CallFlowSimulate,
+    admin: dict = Depends(require_admin),
+):
+    """Dry-run a flow: given a hypothetical ``caller_id`` + ``now`` (ISO-8601),
+    resolve which rule/branch fires and the resolved action from the flow's
+    STORED ``compiled`` artifact — WITHOUT placing a real call.
+
+    Per-product resolution (see CALL_FLOW_BUILDER_PLAN §12 compiled contracts):
+      - ivr/api/conference -> render TwiML via generate_xml (schedule/condition
+        nodes already resolve server-side) -> ``{kind:"twiml", xml}``.
+      - rcf  -> rich (has ``rules``): first-match -> ``{kind:"route",
+        matched_rule, ring, fallback}``; simple -> ``{kind:"route", forward_to,
+        ring_timeout}``.
+      - trunk -> rich (has ``rules``): first-match -> ``{kind:"route",
+        matched_rule, endpoints, strategy, timeout}``; flat -> same shape with
+        matched_rule=null.
+      - ucaas -> ``{kind:"ring", strategy, legs, fallback}`` (no rules layer).
+    Every response carries a human-readable ``trace`` explaining the evaluation.
+
+    404 when the flow does not exist OR has no ``compiled`` artifact yet (never
+    published / saved with a compile). Admin-only, read-only.
+    """
+    now = _parse_now(body.now)
+    caller = body.caller_id
+
+    row = await db.fetch_one(
+        f"SELECT {_COLUMNS} FROM call_flows WHERE id = $1", flow_id
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Call flow not found")
+    flow = _serialize(row)
+    compiled = flow.get("compiled")
+    if not compiled or not isinstance(compiled, dict):
+        raise HTTPException(
+            status_code=404,
+            detail="Call flow has no compiled artifact (never published/compiled)",
+        )
+    product = flow["product"]
+
+    header = (
+        f"simulate flow {flow_id} product={product}: "
+        f"now={now.isoformat()} caller={caller if caller else '(none)'}"
+    )
+
+    # Resolve per product into `result` (the discriminated payload) + `trace`.
+    # The response envelope is the pinned contract: {product, result, trace}.
+
+    # ---- ivr / api / conference: render TwiML server-side -------------------
+    if product in IVR_SINK_PRODUCTS:
+        xml = generate_xml(compiled, flow_id, caller=caller, now=now)
+        node_count = len(compiled.get("nodes", []) or [])
+        result = {"kind": "twiml", "xml": xml}
+        trace = [
+            header,
+            f"-> rendered TwiML ({node_count} top-level node(s); "
+            "schedule/condition branches resolved against now/caller)",
+        ]
+
+    # ---- rcf ----------------------------------------------------------------
+    elif product == "rcf":
+        if "rules" in compiled:
+            rules = compiled.get("rules") or []
+            rule, idx = _first_match(rules, caller, now)
+            fallback = compiled.get("fallback")
+            ring = rule.get("ring") if isinstance(rule, dict) else None
+            trace = [header] + _rule_trace(rules, caller, now, idx)
+            if ring is not None:
+                strategy = ring.get("strategy") if isinstance(ring, dict) else None
+                dests = _leg_dests(ring.get("legs") if isinstance(ring, dict) else ring)
+                trace.append(
+                    f"-> ring {strategy or '?'}: {', '.join(dests) or '(no legs)'} "
+                    f"; fallback {_fallback_label(fallback)}"
+                )
+            else:
+                trace.append(f"-> no rule matched; fallback {_fallback_label(fallback)}")
+            result = {"kind": "route", "matched_rule": idx, "ring": ring, "fallback": fallback}
+        else:
+            forward_to = compiled.get("forward_to")
+            ring_timeout = compiled.get("ring_timeout")
+            trace = [header, f"-> forward_to {forward_to} (ring_timeout={ring_timeout})"]
+            result = {"kind": "route", "forward_to": forward_to, "ring_timeout": ring_timeout}
+
+    # ---- trunk --------------------------------------------------------------
+    elif product == "trunk":
+        if "rules" in compiled:
+            rules = compiled.get("rules") or []
+            rule, idx = _first_match(rules, caller, now)
+            trace = [header] + _rule_trace(rules, caller, now, idx)
+            if isinstance(rule, dict):
+                strategy = rule.get("strategy")
+                timeout = rule.get("timeout")
+                endpoints = rule.get("endpoints")
+                dests = _leg_dests(endpoints)
+                trace.append(
+                    f"-> {strategy or '?'} (timeout={timeout}): "
+                    f"{', '.join(dests) or '(no endpoints)'}"
+                )
+                result = {"kind": "route", "matched_rule": idx, "endpoints": endpoints,
+                          "strategy": strategy, "timeout": timeout}
+            else:
+                trace.append("-> no rule matched")
+                result = {"kind": "route", "matched_rule": None, "endpoints": None,
+                          "strategy": None, "timeout": None}
+        else:
+            strategy = compiled.get("strategy")
+            timeout = compiled.get("timeout")
+            endpoints = compiled.get("endpoints")
+            dests = _leg_dests(endpoints)
+            trace = [
+                header,
+                f"-> {strategy or '?'} (timeout={timeout}): "
+                f"{', '.join(dests) or '(no endpoints)'}",
+            ]
+            result = {"kind": "route", "matched_rule": None, "endpoints": endpoints,
+                      "strategy": strategy, "timeout": timeout}
+
+    # ---- ucaas: flat Find-Me/Follow-Me ring plan (no rules layer today) -----
+    elif product == "ucaas":
+        strategy = compiled.get("strategy")
+        legs = compiled.get("legs")
+        fallback = compiled.get("fallback")
+        dests = _leg_dests(legs)
+        trace = [
+            header,
+            f"-> ring {strategy or '?'}: {', '.join(dests) or '(no legs)'} "
+            f"; fallback {_fallback_label(fallback)}",
+        ]
+        result = {"kind": "ring", "strategy": strategy, "legs": legs, "fallback": fallback}
+
+    else:
+        # Unknown product (should be unreachable — CHECK-constrained on insert).
+        raise HTTPException(
+            status_code=400, detail=f"simulate not supported for product {product!r}"
+        )
+
+    return {"product": product, "result": result, "trace": trace}
 
 
 # ---------------------------------------------------------------------------

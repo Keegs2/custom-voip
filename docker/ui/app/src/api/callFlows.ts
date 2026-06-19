@@ -25,6 +25,8 @@ import type {
   CallFlowUpdate,
   FlowVersion,
   FlowVersionDetail,
+  SimulateRequest,
+  SimulateResult,
 } from '../types/callFlow';
 
 export interface CallFlowListResponse {
@@ -118,4 +120,19 @@ export async function restoreFlowVersion(
   version: number,
 ): Promise<CallFlow> {
   return apiRequest('POST', `/call-flows/${id}/versions/${version}/restore`);
+}
+
+/* ── Simulate ─────────────────────────────────────────────────────────────── */
+
+/**
+ * Dry-run the flow's stored `compiled` artifact against a synthetic inbound
+ * call. Admin-only. The backend reads the last saved/published compiled
+ * artifact, so a never-saved flow (or one whose compiled is stale) returns 404
+ * — surface a "Save/Publish first" hint to the caller in that case.
+ */
+export async function simulateFlow(
+  id: number,
+  params: SimulateRequest = {},
+): Promise<SimulateResult> {
+  return apiRequest('POST', `/call-flows/${id}/simulate`, params);
 }
