@@ -19,6 +19,8 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useFlowStore, useFlowTemporal } from '../store/flowStore';
 import { compileFlow, validateFlow } from '../compile/registry';
+import { fromLegacyIvr } from '../compile/fromLegacyIvr';
+import { listIvrFlows, type LegacyIvrFlowRow } from '../../api/ivr';
 import { PRODUCT_LABELS, SELECTABLE_PRODUCTS } from '../model/palette';
 import {
   createCallFlow,
@@ -75,8 +77,16 @@ export function FlowToolbar() {
   const queryClient = useQueryClient();
   const [previewOpen, setPreviewOpen] = useState(false);
   const [newOpen, setNewOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [simulateOpen, setSimulateOpen] = useState(false);
+
+  // Legacy IVR flows for the import picker — only fetched while the modal is open.
+  const legacyIvrQuery = useQuery({
+    queryKey: ['legacy-ivr-flows'],
+    queryFn: listIvrFlows,
+    enabled: importOpen,
+  });
 
   // List + invalidate flows for the CURRENT product only.
   const queryKey = ['call-flows', { product }] as const;
@@ -178,6 +188,23 @@ export function FlowToolbar() {
     toastOk(`New ${PRODUCT_LABELS[p]} flow`);
   };
 
+  // Convert a legacy ivr_flows row into a CallFlowDoc and drop it on the canvas
+  // as a fresh unsaved draft (id: null) — Save then creates a new call_flows row.
+  const handleImportLegacy = (row: LegacyIvrFlowRow) => {
+    try {
+      const doc = fromLegacyIvr(row.flow_config, {
+        name: `${row.name} (imported)`,
+        customerId: row.customer_id ?? null,
+        did: row.did ?? '',
+      });
+      loadDoc(doc);
+      setImportOpen(false);
+      toastOk(`Imported "${row.name}" — review, then Save to create a call flow`);
+    } catch {
+      toastErr('Could not import this IVR flow');
+    }
+  };
+
   const setName = (v: string) => patchDoc({ name: v });
   const setDid = (v: string) => patchDoc({ entry: { kind: 'did', did: v } });
 
@@ -273,6 +300,7 @@ export function FlowToolbar() {
       <Button variant="ghost" size="sm" onClick={() => undo()} disabled={!canUndo}>Undo</Button>
       <Button variant="ghost" size="sm" onClick={() => redo()} disabled={!canRedo}>Redo</Button>
       <Button variant="ghost" size="sm" onClick={() => setNewOpen(true)}>New</Button>
+      <Button variant="ghost" size="sm" onClick={() => setImportOpen(true)}>Import IVR</Button>
       <Button variant="ghost" size="sm" onClick={() => setPreviewOpen(true)}>Preview</Button>
       <Button
         variant="ghost"
@@ -363,6 +391,69 @@ export function FlowToolbar() {
               <span style={{ fontSize: '0.72rem', color: '#94a3b8' }}>{PRODUCT_BLURBS[p]}</span>
             </button>
           ))}
+        </div>
+      </Modal>
+
+      {/* Import legacy IVR — lists ivr_flows rows, converts the chosen one's
+          flow_config into a CallFlowDoc draft on the canvas. */}
+      <Modal open={importOpen} onClose={() => setImportOpen(false)} title="Import a legacy IVR flow">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <p style={{ margin: 0, fontSize: '0.78rem', color: '#94a3b8', lineHeight: 1.5 }}>
+            Pick an existing IVR flow to rebuild on the canvas. It loads as a new
+            unsaved draft — Save to create a Call Flow (the original IVR is left
+            untouched).
+          </p>
+
+          {legacyIvrQuery.isLoading && (
+            <span style={{ fontSize: '0.78rem', color: '#94a3b8' }}>Loading IVR flows…</span>
+          )}
+          {legacyIvrQuery.isError && (
+            <span style={{ fontSize: '0.78rem', color: '#ef4444' }}>Failed to load IVR flows.</span>
+          )}
+          {legacyIvrQuery.data?.length === 0 && (
+            <span style={{ fontSize: '0.78rem', color: '#94a3b8' }}>No legacy IVR flows found.</span>
+          )}
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: '50vh', overflow: 'auto' }}>
+            {legacyIvrQuery.data?.map((row) => {
+              const nodeCount = row.flow_config?.nodes?.length ?? 0;
+              return (
+                <button
+                  key={row.id}
+                  type="button"
+                  onClick={() => handleImportLegacy(row)}
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 3,
+                    textAlign: 'left',
+                    padding: '12px 14px',
+                    borderRadius: 10,
+                    cursor: 'pointer',
+                    color: '#e2e8f0',
+                    background: 'rgba(26,29,39,0.9)',
+                    border: '1px solid rgba(42,47,69,0.8)',
+                    transition: 'border-color 0.15s',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.borderColor = 'rgba(34,211,238,0.6)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.borderColor = 'rgba(42,47,69,0.8)';
+                  }}
+                >
+                  <span style={{ fontSize: '0.86rem', fontWeight: 700 }}>
+                    {row.name}
+                    {!row.is_active ? ' (inactive)' : ''}
+                  </span>
+                  <span style={{ fontSize: '0.72rem', color: '#94a3b8' }}>
+                    {row.did ? `DID ${row.did} · ` : ''}
+                    {nodeCount} node{nodeCount === 1 ? '' : 's'} · #{row.id}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
         </div>
       </Modal>
     </div>

@@ -1,7 +1,8 @@
 /**
  * Call Flow Builder route. Hosts the node-graph IVR editor (the universal
- * builder from CALL_FLOW_BUILDER_PLAN.md). Admin-gated (RequireAdmin in
- * App.tsx). The legacy `pages/ivr/` tree builder stays intact for now.
+ * builder from CALL_FLOW_BUILDER_PLAN.md) — now the single IVR editor, after
+ * the legacy `pages/ivr/` drag-and-drop builder was retired. Admin-gated
+ * (RequireAdmin in App.tsx).
  *
  * React #310: no hooks here; the stateful work lives inside the shell panes.
  */

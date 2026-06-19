@@ -11,7 +11,6 @@ import { DashboardPage } from './pages/DashboardPage';
 import { RcfPage } from './pages/RcfPage';
 import { ApiDidsPage } from './pages/ApiDidsPage';
 import { TrunksPage } from './pages/TrunksPage';
-import { IvrBuilderPage } from './pages/IvrBuilderPage';
 import { CallFlowBuilderPage } from './pages/CallFlowBuilderPage';
 import { RcfDocsPage } from './pages/docs/RcfDocsPage';
 import { ApiDocsPage } from './pages/docs/ApiDocsPage';
@@ -79,9 +78,8 @@ export function App() {
               <Route path="rcf"        element={<RcfPage />} />
               <Route path="api-dids"   element={<ApiDidsPage />} />
               <Route path="trunks"     element={<TrunksPage />} />
-              <Route path="ivr"        element={<IvrBuilderPage />} />
-              {/* Universal Call Flow Builder (P0 scaffold) — admin-gated.
-                  Leaves the legacy /ivr builder untouched (retired in P1). */}
+              {/* Universal Call Flow Builder — the single IVR editor (the legacy
+                  /ivr drag-and-drop builder was retired). Admin-gated. */}
               <Route
                 path="flows"
                 element={

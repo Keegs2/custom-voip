@@ -45,9 +45,8 @@ const allProductNavItems: NavItemDef[] = [
   // Programmable-voice config — api/hybrid only (RequireProgrammableVoice guards
   // the route). RCF fails the accountTypes filter, so it never appears for them.
   { label: 'Programmable Voice', icon: <Webhook size={16} strokeWidth={1.9} />, to: '/programmable-voice', color: '#c084fc', accountTypes: ['api', 'hybrid'] },
-  // IVR Builder — api/hybrid/ucaas product. Route (/ivr) exists; the page is a
-  // Phase-2 placeholder shell today but admins can review it.
-  { label: 'IVR Builder', icon: <IconIVR size={16} />, to: '/ivr', color: '#22d3ee', accountTypes: ['api', 'hybrid', 'ucaas'] },
+  // The legacy /ivr drag-and-drop builder was retired; IVR editing now lives in
+  // the admin-only Call Flow Builder (/flows, `flowsItem` below).
 ];
 
 /* ─── Voice Operations nav items (UCaaS media/control plane) ───
