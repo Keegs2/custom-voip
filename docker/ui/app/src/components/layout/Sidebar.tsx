@@ -36,9 +36,18 @@ const COMMS_ACCOUNT_TYPES = ['ucaas', 'hybrid'];
 
 const allProductNavItems: NavItemDef[] = [
   { label: 'RCF', icon: <IconRCF size={18} />, to: '/rcf', color: '#4ade80', accountTypes: ['rcf', 'hybrid'] },
+  // SIP Trunks — trunk/hybrid product. The customer portal page (/trunks) is a
+  // placeholder shell today, but the route exists; admins/support see it via
+  // passesAccountType. RCF fails the accountTypes filter, so it never appears.
+  { label: 'SIP Trunks', icon: <IconTrunk size={16} />, to: '/trunks', color: '#fbbf24', accountTypes: ['trunk', 'hybrid'] },
+  // API DIDs — api/hybrid product (API Calling DID inventory).
+  { label: 'API DIDs', icon: <IconAPI size={16} />, to: '/api-dids', color: '#c084fc', accountTypes: ['api', 'hybrid'] },
   // Programmable-voice config — api/hybrid only (RequireProgrammableVoice guards
   // the route). RCF fails the accountTypes filter, so it never appears for them.
   { label: 'Programmable Voice', icon: <Webhook size={16} strokeWidth={1.9} />, to: '/programmable-voice', color: '#c084fc', accountTypes: ['api', 'hybrid'] },
+  // IVR Builder — api/hybrid/ucaas product. Route (/ivr) exists; the page is a
+  // Phase-2 placeholder shell today but admins can review it.
+  { label: 'IVR Builder', icon: <IconIVR size={16} />, to: '/ivr', color: '#22d3ee', accountTypes: ['api', 'hybrid', 'ucaas'] },
 ];
 
 /* ─── Voice Operations nav items (UCaaS media/control plane) ───
@@ -655,10 +664,16 @@ export function Sidebar() {
   const isSupport = user?.role === 'readonly';
   const showAdmin = isAdmin || isSupport;
 
-  // UCaaS gating. RCF accounts are explicitly excluded: `account_type === 'rcf'`
-  // fails both clauses, so hasUcaas is always false for an RCF customer. This is
-  // the primary guard behind C-10 (RCF must see zero UCaaS surface).
+  // UCaaS gating. Admins always see the UCaaS surfaces (Voice Ops + Communications)
+  // so they can review every page we built — consistent with SoftphoneWidget's
+  // hasUcaas. `isAdmin` here is `isActualAdmin && !customerViewMode` (AuthContext),
+  // so when an admin "views as customer" the bypass collapses and the preview
+  // reflects the customer's real surface. RCF accounts are explicitly excluded:
+  // an rcf *customer* user has role 'user' (isAdmin false) and `account_type === 'rcf'`
+  // fails both remaining clauses, so hasUcaas is always false for an RCF customer.
+  // This preserves C-10 (RCF must see zero UCaaS surface).
   const hasUcaas =
+    isAdmin ||
     user?.account_type === 'ucaas' ||
     (user?.account_type !== 'rcf' && user?.ucaas_enabled === true);
 

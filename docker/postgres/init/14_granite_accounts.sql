@@ -11,6 +11,10 @@ INSERT INTO customers (name, account_type, balance, credit_limit, status, traffi
 SELECT 'Granite Telephony', 'hybrid', 1000.0000, 500.0000, 'active', 'premium'
 WHERE NOT EXISTS (SELECT 1 FROM customers WHERE name = 'Granite Telephony');
 
+-- Operator account: enable all UCaaS surfaces so the platform admin can see/review
+-- every product in the UI, and "view as customer" previews the full UCaaS experience.
+UPDATE customers SET ucaas_enabled = true WHERE name = 'Granite Telephony';
+
 -- Create admin user for Granite
 INSERT INTO users (email, password_hash, customer_id, role, name, status)
 VALUES (
