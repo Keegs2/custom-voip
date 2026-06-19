@@ -23,6 +23,7 @@ local specs = {
     "spec/inbound_router_spec.lua",
     "spec/ucaas_inbound_spec.lua",
     "spec/ucaas_ringplan_spec.lua",
+    "spec/trunk_inbound_spec.lua",
     "spec/trunk_outbound_spec.lua",
 }
 

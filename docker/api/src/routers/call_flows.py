@@ -422,6 +422,57 @@ async def publish_call_flow(
                     "strategy=%s legs=%d (sink_ref=%s)",
                     flow_id, did, ext_id, strategy, len(legs), sink_ref,
                 )
+            elif product == "trunk":
+                # SIP-trunk inbound sink = trunk_dids.route_plan (migration 29).
+                # The compiled artifact is the FLAT route plan (CALL_FLOW_BUILDER
+                # _PLAN §12 contract, snake_case keys exactly):
+                #   {strategy:"failover"|"parallel", timeout:int,
+                #    endpoints:[{to, timeout?}]}
+                # The FreeSWITCH Lua reads trunk_dids per call (PG lookup; there
+                # is NO Redis cache for trunk_dids today — unlike rcf_numbers) so
+                # there is NO cache-invalidation step here.
+                if not did:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="entry DID is required to publish a trunk flow",
+                    )
+                # Resolve the trunk DID row by the entry DID. The DID must already
+                # be assigned to a trunk (trunk_dids row exists).
+                td_row = await conn.fetchrow(
+                    "SELECT id FROM trunk_dids WHERE did = $1", did,
+                )
+                if td_row is None:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"no trunk is assigned DID {did}; "
+                               "assign the DID to a trunk before publishing",
+                    )
+                td_id = td_row["id"]
+
+                # Validate the compiled route plan: strategy + non-empty endpoints.
+                strategy = body.compiled.get("strategy")
+                if strategy not in ("failover", "parallel"):
+                    raise HTTPException(
+                        status_code=400,
+                        detail="compiled.strategy must be 'failover' or 'parallel'",
+                    )
+                endpoints = body.compiled.get("endpoints")
+                if not isinstance(endpoints, list) or len(endpoints) == 0:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="compiled.endpoints must be a non-empty array",
+                    )
+
+                await conn.execute(
+                    "UPDATE trunk_dids SET route_plan = $1::jsonb WHERE id = $2",
+                    compiled_json, td_id,
+                )
+                sink_ref = td_id
+                logger.info(
+                    "publish flow %s: trunk_dids.route_plan set did=%s td_id=%s "
+                    "strategy=%s endpoints=%d (sink_ref=%s)",
+                    flow_id, did, td_id, strategy, len(endpoints), sink_ref,
+                )
             # else: other non-IVR products — no sink write yet (P2+ TODO).
             # compiled is still persisted on call_flows below so it is not lost.
 

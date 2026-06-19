@@ -448,6 +448,97 @@ export function NodeConfigPanel() {
           </>
         )}
 
+        {/* SIP-trunk inbound delivery — ordered/parallel PBX endpoints. */}
+        {config.type === 'route' && (
+          <>
+            <FormField
+              as="select"
+              label="Delivery strategy"
+              value={config.strategy}
+              onChange={(e) => set({ strategy: e.target.value as 'failover' | 'parallel' })}
+              hint={
+                config.strategy === 'failover'
+                  ? 'Try each endpoint in order until one answers.'
+                  : 'Ring all endpoints at once; first to answer wins.'
+              }
+            >
+              <option value="failover">Failover (in order)</option>
+              <option value="parallel">Parallel (all at once)</option>
+            </FormField>
+            <FormField
+              label="Timeout (s)"
+              type="number"
+              min={5}
+              value={String(config.timeout)}
+              onChange={(e) => set({ timeout: num(e.target.value) ?? 30 })}
+              hint="Overall time to deliver before the call is dropped."
+            />
+
+            <div>
+              <div style={legsHeader}>Endpoints (in delivery order)</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {config.endpoints.map((ep, i) => (
+                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={legIndex}>{i + 1}</span>
+                    <input
+                      style={{ ...legInput, flex: 1 }}
+                      value={ep.to}
+                      placeholder="10.0.0.5 or pbx.example.com"
+                      onChange={(e) =>
+                        set({ endpoints: config.endpoints.map((x, j) => (j === i ? { ...x, to: e.target.value } : x)) })
+                      }
+                    />
+                    <input
+                      style={{ ...legInput, width: 56 }}
+                      type="number"
+                      min={1}
+                      value={ep.timeout === undefined ? '' : String(ep.timeout)}
+                      placeholder="s"
+                      title="Per-endpoint timeout (optional)"
+                      onChange={(e) =>
+                        set({ endpoints: config.endpoints.map((x, j) => (j === i ? { ...x, timeout: num(e.target.value) } : x)) })
+                      }
+                    />
+                    <button
+                      type="button"
+                      style={legBtn}
+                      disabled={i === 0}
+                      title="Move up"
+                      onClick={() => set({ endpoints: swap(config.endpoints, i, i - 1) })}
+                    >
+                      ↑
+                    </button>
+                    <button
+                      type="button"
+                      style={legBtn}
+                      disabled={i === config.endpoints.length - 1}
+                      title="Move down"
+                      onClick={() => set({ endpoints: swap(config.endpoints, i, i + 1) })}
+                    >
+                      ↓
+                    </button>
+                    <button
+                      type="button"
+                      style={{ ...legBtn, color: '#ef4444' }}
+                      title="Remove endpoint"
+                      onClick={() => set({ endpoints: config.endpoints.filter((_, j) => j !== i) })}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+              </div>
+              <button
+                type="button"
+                style={addLegBtn}
+                onClick={() => set({ endpoints: [...config.endpoints, { to: '' }] })}
+              >
+                + Add endpoint
+              </button>
+            </div>
+          </>
+        )}
+
         {config.type === 'voicemail' && (
           <>
             <FormField

@@ -99,6 +99,10 @@ local sbc = load_module("sbc")
 local dialstring = load_module("dialstring")
 local caller_id = load_module("caller_id")
 local session_timer = load_module("session_timer")
+-- Shared multi-leg ring / failover primitives (bridged_ok, sequential, parallel)
+-- used by both the UCaaS find-me/follow-me path and the trunk multi-endpoint
+-- delivery path (handlers/ucaas.lua, handlers/trunk.lua).
+local multileg = load_module("multileg")
 
 -- Ensure session exists
 if not session then
@@ -285,7 +289,14 @@ local function lookup_trunk_did()
             product_type = "trunk",
             customer_id = tonumber(trunk_did.customer_id),
             trunk_id = trunk_did.trunk_id,
-            traffic_grade = trunk_did.traffic_grade or "standard"
+            traffic_grade = trunk_did.traffic_grade or "standard",
+            -- route_plan: parsed multi-endpoint delivery plan (Lua table) or nil.
+            -- When present, handlers/trunk.lua delivers the call across the
+            -- trunk's PBX endpoints per the plan (failover ordering / parallel);
+            -- when nil it keeps the legacy single-endpoint bridge (backward
+            -- compatible). db_client.lookup_trunk_did already parsed the JSONB and
+            -- guarantees this is either a well-formed table or nil.
+            route_plan = trunk_did.route_plan
         }
     end
 
@@ -428,6 +439,7 @@ local ctx = {
     dialstring = dialstring,
     caller_id = caller_id,
     session_timer = session_timer,
+    multileg = multileg,
 }
 
 freeswitch.consoleLog("DEBUG", "[" .. uuid .. "] STEP 2: Dispatching product_type=" .. tostring(product_type) .. "\n")

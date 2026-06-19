@@ -45,7 +45,7 @@ const PRODUCT_BLURBS: Record<ProductKind, string> = {
   api: 'Webhook-driven programmable voice — same palette as IVR, API product tag.',
   rcf: 'Remote call forwarding — a DID forwards to a single destination.',
   conference: 'A greeting, then join a conference room.',
-  trunk: 'SIP trunk inbound routing.',
+  trunk: 'SIP trunk inbound delivery — try the PBX endpoints in order or in parallel.',
   ucaas: 'Find-me / follow-me ring plans.',
 };
 

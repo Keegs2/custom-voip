@@ -1,7 +1,8 @@
 /**
  * Shared telephony step node — covers every linear IVR verb (say, play, pause,
  * dial, record, redirect, reject, hangup, conference) plus the UCaaS
- * find-me/follow-me verbs (ringGroup, voicemail). A dark-palette card with a
+ * find-me/follow-me verbs (ringGroup, voicemail) and the SIP-trunk inbound
+ * delivery verb (route). A dark-palette card with a
  * target handle (top) and, unless the verb is terminal (hangup/reject/voicemail),
  * a single `next` source handle (bottom).
  *
@@ -42,6 +43,10 @@ function summarize(config: NodeConfig): string {
     case 'ringGroup': {
       const live = config.legs.filter((l) => l.to.trim()).length;
       return `${config.strategy} · ${live} dest${live === 1 ? '' : 's'}`;
+    }
+    case 'route': {
+      const live = config.endpoints.filter((e) => e.to.trim()).length;
+      return `${config.strategy} · ${live} endpoint${live === 1 ? '' : 's'}`;
     }
     case 'voicemail':
       return config.mailbox ? `mailbox ${config.mailbox}` : 'Leave a message';

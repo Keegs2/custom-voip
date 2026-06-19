@@ -30,6 +30,8 @@ export const nodeTypes: NodeTypes = {
   // UCaaS find-me/follow-me verbs.
   ringGroup: StepNode,
   voicemail: StepNode,
+  // SIP-trunk inbound delivery verb.
+  route: StepNode,
   // IVR branching verb.
   menu: MenuNode,
   // Other products — placeholder for now.

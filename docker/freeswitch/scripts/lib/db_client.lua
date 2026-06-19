@@ -63,6 +63,31 @@ local function get_json()
     return nil
 end
 
+-- Decode a JSONB column handed back by luasql as ::text into a Lua table, or
+-- nil. Shared by the two read-only routing-plan columns: extensions.ring_plan
+-- (UCaaS find-me/follow-me) and trunk_dids.route_plan (SIP-trunk multi-endpoint
+-- delivery). The backend OWNS/writes these columns; we only READ them.
+--
+-- FAIL-SAFE: a NULL/empty/"null" value, a missing JSON decoder, OR malformed
+-- JSON all yield nil so the caller degrades cleanly to its legacy single-bridge
+-- path — a bad plan must NEVER abort the call. `label` is used only for the
+-- warning log on malformed input.
+local function decode_jsonb_column(raw, label)
+    if not raw or type(raw) ~= "string" then return nil end
+    local trimmed = raw:gsub("^%s*(.-)%s*$", "%1")
+    if trimmed == "" or trimmed == "null" then return nil end
+    local json = get_json()
+    if not json then return nil end
+    local parsed, perr = json.decode(trimmed)
+    if type(parsed) == "table" then return parsed end
+    if freeswitch and freeswitch.consoleLog then
+        freeswitch.consoleLog("WARN", string.format(
+            "%s has unparseable JSON (%s) — using single-bridge fallback\n",
+            tostring(label), tostring(perr)))
+    end
+    return nil
+end
+
 -- Connection pool state
 local env = nil
 local conn = nil
@@ -346,9 +371,13 @@ function M.lookup_trunk_did(did)
         return nil
     end
 
+    -- route_plan is JSONB; cast to ::text so luasql hands it back as a string we
+    -- can parse with lib/json.lua. The backend owns/writes this column (SIP-trunk
+    -- inbound multi-endpoint delivery — failover ordering / parallel); we only
+    -- READ it here. NULL when no route plan exists -> legacy single-endpoint bridge.
     local sql = string.format([[
         SELECT td.trunk_id, t.customer_id, t.max_channels,
-               c.traffic_grade, c.status
+               c.traffic_grade, c.status, td.route_plan::text AS route_plan
         FROM trunk_dids td
         JOIN sip_trunks t ON td.trunk_id = t.id
         JOIN customers c ON t.customer_id = c.id
@@ -364,6 +393,14 @@ function M.lookup_trunk_did(did)
 
     local row = cursor:fetch({}, "a")
     cursor:close()
+
+    -- Parse the route_plan JSONB text into a Lua table (or nil). A nil/empty/
+    -- "null"/malformed plan -> row.route_plan = nil -> handlers/trunk.lua keeps
+    -- the legacy single-endpoint bridge (backward compatible / fail-safe).
+    if row then
+        row.route_plan = decode_jsonb_column(
+            row.route_plan, "trunk_did " .. tostring(clean_did) .. " route_plan")
+    end
 
     return row
 end
@@ -630,26 +667,11 @@ function M.lookup_extension_did(did)
     -- column means "no ring plan" -> ring_plan = nil -> caller keeps the legacy
     -- single-extension bridge. A malformed plan is logged and treated as nil
     -- (fail-safe: a bad plan must NEVER abort the call), so handlers/ucaas.lua
-    -- always receives either a well-formed table or nil.
+    -- always receives either a well-formed table or nil. (Shared decoder with
+    -- the trunk route_plan path — see decode_jsonb_column above.)
     if row then
-        local raw = row.ring_plan
-        row.ring_plan = nil
-        if raw and type(raw) == "string" then
-            local trimmed = raw:gsub("^%s*(.-)%s*$", "%1")
-            if trimmed ~= "" and trimmed ~= "null" then
-                local json = get_json()
-                if json then
-                    local parsed, perr = json.decode(trimmed)
-                    if type(parsed) == "table" then
-                        row.ring_plan = parsed
-                    else
-                        freeswitch.consoleLog("WARN", string.format(
-                            "Extension %s has unparseable ring_plan (%s) — using single-bridge fallback\n",
-                            tostring(row.extension), tostring(perr)))
-                    end
-                end
-            end
-        end
+        row.ring_plan = decode_jsonb_column(
+            row.ring_plan, "extension " .. tostring(row.extension) .. " ring_plan")
     end
 
     return row

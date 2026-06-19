@@ -34,6 +34,7 @@ export type NodeType =
   | 'menu' // Gather: collect digits, branch per digit
   | 'dial' // Dial/Forward to a PSTN/SIP destination
   | 'ringGroup' // ring N destinations simultaneously/sequentially
+  | 'route' // SIP trunk inbound: try PBX endpoints in order/parallel
   | 'schedule' // time-of-day / holiday routing
   | 'condition' // generic branch (caller-id, variable, %-split)
   | 'record'
@@ -66,6 +67,17 @@ export interface ScheduleRule {
  * group `ringTimeout` for that leg (used by the `sequential` strategy).
  */
 export interface RingLeg {
+  to: string;
+  timeout?: number;
+}
+
+/**
+ * One ordered PBX endpoint in a SIP-trunk inbound route plan (`route` node).
+ * `to` is the trunk's delivery target (an `endpoint_ips` entry / SIP URI); the
+ * optional per-endpoint `timeout` overrides the group `timeout` for that attempt
+ * (used by the `failover` strategy).
+ */
+export interface RouteEndpoint {
   to: string;
   timeout?: number;
 }
@@ -123,6 +135,18 @@ export type NodeConfig =
       ringTimeout: number;
       /** Ordered destinations. Each compiles to a `legs[]` entry `{to, timeout?}`. */
       legs: RingLeg[];
+    }
+  | {
+      type: 'route';
+      /**
+       * `failover` tries endpoints in order until one answers; `parallel` rings
+       * all endpoints at once, first to answer wins.
+       */
+      strategy: 'failover' | 'parallel';
+      /** Overall route timeout (seconds). Compiles to `timeout`. */
+      timeout: number;
+      /** Ordered PBX endpoints. Each compiles to an `endpoints[]` entry `{to, timeout?}`. */
+      endpoints: RouteEndpoint[];
     }
   | { type: 'schedule'; tz: string; rules: ScheduleRule[] }
   | { type: 'condition'; conditions: EdgeCondition[] }

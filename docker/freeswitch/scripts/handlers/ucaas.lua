@@ -51,6 +51,9 @@ return function(ctx)
     local routing = ctx.routing
     local original_caller_number = ctx.original_caller_number
     local original_caller_name = ctx.original_caller_name
+    -- Shared multi-leg ring / failover primitives (bridged_ok, sequential,
+    -- parallel) — same runners the trunk multi-endpoint path uses.
+    local multileg = ctx.multileg
 
     -- UCaaS Extension DID - Route inbound call to user's extension
     local ext = routing.extension
@@ -99,9 +102,9 @@ return function(ctx)
     -- Authoritative bridge-result check (CLAUDE.md): a leg connected iff
     -- originate_disposition == "SUCCESS". bridge_result is NOT a real channel
     -- variable (reading it always returns "") — using it would wrongly drop an
-    -- ANSWERED call into voicemail.
+    -- ANSWERED call into voicemail. Delegates to the shared lib/multileg primitive.
     local function bridged_ok()
-        return get_var("originate_disposition", "") == "SUCCESS"
+        return multileg.bridged_ok(get_var)
     end
 
     -- ========================================================================
@@ -312,23 +315,21 @@ return function(ctx)
     -- plan ring_timeout), advancing on no-answer/busy/decline. One bridge per
     -- leg so the per-leg call_timeout is honored exactly; continue_on_fail=true
     -- returns control here after a failed leg, hangup_after_bridge=true tears the
-    -- call down cleanly once a leg answers.
+    -- call down cleanly once a leg answers. The loop itself is the shared
+    -- lib/multileg.sequential runner — the per-leg dial-string/log stays here.
     local function ring_sequential()
-        for idx, leg in ipairs(legs) do
-            if not session:ready() then return end   -- caller hung up — stop
+        multileg.sequential(session, get_var, legs, function(leg, idx)
             local to = leg and leg.to
-            if to and to ~= "" then
-                local leg_timeout = tonumber(leg.timeout) or plan_timeout
-                local ds = build_leg(to, leg_timeout)
-                freeswitch.consoleLog("INFO", string.format(
-                    "[%s] FMFM sequential leg %d/%d -> %s (timeout=%ds, %s)\n",
-                    uuid, idx, #legs, tostring(to), leg_timeout,
-                    leg_is_extension(to) and "extension" or "pstn"
-                ))
-                pcall(function() session:execute("bridge", ds) end)
-                if bridged_ok() then return end       -- answered — done
-            end
-        end
+            if not to or to == "" then return nil end   -- skip empty leg
+            local leg_timeout = tonumber(leg.timeout) or plan_timeout
+            local ds = build_leg(to, leg_timeout)
+            freeswitch.consoleLog("INFO", string.format(
+                "[%s] FMFM sequential leg %d/%d -> %s (timeout=%ds, %s)\n",
+                uuid, idx, #legs, tostring(to), leg_timeout,
+                leg_is_extension(to) and "extension" or "pstn"
+            ))
+            return ds
+        end)
     end
 
     -- PARALLEL: ring all legs simultaneously up to the overall ring_timeout via
@@ -361,15 +362,13 @@ return function(ctx)
             end
         end
         if #endpoints == 0 then return end
-        local ds = string.format(
-            "{ignore_early_media=false,call_timeout=%d}%s",
-            plan_timeout, table.concat(endpoints, ",")
-        )
         freeswitch.consoleLog("INFO", string.format(
             "[%s] FMFM parallel ringing %d endpoint(s), overall timeout=%ds\n",
             uuid, #endpoints, plan_timeout
         ))
-        pcall(function() session:execute("bridge", ds) end)
+        -- Shared lib/multileg.parallel runner: one comma-joined simring bridge.
+        local prefix = string.format("{ignore_early_media=false,call_timeout=%d}", plan_timeout)
+        multileg.parallel(session, get_var, prefix, endpoints)
     end
 
     -- FALLBACK once all legs fail / no-answer.

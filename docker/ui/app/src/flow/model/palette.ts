@@ -27,6 +27,7 @@ export const NODE_META: Record<string, NodeMeta> = {
   menu: { label: 'Menu', accent: '#c084fc', glyph: '#', blurb: 'Gather digits, branch per key' },
   dial: { label: 'Dial', accent: '#4ade80', glyph: '☎', blurb: 'Forward to a destination' },
   ringGroup: { label: 'Ring Group', accent: '#34d399', glyph: '⇉', blurb: 'Find-me/follow-me ring plan' },
+  route: { label: 'Route', accent: '#fbbf24', glyph: '⌥', blurb: 'Deliver to trunk PBX endpoints' },
   voicemail: { label: 'Voicemail', accent: '#f59e0b', glyph: '✉', blurb: 'Send caller to voicemail' },
   record: { label: 'Record', accent: '#f472b6', glyph: '⏺', blurb: 'Record the caller' },
   redirect: { label: 'Redirect', accent: '#22d3ee', glyph: '↪', blurb: 'Hand control to another flow/URL' },
@@ -78,6 +79,14 @@ export const RCF_PALETTE: NodeType[] = ['dial', 'hangup'];
 export const UCAAS_PALETTE: NodeType[] = ['ringGroup', 'voicemail', 'dial', 'hangup'];
 
 /**
+ * SIP-trunk palette (plan §3 / §12): inbound delivery for a trunk DID. Focused —
+ * a single `route` node (ordered/parallel PBX endpoints with timeouts) plus the
+ * terminal `hangup`. `entry` is auto-created (one per flow), so it is not listed
+ * here. No say/menu/conference: trunk inbound is delivery, not programmable voice.
+ */
+export const TRUNK_PALETTE: NodeType[] = ['route', 'hangup'];
+
+/**
  * Per-product palette. The palette IS the product gate (plan §0.1 decision 2):
  * a product can only express what its palette exposes.
  *
@@ -85,15 +94,14 @@ export const UCAAS_PALETTE: NodeType[] = ['ringGroup', 'voicemail', 'dial', 'han
  *  - `conference`: greeting + join a room.
  *  - `rcf`: forward + hangup only.
  *  - `ucaas`: find-me/follow-me ring plan (ringGroup + voicemail/forward/hangup).
- *  - `trunk`: not surfaced in the product selector yet; minimal stub so the
- *    record is total and type-safe.
+ *  - `trunk`: SIP-trunk inbound delivery — a single `route` node + hangup.
  */
 export const PALETTE_BY_PRODUCT: Record<ProductKind, NodeType[]> = {
   ivr: IVR_PALETTE,
   api: IVR_PALETTE,
   conference: CONFERENCE_PALETTE,
   rcf: RCF_PALETTE,
-  trunk: ['dial', 'reject', 'hangup'],
+  trunk: TRUNK_PALETTE,
   ucaas: UCAAS_PALETTE,
 };
 
@@ -113,4 +121,4 @@ export const PRODUCT_LABELS: Record<ProductKind, string> = {
 };
 
 /** Products offered when creating a NEW flow (Task 1). */
-export const SELECTABLE_PRODUCTS: ProductKind[] = ['ivr', 'api', 'rcf', 'conference', 'ucaas'];
+export const SELECTABLE_PRODUCTS: ProductKind[] = ['ivr', 'api', 'rcf', 'conference', 'trunk', 'ucaas'];
