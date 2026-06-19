@@ -20,3 +20,9 @@ EXPOSE 5432 6432
 
 # Performance-tuned postgres config
 ENV POSTGRES_INITDB_ARGS="--data-checksums"
+
+# Start BOTH Postgres and PgBouncer. Without this ENTRYPOINT the base image's
+# default entrypoint runs Postgres ONLY and PgBouncer never starts (6432 dead) —
+# the bug that made the all-in-one box diverge from production's pooled path.
+ENTRYPOINT ["/usr/local/bin/custom-entrypoint.sh"]
+CMD ["postgres"]

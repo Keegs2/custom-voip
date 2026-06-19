@@ -289,7 +289,9 @@ services:
 
   # qryn — Loki-compatible API over ClickHouse (replaces the homer-app backend)
   qryn:
-    image: qxip/qryn:latest
+    # Pinned to the multi-arch (amd64+arm64) digest validated on the test box,
+    # matching the previously-floating :latest. Bump deliberately, not by drift.
+    image: qxip/qryn@sha256:77acc9c7a9fd98954e42b10c837f8849bae8a0c647b8233b40cf59f606cf6f0e
     container_name: voip-qryn
     environment:
       - CLICKHOUSE_SERVER=clickhouse-server

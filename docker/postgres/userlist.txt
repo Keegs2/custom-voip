@@ -1,3 +1,4 @@
-"voip" "md5$(echo -n 'voip_secretvoip' | md5sum | cut -d' ' -f1)"
-"freeswitch" "md5$(echo -n 'fs_secretfreeswitch' | md5sum | cut -d' ' -f1)"
-"api" "md5$(echo -n 'api_secretapi' | md5sum | cut -d' ' -f1)"
+# GENERATED AT RUNTIME — do not edit.
+# entrypoint.sh overwrites this file on every container start with the roles'
+# real SCRAM-SHA-256 secrets read from pg_authid. This placeholder only exists
+# so the COPY in the Dockerfile has a file to copy; its contents are never used.
