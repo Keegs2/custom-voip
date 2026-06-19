@@ -176,7 +176,10 @@ services:
     environment:
       - DATABASE_URL=postgresql://${API_DB_USER:-api}:${API_DB_PASS:-api_secret}@postgres:5432/${DB_NAME:-voip}
       - REDIS_URL=redis://redis:6379
-      - FREESWITCH_ESL_HOST=${FREESWITCH_ESL_HOST:-127.0.0.1}
+      # NOTE: on Docker Desktop (Mac/Win), host-networked FreeSWITCH is NOT reachable
+      # from this bridge container — API<->FS (ESL, xml_curl, CDR, vm_notify) only works
+      # on a real Linux host / production VMs. host.docker.internal is the best-effort local value.
+      - FREESWITCH_ESL_HOST=${FREESWITCH_ESL_HOST:-host.docker.internal}
       - FREESWITCH_ESL_PORT=${FREESWITCH_ESL_PORT:-8021}
       # ESL password: explicit dev default, NOT the well-known ClueCon.
       # esl_client.py no longer hardcodes a ClueCon fallback (Phase 4).

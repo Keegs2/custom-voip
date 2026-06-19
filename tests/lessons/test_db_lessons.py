@@ -54,3 +54,17 @@ def test_destructive_demo_reset_not_in_autorun_init():
     assert (REPO / "docker" / "postgres" / "dev-seed" / "21_account_cleanup.sql").exists(), (
         "account_cleanup should be preserved under docker/postgres/dev-seed/ (manual only)"
     )
+
+
+def test_sequences_resynced_after_explicit_id_seeds():
+    """Seed scripts INSERT explicit ids (Granite customer 1, UCaaS customer 5, admin
+    user) without advancing the owning sequence, so nextval() would collide with
+    seeded rows (found live in Phase 5). A final init script must setval() every
+    sequence to MAX(owning column). It must sort LAST in init/ (run after all seeds)."""
+    setval_scripts = [f for f in INIT_DIR.glob("*.sql") if "setval" in f.read_text()]
+    assert setval_scripts, "no init script resyncs sequences (setval) — fresh init will collide"
+    # Must run after the highest-numbered seed script (alphabetical init order).
+    last_init = max(INIT_DIR.glob("*.sql"), key=lambda p: p.name)
+    assert "setval" in last_init.read_text(), (
+        f"the sequence resync must be the LAST init script; last is {last_init.name}"
+    )

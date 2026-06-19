@@ -229,25 +229,32 @@ On auth failure, returns a `JSONResponse(status_code=401)` directly (never raise
 
 ## Services Module (services/)
 
-### esl_client.py
-Implements a raw TCP ESL client (no third-party ESL library). Each command opens a new TCP connection to FreeSWITCH:
+### esl_client.py — Phase 5 (single persistent connection)
+ONE asyncio-native, persistent inbound ESL connection (no third-party library;
+switchio rejected — see api/CLAUDE.md). The `ESLClient` class multiplexes:
+- **events** → an authoritative in-memory live-call registry (`uuid -> LiveCall`)
+- **commands** (`api`/`bgapi`) → originate/hangup/transfer/dtmf/status
 
-1. Open TCP connection to `ESL_HOST:ESL_PORT`
-2. Read `auth/request` prompt
-3. Send `auth {password}\n\n`
-4. Read `+OK`
-5. Send `api {command}\n\n`
-6. Read response until `\n\n`
-7. Close connection
+Lifecycle: `start_esl_consumer()` (from main.py lifespan) spawns a supervised
+task that connects, authenticates, subscribes to events, and runs a single
+reader loop. On any failure it reconnects with exponential backoff (1→2→4…30s).
+**Never blocks/crashes API startup when FS is unreachable** (reports
+`connected:false`). A FIFO of futures correlates command/reply + api/response;
+`originate` uses `bgapi` + `BACKGROUND_JOB` so it doesn't stall the reader.
 
-All operations have 5-10 second timeouts. Returns None on any error.
-
-**Public functions**:
-- `originate_call(uuid, from_did, to, customer_id, traffic_grade, webhook_url, timeout)` -- builds an originate command with channel variables. Routes through `sofia/external/{to}@{sbc_proxy}:5060` so Kamailio applies `ext-sip-ip`. The `sip_h_X-Carrier` header is hardcoded to `primary` (Dallas) — all products use the same 2-carrier model and `traffic_grade` is only passed as a channel var, it does NOT select the carrier. In TEST_MODE, uses `loopback/`.
-- `get_call_status(call_id)` -- `uuid_dump`, parses key:value pairs
-- `hangup_call(call_id, cause)` -- `uuid_kill`
-- `transfer_call(call_id, destination)` -- `uuid_transfer`
-- `send_dtmf(call_id, digits)` -- `uuid_send_dtmf`
+**Module-level singleton + wrappers** (every caller uses these — one pattern):
+- `get_esl_client()` / `start_esl_consumer()` / `stop_esl_consumer()`
+- `_send_esl_command(cmd)` -- blocking `api` over the shared connection (used by
+  trunks.py `show channels`, conference.py `conference ...`)
+- `originate_call(...)` -- `bgapi originate` via `sofia/external/{to}@{sbc}:5060`
+  (Kamailio applies `ext-sip-ip`); `X-Carrier` hardcoded `primary`;
+  `traffic_grade` is a channel var only. `TEST_MODE` → `loopback/`.
+- `get_call_status(call_id)` -- registry FIRST (event-derived), `uuid_dump` fallback
+- `hangup_call` / `transfer_call` / `send_dtmf` -- fire-and-forget
+- `hangup_call_confirmed` / `transfer_call_confirmed` / `redirect_call_confirmed`
+  / `send_dtmf_confirmed` -- event-confirmed (wait for the resulting CHANNEL
+  event); back the `/v1/calls/{id}/update` actions.
+- `ESLClient.health()` -- connected/last_event_ts/reconnects/live_calls (for /health)
 
 ### bandwidth_client.py
 Bandwidth Numbers API client. The upstream API returns **XML**, not JSON.

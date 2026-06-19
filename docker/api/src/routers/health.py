@@ -29,12 +29,30 @@ async def _check_redis() -> tuple[str, str]:
         return "error", f"unhealthy: {str(e) or type(e).__name__}"
 
 
+def _esl_health() -> dict:
+    """ESL consumer health WITHOUT touching the connection (pure in-memory read).
+
+    Phase 5: FreeSWITCH being unreachable is NOT fatal and does NOT affect the
+    overall health verdict — locally (Docker Desktop host-net isolation) the
+    consumer can never connect, and the API must still report healthy. This
+    field is informational: connected bool + last_event_ts + reconnect count.
+    """
+    try:
+        from services.esl_client import get_esl_client
+        return get_esl_client().health()
+    except Exception as e:  # noqa: BLE001 — health must never raise
+        return {"configured": False, "connected": False, "error": str(e)}
+
+
 @router.get("/health")
 async def health_check():
     """Health check with DB and Redis connectivity verification.
 
     Always returns HTTP 200 — Redis being down is "degraded", not fatal
     (cache is fail-open by design); Docker must not restart-loop the API.
+
+    The ESL consumer status is reported but is intentionally NOT part of the
+    health verdict (FS may be unreachable locally / during maintenance).
     """
     checks = {"api": "ok"}
     try:
@@ -46,7 +64,11 @@ async def health_check():
     checks["redis"], _ = await _check_redis()
 
     healthy = all(v == "ok" for v in checks.values())
-    return {"status": "healthy" if healthy else "degraded", "checks": checks}
+    return {
+        "status": "healthy" if healthy else "degraded",
+        "checks": checks,
+        "esl": _esl_health(),
+    }
 
 
 @router.get("/health/detailed")

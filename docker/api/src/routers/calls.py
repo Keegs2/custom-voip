@@ -12,7 +12,14 @@ import uuid
 import logging
 from db import database as db
 from db import redis_client as cache
-from services.esl_client import originate_call, get_call_status, hangup_call
+from services.esl_client import (
+    originate_call,
+    get_call_status,
+    hangup_call_confirmed,
+    transfer_call_confirmed,
+    redirect_call_confirmed,
+    send_dtmf_confirmed,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -33,8 +40,11 @@ class CallCreate(BaseModel):
 
 
 class CallUpdate(BaseModel):
-    action: str  # hangup, transfer, hold
-    target: Optional[str] = None  # For transfer
+    action: str  # hangup | transfer | redirect | dtmf
+    target: Optional[str] = None      # transfer destination / redirect TwiML URL
+    digits: Optional[str] = None      # for action=dtmf
+    cause: Optional[str] = None       # for action=hangup (default NORMAL_CLEARING)
+    confirm_timeout: float = 5.0      # seconds to wait for the confirming event
 
 
 @router.post("")
@@ -217,7 +227,21 @@ async def get_call(call_id: str):
 
 @router.post("/{call_id}/update")
 async def update_call(call_id: str, update: CallUpdate):
-    """Modify a live call (hangup, transfer, etc.)."""
+    """Modify a LIVE call, event-confirmed (not fire-and-forget).
+
+    Each action issues the ESL command over the persistent control connection
+    and then waits to observe the resulting CHANNEL event (HANGUP for hangup,
+    transfer EXECUTE_COMPLETE for transfer/redirect, send_dtmf EXECUTE_COMPLETE
+    for dtmf). The response reports `confirmed: true/false` so callers know the
+    switch actually applied the change.
+
+    Actions:
+      - hangup   : uuid_kill (optional `cause`)
+      - transfer : uuid_transfer to `target` extension
+      - redirect : point the call at new TwiML (`target` = voice_url), then
+                   transfer it back into the voice engine to re-fetch
+      - dtmf     : uuid_send_dtmf `digits`
+    """
     # Verify call exists and is active
     active = await db.fetch_one(
         "SELECT uuid, state FROM active_calls WHERE uuid = $1",
@@ -227,20 +251,57 @@ async def update_call(call_id: str, update: CallUpdate):
     if not active:
         raise HTTPException(status_code=404, detail="Active call not found")
 
-    if update.action == "hangup":
-        success = await hangup_call(call_id)
-        if success:
-            return {"call_id": call_id, "action": "hangup", "status": "success"}
-        raise HTTPException(status_code=500, detail="Failed to hangup call")
+    action = update.action
+    timeout = max(0.5, min(update.confirm_timeout, 30.0))
 
-    elif update.action == "transfer":
+    if action == "hangup":
+        result = await hangup_call_confirmed(
+            call_id, cause=update.cause or "NORMAL_CLEARING", timeout=timeout
+        )
+        if not result["ok"]:
+            raise HTTPException(status_code=500, detail="Failed to hangup call")
+        return {
+            "call_id": call_id, "action": "hangup", "status": "success",
+            "confirmed": result["confirmed"], "hangup_cause": result["hangup_cause"],
+        }
+
+    elif action == "transfer":
         if not update.target:
             raise HTTPException(status_code=400, detail="Transfer requires target")
-        # Implement transfer via ESL
-        raise HTTPException(status_code=501, detail="Transfer not yet implemented")
+        result = await transfer_call_confirmed(call_id, update.target, timeout=timeout)
+        if not result["ok"]:
+            raise HTTPException(status_code=500, detail="Failed to transfer call")
+        return {
+            "call_id": call_id, "action": "transfer", "target": update.target,
+            "status": "success", "confirmed": result["confirmed"],
+        }
+
+    elif action == "redirect":
+        if not update.target:
+            raise HTTPException(
+                status_code=400, detail="Redirect requires target (new TwiML URL)"
+            )
+        result = await redirect_call_confirmed(call_id, update.target, timeout=timeout)
+        if not result["ok"]:
+            raise HTTPException(status_code=500, detail="Failed to redirect call")
+        return {
+            "call_id": call_id, "action": "redirect", "voice_url": update.target,
+            "status": "success", "confirmed": result["confirmed"],
+        }
+
+    elif action == "dtmf":
+        if not update.digits:
+            raise HTTPException(status_code=400, detail="DTMF requires digits")
+        result = await send_dtmf_confirmed(call_id, update.digits, timeout=timeout)
+        if not result["ok"]:
+            raise HTTPException(status_code=500, detail="Failed to send DTMF")
+        return {
+            "call_id": call_id, "action": "dtmf", "digits": update.digits,
+            "status": "success", "confirmed": result["confirmed"],
+        }
 
     else:
-        raise HTTPException(status_code=400, detail=f"Unknown action: {update.action}")
+        raise HTTPException(status_code=400, detail=f"Unknown action: {action}")
 
 
 # Helper Functions

@@ -119,15 +119,52 @@ Docker healthcheck: `curl -sf http://127.0.0.1:8000/health` every 15s.
 
 ## FreeSWITCH Integration
 
-### ESL Client (`services/esl_client.py`)
-Raw TCP socket connection to FreeSWITCH Event Socket (port 8021). Opens a new connection per command (no persistent connection). Supports:
-- `originate_call()` -- builds a `sofia/external/dest@proxy` originate command with channel variables for customer_id, product_type, traffic_grade. The `X-Carrier` SIP header is hardcoded to `primary` (Dallas); `traffic_grade` is only passed as a channel var, it does NOT select the carrier.
-- `get_call_status()` -- `uuid_dump` to get live call state
-- `hangup_call()` -- `uuid_kill` with hangup cause
-- `transfer_call()` -- `uuid_transfer`
-- `send_dtmf()` -- `uuid_send_dtmf`
+### ESL Control Plane (`services/esl_client.py`) — Phase 5
+ONE persistent, asyncio-native inbound ESL connection (port 8021) that does BOTH
+event consumption AND api/bgapi commands. This replaced the old per-command
+"open a new socket, auth, send, close" pattern — there is now a single ESL
+client pattern across the whole API (grep: one `class ESLClient`, one
+`asyncio.open_connection` in esl_client.py; calls.py/trunks.py/conference.py all
+route through it via the module wrappers / `_send_esl_command`).
 
-In `TEST_MODE=true`, originate uses `loopback/` instead of `sofia/external/`.
+**switchio was rejected** (Decision Log): its only PyPI releases are ancient
+alphas using `@asyncio.coroutine` (removed in Python 3.11) + an undeclared `six`
+dep — it cannot import on Python 3.12. We own the client instead: zero deps.
+
+- **Persistent consumer** (`ESLClient`): started from the FastAPI lifespan
+  (`start_esl_consumer()`). Subscribes to `CHANNEL_CREATE`, `CHANNEL_ANSWER`,
+  `CHANNEL_HANGUP`, `CHANNEL_EXECUTE_COMPLETE`, `DTMF`, `PLAYBACK_STOP`,
+  `BACKGROUND_JOB`. Maintains an authoritative in-memory **live-call registry**
+  (`uuid -> LiveCall{state, customer_id, caller, dest, direction, answered_at,
+  hangup_cause, last_app, last_dtmf, ...}`). Supervised reconnect with
+  exponential backoff (1→2→4…30s). **Never blocks or crashes API startup when FS
+  is unreachable** (it reports `connected:false` and retries) — required for
+  correctness AND because on Docker Desktop the bridge API container cannot reach
+  host-net FS (EOF). `/health` exposes an informational `esl` field
+  (`connected`, `last_event_ts`, `reconnects`, `live_calls`) that is **not** part
+  of the health verdict.
+- **Command multiplexing:** the single reader loop dispatches command/reply +
+  api/response to a FIFO of futures; `originate` uses `bgapi` + `BACKGROUND_JOB`
+  correlation so a slow originate never stalls event processing.
+- `originate_call()` -- `bgapi originate` of `sofia/external/dest@proxy` with
+  channel vars for customer_id/product_type/traffic_grade. `X-Carrier` hardcoded
+  to `primary` (Dallas); `traffic_grade` is a channel var only, does NOT select
+  the carrier. In `TEST_MODE=true`, uses `loopback/`.
+- `get_call_status()` -- reads the **event-derived registry first** (authoritative,
+  real-time), falling back to `uuid_dump` when the call is untracked.
+- `hangup_call()/transfer_call()/send_dtmf()` -- fire-and-forget `uuid_kill` /
+  `uuid_transfer` / `uuid_send_dtmf`.
+- `hangup_call_confirmed()/transfer_call_confirmed()/redirect_call_confirmed()/
+  send_dtmf_confirmed()` -- issue the command then **wait to observe the
+  resulting CHANNEL event** (`wait_for_event`), returning `confirmed: bool`.
+  These back the event-confirmed `/v1/calls/{id}/update` actions
+  (hangup/transfer/redirect/dtmf). `redirect` sets `voice_url` then transfers the
+  call back into the voice engine extension to re-fetch new TwiML.
+
+**Multi-worker note:** uvicorn runs 4 workers → 4 independent consumers, each
+with its own registry. FS broadcasts every event to every inbound ESL
+connection, so each worker's registry is complete and consistent. A request
+served by worker N sees the same events as any other worker.
 
 ### CDR Ingest (`routers/cdrs.py`)
 FreeSWITCH `mod_json_cdr` POSTs CDRs to `/v1/cdrs/ingest` after each call. The endpoint:

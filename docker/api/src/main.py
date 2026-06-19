@@ -73,6 +73,23 @@ async def lifespan(app: FastAPI):
     presence_cleanup_task = asyncio.create_task(_presence_ttl_cleanup())
     logger.info("Presence TTL cleanup task started")
 
+    # Phase 5 — persistent async ESL control plane. Starts the single inbound
+    # event consumer (live-call registry + command channel). start() spawns a
+    # supervised background task and returns immediately; it NEVER blocks startup
+    # or crashes when FreeSWITCH is unreachable (e.g. Docker Desktop host-net
+    # isolation locally, or FS down in prod) — it just retries with backoff and
+    # reports connected:false on /health.
+    try:
+        from services.esl_client import start_esl_consumer
+        await start_esl_consumer()
+        logger.info("ESL event consumer started")
+    except Exception:
+        logger.warning(
+            "ESL consumer failed to start — call control/live events degraded "
+            "until FreeSWITCH is reachable",
+            exc_info=True,
+        )
+
     yield
 
     # Cleanup
@@ -85,6 +102,11 @@ async def lifespan(app: FastAPI):
             await task
         except asyncio.CancelledError:
             pass
+    try:
+        from services.esl_client import stop_esl_consumer
+        await stop_esl_consumer()
+    except Exception:
+        logger.debug("ESL consumer shutdown error", exc_info=True)
     await close_db()
     await close_redis()
 

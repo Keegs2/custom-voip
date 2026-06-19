@@ -352,7 +352,7 @@ UCaaS conference uses.
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
 | Unified branch base | **RCF-V1 + restore UCaaS** | Carry hard-won SIP/NAT/record-route fixes as-is; UCaaS is additive/isolated. Far lower risk than porting 223 commits onto Full-System |
-| ESL library | **switchio** | asyncio-native, fits FastAPI loop; greenswitch's gevent conflicts with asyncio |
+| ~~ESL library: switchio~~ → **OWN asyncio ESL client** | **REVERSED at Phase 5.** switchio is non-viable: its ONLY PyPI releases are `0.1.0a0`/`0.1.0a1` (ancient alphas) — the latest uses `@asyncio.coroutine` (REMOVED in Python 3.11) and an undeclared `six` dep, so it cannot even import on Python 3.12/FS 1.11 (proven in the FS netns). greenswitch was also dropped (gevent vs asyncio/uvloop). We extended our own raw asyncio client (`services/esl_client.py`) into a single persistent inbound consumer + command channel: native asyncio, zero new deps, full control, no event-loop conflict. EITHER choice was acceptable per the task; the raw client wins on dependency risk. |
 | Media path | **mod_audio_stream → WebSocket** | ESL is control-plane only; audio-fork is standard for STT/AI |
 | XML parsing | **lua-expat (lxp)** | regex parser is fragile + ReDoS-prone; real parser is the correctness floor |
 | Webhook security | **HMAC-SHA256 + HTTPS** | Twilio-parity; lets customers verify authenticity |
@@ -372,6 +372,8 @@ UCaaS conference uses.
 
 **2026-06-18 — Phase 4 verified live:** fresh init 01→23 clean; MinIO buckets auto-created (recordings/voicemail/uploads); presigned put→GET round-trip; coturn up (realm voip.local); FS entrypoint runs (spool symlinks + loopback), ESL=fs_esl_dev_pw works & ClueCon REJECTED, verto ws:8082/wss:8083 RUNNING, no CRIT; API healthy; webrtc creds mint coturn HMAC-SHA1 TURN creds; voicemail/ingest JWT-exempt (200); 2 IDOR holes (api_dids+ivr) fixed, 18 cross-tenant attempts denied; uploads reject 415/413. New infra: minio+coturn services, media_spool volume, STORAGE_*/TURN_* env.
 
+**2026-06-18 — Phase 5 verified live (ESL control plane):** switchio REJECTED (only PyPI alphas 0.1.0a0/0.1.0a1; latest uses `@asyncio.coroutine` removed in py3.11 + undeclared `six` — cannot import on py3.12; proven in FS netns) → extended our OWN persistent asyncio ESL client. ONE pattern now: single inbound connection multiplexes event consumption (live-call registry) + api/bgapi commands; calls.py/trunks.py/conference.py all route through it (grep: 1 `open_connection` in esl_client.py, 1 `class ESLClient`). FastAPI lifespan starts the supervised consumer (exp backoff 1→2→4…30s, never blocks/crashes startup). `/health` gained an informational `esl` field (connected/last_event_ts/reconnects) that is NOT part of the health verdict. Event-confirmed live-modify on `/v1/calls/{id}/update` (hangup/transfer/redirect/dtmf — confirmed by observing the resulting CHANNEL event). `get_call_status` reads the event-derived registry first, falls back to `uuid_dump`. Tests: 16 new unit (registry transitions/waiter/backoff/graceful-degrade) + in-FS-netns integration (real FS: bgapi originate → CHANNEL_CREATE→ANSWER→event-confirmed HANGUP cause=NORMAL_CLEARING; fs_cli-originated channel independently observed dest=9999; FS-restart reconnect: down→2/4/8/16s backoff→reconnected). Full gate 64 passed/3 skipped; API stays HEALTHY through 3× FS restarts (connected:false, never crashes — DD host-net/bridge isolation). greenswitch removed from requirements.txt.
+
 ## Progress Tracker
 
 - [x] Phase 0 — Safety Net & RCF Characterization  ✅ 34 char tests + 40 lessons guards + 33 TwiML fixtures, all green & PM-verified
@@ -379,7 +381,7 @@ UCaaS conference uses.
 - [x] Phase 2 — Lua Refactor (behavior-preserving)  ✅ inbound_router 1071→500 (thin dispatcher); handlers/{rcf,trunk,ucaas} + lib/{dialstring,caller_id,session_timer,sbc} extracted; 66 char tests + 40 guards green; guards re-targeted structure-flexibly; outbound_api kept (live via ESL)
 - [x] Phase 3 — Harden Programmable-Voice Engine  ✅ real pure-Lua XML parser (9 known-bugs fixed) + HMAC-SHA256 webhook signing (KAT byte-identical Lua↔Python) + HTTPS enforce + record-warning + robust fetch; injection-safe curl transport (adversarially verified); 80 twiml/66 lua/51 lessons+signing green; live mod_lua + init-22 verified
 - [x] Phase 4 — Harden Restored UCaaS Features  ✅ S3-compatible object storage (MinIO/GCS) for vm+recordings+uploads; coturn TURN + env-driven WebRTC TLS; upload security (type/size/sanitize/AV-hook); ESL ClueCon KILLED (entrypoint hard-fails); 2 critical IDOR holes fixed (api_dids+ivr) + 22-assert tenant-isolation suite; CLAUDE.md docs refreshed
-- [ ] Phase 5 — ESL Control Plane (switchio)
+- [x] Phase 5 — ESL Control Plane  ✅ switchio rejected (py3.12-incompatible alpha) → OWN persistent asyncio consumer+command client; ONE ESL pattern; live-call registry from real FS events; event-confirmed live-modify (hangup/transfer/redirect/dtmf); supervised reconnect/backoff + /health esl field; 16 unit + in-netns integration (originate→CREATE→ANSWER→confirmed HANGUP, fs_cli observe, FS-restart reconnect) all green; API stays healthy when FS unreachable
 - [ ] Phase 6 — Media Plane + Record/Stream + Recording
 - [ ] Phase 7 — Net-New TwiML Verbs
 - [ ] Phase 8 — UI for Net-New Services
