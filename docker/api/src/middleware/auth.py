@@ -65,7 +65,10 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
         # the DID's voice_url) WITHOUT a JWT — same FS-internal pattern as the
         # ingest endpoints above. Without this, every IVR/API/conference flow 401s
         # on a real call. (The admin preview /ivr/{id}/xml stays auth-required.)
-        # HARDENING (future): require an INGEST_SHARED_SECRET header here too.
+        # SEC-2: like the CDR/voicemail/recording ingest endpoints, the JWT
+        # exemption is closed in the router — the webhook handlers validate the
+        # shared X-Ingest-Secret header (auth.ingest.ingest_secret_ok). Kept here
+        # (not in middleware) to match the existing ingest-auth pattern.
         if "/ivr/webhook/" in path:
             return await call_next(request)
 

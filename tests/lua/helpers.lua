@@ -47,6 +47,12 @@ local function make_env(opts)
     local os_proxy = setmetatable({
         getenv = function(k) return envmap[k] end,
     }, { __index = os })
+    -- Optional deterministic clock: when opts.time is set, os.time() returns it.
+    -- Lets specs pin the REAL wall clock (distinct from the *_NOW_OVERRIDE test
+    -- seam) so they can prove the seam is gated behind TEST_MODE.
+    if opts.time ~= nil then
+        os_proxy.time = function() return opts.time end
+    end
     env.os = os_proxy
 
     -- The scripts mutate package.path/cpath; give them a throwaway table so we

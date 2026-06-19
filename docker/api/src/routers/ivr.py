@@ -20,6 +20,8 @@ from typing import Optional, Any
 
 from db import database as db
 from auth.dependencies import get_current_user, get_customer_filter
+from auth.ingest import ingest_secret_ok, ingest_auth_error
+from config_guard import is_production
 
 logger = logging.getLogger(__name__)
 
@@ -133,9 +135,17 @@ _OFFSET_RE = re.compile(r"^([+-])(\d{1,2}):?(\d{2})?$")
 
 _warned_tz: set = set()  # warn once per unknown tz name (per process)
 
-# Test seam guard: when truthy (default), an `X-Eval-Now` header or `?now=` ISO
-# param overrides the schedule-evaluation instant. See _eval_now().
-_ALLOW_EVAL_NOW = os.getenv("IVR_ALLOW_EVAL_NOW", "true").lower() in ("1", "true", "yes", "on")
+# Test seam guard. An `X-Eval-Now` header or `?now=` ISO param can pin the
+# schedule-evaluation instant (see _eval_now()) — a TEST/SIMULATE convenience
+# that must be INERT in production, where a caller could otherwise force which
+# schedule branch renders. Default ON outside production, OFF in production
+# (matching config_guard's ENV/ENVIRONMENT convention). An explicit
+# IVR_ALLOW_EVAL_NOW always wins (escape hatch for prod debugging).
+_eval_now_override = os.getenv("IVR_ALLOW_EVAL_NOW")
+if _eval_now_override is not None:
+    _ALLOW_EVAL_NOW = _eval_now_override.strip().lower() in ("1", "true", "yes", "on")
+else:
+    _ALLOW_EVAL_NOW = not is_production()
 
 
 def _resolve_tz(tz: Any):
@@ -283,12 +293,13 @@ def _caller_matches(cfg: Any, caller: Optional[str]) -> bool:
 def _eval_now(request: Request) -> datetime:
     """Resolve the tz-aware instant used to evaluate `schedule` nodes.
 
-    Defaults to the server's current UTC time. TEST SEAM (guarded by env
-    IVR_ALLOW_EVAL_NOW, default on): an `X-Eval-Now` header or `?now=` ISO-8601
-    query param overrides it so schedule branches are deterministically testable.
-    The override is read-only — it only selects which already-authored branch
-    renders, never mutates state — and FreeSWITCH never sends it, so it is
-    harmless in production (set IVR_ALLOW_EVAL_NOW=false to disable entirely).
+    Defaults to the server's current UTC time. TEST SEAM (gated by
+    _ALLOW_EVAL_NOW — ON outside production, OFF in production unless
+    IVR_ALLOW_EVAL_NOW is set explicitly): an `X-Eval-Now` header or `?now=`
+    ISO-8601 query param overrides it so schedule branches are deterministically
+    testable. The override is read-only — it only selects which already-authored
+    branch renders, never mutates state — and FreeSWITCH never sends it. In
+    production the override is ignored entirely and real `now` is always used.
     A naive ISO value is assumed UTC."""
     if _ALLOW_EVAL_NOW:
         raw = request.headers.get("X-Eval-Now") or request.query_params.get("now")
@@ -861,7 +872,15 @@ async def ivr_webhook(
     - No ``Digits`` param: returns XML for the root flow.
     - ``Digits`` param present: finds the matching Gather branch and returns that XML.
     - ``gather_id`` query param identifies which Gather node the digits came from.
+
+    SEC-2: JWT-exempt (FreeSWITCH calls it without a user token), so it requires
+    the shared ``X-Ingest-Secret`` header (constant-time compared to env
+    ``INGEST_SHARED_SECRET``); an unset secret allows in dev with a loud warning,
+    same pattern as the CDR/voicemail/recording ingest endpoints.
     """
+    if not ingest_secret_ok(request):
+        return ingest_auth_error()
+
     await _ensure_table()
 
     result = await db.fetch_one(
@@ -950,7 +969,13 @@ async def ivr_webhook_get(
     """GET variant of the webhook for platforms that use GET requests.
 
     `From` (caller number) and the _eval_now seam are threaded so schedule/
-    condition nodes resolve server-side, same as the POST variant."""
+    condition nodes resolve server-side, same as the POST variant.
+
+    SEC-2: JWT-exempt like the POST variant, so it requires the shared
+    ``X-Ingest-Secret`` header (see the POST handler)."""
+    if not ingest_secret_ok(request):
+        return ingest_auth_error()
+
     await _ensure_table()
 
     result = await db.fetch_one(

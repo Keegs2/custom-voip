@@ -32,6 +32,17 @@ local HTTP_TIMEOUT = tonumber(os.getenv("WEBHOOK_HTTP_TIMEOUT")) or 5  -- second
 local HTTP_MAX_ATTEMPTS = tonumber(os.getenv("WEBHOOK_MAX_ATTEMPTS")) or 3  -- total tries per URL
 local HTTP_BACKOFF_MS = tonumber(os.getenv("WEBHOOK_BACKOFF_MS")) or 200    -- base backoff, doubles each retry
 local ALLOW_HTTP = (os.getenv("WEBHOOK_ALLOW_HTTP") == "true")  -- dev only: permit non-HTTPS webhooks
+-- SEC-2 (ingest auth): when a DID's voice_url (or a Gather/Record action URL that
+-- resolves against it) points at OUR OWN hosted IVR webhook, the fetch carries an
+-- X-Ingest-Secret header so the API can authenticate the call — the SAME shared
+-- secret the recording/voicemail/CDR ingest uses (the API compares it
+-- constant-time, see docker/api/src/auth/ingest.py). The Call Flow Builder sets
+-- api_dids.voice_url = "http://<API_HOST>:<API_PORT>/ivr/webhook/<flow>". This
+-- header is sent ONLY to that internal endpoint — NEVER to a CUSTOMER's external
+-- voice_url (that would leak the secret). When the secret is unset (dev) the
+-- header is omitted and nothing changes. Detection: is_internal_ivr_url() below.
+local INGEST_SHARED_SECRET = os.getenv("INGEST_SHARED_SECRET")
+local API_HOST = os.getenv("API_HOST")
 local MAX_REDIRECT_DEPTH = 10 -- prevent infinite redirect loops
 local GATHER_DEFAULT_TIMEOUT = 5  -- seconds
 local DIAL_DEFAULT_TIMEOUT = 30   -- seconds
@@ -442,6 +453,34 @@ local function compute_signature(url, params, method)
     return sig
 end
 
+-- Internal IVR webhook detection (SEC-2). Returns true ONLY when `url` is OUR
+-- own hosted IVR webhook endpoint, anchored on BOTH:
+--   (a) the host being OURS — the configured API_HOST, or the literal "api"
+--       compose hostname the API hardcodes when it builds the voice_url
+--       (http://api:8000/ivr/webhook/<flow>); neither is a host a customer can
+--       point at a server they control, so the secret cannot leak off-platform; and
+--   (b) the path containing "/ivr/webhook/".
+-- Host-anchoring is the security boundary: a CUSTOMER's external voice_url — even
+-- one that puts "/ivr/webhook/" in its path on a foreign host — is NOT ours and
+-- therefore never receives the X-Ingest-Secret header.
+local function url_host_lower(url)
+    local hostport = url and url:match("^https?://([^/?#]+)")
+    if not hostport then return nil end
+    hostport = hostport:gsub("^[^@]*@", "")          -- strip any userinfo
+    return (hostport:match("^([^:]+)") or hostport):lower()
+end
+
+local function is_internal_ivr_url(url)
+    if not url or url == "" then return false end
+    local host = url_host_lower(url)
+    if not host then return false end
+    local ours = (host == "api")
+        or (API_HOST and API_HOST ~= "" and host == API_HOST:lower())
+    if not ours then return false end
+    local path = url:match("^https?://[^/?#]+([^?#]*)") or ""
+    return path:find("/ivr/webhook/", 1, true) ~= nil
+end
+
 -- Single HTTP request. method = "POST" (default) or "GET". Returns body, err.
 local function http_request(url, params, method)
     method = (method == "GET") and "GET" or "POST"
@@ -475,6 +514,15 @@ local function http_request(url, params, method)
     if signature then
         argv[#argv + 1] = "-H"
         argv[#argv + 1] = "X-Revup-Signature: " .. signature
+    end
+    -- Internal IVR webhook auth (SEC-2): authenticate to OUR API with the shared
+    -- ingest secret. Gated on is_internal_ivr_url(url) so it is NEVER sent to a
+    -- customer's external voice_url, and only when the secret is configured (dev
+    -- leaves it unset -> header omitted, behavior unchanged). The token is
+    -- shq()-escaped below with every other argv entry (injection-safe).
+    if INGEST_SHARED_SECRET and INGEST_SHARED_SECRET ~= "" and is_internal_ivr_url(url) then
+        argv[#argv + 1] = "-H"
+        argv[#argv + 1] = "X-Ingest-Secret: " .. INGEST_SHARED_SECRET
     end
     argv[#argv + 1] = final_url
 

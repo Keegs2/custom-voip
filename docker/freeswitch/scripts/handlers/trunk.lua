@@ -256,7 +256,13 @@ return function(ctx)
     if type(route_plan) == "table" and type(route_plan.rules) == "table" then
         if rules_mod and rules_mod.first_match then
             -- now: test seam (deterministic schedule rules), mirrors RCF's seam.
-            local now = tonumber(os.getenv("TRUNK_NOW_OVERRIDE")) or os.time()
+            -- TRUNK_NOW_OVERRIDE is honored ONLY under TEST_MODE so the production
+            -- routing path can never have its schedule clock overridden by the
+            -- environment (TEST_MODE unset/false -> os.time() ALWAYS wins).
+            local now = os.time()
+            if os.getenv("TEST_MODE") == "true" then
+                now = tonumber(os.getenv("TRUNK_NOW_OVERRIDE")) or now
+            end
             local matched, matched_idx = rules_mod.first_match(route_plan.rules, {
                 caller = caller_e164, now = now, schedule = ctx.schedule })
 

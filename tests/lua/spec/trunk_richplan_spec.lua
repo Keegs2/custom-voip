@@ -71,7 +71,10 @@ local function run(opts)
             SBC_PROXY_IP = "10.0.0.1",
             SBC_PROXY_IP_FAILOVER = "10.0.0.2",
             TRUNK_NOW_OVERRIDE = opts.now and tostring(opts.now) or nil,
+            TEST_MODE = opts.test_mode and "true" or nil,
         },
+        -- Pins the REAL wall clock (os.time) for deterministic seam-gating tests.
+        time = opts.real_now,
         freeswitch = fw,
         session = session,
         modules = {
@@ -142,12 +145,38 @@ describe("Trunk RICH: schedule rule selects endpoint by time-of-day", function()
             { match = nil, endpoints = { { to = "203.0.113.51" } } }, -- after hours
         },
     }
+    -- The seam is now gated behind TEST_MODE (production-hardening), so these set
+    -- test_mode. Trunk has no carrier tone-path, so the PBX bridge still executes.
     it("business hours (Mon 09:00 EDT) -> rule 1 endpoint .50", function()
-        local rec = run({ route_plan = plan, now = NOW_BIZ })
+        local rec = run({ route_plan = plan, now = NOW_BIZ, test_mode = true })
         assert.is_true(contains(rec.bridges[1], "sip_h_X-PBX-Dest=203.0.113.50"))
     end)
     it("after hours (Sun 22:00 EDT) -> catch-all rule 2 endpoint .51", function()
-        local rec = run({ route_plan = plan, now = NOW_NIGHT })
+        local rec = run({ route_plan = plan, now = NOW_NIGHT, test_mode = true })
+        assert.is_true(contains(rec.bridges[1], "sip_h_X-PBX-Dest=203.0.113.51"))
+    end)
+end)
+
+-- ── PRODUCTION HARDENING: TRUNK_NOW_OVERRIDE is gated behind TEST_MODE ───────
+-- In production (TEST_MODE unset/false) the override must be IGNORED and os.time()
+-- always used. Pin the real clock to NIGHT and the override to BIZ: gate ON ->
+-- override wins (biz->.50); gate OFF -> real clock wins (night->.51).
+describe("Trunk RICH schedule: TRUNK_NOW_OVERRIDE seam is gated behind TEST_MODE", function()
+    local plan = {
+        rules = {
+            { match = { schedule = { days = { "mon", "tue", "wed", "thu", "fri" },
+                                     start = "09:00", ["end"] = "17:00",
+                                     tz = "America/New_York" } },
+              endpoints = { { to = "203.0.113.50" } } },            -- business hours
+            { match = nil, endpoints = { { to = "203.0.113.51" } } }, -- after hours
+        },
+    }
+    it("TEST_MODE on -> override honored (biz -> .50) despite night real clock", function()
+        local rec = run({ route_plan = plan, now = NOW_BIZ, real_now = NOW_NIGHT, test_mode = true })
+        assert.is_true(contains(rec.bridges[1], "sip_h_X-PBX-Dest=203.0.113.50"))
+    end)
+    it("TEST_MODE off -> override IGNORED, real clock used (night -> .51)", function()
+        local rec = run({ route_plan = plan, now = NOW_BIZ, real_now = NOW_NIGHT })
         assert.is_true(contains(rec.bridges[1], "sip_h_X-PBX-Dest=203.0.113.51"))
     end)
 end)

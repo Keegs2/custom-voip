@@ -64,6 +64,9 @@ local function run(opts)
             RCF_NOW_OVERRIDE = opts.now and tostring(opts.now) or nil,
             TEST_MODE = opts.test_mode and "true" or nil,
         },
+        -- Pins the REAL wall clock (os.time) so the seam-gating tests are
+        -- deterministic regardless of when the suite runs.
+        time = opts.real_now,
         freeswitch = fw,
         session = session,
         modules = { db_client = dbmock.new_db({ rcf = rcf_row(over) }) },
@@ -248,24 +251,55 @@ describe("RICH caller-id match: first matching rule wins (document order)", func
 end)
 
 -- ── schedule rule matching via the RCF_NOW_OVERRIDE test seam ───────────────
+-- Local-extension (10xx) legs so the now-override seam is honored AND the carrier
+-- tone-path (needs_pstn) never fires under TEST_MODE; we assert the SELECTED
+-- rule's leg, which is exactly what the schedule match decides. The seam is now
+-- gated behind TEST_MODE (a production-hardening change), so these set test_mode.
 describe("RICH schedule match selects the right rule by time-of-day", function()
     local plan = {
         rules = {
             { match = { schedule = { days = { "mon", "tue", "wed", "thu", "fri" },
                                      start = "09:00", ["end"] = "17:00",
                                      tz = "America/New_York" } },
-              ring = { legs = { { to = "+18005550100" } } } },          -- business hours
-            { match = nil, ring = { legs = { { to = "+18005550200" } } } }, -- after hours
+              ring = { legs = { { to = "1001" } } } },          -- business hours
+            { match = nil, ring = { legs = { { to = "1002" } } } }, -- after hours
         },
         fallback = { type = "hangup" },
     }
     it("business hours (Mon 09:00 EDT) -> rule 1", function()
-        local rec = run({ routing_plan = plan, now = NOW_BIZ })
-        assert.is_true(contains(rec.bridges[1], "sofia/external/18005550100@"))
+        local rec = run({ routing_plan = plan, now = NOW_BIZ, test_mode = true })
+        assert.is_true(contains(rec.bridges[1], "user/1001@"))
     end)
     it("after hours (Sun 22:00 EDT) -> catch-all rule 2", function()
-        local rec = run({ routing_plan = plan, now = NOW_NIGHT })
-        assert.is_true(contains(rec.bridges[1], "sofia/external/18005550200@"))
+        local rec = run({ routing_plan = plan, now = NOW_NIGHT, test_mode = true })
+        assert.is_true(contains(rec.bridges[1], "user/1002@"))
+    end)
+end)
+
+-- ── PRODUCTION HARDENING: RCF_NOW_OVERRIDE is gated behind TEST_MODE ─────────
+-- The override is a test-only seam. In production (TEST_MODE unset/false) it must
+-- be IGNORED and os.time() always used. We pin the real clock to NIGHT and the
+-- override to BIZ: with the gate ON the override wins (biz->rule 1); with the
+-- gate OFF the real clock wins (night->rule 2), proving the env cannot move the
+-- production schedule clock.
+describe("RICH schedule: RCF_NOW_OVERRIDE seam is gated behind TEST_MODE", function()
+    local plan = {
+        rules = {
+            { match = { schedule = { days = { "mon", "tue", "wed", "thu", "fri" },
+                                     start = "09:00", ["end"] = "17:00",
+                                     tz = "America/New_York" } },
+              ring = { legs = { { to = "1001" } } } },          -- business hours
+            { match = nil, ring = { legs = { { to = "1002" } } } }, -- after hours
+        },
+        fallback = { type = "hangup" },
+    }
+    it("TEST_MODE on -> override honored (biz -> rule 1) despite night real clock", function()
+        local rec = run({ routing_plan = plan, now = NOW_BIZ, real_now = NOW_NIGHT, test_mode = true })
+        assert.is_true(contains(rec.bridges[1], "user/1001@"))
+    end)
+    it("TEST_MODE off -> override IGNORED, real clock used (night -> rule 2)", function()
+        local rec = run({ routing_plan = plan, now = NOW_BIZ, real_now = NOW_NIGHT })
+        assert.is_true(contains(rec.bridges[1], "user/1002@"))
     end)
 end)
 

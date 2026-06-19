@@ -378,7 +378,14 @@ local function handle_rich_plan(ctx, plan)
     -- The schedule + caller-id matcher lives in lib/rules.lua (shared with the
     -- SIP-trunk RICH route_plan path). first_match returns the first rule whose
     -- `match` applies, or nil. Identical semantics to the prior inline loop.
-    local now = tonumber(os.getenv("RCF_NOW_OVERRIDE")) or os.time()  -- test seam
+    -- `now` for schedule rule evaluation. RCF_NOW_OVERRIDE is a TEST-ONLY seam
+    -- that pins "now" deterministically; it is honored ONLY under TEST_MODE so the
+    -- production routing path can never have its schedule clock overridden by the
+    -- environment (TEST_MODE unset/false -> os.time() ALWAYS wins).
+    local now = os.time()
+    if os.getenv("TEST_MODE") == "true" then
+        now = tonumber(os.getenv("RCF_NOW_OVERRIDE")) or now
+    end
     local matched, matched_idx
     local rules_mod = ctx.rules
     if rules_mod and rules_mod.first_match then
