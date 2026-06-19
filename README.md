@@ -1,222 +1,83 @@
-# Voice Platform MVP - Containerized Deployment
+# revup — RCF-V1 (Remote Call Forwarding) — **PRODUCTION**
 
-High-performance containerized voice platform for RCF, API Calling, and SIP Trunk services.
+> **You are on the `RCF-V1` branch — the production system.** It is the
+> carrier-grade Remote Call Forwarding platform deployed for Granite
+> Telecommunications: **RCF + SIP trunks + API-calling backend only.**
+>
+> **There is no UCaaS here** — no WebRTC/softphone, voicemail, conferencing,
+> chat, IVR, or call recording. That stack lives on the `unified` branch.
 
-## Quick Start
+## Branch map — what is built where
+
+| Branch | What it is | Deployed | Has UCaaS / WebRTC? |
+|---|---|---|---|
+| **`RCF-V1`** (here) | Production RCF platform — RCF + SIP trunks + API-calling backend, hardened for live carrier traffic. | **Production** (4 VMs, GCP us-east1-b) | No |
+| **`unified`** | RCF-V1 base **+** full UCaaS (Verto softphone, voicemail, conferencing, chat, IVR, recordings) **+** shared DID-inventory replica. | Sandbox (single all-in-one VM) | Yes |
+| `Full-System` | Legacy full-stack branch — superseded by `unified`. | No | Yes (legacy) |
+
+## What is built on this branch
+
+- **RCF** — DID → forward_to routing (the core product). Provisioning API + admin UI.
+- **SIP Trunks** — IP-authenticated trunks, call-path packages, CPS tiers.
+- **API Calling** — programmable outbound origination via ESL (backend; UI is admin-side).
+- **Admin suite** — customers, trunks, CDRs, rates, tiers, carriers, SIPp, DID inventory,
+  user lookup, call-quality analytics.
+- **SIP troubleshooting** — Homer SIP capture (HEP). The per-VM production deploy uses the
+  **Homer 10** tier (ClickHouse + qryn + Grafana); the local all-in-one dev compose still
+  ships the older Homer 7 tier.
+- **Carrier** — Bandwidth (account 9900717), Dallas + LA, multi-carrier failover.
+
+**Not on this branch** (see `unified`): `webrtc`/`verto`, `voicemail`, `conference`,
+`chat`, `presence`, `extensions`, `ivr`, `recordings`, `queues`, coturn, the shared
+DID-inventory read-replica, and the UCaaS schema tables.
+
+## Production deployment — 4 VMs, GCP `us-east1-b`
+
+Each zone is a self-contained SIP/RTP stack; calls never cross zones. Inbound flows
+Bandwidth → NLB VIP (`34.24.133.82:5060`) → an SBC → FreeSWITCH → carrier.
+
+| VM | Role | Compose file | Services |
+|---|---|---|---|
+| SBC-1 (`10.142.0.100`) | SBC | `docker-compose.sbc.yml` | Kamailio |
+| SBC-2 (`10.142.0.101`) | SBC | `docker-compose.sbc.yml` | Kamailio |
+| Media (`192.168.10.2`) | FreeSWITCH | `docker-compose.media.yml` | FreeSWITCH + Redis |
+| Services (`10.142.0.103`) | App/data | `docker-compose.services.yml` | API + UI + Homer 10 (ClickHouse/qryn/Grafana); **PostgreSQL + PgBouncer run bare-metal on this VM, not in Docker** |
 
 ```bash
-# 1. Clone and navigate
-cd /path/to/revup
-
-# 2. Copy environment file
-cp .env.example .env
-
-# 3. Build and start
-docker compose up -d
-
-# 4. Load fraud prefixes into Redis
-./scripts/load_fraud_prefixes.sh
-
-# 5. Run tests
-./scripts/run_all_tests.sh
+sudo docker compose -f docker-compose.sbc.yml up -d       # each SBC VM
+sudo docker compose -f docker-compose.media.yml up -d     # media VM
+sudo docker compose -f docker-compose.services.yml up -d  # services VM
 ```
 
-## Architecture
+The `docker-compose.yml` at the repo root is an **all-in-one local-dev** stack (single
+host) for development/testing — not the production layout.
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    Docker Host (VCenter VM)                  │
-├─────────────────────────────────────────────────────────────┤
-│  ┌──────────┐  ┌───────────┐  ┌─────────┐  ┌────────────┐  │
-│  │ Kamailio │──│ FreeSWITCH│──│ FastAPI │──│  Webhook   │  │
-│  │  (SBC)   │  │  (Core)   │  │  (API)  │  │   Test     │  │
-│  │  :5060   │  │   :5080   │  │  :8000  │  │   :9000    │  │
-│  └──────────┘  └───────────┘  └─────────┘  └────────────┘  │
-│        │             │              │                        │
-│  ┌─────┴─────────────┴──────────────┴──────────────────┐   │
-│  │                  Docker Network                      │   │
-│  └─────┬─────────────┬──────────────────────────────────┘   │
-│  ┌─────┴─────┐  ┌────┴────┐                                 │
-│  │ PostgreSQL│  │  Redis  │                                 │
-│  │ +PgBouncer│  │         │                                 │
-│  │:5432/6432 │  │  :6379  │                                 │
-│  └───────────┘  └─────────┘                                 │
-└─────────────────────────────────────────────────────────────┘
-```
+## Account types
 
-## Services
+| Type | Sees in UI |
+|---|---|
+| `rcf` | RCF only (DID → forward_to). No UCaaS, ever. |
+| `trunk` / `api` / `hybrid` | Trunk / API-calling features (admin-managed) |
 
-| Service | Port | Purpose |
-|---------|------|---------|
-| PostgreSQL | 5432, 6432 | Database + PgBouncer connection pooling |
-| Redis | 6379 | Caching, velocity tracking, channel management |
-| FreeSWITCH | 5080 | Core SIP switch, call routing |
-| FastAPI | 8000 | REST API for provisioning and control |
-| Kamailio | 5060 | SBC (optional) - rate limiting, security |
-| Webhook Test | 9000 | Mock webhook for API calling tests |
+**RCF customers never see UCaaS features.** That isolation is the core product rule.
 
-## Performance Optimizations
+## Documentation index
 
-### Database
-- **TimescaleDB** hypertables for CDR with automatic partitioning
-- **PgBouncer** connection pooling (100 connections)
-- Hash indexes for O(1) DID lookups
-- Async CDR compression and retention policies
+| Doc | Covers |
+|---|---|
+| [`CLAUDE.md`](CLAUDE.md) | Architecture, GCP production topology + IPs, hard-won SIP/infra lessons, gotchas, env reference |
+| [`GCP_DEPLOYMENT_PLAN.md`](GCP_DEPLOYMENT_PLAN.md) | GCP topology, NLB config, per-VM env vars |
+| [`PRODUCTION_ARCHITECTURE.md`](PRODUCTION_ARCHITECTURE.md) | Capacity planning, scaling |
+| [`docs/LOCAL_RCF_TESTING.md`](docs/LOCAL_RCF_TESTING.md) | Local RCF testing |
+| [`infra/OPENTOFU_PLAN.md`](infra/OPENTOFU_PLAN.md) · [`infra/INFRASTRUCTURE_PLAN.md`](infra/INFRASTRUCTURE_PLAN.md) · [`infra/WEST_ZONE_BUILDOUT.md`](infra/WEST_ZONE_BUILDOUT.md) | GCP IaC + multi-zone expansion |
+| [`docs/UCAAS_PLAN.md`](docs/UCAAS_PLAN.md) | UCaaS roadmap (delivered on `unified`) |
+| component `CLAUDE.md` files | `docker/{api,ui,freeswitch,kamailio,postgres,homer}/` deep dives |
 
-### Redis
-- Lua scripts for atomic velocity checks
-- Atomic channel acquisition/release
-- Cached RCF/trunk lookups (avoid DB on hot path)
-- Disabled persistence for maximum speed
+## Notes
 
-### FreeSWITCH
-- 10,000 max concurrent sessions
-- 500 sessions per second
-- Connection reuse, compact headers
-- Lua scripts with Redis caching
-
-### FastAPI
-- Full async with uvloop + httptools
-- orjson for 10x faster JSON
-- Connection pooling everywhere
-- Multiple workers
-
-## Testing
-
-### Test RCF Functionality
-```bash
-./scripts/test_rcf.sh
-```
-Tests:
-- Create/update/delete RCF numbers
-- Verify caching works
-- SIP call test (requires sipp)
-
-### Test API Calling
-```bash
-./scripts/test_api_calling.sh
-```
-Tests:
-- Outbound call initiation
-- Call status queries
-- Webhook handling
-
-### Test Call Rating
-```bash
-./scripts/test_rating.sh
-```
-Tests:
-- Rate table lookups
-- CDR rating
-- Balance deduction
-- Fraud prefix detection
-
-### Run All Tests
-```bash
-./scripts/run_all_tests.sh
-```
-
-## VCenter VM Deployment
-
-### Requirements
-- Ubuntu 24.04 LTS or Debian 12
-- 4+ vCPUs
-- 8+ GB RAM
-- 50+ GB SSD
-- Docker and Docker Compose installed
-
-### Kernel Tuning
-```bash
-sudo ./scripts/kernel_tune.sh
-sudo reboot
-```
-
-### Firewall
-```bash
-sudo ufw allow 5060/udp  # SIP (Kamailio)
-sudo ufw allow 5060/tcp
-sudo ufw allow 5080/udp  # SIP (FreeSWITCH direct)
-sudo ufw allow 8000/tcp  # API
-sudo ufw allow 16384:16484/udp  # RTP
-```
-
-### Start with SBC
-```bash
-docker compose --profile with-sbc up -d
-```
-
-## API Examples
-
-### Create RCF Number
-```bash
-curl -X POST http://localhost:8000/v1/rcf \
-  -H "Content-Type: application/json" \
-  -d '{
-    "customer_id": 1,
-    "did": "+15551234567",
-    "forward_to": "+15559876543",
-    "pass_caller_id": true
-  }'
-```
-
-### Initiate Outbound Call
-```bash
-curl -X POST http://localhost:8000/v1/calls \
-  -H "Content-Type: application/json" \
-  -d '{
-    "from_did": "+15553001001",
-    "to": "+15551112222",
-    "webhook_url": "http://your-server.com/voice"
-  }'
-```
-
-### Create SIP Trunk
-```bash
-curl -X POST http://localhost:8000/v1/trunks \
-  -H "Content-Type: application/json" \
-  -d '{
-    "customer_id": 3,
-    "trunk_name": "Main Office",
-    "max_channels": 50,
-    "cps_limit": 10
-  }'
-```
-
-### Query CDRs
-```bash
-curl "http://localhost:8000/v1/cdrs?customer_id=1&limit=10"
-```
-
-## Monitoring
-
-### Check Service Health
-```bash
-curl http://localhost:8000/health/detailed
-```
-
-### View Logs
-```bash
-docker compose logs -f freeswitch
-docker compose logs -f api
-```
-
-### FreeSWITCH CLI
-```bash
-docker exec -it voip-freeswitch fs_cli
-```
-
-### Redis Stats
-```bash
-docker exec voip-redis redis-cli INFO stats
-```
-
-## Production Checklist
-
-- [ ] Configure real carrier gateways in FreeSWITCH
-- [ ] Set up TLS certificates for Kamailio
-- [ ] Change default passwords
-- [ ] Configure external IP addresses
-- [ ] Set up log rotation
-- [ ] Configure monitoring/alerting
-- [ ] Test failover scenarios
-- [ ] Load test with expected volume
+- **Deploy workflow:** push to GitHub → SSH to VM → `sudo git pull` → rebuild/restart.
+  Never `gcloud scp`. Repo path on VMs is `/opt/revup`; all commands need `sudo`.
+- **`.env` is not in git** (secrets). Each VM has its own `/opt/revup/.env`; see
+  `GCP_DEPLOYMENT_PLAN.md` for the per-VM variable list.
+- **Type-check the UI before pushing:** `cd docker/ui/app && npx tsc --noEmit`.
+- **Live RCF test DID:** `+16174544217` → forwards to `+17744045256`.
