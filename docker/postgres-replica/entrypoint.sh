@@ -79,7 +79,10 @@ host    all         all     192.168.0.0/16  scram-sha-256
 host    replication all     0.0.0.0/0       scram-sha-256
 EOF
 
-    chown postgres:postgres "$PGDATA/postgresql.conf" "$PGDATA/pg_hba.conf"
+    # Empty ident map (we use no ident user-mapping) — silences a harmless
+    # "could not open file pg_ident.conf" warning on a Debian-sourced clone.
+    : > "$PGDATA/pg_ident.conf"
+    chown postgres:postgres "$PGDATA/postgresql.conf" "$PGDATA/pg_hba.conf" "$PGDATA/pg_ident.conf"
     echo "[replica] clone complete; starting as hot standby"
 fi
 
