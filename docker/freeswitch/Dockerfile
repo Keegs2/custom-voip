@@ -201,6 +201,30 @@ RUN luarocks install luasocket && \
     luarocks install luasql-postgres PGSQL_INCDIR=/usr/include/postgresql
 
 # =============================================================================
+# mod_audio_stream — fork call audio (L16) to a WebSocket for AI/transcription.
+# (Phase 6: powers the <Stream>/<Connect><Stream> TwiML verbs.)
+#
+# Built AFTER the FreeSWITCH install so these layers are PURELY ADDITIVE and do
+# NOT invalidate the (expensive, cached) FreeSWITCH build above. The module ships
+# its WebSocket client (IXWebSocket) as a git submodule, statically linked; its
+# only extra build dep is libevent (libssl/zlib/libspeexdsp are already present).
+# We point pkg-config at the installed FreeSWITCH so its CMake finds modulesdir.
+# =============================================================================
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libevent-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN git clone --recurse-submodules \
+    https://github.com/amigniter/mod_audio_stream.git /usr/src/mod_audio_stream
+WORKDIR /usr/src/mod_audio_stream
+RUN export PKG_CONFIG_PATH=/usr/local/freeswitch/lib/pkgconfig && \
+    mkdir -p build && cd build && \
+    cmake -DCMAKE_BUILD_TYPE=Release .. && \
+    make -j$(nproc) && \
+    make install && \
+    ls -la /usr/local/freeswitch/lib/freeswitch/mod/mod_audio_stream.so
+
+# =============================================================================
 # Stage 2: Create minimal production image
 # =============================================================================
 FROM debian:bookworm-slim AS runtime
@@ -256,6 +280,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # iproute2 provides the 'ip' command, needed by entrypoint.sh to add
     # the public IP to loopback for GCE hairpin NAT workaround
     iproute2 \
+    && rm -rf /var/lib/apt/lists/*
+
+# mod_audio_stream runtime deps: libevent core + pthreads variant (the .so links
+# libevent_pthreads). The bundled WebSocket client (libwsc/IXWebSocket) is static.
+# Separate RUN so it does not invalidate the cached apt layer above.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libevent-2.1-7 \
+    libevent-pthreads-2.1-7 \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy FreeSWITCH installation from builder

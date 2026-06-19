@@ -190,9 +190,76 @@ def approximate_trace(verbs: list, base_url: str) -> list:
             break
 
         elif name == "Record":
-            # Standalone recording is Phase 6: the engine warns loudly and skips
-            # (it does NOT silently no-op an advertised verb).
-            trace.append({"action": "record", "unsupported": True})
+            # Phase 6: real recording via the core `record` app to the shared
+            # spool, then notify the API ingest. Mirrors execute_record().
+            method = "GET" if attrs.get("method") == "GET" else "POST"
+            action_url = attrs.get("action")
+            resolved_action = resolve_url(action_url, base_url) if action_url else None
+            status_cb = attrs.get("recordingStatusCallback")
+            resolved_status = resolve_url(status_cb, base_url) if status_cb else None
+            trace.append({
+                "action": "record",
+                "maxLength": _int(attrs, "maxLength", 3600),
+                "timeout": _int(attrs, "timeout", 5),
+                "finishOnKey": attrs.get("finishOnKey", "#"),
+                "playBeep": attrs.get("playBeep") != "false",
+                "action_url": resolved_action,
+                "recordingStatusCallback": resolved_status,
+            })
+            # recordingStatusCallback fires first (fire-and-forget POST).
+            if resolved_status:
+                trace.append({"http": {
+                    "method": "POST",
+                    "url": resolved_status,
+                    "params": {
+                        **_BASE_PARAMS,
+                        "RecordingSid": "<rec_sid>",
+                        "RecordingUrl": "<rec_url>",
+                        "RecordingDuration": "<rec_dur>",
+                        "RecordingStatus": "completed",
+                    },
+                }})
+            # action URL POSTs recording info, executes returned TwiML, then stops.
+            if resolved_action:
+                trace.append({"http": {
+                    "method": method,
+                    "url": resolved_action,
+                    "params": {
+                        **_BASE_PARAMS,
+                        "RecordingSid": "<rec_sid>",
+                        "RecordingUrl": "<rec_url>",
+                        "RecordingDuration": "<rec_dur>",
+                        "Digits": "<digits>",
+                    },
+                }, "stops_here": True})
+                break
+
+        elif name == "Stream":
+            # One-way audio fork (Twilio <Start><Stream>): does NOT block, so
+            # execution continues to the next verb.
+            trace.append({
+                "action": "stream",
+                "url": attrs.get("url") or text or "",
+                "mode": "one-way",
+                "blocks": False,
+            })
+
+        elif name == "Connect":
+            # <Connect><Stream> is a bidirectional fork that OWNS the call for the
+            # streaming lifetime (blocks until hangup), so execution stops here.
+            stream = next((c for c in children if c.get("verb") == "Stream"), None)
+            if not stream:
+                trace.append({"action": "connect", "skipped_no_stream": True})
+            else:
+                url = stream.get("attrs", {}).get("url") or stream.get("text", "") or ""
+                trace.append({
+                    "action": "connect",
+                    "url": url,
+                    "mode": "bidirectional",
+                    "blocks": True,
+                    "stops_here": True,
+                })
+                break
 
         elif name == "Gather":
             # Children are played as prompts (Say/Play/Pause); other child verbs

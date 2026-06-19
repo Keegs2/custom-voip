@@ -42,8 +42,36 @@ Lua libraries installed via luarocks:
 Module selection in `build/modules.conf.in` via sed substitutions:
 - **Core RCF/SIP** (built + loaded): mod_lua, mod_sofia, mod_xml_curl, mod_json_cdr, mod_event_socket, mod_opus, mod_g729, mod_amr, mod_spandsp, mod_dptools, mod_commands, mod_dialplan_xml, mod_curl, mod_shout, mod_sndfile, mod_tone_stream, mod_say_en, mod_db, mod_hash, mod_loopback, mod_cdr_csv, mod_console, mod_logfile, mod_native_file
 - **UCaaS** (built in the Dockerfile AND loaded in `modules.conf.xml`): mod_conference, mod_av (VP8/H264 for video), mod_verto (WebRTC WSS), mod_rtc (WebRTC media), mod_voicemail, mod_valet_parking
+- **Media plane** (Phase 6, built + loaded): **mod_audio_stream** — forks call audio (L16) to a WebSocket for AI/transcription; powers the `<Stream>`/`<Connect><Stream>` TwiML verbs via the `uuid_audio_stream` API. NOT a SignalWire core module: cloned from `github.com/amigniter/mod_audio_stream` and CMake-built against the installed FreeSWITCH (see "mod_audio_stream build" below). Standalone/`<Record>` recording needs NO extra module — it uses the core `record`/`record_session` apps (mod_dptools).
 - **Built but NOT loaded** (compiled in the Dockerfile, no `<load>` in `modules.conf.xml`): mod_callcenter, mod_spy (reserved for future call-center/monitoring; enable by adding a `<load>` line + config), mod_httapi, mod_http_cache (need xml_curl-served config, unreachable at module-load on the media VM)
 - **Still disabled** (would CRIT-abort without local config): mod_local_stream — RCF/UCaaS use `silence_stream://`/`tone_stream://` instead
+
+#### mod_audio_stream build (Phase 6)
+
+`mod_audio_stream` (audio-fork-to-WebSocket) is NOT in the FreeSWITCH source tree, so
+it is cloned and built in a set of **additive Dockerfile layers placed AFTER the
+FreeSWITCH `make install`** — deliberately, so they do not invalidate the expensive
+cached FreeSWITCH build above. Build chain (builder stage):
+
+1. `apt-get install libevent-dev` (its only extra build dep; libssl/zlib/libspeexdsp
+   are already present). The WebSocket client is a git submodule (`libs/libwsc`,
+   IXWebSocket-style), statically linked — so it is cloned with `--recurse-submodules`.
+2. `cmake -DCMAKE_BUILD_TYPE=Release .. && make && make install` with
+   `PKG_CONFIG_PATH=/usr/local/freeswitch/lib/pkgconfig` so its CMake discovers
+   FreeSWITCH's `modulesdir`. **`make install` lands the `.so` at
+   `/usr/local/freeswitch/lib/freeswitch/mod/mod_audio_stream.so`** — that IS
+   FreeSWITCH's real module-load dir on this image (there is NO `/usr/local/freeswitch/mod`;
+   do not "fix up" a copy there — that was a build bug). The runtime stage copies the
+   whole `/usr/local/freeswitch`, so the module ships automatically.
+3. Runtime stage adds `libevent-2.1-7` **and `libevent-pthreads-2.1-7`** — the module
+   links `libevent_pthreads`, so the core libevent package alone is NOT enough (the
+   module fails to load with `libevent_pthreads-2.1.so.7 => not found`).
+
+`modules.conf.xml` carries `<load module="mod_audio_stream"/>`. Verified live:
+`module_exists mod_audio_stream` → `true`, `uuid_audio_stream` registers, FS boots
+with no CRIT and verto WSS / sofia / conference / voicemail still load. The
+`uuid_audio_stream` API rate arg is **numeric** (`8000|16000`), not `8k/16k` as the
+upstream README claims — the engine passes `8000`.
 
 ### Stage 2: Runtime (`debian:bookworm-slim`)
 
@@ -124,6 +152,10 @@ FreeSWITCH runs with `network_mode: host` in docker-compose.media.yml. This is r
 | `VERTO_TLS_PEM` | `conf/tls/wss.pem` | mod_verto WSS cert+privkey (combined PEM). Env-driven global `verto_tls_pem`. PRODUCTION: mount a CA-issued cert and set this. |
 | `VERTO_TLS_CHAIN` | `conf/tls/wss.crt` | mod_verto WSS cert/CA chain. Env-driven global `verto_tls_chain`. |
 | `VM_NOTIFY_TIMEOUT` | `5` | curl `--max-time` (seconds) for the voicemail-deposit notify POST (lib/vm_notify.lua). |
+| `RECORDINGS_DIR` | `/media/spool/recordings` | Phase 6. Root of tenant-scoped call recordings: `<dir>/customer_<id>/<uuid>.wav`. On the shared `media_spool` volume the API uploads to object storage. |
+| `RECORD_DEFAULT_MAXLEN` | `3600` | Phase 6. Default `<Record>` maxLength (seconds) when the verb omits it. |
+| `REC_NOTIFY_TIMEOUT` | `5` | Phase 6. curl `--max-time` (seconds) for the recordings-ingest notify POST (lib/rec_notify.lua). |
+| `STREAM_SAMPLE_RATE` | `8000` | Phase 6. Sample rate passed to `uuid_audio_stream` for `<Stream>`/`<Connect><Stream>` (mod_audio_stream wants numeric `8000`/`16000`). |
 
 ## Health Check
 
@@ -167,6 +199,8 @@ Also needs `SYS_NICE` capability for real-time scheduling.
 8. **Session timer export**: Channel variables must be `export`ed (not just `set`) to propagate to the B-leg. Without this, Bandwidth tears down calls after Session-Expires (30s) because FreeSWITCH doesn't send refresh re-INVITEs.
 
 9. **Gateway syntax deprecated**: All outbound bridges use `sofia/external/dest@proxy` instead of `sofia/gateway/carrier/dest`. The gateway syntax produced corrupted Contact headers (`sip:gw+carrier_primary@...`).
+
+10. **Recording & streaming (Phase 6)**: `<Record>` and `<Dial record>` use CORE FreeSWITCH (`record` / `record_session`) — NO extra module — writing tenant-scoped WAVs to `/media/spool/recordings/customer_<id>/<uuid>.wav` on the shared spool, then POSTing metadata to the API `POST /v1/recordings/ingest` via `lib/rec_notify.lua` (fail-open; on Docker Desktop FS→API is unreachable, which is an expected clean no-op — prod works). `<Stream>`/`<Connect><Stream>` use the BUILT mod_audio_stream (`uuid_audio_stream`); when absent the verb warns loudly (no silent no-op) so `<Record>` is never blocked on streaming. Recording info (`RecordingUrl`/`RecordingSid`) flows into status/action callbacks.
 
 ## Volumes
 

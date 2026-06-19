@@ -1,0 +1,73 @@
+{
+  "name": "record_with_action",
+  "classification": "correct",
+  "description": "Phase 6: <Record> with an action URL POSTs RecordingUrl/RecordingDuration/Digits to the action after recording, executes the returned TwiML, and stops the current list. recordingStatusCallback fires first (fire-and-forget).",
+  "ideal": "",
+  "base_url": "https://voice.example.com/ivr/voice",
+  "input_xml": "<Response><Record maxLength=\"30\" finishOnKey=\"#\" playBeep=\"true\" action=\"/rec-done\" recordingStatusCallback=\"/rec-status\"/></Response>",
+  "expected_parse": {
+    "ok": true,
+    "verbs": [
+      {
+        "verb": "Record",
+        "attrs": {
+          "action": "/rec-done",
+          "finishOnKey": "#",
+          "maxLength": "30",
+          "playBeep": "true",
+          "recordingStatusCallback": "/rec-status"
+        },
+        "text": "",
+        "children": []
+      }
+    ]
+  },
+  "expected_trace": [
+    {
+      "action": "record",
+      "maxLength": 30,
+      "timeout": 5,
+      "finishOnKey": "#",
+      "playBeep": true,
+      "action_url": "https://voice.example.com/rec-done",
+      "recordingStatusCallback": "https://voice.example.com/rec-status"
+    },
+    {
+      "http": {
+        "method": "POST",
+        "url": "https://voice.example.com/rec-status",
+        "params": {
+          "CallSid": "<call_sid>",
+          "AccountSid": "<customer_id>",
+          "From": "<from>",
+          "To": "<to>",
+          "CallStatus": "in-progress",
+          "Direction": "<direction>",
+          "RecordingSid": "<rec_sid>",
+          "RecordingUrl": "<rec_url>",
+          "RecordingDuration": "<rec_dur>",
+          "RecordingStatus": "completed"
+        }
+      }
+    },
+    {
+      "http": {
+        "method": "POST",
+        "url": "https://voice.example.com/rec-done",
+        "params": {
+          "CallSid": "<call_sid>",
+          "AccountSid": "<customer_id>",
+          "From": "<from>",
+          "To": "<to>",
+          "CallStatus": "in-progress",
+          "Direction": "<direction>",
+          "RecordingSid": "<rec_sid>",
+          "RecordingUrl": "<rec_url>",
+          "RecordingDuration": "<rec_dur>",
+          "Digits": "<digits>"
+        }
+      },
+      "stops_here": true
+    }
+  ]
+}

@@ -1,0 +1,42 @@
+{
+  "name": "stream_start",
+  "classification": "correct",
+  "description": "Phase 6: a top-level <Stream> is a one-way audio fork (Twilio <Start><Stream> semantics) to a ws/wss URL via mod_audio_stream. It does NOT block — execution continues to the following verb.",
+  "ideal": "",
+  "base_url": "https://voice.example.com/ivr/voice",
+  "input_xml": "<Response><Stream url=\"wss://stream.example.com/audio\"/><Say>streaming started</Say></Response>",
+  "expected_parse": {
+    "ok": true,
+    "verbs": [
+      {
+        "verb": "Stream",
+        "attrs": {
+          "url": "wss://stream.example.com/audio"
+        },
+        "text": "",
+        "children": []
+      },
+      {
+        "verb": "Say",
+        "attrs": {},
+        "text": "streaming started",
+        "children": []
+      }
+    ]
+  },
+  "expected_trace": [
+    {
+      "action": "stream",
+      "url": "wss://stream.example.com/audio",
+      "mode": "one-way",
+      "blocks": false
+    },
+    {
+      "action": "say",
+      "text": "streaming started",
+      "voice": "kal",
+      "language": "en",
+      "loop": 1
+    }
+  ]
+}

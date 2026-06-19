@@ -188,14 +188,36 @@ CASES = [
      "skipped gracefully by the executor; only the root is enforced.",
      "<response><Say>hi</Say></response>"),
 
-    # ---- Remaining genuine gaps (characterization for FUTURE phases) -----
-    ("frag_record_verb", "known-bug",
-     "Standalone <Record> is a Phase 6 feature. Today the engine parses it fine "
-     "but warns loudly and skips (no recording is made / no media artifact). "
-     "Phase 6 will implement real recording and resolve this.",
-     "FUTURE: <Record> verb parses but recording is not yet implemented (Phase 6).",
+    # ---- Phase 6: media plane — Record + Stream now IMPLEMENTED -----------
+    ("frag_record_verb", "correct", "",
+     "Phase 6: standalone <Record> is now implemented via the core FreeSWITCH "
+     "`record` app. It writes a WAV to the tenant-scoped shared spool "
+     "(/media/spool/recordings/customer_<id>/<uuid>.wav) and POSTs metadata to "
+     "the API recordings-ingest. With no action/callback it records then falls "
+     "through to the next verb. (playBeep defaults true; maxLength=20 here.)",
      '<Response><Record maxLength="20"/></Response>'),
 
+    ("record_with_action", "correct", "",
+     "Phase 6: <Record> with an action URL POSTs RecordingUrl/RecordingDuration/"
+     "Digits to the action after recording, executes the returned TwiML, and "
+     "stops the current list. recordingStatusCallback fires first (fire-and-forget).",
+     '<Response><Record maxLength="30" finishOnKey="#" playBeep="true" '
+     'action="/rec-done" recordingStatusCallback="/rec-status"/></Response>'),
+
+    ("stream_start", "correct", "",
+     "Phase 6: a top-level <Stream> is a one-way audio fork (Twilio "
+     "<Start><Stream> semantics) to a ws/wss URL via mod_audio_stream. It does "
+     "NOT block — execution continues to the following verb.",
+     '<Response><Stream url="wss://stream.example.com/audio"/>'
+     '<Say>streaming started</Say></Response>'),
+
+    ("connect_stream", "correct", "",
+     "Phase 6: <Connect><Stream url=.../></Connect> is a bidirectional media "
+     "fork that OWNS the call for the streaming lifetime (blocks until hangup), "
+     "so execution stops there.",
+     '<Response><Connect><Stream url="wss://ai.example.com/ws"/></Connect></Response>'),
+
+    # ---- Remaining genuine gaps (characterization for FUTURE phases) -----
     ("frag_dial_sip_child", "known-bug",
      "A <Dial> with a <Sip> child parses correctly, but the executor only dials "
      "<Number> children today, so this Dial resolves to NO target (skipped). "

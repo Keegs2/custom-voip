@@ -175,6 +175,17 @@
     <!-- No additional module needed for basic recording -->
 
     <!-- ============================================ -->
+    <!-- MEDIA STREAMING (Phase 6)                   -->
+    <!-- ============================================ -->
+
+    <!-- mod_audio_stream: forks call audio (L16) to a WebSocket for AI/transcription.
+         Powers the <Stream>/<Connect><Stream> TwiML verbs (uuid_audio_stream API).
+         Built into the image from amigniter/mod_audio_stream. If the build is
+         unavailable, the <Stream> verb logs a clear "module not available" warning
+         (never a silent no-op) and recording (<Record>) is unaffected. -->
+    <load module="mod_audio_stream"/>
+
+    <!-- ============================================ -->
     <!-- OPTIONAL: Advanced Features                 -->
     <!-- ============================================ -->
 

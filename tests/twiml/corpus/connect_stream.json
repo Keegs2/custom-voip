@@ -1,0 +1,36 @@
+{
+  "name": "connect_stream",
+  "classification": "correct",
+  "description": "Phase 6: <Connect><Stream url=.../></Connect> is a bidirectional media fork that OWNS the call for the streaming lifetime (blocks until hangup), so execution stops there.",
+  "ideal": "",
+  "base_url": "https://voice.example.com/ivr/voice",
+  "input_xml": "<Response><Connect><Stream url=\"wss://ai.example.com/ws\"/></Connect></Response>",
+  "expected_parse": {
+    "ok": true,
+    "verbs": [
+      {
+        "verb": "Connect",
+        "attrs": {},
+        "text": "",
+        "children": [
+          {
+            "verb": "Stream",
+            "attrs": {
+              "url": "wss://ai.example.com/ws"
+            },
+            "text": ""
+          }
+        ]
+      }
+    ]
+  },
+  "expected_trace": [
+    {
+      "action": "connect",
+      "url": "wss://ai.example.com/ws",
+      "mode": "bidirectional",
+      "blocks": true,
+      "stops_here": true
+    }
+  ]
+}

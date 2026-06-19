@@ -102,10 +102,22 @@ def env():
         " created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW())"
     )
 
+    # recordings table guard (Phase 6) — present via 25_schema_recordings.sql on a
+    # fresh init; create-if-missing keeps this suite runnable against older DBs.
+    _psql(
+        "CREATE TABLE IF NOT EXISTS recordings ("
+        " id SERIAL PRIMARY KEY,"
+        " customer_id INT NOT NULL REFERENCES customers(id) ON DELETE CASCADE,"
+        " call_uuid VARCHAR(64), recording_uuid VARCHAR(64) NOT NULL UNIQUE,"
+        " object_key TEXT, bucket VARCHAR(100), duration_ms INT,"
+        " kind VARCHAR(20) NOT NULL DEFAULT 'call',"
+        " created_at TIMESTAMPTZ DEFAULT NOW())"
+    )
+
     tag = uuid.uuid4().hex[:8]
     created = {"customers": [], "users": [], "extensions": [], "ivr_flows": [],
                "api_dids": [], "conferences": [], "documents": [],
-               "conversations": [], "voicemails": []}
+               "conversations": [], "voicemails": [], "recordings": []}
 
     def mk_customer(name):
         cid = int(_psql(
@@ -190,11 +202,20 @@ def env():
     ))
     created["ivr_flows"].append(flowB)
 
+    recB = int(_psql(
+        "INSERT INTO recordings (customer_id, call_uuid, recording_uuid, "
+        "object_key, bucket, kind) "
+        f"VALUES ({cidB},'callB-{tag}','rec-{tag}',"
+        f"'customer_{cidB}/recordings/{tag}.wav','voip-recordings','call') RETURNING id"
+    ))
+    created["recordings"].append(recB)
+
     data = {
         "tokenA": _token(secret, uidA, cidA, f"a-{tag}@example.com"),
         "tokenB": _token(secret, uidB, cidB, f"b-{tag}@example.com"),
         "confA": confA, "confB": confB,
         "vmB": vmB, "convB": convB, "docB": docB, "didB": didB, "flowB": flowB,
+        "recB": recB,
         "extA": extA, "extB": extB,
     }
 
@@ -214,6 +235,7 @@ def env():
         ("shared_documents", "id", created["documents"]),
         ("api_dids", "id", created["api_dids"]),
         ("ivr_flows", "id", created["ivr_flows"]),
+        ("recordings", "id", created["recordings"]),
         ("extensions", "id", created["extensions"]),
         ("users", "id", created["users"]),
         ("customers", "id", created["customers"]),
@@ -370,3 +392,25 @@ def test_ivr_list_excludes_other_tenant(env):
     assert r.status_code == 200, r.text
     ids = {row.get("id") for row in r.json()}
     assert env["flowB"] not in ids
+
+
+# --- Recordings (Phase 6 media plane) — tenant scoping / IDOR ---
+def test_cross_tenant_recording_read_denied(env):
+    r = requests.get(f"{API_BASE}/v1/recordings/{env['recB']}", headers=_hA(env))
+    assert r.status_code in DENIED, r.text
+
+
+def test_cross_tenant_recording_audio_denied(env):
+    r = requests.get(
+        f"{API_BASE}/v1/recordings/{env['recB']}/audio",
+        headers=_hA(env), allow_redirects=False,
+    )
+    assert r.status_code in DENIED, r.text
+
+
+def test_recording_list_excludes_other_tenant(env):
+    """A's recordings list must not contain B's recording."""
+    r = requests.get(f"{API_BASE}/v1/recordings", headers=_hA(env))
+    assert r.status_code == 200, r.text
+    ids = {row.get("id") for row in r.json()}
+    assert env["recB"] not in ids

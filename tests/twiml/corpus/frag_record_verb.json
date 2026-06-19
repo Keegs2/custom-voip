@@ -1,8 +1,8 @@
 {
   "name": "frag_record_verb",
-  "classification": "known-bug",
-  "description": "FUTURE: <Record> verb parses but recording is not yet implemented (Phase 6).",
-  "ideal": "Standalone <Record> is a Phase 6 feature. Today the engine parses it fine but warns loudly and skips (no recording is made / no media artifact). Phase 6 will implement real recording and resolve this.",
+  "classification": "correct",
+  "description": "Phase 6: standalone <Record> is now implemented via the core FreeSWITCH `record` app. It writes a WAV to the tenant-scoped shared spool (/media/spool/recordings/customer_<id>/<uuid>.wav) and POSTs metadata to the API recordings-ingest. With no action/callback it records then falls through to the next verb. (playBeep defaults true; maxLength=20 here.)",
+  "ideal": "",
   "base_url": "https://voice.example.com/ivr/voice",
   "input_xml": "<Response><Record maxLength=\"20\"/></Response>",
   "expected_parse": {
@@ -21,7 +21,12 @@
   "expected_trace": [
     {
       "action": "record",
-      "unsupported": true
+      "maxLength": 20,
+      "timeout": 5,
+      "finishOnKey": "#",
+      "playBeep": true,
+      "action_url": null,
+      "recordingStatusCallback": null
     }
   ]
 }

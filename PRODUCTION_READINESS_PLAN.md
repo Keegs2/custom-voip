@@ -382,7 +382,7 @@ UCaaS conference uses.
 - [x] Phase 3 — Harden Programmable-Voice Engine  ✅ real pure-Lua XML parser (9 known-bugs fixed) + HMAC-SHA256 webhook signing (KAT byte-identical Lua↔Python) + HTTPS enforce + record-warning + robust fetch; injection-safe curl transport (adversarially verified); 80 twiml/66 lua/51 lessons+signing green; live mod_lua + init-22 verified
 - [x] Phase 4 — Harden Restored UCaaS Features  ✅ S3-compatible object storage (MinIO/GCS) for vm+recordings+uploads; coturn TURN + env-driven WebRTC TLS; upload security (type/size/sanitize/AV-hook); ESL ClueCon KILLED (entrypoint hard-fails); 2 critical IDOR holes fixed (api_dids+ivr) + 22-assert tenant-isolation suite; CLAUDE.md docs refreshed
 - [x] Phase 5 — ESL Control Plane  ✅ switchio rejected (py3.12-incompatible alpha) → OWN persistent asyncio consumer+command client; ONE ESL pattern; live-call registry from real FS events; event-confirmed live-modify (hangup/transfer/redirect/dtmf); supervised reconnect/backoff + /health esl field; 16 unit + in-netns integration (originate→CREATE→ANSWER→confirmed HANGUP, fs_cli observe, FS-restart reconnect) all green; API stays healthy when FS unreachable
-- [ ] Phase 6 — Media Plane + Record/Stream + Recording
+- [x] Phase 6 — Media Plane + Record/Stream + Recording  ✅ <Record>/<Dial record> via core FS → shared spool → object storage; mod_audio_stream BUILT+LOADED + <Stream>/<Connect>; WS media consumer + pluggable STT hook; recordings table/ingest/presigned-serve, tenant-scoped; 86 twiml/181 pytest green
 - [ ] Phase 7 — Net-New TwiML Verbs
 - [ ] Phase 8 — UI for Net-New Services
 - [ ] Phase 9 — PM Verification & Sign-off

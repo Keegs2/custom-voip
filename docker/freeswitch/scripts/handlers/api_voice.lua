@@ -35,6 +35,14 @@ local ALLOW_HTTP = (os.getenv("WEBHOOK_ALLOW_HTTP") == "true")  -- dev only: per
 local MAX_REDIRECT_DEPTH = 10 -- prevent infinite redirect loops
 local GATHER_DEFAULT_TIMEOUT = 5  -- seconds
 local DIAL_DEFAULT_TIMEOUT = 30   -- seconds
+-- Recording (Phase 6): tenant-scoped on the shared /media/spool volume the API
+-- uploads to object storage. Path: <dir>/customer_<id>/<uuid>.wav
+local RECORDINGS_DIR = os.getenv("RECORDINGS_DIR") or "/media/spool/recordings"
+local RECORD_DEFAULT_MAXLEN = tonumber(os.getenv("RECORD_DEFAULT_MAXLEN")) or 3600  -- seconds
+local RECORD_DEFAULT_TIMEOUT = 5  -- seconds of silence to auto-stop
+-- Audio streaming (Phase 6, mod_audio_stream): mono fork at this sample rate.
+-- mod_audio_stream's uuid_audio_stream API expects a numeric rate (8000|16000).
+local STREAM_SAMPLE_RATE = os.getenv("STREAM_SAMPLE_RATE") or "8000"
 
 -- ============================================
 -- Logging helpers
@@ -80,6 +88,7 @@ end
 
 local xml_lib = load_lib("xml")           -- real XML parser (replaces regex parser)
 local hmac_lib = load_lib("hmac_sha256")  -- HMAC-SHA256 for webhook signing
+local rec_notify_lib = load_lib("rec_notify")  -- recordings-ingest notify (Phase 6)
 
 -- ============================================
 -- Session helpers
@@ -488,6 +497,122 @@ local function build_webhook_params(extra)
 end
 
 -- ============================================
+-- Recording + media-streaming helpers (Phase 6)
+-- ============================================
+-- Standalone recording uses CORE FreeSWITCH (no extra module): the `record`
+-- application for <Record> (one channel) and `record_session`/`stop_record_session`
+-- for <Dial record> (the mixed A+B legs). Media streaming uses mod_audio_stream
+-- (forks L16 audio to a WebSocket) when it is built into the image.
+
+-- Generate a unique recording id. Prefer FreeSWITCH's create_uuid; fall back to
+-- a time+random composite if the API is unavailable (e.g. unit harness).
+local function new_recording_uuid()
+    local id
+    pcall(function()
+        local api = freeswitch.API()
+        if api then
+            local r = api:executeString("create_uuid")
+            if r and r ~= "" then id = (r:gsub("%s+", "")) end
+        end
+    end)
+    if not id or id == "" then
+        id = string.format("rec-%d-%d", os.time(), math.random(100000, 999999))
+    end
+    return id
+end
+
+-- Build the tenant-scoped spool path and ensure the customer dir exists.
+local function recording_spool_path(rec_uuid)
+    local cust = tostring(customer_id or "unknown"):gsub("[^%w_%-]", "")
+    if cust == "" then cust = "unknown" end
+    local dir = string.format("%s/customer_%s", RECORDINGS_DIR, cust)
+    pcall(function() os.execute("mkdir -p " .. shq(dir)) end)
+    return string.format("%s/%s.wav", dir, rec_uuid)
+end
+
+-- POST recording metadata to the API ingest (shared contract). Fail-open: on
+-- Docker Desktop FS->API is unreachable, which is fine — the WAV is on the spool.
+-- Returns the API's stored key / serve URL when it answers, else nil.
+local function notify_recording(rec_uuid, spool_path, duration_ms, kind)
+    if not rec_notify_lib then return nil end
+    local res
+    local ok = pcall(function()
+        res = rec_notify_lib.notify({
+            recording_uuid = rec_uuid,
+            customer_id    = customer_id,
+            call_uuid      = uuid,
+            spool_path     = spool_path,
+            duration_ms    = duration_ms,
+            kind           = kind or "programmable",
+        })
+    end)
+    if not ok or not res then return nil end
+    return res.recording_url or res.storage_key
+end
+
+-- Is mod_audio_stream loaded in this FreeSWITCH? Cached per-process.
+local _audio_stream_cached = nil
+local function audio_stream_available()
+    if _audio_stream_cached ~= nil then return _audio_stream_cached end
+    local avail = false
+    pcall(function()
+        local api = freeswitch.API()
+        if api then
+            local r = api:executeString("module_exists mod_audio_stream")
+            avail = (tostring(r or ""):gsub("%s+", "")) == "true"
+        end
+    end)
+    _audio_stream_cached = avail
+    return avail
+end
+
+-- Start a mono audio fork to a ws/wss URL via mod_audio_stream. Returns true if
+-- the fork was started. NEVER a silent no-op: when the module is absent it logs
+-- a clear, actionable warning so operators know streaming did not happen.
+local function start_audio_stream(url)
+    if not url or url == "" then
+        log_warning(uuid, "Stream verb has no url — skipping")
+        return false
+    end
+    if not (url:match("^wss://") or url:match("^ws://")) then
+        log_warning(uuid, "Stream url is not ws/wss (" .. url .. ") — skipping")
+        return false
+    end
+    if not audio_stream_available() then
+        log_warning(uuid, string.format(
+            "audio streaming module not available (mod_audio_stream not loaded) — "
+            .. "cannot fork call audio to %s. Build mod_audio_stream into the FS "
+            .. "image to enable <Stream>/<Connect><Stream>.", url))
+        return false
+    end
+    -- Audio must be flowing for the fork to carry frames.
+    if direction == "inbound" then
+        pcall(function()
+            local answered = false
+            pcall(function() answered = session:answered() end)
+            if not answered then session:answer() end
+        end)
+    end
+    local started = false
+    pcall(function()
+        local api = freeswitch.API()
+        -- uuid_audio_stream <uuid> start <ws-url> <mix-type> <sampling-rate>
+        local arg = string.format("%s start %s mono %s", uuid, url, STREAM_SAMPLE_RATE)
+        local r = api:executeString("uuid_audio_stream " .. arg)
+        log_info(uuid, string.format("uuid_audio_stream start url=%s rate=%s -> %s",
+            url, STREAM_SAMPLE_RATE, tostring(r)))
+        started = true
+    end)
+    return started
+end
+
+local function stop_audio_stream()
+    pcall(function()
+        freeswitch.API():executeString("uuid_audio_stream " .. uuid .. " stop")
+    end)
+end
+
+-- ============================================
 -- Verb execution functions
 -- ============================================
 
@@ -742,14 +867,12 @@ local function execute_dial(verb)
     local dial_method = (verb.attrs.method == "GET") and "GET" or "POST"
     local dial_record = verb.attrs.record or nil
 
-    -- Recording is NOT yet implemented (standalone recording is Phase 6). Do NOT
-    -- silently ignore an advertised attribute — warn loudly so operators know the
-    -- requested recording did not happen.
-    if dial_record and dial_record ~= "" and dial_record ~= "false" and dial_record ~= "do-not-record" then
-        log_warning(uuid, string.format(
-            "Dial record=\"%s\" requested but call recording is NOT yet supported (pending Phase 6) — proceeding WITHOUT recording",
-            tostring(dial_record)))
-    end
+    -- <Dial record="..."> — record the bridged call. Any value other than the
+    -- explicit opt-outs starts a session recording (record_session captures the
+    -- mixed A+B audio). The Twilio "*-dual" variants request stereo (A/B split).
+    local do_record = dial_record and dial_record ~= "" and dial_record ~= "false"
+        and dial_record ~= "do-not-record"
+    local rec_uuid, rec_spool, dial_recording_url
 
     -- Resolve action URL
     if dial_action then
@@ -847,9 +970,34 @@ local function execute_dial(verb)
 
     log_info(uuid, string.format("Dial: bridge string=%s", combined_dial))
 
+    -- Start recording the session BEFORE the bridge so the whole conversation
+    -- (A+B mixed) is captured. record_session runs until stop_record_session.
+    if do_record then
+        rec_uuid = new_recording_uuid()
+        rec_spool = recording_spool_path(rec_uuid)
+        if dial_record:find("dual", 1, true) then
+            pcall(function() session:execute("set", "RECORD_STEREO=true") end)
+        end
+        log_info(uuid, string.format(
+            "Dial record=%s -> session recording uuid=%s file=%s",
+            tostring(dial_record), rec_uuid, rec_spool))
+        pcall(function() session:execute("record_session", rec_spool) end)
+    end
+
     pcall(function()
         session:execute("bridge", combined_dial)
     end)
+
+    -- Stop + notify the recording after the bridge tears down.
+    if do_record and rec_spool then
+        pcall(function() session:execute("stop_record_session", rec_spool) end)
+        local rec_dur = tonumber(get_var("record_ms", ""))
+            or tonumber(get_var("billmsec", "0")) or 0
+        dial_recording_url = notify_recording(rec_uuid, rec_spool, rec_dur, "call")
+            or rec_spool
+        set_var("RecordingUrl", dial_recording_url)
+        set_var("RecordingSid", rec_uuid)
+    end
 
     -- Check dial result. originate_disposition is the authoritative FreeSWITCH
     -- variable ("SUCCESS" on connect, a failure cause otherwise). The old
@@ -871,10 +1019,16 @@ local function execute_dial(verb)
         local dial_call_status = status_map[dial_status] or "failed"
         local dial_duration = get_var("billmsec", "0")
 
-        local params = build_webhook_params({
+        local extra = {
             DialCallStatus = dial_call_status,
             DialCallDuration = tostring(math.floor(tonumber(dial_duration) / 1000))
-        })
+        }
+        -- Surface the recording to the action handler when Dial record was set.
+        if dial_recording_url then
+            extra.RecordingUrl = dial_recording_url
+            extra.RecordingSid = rec_uuid
+        end
+        local params = build_webhook_params(extra)
 
         local new_verbs, err = fetch_instructions(dial_action, params, dial_method)
         if new_verbs then
@@ -929,6 +1083,147 @@ local function execute_redirect(verb)
 end
 
 -- ============================================
+-- <Record> verb  (standalone recording — core FS `record` app)
+-- ============================================
+local function execute_record(verb)
+    local max_length    = tonumber(verb.attrs.maxLength) or RECORD_DEFAULT_MAXLEN
+    local timeout       = tonumber(verb.attrs.timeout) or RECORD_DEFAULT_TIMEOUT
+    local finish_on_key = verb.attrs.finishOnKey or "#"
+    local play_beep     = not (verb.attrs.playBeep == "false")  -- default true (Twilio)
+    local action_url    = verb.attrs.action or nil
+    local method        = (verb.attrs.method == "GET") and "GET" or "POST"
+    local status_cb     = verb.attrs.recordingStatusCallback or nil
+
+    if action_url then action_url = resolve_url(action_url, current_base_url) end
+    if status_cb then status_cb = resolve_url(status_cb, current_base_url) end
+
+    -- The caller's audio must be flowing to capture it.
+    if direction == "inbound" then
+        pcall(function()
+            local answered = false
+            pcall(function() answered = session:answered() end)
+            if not answered then session:answer() end
+        end)
+    end
+
+    local rec_uuid = new_recording_uuid()
+    local spool_path = recording_spool_path(rec_uuid)
+
+    log_info(uuid, string.format(
+        "Record: uuid=%s maxLength=%d timeout=%d finishOnKey='%s' playBeep=%s file=%s",
+        rec_uuid, max_length, timeout, finish_on_key, tostring(play_beep), spool_path))
+
+    -- finishOnKey terminates the record app via playback_terminators.
+    pcall(function() session:execute("set", "playback_terminators=" .. finish_on_key) end)
+
+    if play_beep then
+        pcall(function() session:execute("playback", "tone_stream://%(1000,0,640)") end)
+    end
+
+    -- core record app: record <file> <time_limit_s> <silence_thresh> <silence_secs>
+    if session_ready() then
+        pcall(function()
+            session:execute("record",
+                string.format("%s %d 200 %d", spool_path, max_length, timeout))
+        end)
+    end
+
+    -- Duration + terminating DTMF from the channel vars the record app sets.
+    local dur_ms = tonumber(get_var("record_ms", "")) or 0
+    if dur_ms == 0 then
+        local secs = tonumber(get_var("record_seconds", ""))
+        if secs then dur_ms = math.floor(secs * 1000) end
+    end
+    local digits = get_var("playback_terminator_used", "") or ""
+
+    log_info(uuid, string.format("Record complete: uuid=%s duration_ms=%d digits='%s'",
+        rec_uuid, dur_ms, digits))
+
+    -- Notify the API ingest (shared contract). The stored key/serve URL it hands
+    -- back is the recordingUrl surfaced to the customer; else fall back to spool.
+    local recording_url = notify_recording(rec_uuid, spool_path, dur_ms, "programmable")
+        or spool_path
+    set_var("RecordingUrl", recording_url)
+    set_var("RecordingSid", rec_uuid)
+
+    -- recordingStatusCallback: fire-and-forget POST once the artifact is ready.
+    if status_cb then
+        local params = build_webhook_params({
+            RecordingSid      = rec_uuid,
+            RecordingUrl      = recording_url,
+            RecordingDuration = tostring(math.floor(dur_ms / 1000)),
+            RecordingStatus   = "completed",
+        })
+        pcall(function() http_request(status_cb, params, "POST") end)
+    end
+
+    -- action URL: POST recording info, execute the returned TwiML, then stop.
+    if action_url then
+        local params = build_webhook_params({
+            RecordingSid      = rec_uuid,
+            RecordingUrl      = recording_url,
+            RecordingDuration = tostring(math.floor(dur_ms / 1000)),
+            Digits            = digits,
+        })
+        local new_verbs, err = fetch_instructions(action_url, params, method)
+        if new_verbs then
+            local saved_base = current_base_url
+            current_base_url = action_url
+            execute_verbs(new_verbs)
+            current_base_url = saved_base
+            return "stop"
+        else
+            log_err(uuid, "Failed to fetch Record action URL: " .. tostring(err))
+        end
+    end
+
+    return nil  -- continue to next verb
+end
+
+-- ============================================
+-- <Stream> verb  (one-way audio fork; Twilio <Start><Stream> semantics)
+-- ============================================
+local function execute_stream(verb)
+    local url = verb.attrs.url or verb.text or ""
+    log_info(uuid, string.format("Stream: url=%s (one-way fork)", url))
+    start_audio_stream(url)
+    -- A <Stream> fork does NOT block — execution continues to the next verb.
+    return nil
+end
+
+-- ============================================
+-- <Connect><Stream> verb  (bidirectional media to a WS peer; OWNS the call)
+-- ============================================
+local function execute_connect(verb)
+    local stream
+    for _, child in ipairs(verb.children or {}) do
+        if child.verb == "Stream" then
+            stream = child
+            break
+        end
+    end
+    if not stream then
+        log_warning(uuid, "Connect verb without a <Stream> child is not supported — skipping")
+        return nil
+    end
+    local url = stream.attrs.url or stream.text or ""
+    log_info(uuid, string.format("Connect><Stream: url=%s (bidirectional)", url))
+
+    if not start_audio_stream(url) then
+        -- Module unavailable / bad url: do NOT hang the call open with no stream.
+        return nil
+    end
+
+    -- <Connect> owns the call for the streaming lifetime: hold it up until the
+    -- channel hangs up (the WS peer / caller ends it), sleeping in 1s slices.
+    while session_ready() do
+        pcall(function() session:execute("sleep", "1000") end)
+    end
+    stop_audio_stream()
+    return "stop"
+end
+
+-- ============================================
 -- Main verb execution loop
 -- ============================================
 
@@ -962,9 +1257,11 @@ execute_verbs = function(verbs)
                 execute_reject(verb)
                 result = "stop"
             elseif verb.verb == "Record" then
-                -- Standalone recording is Phase 6. Do not silently no-op an
-                -- advertised verb — warn loudly and continue.
-                log_warning(uuid, "<Record> verb is NOT yet supported (pending Phase 6) — skipping, no recording made")
+                result = execute_record(verb)
+            elseif verb.verb == "Stream" then
+                execute_stream(verb)
+            elseif verb.verb == "Connect" then
+                result = execute_connect(verb)
             else
                 log_warning(uuid, "Unknown verb: " .. tostring(verb.verb) .. ", skipping")
             end

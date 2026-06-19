@@ -223,9 +223,37 @@ fail-open.
 ### handlers/api_voice.lua  (was voice_webhook.lua)
 
 **TwiML-compatible XML execution engine** for the API Calling / IVR products.
-Renamed from `voice_webhook.lua` in Phase 2; hardened in Phase 3.
+Renamed from `voice_webhook.lua` in Phase 2; hardened in Phase 3; media plane
+(record/stream) added in Phase 6.
 
-Supports these verbs: Say, Play, Gather, Dial, Hangup, Pause, Redirect, Reject.
+Supports these verbs: Say, Play, Gather, Dial, Hangup, Pause, Redirect, Reject,
+**Record, Stream, Connect** (Phase 6).
+
+**Phase 6 — `<Record>` (standalone recording):** uses CORE FreeSWITCH (no extra
+module) — the `record` app. Writes a WAV to the tenant-scoped shared spool
+`/media/spool/recordings/customer_<id>/<uuid>.wav` (dir env-overridable via
+`RECORDINGS_DIR`). Honors `maxLength`, `timeout` (silence auto-stop), `finishOnKey`,
+`playBeep` (default true), `action` (+`method`), `recordingStatusCallback`. On
+completion it POSTs `{recording_uuid, customer_id, call_uuid, spool_path,
+duration_ms, kind}` to the API `POST /v1/recordings/ingest` via `lib/rec_notify.lua`
+(injection-safe system curl, fail-open; the response's `recording_url`/`storage_key`
+becomes the `RecordingUrl` surfaced in the status/action callbacks; falls back to the
+spool path). `RecordingUrl`/`RecordingSid` are also stashed as channel vars.
+
+**Phase 6 — `<Dial record="...">`:** records the bridged call via
+`record_session`/`stop_record_session` (mixed A+B; `*-dual` → `RECORD_STEREO=true`)
+to the same spool, notifies the ingest with `kind="call"`, and includes
+`RecordingUrl` in the Dial `action` POST. Any value except ``/`false`/`do-not-record`
+enables recording (this resolves the Phase 3 "record lie" warning).
+
+**Phase 6 — `<Stream>` / `<Connect><Stream>`:** forks call audio to a `ws/wss` URL
+via **mod_audio_stream** (`uuid_audio_stream <uuid> start <url> mono 8000`). A
+top-level `<Stream>` is a one-way fork that does NOT block (Twilio `<Start><Stream>`
+semantics) and continues to the next verb; `<Connect><Stream url=.../>` is
+bidirectional and OWNS the call until hangup, then tears the fork down. Guarded:
+if mod_audio_stream is not loaded the verb logs a clear "audio streaming module not
+available" WARNING (never a silent no-op). Sample rate env-overridable via
+`STREAM_SAMPLE_RATE` (default `8000`).
 
 Flow:
 1. Build payload from session variables (caller, destination, customer_id, direction)
@@ -406,6 +434,7 @@ Trunk max CPS hard cap: 10. Must upgrade to API for higher.
 | `lib/xml.lua` | **Real pure-Lua XML parser** for the TwiML engine (Phase 3). Decodes entities, escaped quotes, CDATA, arbitrary nesting; rejects malformed loudly. Replaced the regex parser (closed the ReDoS risk). |
 | `lib/hmac_sha256.lua` | Pure-Lua HMAC-SHA256 for webhook signing (`X-Revup-Signature`). KAT byte-identical to the API's Python verifier. |
 | `lib/vm_notify.lua` | POSTs voicemail-deposit metadata to the API `POST /v1/voicemail/ingest` (system curl via io.popen, injection-safe quoting, fail-open). Skipped when `API_HOST` is unset. Env: `VM_NOTIFY_TIMEOUT` (default 5s). |
+| `lib/rec_notify.lua` | **Phase 6.** POSTs call-recording metadata `{recording_uuid, customer_id, call_uuid, spool_path, duration_ms, kind}` to the API `POST /v1/recordings/ingest` (system curl via io.popen, injection-safe quoting, fail-open). Mirrors vm_notify but ALSO reads the JSON response to return the API's `recording_url`/`storage_key` (the serve URL surfaced in callbacks). Skipped when `API_HOST` unset; clean no-op on Docker Desktop where FS→API is unreachable. Env: `REC_NOTIFY_TIMEOUT` (default 5s). |
 
 ---
 

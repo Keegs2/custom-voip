@@ -21,6 +21,8 @@ from routers import (
     onboarding, freeswitch,
     # UCaaS routers (restored on top of the RCF-V1 base — additive)
     ivr, api_dids, extensions, presence, voicemail, webrtc,
+    # Phase 6 — media plane: standalone call recording ingest + serve
+    recordings,
 )
 from routers.chat import router as chat_router
 from routers.conference import router as conference_router
@@ -208,6 +210,10 @@ app.include_router(conference_router, prefix="/v1/conferences", tags=["Conferenc
 app.include_router(conference_router, prefix="/conferences", tags=["Conferences"])
 app.include_router(documents_router, prefix="/v1/documents", tags=["Documents"])
 app.include_router(documents_router, prefix="/documents", tags=["Documents"])
+
+# Phase 6 — standalone call recordings (FS ingest + tenant-scoped presigned serve)
+app.include_router(recordings.router, prefix="/v1/recordings", tags=["Recordings"])
+app.include_router(recordings.router, prefix="/recordings", tags=["Recordings"])
 
 # FreeSWITCH mod_xml_curl gateway. Mounted at /freeswitch (auth-exempt in
 # middleware). Always returns HTTP 200 + the FreeSWITCH "not found" XML so
@@ -533,6 +539,44 @@ async def chat_websocket(websocket: WebSocket):
         pass
     finally:
         chat_manager.disconnect(websocket)
+
+
+# ---------------------------------------------------------------------------
+# WebSocket: media plane — mod_audio_stream audio fork sink (Phase 6)
+# ---------------------------------------------------------------------------
+
+@app.websocket("/ws/media/{call_uuid}")
+async def media_websocket(websocket: WebSocket, call_uuid: str):
+    """Audio-fork sink for FreeSWITCH ``mod_audio_stream`` (Phase 6 media plane).
+
+    FS connects here and streams raw L16 PCM frames (binary). The consumer counts
+    frames + bytes, estimates duration, and feeds each frame to a pluggable STT
+    hook (no-op default; a real vendor is wired via ``STT_BACKEND`` later).
+
+    Auth: media forks arrive from FreeSWITCH WITHOUT a JWT, so this endpoint does
+    not require a token (it matches the ``/ws/*`` middleware exemption and, like
+    the CDR/recording ingest, is reachable only over the internal Docker network
+    in prod). An optional ``?rate=`` query param sets the PCM sample rate
+    (default 8000 Hz, RCF telephony).
+
+    NOTE (Docker Desktop): host-net FreeSWITCH cannot reach the bridged API
+    container, so the live FS→API fork is verified in prod, not locally — the
+    consumer (services.media.consume_media_stream) is unit-tested with a synthetic
+    in-process WebSocket. Same isolation noted for the ESL consumer.
+    """
+    from services.media import consume_media_stream
+
+    await websocket.accept()
+    try:
+        sample_rate = int(websocket.query_params.get("rate", "8000"))
+    except (TypeError, ValueError):
+        sample_rate = 8000
+
+    stats = await consume_media_stream(websocket, call_uuid, sample_rate=sample_rate)
+    logger.info(
+        "Media WS closed call=%s frames=%d bytes=%d duration_ms=%d",
+        call_uuid, stats["frames"], stats["bytes"], stats["duration_ms"],
+    )
 
 
 # ---------------------------------------------------------------------------

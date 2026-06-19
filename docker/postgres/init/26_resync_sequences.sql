@@ -1,4 +1,6 @@
--- 24_resync_sequences.sql — MUST RUN LAST.
+-- 26_resync_sequences.sql — MUST RUN LAST (sorts after every schema/seed script).
+-- (Renamed from 24_ when 25_schema_recordings.sql was added — this resync must
+--  stay the alphabetically-last init script so it runs after all explicit-id seeds.)
 --
 -- Several seed scripts insert rows with EXPLICIT ids (14_granite_accounts → customer 1,
 -- 11b_add_ucaas_type → customer 5, the admin user, etc.) without advancing the owning

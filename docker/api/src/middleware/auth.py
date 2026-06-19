@@ -55,6 +55,11 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
         if path.endswith("/voicemail/ingest"):
             return await call_next(request)
 
+        # Exempt the recording ingest (FreeSWITCH POSTs unauthenticated after a
+        # recording is written to the shared spool — same pattern as CDR ingest).
+        if path.endswith("/recordings/ingest"):
+            return await call_next(request)
+
         # WebSocket connections authenticate via query param, not header
         if path.startswith("/ws/"):
             return await call_next(request)
