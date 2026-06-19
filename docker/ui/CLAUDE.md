@@ -17,7 +17,7 @@ Read this before touching any frontend code.
 | Styling | Tailwind CSS v4 (via `@tailwindcss/vite` plugin) + inline styles |
 | UI primitives | Hand-rolled components in `src/components/ui/` — no third-party UI library |
 | Icons | `lucide-react` (product icons wrapped in `src/components/icons/ProductIcons.tsx`) |
-| Drag-and-drop | `@dnd-kit/core` + `@dnd-kit/sortable` (IVR builder only) |
+| Flow builder canvas | `@xyflow/react` (React Flow) + `@dagrejs/dagre` (auto-layout) + `zustand`/`zundo` (graph state + undo/redo) + `nanoid` — powers the Call Flow Builder (`src/flow/`). Replaced the old `@dnd-kit` IVR tree builder, which has been removed. |
 | Class merging | `clsx` + `tailwind-merge` via `src/utils/cn.ts` |
 | Build check | `tsc -b && vite build` (TypeScript errors block the Docker build) |
 
@@ -111,7 +111,7 @@ QueryClient defaults:
 /rcf                      RcfPage
 /api-dids                 ApiDidsPage
 /trunks                   TrunksPage
-/ivr                      IvrBuilderPage
+/flows                    CallFlowBuilderPage      (Universal Call Flow Builder — wrapped in RequireAdmin)
 /documentation            → redirect to /docs/rcf
 /docs/rcf                 RcfDocsPage
 /docs/api                 ApiDocsPage
@@ -273,7 +273,8 @@ return { items: raw.items ?? [], total: raw.total ?? raw.items?.length ?? 0 };
 | `carriers.ts` | `/carriers` | CRUD + `testCarrier` |
 | `cdrs.ts` | `/cdrs` | `searchCdrs`, `getCdr`, `rateCdr`, `getCdrSummary`, customer-scoped helpers |
 | `rates.ts` | `/rates` | CRUD + `getMarginsData`, `lookupRate` |
-| `ivr.ts` | `/ivr` | CRUD for IVR flows |
+| `callFlows.ts` | `/call-flows` | CRUD + `publishFlow`, `simulateFlow`, version history (`listFlowVersions`/`getFlowVersion`/`restoreFlowVersion`) for the generalized `call_flows` backend. The primary module behind the Call Flow Builder. |
+| `ivr.ts` | `/ivr` | Read-only list/get of legacy `ivr_flows` rows — now used only by the builder's **Import IVR** action (`flow/compile/fromLegacyIvr.ts`) to convert an old flow onto the canvas. |
 | `documents.ts` | `/documents` | folders CRUD, document upload/download/update/delete, stats |
 | `sipp.ts` | `/sipp` | `listSippPresets`, `runSipp` |
 | `health.ts` | `/health` | `getHealth`, `getDetailedHealth` |
@@ -309,8 +310,9 @@ Standard query key conventions:
 ### Client state — React `useState` / `useReducer`
 
 - **Form state:** local `useState` inside each page.
-- **IVR builder:** `useReducer` in `src/pages/ivr/useIvrFlow.ts` — all mutations
-  to the node tree go through typed `IvrAction` dispatches.
+- **Call Flow Builder graph:** `zustand` store with `zundo` temporal middleware in
+  `src/flow/store/flowStore.ts` — nodes/edges, selection, undo/redo, and `loadDoc()`.
+  (The old `@dnd-kit` `useReducer` IVR tree builder was removed.)
 - **Sidebar group open/close:** `useState` + persisted to `localStorage` under
   key `sidebar_groups_open`.
 
@@ -329,7 +331,8 @@ Standard query key conventions:
 
 **`DashboardPage`** (`/`)
 Navigation hub. Static card grid linking to all product areas. No API calls.
-Shows "Phase 2" badges on API Calling and IVR Builder.
+Shows a "Phase 2" badge on API Calling (the customer-facing `ApiDidsPage` is still
+a placeholder).
 
 **`RcfPage`** (`/rcf`)
 Lists RCF entries for the authenticated customer (or all customers for admin via
@@ -343,9 +346,16 @@ Full trunk management lives in `admin/TrunksAdminPage`.
 **`ApiDidsPage`** (`/api-dids`)
 Currently a placeholder/coming-soon shell.
 
-**`IvrBuilderPage`** (`/ivr`)
-Currently a placeholder/coming-soon shell. The IVR engine code
-(`src/pages/ivr/`) is complete but the page wrapper shows "Phase 2".
+**`CallFlowBuilderPage`** (`/flows`, **admin-only — wrapped in `RequireAdmin`**)
+The Universal Call Flow Builder: a React Flow node-graph editor that designs the
+call-handling logic for ANY product (IVR / API / RCF / Conference / Trunk / UCaaS).
+A product selector drives the node palette, the per-product compiler, and the
+validation rules. Save creates/updates a `call_flows` row; Publish compiles to the
+product's native sink (e.g. IVR→`ivr_flows.flow_config`, RCF→`rcf_numbers`,
+UCaaS→`extensions.ring_plan`, Trunk→`trunk_dids.route_plan`) and snapshots a
+version. Also offers **Simulate** (dry-run a caller/time against the flow) and
+**version history** (view/restore). See §11 for internals. This replaced the old
+`/ivr` page entirely.
 
 **`RcfDocsPage`** (`/docs/rcf`) and **`ApiDocsPage`** (`/docs/api`)
 Static inline documentation pages. No API calls. `/documentation` redirects to
@@ -475,8 +485,12 @@ Navigation items are shown/hidden based on `account_type`:
 - `rcf` variant: only RCF shown in Products
 - `trunk` variant: only SIP Trunks shown
 - `hybrid`: RCF + SIP Trunks
-- `ucaas`: IVR Builder shown
-- Admin/support: all items shown
+- `ucaas`: UCaaS extension/voicemail surfaces shown
+- Admin/support: all items shown, **plus** the Call Flow Builder (`/flows`)
+
+The **Call Flow Builder** nav item (`flowsItem`, `/flows`) is admin-only — it is in
+`adminPaths` and the route is `RequireAdmin`-gated. It is not a per-`account_type`
+product item; customers never see it.
 
 **`PageHeader`**
 Standardised page title block: title (h1), optional subtitle, optional right-side
@@ -612,44 +626,73 @@ composed so conflicting utilities are resolved correctly.
 
 ---
 
-## 11. IVR Builder Internals
+## 11. Call Flow Builder Internals (`src/flow/`)
 
-The IVR builder (`src/pages/ivr/`) is fully implemented but the `IvrBuilderPage`
-page wrapper currently shows a "Phase 2 / Coming Soon" placeholder.
+The Universal Call Flow Builder is a React Flow node-graph editor at `/flows`
+(`CallFlowBuilderPage`, admin-only). One product-agnostic graph drives every
+product; per-product compilers emit each backend's native artifact. The legacy
+`@dnd-kit` IVR tree builder (`src/pages/ivr/`) was **removed** — this is the single
+flow/IVR editor.
 
 ### Architecture
 
 ```
-IvrBuilderPage → useIvrFlow() (useReducer)
-               → IvrTopbar    (save, load, new, name)
-               → IvrPalette   (verb drag source)
-               → IvrCanvas    (node tree render + drop targets)
-               → IvrConfigPanel (selected node editor)
-               → IvrXmlModal   (XML preview)
-               → IvrLoadModal  (load existing flow)
+CallFlowBuilderPage → FlowBuilderShell
+  ├─ FlowToolbar          (product selector, Save/Publish, Simulate, History, Import IVR)
+  ├─ NodePalette          (product-filtered node source — model/palette.ts)
+  ├─ CallFlowCanvas       (@xyflow/react canvas; node renderers in canvas/nodes/)
+  ├─ NodeConfigPanel      (selected-node editor — config/)
+  └─ ValidationPanel      (per-product validation — validation/)
+state: store/flowStore.ts (zustand + zundo undo/redo, loadDoc/serialize)
 ```
 
-### `BuilderNode` (internal type, extends `IvrNode`)
+### Core model — `CallFlowDoc` (`model/types.ts`)
 
-The API's `IvrNode.branches` is `Record<string, string>` (id references). The
-builder extends this to `Record<string, BuilderNode[]>` (nested children) and adds
-a `prompt: BuilderNode[]` array for Gather verbs and `_activeBranch: string | null`
-for UI tab state.
+One portable JSON document is the source of truth: a flat `{ nodes[], edges[] }`
+graph (Twilio-Studio style) plus an `entry` binding and `product` kind. Node
+`config` is a discriminated union (`NodeConfig`) keyed by node type. `model/
+defaults.ts` seeds new nodes; `model/palette.ts` exports `PALETTE_BY_PRODUCT` (the
+allowed node set per product — this is how RCF stays simple: its palette only
+exposes customer-allowed capabilities).
 
-### Reducer actions
+### Canvas (`canvas/`)
 
-All mutations dispatch typed `IvrAction` objects. Notable actions:
-- `ADD_NODE` — deep-clones tree, splices new node at path/position
-- `REMOVE_NODE` — deep-clones, removes by id
-- `MOVE_NODE` — removes from source, inserts at target (adjusts index if same array)
-- `UPDATE_CONFIG` — merges into `node.config`
-- `ADD_BRANCH` / `REMOVE_BRANCH` / `SET_ACTIVE_BRANCH` — Gather verb branch management
-- `LOAD_FLOW` — replaces entire state (used when loading a saved flow)
+Custom React Flow node renderers in `canvas/nodes/`: `EntryFlowNode` (the call
+entry point), `StepNode` (linear verbs: say/play/dial/record/…), `MenuNode`
+(per-digit handles for IVR menus), `BranchNode` (schedule/condition with
+in/out + match/nomatch source handles), and `GenericFlowNode` (fallback).
+`canvas/handles.ts` + `nodeTypes.ts` register handle ids and node-type map.
 
-### XML generation
+### Compilers (`compile/`)
 
-`nodesToXml()` and `generateXml()` in `ivrUtils.ts` produce TwiML-compatible XML.
-Gather branch routing is emitted as XML comments (webhook callbacks handle routing).
+Each product has a pure `compile()` (`compile/{ivr,rcf,trunk,ucaas}.ts`,
+dispatched by `compile/registry.ts`, shared types in `compile/types.ts`) that
+turns the `CallFlowDoc` into the backend's native artifact written to the sink on
+publish. Several are **dual-mode**: a simple flat shape when the graph is trivial,
+or a rich rules/plan shape otherwise (RCF, trunk). `compile/fromLegacyIvr.ts` is
+the **reverse** compiler: it converts a legacy `ivr_flows.flow_config` nested tree
+back into a `CallFlowDoc` graph (with `@dagrejs/dagre` top-down auto-layout) for
+the toolbar's **Import IVR** action — the source `ivr_flows` row is never mutated.
+
+### Store (`store/flowStore.ts`)
+
+`zustand` store wrapped in `zundo` temporal middleware: holds nodes/edges +
+selection, exposes graph mutations, undo/redo, and `loadDoc()` (used by both an
+existing-flow load and the legacy importer). `store/serialize.ts` converts between
+the React Flow runtime graph and the persisted `CallFlowDoc`.
+
+### Toolbar actions (`toolbar/`)
+
+- **Save / Publish** — `callFlows.ts` create/update then `publishFlow`; publish
+  compiles + writes the sink + (for DID-bound products) repoints the DID.
+- **FlowSimulateModal** — `POST /call-flows/{id}/simulate` with a test caller-id /
+  timestamp; renders `{ product, result, trace }` (the backend reuses the real
+  schedule/caller matchers, so the dry-run matches live routing).
+- **FlowHistoryModal** — lists published versions (`listFlowVersions`), views a
+  snapshot (`getFlowVersion`), and restores one as a new draft (`restoreFlowVersion`,
+  no sink write until re-published).
+- **Import IVR** — lists legacy flows via `ivr.ts`, converts the chosen one through
+  `fromLegacyIvr.ts`, and `loadDoc`s it as an unsaved draft.
 
 ---
 
@@ -660,6 +703,10 @@ This is the RCF-V1 production architecture. Know what is and is not available:
 ### Fully implemented and deployed
 
 - **RCF** (`account_type: 'rcf'`) — the primary product. Full CRUD, inline editing, bulk operations.
+- **Call Flow Builder** (`/flows`, admin-only) — Universal React Flow editor that
+  designs + publishes call-handling logic for every product (IVR/API/RCF/Conference/
+  Trunk/UCaaS), with simulate + version history. Compiles to each product's existing
+  backend sink. See §11.
 - **SIP Trunks** (`account_type: 'trunk'`) — full management in admin, customer portal is a placeholder.
 - **Admin suite** — customers, trunks, CDRs, rates, tiers, carriers, SIPp, DID search, user lookup.
 - **Call Quality** — platform-wide CDR quality analysis with MOS/jitter/packet-loss metrics.
@@ -672,8 +719,10 @@ This is the RCF-V1 production architecture. Know what is and is not available:
 
 - **API Calling** (`account_type: 'api'`) — `ApiDidsPage` is a placeholder. Admin-side
   `CustomerApiSection` works for admin config. DID management exists in admin only.
-- **IVR Builder** — `IvrBuilderPage` is a placeholder. The IVR engine in `src/pages/ivr/`
-  is complete code but not exposed to customers yet.
+- **Customer self-service IVR/flow editing** — the Call Flow Builder is admin-only
+  today (`/flows` is `RequireAdmin`). Customers don't yet author their own flows;
+  admins build/publish on their behalf. (The legacy customer-facing `/ivr` page and
+  its `@dnd-kit` builder were removed.)
 - **UCaaS** (`ucaas_enabled: true`) — `CustomerUcaasSection` provides extension/voicemail
   management for admin. The softphone widget (WebRTC/Verto) is referenced in nginx
   (`/ws/verto/` proxy) but the softphone component itself is not in this codebase.
@@ -681,9 +730,9 @@ This is the RCF-V1 production architecture. Know what is and is not available:
 ### RCF customers specifically
 
 RCF customers (`account_type: 'rcf'`) see only: RCF page, API Docs, Call Quality,
-Troubleshooting, and Account in the sidebar. They never see SIP Trunks, API Calling,
-or IVR Builder. This is enforced in `Sidebar.tsx` by filtering `allProductNavItems`
-against `user.account_type`.
+Troubleshooting, and Account in the sidebar. They never see SIP Trunks or API
+Calling (filtered in `Sidebar.tsx` against `user.account_type`), nor the admin-only
+Call Flow Builder (`/flows`, `RequireAdmin`).
 
 ---
 
@@ -819,4 +868,5 @@ Danger red:    #ef4444 / #7f1d1d
 
 Active nav items use a coloured gradient background with a matching border and
 glow shadow — each product has its own accent colour defined in `Sidebar.tsx`
-(`#4ade80` for RCF, `#fbbf24` for trunks, `#c084fc` for API, `#22d3ee` for IVR).
+(`#4ade80` for RCF, `#fbbf24` for trunks, `#c084fc` for API, `#22d3ee` for the
+Call Flow Builder).
