@@ -107,6 +107,24 @@ resource "google_compute_firewall" "test_rtp" {
   target_tags   = ["voip-test"]
 }
 
+# SSH — from your workstation AND Google's IAP range (browser "SSH-in-browser").
+# Needed because adopting fs-media swapped its tags off voip-media, dropping its
+# old SSH allowance; the voip-test rules below only open SIP/RTP/web.
+resource "google_compute_firewall" "test_ssh" {
+  name      = "voip-test-ssh"
+  network   = var.network
+  direction = "INGRESS"
+
+  allow {
+    protocol = "tcp"
+    ports    = ["22"]
+  }
+
+  # 35.235.240.0/20 = Google IAP TCP-forwarding range (browser/IAP SSH).
+  source_ranges = concat(var.office_cidrs, ["35.235.240.0/20"])
+  target_tags   = ["voip-test"]
+}
+
 # UI / API / Verto WSS / TURN — from YOUR test client IP(s) only.
 resource "google_compute_firewall" "test_web" {
   name      = "voip-test-web"
