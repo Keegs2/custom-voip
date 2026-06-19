@@ -32,6 +32,29 @@ The three decisions to weigh in on are at the very bottom (§11).
 
 ---
 
+## 0.1 DECISIONS — LOCKED (product owner, 2026-06-19)
+
+1. **Storage = generalized `call_flows` table up front** (not the extend-`ivr_flows`
+   shortcut). One product-agnostic table is the home for every product's flow graph
+   from day one. **Implication:** P1 is no longer "zero backend change" — we add the
+   `call_flows` table + a thin CRUD/compile service first. The **runtime stays
+   unchanged**: each product still compiles to its existing sink (IVR →
+   `ivr_flows.flow_config` served by `api_voice.lua`; RCF → `rcf_numbers` columns),
+   so no FreeSWITCH/Lua change. `call_flows` holds the editable graph + status +
+   version; the compiled artifact is written to the product sink on publish. See §7.
+2. **RCF stays simple — the palette is the gate.** We do NOT extend the RCF Lua
+   runtime. The RCF palette exposes **only the capabilities an RCF customer is
+   allowed** (forward/dial, failover, ring-timeout, pass-caller-ID) — i.e. exactly
+   what `rcf_numbers` already supports. The 🔶 rich-RCF nodes (time-of-day, ring
+   groups, conditions) are **not in the RCF palette** until/unless a separate funded
+   runtime epic enables them. The builder enforces the boundary by construction.
+3. **Replace the IVR builder + full polish.** Retire the `@dnd-kit` tree builder,
+   migrate saved flows via the legacy importer, and build the flagship IVR canvas to
+   n8n/Twilio-grade polish (custom telephony nodes, validation, simulate mode,
+   draft/publish + version history).
+
+---
+
 ## 1. Recommended Package Stack
 
 All MIT-licensed. Versions are current as of 2026-06.
