@@ -13,6 +13,7 @@ from datetime import datetime
 
 from db import database as db
 from auth.dependencies import get_current_user, get_customer_filter
+from auth.ingest import ingest_secret_ok, ingest_auth_error
 from services import storage
 
 logger = logging.getLogger(__name__)
@@ -216,18 +217,49 @@ async def delete_voicemail(
 
 @router.post("/ingest")
 async def ingest_voicemail(request: Request):
-    """Receive a voicemail notification from FreeSWITCH.
+    """Receive a voicemail from FreeSWITCH.
 
-    This endpoint is called by FreeSWITCH over the internal Docker network
-    after a voicemail is deposited. No authentication is required.
+    SEC-2: requires the shared ``X-Ingest-Secret`` header (constant-time compared
+    to env ``INGEST_SHARED_SECRET``); an unset secret allows in dev with a loud
+    warning.
 
-    Always returns 200 to prevent FreeSWITCH retries.
+    PROD-2 (cross-VM media): in production the FreeSWITCH Media VM and the API
+    Services VM do NOT share a volume, so FreeSWITCH POSTs the audio FILE via
+    ``multipart/form-data`` (field ``file``) alongside the metadata fields. LOCAL
+    fallback: when no file is attached we read ``storage_path`` from the shared
+    spool volume (single-host dev). The audio is uploaded to the voip-voicemail
+    bucket (MinIO local / GCS-S3 prod) under a tenant-scoped key.
+
+    Always returns 200 on processing errors to prevent FreeSWITCH retries.
     """
+    if not ingest_secret_ok(request):
+        return ingest_auth_error()
+
+    # Parse metadata + optional uploaded audio from EITHER multipart or JSON.
+    file_bytes: Optional[bytes] = None
+    file_name: Optional[str] = None
+    ctype = request.headers.get("content-type", "")
     try:
-        body = await request.json()
+        if ctype.startswith("multipart/form-data"):
+            form = await request.form()
+            body = {
+                "extension": form.get("extension"),
+                "customer_id": form.get("customer_id"),
+                "caller_id": form.get("caller_id"),
+                "caller_name": form.get("caller_name"),
+                "duration_ms": form.get("duration_ms"),
+                "storage_path": form.get("storage_path"),
+                "transcription": form.get("transcription"),
+            }
+            upload = form.get("file")
+            if upload is not None and hasattr(upload, "read"):
+                file_bytes = await upload.read()
+                file_name = getattr(upload, "filename", None) or "voicemail.wav"
+        else:
+            body = await request.json()
     except Exception as e:
         logger.warning("Voicemail ingest: failed to parse body: %s", e)
-        return {"status": "error", "detail": "invalid JSON"}
+        return {"status": "error", "detail": "invalid body"}
 
     try:
         extension_number = body.get("extension")
@@ -257,13 +289,34 @@ async def ingest_voicemail(request: Request):
 
         extension_id = ext_row["id"]
 
-        # FreeSWITCH writes the recording to the shared spool volume
-        # (/media/spool/...). Upload it to the voip-voicemail bucket under a
-        # tenant-scoped key so any media node can serve it via presigned URL.
-        # storage_path persisted is the OBJECT KEY (not the local path).
+        # Upload the audio to the voip-voicemail bucket under a tenant-scoped key
+        # so any media node can serve it via presigned URL. storage_path persisted
+        # is the OBJECT KEY (not the local path). Prefer the multipart file
+        # (cross-VM prod); fall back to the shared spool path (single-host dev).
         local_path = body.get("storage_path")
         object_key = None
-        if local_path and os.path.isfile(local_path):
+        if file_bytes is not None:
+            try:
+                basename = os.path.basename(file_name or "voicemail.wav")
+                object_key = storage.tenant_key(
+                    int(customer_id),
+                    "voicemail",
+                    f"ext_{extension_id}",
+                    f"{uuid.uuid4().hex}_{basename}",
+                )
+                ext = os.path.splitext(basename)[1].lower()
+                content_type = "audio/wav" if ext in (".wav", "") else "application/octet-stream"
+                storage.put_file(
+                    storage.BUCKET_VOICEMAIL, object_key, file_bytes, content_type
+                )
+            except Exception:
+                logger.exception(
+                    "Voicemail ingest: object-storage upload failed for uploaded "
+                    "file (extension=%s); persisting without object_key",
+                    extension_number,
+                )
+                object_key = None
+        elif local_path and os.path.isfile(local_path):
             try:
                 basename = os.path.basename(local_path)
                 object_key = storage.tenant_key(
@@ -293,6 +346,14 @@ async def ingest_voicemail(request: Request):
         # path FS provided so the deposit is never lost.
         stored_path = object_key or local_path
 
+        # duration_ms may arrive as a multipart string — coerce to int/None.
+        duration_ms = body.get("duration_ms")
+        if duration_ms is not None:
+            try:
+                duration_ms = int(duration_ms)
+            except (TypeError, ValueError):
+                duration_ms = None
+
         row = await db.fetch_one(
             """INSERT INTO voicemails
                    (extension_id, caller_id, caller_name, duration_ms,
@@ -302,7 +363,7 @@ async def ingest_voicemail(request: Request):
             extension_id,
             body.get("caller_id"),
             body.get("caller_name"),
-            body.get("duration_ms"),
+            duration_ms,
             stored_path,
             body.get("transcription"),
         )

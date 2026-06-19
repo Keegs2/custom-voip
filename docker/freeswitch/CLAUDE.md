@@ -154,6 +154,7 @@ FreeSWITCH runs with `network_mode: host` in docker-compose.media.yml. This is r
 | `VERTO_TLS_PEM` | `conf/tls/wss.pem` | mod_verto WSS cert+privkey (combined PEM). Env-driven global `verto_tls_pem`. PRODUCTION: mount a CA-issued cert and set this. |
 | `VERTO_TLS_CHAIN` | `conf/tls/wss.crt` | mod_verto WSS cert/CA chain. Env-driven global `verto_tls_chain`. |
 | `VM_NOTIFY_TIMEOUT` | `5` | curl `--max-time` (seconds) for the voicemail-deposit notify POST (lib/vm_notify.lua). |
+| `INGEST_SHARED_SECRET` | (unset) | SEC-2. Shared secret sent as `X-Ingest-Secret` on the multipart media uploads to the API ingest endpoints (lib/vm_notify.lua, lib/rec_notify.lua). MUST match the API's `INGEST_SHARED_SECRET` (the API compares it constant-time). When unset (local harness) the header is omitted and notify still no-ops cleanly. Read directly via `os.getenv` — set it in the container env on the Media VM. PRODUCTION: set a strong value. |
 | `RECORDINGS_DIR` | `/media/spool/recordings` | Phase 6. Root of tenant-scoped call recordings: `<dir>/customer_<id>/<uuid>.wav`. On the shared `media_spool` volume the API uploads to object storage. |
 | `RECORD_DEFAULT_MAXLEN` | `3600` | Phase 6. Default `<Record>` maxLength (seconds) when the verb omits it. |
 | `REC_NOTIFY_TIMEOUT` | `5` | Phase 6. curl `--max-time` (seconds) for the recordings-ingest notify POST (lib/rec_notify.lua). |
@@ -193,6 +194,10 @@ Also needs `SYS_NICE` capability for real-time scheduling.
 
    **WebRTC needs TURN**: STUN-only fails behind symmetric NAT. The sibling `coturn` service (`docker/coturn/turnserver.conf`) provides the TURN relay; the API mints time-limited credentials from the shared `TURN_SECRET`. Verto WSS TLS cert paths are env-driven (`VERTO_TLS_PEM`/`VERTO_TLS_CHAIN`, dev self-signed under `conf/tls/`).
 
+   **PRODUCTION WebRTC TLS (PROD-5 — drop-in cert, no code change):** browsers require a CA-trusted cert on BOTH the Verto WSS listener (8083) and the coturn `turns:` listener (5349). The wiring is already env/path-driven — production only provisions the cert:
+   - **Verto WSS (mod_verto):** obtain a CA-issued cert for the platform FQDN (a combined cert+privkey PEM, e.g. Let's Encrypt `fullchain.pem`+`privkey.pem` concatenated), mount it into the FS container, and point `VERTO_TLS_PEM` (combined PEM) and `VERTO_TLS_CHAIN` (cert/CA chain) at the mounted paths. `freeswitch.xml` exec-sets `$${verto_tls_pem}`/`$${verto_tls_chain}` from those env vars; `verto.conf.xml` reads them as `secure-combined`/`secure-chain`. No file edit — just set the env + mount. The committed `conf/tls/wss.pem`/`wss.crt` are dev self-signed only.
+   - **coturn `turns:` TLS:** see the PRODUCTION block in `docker/coturn/turnserver.conf` — mount the CA cert at `/etc/coturn/certs`, uncomment `cert=`/`pkey=` (or envsubst `${TURN_TLS_CERT}`/`${TURN_TLS_KEY}`, or append `--cert`/`--pkey` CLI overrides), restart. coturn does NOT expand env inside its config file, so use one of those three injection methods.
+
 2. **mod_local_stream disabled**: It requires `local_stream.conf.xml` which doesn't exist. When xml_curl can't reach the API during startup, the missing config causes a CRIT abort. RCF uses `silence_stream://-1` for hold music instead.
 
 3. **mod_httapi and mod_http_cache: built-but-not-loaded**: The Dockerfile ENABLES them at build time (`sed` uncomments them in `build/modules.conf.in`, lines 129/131), so the modules exist in the image. But `modules.conf.xml` leaves their `<load>` lines commented (lines 83/92), so they are NOT loaded at runtime. They are not loaded because their configs would need to be served by xml_curl, which is unreachable during module load on the media VM. To enable, uncomment in `modules.conf.xml` AND provide reachable config.
@@ -203,7 +208,7 @@ Also needs `SYS_NICE` capability for real-time scheduling.
 
 6. **Lua package path**: mod_lua adds script-directory as a searcher, which breaks `require("redis")` because it tries to read the scripts directory as a file. All scripts prepend explicit luarocks paths and use `loadfile()` instead of `require()` for local modules.
 
-7. **Redis code removed from inbound_router.lua (RCF-V1)**: The redis-lua library has connection pooling issues inside mod_lua's threading model. The route cache, fraud prefix check, and velocity limiting were deleted from the script (old code in git history; re-adding needs a synchronous client). Calls route via PostgreSQL only. trunk_outbound/api_outbound still load redis fail-open.
+7. **Redis code removed from inbound_router.lua (RCF-V1)**: The redis-lua library has connection pooling issues inside mod_lua's threading model. The route cache, fraud prefix check, and velocity limiting were deleted from the script (old code in git history; re-adding needs a synchronous client). Calls route via PostgreSQL only. trunk_outbound/outbound_api still load redis fail-open (via `loadfile()`). NOTE: the tier-aware `api_outbound.lua` was DELETED in the Phase 9 remediation as dead code — the live ESL-originate outbound API handler is `outbound_api.lua` (applied directly to the A-leg by esl_client.py's `&lua(outbound_api.lua)` originate; no dialplan extension).
 
 8. **Session timer export**: Channel variables must be `export`ed (not just `set`) to propagate to the B-leg. Without this, Bandwidth tears down calls after Session-Expires (30s) because FreeSWITCH doesn't send refresh re-INVITEs.
 

@@ -277,25 +277,29 @@ Primary context. Processing order:
 
 2. **Special numbers**: 9196 (echo), 9195 (delay echo), 9198 (tone), 9197 (milliwatt)
 
-3. **Outbound API calls**: Matches `outbound_api=true` channel variable (set by ESL originate). Runs `api_outbound.lua` with tier-aware CPS limits.
+   **NOTE — no outbound-API extensions here:** The former `outbound_api` and
+   `api_product_type` extensions (which ran the now-deleted `api_outbound.lua`)
+   were DEAD and were removed in the Phase 9 remediation. ESL-originated API
+   outbound calls do NOT enter the public dialplan via an extension — the API
+   originates `...loopback/<dest>/default &lua(outbound_api.lua)`, applying
+   `outbound_api.lua` directly to the A-leg. See
+   `scripts/CLAUDE.md` → "outbound_api.lua".
 
-4. **API product type**: Matches `product_type=api` AND `direction=outbound`. Alternative entry for API calls.
+3. **Trunk header debug** (`continue=true`): Non-terminating `^(.*)$` extension that logs the inbound X-Trunk-ID header variants (debugging header casing). Falls through to the next extension.
 
-5. **Trunk header debug** (`continue=true`): Non-terminating `^(.*)$` extension that logs the inbound X-Trunk-ID header variants (debugging header casing). Falls through to the next extension.
+4. **Trunk outbound from Kamailio**: Matches `sip_h_X-Trunk-ID` regex `^\s*\d+\s*$`. Copies X-Trunk-ID, X-Customer-ID, X-Max-Channels headers to channel variables. Runs `trunk_outbound.lua`.
 
-6. **Trunk outbound from Kamailio**: Matches `sip_h_X-Trunk-ID` regex `^\s*\d+\s*$`. Copies X-Trunk-ID, X-Customer-ID, X-Max-Channels headers to channel variables. Runs `trunk_outbound.lua`.
+5. **Trunk outbound legacy**: Matches `trunk_id` channel variable (set by earlier dialplan logic).
 
-6. **Trunk outbound legacy**: Matches `trunk_id` channel variable (set by earlier dialplan logic).
+6. **Inbound handler** (main routing): Matches `^(\+?1?\d{10,15})$`. Sets direction=inbound, runs `inbound_router.lua`. If Lua returns without completing, responds 503 (not 404 -- DID may exist but service unavailable).
 
-7. **Inbound handler** (main routing): Matches `^(\+?1?\d{10,15})$`. Sets direction=inbound, runs `inbound_router.lua`. If Lua returns without completing, responds 503 (not 404 -- DID may exist but service unavailable).
+7. **Inbound short format**: Matches `^(\d{10})$`. Normalizes to +1 prefix, transfers to public context.
 
-8. **Inbound short format**: Matches `^(\d{10})$`. Normalizes to +1 prefix, transfers to public context.
+8. **Star codes**: `*XX` to `*XXXX` -> 404 (placeholder)
 
-9. **Star codes**: `*XX` to `*XXXX` -> 404 (placeholder)
+9. **Emergency 911**: Routes 911/933 through Kamailio via external profile with failover.
 
-10. **Emergency 911**: Routes 911/933 through Kamailio via external profile with failover.
-
-11. **Catchall**: Everything unmatched -> 404
+10. **Catchall**: Everything unmatched -> 404
 
 ### Context: `features`
 

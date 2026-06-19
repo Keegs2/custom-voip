@@ -35,6 +35,25 @@ services:
       - SBC_PROXY_IP_FAILOVER=${SBC_PROXY_IP_FAILOVER:-${SBC_PROXY_IP}}
       - ESL_PASSWORD=${ESL_PASSWORD}
       - TEST_MODE=${TEST_MODE:-false}
+      # --- UCaaS / unified image (Phase 1-8) ---------------------------------
+      # SEC-2: shared secret FS sends as X-Ingest-Secret on the multipart
+      # recording/voicemail uploads (lib/rec_notify.lua, lib/vm_notify.lua).
+      # MUST match the Services VM API's INGEST_SHARED_SECRET.
+      - INGEST_SHARED_SECRET=${INGEST_SHARED_SECRET}
+      # <Say> TTS engine. Default = Piper (mod_tts_commandline); set TTS_ENGINE=flite
+      # to use the built-in flite fallback. Pluggable with no code change.
+      - TTS_ENGINE=${TTS_ENGINE:-tts_commandline}
+      - TTS_DEFAULT_VOICE=${TTS_DEFAULT_VOICE:-slt}
+      # api_voice.lua webhook/action HTTP knobs (have safe defaults).
+      - WEBHOOK_HTTP_TIMEOUT=${WEBHOOK_HTTP_TIMEOUT:-5}
+      - WEBHOOK_MAX_ATTEMPTS=${WEBHOOK_MAX_ATTEMPTS:-3}
+      - WEBHOOK_BACKOFF_MS=${WEBHOOK_BACKOFF_MS:-200}
+      # Dev-only: permit non-HTTPS webhook URLs. Leave false in production.
+      - WEBHOOK_ALLOW_HTTP=${WEBHOOK_ALLOW_HTTP:-false}
+      # mod_verto WSS TLS — combined cert+privkey PEM and cert/CA chain. Mount a
+      # CA-issued cert at /usr/local/freeswitch/conf/tls and point these at it.
+      - VERTO_TLS_PEM=${VERTO_TLS_PEM:-/usr/local/freeswitch/conf/tls/wss.pem}
+      - VERTO_TLS_CHAIN=${VERTO_TLS_CHAIN:-/usr/local/freeswitch/conf/tls/wss.crt}
       # Per-attempt progress timeout (seconds) for SBC/carrier failover loops:
       # fail the attempt only if NO provisional response (180/183) arrives within
       # N seconds (bounds PDD); once ringing starts the call may ring to call_timeout.
@@ -44,6 +63,10 @@ services:
       - ./docker/freeswitch/conf:/usr/local/freeswitch/conf
       - ./docker/freeswitch/scripts:/usr/local/freeswitch/scripts
       - freeswitch_logs:/var/log/freeswitch
+      # LOCAL scratch: FS writes recordings/voicemail here, then POSTs the FILE
+      # (multipart) to the Services VM API over the VPC (PROD-2 — no shared
+      # cross-VM volume). The API uploads to GCS. This volume is FS-local only.
+      - media_spool:/media/spool
     cap_add:
       - NET_ADMIN
       - SYS_NICE
@@ -96,6 +119,26 @@ services:
       retries: 5
     restart: unless-stopped
 
+  # TURN/STUN (coturn) — co-located on the Media VM because Verto/WebRTC runs on
+  # FreeSWITCH here. Relays Verto/WebRTC media for clients behind symmetric NAT.
+  # Shares TURN_SECRET/TURN_REALM with the Services VM API (webrtc.py mints
+  # time-limited RFC 5766 credentials with the SAME secret). Host networking so
+  # the advertised relay candidates use the VM's real public IP.
+  coturn:
+    image: coturn/coturn:latest
+    container_name: voip-coturn
+    network_mode: host
+    volumes:
+      - ./docker/coturn/turnserver.conf:/etc/coturn/turnserver.conf:ro
+      # Mount a CA-issued cert dir here (read-only) to arm turns: (TLS) on 5349.
+      # e.g. host /etc/letsencrypt/live/turn.example.com -> /etc/coturn/certs
+      - ${TURN_CERT_DIR:-./docker/coturn/certs}:/etc/coturn/certs:ro
+    environment:
+      - TURN_SECRET=${TURN_SECRET}
+      - TURN_REALM=${TURN_REALM:-voip.local}
+    command: ["-c", "/etc/coturn/turnserver.conf"]
+    restart: unless-stopped
+
 networks:
   redis-network:
     driver: bridge
@@ -104,4 +147,6 @@ volumes:
   freeswitch_logs:
     driver: local
   redis_data:
+    driver: local
+  media_spool:
     driver: local

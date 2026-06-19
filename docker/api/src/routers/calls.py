@@ -189,13 +189,15 @@ async def list_live_calls(
     is NOT cleared on disconnect, so this returns the last-known calls with
     ``esl_connected=false`` rather than erroring — never a 500.
 
-    NOTE: under uvicorn's multiple workers each worker keeps its own registry,
-    but FreeSWITCH broadcasts every event to every inbound ESL connection, so
-    every worker's registry is complete and consistent.
+    PROD-3: cross-worker consistency. Reads come from ``live_snapshot()`` which
+    unions this worker's in-memory registry with the Redis-mirrored calls written
+    by all workers, so the result is consistent across the 4 uvicorn workers even
+    if one worker's ESL connection is momentarily reconnecting. Degrades to the
+    local registry when Redis is unavailable — never a 500.
     """
     client = get_esl_client()
     calls = []
-    for c in client.snapshot():
+    for c in await client.live_snapshot():
         if c.get("state") == "hungup":
             continue
         if customer_filter is not None and c.get("customer_id") != customer_filter:
@@ -216,9 +218,54 @@ async def list_live_calls(
     }
 
 
+async def _resolve_call_owner(call_id: str) -> Optional[int]:
+    """Resolve the customer_id that owns ``call_id`` for tenant scoping (SEC-1).
+
+    Reads, in order of authority for a LIVE call: the ESL live-call registry
+    (event-derived, real-time), then the ``active_calls`` table (API-originated
+    calls), then ``cdrs`` (completed calls). Returns None when the call is unknown
+    or has no customer_id (e.g. an inbound call with no customer channel var) —
+    callers treat None as "deny for non-admins" to avoid cross-tenant leakage.
+    """
+    client = get_esl_client()
+    live = client.get_call(call_id)
+    if live is not None and live.customer_id is not None:
+        return live.customer_id
+    row = await db.fetch_one(
+        "SELECT customer_id FROM active_calls WHERE uuid = $1", call_id
+    )
+    if row and row["customer_id"] is not None:
+        return row["customer_id"]
+    row = await db.fetch_one(
+        "SELECT customer_id FROM cdrs WHERE uuid = $1 ORDER BY start_time DESC LIMIT 1",
+        call_id,
+    )
+    if row:
+        return row["customer_id"]
+    return None
+
+
+def _deny_cross_tenant(owner: Optional[int], customer_filter: Optional[int]) -> None:
+    """404 when a non-admin (``customer_filter`` set) does not own the call.
+
+    Mirrors recordings.py / media.py: a cross-tenant id is indistinguishable from
+    a missing one (404) so call existence is never leaked across tenants.
+    """
+    if customer_filter is not None and owner != customer_filter:
+        raise HTTPException(status_code=404, detail="Call not found")
+
+
 @router.get("/{call_id}")
-async def get_call(call_id: str):
-    """Get call status by ID."""
+async def get_call(
+    call_id: str,
+    customer_filter: Optional[int] = Depends(get_customer_filter),
+):
+    """Get call status by ID. Tenant-scoped: a non-admin may only read calls
+    owned by their own customer (cross-tenant → 404)."""
+    # SEC-1: resolve the owning customer and deny cross-tenant reads first.
+    owner = await _resolve_call_owner(call_id)
+    _deny_cross_tenant(owner, customer_filter)
+
     # Check active calls first
     active = await db.fetch_one(
         """
@@ -270,7 +317,11 @@ async def get_call(call_id: str):
 
 
 @router.post("/{call_id}/update")
-async def update_call(call_id: str, update: CallUpdate):
+async def update_call(
+    call_id: str,
+    update: CallUpdate,
+    customer_filter: Optional[int] = Depends(get_customer_filter),
+):
     """Modify a LIVE call, event-confirmed (not fire-and-forget).
 
     Each action issues the ESL command over the persistent control connection
@@ -286,6 +337,11 @@ async def update_call(call_id: str, update: CallUpdate):
                    transfer it back into the voice engine to re-fetch
       - dtmf     : uuid_send_dtmf `digits`
     """
+    # SEC-1: resolve the owning customer and deny cross-tenant control first, so a
+    # non-owner can never hangup/transfer/redirect/DTMF another tenant's live call.
+    owner = await _resolve_call_owner(call_id)
+    _deny_cross_tenant(owner, customer_filter)
+
     # Verify call exists and is active
     active = await db.fetch_one(
         "SELECT uuid, state FROM active_calls WHERE uuid = $1",

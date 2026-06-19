@@ -117,7 +117,8 @@ def env():
     tag = uuid.uuid4().hex[:8]
     created = {"customers": [], "users": [], "extensions": [], "ivr_flows": [],
                "api_dids": [], "conferences": [], "documents": [],
-               "conversations": [], "voicemails": [], "recordings": []}
+               "conversations": [], "voicemails": [], "recordings": [],
+               "active_calls": []}
 
     def mk_customer(name):
         cid = int(_psql(
@@ -210,13 +211,23 @@ def env():
     ))
     created["recordings"].append(recB)
 
+    # SEC-1: a LIVE call owned by B (active_calls row) — A must not read it or
+    # control it via /v1/calls/{id} or /v1/calls/{id}/update.
+    callB = str(uuid.uuid4())
+    _psql(
+        "INSERT INTO active_calls (uuid, customer_id, product_type, direction, "
+        "caller_id, destination) "
+        f"VALUES ('{callB}',{cidB},'api','outbound','+15550000001','+15550000002')"
+    )
+    created["active_calls"].append(callB)
+
     data = {
         "tokenA": _token(secret, uidA, cidA, f"a-{tag}@example.com"),
         "tokenB": _token(secret, uidB, cidB, f"b-{tag}@example.com"),
         "cidA": cidA, "cidB": cidB,
         "confA": confA, "confB": confB,
         "vmB": vmB, "convB": convB, "docB": docB, "didB": didB, "flowB": flowB,
-        "recB": recB,
+        "recB": recB, "callB": callB,
         "extA": extA, "extB": extB,
     }
 
@@ -225,6 +236,13 @@ def env():
     # --- teardown (best-effort, FK-safe order) ---
     def _csv(ids):
         return ",".join(str(i) for i in ids)
+
+    # active_calls uuids are TEXT/UUID literals — delete them individually.
+    for cu in created["active_calls"]:
+        try:
+            _psql(f"DELETE FROM active_calls WHERE uuid = '{cu}'")
+        except Exception:
+            pass
 
     for tbl, col, ids in [
         ("voicemails", "id", created["voicemails"]),
@@ -512,6 +530,33 @@ def test_live_calls_list_scoped_to_tenant(env):
     assert "esl_connected" in body
     for c in body.get("calls", []):
         assert c.get("customer_id") == env["cidA"], c
+
+
+# SEC-1: A must not READ or CONTROL B's individual live call. The owner is
+# resolved from the active_calls row (then ESL registry / cdrs) and a cross-tenant
+# id 404s — same indistinguishable-from-missing rule as recordings/media.
+def test_cross_tenant_call_get_denied(env):
+    r = requests.get(f"{API_BASE}/v1/calls/{env['callB']}", headers=_hA(env))
+    assert r.status_code in DENIED, r.text
+
+
+def test_cross_tenant_call_update_denied(env):
+    r = requests.post(
+        f"{API_BASE}/v1/calls/{env['callB']}/update",
+        headers=_hA(env), json={"action": "hangup"},
+    )
+    assert r.status_code in DENIED, r.text
+
+
+def test_own_call_get_passes_tenant_gate(env):
+    """Positive control: B reading its OWN active call passes the tenant gate
+    (proves the cross-tenant deny isn't a blanket 404). It returns 200 with the
+    call's metadata even when ESL is unreachable locally (data comes from the
+    active_calls row)."""
+    hB = {"Authorization": f"Bearer {env['tokenB']}"}
+    r = requests.get(f"{API_BASE}/v1/calls/{env['callB']}", headers=hB)
+    assert r.status_code == 200, r.text
+    assert r.json().get("call_id") == env["callB"]
 
 
 # --- Live mod_fifo queues (Phase 8) — tenant-scoped purely by fifo_<C>_ prefix.

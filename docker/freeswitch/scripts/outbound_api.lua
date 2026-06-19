@@ -30,16 +30,33 @@ bridge_progress_timeout = math.floor(bridge_progress_timeout)
 package.path = "/usr/local/freeswitch/scripts/lib/?.lua;/usr/local/freeswitch/scripts/?.lua;/usr/local/share/lua/5.3/?.lua;/usr/local/share/lua/5.3/?/init.lua;/usr/share/lua/5.3/?.lua;/usr/share/lua/5.3/?/init.lua;" .. (package.path or "")
 package.cpath = "/usr/local/lib/lua/5.3/?.so;/usr/local/lib/lua/5.3/?/?.so;/usr/lib/lua/5.3/?.so;/usr/lib/lua/5.3/?/?.so;" .. (package.cpath or "")
 
-local ok, redis = pcall(require, "redis_client")
-if not ok then
-    freeswitch.consoleLog("ERR", "Failed to load redis_client: " .. tostring(redis) .. "\n")
-    redis = nil
+-- Load local modules using loadfile() — NOT require() (CLAUDE.md gotcha #10:
+-- mod_lua installs the script directory as a package searcher, so a bare
+-- require() of a script-directory module can silently fail/misbehave and break
+-- this LIVE ESL-originate path). This is the same proven pattern used by
+-- inbound_router.lua / trunk_outbound.lua. All failures are fail-open (nil).
+local function load_module(name)
+    local path = "/usr/local/freeswitch/scripts/lib/" .. name .. ".lua"
+    local func, err = loadfile(path)
+    if not func then
+        freeswitch.consoleLog("ERR", "[outbound_api] Failed to load " .. name .. ": " .. tostring(err) .. "\n")
+        return nil
+    end
+    local ok, result = pcall(func)
+    if not ok then
+        freeswitch.consoleLog("ERR", "[outbound_api] Failed to execute " .. name .. ": " .. tostring(result) .. "\n")
+        return nil
+    end
+    return result
 end
 
-local ok2, db = pcall(require, "db_client")
-if not ok2 then
-    freeswitch.consoleLog("ERR", "Failed to load db_client: " .. tostring(db) .. "\n")
-    db = nil
+local redis = load_module("redis_client")
+local db = load_module("db_client")
+
+-- E.164 normalization helpers — single source of truth in lib/e164.lua.
+local e164 = load_module("e164")
+if not e164 then
+    freeswitch.consoleLog("ERR", "[outbound_api] Failed to load e164 — number normalization will fail\n")
 end
 
 -- Ensure session exists
@@ -107,25 +124,23 @@ if destination == "" then
     return
 end
 
--- Normalize destination to E.164.
--- DELIBERATELY KEPT INLINE (not lib/e164.normalize_destination): this copy
--- intentionally DIVERGES — it lacks the `011` international-prefix -> "+" branch
--- that lib/e164 has. Migrating it would silently change 011 dialing behavior on
--- this legacy ESL-originated path. Candidate for a future *deliberate*
--- consolidation with api_outbound.lua, not a mechanical refactor.
+-- Normalize destination to E.164 via the single source of truth lib/e164.
+-- RECONCILED (Phase 9): this used to carry an inline copy that DIVERGED by
+-- lacking the `011` international-prefix -> "+" branch. The divergence is now
+-- aligned — lib/e164.normalize_destination is identical except it ALSO maps a
+-- leading `011` international prefix to "+", which is the correct behavior here.
 local function normalize_destination(number)
+    if e164 and e164.normalize_destination then
+        return e164.normalize_destination(number)
+    end
+    -- Fail-open fallback (e164 module failed to load): basic normalization,
+    -- preserving the same 10/11-digit US handling.
     local clean = number:gsub("[^%d+*#]", "")
-    if clean:match("^%+") then
-        return clean
-    end
-    -- Get digit count (Lua patterns don't support {n} quantifiers)
+    if clean:match("^%+") then return clean end
     local digit_count = #clean
-    if digit_count == 10 and clean:match("^%d+$") then
-        return "+1" .. clean
-    end
-    if digit_count == 11 and clean:match("^1%d+$") then
-        return "+" .. clean
-    end
+    if digit_count == 10 and clean:match("^%d+$") then return "+1" .. clean end
+    if digit_count == 11 and clean:match("^1%d+$") then return "+" .. clean end
+    if clean:match("^011") then return "+" .. clean:gsub("^011", "") end
     return "+" .. clean
 end
 

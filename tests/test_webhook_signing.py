@@ -23,6 +23,7 @@ from services.webhook_signing import (  # noqa: E402
     compute_signature,
     verify_signature,
     generate_secret,
+    is_safe_webhook_url,
     SIGNATURE_HEADER,
 )
 
@@ -93,3 +94,35 @@ def test_generated_secret_format():
 
 def test_signature_header_name():
     assert SIGNATURE_HEADER == "X-Revup-Signature"
+
+
+# --------------------------------------------------------------------------
+# SSRF guard for customer-supplied webhook URLs (SHOULD-FIX c)
+# resolve=False so these are pure, hermetic (no DNS) — literal-IP / scheme checks.
+# --------------------------------------------------------------------------
+def test_ssrf_blocks_cloud_metadata_ip():
+    assert is_safe_webhook_url("http://169.254.169.254/latest/meta-data/", resolve=False) is False
+
+
+def test_ssrf_blocks_metadata_hostname():
+    assert is_safe_webhook_url("http://metadata.google.internal/computeMetadata/v1/") is False
+
+
+def test_ssrf_blocks_loopback_and_private_and_unspecified():
+    assert is_safe_webhook_url("http://127.0.0.1/hook", resolve=False) is False
+    assert is_safe_webhook_url("http://localhost/hook") is False
+    assert is_safe_webhook_url("http://10.0.0.5/hook", resolve=False) is False
+    assert is_safe_webhook_url("http://192.168.1.10/hook", resolve=False) is False
+    assert is_safe_webhook_url("http://172.16.0.1/hook", resolve=False) is False
+    assert is_safe_webhook_url("http://0.0.0.0/hook", resolve=False) is False
+
+
+def test_ssrf_blocks_non_http_schemes():
+    assert is_safe_webhook_url("file:///etc/passwd", resolve=False) is False
+    assert is_safe_webhook_url("gopher://127.0.0.1/", resolve=False) is False
+    assert is_safe_webhook_url("not a url", resolve=False) is False
+
+
+def test_ssrf_allows_public_literal_ip_and_https():
+    assert is_safe_webhook_url("https://8.8.8.8/voice", resolve=False) is True
+    assert is_safe_webhook_url("https://hooks.revup.io/v1/voice", resolve=False) is True

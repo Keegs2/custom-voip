@@ -32,7 +32,13 @@ HEALTH_PY = REPO / "docker" / "api" / "src" / "routers" / "health.py"
 MIDDLEWARE_AUTH_PY = REPO / "docker" / "api" / "src" / "middleware" / "auth.py"
 INBOUND_ROUTER_LUA = REPO / "docker" / "freeswitch" / "scripts" / "inbound_router.lua"
 TRUNK_OUTBOUND_LUA = REPO / "docker" / "freeswitch" / "scripts" / "trunk_outbound.lua"
-API_OUTBOUND_LUA = REPO / "docker" / "freeswitch" / "scripts" / "api_outbound.lua"
+# The tier-aware api_outbound.lua was DELETED in the Phase 9 remediation (it was
+# dead — only the never-entered outbound_api/api_product_type public.xml
+# extensions referenced it). The LIVE ESL-originate outbound API path is
+# outbound_api.lua (applied directly to the A-leg by esl_client.py), which still
+# loads redis_client fail-open — so the "outbound retains fail-open Redis" lesson
+# is now guarded against that live file.
+OUTBOUND_API_LUA = REPO / "docker" / "freeswitch" / "scripts" / "outbound_api.lua"
 COMPOSE_SERVICES = REPO / "docker-compose.services.yml"
 COMPOSE_MEDIA = REPO / "docker-compose.media.yml"
 
@@ -258,8 +264,12 @@ def test_inbound_router_has_no_redis_route_logic():
 def test_trunk_and_api_outbound_still_load_redis_fail_open():
     """CLAUDE.md: "trunk_outbound/api_outbound still load redis_client fail-open."
     Confirms the contrast: the OTHER outbound scripts deliberately keep Redis.
-    (If this changes, the Redis-removal lesson's scope needs revisiting.)"""
-    for path in (TRUNK_OUTBOUND_LUA, API_OUTBOUND_LUA):
+    (If this changes, the Redis-removal lesson's scope needs revisiting.)
+
+    api_outbound.lua was deleted in Phase 9 remediation; the live ESL-originate
+    outbound API handler is now outbound_api.lua, which must keep loading
+    redis_client fail-open via the loadfile() pattern."""
+    for path in (TRUNK_OUTBOUND_LUA, OUTBOUND_API_LUA):
         src = _read(path)
         assert 'load_module("redis_client")' in src, (
             f"{path.name} no longer loads redis_client — the RCF-V1 lesson said "

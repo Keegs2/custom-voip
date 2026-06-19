@@ -102,6 +102,9 @@ services:
       # ESL password env-driven (entrypoint templates event_socket.conf). Dev
       # default is explicit and NOT ClueCon; must match the API's value.
       - ESL_PASSWORD=${FREESWITCH_ESL_PASSWORD:-fs_esl_dev_pw}
+      # SEC-2: FS sends this as X-Ingest-Secret on recording/voicemail/CDR ingest;
+      # must match the API's value. (Local FS->API is blocked on Docker Desktop anyway.)
+      - INGEST_SHARED_SECRET=${INGEST_SHARED_SECRET:-dev_ingest_secret_change_me}
     volumes:
       - ./docker/freeswitch/conf:/usr/local/freeswitch/conf
       - ./docker/freeswitch/scripts:/usr/local/freeswitch/scripts
@@ -185,6 +188,13 @@ services:
       # esl_client.py no longer hardcodes a ClueCon fallback (Phase 4).
       - FREESWITCH_ESL_PASSWORD=${FREESWITCH_ESL_PASSWORD:-fs_esl_dev_pw}
       - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+      # PROD-4: deployment environment. ENV=production makes the API fail-fast on
+      # dev-default secrets (TURN_SECRET / STORAGE_SECRET_KEY / INGEST_SHARED_SECRET).
+      - ENV=${ENV:-development}
+      # SEC-2: shared secret FreeSWITCH sends as X-Ingest-Secret on CDR/voicemail/
+      # recording ingest. Dev default keeps local ingest working; production MUST
+      # set a real value (and FS must send the matching header).
+      - INGEST_SHARED_SECRET=${INGEST_SHARED_SECRET:-dev_ingest_secret_change_me}
       - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:8080,http://localhost:8443}
       - SBC_PROXY_IP=${SBC_PROXY_IP:-127.0.0.1}
       - TEST_MODE=${TEST_MODE:-false}

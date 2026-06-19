@@ -36,8 +36,13 @@ router = APIRouter()
 async def list_media_streams(
     customer_filter: int | None = Depends(get_customer_filter),
 ):
-    """List active media-fork sessions (tenant-scoped via the ESL registry)."""
-    streams = list_active_streams()
+    """List active media-fork sessions (tenant-scoped via the ESL registry).
+
+    PROD-3: ``list_active_streams`` unions all workers' forks via Redis, so this
+    is consistent across the 4 uvicorn workers (degrades to the local worker's
+    view when Redis is down — never 500s).
+    """
+    streams = await list_active_streams()
 
     if customer_filter is not None:
         client = get_esl_client()

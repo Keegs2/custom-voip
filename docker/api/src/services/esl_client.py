@@ -21,6 +21,7 @@ with backoff and report `connected: false`. This is also correct production
 resilience: the API must never block startup or crash because FS is unreachable.
 """
 import os
+import json
 import time
 import uuid as uuidlib
 import asyncio
@@ -30,7 +31,23 @@ from dataclasses import dataclass, field, asdict
 from typing import Optional, Dict, Any, Callable, Awaitable, List, Deque, Tuple
 from urllib.parse import unquote
 
+from db import redis_client as cache
+
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# PROD-3: cross-worker live-call registry mirror. Each uvicorn worker runs its
+# own ESL consumer; FreeSWITCH broadcasts every event to every inbound ESL
+# connection, so each worker's in-memory registry is already complete WHILE its
+# connection is up. To stay consistent across workers even when one worker's ESL
+# connection is briefly down (reconnecting), every registry update is also
+# mirrored to Redis (a JSON value per call uuid + an index set, TTL'd so dead
+# entries self-expire). Reads (/calls/live) union Redis with the local registry.
+# Degrades gracefully to the local registry when Redis is unavailable.
+# ---------------------------------------------------------------------------
+_REDIS_CALL_PREFIX = "esl:call:"
+_REDIS_CALL_INDEX = "esl:calls"
+_REDIS_CALL_TTL = int(os.getenv("ESL_CALL_REDIS_TTL", "3600"))
 
 # ---------------------------------------------------------------------------
 # Connection settings. FS runs with host networking — the API reaches it via the
@@ -148,6 +165,10 @@ class ESLClient:
         self.last_error: Optional[str] = None
         self.reconnects: int = 0
         self._last_prune: float = 0.0
+
+        # PROD-3: fire-and-forget Redis-mirror tasks (kept referenced so they are
+        # not GC'd mid-flight). Only created when Redis is actually up.
+        self._mirror_tasks: set = set()
 
     # ------------------------------------------------------------------ public
     @property
@@ -499,6 +520,82 @@ class ESLClient:
         elif name == "PLAYBACK_STOP":
             if call is not None:
                 call.touch()
+
+        # PROD-3: mirror the updated call to Redis for cross-worker consistency.
+        touched = self.registry.get(call_uuid)
+        if touched is not None:
+            self._mirror_call_to_redis(touched)
+
+    # ----------------------------------------------------------- redis mirror
+    def _mirror_call_to_redis(self, call: "LiveCall") -> None:
+        """Schedule a best-effort write-through of ``call`` to Redis (PROD-3).
+
+        No-ops instantly when Redis is down (inspects the module-level client
+        directly, never get_client(), so a dead Redis cannot trigger a blocking
+        reconnect) or when there is no running event loop (e.g. the synchronous
+        unit tests) — so it never spawns dangling tasks in tests.
+        """
+        if cache.client is None:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        task = loop.create_task(self._redis_write_call(asdict(call)))
+        self._mirror_tasks.add(task)
+        task.add_done_callback(self._mirror_tasks.discard)
+
+    async def _redis_write_call(self, snap: Dict[str, Any]) -> None:
+        rc = cache.client
+        if rc is None:
+            return
+        try:
+            uuid_ = snap.get("uuid")
+            if not uuid_:
+                return
+            # Hung-up calls expire after the prune TTL; live calls keep the long TTL.
+            ttl = int(_HUNGUP_TTL_SEC) if snap.get("state") == "hungup" else _REDIS_CALL_TTL
+            await rc.set(f"{_REDIS_CALL_PREFIX}{uuid_}", json.dumps(snap), ex=ttl)
+            await rc.sadd(_REDIS_CALL_INDEX, uuid_)
+        except Exception:  # noqa: BLE001
+            logger.debug("ESL redis mirror write failed", exc_info=True)
+
+    async def live_snapshot(self) -> List[Dict[str, Any]]:
+        """Cross-worker live-call snapshot (PROD-3): union of this worker's
+        in-memory registry and the Redis-mirrored calls of all workers, deduped by
+        uuid (the entry with the newer ``updated_at`` wins). Degrades to the local
+        registry when Redis is unavailable — never raises."""
+        self._prune_if_due()
+        combined: Dict[str, Dict[str, Any]] = {}
+
+        rc = cache.client
+        if rc is not None:
+            try:
+                uuids = await rc.smembers(_REDIS_CALL_INDEX)
+                for u in uuids:
+                    raw = await rc.get(f"{_REDIS_CALL_PREFIX}{u}")
+                    if raw is None:
+                        try:
+                            await rc.srem(_REDIS_CALL_INDEX, u)
+                        except Exception:  # noqa: BLE001
+                            pass
+                        continue
+                    try:
+                        combined[u] = json.loads(raw)
+                    except Exception:  # noqa: BLE001
+                        continue
+            except Exception:  # noqa: BLE001
+                logger.debug("ESL redis snapshot read failed", exc_info=True)
+
+        # Overlay the local registry where it is at least as fresh (broadcast
+        # usually makes the local view complete; Redis fills momentary gaps).
+        for c in self.registry.values():
+            d = asdict(c)
+            prev = combined.get(c.uuid)
+            if prev is None or d.get("updated_at", 0) >= prev.get("updated_at", 0):
+                combined[c.uuid] = d
+
+        return list(combined.values())
 
     # ------------------------------------------------------------------ pruning
     def _prune_if_due(self) -> None:

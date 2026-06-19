@@ -2,7 +2,8 @@
 --
 -- Single source of truth for the session-timer normalization that was
 -- previously copy-pasted inline into inbound_router.lua (rcf branch),
--- trunk_outbound.lua and api_outbound.lua. The values here are byte-for-byte
+-- trunk_outbound.lua and outbound_api.lua (the dead api_outbound.lua copy was
+-- deleted in the Phase 9 remediation). The values here are byte-for-byte
 -- the shipped logic — this extraction is behavior-preserving.
 --
 -- Two pieces, both required on every outbound carrier leg (see CLAUDE.md

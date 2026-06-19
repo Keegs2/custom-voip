@@ -424,57 +424,15 @@
       </condition>
     </extension>
 
-    <!-- ============================================ -->
-    <!-- OUTBOUND API CALLS (Originated via ESL)    -->
-    <!-- ============================================ -->
     <!--
-      Calls originated via Event Socket for API Calling product
-      These have outbound_api=true set by the originate command
-      Uses api_outbound.lua with tier-aware CPS limits (25/50/100+ CPS)
+      NOTE: The former `outbound_api` and `api_product_type` dialplan extensions
+      (which ran the now-DELETED api_outbound.lua) were removed in the Phase 9
+      remediation. They were DEAD: ESL-originated API outbound calls never enter
+      the public dialplan via these extensions. The live path is esl_client.py
+      issuing `originate {outbound_api=true,...}loopback/<dest>/default
+      &lua(outbound_api.lua)` — i.e. `outbound_api.lua` is applied DIRECTLY to the
+      originated A-leg as a dialplan application, not matched by an extension here.
     -->
-    <extension name="outbound_api">
-      <condition field="${outbound_api}" expression="^true$">
-        <action application="log" data="INFO API Outbound: ${uuid} to ${destination_number} customer=${customer_id}"/>
-        <action application="set" data="direction=outbound"/>
-        <action application="set" data="product_type=api"/>
-        <action application="set" data="call_start_time=${strftime(%Y-%m-%d %H:%M:%S)}"/>
-
-        <!-- Set hangup hook for cleanup -->
-        <action application="set" data="api_on_answer="/>
-        <action application="set" data="hangup_after_bridge=true"/>
-        <action application="set" data="continue_on_fail=false"/>
-
-        <!-- Execute Lua script for API call handling with tier-aware CPS -->
-        <action application="lua" data="api_outbound.lua"/>
-
-        <!-- Fallback if Lua doesn't handle -->
-        <action application="log" data="ERR API Outbound script did not complete call"/>
-        <action application="hangup" data="NORMAL_TEMPORARY_FAILURE"/>
-      </condition>
-    </extension>
-
-    <!-- ============================================ -->
-    <!-- OUTBOUND API CALLS (product_type routing)   -->
-    <!-- ============================================ -->
-    <!--
-      Alternative routing for API calls based on product_type variable
-      This handles cases where calls are transferred to API processing
-    -->
-    <extension name="api_product_type">
-      <condition field="${product_type}" expression="^api$">
-        <condition field="${direction}" expression="^outbound$">
-          <action application="log" data="INFO API Product Type Route: ${uuid} to ${destination_number}"/>
-          <action application="set" data="call_start_time=${strftime(%Y-%m-%d %H:%M:%S)}"/>
-
-          <!-- Execute API outbound script with tier enforcement -->
-          <action application="lua" data="api_outbound.lua"/>
-
-          <!-- Fallback -->
-          <action application="log" data="ERR API product_type route did not complete"/>
-          <action application="hangup" data="NORMAL_TEMPORARY_FAILURE"/>
-        </condition>
-      </condition>
-    </extension>
 
     <!-- ============================================ -->
     <!-- TRUNK OUTBOUND (From Customer PBX)         -->

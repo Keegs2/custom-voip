@@ -349,6 +349,20 @@ async def create_ivr_flow(
     if customer["status"] != "active":
         raise HTTPException(status_code=400, detail="Customer is not active")
 
+    # SEC-3 (DID-claim IDOR): if this flow is linked to a DID, that DID must be
+    # an API DID owned by this customer — creating the flow repoints the DID's
+    # voice_url at our hosted webhook (_update_did_voice_url below), so without
+    # this gate a tenant could hijack another tenant's DID into its own IVR.
+    if flow.did:
+        owned_did = await db.fetch_one(
+            "SELECT 1 FROM api_dids WHERE did = $1 AND customer_id = $2",
+            flow.did, customer_id,
+        )
+        if not owned_did:
+            raise HTTPException(
+                status_code=403, detail="DID is not assigned to this customer"
+            )
+
     flow_json = json.dumps(flow.flow_config)
 
     result = await db.fetch_one(

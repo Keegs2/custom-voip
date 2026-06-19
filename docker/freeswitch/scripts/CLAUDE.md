@@ -196,29 +196,39 @@ Call flow:
 10. Failover with X-Carrier=secondary if primary fails
 11. Set `api_hangup_hook=lua channel_release.lua` for channel cleanup
 
-### api_outbound.lua
+### api_outbound.lua — DELETED (Phase 9 remediation)
 
-**Called per ESL-originated outbound API call** from the `outbound_api` dialplan extension.
-
-Call flow:
-1. Read customer_id, destination, webhook_url, callback_url from channel variables (set by ESL originate)
-2. Normalize destination to E.164
-3. [If Redis] Fraud prefix check
-4. [If Redis] CPS check with API tier limits (25/50/100+ CPS via redis_cps)
-5. Get per-call fee from tier (starter=$0.01, professional=$0.008, enterprise=$0.005)
-6. [If Redis] Velocity check with higher API limits (300 CPM, 5000 daily)
-7. If webhook_url set: hand off to handlers/api_voice.lua (TwiML engine)
-8. If no webhook: bridge via `sofia/external/dest@sbc_proxy_ip:5060` with X-Carrier=primary
-9. Failover with X-Carrier=secondary
+The tier-aware `api_outbound.lua` (454 lines) was **deleted**: it was DEAD code.
+Its only references were the `outbound_api` and `api_product_type` extensions in
+`public.xml`, and those extensions were **never entered** — the live API-outbound
+path does NOT pass through the public dialplan via an extension. Both dead
+extensions were removed alongside the script. The live handler is `outbound_api.lua`
+(below). `grep -rn api_outbound docker/` now returns clean.
 
 ### outbound_api.lua
 
-**LIVE — ESL-originate outbound API handler.** Reached from the `outbound_api`
-dialplan extension when the API originates a call via ESL (`outbound_api=true`).
-Kept (not deleted) because it is on the live ESL path. Simpler than
-api_outbound.lua: no tier-aware CPS, supports webhook handoff to
-`handlers/api_voice.lua`, falls back to a simple bridge. Loads `redis_client`
-fail-open.
+**LIVE — ESL-originate outbound API handler.** This is the ONLY outbound-API
+path. `docker/api/src/services/esl_client.py` originates the call as
+`originate {outbound_api=true,destination_number=...,webhook_url=...}loopback/<dest>/default
+&lua(outbound_api.lua)` — i.e. `outbound_api.lua` is applied **directly to the
+originated A-leg as a dialplan application** (the `&lua(...)` originate form), NOT
+matched by a `public.xml` extension. Simpler than the deleted api_outbound.lua: no
+tier-aware CPS.
+
+Loads its local modules (`redis_client`, `db_client`, `e164`) via the proven
+`load_module()`/`loadfile()` pattern (NOT `require()` — gotcha #10), `redis_client`
+fail-open. Normalizes the destination via `lib/e164.normalize_destination` (the
+former inline copy was reconciled to the shared lib; the only prior divergence —
+the `011` international-prefix → "+" branch — is now aligned).
+
+Call flow:
+1. Read customer_id, destination, webhook_url, callback_url from channel variables (set by ESL originate)
+2. Normalize destination to E.164 via `lib/e164`
+3. [If Redis] fraud prefix check (fail-open)
+4. [If Redis] velocity check (fail-open)
+5. If webhook_url set: hand off to `handlers/api_voice.lua` (TwiML engine)
+6. If no webhook: bridge via `sofia/external/dest@sbc_proxy_ip:5060` with X-Carrier=primary
+7. Failover with X-Carrier=secondary
 
 ### handlers/api_voice.lua  (was voice_webhook.lua)
 
@@ -428,7 +438,7 @@ All queries filter on `enabled=true` / `status='active'`.
 
 Redis client with connection pooling and atomic operations.
 
-**IMPORTANT: Disabled in inbound_router.lua for RCF-V1** due to redis-lua connection pooling issues in mod_lua's threading model. Still used by trunk_outbound.lua and api_outbound.lua (which may also hit the same issues).
+**IMPORTANT: Disabled in inbound_router.lua for RCF-V1** due to redis-lua connection pooling issues in mod_lua's threading model. Still used by trunk_outbound.lua and outbound_api.lua (which may also hit the same issues), both loading it fail-open via `loadfile()`.
 
 **Connection Management:**
 - Single persistent connection per mod_lua thread
@@ -493,8 +503,8 @@ Trunk max CPS hard cap: 10. Must upgrade to API for higher.
 | `lib/sbc.lua` | Cached TCP reachability pre-check (`sbc_tcp_probe`/`is_sbc_reachable`, 30s up / 10s down cache via FS globals) + the SBC/carrier failover attempt ordering. Fails open (WARNING) if luasocket is unavailable. |
 | `lib/xml.lua` | **Real pure-Lua XML parser** for the TwiML engine (Phase 3). Decodes entities, escaped quotes, CDATA, arbitrary nesting; rejects malformed loudly. Replaced the regex parser (closed the ReDoS risk). |
 | `lib/hmac_sha256.lua` | Pure-Lua HMAC-SHA256 for webhook signing (`X-Revup-Signature`). KAT byte-identical to the API's Python verifier. |
-| `lib/vm_notify.lua` | POSTs voicemail-deposit metadata to the API `POST /v1/voicemail/ingest` (system curl via io.popen, injection-safe quoting, fail-open). Skipped when `API_HOST` is unset. Env: `VM_NOTIFY_TIMEOUT` (default 5s). |
-| `lib/rec_notify.lua` | **Phase 6.** POSTs call-recording metadata `{recording_uuid, customer_id, call_uuid, spool_path, duration_ms, kind}` to the API `POST /v1/recordings/ingest` (system curl via io.popen, injection-safe quoting, fail-open). Mirrors vm_notify but ALSO reads the JSON response to return the API's `recording_url`/`storage_key` (the serve URL surfaced in callbacks). Skipped when `API_HOST` unset; clean no-op on Docker Desktop where FS→API is unreachable. Env: `REC_NOTIFY_TIMEOUT` (default 5s). |
+| `lib/vm_notify.lua` | **Uploads** the voicemail FILE (multipart `-F file=@<path>`) + metadata fields to the API `POST /v1/voicemail/ingest` (system curl via io.popen, injection-safe `shq()` quoting on every token, fail-open). Sends `X-Ingest-Secret: $INGEST_SHARED_SECRET` (SEC-2) when set. Posts the FILE — not just a path — because in prod FS (Media VM) and the API (Services VM) share no volume (PROD-2); `storage_path` is still sent for shared-volume reconciliation in dev. Skipped when `API_HOST` is unset. Env: `VM_NOTIFY_TIMEOUT` (default 5s), `INGEST_SHARED_SECRET`. |
+| `lib/rec_notify.lua` | **Phase 6.** **Uploads** the recording FILE (multipart `-F file=@<path>`) + metadata fields `{recording_uuid, customer_id, call_uuid, spool_path, duration_ms, kind}` to the API `POST /v1/recordings/ingest` (system curl via io.popen, injection-safe `shq()` quoting, fail-open). Sends `X-Ingest-Secret: $INGEST_SHARED_SECRET` (SEC-2) when set. Posts the FILE — not just a path — for cross-VM prod (PROD-2); `spool_path` still sent for dev reconciliation. Reads the JSON response to return the API's `recording_url`/`storage_key` (the serve URL surfaced in callbacks). Skipped when `API_HOST` unset; clean no-op on Docker Desktop where FS→API is unreachable. Env: `REC_NOTIFY_TIMEOUT` (default 5s), `INGEST_SHARED_SECRET`. |
 
 ---
 

@@ -44,6 +44,12 @@ async def lifespan(app: FastAPI):
     """Initialize and cleanup resources."""
     logger.info("Starting RCF Platform API...")
 
+    # PROD-4: fail-fast in production (loud-warn in dev) if any guarded secret is
+    # still a dev sentinel (TURN_SECRET / STORAGE_SECRET_KEY / INGEST_SHARED_SECRET).
+    # Mirrors the JWT_SECRET_KEY / ESL ClueCon hard-fail pattern.
+    from config_guard import assert_production_secrets
+    assert_production_secrets()
+
     # Initialize database pool
     await init_db()
     logger.info("Database pool initialized")

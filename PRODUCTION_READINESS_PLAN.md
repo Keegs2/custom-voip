@@ -1,5 +1,19 @@
 # Production Readiness Plan — Unified UCaaS Platform
 
+ > ## ✅ PHASE 9 REMEDIATION COMPLETE (2026-06-18)
+> All 🔴 must-fix items below were remediated and verified (270 pytest + 66 Lua green; 4 compose files parse):
+> **SEC-1** call endpoints now tenant-gated (cross-tenant → 404) · **SEC-2** ingest requires `X-Ingest-Secret`
+> (constant-time) · **SEC-3** DID-ownership enforced on api_dids/ivr create · **PROD-1** per-VM compose
+> (media+services+sbc) wired for GCS · **PROD-2** cross-VM storage re-architected — FS POSTs the recording
+> FILE (multipart) to the API → API uploads to GCS (no shared volume) · **PROD-3** ESL/media registries
+> Redis-backed (consistent across the 4 workers) · **PROD-4** dev-secret hard-fail guard (`ENV=production`)
+> + all new vars in per-role `.env.example` · **PROD-5** coturn/Verto TLS armable + documented · **CODE-1**
+> dead `api_outbound.lua` deleted, live `outbound_api.lua` on `loadfile()`+`lib/e164`. Plus SHOULD-FIX:
+> `?token=` URL auth removed (presigned-JSON), WS media DoS caps, webhook SSRF guard, `shq` mkdir, LoginPage
+> deleted, postgres docs refreshed. **Remaining = deployment-time only:** real GCS HMAC keys + buckets, real
+> TURN/Verto CA certs, production `.env` secrets, and a staging call test on the real 4-VM topology (the
+> FS↔API paths that the Docker-Desktop isolation prevents testing locally).
+>
 > ## ⚖️ PHASE 9 — PM SIGN-OFF (2026-06-18)
 >
 > **Verdict: the local single-host stack is production-GRADE and fully green; the platform is NOT yet

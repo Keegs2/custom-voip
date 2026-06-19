@@ -1,19 +1,30 @@
--- lib/vm_notify.lua — notify the API that a voicemail was deposited on the
--- shared /media/spool volume, so the API can upload it to object storage and
--- create the voicemails row.
+-- lib/vm_notify.lua — notify the API that a voicemail was deposited, and HAND
+-- THE API THE ACTUAL AUDIO FILE so it can upload it to object storage and create
+-- the voicemails row.
 --
--- WHY system curl (io.popen) and not mod_curl: this runs as a fire-and-forget
--- POST with a custom Content-Type and a JSON body; mod_curl's session app form
--- encodes and can't cleanly set arbitrary headers. We mirror the injection-safe
--- shell quoting used by handlers/api_voice.lua.
+-- PROD-2 (cross-VM media): in production FreeSWITCH (Media VM) and the API
+-- (Services VM) do NOT share a volume, so a spool PATH alone is useless to the
+-- API. We therefore POST the voicemail FILE itself as multipart/form-data
+-- (curl -F file=@<path>) ALONGSIDE the metadata fields. The same code path works
+-- in local dev (where the shared /media/spool volume still exists) — we keep
+-- sending storage_path so the API can reconcile from the volume as a fallback.
+--
+-- SEC-2 (ingest auth): every POST carries `X-Ingest-Secret: <INGEST_SHARED_SECRET>`
+-- so the API can authenticate the uploader constant-time. Header is sent only
+-- when the env var is set (dev/local harness without it still no-ops cleanly).
+--
+-- WHY system curl (io.popen) and not mod_curl: mod_curl's session app cannot set
+-- an arbitrary header (X-Ingest-Secret) nor stream a multipart file upload. We
+-- mirror the injection-safe single-quote shell quoting used by handlers/api_voice.lua:
+-- EVERY token that contains caller/file-derived data is `shq()`-wrapped.
 --
 -- ROBUSTNESS: every failure is logged and swallowed. A notify failure NEVER
--- disrupts the call or the recording — the WAV is already on the shared spool,
--- so the API can also reconcile it by scanning the volume later.
+-- disrupts the call or the recording — the WAV is already on the spool, so the
+-- API can also reconcile it by scanning the volume later (dev).
 --
--- The API contract (docker/api/src/routers/voicemail.py, POST /v1/voicemail/ingest):
---   { extension:str, customer_id:int, caller_id?, caller_name?,
---     duration_ms?:int, storage_path?:str, transcription?:str }
+-- The API contract (docker/api/src/routers/voicemail.py, POST /v1/voicemail/ingest)
+-- — multipart/form-data: file (the audio) + fields: extension, customer_id,
+--   caller_id?, caller_name?, duration_ms?, storage_path?, transcription?
 
 local M = {}
 
@@ -28,37 +39,6 @@ local function shq(s)
     return "'" .. tostring(s or ""):gsub("'", "'\\''") .. "'"
 end
 
--- Minimal JSON string escaper for the small, known field set we emit.
-local function jstr(s)
-    s = tostring(s or "")
-    s = s:gsub("\\", "\\\\"):gsub('"', '\\"')
-         :gsub("\n", "\\n"):gsub("\r", "\\r"):gsub("\t", "\\t")
-    return '"' .. s .. '"'
-end
-
--- Build the JSON body from a metadata table. customer_id/duration_ms are
--- emitted as JSON numbers when valid, else omitted (customer_id -> null).
-local function build_body(meta)
-    local parts = {}
-    parts[#parts + 1] = '"extension":' .. jstr(meta.extension)
-    local cid = tonumber(meta.customer_id)
-    parts[#parts + 1] = '"customer_id":' .. (cid and string.format("%d", cid) or "null")
-    if meta.caller_id and meta.caller_id ~= "" then
-        parts[#parts + 1] = '"caller_id":' .. jstr(meta.caller_id)
-    end
-    if meta.caller_name and meta.caller_name ~= "" then
-        parts[#parts + 1] = '"caller_name":' .. jstr(meta.caller_name)
-    end
-    local dur = tonumber(meta.duration_ms)
-    if dur then
-        parts[#parts + 1] = '"duration_ms":' .. string.format("%d", math.floor(dur))
-    end
-    if meta.storage_path and meta.storage_path ~= "" then
-        parts[#parts + 1] = '"storage_path":' .. jstr(meta.storage_path)
-    end
-    return "{" .. table.concat(parts, ",") .. "}"
-end
-
 -- notify(meta) -> bool. meta fields: extension, customer_id, caller_id,
 -- caller_name, duration_ms, storage_path. Returns true only on a 2xx.
 function M.notify(meta)
@@ -71,13 +51,44 @@ function M.notify(meta)
     end
     local api_port = os.getenv("API_PORT") or "8000"
     local timeout  = tonumber(os.getenv("VM_NOTIFY_TIMEOUT")) or 5
+    local secret   = os.getenv("INGEST_SHARED_SECRET")
     local url = string.format("http://%s:%s/v1/voicemail/ingest", api_host, api_port)
-    local body = build_body(meta)
+    local storage_path = meta.storage_path
 
-    local cmd = string.format(
-        "curl -s -o /dev/null -w '%%{http_code}' --max-time %d "
-        .. "-X POST -H 'Content-Type: application/json' --data %s %s 2>/dev/null",
-        timeout, shq(body), shq(url))
+    -- Build the curl argv as a list of shell-safe tokens. -o /dev/null discards
+    -- the body; -w '%{http_code}' yields just the status (fail-open on anything
+    -- that is not 2xx).
+    local args = {
+        "curl", "-s", "-o", "/dev/null", "-w", shq("%{http_code}"),
+        "--max-time", tostring(timeout), "-X", "POST",
+    }
+    if secret and secret ~= "" then
+        args[#args + 1] = "-H"
+        args[#args + 1] = shq("X-Ingest-Secret: " .. secret)
+    end
+    -- The audio file (multipart). curl reads name=@filename; quoting the whole
+    -- token keeps paths with spaces/specials injection-safe.
+    if storage_path and storage_path ~= "" then
+        args[#args + 1] = "-F"
+        args[#args + 1] = shq("file=@" .. storage_path)
+    end
+    -- Metadata form fields (mirror the old JSON body field set).
+    local function field(name, value)
+        if value == nil or value == "" then return end
+        args[#args + 1] = "-F"
+        args[#args + 1] = shq(name .. "=" .. tostring(value))
+    end
+    field("extension", meta.extension)
+    local cid = tonumber(meta.customer_id)
+    if cid then field("customer_id", string.format("%d", cid)) end
+    field("caller_id", meta.caller_id)
+    field("caller_name", meta.caller_name)
+    local dur = tonumber(meta.duration_ms)
+    if dur then field("duration_ms", string.format("%d", math.floor(dur))) end
+    field("storage_path", storage_path)
+    args[#args + 1] = shq(url)
+    args[#args + 1] = "2>/dev/null"
+    local cmd = table.concat(args, " ")
 
     local ok, ph = pcall(io.popen, cmd)
     if not ok or not ph then
@@ -88,12 +99,12 @@ function M.notify(meta)
     ph:close()
     code = code:gsub("%s+", "")
     if code == "200" or code == "201" then
-        log("INFO", string.format("notified API ext=%s cust=%s http=%s",
+        log("INFO", string.format("uploaded voicemail to API ext=%s cust=%s http=%s",
             tostring(meta.extension), tostring(meta.customer_id), code))
         return true
     end
     log("WARNING", string.format(
-        "API notify non-2xx (http=%s) ext=%s — file remains on spool %s",
+        "API voicemail ingest non-2xx (http=%s) ext=%s — file remains on spool %s",
         code == "" and "none" or code, tostring(meta.extension), tostring(meta.storage_path)))
     return false
 end

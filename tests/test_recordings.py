@@ -234,7 +234,7 @@ print("RESULT_JSON:" + json.dumps(out))
 # Step 2 — run AS THE API USER: POST the (unauthenticated) ingest endpoint, then
 # presign-GET the uploaded object and prove the bytes round-trip exactly via sha256.
 _INGEST_SERVE = r"""
-import sys, json, hashlib
+import os, sys, json, hashlib
 sys.path.insert(0, "/app")
 import httpx
 from services import storage
@@ -244,6 +244,9 @@ RUUID = "__RUUID__"
 SPOOL = "__SPOOL_PATH__"
 out = {}
 try:
+    # SEC-2: send the shared ingest secret the API container is configured with.
+    SECRET = os.environ.get("INGEST_SHARED_SECRET", "")
+    headers = {"X-Ingest-Secret": SECRET} if SECRET else {}
     r = httpx.post(
         "http://127.0.0.1:8000/v1/recordings/ingest",
         json={
@@ -254,6 +257,7 @@ try:
             "duration_ms": 100,
             "kind": "call",
         },
+        headers=headers,
         timeout=30,
     )
     out["ingest_status"] = r.status_code
@@ -277,6 +281,71 @@ except Exception as e:
     out["error"] = repr(e); out["ok"] = False
 print("RESULT_JSON:" + json.dumps(out))
 """
+
+
+# Step 2 (PROD-2) — multipart variant: POST the audio FILE itself (field `file`)
+# plus the metadata fields, mirroring production where the FreeSWITCH Media VM and
+# the API Services VM share NO volume. Proves the bytes round-trip MinIO exactly.
+_INGEST_MULTIPART = r"""
+import os, sys, json, hashlib
+sys.path.insert(0, "/app")
+import httpx
+from services import storage
+
+CID = __CID__
+RUUID = "__RUUID__"
+SPOOL = "__SPOOL_PATH__"
+out = {}
+try:
+    SECRET = os.environ.get("INGEST_SHARED_SECRET", "")
+    headers = {"X-Ingest-Secret": SECRET} if SECRET else {}
+    with open(SPOOL, "rb") as f:
+        data = f.read()
+    out["orig_sha256"] = hashlib.sha256(data).hexdigest()
+    out["orig_len"] = len(data)
+    r = httpx.post(
+        "http://127.0.0.1:8000/v1/recordings/ingest",
+        data={
+            "recording_uuid": RUUID,
+            "customer_id": str(CID),
+            "call_uuid": "call-" + RUUID,
+            "duration_ms": "100",
+            "kind": "call",
+        },
+        files={"file": ("rec.wav", data, "audio/wav")},
+        headers=headers,
+        timeout=30,
+    )
+    out["ingest_status"] = r.status_code
+    body = r.json()
+    out["ingest_body"] = body
+    out["recording_id"] = body.get("recording_id")
+    key = body.get("object_key")
+    out["object_key"] = key
+    if key:
+        url = storage.presigned_get_url(storage.BUCKET_RECORDINGS, key, ttl=120)
+        g = httpx.get(url, timeout=15)
+        out["serve_status"] = g.status_code
+        out["served_sha256"] = hashlib.sha256(g.content).hexdigest()
+        out["ok"] = (
+            r.status_code == 200 and g.status_code == 200
+            and out["served_sha256"] == out["orig_sha256"]
+        )
+    else:
+        out["ok"] = False
+except Exception as e:
+    out["error"] = repr(e); out["ok"] = False
+print("RESULT_JSON:" + json.dumps(out))
+"""
+
+
+def _ingest_secret() -> str:
+    """Read INGEST_SHARED_SECRET from the running API container (set in compose)."""
+    r = subprocess.run(
+        ["docker", "exec", API_CONTAINER, "printenv", "INGEST_SHARED_SECRET"],
+        capture_output=True, text=True,
+    )
+    return r.stdout.strip()
 
 
 def _exec_json(args):
@@ -345,6 +414,73 @@ def env_guard():
     yield
 
 
+@pytest.fixture(scope="module")
+def live_multipart(env_guard):
+    """PROD-2 round-trip: write a WAV as root, then POST it as a MULTIPART FILE
+    (not a spool_path) to the ingest endpoint and prove the bytes round-trip
+    MinIO via a presigned GET. Mirrors production cross-VM media (no shared spool)."""
+    ruuid = uuid.uuid4().hex
+    spool_path = f"/media/spool/recordings/customer_{OWNER_CUSTOMER_ID}/mp_{ruuid}.wav"
+
+    wrote = _exec_json([
+        "docker", "exec", "-u", "0", "-i", API_CONTAINER, "python", "-c",
+        _WRITE_WAV.replace("__SPOOL_PATH__", spool_path),
+    ])
+    assert wrote.get("ok"), f"failed to seed spool WAV: {wrote.get('error')}"
+
+    result = _exec_json([
+        "docker", "exec", "-i", API_CONTAINER, "python", "-c",
+        _INGEST_MULTIPART
+        .replace("__CID__", str(OWNER_CUSTOMER_ID))
+        .replace("__RUUID__", ruuid)
+        .replace("__SPOOL_PATH__", spool_path),
+    ])
+    result["recording_uuid"] = ruuid
+
+    yield result
+
+    # teardown — DB row + object + spool file (best-effort)
+    try:
+        _psql(f"DELETE FROM recordings WHERE recording_uuid = '{ruuid}'")
+    except Exception:
+        pass
+    key = result.get("object_key")
+    if key:
+        try:
+            subprocess.run(
+                ["docker", "exec", "-i", API_CONTAINER, "python", "-c",
+                 "import sys; sys.path.insert(0,'/app'); from services import storage; "
+                 f"storage.delete(storage.BUCKET_RECORDINGS, {key!r})"],
+                capture_output=True, text=True, timeout=30,
+            )
+        except Exception:
+            pass
+    try:
+        subprocess.run(
+            ["docker", "exec", "-u", "0", "-i", API_CONTAINER, "rm", "-f", spool_path],
+            capture_output=True, text=True, timeout=30,
+        )
+    except Exception:
+        pass
+
+
+def test_multipart_ingest_uploaded_to_bucket(live_multipart):
+    assert "error" not in live_multipart, live_multipart.get("error")
+    assert live_multipart["ingest_status"] == 200, live_multipart
+    assert live_multipart["object_key"], "multipart ingest returned no object_key"
+    assert live_multipart["object_key"].startswith(
+        f"customer_{OWNER_CUSTOMER_ID}/recordings/"
+    )
+
+
+def test_multipart_serve_returns_exact_bytes(live_multipart):
+    assert "error" not in live_multipart, live_multipart.get("error")
+    assert live_multipart["serve_status"] == 200, live_multipart
+    assert live_multipart["ok"] is True, live_multipart
+    # The presigned GET returns exactly the bytes we POSTed as the multipart file.
+    assert live_multipart["served_sha256"] == live_multipart["orig_sha256"]
+
+
 def test_ingest_uploaded_to_bucket(live):
     assert "error" not in live, live.get("error")
     assert live["ingest_status"] == 200, live
@@ -375,17 +511,22 @@ def test_presigned_serve_returns_exact_bytes(live):
     assert "X-Amz-Signature" in live["presigned_url"]
 
 
-def test_audio_endpoint_redirects_to_presigned(live):
-    """GET /v1/recordings/{id}/audio (owner token) → 307 to a presigned URL."""
+def test_audio_endpoint_returns_presigned_json(live):
+    """GET /v1/recordings/{id}/audio (owner token) → 200 JSON with a presigned URL.
+
+    SHOULD-FIX (a): the endpoint returns the presigned URL as JSON (like
+    voicemail), no 307 redirect and no ?token= JWT-in-URL.
+    """
     token = _token(live["_secret"], OWNER_CUSTOMER_ID)
     r = requests.get(
         f"{API_BASE}/v1/recordings/{live['recording_id']}/audio",
         headers={"Authorization": f"Bearer {token}"},
         allow_redirects=False,
     )
-    assert r.status_code == 307, r.text
-    loc = r.headers.get("Location", "")
-    assert "X-Amz-Signature" in loc, loc
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert "X-Amz-Signature" in body.get("url", ""), body
+    assert body.get("expires_in")
 
 
 def test_list_includes_recording_for_owner(live):
@@ -399,12 +540,44 @@ def test_list_includes_recording_for_owner(live):
     assert live["recording_id"] in ids
 
 
-def test_ingest_is_jwt_exempt(env_guard):
-    """The ingest endpoint must accept an unauthenticated POST (no 401)."""
+def test_ingest_is_jwt_exempt_but_requires_secret(env_guard):
+    """The ingest endpoint must be JWT-exempt (FreeSWITCH has no token) yet, with
+    SEC-2, require the shared X-Ingest-Secret. With the correct secret (and NO JWT)
+    it returns the resilient always-200 body."""
+    secret = _ingest_secret()
+    if not secret:
+        pytest.skip("INGEST_SHARED_SECRET not set in API container (dev-allow mode)")
     r = requests.post(
         f"{API_BASE}/v1/recordings/ingest",
+        headers={"X-Ingest-Secret": secret},
         json={"recording_uuid": "", "customer_id": None, "spool_path": ""},
     )
-    # Resilient ingest: always 200-ish, never 401 (it is auth-exempt).
+    # JWT-exempt + correct secret: 200, error handled internally (missing fields).
     assert r.status_code == 200, r.text
-    assert r.json().get("status") == "error"  # missing fields, handled internally
+    assert r.json().get("status") == "error"
+
+
+def test_ingest_without_secret_is_rejected(env_guard):
+    """SEC-2: an ingest POST WITHOUT the shared secret is rejected (401), not
+    silently trusted. (Skips in dev-allow mode where the secret is unset.)"""
+    secret = _ingest_secret()
+    if not secret:
+        pytest.skip("INGEST_SHARED_SECRET not set in API container (dev-allow mode)")
+    r = requests.post(
+        f"{API_BASE}/v1/recordings/ingest",
+        json={"recording_uuid": "x", "customer_id": 1, "spool_path": ""},
+    )
+    assert r.status_code in DENIED, r.text
+
+
+def test_ingest_with_wrong_secret_is_rejected(env_guard):
+    """SEC-2: a wrong shared secret is rejected (constant-time compare)."""
+    secret = _ingest_secret()
+    if not secret:
+        pytest.skip("INGEST_SHARED_SECRET not set in API container (dev-allow mode)")
+    r = requests.post(
+        f"{API_BASE}/v1/recordings/ingest",
+        headers={"X-Ingest-Secret": secret + "_wrong"},
+        json={"recording_uuid": "x", "customer_id": 1, "spool_path": ""},
+    )
+    assert r.status_code in DENIED, r.text

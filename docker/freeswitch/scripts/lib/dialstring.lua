@@ -3,7 +3,8 @@
 -- Single source of truth for the `{...}sofia/external/<dest>@<proxy>:5060`
 -- skeleton that was previously copy-pasted into the four outbound bridge sites
 -- (inbound_router.lua rcf failover loop, trunk_outbound.lua primary+failover,
--- api_outbound.lua primary+failover). Centralizing the skeleton removes the
+-- outbound_api.lua primary+failover; the dead api_outbound.lua copy was deleted
+-- in the Phase 9 remediation). Centralizing the skeleton removes the
 -- near-duplicate `}sofia/external/%s@%s:5060` literal from every call site while
 -- producing byte-for-byte identical strings.
 --

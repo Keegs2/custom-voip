@@ -3,6 +3,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from typing import Optional
 from datetime import datetime, timedelta, timezone
 from db import database as db
+from auth.ingest import ingest_secret_ok, ingest_auth_error
 import logging
 import re
 
@@ -530,7 +531,12 @@ async def ingest_cdr(request: Request):
 
     Body size is implicitly constrained by the Pydantic-validated CDR shape
     (a single FreeSWITCH JSON CDR, typically 2-10 KB).
+
+    SEC-2: requires the shared ``X-Ingest-Secret`` header (constant-time compared
+    to env ``INGEST_SHARED_SECRET``); unset secret allows in dev with a loud warn.
     """
+    if not ingest_secret_ok(request):
+        return ingest_auth_error()
     try:
         content_type = request.headers.get("content-type", "")
         if "application/json" in content_type:
@@ -590,7 +596,11 @@ async def ingest_cdr_bulk(request: Request):
         jq -s '.' /var/log/freeswitch/json_cdr/a_*.cdr.json | \\
         curl -X POST http://127.0.0.1:8088/v1/cdrs/ingest/bulk \\
              -H 'Content-Type: application/json' -d @-
+
+    SEC-2: requires the shared ``X-Ingest-Secret`` header (see /ingest).
     """
+    if not ingest_secret_ok(request):
+        return ingest_auth_error()
     try:
         body = await request.json()
     except Exception as e:

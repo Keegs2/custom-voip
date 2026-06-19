@@ -64,19 +64,18 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
         if path.startswith("/ws/"):
             return await call_next(request)
 
-        # Extract Bearer token from Authorization header. Media-download routes
-        # (recordings /audio) are loaded by browser <audio>/<a download> elements
-        # which cannot set an Authorization header, so for those GET routes only we
-        # also accept the JWT via a ?token= query param.
+        # Extract Bearer token from Authorization header.
+        #
+        # SHOULD-FIX (a): the legacy ``?token=`` JWT-in-URL branch for /audio
+        # routes was REMOVED. Media-audio endpoints now return a short-lived
+        # presigned object-storage URL as JSON (see recordings.py / voicemail.py
+        # ``/audio``), which the browser <audio>/<a download> fetches directly —
+        # no JWT in the URL. The /audio request itself uses the normal
+        # Authorization header like every other API call, so a JWT can no longer
+        # leak via query string / referrer / access logs.
         auth_header = request.headers.get("Authorization")
         if auth_header and auth_header.startswith("Bearer "):
             token = auth_header[7:]  # Strip "Bearer " prefix
-        elif (
-            request.method == "GET"
-            and path.endswith("/audio")
-            and request.query_params.get("token")
-        ):
-            token = request.query_params["token"]
         else:
             return JSONResponse(
                 status_code=401,

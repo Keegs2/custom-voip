@@ -16,6 +16,15 @@
 --
 -- `freeswitch` is the mod_lua global.
 
+-- POSIX shell single-quote escape: wrap in '...' and turn each ' into '\''.
+-- Same helper used by lib/vm_notify.lua / lib/rec_notify.lua. Defense-in-depth
+-- for the one os.execute() shell-out below (the vm_dir components are already
+-- int customer_id / digit-validated extension, but never hand un-quoted
+-- interpolation to a shell).
+local function shq(s)
+    return "'" .. tostring(s or ""):gsub("'", "'\\''") .. "'"
+end
+
 return function(ctx)
     local session = ctx.session
     local get_var = ctx.get_var
@@ -120,7 +129,7 @@ return function(ctx)
                 customer_domain, ext
             )
             session:execute("set", "playback_terminators=#")
-            os.execute("mkdir -p " .. vm_dir)
+            os.execute("mkdir -p " .. shq(vm_dir))
             local vm_file = string.format("%s/msg_%s.wav", vm_dir, uuid)
 
             freeswitch.consoleLog("INFO", string.format(

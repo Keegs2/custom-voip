@@ -37,6 +37,35 @@ services:
       - BANDWIDTH_SIP_PEER_ID=${BANDWIDTH_SIP_PEER_ID:-1162116}
       - TEST_MODE=${TEST_MODE:-false}
       - ENABLE_DOCS=${ENABLE_DOCS:-true}
+      # PROD-4: ENV=production makes the API fail-fast on dev-default secrets
+      # (TURN_SECRET / STORAGE_SECRET_KEY / INGEST_SHARED_SECRET). Keep this set.
+      - ENV=${ENV:-production}
+      # SEC-2: shared secret FreeSWITCH sends as X-Ingest-Secret on CDR/recording/
+      # voicemail ingest. MUST match the Media VM FS INGEST_SHARED_SECRET.
+      - INGEST_SHARED_SECRET=${INGEST_SHARED_SECRET}
+      # --- Object storage: GCS via the S3-interop endpoint (NO MinIO in prod) ---
+      # boto3 is endpoint-agnostic. STORAGE_ACCESS_KEY/STORAGE_SECRET_KEY are GCS
+      # HMAC keys. GCS requires path-style addressing (STORAGE_FORCE_PATH_STYLE=true).
+      - STORAGE_ENDPOINT_URL=${STORAGE_ENDPOINT_URL:-https://storage.googleapis.com}
+      - STORAGE_ACCESS_KEY=${STORAGE_ACCESS_KEY}
+      - STORAGE_SECRET_KEY=${STORAGE_SECRET_KEY}
+      - STORAGE_REGION=${STORAGE_REGION:-us-east1}
+      - STORAGE_FORCE_PATH_STYLE=${STORAGE_FORCE_PATH_STYLE:-true}
+      - STORAGE_BUCKET_RECORDINGS=${STORAGE_BUCKET_RECORDINGS:-voip-recordings}
+      - STORAGE_BUCKET_VOICEMAIL=${STORAGE_BUCKET_VOICEMAIL:-voip-voicemail}
+      - STORAGE_BUCKET_UPLOADS=${STORAGE_BUCKET_UPLOADS:-voip-uploads}
+      # --- TURN/STUN — coturn lives on the Media VM; webrtc.py mints creds -------
+      # TURN_HOST = Media VM PUBLIC IP. TURN_SECRET/REALM MUST match coturn there.
+      - TURN_HOST=${TURN_HOST}
+      - TURN_PORT=${TURN_PORT:-3478}
+      - TURN_TLS_PORT=${TURN_TLS_PORT:-5349}
+      - TURN_SECRET=${TURN_SECRET}
+      - TURN_REALM=${TURN_REALM:-voip.local}
+      # Media ingest caps (recording/voicemail/stream guards). Safe defaults.
+      - MEDIA_MAX_BYTES=${MEDIA_MAX_BYTES:-104857600}
+      - MEDIA_MAX_FRAMES=${MEDIA_MAX_FRAMES:-2000000}
+      - MEDIA_MAX_DURATION_MS=${MEDIA_MAX_DURATION_MS:-14400000}
+      - MEDIA_MAX_CONCURRENT_STREAMS=${MEDIA_MAX_CONCURRENT_STREAMS:-200}
     ports:
       - "8088:8000"
     networks:
@@ -66,6 +95,10 @@ services:
     container_name: voip-ui
     depends_on:
       - api
+    environment:
+      # Verto WSS endpoint the SPA connects to for the WebRTC softphone/conference.
+      # Points at mod_verto on the Media VM (FreeSWITCH), e.g. wss://<media-vm>:8082.
+      - VERTO_WS_URL=${VERTO_WS_URL}
     ports:
       - "8080:80"
       - "8443:443"

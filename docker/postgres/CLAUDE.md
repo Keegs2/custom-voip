@@ -24,13 +24,27 @@ Scripts in `init/` run alphabetically on first database creation:
 | `07_cps_tiers.sql` | CPS tier system: `cps_tiers`, `cps_usage_log`, `cps_tier_changes` (tier-change audit log), `call_path_packages`. Triggers for auto-tier assignment and change logging. |
 | `08_carrier_gateways.sql` | `carrier_gateways` table. Seeds Bandwidth Dallas (67.231.2.12) and LA (216.82.238.134). |
 | `09_schema_users.sql` | `users` table for JWT auth. Seeds admin@customvoip.com / admin123. |
-| `11a_schema_did_assignment.sql` | UCaaS DID-to-extension mapping. **Non-functional on RCF-V1:** it `ALTER TABLE extensions` but the `extensions` table is created by `10_schema_ucaas.sql`, which does NOT exist on this branch. A fresh RCF-V1 init would FAIL on this script. Full-System branch only. |
-| `14_granite_accounts.sql` | **Production seed:** Granite Telephony customer, admin user, RCF DID +16174544217 → +17744045256. |
+| `10_schema_ucaas.sql` | **UCaaS core:** `extensions`, presence, voicemail, `user_devices`. Now present on the unified branch — establishes the `extensions` table that `11a` and `11d` extend. |
+| `11_schema_chat.sql` | Chat / messaging tables for UCaaS (rooms, messages, membership). |
+| `11a_schema_did_assignment.sql` | UCaaS DID-to-extension mapping. `ALTER TABLE extensions …` — now inits clean because `10_schema_ucaas.sql` (which creates `extensions`) runs first on the unified branch. |
+| `11b_add_ucaas_type.sql` | Adds the `ucaas` account type to `customers`; seeds a UCaaS test customer (explicit id=5). |
+| `11c_ucaas_enabled_flag.sql` | Adds the `ucaas_enabled` flag column to `customers`. |
+| `11d_per_customer_extensions.sql` | Per-customer extension uniqueness (namespacing) on `extensions`. |
+| `12_multi_tenant_extensions.sql` | Multi-tenant extension namespacing / tenant scoping. |
+| `13_schema_conferencing.sql` | Conferencing tables for UCaaS (conference rooms, participants). |
+| `14_granite_accounts.sql` | **Production seed:** Granite Telephony customer (explicit id=1), admin user, RCF DID +16174544217 → +17744045256. |
+| `15_schema_documents.sql` | Shared document library for customer organizations. |
 | `16_cdr_detail_columns.sql` | Idempotent ALTER TABLE adding SIP detail columns to CDRs. |
 | `17_did_inventory.sql` | `did_inventory` table — tracks all Bandwidth DIDs and their assignment to customers/products (backs the number_inventory API). |
 | `18_sbc_id_column.sql` | Idempotent ALTER adding `cdrs.sbc_id VARCHAR(30)` + partial index, for SBC failover tracking (backs `/v1/sbc/stats`). |
 | `19_onboarding_requests.sql` | `onboarding_requests` table — backs the onboarding intake/approval router. |
 | `20_rcf_max_channels.sql` | Idempotent ALTER adding `rcf_numbers.max_channels INT DEFAULT 0` (0 = unlimited); FreeSWITCH enforces via limit_hash. |
+| `22_webhook_signing.sql` | Adds `customers.webhook_signing_secret` (HMAC-SHA256 key); FS signs programmable-voice webhook POSTs with it. |
+| `23_schema_ivr.sql` | `ivr_flows` (+ related) tables for the programmable-voice / IVR builder. |
+| `25_schema_recordings.sql` | `recordings` table — call/conference recording metadata + object-storage keys (backs the recordings ingest/serve API). |
+| `26_resync_sequences.sql` | **MUST RUN LAST** (sorts after every schema/seed script). Advances owning sequences past explicitly-seeded ids (Granite customer 1, UCaaS customer 5, admin user, …) so `nextval()` does not collide with seeded rows. Renamed from `24_` when `25_` was added. |
+
+> **Fresh init is clean.** The unified branch ships `10–13`, `15`, `22`, `23`, `25`, `26` (the previously-missing UCaaS/conferencing/documents/recordings schemas), so the whole `init/` set applies in order on a fresh `initdb` with no failures. The earlier warning that `11a` fails on fresh init no longer applies — `10_schema_ucaas.sql` creates `extensions` before `11a`/`11d` alter it.
 
 ## Hot-Path Tables (Call Setup)
 

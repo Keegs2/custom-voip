@@ -1,8 +1,9 @@
 -- lib/e164.lua — E.164 number normalization helpers (RCF-V1)
 --
 -- Single source of truth for the number-format helpers that were previously
--- copy-pasted verbatim into inbound_router.lua, trunk_outbound.lua,
--- api_outbound.lua and outbound_api.lua. The function BODIES here are
+-- copy-pasted verbatim into inbound_router.lua, trunk_outbound.lua and
+-- outbound_api.lua (the tier-aware api_outbound.lua copy was deleted in the
+-- Phase 9 remediation as dead code). The function BODIES here are
 -- byte-for-byte the shipped logic — this extraction is behavior-preserving and
 -- is independently characterized by tests/lua/spec/e164_spec.lua and pinned by
 -- the existing normalization_spec.lua (which extracts these same names out of

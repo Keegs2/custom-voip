@@ -103,6 +103,24 @@ async def create_api_did(
     if customer["status"] != "active":
         raise HTTPException(status_code=400, detail="Customer is not active")
 
+    # SEC-3 (DID-claim IDOR): the DID must already be assigned to this customer in
+    # did_inventory before it can be wired to an API voice app. Without this gate a
+    # tenant could claim another tenant's (or an unallocated) DID and intercept its
+    # calls / spoof its caller ID. An admin (customer_filter None) may provision a
+    # DID that is not yet in inventory, but may NOT attach one assigned elsewhere.
+    inv = await db.fetch_one(
+        "SELECT customer_id FROM did_inventory WHERE did = $1", api_did.did
+    )
+    if inv is None:
+        if customer_filter is not None:
+            raise HTTPException(
+                status_code=403, detail="DID is not assigned to your account"
+            )
+    elif inv["customer_id"] != customer_id:
+        raise HTTPException(
+            status_code=403, detail="DID is not assigned to this customer"
+        )
+
     try:
         result = await db.fetch_one(
             """

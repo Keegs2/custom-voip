@@ -15,11 +15,11 @@ import logging
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Depends, Request, Query
-from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 
 from db import database as db
 from auth.dependencies import get_current_user, get_customer_filter
+from auth.ingest import ingest_secret_ok, ingest_auth_error
 from services import storage
 
 logger = logging.getLogger(__name__)
@@ -103,18 +103,50 @@ async def _verify_recording_access(
 
 @router.post("/ingest")
 async def ingest_recording(request: Request):
-    """Receive a recording notification from FreeSWITCH.
+    """Receive a recording from FreeSWITCH.
 
-    Called over the internal Docker network after a recording is written to the
-    shared spool. No authentication (JWT-exempt in middleware). Always returns a
-    200 JSON body — errors are handled internally and logged — so FreeSWITCH's
-    ``mod_*`` HTTP poster never retry-storms.
+    SEC-2: requires the shared ``X-Ingest-Secret`` header (constant-time compared
+    to env ``INGEST_SHARED_SECRET``); an unset secret allows in dev with a loud
+    warning.
+
+    PROD-2 (cross-VM media): in production the FreeSWITCH Media VM and the API
+    Services VM do NOT share a volume, so FreeSWITCH POSTs the audio FILE itself
+    via ``multipart/form-data`` (field ``file``) alongside the metadata fields.
+    LOCAL fallback: when no file is attached we read ``spool_path`` from the
+    shared ``/media/spool`` volume (single-host dev). Either way the audio is
+    uploaded to object storage (MinIO local / GCS-S3 prod — storage.py is
+    endpoint-agnostic) under a tenant-scoped key.
+
+    Always returns a 200 JSON body on processing errors — handled internally and
+    logged — so FreeSWITCH's ``mod_*`` HTTP poster never retry-storms.
     """
+    if not ingest_secret_ok(request):
+        return ingest_auth_error()
+
+    # Parse metadata + optional uploaded audio from EITHER multipart or JSON.
+    file_bytes: Optional[bytes] = None
+    file_name: Optional[str] = None
+    ctype = request.headers.get("content-type", "")
     try:
-        body = await request.json()
+        if ctype.startswith("multipart/form-data"):
+            form = await request.form()
+            body = {
+                "recording_uuid": form.get("recording_uuid"),
+                "customer_id": form.get("customer_id"),
+                "spool_path": form.get("spool_path"),
+                "call_uuid": form.get("call_uuid"),
+                "duration_ms": form.get("duration_ms"),
+                "kind": form.get("kind"),
+            }
+            upload = form.get("file")
+            if upload is not None and hasattr(upload, "read"):
+                file_bytes = await upload.read()
+                file_name = getattr(upload, "filename", None) or "recording.wav"
+        else:
+            body = await request.json()
     except Exception as e:
         logger.warning("Recording ingest: failed to parse body: %s", e)
-        return {"status": "error", "detail": "invalid JSON"}
+        return {"status": "error", "detail": "invalid body"}
 
     try:
         recording_uuid = body.get("recording_uuid")
@@ -122,6 +154,11 @@ async def ingest_recording(request: Request):
         spool_path = body.get("spool_path")
         call_uuid = body.get("call_uuid")
         duration_ms = body.get("duration_ms")
+        if duration_ms is not None:
+            try:
+                duration_ms = int(duration_ms)
+            except (TypeError, ValueError):
+                duration_ms = None
         kind = (body.get("kind") or "call").lower()
 
         if not recording_uuid or customer_id is None:
@@ -149,41 +186,64 @@ async def ingest_recording(request: Request):
                 "duplicate": True,
             }
 
-        # Upload the WAV from the shared spool to the voip-recordings bucket under
-        # a tenant-scoped key. object_key/bucket stay NULL on failure so the row
-        # still records the call's existence (the deposit is never lost).
+        # Upload the WAV to the voip-recordings bucket under a tenant-scoped key.
+        # object_key/bucket stay NULL on failure so the row still records the
+        # call's existence (the deposit is never lost). Prefer the multipart file
+        # (cross-VM prod); fall back to the shared spool path (single-host dev).
         object_key = None
         bucket = None
-        safe_path = _safe_spool_path(spool_path)
-        if safe_path and os.path.isfile(safe_path):
+        if file_bytes is not None:
             try:
-                basename = os.path.basename(safe_path)
+                basename = os.path.basename(file_name or "recording.wav")
                 object_key = storage.tenant_key(
                     customer_id, "recordings", f"{uuid.uuid4().hex}_{basename}",
                 )
                 ext = os.path.splitext(basename)[1].lower()
                 content_type = "audio/wav" if ext in (".wav", "") else "application/octet-stream"
                 storage.put_file(
-                    storage.BUCKET_RECORDINGS, object_key, safe_path, content_type
+                    storage.BUCKET_RECORDINGS, object_key, file_bytes, content_type
                 )
                 bucket = storage.BUCKET_RECORDINGS
-                # Best-effort: drop the spool copy after a successful upload.
-                try:
-                    os.remove(safe_path)
-                except OSError:
-                    pass
             except Exception:
                 logger.exception(
-                    "Recording ingest: object-storage upload failed for %s; "
-                    "persisting row without object_key", safe_path,
+                    "Recording ingest: object-storage upload failed for "
+                    "uploaded file (recording_uuid=%s); persisting row without "
+                    "object_key", recording_uuid,
                 )
                 object_key = None
                 bucket = None
         else:
-            logger.warning(
-                "Recording ingest: spool file missing/unsafe for recording_uuid=%s "
-                "(spool_path=%s)", recording_uuid, spool_path,
-            )
+            safe_path = _safe_spool_path(spool_path)
+            if safe_path and os.path.isfile(safe_path):
+                try:
+                    basename = os.path.basename(safe_path)
+                    object_key = storage.tenant_key(
+                        customer_id, "recordings", f"{uuid.uuid4().hex}_{basename}",
+                    )
+                    ext = os.path.splitext(basename)[1].lower()
+                    content_type = "audio/wav" if ext in (".wav", "") else "application/octet-stream"
+                    storage.put_file(
+                        storage.BUCKET_RECORDINGS, object_key, safe_path, content_type
+                    )
+                    bucket = storage.BUCKET_RECORDINGS
+                    # Best-effort: drop the spool copy after a successful upload.
+                    try:
+                        os.remove(safe_path)
+                    except OSError:
+                        pass
+                except Exception:
+                    logger.exception(
+                        "Recording ingest: object-storage upload failed for %s; "
+                        "persisting row without object_key", safe_path,
+                    )
+                    object_key = None
+                    bucket = None
+            else:
+                logger.warning(
+                    "Recording ingest: no multipart file and spool file "
+                    "missing/unsafe for recording_uuid=%s (spool_path=%s)",
+                    recording_uuid, spool_path,
+                )
 
         row = await db.fetch_one(
             """INSERT INTO recordings
@@ -273,10 +333,14 @@ async def get_recording_audio(
     user: dict = Depends(get_current_user),
     customer_filter: Optional[int] = Depends(get_customer_filter),
 ):
-    """Redirect (307) to a short-lived presigned URL for the recording audio.
+    """Return a short-lived presigned URL to stream/download the recording audio.
 
-    The object lives privately in the voip-recordings bucket under a tenant-scoped
-    key — the browser never sees storage credentials.
+    SHOULD-FIX (a): returns the presigned URL as JSON (``{url, expires_in}``),
+    matching the voicemail ``/audio`` contract, so the frontend can stream/download
+    it directly without a JWT-in-URL redirect. The object lives privately in the
+    voip-recordings bucket under a tenant-scoped key — the browser never sees
+    storage credentials, and the JWT is sent normally in the Authorization header
+    for THIS request (no ``?token=`` query param).
     """
     rec = await _verify_recording_access(recording_id, customer_filter)
 
@@ -297,4 +361,4 @@ async def get_recording_audio(
         logger.exception("Failed to presign recording %s", recording_id)
         raise HTTPException(status_code=503, detail="Storage temporarily unavailable")
 
-    return RedirectResponse(url=url, status_code=307)
+    return {"url": url, "expires_in": RECORDING_URL_TTL}
