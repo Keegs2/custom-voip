@@ -1,6 +1,66 @@
 # Production Readiness Plan — Unified UCaaS Platform
 
-**Status:** Draft for execution · **Owner (PM):** Claude · **Started:** 2026-06-18
+> ## ⚖️ PHASE 9 — PM SIGN-OFF (2026-06-18)
+>
+> **Verdict: the local single-host stack is production-GRADE and fully green; the platform is NOT yet
+> cleared for live 4-VM production traffic.** The 8 build phases delivered a solid, well-tested unified
+> platform — but the independent Phase-9 audits (security, completeness, dead-code) + clean-room verification
+> surfaced a real gap between "local compose works" and "the documented 4-VM deploy works," plus two
+> exploitable security holes. Honest bottom line: **excellent foundation, ~9 must-fix items before carrier traffic.**
+>
+> ### ✅ What is PROVEN (local clean-room, this session)
+> - **All 7 services boot clean from `down -v`** (postgres, redis, minio, coturn, freeswitch, api, kamailio).
+>   Fresh Postgres init **01→26 clean**; kamailio booted after an image rebuild (stale-image, not a regression).
+> - **258 pytest + 66 Lua + 106 TwiML green**; **44 lesson guards** hold → RCF/trunk hardening characterization
+>   **byte-for-byte unchanged** through all 8 phases (record-route/`r2=on`, Cloud-NAT, failover, session timers).
+> - Per-product live proofs: Piper TTS rendered a real WAV; `<Record>` → shared spool → object storage round-trip;
+>   2-member `<Conference>`; `mod_audio_stream`/`mod_fifo`/Verto WSS loaded; webhook HMAC signs + tamper-rejects
+>   (constant-time); ESL one-pattern + graceful degradation; no committed secrets; ClueCon killed.
+> - **Security posture is mostly solid**: JWT (HS256 pinned, required), ESL/shell/SQL injection guards, Lua
+>   `shq` quoting, spool path-confinement, upload validation, tenant isolation across MOST routers.
+>
+> ### 🔴 MUST-FIX before production traffic
+> | ID | Finding | Source |
+> |----|---------|--------|
+> | SEC-1 | **Cross-tenant call hijack** — `GET/POST /v1/calls/{id}[/update]` have no tenant gate; a tenant can `redirect` another's live call to attacker TwiML (`calls.py:273`) | security |
+> | SEC-2 | **Unauth ingest trusts body `customer_id`** — `/cdrs|voicemail|recordings/ingest` forgeable by any party reaching the port; needs shared-secret/mTLS/IP-allowlist | security |
+> | SEC-3 | **DID-claim IDOR** — `api_dids`/`ivr` create don't verify DID ownership vs `did_inventory` | security |
+> | PROD-1 | **Per-VM compose not wired** — `media_spool`/`STORAGE_*`/`TURN_*`/coturn/minio exist in local compose ONLY; `docker-compose.{media,services}.yml` would deploy the OLD RCF stack | completeness |
+> | PROD-2 | **Cross-VM media storage broken** — recordings/voicemail/conference read a shared volume that can't span the Media↔Services VMs → silent data loss (ingest always 200) | completeness |
+> | PROD-3 | **Multi-worker registries** — `--workers 4` runs 4 independent ESL/media registries; live-modify hits a random worker. Pin to 1 control-plane worker OR back with Redis | completeness |
+> | PROD-4 | **Secrets are dev defaults & undocumented** — `minioadmin`, `dev-turn-secret`, etc.; `STORAGE_*`/`TURN_*`/`WEBHOOK_*`/`TTS_*` absent from every `.env.example` | completeness |
+> | PROD-5 | **WebRTC/TURN TLS not armed** — coturn `turns:` certs commented out, Verto self-signed; STUN-only fails behind symmetric NAT (never tested) | completeness |
+> | CODE-1 | **454-line dead `api_outbound.lua`** + its 2 unreachable dialplan extensions (the Phase-2 naming-collision call was backwards; `outbound_api.lua` is the live one). Live `outbound_api.lua` uses `require()` not `loadfile()` (gotcha #10 — can silently fail). Update the `test_api_lessons` guard + 3 CLAUDE.md docs | dead-code |
+>
+> ### 🟡 SHOULD-FIX soon
+> `?token=` JWT-in-URL for `/audio` (prefer presigned-JSON like voicemail) · webhook replay (add signed
+> timestamp/nonce) · `ucaas.lua:123` `os.execute mkdir` not `shq`-quoted · WS media consumer has no
+> frame/byte/duration cap (DoS) · webhook SSRF guard (block internal/metadata IPs) · ingest dead-letter/retry
+> when object storage is down · MinIO single-node → decide GCS/S3 prod backend · delete dead `LoginPage.tsx` ·
+> refresh stale `docker/postgres/CLAUDE.md`.
+>
+> ### 🟢 ACCEPTABLE known-limitations (documented non-goals, not blockers)
+> `mod_fifo` blocking-`in` (no waitUrl-TwiML/mid-wait `<Leave>`) · single Piper voice · switchio rejected →
+> own asyncio client · in-memory chat/presence registries (Redis pub/sub fanned) · AV scanner ships Noop
+> (wire ClamAV before external uploads) · chat emoji/attach "coming soon" · **Docker-Desktop FS↔API isolation**
+> means ESL/xml_curl/CDR/notify/audio-fork end-to-end paths are PROD-verified, not locally (verified in FS netns).
+>
+> ### Per-area readiness
+> | Area | Local | Production-4VM |
+> |------|-------|----------------|
+> | RCF/trunk SIP core + hardening | ✅ green | ✅ (unchanged, prod-proven) |
+> | UCaaS features (conf/vm/chat/IVR/softphone) | ✅ green | ⚠️ blocked by PROD-1/2/4/5 |
+> | Programmable voice (TwiML/signing/verbs) | ✅ green | ⚠️ SEC-1/2/3 + PROD-1 |
+> | Media plane (record/stream/Piper) | ✅ green | ⚠️ PROD-2 (cross-VM storage) |
+> | Security | ⚠️ SEC-1/2/3 | 🔴 fix required |
+> | Production deploy wiring | n/a | 🔴 not done (PROD-1..5) |
+>
+> **Recommendation:** run a focused **remediation round** (the SEC-* + CODE-1 are quick, high-value; PROD-1/3/4
+> are wiring; PROD-2/5 + storage backend need a design decision) before any carrier traffic. The build work is
+> sound — this is finishing the production-deploy layer the 8 phases (local-focused) didn't cover, plus closing
+> 2 authz holes. Full audit detail retained in the session transcript.
+
+**Status:** Build phases 0–8 COMPLETE & locally verified · Phase 9 sign-off: CONDITIONAL (remediation required) · **Owner (PM):** Claude · **Started:** 2026-06-18
 **Mission:** Produce ONE unified branch that runs the **complete UCaaS / customer-products stack**
 (conferencing, voicemail, IVR builder, WebRTC softphone, chat, presence, documents, programmable
 voice) on top of the **production-hardened SIP/infra foundation** from RCF-V1 — then harden the
