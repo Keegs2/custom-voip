@@ -23,7 +23,10 @@ type BadgeVariant =
   | 'pending'
   | 'billing_verified'
   | 'provisioning'
-  | 'rejected';
+  | 'rejected'
+  | 'env_prod'
+  | 'env_sandbox'
+  | 'env_reserved';
 
 interface BadgeProps {
   variant: BadgeVariant;
@@ -55,6 +58,10 @@ const variantClasses: Record<BadgeVariant, string> = {
   billing_verified: 'bg-blue-500/[0.12] text-blue-300 border border-blue-500/25',
   provisioning:     'bg-cyan-500/[0.10] text-cyan-300 border border-cyan-500/25',
   rejected:         'bg-red-500/[0.10] text-red-400 border border-red-500/20',
+  // Per-number routing environment (did_inventory.allocated_env)
+  env_prod:         'bg-emerald-500/[0.12] text-emerald-400 border border-emerald-500/20 ring-1 ring-emerald-500/10',
+  env_sandbox:      'bg-amber-500/[0.10] text-amber-300 border border-amber-500/25',
+  env_reserved:     'bg-slate-500/[0.10] text-slate-400 border border-slate-500/20',
 };
 
 export function Badge({ variant, children, className }: BadgeProps) {

@@ -6,6 +6,14 @@ export type DidStatus =
   | 'porting_out'
   | 'suspended';
 
+/**
+ * Which environment OWNS a DID for call routing (did_inventory.allocated_env).
+ * - 'prod'     → served by the production platform (DB column default)
+ * - 'sandbox'  → reserved for the test / sandbox environment
+ * - 'reserved' → held, not routable anywhere
+ */
+export type DidAllocatedEnv = 'prod' | 'sandbox' | 'reserved';
+
 export interface DidInventoryItem {
   id: number;
   did: string;
@@ -18,6 +26,9 @@ export interface DidInventoryItem {
   product_type?: string;
   product_ref_id?: number;
   status: DidStatus;
+  // Owning environment for routing. Optional: older rows or endpoints that don't
+  // SELECT the column may omit it (the DB column is NOT NULL DEFAULT 'prod').
+  allocated_env?: DidAllocatedEnv;
   assigned_at?: string;
   notes?: string;
 }

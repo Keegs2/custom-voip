@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { Button } from '../../components/ui/Button';
+import { Badge } from '../../components/ui/Badge';
 import { Modal } from '../../components/ui/Modal';
 import { FormField } from '../../components/ui/FormField';
 import { Spinner } from '../../components/ui/Spinner';
@@ -31,7 +32,7 @@ import {
   requestDid,
 } from '../../api/didInventory';
 import { listCustomers } from '../../api/customers';
-import type { DidInventoryItem, DidStatus } from '../../types/didInventory';
+import type { DidInventoryItem, DidStatus, DidAllocatedEnv } from '../../types/didInventory';
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
 
@@ -187,6 +188,24 @@ function ProductPill({ type }: { type: string }) {
   );
 }
 
+// ─── Environment badge ───────────────────────────────────────────────────────────
+
+const ENV_BADGE: Record<DidAllocatedEnv, { variant: 'env_prod' | 'env_sandbox' | 'env_reserved'; label: string }> = {
+  prod:     { variant: 'env_prod',     label: 'Production' },
+  sandbox:  { variant: 'env_sandbox',  label: 'Sandbox' },
+  reserved: { variant: 'env_reserved', label: 'Reserved' },
+};
+
+function EnvBadge({ env }: { env?: DidAllocatedEnv }) {
+  // Missing/undefined is treated as Production: did_inventory.allocated_env is
+  // NOT NULL DEFAULT 'prod', so an absent value only means the endpoint didn't
+  // serialize the column — the number is still owned by production. Treating it
+  // as Production is less surprising than a neutral dash for a routing column
+  // that always resolves to a real environment server-side.
+  const { variant, label } = ENV_BADGE[env ?? 'prod'];
+  return <Badge variant={variant}>{label}</Badge>;
+}
+
 // ─── Stat card ──────────────────────────────────────────────────────────────────
 
 interface StatCardProps {
@@ -340,6 +359,10 @@ interface FilterBarProps {
   onStateChange: (v: string) => void;
   placeholder?: string;
   hideStatus?: boolean;
+  // Optional environment filter (Inventory tab only). Client-side — see InventoryTab.
+  showEnv?: boolean;
+  envFilter?: DidAllocatedEnv | '';
+  onEnvChange?: (v: DidAllocatedEnv | '') => void;
 }
 
 function FilterBar({
@@ -351,6 +374,9 @@ function FilterBar({
   onStateChange,
   placeholder = 'Search DID, city, rate center…',
   hideStatus = false,
+  showEnv = false,
+  envFilter = '',
+  onEnvChange,
 }: FilterBarProps) {
   return (
     <div
@@ -476,6 +502,34 @@ function FilterBar({
           <option value="porting_in">Porting In</option>
           <option value="porting_out">Porting Out</option>
           <option value="suspended">Suspended</option>
+        </select>
+      )}
+
+      {/* Environment filter (Inventory tab only) */}
+      {showEnv && (
+        <select
+          value={envFilter}
+          onChange={(e) => onEnvChange?.(e.target.value as DidAllocatedEnv | '')}
+          style={{
+            padding: '6px 28px 6px 10px',
+            background: 'rgba(30,33,48,0.8)',
+            border: '1px solid rgba(42,47,69,0.8)',
+            borderRadius: 8,
+            color: envFilter ? '#e2e8f0' : '#475569',
+            fontSize: '0.78rem',
+            outline: 'none',
+            cursor: 'pointer',
+            minWidth: 130,
+            appearance: 'none',
+            backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23475569' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E")`,
+            backgroundRepeat: 'no-repeat',
+            backgroundPosition: 'calc(100% - 8px) center',
+          }}
+        >
+          <option value="">All Environments</option>
+          <option value="prod">Production</option>
+          <option value="sandbox">Sandbox</option>
+          <option value="reserved">Reserved</option>
         </select>
       )}
     </div>
@@ -711,6 +765,7 @@ function InventoryTab() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<DidStatus | ''>('');
   const [stateFilter, setStateFilter] = useState('');
+  const [envFilter, setEnvFilter] = useState<DidAllocatedEnv | ''>('');
   const [offset, setOffset] = useState(0);
   const [assignTarget, setAssignTarget] = useState<DidInventoryItem | null>(null);
   const [unassignTarget, setUnassignTarget] = useState<DidInventoryItem | null>(null);
@@ -763,8 +818,22 @@ function InventoryTab() {
     setOffset(0);
   }, []);
 
+  // No setOffset reset needed: env filter is applied client-side after fetch.
+  const handleEnvChange = useCallback((v: DidAllocatedEnv | '') => {
+    setEnvFilter(v);
+  }, []);
+
   const items = data?.items ?? [];
   const total = data?.total ?? 0;
+
+  // The /numbers/inventory endpoint has NO env query param, so the environment
+  // filter is applied CLIENT-SIDE over the already-fetched page. Caveat: this
+  // narrows only the current page (server-side limit/offset); `total` still
+  // reflects the unfiltered server count.
+  const filteredItems = envFilter
+    ? items.filter((item) => (item.allocated_env ?? 'prod') === envFilter)
+    : items;
+  const hasFilters = Boolean(search || statusFilter || stateFilter || envFilter);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
@@ -823,7 +892,8 @@ function InventoryTab() {
             ) : (
               <span>
                 <strong style={{ color: '#94a3b8' }}>{total.toLocaleString()}</strong> numbers
-                {(search || statusFilter || stateFilter) && ' (filtered)'}
+                {hasFilters && ' (filtered)'}
+                {envFilter && ` · showing ${filteredItems.length.toLocaleString()} on this page`}
               </span>
             )}
           </div>
@@ -845,6 +915,9 @@ function InventoryTab() {
           onStatusChange={handleStatusChange}
           stateFilter={stateFilter}
           onStateChange={handleStateChange}
+          showEnv
+          envFilter={envFilter}
+          onEnvChange={handleEnvChange}
         />
 
         {/* Table */}
@@ -857,6 +930,7 @@ function InventoryTab() {
                 <Th>State</Th>
                 <Th>Status</Th>
                 <Th>Product</Th>
+                <Th>Environment</Th>
                 <Th>Customer</Th>
                 <Th right>Actions</Th>
               </tr>
@@ -864,19 +938,19 @@ function InventoryTab() {
             <tbody>
               {isLoading ? (
                 <tr>
-                  <td colSpan={7} style={{ textAlign: 'center', padding: 48, color: '#475569' }}>
+                  <td colSpan={8} style={{ textAlign: 'center', padding: 48, color: '#475569' }}>
                     <Spinner size="sm" />
                   </td>
                 </tr>
-              ) : items.length === 0 ? (
+              ) : filteredItems.length === 0 ? (
                 <tr>
-                  <td colSpan={7} style={{ textAlign: 'center', padding: 48, color: '#475569', fontSize: '0.82rem' }}>
+                  <td colSpan={8} style={{ textAlign: 'center', padding: 48, color: '#475569', fontSize: '0.82rem' }}>
                     No numbers found
-                    {(search || statusFilter || stateFilter) && ' matching those filters'}
+                    {hasFilters && ' matching those filters'}
                   </td>
                 </tr>
               ) : (
-                items.map((item) => (
+                filteredItems.map((item) => (
                   <tr
                     key={item.id}
                     style={{ transition: 'background 0.1s' }}
@@ -903,6 +977,9 @@ function InventoryTab() {
                       ) : (
                         <span style={{ color: '#334155', fontSize: '0.75rem' }}>—</span>
                       )}
+                    </Td>
+                    <Td>
+                      <EnvBadge env={item.allocated_env} />
                     </Td>
                     <Td>
                       {item.customer_name ? (
@@ -1077,19 +1154,20 @@ function AvailableTab({ isAdmin }: AvailableTabProps) {
                 <Th>State</Th>
                 <Th>LATA</Th>
                 <Th>Rate Center</Th>
+                <Th>Environment</Th>
                 <Th right>Action</Th>
               </tr>
             </thead>
             <tbody>
               {isLoading ? (
                 <tr>
-                  <td colSpan={6} style={{ textAlign: 'center', padding: 48, color: '#475569' }}>
+                  <td colSpan={7} style={{ textAlign: 'center', padding: 48, color: '#475569' }}>
                     <Spinner size="sm" />
                   </td>
                 </tr>
               ) : items.length === 0 ? (
                 <tr>
-                  <td colSpan={6} style={{ textAlign: 'center', padding: 48, color: '#475569', fontSize: '0.82rem' }}>
+                  <td colSpan={7} style={{ textAlign: 'center', padding: 48, color: '#475569', fontSize: '0.82rem' }}>
                     No available numbers
                     {(search || stateFilter) && ' matching those filters'}
                   </td>
@@ -1114,6 +1192,9 @@ function AvailableTab({ isAdmin }: AvailableTabProps) {
                     <Td muted>{item.state ?? '—'}</Td>
                     <Td muted>{item.lata ?? '—'}</Td>
                     <Td muted>{item.rate_center ?? '—'}</Td>
+                    <Td>
+                      <EnvBadge env={item.allocated_env} />
+                    </Td>
                     <Td right>
                       {isAdmin ? (
                         <Button
@@ -1279,6 +1360,7 @@ function AssignmentsTab() {
                       <Th>DID</Th>
                       <Th>City / State</Th>
                       <Th>Product</Th>
+                      <Th>Environment</Th>
                       <Th>Assigned</Th>
                       <Th>Notes</Th>
                       <Th right>Actions</Th>
@@ -1309,6 +1391,9 @@ function AssignmentsTab() {
                           ) : (
                             <span style={{ color: '#334155' }}>—</span>
                           )}
+                        </Td>
+                        <Td>
+                          <EnvBadge env={item.allocated_env} />
                         </Td>
                         <Td muted>
                           {item.assigned_at
@@ -1392,6 +1477,7 @@ function MyNumbersTab() {
                 <Th>State</Th>
                 <Th>Product</Th>
                 <Th>Status</Th>
+                <Th>Environment</Th>
                 <Th>Assigned</Th>
                 <Th>Notes</Th>
               </tr>
@@ -1399,13 +1485,13 @@ function MyNumbersTab() {
             <tbody>
               {isLoading ? (
                 <tr>
-                  <td colSpan={7} style={{ textAlign: 'center', padding: 48, color: '#475569' }}>
+                  <td colSpan={8} style={{ textAlign: 'center', padding: 48, color: '#475569' }}>
                     <Spinner size="sm" />
                   </td>
                 </tr>
               ) : items.length === 0 ? (
                 <tr>
-                  <td colSpan={7} style={{ textAlign: 'center', padding: 48, color: '#475569', fontSize: '0.82rem' }}>
+                  <td colSpan={8} style={{ textAlign: 'center', padding: 48, color: '#475569', fontSize: '0.82rem' }}>
                     No numbers are currently assigned to your account
                   </td>
                 </tr>
@@ -1436,6 +1522,9 @@ function MyNumbersTab() {
                     </Td>
                     <Td>
                       <StatusBadge status={item.status} />
+                    </Td>
+                    <Td>
+                      <EnvBadge env={item.allocated_env} />
                     </Td>
                     <Td muted>
                       {item.assigned_at

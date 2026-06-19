@@ -116,11 +116,17 @@ routing/CDR access stays on the primary/local engine. asyncpg keeps
 
 | Phase | What | Touches prod? | Who | Status |
 |---|---|---|---|---|
-| 1 | Create East **read replica** — repo-encoded self-bootstrapping standby + prod enablement (reload only, NO restart) | Yes (reload) | `infra/replica/` (built + verified; you run the runbook) | **BUILT + verified; awaiting prod enablement** |
+| 1 | Create East **read replica** — repo-encoded self-bootstrapping standby + prod enablement (reload only, NO restart) | Yes (reload) | `infra/replica/` | **LIVE** — standby streaming from prod (slot active), read-only verified |
 | 2 | API dual-engine: add `INVENTORY_READ_URL`, route `did_inventory` reads to it (fallback = primary) | No (no-op until set) | code | **DONE + verified** |
 | 3 | `did_inventory.allocated_env` migration + reconciliation guard in prod & sandbox APIs | Yes (additive, idempotent) | code + migration | **DONE + verified** |
-| 4 | Point sandbox `INVENTORY_READ_URL` at the replica; stop standalone inventory seeding in sandbox | No (sandbox only) | config | TODO (after Phase 1) |
+| 4 | Point sandbox `INVENTORY_READ_URL` at the replica; stop standalone inventory seeding in sandbox | No (sandbox only) | config | **DONE** — sandbox reads prod inventory via the standby |
 | 5 | (Future) per-zone replicas for West/Central FS/Kam reads | Yes (per zone) | infra | TODO |
+| + | UI: per-number Environment badge (Production / Sandbox / Reserved) in Number Management | No | frontend | **DONE + verified** |
+
+> **Live as of 2026-06-19.** `allocated_env` was hand-applied to the existing PROD DB
+> (`ALTER TABLE did_inventory ADD COLUMN ...`) — it replicates to the standby via WAL.
+> The sandbox reads prod's inventory through the read-only standby; the UI tags each
+> number's owning environment. PG/TS versions: prod & standby both PG16 + TimescaleDB 2.26.3.
 
 **Apply-to-existing-DBs note:** the `allocated_env` migration (`24_did_allocation.sql`)
 only runs on a fresh `initdb`. For the already-provisioned prod + sandbox DBs, hand-apply
