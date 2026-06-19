@@ -86,12 +86,17 @@ export const RCF_PALETTE: NodeType[] = ['dial', 'ringGroup', 'schedule', 'condit
 export const UCAAS_PALETTE: NodeType[] = ['ringGroup', 'voicemail', 'dial', 'hangup'];
 
 /**
- * SIP-trunk palette (plan §3 / §12): inbound delivery for a trunk DID. Focused —
- * a single `route` node (ordered/parallel PBX endpoints with timeouts) plus the
- * terminal `hangup`. `entry` is auto-created (one per flow), so it is not listed
- * here. No say/menu/conference: trunk inbound is delivery, not programmable voice.
+ * SIP-trunk palette — DUAL-MODE (mirrors rich-RCF, plan §3 / §12).
+ *
+ * Trunk inbound stays SIMPLE by default: a flow that is just `route` + `hangup`
+ * compiles to the flat `trunk_dids.route_plan` artifact (`{strategy,timeout,
+ * endpoints}`), exactly as before. Adding either advanced verb — `schedule`
+ * (time-of-day) or `condition` (caller-ID) — flips the compiler into RICH mode and
+ * emits an ordered `{rules:[...]}` plan whose rule actions are `route` deliveries.
+ * The palette IS the gate: these are the only verbs trunk inbound can express. No
+ * say/menu/conference: trunk inbound is delivery, not programmable voice.
  */
-export const TRUNK_PALETTE: NodeType[] = ['route', 'hangup'];
+export const TRUNK_PALETTE: NodeType[] = ['route', 'schedule', 'condition', 'hangup'];
 
 /**
  * Per-product palette. The palette IS the product gate (plan §0.1 decision 2):

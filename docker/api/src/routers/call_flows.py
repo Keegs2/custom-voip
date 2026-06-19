@@ -524,20 +524,32 @@ async def publish_call_flow(
                 )
             elif product == "trunk":
                 # SIP-trunk inbound sink = trunk_dids.route_plan (migration 29).
-                # The compiled artifact is the FLAT route plan (CALL_FLOW_BUILDER
-                # _PLAN §12 contract, snake_case keys exactly):
-                #   {strategy:"failover"|"parallel", timeout:int,
-                #    endpoints:[{to, timeout?}]}
-                # The FreeSWITCH Lua reads trunk_dids per call (PG lookup; there
-                # is NO Redis cache for trunk_dids today — unlike rcf_numbers) so
-                # there is NO cache-invalidation step here.
+                # DUAL-MODE publish, mirroring the rcf branch above. Mode is
+                # detected purely by the presence of the `rules` key:
+                #
+                #  - SIMPLE (compiled has NO `rules` key): the FLAT route plan
+                #    (CALL_FLOW_BUILDER_PLAN §12 contract, snake_case keys exactly):
+                #      {strategy:"failover"|"parallel", timeout:int,
+                #       endpoints:[{to, timeout?}]}
+                #    Stored verbatim in trunk_dids.route_plan.
+                #
+                #  - RICH (compiled HAS a `rules` key): the rich artifact
+                #      {rules:[{match,strategy,timeout,endpoints:[{to,timeout?}]}]}
+                #    Stored verbatim in the SAME trunk_dids.route_plan column. A
+                #    rules-keyed plan tells the runtime to evaluate the ordered
+                #    match rules instead of the single flat route plan.
+                #
+                # Either mode writes route_plan verbatim (compiled_json) to the
+                # same column. The FreeSWITCH Lua reads trunk_dids per call (PG
+                # lookup; there is NO Redis cache for trunk_dids today — unlike
+                # rcf_numbers) so there is NO cache-invalidation step here.
                 if not did:
                     raise HTTPException(
                         status_code=400,
                         detail="entry DID is required to publish a trunk flow",
                     )
                 # Resolve the trunk DID row by the entry DID. The DID must already
-                # be assigned to a trunk (trunk_dids row exists).
+                # be assigned to a trunk (trunk_dids row exists). Mode-independent.
                 td_row = await conn.fetchrow(
                     "SELECT id FROM trunk_dids WHERE did = $1", did,
                 )
@@ -549,30 +561,52 @@ async def publish_call_flow(
                     )
                 td_id = td_row["id"]
 
-                # Validate the compiled route plan: strategy + non-empty endpoints.
-                strategy = body.compiled.get("strategy")
-                if strategy not in ("failover", "parallel"):
-                    raise HTTPException(
-                        status_code=400,
-                        detail="compiled.strategy must be 'failover' or 'parallel'",
-                    )
-                endpoints = body.compiled.get("endpoints")
-                if not isinstance(endpoints, list) or len(endpoints) == 0:
-                    raise HTTPException(
-                        status_code=400,
-                        detail="compiled.endpoints must be a non-empty array",
-                    )
+                is_rich = "rules" in body.compiled
 
-                await conn.execute(
-                    "UPDATE trunk_dids SET route_plan = $1::jsonb WHERE id = $2",
-                    compiled_json, td_id,
-                )
-                sink_ref = td_id
-                logger.info(
-                    "publish flow %s: trunk_dids.route_plan set did=%s td_id=%s "
-                    "strategy=%s endpoints=%d (sink_ref=%s)",
-                    flow_id, did, td_id, strategy, len(endpoints), sink_ref,
-                )
+                if not is_rich:
+                    # ---- SIMPLE MODE -------------------------------------------
+                    # Validate the flat route plan: strategy + non-empty endpoints.
+                    strategy = body.compiled.get("strategy")
+                    if strategy not in ("failover", "parallel"):
+                        raise HTTPException(
+                            status_code=400,
+                            detail="compiled.strategy must be 'failover' or 'parallel'",
+                        )
+                    endpoints = body.compiled.get("endpoints")
+                    if not isinstance(endpoints, list) or len(endpoints) == 0:
+                        raise HTTPException(
+                            status_code=400,
+                            detail="compiled.endpoints must be a non-empty array",
+                        )
+                    await conn.execute(
+                        "UPDATE trunk_dids SET route_plan = $1::jsonb WHERE id = $2",
+                        compiled_json, td_id,
+                    )
+                    sink_ref = td_id
+                    logger.info(
+                        "publish flow %s: trunk_dids.route_plan SIMPLE set did=%s "
+                        "td_id=%s strategy=%s endpoints=%d (sink_ref=%s)",
+                        flow_id, did, td_id, strategy, len(endpoints), sink_ref,
+                    )
+                else:
+                    # ---- RICH MODE ---------------------------------------------
+                    # Validate: rules is a non-empty list. Stored verbatim.
+                    rules = body.compiled.get("rules")
+                    if not isinstance(rules, list) or len(rules) == 0:
+                        raise HTTPException(
+                            status_code=400,
+                            detail="compiled.rules must be a non-empty array",
+                        )
+                    await conn.execute(
+                        "UPDATE trunk_dids SET route_plan = $1::jsonb WHERE id = $2",
+                        compiled_json, td_id,
+                    )
+                    sink_ref = td_id
+                    logger.info(
+                        "publish flow %s: trunk_dids.route_plan RICH set did=%s "
+                        "td_id=%s rules=%d (sink_ref=%s)",
+                        flow_id, did, td_id, len(rules), sink_ref,
+                    )
             # else: other non-IVR products — no sink write yet (P2+ TODO).
             # compiled is still persisted on call_flows below so it is not lost.
 

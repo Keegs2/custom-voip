@@ -126,45 +126,10 @@ local function normalize_ring(ring, default_timeout)
     return out
 end
 
--- caller_id condition: prefix (caller STARTS WITH) and/or equals (exact). Both
--- match against the E.164 caller. An empty/absent condition field is ignored.
-local function caller_id_matches(cond, caller)
-    if type(cond) ~= "table" then return true end
-    caller = caller or ""
-    local eq = cond.equals
-    if type(eq) == "string" and eq ~= "" and caller ~= eq then
-        return false
-    end
-    local pfx = cond.prefix
-    if type(pfx) == "string" and pfx ~= "" and caller:sub(1, #pfx) ~= pfx then
-        return false
-    end
-    return true
-end
-
--- Does this rule's `match` apply right now? nil/non-table match = catch-all
--- (always). A schedule condition requires the schedule lib; if it is somehow
--- unavailable the rule conservatively does NOT match (so a missing primitive
--- can never silently route after-hours calls to the business-hours leg).
-local function rule_matches(rule, caller, now, sched)
-    if type(rule) ~= "table" then return false end
-    local m = rule.match
-    if type(m) ~= "table" then return true end          -- nil/scalar = catch-all
-    if m.schedule ~= nil then
-        if not (sched and sched.matches) then
-            if freeswitch and freeswitch.consoleLog then
-                freeswitch.consoleLog("WARNING",
-                    "[rcf] schedule lib unavailable — schedule rule skipped\n")
-            end
-            return false
-        end
-        if not sched.matches(m.schedule, now) then return false end
-    end
-    if m.caller_id ~= nil and not caller_id_matches(m.caller_id, caller) then
-        return false
-    end
-    return true
-end
+-- NOTE: the schedule + caller-id `match` predicate (caller_id_matches /
+-- rule_matches / first-match-wins selection) was FACTORED OUT to lib/rules.lua
+-- so the SIP-trunk inbound handler reuses the identical matcher. The selection
+-- below calls ctx.rules.first_match(); RCF's routing behavior is unchanged.
 
 -- ===========================================================================
 -- RICH RCF executor. Mirrors handlers/ucaas.lua find-me/follow-me but with RCF
@@ -410,13 +375,18 @@ local function handle_rich_plan(ctx, plan)
     end
 
     -- ----- rule selection (document order; first match wins) -----------------
+    -- The schedule + caller-id matcher lives in lib/rules.lua (shared with the
+    -- SIP-trunk RICH route_plan path). first_match returns the first rule whose
+    -- `match` applies, or nil. Identical semantics to the prior inline loop.
     local now = tonumber(os.getenv("RCF_NOW_OVERRIDE")) or os.time()  -- test seam
     local matched, matched_idx
-    for i, rule in ipairs(plan.rules) do
-        if rule_matches(rule, caller_e164, now, sched) then
-            matched, matched_idx = rule, i
-            break
-        end
+    local rules_mod = ctx.rules
+    if rules_mod and rules_mod.first_match then
+        matched, matched_idx = rules_mod.first_match(plan.rules, {
+            caller = caller_e164, now = now, schedule = sched })
+    else
+        freeswitch.consoleLog("ERR",
+            "[" .. uuid .. "] RICH RCF: rules lib unavailable — no rule can match, using fallback\n")
     end
 
     local r = nil

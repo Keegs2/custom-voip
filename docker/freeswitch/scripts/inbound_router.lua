@@ -107,6 +107,11 @@ local multileg = load_module("multileg")
 -- `match.schedule` conditions (handlers/rcf.lua). Side-effect-free; product-
 -- agnostic so trunk/IVR can reuse it for time-based branching later.
 local schedule = load_module("schedule")
+-- Shared first-match-wins rule SELECTION engine (schedule + caller-id `match`,
+-- document order). Used by BOTH the RICH RCF path (handlers/rcf.lua) and the
+-- RICH SIP-trunk inbound path (handlers/trunk.lua) so the two products evaluate
+-- routing rules with identical semantics. Side-effect-free.
+local rules = load_module("rules")
 
 -- Ensure session exists
 if not session then
@@ -453,6 +458,7 @@ local ctx = {
     session_timer = session_timer,
     multileg = multileg,
     schedule = schedule,
+    rules = rules,
 }
 
 freeswitch.consoleLog("DEBUG", "[" .. uuid .. "] STEP 2: Dispatching product_type=" .. tostring(product_type) .. "\n")

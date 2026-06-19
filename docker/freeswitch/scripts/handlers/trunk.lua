@@ -58,7 +58,17 @@ return function(ctx)
     local dialstring = ctx.dialstring
     local session_timer = ctx.session_timer
     local multileg = ctx.multileg
+    local rules_mod = ctx.rules        -- shared schedule+caller-id matcher (RICH)
     local route_plan = ctx.routing and ctx.routing.route_plan
+
+    -- Caller number for RICH caller-id rule matching, normalized to E.164 EXACTLY
+    -- as handlers/rcf.lua normalizes it (ctx.normalize_did over the dispatcher-
+    -- preserved original caller), so "+1617" prefix / exact-equals conditions
+    -- behave identically across products. Only consumed on the RICH path.
+    local normalize_did = ctx.normalize_did
+    local caller_e164 = normalize_did
+        and normalize_did(ctx.original_caller_number or caller_id or "")
+        or (ctx.original_caller_number or caller_id or "")
 
     -- SIP Trunk inbound — route call to customer's PBX
     -- Look up the customer's authorized IP(s) and bridge to their PBX
@@ -117,31 +127,38 @@ return function(ctx)
     local bridge_did = normalized_did:gsub("^%+", "")
 
     -- ========================================================================
-    -- route_plan path — multi-endpoint delivery (failover ordering / parallel).
-    -- Build the ORDERED, AUTHORIZED endpoint list first; if it is empty we fall
-    -- through to the legacy single-endpoint bridge (fail-safe).
+    -- route_plan multi-endpoint DELIVERY (shared by SIMPLE and RICH).
+    --
+    -- deliver_via_plan(endpoints, strategy, timeout) takes a plan's endpoint list
+    -- (each {to=<ip|ip:port>, timeout?}), filters it to the trunk's AUTHORIZED
+    -- IPs (trunk_auth_ips — Kamailio does NOT re-validate X-PBX-Dest, so an
+    -- unauthorized IP would be an open relay), and delivers across the survivors
+    -- via failover (sequential) or parallel (simring), each endpoint carrying its
+    -- OWN X-PBX-Dest. Returns true if it delivered (>=1 authorized endpoint),
+    -- false if NO authorized endpoint survived (the caller decides what to do —
+    -- SIMPLE fails safe to legacy, RICH rejects). This is byte-for-byte the
+    -- multi-endpoint logic that previously lived inline, now reused by BOTH modes.
     -- ========================================================================
-    if type(route_plan) == "table" and type(route_plan.endpoints) == "table"
-        and #route_plan.endpoints > 0 then
 
-        -- Authorized PBX IPs for this trunk (trunk_auth_ips, bare host() IPs).
-        local authorized = {}
-        for _, ip in ipairs(endpoint_ips) do authorized[ip] = true end
+    -- Authorized PBX IPs for this trunk (trunk_auth_ips, bare host() IPs).
+    local authorized = {}
+    for _, ip in ipairs(endpoint_ips) do authorized[ip] = true end
 
-        -- Extract the bare IP from a plan endpoint "to" ("ip" or "ip:port").
-        -- Kamailio's X-PBX-Dest handler HARD-CODES :5060, so only the IP is
-        -- meaningful (a custom port in the plan cannot be honored by the current
-        -- SBC config — see report).
-        local function pbx_ip_of(to)
-            if not to then return nil end
-            local s = tostring(to):gsub("^%s*(.-)%s*$", "%1")
-            if s == "" then return nil end
-            return s:match("^([^:]+)")
-        end
+    -- Extract the bare IP from a plan endpoint "to" ("ip" or "ip:port").
+    -- Kamailio's X-PBX-Dest handler HARD-CODES :5060, so only the IP is
+    -- meaningful (a custom port in the plan cannot be honored by the current
+    -- SBC config — see report).
+    local function pbx_ip_of(to)
+        if not to then return nil end
+        local s = tostring(to):gsub("^%s*(.-)%s*$", "%1")
+        if s == "" then return nil end
+        return s:match("^([^:]+)")
+    end
 
+    local function deliver_via_plan(plan_endpoints, strategy_in, plan_timeout_raw)
         -- Filter the plan to authorized endpoints, preserving plan order.
         local eps = {}
-        for _, ep in ipairs(route_plan.endpoints) do
+        for _, ep in ipairs(plan_endpoints) do
             local ip = (type(ep) == "table") and pbx_ip_of(ep.to) or nil
             if ip and authorized[ip] then
                 eps[#eps + 1] = {
@@ -158,76 +175,137 @@ return function(ctx)
             end
         end
 
-        if #eps > 0 then
-            -- Per-endpoint default timeout. 60 matches the legacy single bridge's
-            -- call_timeout, so an endpoint with no explicit timeout rings exactly
-            -- as long as today's single delivery.
-            local plan_timeout = tonumber(route_plan.timeout) or 60
-            local strategy = route_plan.strategy
-            if strategy ~= "parallel" then strategy = "failover" end
+        if #eps == 0 then return false end
+
+        -- Per-endpoint default timeout. 60 matches the legacy single bridge's
+        -- call_timeout, so an endpoint with no explicit timeout rings exactly
+        -- as long as today's single delivery.
+        local plan_timeout = tonumber(plan_timeout_raw) or 60
+        local strategy = strategy_in
+        if strategy ~= "parallel" then strategy = "failover" end
+
+        freeswitch.consoleLog("INFO", string.format(
+            "[%s] Trunk route_plan: strategy=%s endpoints=%d timeout=%ds\n",
+            uuid, strategy, #eps, plan_timeout))
+
+        if strategy == "parallel" then
+            -- PARALLEL: ring all PBX endpoints at once. Common bridge options
+            -- (SOA off, overall call_timeout, RFC 4028 timers) live in the
+            -- global {} block; each endpoint's OWN X-PBX-Dest (and optional
+            -- per-leg timeout) lives in its [] per-channel block. All legs go
+            -- to the same SBC; Kamailio reads each forked INVITE's X-PBX-Dest
+            -- independently. We can NOT use a single A-leg X-PBX-Dest here —
+            -- that's exactly why each leg carries its own in [].
+            local channels = {}
+            for _, ep in ipairs(eps) do
+                local lv = {}
+                if ep.timeout then lv[#lv + 1] = "leg_timeout=" .. ep.timeout end
+                lv[#lv + 1] = "sip_h_X-PBX-Dest=" .. ep.ip
+                channels[#channels + 1] = "[" .. table.concat(lv, ",") .. "]" ..
+                    string.format("sofia/external/%s@%s:5060", bridge_did, sbc_proxy_ip)
+            end
+            local prefix = string.format(
+                "{ignore_early_media=false,sip_enable_soa=false,call_timeout=%d,%s}",
+                plan_timeout, session_timer.BRIDGE_OPTS)
+            freeswitch.consoleLog("INFO", string.format(
+                "[%s] Trunk parallel delivery: %s%s\n",
+                uuid, prefix, table.concat(channels, ",")))
+            multileg.parallel(session, get_var, prefix, channels)
+        else
+            -- FAILOVER (sequential): try endpoints in order, each up to its
+            -- own timeout (or the plan timeout), advancing on no-answer/busy/
+            -- failure. One bridge per endpoint so each per-endpoint timeout is
+            -- honored exactly. X-PBX-Dest is in THIS attempt's {} block, so
+            -- the new B-leg's INVITE always carries the right PBX IP and no
+            -- stale value can leak from a previous attempt.
+            multileg.sequential(session, get_var, eps, function(ep, idx)
+                local t = ep.timeout or plan_timeout
+                local inner = string.format(
+                    "ignore_early_media=false,sip_enable_soa=false,call_timeout=%d," ..
+                    "sip_h_X-PBX-Dest=%s,%s",
+                    t, ep.ip, session_timer.BRIDGE_OPTS)
+                local ds = dialstring.bridge(inner, bridge_did, sbc_proxy_ip)
+                freeswitch.consoleLog("INFO", string.format(
+                    "[%s] Trunk failover attempt %d/%d -> PBX %s (timeout=%ds): %s\n",
+                    uuid, idx, #eps, ep.ip, t, ds))
+                return ds
+            end)
+        end
+
+        -- Bridge result across all endpoints. originate_disposition is the
+        -- authoritative success/failure indicator.
+        local disposition = get_var("originate_disposition", "")
+        if disposition ~= "" and disposition ~= "SUCCESS" then
+            freeswitch.consoleLog("WARNING", string.format(
+                "[%s] Trunk route_plan delivery failed across %d endpoint(s): disposition=%s last_cause=%s\n",
+                uuid, #eps, disposition, get_var("last_bridge_hangup_cause", "")))
+        end
+        return true
+    end
+
+    -- ========================================================================
+    -- RICH route_plan — { rules = { { match, strategy, timeout, endpoints }, ... } }.
+    -- Detected by the presence of a `rules` table. Evaluate the rules in order
+    -- (shared schedule + caller-id matcher, lib/rules.first_match), FIRST match
+    -- wins (match=nil => default/catch-all), then deliver THAT rule's endpoints
+    -- via deliver_via_plan above. No rule matches (or the matched rule has no
+    -- authorized endpoints) => REJECT — we deliberately do NOT silently fall
+    -- through to the legacy single-endpoint bridge, because a RICH plan is an
+    -- explicit routing policy.
+    -- ========================================================================
+    if type(route_plan) == "table" and type(route_plan.rules) == "table" then
+        if rules_mod and rules_mod.first_match then
+            -- now: test seam (deterministic schedule rules), mirrors RCF's seam.
+            local now = tonumber(os.getenv("TRUNK_NOW_OVERRIDE")) or os.time()
+            local matched, matched_idx = rules_mod.first_match(route_plan.rules, {
+                caller = caller_e164, now = now, schedule = ctx.schedule })
 
             freeswitch.consoleLog("INFO", string.format(
-                "[%s] Trunk route_plan: strategy=%s endpoints=%d timeout=%ds\n",
-                uuid, strategy, #eps, plan_timeout))
+                "[%s] Trunk RICH route_plan: rules=%d matched=%s caller=%s\n",
+                uuid, #route_plan.rules, tostring(matched_idx), tostring(caller_e164)))
 
-            if strategy == "parallel" then
-                -- PARALLEL: ring all PBX endpoints at once. Common bridge options
-                -- (SOA off, overall call_timeout, RFC 4028 timers) live in the
-                -- global {} block; each endpoint's OWN X-PBX-Dest (and optional
-                -- per-leg timeout) lives in its [] per-channel block. All legs go
-                -- to the same SBC; Kamailio reads each forked INVITE's X-PBX-Dest
-                -- independently. We can NOT use a single A-leg X-PBX-Dest here —
-                -- that's exactly why each leg carries its own in [].
-                local channels = {}
-                for _, ep in ipairs(eps) do
-                    local lv = {}
-                    if ep.timeout then lv[#lv + 1] = "leg_timeout=" .. ep.timeout end
-                    lv[#lv + 1] = "sip_h_X-PBX-Dest=" .. ep.ip
-                    channels[#channels + 1] = "[" .. table.concat(lv, ",") .. "]" ..
-                        string.format("sofia/external/%s@%s:5060", bridge_did, sbc_proxy_ip)
+            if matched and type(matched.endpoints) == "table"
+                and #matched.endpoints > 0 then
+                if deliver_via_plan(matched.endpoints, matched.strategy, matched.timeout) then
+                    return
                 end
-                local prefix = string.format(
-                    "{ignore_early_media=false,sip_enable_soa=false,call_timeout=%d,%s}",
-                    plan_timeout, session_timer.BRIDGE_OPTS)
-                freeswitch.consoleLog("INFO", string.format(
-                    "[%s] Trunk parallel delivery: %s%s\n",
-                    uuid, prefix, table.concat(channels, ",")))
-                multileg.parallel(session, get_var, prefix, channels)
-            else
-                -- FAILOVER (sequential): try endpoints in order, each up to its
-                -- own timeout (or the plan timeout), advancing on no-answer/busy/
-                -- failure. One bridge per endpoint so each per-endpoint timeout is
-                -- honored exactly. X-PBX-Dest is in THIS attempt's {} block, so
-                -- the new B-leg's INVITE always carries the right PBX IP and no
-                -- stale value can leak from a previous attempt.
-                multileg.sequential(session, get_var, eps, function(ep, idx)
-                    local t = ep.timeout or plan_timeout
-                    local inner = string.format(
-                        "ignore_early_media=false,sip_enable_soa=false,call_timeout=%d," ..
-                        "sip_h_X-PBX-Dest=%s,%s",
-                        t, ep.ip, session_timer.BRIDGE_OPTS)
-                    local ds = dialstring.bridge(inner, bridge_did, sbc_proxy_ip)
-                    freeswitch.consoleLog("INFO", string.format(
-                        "[%s] Trunk failover attempt %d/%d -> PBX %s (timeout=%ds): %s\n",
-                        uuid, idx, #eps, ep.ip, t, ds))
-                    return ds
-                end)
+                -- Rule matched but every endpoint failed authorization. Reject
+                -- (explicit policy) rather than fall to legacy.
+                freeswitch.consoleLog("WARNING", string.format(
+                    "[%s] Trunk RICH route_plan rule %s for trunk %s had no authorized endpoints — rejecting\n",
+                    uuid, tostring(matched_idx), tostring(trunk_id)))
+                hangup("NO_ROUTE_DESTINATION",
+                    "[" .. uuid .. "] Trunk RICH plan matched rule has no authorized endpoint")
+                return
             end
 
-            -- Bridge result across all endpoints. originate_disposition is the
-            -- authoritative success/failure indicator.
-            local disposition = get_var("originate_disposition", "")
-            if disposition ~= "" and disposition ~= "SUCCESS" then
-                freeswitch.consoleLog("WARNING", string.format(
-                    "[%s] Trunk route_plan delivery failed across %d endpoint(s): disposition=%s last_cause=%s\n",
-                    uuid, #eps, disposition, get_var("last_bridge_hangup_cause", "")))
-            end
+            -- No rule matched (or matched rule carries no endpoints) -> reject.
+            freeswitch.consoleLog("WARNING", string.format(
+                "[%s] Trunk RICH route_plan: no rule matched for trunk %s (caller=%s) — rejecting\n",
+                uuid, tostring(trunk_id), tostring(caller_e164)))
+            hangup("NO_ROUTE_DESTINATION",
+                "[" .. uuid .. "] Trunk RICH plan: no matching rule")
             return
         end
 
-        -- route_plan present but NO authorized endpoints survived validation.
-        -- Fail safe to the legacy single-endpoint bridge below (never drop the
-        -- call because of a bad plan).
+        -- Infra failure (rules lib didn't load): degrade to the legacy single-
+        -- endpoint bridge below rather than drop the call. Distinct from a
+        -- deliberate no-match reject above.
+        freeswitch.consoleLog("ERR", string.format(
+            "[%s] Trunk RICH route_plan present but rules lib unavailable — falling back to legacy single-endpoint bridge\n",
+            uuid))
+
+    -- ========================================================================
+    -- SIMPLE route_plan — { strategy, timeout, endpoints:[...] } (NO `rules`).
+    -- Unchanged multi-endpoint delivery; if the plan resolves to NO authorized
+    -- endpoints it fails SAFE to the legacy single-endpoint bridge below (never
+    -- drop the call because of a bad plan).
+    -- ========================================================================
+    elseif type(route_plan) == "table" and type(route_plan.endpoints) == "table"
+        and #route_plan.endpoints > 0 then
+        if deliver_via_plan(route_plan.endpoints, route_plan.strategy, route_plan.timeout) then
+            return
+        end
         freeswitch.consoleLog("WARNING", string.format(
             "[%s] route_plan for trunk %s had no authorized endpoints — falling back to legacy single-endpoint bridge\n",
             uuid, tostring(trunk_id)))
