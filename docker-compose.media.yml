@@ -125,7 +125,7 @@ services:
   # time-limited RFC 5766 credentials with the SAME secret). Host networking so
   # the advertised relay candidates use the VM's real public IP.
   coturn:
-    image: coturn/coturn:latest
+    image: coturn/coturn:4.6.2
     container_name: voip-coturn
     network_mode: host
     volumes:

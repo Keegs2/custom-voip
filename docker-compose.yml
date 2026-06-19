@@ -86,7 +86,7 @@ services:
     network_mode: host
     environment:
       - DB_HOST=${DB_HOST:-127.0.0.1}
-      - DB_PORT=${DB_PORT:-5432}
+      - DB_PORT=${DB_PORT:-6432}   # PgBouncer (matches production)
       - DB_NAME=${DB_NAME:-voip}
       - DB_USER=${DB_USER:-freeswitch}
       - DB_PASS=${DB_PASS:-fs_secret}
@@ -142,7 +142,7 @@ services:
       - FREESWITCH_IP=${FREESWITCH_IP:-127.0.0.1}
       - FS_PUBLIC_IP=${FS_PUBLIC_IP:-${EXTERNAL_SIP_IP}}
       - DB_HOST=${DB_HOST:-127.0.0.1}
-      - DB_PORT=${DB_PORT:-5432}
+      - DB_PORT=${DB_PORT:-6432}   # PgBouncer (matches production)
       - DB_USER=${DB_USER:-freeswitch}
       - DB_PASS=${DB_PASS:-fs_secret}
       - HOMER_IP=${HOMER_IP:-127.0.0.1}
@@ -177,7 +177,9 @@ services:
       redis:
         condition: service_healthy
     environment:
-      - DATABASE_URL=postgresql://${API_DB_USER:-api}:${API_DB_PASS:-api_secret}@postgres:5432/${DB_NAME:-voip}
+      # Through PgBouncer (6432), matching production — exercises the transaction-mode
+      # pooling path the code targets (statement_cache_size=0 + ::type casts).
+      - DATABASE_URL=postgresql://${API_DB_USER:-api}:${API_DB_PASS:-api_secret}@postgres:6432/${DB_NAME:-voip}
       - REDIS_URL=redis://redis:6379
       # NOTE: on Docker Desktop (Mac/Win), host-networked FreeSWITCH is NOT reachable
       # from this bridge container — API<->FS (ESL, xml_curl, CDR, vm_notify) only works
@@ -248,10 +250,16 @@ services:
       # UCaaS (unified): Verto WSS endpoint the SPA connects to for WebRTC
       # softphone/conference. Override per-zone (e.g. ws://<media-vm>:8082).
       # Local dev default points at the FreeSWITCH mod_verto WSS on the host.
-      - VERTO_WS_URL=${VERTO_WS_URL:-ws://localhost:8082}
+      - VERTO_WS_URL=${VERTO_WS_URL:-wss://localhost:8443/ws/verto/}
+      # nginx /ws/verto/ proxy target (templated into the conf by the UI entrypoint).
+      # Single-host test box: the FreeSWITCH mod_verto WSS on the host (8082).
+      - VERTO_PROXY_TARGET=${VERTO_PROXY_TARGET:-host.docker.internal:8082}
     ports:
       - "${UI_HTTP_PORT:-8080}:80"
       - "${UI_HTTPS_PORT:-8443}:443"
+    # So nginx (bridge) can reach the host-networked FreeSWITCH mod_verto on :8082.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - voip-network
     deploy:
@@ -389,7 +397,7 @@ services:
   # TURN/STUN (coturn) — WebRTC/Verto media relay for clients behind symmetric NAT.
   # Shares TURN_SECRET with the API (webrtc.py mints time-limited TURN credentials).
   coturn:
-    image: coturn/coturn:latest
+    image: coturn/coturn:4.6.2
     container_name: voip-coturn
     network_mode: host
     volumes:

@@ -1,0 +1,10 @@
+# Local Terraform/OpenTofu state, plans, provider downloads, and per-user vars.
+# State lives in the GCS backend (gs://revup-tofu-state); never commit local copies.
+.terraform/
+*.tfstate
+*.tfstate.*
+*.plan
+crash.log
+
+# Per-user variables (office CIDRs, etc.) — copy from terraform.tfvars.example.
+terraform.tfvars

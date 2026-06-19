@@ -99,6 +99,11 @@ services:
       # Verto WSS endpoint the SPA connects to for the WebRTC softphone/conference.
       # Points at mod_verto on the Media VM (FreeSWITCH), e.g. wss://<media-vm>:8082.
       - VERTO_WS_URL=${VERTO_WS_URL}
+      # nginx /ws/verto/ upstream (templated into the conf by the UI entrypoint).
+      # mod_verto runs on the Media VM (FreeSWITCH), NOT the SBC — default to the
+      # fs-media-v2 VPC IP. Override VERTO_PROXY_TARGET per-zone in the services-VM
+      # .env (each zone's media VM IP:8082).
+      - VERTO_PROXY_TARGET=${VERTO_PROXY_TARGET:-192.168.10.2:8082}
     ports:
       - "8080:80"
       - "8443:443"
