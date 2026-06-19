@@ -31,10 +31,15 @@ services:
     networks:
       - voip-network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U voip -d voip"]
+      # Healthy only when BOTH raw PG (5432) AND the PgBouncer pooled path (6432)
+      # accept an authenticated query. Without the 6432 check, "healthy" fires as
+      # soon as PG is up but before the entrypoint starts PgBouncer — so dependents
+      # (Kamailio sqlops, API asyncpg) race a dead 6432 and crash-loop on cold boot.
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\" -p 5432 && PGPASSWORD=\"$$POSTGRES_PASSWORD\" psql -h 127.0.0.1 -p 6432 -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\" -tAc 'select 1' >/dev/null 2>&1"]
       interval: 5s
       timeout: 5s
       retries: 10
+      start_period: 45s
     deploy:
       resources:
         limits:
@@ -135,7 +140,12 @@ services:
     build: ./docker/kamailio
     container_name: voip-kamailio
     depends_on:
-      - freeswitch
+      # Wait for PgBouncer (postgres healthcheck now probes 6432) so the sqlops
+      # [trunk] children don't race a dead pool and crash-loop on cold boot.
+      postgres:
+        condition: service_healthy
+      freeswitch:
+        condition: service_started
     network_mode: host
     environment:
       - EXTERNAL_SIP_IP=${EXTERNAL_SIP_IP}
