@@ -261,27 +261,46 @@ services:
           memory: 128M
     restart: unless-stopped
 
-  # Homer 7 SIP Monitoring — essential for RCF SIP troubleshooting
-  homer-db:
-    image: postgres:14-alpine
-    container_name: voip-homer-db
-    environment:
-      POSTGRES_PASSWORD: ${HOMER_DB_PASS:-homerSeven}
-      POSTGRES_USER: root
+  # Homer 10 SIP capture — ClickHouse + qryn + Grafana (matches production
+  # docker-compose.services.yml; the API /homer/search queries qryn/ClickHouse
+  # and the UI proxies /grafana). Replaces the old Homer 7 postgres+homer-app.
+  clickhouse-server:
+    image: clickhouse/clickhouse-server:23.3-alpine
+    container_name: voip-clickhouse
     volumes:
-      - homer_db_data:/var/lib/postgresql/data
-      - ./docker/homer/init-user-db.sh:/docker-entrypoint-initdb.d/init-user-db.sh
+      - clickhouse_data:/var/lib/clickhouse
+      - ./docker/homer/clickhouse-users.xml:/etc/clickhouse-server/users.d/custom-users.xml
     networks:
       - voip-network
     healthcheck:
-      test: ["CMD-SHELL", "psql -h localhost -U root -c '\\l'"]
-      interval: 2s
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:8123/ping || exit 1"]
+      interval: 5s
       timeout: 3s
       retries: 30
     restart: unless-stopped
 
+  # qryn — Loki-compatible API over ClickHouse (replaces the homer-app backend)
+  qryn:
+    image: qxip/qryn:latest
+    container_name: voip-qryn
+    environment:
+      - CLICKHOUSE_SERVER=clickhouse-server
+      - CLICKHOUSE_PORT=8123
+      - CLICKHOUSE_DB=qryn
+      - "CLICKHOUSE_AUTH=default:"
+      - "NODE_OPTIONS=--max-old-space-size=4096"
+    ports:
+      - "3100:3100"
+    depends_on:
+      clickhouse-server:
+        condition: service_healthy
+    networks:
+      - voip-network
+    restart: unless-stopped
+
+  # Heplify Server — receives HEP from Kamailio/FreeSWITCH, pushes to qryn
   heplify-server:
-    image: ghcr.io/sipcapture/heplify-server
+    image: ghcr.io/sipcapture/heplify-server:1.60.3
     container_name: voip-heplify-server
     ports:
       - "9060:9060"
@@ -290,36 +309,55 @@ services:
     environment:
       - "HEPLIFYSERVER_HEPADDR=0.0.0.0:9060"
       - "HEPLIFYSERVER_HEPTCPADDR=0.0.0.0:9061"
-      - "HEPLIFYSERVER_DBSHEMA=homer7"
-      - "HEPLIFYSERVER_DBDRIVER=postgres"
-      - "HEPLIFYSERVER_DBADDR=homer-db:5432"
-      - "HEPLIFYSERVER_DBUSER=root"
-      - "HEPLIFYSERVER_DBPASS=${HOMER_DB_PASS:-homerSeven}"
+      - "HEPLIFYSERVER_DBSHEMA=mock"
+      - "HEPLIFYSERVER_DBDRIVER=mock"
+      - "HEPLIFYSERVER_LOKIURL=http://qryn:3100/loki/api/v1/push"
+      - "HEPLIFYSERVER_PROMADDR=0.0.0.0:9096"
+      - "HEPLIFYSERVER_LOKITIMER=1"
+      - "HEPLIFYSERVER_LOKIIPPORTLABELS=true"
       - "HEPLIFYSERVER_ALEGIDS=X-CID"
       - "HEPLIFYSERVER_LOGLVL=info"
       - "HEPLIFYSERVER_LOGSTD=true"
+      - "HEPLIFYSERVER_DEDUP=false"
+      - "HEPLIFYSERVER_LOKIFROMTOLABELS=true"
+      - "HEPLIFYSERVER_LOKICALLIDLABELS=true"
+      - "HEPLIFYSERVER_FORCEALEGID=false"
+      - "HEPLIFYSERVER_LOKIBULK=200"
+      # Preserve HEP timestamps (qryn/ClickHouse accepts out-of-order writes).
+      - "HEPLIFYSERVER_LOKIALLOWOUTOFORDER=true"
+      - "HEPLIFYSERVER_SCRIPTENABLE=true"
+      - "HEPLIFYSERVER_SCRIPTFOLDER=/scripts"
+    volumes:
+      - ./docker/homer/scripts:/scripts:ro
     depends_on:
-      homer-db:
+      clickhouse-server:
         condition: service_healthy
     networks:
       - voip-network
     restart: unless-stopped
 
-  homer-webapp:
-    image: ghcr.io/sipcapture/homer-app
-    container_name: voip-homer-webapp
-    ports:
-      - "9080:80"
+  # Grafana — SIP trace visualization (replaces the homer-app Angular UI).
+  # Reached via the UI's /grafana/ proxy (8080/8443); 3000 is internal/dev.
+  grafana:
+    image: grafana/grafana-oss:10.4.3
+    container_name: voip-grafana
     environment:
-      - "DB_HOST=homer-db"
-      - "DB_USER=root"
-      - "DB_PASS=${HOMER_DB_PASS:-homerSeven}"
-      - "HOMER_LOGLEVEL=info"
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-sipcapture}
+      - GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS=qxip-flow-panel
+      - "GF_INSTALL_PLUGINS=https://github.com/metrico/grafana-flow/releases/download/v10.0.10/qxip-flow-panel-10.0.10.zip;qxip-flow-panel"
+      - GF_SECURITY_ALLOW_EMBEDDING=true
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+      - GF_SERVER_ROOT_URL=/grafana/
+      - GF_SERVER_SERVE_FROM_SUB_PATH=true
+    ports:
+      - "3000:3000"
     volumes:
-      - ./docker/homer/bootstrap:/app/bootstrap
+      - grafana_data:/var/lib/grafana
+      - ./docker/homer/grafana/provisioning:/etc/grafana/provisioning
+      - ./docker/homer/grafana/dashboards:/var/lib/grafana/dashboards
     depends_on:
-      homer-db:
-        condition: service_healthy
+      - qryn
     networks:
       - voip-network
     restart: unless-stopped
@@ -376,7 +414,9 @@ volumes:
     driver: local
   freeswitch_logs:
     driver: local
-  homer_db_data:
+  clickhouse_data:
+    driver: local
+  grafana_data:
     driver: local
   minio_data:
     driver: local
