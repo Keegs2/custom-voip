@@ -11,7 +11,7 @@ import {
   IconRCF, IconTrunk, IconAPI, IconIVR, IconDocs,
   IconAdmin, IconSignal, IconTroubleshoot, IconVoicemail,
 } from '../icons/ProductIcons';
-import { Package, Shield, ChevronDown, Clock, Eye, EyeOff, Server, BookOpen, FolderOpen, MessageCircle, RadioTower, Mic, ListOrdered, Waves, Video, Webhook } from 'lucide-react';
+import { Package, Shield, ChevronDown, Clock, Eye, EyeOff, Server, BookOpen, FolderOpen, MessageCircle, RadioTower, Mic, ListOrdered, Waves, Video, Webhook, Workflow } from 'lucide-react';
 import { AccessRequestForm } from './AccessRequestForm';
 
 /* ─── Types ───────────────────────────────────────────────── */
@@ -708,7 +708,7 @@ export function Sidebar() {
     const commPaths    = ['/communications', '/chat', '/conference', '/documents', '/voicemail'];
     // '/conferences/live' lives in Voice Ops; '/conference' (singular) is Comms.
     const voiceOpsPaths = ['/live-calls', '/recordings', '/queues', '/media-streams', '/conferences/live'];
-    const adminPaths   = ['/admin', '/call-quality', '/admin/platform', '/troubleshooting'];
+    const adminPaths   = ['/admin', '/call-quality', '/admin/platform', '/troubleshooting', '/flows'];
     const docPaths     = docNavItems.map((i) => i.to);
     const inProducts = productPaths.some((p) => path === p || path.startsWith(p + '/'));
     const inComms    = commPaths.some((p) => path === p || path.startsWith(p + '/'));
@@ -761,6 +761,10 @@ export function Sidebar() {
   const platformItem: NavItemDef    = {
     label: 'Platform Management', to: '/admin/platform', color: '#60a5fa', icon: <Server size={15} strokeWidth={1.7} />,
     isActiveFn: (p) => p.startsWith('/admin/platform'),
+  };
+  // Universal Call Flow Builder (P0 scaffold) — admin-only preview surface.
+  const flowsItem: NavItemDef       = {
+    label: 'Call Flow Builder', to: '/flows', color: '#22d3ee', icon: <Workflow size={15} strokeWidth={1.7} />,
   };
   const callQualityItem: NavItemDef = { label: 'Call Quality',        to: '/call-quality',    color: '#22c55e', icon: <IconSignal size={17} /> };
   const troubleItem: NavItemDef     = { label: 'Troubleshooting',     to: '/troubleshooting', color: '#fbbf24', icon: <IconTroubleshoot size={17} /> };
@@ -1090,6 +1094,7 @@ export function Sidebar() {
                       <SubGroupLabel label="Customers" />
                       <SidebarNavItem item={customersItem} onNavigate={closeMobile} small />
                       <SidebarNavItem item={platformItem}  onNavigate={closeMobile} small />
+                      <SidebarNavItem item={flowsItem}     onNavigate={closeMobile} small />
                     </>
                   )}
 

@@ -21,6 +21,8 @@ from routers import (
     onboarding, freeswitch,
     # UCaaS routers (restored on top of the RCF-V1 base — additive)
     ivr, api_dids, extensions, presence, voicemail, webrtc,
+    # Universal Call Flow Builder — product-agnostic flow store (admin-only)
+    call_flows,
     # Phase 6 — media plane: standalone call recording ingest + serve
     recordings,
     # Phase 8 — read-only observability for the UI
@@ -202,6 +204,8 @@ app.include_router(onboarding.router, prefix="/onboarding", tags=["Onboarding"])
 # ---------------------------------------------------------------------------
 app.include_router(ivr.router, prefix="/v1/ivr", tags=["IVR Builder"])
 app.include_router(ivr.router, prefix="/ivr", tags=["IVR Builder"])
+app.include_router(call_flows.router, prefix="/v1/call-flows", tags=["Call Flow Builder"])
+app.include_router(call_flows.router, prefix="/call-flows", tags=["Call Flow Builder"])
 app.include_router(api_dids.router, prefix="/v1/api-dids", tags=["API DIDs"])
 app.include_router(api_dids.router, prefix="/api-dids", tags=["API DIDs"])
 app.include_router(extensions.router, prefix="/v1/extensions", tags=["Extensions"])

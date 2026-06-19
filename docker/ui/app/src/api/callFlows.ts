@@ -1,0 +1,74 @@
+/**
+ * Typed client for the generalized `call_flows` API. Paths are relative to the
+ * `/api` base (apiRequest prepends it). List responses are normalised to
+ * `{ items, total }` per the codebase convention (CLAUDE.md §5).
+ *
+ * Pinned contract (backend built in parallel):
+ *   GET    /call-flows?product=&customer_id=  -> { items, total }
+ *   POST   /call-flows                          -> CallFlow
+ *   GET    /call-flows/{id}                     -> CallFlow
+ *   PUT    /call-flows/{id}                     -> CallFlow
+ *   POST   /call-flows/{id}/publish             -> CallFlow
+ *   DELETE /call-flows/{id}                     -> void
+ */
+import { apiRequest } from './client';
+import type {
+  CallFlow,
+  CallFlowCreate,
+  CallFlowListParams,
+  CallFlowPublish,
+  CallFlowUpdate,
+} from '../types/callFlow';
+
+export interface CallFlowListResponse {
+  items: CallFlow[];
+  total: number;
+}
+
+export async function listCallFlows(
+  params: CallFlowListParams = {},
+): Promise<CallFlowListResponse> {
+  const query = new URLSearchParams();
+  if (params.product) query.set('product', params.product);
+  if (params.customer_id !== undefined) {
+    query.set('customer_id', String(params.customer_id));
+  }
+  const qs = query.toString();
+  const raw = await apiRequest<CallFlow[] | CallFlowListResponse>(
+    'GET',
+    `/call-flows${qs ? `?${qs}` : ''}`,
+  );
+  if (Array.isArray(raw)) {
+    return { items: raw, total: raw.length };
+  }
+  return {
+    items: raw.items ?? [],
+    total: raw.total ?? raw.items?.length ?? 0,
+  };
+}
+
+export async function getCallFlow(id: number): Promise<CallFlow> {
+  return apiRequest('GET', `/call-flows/${id}`);
+}
+
+export async function createCallFlow(data: CallFlowCreate): Promise<CallFlow> {
+  return apiRequest('POST', '/call-flows', data);
+}
+
+export async function updateCallFlow(
+  id: number,
+  data: CallFlowUpdate,
+): Promise<CallFlow> {
+  return apiRequest('PUT', `/call-flows/${id}`, data);
+}
+
+export async function publishCallFlow(
+  id: number,
+  data: CallFlowPublish,
+): Promise<CallFlow> {
+  return apiRequest('POST', `/call-flows/${id}/publish`, data);
+}
+
+export async function deleteCallFlow(id: number): Promise<void> {
+  return apiRequest('DELETE', `/call-flows/${id}`);
+}

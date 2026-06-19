@@ -12,6 +12,7 @@ import { RcfPage } from './pages/RcfPage';
 import { ApiDidsPage } from './pages/ApiDidsPage';
 import { TrunksPage } from './pages/TrunksPage';
 import { IvrBuilderPage } from './pages/IvrBuilderPage';
+import { CallFlowBuilderPage } from './pages/CallFlowBuilderPage';
 import { RcfDocsPage } from './pages/docs/RcfDocsPage';
 import { ApiDocsPage } from './pages/docs/ApiDocsPage';
 import { TroubleshootingPage } from './pages/TroubleshootingPage';
@@ -79,6 +80,16 @@ export function App() {
               <Route path="api-dids"   element={<ApiDidsPage />} />
               <Route path="trunks"     element={<TrunksPage />} />
               <Route path="ivr"        element={<IvrBuilderPage />} />
+              {/* Universal Call Flow Builder (P0 scaffold) — admin-gated.
+                  Leaves the legacy /ivr builder untouched (retired in P1). */}
+              <Route
+                path="flows"
+                element={
+                  <RequireAdmin>
+                    <CallFlowBuilderPage />
+                  </RequireAdmin>
+                }
+              />
               <Route path="documentation" element={<Navigate to="/docs/rcf" replace />} />
               <Route path="docs/rcf"         element={<RcfDocsPage />} />
               <Route path="docs/api"         element={<ApiDocsPage />} />
