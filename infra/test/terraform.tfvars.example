@@ -1,0 +1,14 @@
+# Copy to terraform.tfvars and set your values.
+
+# REQUIRED: your test-client public IP(s) — these get UI/API/Verto/TURN access.
+# Find yours: curl -s ifconfig.me
+office_cidrs = ["YOUR.OFFICE.IP/32"]
+
+# Optional overrides (defaults shown):
+# project              = "rugged-night-193017"
+# region               = "us-east1"
+# zone                 = "us-east1-b"
+# instance_name        = "fs-media"
+# instance_internal_ip = "10.142.0.102"
+# boot_disk_name       = "fs-media"   # confirm via `tofu plan`; override if the disk name differs
+# machine_type         = "e2-standard-8"
