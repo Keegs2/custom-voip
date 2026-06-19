@@ -11,7 +11,7 @@ import {
   IconRCF, IconTrunk, IconAPI, IconIVR, IconDocs,
   IconAdmin, IconSignal, IconTroubleshoot, IconVoicemail,
 } from '../icons/ProductIcons';
-import { Package, Shield, ChevronDown, Clock, Eye, EyeOff, Server, BookOpen, FolderOpen, MessageCircle } from 'lucide-react';
+import { Package, Shield, ChevronDown, Clock, Eye, EyeOff, Server, BookOpen, FolderOpen, MessageCircle, RadioTower, Mic, ListOrdered, Waves, Video, Webhook } from 'lucide-react';
 import { AccessRequestForm } from './AccessRequestForm';
 
 /* ─── Types ───────────────────────────────────────────────── */
@@ -29,8 +29,31 @@ interface NavItemDef {
 
 /* ─── Nav item definitions ────────────────────────────────── */
 
+/** UCaaS account types — shared by the Communications and Voice Operations
+ *  groups. `rcf` is intentionally absent so the shared accountTypes filter
+ *  (passesAccountType) excludes RCF accounts from every UCaaS surface. */
+const COMMS_ACCOUNT_TYPES = ['ucaas', 'hybrid'];
+
 const allProductNavItems: NavItemDef[] = [
   { label: 'RCF', icon: <IconRCF size={18} />, to: '/rcf', color: '#4ade80', accountTypes: ['rcf', 'hybrid'] },
+  // Programmable-voice config — api/hybrid only (RequireProgrammableVoice guards
+  // the route). RCF fails the accountTypes filter, so it never appears for them.
+  { label: 'Programmable Voice', icon: <Webhook size={16} strokeWidth={1.9} />, to: '/programmable-voice', color: '#c084fc', accountTypes: ['api', 'hybrid'] },
+];
+
+/* ─── Voice Operations nav items (UCaaS media/control plane) ───
+ * Net-new media/control surfaces (live calls, recordings, queues, media
+ * streams, live conferences). Double-gated exactly like the Communications
+ * group: every item carries accountTypes: ['ucaas','hybrid'] AND the whole group
+ * only renders when `hasUcaas` is true — so an `rcf` account never sees any of
+ * it (C-10 / feedback_rcf_simplicity), and RequireUcaas blocks direct-URL access.
+ */
+const allVoiceOpsNavItems: NavItemDef[] = [
+  { label: 'Live Calls',       icon: <RadioTower size={15} strokeWidth={1.8} />,  to: '/live-calls',        color: '#22c55e', accountTypes: COMMS_ACCOUNT_TYPES },
+  { label: 'Recordings',       icon: <Mic size={15} strokeWidth={1.8} />,         to: '/recordings',        color: '#60a5fa', accountTypes: COMMS_ACCOUNT_TYPES },
+  { label: 'Queues',           icon: <ListOrdered size={15} strokeWidth={1.8} />, to: '/queues',            color: '#fbbf24', accountTypes: COMMS_ACCOUNT_TYPES },
+  { label: 'Media Streams',    icon: <Waves size={15} strokeWidth={1.8} />,       to: '/media-streams',     color: '#38bdf8', accountTypes: COMMS_ACCOUNT_TYPES },
+  { label: 'Live Conferences', icon: <Video size={15} strokeWidth={1.8} />,       to: '/conferences/live',  color: '#4ade80', accountTypes: COMMS_ACCOUNT_TYPES },
 ];
 
 /* ─── UCaaS Communications nav items ──────────────────────────
@@ -39,8 +62,6 @@ const allProductNavItems: NavItemDef[] = [
  * The whole group is additionally gated on `hasUcaas` at render time, so an
  * `rcf` customer can never see any of this surface (C-10 / feedback_rcf_simplicity).
  */
-const COMMS_ACCOUNT_TYPES = ['ucaas', 'hybrid'];
-
 const allCommsNavItems: NavItemDef[] = [
   { label: 'Communications', icon: <MessageCircle size={16} strokeWidth={1.9} />, to: '/communications', color: '#38bdf8', accountTypes: COMMS_ACCOUNT_TYPES },
   { label: 'Chat',           icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} style={{ width: 15, height: 15 }}><path d="M8.625 12a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H8.25m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H12m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 0 1-2.555-.337A5.972 5.972 0 0 1 5.41 20.97a5.969 5.969 0 0 1-.474-.065 4.48 4.48 0 0 0 .978-2.025c.09-.457-.133-.901-.467-1.226C3.93 16.178 3 14.189 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25Z" strokeLinecap="round" strokeLinejoin="round" /></svg>, to: '/chat', color: '#60a5fa', accountTypes: COMMS_ACCOUNT_TYPES },
@@ -614,6 +635,7 @@ export function Sidebar() {
     return {
       products:          stored.products          ?? true,
       communications:    stored.communications    ?? true,
+      voiceOps:          stored.voiceOps          ?? true,
       comingSoon:        stored.comingSoon        ?? false,
       documentation:     stored.documentation     ?? true,
       administration:    stored.administration    ?? false,
@@ -659,16 +681,23 @@ export function Sidebar() {
   // the `hasUcaas` group guard at render time. Both exclude `rcf`.
   const commsNavItems = allCommsNavItems.filter(passesAccountType);
 
+  // Voice Operations items — same double-gating as comms (accountTypes filter +
+  // `hasUcaas` group guard). RCF is excluded by both.
+  const voiceOpsNavItems = allVoiceOpsNavItems.filter(passesAccountType);
+
   // Auto-expand group when current route lives inside it
   useEffect(() => {
     const path = location.pathname;
 
     const productPaths = productNavItems.map((i) => i.to);
     const commPaths    = ['/communications', '/chat', '/conference', '/documents', '/voicemail'];
+    // '/conferences/live' lives in Voice Ops; '/conference' (singular) is Comms.
+    const voiceOpsPaths = ['/live-calls', '/recordings', '/queues', '/media-streams', '/conferences/live'];
     const adminPaths   = ['/admin', '/call-quality', '/admin/platform', '/troubleshooting'];
     const docPaths     = docNavItems.map((i) => i.to);
     const inProducts = productPaths.some((p) => path === p || path.startsWith(p + '/'));
     const inComms    = commPaths.some((p) => path === p || path.startsWith(p + '/'));
+    const inVoiceOps = voiceOpsPaths.some((p) => path === p || path.startsWith(p + '/'));
     const inAdmin    = adminPaths.some((p) => path === p || path.startsWith(p + '/'));
     const inDocs     = docPaths.some((p) => path === p || path.startsWith(p + '/'));
 
@@ -676,10 +705,12 @@ export function Sidebar() {
       const next = { ...prev };
       if (inProducts && !prev.products)       next.products       = true;
       if (inComms    && !prev.communications) next.communications = true;
+      if (inVoiceOps && !prev.voiceOps)       next.voiceOps       = true;
       if (inAdmin    && !prev.administration) next.administration = true;
       if (inDocs     && !prev.documentation)  next.documentation  = true;
       if (next.products       === prev.products &&
           next.communications === prev.communications &&
+          next.voiceOps       === prev.voiceOps &&
           next.administration === prev.administration &&
           next.documentation  === prev.documentation) {
         return prev;
@@ -975,6 +1006,26 @@ export function Sidebar() {
                     }
                     return <SidebarNavItem key={item.to} item={item} onNavigate={closeMobile} small />;
                   })}
+                </CollapsibleGroup>
+              </>
+            )}
+
+            {/* ── GROUP 1.6: Voice Operations (UCaaS media/control) ──
+                Same double-gating as Communications: hasUcaas group guard +
+                per-item accountTypes filter. RCF → group never rendered. */}
+            {hasUcaas && voiceOpsNavItems.length > 0 && (
+              <>
+                <div style={{ height: 6 }} />
+                <CollapsibleGroup
+                  id="voiceOps"
+                  label="Voice Operations"
+                  icon={<RadioTower size={11} strokeWidth={2.5} />}
+                  isOpen={groupOpen.voiceOps}
+                  onToggle={toggleGroup}
+                >
+                  {voiceOpsNavItems.map((item) => (
+                    <SidebarNavItem key={item.to} item={item} onNavigate={closeMobile} small />
+                  ))}
                 </CollapsibleGroup>
               </>
             )}

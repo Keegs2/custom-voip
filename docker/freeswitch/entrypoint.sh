@@ -71,4 +71,16 @@ for sub in voicemail recordings; do
   fi
 done
 
+# -----------------------------------------------------------------------------
+# 4. TTS engine default (Phase 7).
+# The <Say> verb (handlers/api_voice.lua) reads the TTS_ENGINE env var. Piper
+# (neural, offline) via mod_tts_commandline is the default; export it here when
+# unset so (a) the value is visible in `env`, and (b) the freeswitch.xml
+# `$${tts_engine}` exec-set global resolves to the SAME value the Lua hook uses.
+# Set TTS_ENGINE=flite (and optionally TTS_DEFAULT_VOICE) to fall back to flite.
+# -----------------------------------------------------------------------------
+export TTS_ENGINE="${TTS_ENGINE:-tts_commandline}"
+export TTS_DEFAULT_VOICE="${TTS_DEFAULT_VOICE:-slt}"
+echo "entrypoint: TTS_ENGINE=${TTS_ENGINE} TTS_DEFAULT_VOICE=${TTS_DEFAULT_VOICE}"
+
 exec /usr/local/freeswitch/bin/freeswitch "$@"

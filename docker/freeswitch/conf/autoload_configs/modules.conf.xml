@@ -130,15 +130,22 @@
          silence_stream:// for hold music, so this module isn't needed. -->
     <!-- <load module="mod_local_stream"/> -->
 
-    <!-- Text-to-speech: Flite (offline TTS) - disabled, not built -->
-    <!-- <load module="mod_flite"/> -->
+    <!-- Text-to-speech: Flite (offline TTS) — SECONDARY/fallback <Say> engine.
+         Piper via mod_tts_commandline (below) is the default; flite is used when
+         TTS_ENGINE=flite. Built from debian flite1-dev (voices kal/kal16/awb/rms/slt). -->
+    <load module="mod_flite"/>
 
     <!-- Text-to-speech: Say (number/date/time) -->
     <load module="mod_say_en"/>
 
-    <!-- Alternative TTS engines (cloud-based) -->
-    <!-- <load module="mod_tts_commandline"/> -->
-    <!-- <load module="mod_unimrcp"/> --> <!-- For ASR/TTS via MRCP -->
+    <!-- Text-to-speech: Piper (neural, offline, MIT) via mod_tts_commandline.
+         This is the DEFAULT <Say> engine (TTS_ENGINE=tts_commandline). The module
+         shells out to scripts/bin/piper_tts.sh (see tts_commandline.conf.xml) which
+         renders text with the bundled Piper binary + en_US-lessac-medium voice
+         installed at /opt/piper in the Dockerfile. flite stays available as a
+         fallback engine (TTS_ENGINE=flite) with no extra module. -->
+    <load module="mod_tts_commandline"/>
+    <!-- <load module="mod_unimrcp"/> --> <!-- For cloud ASR/TTS via MRCP -->
 
     <!-- ============================================ -->
     <!-- CONFERENCING (UCaaS — unified)              -->

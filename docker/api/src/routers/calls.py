@@ -5,13 +5,14 @@ Implements tiered CPS (Calls Per Second) limits for API calling:
 - api_standard: 8 CPS, $0.008/call
 - api_premium: 15 CPS, $0.005/call
 """
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends
 from pydantic import BaseModel
 from typing import Optional
 import uuid
 import logging
 from db import database as db
 from db import redis_client as cache
+from auth.dependencies import get_customer_filter
 from services.esl_client import (
     originate_call,
     get_call_status,
@@ -19,6 +20,7 @@ from services.esl_client import (
     transfer_call_confirmed,
     redirect_call_confirmed,
     send_dtmf_confirmed,
+    get_esl_client,
 )
 
 logger = logging.getLogger(__name__)
@@ -169,6 +171,48 @@ async def create_call(call: CallCreate, background_tasks: BackgroundTasks):
         "to": call.to,
         "tier": api_tier_name,
         "per_call_fee": per_call_fee
+    }
+
+
+@router.get("/live")
+async def list_live_calls(
+    customer_filter: int | None = Depends(get_customer_filter),
+):
+    """List LIVE calls from the Phase 5 ESL in-memory live-call registry.
+
+    Tenant-scoped: non-admins (``customer_filter`` set) see only calls tagged
+    with their own customer_id; admins (None) see all. Hung-up calls (still
+    lingering in the registry within their prune TTL) are excluded — this is the
+    in-progress view.
+
+    Degrades gracefully when ESL is disconnected: the registry is in-memory and
+    is NOT cleared on disconnect, so this returns the last-known calls with
+    ``esl_connected=false`` rather than erroring — never a 500.
+
+    NOTE: under uvicorn's multiple workers each worker keeps its own registry,
+    but FreeSWITCH broadcasts every event to every inbound ESL connection, so
+    every worker's registry is complete and consistent.
+    """
+    client = get_esl_client()
+    calls = []
+    for c in client.snapshot():
+        if c.get("state") == "hungup":
+            continue
+        if customer_filter is not None and c.get("customer_id") != customer_filter:
+            continue
+        calls.append({
+            "uuid": c.get("uuid"),
+            "customer_id": c.get("customer_id"),
+            "caller": c.get("caller"),
+            "dest": c.get("dest"),
+            "direction": c.get("direction"),
+            "state": c.get("state"),
+            "answered_at": c.get("answered_at"),
+        })
+    return {
+        "esl_connected": client.connected,
+        "count": len(calls),
+        "calls": calls,
     }
 
 

@@ -47,6 +47,9 @@ Every configurable value follows the same pattern -- set a default, then overrid
 **WebRTC TLS (mod_verto):**
 - `verto_tls_pem` / `verto_tls_chain` -- exec-set from `VERTO_TLS_PEM`/`VERTO_TLS_CHAIN`; dev defaults are the self-signed `conf/tls/wss.pem` / `conf/tls/wss.crt`. Referenced by `verto.conf.xml` `secure-combined`/`secure-chain`.
 
+**TTS (Phase 7 — `<Say>` engine):**
+- `tts_engine` / `tts_default_voice` -- exec-set from `TTS_ENGINE`/`TTS_DEFAULT_VOICE`; defaults `tts_commandline` (Piper) / `slt`. NOTE: `handlers/api_voice.lua` reads the **env var** `TTS_ENGINE` directly (os.getenv), not this global — entrypoint.sh exports the same default so they agree. These globals are for parity/visibility. Set `TTS_ENGINE=flite` to fall back to flite. The engine config lives in `autoload_configs/tts_commandline.conf.xml` (`command` → `scripts/bin/piper_tts.sh ${file} ${rate} ${voice} ${text}`; mod_tts_commandline shell-quotes every token, so `${text}` is injection-safe). Piper renders 22050 Hz WAVs; mod_sndfile resamples to the call rate. See docker/freeswitch/CLAUDE.md "Piper neural TTS".
+
 **Recording/voicemail storage (Phase 4 — shared spool):**
 - `recordings_dir=/media/spool/recordings` (was `/var/lib/freeswitch/recordings`). `voicemail.conf.xml` `storage-dir=/media/spool/voicemail/`. entrypoint.sh symlinks the in-image `/var/lib/freeswitch/{voicemail,recordings}` onto the spool. The API uploads both to object storage.
 
@@ -170,7 +173,8 @@ Loaded modules organized by purpose:
 | Scripting | mod_lua | mod_v8 |
 | HTTP/API | mod_event_socket, mod_xml_curl, mod_curl | mod_httapi, mod_http_cache (built, not loaded) |
 | CDR | mod_cdr_csv, mod_json_cdr | mod_cdr_sqlite, mod_cdr_pg_csv |
-| Audio | mod_tone_stream, mod_sndfile, mod_native_file, mod_shout, mod_say_en | mod_local_stream, mod_flite |
+| Audio | mod_tone_stream, mod_sndfile, mod_native_file, mod_shout, mod_say_en | mod_local_stream |
+| TTS (loaded) | mod_tts_commandline (Phase 7 — Piper engine for `<Say>`; needs `tts_commandline.conf.xml`), mod_flite (fallback engine, `TTS_ENGINE=flite`) | mod_unimrcp |
 | Database | mod_db, mod_hash | mod_odbc_query |
 | UCaaS (loaded) | mod_conference, mod_av, mod_voicemail, mod_valet_parking | -- |
 | Call queues (loaded) | mod_fifo (Phase 7 — `<Enqueue>`/`<Dial><Queue>`; needs `fifo.conf.xml`) | -- |

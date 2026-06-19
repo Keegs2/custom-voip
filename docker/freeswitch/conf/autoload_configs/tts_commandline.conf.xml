@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  mod_tts_commandline — Piper neural TTS for the TwiML <Say> verb (Phase 7).
+
+  This is the default <Say> engine on the unified image (TTS_ENGINE=tts_commandline).
+  The `command` runs once per <Say> render: mod_tts_commandline substitutes the four
+  ${...} tokens (each passed through switch_util_quote_shell_arg, so all are
+  shell-safe and ${text} is a single quoted argument — NO injection from customer
+  text), then runs the command, then plays the WAV the command wrote to ${file}.
+
+  Token order MUST match scripts/bin/piper_tts.sh: <outfile> <rate> <voice> <text>.
+    ${file}  — module-generated temp WAV path the wrapper must write.
+    ${rate}  — negotiated session rate (e.g. 8000); informational (Piper's rate is
+               fixed by the model — 22050 Hz for medium voices; FS resamples).
+    ${voice} — the requested <Say voice="..."> token (mapped to a model in the wrapper).
+    ${text}  — the text to synthesize (SSML already stripped by api_voice.lua).
+
+  flite remains available as a fallback engine (TTS_ENGINE=flite) with NO config here.
+-->
+<configuration name="tts_commandline.conf" description="Command line TTS (Piper)">
+  <settings>
+    <param name="command" value="/usr/local/freeswitch/scripts/bin/piper_tts.sh ${file} ${rate} ${voice} ${text}"/>
+  </settings>
+</configuration>

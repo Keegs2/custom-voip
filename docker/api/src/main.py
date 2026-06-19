@@ -23,6 +23,8 @@ from routers import (
     ivr, api_dids, extensions, presence, voicemail, webrtc,
     # Phase 6 — media plane: standalone call recording ingest + serve
     recordings,
+    # Phase 8 — read-only observability for the UI
+    queues, media,
 )
 from routers.chat import router as chat_router
 from routers.conference import router as conference_router
@@ -214,6 +216,13 @@ app.include_router(documents_router, prefix="/documents", tags=["Documents"])
 # Phase 6 — standalone call recordings (FS ingest + tenant-scoped presigned serve)
 app.include_router(recordings.router, prefix="/v1/recordings", tags=["Recordings"])
 app.include_router(recordings.router, prefix="/recordings", tags=["Recordings"])
+
+# Phase 8 — read-only observability endpoints for the UI (live queues + media
+# streams). Live calls live on the existing calls router (/v1/calls/live).
+app.include_router(queues.router, prefix="/v1/queues", tags=["Queues"])
+app.include_router(queues.router, prefix="/queues", tags=["Queues"])
+app.include_router(media.router, prefix="/v1/media", tags=["Media"])
+app.include_router(media.router, prefix="/media", tags=["Media"])
 
 # FreeSWITCH mod_xml_curl gateway. Mounted at /freeswitch (auth-exempt in
 # middleware). Always returns HTTP 200 + the FreeSWITCH "not found" XML so

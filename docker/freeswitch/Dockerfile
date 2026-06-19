@@ -120,6 +120,15 @@ RUN PKG_CONFIG_PATH=/usr/lib/pkgconfig cmake . -DCMAKE_INSTALL_PREFIX=/usr \
     && make -j$(nproc) \
     && make install
 
+# flite (Phase 7) — built as the SECONDARY/fallback <Say> engine (Piper via
+# mod_tts_commandline is primary). Debian's flite1-dev ships the lib + the CMU
+# voices (kal/kal16/awb/rms/slt — matching api_voice.lua's FLITE_VOICE_MAP); the
+# FreeSWITCH ./configure below detects HAVE_FLITE and compiles mod_flite. Its own
+# apt layer keeps it from invalidating the cached source-lib builds above.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    flite1-dev \
+    && rm -rf /var/lib/apt/lists/*
+
 # Configure FreeSWITCH modules
 WORKDIR /usr/src/freeswitch
 
@@ -159,9 +168,13 @@ RUN sed -i 's|#applications/mod_commands|applications/mod_commands|' build/modul
     sed -i 's|#say/mod_say_en|say/mod_say_en|' build/modules.conf.in && \
     # XML handlers
     sed -i 's|#xml_int/mod_xml_curl|xml_int/mod_xml_curl|' build/modules.conf.in && \
-    # TTS - disabled mod_flite as it requires additional deps
-    # To enable, install libflite1 and libflite-dev
-    # sed -i 's|#asr_tts/mod_flite|asr_tts/mod_flite|' build/modules.conf.in && \
+    # TTS (Phase 7) — mod_tts_commandline shells out to an external synthesizer
+    # (Piper, installed in the runtime stage). It has NO build deps (it just runs
+    # a shell command + reads the resulting WAV via the core file interface), so
+    # enabling it is a one-line module add. flite stays disabled (needs libflite).
+    sed -i 's|#asr_tts/mod_tts_commandline|asr_tts/mod_tts_commandline|' build/modules.conf.in && \
+    # mod_flite — secondary/fallback <Say> engine (flite1-dev installed above).
+    sed -i 's|#asr_tts/mod_flite|asr_tts/mod_flite|' build/modules.conf.in && \
     # DSP for DTMF/fax — needed for RCF and UCaaS
     sed -i 's|#applications/mod_spandsp|applications/mod_spandsp|' build/modules.conf.in && \
     # UCaaS (unified): conferencing
@@ -263,6 +276,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libshout3 \
     libmpg123-0 \
     libmp3lame0 \
+    # flite TTS runtime (Phase 7 — fallback <Say> engine; voices kal/kal16/awb/rms/slt)
+    libflite1 \
     # Lua runtime - CRITICAL for mod_lua
     lua5.3 \
     liblua5.3-0 \
@@ -359,6 +374,57 @@ RUN openssl req -x509 -newkey rsa:2048 \
     cat /usr/local/freeswitch/conf/tls/agent.crt /usr/local/freeswitch/conf/tls/agent.key > /usr/local/freeswitch/conf/tls/agent.pem && \
     cp /usr/local/freeswitch/conf/tls/agent.pem /usr/local/freeswitch/conf/tls/wss.pem && \
     chmod 600 /usr/local/freeswitch/conf/tls/*.key /usr/local/freeswitch/conf/tls/*.pem
+
+# =============================================================================
+# Piper neural TTS (Phase 7) — the high-quality, offline, MIT-licensed engine
+# behind mod_tts_commandline for the TwiML <Say> verb.
+#
+# Installed in the RUNTIME stage (not the builder) because Piper ships as a
+# self-contained prebuilt release tarball — the `piper` binary + bundled
+# libonnxruntime + libpiper_phonemize + espeak-ng-data — so there is nothing to
+# compile. We download the tarball for the BUILD ARCH (BuildKit auto-populates
+# TARGETARCH: amd64 -> x86_64, arm64 -> aarch64) plus ONE en-US voice model from
+# huggingface (en_US-lessac-medium, ~63 MB .onnx + small .onnx.json). This keeps
+# the image lean (one voice); add more .onnx/.onnx.json under /opt/piper/voices
+# and extend scripts/bin/piper_tts.sh for multi-voice.
+#
+# IN-IMAGE (no sidecar) is deliberate: a sidecar would hit the documented
+# Docker-Desktop FS->bridge network isolation; in-image renders with zero
+# network and is locally verifiable. Pinned to a specific Piper release for
+# reproducibility. onnxruntime's CPU backend needs libgomp1 (OpenMP) at runtime.
+# =============================================================================
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgomp1 xz-utils \
+    && rm -rf /var/lib/apt/lists/*
+
+ARG TARGETARCH
+ARG PIPER_VERSION=2023.11.14-2
+ARG PIPER_VOICE=en_US-lessac-medium
+RUN set -eux; \
+    case "${TARGETARCH:-amd64}" in \
+      amd64) PIPER_ARCH=x86_64 ;; \
+      arm64) PIPER_ARCH=aarch64 ;; \
+      *) echo "Unsupported TARGETARCH=${TARGETARCH} for Piper" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSL -o /tmp/piper.tar.gz \
+      "https://github.com/rhasspy/piper/releases/download/${PIPER_VERSION}/piper_linux_${PIPER_ARCH}.tar.gz"; \
+    tar -xzf /tmp/piper.tar.gz -C /opt; \
+    rm -f /tmp/piper.tar.gz; \
+    mkdir -p /opt/piper/voices; \
+    curl -fsSL -o "/opt/piper/voices/${PIPER_VOICE}.onnx" \
+      "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium/${PIPER_VOICE}.onnx"; \
+    curl -fsSL -o "/opt/piper/voices/${PIPER_VOICE}.onnx.json" \
+      "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium/${PIPER_VOICE}.onnx.json"; \
+    # Smoke-test the binary + model at build time so a broken download fails the build.
+    echo "piper build smoke test" | LD_LIBRARY_PATH=/opt/piper /opt/piper/piper \
+      --model "/opt/piper/voices/${PIPER_VOICE}.onnx" \
+      --espeak_data /opt/piper/espeak-ng-data \
+      --output_file /tmp/piper_build_test.wav; \
+    ls -la /tmp/piper_build_test.wav /opt/piper/piper "/opt/piper/voices/${PIPER_VOICE}.onnx"; \
+    rm -f /tmp/piper_build_test.wav
+ENV PIPER_DIR=/opt/piper
+ENV PIPER_VOICES_DIR=/opt/piper/voices
+ENV PIPER_DEFAULT_MODEL=en_US-lessac-medium
 
 # Set Lua path environment variables for mod_lua to find libraries
 ENV LUA_PATH="/usr/local/freeswitch/scripts/?.lua;/usr/local/freeswitch/scripts/lib/?.lua;/usr/local/share/lua/5.3/?.lua;/usr/local/share/lua/5.3/?/init.lua;/usr/share/lua/5.3/?.lua;/usr/share/lua/5.3/?/init.lua;;"

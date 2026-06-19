@@ -5,6 +5,7 @@ import { ChatProvider } from './contexts/ChatContext';
 import { RequireAuth } from './components/auth/RequireAuth';
 import { RequireAdmin } from './components/auth/RequireAdmin';
 import { RequireUcaas } from './components/auth/RequireUcaas';
+import { RequireProgrammableVoice } from './components/auth/RequireProgrammableVoice';
 import { AppLayout } from './components/layout/AppLayout';
 import { DashboardPage } from './pages/DashboardPage';
 import { RcfPage } from './pages/RcfPage';
@@ -36,6 +37,15 @@ import { ChatPage } from './pages/ChatPage';
 import { ConferencePage } from './pages/ConferencePage';
 import { DocumentsPage } from './pages/DocumentsPage';
 import { VoicemailPage } from './pages/VoicemailPage';
+// Phase 8 — net-new media/control surfaces. UCaaS ops (live calls, recordings,
+// queues, media streams, live conferences) are gated by RequireUcaas; the
+// programmable-voice config page is gated by RequireProgrammableVoice (api/hybrid).
+import { RecordingsPage } from './pages/RecordingsPage';
+import { LiveCallsPage } from './pages/LiveCallsPage';
+import { MediaStreamsPage } from './pages/MediaStreamsPage';
+import { LiveConferencesPage } from './pages/LiveConferencesPage';
+import { QueuesPage } from './pages/QueuesPage';
+import { ProgrammableVoicePage } from './pages/ProgrammableVoicePage';
 
 /** Redirects /admin/user/:userId → /admin/customers/users/:userId */
 function UserDetailRedirect() {
@@ -94,6 +104,28 @@ export function App() {
                 <Route path="conference"      element={<ConferencePage />} />
                 <Route path="documents"       element={<DocumentsPage />} />
                 <Route path="voicemail"        element={<VoicemailPage />} />
+
+                {/* Phase 8 — UCaaS media/control operations. Same RequireUcaas
+                    gate as the rest of this subtree: an rcf (or any non-UCaaS)
+                    user is redirected to the dashboard and renders ZERO of it. */}
+                <Route path="live-calls"        element={<LiveCallsPage />} />
+                <Route path="recordings"        element={<RecordingsPage />} />
+                <Route path="queues"            element={<QueuesPage />} />
+                <Route path="media-streams"     element={<MediaStreamsPage />} />
+                <Route path="conferences/live"  element={<LiveConferencesPage />} />
+              </Route>
+
+              {/* Programmable-voice config — api/hybrid product feature, gated by
+                  RequireProgrammableVoice (NOT RequireUcaas). RCF is excluded;
+                  a direct-URL attempt redirects to the dashboard. */}
+              <Route
+                element={
+                  <RequireProgrammableVoice>
+                    <Outlet />
+                  </RequireProgrammableVoice>
+                }
+              >
+                <Route path="programmable-voice" element={<ProgrammableVoicePage />} />
               </Route>
 
               {/* Redirects from old standalone paths to their new tab locations */}

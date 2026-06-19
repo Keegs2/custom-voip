@@ -498,3 +498,57 @@ def test_own_live_conference_control_passes_tenant_gate(env):
     )
     assert r.status_code not in (403, 404), r.text
     assert r.status_code != 500, r.text
+
+
+# --- Live calls (Phase 8) — ESL in-memory live-call registry, tenant-scoped ---
+# The registry tags each LiveCall with the customer_id from the channel vars.
+# A's /v1/calls/live must be a clean 200 (degraded-empty when ESL is down on
+# Docker Desktop, NOT a 500) and must never expose a call owned by B — every
+# visible call must belong to A.
+def test_live_calls_list_scoped_to_tenant(env):
+    r = requests.get(f"{API_BASE}/v1/calls/live", headers=_hA(env))
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert "esl_connected" in body
+    for c in body.get("calls", []):
+        assert c.get("customer_id") == env["cidA"], c
+
+
+# --- Live mod_fifo queues (Phase 8) — tenant-scoped purely by fifo_<C>_ prefix.
+# These queues have NO DB row; ownership is the name prefix. The tenant gate runs
+# before any ESL call, so cross-tenant denies correctly even though FreeSWITCH
+# ESL is unreachable on Docker Desktop (synthetic/named queue — no live queue
+# required locally).
+def _queue_b_name(env) -> str:
+    return f"fifo_{env['cidB']}_support"
+
+
+def test_live_queue_list_scoped_to_tenant(env):
+    """A's queue list must be a clean 200 (degraded-empty when ESL is down) and
+    must never expose B's queue — every visible queue must belong to A."""
+    r = requests.get(f"{API_BASE}/v1/queues", headers=_hA(env))
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert "esl_connected" in body
+    fs_names = {q.get("fs_name") for q in body.get("queues", [])}
+    assert _queue_b_name(env) not in fs_names
+    for q in body.get("queues", []):
+        assert q.get("customer_id") == env["cidA"], q
+
+
+def test_cross_tenant_live_queue_view_denied(env):
+    r = requests.get(
+        f"{API_BASE}/v1/queues/{_queue_b_name(env)}", headers=_hA(env)
+    )
+    assert r.status_code in DENIED, r.text
+
+
+def test_own_live_queue_view_passes_tenant_gate(env):
+    """Positive control: A viewing its OWN fifo_<A>_* queue passes the tenant
+    gate (proves the cross-tenant deny isn't a blanket 404). With ESL unreachable
+    locally it degrades to a clean 200 depth=0/members=[] — never 403/404/500."""
+    r = requests.get(
+        f"{API_BASE}/v1/queues/fifo_{env['cidA']}_support", headers=_hA(env)
+    )
+    assert r.status_code == 200, r.text
+    assert r.status_code not in (403, 404, 500)

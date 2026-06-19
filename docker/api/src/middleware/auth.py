@@ -64,15 +64,24 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
         if path.startswith("/ws/"):
             return await call_next(request)
 
-        # Extract Bearer token from Authorization header
+        # Extract Bearer token from Authorization header. Media-download routes
+        # (recordings /audio) are loaded by browser <audio>/<a download> elements
+        # which cannot set an Authorization header, so for those GET routes only we
+        # also accept the JWT via a ?token= query param.
         auth_header = request.headers.get("Authorization")
-        if not auth_header or not auth_header.startswith("Bearer "):
+        if auth_header and auth_header.startswith("Bearer "):
+            token = auth_header[7:]  # Strip "Bearer " prefix
+        elif (
+            request.method == "GET"
+            and path.endswith("/audio")
+            and request.query_params.get("token")
+        ):
+            token = request.query_params["token"]
+        else:
             return JSONResponse(
                 status_code=401,
                 content={"detail": "Not authenticated"},
             )
-
-        token = auth_header[7:]  # Strip "Bearer " prefix
 
         try:
             claims = decode_access_token(token)

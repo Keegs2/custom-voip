@@ -152,6 +152,22 @@
   <X-PRE-PROCESS cmd="set" data="recordings_dir=/media/spool/recordings"/>
 
   <!-- ============================================ -->
+  <!-- TEXT-TO-SPEECH (Phase 7 — <Say> engine)     -->
+  <!-- ============================================ -->
+  <!-- Piper (neural, offline, MIT) is the default <Say> engine, wired via
+       mod_tts_commandline (tts_commandline.conf.xml -> scripts/bin/piper_tts.sh,
+       Piper binary + en_US-lessac-medium voice at /opt/piper). flite stays
+       available as a fallback engine: set TTS_ENGINE=flite.
+       NOTE: handlers/api_voice.lua reads the TTS_ENGINE *env var* (os.getenv),
+       not this `$${tts_engine}` global — entrypoint.sh exports the same default
+       so they agree. These globals exist for parity/visibility and any future
+       XML/dialplan consumer. -->
+  <X-PRE-PROCESS cmd="set" data="tts_engine=tts_commandline"/>
+  <X-PRE-PROCESS cmd="exec-set" data="tts_engine=echo ${TTS_ENGINE:-tts_commandline}"/>
+  <X-PRE-PROCESS cmd="set" data="tts_default_voice=slt"/>
+  <X-PRE-PROCESS cmd="exec-set" data="tts_default_voice=echo ${TTS_DEFAULT_VOICE:-slt}"/>
+
+  <!-- ============================================ -->
   <!-- DEFAULT TIMEOUTS                            -->
   <!-- ============================================ -->
   <X-PRE-PROCESS cmd="set" data="default_ring_timeout=30"/>

@@ -47,13 +47,18 @@ local STREAM_SAMPLE_RATE = os.getenv("STREAM_SAMPLE_RATE") or "8000"
 -- ============================================
 -- TTS (Phase 7) — pluggable <Say> engine
 -- ============================================
--- The <Say> verb speaks via a configurable TTS engine. `flite` is the offline
--- default (built into the image). The engine is a DROP-IN HOOK: set TTS_ENGINE
--- to any mod_*/speak engine name (e.g. a future `tts_commandline` wrapping Piper,
--- or a cloud engine via mod_unimrcp/mod_polly) WITHOUT touching this code — the
--- speak app is invoked as `<engine>|<voice>|<text>`. TTS_DEFAULT_VOICE picks the
--- flite voice when the TwiML omits one. See docker/freeswitch/CLAUDE.md "TTS".
-local TTS_ENGINE = os.getenv("TTS_ENGINE") or "flite"
+-- The <Say> verb speaks via a configurable TTS engine. The default is
+-- `tts_commandline` (Piper — neural, offline, MIT — installed in the image; see
+-- docker/freeswitch/CLAUDE.md "TTS"). `flite` stays available as a fallback engine
+-- (set TTS_ENGINE=flite). The engine is a DROP-IN HOOK: set TTS_ENGINE to any
+-- mod_*/speak engine name (Piper via tts_commandline, flite, or a cloud engine via
+-- mod_unimrcp/mod_polly) WITHOUT touching this code — the speak app is invoked as
+-- `<engine>|<voice>|<text>`. entrypoint.sh also exports TTS_ENGINE's default so the
+-- env and the `$${tts_engine}` freeswitch.xml global agree; this `or` is the
+-- in-code safety net. TTS_DEFAULT_VOICE picks the voice when the TwiML omits one
+-- (the Piper wrapper maps "slt"/unknown tokens to its default model; flite reads
+-- it as a flite voice).
+local TTS_ENGINE = os.getenv("TTS_ENGINE") or "tts_commandline"
 local TTS_DEFAULT_VOICE = os.getenv("TTS_DEFAULT_VOICE") or "slt"
 
 -- Map a Twilio-ish voice/language to a flite voice. flite ships: kal, kal16,

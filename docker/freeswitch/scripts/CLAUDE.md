@@ -273,14 +273,21 @@ top-level verb simply ends the current document; it cannot interrupt an in-progr
 `<Enqueue>`. A non-blocking queue (mod_callcenter wait-loop) or a DTMF abort key
 would be required for full `<Leave>`/waitUrl parity.
 
-**Phase 7 — TTS (`<Say>`):** `flite` stays the offline default. The engine is now
-PLUGGABLE via `TTS_ENGINE` (default `flite`): the speak app is invoked as
-`<engine>|<voice>|<text>`, so a higher-quality engine drops in with no code change.
-`voice`/`language` are mapped to flite voices (man→rms, woman/alice→slt, vendor
-voice names guessed by gender, else `TTS_DEFAULT_VOICE`); for non-flite engines the
-requested voice is passed through. `<Say>` now strips SSML/`<speak>` markup so tags
-are never read literally (it is NOT a full SSML engine — `<break>`→comma pause, all
-other tags dropped). See the Decision Log + docker/freeswitch/CLAUDE.md "TTS".
+**Phase 7 — TTS (`<Say>`):** the default engine is **Piper** (neural, offline, MIT)
+via `mod_tts_commandline` (`TTS_ENGINE=tts_commandline`); `flite` is the fallback
+engine (`TTS_ENGINE=flite`). The engine is PLUGGABLE via `TTS_ENGINE`: the speak app
+is invoked as `<engine>|<voice>|<text>`, so the engine swaps with no code change.
+For non-flite engines (Piper) the requested `voice` is passed through and the
+`scripts/bin/piper_tts.sh` wrapper maps it to a model (one shipped:
+`en_US-lessac-medium`; unknown/`slt`→default); for flite, `voice`/`language` map to
+flite voices (man→rms, woman/alice→slt, vendor names guessed by gender, else
+`TTS_DEFAULT_VOICE`). `<Say>` strips SSML/`<speak>` markup so tags are never read
+literally (NOT a full SSML engine — `<break>`→comma pause, all other tags dropped).
+The default is set in three agreeing places: this handler's `os.getenv("TTS_ENGINE")
+or "tts_commandline"`, `entrypoint.sh`'s export, and the `$${tts_engine}` global.
+Piper renders 22050 Hz WAVs; FS resamples to the call rate. mod_tts_commandline
+shell-quotes `${text}` so there is no injection from customer text. See the Decision
+Log + docker/freeswitch/CLAUDE.md "Piper neural TTS".
 
 **Phase 6 — `<Record>` (standalone recording):** uses CORE FreeSWITCH (no extra
 module) — the `record` app. Writes a WAV to the tenant-scoped shared spool
