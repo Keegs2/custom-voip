@@ -1,5 +1,9 @@
 /**
- * Draggable / click-to-add node palette for the IVR builder.
+ * Draggable / click-to-add node palette for the call flow builder.
+ *
+ * The palette IS the product gate (plan §0.1 decision 2): it shows ONLY the node
+ * types the current product (`doc.product`) is allowed to express — RCF gets just
+ * forward + hangup, conference gets greeting + room, IVR/API get the full verb set.
  *
  * Drag: sets the node type on the drag payload; the canvas reads it in `onDrop`
  * and places the node under the cursor. Click: adds the node at a default
@@ -8,7 +12,7 @@
  * React #310: store hooks are read unconditionally at the top.
  */
 import { useFlowStore } from '../store/flowStore';
-import { IVR_PALETTE, NODE_META } from '../model/palette';
+import { NODE_META, PRODUCT_LABELS, paletteForProduct } from '../model/palette';
 import type { NodeType } from '../model/types';
 
 /** Custom MIME used to carry the node type across the HTML5 DnD boundary. */
@@ -17,6 +21,8 @@ export const PALETTE_DND_MIME = 'application/revup-flow-node';
 export function NodePalette() {
   const addNode = useFlowStore((s) => s.addNode);
   const setSelected = useFlowStore((s) => s.setSelected);
+  const product = useFlowStore((s) => s.doc.product);
+  const palette = paletteForProduct(product);
 
   const handleClick = (type: NodeType) => {
     // Stagger click-adds by the current node count so stacked adds stay visible
@@ -50,10 +56,10 @@ export function NodePalette() {
           padding: '2px 2px 6px',
         }}
       >
-        Verbs
+        {PRODUCT_LABELS[product]} verbs
       </div>
 
-      {IVR_PALETTE.map((type) => {
+      {palette.map((type) => {
         const meta = NODE_META[type];
         return (
           <button

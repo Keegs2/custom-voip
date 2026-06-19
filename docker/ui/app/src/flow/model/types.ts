@@ -94,10 +94,16 @@ export type NodeConfig =
     }
   | {
       type: 'dial';
+      /** Forward destination. For RCF this compiles to `forward_to`. */
       number: string;
       callerId?: string;
+      /** Ring timeout (seconds). For RCF this compiles to `ring_timeout`. */
       timeout: number;
       record?: boolean;
+      /** RCF-only: pass the original caller's CID through (`pass_caller_id`). */
+      passCallerId?: boolean;
+      /** RCF-only: max concurrent channels to the destination (`max_channels`). */
+      maxChannels?: number;
     }
   | {
       type: 'ringGroup';

@@ -22,7 +22,7 @@ import {
   type NodeChange,
   type Viewport,
 } from '@xyflow/react';
-import type { CallFlowDoc, NodeConfig, NodeType } from '../model/types';
+import type { CallFlowDoc, NodeConfig, NodeType, ProductKind } from '../model/types';
 import { emptyDoc, makeNode, newId } from '../model/defaults';
 import {
   deserialize,
@@ -63,6 +63,8 @@ export interface FlowState {
   /* Lifecycle */
   loadDoc: (doc: CallFlowDoc) => void;
   reset: () => void;
+  /** Start a fresh, empty draft for a specific product (Task 1 selector). */
+  newFlow: (product: ProductKind) => void;
 
   /** Assemble the current store state back into a persistable `CallFlowDoc`. */
   getDoc: () => CallFlowDoc;
@@ -186,6 +188,13 @@ export const useFlowStore = create<FlowState>()(
 
       reset: () => {
         const fresh = emptyDoc(get().doc.product);
+        const graph = serialize(fresh);
+        set({ doc: fresh, nodes: graph.nodes, edges: graph.edges, selectedId: null });
+        useFlowStore.temporal.getState().clear();
+      },
+
+      newFlow: (product) => {
+        const fresh = emptyDoc(product);
         const graph = serialize(fresh);
         set({ doc: fresh, nodes: graph.nodes, edges: graph.edges, selectedId: null });
         useFlowStore.temporal.getState().clear();

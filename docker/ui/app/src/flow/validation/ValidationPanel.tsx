@@ -1,25 +1,27 @@
 /**
- * Live validation panel. Recomputes `validateIvr` on every graph change and
- * lists the findings; clicking a finding selects the offending node so the
- * canvas + config panel focus it. Publish is blocked while any error remains
- * (enforced in the toolbar via the same `validateIvr`).
+ * Live validation panel. Recomputes the current product's `validate()` on every
+ * graph change and lists the findings; clicking a finding selects the offending
+ * node so the canvas + config panel focus it. Publish is blocked while any error
+ * remains (enforced in the toolbar via the same product-aware `validateFlow`).
  *
  * React #310: store hooks unconditionally at the top.
  */
 import { useFlowStore } from '../store/flowStore';
-import { validateIvr } from '../compile/ivr';
+import { validateFlow } from '../compile/registry';
 
 export function ValidationPanel() {
   // Subscribe to graph slices so this recomputes on any structural change.
   const nodes = useFlowStore((s) => s.nodes);
   const edges = useFlowStore((s) => s.edges);
+  const product = useFlowStore((s) => s.doc.product);
   const getDoc = useFlowStore((s) => s.getDoc);
   const setSelected = useFlowStore((s) => s.setSelected);
 
-  // `nodes`/`edges` are referenced so the memo/recompute tracks them.
+  // `nodes`/`edges`/`product` are referenced so the recompute tracks them.
   void nodes;
   void edges;
-  const { issues } = validateIvr(getDoc());
+  void product;
+  const { issues } = validateFlow(getDoc());
 
   const errors = issues.filter((i) => i.severity === 'error');
   const warnings = issues.filter((i) => i.severity === 'warning');

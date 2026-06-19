@@ -7,7 +7,7 @@
  * the canvas — `entry` is created automatically (one per flow) so it is not in
  * the palette.
  */
-import type { NodeType } from './types';
+import type { NodeType, ProductKind } from './types';
 
 export interface NodeMeta {
   label: string;
@@ -53,3 +53,53 @@ export const IVR_PALETTE: NodeType[] = [
   'reject',
   'hangup',
 ];
+
+/**
+ * Conference palette (plan §3): a greeting then join a room. `entry` is
+ * auto-created, so it is not listed here.
+ */
+export const CONFERENCE_PALETTE: NodeType[] = ['say', 'play', 'conference', 'hangup'];
+
+/**
+ * RCF palette (plan §0.1 / §12): RCF stays simple — a single forward
+ * destination, nothing else. `entry` is auto-created. NO menu/say/conference and
+ * NO second-destination/failover node (`rcf_numbers.failover_to` is dead code).
+ */
+export const RCF_PALETTE: NodeType[] = ['dial', 'hangup'];
+
+/**
+ * Per-product palette. The palette IS the product gate (plan §0.1 decision 2):
+ * a product can only express what its palette exposes.
+ *
+ *  - `ivr` / `api`: the full IVR verb set (same palette + compiler).
+ *  - `conference`: greeting + join a room.
+ *  - `rcf`: forward + hangup only.
+ *  - `trunk` / `ucaas`: not surfaced in the product selector yet; minimal stubs
+ *    so the record is total and type-safe.
+ */
+export const PALETTE_BY_PRODUCT: Record<ProductKind, NodeType[]> = {
+  ivr: IVR_PALETTE,
+  api: IVR_PALETTE,
+  conference: CONFERENCE_PALETTE,
+  rcf: RCF_PALETTE,
+  trunk: ['dial', 'reject', 'hangup'],
+  ucaas: ['say', 'play', 'dial', 'conference', 'hangup'],
+};
+
+/** The ordered palette a product exposes for dragging onto the canvas. */
+export function paletteForProduct(product: ProductKind): NodeType[] {
+  return PALETTE_BY_PRODUCT[product] ?? IVR_PALETTE;
+}
+
+/** Human-friendly product names for the toolbar + product selector. */
+export const PRODUCT_LABELS: Record<ProductKind, string> = {
+  ivr: 'IVR',
+  api: 'API Calling',
+  rcf: 'RCF',
+  conference: 'Conference',
+  trunk: 'SIP Trunk',
+  ucaas: 'UCaaS',
+};
+
+/** Products offered when creating a NEW flow (Task 1). */
+export const SELECTABLE_PRODUCTS: ProductKind[] = ['ivr', 'api', 'rcf', 'conference'];

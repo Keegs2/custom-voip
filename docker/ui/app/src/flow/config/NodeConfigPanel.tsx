@@ -22,6 +22,7 @@ export function NodeConfigPanel() {
   const updateNodeConfig = useFlowStore((s) => s.updateNodeConfig);
   const updateNodeLabel = useFlowStore((s) => s.updateNodeLabel);
   const removeNode = useFlowStore((s) => s.removeNode);
+  const product = useFlowStore((s) => s.doc.product);
 
   if (!node || !selectedId) {
     return (
@@ -209,7 +210,44 @@ export function NodeConfigPanel() {
           </>
         )}
 
-        {config.type === 'dial' && (
+        {/* RCF forward — single destination, no failover (plan §0.1/§12). */}
+        {config.type === 'dial' && product === 'rcf' && (
+          <>
+            <FormField
+              label="Forward to"
+              value={config.number}
+              onChange={(e) => set({ number: e.target.value })}
+              placeholder="+16175551234"
+              hint="The single destination this DID forwards to."
+            />
+            <FormField
+              label="Ring timeout (s)"
+              type="number"
+              min={5}
+              value={String(config.timeout)}
+              onChange={(e) => set({ timeout: num(e.target.value) ?? 30 })}
+            />
+            <FormField
+              label="Max channels"
+              type="number"
+              min={1}
+              value={String(config.maxChannels ?? '')}
+              onChange={(e) => set({ maxChannels: num(e.target.value) })}
+              placeholder="(optional concurrent-call cap)"
+            />
+            <label style={checkboxRow}>
+              <input
+                type="checkbox"
+                checked={!!config.passCallerId}
+                onChange={(e) => set({ passCallerId: e.target.checked })}
+              />
+              Pass caller ID through
+            </label>
+          </>
+        )}
+
+        {/* IVR / API / conference dial — full destination options. */}
+        {config.type === 'dial' && product !== 'rcf' && (
           <>
             <FormField
               label="Destination"

@@ -24,6 +24,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, field_validator
 
 from db import database as db
+from db import redis_client as cache
 from auth.dependencies import require_admin
 
 logger = logging.getLogger(__name__)
@@ -34,7 +35,10 @@ router = APIRouter()
 VALID_PRODUCTS = {"ivr", "rcf", "trunk", "api", "conference", "ucaas"}
 
 # Products whose publish writes the existing IVR sink (ivr_flows.flow_config).
-IVR_SINK_PRODUCTS = {"ivr", "api"}
+# "conference" compiles to an IVR node tree (greeting -> <Conference> verb) that
+# the P1 IVR runtime already executes, so it publishes through the identical sink
+# path as ivr/api (ivr_flows row + DID voice_url repoint), no other change.
+IVR_SINK_PRODUCTS = {"ivr", "api", "conference"}
 
 # Column projection for every CallFlow read/return (matches the CallFlow JSON).
 _COLUMNS = (
@@ -316,8 +320,61 @@ async def publish_call_flow(
                             "publish flow %s: DID %s voice_url -> %s",
                             flow_id, did, webhook_url,
                         )
-            # else: non-IVR products — no sink write yet (P2+ TODO). compiled is
-            # still persisted on call_flows below so the artifact is not lost.
+            elif product == "rcf":
+                # RCF sink = the existing rcf_numbers row the FreeSWITCH Lua
+                # already reads. The compiled artifact is FLAT (CALL_FLOW_BUILDER
+                # _PLAN §12): {forward_to, ring_timeout?, pass_caller_id?,
+                # max_channels?}. NO failover_to — §12 verified rcf_numbers.
+                # failover_to is DEAD code the Lua never reads, so it is never
+                # written here. RCF stays simple (§0.1): forward + ring-timeout +
+                # pass-CID + concurrent-cap only.
+                if not did:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="entry DID is required to publish an rcf flow",
+                    )
+                if customer_id is None:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="customer_id is required to publish an rcf flow",
+                    )
+                forward_to = body.compiled.get("forward_to")
+                if not forward_to:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="compiled.forward_to is required to publish an rcf flow",
+                    )
+                # Defaults mirror rcf.py / the rcf_numbers column defaults.
+                ring_timeout = body.compiled.get("ring_timeout", 30)
+                pass_caller_id = body.compiled.get("pass_caller_id", True)
+                max_channels = body.compiled.get("max_channels", 0)
+
+                rcf_row = await conn.fetchrow(
+                    """
+                    INSERT INTO rcf_numbers
+                        (did, customer_id, name, forward_to, ring_timeout,
+                         pass_caller_id, max_channels)
+                    VALUES ($1, $2::int, $3, $4, $5::int, $6::bool, $7::int)
+                    ON CONFLICT (did) DO UPDATE SET
+                        forward_to = EXCLUDED.forward_to,
+                        ring_timeout = EXCLUDED.ring_timeout,
+                        pass_caller_id = EXCLUDED.pass_caller_id,
+                        max_channels = EXCLUDED.max_channels,
+                        customer_id = EXCLUDED.customer_id,
+                        name = EXCLUDED.name
+                    RETURNING id
+                    """,
+                    did, customer_id, name, forward_to, ring_timeout,
+                    pass_caller_id, max_channels,
+                )
+                sink_ref = rcf_row["id"]
+                logger.info(
+                    "publish flow %s: rcf_numbers upsert did=%s -> forward_to=%s "
+                    "(sink_ref=%s)",
+                    flow_id, did, forward_to, sink_ref,
+                )
+            # else: other non-IVR products — no sink write yet (P2+ TODO).
+            # compiled is still persisted on call_flows below so it is not lost.
 
             row = await conn.fetchrow(
                 f"""
@@ -329,6 +386,13 @@ async def publish_call_flow(
                 """,
                 compiled_json, sink_ref, flow_id,
             )
+
+    # After commit, invalidate the FreeSWITCH RCF route cache exactly like
+    # rcf.py (update_rcf, rcf.py:335) so the new forward_to is picked up on the
+    # next call. No-op when Redis is unavailable.
+    if product == "rcf" and did:
+        await cache.invalidate_rcf_cache(did)
+        logger.info("publish flow %s: rcf cache invalidated for did=%s", flow_id, did)
 
     return _serialize(row)
 

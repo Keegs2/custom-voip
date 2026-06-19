@@ -1,11 +1,16 @@
 /**
- * Builder toolbar — flow identity (name, DID entry binding, customer), the
- * load/new controls, undo/redo, compiled-artifact preview, and the Save /
+ * Builder toolbar — flow identity (product, name, DID entry binding, customer),
+ * the new/load controls, undo/redo, compiled-artifact preview, and the Save /
  * Publish actions wired to the `call_flows` API.
  *
- * Save  → PUT/POST draft with { flow_graph: CallFlowDoc, compiled }.
+ * The PRODUCT drives everything: which palette/compiler/validation runs, which
+ * `product` tag is sent to the API, and which existing flows the "Open flow"
+ * picker lists. Creating a new flow picks the product; loading one inherits the
+ * stored `product` from the flow_graph.
+ *
+ * Save  → PUT/POST draft with { product, flow_graph: CallFlowDoc, compiled }.
  * Publish → validate (block on errors) → ensure saved → POST /publish { compiled };
- *           the backend writes ivr_flows.flow_config + repoints the DID voice_url.
+ *           the backend writes the product sink (rcf_numbers / ivr_flows) + repoints DID.
  *
  * React #310: ALL hooks (store, query, local state) are declared unconditionally
  * at the top, before any early return or conditional render.
@@ -13,7 +18,8 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useFlowStore, useFlowTemporal } from '../store/flowStore';
-import { compileIvr, validateIvr } from '../compile/ivr';
+import { compileFlow, validateFlow } from '../compile/registry';
+import { PRODUCT_LABELS, SELECTABLE_PRODUCTS } from '../model/palette';
 import {
   createCallFlow,
   getCallFlow,
@@ -22,23 +28,31 @@ import {
   updateCallFlow,
 } from '../../api/callFlows';
 import type { CallFlow } from '../../types/callFlow';
-import type { CallFlowDoc, EntryBinding } from '../model/types';
+import type { CallFlowDoc, EntryBinding, ProductKind } from '../model/types';
 import { Button } from '../../components/ui/Button';
 import { Modal } from '../../components/ui/Modal';
 import { AdminCustomerSelector } from '../../components/AdminCustomerSelector';
 import { useToast } from '../../components/ui/ToastContext';
 import { ApiError } from '../../api/client';
 
-const PRODUCT = 'ivr' as const;
-const QUERY_KEY = ['call-flows', { product: PRODUCT }] as const;
-
 function entryDid(entry: EntryBinding): string {
   return entry.kind === 'did' ? entry.did : '';
 }
 
+/** One-line blurb per selectable product, shown in the New-flow picker. */
+const PRODUCT_BLURBS: Record<ProductKind, string> = {
+  ivr: 'Multi-step menus, gather, dial, record — the full programmable-voice palette.',
+  api: 'Webhook-driven programmable voice — same palette as IVR, API product tag.',
+  rcf: 'Remote call forwarding — a DID forwards to a single destination.',
+  conference: 'A greeting, then join a conference room.',
+  trunk: 'SIP trunk inbound routing.',
+  ucaas: 'Find-me / follow-me ring plans.',
+};
+
 export function FlowToolbar() {
   // ── Hooks (all unconditional, top of component) ──────────────────────────
   const docId = useFlowStore((s) => s.doc.id);
+  const product = useFlowStore((s) => s.doc.product);
   const name = useFlowStore((s) => s.doc.name);
   const status = useFlowStore((s) => s.doc.status);
   const entry = useFlowStore((s) => s.doc.entry);
@@ -48,7 +62,7 @@ export function FlowToolbar() {
   const patchDoc = useFlowStore((s) => s.patchDoc);
   const getDoc = useFlowStore((s) => s.getDoc);
   const loadDoc = useFlowStore((s) => s.loadDoc);
-  const reset = useFlowStore((s) => s.reset);
+  const newFlow = useFlowStore((s) => s.newFlow);
 
   const undo = useFlowTemporal((s) => s.undo);
   const redo = useFlowTemporal((s) => s.redo);
@@ -58,16 +72,19 @@ export function FlowToolbar() {
   const { toastOk, toastErr } = useToast();
   const queryClient = useQueryClient();
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [newOpen, setNewOpen] = useState(false);
 
-  const flowsQuery = useQuery({ queryKey: QUERY_KEY, queryFn: () => listCallFlows({ product: PRODUCT }) });
+  // List + invalidate flows for the CURRENT product only.
+  const queryKey = ['call-flows', { product }] as const;
+  const flowsQuery = useQuery({ queryKey, queryFn: () => listCallFlows({ product }) });
 
   const saveMutation = useMutation({
     mutationFn: async (): Promise<CallFlow> => {
       const doc = getDoc();
-      const compiled = compileIvr(doc);
+      const compiled = compileFlow(doc);
       if (doc.id == null) {
         return createCallFlow({
-          product: PRODUCT,
+          product: doc.product,
           name: doc.name,
           customer_id: doc.customerId ?? undefined,
           entry: doc.entry,
@@ -84,7 +101,7 @@ export function FlowToolbar() {
     },
     onSuccess: (flow) => {
       patchDoc({ id: flow.id, status: flow.status, version: flow.version });
-      queryClient.invalidateQueries({ queryKey: QUERY_KEY });
+      queryClient.invalidateQueries({ queryKey });
       toastOk('Flow saved');
     },
     onError: (e) => toastErr(e instanceof ApiError ? e.message : 'Save failed'),
@@ -93,16 +110,16 @@ export function FlowToolbar() {
   const publishMutation = useMutation({
     mutationFn: async (): Promise<CallFlow> => {
       const doc = getDoc();
-      const result = validateIvr(doc);
+      const result = validateFlow(doc);
       if (!result.ok) throw new Error('Fix validation errors before publishing.');
       if (doc.customerId == null) throw new Error('Select a customer before publishing.');
       if (!entryDid(doc.entry)) throw new Error('Bind a DID (entry) before publishing.');
-      const compiled = compileIvr(doc);
+      const compiled = compileFlow(doc);
 
       let id = doc.id;
       if (id == null) {
         const created = await createCallFlow({
-          product: PRODUCT,
+          product: doc.product,
           name: doc.name,
           customer_id: doc.customerId,
           entry: doc.entry,
@@ -118,7 +135,7 @@ export function FlowToolbar() {
     },
     onSuccess: (flow) => {
       patchDoc({ id: flow.id, status: flow.status, version: flow.version });
-      queryClient.invalidateQueries({ queryKey: QUERY_KEY });
+      queryClient.invalidateQueries({ queryKey });
       toastOk('Flow published — DID routing updated');
     },
     onError: (e) => toastErr(e instanceof ApiError ? e.message : (e as Error).message),
@@ -127,16 +144,18 @@ export function FlowToolbar() {
   // Derived (no hooks) — safe after the hooks above.
   void nodes;
   void edges;
-  const validation = validateIvr(getDoc());
+  const validation = validateFlow(getDoc());
   const hasErrors = !validation.ok;
-  const compiledPreview = JSON.stringify(compileIvr(getDoc()), null, 2);
+  const compiledPreview = JSON.stringify(compileFlow(getDoc()), null, 2);
 
   const handleLoad = async (id: number) => {
     try {
       const flow = await getCallFlow(id);
+      // The stored graph carries its own product → palette/compiler follow it.
       loadDoc(flow.flow_graph as CallFlowDoc);
       patchDoc({
         id: flow.id,
+        product: flow.product,
         name: flow.name,
         status: flow.status,
         version: flow.version,
@@ -147,6 +166,12 @@ export function FlowToolbar() {
     } catch (e) {
       toastErr(e instanceof ApiError ? e.message : 'Failed to load flow');
     }
+  };
+
+  const handleNewFlow = (p: ProductKind) => {
+    newFlow(p);
+    setNewOpen(false);
+    toastOk(`New ${PRODUCT_LABELS[p]} flow`);
   };
 
   const setName = (v: string) => patchDoc({ name: v });
@@ -164,6 +189,27 @@ export function FlowToolbar() {
         borderBottom: '1px solid rgba(42,47,69,0.6)',
       }}
     >
+      {/* Current product — set when creating/loading a flow, not editable here. */}
+      <Field label="Product">
+        <span
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            height: 34,
+            padding: '0 12px',
+            borderRadius: 8,
+            fontSize: '0.78rem',
+            fontWeight: 700,
+            color: '#22d3ee',
+            background: 'rgba(34,211,238,0.12)',
+            border: '1px solid rgba(34,211,238,0.4)',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {PRODUCT_LABELS[product]}
+        </span>
+      </Field>
+
       {/* Name */}
       <Field label="Flow name">
         <input style={inputStyle} value={name} onChange={(e) => setName(e.target.value)} placeholder="Untitled Flow" />
@@ -222,7 +268,7 @@ export function FlowToolbar() {
       {/* Actions */}
       <Button variant="ghost" size="sm" onClick={() => undo()} disabled={!canUndo}>Undo</Button>
       <Button variant="ghost" size="sm" onClick={() => redo()} disabled={!canRedo}>Redo</Button>
-      <Button variant="ghost" size="sm" onClick={() => reset()}>New</Button>
+      <Button variant="ghost" size="sm" onClick={() => setNewOpen(true)}>New</Button>
       <Button variant="ghost" size="sm" onClick={() => setPreviewOpen(true)}>Preview</Button>
       <Button variant="primary" size="sm" loading={saveMutation.isPending} onClick={() => saveMutation.mutate()}>
         Save
@@ -254,6 +300,45 @@ export function FlowToolbar() {
         >
           {compiledPreview}
         </pre>
+      </Modal>
+
+      {/* New-flow product selector (Task 1) — picks palette + compiler + tag. */}
+      <Modal open={newOpen} onClose={() => setNewOpen(false)} title="New call flow — choose a product">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <p style={{ margin: 0, fontSize: '0.78rem', color: '#94a3b8', lineHeight: 1.5 }}>
+            The product sets the node palette, the compiler, and how this flow publishes.
+            (This clears the current canvas.)
+          </p>
+          {SELECTABLE_PRODUCTS.map((p) => (
+            <button
+              key={p}
+              type="button"
+              onClick={() => handleNewFlow(p)}
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 3,
+                textAlign: 'left',
+                padding: '12px 14px',
+                borderRadius: 10,
+                cursor: 'pointer',
+                color: '#e2e8f0',
+                background: 'rgba(26,29,39,0.9)',
+                border: '1px solid rgba(42,47,69,0.8)',
+                transition: 'border-color 0.15s',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.borderColor = 'rgba(34,211,238,0.6)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.borderColor = 'rgba(42,47,69,0.8)';
+              }}
+            >
+              <span style={{ fontSize: '0.86rem', fontWeight: 700 }}>{PRODUCT_LABELS[p]}</span>
+              <span style={{ fontSize: '0.72rem', color: '#94a3b8' }}>{PRODUCT_BLURBS[p]}</span>
+            </button>
+          ))}
+        </div>
       </Modal>
     </div>
   );
