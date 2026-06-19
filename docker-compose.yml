@@ -219,6 +219,11 @@ services:
       - TURN_REALM=${TURN_REALM:-voip.local}
     ports:
       - "${API_PORT:-8088}:8000"
+    # On a real Linux host (single-box test/prod), host.docker.internal is NOT
+    # auto-provided (unlike Docker Desktop). This maps it to the host gateway so the
+    # bridge-networked API can reach the host-networked FreeSWITCH ESL on :8021.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - media_spool:/media/spool   # reads FS-written vm/recordings, uploads to object storage
     networks:
