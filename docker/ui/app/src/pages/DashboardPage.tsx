@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Shield, Zap, Globe, Activity, PhoneForwarded, Phone, Code, Webhook, MessageCircle, ArrowRight } from 'lucide-react';
+import { Shield, Zap, Globe, Activity, PhoneForwarded, Phone, Code, Webhook, MessageCircle, Voicemail, ArrowRight } from 'lucide-react';
 import { HaArchitectureViz } from '../components/layout/HaArchitectureViz';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -89,12 +89,20 @@ const PRODUCT_CARDS: ProductCard[] = [
     animDelay: '0.4s',
   },
   {
+    icon: <Voicemail size={20} strokeWidth={1.75} />,
+    title: 'Voicemail',
+    subtitle: 'Visual voicemail with transcription & encrypted storage',
+    active: true,
+    route: '/voicemail',
+    animDelay: '0.5s',
+  },
+  {
     icon: <MessageCircle size={20} strokeWidth={1.75} />,
     title: 'Unified Comms',
-    subtitle: 'Chat, meetings, calendar, documents & voicemail',
+    subtitle: 'Chat, meetings, calendar & documents',
     active: true,
     route: '/communications',
-    animDelay: '0.5s',
+    animDelay: '0.6s',
   },
 ];
 

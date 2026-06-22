@@ -81,8 +81,17 @@ const allCommsNavItems: NavItemDef[] = [
   { label: 'Meetings',       icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} style={{ width: 15, height: 15 }}><path d="m15.75 10.5 4.72-4.72a.75.75 0 0 1 1.28.53v11.38a.75.75 0 0 1-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 0 0 2.25-2.25v-9a2.25 2.25 0 0 0-2.25-2.25h-9A2.25 2.25 0 0 0 2.25 7.5v9a2.25 2.25 0 0 0 2.25 2.25Z" strokeLinecap="round" strokeLinejoin="round" /></svg>, to: '/conference', color: '#4ade80', accountTypes: COMMS_ACCOUNT_TYPES },
   { label: 'Calendar',       icon: <CalendarDays size={15} strokeWidth={1.8} />, to: '/calendar', color: '#2dd4bf', accountTypes: COMMS_ACCOUNT_TYPES },
   { label: 'Documents',      icon: <FolderOpen size={14} strokeWidth={1.8} />, to: '/documents', color: '#fbbf24', accountTypes: COMMS_ACCOUNT_TYPES },
-  { label: 'Voicemail',      icon: <IconVoicemail size={15} />, to: '/voicemail', color: '#818cf8', accountTypes: COMMS_ACCOUNT_TYPES },
 ];
+
+/* ─── Voicemail — standalone UCaaS product (sits directly above Unified Comms) ──
+ * Promoted out of the Unified Comms dropdown into its own Products entry. Same UCaaS
+ * gating as the comms surfaces (hasUcaas + accountTypes ['ucaas','hybrid']); carries
+ * the unread-voicemail badge. NOTE: today voicemail rides on the UCaaS extension
+ * model (gated by a provisioned extension); a truly separate billing SKU is a future
+ * backend item. */
+const voicemailItem: NavItemDef = {
+  label: 'Voicemail', icon: <IconVoicemail size={15} />, to: '/voicemail', color: '#818cf8', accountTypes: COMMS_ACCOUNT_TYPES,
+};
 
 /* ─── Presence config ─────────────────────────────────────── */
 
@@ -995,10 +1004,24 @@ export function Sidebar() {
                 <SidebarNavItem key={item.to} item={item} onNavigate={closeMobile} small />
               ))}
 
-              {/* Unified Comms — expandable item directly under Programmable Voice.
-                  Click → /communications; the chevron toggles the nested Chat /
-                  Meetings / Documents / Voicemail dropdown. Gated on hasUcaas, so
-                  it is never shown for rcf accounts (feedback_rcf_simplicity). */}
+              {/* Voicemail — its own UCaaS product, directly above Unified Comms.
+                  Gated on hasUcaas; customers see it once they have a provisioned
+                  extension (credentials), admins always (same rule as before). Keeps
+                  the unread-voicemail badge. */}
+              {hasUcaas && (credentials || isAdmin) && (
+                <SidebarNavItem
+                  item={voicemailItem}
+                  onNavigate={closeMobile}
+                  small
+                  badge={unreadVoicemailCount}
+                  badgeColor="#ef4444"
+                />
+              )}
+
+              {/* Unified Comms — expandable item under Voicemail. Click →
+                  /communications; the chevron toggles the nested Chat / Meetings /
+                  Calendar / Documents dropdown. Gated on hasUcaas, so it is never
+                  shown for rcf accounts (feedback_rcf_simplicity). */}
               {hasUcaas && commsNavItems.length > 0 && (
                 <ExpandableNavItem
                   item={unifiedCommsItem}
@@ -1010,22 +1033,6 @@ export function Sidebar() {
                   }}
                 >
                   {commsNavItems.map((item) => {
-                    if (item.to === '/voicemail') {
-                      // Customers see Voicemail only once they have a provisioned
-                      // WebRTC extension (credentials present); admins always see it
-                      // so they can review the page (same rule as hasUcaas).
-                      if (!credentials && !isAdmin) return null;
-                      return (
-                        <SidebarNavItem
-                          key={item.to}
-                          item={item}
-                          onNavigate={closeMobile}
-                          small
-                          badge={unreadVoicemailCount}
-                          badgeColor="#ef4444"
-                        />
-                      );
-                    }
                     if (item.to === '/chat') {
                       return (
                         <SidebarNavItem
