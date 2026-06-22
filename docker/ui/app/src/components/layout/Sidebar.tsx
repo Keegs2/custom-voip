@@ -64,14 +64,19 @@ const allVoiceOpsNavItems: NavItemDef[] = [
   { label: 'Live Conferences', icon: <Video size={15} strokeWidth={1.8} />,       to: '/conferences/live',  color: '#4ade80', accountTypes: COMMS_ACCOUNT_TYPES },
 ];
 
-/* ─── UCaaS Communications nav items ──────────────────────────
- * EVERY item is tagged accountTypes: ['ucaas', 'hybrid'] so the shared
- * account-type filter (passesAccountType) excludes them for `rcf` accounts.
- * The whole group is additionally gated on `hasUcaas` at render time, so an
- * `rcf` customer can never see any of this surface (C-10 / feedback_rcf_simplicity).
+/* ─── Unified Comms — ONE expandable PRODUCT item (not its own section) ───────
+ * "Unified Comms" lives in the Products list directly under Programmable Voice.
+ * Clicking it navigates to /communications; it expands to reveal Chat / Meetings /
+ * Documents / Voicemail (allCommsNavItems below) as nested children. EVERY item is
+ * tagged accountTypes: ['ucaas','hybrid'] so the shared filter (passesAccountType)
+ * excludes `rcf`; the whole thing is also gated on `hasUcaas` at render time
+ * (C-10 / feedback_rcf_simplicity).
  */
+const unifiedCommsItem: NavItemDef = {
+  label: 'Unified Comms', icon: <MessageCircle size={16} strokeWidth={1.9} />, to: '/communications', color: '#38bdf8', accountTypes: COMMS_ACCOUNT_TYPES,
+};
+
 const allCommsNavItems: NavItemDef[] = [
-  { label: 'Communications', icon: <MessageCircle size={16} strokeWidth={1.9} />, to: '/communications', color: '#38bdf8', accountTypes: COMMS_ACCOUNT_TYPES },
   { label: 'Chat',           icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} style={{ width: 15, height: 15 }}><path d="M8.625 12a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H8.25m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H12m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 0 1-2.555-.337A5.972 5.972 0 0 1 5.41 20.97a5.969 5.969 0 0 1-.474-.065 4.48 4.48 0 0 0 .978-2.025c.09-.457-.133-.901-.467-1.226C3.93 16.178 3 14.189 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25Z" strokeLinecap="round" strokeLinejoin="round" /></svg>, to: '/chat', color: '#60a5fa', accountTypes: COMMS_ACCOUNT_TYPES },
   { label: 'Meetings',       icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} style={{ width: 15, height: 15 }}><path d="m15.75 10.5 4.72-4.72a.75.75 0 0 1 1.28.53v11.38a.75.75 0 0 1-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 0 0 2.25-2.25v-9a2.25 2.25 0 0 0-2.25-2.25h-9A2.25 2.25 0 0 0 2.25 7.5v9a2.25 2.25 0 0 0 2.25 2.25Z" strokeLinecap="round" strokeLinejoin="round" /></svg>, to: '/conference', color: '#4ade80', accountTypes: COMMS_ACCOUNT_TYPES },
   { label: 'Documents',      icon: <FolderOpen size={14} strokeWidth={1.8} />, to: '/documents', color: '#fbbf24', accountTypes: COMMS_ACCOUNT_TYPES },
@@ -418,6 +423,93 @@ function SidebarNavItem({ item, onNavigate, small, badge, badgeColor }: SidebarN
   );
 }
 
+/* ─── ExpandableNavItem ───────────────────────────────────────
+ * A normal (non-section) nav item that ALSO expands to nested children. The main
+ * row is a NavLink (navigates to item.to); a separate chevron button toggles the
+ * children without navigating. Used for "Unified Comms" inside the Products list. */
+function ExpandableNavItem({
+  item,
+  isOpen,
+  onToggle,
+  onNavigate,
+  children,
+}: {
+  item: NavItemDef;
+  isOpen: boolean;
+  onToggle: () => void;
+  onNavigate?: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <SidebarNavItem item={item} small onNavigate={onNavigate} />
+        </div>
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-expanded={isOpen}
+          aria-label={`Toggle ${item.label}`}
+          title={isOpen ? `Collapse ${item.label}` : `Expand ${item.label}`}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: 22,
+            height: 22,
+            flexShrink: 0,
+            borderRadius: 6,
+            border: 'none',
+            background: 'transparent',
+            color: '#475569',
+            cursor: 'pointer',
+            transition: 'background 0.15s, color 0.15s',
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = 'rgba(255,255,255,0.05)';
+            e.currentTarget.style.color = '#94a3b8';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = 'transparent';
+            e.currentTarget.style.color = '#475569';
+          }}
+        >
+          <ChevronDown
+            size={12}
+            strokeWidth={2.5}
+            style={{ transition: 'transform 0.2s ease', transform: isOpen ? 'rotate(0deg)' : 'rotate(-90deg)' }}
+          />
+        </button>
+      </div>
+
+      {/* Nested children — indented with a left rail to show hierarchy */}
+      <div
+        style={{
+          overflow: 'hidden',
+          maxHeight: isOpen ? 400 : 0,
+          opacity: isOpen ? 1 : 0,
+          transition: 'max-height 0.25s ease, opacity 0.2s ease',
+        }}
+      >
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 1,
+            paddingTop: 2,
+            paddingLeft: 12,
+            marginLeft: 11,
+            borderLeft: '1px solid rgba(42,47,69,0.6)',
+          }}
+        >
+          {children}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ─── CollapsibleGroup ────────────────────────────────────── */
 
 interface CollapsibleGroupProps {
@@ -563,7 +655,7 @@ export function Sidebar() {
     const stored = loadGroupState();
     return {
       products:          stored.products          ?? true,
-      communications:    stored.communications    ?? true,
+      unifiedComms:      stored.unifiedComms      ?? true,
       voiceOps:          stored.voiceOps          ?? true,
       documentation:     stored.documentation     ?? true,
       administration:    stored.administration    ?? false,
@@ -638,12 +730,14 @@ export function Sidebar() {
     setGroupOpen((prev) => {
       const next = { ...prev };
       if (inProducts && !prev.products)       next.products       = true;
-      if (inComms    && !prev.communications) next.communications = true;
+      if (inComms    && !prev.unifiedComms)   next.unifiedComms   = true;
       if (inVoiceOps && !prev.voiceOps)       next.voiceOps       = true;
       if (inAdmin    && !prev.administration) next.administration = true;
       if (inDocs     && !prev.documentation)  next.documentation  = true;
+      // Comms routes live under the Products group, so keep it open too.
+      if (inComms    && !prev.products)       next.products       = true;
       if (next.products       === prev.products &&
-          next.communications === prev.communications &&
+          next.unifiedComms   === prev.unifiedComms &&
           next.voiceOps       === prev.voiceOps &&
           next.administration === prev.administration &&
           next.documentation  === prev.documentation) {
@@ -899,20 +993,20 @@ export function Sidebar() {
               {productNavItems.map((item) => (
                 <SidebarNavItem key={item.to} item={item} onNavigate={closeMobile} small />
               ))}
-            </CollapsibleGroup>
 
-            {/* ── GROUP 1.5: Communications (UCaaS only) ────── */}
-            {/* Gated on hasUcaas (false for rcf) AND every item is filtered by
-                accountTypes: ['ucaas','hybrid']. RCF → group never rendered. */}
-            {hasUcaas && commsNavItems.length > 0 && (
-              <>
-                <div style={{ height: 6 }} />
-                <CollapsibleGroup
-                  id="communications"
-                  label="Communications"
-                  icon={<MessageCircle size={11} strokeWidth={2.5} />}
-                  isOpen={groupOpen.communications}
-                  onToggle={toggleGroup}
+              {/* Unified Comms — expandable item directly under Programmable Voice.
+                  Click → /communications; the chevron toggles the nested Chat /
+                  Meetings / Documents / Voicemail dropdown. Gated on hasUcaas, so
+                  it is never shown for rcf accounts (feedback_rcf_simplicity). */}
+              {hasUcaas && commsNavItems.length > 0 && (
+                <ExpandableNavItem
+                  item={unifiedCommsItem}
+                  isOpen={groupOpen.unifiedComms}
+                  onToggle={() => toggleGroup('unifiedComms')}
+                  onNavigate={() => {
+                    closeMobile();
+                    if (!groupOpen.unifiedComms) toggleGroup('unifiedComms');
+                  }}
                 >
                   {commsNavItems.map((item) => {
                     if (item.to === '/voicemail') {
@@ -944,9 +1038,9 @@ export function Sidebar() {
                     }
                     return <SidebarNavItem key={item.to} item={item} onNavigate={closeMobile} small />;
                   })}
-                </CollapsibleGroup>
-              </>
-            )}
+                </ExpandableNavItem>
+              )}
+            </CollapsibleGroup>
 
             {/* ── GROUP 1.6: Voice Operations (UCaaS media/control) ──
                 Same double-gating as Communications: hasUcaas group guard +
