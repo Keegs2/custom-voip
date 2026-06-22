@@ -194,6 +194,7 @@ def _message_public(row: dict) -> dict:
         "is_saved": row.get("is_saved"),
         "transcript_status": row.get("transcript_status"),
         "encrypted": row.get("wrapped_dek") is not None,
+        "deleted_at": row.get("deleted_at"),
         "created_at": row.get("created_at"),
     }
 
@@ -824,6 +825,8 @@ async def mailbox_message_count(
 @router.get("/mailboxes/{mailbox_id}/messages")
 async def list_mailbox_messages(
     mailbox_id: int,
+    folder: Optional[str] = Query(
+        None, description="inbox | saved | trash — one-query folder filter"),
     is_read: Optional[bool] = None,
     is_saved: Optional[bool] = None,
     include_deleted: bool = False,
@@ -831,16 +834,35 @@ async def list_mailbox_messages(
     offset: int = 0,
     customer_filter: int | None = Depends(get_customer_filter),
 ):
+    """List messages. ``folder`` gives the frontend Trash/Saved/Inbox in ONE
+    query (no client-side diffing):
+      * inbox  — not deleted AND not saved
+      * saved  — saved AND not deleted
+      * trash  — soft-deleted (deleted_at IS NOT NULL)
+    When ``folder`` is omitted the legacy is_read/is_saved/include_deleted
+    filters apply (default excludes trashed). ``is_read`` may be combined with
+    any folder."""
     await _get_owned_mailbox(mailbox_id, customer_filter)
     query = "SELECT * FROM voicemails WHERE mailbox_id = $1"
     values: list = [mailbox_id]
     idx = 2
-    if not include_deleted:
-        query += " AND deleted_at IS NULL"
+    if folder is not None:
+        if folder == "inbox":
+            query += " AND deleted_at IS NULL AND is_saved = false"
+        elif folder == "saved":
+            query += " AND deleted_at IS NULL AND is_saved = true"
+        elif folder == "trash":
+            query += " AND deleted_at IS NOT NULL"
+        else:
+            raise HTTPException(status_code=400,
+                                detail="folder must be 'inbox', 'saved', or 'trash'")
+    else:
+        if not include_deleted:
+            query += " AND deleted_at IS NULL"
+        if is_saved is not None:
+            query += f" AND is_saved = ${idx}"; values.append(is_saved); idx += 1
     if is_read is not None:
         query += f" AND is_read = ${idx}"; values.append(is_read); idx += 1
-    if is_saved is not None:
-        query += f" AND is_saved = ${idx}"; values.append(is_saved); idx += 1
     query += f" ORDER BY created_at DESC LIMIT ${idx} OFFSET ${idx + 1}"
     values.extend([limit, offset])
     rows = await db.fetch_all(query, *values)
@@ -897,6 +919,57 @@ async def delete_message(
     return {"status": "deleted", "message_id": message_id}
 
 
+@router.put("/messages/{message_id}/restore")
+async def restore_message(
+    message_id: int,
+    request: Request,
+    user: dict = Depends(get_current_user),
+    customer_filter: int | None = Depends(get_customer_filter),
+):
+    """Restore a soft-deleted (trashed) message — clears deleted_at. Idempotent;
+    restoring a non-trashed message is a no-op. Tenant-scoped via _get_owned_message."""
+    msg = await _get_owned_message(message_id, customer_filter)
+    await db.execute(
+        "UPDATE voicemails SET deleted_at = NULL WHERE id = $1 AND deleted_at IS NOT NULL",
+        message_id,
+    )
+    await _audit("message_restore", mailbox_id=msg["mailbox_id"], message_id=message_id,
+                 user=user, customer_id=msg["box_customer_id"], request=request)
+    return {"status": "restored", "message_id": message_id}
+
+
+@router.delete("/messages/{message_id}/purge")
+async def purge_message(
+    message_id: int,
+    request: Request,
+    user: dict = Depends(get_current_user),
+    customer_filter: int | None = Depends(get_customer_filter),
+):
+    """Hard-purge a TRASHED message: delete the encrypted object + the DB row.
+    Only messages already in Trash (deleted_at set) may be purged (empty-trash
+    semantics). Legal hold → 423. Tenant-scoped (owner or admin via
+    _get_owned_message)."""
+    msg = await _get_owned_message(message_id, customer_filter)
+    if msg.get("deleted_at") is None:
+        raise HTTPException(status_code=409,
+                            detail="Message must be in Trash before it can be purged")
+    if msg.get("legal_hold") or msg.get("box_legal_hold"):
+        raise HTTPException(status_code=423, detail="Message is under legal hold")
+    # Best-effort object delete first; the row is the source of truth so we
+    # remove it regardless of an object-store hiccup (orphan sweeper can reap).
+    bucket, key = msg.get("bucket"), msg.get("object_key")
+    if bucket and key and not str(key).startswith("/"):
+        try:
+            await asyncio.to_thread(storage.delete, bucket, key)
+        except Exception:
+            logger.warning("purge: object delete failed for message %s", message_id,
+                           exc_info=True)
+    await db.execute("DELETE FROM voicemails WHERE id = $1", message_id)
+    await _audit("message_purge", mailbox_id=msg["mailbox_id"], message_id=message_id,
+                 user=user, customer_id=msg["box_customer_id"], request=request)
+    return {"status": "purged", "message_id": message_id}
+
+
 # ===========================================================================
 # Bindings (mailbox resolution map)
 # ===========================================================================
@@ -917,26 +990,120 @@ async def list_bindings(
 async def create_binding(
     mailbox_id: int,
     body: BindingCreate,
+    user: dict = Depends(get_current_user),
     customer_filter: int | None = Depends(get_customer_filter),
 ):
-    """Bind a dedicated DID or attach to an existing line (v1 types only)."""
+    """Bind a dedicated DID or attach to an existing line (v1 types only).
+
+    dedicated_did supports SELF-SERVE claiming: an entitled customer (or an
+    admin) may claim an AVAILABLE/unassigned inventory DID and have it assigned
+    to their own customer atomically with the binding. SEC-3 still holds — a DID
+    assigned to a DIFFERENT customer is never claimable (403).
+    """
     mb = await _get_owned_mailbox(mailbox_id, customer_filter)
+    is_admin = customer_filter is None
+    target_customer = mb["customer_id"]
 
     if body.binding_type == "dedicated_did":
         if not body.did:
             raise HTTPException(status_code=400, detail="did is required for dedicated_did")
-        # SEC-3 (DID-claim IDOR): the DID must already be assigned to this
-        # customer in did_inventory before it can back a mailbox. Mirrors
-        # api_dids.create. Admins (customer_filter None) may bind a DID that is
-        # not yet in inventory, but not one assigned elsewhere.
+        # Inventory ownership decision (SEC-3 DID-claim IDOR). did_inventory.did
+        # is stored E.164 (matches what FS sends as to_did on resolve/ingest).
         inv = await db.fetch_one(
-            "SELECT customer_id FROM did_inventory WHERE did = $1", body.did
+            "SELECT id, status, customer_id FROM did_inventory WHERE did = $1", body.did
         )
+        claim_available = False
         if inv is None:
-            if customer_filter is not None:
+            # Not tracked in inventory. Admins may bind an un-inventoried DID
+            # (e.g. ported/manual); non-admins may not claim one (mirrors
+            # api_dids.create).
+            if not is_admin:
                 raise HTTPException(status_code=403, detail="DID is not assigned to your account")
-        elif inv["customer_id"] != mb["customer_id"]:
+        elif inv["customer_id"] is None:
+            # Unassigned inventory DID → eligible for self-serve claim. Only
+            # 'available' is claimable (reserved/porting/suspended are not).
+            if inv["status"] != "available":
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"DID is not available to claim (status: {inv['status']})",
+                )
+            claim_available = True
+        elif inv["customer_id"] != target_customer:
+            # SEC-3: never claim another tenant's number.
             raise HTTPException(status_code=403, detail="DID is not assigned to this customer")
+        # else: already owned by this customer → just create the binding.
+
+        # Entitlement gate applies ONLY to the self-claim path; admins are
+        # unrestricted. (Binding an already-owned DID needs no re-gate — the
+        # mailbox itself was created behind the same voicemail_enabled gate.)
+        if claim_available and not is_admin:
+            cust = await db.fetch_one(
+                "SELECT voicemail_enabled FROM customers WHERE id = $1", target_customer
+            )
+            if not cust or not cust["voicemail_enabled"]:
+                raise HTTPException(
+                    status_code=403, detail="Voicemail is not enabled for this customer"
+                )
+
+        if claim_available:
+            # Atomic claim + bind: assign the inventory DID to this customer AND
+            # create the binding in one transaction (reuses number_inventory
+            # assign semantics — status='assigned', product_type/ref set). A
+            # FOR UPDATE re-check closes the race where two callers claim the
+            # same DID concurrently.
+            actor_id = int(user["sub"])
+            pool = await db.get_pool()
+            async with pool.acquire() as conn:
+                async with conn.transaction():
+                    locked = await conn.fetchrow(
+                        "SELECT status, customer_id FROM did_inventory WHERE did = $1 FOR UPDATE",
+                        body.did,
+                    )
+                    if (locked is None or locked["customer_id"] is not None
+                            or locked["status"] != "available"):
+                        raise HTTPException(status_code=409, detail="DID is no longer available")
+                    try:
+                        row = await conn.fetchrow(
+                            """
+                            INSERT INTO voicemail_box_bindings (mailbox_id, binding_type, did)
+                            VALUES ($1::int, 'dedicated_did', $2::text) RETURNING *
+                            """,
+                            mailbox_id, body.did,
+                        )
+                    except Exception as e:
+                        if "unique" in str(e).lower():
+                            raise HTTPException(status_code=409, detail="DID already bound to a mailbox")
+                        raise
+                    # The voicemail binding IS the product record; point
+                    # did_inventory at it (product_ref_id = binding id).
+                    await conn.execute(
+                        """
+                        UPDATE did_inventory
+                           SET customer_id = $1::int,
+                               product_type = 'voicemail',
+                               product_ref_id = $2::int,
+                               status = 'assigned',
+                               assigned_at = NOW(),
+                               assigned_by = $3::int,
+                               updated_at = NOW()
+                         WHERE did = $4::text
+                        """,
+                        target_customer, row["id"], actor_id, body.did,
+                    )
+                    # ---- BILLING SEAM (Phase 2 billing) -------------------------------
+                    # A per-mailbox / per-DID rental charge will hook in HERE, inside
+                    # this same transaction (or as a post-commit BackgroundTasks fee
+                    # mirroring calls.py), against the mailbox's plan_sku /
+                    # voicemail_plans + customer balance. No charge is applied today —
+                    # this is only the seam.
+                    # -------------------------------------------------------------------
+            logger.info(
+                "Voicemail dedicated_did self-claim: did=%s customer=%s mailbox=%s by_user=%s",
+                body.did, target_customer, mailbox_id, actor_id,
+            )
+            return dict(row)
+
+        # Already-owned (or admin un-inventoried) DID → bind only.
         try:
             row = await db.fetch_one(
                 """
@@ -981,6 +1148,66 @@ async def delete_binding(
     if result == "DELETE 0":
         raise HTTPException(status_code=404, detail="Binding not found")
     return {"status": "deleted", "binding_id": binding_id}
+
+
+# ===========================================================================
+# Attachable numbers (attach-to-existing-line picker)
+# ===========================================================================
+@router.get("/attachable-numbers")
+async def attachable_numbers(
+    customer_id: Optional[int] = None,
+    customer_filter: int | None = Depends(get_customer_filter),
+):
+    """Numbers a customer owns across products, shaped for the
+    attach-to-existing-line binding picker (frontend + admin attach-on-behalf).
+
+    Scope: non-admins are forced to their own customer; admins may target a
+    customer via ``?customer_id=``. Reuses the search.py cross-product union
+    shape (RCF dids ∪ trunk dids ∪ UCaaS extensions).
+
+    Row shape — the frontend maps ``product → attach_product`` and
+    ``ref → attach_ref`` directly into a ``binding_type='attached'`` create:
+      ``{ product: 'rcf'|'trunk', ref, label, current_routing }``
+    attach_ref convention (must match telephony lookup_attached_mailbox, which is
+    DID-keyed for both): ``ref`` = normalized E.164 DID as stored in the product
+    table.
+
+    Phase 1 = RCF + Trunk only (both DID-keyed end to end: this endpoint, the
+    binding create, and the telephony ``lookup_attached_mailbox`` all agree on
+    ``attach_ref = DID``). UCaaS-extension attach is DEFERRED to Phase 2: the
+    ucaas.lua no-answer fallback keys the attached lookup by the inbound DID, not
+    the extension id, and the UCaaS-DID→extension mapping isn't surfaced here —
+    shipping it now would be a non-functional path. Reconcile the lua keying +
+    DID mapping before re-adding a UCaaS branch.
+    """
+    target = customer_filter if customer_filter is not None else customer_id
+    if target is None:
+        raise HTTPException(status_code=400, detail="customer_id is required")
+
+    rows = await db.fetch_all(
+        """
+        SELECT 'rcf'::text AS product,
+               r.did AS ref,
+               COALESCE(r.name, r.did) AS label,
+               r.forward_to AS current_routing
+          FROM rcf_numbers r
+         WHERE r.customer_id = $1
+
+        UNION ALL
+
+        SELECT 'trunk'::text AS product,
+               td.did AS ref,
+               COALESCE(t.trunk_name, td.did) AS label,
+               t.trunk_name AS current_routing
+          FROM trunk_dids td
+          JOIN sip_trunks t ON t.id = td.trunk_id
+         WHERE t.customer_id = $1
+
+        ORDER BY product, ref
+        """,
+        target,
+    )
+    return [dict(r) for r in rows]
 
 
 # ===========================================================================

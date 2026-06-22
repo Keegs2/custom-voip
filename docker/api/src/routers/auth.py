@@ -85,7 +85,8 @@ async def login(body: LoginRequest):
     """Authenticate a user and return a JWT access token."""
     row = await db.fetch_one(
         """SELECT u.id, u.email, u.password_hash, u.role, u.customer_id, u.name, u.status,
-                  c.name AS customer_name, c.account_type, c.ucaas_enabled
+                  c.name AS customer_name, c.account_type, c.ucaas_enabled,
+                  c.voicemail_enabled
            FROM users u
            LEFT JOIN customers c ON u.customer_id = c.id
            WHERE u.email = $1""",
@@ -135,6 +136,7 @@ async def login(body: LoginRequest):
             "customer_name": user.get("customer_name"),
             "account_type": account_type,
             "ucaas_enabled": bool(user.get("ucaas_enabled")),
+            "voicemail_enabled": bool(user.get("voicemail_enabled")),
             "has_ucaas": has_ucaas,
         },
     }
@@ -150,7 +152,7 @@ async def get_me(user: dict = Depends(get_current_user)):
     row = await db.fetch_one(
         """SELECT u.id, u.email, u.name, u.role, u.customer_id, u.status,
                   u.created_at, u.last_login, c.name AS customer_name,
-                  c.account_type, c.ucaas_enabled
+                  c.account_type, c.ucaas_enabled, c.voicemail_enabled
            FROM users u
            LEFT JOIN customers c ON u.customer_id = c.id
            WHERE u.id = $1""",
@@ -165,6 +167,9 @@ async def get_me(user: dict = Depends(get_current_user)):
         account_type == "ucaas"
         or (account_type in ("api", "trunk", "hybrid") and result.get("ucaas_enabled"))
     )
+    # Voicemail is a standalone entitlement (any account type). Default false
+    # when the user has no customer. Mirrors how ucaas_enabled is surfaced.
+    result["voicemail_enabled"] = bool(result.get("voicemail_enabled"))
     return result
 
 
@@ -218,7 +223,7 @@ async def update_me(body: UpdateMeRequest, user: dict = Depends(get_current_user
     result = dict(updated)
     if result.get("customer_id"):
         cust = await db.fetch_one(
-            "SELECT name, account_type, ucaas_enabled FROM customers WHERE id = $1",
+            "SELECT name, account_type, ucaas_enabled, voicemail_enabled FROM customers WHERE id = $1",
             result["customer_id"],
         )
         if cust:
@@ -226,6 +231,7 @@ async def update_me(body: UpdateMeRequest, user: dict = Depends(get_current_user
             account_type = cust["account_type"]
             result["account_type"] = account_type
             result["ucaas_enabled"] = cust["ucaas_enabled"]
+            result["voicemail_enabled"] = bool(cust.get("voicemail_enabled"))
             result["has_ucaas"] = (
                 account_type == "ucaas"
                 or (account_type in ("api", "trunk", "hybrid") and bool(cust.get("ucaas_enabled")))

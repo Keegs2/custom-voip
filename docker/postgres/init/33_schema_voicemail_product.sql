@@ -31,6 +31,19 @@ BEGIN;
 ALTER TABLE customers ADD COLUMN IF NOT EXISTS voicemail_enabled BOOLEAN DEFAULT false;
 
 -- ---------------------------------------------------------------------------
+-- did_inventory.product_type — allow 'voicemail' so the self-serve dedicated-DID
+-- claim (POST /voicemail/mailboxes/{id}/bindings) can mark an AVAILABLE inventory
+-- DID assigned to a customer for a voicemail mailbox, mirroring number_inventory
+-- assign semantics (status='assigned', product_type set, product_ref_id = the
+-- voicemail_box_bindings row id). 17_did_inventory.sql shipped the CHECK without
+-- 'voicemail'. Idempotent: drop-and-recreate the named constraint. NULL still
+-- passes (unassigned DIDs).
+-- ---------------------------------------------------------------------------
+ALTER TABLE did_inventory DROP CONSTRAINT IF EXISTS did_inventory_product_type_check;
+ALTER TABLE did_inventory ADD CONSTRAINT did_inventory_product_type_check
+    CHECK (product_type IN ('rcf', 'trunk', 'api', 'ucaas', 'voicemail'));
+
+-- ---------------------------------------------------------------------------
 -- §1.1 voicemail_boxes — the mailbox spine
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS voicemail_boxes (
