@@ -8,10 +8,10 @@ import { PresenceIndicator } from '../softphone/PresenceIndicator';
 import type { PresenceStatus } from '../../types/softphone';
 import { ApiError } from '../../api/client';
 import {
-  IconRCF, IconTrunk, IconAPI, IconIVR, IconDocs,
+  IconRCF, IconTrunk, IconAPI, IconDocs,
   IconAdmin, IconSignal, IconTroubleshoot, IconVoicemail,
 } from '../icons/ProductIcons';
-import { Package, Shield, ChevronDown, Clock, Eye, EyeOff, Server, BookOpen, FolderOpen, MessageCircle, RadioTower, Mic, ListOrdered, Waves, Video, Webhook, Workflow } from 'lucide-react';
+import { Package, Shield, ChevronDown, Eye, EyeOff, Server, BookOpen, FolderOpen, MessageCircle, RadioTower, Mic, ListOrdered, Waves, Video, Webhook, Workflow } from 'lucide-react';
 import { AccessRequestForm } from './AccessRequestForm';
 
 /* ─── Types ───────────────────────────────────────────────── */
@@ -93,19 +93,6 @@ const PRESENCE_OPTIONS: { value: PresenceStatus; label: string; color: string }[
 const docNavItems: NavItemDef[] = [
   { label: 'RCF Guide',     icon: <IconRCF size={18} />,  to: '/docs/rcf', color: '#4ade80' },
   { label: 'API Reference', icon: <IconDocs size={18} />, to: '/docs/api', color: '#3b82f6' },
-];
-
-/* ─── Coming Soon item definitions ───────────────────────── */
-
-interface ComingSoonItemDef {
-  label: string;
-  icon: React.ReactNode;
-}
-
-const COMING_SOON_ITEMS: ComingSoonItemDef[] = [
-  { label: 'SIP Trunking', icon: <IconTrunk size={18} /> },
-  { label: 'API Calling',  icon: <IconAPI size={18} /> },
-  { label: 'IVR Builder',  icon: <IconIVR size={18} /> },
 ];
 
 /* ─── localStorage helpers ────────────────────────────────── */
@@ -309,72 +296,6 @@ function SidebarLoginForm() {
           )}
         </button>
       </form>
-    </div>
-  );
-}
-
-/* ─── ComingSoonNavItem ───────────────────────────────────── */
-
-function ComingSoonNavItem({ item }: { item: ComingSoonItemDef }) {
-  return (
-    <div
-      title="Coming Soon"
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 8,
-        padding: '5px 10px 5px 14px',
-        borderRadius: 10,
-        fontSize: '0.76rem',
-        fontWeight: 500,
-        letterSpacing: '-0.01em',
-        color: '#64748b',
-        opacity: 0.45,
-        cursor: 'default',
-        userSelect: 'none',
-      }}
-    >
-      {/* Icon swatch */}
-      <span
-        style={{
-          width: 24,
-          height: 24,
-          borderRadius: 6,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          flexShrink: 0,
-          background: 'rgba(255,255,255,0.04)',
-          border: '1px solid rgba(255,255,255,0.06)',
-          color: '#475569',
-        }}
-      >
-        {item.icon}
-      </span>
-
-      {/* Label */}
-      <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-        {item.label}
-      </span>
-
-      {/* "Soon" badge */}
-      <span
-        style={{
-          fontSize: '0.55rem',
-          fontWeight: 700,
-          letterSpacing: '0.06em',
-          textTransform: 'uppercase',
-          color: '#818cf8',
-          background: 'rgba(99,102,241,0.15)',
-          border: '1px solid rgba(99,102,241,0.25)',
-          borderRadius: 999,
-          padding: '2px 7px',
-          lineHeight: 1.6,
-          flexShrink: 0,
-        }}
-      >
-        Soon
-      </span>
     </div>
   );
 }
@@ -644,7 +565,6 @@ export function Sidebar() {
       products:          stored.products          ?? true,
       communications:    stored.communications    ?? true,
       voiceOps:          stored.voiceOps          ?? true,
-      comingSoon:        stored.comingSoon        ?? false,
       documentation:     stored.documentation     ?? true,
       administration:    stored.administration    ?? false,
     };
@@ -1047,20 +967,6 @@ export function Sidebar() {
                 </CollapsibleGroup>
               </>
             )}
-
-            {/* ── GROUP 2: Coming Soon ──────────────────────── */}
-            <div style={{ height: 6 }} />
-            <CollapsibleGroup
-              id="comingSoon"
-              label="Coming Soon"
-              icon={<Clock size={11} strokeWidth={2.5} />}
-              isOpen={groupOpen.comingSoon}
-              onToggle={toggleGroup}
-            >
-              {COMING_SOON_ITEMS.map((item) => (
-                <ComingSoonNavItem key={item.label} item={item} />
-              ))}
-            </CollapsibleGroup>
 
             {/* ── GROUP 3: Documentation ───────────────────── */}
             <div style={{ height: 6 }} />
