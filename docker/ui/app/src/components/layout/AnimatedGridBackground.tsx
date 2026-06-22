@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 
 /**
- * AnimatedGridBackground — Keystone edition
+ * AnimatedGridBackground — Shale edition
  *
  * Animated grid background adapted from Zentra's component with these changes:
  * - All orange colors replaced with blue (#3b82f6, #60a5fa)
@@ -13,7 +13,7 @@ import { useMemo } from 'react';
  *   travel inward, fade out at 100%
  * - Grid opacity default 0.06 (subtler)
  * - Grid line color: rgba(99, 130, 180, opacity) — blue-tinted
- * - Vignette uses Keystone's #0f1117 background color
+ * - Vignette uses Shale's #0f1117 background color
  */
 
 interface EnergyDot {

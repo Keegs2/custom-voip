@@ -921,8 +921,8 @@ export function Sidebar() {
           />
           <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <img
-              src="/keystone_logo.png"
-              alt="Granite Keystone"
+              src="/shale_logo.png"
+              alt="Granite Shale"
               style={{
                 height: 40,
                 width: 'auto',

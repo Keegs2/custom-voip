@@ -626,8 +626,8 @@ export function PageHeaderCard({ eyebrow, title, subtitle, accent }: PageHeaderC
             }}
           >
             <img
-              src="/keystone_logo.png"
-              alt="Keystone"
+              src="/shale_logo.png"
+              alt="Shale"
               style={{
                 width: 36,
                 height: 36,

@@ -1705,7 +1705,7 @@ export function DIDSearchPage() {
             </div>
           </div>
 
-          {/* Keystone branding strip */}
+          {/* Shale branding strip */}
           <div
             style={{
               display: 'flex',
@@ -1732,7 +1732,7 @@ export function DIDSearchPage() {
                 opacity: 0.65,
               }}
             >
-              Granite Keystone · Telecom Number Management
+              Granite Shale · Telecom Number Management
             </span>
             <div
               style={{

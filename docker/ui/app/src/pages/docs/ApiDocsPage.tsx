@@ -1,5 +1,5 @@
 /**
- * API Reference — comprehensive developer documentation for the Granite Keystone
+ * API Reference — comprehensive developer documentation for the Granite Shale
  * REST API. Covers authentication, RCF endpoints, CDR/usage, number inventory,
  * and integration patterns.
  */
@@ -70,7 +70,7 @@ function ApiGettingStartedSection() {
       subtitle="Authentication, base URL, quick example, rate limits, and error codes."
     >
       <P>
-        The Keystone API is RESTful and JSON-based. Every request to a protected endpoint must include
+        The Shale API is RESTful and JSON-based. Every request to a protected endpoint must include
         an <IC>Authorization</IC> header with a valid JWT bearer token. Tokens are obtained by POSTing
         credentials to the login endpoint and are valid for <strong style={{ color: C.text }}>8 hours</strong>.
       </P>
@@ -81,7 +81,7 @@ function ApiGettingStartedSection() {
 
       <ParamTable
         params={[
-          { name: 'email',    type: 'string', required: true,  description: 'The email address associated with your Keystone account.' },
+          { name: 'email',    type: 'string', required: true,  description: 'The email address associated with your Shale account.' },
           { name: 'password', type: 'string', required: true,  description: 'Your account password.' },
         ]}
       />
@@ -655,7 +655,7 @@ function ApiIntegrationSection() {
       </Callout>
 
       <P>
-        Webhooks allow Keystone to push call event data to your systems in real time rather than
+        Webhooks allow Shale to push call event data to your systems in real time rather than
         requiring your application to poll the CDR API. When enabled, the platform will POST to your
         registered HTTPS endpoint with a JSON payload for each of the following events:
       </P>
@@ -896,7 +896,7 @@ export function ApiDocsPage() {
       <PageHeaderCard
         eyebrow="Developer Reference"
         title="API Reference"
-        subtitle="RESTful API documentation for programmatic access to the Granite Keystone platform"
+        subtitle="RESTful API documentation for programmatic access to the Granite Shale platform"
         accent={BLUE}
       />
 

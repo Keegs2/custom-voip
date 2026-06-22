@@ -809,7 +809,7 @@ export function AccessRequestForm() {
               userSelect: 'none',
             }}
           >
-            New to Granite Keystone?
+            New to Granite Shale?
           </span>
 
           <button

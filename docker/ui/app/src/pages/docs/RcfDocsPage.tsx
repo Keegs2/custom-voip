@@ -1,5 +1,5 @@
 /**
- * RCF User Guide — concise customer-facing documentation for Granite Keystone RCF.
+ * RCF User Guide — concise customer-facing documentation for Granite Shale RCF.
  */
 
 import { Phone, HelpCircle, LogIn } from 'lucide-react';
@@ -178,7 +178,7 @@ export function RcfDocsPage() {
     <div style={{ paddingTop: 20 }}>
       <PageHeaderCard
         eyebrow="Customer Guide"
-        title="Granite Keystone RCF"
+        title="Granite Shale RCF"
         subtitle="Manage your Remote Call Forwarding numbers"
         accent={GREEN}
       />

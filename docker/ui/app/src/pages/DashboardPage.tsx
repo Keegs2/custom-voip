@@ -551,16 +551,16 @@ export function DashboardPage() {
             maxWidth: 760,
           }}
         >
-          {/* Keystone branded image with scan-line overlay */}
+          {/* Shale branded image with scan-line overlay */}
           {/*
             Two-layer structure:
-            - .dash-keystone-hero-wrap  → outer; handles hover scale via CSS transition
-            - img.dash-keystone-hero    → inner; owns glow + float animation, never paused
+            - .dash-shale-hero-wrap  → outer; handles hover scale via CSS transition
+            - img.dash-shale-hero    → inner; owns glow + float animation, never paused
             Keeping them on separate elements prevents the animation transform and the
             hover scale transform from fighting on the same CSS property.
           */}
           <div
-            className="dash-keystone-hero-wrap"
+            className="dash-shale-hero-wrap"
             style={{
               position: 'relative',
               marginBottom: 32,
@@ -569,9 +569,9 @@ export function DashboardPage() {
             }}
           >
             <img
-              src="/keystone_image.png"
-              alt="Granite Keystone — Distributed Voice Infrastructure"
-              className="dash-keystone-hero"
+              src="/shale_image.png"
+              alt="Granite Shale — Distributed Voice Infrastructure"
+              className="dash-shale-hero"
               style={{
                 width: 320,
                 height: 'auto',

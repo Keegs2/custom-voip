@@ -701,7 +701,7 @@ function RcfPageHeader({ title, subtitle, totalNumbers, activeCount, disabledCou
       />
 
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 24 }}>
-        {/* Keystone logo with glow */}
+        {/* Shale logo with glow */}
         <div style={{ flexShrink: 0, position: 'relative' }}>
           <div
             style={{
@@ -717,8 +717,8 @@ function RcfPageHeader({ title, subtitle, totalNumbers, activeCount, disabledCou
             }}
           >
             <img
-              src="/keystone_logo.png"
-              alt="Keystone"
+              src="/shale_logo.png"
+              alt="Shale"
               style={{
                 width: 36,
                 height: 36,
@@ -865,8 +865,8 @@ function EmptyState() {
         }}
       >
         <img
-          src="/keystone_logo.png"
-          alt="Keystone"
+          src="/shale_logo.png"
+          alt="Shale"
           style={{
             width: 44,
             height: 44,

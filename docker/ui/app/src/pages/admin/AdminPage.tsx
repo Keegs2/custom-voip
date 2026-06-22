@@ -62,7 +62,7 @@ export function AdminPage() {
         />
 
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 24, position: 'relative' }}>
-          {/* Keystone logo with glow */}
+          {/* Shale logo with glow */}
           <div style={{ flexShrink: 0 }}>
             <div
               style={{
@@ -78,8 +78,8 @@ export function AdminPage() {
               }}
             >
               <img
-                src="/keystone_logo.png"
-                alt="Keystone"
+                src="/shale_logo.png"
+                alt="Shale"
                 style={{
                   width: 40,
                   height: 40,

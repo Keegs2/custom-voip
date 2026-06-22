@@ -3,14 +3,14 @@ import { type CSSProperties, useMemo } from 'react';
 /**
  * HaArchitectureViz
  *
- * SVG-based animated diagram visualising the Granite Keystone HA
+ * SVG-based animated diagram visualising the Granite Shale HA
  * call-routing architecture in a horizontal left-to-right flow.
  *
  * Architecture (each location has two discrete SBC nodes):
  *
- *                                    ┌─ Granite East: [SBC-1][SBC-2] → [Keystone] ──┐
- *  [Inbound] → [Key Distributor] ────┼─ Granite Central:[SBC-1][SBC-2]→ [Keystone] ──┼→ [Dallas]
- *    Trunk      Primary (active)     └─ Granite West:  [SBC-1][SBC-2] → [Keystone] ──┤→ [LA]
+ *                                    ┌─ Granite East: [SBC-1][SBC-2] → [Shale] ──┐
+ *  [Inbound] → [Key Distributor] ────┼─ Granite Central:[SBC-1][SBC-2]→ [Shale] ──┼→ [Dallas]
+ *    Trunk      Primary (active)     └─ Granite West:  [SBC-1][SBC-2] → [Shale] ──┤→ [LA]
  *               Hot Backup (standby)                                              └→ [Backup]
  *
  * Failover simulation — a 50-second CSS keyframe cycle drives five scenarios:
@@ -45,7 +45,7 @@ const COL = {
   locOut:  710,   // right edge of location containers — ksX(660) + 50
   sbc1X:   468,   // SBC-1 node centre (upper SBC within location)
   sbc2X:   468,   // SBC-2 node centre — same X as SBC-1, stacked vertically
-  ksX:     660,   // Keystone engine node centre (right of SBC column)
+  ksX:     660,   // Shale engine node centre (right of SBC column)
   termX:   1120,  // Stage 4: termination trunk nodes (near right edge of 1200px viewBox)
 } as const;
 
@@ -206,7 +206,7 @@ const PATH_BKD_C2: PathDef = makeBackupKdToSbc(1, 2, 'bkd-c2');
 const PATH_BKD_W1: PathDef = makeBackupKdToSbc(2, 1, 'bkd-w1');
 const PATH_BKD_W2: PathDef = makeBackupKdToSbc(2, 2, 'bkd-w2');
 
-// Stage 3 internal: SBC → Keystone (within each location)
+// Stage 3 internal: SBC → Shale (within each location)
 function makeSbcToKs(
   locIdx: number,
   sbcNum: 1 | 2,
@@ -233,7 +233,7 @@ const PATH_SBC2_KS_C: PathDef  = makeSbcToKs(1, 2, 'sbc2-central', 's2ks-c');
 const PATH_SBC1_KS_W: PathDef  = makeSbcToKs(2, 1, 'west-loc',     's1ks-w');
 const PATH_SBC2_KS_W: PathDef  = makeSbcToKs(2, 2, 'west-loc',     's2ks-w');
 
-// Stage 3→4: each location Keystone → each termination trunk (9 paths)
+// Stage 3→4: each location Shale → each termination trunk (9 paths)
 function makeTermPath(
   locIdx: number,
   termIdx: number,
@@ -336,7 +336,7 @@ const ALL_PACKETS: PacketConfig[] = [
   ...makePackets('nlb-w1', 3, 0.5, 'west-loc',      false, 0.15, 13, false),
   ...makePackets('nlb-w2', 3, 0.5, 'west-loc',      false, 0.35, 13, false),
 
-  // ── Stage 3: SBC → Keystone ─────────────────────────────────────────────
+  // ── Stage 3: SBC → Shale ─────────────────────────────────────────────
   ...makePackets('s1ks-e', 3, 0.35, 'sbc1-east',    false, 0.05, 14, true),
   ...makePackets('s2ks-e', 2, 0.35, 'normal',        false, 0.10, 14, true),
 
@@ -346,7 +346,7 @@ const ALL_PACKETS: PacketConfig[] = [
   ...makePackets('s1ks-w', 3, 0.35, 'west-loc',      false, 0.03, 14, true),
   ...makePackets('s2ks-w', 2, 0.35, 'west-loc',      false, 0.13, 14, true),
 
-  // ── Stage 4: Keystone → Termination ─────────────────────────────────────
+  // ── Stage 4: Shale → Termination ─────────────────────────────────────
   ...makePackets('e-t0', 2, 0.5, 'term-dallas', true,  0.00, 14, true),
   ...makePackets('e-t1', 2, 0.5, 'normal',      true,  0.08, 14, true),
   ...makePackets('e-t2', 2, 0.5, 'normal',      true,  0.20, 14, true),
@@ -869,7 +869,7 @@ export function HaArchitectureViz() {
         height="auto"
         preserveAspectRatio="xMidYMid meet"
         style={{ display: 'block' }}
-        aria-label="Keystone: inbound trunks route through a Primary Key Distributor (GCP Global Load Balancer) — with a Hot Backup Key Distributor on standby — to three Granite locations, each with dual Signal Keys and a Keystone Engine, terminating via Dallas, LA, and Backup PoP trunks. A 50-second animation cycles through five failover scenarios including Primary Key Distributor failure where the Hot Backup automatically takes over."
+        aria-label="Shale: inbound trunks route through a Primary Key Distributor (GCP Global Load Balancer) — with a Hot Backup Key Distributor on standby — to three Granite locations, each with dual Signal Keys and a Shale Engine, terminating via Dallas, LA, and Backup PoP trunks. A 50-second animation cycles through five failover scenarios including Primary Key Distributor failure where the Hot Backup automatically takes over."
       >
         <defs>
           {/* Grid background pattern */}
@@ -960,7 +960,7 @@ export function HaArchitectureViz() {
             </feMerge>
           </filter>
 
-          {/* Keystone / KD logo glow — blue halo */}
+          {/* Shale / KD logo glow — blue halo */}
           <filter id={`${uid}-imgf`} x="-60%" y="-60%" width="220%" height="220%">
             <feGaussianBlur in="SourceGraphic" stdDeviation="2.8" result="blur" />
             <feColorMatrix in="blur" type="matrix"
@@ -1028,7 +1028,7 @@ export function HaArchitectureViz() {
           <path d={PATH_BKD_W1.d} stroke="rgba(59,130,246,0.07)" strokeWidth="0.7" strokeDasharray="4 3" />
           <path d={PATH_BKD_W2.d} stroke="rgba(59,130,246,0.07)" strokeWidth="0.7" strokeDasharray="4 3" />
 
-          {/* Stage 3 internal — SBC to Keystone (dashed) */}
+          {/* Stage 3 internal — SBC to Shale (dashed) */}
           <path d={PATH_SBC1_KS_E.d} stroke="rgba(59,130,246,0.14)" strokeWidth="0.75" strokeDasharray="3 2.5" />
           <path d={PATH_SBC2_KS_E.d} stroke="rgba(59,130,246,0.14)" strokeWidth="0.75" strokeDasharray="3 2.5" />
           <path d={PATH_SBC1_KS_C.d} stroke="rgba(59,130,246,0.14)" strokeWidth="0.75" strokeDasharray="3 2.5" />
@@ -1047,7 +1047,7 @@ export function HaArchitectureViz() {
           Packets are split into two animated wrapper groups:
           - Primary KD layer: inbound + primary-fan packets — hides at 90%
           - Backup KD layer: backup-fan packets — appears at 90%
-          - Unaffected packets (SBC→Keystone, Keystone→Termination) are
+          - Unaffected packets (SBC→Shale, Shale→Termination) are
             outside both wrappers and run on their own per-group animations.
 
           We identify primary-layer packets as those using paths:
@@ -1379,7 +1379,7 @@ function LocationGroup({
         nodeClass={sbc2CentralClass ?? sbc2Class}
       />
 
-      {/* Keystone engine — right side of the container */}
+      {/* Shale engine — right side of the container */}
       <KsNode uid={uid} cx={COL.ksX} cy={cy} />
     </g>
   );
@@ -1420,14 +1420,14 @@ function SbcNode({
   );
 }
 
-/* ── Keystone Media Engine — logo image node ── */
+/* ── Shale Media Engine — logo image node ── */
 function KsNode({ uid, cx, cy }: { uid: string; cx: number; cy: number }) {
   const S = 28;
   return (
     <g transform={`translate(${cx}, ${cy})`}>
       <circle r="28" fill={`url(#${uid}-ng)`} />
       <image
-        href="/keystone_logo.png"
+        href="/shale_logo.png"
         x={-S / 2}
         y={-S / 2}
         width={S}
@@ -1438,7 +1438,7 @@ function KsNode({ uid, cx, cy }: { uid: string; cx: number; cy: number }) {
       <text y={S / 2 + 10} textAnchor="middle" fontSize="5"
         fontFamily="'SF Mono', 'Fira Code', 'Consolas', monospace"
         letterSpacing="0.06em" fill="rgba(96,165,250,0.45)" fontWeight="600">
-        Keystone Engine
+        Shale Engine
       </text>
     </g>
   );
