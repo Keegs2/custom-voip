@@ -8,7 +8,7 @@ import { PresenceIndicator } from '../softphone/PresenceIndicator';
 import type { PresenceStatus } from '../../types/softphone';
 import { ApiError } from '../../api/client';
 import {
-  IconRCF, IconTrunk, IconAPI, IconDocs,
+  IconRCF, IconTrunk, IconDocs,
   IconAdmin, IconSignal, IconTroubleshoot, IconVoicemail,
 } from '../icons/ProductIcons';
 import { Package, Shield, ChevronDown, Eye, EyeOff, Server, BookOpen, FolderOpen, MessageCircle, RadioTower, Mic, ListOrdered, Waves, Video, Webhook, Workflow, CalendarDays } from 'lucide-react';
@@ -40,10 +40,11 @@ const allProductNavItems: NavItemDef[] = [
   // placeholder shell today, but the route exists; admins/support see it via
   // passesAccountType. RCF fails the accountTypes filter, so it never appears.
   { label: 'SIP Trunks', icon: <IconTrunk size={16} />, to: '/trunks', color: '#fbbf24', accountTypes: ['trunk', 'hybrid'] },
-  // API DIDs — api/hybrid product (API Calling DID inventory).
-  { label: 'API DIDs', icon: <IconAPI size={16} />, to: '/api-dids', color: '#c084fc', accountTypes: ['api', 'hybrid'] },
-  // Programmable-voice config — api/hybrid only (RequireProgrammableVoice guards
-  // the route). RCF fails the accountTypes filter, so it never appears for them.
+  // Programmable Voice — api/hybrid product. The single API-Calling surface: the
+  // customer's programmable numbers + their webhook programming + signing secret.
+  // (The former "API DIDs" item was merged in — same numbers, one page.)
+  // RequireProgrammableVoice guards the route; RCF fails the accountTypes filter,
+  // so it never appears for them.
   { label: 'Programmable Voice', icon: <Webhook size={16} strokeWidth={1.9} />, to: '/programmable-voice', color: '#c084fc', accountTypes: ['api', 'hybrid'] },
   // The legacy /ivr drag-and-drop builder was retired; IVR editing now lives in
   // the admin-only Call Flow Builder (/flows, `flowsItem` below).

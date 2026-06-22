@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Shield, Zap, Globe, Activity, PhoneForwarded, Phone, Code, Webhook, MessageCircle, Voicemail, ArrowRight } from 'lucide-react';
+import { Shield, Zap, Globe, Activity, PhoneForwarded, Phone, Webhook, MessageCircle, Voicemail, ArrowRight } from 'lucide-react';
 import { HaArchitectureViz } from '../components/layout/HaArchitectureViz';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -73,20 +73,12 @@ const PRODUCT_CARDS: ProductCard[] = [
     animDelay: '0.2s',
   },
   {
-    icon: <Code size={20} strokeWidth={1.75} />,
-    title: 'API DIDs',
-    subtitle: 'Inbound DIDs for programmable voice',
-    active: true,
-    route: '/api-dids',
-    animDelay: '0.3s',
-  },
-  {
     icon: <Webhook size={20} strokeWidth={1.75} />,
     title: 'Programmable Voice',
-    subtitle: 'Webhook-driven call control with TwiML',
+    subtitle: 'Program your inbound numbers — webhook-driven call control with TwiML',
     active: true,
     route: '/programmable-voice',
-    animDelay: '0.4s',
+    animDelay: '0.3s',
   },
   {
     icon: <Voicemail size={20} strokeWidth={1.75} />,
@@ -94,7 +86,7 @@ const PRODUCT_CARDS: ProductCard[] = [
     subtitle: 'Visual voicemail with transcription & encrypted storage',
     active: true,
     route: '/voicemail',
-    animDelay: '0.5s',
+    animDelay: '0.4s',
   },
   {
     icon: <MessageCircle size={20} strokeWidth={1.75} />,
@@ -102,7 +94,7 @@ const PRODUCT_CARDS: ProductCard[] = [
     subtitle: 'Chat, meetings, calendar & documents',
     active: true,
     route: '/communications',
-    animDelay: '0.6s',
+    animDelay: '0.5s',
   },
 ];
 

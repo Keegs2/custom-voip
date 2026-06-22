@@ -270,7 +270,7 @@ input[type="time"] {
 .dash-products-grid {
   display: grid;
   gap: 16px;
-  /* 6 product cards → a balanced 3-across grid (2 rows of 3) on desktop. */
+  /* 5 product cards → a balanced 3-across grid (3 + 2) on desktop. */
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 

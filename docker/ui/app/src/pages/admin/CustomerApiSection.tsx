@@ -148,10 +148,10 @@ export function CustomerApiSection({ customerId }: CustomerApiSectionProps) {
         </span>
         <button
           type="button"
-          onClick={(e) => { e.stopPropagation(); navigate('/api-dids'); }}
+          onClick={(e) => { e.stopPropagation(); navigate('/programmable-voice'); }}
           className="text-[0.72rem] text-[#3b82f6] hover:underline"
         >
-          Manage API DIDs
+          Manage Programmable Voice
         </button>
       </div>
 

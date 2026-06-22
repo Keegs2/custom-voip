@@ -1,6 +1,6 @@
 /**
  * Educational empty state shown when the user has no calendar connections.
- * Matches the TrunksPage/ApiDidsPage quality bar: headline, 3 "how it works"
+ * Matches the TrunksPage/ProgrammableVoicePage quality bar: headline, 3 "how it works"
  * steps, a privacy reassurance pill, and the two Connect buttons.
  */
 import { CalendarDays, Lock } from 'lucide-react';

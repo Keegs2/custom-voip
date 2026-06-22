@@ -1,5 +1,5 @@
 import { apiRequest } from './client';
-import type { ApiDid, ApiDidCreate, ApiDidUpdate } from '../types/apiDid';
+import type { ApiDid, ApiDidCreate, ApiDidUpdate, WebhookSecret } from '../types/apiDid';
 
 export interface ApiDidsListParams {
   customer_id?: number;
@@ -51,4 +51,14 @@ export async function updateApiDid(id: number, data: ApiDidUpdate): Promise<ApiD
 
 export async function deleteApiDid(id: number): Promise<void> {
   return apiRequest('DELETE', `/api-dids/${id}`);
+}
+
+/** GET /customers/{id}/webhook-secret — current signing secret (admin-scoped). */
+export async function getWebhookSecret(customerId: number): Promise<WebhookSecret> {
+  return apiRequest('GET', `/customers/${customerId}/webhook-secret`);
+}
+
+/** POST /customers/{id}/webhook-secret/rotate — mint a new signing secret. */
+export async function rotateWebhookSecret(customerId: number): Promise<WebhookSecret> {
+  return apiRequest('POST', `/customers/${customerId}/webhook-secret/rotate`);
 }

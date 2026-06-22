@@ -8,7 +8,7 @@ interface RequireProgrammableVoiceProps {
 
 /**
  * Guards the programmable-voice configuration surface (per-DID voice_url /
- * fallback_url editor + webhook signing-secret panel). Programmable voice is an
+ * status_callback editor + webhook signing-secret panel). Programmable voice is an
  * `api` / `hybrid` product feature, so this guard is intentionally distinct from
  * `RequireUcaas`:
  *
