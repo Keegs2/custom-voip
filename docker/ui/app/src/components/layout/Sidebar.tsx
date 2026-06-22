@@ -1087,18 +1087,24 @@ export function Sidebar() {
                   isOpen={groupOpen.administration}
                   onToggle={toggleGroup}
                 >
-                  {/* ── Customers sub-group (admin only) ──── */}
+                  {/* ── Customer section (admin only) — managing customer
+                      accounts and their call handling. */}
                   {isAdmin && (
                     <>
-                      <SubGroupLabel label="Customers" />
+                      <SubGroupLabel label="Customer" />
                       <SidebarNavItem item={customersItem} onNavigate={closeMobile} small />
-                      <SidebarNavItem item={platformItem}  onNavigate={closeMobile} small />
                       <SidebarNavItem item={flowsItem}     onNavigate={closeMobile} small />
                     </>
                   )}
 
-                  {/* ── Support sub-group (admin + readonly) */}
-                  <SubGroupLabel label="Support" />
+                  {/* ── Platform section — platform/network management +
+                      observability. Platform Management is admin-only; Call Quality
+                      and Troubleshooting are also visible to readonly (support)
+                      users, so the section still renders for them. */}
+                  <SubGroupLabel label="Platform" />
+                  {isAdmin && (
+                    <SidebarNavItem item={platformItem} onNavigate={closeMobile} small />
+                  )}
                   <SidebarNavItem item={callQualityItem} onNavigate={closeMobile} small />
                   <SidebarNavItem item={troubleItem}     onNavigate={closeMobile} small />
                 </CollapsibleGroup>
