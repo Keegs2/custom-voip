@@ -1109,16 +1109,22 @@ function CallDetailPanel({ cdr, onClose }: CallDetailPanelProps) {
           <button
             onClick={onClose}
             aria-label="Close panel"
+            className="modal-close-btn"
             style={{
               background: 'none',
-              border: '1px solid rgba(42,47,69,0.6)',
+              border: 'none',
               borderRadius: 8,
               color: '#718096',
               cursor: 'pointer',
-              padding: '4px 10px',
-              fontSize: '0.8rem',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: 32,
+              height: 32,
+              fontSize: '0.95rem',
+              lineHeight: 1,
               flexShrink: 0,
-              marginTop: 2,
+              marginTop: -2,
             }}
           >
             ✕

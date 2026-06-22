@@ -46,7 +46,7 @@ export function FormField(props: FormFieldProps) {
   const id = (rest as { id?: string }).id ?? label.toLowerCase().replace(/\s+/g, '-');
 
   return (
-    <div className={cn('flex flex-col gap-1.5', fullWidth && 'col-span-2', className)}>
+    <div className={cn('flex flex-col gap-2', fullWidth && 'col-span-2', className)}>
       <label htmlFor={id} className={labelBase}>
         {label}
         {required && <span className="text-red-400 ml-0.5">*</span>}

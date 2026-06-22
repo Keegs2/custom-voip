@@ -187,6 +187,7 @@ function CreateRoomModal({ onClose, onCreate }: CreateRoomModalProps) {
         inset: 0,
         background: 'rgba(0,0,0,0.65)',
         backdropFilter: 'blur(6px)',
+        animation: 'modal-backdrop-in 0.18s ease-out both',
         zIndex: 500,
         display: 'flex',
         alignItems: 'center',
@@ -199,10 +200,11 @@ function CreateRoomModal({ onClose, onCreate }: CreateRoomModalProps) {
         style={{
           width: '100%',
           maxWidth: 480,
-          background: '#131520',
+          background: 'linear-gradient(180deg, #1c1f2b 0%, #15171f 100%)',
           borderRadius: 16,
-          border: '1px solid rgba(255,255,255,0.08)',
-          boxShadow: '0 24px 64px rgba(0,0,0,0.6)',
+          border: '1px solid rgba(59,130,246,0.14)',
+          boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.05), 0 0 0 1px rgba(0,0,0,0.4), 0 24px 60px -12px rgba(0,0,0,0.7), 0 8px 24px -8px rgba(0,0,0,0.5)',
+          animation: 'modal-in 0.18s cubic-bezier(0.16, 1, 0.3, 1) both',
           overflow: 'hidden',
         }}
       >
@@ -244,7 +246,9 @@ function CreateRoomModal({ onClose, onCreate }: CreateRoomModalProps) {
           <button
             type="button"
             onClick={onClose}
-            style={{ background: 'none', border: 'none', color: '#475569', cursor: 'pointer', padding: 4 }}
+            aria-label="Close"
+            className="modal-close-btn"
+            style={{ background: 'none', border: 'none', color: '#718096', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', width: 32, height: 32, borderRadius: 8, flexShrink: 0 }}
           >
             <X size={18} />
           </button>
@@ -432,6 +436,7 @@ function ScheduleModal({ conferenceId, onClose, onCreated }: ScheduleModalProps)
         inset: 0,
         background: 'rgba(0,0,0,0.65)',
         backdropFilter: 'blur(6px)',
+        animation: 'modal-backdrop-in 0.18s ease-out both',
         zIndex: 500,
         display: 'flex',
         alignItems: 'center',
@@ -444,10 +449,11 @@ function ScheduleModal({ conferenceId, onClose, onCreated }: ScheduleModalProps)
         style={{
           width: '100%',
           maxWidth: 440,
-          background: '#131520',
+          background: 'linear-gradient(180deg, #1c1f2b 0%, #15171f 100%)',
           borderRadius: 16,
-          border: '1px solid rgba(255,255,255,0.08)',
-          boxShadow: '0 24px 64px rgba(0,0,0,0.6)',
+          border: '1px solid rgba(59,130,246,0.14)',
+          boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.05), 0 0 0 1px rgba(0,0,0,0.4), 0 24px 60px -12px rgba(0,0,0,0.7), 0 8px 24px -8px rgba(0,0,0,0.5)',
+          animation: 'modal-in 0.18s cubic-bezier(0.16, 1, 0.3, 1) both',
           overflow: 'hidden',
         }}
       >
@@ -466,7 +472,7 @@ function ScheduleModal({ conferenceId, onClose, onCreated }: ScheduleModalProps)
               Schedule Session
             </span>
           </div>
-          <button type="button" onClick={onClose} style={{ background: 'none', border: 'none', color: '#475569', cursor: 'pointer', padding: 4 }}>
+          <button type="button" onClick={onClose} aria-label="Close" className="modal-close-btn" style={{ background: 'none', border: 'none', color: '#718096', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', width: 32, height: 32, borderRadius: 8, flexShrink: 0 }}>
             <X size={16} />
           </button>
         </div>
@@ -605,6 +611,7 @@ function InviteParticipantsModal({
         inset: 0,
         background: 'rgba(0,0,0,0.65)',
         backdropFilter: 'blur(6px)',
+        animation: 'modal-backdrop-in 0.18s ease-out both',
         zIndex: 500,
         display: 'flex',
         alignItems: 'center',
@@ -618,10 +625,11 @@ function InviteParticipantsModal({
           width: '100%',
           maxWidth: 480,
           maxHeight: '80vh',
-          background: '#131520',
+          background: 'linear-gradient(180deg, #1c1f2b 0%, #15171f 100%)',
           borderRadius: 16,
-          border: '1px solid rgba(255,255,255,0.08)',
-          boxShadow: '0 24px 64px rgba(0,0,0,0.6)',
+          border: '1px solid rgba(59,130,246,0.14)',
+          boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.05), 0 0 0 1px rgba(0,0,0,0.4), 0 24px 60px -12px rgba(0,0,0,0.7), 0 8px 24px -8px rgba(0,0,0,0.5)',
+          animation: 'modal-in 0.18s cubic-bezier(0.16, 1, 0.3, 1) both',
           display: 'flex',
           flexDirection: 'column',
           overflow: 'hidden',
@@ -668,7 +676,9 @@ function InviteParticipantsModal({
           <button
             type="button"
             onClick={onClose}
-            style={{ background: 'none', border: 'none', color: '#475569', cursor: 'pointer', padding: 4 }}
+            aria-label="Close"
+            className="modal-close-btn"
+            style={{ background: 'none', border: 'none', color: '#718096', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', width: 32, height: 32, borderRadius: 8, flexShrink: 0 }}
           >
             <X size={18} />
           </button>

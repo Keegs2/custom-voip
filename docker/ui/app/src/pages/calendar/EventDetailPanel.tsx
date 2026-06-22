@@ -151,9 +151,9 @@ export function EventDetailPanel({ event, onClose }: EventDetailPanelProps) {
           right: 0,
           bottom: 0,
           width: 'min(440px, 100vw)',
-          background: '#13151d',
-          borderLeft: '1px solid rgba(42,47,69,0.7)',
-          boxShadow: '-12px 0 40px rgba(0,0,0,0.5)',
+          background: 'linear-gradient(180deg, #1c1f2b 0%, #15171f 100%)',
+          borderLeft: '1px solid rgba(59,130,246,0.14)',
+          boxShadow: '-16px 0 48px rgba(0,0,0,0.55)',
           display: 'flex',
           flexDirection: 'column',
           animation: 'rv-cal-slide-in 0.22s ease',
@@ -221,19 +221,23 @@ export function EventDetailPanel({ event, onClose }: EventDetailPanelProps) {
             aria-label="Close"
             style={{
               flexShrink: 0,
-              width: 28,
-              height: 28,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: 32,
+              height: 32,
               borderRadius: 8,
-              border: '1px solid rgba(42,47,69,0.6)',
+              border: 'none',
               background: 'transparent',
-              color: '#64748b',
+              color: '#718096',
               cursor: 'pointer',
-              fontSize: '1rem',
+              fontSize: '0.95rem',
               lineHeight: 1,
               padding: 0,
+              transition: 'background-color 0.15s, color 0.15s',
             }}
-            onMouseEnter={(e) => { e.currentTarget.style.color = '#e2e8f0'; }}
-            onMouseLeave={(e) => { e.currentTarget.style.color = '#64748b'; }}
+            onMouseEnter={(e) => { e.currentTarget.style.color = '#e2e8f0'; e.currentTarget.style.background = 'rgba(255,255,255,0.06)'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.color = '#718096'; e.currentTarget.style.background = 'transparent'; }}
           >
             ✕
           </button>

@@ -646,31 +646,34 @@ function EditDescModal({ doc, onSave, onClose }: EditDescModalProps) {
 
   return (
     <div
+      className="animate-modal-backdrop"
       style={{
         position: 'fixed', inset: 0, zIndex: 500,
-        background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(4px)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
       }}
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
       <div
+        className="animate-modal-panel"
         style={{
-          background: '#1a1f2e',
-          border: '1px solid rgba(255,255,255,0.10)',
+          background: 'linear-gradient(180deg, #1c1f2b 0%, #15171f 100%)',
+          border: '1px solid rgba(59,130,246,0.14)',
           borderRadius: 16,
           padding: 28,
           width: 460,
           maxWidth: 'calc(100vw - 40px)',
-          boxShadow: '0 20px 60px rgba(0,0,0,0.6)',
+          boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.05), 0 0 0 1px rgba(0,0,0,0.4), 0 24px 60px -12px rgba(0,0,0,0.7), 0 8px 24px -8px rgba(0,0,0,0.5)',
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
-          <div style={{ fontSize: '1rem', fontWeight: 700, color: '#f1f5f9', letterSpacing: '-0.02em' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 22 }}>
+          <div style={{ fontSize: '1.125rem', fontWeight: 700, color: '#f1f5f9', letterSpacing: '-0.01em' }}>
             Edit document
           </div>
           <button
-            type="button" onClick={onClose}
-            style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#475569', display: 'flex' }}
+            type="button" onClick={onClose} aria-label="Close"
+            className="modal-close-btn"
+            style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#718096', display: 'flex', alignItems: 'center', justifyContent: 'center', width: 32, height: 32, borderRadius: 8 }}
           >
             <X size={18} strokeWidth={2} />
           </button>
@@ -774,30 +777,32 @@ function NewFolderModal({ parentId, folders, onSave, onClose }: NewFolderModalPr
 
   return (
     <div
+      className="animate-modal-backdrop"
       style={{
         position: 'fixed', inset: 0, zIndex: 500,
-        background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(4px)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
       }}
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
       <div
+        className="animate-modal-panel"
         style={{
-          background: '#1a1f2e',
-          border: '1px solid rgba(255,255,255,0.10)',
+          background: 'linear-gradient(180deg, #1c1f2b 0%, #15171f 100%)',
+          border: '1px solid rgba(59,130,246,0.14)',
           borderRadius: 16,
           padding: 28,
           width: 400,
           maxWidth: 'calc(100vw - 40px)',
-          boxShadow: '0 20px 60px rgba(0,0,0,0.6)',
+          boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.05), 0 0 0 1px rgba(0,0,0,0.4), 0 24px 60px -12px rgba(0,0,0,0.7), 0 8px 24px -8px rgba(0,0,0,0.5)',
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: '1rem', fontWeight: 700, color: '#f1f5f9', letterSpacing: '-0.02em' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 22 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: '1.125rem', fontWeight: 700, color: '#f1f5f9', letterSpacing: '-0.01em' }}>
             <FolderPlus size={18} color="#60a5fa" strokeWidth={1.8} />
             New Folder
           </div>
-          <button type="button" onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#475569', display: 'flex' }}>
+          <button type="button" onClick={onClose} aria-label="Close" className="modal-close-btn" style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#718096', display: 'flex', alignItems: 'center', justifyContent: 'center', width: 32, height: 32, borderRadius: 8 }}>
             <X size={18} strokeWidth={2} />
           </button>
         </div>

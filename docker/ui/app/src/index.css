@@ -123,6 +123,48 @@ body {
   color: #e2e8f0;
 }
 
+/* ─── Modal entrance animations ───────────────────────────── */
+@keyframes modal-backdrop-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes modal-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.animate-modal-backdrop {
+  animation: modal-backdrop-in 0.18s ease-out both;
+}
+
+.animate-modal-panel {
+  animation: modal-in 0.18s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-modal-backdrop,
+  .animate-modal-panel {
+    animation: none;
+  }
+}
+
+/* Shared close-button hover for custom (inline-styled) modal/drawer headers */
+.modal-close-btn {
+  transition: background-color 0.15s, color 0.15s;
+}
+
+.modal-close-btn:hover {
+  background: rgba(255, 255, 255, 0.06) !important;
+  color: #e2e8f0 !important;
+}
+
 /* ─── Form control base styles ───────────────────────────── */
 .form-control {
   font-size: 0.875rem;
