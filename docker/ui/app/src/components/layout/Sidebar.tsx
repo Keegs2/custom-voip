@@ -88,7 +88,15 @@ const allCommsNavItems: NavItemDef[] = [
  * gating as the comms surfaces (hasUcaas + accountTypes ['ucaas','hybrid']); carries
  * the unread-voicemail badge. NOTE: today voicemail rides on the UCaaS extension
  * model (gated by a provisioned extension); a truly separate billing SKU is a future
- * backend item. */
+ * backend item.
+ *
+ * FOLLOW-UP (Visual Voicemail standalone product): voicemail is now its own
+ * encrypted product with mailbox-centric provisioning. To fully un-gate it from
+ * UCaaS, surface `customers.voicemail_enabled` on the `/auth/me` user payload
+ * (User.voicemail_enabled) and gate `voicemailItem` on that entitlement instead
+ * of `hasUcaas`. Until that flag is on the auth payload we KEEP the current
+ * gating below (hasUcaas + provisioned extension OR admin) so visibility is
+ * unchanged. */
 const voicemailItem: NavItemDef = {
   label: 'Voicemail', icon: <IconVoicemail size={15} />, to: '/voicemail', color: '#818cf8', accountTypes: COMMS_ACCOUNT_TYPES,
 };

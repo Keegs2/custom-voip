@@ -59,15 +59,13 @@ export interface WebRTCCredentials {
   ice_servers: RTCIceServer[];
 }
 
-export interface VoicemailMessage {
-  id: number;
-  caller_id: string;
-  caller_name: string;
-  duration_ms: number;
-  is_read: boolean;
-  created_at: string;
-  audio_url?: string;
-}
+/**
+ * `VoicemailMessage` now lives in `types/voicemail.ts` (promoted out of here for
+ * the standalone Visual Voicemail product). Re-exported for back-compat so
+ * existing imports (`SoftphoneContext`, the sidebar unread badge, etc.) keep
+ * working unchanged.
+ */
+export type { VoicemailMessage } from './voicemail';
 
 export interface CallHistoryEntry {
   uuid: string;

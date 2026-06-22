@@ -1,79 +1,62 @@
-import { useEffect, useState, useCallback, useRef } from 'react';
-import { listVoicemails, deleteVoicemail, markVoicemailRead } from '../api/voicemail';
-import { useSoftphone } from '../contexts/SoftphoneContext';
+import { useMemo, useState } from 'react';
+import {
+  useQuery,
+  useMutation,
+  useQueryClient,
+  keepPreviousData,
+} from '@tanstack/react-query';
+import { Inbox, Mail, Star, Trash2, Plus, Phone, Search, ChevronDown, Forward } from 'lucide-react';
 import { Sidebar } from '../components/layout/Sidebar';
 import { SoftphoneWidget } from '../components/softphone/SoftphoneWidget';
-import type { VoicemailMessage } from '../types/softphone';
+import { AdminCustomerSelector } from '../components/AdminCustomerSelector';
+import { useSoftphone } from '../contexts/SoftphoneContext';
+import { useAuth } from '../contexts/AuthContext';
+import { useToast } from '../components/ui/Toast';
+import { fmt } from '../utils/format';
+import {
+  listMailboxes,
+  getMailboxMessageCount,
+  listMailboxMessages,
+  getMessage,
+  markMessageRead,
+  markMessageSaved,
+  deleteMessage,
+} from '../api/voicemail';
+import type { VoicemailMailbox, VoicemailMessage, Transcript } from '../types/voicemail';
+import { VoicemailPlayer } from './voicemail/player/VoicemailPlayer';
+import { EncryptionBadge } from './voicemail/shared/EncryptionBadge';
+import { VoicemailSetupWizard } from './voicemail/setup/VoicemailSetupWizard';
 
-/* ─── Keyframe injection ─────────────────────────────────── */
+const ACCENT = '#818cf8';
 
 const GLOBAL_STYLES = `
   @keyframes spin { to { transform: rotate(360deg); } }
-  @keyframes vmFadeIn {
-    from { opacity: 0; transform: translateY(5px); }
-    to   { opacity: 1; transform: translateY(0); }
-  }
+  @keyframes vmFadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
 `;
 
-/* ─── Filter type ────────────────────────────────────────── */
+/* ─── Folders ─────────────────────────────────────────────── */
 
-type FilterKey = 'all' | 'unread';
+type Folder = 'inbox' | 'unread' | 'saved' | 'trash';
 
-/* ─── Icons ──────────────────────────────────────────────── */
+const FOLDERS: { id: Folder; label: string; icon: React.ReactNode }[] = [
+  { id: 'inbox', label: 'Inbox', icon: <Inbox size={15} /> },
+  { id: 'unread', label: 'Unread', icon: <Mail size={15} /> },
+  { id: 'saved', label: 'Saved', icon: <Star size={15} /> },
+  { id: 'trash', label: 'Trash', icon: <Trash2 size={15} /> },
+];
 
-const IconVoicemail = ({ size = 22 }: { size?: number }) => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} style={{ width: size, height: size }}>
-    <path d="M5.25 8.25a3 3 0 1 0 6 0 3 3 0 0 0-6 0ZM12.75 8.25a3 3 0 1 0 6 0 3 3 0 0 0-6 0Z" strokeLinecap="round" strokeLinejoin="round" />
-    <path d="M2.25 14.25h7.5M14.25 14.25h7.5M5.25 14.25a3.75 3.75 0 0 0 0 0M18.75 14.25a3.75 3.75 0 0 0 0 0" strokeLinecap="round" strokeLinejoin="round" />
-  </svg>
-);
-
-const IconPlay = () => (
-  <svg viewBox="0 0 24 24" fill="currentColor" style={{ width: 16, height: 16 }}>
-    <path fillRule="evenodd" d="M4.5 5.653c0-1.427 1.529-2.33 2.779-1.643l11.54 6.347c1.295.712 1.295 2.573 0 3.286L7.28 19.99c-1.25.687-2.779-.217-2.779-1.643V5.653Z" clipRule="evenodd" />
-  </svg>
-);
-
-const IconPause = () => (
-  <svg viewBox="0 0 24 24" fill="currentColor" style={{ width: 16, height: 16 }}>
-    <path fillRule="evenodd" d="M6.75 5.25a.75.75 0 0 1 .75-.75H9a.75.75 0 0 1 .75.75v13.5a.75.75 0 0 1-.75.75H7.5a.75.75 0 0 1-.75-.75V5.25Zm7.5 0A.75.75 0 0 1 15 4.5h1.5a.75.75 0 0 1 .75.75v13.5a.75.75 0 0 1-.75.75H15a.75.75 0 0 1-.75-.75V5.25Z" clipRule="evenodd" />
-  </svg>
-);
-
-const IconDelete = () => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} style={{ width: 16, height: 16 }}>
-    <path d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" strokeLinecap="round" strokeLinejoin="round" />
-  </svg>
-);
-
-const IconCallBack = () => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} style={{ width: 14, height: 14 }}>
-    <path d="M2.25 6.338c0 12.03 9.716 21.75 21.75 21.75" strokeLinecap="round" strokeLinejoin="round" />
-    <path d="m2.25 6.338 3.56-3.56a1.5 1.5 0 0 1 2.121 0l2.296 2.296a1.5 1.5 0 0 1 0 2.122l-1.054 1.053c-.226.226-.296.56-.144.849a13.478 13.478 0 0 0 5.636 5.635c.29.153.624.083.85-.143l1.053-1.054a1.5 1.5 0 0 1 2.122 0l2.296 2.296a1.5 1.5 0 0 1 0 2.121l-3.56 3.56" strokeLinecap="round" strokeLinejoin="round" />
-  </svg>
-);
-
-const IconRefresh = () => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} style={{ width: 14, height: 14 }}>
-    <path d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99" strokeLinecap="round" strokeLinejoin="round" />
-  </svg>
-);
-
-/* ─── Helpers ────────────────────────────────────────────── */
+/* ─── Helpers ─────────────────────────────────────────────── */
 
 function formatDuration(ms: number): string {
-  const s = Math.floor(ms / 1000);
+  const s = Math.floor((ms ?? 0) / 1000);
   const m = Math.floor(s / 60);
-  const sec = s % 60;
-  return m > 0 ? `${m}:${String(sec).padStart(2, '0')}` : `0:${String(sec).padStart(2, '0')}`;
+  return `${m}:${String(s % 60).padStart(2, '0')}`;
 }
 
 function formatDate(iso: string): string {
   const d = new Date(iso);
-  const now = new Date();
-  const diffMs = now.getTime() - d.getTime();
+  const diffMs = Date.now() - d.getTime();
   const diffDays = Math.floor(diffMs / 86400000);
-
   if (diffDays === 0) {
     const diffH = Math.floor(diffMs / 3600000);
     if (diffH === 0) {
@@ -82,751 +65,881 @@ function formatDate(iso: string): string {
     }
     return `${diffH}h ago`;
   }
-  if (diffDays === 1) return 'Yesterday ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  if (diffDays < 7) return d.toLocaleDateString([], { weekday: 'long' }) + ', ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  return d.toLocaleDateString([], { year: 'numeric', month: 'short', day: 'numeric' });
+  if (diffDays === 1) return 'Yesterday';
+  if (diffDays < 7) return d.toLocaleDateString([], { weekday: 'long' });
+  return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
 }
 
-/* ─── Audio player ───────────────────────────────────────── */
-
-interface AudioPlayerProps {
-  url: string;
-  onPlay?: () => void;
+function transcriptPreview(status: VoicemailMessage['transcript_status']): string {
+  switch (status) {
+    case 'done':
+      return 'Transcription ready — open to read';
+    case 'processing':
+    case 'pending':
+      return 'Transcribing…';
+    case 'failed':
+      return 'Transcription unavailable';
+    default:
+      return 'No transcription';
+  }
 }
 
-function AudioPlayer({ url, onPlay }: AudioPlayerProps) {
-  const audioRef = useRef<HTMLAudioElement>(null);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [duration, setDuration] = useState(0);
-
-  const toggle = useCallback(() => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    if (isPlaying) {
-      audio.pause();
-    } else {
-      onPlay?.();
-      void audio.play();
-    }
-  }, [isPlaying, onPlay]);
-
-  const handleTimeUpdate = useCallback(() => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    setProgress(audio.duration ? audio.currentTime / audio.duration : 0);
-  }, []);
-
-  const handleScrub = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    const rect = e.currentTarget.getBoundingClientRect();
-    const pct = (e.clientX - rect.left) / rect.width;
-    audio.currentTime = pct * audio.duration;
-  }, []);
-
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1 }}>
-      <audio
-        ref={audioRef}
-        src={url}
-        onPlay={() => setIsPlaying(true)}
-        onPause={() => setIsPlaying(false)}
-        onEnded={() => { setIsPlaying(false); setProgress(0); }}
-        onTimeUpdate={handleTimeUpdate}
-        onLoadedMetadata={() => { setDuration(audioRef.current?.duration ?? 0); }}
-        preload="metadata"
-      />
-
-      <button
-        type="button"
-        onClick={toggle}
-        aria-label={isPlaying ? 'Pause' : 'Play'}
-        style={{
-          width: 32,
-          height: 32,
-          borderRadius: '50%',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          background: 'linear-gradient(135deg, #3b82f6 0%, #60a5fa 100%)',
-          border: 'none',
-          color: '#fff',
-          cursor: 'pointer',
-          flexShrink: 0,
-          boxShadow: '0 2px 10px rgba(59,130,246,0.35)',
-          transition: 'transform 0.1s',
-        }}
-        onMouseDown={(e) => { e.currentTarget.style.transform = 'scale(0.92)'; }}
-        onMouseUp={(e) => { e.currentTarget.style.transform = 'scale(1)'; }}
-      >
-        {isPlaying ? <IconPause /> : <IconPlay />}
-      </button>
-
-      {/* Progress bar */}
-      <div
-        onClick={handleScrub}
-        role="progressbar"
-        aria-valuenow={Math.round(progress * 100)}
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-label="Playback progress"
-        style={{
-          flex: 1,
-          height: 4,
-          background: 'rgba(255,255,255,0.08)',
-          borderRadius: 2,
-          cursor: 'pointer',
-          position: 'relative',
-          overflow: 'hidden',
-        }}
-      >
-        <div
-          style={{
-            position: 'absolute',
-            left: 0,
-            top: 0,
-            bottom: 0,
-            width: `${progress * 100}%`,
-            background: 'linear-gradient(90deg, #3b82f6, #60a5fa)',
-            borderRadius: 2,
-            transition: 'width 0.1s linear',
-          }}
-        />
-      </div>
-
-      {/* Time display */}
-      <span style={{ fontSize: '0.7rem', color: '#64748b', flexShrink: 0, fontVariantNumeric: 'tabular-nums', minWidth: 36, textAlign: 'right' }}>
-        {duration > 0 ? formatDuration(Math.floor(progress * duration * 1000)) : '—'}
-      </span>
-    </div>
-  );
-}
-
-/* ─── Voicemail card ─────────────────────────────────────── */
-
-interface VoicemailCardProps {
-  message: VoicemailMessage;
-  onDelete: () => void;
-  onMarkRead: () => void;
-  onCallBack: () => void;
-  canCallBack: boolean;
-  isDeleting: boolean;
-}
-
-function VoicemailCard({ message, onDelete, onMarkRead, onCallBack, canCallBack, isDeleting }: VoicemailCardProps) {
-  const hasAudio = Boolean(message.audio_url);
-  const displayName = message.caller_name && message.caller_name !== message.caller_id
-    ? message.caller_name
-    : null;
-
-  return (
-    <div
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 12,
-        padding: '14px 20px',
-        borderBottom: '1px solid rgba(255,255,255,0.04)',
-        background: message.is_read ? 'transparent' : 'rgba(99,102,241,0.04)',
-        transition: 'background 0.15s, opacity 0.2s',
-        opacity: isDeleting ? 0.4 : 1,
-        animation: 'vmFadeIn 0.18s ease-out',
-        cursor: 'default',
-      }}
-      onMouseEnter={(e) => {
-        if (!isDeleting) (e.currentTarget as HTMLDivElement).style.background = message.is_read ? 'rgba(255,255,255,0.025)' : 'rgba(99,102,241,0.07)';
-      }}
-      onMouseLeave={(e) => {
-        (e.currentTarget as HTMLDivElement).style.background = message.is_read ? 'transparent' : 'rgba(99,102,241,0.04)';
-      }}
-    >
-      {/* Header row */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-        {/* Unread dot */}
-        {!message.is_read && (
-          <div
-            style={{
-              width: 7,
-              height: 7,
-              borderRadius: '50%',
-              background: '#818cf8',
-              flexShrink: 0,
-              boxShadow: '0 0 6px rgba(129,140,248,0.55)',
-            }}
-          />
-        )}
-
-        {/* Avatar */}
-        <div
-          style={{
-            width: 38,
-            height: 38,
-            borderRadius: '50%',
-            background: 'linear-gradient(135deg, rgba(99,102,241,0.20) 0%, rgba(59,130,246,0.15) 100%)',
-            border: '1px solid rgba(99,102,241,0.20)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            fontSize: '0.875rem',
-            fontWeight: 700,
-            color: '#818cf8',
-            flexShrink: 0,
-            marginLeft: message.is_read ? 15 : 0,
-          }}
-        >
-          {(displayName ?? message.caller_id).charAt(0).toUpperCase()}
-        </div>
-
-        {/* Caller info */}
-        <div style={{ flex: 1, minWidth: 0 }}>
-          {displayName && (
-            <div style={{ fontSize: '0.875rem', fontWeight: 700, color: '#f1f5f9', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {displayName}
-            </div>
-          )}
-          <div style={{ fontSize: displayName ? '0.78rem' : '0.875rem', color: displayName ? '#64748b' : '#e2e8f0', fontFamily: 'monospace', fontWeight: 600 }}>
-            {message.caller_id}
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
-            <span style={{ fontSize: '0.7rem', color: '#475569' }}>
-              {formatDate(message.created_at)}
-            </span>
-            <span style={{ color: '#1e293b', fontSize: '0.7rem' }}>·</span>
-            <span style={{ fontSize: '0.7rem', color: '#475569' }}>
-              {formatDuration(message.duration_ms)}
-            </span>
-          </div>
-        </div>
-
-        {/* Action buttons */}
-        <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
-          {canCallBack && (
-            <button
-              type="button"
-              onClick={onCallBack}
-              aria-label={`Call back ${message.caller_id}`}
-              title="Call back"
-              style={{
-                width: 30,
-                height: 30,
-                borderRadius: '50%',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                background: 'rgba(34,197,94,0.10)',
-                border: '1px solid rgba(34,197,94,0.25)',
-                color: '#22c55e',
-                cursor: 'pointer',
-                transition: 'background 0.15s',
-              }}
-              onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(34,197,94,0.20)'; }}
-              onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(34,197,94,0.10)'; }}
-            >
-              <IconCallBack />
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={onDelete}
-            disabled={isDeleting}
-            aria-label="Delete voicemail"
-            title="Delete"
-            style={{
-              width: 30,
-              height: 30,
-              borderRadius: '50%',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              background: 'rgba(239,68,68,0.08)',
-              border: '1px solid rgba(239,68,68,0.20)',
-              color: '#f87171',
-              cursor: isDeleting ? 'not-allowed' : 'pointer',
-              transition: 'background 0.15s',
-              opacity: isDeleting ? 0.5 : 1,
-            }}
-            onMouseEnter={(e) => { if (!isDeleting) e.currentTarget.style.background = 'rgba(239,68,68,0.18)'; }}
-            onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(239,68,68,0.08)'; }}
-          >
-            <IconDelete />
-          </button>
-        </div>
-      </div>
-
-      {/* Audio player */}
-      {hasAudio ? (
-        <div style={{ paddingLeft: message.is_read ? 50 : 34, paddingRight: 2 }}>
-          <AudioPlayer
-            url={message.audio_url!}
-            onPlay={() => { if (!message.is_read) void onMarkRead(); }}
-          />
-        </div>
-      ) : (
-        <div
-          style={{
-            marginLeft: message.is_read ? 50 : 34,
-            padding: '7px 12px',
-            borderRadius: 8,
-            background: 'rgba(255,255,255,0.03)',
-            border: '1px solid rgba(255,255,255,0.05)',
-            fontSize: '0.75rem',
-            color: '#334155',
-          }}
-        >
-          Audio not available — message may be stored on the server
-        </div>
-      )}
-
-      {/* Mark as read — only when no audio to trigger it automatically */}
-      {!message.is_read && !hasAudio && (
-        <button
-          type="button"
-          onClick={onMarkRead}
-          style={{
-            alignSelf: 'flex-start',
-            marginLeft: 34,
-            padding: '4px 10px',
-            borderRadius: 6,
-            background: 'transparent',
-            border: '1px solid rgba(99,102,241,0.25)',
-            color: '#818cf8',
-            fontSize: '0.7rem',
-            cursor: 'pointer',
-          }}
-        >
-          Mark as heard
-        </button>
-      )}
-    </div>
-  );
-}
-
-/* ─── Left panel filter item ─────────────────────────────── */
-
-interface FilterItemProps {
-  label: string;
-  count: number;
-  isSelected: boolean;
-  badgeColor?: 'red' | 'blue' | 'neutral';
-  onClick: () => void;
-}
-
-function FilterItem({ label, count, isSelected, badgeColor = 'neutral', onClick }: FilterItemProps) {
-  const badgeStyles: Record<string, React.CSSProperties> = {
-    red:     { background: 'rgba(239,68,68,0.15)',   color: '#f87171', border: '1px solid rgba(239,68,68,0.25)' },
-    blue:    { background: 'rgba(59,130,246,0.15)',  color: '#60a5fa', border: '1px solid rgba(59,130,246,0.25)' },
-    neutral: { background: 'rgba(255,255,255,0.06)', color: '#475569', border: 'none' },
-  };
-
-  return (
-    <div
-      onClick={onClick}
-      role="button"
-      tabIndex={0}
-      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onClick(); }}
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 8,
-        padding: '8px 14px',
-        borderRadius: 8,
-        cursor: 'pointer',
-        userSelect: 'none',
-        background: isSelected
-          ? 'linear-gradient(135deg, rgba(59,130,246,0.16) 0%, rgba(59,130,246,0.08) 100%)'
-          : 'transparent',
-        color: isSelected ? '#93c5fd' : '#64748b',
-        transition: 'background 0.12s, color 0.12s',
-        marginBottom: 2,
-      }}
-      onMouseEnter={(e) => {
-        if (!isSelected) {
-          (e.currentTarget as HTMLDivElement).style.background = 'rgba(255,255,255,0.04)';
-          (e.currentTarget as HTMLDivElement).style.color = '#94a3b8';
-        }
-      }}
-      onMouseLeave={(e) => {
-        if (!isSelected) {
-          (e.currentTarget as HTMLDivElement).style.background = 'transparent';
-          (e.currentTarget as HTMLDivElement).style.color = '#64748b';
-        }
-      }}
-    >
-      {/* Voicemail icon */}
-      <span style={{ flexShrink: 0, display: 'flex', color: isSelected ? '#60a5fa' : 'inherit' }}>
-        <IconVoicemail size={15} />
-      </span>
-
-      <span style={{
-        flex: 1,
-        fontSize: '0.825rem',
-        fontWeight: isSelected ? 700 : 500,
-        color: isSelected ? '#e2e8f0' : 'inherit',
-        overflow: 'hidden',
-        textOverflow: 'ellipsis',
-        whiteSpace: 'nowrap',
-      }}>
-        {label}
-      </span>
-
-      {count > 0 && (
-        <span style={{ fontSize: '0.65rem', fontWeight: 700, borderRadius: 4, padding: '1px 5px', flexShrink: 0, ...badgeStyles[badgeColor] }}>
-          {count}
-        </span>
-      )}
-      {count === 0 && (
-        <span style={{ fontSize: '0.65rem', color: '#475569', background: 'rgba(255,255,255,0.06)', borderRadius: 4, padding: '1px 5px', flexShrink: 0 }}>
-          0
-        </span>
-      )}
-    </div>
-  );
-}
-
-/* ─── Empty / loading states for right panel ─────────────── */
-
-function RightPanelEmpty() {
-  return (
-    <div
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        height: '100%',
-        gap: 14,
-        padding: 48,
-        color: '#334155',
-      }}
-    >
-      <div
-        style={{
-          width: 72,
-          height: 72,
-          borderRadius: 20,
-          background: 'linear-gradient(135deg, rgba(99,102,241,0.12) 0%, rgba(59,130,246,0.08) 100%)',
-          border: '1px solid rgba(99,102,241,0.18)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          color: '#6366f1',
-        }}
-      >
-        <IconVoicemail size={32} />
-      </div>
-      <div style={{ textAlign: 'center', maxWidth: 260 }}>
-        <div style={{ fontSize: '1rem', fontWeight: 700, color: '#94a3b8', marginBottom: 6, letterSpacing: '-0.02em' }}>
-          No voicemail messages
-        </div>
-        <div style={{ fontSize: '0.85rem', color: '#475569', lineHeight: 1.6 }}>
-          New messages will appear here as they arrive.
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function RightPanelNoUnread() {
-  return (
-    <div
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        height: '100%',
-        gap: 14,
-        padding: 48,
-        color: '#334155',
-      }}
-    >
-      <div
-        style={{
-          width: 72,
-          height: 72,
-          borderRadius: 20,
-          background: 'linear-gradient(135deg, rgba(34,197,94,0.12) 0%, rgba(59,130,246,0.08) 100%)',
-          border: '1px solid rgba(34,197,94,0.18)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          color: '#22c55e',
-        }}
-      >
-        <IconVoicemail size={32} />
-      </div>
-      <div style={{ textAlign: 'center', maxWidth: 260 }}>
-        <div style={{ fontSize: '1rem', fontWeight: 700, color: '#94a3b8', marginBottom: 6 }}>
-          All caught up
-        </div>
-        <div style={{ fontSize: '0.85rem', color: '#475569', lineHeight: 1.6 }}>
-          No unread voicemails. Switch to All Messages to see your history.
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* ─── Main page ──────────────────────────────────────────── */
+/* ─────────────────────────────────────────────────────────────────────────
+ * Page
+ * ──────────────────────────────────────────────────────────────────────── */
 
 export function VoicemailPage() {
+  // All hooks unconditionally at the top (React #310).
+  const { isAdmin } = useAuth();
   const { refreshVoicemailCount, makeCall, connectionState } = useSoftphone();
-  const [messages, setMessages] = useState<VoicemailMessage[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [deletingIds, setDeletingIds] = useState<Set<number>>(new Set());
-  const [filter, setFilter] = useState<FilterKey>('all');
+  const { toastOk, toastErr } = useToast();
+  const queryClient = useQueryClient();
 
-  const load = useCallback(async () => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      const result = await listVoicemails({ limit: 100 });
-      const items = Array.isArray(result) ? result : (result.items ?? []);
-      setMessages(items);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load voicemails');
-    } finally {
-      setIsLoading(false);
+  const [customerId, setCustomerId] = useState<number | undefined>(undefined);
+  const [mailboxSel, setMailboxId] = useState<number | null>(null);
+  const [folder, setFolder] = useState<Folder>('inbox');
+  const [search, setSearch] = useState('');
+  const [selectedSel, setSelectedId] = useState<number | null>(null);
+  const [wizardOpen, setWizardOpen] = useState(false);
+
+  const mailboxesQuery = useQuery({
+    queryKey: ['voicemail', 'mailboxes', { customerId }],
+    queryFn: () => listMailboxes({ customer_id: customerId }),
+    staleTime: 30_000,
+  });
+  const mailboxes = useMemo(() => mailboxesQuery.data ?? [], [mailboxesQuery.data]);
+
+  // Effective mailbox: the user's pick if still valid, else the first mailbox.
+  // Derived during render (never setState-in-effect) so a customer switch or a
+  // deleted mailbox transparently falls back to a sensible default.
+  const mailboxId =
+    mailboxSel !== null && mailboxes.some((m) => m.id === mailboxSel)
+      ? mailboxSel
+      : mailboxes[0]?.id ?? null;
+
+  const countQuery = useQuery({
+    queryKey: ['voicemail', 'count', mailboxId],
+    queryFn: () => getMailboxMessageCount(mailboxId as number),
+    enabled: mailboxId !== null,
+  });
+
+  const activeQuery = useQuery({
+    queryKey: ['voicemail', 'messages', mailboxId, 'active'],
+    queryFn: () => listMailboxMessages(mailboxId as number, { include_deleted: false, limit: 200 }),
+    enabled: mailboxId !== null,
+    placeholderData: keepPreviousData,
+  });
+
+  // Trash is everything-minus-active; only fetched when the Trash folder is open.
+  const allQuery = useQuery({
+    queryKey: ['voicemail', 'messages', mailboxId, 'all'],
+    queryFn: () => listMailboxMessages(mailboxId as number, { include_deleted: true, limit: 200 }),
+    enabled: mailboxId !== null && folder === 'trash',
+    placeholderData: keepPreviousData,
+  });
+
+  /* ── derived folder lists ─────────────────────────────────── */
+  const activeMessages = useMemo(() => activeQuery.data ?? [], [activeQuery.data]);
+  const trashMessages = useMemo(() => {
+    const activeIds = new Set(activeMessages.map((m) => m.id));
+    return (allQuery.data ?? []).filter((m) => !activeIds.has(m.id));
+  }, [allQuery.data, activeMessages]);
+
+  const folderMessages = useMemo(() => {
+    switch (folder) {
+      case 'unread':
+        return activeMessages.filter((m) => !m.is_read);
+      case 'saved':
+        return activeMessages.filter((m) => m.is_saved);
+      case 'trash':
+        return trashMessages;
+      default:
+        return activeMessages;
     }
-  }, []);
+  }, [folder, activeMessages, trashMessages]);
 
-  useEffect(() => {
-    void load();
-  }, [load]);
+  const visibleMessages = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return folderMessages;
+    return folderMessages.filter(
+      (m) =>
+        (m.caller_id ?? '').toLowerCase().includes(q) ||
+        (m.caller_name ?? '').toLowerCase().includes(q),
+    );
+  }, [folderMessages, search]);
 
-  const handleDelete = useCallback(async (id: number) => {
-    setDeletingIds((prev) => new Set([...prev, id]));
-    try {
-      await deleteVoicemail(id);
-      setMessages((prev) => prev.filter((m) => m.id !== id));
-      refreshVoicemailCount();
-    } catch {
-      // Revert optimistic UI — just leave the item; a reload will fix state
-    } finally {
-      setDeletingIds((prev) => { const next = new Set(prev); next.delete(id); return next; });
-    }
-  }, [refreshVoicemailCount]);
+  // Effective selection: the user's pick if still in view, else the first row.
+  // Also derived during render so it auto-selects without a setState effect.
+  const selectedId =
+    selectedSel !== null && visibleMessages.some((m) => m.id === selectedSel)
+      ? selectedSel
+      : visibleMessages[0]?.id ?? null;
 
-  const handleMarkRead = useCallback(async (id: number) => {
-    try {
-      await markVoicemailRead(id);
-      setMessages((prev) => prev.map((m) => m.id === id ? { ...m, is_read: true } : m));
-      refreshVoicemailCount();
-    } catch {
-      // Not critical — ignore
-    }
-  }, [refreshVoicemailCount]);
+  const detailQuery = useQuery({
+    queryKey: ['voicemail', 'message', selectedId],
+    queryFn: () => getMessage(selectedId as number),
+    enabled: selectedId !== null,
+    staleTime: 0,
+  });
 
-  /* ── Derived counts ──────────────────────────────────────── */
-  const totalCount = messages.length;
-  const unreadCount = messages.filter((m) => !m.is_read).length;
+  /* ── mutations ────────────────────────────────────────────── */
+  const invalidateMessages = () => {
+    void queryClient.invalidateQueries({ queryKey: ['voicemail', 'messages', mailboxId] });
+    void queryClient.invalidateQueries({ queryKey: ['voicemail', 'count', mailboxId] });
+    refreshVoicemailCount();
+  };
 
-  const visibleMessages = filter === 'unread'
-    ? messages.filter((m) => !m.is_read)
-    : messages;
+  const readMutation = useMutation({
+    mutationFn: (id: number) => markMessageRead(id, true),
+    onSuccess: invalidateMessages,
+  });
 
-  const filterLabel = filter === 'unread' ? 'Unread' : 'All Messages';
+  const saveMutation = useMutation({
+    mutationFn: ({ id, saved }: { id: number; saved: boolean }) => markMessageSaved(id, saved),
+    onSuccess: (_, { saved }) => {
+      invalidateMessages();
+      toastOk(saved ? 'Saved' : 'Removed from Saved');
+    },
+    onError: (e: Error) => toastErr(e.message),
+  });
 
-  /* ── Render ──────────────────────────────────────────────── */
+  const deleteMutation = useMutation({
+    mutationFn: (id: number) => deleteMessage(id),
+    onSuccess: () => {
+      invalidateMessages();
+      void queryClient.invalidateQueries({ queryKey: ['voicemail', 'messages', mailboxId, 'all'] });
+      toastOk('Message deleted');
+      setSelectedId(null);
+    },
+    onError: (e: Error) => toastErr(e.message),
+  });
+
+  const selectedMailbox = mailboxes.find((m) => m.id === mailboxId) ?? null;
+  const selectedMessage = visibleMessages.find((m) => m.id === selectedId) ?? null;
+
+  const count = countQuery.data;
+  const folderCounts: Record<Folder, number | undefined> = {
+    inbox: count?.total,
+    unread: count?.unread,
+    saved: count?.saved,
+    trash: folder === 'trash' ? trashMessages.length : undefined,
+  };
+
+  /* ── render ───────────────────────────────────────────────── */
   return (
-    <div
-      style={{
-        display: 'flex',
-        height: '100vh',
-        width: '100vw',
-        overflow: 'hidden',
-        background: '#0f1117',
-      }}
-    >
+    <div style={{ display: 'flex', height: '100vh', width: '100vw', overflow: 'hidden', background: '#0f1117' }}>
       <style>{GLOBAL_STYLES}</style>
-
-      {/* Fixed sidebar — same as AppLayout and other full-screen pages */}
       <Sidebar />
 
-      {/* Main shell — fills space to the right of the sidebar */}
-      <div
-        style={{
-          marginLeft: 240,
-          flex: 1,
-          display: 'flex',
-          overflow: 'hidden',
-          height: '100vh',
-        }}
-      >
-        {/* ── Left panel: filter list (280px) ─────────────── */}
-        <div
+      <div style={{ marginLeft: 240, flex: 1, display: 'flex', overflow: 'hidden', height: '100vh', minWidth: 0 }}>
+        {/* ── Rail: folders + mailbox switcher ──────────────── */}
+        <aside
           style={{
-            width: 280,
+            width: 256,
+            flexShrink: 0,
+            borderRight: '1px solid rgba(255,255,255,0.06)',
+            display: 'flex',
+            flexDirection: 'column',
+            background: '#0c0e16',
+            minHeight: 0,
+          }}
+        >
+          <div style={{ padding: '18px 16px 12px', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+              <span style={{ fontSize: '0.7rem', fontWeight: 700, color: '#334155', textTransform: 'uppercase', letterSpacing: '0.12em' }}>
+                Voicemail
+              </span>
+              <button
+                type="button"
+                onClick={() => setWizardOpen(true)}
+                title="New mailbox"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 5,
+                  padding: '5px 9px',
+                  borderRadius: 8,
+                  border: `1px solid ${ACCENT}44`,
+                  background: `${ACCENT}1a`,
+                  color: ACCENT,
+                  fontSize: '0.68rem',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  fontFamily: 'inherit',
+                }}
+              >
+                <Plus size={12} strokeWidth={2.5} /> New
+              </button>
+            </div>
+
+            <MailboxSwitcher mailboxes={mailboxes} selectedId={mailboxId} onSelect={setMailboxId} />
+          </div>
+
+          <div style={{ flex: 1, overflowY: 'auto', padding: '8px' }}>
+            {FOLDERS.map((f) => (
+              <FolderItem
+                key={f.id}
+                icon={f.icon}
+                label={f.label}
+                count={folderCounts[f.id]}
+                active={folder === f.id}
+                onClick={() => setFolder(f.id)}
+              />
+            ))}
+          </div>
+
+          {isAdmin && (
+            <div style={{ padding: '10px 12px', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+              <AdminCustomerSelector
+                selectedCustomerId={customerId}
+                onSelect={(id) => { setCustomerId(id); setMailboxId(null); setSelectedId(null); }}
+                accent={ACCENT}
+              />
+            </div>
+          )}
+        </aside>
+
+        {/* ── Message list ───────────────────────────────────── */}
+        <section
+          style={{
+            width: 360,
             flexShrink: 0,
             borderRight: '1px solid rgba(255,255,255,0.06)',
             display: 'flex',
             flexDirection: 'column',
             minHeight: 0,
-            background: '#0c0e16',
+            background: '#0b0d14',
           }}
         >
-          {/* Panel header */}
-          <div
-            style={{
-              padding: '18px 16px 12px',
-              borderBottom: '1px solid rgba(255,255,255,0.05)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              flexShrink: 0,
-            }}
-          >
-            <span style={{ fontSize: '0.7rem', fontWeight: 700, color: '#334155', textTransform: 'uppercase', letterSpacing: '0.12em' }}>
-              Voicemail
-            </span>
-            <button
-              type="button"
-              onClick={() => void load()}
-              title="Refresh"
-              style={{
-                background: 'rgba(255,255,255,0.05)',
-                border: '1px solid rgba(255,255,255,0.08)',
-                borderRadius: 7,
-                cursor: 'pointer',
-                color: '#475569',
-                display: 'flex',
-                alignItems: 'center',
-                padding: '5px 7px',
-                transition: 'background 0.15s, color 0.15s',
-              }}
-              onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.09)'; e.currentTarget.style.color = '#94a3b8'; }}
-              onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.05)'; e.currentTarget.style.color = '#475569'; }}
-            >
-              <IconRefresh />
-            </button>
-          </div>
-
-          {/* Filter list */}
-          <div style={{ flex: 1, overflowY: 'auto', padding: '8px 8px' }}>
-            <FilterItem
-              label="All Messages"
-              count={totalCount}
-              isSelected={filter === 'all'}
-              badgeColor="neutral"
-              onClick={() => setFilter('all')}
-            />
-            <FilterItem
-              label="Unread"
-              count={unreadCount}
-              isSelected={filter === 'unread'}
-              badgeColor="red"
-              onClick={() => setFilter('unread')}
-            />
-          </div>
-        </div>
-
-        {/* ── Right panel: message list ────────────────────── */}
-        <div
-          style={{
-            flex: 1,
-            display: 'flex',
-            flexDirection: 'column',
-            minHeight: 0,
-            minWidth: 0,
-            background: '#0f1117',
-          }}
-        >
-          {/* Right panel header */}
-          <div
-            style={{
-              padding: '14px 24px',
-              borderBottom: '1px solid rgba(255,255,255,0.06)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              flexShrink: 0,
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <span style={{ fontSize: '0.925rem', fontWeight: 700, color: '#e2e8f0', letterSpacing: '-0.02em' }}>
-                {filterLabel}
-              </span>
-              {!isLoading && (
-                <span
-                  style={{
-                    fontSize: '0.7rem',
-                    fontWeight: 600,
-                    color: '#475569',
-                    background: 'rgba(255,255,255,0.06)',
-                    borderRadius: 5,
-                    padding: '2px 7px',
-                  }}
-                >
-                  {visibleMessages.length} {visibleMessages.length === 1 ? 'message' : 'messages'}
-                </span>
-              )}
-              {unreadCount > 0 && filter === 'all' && (
-                <span
-                  style={{
-                    fontSize: '0.7rem',
-                    fontWeight: 700,
-                    color: '#f87171',
-                    background: 'rgba(239,68,68,0.12)',
-                    border: '1px solid rgba(239,68,68,0.22)',
-                    borderRadius: 5,
-                    padding: '2px 7px',
-                  }}
-                >
-                  {unreadCount} new
-                </span>
-              )}
+          <div style={{ padding: '14px 16px', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+            <div style={{ position: 'relative' }}>
+              <Search size={14} style={{ position: 'absolute', left: 11, top: '50%', transform: 'translateY(-50%)', color: '#475569' }} />
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search messages"
+                style={{
+                  width: '100%',
+                  boxSizing: 'border-box',
+                  padding: '8px 12px 8px 32px',
+                  borderRadius: 8,
+                  border: '1px solid rgba(255,255,255,0.08)',
+                  background: 'rgba(15,17,23,0.8)',
+                  color: '#e2e8f0',
+                  fontSize: '0.8rem',
+                  outline: 'none',
+                }}
+              />
             </div>
           </div>
 
-          {/* Error banner */}
-          {error && (
-            <div
-              style={{
-                margin: '12px 24px 0',
-                padding: '10px 14px',
-                borderRadius: 10,
-                background: 'rgba(239,68,68,0.08)',
-                border: '1px solid rgba(239,68,68,0.20)',
-                color: '#f87171',
-                fontSize: '0.85rem',
-                flexShrink: 0,
-              }}
-            >
-              {error}
-            </div>
-          )}
-
-          {/* Message list — scrollable */}
           <div style={{ flex: 1, overflowY: 'auto' }}>
-            {isLoading ? (
-              <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
-                <div style={{ width: 26, height: 26, border: '2px solid rgba(255,255,255,0.08)', borderTopColor: '#3b82f6', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
-              </div>
-            ) : visibleMessages.length === 0 && filter === 'all' ? (
-              <RightPanelEmpty />
-            ) : visibleMessages.length === 0 && filter === 'unread' ? (
-              <RightPanelNoUnread />
+            {mailboxId === null && !mailboxesQuery.isLoading ? (
+              <NoMailboxes onCreate={() => setWizardOpen(true)} />
+            ) : activeQuery.isLoading || (folder === 'trash' && allQuery.isLoading) ? (
+              <CenterSpinner />
+            ) : visibleMessages.length === 0 ? (
+              <EmptyFolder folder={folder} hasSearch={search.trim().length > 0} />
             ) : (
-              visibleMessages.map((msg) => (
-                <VoicemailCard
-                  key={msg.id}
-                  message={msg}
-                  onDelete={() => void handleDelete(msg.id)}
-                  onMarkRead={() => void handleMarkRead(msg.id)}
-                  onCallBack={() => void makeCall(msg.caller_id)}
-                  canCallBack={connectionState === 'registered'}
-                  isDeleting={deletingIds.has(msg.id)}
+              visibleMessages.map((m) => (
+                <MessageRow
+                  key={m.id}
+                  message={m}
+                  selected={m.id === selectedId}
+                  onClick={() => setSelectedId(m.id)}
                 />
               ))
             )}
           </div>
-        </div>
+        </section>
+
+        {/* ── Reading pane ───────────────────────────────────── */}
+        <section style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', background: '#0f1117' }}>
+          {selectedMessage ? (
+            <ReadingPane
+              key={selectedMessage.id}
+              message={selectedMessage}
+              detail={detailQuery.data}
+              detailLoading={detailQuery.isLoading}
+              isTrash={folder === 'trash'}
+              canCallBack={connectionState === 'registered'}
+              onPlay={() => { if (!selectedMessage.is_read) readMutation.mutate(selectedMessage.id); }}
+              onCallBack={() => void makeCall(selectedMessage.caller_id)}
+              onToggleSave={() => saveMutation.mutate({ id: selectedMessage.id, saved: !selectedMessage.is_saved })}
+              onDelete={() => deleteMutation.mutate(selectedMessage.id)}
+              deleting={deleteMutation.isPending}
+            />
+          ) : (
+            <ReadingEmpty mailbox={selectedMailbox} />
+          )}
+        </section>
       </div>
 
-      {/* Softphone overlay */}
       <SoftphoneWidget />
+
+      <VoicemailSetupWizard
+        open={wizardOpen}
+        onClose={() => setWizardOpen(false)}
+        customerId={customerId}
+        onCreated={(id) => {
+          setWizardOpen(false);
+          setMailboxId(id);
+          setSelectedId(null);
+          void queryClient.invalidateQueries({ queryKey: ['voicemail', 'mailboxes'] });
+        }}
+      />
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+ * Mailbox switcher
+ * ──────────────────────────────────────────────────────────────────────── */
+
+function MailboxSwitcher({
+  mailboxes,
+  selectedId,
+  onSelect,
+}: {
+  mailboxes: VoicemailMailbox[];
+  selectedId: number | null;
+  onSelect: (id: number) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const selected = mailboxes.find((m) => m.id === selectedId);
+
+  if (mailboxes.length === 0) {
+    return (
+      <div style={{ fontSize: '0.74rem', color: '#475569', padding: '8px 4px' }}>No mailboxes yet</div>
+    );
+  }
+
+  return (
+    <div style={{ position: 'relative' }}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 8,
+          width: '100%',
+          padding: '9px 11px',
+          borderRadius: 9,
+          border: `1px solid ${ACCENT}30`,
+          background: `${ACCENT}12`,
+          color: '#e2e8f0',
+          cursor: 'pointer',
+          fontFamily: 'inherit',
+        }}
+      >
+        <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', minWidth: 0 }}>
+          <span style={{ fontSize: '0.82rem', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 180 }}>
+            {selected?.label ?? `Mailbox ${selected?.id ?? ''}`}
+          </span>
+          <span style={{ fontSize: '0.64rem', color: ACCENT }}>{mailboxes.length} mailbox{mailboxes.length === 1 ? '' : 'es'}</span>
+        </span>
+        <ChevronDown size={14} style={{ color: ACCENT, transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }} />
+      </button>
+
+      {open && (
+        <div
+          style={{
+            position: 'absolute',
+            top: 'calc(100% + 4px)',
+            left: 0,
+            right: 0,
+            zIndex: 30,
+            background: '#161922',
+            border: '1px solid rgba(255,255,255,0.1)',
+            borderRadius: 10,
+            boxShadow: '0 12px 36px rgba(0,0,0,0.6)',
+            overflow: 'hidden',
+            maxHeight: 280,
+            overflowY: 'auto',
+          }}
+        >
+          {mailboxes.map((m) => (
+            <button
+              key={m.id}
+              type="button"
+              onClick={() => { onSelect(m.id); setOpen(false); }}
+              style={{
+                display: 'block',
+                width: '100%',
+                textAlign: 'left',
+                padding: '9px 12px',
+                background: m.id === selectedId ? `${ACCENT}1c` : 'transparent',
+                border: 'none',
+                color: '#e2e8f0',
+                cursor: 'pointer',
+                fontSize: '0.8rem',
+                fontFamily: 'inherit',
+              }}
+            >
+              <span style={{ fontWeight: 600 }}>{m.label ?? `Mailbox ${m.id}`}</span>
+              {m.status !== 'active' && (
+                <span style={{ marginLeft: 8, fontSize: '0.64rem', color: '#f59e0b' }}>{m.status}</span>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ─── Folder item ─────────────────────────────────────────── */
+
+function FolderItem({
+  icon,
+  label,
+  count,
+  active,
+  onClick,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  count: number | undefined;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 10,
+        width: '100%',
+        padding: '8px 12px',
+        marginBottom: 2,
+        borderRadius: 9,
+        border: '1px solid transparent',
+        background: active ? `linear-gradient(135deg, ${ACCENT}22 0%, ${ACCENT}0e 100%)` : 'transparent',
+        borderColor: active ? `${ACCENT}40` : 'transparent',
+        color: active ? '#e2e8f0' : '#64748b',
+        cursor: 'pointer',
+        fontFamily: 'inherit',
+        transition: 'all 0.12s',
+      }}
+    >
+      <span style={{ color: active ? ACCENT : '#475569', display: 'flex' }}>{icon}</span>
+      <span style={{ flex: 1, textAlign: 'left', fontSize: '0.83rem', fontWeight: active ? 700 : 500 }}>{label}</span>
+      {count !== undefined && count > 0 && (
+        <span
+          style={{
+            fontSize: '0.64rem',
+            fontWeight: 700,
+            padding: '1px 6px',
+            borderRadius: 5,
+            background: active ? `${ACCENT}2a` : 'rgba(255,255,255,0.06)',
+            color: active ? ACCENT : '#475569',
+          }}
+        >
+          {count}
+        </span>
+      )}
+    </button>
+  );
+}
+
+/* ─── Message row ─────────────────────────────────────────── */
+
+function MessageRow({
+  message,
+  selected,
+  onClick,
+}: {
+  message: VoicemailMessage;
+  selected: boolean;
+  onClick: () => void;
+}) {
+  const displayName = message.caller_name && message.caller_name !== message.caller_id ? message.caller_name : null;
+  const initial = (displayName ?? message.caller_id ?? '?').charAt(0).toUpperCase();
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        display: 'flex',
+        gap: 11,
+        width: '100%',
+        textAlign: 'left',
+        padding: '13px 16px',
+        borderBottom: '1px solid rgba(255,255,255,0.04)',
+        borderLeft: `2px solid ${selected ? ACCENT : 'transparent'}`,
+        background: selected ? `${ACCENT}14` : message.is_read ? 'transparent' : `${ACCENT}08`,
+        cursor: 'pointer',
+        fontFamily: 'inherit',
+        animation: 'vmFadeIn 0.18s ease-out',
+        transition: 'background 0.12s',
+      }}
+    >
+      <div style={{ position: 'relative', flexShrink: 0 }}>
+        <div
+          style={{
+            width: 38,
+            height: 38,
+            borderRadius: '50%',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: `linear-gradient(135deg, ${ACCENT}33 0%, ${ACCENT}18 100%)`,
+            border: `1px solid ${ACCENT}33`,
+            color: ACCENT,
+            fontWeight: 700,
+            fontSize: '0.85rem',
+          }}
+        >
+          {initial}
+        </div>
+        {!message.is_read && (
+          <span style={{ position: 'absolute', top: -1, right: -1, width: 9, height: 9, borderRadius: '50%', background: ACCENT, border: '2px solid #0b0d14' }} />
+        )}
+      </div>
+
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'baseline' }}>
+          <span style={{ fontSize: '0.84rem', fontWeight: message.is_read ? 600 : 700, color: '#e2e8f0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {displayName ?? fmt(message.caller_id)}
+          </span>
+          <span style={{ fontSize: '0.66rem', color: '#475569', flexShrink: 0 }}>{formatDate(message.created_at)}</span>
+        </div>
+        <div style={{ fontSize: '0.7rem', color: '#64748b', fontFamily: 'monospace', marginTop: 1 }}>
+          {displayName ? fmt(message.caller_id) : `${formatDuration(message.duration_ms)} min`}
+        </div>
+        <div style={{ fontSize: '0.7rem', color: '#475569', marginTop: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {transcriptPreview(message.transcript_status)}
+        </div>
+      </div>
+    </button>
+  );
+}
+
+/* ─── Reading pane ────────────────────────────────────────── */
+
+interface ReadingPaneProps {
+  message: VoicemailMessage;
+  detail: VoicemailMessage | undefined;
+  detailLoading: boolean;
+  isTrash: boolean;
+  canCallBack: boolean;
+  onPlay: () => void;
+  onCallBack: () => void;
+  onToggleSave: () => void;
+  onDelete: () => void;
+  deleting: boolean;
+}
+
+function ReadingPane({
+  message,
+  detail,
+  detailLoading,
+  isTrash,
+  canCallBack,
+  onPlay,
+  onCallBack,
+  onToggleSave,
+  onDelete,
+  deleting,
+}: ReadingPaneProps) {
+  const displayName = message.caller_name && message.caller_name !== message.caller_id ? message.caller_name : null;
+
+  const forwardHref = useMemo(() => {
+    const subject = `Voicemail from ${displayName ?? fmt(message.caller_id)}`;
+    const lines = [
+      `From: ${displayName ? `${displayName} (${fmt(message.caller_id)})` : fmt(message.caller_id)}`,
+      `Received: ${new Date(message.created_at).toLocaleString()}`,
+      `Duration: ${formatDuration(message.duration_ms)}`,
+    ];
+    if (detail?.transcript?.status === 'done' && detail.transcript.text) {
+      lines.push('', 'Transcript:', detail.transcript.text);
+    } else {
+      lines.push('', '(Audio is encrypted — open it in the revup portal to listen.)');
+    }
+    return `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(lines.join('\n'))}`;
+  }, [displayName, message, detail]);
+
+  return (
+    <>
+      {/* Header */}
+      <div style={{ padding: '20px 28px', borderBottom: '1px solid rgba(255,255,255,0.06)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexShrink: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14, minWidth: 0 }}>
+          <div
+            style={{
+              width: 46,
+              height: 46,
+              borderRadius: '50%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              background: `linear-gradient(135deg, ${ACCENT}33 0%, ${ACCENT}18 100%)`,
+              border: `1px solid ${ACCENT}33`,
+              color: ACCENT,
+              fontWeight: 700,
+              fontSize: '1.1rem',
+              flexShrink: 0,
+            }}
+          >
+            {(displayName ?? message.caller_id ?? '?').charAt(0).toUpperCase()}
+          </div>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: '1.02rem', fontWeight: 700, color: '#f1f5f9', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {displayName ?? fmt(message.caller_id)}
+            </div>
+            <div style={{ fontSize: '0.76rem', color: '#64748b', display: 'flex', gap: 8, marginTop: 2 }}>
+              {displayName && <span style={{ fontFamily: 'monospace' }}>{fmt(message.caller_id)}</span>}
+              <span>{formatDate(message.created_at)}</span>
+              <span>·</span>
+              <span>{formatDuration(message.duration_ms)}</span>
+            </div>
+          </div>
+        </div>
+        <EncryptionBadge size="sm" />
+      </div>
+
+      {/* Body */}
+      <div style={{ flex: 1, overflowY: 'auto', padding: '24px 28px', display: 'flex', flexDirection: 'column', gap: 22 }}>
+        <VoicemailPlayer
+          messageId={message.id}
+          durationMs={message.duration_ms}
+          peaks={message.peaks}
+          onFirstPlay={onPlay}
+        />
+
+        <TranscriptPanel transcript={detail?.transcript} loading={detailLoading} />
+      </div>
+
+      {/* Actions */}
+      <div style={{ padding: '16px 28px', borderTop: '1px solid rgba(255,255,255,0.06)', display: 'flex', gap: 10, flexShrink: 0 }}>
+        <ActionButton
+          icon={<Phone size={15} />}
+          label="Call back"
+          onClick={onCallBack}
+          disabled={!canCallBack}
+          title={canCallBack ? 'Call back' : 'Softphone not connected'}
+        />
+        <ActionButton
+          icon={<Star size={15} fill={message.is_saved ? ACCENT : 'none'} />}
+          label={message.is_saved ? 'Saved' : 'Save'}
+          onClick={onToggleSave}
+          active={message.is_saved}
+        />
+        <a
+          href={forwardHref}
+          style={{ textDecoration: 'none' }}
+        >
+          <ActionButton icon={<Forward size={15} />} label="Forward" onClick={() => undefined} asChild />
+        </a>
+        <div style={{ flex: 1 }} />
+        {!isTrash && (
+          <ActionButton
+            icon={<Trash2 size={15} />}
+            label={deleting ? 'Deleting…' : 'Delete'}
+            onClick={onDelete}
+            disabled={deleting}
+            danger
+          />
+        )}
+      </div>
+    </>
+  );
+}
+
+function ActionButton({
+  icon,
+  label,
+  onClick,
+  disabled,
+  active,
+  danger,
+  title,
+  asChild,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+  active?: boolean;
+  danger?: boolean;
+  title?: string;
+  asChild?: boolean;
+}) {
+  const color = danger ? '#f87171' : active ? ACCENT : '#94a3b8';
+  const border = danger ? 'rgba(239,68,68,0.25)' : active ? `${ACCENT}44` : 'rgba(255,255,255,0.1)';
+  const bg = danger ? 'rgba(239,68,68,0.08)' : active ? `${ACCENT}18` : 'rgba(255,255,255,0.03)';
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      tabIndex={asChild ? -1 : 0}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 7,
+        padding: '8px 14px',
+        borderRadius: 9,
+        border: `1px solid ${border}`,
+        background: bg,
+        color,
+        fontSize: '0.78rem',
+        fontWeight: 600,
+        fontFamily: 'inherit',
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        opacity: disabled ? 0.45 : 1,
+        transition: 'all 0.12s',
+      }}
+    >
+      {icon}
+      {label}
+    </button>
+  );
+}
+
+/* ─── Transcript panel ────────────────────────────────────── */
+
+function TranscriptPanel({ transcript, loading }: { transcript: Transcript | undefined; loading: boolean }) {
+  let body: React.ReactNode;
+  if (loading) {
+    body = <span style={{ color: '#475569', fontSize: '0.82rem' }}>Loading…</span>;
+  } else if (transcript?.status === 'done' && transcript.text) {
+    body = <p style={{ color: '#cbd5e0', fontSize: '0.88rem', lineHeight: 1.7, margin: 0 }}>{transcript.text}</p>;
+  } else {
+    const msg =
+      transcript?.status === 'processing' || transcript?.status === 'pending'
+        ? 'Transcription is in progress — check back shortly.'
+        : transcript?.status === 'failed'
+          ? 'A transcript couldn’t be generated for this message.'
+          : 'Transcription isn’t enabled for this message.';
+    body = <span style={{ color: '#475569', fontSize: '0.83rem', fontStyle: 'italic' }}>{msg}</span>;
+  }
+
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+        <span style={{ fontSize: '0.68rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+          Transcript
+        </span>
+        {transcript?.language && (
+          <span style={{ fontSize: '0.64rem', color: '#475569', textTransform: 'uppercase' }}>{transcript.language}</span>
+        )}
+      </div>
+      <div style={{ padding: '14px 16px', borderRadius: 12, background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)' }}>
+        {body}
+      </div>
+    </div>
+  );
+}
+
+/* ─── Empty / loading states ──────────────────────────────── */
+
+function CenterSpinner() {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
+      <div style={{ width: 26, height: 26, border: '2px solid rgba(255,255,255,0.08)', borderTopColor: ACCENT, borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+    </div>
+  );
+}
+
+function EmptyFolder({ folder, hasSearch }: { folder: Folder; hasSearch: boolean }) {
+  const text = hasSearch
+    ? 'No messages match your search.'
+    : folder === 'unread'
+      ? 'You’re all caught up — no unread messages.'
+      : folder === 'saved'
+        ? 'No saved messages yet.'
+        : folder === 'trash'
+          ? 'Trash is empty.'
+          : 'No messages in this mailbox yet.';
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', padding: 40, gap: 10, textAlign: 'center' }}>
+      <Inbox size={34} style={{ color: '#2d3748' }} />
+      <span style={{ color: '#475569', fontSize: '0.85rem' }}>{text}</span>
+    </div>
+  );
+}
+
+function ReadingEmpty({ mailbox }: { mailbox: VoicemailMailbox | null }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: 14, padding: 48, color: '#334155' }}>
+      <div
+        style={{
+          width: 76,
+          height: 76,
+          borderRadius: 20,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: `linear-gradient(135deg, ${ACCENT}1f 0%, ${ACCENT}0c 100%)`,
+          border: `1px solid ${ACCENT}33`,
+          color: ACCENT,
+        }}
+      >
+        <Mail size={32} />
+      </div>
+      <div style={{ textAlign: 'center', maxWidth: 280 }}>
+        <div style={{ fontSize: '1rem', fontWeight: 700, color: '#94a3b8', marginBottom: 6 }}>
+          {mailbox ? 'Select a message' : 'No mailbox selected'}
+        </div>
+        <div style={{ fontSize: '0.85rem', color: '#475569', lineHeight: 1.6 }}>
+          Choose a message from the list to listen, read its transcript, and reply.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function NoMailboxes({ onCreate }: { onCreate: () => void }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: 16, padding: 40, textAlign: 'center' }}>
+      <div
+        style={{
+          width: 72,
+          height: 72,
+          borderRadius: 20,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: `linear-gradient(135deg, ${ACCENT}1f 0%, ${ACCENT}0c 100%)`,
+          border: `1px solid ${ACCENT}33`,
+          color: ACCENT,
+        }}
+      >
+        <Inbox size={30} />
+      </div>
+      <div>
+        <div style={{ fontSize: '0.95rem', fontWeight: 700, color: '#94a3b8', marginBottom: 6 }}>No voicemail boxes yet</div>
+        <div style={{ fontSize: '0.82rem', color: '#475569', lineHeight: 1.6, maxWidth: 240, marginBottom: 16 }}>
+          Create an encrypted voicemail box — buy a dedicated number or add it to a line you already have.
+        </div>
+        <button
+          type="button"
+          onClick={onCreate}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 7,
+            padding: '9px 16px',
+            borderRadius: 10,
+            border: 'none',
+            background: `linear-gradient(135deg, ${ACCENT} 0%, #6366f1 100%)`,
+            color: '#fff',
+            fontSize: '0.82rem',
+            fontWeight: 700,
+            cursor: 'pointer',
+            fontFamily: 'inherit',
+            boxShadow: `0 4px 16px ${ACCENT}44`,
+          }}
+        >
+          <Plus size={15} strokeWidth={2.5} /> New mailbox
+        </button>
+      </div>
     </div>
   );
 }
