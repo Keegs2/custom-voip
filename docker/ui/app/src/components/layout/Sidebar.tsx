@@ -1010,9 +1010,10 @@ export function Sidebar() {
                 >
                   {commsNavItems.map((item) => {
                     if (item.to === '/voicemail') {
-                      // Voicemail only appears once the user has a provisioned
-                      // WebRTC extension (credentials present).
-                      if (!credentials) return null;
+                      // Customers see Voicemail only once they have a provisioned
+                      // WebRTC extension (credentials present); admins always see it
+                      // so they can review the page (same rule as hasUcaas).
+                      if (!credentials && !isAdmin) return null;
                       return (
                         <SidebarNavItem
                           key={item.to}
