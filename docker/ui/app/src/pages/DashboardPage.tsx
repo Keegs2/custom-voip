@@ -569,7 +569,7 @@ export function DashboardPage() {
             }}
           >
             <img
-              src="/shale_image.png"
+              src="/shale_logo.png"
               alt="Granite Shale — Distributed Voice Infrastructure"
               className="dash-shale-hero"
               style={{
