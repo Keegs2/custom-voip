@@ -21,6 +21,7 @@ interface CreateFormState {
   daily_limit: string;
   cpm_limit: string;
   ucaas_enabled: boolean;
+  voicemail_enabled: boolean;
 }
 
 const INITIAL_CREATE: CreateFormState = {
@@ -31,6 +32,7 @@ const INITIAL_CREATE: CreateFormState = {
   daily_limit: '500',
   cpm_limit: '60',
   ucaas_enabled: false,
+  voicemail_enabled: false,
 };
 
 export function CustomersAdminPage() {
@@ -62,6 +64,8 @@ export function CustomersAdminPage() {
         ...(createForm.account_type !== 'rcf' && createForm.account_type !== 'ucaas'
           ? { ucaas_enabled: createForm.ucaas_enabled }
           : {}),
+        // Voicemail is account-type-orthogonal — always send it
+        voicemail_enabled: createForm.voicemail_enabled,
       }),
     onSuccess: (created) => {
       qc.invalidateQueries({ queryKey: ['customers'] });
@@ -307,6 +311,55 @@ export function CustomersAdminPage() {
               </span>
             </div>
           )}
+
+          {/* Voicemail add-on toggle — account-type-orthogonal, always available */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 10,
+              marginTop: 16,
+              padding: '12px 16px',
+              background: createForm.voicemail_enabled ? 'rgba(129,140,248,0.06)' : 'rgba(255,255,255,0.02)',
+              border: `1px solid ${createForm.voicemail_enabled ? 'rgba(129,140,248,0.25)' : 'rgba(42,47,69,0.5)'}`,
+              borderRadius: 10,
+              transition: 'background 0.15s, border-color 0.15s',
+              cursor: 'pointer',
+              userSelect: 'none',
+            }}
+            onClick={() => updateCreateForm('voicemail_enabled', !createForm.voicemail_enabled)}
+          >
+            <input
+              id="create-voicemail-enabled"
+              type="checkbox"
+              checked={createForm.voicemail_enabled}
+              onChange={(e) => updateCreateForm('voicemail_enabled', e.target.checked)}
+              onClick={(e) => e.stopPropagation()}
+              style={{ width: 15, height: 15, accentColor: '#818cf8', cursor: 'pointer', flexShrink: 0 }}
+            />
+            <label
+              htmlFor="create-voicemail-enabled"
+              style={{
+                fontSize: '0.82rem',
+                fontWeight: 600,
+                color: createForm.voicemail_enabled ? '#818cf8' : '#64748b',
+                cursor: 'pointer',
+                transition: 'color 0.15s',
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              Voicemail Enabled
+            </label>
+            <span
+              style={{
+                fontSize: '0.72rem',
+                color: '#4a5568',
+                marginLeft: 4,
+              }}
+            >
+              Grants standalone Visual Voicemail access
+            </span>
+          </div>
 
           <div
             style={{

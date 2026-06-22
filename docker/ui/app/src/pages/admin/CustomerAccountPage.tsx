@@ -753,6 +753,17 @@ function AccountDetailView({ customer, onEdit, onDelete }: AccountDetailViewProp
     onError: (err: Error) => toastErr(err.message),
   });
 
+  const voicemailMutation = useMutation({
+    mutationFn: (enabled: boolean) =>
+      apiRequest<Customer>('PUT', `/customers/${customer.id}`, { voicemail_enabled: enabled }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['customer', customer.id] });
+      qc.invalidateQueries({ queryKey: ['customers'] });
+      toastOk(`Voicemail add-on ${!customer.voicemail_enabled ? 'enabled' : 'disabled'}`);
+    },
+    onError: (err: Error) => toastErr(err.message),
+  });
+
   function handleAddCredit(e: React.FormEvent) {
     e.preventDefault();
     const amount = parseFloat(creditAmount);
@@ -994,6 +1005,79 @@ function AccountDetailView({ customer, onEdit, onDelete }: AccountDetailViewProp
               UCaaS {customer.ucaas_enabled ? 'Enabled' : 'Disabled'}
             </button>
           )}
+
+          {/* Voicemail add-on toggle — account-type-orthogonal, always available */}
+          <button
+            type="button"
+            disabled={voicemailMutation.isPending}
+            onClick={() => voicemailMutation.mutate(!customer.voicemail_enabled)}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 7,
+              fontSize: '0.8rem',
+              fontWeight: 600,
+              padding: '6px 14px',
+              borderRadius: 8,
+              cursor: voicemailMutation.isPending ? 'wait' : 'pointer',
+              border: `1px solid ${customer.voicemail_enabled ? 'rgba(129,140,248,0.35)' : 'rgba(100,116,139,0.30)'}`,
+              background: customer.voicemail_enabled
+                ? 'rgba(129,140,248,0.10)'
+                : 'rgba(100,116,139,0.08)',
+              color: customer.voicemail_enabled ? '#818cf8' : '#64748b',
+              transition: 'background 0.15s, border-color 0.15s, color 0.15s',
+              opacity: voicemailMutation.isPending ? 0.6 : 1,
+            }}
+            onMouseEnter={(e) => {
+              if (!voicemailMutation.isPending) {
+                e.currentTarget.style.background = customer.voicemail_enabled
+                  ? 'rgba(239,68,68,0.10)'
+                  : 'rgba(129,140,248,0.10)';
+                e.currentTarget.style.borderColor = customer.voicemail_enabled
+                  ? 'rgba(239,68,68,0.35)'
+                  : 'rgba(129,140,248,0.35)';
+                e.currentTarget.style.color = customer.voicemail_enabled ? '#f87171' : '#818cf8';
+              }
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = customer.voicemail_enabled
+                ? 'rgba(129,140,248,0.10)'
+                : 'rgba(100,116,139,0.08)';
+              e.currentTarget.style.borderColor = customer.voicemail_enabled
+                ? 'rgba(129,140,248,0.35)'
+                : 'rgba(100,116,139,0.30)';
+              e.currentTarget.style.color = customer.voicemail_enabled ? '#818cf8' : '#64748b';
+            }}
+          >
+            {/* Toggle track */}
+            <span
+              style={{
+                position: 'relative',
+                display: 'inline-block',
+                width: 28,
+                height: 16,
+                borderRadius: 8,
+                background: customer.voicemail_enabled ? '#818cf8' : 'rgba(100,116,139,0.35)',
+                transition: 'background 0.2s',
+                flexShrink: 0,
+              }}
+            >
+              <span
+                style={{
+                  position: 'absolute',
+                  top: 2,
+                  left: customer.voicemail_enabled ? 14 : 2,
+                  width: 12,
+                  height: 12,
+                  borderRadius: '50%',
+                  background: '#fff',
+                  transition: 'left 0.2s',
+                  boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
+                }}
+              />
+            </span>
+            Voicemail {customer.voicemail_enabled ? 'Enabled' : 'Disabled'}
+          </button>
 
           {/* Add Credit form */}
           <form

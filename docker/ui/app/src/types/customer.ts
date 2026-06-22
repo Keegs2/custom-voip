@@ -15,6 +15,7 @@ export interface Customer {
   fraud_score: number;
   created_at: string;
   ucaas_enabled: boolean | null;
+  voicemail_enabled?: boolean | null;
 }
 
 export interface CustomerCreate {
@@ -26,6 +27,7 @@ export interface CustomerCreate {
   daily_limit?: number | null;
   cpm_limit?: number | null;
   ucaas_enabled?: boolean | null;
+  voicemail_enabled?: boolean | null;
 }
 
 export interface CustomerUpdate {
@@ -37,4 +39,5 @@ export interface CustomerUpdate {
   daily_limit?: number | null;
   cpm_limit?: number | null;
   ucaas_enabled?: boolean | null;
+  voicemail_enabled?: boolean | null;
 }

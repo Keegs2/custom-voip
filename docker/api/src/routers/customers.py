@@ -17,6 +17,7 @@ class CustomerCreate(BaseModel):
     daily_limit: float = 500
     cpm_limit: int = 60
     ucaas_enabled: bool = False  # UCaaS add-on for api/trunk/hybrid customers
+    voicemail_enabled: bool = False  # Visual Voicemail add-on — orthogonal to account_type
     webhook_signing_secret: Optional[str] = None  # auto-generated if not provided
 
 
@@ -28,6 +29,7 @@ class CustomerUpdate(BaseModel):
     daily_limit: Optional[float] = None
     cpm_limit: Optional[int] = None
     ucaas_enabled: Optional[bool] = None
+    voicemail_enabled: Optional[bool] = None
 
 
 @router.get("")
@@ -41,7 +43,7 @@ async def list_customers(
     query = """
         SELECT id, name, account_type, balance, credit_limit, status,
                traffic_grade, daily_limit, cpm_limit, fraud_score,
-               ucaas_enabled, created_at
+               ucaas_enabled, voicemail_enabled, created_at
         FROM customers
         WHERE 1=1
     """
@@ -70,19 +72,22 @@ async def create_customer(customer: CustomerCreate):
     """Create a new customer."""
     # UCaaS account type always has UCaaS enabled implicitly
     ucaas_flag = True if customer.account_type == "ucaas" else customer.ucaas_enabled
+    # Visual Voicemail is an add-on orthogonal to account_type — persist the
+    # provided boolean as-is, NEVER derive it from account_type.
+    voicemail_flag = customer.voicemail_enabled
     # Every customer gets a webhook signing secret so the programmable-voice
     # engine can always sign callbacks. Caller may supply one (e.g. migration),
     # otherwise mint a fresh 256-bit secret.
     signing_secret = customer.webhook_signing_secret or generate_secret()
     result = await db.fetch_one(
         """
-        INSERT INTO customers (name, account_type, credit_limit, traffic_grade, daily_limit, cpm_limit, ucaas_enabled, webhook_signing_secret)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-        RETURNING id, name, account_type, balance, status, traffic_grade, ucaas_enabled, created_at
+        INSERT INTO customers (name, account_type, credit_limit, traffic_grade, daily_limit, cpm_limit, ucaas_enabled, voicemail_enabled, webhook_signing_secret)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        RETURNING id, name, account_type, balance, status, traffic_grade, ucaas_enabled, voicemail_enabled, created_at
         """,
         customer.name, customer.account_type, customer.credit_limit,
         customer.traffic_grade, customer.daily_limit, customer.cpm_limit, ucaas_flag,
-        signing_secret
+        voicemail_flag, signing_secret
     )
     return dict(result)
 
@@ -94,7 +99,7 @@ async def get_customer(customer_id: int):
         """
         SELECT id, name, account_type, balance, credit_limit, status,
                traffic_grade, daily_limit, cpm_limit, fraud_score,
-               ucaas_enabled, created_at
+               ucaas_enabled, voicemail_enabled, created_at
         FROM customers WHERE id = $1
         """,
         customer_id
@@ -123,7 +128,7 @@ async def update_customer(customer_id: int, customer: CustomerUpdate):
     query = f"""
         UPDATE customers SET {', '.join(updates)}, updated_at = NOW()
         WHERE id = ${idx}
-        RETURNING id, name, account_type, status, traffic_grade, ucaas_enabled
+        RETURNING id, name, account_type, status, traffic_grade, ucaas_enabled, voicemail_enabled
     """
 
     result = await db.fetch_one(query, *values)
