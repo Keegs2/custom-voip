@@ -457,7 +457,7 @@ function RequestAccessCta() {
     <div
       style={{
         width: '100%',
-        maxWidth: 1400,
+        maxWidth: 1600,
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
@@ -644,7 +644,7 @@ export function DashboardPage() {
         <div
           style={{
             width: '100%',
-            maxWidth: 1400,
+            maxWidth: 1600,
             marginBottom: 48,
           }}
         >
@@ -652,16 +652,10 @@ export function DashboardPage() {
             <SectionLabel>Products</SectionLabel>
           </div>
 
-          <div
-            style={{
-              display: 'grid',
-              // 5 cards across on desktop; wrap to fewer columns as width shrinks
-              // (3 on mid-size, 2 on tablet, 1 on mobile) so the row never orphans
-              // a lone trailing card. auto-fit + minmax keeps every cell balanced.
-              gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-              gap: 16,
-            }}
-          >
+          {/* Fixed-column responsive grid (see .dash-products-grid in index.css):
+              5 across on desktop → 3 → 2 → 1 as the viewport narrows, so the row
+              never orphans a lone trailing card the way auto-fit did (4 + 1). */}
+          <div className="dash-products-grid">
             {PRODUCT_CARDS.map((card) => (
               <ProductCardEl
                 key={card.title}
@@ -683,7 +677,7 @@ export function DashboardPage() {
         {/* ──────────────────────────────────────────────────── */}
         <div
           className="animate-fade-in-up animation-delay-600"
-          style={{ width: '100%', maxWidth: 1400 }}
+          style={{ width: '100%', maxWidth: 1600 }}
         >
           <HaArchitectureViz />
         </div>
@@ -694,7 +688,7 @@ export function DashboardPage() {
         {!isAuthenticated && (
           <div
             className="animate-fade-in-up animation-delay-200"
-            style={{ width: '100%', maxWidth: 1400 }}
+            style={{ width: '100%', maxWidth: 1600 }}
           >
             <RequestAccessCta />
           </div>
@@ -706,7 +700,7 @@ export function DashboardPage() {
         <div
           style={{
             width: '100%',
-            maxWidth: 1400,
+            maxWidth: 1600,
             marginBottom: 72,
           }}
         >
