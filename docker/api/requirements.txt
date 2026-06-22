@@ -34,10 +34,16 @@ aiohttp>=3.9.0
 # We use our OWN persistent asyncio ESL client (services/esl_client.py): zero new
 # dependencies, native asyncio, full event + command multiplexing.
 
-# Token encryption at rest (Fernet) for the Calendar integration. Transitively
-# present via python-jose[cryptography]; pinned explicitly so the dependency is
-# not silently dropped if jose's extras change.
+# Token encryption at rest (Fernet) for the Calendar integration AND envelope
+# encryption (AES-256-GCM per-object DEK + MultiFernet KEK wrap) for the
+# encrypted-at-rest Visual Voicemail product (services/voicemail_crypto.py).
+# Transitively present via python-jose[cryptography]; pinned explicitly so the
+# dependency is not silently dropped if jose's extras change.
 cryptography>=42.0.0
+# Optional — production envelope-KEK provider for Visual Voicemail
+# (GcpKmsProvider, Cloud HSM / FIPS 140-2 L3). Not required for the local
+# MinIO/LocalKmsProvider stack; install only on the prod Services VM.
+# google-cloud-kms>=2.21.0
 
 # Authentication
 python-jose[cryptography]>=3.3.0

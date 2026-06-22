@@ -55,6 +55,27 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
         if path.endswith("/voicemail/ingest"):
             return await call_next(request)
 
+        # Visual Voicemail product (encrypt-on-write) — FS↔API ingest-secret
+        # endpoints. JWT-exempt in middleware; the routers validate the shared
+        # X-Ingest-Secret header (auth.ingest.ingest_secret_ok), same pattern as
+        # the CDR/voicemail/recording ingest above.
+        if (path.endswith("/voicemail/resolve")
+                or path.endswith("/voicemail/greetings/ingest")
+                or path.endswith("/voicemail/pin/verify")):
+            return await call_next(request)
+
+        # Decrypt-stream playback carve-out: the <audio src> / <a download> hits
+        # these with a SHORT-LIVED scoped vm_play token in the ?t= query param
+        # (the browser can't set an Authorization header on a media element).
+        # The stream handlers validate the token themselves (typ/id/mailbox/exp/
+        # ownership). ONLY the /stream routes are exempt — the auth'd
+        # playback-token mint endpoint still requires a JWT. Mirrors the /ws/*
+        # query-param auth precedent.
+        if "/voicemail/messages/" in path and path.endswith("/stream"):
+            return await call_next(request)
+        if "/voicemail/greetings/" in path and path.endswith("/stream"):
+            return await call_next(request)
+
         # Exempt the recording ingest (FreeSWITCH POSTs unauthenticated after a
         # recording is written to the shared spool — same pattern as CDR ingest).
         if path.endswith("/recordings/ingest"):
