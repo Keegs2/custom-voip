@@ -27,6 +27,8 @@ from routers import (
     recordings,
     # Phase 8 — read-only observability for the UI
     queues, media,
+    # Calendar integration (read-only, per-user OAuth: Google + Microsoft)
+    calendar,
 )
 from routers.chat import router as chat_router
 from routers.conference import router as conference_router
@@ -233,6 +235,12 @@ app.include_router(queues.router, prefix="/v1/queues", tags=["Queues"])
 app.include_router(queues.router, prefix="/queues", tags=["Queues"])
 app.include_router(media.router, prefix="/v1/media", tags=["Media"])
 app.include_router(media.router, prefix="/media", tags=["Media"])
+
+# Calendar integration — read-only, per-user OAuth (Google Calendar + MS Graph).
+# Mounted at both /v1/calendar and /calendar. The /callback/{provider} route is
+# JWT-exempt in middleware (signed-state + PKCE), every other route is JWT-required.
+app.include_router(calendar.router, prefix="/v1/calendar", tags=["Calendar"])
+app.include_router(calendar.router, prefix="/calendar", tags=["Calendar"])
 
 # FreeSWITCH mod_xml_curl gateway. Mounted at /freeswitch (auth-exempt in
 # middleware). Always returns HTTP 200 + the FreeSWITCH "not found" XML so

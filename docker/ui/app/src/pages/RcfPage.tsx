@@ -4732,7 +4732,7 @@ interface PortalHeaderProps {
   icon: React.ReactNode;
   title: string;
   subtitle: string;
-  badgeVariant?: 'rcf' | 'api' | 'trunk';
+  badgeVariant?: 'rcf' | 'api' | 'trunk' | 'calendar';
   userEmail?: string | null;
 }
 
@@ -4740,6 +4740,7 @@ const ACCENT_BY_VARIANT: Record<string, string> = {
   rcf: '#3b82f6',
   api: '#a855f7',
   trunk: '#f59e0b',
+  calendar: '#2dd4bf',
 };
 
 export function PortalHeader({ icon, title, subtitle, badgeVariant = 'rcf', userEmail }: PortalHeaderProps) {

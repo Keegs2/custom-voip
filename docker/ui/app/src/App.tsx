@@ -35,6 +35,7 @@ import { AccountPage } from './pages/AccountPage';
 import { CommunicationsPage } from './pages/CommunicationsPage';
 import { ChatPage } from './pages/ChatPage';
 import { ConferencePage } from './pages/ConferencePage';
+import { CalendarPage } from './pages/CalendarPage';
 import { DocumentsPage } from './pages/DocumentsPage';
 import { VoicemailPage } from './pages/VoicemailPage';
 // Phase 8 — net-new media/control surfaces. UCaaS ops (live calls, recordings,
@@ -111,6 +112,7 @@ export function App() {
                 <Route path="communications"  element={<CommunicationsPage />} />
                 <Route path="chat"            element={<ChatPage />} />
                 <Route path="conference"      element={<ConferencePage />} />
+                <Route path="calendar"        element={<CalendarPage />} />
                 <Route path="documents"       element={<DocumentsPage />} />
                 <Route path="voicemail"        element={<VoicemailPage />} />
 

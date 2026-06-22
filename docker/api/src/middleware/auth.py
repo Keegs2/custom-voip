@@ -72,6 +72,15 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
         if "/ivr/webhook/" in path:
             return await call_next(request)
 
+        # Exempt the calendar OAuth provider callback. Google/Microsoft redirect
+        # the user's browser here WITHOUT a JWT — the user identity comes from the
+        # signed `state` (typ=cal_state) + single-use PKCE nonce, validated in the
+        # router (routers/calendar.py). Same exempt-in-middleware/validate-in-router
+        # pattern as the IVR webhook / ingest endpoints above. Only /callback/ is
+        # exempt — every other /calendar endpoint stays JWT-required.
+        if "/calendar/callback/" in path:
+            return await call_next(request)
+
         # WebSocket connections authenticate via query param, not header
         if path.startswith("/ws/"):
             return await call_next(request)

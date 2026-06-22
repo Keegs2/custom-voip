@@ -206,6 +206,83 @@ async def get_velocity(customer_id: int) -> dict:
     }
 
 
+# Calendar integration helpers (fail-open) ---------------------------------
+# PKCE verifier stash (single-use) + short-lived event cache. All no-op /
+# return None when Redis is unavailable so the calendar flow degrades, never
+# crashes. NOTE: the PKCE nonce being single-use is a replay guard — pop() uses
+# GETDEL so a verifier can only be consumed once even under concurrent callbacks.
+
+_CAL_PKCE_TTL_SEC = 600  # 10m — matches the signed-state exp window.
+
+
+async def cal_pkce_put(nonce: str, verifier: str) -> None:
+    """Stash a PKCE verifier under cal:pkce:{nonce} (TTL 600s). No-op if Redis down."""
+    if not client:
+        return
+    try:
+        await client.set(f"cal:pkce:{nonce}", verifier, ex=_CAL_PKCE_TTL_SEC)
+    except Exception as exc:
+        logger.warning("cal_pkce_put failed (%s)", type(exc).__name__)
+
+
+async def cal_pkce_pop(nonce: str) -> Optional[str]:
+    """Atomically GET+DEL the PKCE verifier (single-use replay guard).
+
+    Returns the verifier or None (missing/expired/replayed/Redis down). If Redis
+    is unavailable the callback cannot validate PKCE and must fail closed — the
+    router treats a None here as state_invalid.
+    """
+    if not client:
+        return None
+    try:
+        # GETDEL (Redis 6.2+) is atomic single-use. Fall back to GET+DEL pipeline
+        # on older servers that lack the command.
+        try:
+            return await client.getdel(f"cal:pkce:{nonce}")
+        except Exception:
+            pipe = client.pipeline()
+            pipe.get(f"cal:pkce:{nonce}")
+            pipe.delete(f"cal:pkce:{nonce}")
+            results = await pipe.execute()
+            return results[0]
+    except Exception as exc:
+        logger.warning("cal_pkce_pop failed (%s)", type(exc).__name__)
+        return None
+
+
+def _cal_cache_ttl() -> int:
+    try:
+        return int(os.getenv("CALENDAR_CACHE_TTL", "120"))
+    except (TypeError, ValueError):
+        return 120
+
+
+async def cal_events_get(key: str) -> Optional[list]:
+    """Read a cached events list (orjson). Returns None on miss/unavailable."""
+    if not client:
+        return None
+    try:
+        raw = await client.get(f"cal:events:{key}")
+        if not raw:
+            return None
+        import orjson
+        return orjson.loads(raw)
+    except Exception as exc:
+        logger.warning("cal_events_get failed (%s)", type(exc).__name__)
+        return None
+
+
+async def cal_events_set(key: str, events: list) -> None:
+    """Cache an events list (orjson) under cal:events:{key}. No-op if Redis down."""
+    if not client:
+        return
+    try:
+        import orjson
+        await client.set(f"cal:events:{key}", orjson.dumps(events), ex=_cal_cache_ttl())
+    except Exception as exc:
+        logger.warning("cal_events_set failed (%s)", type(exc).__name__)
+
+
 async def invalidate_rcf_cache(did: str):
     """Invalidate RCF cache when config changes. No-op if Redis is unavailable."""
     if not client:

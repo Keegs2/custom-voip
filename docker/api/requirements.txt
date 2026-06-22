@@ -34,6 +34,11 @@ aiohttp>=3.9.0
 # We use our OWN persistent asyncio ESL client (services/esl_client.py): zero new
 # dependencies, native asyncio, full event + command multiplexing.
 
+# Token encryption at rest (Fernet) for the Calendar integration. Transitively
+# present via python-jose[cryptography]; pinned explicitly so the dependency is
+# not silently dropped if jose's extras change.
+cryptography>=42.0.0
+
 # Authentication
 python-jose[cryptography]>=3.3.0
 passlib[bcrypt]>=1.7.4

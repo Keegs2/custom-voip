@@ -1,0 +1,156 @@
+/*
+ * FullCalendar dark theme — scoped under `.rv-calendar` so it never leaks into
+ * the rest of the app. Maps FullCalendar's `--fc-*` design tokens onto the
+ * revup §15 palette (CLAUDE.md). Read-only calendar: no editing affordances.
+ */
+
+.rv-calendar {
+  /* Surface + borders */
+  --fc-page-bg-color: transparent;
+  --fc-border-color: rgba(42, 47, 69, 0.6);
+  --fc-neutral-bg-color: rgba(15, 17, 23, 0.5);
+  --fc-neutral-text-color: #94a3b8;
+
+  /* Today highlight — teal accent matches the Calendar nav colour (#2dd4bf) */
+  --fc-today-bg-color: rgba(45, 212, 191, 0.07);
+
+  /* Now indicator (time grid) */
+  --fc-now-indicator-color: #2dd4bf;
+
+  /* Events default (per-event colors override these inline) */
+  --fc-event-bg-color: rgba(45, 212, 191, 0.18);
+  --fc-event-border-color: rgba(45, 212, 191, 0.45);
+  --fc-event-text-color: #e2e8f0;
+
+  /* List view */
+  --fc-list-event-hover-bg-color: rgba(45, 212, 191, 0.08);
+
+  font-size: 0.85rem;
+  color: #e2e8f0;
+}
+
+/* Column headers + day numbers */
+.rv-calendar .fc .fc-col-header-cell-cushion,
+.rv-calendar .fc .fc-daygrid-day-number,
+.rv-calendar .fc .fc-timegrid-axis-cushion,
+.rv-calendar .fc .fc-timegrid-slot-label-cushion {
+  color: #718096;
+  text-decoration: none;
+}
+
+.rv-calendar .fc .fc-col-header-cell-cushion {
+  font-size: 0.62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 8px 4px;
+}
+
+/* Day cell numbers */
+.rv-calendar .fc .fc-daygrid-day-number {
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 6px 8px;
+}
+
+/* Today's date number gets the accent */
+.rv-calendar .fc .fc-day-today .fc-daygrid-day-number,
+.rv-calendar .fc .fc-day-today .fc-col-header-cell-cushion {
+  color: #2dd4bf;
+}
+
+/* Days outside the current month — dimmed */
+.rv-calendar .fc .fc-day-other .fc-daygrid-day-number {
+  opacity: 0.35;
+}
+
+/* Events — clickable, rounded, dark-friendly */
+.rv-calendar .fc .fc-event,
+.rv-calendar .fc .fc-event:focus {
+  border-radius: 6px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 1px 4px;
+  cursor: pointer;
+  box-shadow: none;
+}
+
+.rv-calendar .fc .fc-event:hover {
+  filter: brightness(1.15);
+}
+
+.rv-calendar .fc .fc-daygrid-event {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rv-calendar .fc .fc-daygrid-event-dot {
+  border-color: currentColor;
+}
+
+/* "+N more" link */
+.rv-calendar .fc .fc-daygrid-more-link {
+  color: #2dd4bf;
+  font-size: 0.66rem;
+  font-weight: 700;
+}
+
+/* Time-grid slot lines a touch fainter */
+.rv-calendar .fc .fc-timegrid-slot {
+  height: 2.2em;
+}
+
+/* List view rows */
+.rv-calendar .fc .fc-list {
+  border-radius: 12px;
+  overflow: hidden;
+  border-color: rgba(42, 47, 69, 0.6);
+}
+
+.rv-calendar .fc .fc-list-day-cushion {
+  background: rgba(15, 17, 23, 0.6);
+}
+
+.rv-calendar .fc .fc-list-day-text,
+.rv-calendar .fc .fc-list-day-side-text {
+  color: #94a3b8;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.rv-calendar .fc .fc-list-event-title,
+.rv-calendar .fc .fc-list-event-time {
+  color: #e2e8f0;
+  font-size: 0.8rem;
+}
+
+.rv-calendar .fc .fc-list-event-graphic .fc-list-event-dot {
+  border-color: currentColor;
+}
+
+.rv-calendar .fc .fc-list-empty {
+  background: transparent;
+  color: #475569;
+}
+
+/* Popover (more-events) — keep it on theme */
+.rv-calendar .fc .fc-popover {
+  background: #1a1d27;
+  border: 1px solid rgba(42, 47, 69, 0.8);
+  border-radius: 12px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
+}
+
+.rv-calendar .fc .fc-popover-header {
+  background: rgba(15, 17, 23, 0.6);
+  color: #e2e8f0;
+}
+
+/* Scrollbar inside the calendar body */
+.rv-calendar .fc-scroller {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(42, 47, 69, 0.6) transparent;
+}

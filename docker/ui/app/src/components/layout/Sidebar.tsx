@@ -11,7 +11,7 @@ import {
   IconRCF, IconTrunk, IconAPI, IconDocs,
   IconAdmin, IconSignal, IconTroubleshoot, IconVoicemail,
 } from '../icons/ProductIcons';
-import { Package, Shield, ChevronDown, Eye, EyeOff, Server, BookOpen, FolderOpen, MessageCircle, RadioTower, Mic, ListOrdered, Waves, Video, Webhook, Workflow } from 'lucide-react';
+import { Package, Shield, ChevronDown, Eye, EyeOff, Server, BookOpen, FolderOpen, MessageCircle, RadioTower, Mic, ListOrdered, Waves, Video, Webhook, Workflow, CalendarDays } from 'lucide-react';
 import { AccessRequestForm } from './AccessRequestForm';
 
 /* ─── Types ───────────────────────────────────────────────── */
@@ -79,6 +79,7 @@ const unifiedCommsItem: NavItemDef = {
 const allCommsNavItems: NavItemDef[] = [
   { label: 'Chat',           icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} style={{ width: 15, height: 15 }}><path d="M8.625 12a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H8.25m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H12m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 0 1-2.555-.337A5.972 5.972 0 0 1 5.41 20.97a5.969 5.969 0 0 1-.474-.065 4.48 4.48 0 0 0 .978-2.025c.09-.457-.133-.901-.467-1.226C3.93 16.178 3 14.189 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25Z" strokeLinecap="round" strokeLinejoin="round" /></svg>, to: '/chat', color: '#60a5fa', accountTypes: COMMS_ACCOUNT_TYPES },
   { label: 'Meetings',       icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} style={{ width: 15, height: 15 }}><path d="m15.75 10.5 4.72-4.72a.75.75 0 0 1 1.28.53v11.38a.75.75 0 0 1-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 0 0 2.25-2.25v-9a2.25 2.25 0 0 0-2.25-2.25h-9A2.25 2.25 0 0 0 2.25 7.5v9a2.25 2.25 0 0 0 2.25 2.25Z" strokeLinecap="round" strokeLinejoin="round" /></svg>, to: '/conference', color: '#4ade80', accountTypes: COMMS_ACCOUNT_TYPES },
+  { label: 'Calendar',       icon: <CalendarDays size={15} strokeWidth={1.8} />, to: '/calendar', color: '#2dd4bf', accountTypes: COMMS_ACCOUNT_TYPES },
   { label: 'Documents',      icon: <FolderOpen size={14} strokeWidth={1.8} />, to: '/documents', color: '#fbbf24', accountTypes: COMMS_ACCOUNT_TYPES },
   { label: 'Voicemail',      icon: <IconVoicemail size={15} />, to: '/voicemail', color: '#818cf8', accountTypes: COMMS_ACCOUNT_TYPES },
 ];
@@ -716,7 +717,7 @@ export function Sidebar() {
     const path = location.pathname;
 
     const productPaths = productNavItems.map((i) => i.to);
-    const commPaths    = ['/communications', '/chat', '/conference', '/documents', '/voicemail'];
+    const commPaths    = ['/communications', '/chat', '/conference', '/calendar', '/documents', '/voicemail'];
     // '/conferences/live' lives in Voice Ops; '/conference' (singular) is Comms.
     const voiceOpsPaths = ['/live-calls', '/recordings', '/queues', '/media-streams', '/conferences/live'];
     const adminPaths   = ['/admin', '/call-quality', '/admin/platform', '/troubleshooting', '/flows'];
