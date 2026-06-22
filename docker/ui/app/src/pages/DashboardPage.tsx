@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Shield, Zap, Globe, Activity, PhoneForwarded, Phone, Code, Voicemail, ArrowRight } from 'lucide-react';
+import { Shield, Zap, Globe, Activity, PhoneForwarded, Phone, Code, Webhook, MessageCircle, ArrowRight } from 'lucide-react';
 import { HaArchitectureViz } from '../components/layout/HaArchitectureViz';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -68,22 +68,33 @@ const PRODUCT_CARDS: ProductCard[] = [
     icon: <Phone size={20} strokeWidth={1.75} />,
     title: 'SIP Trunking',
     subtitle: 'Enterprise SIP connectivity',
-    active: false,
+    active: true,
+    route: '/trunks',
     animDelay: '0.2s',
   },
   {
     icon: <Code size={20} strokeWidth={1.75} />,
-    title: 'API Calling',
-    subtitle: 'Programmable voice via webhooks',
-    active: false,
+    title: 'API DIDs',
+    subtitle: 'Inbound DIDs for programmable voice',
+    active: true,
+    route: '/api-dids',
     animDelay: '0.3s',
   },
   {
-    icon: <Voicemail size={20} strokeWidth={1.75} />,
-    title: 'Voicemail',
-    subtitle: 'Visual voicemail with transcription',
-    active: false,
+    icon: <Webhook size={20} strokeWidth={1.75} />,
+    title: 'Programmable Voice',
+    subtitle: 'Webhook-driven call control with TwiML',
+    active: true,
+    route: '/programmable-voice',
     animDelay: '0.4s',
+  },
+  {
+    icon: <MessageCircle size={20} strokeWidth={1.75} />,
+    title: 'Unified Comms',
+    subtitle: 'Chat, meetings, calendar, documents & voicemail',
+    active: true,
+    route: '/communications',
+    animDelay: '0.5s',
   },
 ];
 
@@ -180,9 +191,10 @@ function CapabilityCardEl({ card }: { card: CapabilityCard }) {
 interface ProductCardElProps {
   card: ProductCard;
   /**
-   * When provided and the card is the RCF tile, clicking fires this callback
-   * instead of navigating. Used to open the Request Access form for unauthenticated
-   * visitors — avoids a silent redirect to /login.
+   * When provided, clicking the card fires this callback instead of navigating.
+   * Used to open the Request Access form for unauthenticated visitors on the public
+   * homepage — avoids product cards being dead-ends that silently bounce to login.
+   * Authenticated users get no callback, so the card navigates to its route normally.
    */
   onRequestAccess?: () => void;
 }
@@ -627,7 +639,7 @@ export function DashboardPage() {
         </div>
 
         {/* ──────────────────────────────────────────────────── */}
-        {/* PRODUCTS — 4 horizontal cards                        */}
+        {/* PRODUCTS — 5 horizontal cards                        */}
         {/* ──────────────────────────────────────────────────── */}
         <div
           style={{
@@ -642,7 +654,11 @@ export function DashboardPage() {
 
           <div
             style={{
-              display: 'flex',
+              display: 'grid',
+              // 5 cards across on desktop; wrap to fewer columns as width shrinks
+              // (3 on mid-size, 2 on tablet, 1 on mobile) so the row never orphans
+              // a lone trailing card. auto-fit + minmax keeps every cell balanced.
+              gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
               gap: 16,
             }}
           >
@@ -651,11 +667,11 @@ export function DashboardPage() {
                 key={card.title}
                 card={card}
                 onRequestAccess={
-                  // Only the active RCF tile needs special behavior for unauthenticated visitors.
-                  // Authenticated users navigate normally — no callback provided.
-                  !isAuthenticated && card.active && card.route === '/rcf'
-                    ? openRequestAccess
-                    : undefined
+                  // On the public homepage every active product card opens the
+                  // Request Access flow instead of bouncing an unauthenticated
+                  // visitor to login. Authenticated users navigate normally —
+                  // no callback provided, so handleClick uses card.route.
+                  !isAuthenticated && card.active ? openRequestAccess : undefined
                 }
               />
             ))}
