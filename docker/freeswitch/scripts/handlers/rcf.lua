@@ -289,57 +289,72 @@ local function handle_rich_plan(ctx, plan)
         end
     end
 
-    -- DID-scoped voicemail recorder (rich fallback type "voicemail"). Self-
-    -- contained tones + core `record` app to the shared spool; notify is best-
-    -- effort / fail-open. Fully wrapped in pcall — a recorder error never breaks
-    -- the call. Storage mirrors UCaaS (entrypoint.sh symlinks /var/lib/freeswitch/
-    -- voicemail -> /media/spool/voicemail).
+    -- DID-scoped voicemail recorder (rich fallback type "voicemail"). Delegates
+    -- to the shared lib/vm_record so the tones/beep/record flow is identical to
+    -- the UCaaS recorder.
+    --
+    -- ATTACHED-MODEL GATE (task §5): if a mailbox is bound to this RCF DID
+    -- (voicemail_box_bindings binding_type='attached', attach_product='rcf'),
+    -- record to tmpfs and upload it ENCRYPTED (the API encrypts on write — FS
+    -- never inserts a row). When NO mailbox is bound the behavior is BYTE-FOR-BYTE
+    -- the legacy spool deposit (same vm_dir, same record args, same notify meta,
+    -- NO shred) — the same backward-compat discipline routing_plan uses. The
+    -- attached lookup runs ONLY here on the no-answer fallback, never on the
+    -- call-setup hot path.
     local function record_voicemail()
         local last_cause = get_var("last_bridge_hangup_cause", "")
         freeswitch.consoleLog("INFO", string.format(
             "[%s] RICH RCF fallback=voicemail (last_cause=%s) for DID %s\n",
             uuid, last_cause, normalized_did))
-        pcall(function()
-            if not session:ready() then return end
-            session:answer()
-            session:sleep(500)
-            session:execute("playback", "tone_stream://%(200,80,500);%(200,80,650);%(200,0,800)")
-            session:sleep(800)
-            session:execute("playback", "tone_stream://%(150,100,700);%(150,0,700)")
-            session:sleep(600)
-            session:execute("playback", "tone_stream://%(1000,0,640)")
 
-            local did10 = ctx.to_10digit(normalized_did)
-            local vm_dir = string.format("/var/lib/freeswitch/voicemail/rcf/%s", did10)
-            session:execute("set", "playback_terminators=#")
-            os.execute("mkdir -p " .. shq(vm_dir))
-            local vm_file = string.format("%s/msg_%s.wav", vm_dir, uuid)
-            session:execute("record", vm_file .. " 300 200 3")
+        local vmr = ctx.vm_record
+        if not vmr or not vmr.record then
+            freeswitch.consoleLog("ERR",
+                "[" .. uuid .. "] vm_record unavailable — skipping voicemail\n")
+            return
+        end
 
-            if session:ready() then
-                session:execute("playback", "tone_stream://%(100,0,800)")
-                session:sleep(300)
-                session:execute("playback", "tone_stream://%(200,80,600);%(200,0,400)")
-            end
+        local did10 = ctx.to_10digit(normalized_did)
 
-            if os.getenv("API_HOST") then
-                local notify_chunk = loadfile("/usr/local/freeswitch/scripts/lib/vm_notify.lua")
-                if notify_chunk then
-                    local okmod, vm_notify = pcall(notify_chunk)
-                    if okmod and vm_notify then
-                        local spool_path = vm_file:gsub(
-                            "^/var/lib/freeswitch/voicemail", "/media/spool/voicemail")
-                        pcall(vm_notify.notify, {
-                            extension    = did10,
-                            customer_id  = ctx.customer_id,
-                            caller_id    = original_caller_number,
-                            caller_name  = original_caller_name,
-                            storage_path = spool_path,
-                        })
-                    end
-                end
-            end
-        end)
+        local mailbox = nil
+        if ctx.db and ctx.db.lookup_attached_mailbox then
+            local okq, m = pcall(ctx.db.lookup_attached_mailbox, "rcf", normalized_did)
+            if okq and type(m) == "table" and m.mailbox_id then mailbox = m end
+        end
+
+        if mailbox then
+            -- ENCRYPTED deposit (attached mailbox) — tmpfs + shred.
+            vmr.record({
+                session = session, uuid = uuid, get_var = get_var,
+                storage = "tmpfs",
+                log_prefix = "[" .. uuid .. "] [rcf-vm] ",
+                notify_duration = true,
+                notify = {
+                    to_did         = normalized_did,
+                    mailbox_id     = mailbox.mailbox_id,
+                    attach_product = "rcf",
+                    attach_ref     = normalized_did,
+                    customer_id    = ctx.customer_id,
+                    caller_id      = original_caller_number,
+                    caller_name    = original_caller_name,
+                    source_model   = "rcf",
+                },
+            })
+        else
+            -- LEGACY spool deposit (no mailbox bound) — byte-for-byte unchanged.
+            vmr.record({
+                session = session, uuid = uuid, get_var = get_var,
+                storage = "spool",
+                vm_dir = string.format("/var/lib/freeswitch/voicemail/rcf/%s", did10),
+                log_prefix = "[" .. uuid .. "] [rcf-vm] ",
+                notify = {
+                    extension   = did10,
+                    customer_id = ctx.customer_id,
+                    caller_id   = original_caller_number,
+                    caller_name = original_caller_name,
+                },
+            })
+        end
     end
 
     -- Plan-level fallback once a matched rule's ring fails / no rule matched.

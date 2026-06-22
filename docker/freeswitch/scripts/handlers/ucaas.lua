@@ -112,88 +112,73 @@ return function(ctx)
     -- effects are byte-for-byte identical). Used by the legacy no-answer path
     -- AND by the ring-plan fallback type "voicemail".
     -- ========================================================================
+    -- Voicemail recorder. Delegates to the shared lib/vm_record (the tones/beep/
+    -- record flow is byte-for-byte the prior inline copy).
+    --
+    -- ATTACHED-MODEL GATE (task §5): if a mailbox is bound to this extension's
+    -- DID (voicemail_box_bindings binding_type='attached', attach_product=
+    -- 'ucaas'), record to tmpfs and upload it ENCRYPTED (the API encrypts on
+    -- write). When NO mailbox is bound the behavior is BYTE-FOR-BYTE the legacy
+    -- spool deposit (same /var/lib/freeswitch/voicemail/<domain>/<ext> path so
+    -- *97 retrieval works, same record args, same notify meta incl. duration_ms,
+    -- NO shred). The attached lookup runs ONLY on this no-answer fallback.
     local function record_voicemail()
         local last_bridge_hangup = get_var("last_bridge_hangup_cause", "")
         freeswitch.consoleLog("INFO", string.format(
             "[%s] UCaaS bridge failed (cause=%s), recording voicemail for ext %s@%s\n",
             uuid, last_bridge_hangup, ext, customer_domain
         ))
-        pcall(function()
-            if not session:ready() then return end
-            session:answer()
-            session:sleep(500)
 
-            -- "The person at extension <ext> is not available."
-            -- Three ascending tones = universal "not available" signal
-            session:execute("playback", "tone_stream://%(200,80,500);%(200,80,650);%(200,0,800)")
-            session:sleep(800)
+        local vmr = ctx.vm_record
+        if not vmr or not vmr.record then
+            freeswitch.consoleLog("ERR",
+                "[" .. uuid .. "] vm_record unavailable — skipping voicemail\n")
+            return
+        end
 
-            -- "Please leave a message after the tone."
-            -- Two short tones = "get ready"
-            session:execute("playback", "tone_stream://%(150,100,700);%(150,0,700)")
-            session:sleep(600)
+        local mailbox = nil
+        if ctx.db and ctx.db.lookup_attached_mailbox then
+            local okq, m = pcall(ctx.db.lookup_attached_mailbox, "ucaas", normalized_did)
+            if okq and type(m) == "table" and m.mailbox_id then mailbox = m end
+        end
 
-            -- BEEP — start recording
-            session:execute("playback", "tone_stream://%(1000,0,640)")
-
-            -- Record to mod_voicemail's storage directory so *97 retrieval works.
-            -- Format: /var/lib/freeswitch/voicemail/<domain>/<ext>/msg_<uuid>.wav
-            local vm_dir = string.format(
-                "/var/lib/freeswitch/voicemail/%s/%s",
-                customer_domain, ext
-            )
-            session:execute("set", "playback_terminators=#")
-            os.execute("mkdir -p " .. shq(vm_dir))
-            local vm_file = string.format("%s/msg_%s.wav", vm_dir, uuid)
-
-            freeswitch.consoleLog("INFO", string.format(
-                "[%s] Recording voicemail to %s (max 300s, silence detect 200/3)\n",
-                uuid, vm_file
-            ))
-
-            -- record <file> <max_seconds> <silence_threshold> <silence_hits>
-            session:execute("record", vm_file .. " 300 200 3")
-
-            -- Confirmation beep
-            if session:ready() then
-                session:execute("playback", "tone_stream://%(100,0,800)")
-                session:sleep(300)
-                session:execute("playback", "tone_stream://%(200,80,600);%(200,0,400)")
-            end
-
-            freeswitch.consoleLog("INFO", string.format(
-                "[%s] Voicemail recorded: %s\n", uuid, vm_file
-            ))
-
-            -- Notify the API so it uploads the spooled WAV to object storage and
-            -- creates the voicemails row. Fire-and-forget, fully fail-open: a
-            -- notify failure never affects the call. Skipped cleanly when
-            -- API_HOST is unset (unit harness).
-            if os.getenv("API_HOST") then
-                local notify_chunk = loadfile(
-                    "/usr/local/freeswitch/scripts/lib/vm_notify.lua")
-                if notify_chunk then
-                    local okmod, vm_notify = pcall(notify_chunk)
-                    if okmod and vm_notify then
-                        local spool_path = vm_file:gsub(
-                            "^/var/lib/freeswitch/voicemail", "/media/spool/voicemail")
-                        local dur_ms = tonumber(ctx.get_var("record_ms", ""))
-                        if not dur_ms then
-                            local secs = tonumber(ctx.get_var("record_seconds", ""))
-                            if secs then dur_ms = secs * 1000 end
-                        end
-                        pcall(vm_notify.notify, {
-                            extension    = ext,
-                            customer_id  = customer_id,
-                            caller_id    = original_caller_number,
-                            caller_name  = original_caller_name,
-                            duration_ms  = dur_ms,
-                            storage_path = spool_path,
-                        })
-                    end
-                end
-            end
-        end)
+        if mailbox then
+            -- ENCRYPTED deposit (attached mailbox) — tmpfs + shred.
+            vmr.record({
+                session = session, uuid = uuid, get_var = ctx.get_var,
+                storage = "tmpfs",
+                log_prefix = "[" .. uuid .. "] [ucaas-vm] ",
+                notify_duration = true,
+                notify = {
+                    to_did         = normalized_did,
+                    mailbox_id     = mailbox.mailbox_id,
+                    attach_product = "ucaas",
+                    attach_ref     = normalized_did,
+                    customer_id    = customer_id,
+                    caller_id      = original_caller_number,
+                    caller_name    = original_caller_name,
+                    source_model   = "ucaas",
+                },
+            })
+        else
+            -- LEGACY spool deposit (no mailbox bound) — byte-for-byte unchanged.
+            -- Record to mod_voicemail's storage dir so *97 retrieval works:
+            -- /var/lib/freeswitch/voicemail/<domain>/<ext>/msg_<uuid>.wav.
+            vmr.record({
+                session = session, uuid = uuid, get_var = ctx.get_var,
+                storage = "spool",
+                vm_dir = string.format("/var/lib/freeswitch/voicemail/%s/%s",
+                    customer_domain, ext),
+                log_prefix = "[" .. uuid .. "] [ucaas-vm] ",
+                notify_duration = true,
+                notify = {
+                    extension   = ext,
+                    customer_id = customer_id,
+                    caller_id   = original_caller_number,
+                    caller_name = original_caller_name,
+                },
+            })
+        end
     end
 
     -- ========================================================================

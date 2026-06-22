@@ -39,8 +39,17 @@ local function shq(s)
     return "'" .. tostring(s or ""):gsub("'", "'\\''") .. "'"
 end
 
--- notify(meta) -> bool. meta fields: extension, customer_id, caller_id,
--- caller_name, duration_ms, storage_path. Returns true only on a 2xx.
+-- notify(meta) -> bool. Returns true only on a 2xx. meta fields:
+--   PRODUCT (encrypted Visual Voicemail — deterministic mailbox resolution by the
+--   API): to_did, mailbox_id, attach_product, attach_ref, source_model,
+--   greeting_type. The API resolves the mailbox via voicemail_box_bindings
+--   (dedicated_did by to_did, OR attached by attach_product+attach_ref) and
+--   encrypts on write — FS never inserts a row. For the tmpfs path the multipart
+--   `file` upload IS the only handoff (no shared volume cross-VM).
+--   LEGACY (UCaaS/RCF spool fallback): extension, customer_id.
+--   COMMON: caller_id, caller_name, duration_ms, storage_path.
+-- Every field is sent only when present, so legacy callers post the exact same
+-- field set as before (mailbox_id/to_did/etc. are simply absent).
 function M.notify(meta)
     meta = meta or {}
     local api_host = os.getenv("API_HOST")
@@ -78,9 +87,22 @@ function M.notify(meta)
         args[#args + 1] = "-F"
         args[#args + 1] = shq(name .. "=" .. tostring(value))
     end
+    -- Product (encrypted Visual Voicemail) resolution + context fields. The API
+    -- resolves the mailbox by to_did (dedicated_did) or attach_product+attach_ref
+    -- (attached); mailbox_id/source_model/greeting_type are carried for audit /
+    -- forward-compat. All optional — omitted cleanly for the legacy paths.
+    field("to_did", meta.to_did)
+    local mbid = tonumber(meta.mailbox_id)
+    if mbid then field("mailbox_id", string.format("%d", mbid)) end
+    field("attach_product", meta.attach_product)
+    field("attach_ref", meta.attach_ref)
+    field("source_model", meta.source_model)
+    field("greeting_type", meta.greeting_type)
+    -- Legacy (UCaaS/RCF spool fallback) resolution fields.
     field("extension", meta.extension)
     local cid = tonumber(meta.customer_id)
     if cid then field("customer_id", string.format("%d", cid)) end
+    -- Common context.
     field("caller_id", meta.caller_id)
     field("caller_name", meta.caller_name)
     local dur = tonumber(meta.duration_ms)

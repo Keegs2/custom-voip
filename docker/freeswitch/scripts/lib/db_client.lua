@@ -692,6 +692,95 @@ function M.lookup_extension_did(did)
     return row
 end
 
+-- ---------------------------------------------------------------------------
+-- Visual Voicemail (Phase 1) — mailbox resolution against voicemail_box_bindings.
+-- The backend OWNS/writes these tables; FreeSWITCH has READ-ONLY SELECT
+-- (granted in 33_schema_voicemail_product.sql). v1 resolution is DETERMINISTIC:
+-- by the dialed DID (dedicated_did) or by the originating product+ref (attached).
+-- No diversion / History-Info / carrier-header dependency.
+-- ---------------------------------------------------------------------------
+
+-- Lookup a DEDICATED-DID mailbox: the dialed DID is a mailbox's own access DID
+-- (voicemail_box_bindings.binding_type='dedicated_did' AND did = to_did). Used by
+-- the inbound_router dispatch cascade (LAST, after rcf/api/trunk/ucaas) to route
+-- the call to handlers/voicemail.lua. Returns product_type='voicemail' with the
+-- mailbox id + mode, or nil. ring_target/ring_timeout are reserved for the
+-- Phase-2 ring-target-then-VM feature (not in the v1 schema → stay nil).
+function M.lookup_voicemail_did(did)
+    local clean_did = validate_did(did)
+    if not clean_did then
+        freeswitch.consoleLog("WARN", "Invalid DID format for voicemail lookup: " .. tostring(did) .. "\n")
+        return nil
+    end
+
+    local sql = string.format([[
+        SELECT bd.mailbox_id, b.customer_id, b.timezone
+        FROM voicemail_box_bindings bd
+        JOIN voicemail_boxes b ON bd.mailbox_id = b.id
+        WHERE bd.binding_type = 'dedicated_did' AND bd.did = %s
+          AND b.status = 'active'
+        LIMIT 1
+    ]], sql_string(clean_did))
+
+    local cursor, err = execute_query(sql)
+    if not cursor then
+        freeswitch.consoleLog("ERR", "Voicemail DID lookup failed: " .. tostring(err) .. "\n")
+        return nil
+    end
+
+    local row = cursor:fetch({}, "a")
+    cursor:close()
+    if not row then return nil end
+
+    return {
+        product_type = "voicemail",
+        mailbox_id   = row.mailbox_id,
+        customer_id  = row.customer_id,
+        timezone     = row.timezone,
+        mode         = "direct",
+    }
+end
+
+-- Lookup an ATTACHED mailbox: a mailbox bound as the no-answer/busy fallback of
+-- an existing revup line (binding_type='attached', keyed by (attach_product,
+-- attach_ref)). Called ONLY from the rcf/ucaas voicemail-fallback path (NOT on
+-- the call-setup hot path) to decide whether a no-answer becomes an ENCRYPTED
+-- deposit (mailbox bound) or the LEGACY spool deposit (no mailbox bound — gate
+-- returns nil). attach_ref is the normalized E.164 DID the handler also sends to
+-- the ingest, so the FS gate and the API resolution agree on the same binding.
+function M.lookup_attached_mailbox(attach_product, attach_ref)
+    if not attach_product or attach_product == "" then return nil end
+    if not attach_ref or attach_ref == "" then return nil end
+    local p = tostring(attach_product)
+    -- attach_product is a fixed enum (schema CHECK) — whitelist it.
+    if p ~= "rcf" and p ~= "trunk" and p ~= "ucaas" and p ~= "api" then return nil end
+
+    local sql = string.format([[
+        SELECT bd.mailbox_id, b.customer_id, b.timezone
+        FROM voicemail_box_bindings bd
+        JOIN voicemail_boxes b ON bd.mailbox_id = b.id
+        WHERE bd.binding_type = 'attached' AND bd.attach_product = %s
+          AND bd.attach_ref = %s AND b.status = 'active'
+        LIMIT 1
+    ]], sql_string(p), sql_string(tostring(attach_ref)))
+
+    local cursor, err = execute_query(sql)
+    if not cursor then
+        freeswitch.consoleLog("ERR", "Attached mailbox lookup failed: " .. tostring(err) .. "\n")
+        return nil
+    end
+
+    local row = cursor:fetch({}, "a")
+    cursor:close()
+    if not row then return nil end
+
+    return {
+        mailbox_id  = row.mailbox_id,
+        customer_id = row.customer_id,
+        timezone    = row.timezone,
+    }
+end
+
 -- Lookup assigned DID for an extension (for outbound caller ID)
 function M.lookup_did_for_extension(ext)
     if not ext or ext == "" then

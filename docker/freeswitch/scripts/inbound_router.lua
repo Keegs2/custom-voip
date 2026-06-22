@@ -112,6 +112,10 @@ local schedule = load_module("schedule")
 -- RICH SIP-trunk inbound path (handlers/trunk.lua) so the two products evaluate
 -- routing rules with identical semantics. Side-effect-free.
 local rules = load_module("rules")
+-- Shared voicemail recorder (tones/greeting/beep/record/upload/shred). Used by
+-- the standalone voicemail handler (handlers/voicemail.lua) AND by the rcf/ucaas
+-- no-answer fallback (attached-mailbox encrypted deposit). Passed via ctx.
+local vm_record = load_module("vm_record")
 
 -- Ensure session exists
 if not session then
@@ -350,6 +354,33 @@ local function lookup_extension_did()
     return nil
 end
 
+-- Try Voicemail (dedicated-DID) lookup — LAST in the cascade. A DID that is a
+-- mailbox's own access DID (voicemail_box_bindings.binding_type='dedicated_did')
+-- resolves here and routes to handlers/voicemail.lua. Placed AFTER
+-- rcf/api/trunk/ucaas so it NEVER shadows a revenue product — the bindings table
+-- is disjoint from rcf_numbers / api_dids / trunk_dids / extensions, so this only
+-- matches DIDs no earlier lookup claimed. Deterministic by the dialed DID only
+-- (no diversion / carrier-header dependency).
+local function lookup_voicemail()
+    if not db or not db.lookup_voicemail_did then return nil end
+
+    local vm = db.lookup_voicemail_did(normalized_did)
+    if vm then
+        freeswitch.consoleLog("DEBUG", "[" .. uuid .. "] Voicemail dedicated-DID hit: mailbox="
+            .. tostring(vm.mailbox_id) .. "\n")
+        return {
+            product_type = "voicemail",
+            customer_id  = tonumber(vm.customer_id),
+            mailbox_id   = tonumber(vm.mailbox_id),
+            vm_mode      = vm.mode or "direct",
+            ring_target  = vm.ring_target,
+            ring_timeout = tonumber(vm.ring_timeout) or 30,
+        }
+    end
+
+    return nil
+end
+
 freeswitch.consoleLog("DEBUG", "[" .. uuid .. "] STEP 1: DID lookup for " .. tostring(normalized_did) .. "\n")
 -- Execute lookups in order: RCF -> API -> Trunk -> UCaaS Extension
 -- Revenue-generating products (RCF, API, Trunk) take priority over UCaaS
@@ -363,6 +394,9 @@ if not routing then
 end
 if not routing then
     routing = lookup_extension_did()
+end
+if not routing then
+    routing = lookup_voicemail()
 end
 
 -- No match found
@@ -442,6 +476,11 @@ local ctx = {
     pass_caller_id = pass_caller_id,
     trunk_id = trunk_id,
 
+    -- Visual Voicemail routing (set for product_type=="voicemail"; nil otherwise).
+    mailbox_id = routing.mailbox_id,
+    vm_mode = routing.vm_mode,
+    ring_target = routing.ring_target,
+
     to_10digit = to_10digit,
     normalize_did = normalize_did,
 
@@ -459,6 +498,7 @@ local ctx = {
     multileg = multileg,
     schedule = schedule,
     rules = rules,
+    vm_record = vm_record,
 }
 
 freeswitch.consoleLog("DEBUG", "[" .. uuid .. "] STEP 2: Dispatching product_type=" .. tostring(product_type) .. "\n")
@@ -539,6 +579,16 @@ elseif product_type == "trunk" then
         handler(ctx)
     else
         freeswitch.consoleLog("ERR", "[" .. uuid .. "] trunk handler unavailable — rejecting\n")
+        hangup("NORMAL_TEMPORARY_FAILURE")
+    end
+
+elseif product_type == "voicemail" then
+    -- Standalone encrypted Visual Voicemail (dedicated DID) -> handlers/voicemail.lua
+    local handler = load_handler("voicemail")
+    if handler then
+        handler(ctx)
+    else
+        freeswitch.consoleLog("ERR", "[" .. uuid .. "] voicemail handler unavailable — rejecting\n")
         hangup("NORMAL_TEMPORARY_FAILURE")
     end
 end

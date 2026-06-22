@@ -28,6 +28,7 @@ local specs = {
     "spec/trunk_inbound_spec.lua",
     "spec/trunk_richplan_spec.lua",
     "spec/trunk_outbound_spec.lua",
+    "spec/voicemail_spec.lua",
 }
 
 for _, rel in ipairs(specs) do

@@ -55,6 +55,19 @@ function M.new_db(cfg)
 
     function db.lookup_customer(id) return cfg.customer end
 
+    -- Visual Voicemail mailbox resolution. Default nil (no mailbox) so existing
+    -- rcf/ucaas specs take the LEGACY spool path unchanged; a spec can set
+    -- cfg.voicemail / cfg.attached_mailbox to exercise the new encrypted paths.
+    function db.lookup_voicemail_did(did)
+        cfg.last_voicemail_did = did
+        return cfg.voicemail
+    end
+
+    function db.lookup_attached_mailbox(product, ref)
+        cfg.last_attached = { product = product, ref = ref }
+        return cfg.attached_mailbox
+    end
+
     -- trunk_outbound.lua's default-DID fallback uses get_connection():execute().
     function db.get_connection()
         if cfg.connection == false then return nil end
