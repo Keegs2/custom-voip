@@ -2,14 +2,43 @@
 
 Supports call path packages for managing concurrent call capacity per trunk.
 CPS (call setup rate) is managed separately via cps_tiers.
+
+Multi-tenant contract (mirrors routers/api_dids.py):
+  - Reads are tenant-scoped: non-admins (customer_filter not None) only ever see
+    their own customer's trunks; admins (customer_filter None) are unrestricted.
+  - Cross-tenant / missing resources return 404 (never 403) so existence is not
+    leaked across tenants.
+  - Provisioning / billing-affecting writes (create, capacity/CPS/enabled update,
+    call-path assignment, DID assignment) are admin-only (require_admin).
+  - Auth-IP management (add/remove IPs) is documented customer self-service, so
+    trunk OWNERS may do it, scoped to their own trunk.
 """
-from fastapi import APIRouter, HTTPException
+import logging
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Optional, List
 from db import database as db
 from db import redis_client as cache
+from auth.dependencies import get_customer_filter, require_admin
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+async def _get_owned_trunk(trunk_id: int, customer_filter: int | None) -> dict:
+    """Fetch a trunk enforcing tenant isolation via one indexed PK lookup. 404 if
+    it does not exist OR belongs to another customer (do not leak existence
+    cross-tenant). Used to gate every sub-resource (ips/dids/stats) by parent."""
+    row = await db.fetch_one(
+        "SELECT id, customer_id FROM sip_trunks WHERE id = $1",
+        trunk_id,
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Trunk not found")
+    if customer_filter is not None and row["customer_id"] != customer_filter:
+        raise HTTPException(status_code=404, detail="Trunk not found")
+    return dict(row)
 
 
 class TrunkCreate(BaseModel):
@@ -46,9 +75,10 @@ async def list_trunks(
     customer_id: Optional[int] = None,
     enabled: Optional[bool] = None,
     limit: int = 100,
-    offset: int = 0
+    offset: int = 0,
+    customer_filter: int | None = Depends(get_customer_filter),
 ):
-    """List all SIP trunks with optional filters."""
+    """List SIP trunks. Non-admins are scoped to their own customer."""
     query = """
         SELECT t.id, t.trunk_name, t.customer_id, t.max_channels, t.cps_limit,
                t.auth_type, t.tech_prefix, t.enabled, t.created_at,
@@ -64,7 +94,12 @@ async def list_trunks(
     values = []
     idx = 1
 
-    if customer_id is not None:
+    # Enforce tenant scoping for non-admins; admins may filter by customer_id.
+    if customer_filter is not None:
+        query += f" AND t.customer_id = ${idx}"
+        values.append(customer_filter)
+        idx += 1
+    elif customer_id is not None:
         query += f" AND t.customer_id = ${idx}"
         values.append(customer_id)
         idx += 1
@@ -82,8 +117,8 @@ async def list_trunks(
 
 
 @router.post("")
-async def create_trunk(trunk: TrunkCreate):
-    """Create a new SIP trunk."""
+async def create_trunk(trunk: TrunkCreate, admin: dict = Depends(require_admin)):
+    """Create a new SIP trunk. Admin-only: provisioning/billing-affecting."""
     # Verify customer
     customer = await db.fetch_one(
         "SELECT id, status FROM customers WHERE id = $1",
@@ -119,8 +154,13 @@ async def list_call_path_packages():
 
 
 @router.get("/{trunk_id}")
-async def get_trunk(trunk_id: int):
-    """Get trunk by ID with call path package info."""
+async def get_trunk(
+    trunk_id: int,
+    customer_filter: int | None = Depends(get_customer_filter),
+):
+    """Get trunk by ID with call path package info (tenant-scoped)."""
+    # Ownership gate first (404 cross-tenant), then enrich.
+    await _get_owned_trunk(trunk_id, customer_filter)
     result = await db.fetch_one(
         """
         SELECT t.*, c.name as customer_name,
@@ -140,8 +180,8 @@ async def get_trunk(trunk_id: int):
 
 
 @router.put("/{trunk_id}")
-async def update_trunk(trunk_id: int, trunk: TrunkUpdate):
-    """Update trunk settings."""
+async def update_trunk(trunk_id: int, trunk: TrunkUpdate, admin: dict = Depends(require_admin)):
+    """Update trunk settings (capacity/CPS/enabled). Admin-only: billing-affecting."""
     updates = []
     values = []
     idx = 1
@@ -168,8 +208,10 @@ async def update_trunk(trunk_id: int, trunk: TrunkUpdate):
 
 
 @router.put("/{trunk_id}/call-paths")
-async def assign_call_path_package(trunk_id: int, body: CallPathAssign):
-    """Assign a call path package to a trunk.
+async def assign_call_path_package(
+    trunk_id: int, body: CallPathAssign, admin: dict = Depends(require_admin)
+):
+    """Assign a call path package to a trunk. Admin-only: capacity/billing-affecting.
 
     Updates the trunk's call_path_package_id and sets max_channels to match
     the package's call_paths count.
@@ -215,12 +257,12 @@ async def assign_call_path_package(trunk_id: int, body: CallPathAssign):
 # Trunk IPs
 
 @router.post("/{trunk_id}/ips")
-async def add_trunk_ip(trunk_id: int, ip: TrunkIP):
-    """Add an authorized IP to a trunk."""
-    # Verify trunk exists
-    trunk = await db.fetch_one("SELECT id FROM sip_trunks WHERE id = $1", trunk_id)
-    if not trunk:
-        raise HTTPException(status_code=404, detail="Trunk not found")
+async def add_trunk_ip(
+    trunk_id: int, ip: TrunkIP, customer_filter: int | None = Depends(get_customer_filter)
+):
+    """Add an authorized IP to a trunk. Customer self-service: trunk OWNERS (and
+    admins) may manage their own trunk's auth IPs; ownership-gated (404 cross-tenant)."""
+    await _get_owned_trunk(trunk_id, customer_filter)
 
     try:
         result = await db.fetch_one(
@@ -239,8 +281,11 @@ async def add_trunk_ip(trunk_id: int, ip: TrunkIP):
 
 
 @router.get("/{trunk_id}/ips")
-async def list_trunk_ips(trunk_id: int):
-    """List all IPs for a trunk."""
+async def list_trunk_ips(
+    trunk_id: int, customer_filter: int | None = Depends(get_customer_filter)
+):
+    """List all IPs for a trunk (ownership-gated read)."""
+    await _get_owned_trunk(trunk_id, customer_filter)
     results = await db.fetch_all(
         "SELECT id, ip_address::text, description FROM trunk_auth_ips WHERE trunk_id = $1",
         trunk_id
@@ -249,8 +294,12 @@ async def list_trunk_ips(trunk_id: int):
 
 
 @router.delete("/{trunk_id}/ips/{ip_id}")
-async def delete_trunk_ip(trunk_id: int, ip_id: int):
-    """Remove an IP from a trunk."""
+async def delete_trunk_ip(
+    trunk_id: int, ip_id: int, customer_filter: int | None = Depends(get_customer_filter)
+):
+    """Remove an IP from a trunk. Customer self-service: trunk OWNERS (and admins)
+    may manage their own trunk's auth IPs; ownership-gated (404 cross-tenant)."""
+    await _get_owned_trunk(trunk_id, customer_filter)
     # Get IP before delete for cache invalidation
     ip_row = await db.fetch_one(
         "SELECT ip_address::text as ip FROM trunk_auth_ips WHERE id = $1 AND trunk_id = $2",
@@ -273,8 +322,8 @@ async def delete_trunk_ip(trunk_id: int, ip_id: int):
 # Trunk DIDs
 
 @router.post("/{trunk_id}/dids")
-async def add_trunk_did(trunk_id: int, did: TrunkDID):
-    """Assign a DID to a trunk."""
+async def add_trunk_did(trunk_id: int, did: TrunkDID, admin: dict = Depends(require_admin)):
+    """Assign a DID to a trunk. Admin-only: provisioning."""
     trunk = await db.fetch_one("SELECT id FROM sip_trunks WHERE id = $1", trunk_id)
     if not trunk:
         raise HTTPException(status_code=404, detail="Trunk not found")
@@ -296,8 +345,11 @@ async def add_trunk_did(trunk_id: int, did: TrunkDID):
 
 
 @router.get("/{trunk_id}/dids")
-async def list_trunk_dids(trunk_id: int):
-    """List all DIDs for a trunk."""
+async def list_trunk_dids(
+    trunk_id: int, customer_filter: int | None = Depends(get_customer_filter)
+):
+    """List all DIDs for a trunk (ownership-gated read)."""
+    await _get_owned_trunk(trunk_id, customer_filter)
     results = await db.fetch_all(
         "SELECT id, did FROM trunk_dids WHERE trunk_id = $1",
         trunk_id
@@ -306,14 +358,20 @@ async def list_trunk_dids(trunk_id: int):
 
 
 @router.get("/{trunk_id}/stats")
-async def get_trunk_stats(trunk_id: int):
-    """Get real-time stats for a trunk."""
+async def get_trunk_stats(
+    trunk_id: int, customer_filter: int | None = Depends(get_customer_filter)
+):
+    """Get real-time stats for a trunk (ownership-gated read)."""
     from services.esl_client import _send_esl_command
 
-    # Get trunk info
+    # Get trunk info; fold the tenant predicate into the existing lookup so a
+    # non-owner gets 404 (no cross-tenant leak) without an extra round-trip.
     trunk = await db.fetch_one(
-        "SELECT id, max_channels, cps_limit FROM sip_trunks WHERE id = $1",
-        trunk_id
+        """
+        SELECT id, max_channels, cps_limit FROM sip_trunks
+        WHERE id = $1 AND ($2::int IS NULL OR customer_id = $2)
+        """,
+        trunk_id, customer_filter
     )
     if not trunk:
         raise HTTPException(status_code=404, detail="Trunk not found")

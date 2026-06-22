@@ -1,15 +1,48 @@
-"""RCF (Remote Call Forwarding) endpoints."""
+"""RCF (Remote Call Forwarding) endpoints.
+
+Multi-tenant contract (mirrors routers/api_dids.py):
+  - Reads are tenant-scoped: non-admins (customer_filter not None) only ever see
+    their own customer's RCF numbers; admins (customer_filter None) are unrestricted.
+  - Cross-tenant / missing resources return 404 (never 403) so existence is not
+    leaked across tenants.
+  - forward_to / ring_timeout edits (PUT/PATCH) are documented customer
+    self-service (the RcfPage edits these inline), so OWNERS may edit their own
+    number; gated to the resolved row's customer_id.
+  - Create / delete are admin-only (provisioning).
+"""
 import os
 import re
 import logging
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, field_validator
 from typing import Optional
 from db import database as db
 from db import redis_client as cache
+from auth.dependencies import get_customer_filter, require_admin
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+async def _get_owned_rcf(identifier: str, customer_filter: int | None) -> dict:
+    """Resolve an RCF row by numeric id OR E.164 DID and enforce tenant isolation.
+    404 if it does not exist OR belongs to another customer (do not leak existence
+    cross-tenant). Returns the resolved row (id, did, customer_id)."""
+    if identifier.isdigit():
+        row = await db.fetch_one(
+            "SELECT id, did, customer_id FROM rcf_numbers WHERE id = $1",
+            int(identifier),
+        )
+    else:
+        row = await db.fetch_one(
+            "SELECT id, did, customer_id FROM rcf_numbers WHERE did = $1",
+            identifier,
+        )
+    if not row:
+        raise HTTPException(status_code=404, detail="RCF number not found")
+    if customer_filter is not None and row["customer_id"] != customer_filter:
+        raise HTTPException(status_code=404, detail="RCF number not found")
+    return dict(row)
 
 # --- Reconciliation guard configuration ------------------------------------
 # DEPLOY_ENV identifies which environment this API instance serves. The guard
@@ -234,8 +267,14 @@ class RCFResponse(BaseModel):
 
 
 @router.post("")
-async def create_rcf(rcf: RCFCreate):
-    """Create a new RCF number."""
+async def create_rcf(rcf: RCFCreate, admin: dict = Depends(require_admin)):
+    """Create a new RCF number. Admin-only: provisioning.
+
+    SEC-3 note: api_dids gates create on did_inventory ownership to stop a tenant
+    claiming another tenant's DID. That cross-tenant claim path is unreachable
+    here because creation is admin-only (require_admin); admins are trusted to
+    target any customer via the payload. The DID-vs-environment ownership check is
+    still enforced below via _enforce_allocation_guard (shared inventory)."""
     # Verify customer exists and is active
     customer = await db.fetch_one(
         "SELECT id, status FROM customers WHERE id = $1",
@@ -268,8 +307,13 @@ async def create_rcf(rcf: RCFCreate):
 
 
 @router.get("/{did}")
-async def get_rcf(did: str):
-    """Get RCF config by DID."""
+async def get_rcf(
+    did: str,
+    customer_filter: int | None = Depends(get_customer_filter),
+):
+    """Get RCF config by DID (tenant-scoped)."""
+    # Ownership gate first (404 cross-tenant), then enrich.
+    await _get_owned_rcf(did, customer_filter)
     result = await db.fetch_one(
         """
         SELECT r.*, c.name as customer_name, c.traffic_grade
@@ -285,8 +329,15 @@ async def get_rcf(did: str):
 
 
 @router.put("/{identifier}")
-async def update_rcf(identifier: str, rcf: RCFUpdate) -> RCFResponse:
-    """Update RCF settings by ID (numeric) or DID (E.164 string)."""
+async def update_rcf(
+    identifier: str,
+    rcf: RCFUpdate,
+    customer_filter: int | None = Depends(get_customer_filter),
+) -> RCFResponse:
+    """Update RCF settings by ID (numeric) or DID (E.164 string).
+
+    Customer self-service: trunk/RCF OWNERS (and admins) may edit their own
+    number; ownership-gated (404 cross-tenant) for both id and DID identifiers."""
     updates = []
     values = []
     idx = 1
@@ -296,34 +347,24 @@ async def update_rcf(identifier: str, rcf: RCFUpdate) -> RCFResponse:
     if not update_data:
         raise HTTPException(status_code=400, detail="No fields to update")
 
-    # Reconciliation guard: resolve the DID this routing change targets, then
-    # refuse if the shared inventory allocates it to a different environment.
-    # Identifier may be a numeric rcf_numbers.id or the E.164 DID itself.
-    if identifier.isdigit():
-        existing = await db.fetch_one(
-            "SELECT did FROM rcf_numbers WHERE id = $1", int(identifier)
-        )
-        guard_did = existing["did"] if existing else None
-    else:
-        guard_did = identifier
-    if guard_did:
-        await _enforce_allocation_guard(guard_did)
+    # Ownership gate (404 cross-tenant) AND resolves the row's id/DID in one
+    # lookup — the identifier may be a numeric rcf_numbers.id or the E.164 DID.
+    owned = await _get_owned_rcf(identifier, customer_filter)
+
+    # Reconciliation guard: refuse if the shared inventory allocates the resolved
+    # DID to a different environment.
+    await _enforce_allocation_guard(owned["did"])
 
     for field, value in update_data.items():
         updates.append(f"{field} = ${idx}")
         values.append(value)
         idx += 1
 
-    if identifier.isdigit():
-        values.append(int(identifier))
-        where_clause = f"id = ${idx}"
-    else:
-        values.append(identifier)
-        where_clause = f"did = ${idx}"
-
+    # Update by the resolved primary key (ownership already verified above).
+    values.append(owned["id"])
     query = f"""
         UPDATE rcf_numbers SET {', '.join(updates)}
-        WHERE {where_clause}
+        WHERE id = ${idx}
         RETURNING id, did, name, forward_to, pass_caller_id, enabled, ring_timeout, failover_to, max_channels, customer_id
     """
 
@@ -357,14 +398,21 @@ async def update_rcf(identifier: str, rcf: RCFUpdate) -> RCFResponse:
 
 
 @router.patch("/{identifier}")
-async def patch_rcf(identifier: str, rcf: RCFUpdate) -> RCFResponse:
-    """Partial update for RCF settings (alias for PUT)."""
-    return await update_rcf(identifier, rcf)
+async def patch_rcf(
+    identifier: str,
+    rcf: RCFUpdate,
+    customer_filter: int | None = Depends(get_customer_filter),
+) -> RCFResponse:
+    """Partial update for RCF settings (alias for PUT; same ownership gate)."""
+    return await update_rcf(identifier, rcf, customer_filter)
 
 
 @router.delete("/{identifier}")
-async def delete_rcf(identifier: str):
-    """Delete an RCF number by ID (numeric) or DID (E.164 string)."""
+async def delete_rcf(identifier: str, admin: dict = Depends(require_admin)):
+    """Delete an RCF number by ID (numeric) or DID (E.164 string).
+
+    Admin-only: provisioning. The allocation guard is intentionally NOT applied
+    on delete (removing routing for a foreign-env DID is always safe)."""
     if identifier.isdigit():
         # Lookup DID first for cache invalidation, then delete by ID
         row = await db.fetch_one(
@@ -385,8 +433,12 @@ async def delete_rcf(identifier: str):
 
 
 @router.get("")
-async def list_rcf(customer_id: Optional[int] = None, enabled: Optional[bool] = None):
-    """List RCF numbers with optional filters."""
+async def list_rcf(
+    customer_id: Optional[int] = None,
+    enabled: Optional[bool] = None,
+    customer_filter: int | None = Depends(get_customer_filter),
+):
+    """List RCF numbers. Non-admins are scoped to their own customer."""
     query = """
         SELECT r.id, r.did, r.name, r.forward_to, r.pass_caller_id, r.enabled,
                r.ring_timeout, r.failover_to, r.max_channels, r.customer_id,
@@ -398,7 +450,12 @@ async def list_rcf(customer_id: Optional[int] = None, enabled: Optional[bool] = 
     values = []
     idx = 1
 
-    if customer_id is not None:
+    # Enforce tenant scoping for non-admins; admins may filter by customer_id.
+    if customer_filter is not None:
+        query += f" AND r.customer_id = ${idx}"
+        values.append(customer_filter)
+        idx += 1
+    elif customer_id is not None:
         query += f" AND r.customer_id = ${idx}"
         values.append(customer_id)
         idx += 1
