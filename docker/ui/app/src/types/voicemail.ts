@@ -78,6 +78,8 @@ export interface VoicemailMessage {
   transcript_status?: TranscriptStatus | null;
   /** True when the row is envelope-encrypted (`wrapped_dek IS NOT NULL`). */
   encrypted?: boolean;
+  /** Soft-delete timestamp. Non-null ⇒ the message lives in Trash. */
+  deleted_at?: string | null;
   created_at: string;
   /** Detail-only — populated by `GET /voicemail/messages/{id}`. */
   transcript?: Transcript;
@@ -137,6 +139,25 @@ export interface Binding {
   attach_product: AttachProduct | null;
   attach_ref: string | null;
   created_at?: string;
+}
+
+/* ─── Attachable numbers (attach-to-existing-line picker) ─── */
+
+/**
+ * A number the customer already owns that can host an `attached` voicemail
+ * binding. Returned by `GET /voicemail/attachable-numbers`.
+ *
+ * Phase 1 is RCF + Trunk only (both DID-keyed end-to-end — endpoint, binding
+ * create, and telephony `lookup_attached_mailbox` all agree on `attach_ref =
+ * DID`). UCaaS-extension attach is deferred to Phase 2, so `product` is narrowed
+ * to the two supported kinds here. The picker maps `product → attach_product`
+ * and `ref → attach_ref` directly into a `binding_type='attached'` create.
+ */
+export interface AttachableNumber {
+  product: 'rcf' | 'trunk';
+  ref: string;
+  label: string;
+  current_routing: string | null;
 }
 
 /* ─── Playback source (the decrypt-stream boundary) ───────── */

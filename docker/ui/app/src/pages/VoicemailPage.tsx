@@ -5,7 +5,7 @@ import {
   useQueryClient,
   keepPreviousData,
 } from '@tanstack/react-query';
-import { Inbox, Mail, Star, Trash2, Plus, Phone, Search, ChevronDown, Forward } from 'lucide-react';
+import { Inbox, Mail, Star, Trash2, Plus, Phone, Search, ChevronDown, Forward, RotateCcw } from 'lucide-react';
 import { Sidebar } from '../components/layout/Sidebar';
 import { SoftphoneWidget } from '../components/softphone/SoftphoneWidget';
 import { AdminCustomerSelector } from '../components/AdminCustomerSelector';
@@ -21,7 +21,10 @@ import {
   markMessageRead,
   markMessageSaved,
   deleteMessage,
+  restoreMessage,
+  purgeMessage,
 } from '../api/voicemail';
+import type { MailboxMessagesParams } from '../api/voicemail';
 import type { VoicemailMailbox, VoicemailMessage, Transcript } from '../types/voicemail';
 import { VoicemailPlayer } from './voicemail/player/VoicemailPlayer';
 import { EncryptionBadge } from './voicemail/shared/EncryptionBadge';
@@ -44,6 +47,19 @@ const FOLDERS: { id: Folder; label: string; icon: React.ReactNode }[] = [
   { id: 'saved', label: 'Saved', icon: <Star size={15} /> },
   { id: 'trash', label: 'Trash', icon: <Trash2 size={15} /> },
 ];
+
+/**
+ * Map each UI folder to a single server query (no client-side diffing).
+ * The backend `folder` param does the filtering: inbox = not-deleted & not-saved,
+ * saved = saved & not-deleted, trash = soft-deleted. Unread reuses the inbox
+ * folder narrowed by `is_read=false`.
+ */
+const FOLDER_QUERY: Record<Folder, Pick<MailboxMessagesParams, 'folder' | 'is_read'>> = {
+  inbox: { folder: 'inbox' },
+  unread: { folder: 'inbox', is_read: false },
+  saved: { folder: 'saved' },
+  trash: { folder: 'trash' },
+};
 
 /* ─── Helpers ─────────────────────────────────────────────── */
 
@@ -123,40 +139,18 @@ export function VoicemailPage() {
     enabled: mailboxId !== null,
   });
 
-  const activeQuery = useQuery({
-    queryKey: ['voicemail', 'messages', mailboxId, 'active'],
-    queryFn: () => listMailboxMessages(mailboxId as number, { include_deleted: false, limit: 200 }),
+  // One query per folder — the server does the filtering (folder param). The
+  // folder is part of the key so each folder caches independently and switching
+  // is instant after the first fetch.
+  const messagesQuery = useQuery({
+    queryKey: ['voicemail', 'messages', mailboxId, folder],
+    queryFn: () => listMailboxMessages(mailboxId as number, { ...FOLDER_QUERY[folder], limit: 200 }),
     enabled: mailboxId !== null,
     placeholderData: keepPreviousData,
   });
 
-  // Trash is everything-minus-active; only fetched when the Trash folder is open.
-  const allQuery = useQuery({
-    queryKey: ['voicemail', 'messages', mailboxId, 'all'],
-    queryFn: () => listMailboxMessages(mailboxId as number, { include_deleted: true, limit: 200 }),
-    enabled: mailboxId !== null && folder === 'trash',
-    placeholderData: keepPreviousData,
-  });
-
-  /* ── derived folder lists ─────────────────────────────────── */
-  const activeMessages = useMemo(() => activeQuery.data ?? [], [activeQuery.data]);
-  const trashMessages = useMemo(() => {
-    const activeIds = new Set(activeMessages.map((m) => m.id));
-    return (allQuery.data ?? []).filter((m) => !activeIds.has(m.id));
-  }, [allQuery.data, activeMessages]);
-
-  const folderMessages = useMemo(() => {
-    switch (folder) {
-      case 'unread':
-        return activeMessages.filter((m) => !m.is_read);
-      case 'saved':
-        return activeMessages.filter((m) => m.is_saved);
-      case 'trash':
-        return trashMessages;
-      default:
-        return activeMessages;
-    }
-  }, [folder, activeMessages, trashMessages]);
+  /* ── derived folder list ──────────────────────────────────── */
+  const folderMessages = useMemo(() => messagesQuery.data ?? [], [messagesQuery.data]);
 
   const visibleMessages = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -207,8 +201,27 @@ export function VoicemailPage() {
     mutationFn: (id: number) => deleteMessage(id),
     onSuccess: () => {
       invalidateMessages();
-      void queryClient.invalidateQueries({ queryKey: ['voicemail', 'messages', mailboxId, 'all'] });
-      toastOk('Message deleted');
+      toastOk('Message moved to Trash');
+      setSelectedId(null);
+    },
+    onError: (e: Error) => toastErr(e.message),
+  });
+
+  const restoreMutation = useMutation({
+    mutationFn: (id: number) => restoreMessage(id),
+    onSuccess: () => {
+      invalidateMessages();
+      toastOk('Message restored');
+      setSelectedId(null);
+    },
+    onError: (e: Error) => toastErr(e.message),
+  });
+
+  const purgeMutation = useMutation({
+    mutationFn: (id: number) => purgeMessage(id),
+    onSuccess: () => {
+      invalidateMessages();
+      toastOk('Message deleted permanently');
       setSelectedId(null);
     },
     onError: (e: Error) => toastErr(e.message),
@@ -222,7 +235,9 @@ export function VoicemailPage() {
     inbox: count?.total,
     unread: count?.unread,
     saved: count?.saved,
-    trash: folder === 'trash' ? trashMessages.length : undefined,
+    // Trash isn't in the count summary (which excludes deleted); show the live
+    // list length only while the Trash folder is open.
+    trash: folder === 'trash' ? folderMessages.length : undefined,
   };
 
   /* ── render ───────────────────────────────────────────────── */
@@ -336,7 +351,7 @@ export function VoicemailPage() {
           <div style={{ flex: 1, overflowY: 'auto' }}>
             {mailboxId === null && !mailboxesQuery.isLoading ? (
               <NoMailboxes onCreate={() => setWizardOpen(true)} />
-            ) : activeQuery.isLoading || (folder === 'trash' && allQuery.isLoading) ? (
+            ) : messagesQuery.isLoading ? (
               <CenterSpinner />
             ) : visibleMessages.length === 0 ? (
               <EmptyFolder folder={folder} hasSearch={search.trim().length > 0} />
@@ -368,6 +383,10 @@ export function VoicemailPage() {
               onToggleSave={() => saveMutation.mutate({ id: selectedMessage.id, saved: !selectedMessage.is_saved })}
               onDelete={() => deleteMutation.mutate(selectedMessage.id)}
               deleting={deleteMutation.isPending}
+              onRestore={() => restoreMutation.mutate(selectedMessage.id)}
+              onPurge={() => purgeMutation.mutate(selectedMessage.id)}
+              restoring={restoreMutation.isPending}
+              purging={purgeMutation.isPending}
             />
           ) : (
             <ReadingEmpty mailbox={selectedMailbox} />
@@ -633,6 +652,10 @@ interface ReadingPaneProps {
   onToggleSave: () => void;
   onDelete: () => void;
   deleting: boolean;
+  onRestore: () => void;
+  onPurge: () => void;
+  restoring: boolean;
+  purging: boolean;
 }
 
 function ReadingPane({
@@ -646,6 +669,10 @@ function ReadingPane({
   onToggleSave,
   onDelete,
   deleting,
+  onRestore,
+  onPurge,
+  restoring,
+  purging,
 }: ReadingPaneProps) {
   const displayName = message.caller_name && message.caller_name !== message.caller_id ? message.caller_name : null;
 
@@ -736,7 +763,23 @@ function ReadingPane({
           <ActionButton icon={<Forward size={15} />} label="Forward" onClick={() => undefined} asChild />
         </a>
         <div style={{ flex: 1 }} />
-        {!isTrash && (
+        {isTrash ? (
+          <>
+            <ActionButton
+              icon={<RotateCcw size={15} />}
+              label={restoring ? 'Restoring…' : 'Restore'}
+              onClick={onRestore}
+              disabled={restoring || purging}
+            />
+            <ActionButton
+              icon={<Trash2 size={15} />}
+              label={purging ? 'Deleting…' : 'Delete forever'}
+              onClick={onPurge}
+              disabled={restoring || purging}
+              danger
+            />
+          </>
+        ) : (
           <ActionButton
             icon={<Trash2 size={15} />}
             label={deleting ? 'Deleting…' : 'Delete'}

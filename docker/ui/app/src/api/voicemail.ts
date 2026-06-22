@@ -24,6 +24,7 @@ import type {
   PlaybackSource,
   CreateMailboxPayload,
   MailboxStatus,
+  AttachableNumber,
 } from '../types/voicemail';
 
 /* ─────────────────────────────────────────────────────────────────────────
@@ -135,6 +136,10 @@ export async function deleteMailbox(mailboxId: number): Promise<void> {
  * ──────────────────────────────────────────────────────────────────────── */
 
 export interface MailboxMessagesParams {
+  /** One-query folder filter (server-side): inbox | saved | trash.
+   *  `inbox` = not deleted & not saved, `saved` = saved & not deleted,
+   *  `trash` = soft-deleted. May be combined with `is_read`. */
+  folder?: 'inbox' | 'saved' | 'trash';
   is_read?: boolean;
   is_saved?: boolean;
   include_deleted?: boolean;
@@ -147,6 +152,7 @@ export async function listMailboxMessages(
   params: MailboxMessagesParams = {},
 ): Promise<VoicemailMessage[]> {
   const qs = new URLSearchParams();
+  if (params.folder) qs.set('folder', params.folder);
   if (params.is_read !== undefined) qs.set('is_read', String(params.is_read));
   if (params.is_saved !== undefined) qs.set('is_saved', String(params.is_saved));
   if (params.include_deleted) qs.set('include_deleted', 'true');
@@ -189,6 +195,16 @@ export async function markMessageSaved(
 
 export async function deleteMessage(messageId: number): Promise<void> {
   return apiRequest('DELETE', `/voicemail/messages/${messageId}`);
+}
+
+/** Restore a trashed message — clears `deleted_at`, returning it to its folder. */
+export async function restoreMessage(messageId: number): Promise<void> {
+  await apiRequest('PUT', `/voicemail/messages/${messageId}/restore`);
+}
+
+/** Hard-delete a trashed message (empty-trash). Only valid once in Trash. */
+export async function purgeMessage(messageId: number): Promise<void> {
+  return apiRequest('DELETE', `/voicemail/messages/${messageId}/purge`);
 }
 
 /* ─────────────────────────────────────────────────────────────────────────
@@ -259,6 +275,21 @@ export async function createBinding(
 
 export async function deleteBinding(mailboxId: number, bindingId: number): Promise<void> {
   return apiRequest('DELETE', `/voicemail/mailboxes/${mailboxId}/bindings/${bindingId}`);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+ * Attachable numbers — server-side picker for the "add to an existing line"
+ * attach flow. Tenant-scoped: non-admins get their own numbers; admins pass
+ * `customerId` (`?customer_id=`). Returns RCF + Trunk numbers only (Phase 1).
+ * ──────────────────────────────────────────────────────────────────────── */
+
+export async function listAttachableNumbers(customerId?: number): Promise<AttachableNumber[]> {
+  const qs = customerId !== undefined ? `?customer_id=${customerId}` : '';
+  const raw = await apiRequest<AttachableNumber[] | { items?: AttachableNumber[] }>(
+    'GET',
+    `/voicemail/attachable-numbers${qs}`,
+  );
+  return Array.isArray(raw) ? raw : raw.items ?? [];
 }
 
 /* ─────────────────────────────────────────────────────────────────────────

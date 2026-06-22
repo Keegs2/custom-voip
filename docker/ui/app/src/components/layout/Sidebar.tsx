@@ -83,22 +83,20 @@ const allCommsNavItems: NavItemDef[] = [
   { label: 'Documents',      icon: <FolderOpen size={14} strokeWidth={1.8} />, to: '/documents', color: '#fbbf24', accountTypes: COMMS_ACCOUNT_TYPES },
 ];
 
-/* ─── Voicemail — standalone UCaaS product (sits directly above Unified Comms) ──
- * Promoted out of the Unified Comms dropdown into its own Products entry. Same UCaaS
- * gating as the comms surfaces (hasUcaas + accountTypes ['ucaas','hybrid']); carries
- * the unread-voicemail badge. NOTE: today voicemail rides on the UCaaS extension
- * model (gated by a provisioned extension); a truly separate billing SKU is a future
- * backend item.
+/* ─── Voicemail — standalone encrypted product (sits directly above Unified Comms) ──
+ * Visual Voicemail is its own encrypted product with mailbox-centric provisioning,
+ * entitled via `customers.voicemail_enabled` (now surfaced on the /auth/me + login
+ * user payload as `User.voicemail_enabled`, exactly like `ucaas_enabled`).
  *
- * FOLLOW-UP (Visual Voicemail standalone product): voicemail is now its own
- * encrypted product with mailbox-centric provisioning. To fully un-gate it from
- * UCaaS, surface `customers.voicemail_enabled` on the `/auth/me` user payload
- * (User.voicemail_enabled) and gate `voicemailItem` on that entitlement instead
- * of `hasUcaas`. Until that flag is on the auth payload we KEEP the current
- * gating below (hasUcaas + provisioned extension OR admin) so visibility is
- * unchanged. */
+ * Visibility (see `showVoicemail` in Sidebar): the item appears when the customer
+ * carries the voicemail entitlement OR the legacy UCaaS/admin condition holds — so
+ * existing UCaaS/hybrid customers and admins keep seeing it, AND any customer with
+ * the entitlement now sees it regardless of account_type. An RCF customer with
+ * NEITHER the entitlement nor UCaaS still sees nothing (C-10 / RCF simplicity).
+ * Carries the unread-voicemail badge. NOTE: accountTypes is intentionally omitted
+ * so the entitlement (not account_type) is the sole product gate. */
 const voicemailItem: NavItemDef = {
-  label: 'Voicemail', icon: <IconVoicemail size={15} />, to: '/voicemail', color: '#818cf8', accountTypes: COMMS_ACCOUNT_TYPES,
+  label: 'Voicemail', icon: <IconVoicemail size={15} />, to: '/voicemail', color: '#818cf8',
 };
 
 /* ─── Presence config ─────────────────────────────────────── */
@@ -706,6 +704,13 @@ export function Sidebar() {
     user?.account_type === 'ucaas' ||
     (user?.account_type !== 'rcf' && user?.ucaas_enabled === true);
 
+  // Voicemail visibility — its own entitlement, decoupled from account_type.
+  // Show when the customer carries `voicemail_enabled`, OR the legacy UCaaS/admin
+  // condition holds (provisioned extension via `credentials`, or an admin). An RCF
+  // customer with neither still sees nothing (C-10 / RCF simplicity preserved).
+  const showVoicemail =
+    user?.voicemail_enabled === true || (hasUcaas && (Boolean(credentials) || isAdmin));
+
   /* ── Shared account-type predicate ─────────────────────── */
 
   const passesAccountType = (item: NavItemDef): boolean => {
@@ -1012,11 +1017,10 @@ export function Sidebar() {
                 <SidebarNavItem key={item.to} item={item} onNavigate={closeMobile} small />
               ))}
 
-              {/* Voicemail — its own UCaaS product, directly above Unified Comms.
-                  Gated on hasUcaas; customers see it once they have a provisioned
-                  extension (credentials), admins always (same rule as before). Keeps
-                  the unread-voicemail badge. */}
-              {hasUcaas && (credentials || isAdmin) && (
+              {/* Voicemail — standalone encrypted product, directly above Unified
+                  Comms. Gated on the voicemail entitlement OR the legacy UCaaS/admin
+                  condition (see `showVoicemail`). Keeps the unread-voicemail badge. */}
+              {showVoicemail && (
                 <SidebarNavItem
                   item={voicemailItem}
                   onNavigate={closeMobile}

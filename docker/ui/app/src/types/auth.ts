@@ -10,6 +10,10 @@ export interface User {
   customer_name: string | null;
   account_type: 'rcf' | 'api' | 'trunk' | 'hybrid' | 'ucaas' | null;
   ucaas_enabled: boolean | null;
+  /** Standalone Visual Voicemail entitlement (`customers.voicemail_enabled`).
+   *  Surfaced on /auth/me + login exactly like `ucaas_enabled`; gates the
+   *  Voicemail nav independently of account_type. */
+  voicemail_enabled?: boolean;
 }
 
 export interface LoginResponse {

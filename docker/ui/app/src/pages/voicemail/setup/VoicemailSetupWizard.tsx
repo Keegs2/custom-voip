@@ -5,15 +5,17 @@ import { Modal } from '../../../components/ui/Modal';
 import { Button } from '../../../components/ui/Button';
 import { useToast } from '../../../components/ui/Toast';
 import { fmt } from '../../../utils/format';
-import { listAvailableDids, listMyDids, requestDid } from '../../../api/didInventory';
+import { listAvailableDids, requestDid } from '../../../api/didInventory';
 import {
   createMailbox,
   createBinding,
+  listAttachableNumbers,
   setMailboxPin,
   updateMailboxSettings,
 } from '../../../api/voicemail';
+import { ApiError } from '../../../api/client';
 import { EncryptionBadge } from '../shared/EncryptionBadge';
-import type { AttachProduct } from '../../../types/voicemail';
+import type { AttachProduct, AttachableNumber } from '../../../types/voicemail';
 
 /* ─────────────────────────────────────────────────────────────────────────
  * Wizard state
@@ -23,7 +25,10 @@ type DeliveryModel = 'dedicated_did' | 'attached';
 type BuyMode = 'search' | 'port';
 
 const ACCENT = '#818cf8';
-const ATTACH_PRODUCTS: AttachProduct[] = ['rcf', 'trunk', 'ucaas', 'api'];
+// Phase 1 attach supports RCF + Trunk only (both DID-keyed end-to-end). UCaaS-
+// extension attach is deferred to Phase 2, so the manual-entry product list and the
+// server picker (`/voicemail/attachable-numbers`) agree on just these two.
+const ATTACH_PRODUCTS: AttachProduct[] = ['rcf', 'trunk'];
 const TIMEZONES = [
   'America/New_York',
   'America/Chicago',
@@ -122,9 +127,11 @@ export function VoicemailSetupWizard({ open, onClose, onCreated, customerId }: V
     staleTime: 30_000,
   });
 
-  const myDidsQuery = useQuery({
-    queryKey: ['voicemail', 'my-dids'],
-    queryFn: () => listMyDids(),
+  // Attach picker — server-side, RCF + Trunk only. Admins scope to the selected
+  // customer via `customerId`; tenants get their own numbers (server-enforced).
+  const attachableQuery = useQuery({
+    queryKey: ['voicemail', 'attachable-numbers', customerId],
+    queryFn: () => listAttachableNumbers(customerId),
     enabled: open && state.step === 2 && state.delivery === 'attached',
     staleTime: 30_000,
   });
@@ -177,17 +184,35 @@ export function VoicemailSetupWizard({ open, onClose, onCreated, customerId }: V
       let bindingPending = false;
 
       if (state.delivery === 'dedicated_did') {
-        const did = state.buyMode === 'search' ? state.selectedDid! : state.portNumber.trim();
-        try {
-          await createBinding(mailbox.id, { binding_type: 'dedicated_did', did });
-        } catch {
-          // A customer can't bind a DID that isn't yet assigned to them (SEC-3).
-          // Reserve it for admin assignment and leave the mailbox pending.
+        if (state.buyMode === 'search') {
+          // Available inventory DID — the binding create now auto-claims it
+          // (assign + bind in one transaction) for an entitled customer. 403 means
+          // it belongs to someone else; 409 means it's no longer available — both
+          // are "pick another", surfaced as a toast (no admin round-trip).
+          const did = state.selectedDid!;
+          try {
+            await createBinding(mailbox.id, { binding_type: 'dedicated_did', did });
+          } catch (err) {
+            const status = err instanceof ApiError ? err.status : undefined;
+            toastErr(
+              status === 403 || status === 409
+                ? "That number isn't available — pick another."
+                : err instanceof Error
+                  ? err.message
+                  : 'Could not reserve that number.',
+            );
+            void queryClient.invalidateQueries({ queryKey: ['voicemail', 'available-dids'] });
+            return; // mailbox exists but unbound; let the user retry with another DID
+          }
+        } else {
+          // Port-in: the number isn't on the platform yet, so there's nothing to
+          // bind. Reserve it for provisioning and leave the mailbox pending.
+          const did = state.portNumber.trim();
           bindingPending = true;
           try {
             await requestDid(did, `Voicemail mailbox #${mailbox.id} access number`);
           } catch {
-            /* number not in our inventory (port) — provisioning handles it */
+            /* number not in our inventory yet — provisioning handles the port */
           }
         }
       } else {
@@ -270,8 +295,8 @@ export function VoicemailSetupWizard({ open, onClose, onCreated, customerId }: V
             setSearch={setSearch}
             availableLoading={availableQuery.isLoading}
             availableDids={availableQuery.data ?? []}
-            myDidsLoading={myDidsQuery.isLoading}
-            myDids={myDidsQuery.data ?? []}
+            attachableLoading={attachableQuery.isLoading}
+            attachableNumbers={attachableQuery.data ?? []}
           />
         )}
         {state.step === 3 && <StepPersonalize state={state} dispatch={dispatch} pinValid={pinValid} emailValid={emailValid} />}
@@ -376,8 +401,8 @@ interface StepNumberProps {
   setSearch: (s: string) => void;
   availableLoading: boolean;
   availableDids: { id: number; did: string; city?: string; state?: string }[];
-  myDidsLoading: boolean;
-  myDids: { id: number; did: string; product_type?: string }[];
+  attachableLoading: boolean;
+  attachableNumbers: AttachableNumber[];
 }
 
 function StepNumber({
@@ -387,8 +412,8 @@ function StepNumber({
   setSearch,
   availableLoading,
   availableDids,
-  myDidsLoading,
-  myDids,
+  attachableLoading,
+  attachableNumbers,
 }: StepNumberProps) {
   if (state.delivery === 'dedicated_did') {
     return (
@@ -468,23 +493,25 @@ function StepNumber({
         busy fallback — the rest of its routing is unchanged.
       </p>
       <div style={{ maxHeight: 220, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 16 }}>
-        {myDidsLoading ? (
+        {attachableLoading ? (
           <Centered><Loader2 size={20} className="animate-spin" style={{ color: ACCENT }} /></Centered>
-        ) : myDids.length === 0 ? (
-          <Centered><span style={{ color: '#64748b', fontSize: '0.82rem' }}>No numbers found on your account. Enter one manually below.</span></Centered>
+        ) : attachableNumbers.length === 0 ? (
+          <Centered>
+            <span style={{ color: '#64748b', fontSize: '0.82rem', lineHeight: 1.6 }}>
+              No eligible RCF or trunk numbers — buy a dedicated voicemail number
+              instead, or enter a line manually below.
+            </span>
+          </Centered>
         ) : (
-          myDids.map((d) => {
-            const product = normalizeProduct(d.product_type);
-            return (
-              <NumberRow
-                key={d.id}
-                primary={fmt(d.did)}
-                secondary={(product ?? 'line').toUpperCase()}
-                selected={state.attachRef === d.did}
-                onClick={() => dispatch({ type: 'selectAttach', product: product ?? 'rcf', ref: d.did })}
-              />
-            );
-          })
+          attachableNumbers.map((n) => (
+            <NumberRow
+              key={`${n.product}:${n.ref}`}
+              primary={fmt(n.ref)}
+              secondary={`${n.product.toUpperCase()}${n.label && n.label !== n.ref ? ` · ${n.label}` : ''}`}
+              selected={state.attachProduct === n.product && state.attachRef === n.ref}
+              onClick={() => dispatch({ type: 'selectAttach', product: n.product, ref: n.ref })}
+            />
+          ))
         )}
       </div>
 
@@ -512,11 +539,6 @@ function StepNumber({
       </div>
     </div>
   );
-}
-
-function normalizeProduct(p: string | undefined): AttachProduct | null {
-  if (!p) return null;
-  return (ATTACH_PRODUCTS as string[]).includes(p) ? (p as AttachProduct) : null;
 }
 
 function ModeTab({ active, onClick, icon, label }: { active: boolean; onClick: () => void; icon: React.ReactNode; label: string }) {
