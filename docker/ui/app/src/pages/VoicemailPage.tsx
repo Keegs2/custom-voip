@@ -242,11 +242,15 @@ export function VoicemailPage() {
 
   /* ── render ───────────────────────────────────────────────── */
   return (
-    <div style={{ display: 'flex', height: '100vh', width: '100vw', overflow: 'hidden', background: '#0f1117' }}>
+    <div className="min-h-screen" style={{ background: '#0f1117' }}>
       <style>{GLOBAL_STYLES}</style>
       <Sidebar />
 
-      <div style={{ marginLeft: 240, flex: 1, display: 'flex', overflow: 'hidden', height: '100vh', minWidth: 0 }}>
+      {/* Content sits flush to the right of the fixed 240px sidebar and fills
+          calc(100vw - 240px). A plain block wrapper (no flex/100vw) takes the
+          full width minus its marginLeft, so the three master-detail zones lay
+          out correctly without any centering or overflow. */}
+      <div style={{ marginLeft: 240, height: '100vh', display: 'flex', overflow: 'hidden' }}>
         {/* ── Rail: folders + mailbox switcher ──────────────── */}
         <aside
           style={{

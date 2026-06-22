@@ -1608,7 +1608,8 @@ export function DocumentsPage() {
 
   return (
     <div
-      style={{ display: 'flex', height: '100vh', width: '100vw', overflow: 'hidden', background: '#0f1117' }}
+      className="min-h-screen"
+      style={{ background: '#0f1117' }}
       onDragEnter={handlePageDragEnter}
       onDragLeave={handlePageDragLeave}
       onDragOver={handlePageDragOver}
@@ -1655,11 +1656,11 @@ export function DocumentsPage() {
       {/* Sidebar */}
       <Sidebar />
 
-      {/* Main content — sits to the right of the 240px sidebar */}
+      {/* Main content — a plain block wrapper (no flex/100vw) fills the space
+          to the right of the fixed 240px sidebar: calc(100vw - 240px). */}
       <div
         style={{
           marginLeft: 240,
-          flex: 1,
           display: 'flex',
           overflow: 'hidden',
           height: '100vh',

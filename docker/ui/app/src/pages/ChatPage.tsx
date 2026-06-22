@@ -214,26 +214,18 @@ export function ChatPage() {
   );
 
   return (
-    <div
-      style={{
-        display: 'flex',
-        height: '100vh',
-        width: '100vw',
-        overflow: 'hidden',
-        background: '#0f1117',
-      }}
-    >
+    <div className="min-h-screen" style={{ background: '#0f1117' }}>
       {/* Global keyframes */}
       <style>{GLOBAL_STYLES}</style>
 
       {/* Fixed sidebar — same as AppLayout */}
       <Sidebar />
 
-      {/* Chat shell — fills the space to the right of the sidebar */}
+      {/* Chat shell — a plain block wrapper (no flex/100vw) fills the space to
+          the right of the fixed 240px sidebar: calc(100vw - 240px). */}
       <div
         style={{
           marginLeft: 240,
-          flex: 1,
           display: 'flex',
           overflow: 'hidden',
           height: '100vh',

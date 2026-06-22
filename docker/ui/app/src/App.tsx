@@ -96,12 +96,21 @@ export function App() {
               <Route path="call-quality" element={<CallQualityPage />} />
               <Route path="account"          element={<AccountPage />} />
 
-              {/* UCaaS communications — only surfaced in the sidebar for
+              {/* UCaaS communications that live INSIDE AppLayout's content
+                  column — these pages do NOT render their own Sidebar; they
+                  rely on AppLayout's. Only surfaced in the sidebar for
                   ucaas/hybrid accounts (Sidebar gating, C-10). RCF customers
                   get no nav entry and no softphone chrome. The RequireUcaas
                   guard additionally blocks direct-URL access: an rcf (or any
-                  non-UCaaS) user typing /chat, /conference, etc. is redirected
-                  to the dashboard and renders ZERO UCaaS content. */}
+                  non-UCaaS) user typing /communications, etc. is redirected to
+                  the dashboard and renders ZERO UCaaS content.
+
+                  NOTE: the full-screen UCaaS pages that render their OWN Sidebar
+                  + SoftphoneWidget (chat, conference, documents, voicemail) are
+                  routed OUTSIDE AppLayout below — putting them here double-wraps
+                  them (second sidebar + AppLayout's centered max-width box),
+                  which margins their content into the page center with a gap and
+                  a right-edge overflow. */}
               <Route
                 element={
                   <RequireUcaas>
@@ -110,11 +119,7 @@ export function App() {
                 }
               >
                 <Route path="communications"  element={<CommunicationsPage />} />
-                <Route path="chat"            element={<ChatPage />} />
-                <Route path="conference"      element={<ConferencePage />} />
                 <Route path="calendar"        element={<CalendarPage />} />
-                <Route path="documents"       element={<DocumentsPage />} />
-                <Route path="voicemail"        element={<VoicemailPage />} />
 
                 {/* Phase 8 — UCaaS media/control operations. Same RequireUcaas
                     gate as the rest of this subtree: an rcf (or any non-UCaaS)
@@ -194,6 +199,28 @@ export function App() {
               </RequireAuth>
             }
           />
+
+          {/* Full-screen UCaaS pages — each renders its OWN Sidebar +
+              SoftphoneWidget, so they live OUTSIDE AppLayout to avoid a second
+              sidebar and AppLayout's centered max-width content box (the cause
+              of the center-gap + right-overflow bug). Gating is fully preserved:
+              RequireAuth (layout route) → RequireUcaas (children) — an rcf or
+              any non-UCaaS user is still redirected to the dashboard and renders
+              ZERO UCaaS content, exactly as when they were inside AppLayout. */}
+          <Route element={<RequireAuth />}>
+            <Route
+              element={
+                <RequireUcaas>
+                  <Outlet />
+                </RequireUcaas>
+              }
+            >
+              <Route path="chat"        element={<ChatPage />} />
+              <Route path="conference"  element={<ConferencePage />} />
+              <Route path="documents"   element={<DocumentsPage />} />
+              <Route path="voicemail"   element={<VoicemailPage />} />
+            </Route>
+          </Route>
 
           {/* Catch-all redirect to home */}
           <Route path="*" element={<Navigate to="/" replace />} />
