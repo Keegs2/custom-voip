@@ -80,16 +80,10 @@ export function App() {
                   programmable numbers. Old /api-dids links/bookmarks redirect. */}
               <Route path="api-dids"   element={<Navigate to="/programmable-voice" replace />} />
               <Route path="trunks"     element={<TrunksPage />} />
-              {/* Universal Call Flow Builder — the single IVR editor (the legacy
-                  /ivr drag-and-drop builder was retired). Admin-gated. */}
-              <Route
-                path="flows"
-                element={
-                  <RequireAdmin>
-                    <CallFlowBuilderPage />
-                  </RequireAdmin>
-                }
-              />
+              {/* NOTE: the Universal Call Flow Builder (/flows) is routed
+                  FULL-SCREEN, outside AppLayout (see below) — the node graph
+                  needs the entire viewport, so it renders its own Sidebar
+                  instead of living inside AppLayout's centered max-width box. */}
               <Route path="documentation" element={<Navigate to="/docs/rcf" replace />} />
               <Route path="docs/rcf"         element={<RcfDocsPage />} />
               <Route path="docs/api"         element={<ApiDocsPage />} />
@@ -197,6 +191,21 @@ export function App() {
             element={
               <RequireAuth>
                 <TroubleshootingPage />
+              </RequireAuth>
+            }
+          />
+
+          {/* Universal Call Flow Builder — full-screen, outside AppLayout so the
+              node graph fills the whole viewport (renders its own Sidebar). The
+              legacy /ivr drag-and-drop builder was retired. Admin-gated:
+              RequireAuth → RequireAdmin (RequireAdmin must sit inside RequireAuth). */}
+          <Route
+            path="flows"
+            element={
+              <RequireAuth>
+                <RequireAdmin>
+                  <CallFlowBuilderPage />
+                </RequireAdmin>
               </RequireAuth>
             }
           />

@@ -15,7 +15,7 @@
  * React #310: ALL hooks (store, query, local state) are declared unconditionally
  * at the top, before any early return or conditional render.
  */
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useFlowStore, useFlowTemporal } from '../store/flowStore';
 import { compileFlow, validateFlow } from '../compile/registry';
@@ -80,6 +80,9 @@ export function FlowToolbar() {
   const [importOpen, setImportOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [simulateOpen, setSimulateOpen] = useState(false);
+  // Product the user picked from the name dropdown that needs a "this clears the
+  // canvas" confirmation before we start a fresh flow of that product.
+  const [pendingProduct, setPendingProduct] = useState<ProductKind | null>(null);
 
   // Legacy IVR flows for the import picker — only fetched while the modal is open.
   const legacyIvrQuery = useQuery({
@@ -156,8 +159,17 @@ export function FlowToolbar() {
   });
 
   // Derived (no hooks) — safe after the hooks above.
-  void nodes;
-  void edges;
+  //
+  // "Meaningful content" mirrors the New-flow modal semantics: switching product
+  // swaps the palette + compiler, so existing nodes may become invalid — we start
+  // a fresh flow. If the canvas is effectively empty (just the auto `entry` node,
+  // no edges, default name, never saved) we switch silently; otherwise we confirm.
+  const hasContent =
+    nodes.length > 1 ||
+    edges.length > 0 ||
+    docId != null ||
+    (name.trim() !== '' && name !== 'Untitled Flow');
+
   const validation = validateFlow(getDoc());
   const hasErrors = !validation.ok;
   const compiledPreview = JSON.stringify(compileFlow(getDoc()), null, 2);
@@ -188,6 +200,25 @@ export function FlowToolbar() {
     toastOk(`New ${PRODUCT_LABELS[p]} flow`);
   };
 
+  // Product picked from the name dropdown. Same product → no-op; empty canvas →
+  // switch immediately; otherwise stage it and confirm (switching starts fresh).
+  const handlePickProduct = (p: ProductKind) => {
+    if (p === product) return;
+    if (hasContent) {
+      setPendingProduct(p);
+      return;
+    }
+    newFlow(p);
+    toastOk(`Switched to ${PRODUCT_LABELS[p]}`);
+  };
+
+  const confirmSwitchProduct = () => {
+    if (pendingProduct == null) return;
+    newFlow(pendingProduct);
+    toastOk(`Switched to ${PRODUCT_LABELS[pendingProduct]}`);
+    setPendingProduct(null);
+  };
+
   // Convert a legacy ivr_flows row into a CallFlowDoc and drop it on the canvas
   // as a fresh unsaved draft (id: null) — Save then creates a new call_flows row.
   const handleImportLegacy = (row: LegacyIvrFlowRow) => {
@@ -213,70 +244,74 @@ export function FlowToolbar() {
       style={{
         display: 'flex',
         alignItems: 'flex-end',
-        gap: 10,
+        gap: 12,
         flexWrap: 'wrap',
-        padding: '10px 14px',
-        background: '#13151d',
+        padding: '10px 16px',
+        background: 'linear-gradient(180deg, #161922 0%, #13151d 100%)',
         borderBottom: '1px solid rgba(42,47,69,0.6)',
       }}
     >
-      {/* Current product — set when creating/loading a flow, not editable here. */}
-      <Field label="Product">
+      {/* Brand — replaces the removed PageHeader now that the builder is
+          full-screen. The cyan bar is the Call Flow Builder accent (§15). */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, alignSelf: 'stretch', paddingRight: 4 }}>
         <span
           style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            height: 34,
-            padding: '0 12px',
-            borderRadius: 8,
-            fontSize: '0.78rem',
-            fontWeight: 700,
-            color: '#22d3ee',
-            background: 'rgba(34,211,238,0.12)',
-            border: '1px solid rgba(34,211,238,0.4)',
-            whiteSpace: 'nowrap',
+            width: 3,
+            alignSelf: 'stretch',
+            borderRadius: 2,
+            background: 'linear-gradient(180deg, #22d3ee 0%, #0891b2 100%)',
+            boxShadow: '0 0 10px rgba(34,211,238,0.45)',
           }}
-        >
-          {PRODUCT_LABELS[product]}
-        </span>
-      </Field>
-
-      {/* Name */}
-      <Field label="Flow name">
-        <input style={inputStyle} value={name} onChange={(e) => setName(e.target.value)} placeholder="Untitled Flow" />
-      </Field>
-
-      {/* DID entry binding */}
-      <Field label="DID (entry)">
-        <input style={{ ...inputStyle, width: 150 }} value={entryDid(entry)} onChange={(e) => setDid(e.target.value)} placeholder="+16175551234" />
-      </Field>
-
-      {/* Customer */}
-      <Field label="Customer">
-        <AdminCustomerSelector
-          selectedCustomerId={customerId ?? undefined}
-          onSelect={(id) => patchDoc({ customerId: id ?? null })}
-          accent="#22d3ee"
         />
-      </Field>
+        <span style={{ fontSize: '0.95rem', fontWeight: 800, color: '#e2e8f0', letterSpacing: '-0.01em', whiteSpace: 'nowrap' }}>
+          Call Flow Builder
+        </span>
+      </div>
 
-      {/* Load existing */}
-      <Field label="Open flow">
-        <select
-          style={{ ...inputStyle, width: 170, cursor: 'pointer' }}
-          value=""
-          onChange={(e) => e.target.value && handleLoad(Number(e.target.value))}
-        >
-          <option value="">{flowsQuery.isLoading ? 'Loading…' : 'Select a flow…'}</option>
-          {flowsQuery.data?.items.map((f) => (
-            <option key={f.id} value={f.id}>
-              {f.name} ({f.status})
-            </option>
-          ))}
-        </select>
-      </Field>
+      {/* ── Flow-identity group ─────────────────────────────────────────── */}
+      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10, flexWrap: 'wrap' }}>
+        {/* Product — the NAME is the control: click to switch product. */}
+        <Field label="Product">
+          <ProductSelect product={product} onPick={handlePickProduct} />
+        </Field>
 
-      <div style={{ flex: 1 }} />
+        {/* Name */}
+        <Field label="Flow name">
+          <input style={inputStyle} value={name} onChange={(e) => setName(e.target.value)} placeholder="Untitled Flow" />
+        </Field>
+
+        {/* DID entry binding */}
+        <Field label="DID (entry)">
+          <input style={{ ...inputStyle, width: 150 }} value={entryDid(entry)} onChange={(e) => setDid(e.target.value)} placeholder="+16175551234" />
+        </Field>
+
+        {/* Customer */}
+        <Field label="Customer">
+          <AdminCustomerSelector
+            selectedCustomerId={customerId ?? undefined}
+            onSelect={(id) => patchDoc({ customerId: id ?? null })}
+            accent="#22d3ee"
+          />
+        </Field>
+
+        {/* Load existing */}
+        <Field label="Open flow">
+          <select
+            style={{ ...inputStyle, width: 170, cursor: 'pointer' }}
+            value=""
+            onChange={(e) => e.target.value && handleLoad(Number(e.target.value))}
+          >
+            <option value="">{flowsQuery.isLoading ? 'Loading…' : 'Select a flow…'}</option>
+            {flowsQuery.data?.items.map((f) => (
+              <option key={f.id} value={f.id}>
+                {f.name} ({f.status})
+              </option>
+            ))}
+          </select>
+        </Field>
+      </div>
+
+      <div style={{ flex: 1, minWidth: 8 }} />
 
       {/* Status badge */}
       <span
@@ -353,6 +388,32 @@ export function FlowToolbar() {
         >
           {compiledPreview}
         </pre>
+      </Modal>
+
+      {/* Confirm switching product from the name dropdown — switching starts a
+          fresh flow of the new product (the palette + compiler change). */}
+      <Modal
+        open={pendingProduct != null}
+        onClose={() => setPendingProduct(null)}
+        title="Switch product?"
+        maxWidth="max-w-md"
+        footer={
+          <>
+            <Button variant="ghost" size="sm" onClick={() => setPendingProduct(null)}>
+              Cancel
+            </Button>
+            <Button variant="primary" size="sm" onClick={confirmSwitchProduct}>
+              Switch to {pendingProduct ? PRODUCT_LABELS[pendingProduct] : ''}
+            </Button>
+          </>
+        }
+      >
+        <p style={{ margin: 0, fontSize: '0.82rem', color: '#94a3b8', lineHeight: 1.6 }}>
+          Switching from <strong style={{ color: '#22d3ee' }}>{PRODUCT_LABELS[product]}</strong> to{' '}
+          <strong style={{ color: '#22d3ee' }}>{pendingProduct ? PRODUCT_LABELS[pendingProduct] : ''}</strong> changes
+          the node palette and compiler, so this <strong style={{ color: '#e2e8f0' }}>starts a fresh flow</strong> and
+          clears the current canvas. This can't be undone.
+        </p>
       </Modal>
 
       {/* New-flow product selector (Task 1) — picks palette + compiler + tag. */}
@@ -456,6 +517,149 @@ export function FlowToolbar() {
           </div>
         </div>
       </Modal>
+    </div>
+  );
+}
+
+/**
+ * Product picker whose trigger IS the product name (Task 3). Clicking the name
+ * opens a popover listing every selectable product with its one-line blurb; the
+ * current product is marked. Picking a product calls `onPick` (the parent owns
+ * the "switching starts a fresh flow" confirmation). Cyan accent (#22d3ee, §15).
+ *
+ * React #310: all hooks (state, ref, effect) are declared unconditionally at the
+ * top, before any early return.
+ */
+function ProductSelect({ product, onPick }: { product: ProductKind; onPick: (p: ProductKind) => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  // Close on outside-click / Escape while open.
+  useEffect(() => {
+    if (!open) return;
+    const onPointer = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('mousedown', onPointer);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onPointer);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  const pick = (p: ProductKind) => {
+    setOpen(false);
+    onPick(p);
+  };
+
+  return (
+    <div ref={ref} style={{ position: 'relative' }}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        title="Change product"
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 8,
+          height: 34,
+          padding: '0 10px 0 12px',
+          borderRadius: 8,
+          fontSize: '0.78rem',
+          fontWeight: 700,
+          color: '#22d3ee',
+          background: 'rgba(34,211,238,0.12)',
+          border: `1px solid ${open ? 'rgba(34,211,238,0.75)' : 'rgba(34,211,238,0.4)'}`,
+          cursor: 'pointer',
+          whiteSpace: 'nowrap',
+          outline: 'none',
+        }}
+      >
+        {PRODUCT_LABELS[product]}
+        <span
+          aria-hidden="true"
+          style={{
+            fontSize: '0.6rem',
+            opacity: 0.85,
+            transform: open ? 'rotate(180deg)' : 'none',
+            transition: 'transform 0.15s',
+          }}
+        >
+          ▾
+        </span>
+      </button>
+
+      {open && (
+        <div
+          role="listbox"
+          style={{
+            position: 'absolute',
+            top: 'calc(100% + 6px)',
+            left: 0,
+            zIndex: 50,
+            width: 300,
+            padding: 6,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 2,
+            borderRadius: 12,
+            background: 'linear-gradient(180deg, #1c1f2b 0%, #15171f 100%)',
+            border: '1px solid rgba(34,211,238,0.22)',
+            boxShadow: '0 18px 48px -12px rgba(0,0,0,0.7), 0 0 0 1px rgba(0,0,0,0.4)',
+          }}
+        >
+          {SELECTABLE_PRODUCTS.map((p) => {
+            const active = p === product;
+            return (
+              <button
+                key={p}
+                type="button"
+                role="option"
+                aria-selected={active}
+                onClick={() => pick(p)}
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 2,
+                  textAlign: 'left',
+                  padding: '9px 11px',
+                  borderRadius: 8,
+                  cursor: 'pointer',
+                  color: '#e2e8f0',
+                  background: active ? 'rgba(34,211,238,0.12)' : 'transparent',
+                  border: `1px solid ${active ? 'rgba(34,211,238,0.4)' : 'transparent'}`,
+                  transition: 'background 0.12s, border-color 0.12s',
+                }}
+                onMouseEnter={(e) => {
+                  if (!active) e.currentTarget.style.background = 'rgba(255,255,255,0.04)';
+                }}
+                onMouseLeave={(e) => {
+                  if (!active) e.currentTarget.style.background = 'transparent';
+                }}
+              >
+                <span
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 7,
+                    fontSize: '0.82rem',
+                    fontWeight: 700,
+                    color: active ? '#22d3ee' : '#e2e8f0',
+                  }}
+                >
+                  {PRODUCT_LABELS[p]}
+                  {active && <span style={{ fontSize: '0.72rem', color: '#22d3ee' }}>✓</span>}
+                </span>
+                <span style={{ fontSize: '0.7rem', color: '#94a3b8', lineHeight: 1.4 }}>{PRODUCT_BLURBS[p]}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

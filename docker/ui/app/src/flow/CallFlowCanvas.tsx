@@ -9,7 +9,7 @@
  * React #310: every hook is declared unconditionally at the top of each
  * component, before any early return.
  */
-import { useCallback } from 'react';
+import { useCallback, useEffect } from 'react';
 import {
   ReactFlow,
   ReactFlowProvider,
@@ -18,6 +18,7 @@ import {
   MiniMap,
   Controls,
   useReactFlow,
+  type FitViewOptions,
   type OnMove,
   type IsValidConnection,
   type NodeMouseHandler,
@@ -30,6 +31,14 @@ import { PALETTE_DND_MIME } from './palette/NodePalette';
 import type { RFNode } from './store/serialize';
 import type { NodeType } from './model/types';
 
+/**
+ * Overview fit — the builder opens (and re-fits on load) ZOOMED OUT so wide
+ * AND tall flows are legible whole. `maxZoom` caps the scale so a brand-new
+ * flow (a single Entry node) is shown at a comfortable size instead of being
+ * blown up to fill the viewport. `padding` leaves breathing room on all sides.
+ */
+const OVERVIEW_FIT: FitViewOptions = { padding: 0.28, minZoom: 0.15, maxZoom: 0.85 };
+
 function CanvasInner() {
   // All hooks first — React #310.
   const nodes = useFlowStore((s) => s.nodes);
@@ -40,7 +49,19 @@ function CanvasInner() {
   const addNode = useFlowStore((s) => s.addNode);
   const setSelected = useFlowStore((s) => s.setSelected);
   const setViewport = useFlowStore((s) => s.setViewport);
-  const { screenToFlowPosition } = useReactFlow();
+  const graphEpoch = useFlowStore((s) => s.graphEpoch);
+  const { screenToFlowPosition, fitView } = useReactFlow();
+
+  // Re-fit to an overview whenever a whole graph is swapped in (load / new /
+  // reset bump `graphEpoch`). A short delay lets React Flow measure the freshly
+  // mounted nodes before fitting; incremental edits don't bump the epoch, so
+  // ordinary editing never yanks the viewport.
+  useEffect(() => {
+    const id = window.setTimeout(() => {
+      fitView({ ...OVERVIEW_FIT, duration: 350 });
+    }, 60);
+    return () => window.clearTimeout(id);
+  }, [graphEpoch, fitView]);
 
   const handleNodeClick = useCallback<NodeMouseHandler<RFNode>>(
     (_event, node) => setSelected(node.id),
@@ -96,6 +117,10 @@ function CanvasInner() {
       isValidConnection={isValidConnection}
       colorMode="dark"
       fitView
+      fitViewOptions={OVERVIEW_FIT}
+      defaultViewport={{ x: 0, y: 0, zoom: 0.75 }}
+      minZoom={0.15}
+      maxZoom={2}
       deleteKeyCode={['Backspace', 'Delete']}
       proOptions={{ hideAttribution: true }}
       style={{ background: '#0f1117' }}

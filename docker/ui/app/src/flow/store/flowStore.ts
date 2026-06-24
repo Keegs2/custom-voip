@@ -41,6 +41,13 @@ export interface FlowState {
   edges: RFEdge[];
   /** Currently-selected node (drives the config panel in P1). */
   selectedId: string | null;
+  /**
+   * Monotonic counter bumped whenever the whole graph is replaced wholesale
+   * (loadDoc / newFlow / reset). The canvas watches it to re-fit the viewport
+   * to an overview after a new graph is swapped in — incremental edits (which
+   * don't touch this) never trigger a re-fit.
+   */
+  graphEpoch: number;
 
   /* React Flow event forwarding */
   onNodesChange: (changes: NodeChange<RFNode>[]) => void;
@@ -95,6 +102,7 @@ export const useFlowStore = create<FlowState>()(
       nodes: INITIAL_GRAPH.nodes,
       edges: INITIAL_GRAPH.edges,
       selectedId: null,
+      graphEpoch: 0,
 
       onNodesChange: (changes) =>
         set({ nodes: applyNodeChanges(changes, get().nodes) }),
@@ -181,7 +189,13 @@ export const useFlowStore = create<FlowState>()(
 
       loadDoc: (doc) => {
         const graph = serialize(doc);
-        set({ doc, nodes: graph.nodes, edges: graph.edges, selectedId: null });
+        set({
+          doc,
+          nodes: graph.nodes,
+          edges: graph.edges,
+          selectedId: null,
+          graphEpoch: get().graphEpoch + 1,
+        });
         // A fresh document starts a fresh undo timeline.
         useFlowStore.temporal.getState().clear();
       },
@@ -189,14 +203,26 @@ export const useFlowStore = create<FlowState>()(
       reset: () => {
         const fresh = emptyDoc(get().doc.product);
         const graph = serialize(fresh);
-        set({ doc: fresh, nodes: graph.nodes, edges: graph.edges, selectedId: null });
+        set({
+          doc: fresh,
+          nodes: graph.nodes,
+          edges: graph.edges,
+          selectedId: null,
+          graphEpoch: get().graphEpoch + 1,
+        });
         useFlowStore.temporal.getState().clear();
       },
 
       newFlow: (product) => {
         const fresh = emptyDoc(product);
         const graph = serialize(fresh);
-        set({ doc: fresh, nodes: graph.nodes, edges: graph.edges, selectedId: null });
+        set({
+          doc: fresh,
+          nodes: graph.nodes,
+          edges: graph.edges,
+          selectedId: null,
+          graphEpoch: get().graphEpoch + 1,
+        });
         useFlowStore.temporal.getState().clear();
       },
 

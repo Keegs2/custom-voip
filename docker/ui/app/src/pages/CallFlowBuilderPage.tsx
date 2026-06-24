@@ -1,30 +1,34 @@
 /**
- * Call Flow Builder route. Hosts the node-graph IVR editor (the universal
- * builder from CALL_FLOW_BUILDER_PLAN.md) — now the single IVR editor, after
- * the legacy `pages/ivr/` drag-and-drop builder was retired. Admin-gated
- * (RequireAdmin in App.tsx).
+ * Call Flow Builder route — a FULL-SCREEN workspace.
+ *
+ * The node-graph editor benefits from maximum canvas real estate (flows can be
+ * very wide AND very tall), so this page renders OUTSIDE AppLayout's 1160px
+ * centered column. It draws its own `Sidebar` (so the left app nav keeps
+ * working) and lets `FlowBuilderShell` fill the entire remaining width and the
+ * full viewport height — mirroring the `/troubleshooting` precedent. Admin-gated
+ * (RequireAuth → RequireAdmin in App.tsx).
  *
  * React #310: no hooks here; the stateful work lives inside the shell panes.
  */
-import { PageHeader } from '../components/layout/PageHeader';
+import { Sidebar } from '../components/layout/Sidebar';
 import { FlowBuilderShell } from '../flow/FlowBuilderShell';
 
 export function CallFlowBuilderPage() {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-      <PageHeader
-        title="Call Flow Builder"
-        subtitle="Design IVR call-handling logic on a node graph, then publish to the live runtime."
-      />
+    <div style={{ height: '100vh', overflow: 'hidden', background: '#0f1117' }}>
+      <Sidebar />
 
+      {/* The Sidebar is fixed at 240px on the left; offset the workspace by it
+          and let the builder consume every remaining pixel of width + height. */}
       <div
         style={{
-          height: 'calc(100vh - 200px)',
-          minHeight: 600,
-          borderRadius: 16,
-          overflow: 'hidden',
-          border: '1px solid rgba(42,47,69,0.6)',
-          background: '#0f1117',
+          marginLeft: 240,
+          height: '100vh',
+          display: 'flex',
+          flexDirection: 'column',
+          minWidth: 0,
+          boxSizing: 'border-box',
+          borderLeft: '1px solid rgba(42,47,69,0.6)',
         }}
       >
         <FlowBuilderShell />
