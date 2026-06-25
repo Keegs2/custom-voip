@@ -9,6 +9,7 @@ import { RequireProgrammableVoice } from './components/auth/RequireProgrammableV
 import { AppLayout } from './components/layout/AppLayout';
 import { DashboardPage } from './pages/DashboardPage';
 import { RcfPage } from './pages/RcfPage';
+import { RcfGlassPage } from './pages/rcf-glass/RcfGlassPage';
 import { TrunksPage } from './pages/TrunksPage';
 import { CallFlowBuilderPage } from './pages/CallFlowBuilderPage';
 import { RcfDocsPage } from './pages/docs/RcfDocsPage';
@@ -76,6 +77,10 @@ export function App() {
             {/* Protected — all other routes require authentication */}
             <Route element={<RequireAuth />}>
               <Route path="rcf"        element={<RcfPage />} />
+              {/* Liquid-glass design-direction PROTOTYPE of the RCF page.
+                  Same live data + same forward_to mutation as /rcf; the
+                  original is untouched. Navigate directly to compare. */}
+              <Route path="rcf-glass"  element={<RcfGlassPage />} />
               {/* API DIDs merged into Programmable Voice — the API numbers ARE the
                   programmable numbers. Old /api-dids links/bookmarks redirect. */}
               <Route path="api-dids"   element={<Navigate to="/programmable-voice" replace />} />

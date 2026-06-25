@@ -103,6 +103,102 @@ def _first_leg_dest(rule: Any) -> Optional[str]:
 
 
 # ---------------------------------------------------------------------------
+# Publish overwrite-guard (RCF) — compare live routing vs what's about to publish
+# ---------------------------------------------------------------------------
+
+def _norm_str(v: Any) -> str:
+    """Normalize a forward-destination-ish value to a trimmed string for
+    comparison: None -> "", anything else -> ``str(v).strip()``. So a NULL/blank
+    DB value and an absent compiled key both collapse to "" and compare equal."""
+    if v is None:
+        return ""
+    return str(v).strip()
+
+
+def _norm_int(v: Any, default: int) -> Any:
+    """Normalize an int-ish value: None -> ``default``, otherwise coerce to int
+    (so a DB ``30`` and a compiled ``"30"`` compare equal). Uncoercible values
+    are returned as-is so a genuine mismatch still trips the guard."""
+    if v is None:
+        return default
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return v
+
+
+def _rcf_divergence_detail(
+    did: str, existing: Any, compiled: dict, is_rich: bool
+) -> Optional[str]:
+    """Return a human-readable 409 detail when publishing ``compiled`` would
+    MATERIALLY change the live ``rcf_numbers`` row for ``did``, else None.
+
+    ``existing`` is the row (forward_to, ring_timeout, pass_caller_id,
+    max_channels, routing_plan). Material divergence is:
+      - a mode change: existing has a non-null routing_plan (rich) but the new
+        artifact is flat (no ``rules``), or vice-versa; OR
+      - simple-vs-simple: any of forward_to / ring_timeout / pass_caller_id /
+        max_channels differs after type normalization.
+    An unchanged hydrate->republish returns None (no false positive). Rich-vs-rich
+    is out of scope today (returns None) — only simple fields + mode are guarded.
+    """
+    existing_is_rich = existing["routing_plan"] is not None
+
+    # Mode change (simple <-> rich) is always material.
+    if existing_is_rich != is_rich:
+        cur = (
+            "a multi-rule routing plan" if existing_is_rich
+            else f"forward to {_norm_str(existing['forward_to']) or '(unset)'}"
+        )
+        new = (
+            "a multi-rule routing plan" if is_rich
+            else f"forward to {_norm_str(compiled.get('forward_to')) or '(unset)'}"
+        )
+        return (
+            f"{did} currently uses {cur}. Publishing will change it to {new}. "
+            "Confirm to overwrite."
+        )
+
+    # Both rich: not guarded (only simple-mode fields are compared today).
+    if is_rich:
+        return None
+
+    # Simple-vs-simple: normalize types so an unchanged republish does NOT trip.
+    # Defaults mirror the publish writer + rcf_numbers column defaults.
+    cur_forward = _norm_str(existing["forward_to"])
+    new_forward = _norm_str(compiled.get("forward_to"))
+    cur_ring = _norm_int(existing["ring_timeout"], 30)
+    new_ring = _norm_int(compiled.get("ring_timeout"), 30)
+    cur_pass = bool(existing["pass_caller_id"])
+    new_pass = bool(compiled.get("pass_caller_id", True))
+    cur_max = _norm_int(existing["max_channels"], 0)
+    new_max = _norm_int(compiled.get("max_channels"), 0)
+
+    if (cur_forward, cur_ring, cur_pass, cur_max) == (
+        new_forward, new_ring, new_pass, new_max
+    ):
+        return None  # No material difference — proceed silently.
+
+    # Lead with forward_to (the headline the operator cares about), then list any
+    # other changed fields so the confirmation message is fully descriptive.
+    detail = (
+        f"{did} currently forwards to {cur_forward or '(unset)'}. "
+        f"Publishing will change it to {new_forward or '(unset)'}. "
+    )
+    extra = []
+    if cur_ring != new_ring:
+        extra.append(f"ring_timeout {cur_ring} -> {new_ring}")
+    if cur_pass != new_pass:
+        extra.append(f"pass_caller_id {cur_pass} -> {new_pass}")
+    if cur_max != new_max:
+        extra.append(f"max_channels {cur_max} -> {new_max}")
+    if extra:
+        detail += "Also changing: " + ", ".join(extra) + ". "
+    detail += "Confirm to overwrite."
+    return detail
+
+
+# ---------------------------------------------------------------------------
 # Pydantic models (inline, Pydantic V2)
 # ---------------------------------------------------------------------------
 
@@ -133,6 +229,11 @@ class CallFlowUpdate(BaseModel):
 
 class CallFlowPublish(BaseModel):
     compiled: dict
+    # Overwrite guard (RCF only, today): when False (default), publishing a flow
+    # whose target already has a MATERIALLY DIFFERENT live routing config is
+    # rejected with 409 so an operator can't silently clobber a line's existing
+    # forwarding. Set True to confirm and overwrite. No effect on non-RCF products.
+    overwrite_existing: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -386,6 +487,28 @@ async def publish_call_flow(
                     )
 
                 is_rich = "rules" in body.compiled
+
+                # OVERWRITE GUARD: before writing the sink, refuse to silently
+                # clobber an EXISTING live rcf_numbers config that materially
+                # differs from what's about to be published. Skipped when there is
+                # no existing row, when nothing material changed, or when the
+                # operator passed overwrite_existing=True. Read inside the same
+                # transaction/connection that does the upsert for a consistent view.
+                if not body.overwrite_existing:
+                    existing_rcf = await conn.fetchrow(
+                        """
+                        SELECT forward_to, ring_timeout, pass_caller_id,
+                               max_channels, routing_plan
+                        FROM rcf_numbers WHERE did = $1
+                        """,
+                        did,
+                    )
+                    if existing_rcf is not None:
+                        divergence = _rcf_divergence_detail(
+                            did, existing_rcf, body.compiled, is_rich
+                        )
+                        if divergence is not None:
+                            raise HTTPException(status_code=409, detail=divergence)
 
                 if not is_rich:
                     # ---- SIMPLE MODE -------------------------------------------

@@ -50,6 +50,13 @@ export interface CallFlowUpdate {
 
 export interface CallFlowPublish {
   compiled: unknown;
+  /**
+   * When the live product config has diverged from what this flow last published,
+   * the backend returns HTTP 409 unless this is `true` (an explicit operator
+   * confirmation to overwrite the diverging live config). Omitted/false on the
+   * first attempt; set to `true` only after the operator confirms.
+   */
+  overwrite_existing?: boolean;
 }
 
 /** One row in a flow's published-version history (newest first). */

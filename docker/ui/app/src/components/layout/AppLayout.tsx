@@ -1,6 +1,21 @@
 import { Outlet, useLocation } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { SoftphoneWidget } from '../softphone/SoftphoneWidget';
+import { GlassBackground } from '../glass/GlassBackground';
+
+/**
+ * App-wide SPACING STANDARD — the single source of truth for the content
+ * container's breathing room. Every routed page renders inside this padded,
+ * centered column, so pages must NOT add their own top margin/padding (the
+ * top offset is owned here). See docs/FRONTEND_GLASS_REFACTOR.md §7.
+ *
+ *  - PAGE_PADDING_X      left/right gutter — fluid, never cramped, never sprawling
+ *  - PAGE_PADDING_TOP    comfortable top offset so content is not glued to the edge
+ *  - PAGE_PADDING_BOTTOM generous tail so the last row clears the softphone widget
+ */
+const PAGE_PADDING_X = 'clamp(24px, 3vw, 48px)';
+const PAGE_PADDING_TOP = 40;
+const PAGE_PADDING_BOTTOM = 80;
 
 export function AppLayout() {
   // The public landing page (index route) is a marketing surface and breathes
@@ -10,16 +25,35 @@ export function AppLayout() {
 
   return (
     <div className="min-h-screen bg-[#0f1117]">
+      {/*
+        App-wide liquid-glass backdrop. Fixed + zIndex:0, so it paints behind the
+        content (which is lifted to zIndex:1 below) and behind the Sidebar
+        (zIndex:100). It never recolours the Sidebar and is subtle enough that
+        opaque, not-yet-glassified pages still read fine on top.
+      */}
+      <GlassBackground />
       <Sidebar />
-      {/* Main content — offset by fixed sidebar width on md+ */}
+      {/* Main content — offset by fixed sidebar width on md+. position:relative +
+          zIndex:1 lifts the whole content column above the GlassBackground. */}
       <main
         className="min-h-screen flex flex-col"
-        style={{ marginLeft: 240 }}
+        style={{ marginLeft: 240, position: 'relative', zIndex: 1 }}
       >
-        {/* Inner wrapper: fills main, centers content within the content column */}
+        {/* Inner wrapper: fills main, centers content within the content column,
+            and owns the app-wide spacing standard (top offset + gutters + tail).
+            Pages render directly inside this — they never re-pad the top edge. */}
         <div
-          className="flex-1 flex flex-col py-8 pb-20"
-          style={{ maxWidth: contentMaxWidth, width: '100%', marginLeft: 'auto', marginRight: 'auto', paddingLeft: 'clamp(24px, 3vw, 48px)', paddingRight: 'clamp(24px, 3vw, 48px)' }}
+          className="flex-1 flex flex-col"
+          style={{
+            maxWidth: contentMaxWidth,
+            width: '100%',
+            marginLeft: 'auto',
+            marginRight: 'auto',
+            paddingLeft: PAGE_PADDING_X,
+            paddingRight: PAGE_PADDING_X,
+            paddingTop: PAGE_PADDING_TOP,
+            paddingBottom: PAGE_PADDING_BOTTOM,
+          }}
         >
           <Outlet />
         </div>

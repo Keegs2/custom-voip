@@ -38,7 +38,6 @@
  *    (e.g. Dial `action`/`timeLimit`/nested `<Sip>`, Conference
  *    `waitUrl`/`video`, Record `action`/`method`) are dropped.
  */
-import { Graph, layout } from '@dagrejs/dagre';
 import type {
   CallFlowDoc,
   CallerIdMatch,
@@ -49,6 +48,7 @@ import type {
   NodeType,
 } from '../model/types';
 import { defaultLabel, newId } from '../model/defaults';
+import { layoutTopDown } from './layout';
 import {
   COND_MATCH,
   COND_NOMATCH,
@@ -215,9 +215,6 @@ function conditionBranchHandle(key: string): string | null {
 
 /* ─── Conversion ────────────────────────────────────────────────────────── */
 
-const NODE_W = 220;
-const NODE_H = 84;
-
 export function fromLegacyIvr(flowConfig: LegacyFlowConfig, meta: LegacyIvrMeta): CallFlowDoc {
   const nodes: FlowNode[] = [];
   const edges: FlowEdge[] = [];
@@ -348,7 +345,7 @@ export function fromLegacyIvr(flowConfig: LegacyFlowConfig, meta: LegacyIvrMeta)
   const rootHead = emitSequence(flowConfig.nodes);
   if (rootHead) addEdge(entryNode.id, NEXT_HANDLE, rootHead);
 
-  layoutPositions(nodes, edges);
+  layoutTopDown(nodes, edges);
 
   return {
     schemaVersion: 1,
@@ -363,26 +360,4 @@ export function fromLegacyIvr(flowConfig: LegacyFlowConfig, meta: LegacyIvrMeta)
     status: 'draft',
     version: 1,
   };
-}
-
-/* ─── Auto-layout (dagre, top-down) ─────────────────────────────────────── */
-
-/** Assign top-down positions in place. React Flow positions are top-left; dagre
- * centres nodes, so we offset by half the node box. */
-function layoutPositions(nodes: FlowNode[], edges: FlowEdge[]): void {
-  const g = new Graph({ directed: true });
-  g.setGraph({ rankdir: 'TB', nodesep: 60, ranksep: 90, marginx: 24, marginy: 24 });
-  g.setDefaultEdgeLabel(() => ({}));
-
-  for (const n of nodes) g.setNode(n.id, { width: NODE_W, height: NODE_H });
-  for (const e of edges) g.setEdge(e.source, e.target);
-
-  layout(g);
-
-  for (const n of nodes) {
-    const p = g.node(n.id) as { x?: number; y?: number } | undefined;
-    if (p && typeof p.x === 'number' && typeof p.y === 'number') {
-      n.position = { x: Math.round(p.x - NODE_W / 2), y: Math.round(p.y - NODE_H / 2) };
-    }
-  }
 }

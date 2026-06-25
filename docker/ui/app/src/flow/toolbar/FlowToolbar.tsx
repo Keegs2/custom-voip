@@ -1,27 +1,34 @@
 /**
- * Builder toolbar — flow identity (product, name, DID entry binding, customer),
- * the new/load controls, undo/redo, compiled-artifact preview, and the Save /
- * Publish actions wired to the `call_flows` API.
+ * Builder toolbar — TWO ROWS, reorganised around a gated setup chain.
  *
- * The PRODUCT drives everything: which palette/compiler/validation runs, which
- * `product` tag is sent to the API, and which existing flows the "Open flow"
- * picker lists. Creating a new flow picks the product; loading one inherits the
- * stored `product` from the flow_graph.
+ * The Customer → Product → Line selection is now made in the centre "Set up this
+ * flow" card (`FlowBuilderShell.GuidedSetup`), not here. This toolbar MIRRORS that
+ * selection: `SetupSummary` reads the same shared `setupStore` the card writes to,
+ * so the customer · product · line "fills in" live as the operator picks it. Once
+ * the flow is configured, the summary persists (so the operator always sees what
+ * they're editing while the canvas is up) and a small "Change" re-opens the setup
+ * card (`setupStore.beginEdit`, seeded from the committed doc).
  *
- * Save  → PUT/POST draft with { product, flow_graph: CallFlowDoc, compiled }.
- * Publish → validate (block on errors) → ensure saved → POST /publish { compiled };
- *           the backend writes the product sink (rcf_numbers / ivr_flows) + repoints DID.
+ * Row 1 (identity): brand + the live selection summary + (when configured) Change.
+ * Row 2 (controls): flow name + DRAFT/PUBLISHED badge + "Open flow" on the left;
+ * Undo/Redo, a "More" overflow (New / Import IVR / Preview / History / Simulate),
+ * and the primary Save / Publish on the right.
  *
- * React #310: ALL hooks (store, query, local state) are declared unconditionally
- * at the top, before any early return or conditional render.
+ * Bypass paths: "Open flow" and "Import IVR" set product/customer/entry directly
+ * and seed the shared staging so the summary reflects the loaded doc immediately.
+ *
+ * React #310: ALL hooks (store, query, local state, effect) are declared
+ * unconditionally at the top, before any early return or conditional render.
  */
 import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useFlowStore, useFlowTemporal } from '../store/flowStore';
+import { useSetupStore } from '../store/setupStore';
 import { compileFlow, validateFlow } from '../compile/registry';
 import { fromLegacyIvr } from '../compile/fromLegacyIvr';
 import { listIvrFlows, type LegacyIvrFlowRow } from '../../api/ivr';
 import { PRODUCT_LABELS, SELECTABLE_PRODUCTS } from '../model/palette';
+import { entryKey, entryLabel, isEntryBound } from '../model/setup';
 import {
   createCallFlow,
   getCallFlow,
@@ -29,19 +36,16 @@ import {
   publishCallFlow,
   updateCallFlow,
 } from '../../api/callFlows';
+import { listCustomers } from '../../api/customers';
 import type { CallFlow } from '../../types/callFlow';
 import type { CallFlowDoc, EntryBinding, ProductKind } from '../model/types';
 import { Button } from '../../components/ui/Button';
 import { Modal } from '../../components/ui/Modal';
-import { AdminCustomerSelector } from '../../components/AdminCustomerSelector';
 import { useToast } from '../../components/ui/ToastContext';
 import { ApiError } from '../../api/client';
+import { fmt } from '../../utils/format';
 import { FlowHistoryModal } from './FlowHistoryModal';
 import { FlowSimulateModal } from './FlowSimulateModal';
-
-function entryDid(entry: EntryBinding): string {
-  return entry.kind === 'did' ? entry.did : '';
-}
 
 /** One-line blurb per selectable product, shown in the New-flow picker. */
 const PRODUCT_BLURBS: Record<ProductKind, string> = {
@@ -53,6 +57,11 @@ const PRODUCT_BLURBS: Record<ProductKind, string> = {
   ucaas: 'Find-me / follow-me ring plans.',
 };
 
+/** Short, human label for a bound entry — used in the summary's Line segment. */
+function lineText(entry: EntryBinding): string {
+  return entry.kind === 'did' ? fmt(entry.did) || entry.did : entryLabel(entry);
+}
+
 export function FlowToolbar() {
   // ── Hooks (all unconditional, top of component) ──────────────────────────
   const docId = useFlowStore((s) => s.doc.id);
@@ -61,12 +70,15 @@ export function FlowToolbar() {
   const status = useFlowStore((s) => s.doc.status);
   const entry = useFlowStore((s) => s.doc.entry);
   const customerId = useFlowStore((s) => s.doc.customerId);
-  const nodes = useFlowStore((s) => s.nodes);
-  const edges = useFlowStore((s) => s.edges);
   const patchDoc = useFlowStore((s) => s.patchDoc);
   const getDoc = useFlowStore((s) => s.getDoc);
   const loadDoc = useFlowStore((s) => s.loadDoc);
   const newFlow = useFlowStore((s) => s.newFlow);
+
+  const editing = useSetupStore((s) => s.editing);
+  const seedSetup = useSetupStore((s) => s.seed);
+  const resetSetup = useSetupStore((s) => s.reset);
+  const beginEdit = useSetupStore((s) => s.beginEdit);
 
   const undo = useFlowTemporal((s) => s.undo);
   const redo = useFlowTemporal((s) => s.redo);
@@ -80,9 +92,9 @@ export function FlowToolbar() {
   const [importOpen, setImportOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [simulateOpen, setSimulateOpen] = useState(false);
-  // Product the user picked from the name dropdown that needs a "this clears the
-  // canvas" confirmation before we start a fresh flow of that product.
-  const [pendingProduct, setPendingProduct] = useState<ProductKind | null>(null);
+  // Holds the server's 409 detail when publishing would overwrite a diverging
+  // live config — drives the overwrite-confirm modal. Null = no conflict pending.
+  const [publishConflict, setPublishConflict] = useState<string | null>(null);
 
   // Legacy IVR flows for the import picker — only fetched while the modal is open.
   const legacyIvrQuery = useQuery({
@@ -124,13 +136,15 @@ export function FlowToolbar() {
     onError: (e) => toastErr(e instanceof ApiError ? e.message : 'Save failed'),
   });
 
-  const publishMutation = useMutation({
-    mutationFn: async (): Promise<CallFlow> => {
+  // `overwrite` is the publish variable: false on the first attempt, true after
+  // the operator confirms overwriting a diverging live config (the 409 path).
+  const publishMutation = useMutation<CallFlow, Error, boolean>({
+    mutationFn: async (overwrite): Promise<CallFlow> => {
       const doc = getDoc();
       const result = validateFlow(doc);
       if (!result.ok) throw new Error('Fix validation errors before publishing.');
       if (doc.customerId == null) throw new Error('Select a customer before publishing.');
-      if (!entryDid(doc.entry)) throw new Error('Bind a DID (entry) before publishing.');
+      if (!isEntryBound(doc.entry)) throw new Error('Select a line before publishing.');
       const compiled = compileFlow(doc);
 
       let id = doc.id;
@@ -148,32 +162,36 @@ export function FlowToolbar() {
       } else {
         await updateCallFlow(id, { name: doc.name, entry: doc.entry, flow_graph: doc, compiled });
       }
-      return publishCallFlow(id, { compiled });
+      return publishCallFlow(id, { compiled, overwrite_existing: overwrite ? true : undefined });
     },
     onSuccess: (flow) => {
       patchDoc({ id: flow.id, status: flow.status, version: flow.version });
       queryClient.invalidateQueries({ queryKey });
-      toastOk('Flow published — DID routing updated');
+      toastOk('Flow published — routing updated');
     },
-    onError: (e) => toastErr(e instanceof ApiError ? e.message : (e as Error).message),
+    onError: (e) => {
+      // 409 = the live config diverged from what this flow last published. Don't
+      // treat it as an error — open a confirm modal so the operator can choose to
+      // overwrite (re-publishing with overwrite_existing: true).
+      if (e instanceof ApiError && e.status === 409) {
+        setPublishConflict(e.message);
+        return;
+      }
+      toastErr(e.message);
+    },
   });
 
-  // Derived (no hooks) — safe after the hooks above.
-  //
-  // "Meaningful content" mirrors the New-flow modal semantics: switching product
-  // swaps the palette + compiler, so existing nodes may become invalid — we start
-  // a fresh flow. If the canvas is effectively empty (just the auto `entry` node,
-  // no edges, default name, never saved) we switch silently; otherwise we confirm.
-  const hasContent =
-    nodes.length > 1 ||
-    edges.length > 0 ||
-    docId != null ||
-    (name.trim() !== '' && name !== 'Untitled Flow');
+  // ── Derived (no hooks) — safe after the hooks above ──────────────────────
+  const configured = customerId != null && isEntryBound(entry);
+  // "Change" is offered only while the live canvas is up (configured + not already
+  // re-staging) — it re-opens setup pre-filled from the committed doc.
+  const showChange = configured && !editing;
 
   const validation = validateFlow(getDoc());
   const hasErrors = !validation.ok;
   const compiledPreview = JSON.stringify(compileFlow(getDoc()), null, 2);
 
+  // ── Flow actions ─────────────────────────────────────────────────────────
   const handleLoad = async (id: number) => {
     try {
       const flow = await getCallFlow(id);
@@ -188,6 +206,8 @@ export function FlowToolbar() {
         customerId: flow.customer_id,
         entry: flow.entry,
       });
+      // Reflect the loaded selection into staging so the summary fills in.
+      seedSetup({ customerId: flow.customer_id, product: flow.product, lineKey: entryKey(flow.entry) });
       toastOk(`Loaded "${flow.name}"`);
     } catch (e) {
       toastErr(e instanceof ApiError ? e.message : 'Failed to load flow');
@@ -196,27 +216,9 @@ export function FlowToolbar() {
 
   const handleNewFlow = (p: ProductKind) => {
     newFlow(p);
+    resetSetup();
     setNewOpen(false);
-    toastOk(`New ${PRODUCT_LABELS[p]} flow`);
-  };
-
-  // Product picked from the name dropdown. Same product → no-op; empty canvas →
-  // switch immediately; otherwise stage it and confirm (switching starts fresh).
-  const handlePickProduct = (p: ProductKind) => {
-    if (p === product) return;
-    if (hasContent) {
-      setPendingProduct(p);
-      return;
-    }
-    newFlow(p);
-    toastOk(`Switched to ${PRODUCT_LABELS[p]}`);
-  };
-
-  const confirmSwitchProduct = () => {
-    if (pendingProduct == null) return;
-    newFlow(pendingProduct);
-    toastOk(`Switched to ${PRODUCT_LABELS[pendingProduct]}`);
-    setPendingProduct(null);
+    toastOk(`New ${PRODUCT_LABELS[p]} flow — pick a customer + line to start`);
   };
 
   // Convert a legacy ivr_flows row into a CallFlowDoc and drop it on the canvas
@@ -229,6 +231,7 @@ export function FlowToolbar() {
         did: row.did ?? '',
       });
       loadDoc(doc);
+      seedSetup({ customerId: doc.customerId, product: doc.product, lineKey: entryKey(doc.entry) });
       setImportOpen(false);
       toastOk(`Imported "${row.name}" — review, then Save to create a call flow`);
     } catch {
@@ -236,140 +239,185 @@ export function FlowToolbar() {
     }
   };
 
+  const handleChange = () =>
+    beginEdit({ customerId, product, lineKey: entryKey(entry) });
+
   const setName = (v: string) => patchDoc({ name: v });
-  const setDid = (v: string) => patchDoc({ entry: { kind: 'did', did: v } });
+
+  const moreItems: MoreItem[] = [
+    { label: 'New flow…', onClick: () => setNewOpen(true) },
+    { label: 'Import IVR…', onClick: () => setImportOpen(true) },
+    { label: 'Preview compiled…', onClick: () => setPreviewOpen(true) },
+    {
+      label: 'Version history…',
+      onClick: () => setHistoryOpen(true),
+      disabled: docId == null,
+      title: docId == null ? 'Save the flow to enable version history' : undefined,
+    },
+    {
+      label: 'Simulate…',
+      onClick: () => setSimulateOpen(true),
+      disabled: docId == null,
+      title: docId == null ? 'Save the flow to enable simulation' : undefined,
+    },
+  ];
 
   return (
     <div
       style={{
         display: 'flex',
-        alignItems: 'flex-end',
-        gap: 12,
-        flexWrap: 'wrap',
+        flexDirection: 'column',
+        gap: 10,
         padding: '10px 16px',
         background: 'linear-gradient(180deg, #161922 0%, #13151d 100%)',
         borderBottom: '1px solid rgba(42,47,69,0.6)',
       }}
     >
-      {/* Brand — replaces the removed PageHeader now that the builder is
-          full-screen. The cyan bar is the Call Flow Builder accent (§15). */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, alignSelf: 'stretch', paddingRight: 4 }}>
-        <span
-          style={{
-            width: 3,
-            alignSelf: 'stretch',
-            borderRadius: 2,
-            background: 'linear-gradient(180deg, #22d3ee 0%, #0891b2 100%)',
-            boxShadow: '0 0 10px rgba(34,211,238,0.45)',
-          }}
-        />
-        <span style={{ fontSize: '0.95rem', fontWeight: 800, color: '#e2e8f0', letterSpacing: '-0.01em', whiteSpace: 'nowrap' }}>
-          Call Flow Builder
-        </span>
+      {/* ── Row 1 — brand + the live selection summary ─────────────────────── */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+        {/* Brand */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+          <span
+            style={{
+              width: 3,
+              height: 22,
+              borderRadius: 2,
+              background: 'linear-gradient(180deg, #22d3ee 0%, #0891b2 100%)',
+              boxShadow: '0 0 10px rgba(34,211,238,0.45)',
+            }}
+          />
+          <span
+            style={{
+              fontSize: '0.95rem',
+              fontWeight: 800,
+              color: '#e2e8f0',
+              letterSpacing: '-0.01em',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            Call Flow Builder
+          </span>
+        </div>
+
+        <SetupSummary />
+
+        <div style={{ flex: 1, minWidth: 8 }} />
+
+        {showChange && (
+          <Button variant="ghost" size="sm" onClick={handleChange}>
+            Change
+          </Button>
+        )}
       </div>
 
-      {/* ── Flow-identity group ─────────────────────────────────────────── */}
-      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10, flexWrap: 'wrap' }}>
-        {/* Product — the NAME is the control: click to switch product. */}
-        <Field label="Product">
-          <ProductSelect product={product} onPick={handlePickProduct} />
-        </Field>
+      {/* ── Row 2 — flow identity + actions ────────────────────────────────── */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <InlineField label="Flow name">
+          <input style={{ ...inputStyle, width: 200 }} value={name} onChange={(e) => setName(e.target.value)} placeholder="Untitled Flow" />
+        </InlineField>
 
-        {/* Name */}
-        <Field label="Flow name">
-          <input style={inputStyle} value={name} onChange={(e) => setName(e.target.value)} placeholder="Untitled Flow" />
-        </Field>
+        <span
+          style={{
+            flexShrink: 0,
+            padding: '4px 9px',
+            borderRadius: 6,
+            fontSize: '0.66rem',
+            fontWeight: 800,
+            textTransform: 'uppercase',
+            lineHeight: 1.2,
+            color: status === 'published' ? '#22c55e' : '#f59e0b',
+            background: status === 'published' ? 'rgba(34,197,94,0.12)' : 'rgba(245,158,11,0.12)',
+            border: `1px solid ${status === 'published' ? 'rgba(34,197,94,0.4)' : 'rgba(245,158,11,0.4)'}`,
+          }}
+        >
+          {status}
+          {docId != null ? ` · #${docId}` : ''}
+        </span>
 
-        {/* DID entry binding */}
-        <Field label="DID (entry)">
-          <input style={{ ...inputStyle, width: 150 }} value={entryDid(entry)} onChange={(e) => setDid(e.target.value)} placeholder="+16175551234" />
-        </Field>
-
-        {/* Customer */}
-        <Field label="Customer">
-          <AdminCustomerSelector
-            selectedCustomerId={customerId ?? undefined}
-            onSelect={(id) => patchDoc({ customerId: id ?? null })}
-            accent="#22d3ee"
-          />
-        </Field>
-
-        {/* Load existing */}
-        <Field label="Open flow">
+        <InlineField label="Open flow">
           <select
-            style={{ ...inputStyle, width: 170, cursor: 'pointer' }}
+            style={{ ...inputStyle, width: 180, cursor: 'pointer' }}
             value=""
             onChange={(e) => e.target.value && handleLoad(Number(e.target.value))}
           >
-            <option value="">{flowsQuery.isLoading ? 'Loading…' : 'Select a flow…'}</option>
+            <option value="">{flowsQuery.isLoading ? 'Loading…' : 'Open a saved flow…'}</option>
             {flowsQuery.data?.items.map((f) => (
               <option key={f.id} value={f.id}>
                 {f.name} ({f.status})
               </option>
             ))}
           </select>
-        </Field>
+        </InlineField>
+
+        <div style={{ flex: 1, minWidth: 8 }} />
+
+        {/* Edit history */}
+        <div style={{ display: 'flex', gap: 6 }}>
+          <Button variant="ghost" size="sm" onClick={() => undo()} disabled={!canUndo}>Undo</Button>
+          <Button variant="ghost" size="sm" onClick={() => redo()} disabled={!canRedo}>Redo</Button>
+        </div>
+
+        {/* Less-used actions, grouped behind an overflow menu */}
+        <MoreMenu items={moreItems} />
+
+        {/* Primary actions */}
+        <div style={{ display: 'flex', gap: 6 }}>
+          <Button
+            variant="primary"
+            size="sm"
+            loading={saveMutation.isPending}
+            disabled={!configured}
+            title={!configured ? 'Select a customer, product, and line first' : undefined}
+            onClick={() => saveMutation.mutate()}
+          >
+            Save
+          </Button>
+          <Button
+            variant="success"
+            size="sm"
+            loading={publishMutation.isPending}
+            disabled={!configured || hasErrors}
+            title={!configured ? 'Select a customer, product, and line first' : undefined}
+            onClick={() => publishMutation.mutate(false)}
+          >
+            Publish
+          </Button>
+        </div>
       </div>
-
-      <div style={{ flex: 1, minWidth: 8 }} />
-
-      {/* Status badge */}
-      <span
-        style={{
-          alignSelf: 'center',
-          padding: '3px 9px',
-          borderRadius: 6,
-          fontSize: '0.66rem',
-          fontWeight: 800,
-          textTransform: 'uppercase',
-          color: status === 'published' ? '#22c55e' : '#f59e0b',
-          background: status === 'published' ? 'rgba(34,197,94,0.12)' : 'rgba(245,158,11,0.12)',
-          border: `1px solid ${status === 'published' ? 'rgba(34,197,94,0.4)' : 'rgba(245,158,11,0.4)'}`,
-        }}
-      >
-        {status}
-        {docId != null ? ` · #${docId}` : ''}
-      </span>
-
-      {/* Actions */}
-      <Button variant="ghost" size="sm" onClick={() => undo()} disabled={!canUndo}>Undo</Button>
-      <Button variant="ghost" size="sm" onClick={() => redo()} disabled={!canRedo}>Redo</Button>
-      <Button variant="ghost" size="sm" onClick={() => setNewOpen(true)}>New</Button>
-      <Button variant="ghost" size="sm" onClick={() => setImportOpen(true)}>Import IVR</Button>
-      <Button variant="ghost" size="sm" onClick={() => setPreviewOpen(true)}>Preview</Button>
-      <Button
-        variant="ghost"
-        size="sm"
-        disabled={docId == null}
-        title={docId == null ? 'Save the flow to enable version history' : undefined}
-        onClick={() => setHistoryOpen(true)}
-      >
-        History
-      </Button>
-      <Button
-        variant="ghost"
-        size="sm"
-        disabled={docId == null}
-        title={docId == null ? 'Save the flow to enable simulation' : undefined}
-        onClick={() => setSimulateOpen(true)}
-      >
-        Simulate
-      </Button>
-      <Button variant="primary" size="sm" loading={saveMutation.isPending} onClick={() => saveMutation.mutate()}>
-        Save
-      </Button>
-      <Button
-        variant="success"
-        size="sm"
-        loading={publishMutation.isPending}
-        disabled={hasErrors}
-        onClick={() => publishMutation.mutate()}
-      >
-        Publish
-      </Button>
 
       <FlowHistoryModal open={historyOpen} onClose={() => setHistoryOpen(false)} flowId={docId ?? null} />
       <FlowSimulateModal open={simulateOpen} onClose={() => setSimulateOpen(false)} flowId={docId ?? null} />
+
+      {/* Overwrite-guard — shown when publish returns 409 because the live config
+          has diverged. The server's detail names the DID + current vs new forward. */}
+      <Modal
+        open={publishConflict != null}
+        onClose={() => setPublishConflict(null)}
+        title="Live config has changed"
+        maxWidth="max-w-md"
+        footer={
+          <>
+            <Button variant="ghost" size="sm" onClick={() => setPublishConflict(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="success"
+              size="sm"
+              loading={publishMutation.isPending}
+              onClick={() => {
+                setPublishConflict(null);
+                publishMutation.mutate(true);
+              }}
+            >
+              Overwrite &amp; publish
+            </Button>
+          </>
+        }
+      >
+        <p style={{ margin: 0, fontSize: '0.82rem', color: '#94a3b8', lineHeight: 1.6 }}>
+          {publishConflict}
+        </p>
+      </Modal>
 
       <Modal open={previewOpen} onClose={() => setPreviewOpen(false)} title="Compiled artifact" maxWidth="max-w-2xl">
         <pre
@@ -390,38 +438,12 @@ export function FlowToolbar() {
         </pre>
       </Modal>
 
-      {/* Confirm switching product from the name dropdown — switching starts a
-          fresh flow of the new product (the palette + compiler change). */}
-      <Modal
-        open={pendingProduct != null}
-        onClose={() => setPendingProduct(null)}
-        title="Switch product?"
-        maxWidth="max-w-md"
-        footer={
-          <>
-            <Button variant="ghost" size="sm" onClick={() => setPendingProduct(null)}>
-              Cancel
-            </Button>
-            <Button variant="primary" size="sm" onClick={confirmSwitchProduct}>
-              Switch to {pendingProduct ? PRODUCT_LABELS[pendingProduct] : ''}
-            </Button>
-          </>
-        }
-      >
-        <p style={{ margin: 0, fontSize: '0.82rem', color: '#94a3b8', lineHeight: 1.6 }}>
-          Switching from <strong style={{ color: '#22d3ee' }}>{PRODUCT_LABELS[product]}</strong> to{' '}
-          <strong style={{ color: '#22d3ee' }}>{pendingProduct ? PRODUCT_LABELS[pendingProduct] : ''}</strong> changes
-          the node palette and compiler, so this <strong style={{ color: '#e2e8f0' }}>starts a fresh flow</strong> and
-          clears the current canvas. This can't be undone.
-        </p>
-      </Modal>
-
-      {/* New-flow product selector (Task 1) — picks palette + compiler + tag. */}
+      {/* New-flow product selector — picks palette + compiler + tag. */}
       <Modal open={newOpen} onClose={() => setNewOpen(false)} title="New call flow — choose a product">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           <p style={{ margin: 0, fontSize: '0.78rem', color: '#94a3b8', lineHeight: 1.5 }}>
             The product sets the node palette, the compiler, and how this flow publishes.
-            (This clears the current canvas.)
+            (This clears the current canvas — you'll then pick a customer + line to start building.)
           </p>
           {SELECTABLE_PRODUCTS.map((p) => (
             <button
@@ -521,20 +543,106 @@ export function FlowToolbar() {
   );
 }
 
+/* ─── Selection summary — the live mirror of the centre card ───────────────── */
+
 /**
- * Product picker whose trigger IS the product name (Task 3). Clicking the name
- * opens a popover listing every selectable product with its one-line blurb; the
- * current product is marked. Picking a product calls `onPick` (the parent owns
- * the "switching starts a fresh flow" confirmation). Cyan accent (#22d3ee, §15).
+ * Read-only customer · product · line breadcrumb that "fills in" live as the
+ * operator picks in the centre setup card. Reads the shared `setupStore` (the
+ * staged customer + product) and the committed doc (the bound line), so it tracks
+ * both mid-setup staging AND a configured flow. The card is the input — this never
+ * edits; the toolbar's "Change" is what re-opens setup.
  *
- * React #310: all hooks (state, ref, effect) are declared unconditionally at the
- * top, before any early return.
+ * React #310: the customers query + store reads are unconditional at the top.
  */
-function ProductSelect({ product, onPick }: { product: ProductKind; onPick: (p: ProductKind) => void }) {
+function SetupSummary() {
+  const customersQuery = useQuery({
+    queryKey: ['customers-dropdown'],
+    queryFn: () => listCustomers({ limit: 500 }),
+    staleTime: 60_000,
+  });
+  const stgCustomerId = useSetupStore((s) => s.customerId);
+  const stgProduct = useSetupStore((s) => s.product);
+  const docCustomerId = useFlowStore((s) => s.doc.customerId);
+  const docProduct = useFlowStore((s) => s.doc.product);
+  const docEntry = useFlowStore((s) => s.doc.entry);
+
+  // Derived (no hooks below).
+  const configured = docCustomerId != null && isEntryBound(docEntry);
+  // Staging is seeded on every load/commit, so it's the live source for the first
+  // two segments; fall back to the committed doc for safety.
+  const custId = stgCustomerId ?? (configured ? docCustomerId : null);
+  const prod = stgProduct ?? (configured ? docProduct : null);
+
+  const customers = customersQuery.data?.items ?? [];
+  const customerName =
+    custId != null ? customers.find((c) => c.id === custId)?.name ?? `Customer #${custId}` : null;
+  const productName = prod != null ? PRODUCT_LABELS[prod] : null;
+  const line = configured ? lineText(docEntry) : null;
+
+  return (
+    <div
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 9,
+        minWidth: 0,
+        padding: '5px 12px',
+        borderRadius: 9,
+        whiteSpace: 'nowrap',
+        overflow: 'hidden',
+        background: configured ? 'rgba(34,211,238,0.08)' : 'rgba(26,29,39,0.7)',
+        border: `1px solid ${configured ? 'rgba(34,211,238,0.3)' : 'rgba(42,47,69,0.6)'}`,
+      }}
+    >
+      <span style={{ fontSize: '0.7rem', color: configured ? '#22d3ee' : '#475569', flexShrink: 0 }}>●</span>
+      <Seg value={customerName} placeholder="Customer" />
+      <Sep />
+      <Seg value={productName} placeholder="Product" />
+      <Sep />
+      <Seg value={line} placeholder="Line" accent />
+    </div>
+  );
+}
+
+function Seg({ value, placeholder, accent = false }: { value: string | null; placeholder: string; accent?: boolean }) {
+  const filled = value != null && value !== '';
+  return (
+    <span
+      style={{
+        fontSize: '0.78rem',
+        fontWeight: filled ? 700 : 600,
+        color: filled ? (accent ? '#22d3ee' : '#e2e8f0') : '#475569',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        minWidth: 0,
+      }}
+    >
+      {filled ? value : placeholder}
+    </span>
+  );
+}
+
+function Sep() {
+  return <span aria-hidden="true" style={{ fontSize: '0.72rem', color: '#475569', flexShrink: 0 }}>·</span>;
+}
+
+/* ─── Actions overflow menu ────────────────────────────────────────────────── */
+
+interface MoreItem {
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+  title?: string;
+}
+
+/**
+ * Compact "More ▾" popover grouping the least-used actions so the toolbar
+ * doesn't wrap chaotically. React #310: all hooks declared unconditionally.
+ */
+function MoreMenu({ items }: { items: MoreItem[] }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
-  // Close on outside-click / Escape while open.
   useEffect(() => {
     if (!open) return;
     const onPointer = (e: MouseEvent) => {
@@ -551,57 +659,20 @@ function ProductSelect({ product, onPick }: { product: ProductKind; onPick: (p: 
     };
   }, [open]);
 
-  const pick = (p: ProductKind) => {
-    setOpen(false);
-    onPick(p);
-  };
-
   return (
     <div ref={ref} style={{ position: 'relative' }}>
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        title="Change product"
-        style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          gap: 8,
-          height: 34,
-          padding: '0 10px 0 12px',
-          borderRadius: 8,
-          fontSize: '0.78rem',
-          fontWeight: 700,
-          color: '#22d3ee',
-          background: 'rgba(34,211,238,0.12)',
-          border: `1px solid ${open ? 'rgba(34,211,238,0.75)' : 'rgba(34,211,238,0.4)'}`,
-          cursor: 'pointer',
-          whiteSpace: 'nowrap',
-          outline: 'none',
-        }}
-      >
-        {PRODUCT_LABELS[product]}
-        <span
-          aria-hidden="true"
-          style={{
-            fontSize: '0.6rem',
-            opacity: 0.85,
-            transform: open ? 'rotate(180deg)' : 'none',
-            transition: 'transform 0.15s',
-          }}
-        >
-          ▾
-        </span>
-      </button>
-
+      <Button variant="ghost" size="sm" onClick={() => setOpen((o) => !o)}>
+        More ▾
+      </Button>
       {open && (
         <div
-          role="listbox"
+          role="menu"
           style={{
             position: 'absolute',
             top: 'calc(100% + 6px)',
-            left: 0,
+            right: 0,
             zIndex: 50,
-            width: 300,
+            width: 210,
             padding: 6,
             display: 'flex',
             flexDirection: 'column',
@@ -612,62 +683,62 @@ function ProductSelect({ product, onPick }: { product: ProductKind; onPick: (p: 
             boxShadow: '0 18px 48px -12px rgba(0,0,0,0.7), 0 0 0 1px rgba(0,0,0,0.4)',
           }}
         >
-          {SELECTABLE_PRODUCTS.map((p) => {
-            const active = p === product;
-            return (
-              <button
-                key={p}
-                type="button"
-                role="option"
-                aria-selected={active}
-                onClick={() => pick(p)}
-                style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: 2,
-                  textAlign: 'left',
-                  padding: '9px 11px',
-                  borderRadius: 8,
-                  cursor: 'pointer',
-                  color: '#e2e8f0',
-                  background: active ? 'rgba(34,211,238,0.12)' : 'transparent',
-                  border: `1px solid ${active ? 'rgba(34,211,238,0.4)' : 'transparent'}`,
-                  transition: 'background 0.12s, border-color 0.12s',
-                }}
-                onMouseEnter={(e) => {
-                  if (!active) e.currentTarget.style.background = 'rgba(255,255,255,0.04)';
-                }}
-                onMouseLeave={(e) => {
-                  if (!active) e.currentTarget.style.background = 'transparent';
-                }}
-              >
-                <span
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 7,
-                    fontSize: '0.82rem',
-                    fontWeight: 700,
-                    color: active ? '#22d3ee' : '#e2e8f0',
-                  }}
-                >
-                  {PRODUCT_LABELS[p]}
-                  {active && <span style={{ fontSize: '0.72rem', color: '#22d3ee' }}>✓</span>}
-                </span>
-                <span style={{ fontSize: '0.7rem', color: '#94a3b8', lineHeight: 1.4 }}>{PRODUCT_BLURBS[p]}</span>
-              </button>
-            );
-          })}
+          {items.map((it) => (
+            <button
+              key={it.label}
+              type="button"
+              role="menuitem"
+              disabled={it.disabled}
+              title={it.title}
+              onClick={() => {
+                if (it.disabled) return;
+                setOpen(false);
+                it.onClick();
+              }}
+              style={{
+                textAlign: 'left',
+                padding: '8px 10px',
+                borderRadius: 8,
+                cursor: it.disabled ? 'not-allowed' : 'pointer',
+                fontSize: '0.8rem',
+                fontWeight: 600,
+                color: it.disabled ? '#475569' : '#e2e8f0',
+                background: 'transparent',
+                border: '1px solid transparent',
+                transition: 'background 0.12s',
+              }}
+              onMouseEnter={(e) => {
+                if (!it.disabled) e.currentTarget.style.background = 'rgba(255,255,255,0.04)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = 'transparent';
+              }}
+            >
+              {it.label}
+            </button>
+          ))}
         </div>
       )}
     </div>
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+/* ─── Shared field primitives ──────────────────────────────────────────────── */
+
+/** Inline label + control on one baseline — keeps Row 2 vertically centred. */
+function InlineField({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <label style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-      <span style={{ fontSize: '0.6rem', fontWeight: 800, letterSpacing: '0.06em', textTransform: 'uppercase', color: '#4a5568' }}>
+    <label style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+      <span
+        style={{
+          fontSize: '0.6rem',
+          fontWeight: 800,
+          letterSpacing: '0.06em',
+          textTransform: 'uppercase',
+          color: '#4a5568',
+          whiteSpace: 'nowrap',
+        }}
+      >
         {label}
       </span>
       {children}
@@ -676,7 +747,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 
 const inputStyle: React.CSSProperties = {
-  height: 34,
+  height: 32,
   padding: '0 10px',
   borderRadius: 8,
   fontSize: '0.8rem',

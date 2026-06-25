@@ -8,7 +8,9 @@
  *   POST   /call-flows                          -> CallFlow
  *   GET    /call-flows/{id}                     -> CallFlow
  *   PUT    /call-flows/{id}                     -> CallFlow
- *   POST   /call-flows/{id}/publish             -> CallFlow
+ *   POST   /call-flows/{id}/publish             -> CallFlow  (409 if live config
+ *                                                  diverges and overwrite_existing
+ *                                                  is not true)
  *   DELETE /call-flows/{id}                     -> void
  *
  * Version history (admin-only, built in parallel):
