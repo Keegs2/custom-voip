@@ -39,7 +39,10 @@ export const GLASS = {
   text: '#e2e8f0',
   textMuted: '#94a3b8',
   textFaint: '#475569',
-} as const;
+  // NOTE: deliberately NOT `as const` — tokens must be typed `string` so helper
+  // params that default to e.g. `GLASS.accent` infer `string` (not the literal
+  // '#3b82f6'), letting any accent flow through. Keys are still type-checked.
+};
 
 /**
  * Options for {@link glassSurface}. The frosted-surface fill + sheen are

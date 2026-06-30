@@ -9,13 +9,19 @@ import { GlassBackground } from '../glass/GlassBackground';
  * centered column, so pages must NOT add their own top margin/padding (the
  * top offset is owned here). See docs/FRONTEND_GLASS_REFACTOR.md §7.
  *
- *  - PAGE_PADDING_X      left/right gutter — fluid, never cramped, never sprawling
- *  - PAGE_PADDING_TOP    comfortable top offset so content is not glued to the edge
- *  - PAGE_PADDING_BOTTOM generous tail so the last row clears the softphone widget
+ * All three gutters are FLUID (clamp) so horizontal and vertical breathing room
+ * scale together — never cramped on a laptop, never sprawling on a wide monitor.
+ *
+ *  - PAGE_PADDING_X      left/right gutter — 24px → 48px
+ *  - PAGE_PADDING_TOP    comfortable top offset so content is not glued to the
+ *                        edge — 32px → 48px (min 32px guarantees the offset even
+ *                        on short viewports)
+ *  - PAGE_PADDING_BOTTOM generous tail so the last row clears the softphone
+ *                        widget — 64px → 96px
  */
 const PAGE_PADDING_X = 'clamp(24px, 3vw, 48px)';
-const PAGE_PADDING_TOP = 40;
-const PAGE_PADDING_BOTTOM = 80;
+const PAGE_PADDING_TOP = 'clamp(32px, 4vh, 48px)';
+const PAGE_PADDING_BOTTOM = 'clamp(64px, 8vh, 96px)';
 
 export function AppLayout() {
   // The public landing page (index route) is a marketing surface and breathes

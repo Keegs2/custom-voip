@@ -99,7 +99,7 @@ export function CustomerEditForm({ customer, onCancel, onSaved }: CustomerEditFo
     <form
       onSubmit={handleSubmit}
       onClick={(e) => e.stopPropagation()}
-      style={{ padding: '28px 28px 24px' }}
+      style={{ paddingBottom: 18 }}
     >
       {/* General section */}
       <div style={sectionLabelStyle}>General</div>

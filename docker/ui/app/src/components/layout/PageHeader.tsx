@@ -11,14 +11,16 @@ interface PageHeaderProps {
 
 export function PageHeader({ title, subtitle, actions, className }: PageHeaderProps) {
   // Spacing standard (see docs/FRONTEND_GLASS_REFACTOR.md §7): the header sits
-  // flush with the layout's top offset and pushes the first section down by one
-  // section-gap (mb-8 = 32px). The hairline divider uses a translucent-white
-  // glass rule (matches glassSurface's 1px border) instead of an opaque line.
+  // flush with the layout's top offset (NO top margin of its own) and pushes the
+  // first section down by exactly one section-gap (mb-8 = 32px). The hairline
+  // divider uses a translucent-white glass rule (matches glassSurface's 1px
+  // border) instead of an opaque line. `gap-2` (8px) is the control gap between
+  // action buttons in the right-hand slot.
   return (
     <div
       className={cn(
         'flex items-start justify-between gap-4 flex-wrap',
-        'mb-8 pb-5 border-b border-white/10',
+        'mt-0 mb-8 pb-5 border-b border-white/10',
         className,
       )}
     >
@@ -27,7 +29,7 @@ export function PageHeader({ title, subtitle, actions, className }: PageHeaderPr
           {title}
         </h1>
         {subtitle && (
-          <p className="text-sm text-[#718096] mt-1">{subtitle}</p>
+          <p className="text-sm text-[#718096] mt-1 max-w-[68ch]">{subtitle}</p>
         )}
       </div>
       {actions && (
