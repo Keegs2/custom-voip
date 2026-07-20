@@ -125,9 +125,9 @@ export function DocumentsPage() {
       <Sidebar />
 
       {/* Content — floats the rail + main panel over the glass backdrop.
-          md:ml-60 = the 240px sidebar offset, applied ONLY at md+ (below md
+          sidebar-offset = the 240px sidebar offset, applied ONLY at md+ (below md
           the Sidebar is off-canvas; see contentShell's note in styles.ts). */}
-      <div className="md:ml-60" style={contentShell}>
+      <div className="sidebar-offset" style={contentShell}>
         {/* Left: folder rail */}
         <FolderRail
           folders={doc.folders}

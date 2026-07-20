@@ -56,10 +56,10 @@ export function ChatPage() {
       {/* Fixed product sidebar — keeps its own accent system. */}
       <Sidebar />
 
-      {/* Padded content column → frosted chat frame. md:ml-60 = the 240px
+      {/* Padded content column → frosted chat frame. sidebar-offset = the 240px
           sidebar offset, applied ONLY at md+ (below md the Sidebar is
           off-canvas; see shell's note in styles.ts). */}
-      <div className="md:ml-60" style={shell}>
+      <div className="sidebar-offset" style={shell}>
         <div style={frame()}>
           <GlassSheen />
 

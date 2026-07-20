@@ -26,7 +26,7 @@ export const root: CSSProperties = {
  * 100vh height honest with the padding.
  *
  * The sidebar offset is NOT set here: inline styles cannot be responsive, so
- * the consuming element pairs this with `className="md:ml-60"` (240px at md+
+ * the consuming element pairs this with `className="sidebar-offset"` (240px at md+
  * only — below md the Sidebar is off-canvas and a margin would leave a dead
  * gutter).
  */

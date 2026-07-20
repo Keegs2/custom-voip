@@ -19,7 +19,7 @@ export const DURATION_COLOR = '#c084fc';
 // Mirrors AppLayout's PAGE_PADDING_* clamps so this page breathes identically
 // to every routed page and is never glued to the top edge.
 // The sidebar offset is NOT set here: inline styles cannot be responsive, so
-// the consuming element pairs pageMain with `className="md:ml-60"` (240px at
+// the consuming element pairs pageMain with `className="sidebar-offset"` (240px at
 // md+ only — below md the Sidebar is off-canvas and a margin would leave a
 // dead gutter).
 

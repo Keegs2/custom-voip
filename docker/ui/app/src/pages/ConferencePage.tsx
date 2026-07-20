@@ -134,11 +134,11 @@ export function ConferencePage() {
       <Sidebar />
 
       {/* Main shell — fills the space to the right of the fixed 240px sidebar.
-          The offset applies ONLY at md+ (`md:ml-60`): below md the Sidebar is
+          The offset applies ONLY at md+ (`sidebar-offset`): below md the Sidebar is
           off-canvas behind the hamburger topbar, so an unconditional margin
           would leave a 240px dead gutter on phones/tablets. */}
       <div
-        className="md:ml-60"
+        className="sidebar-offset"
         style={{
           position: 'relative',
           zIndex: 1,

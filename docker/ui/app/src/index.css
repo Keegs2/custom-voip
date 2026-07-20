@@ -28,6 +28,19 @@
   --sidebar-w: 240px;
 }
 
+/* Sidebar content offset — the SINGLE source of truth. AppLayout's <main> and
+   every full-bleed page use `className="sidebar-offset"`. Content clears the
+   fixed 240px sidebar at md+ (the Sidebar is off-canvas below md, so content is
+   full-width there). This is a HAND-WRITTEN media rule, NOT a Tailwind responsive
+   utility (`md:ml-*`), so the offset is ALWAYS emitted and applied regardless of
+   Tailwind content-scanning / responsive-variant quirks that silently dropped the
+   previous `md:ml-60` and let content slide under the sidebar. 240px is hardcoded
+   to match the Sidebar's own inline width. */
+.sidebar-offset { margin-left: 0; }
+@media (min-width: 768px) {
+  .sidebar-offset { margin-left: 240px; }
+}
+
 *, *::before, *::after {
   box-sizing: border-box;
   margin: 0;

@@ -41,12 +41,12 @@ export function AppLayout() {
       <GlassBackground />
       <Sidebar />
       {/* Main content — offset by the fixed 240px sidebar ONLY at md+ via the
-          responsive class (`md:ml-60` = 240px): below md the Sidebar is
+          responsive class (`sidebar-offset` = 240px): below md the Sidebar is
           off-canvas behind the hamburger topbar, so an inline marginLeft would
           leave a 240px dead gutter on phones/tablets (2026-07 audit P0).
           position:relative + zIndex:1 lifts the content above GlassBackground. */}
       <main
-        className="min-h-screen flex flex-col md:ml-60"
+        className="min-h-screen flex flex-col sidebar-offset"
         style={{ position: 'relative', zIndex: 1 }}
       >
         {/* Inner wrapper: fills main, centers content within the content column,
