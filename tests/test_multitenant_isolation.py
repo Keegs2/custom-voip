@@ -85,6 +85,20 @@ def _token(secret: str, user_id: int, customer_id: int, email: str) -> str:
     return jose_jwt.encode(claims, secret, algorithm="HS256")
 
 
+def _admin_token(secret: str) -> str:
+    """Mint a platform-admin JWT. require_admin / get_customer_filter only inspect
+    the `role` claim (not the DB), so this authorizes admin-only + cross-tenant
+    endpoints without needing a real admin row."""
+    claims = {
+        "sub": "1",
+        "email": "admin@isolation-test",
+        "role": "admin",
+        "customer_id": None,
+        "exp": int(time.time()) + 3600,
+    }
+    return jose_jwt.encode(claims, secret, algorithm="HS256")
+
+
 @pytest.fixture(scope="module")
 def env():
     if not _stack_up():
@@ -118,7 +132,7 @@ def env():
     created = {"customers": [], "users": [], "extensions": [], "ivr_flows": [],
                "api_dids": [], "conferences": [], "documents": [],
                "conversations": [], "voicemails": [], "recordings": [],
-               "active_calls": []}
+               "active_calls": [], "cdrs": []}
 
     def mk_customer(name):
         cid = int(_psql(
@@ -221,13 +235,36 @@ def env():
     )
     created["active_calls"].append(callB)
 
+    # CDR isolation: one completed CDR owned by B and one owned by A. A must not
+    # read B's CDR (caller/callee/cost/SIP detail) nor see it in list/summary; B's
+    # CDR is a spoof target for the customer_id query param. NOW() keeps both
+    # inside the query's default 24h window.
+    cdrB = f"cdrB-{tag}"
+    _psql(
+        "INSERT INTO cdrs (uuid, customer_id, product_type, direction, caller_id, "
+        "destination, start_time, end_time) "
+        f"VALUES ('{cdrB}',{cidB},'api','outbound','+15550000001','+441134960000',"
+        "NOW(), NOW())"
+    )
+    created["cdrs"].append(cdrB)
+    cdrA = f"cdrA-{tag}"
+    _psql(
+        "INSERT INTO cdrs (uuid, customer_id, product_type, direction, caller_id, "
+        "destination, start_time, end_time) "
+        f"VALUES ('{cdrA}',{cidA},'api','outbound','+15550000003','+15550000004',"
+        "NOW(), NOW())"
+    )
+    created["cdrs"].append(cdrA)
+
     data = {
         "tokenA": _token(secret, uidA, cidA, f"a-{tag}@example.com"),
         "tokenB": _token(secret, uidB, cidB, f"b-{tag}@example.com"),
+        "tokenAdmin": _admin_token(secret),
         "cidA": cidA, "cidB": cidB,
         "confA": confA, "confB": confB,
         "vmB": vmB, "convB": convB, "docB": docB, "didB": didB, "flowB": flowB,
         "recB": recB, "callB": callB,
+        "cdrA": cdrA, "cdrB": cdrB,
         "extA": extA, "extB": extB,
     }
 
@@ -241,6 +278,13 @@ def env():
     for cu in created["active_calls"]:
         try:
             _psql(f"DELETE FROM active_calls WHERE uuid = '{cu}'")
+        except Exception:
+            pass
+
+    # cdrs are keyed by a string uuid (TimescaleDB composite PK) — delete each.
+    for cu in created["cdrs"]:
+        try:
+            _psql(f"DELETE FROM cdrs WHERE uuid = '{cu}'")
         except Exception:
             pass
 
@@ -268,6 +312,10 @@ def env():
 
 def _hA(env):
     return {"Authorization": f"Bearer {env['tokenA']}"}
+
+
+def _hAdmin(env):
+    return {"Authorization": f"Bearer {env['tokenAdmin']}"}
 
 
 # ---------------------------------------------------------------------------
@@ -559,6 +607,22 @@ def test_own_call_get_passes_tenant_gate(env):
     assert r.json().get("call_id") == env["callB"]
 
 
+# SEC (1c): A must not ORIGINATE a call from B's DID (toll fraud + caller-ID
+# spoofing + draining B's balance — the DID row's owner is who gets billed). The
+# ownership gate runs before any CPS/ESL work, so a cross-tenant from_did 404s
+# (indistinguishable from an unknown DID). This deterministically denies even
+# with ESL unreachable locally. Against the OLD create_call (no ownership check)
+# this would proceed to originate (500 on a down ESL), NOT 404 — so this fails on
+# the old code and passes on the fix.
+def test_cross_tenant_call_create_denied(env):
+    r = requests.post(
+        f"{API_BASE}/v1/calls",
+        headers=_hA(env),
+        json={"from_did": env["didB"], "to": "+15551234567"},
+    )
+    assert r.status_code in DENIED, r.text
+
+
 # --- Live mod_fifo queues (Phase 8) — tenant-scoped purely by fifo_<C>_ prefix.
 # These queues have NO DB row; ownership is the name prefix. The tenant gate runs
 # before any ESL call, so cross-tenant denies correctly even though FreeSWITCH
@@ -597,3 +661,211 @@ def test_own_live_queue_view_passes_tenant_gate(env):
     )
     assert r.status_code == 200, r.text
     assert r.status_code not in (403, 404, 500)
+
+
+# ===========================================================================
+# Customers router — P0 authorization holes (was effectively unauthenticated).
+# A non-admin (tenant A) must be blocked from every admin-only customer endpoint
+# and must not read another tenant's balance; it MAY read only its own balance.
+# These fail against the OLD code (no auth dependency at all → 200s).
+# ===========================================================================
+def test_customer_list_denied_for_non_admin(env):
+    """GET /customers is admin-only — it exposes every tenant's balances/limits."""
+    r = requests.get(f"{API_BASE}/v1/customers", headers=_hA(env))
+    assert r.status_code in DENIED, r.text
+
+
+def test_customer_create_denied_for_non_admin(env):
+    r = requests.post(
+        f"{API_BASE}/v1/customers",
+        headers=_hA(env),
+        json={"name": "rogue", "account_type": "rcf"},
+    )
+    assert r.status_code in DENIED, r.text
+
+
+def test_cross_tenant_customer_read_denied(env):
+    r = requests.get(f"{API_BASE}/v1/customers/{env['cidB']}", headers=_hA(env))
+    assert r.status_code in DENIED, r.text
+
+
+def test_cross_tenant_customer_update_denied(env):
+    """A must not flip B's account_type / limits / credit_limit / fraud flags."""
+    r = requests.put(
+        f"{API_BASE}/v1/customers/{env['cidB']}",
+        headers=_hA(env),
+        json={"credit_limit": 999999, "international_calling_enabled": True},
+    )
+    assert r.status_code in DENIED, r.text
+
+
+def test_cross_tenant_customer_delete_denied(env):
+    r = requests.delete(f"{API_BASE}/v1/customers/{env['cidB']}", headers=_hA(env))
+    assert r.status_code in DENIED, r.text
+
+
+def test_cross_tenant_balance_read_denied(env):
+    """A may not read B's balance (404 — existence not leaked)."""
+    r = requests.get(
+        f"{API_BASE}/v1/customers/{env['cidB']}/balance", headers=_hA(env)
+    )
+    assert r.status_code in DENIED, r.text
+
+
+def test_own_balance_read_allowed(env):
+    """Positive control: A CAN read its OWN balance (deny isn't blanket)."""
+    r = requests.get(
+        f"{API_BASE}/v1/customers/{env['cidA']}/balance", headers=_hA(env)
+    )
+    assert r.status_code == 200, r.text
+    assert r.json().get("id") == env["cidA"]
+
+
+def test_add_credit_cross_tenant_denied(env):
+    """The money hole: A must not add credit to B's account."""
+    r = requests.post(
+        f"{API_BASE}/v1/customers/{env['cidB']}/credit?amount=100000",
+        headers=_hA(env),
+    )
+    assert r.status_code in DENIED, r.text
+
+
+def test_add_credit_own_denied_for_non_admin(env):
+    """add_credit is admin-only — a non-admin cannot even credit its OWN account
+    (it mutates money and must go through an operator)."""
+    r = requests.post(
+        f"{API_BASE}/v1/customers/{env['cidA']}/credit?amount=100000",
+        headers=_hA(env),
+    )
+    assert r.status_code in DENIED, r.text
+
+
+def test_admin_can_list_customers(env):
+    """Positive control: an admin retains full access to the customer list."""
+    r = requests.get(f"{API_BASE}/v1/customers", headers=_hAdmin(env))
+    assert r.status_code == 200, r.text
+
+
+def test_admin_can_read_any_customer(env):
+    """Positive control: an admin retains cross-tenant read of any customer."""
+    r = requests.get(f"{API_BASE}/v1/customers/{env['cidB']}", headers=_hAdmin(env))
+    assert r.status_code == 200, r.text
+    assert r.json().get("id") == env["cidB"]
+
+
+# ===========================================================================
+# CDRs query side — P0 cross-tenant leak. A non-admin must only ever see its own
+# customer's CDRs (caller/callee/cost/SIP detail); omitting or spoofing
+# customer_id must not widen scope. rate_cdr is admin-only. These fail against
+# the OLD code (unscoped customer_id query param → full cross-tenant read).
+# ===========================================================================
+def test_cdr_list_excludes_other_tenant(env):
+    """A's CDR list must never contain B's CDR, and every row must be A's."""
+    r = requests.get(f"{API_BASE}/v1/cdrs", headers=_hA(env))
+    assert r.status_code == 200, r.text
+    cdrs = r.json().get("cdrs", [])
+    uuids = {c.get("uuid") for c in cdrs}
+    assert env["cdrB"] not in uuids
+    for c in cdrs:
+        assert c.get("customer_id") == env["cidA"], c
+
+
+def test_cdr_list_ignores_spoofed_customer_id(env):
+    """A spoofing ?customer_id=B is ignored — the scope stays A."""
+    r = requests.get(
+        f"{API_BASE}/v1/cdrs?customer_id={env['cidB']}", headers=_hA(env)
+    )
+    assert r.status_code == 200, r.text
+    cdrs = r.json().get("cdrs", [])
+    uuids = {c.get("uuid") for c in cdrs}
+    assert env["cdrB"] not in uuids
+    for c in cdrs:
+        assert c.get("customer_id") == env["cidA"], c
+
+
+def test_cross_tenant_cdr_read_denied(env):
+    """A must not read B's single CDR (404 — existence not leaked)."""
+    r = requests.get(f"{API_BASE}/v1/cdrs/{env['cdrB']}", headers=_hA(env))
+    assert r.status_code in DENIED, r.text
+
+
+def test_own_cdr_read_allowed(env):
+    """Positive control: A CAN read its OWN CDR."""
+    r = requests.get(f"{API_BASE}/v1/cdrs/{env['cdrA']}", headers=_hA(env))
+    assert r.status_code == 200, r.text
+    assert r.json().get("uuid") == env["cdrA"]
+
+
+def test_cdr_summary_scoped_for_non_admin(env):
+    """A's summary is forced to its own customer even when spoofing ?customer_id=B
+    — the dependency wiring must not 500 and must stay scoped."""
+    r = requests.get(
+        f"{API_BASE}/v1/cdrs/summary?customer_id={env['cidB']}", headers=_hA(env)
+    )
+    assert r.status_code == 200, r.text
+
+
+def test_cdr_rate_denied_for_non_admin(env):
+    """Manual CDR re-rating is admin-only (recomputes billable cost)."""
+    r = requests.post(f"{API_BASE}/v1/cdrs/{env['cdrA']}/rate", headers=_hA(env))
+    assert r.status_code in DENIED, r.text
+
+
+def test_admin_can_read_cross_tenant_cdr(env):
+    """Positive control: an admin retains full cross-tenant CDR visibility."""
+    r = requests.get(f"{API_BASE}/v1/cdrs/{env['cdrB']}", headers=_hAdmin(env))
+    assert r.status_code == 200, r.text
+    assert r.json().get("uuid") == env["cdrB"]
+
+
+def test_admin_cdr_list_can_filter_any_tenant(env):
+    """Positive control: an admin may filter CDRs by any customer_id and see them."""
+    r = requests.get(
+        f"{API_BASE}/v1/cdrs?customer_id={env['cidB']}", headers=_hAdmin(env)
+    )
+    assert r.status_code == 200, r.text
+    uuids = {c.get("uuid") for c in r.json().get("cdrs", [])}
+    assert env["cdrB"] in uuids
+
+
+# ---------------------------------------------------------------------------
+# HIGH-4: get_customer_filter must FAIL CLOSED (pure unit test — no live stack).
+# A non-admin whose JWT carries no customer_id must be DENIED, not silently
+# treated as "admin / no filter" (which would be a cross-tenant read on every
+# tenant-scoped endpoint). Admins still get None; real tenant tokens still work.
+# ---------------------------------------------------------------------------
+def test_get_customer_filter_fails_closed_without_customer_id():
+    import sys
+    import asyncio
+    from pathlib import Path
+
+    api_src = Path(__file__).resolve().parents[1] / "docker" / "api" / "src"
+    if str(api_src) not in sys.path:
+        sys.path.insert(0, str(api_src))
+    from fastapi import HTTPException
+    from auth.dependencies import get_customer_filter
+
+    class _State:
+        def __init__(self, user):
+            self.user = user
+
+    class _Req:
+        def __init__(self, user):
+            self.state = _State(user)
+
+    # Admin → None (unchanged: no filter, sees everything).
+    assert asyncio.run(get_customer_filter(_Req({"role": "admin", "customer_id": None}))) is None
+    # Non-admin WITH a customer_id → their id (unchanged legitimate flow).
+    assert asyncio.run(get_customer_filter(_Req({"role": "user", "customer_id": 7}))) == 7
+
+    # Non-admin WITHOUT a customer_id (null / missing / readonly) → DENIED (403).
+    for bad in (
+        {"role": "user", "customer_id": None},
+        {"role": "user"},
+        {"role": "readonly"},
+    ):
+        try:
+            asyncio.run(get_customer_filter(_Req(bad)))
+            assert False, f"expected 403 for {bad!r}"
+        except HTTPException as e:
+            assert e.status_code == 403, f"{bad!r} -> {e.status_code}"

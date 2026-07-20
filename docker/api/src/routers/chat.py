@@ -19,6 +19,7 @@ from db import database as db
 from db.redis_client import get_client
 from auth.dependencies import get_current_user
 from services import storage
+from services import envelope_crypto as ec
 from services.upload_security import (
     validate_upload, UploadRejected, CHAT_MAX_FILE_SIZE,
 )
@@ -30,6 +31,15 @@ router = APIRouter()
 CHAT_EVENTS_CHANNEL = "chat:events"
 CHAT_TYPING_CHANNEL = "chat:typing"
 ATTACHMENT_URL_TTL = int(os.getenv("CHAT_ATTACHMENT_URL_TTL", "3600"))
+
+# Encryption-at-rest for message bodies: 'on' (default — encrypt when a KEK is
+# configured) or 'off' (legacy plaintext). Each conversation has ONE DEK (wrapped
+# under the customer chat KEK, stored on chat_conversations); every message body
+# is AES-256-GCM encrypted with that DEK (fresh IV per message). Reading a thread
+# unwraps the DEK ONCE — never once per message — so a KMS-backed provider is not
+# N+1'd. Real-time delivery (WS event payloads) carries the sender's plaintext
+# over TLS; only the at-rest copy is ciphertext.
+CHAT_ENCRYPTION = os.getenv("CHAT_ENCRYPTION", "on").lower()
 
 
 # ---------------------------------------------------------------------------
@@ -122,6 +132,125 @@ async def _publish_event(event_type: str, data: dict):
 
 
 # ---------------------------------------------------------------------------
+# Encryption-at-rest helpers (per-conversation DEK)
+# ---------------------------------------------------------------------------
+
+def _chat_scope(customer_id: int) -> str:
+    """Stable KEK scope for a customer's chat (one KEK per customer)."""
+    return f"chat:customer:{int(customer_id)}"
+
+
+_warned_chat_plaintext = False
+
+
+def _encryption_enabled() -> bool:
+    enabled = CHAT_ENCRYPTION != "off" and ec.encryption_configured()
+    # MEDIUM-9: when encryption is EXPECTED (mode != 'off') but no KEK is
+    # configured, message bodies are stored plaintext. That must not be SILENT in
+    # production — emit one loud warning so the missing-KEK misconfig is visible.
+    if not enabled and CHAT_ENCRYPTION != "off":
+        global _warned_chat_plaintext
+        if not _warned_chat_plaintext:
+            from config_guard import is_production
+            log = logger.error if is_production() else logger.warning
+            log(
+                "SECURITY: CHAT_ENCRYPTION=%s but no KEK is configured — chat message "
+                "bodies are being stored PLAINTEXT at rest. Configure ENVELOPE_LOCAL_KEK "
+                "(or a KMS provider) in production.", CHAT_ENCRYPTION,
+            )
+            _warned_chat_plaintext = True
+    return enabled
+
+
+async def _conversation_crypto(conversation_id: int) -> Optional[dict]:
+    """Load a conversation's envelope columns (SELECT * so it degrades to
+    'no encryption columns' on a DB where the migration is not yet applied)."""
+    row = await db.fetch_one("SELECT * FROM chat_conversations WHERE id = $1", conversation_id)
+    return dict(row) if row else None
+
+
+async def _conversation_dek(
+    conversation_id: int, customer_id: Optional[int], *, create: bool, cache: dict
+) -> Optional[bytes]:
+    """Return the raw per-conversation DEK bytes (cached per request), or None.
+
+    * If the conversation already has a wrapped DEK, unwrap it (once, cached).
+    * Else if ``create`` and encryption is enabled, provision a fresh DEK, wrap it
+      under the customer chat KEK, and persist it on the conversation. A
+      concurrent creator is handled by an ``UPDATE ... WHERE wrapped_dek IS NULL``
+      followed by an authoritative re-read (all messages share ONE DEK).
+    * Else None (message stored/kept plaintext).
+    """
+    if conversation_id in cache:
+        return cache[conversation_id]
+
+    dek: Optional[bytes] = None
+    crypto = await _conversation_crypto(conversation_id)
+    if crypto is not None and crypto.get("wrapped_dek") is not None:
+        dek = await ec.unwrap_dek(
+            crypto["wrapped_dek"], crypto.get("kek_provider") or "local", crypto["kek_key_ref"],
+        )
+    elif create and _encryption_enabled() and customer_id is not None:
+        kek_provider, kek_key_ref = await ec.resolve_or_create_kek(
+            _chat_scope(customer_id), customer_id
+        )
+        new_dek = ec.generate_dek()
+        wrapped = await ec.wrap_dek(new_dek, kek_provider, kek_key_ref)
+        await db.execute(
+            """
+            UPDATE chat_conversations
+               SET wrapped_dek = $1::bytea, kek_provider = $2::text,
+                   kek_key_ref = $3::text, enc_algo = $4::text,
+                   encryption_status = 'encrypted'
+             WHERE id = $5 AND wrapped_dek IS NULL
+            """,
+            wrapped, kek_provider, kek_key_ref, ec.ENC_ALGO, conversation_id,
+        )
+        # Authoritative re-read handles the race: use whichever DEK persisted.
+        crypto2 = await _conversation_crypto(conversation_id)
+        if crypto2 is not None and crypto2.get("wrapped_dek") is not None:
+            dek = await ec.unwrap_dek(
+                crypto2["wrapped_dek"], crypto2.get("kek_provider") or "local",
+                crypto2["kek_key_ref"],
+            )
+        else:
+            dek = new_dek
+
+    cache[conversation_id] = dek
+    return dek
+
+
+def _strip_cipher_columns(d: dict) -> dict:
+    """Remove the raw ciphertext columns from a message dict before returning it
+    (they are BYTEA and not JSON-serialisable; content is exposed decrypted)."""
+    d.pop("content_ciphertext", None)
+    d.pop("content_iv", None)
+    d.pop("enc_algo", None)
+    return d
+
+
+async def _decrypt_message_row(d: dict, conversation_id: int,
+                               customer_id: Optional[int], cache: dict) -> dict:
+    """Decrypt a message dict's body in place (if encrypted) and strip cipher
+    columns. Soft-deleted messages keep content=None. Never raises out."""
+    ct = d.get("content_ciphertext")
+    iv = d.get("content_iv")
+    if d.get("deleted_at"):
+        d["content"] = None
+    elif ct is not None and iv is not None:
+        dek = await _conversation_dek(conversation_id, customer_id, create=False, cache=cache)
+        if dek is not None:
+            try:
+                d["content"] = ec.decrypt_with_dek(dek, ct, iv).decode("utf-8")
+            except Exception:
+                logger.warning("chat: failed to decrypt message %s", d.get("id"), exc_info=True)
+                d["content"] = None
+        else:
+            d["content"] = None
+    return _strip_cipher_columns(d)
+
+
+# ---------------------------------------------------------------------------
 # Conversations
 # ---------------------------------------------------------------------------
 
@@ -198,13 +327,41 @@ async def list_conversations(user: dict = Depends(get_current_user)):
         *query_params,
     )
     results = []
+    dek_cache: dict = {}
     for r in rows:
         d = dict(r)
         # Parse participants JSON from postgres json_agg
         if d.get("participants") and isinstance(d["participants"], str):
             d["participants"] = orjson.loads(d["participants"])
+        # Decrypt the last-message preview if it is stored encrypted (content is
+        # NULL on the row for encrypted messages). One DEK unwrap per conversation.
+        if d.get("last_message_content") is None and d.get("last_message_id") is not None:
+            d["last_message_content"] = await _decrypt_preview(
+                d["last_message_id"], d["id"], dek_cache
+            )
         results.append(d)
     return results
+
+
+async def _decrypt_preview(message_id: int, conversation_id: int, cache: dict):
+    """Decrypt a conversation's last-message preview (for the conversation list).
+    Returns the plaintext, the legacy plaintext content, or None. Never raises."""
+    row = await db.fetch_one("SELECT * FROM chat_messages WHERE id = $1", message_id)
+    if not row:
+        return None
+    d = dict(row)
+    if d.get("deleted_at"):
+        return None
+    ct, iv = d.get("content_ciphertext"), d.get("content_iv")
+    if ct is None or iv is None:
+        return d.get("content")
+    dek = await _conversation_dek(conversation_id, None, create=False, cache=cache)
+    if dek is None:
+        return None
+    try:
+        return ec.decrypt_with_dek(dek, ct, iv).decode("utf-8")
+    except Exception:
+        return None
 
 
 @router.post("/conversations", status_code=201)
@@ -401,14 +558,15 @@ async def list_messages(
     user_id = int(user["sub"])
     customer_id = user.get("customer_id")
 
-    await _verify_conversation_customer(conversation_id, customer_id, user_id)
+    conv = await _verify_conversation_customer(conversation_id, customer_id, user_id)
     if customer_id is not None:
         await _verify_participant(conversation_id, user_id)
 
+    # SELECT m.* so the (possibly-present) content_ciphertext/content_iv columns
+    # come back for decryption; they are stripped from the response by
+    # _decrypt_message_row. On an un-migrated DB they simply are not present.
     query = """
-        SELECT m.id, m.conversation_id, m.sender_id, m.content,
-               m.message_type, m.reply_to_id, m.edited_at, m.deleted_at,
-               m.created_at,
+        SELECT m.*,
                u.name AS sender_name, u.email AS sender_email
         FROM chat_messages m
         JOIN users u ON u.id = m.sender_id
@@ -427,12 +585,14 @@ async def list_messages(
 
     rows = await db.fetch_all(query, *values)
 
+    # Decrypt bodies transparently: the per-conversation DEK is unwrapped at most
+    # ONCE (cached) for the whole page, not per message. The response shape is
+    # identical to before (plaintext `content`, cipher columns stripped).
+    dek_cache: dict = {}
+    conv_customer_id = conv.get("customer_id")
     results = []
     for r in rows:
-        d = dict(r)
-        # Redact content of soft-deleted messages
-        if d.get("deleted_at"):
-            d["content"] = None
+        d = await _decrypt_message_row(dict(r), conversation_id, conv_customer_id, dek_cache)
         results.append(d)
     return results
 
@@ -447,22 +607,42 @@ async def send_message(
     user_id = int(user["sub"])
     customer_id = user.get("customer_id")
 
-    await _verify_conversation_customer(conversation_id, customer_id, user_id)
+    conv = await _verify_conversation_customer(conversation_id, customer_id, user_id)
     if customer_id is not None:
         await _verify_participant(conversation_id, user_id)
 
     now = datetime.now(timezone.utc)
 
-    # Insert message
-    msg = await db.fetch_one(
-        """INSERT INTO chat_messages
-               (conversation_id, sender_id, content, message_type, reply_to_id, created_at)
-           VALUES ($1, $2, $3, $4, $5, $6)
-           RETURNING id, conversation_id, sender_id, content, message_type,
-                     reply_to_id, edited_at, deleted_at, created_at""",
-        conversation_id, user_id, body.content, body.message_type,
-        body.reply_to_id, now,
-    )
+    # Encrypt the body at rest with the per-conversation DEK when enabled +
+    # configured (lazily provisioning the DEK on first encrypted message).
+    enc = None
+    if _encryption_enabled():
+        dek = await _conversation_dek(conversation_id, conv.get("customer_id"), create=True, cache={})
+        if dek is not None:
+            enc = ec.encrypt_with_dek(dek, body.content.encode("utf-8"))
+
+    if enc is not None:
+        ct, iv = enc
+        msg = await db.fetch_one(
+            """INSERT INTO chat_messages
+                   (conversation_id, sender_id, content, content_ciphertext, content_iv,
+                    enc_algo, message_type, reply_to_id, created_at)
+               VALUES ($1, $2, NULL, $3::bytea, $4::bytea, $5::text, $6, $7, $8)
+               RETURNING id, conversation_id, sender_id, message_type,
+                         reply_to_id, edited_at, deleted_at, created_at""",
+            conversation_id, user_id, ct, iv, ec.ENC_ALGO, body.message_type,
+            body.reply_to_id, now,
+        )
+    else:
+        msg = await db.fetch_one(
+            """INSERT INTO chat_messages
+                   (conversation_id, sender_id, content, message_type, reply_to_id, created_at)
+               VALUES ($1, $2, $3, $4, $5, $6)
+               RETURNING id, conversation_id, sender_id, content, message_type,
+                         reply_to_id, edited_at, deleted_at, created_at""",
+            conversation_id, user_id, body.content, body.message_type,
+            body.reply_to_id, now,
+        )
 
     # Bump conversation updated_at
     await db.execute(
@@ -476,6 +656,9 @@ async def send_message(
     )
 
     result = dict(msg)
+    # Response + WS event carry the sender's plaintext (the at-rest copy is
+    # ciphertext); delivery is over TLS. Keeps the API/event shape unchanged.
+    result["content"] = body.content
     result["sender_name"] = sender["name"] if sender else None
     result["sender_email"] = sender["email"] if sender else None
 
@@ -507,7 +690,7 @@ async def edit_message(
     user_id = int(user["sub"])
     customer_id = user.get("customer_id")
 
-    await _verify_conversation_customer(conversation_id, customer_id, user_id)
+    conv = await _verify_conversation_customer(conversation_id, customer_id, user_id)
     if customer_id is not None:
         await _verify_participant(conversation_id, user_id)
 
@@ -523,15 +706,36 @@ async def edit_message(
         raise HTTPException(status_code=403, detail="Only the sender can edit this message")
 
     now = datetime.now(timezone.utc)
-    updated = await db.fetch_one(
-        """UPDATE chat_messages SET content = $1, edited_at = $2
-           WHERE id = $3
-           RETURNING id, conversation_id, sender_id, content, message_type,
-                     reply_to_id, edited_at, deleted_at, created_at""",
-        body.content, now, message_id,
-    )
+
+    # Re-encrypt the edited body at rest with the per-conversation DEK when enabled.
+    enc = None
+    if _encryption_enabled():
+        dek = await _conversation_dek(conversation_id, conv.get("customer_id"), create=True, cache={})
+        if dek is not None:
+            enc = ec.encrypt_with_dek(dek, body.content.encode("utf-8"))
+
+    if enc is not None:
+        ct, iv = enc
+        updated = await db.fetch_one(
+            """UPDATE chat_messages
+                  SET content = NULL, content_ciphertext = $1::bytea, content_iv = $2::bytea,
+                      enc_algo = $3::text, edited_at = $4
+                WHERE id = $5
+                RETURNING id, conversation_id, sender_id, message_type,
+                          reply_to_id, edited_at, deleted_at, created_at""",
+            ct, iv, ec.ENC_ALGO, now, message_id,
+        )
+    else:
+        updated = await db.fetch_one(
+            """UPDATE chat_messages SET content = $1, edited_at = $2
+               WHERE id = $3
+               RETURNING id, conversation_id, sender_id, content, message_type,
+                         reply_to_id, edited_at, deleted_at, created_at""",
+            body.content, now, message_id,
+        )
 
     result = dict(updated)
+    result["content"] = body.content
 
     parts = await db.fetch_all(
         "SELECT user_id FROM chat_participants WHERE conversation_id = $1",

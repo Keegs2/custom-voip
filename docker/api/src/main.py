@@ -29,6 +29,12 @@ from routers import (
     queues, media,
     # Calendar integration (read-only, per-user OAuth: Google + Microsoft)
     calendar,
+    # Leapfrog wave: in-boundary AI voice agents, toll-free/RespOrg, least-cost outbound
+    ai_agents, tollfree, lco,
+    # Payments/monetary system (Wave 1: read-only ledger + balance)
+    billing,
+    # Payments DEMO (§9): exec-facing simulation of all rails (PAYMENTS_DEMO_MODE-gated)
+    payments,
 )
 from routers.chat import router as chat_router
 from routers.conference import router as conference_router
@@ -241,6 +247,27 @@ app.include_router(media.router, prefix="/media", tags=["Media"])
 # JWT-exempt in middleware (signed-state + PKCE), every other route is JWT-required.
 app.include_router(calendar.router, prefix="/v1/calendar", tags=["Calendar"])
 app.include_router(calendar.router, prefix="/calendar", tags=["Calendar"])
+
+# Leapfrog wave — in-boundary AI voice agents (config CRUD + media WebSocket),
+# API-first toll-free/RespOrg, and least-cost-outbound admin/reporting. All are
+# tenant-scoped; the AI features are gated OFF by default (AI_AGENTS_ENABLED).
+app.include_router(ai_agents.router, prefix="/v1/ai-agents", tags=["AI Voice Agents"])
+app.include_router(ai_agents.router, prefix="/ai-agents", tags=["AI Voice Agents"])
+# The mod_audio_stream media WebSocket: /ws/ai-agent (JWT-exempt via /ws/* in
+# middleware; authenticated by the INGEST_SHARED_SECRET 'k' query param).
+app.include_router(ai_agents.ws_router, prefix="/ws", tags=["AI Voice Agents"])
+app.include_router(tollfree.router, prefix="/v1/toll-free", tags=["Toll-Free / RespOrg"])
+app.include_router(tollfree.router, prefix="/toll-free", tags=["Toll-Free / RespOrg"])
+app.include_router(lco.router, prefix="/v1/lco", tags=["Least-Cost Outbound"])
+app.include_router(lco.router, prefix="/lco", tags=["Least-Cost Outbound"])
+# Payments — Wave 1 read-only ledger/balance (tenant-scoped). Rails (Stripe/x402)
+# mount here in later waves.
+app.include_router(billing.router, prefix="/v1/billing", tags=["Billing"])
+app.include_router(billing.router, prefix="/billing", tags=["Billing"])
+# Payments DEMO — exec-facing simulation of the whole monetary system (§9).
+# Dormant unless PAYMENTS_DEMO_MODE=true (every route 404s otherwise).
+app.include_router(payments.router, prefix="/v1/payments", tags=["Payments"])
+app.include_router(payments.router, prefix="/payments", tags=["Payments"])
 
 # FreeSWITCH mod_xml_curl gateway. Mounted at /freeswitch (auth-exempt in
 # middleware). Always returns HTTP 200 + the FreeSWITCH "not found" XML so
@@ -580,11 +607,12 @@ async def media_websocket(websocket: WebSocket, call_uuid: str):
     frames + bytes, estimates duration, and feeds each frame to a pluggable STT
     hook (no-op default; a real vendor is wired via ``STT_BACKEND`` later).
 
-    Auth: media forks arrive from FreeSWITCH WITHOUT a JWT, so this endpoint does
-    not require a token (it matches the ``/ws/*`` middleware exemption and, like
-    the CDR/recording ingest, is reachable only over the internal Docker network
-    in prod). An optional ``?rate=`` query param sets the PCM sample rate
-    (default 8000 Hz, RCF telephony).
+    Auth (MEDIUM-5): media forks arrive from FreeSWITCH WITHOUT a JWT, so — like
+    the CDR/recording ingest and the /ws/ai-agent socket — this endpoint is
+    authenticated by the shared ``INGEST_SHARED_SECRET`` (constant-time), supplied
+    via the ``X-Ingest-Secret`` header (preferred) or the ``?k=`` query param. An
+    unset secret is allowed in local dev but REFUSED in production (fail-closed).
+    An optional ``?rate=`` query param sets the PCM sample rate (default 8000 Hz).
 
     NOTE (Docker Desktop): host-net FreeSWITCH cannot reach the bridged API
     container, so the live FS→API fork is verified in prod, not locally — the
@@ -592,6 +620,11 @@ async def media_websocket(websocket: WebSocket, call_uuid: str):
     in-process WebSocket. Same isolation noted for the ESL consumer.
     """
     from services.media import consume_media_stream
+
+    # Reject BEFORE accept → clean handshake rejection, no consumer spun up.
+    if not ai_agents._ws_secret_ok(websocket):
+        await websocket.close(code=4401, reason="unauthorized")
+        return
 
     await websocket.accept()
     try:

@@ -164,6 +164,41 @@ def validate_forward_destination(dest: str) -> str:
     )
 
 
+def _is_international(dest: Optional[str]) -> bool:
+    """True when a (already-normalized) forward destination is international.
+
+    A destination is international when it is E.164 (``+...``) but NOT NANP. NANP
+    is normalized upstream to ``+1`` followed by exactly 10 digits (12 chars).
+    Local PBX extensions (no leading ``+``) are never international."""
+    if not dest:
+        return False
+    if not dest.startswith("+"):
+        return False  # local extension / non-E.164 — treated as domestic/local
+    if dest.startswith("+1") and len(dest) == 12:
+        return False  # NANP (+1 + 10 digits) is domestic
+    return True
+
+
+def _enforce_international_policy(intl_enabled: bool, *destinations: Optional[str]) -> None:
+    """Provisioning-time fraud guard (complements telephony's call-time check):
+    refuse to save an international forward/failover destination unless the owning
+    customer has international calling enabled. Raises 403 with an actionable
+    message. This is defense in depth — the FreeSWITCH RCF path also reads
+    ``customers.international_calling_enabled`` at call time."""
+    if intl_enabled:
+        return
+    for dest in destinations:
+        if _is_international(dest):
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    f"International destination '{dest}' is not permitted: this "
+                    "account does not have international calling enabled. Contact "
+                    "support to enable international destinations for this account."
+                ),
+            )
+
+
 class RCFCreate(BaseModel):
     customer_id: int
     did: str
@@ -277,13 +312,19 @@ async def create_rcf(rcf: RCFCreate, admin: dict = Depends(require_admin)):
     still enforced below via _enforce_allocation_guard (shared inventory)."""
     # Verify customer exists and is active
     customer = await db.fetch_one(
-        "SELECT id, status FROM customers WHERE id = $1",
+        "SELECT id, status, international_calling_enabled FROM customers WHERE id = $1",
         rcf.customer_id
     )
     if not customer:
         raise HTTPException(status_code=404, detail="Customer not found")
     if customer["status"] != "active":
         raise HTTPException(status_code=400, detail="Customer is not active")
+
+    # Fraud guard (defense in depth): refuse an international forward/failover
+    # destination unless this customer has international calling enabled.
+    _enforce_international_policy(
+        customer["international_calling_enabled"], rcf.forward_to, rcf.failover_to
+    )
 
     # Reconciliation guard: refuse if the shared inventory allocates this DID
     # to a different environment. rcf.did is already validated to E.164.
@@ -354,6 +395,20 @@ async def update_rcf(
     # Reconciliation guard: refuse if the shared inventory allocates the resolved
     # DID to a different environment.
     await _enforce_allocation_guard(owned["did"])
+
+    # Fraud guard (defense in depth): if this update sets an international
+    # forward/failover destination, the owning customer must have international
+    # calling enabled. Only pay for the customer lookup when a target is actually
+    # international.
+    new_forward = update_data.get("forward_to")
+    new_failover = update_data.get("failover_to")
+    if _is_international(new_forward) or _is_international(new_failover):
+        cust = await db.fetch_one(
+            "SELECT international_calling_enabled FROM customers WHERE id = $1",
+            owned["customer_id"],
+        )
+        intl_enabled = bool(cust["international_calling_enabled"]) if cust else False
+        _enforce_international_policy(intl_enabled, new_forward, new_failover)
 
     for field, value in update_data.items():
         updates.append(f"{field} = ${idx}")

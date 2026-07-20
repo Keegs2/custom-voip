@@ -1,8 +1,22 @@
-"""CDR (Call Detail Record) query and ingestion endpoints."""
-from fastapi import APIRouter, HTTPException, Query, Request
+"""CDR (Call Detail Record) query and ingestion endpoints.
+
+Tenant scoping (P0 security hardening): the QUERY side (query_cdrs / cdr_summary /
+get_cdr / rate_cdr) is multi-tenant. CDRs expose caller/callee, cost, and full SIP
+detail, so a non-admin must only ever see their OWN customer's CDRs:
+  - query_cdrs / cdr_summary FORCE customer_id to the caller's own customer for
+    non-admins (a spoofed/omitted customer_id query param is ignored), and honor
+    the optional customer_id filter only for admins.
+  - get_cdr folds the tenant predicate into the lookup so a cross-tenant uuid 404s
+    (indistinguishable from missing — existence is not leaked).
+  - rate_cdr is admin-only (manual re-rating is an operator action).
+The INGEST side (ingest_cdr / bulk) is unchanged: it stays auth-exempt (FreeSWITCH
+has no JWT) and ALWAYS returns 200 to prevent mod_json_cdr retry storms.
+"""
+from fastapi import APIRouter, HTTPException, Query, Request, Depends
 from typing import Optional
 from datetime import datetime, timedelta, timezone
 from db import database as db
+from auth.dependencies import get_customer_filter, require_admin
 from auth.ingest import ingest_secret_ok, ingest_auth_error
 import logging
 import re
@@ -675,9 +689,17 @@ async def query_cdrs(
     end_date: Optional[datetime] = None,
     rated_only: bool = False,
     limit: int = Query(default=100, le=1000),
-    offset: int = 0
+    offset: int = 0,
+    customer_filter: int | None = Depends(get_customer_filter),
 ):
-    """Query CDRs with filters."""
+    """Query CDRs with filters. Non-admins are hard-scoped to their own customer;
+    admins may optionally filter by customer_id (default: all customers)."""
+    # Tenant scoping: a non-admin can only ever see their own customer's CDRs.
+    # Override (do not merely default) any customer_id query param so a spoofed
+    # or omitted value cannot widen the scope.
+    if customer_filter is not None:
+        customer_id = customer_filter
+
     # Default to last 24 hours if no date range
     if not start_date:
         start_date = datetime.now(timezone.utc) - timedelta(hours=24)
@@ -761,9 +783,16 @@ async def cdr_summary(
     customer_id: Optional[int] = None,
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
-    group_by: str = "day"  # day, hour, destination
+    group_by: str = "day",  # day, hour, destination
+    customer_filter: int | None = Depends(get_customer_filter),
 ):
-    """Get CDR summary statistics."""
+    """Get CDR summary statistics. Non-admins are hard-scoped to their own
+    customer (a spoofed/omitted customer_id is ignored); admins may filter."""
+    # Tenant scoping: force the caller's own customer for non-admins so aggregate
+    # spend/volume never spans tenants.
+    if customer_filter is not None:
+        customer_id = customer_filter
+
     if not start_date:
         start_date = datetime.now(timezone.utc) - timedelta(days=7)
     if not end_date:
@@ -826,8 +855,16 @@ async def cdr_summary(
 
 
 @router.get("/{cdr_uuid}")
-async def get_cdr(cdr_uuid: str):
-    """Get a single CDR by UUID including all RTP quality metrics."""
+async def get_cdr(
+    cdr_uuid: str,
+    customer_filter: int | None = Depends(get_customer_filter),
+):
+    """Get a single CDR by UUID including all RTP quality metrics.
+
+    Tenant-scoped: the tenant predicate is folded into the lookup so a non-admin
+    requesting another tenant's (or a nonexistent) CDR gets an identical 404 —
+    CDR existence is never leaked cross-tenant. Admins (NULL filter) see any CDR.
+    """
     result = await db.fetch_one(
         """
         SELECT uuid, customer_id, product_type, trunk_id, direction,
@@ -850,9 +887,9 @@ async def get_cdr(cdr_uuid: str):
                sip_from_user, sip_to_user, hangup_cause_q850,
                sip_hangup_disposition, sip_user_agent,
                network_addr, bridge_uuid, sbc_id
-        FROM cdrs WHERE uuid = $1
+        FROM cdrs WHERE uuid = $1 AND ($2::int IS NULL OR customer_id = $2)
         """,
-        cdr_uuid
+        cdr_uuid, customer_filter
     )
     if not result:
         raise HTTPException(status_code=404, detail="CDR not found")
@@ -872,8 +909,9 @@ async def get_cdr(cdr_uuid: str):
 
 
 @router.post("/{cdr_uuid}/rate")
-async def rate_cdr(cdr_uuid: str):
-    """Manually trigger rating for a CDR."""
+async def rate_cdr(cdr_uuid: str, admin: dict = Depends(require_admin)):
+    """Manually trigger rating for a CDR. Admin-only: re-rating is an operator
+    action that recomputes billable cost."""
     # Call the PostgreSQL rating function
     result = await db.fetch_one("SELECT rate_cdr($1) as cost", cdr_uuid)
 

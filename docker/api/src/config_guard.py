@@ -25,6 +25,10 @@ DEV_SENTINELS = {
     "STORAGE_SECRET_KEY": "minioadmin",
 }
 
+# INGEST_SHARED_SECRET is guarded specially (unset is ALSO a hole, with its own
+# message) but a dev-sentinel value must be rejected in production too.
+INGEST_DEV_SENTINEL = "dev_ingest_secret_change_me"
+
 
 def is_production() -> bool:
     """True when the API is told it is running in production via ENV/ENVIRONMENT."""
@@ -38,8 +42,11 @@ def find_offenders() -> list[str]:
     for var, sentinel in DEV_SENTINELS.items():
         if os.getenv(var, sentinel) == sentinel:
             offenders.append(f"{var} is still the dev default")
-    if not os.getenv("INGEST_SHARED_SECRET", ""):
+    ingest = os.getenv("INGEST_SHARED_SECRET", "")
+    if not ingest:
         offenders.append("INGEST_SHARED_SECRET is unset (ingest endpoints unauthenticated)")
+    elif ingest == INGEST_DEV_SENTINEL:
+        offenders.append("INGEST_SHARED_SECRET is still the dev default")
     return offenders
 
 

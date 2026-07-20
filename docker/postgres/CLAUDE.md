@@ -42,7 +42,7 @@ Scripts in `init/` run alphabetically on first database creation:
 | `22_webhook_signing.sql` | Adds `customers.webhook_signing_secret` (HMAC-SHA256 key); FS signs programmable-voice webhook POSTs with it. |
 | `23_schema_ivr.sql` | `ivr_flows` (+ related) tables for the programmable-voice / IVR builder. |
 | `25_schema_recordings.sql` | `recordings` table — call/conference recording metadata + object-storage keys (backs the recordings ingest/serve API). |
-| `26_resync_sequences.sql` | **MUST RUN LAST** (sorts after every schema/seed script). Advances owning sequences past explicitly-seeded ids (Granite customer 1, UCaaS customer 5, admin user, …) so `nextval()` does not collide with seeded rows. Renamed from `24_` when `25_` was added. |
+| `99_resync_sequences.sql` | **MUST RUN LAST** (sorts after every schema/seed script). Advances owning sequences past explicitly-seeded ids (Granite customer 1, UCaaS customer 5, admin user, …) so `nextval()` does not collide with seeded rows. Renumbered `24_`→`26_`→`99_` as schema files grew past `33_`, so it always sorts last. |
 
 > **Fresh init is clean.** The unified branch ships `10–13`, `15`, `22`, `23`, `25`, `26` (the previously-missing UCaaS/conferencing/documents/recordings schemas), so the whole `init/` set applies in order on a fresh `initdb` with no failures. The earlier warning that `11a` fails on fresh init no longer applies — `10_schema_ucaas.sql` creates `extensions` before `11a`/`11d` alter it.
 

@@ -88,6 +88,28 @@ _ORIGINATE_JOB_TIMEOUT = 90.0
 
 
 # ---------------------------------------------------------------------------
+# ESL command-injection guard (boundary defense, defense-in-depth)
+# ---------------------------------------------------------------------------
+# ESL frames are newline-delimited and terminated by a blank line ("\n\n"). Any
+# CR/LF (or NUL) embedded in a command component therefore lets a caller inject
+# additional ESL commands. Callers (e.g. routers/calls.py) already validate their
+# inputs, but this is the last line of defense so NO command with an embedded
+# control char is ever written to the socket, regardless of who built it.
+class ESLCommandError(ValueError):
+    """Raised when a command contains illegal control characters (injection)."""
+
+
+def _assert_esl_safe(command: str) -> None:
+    """Reject any command containing CR, LF, or NUL before it hits the wire."""
+    if command is None:
+        raise ESLCommandError("ESL command must not be None")
+    if "\r" in command or "\n" in command or "\x00" in command:
+        raise ESLCommandError(
+            "ESL command contains illegal control characters (possible injection)"
+        )
+
+
+# ---------------------------------------------------------------------------
 # Live-call registry
 # ---------------------------------------------------------------------------
 @dataclass
@@ -364,6 +386,11 @@ class ESLClient:
     async def api(self, command: str) -> Optional[str]:
         """Blocking `api` command. Returns the response body text, or None when
         disconnected / on error. Use only for fast commands (uuid_*, show, ...)."""
+        try:
+            _assert_esl_safe(command)  # boundary defense: no CR/LF/NUL on the wire
+        except ESLCommandError as e:
+            logger.error("ESL api() rejected unsafe command: %s", e)
+            return None
         if not self._connected:
             logger.warning("ESL api('%s') skipped — not connected", command.split()[0])
             return None
@@ -378,6 +405,11 @@ class ESLClient:
         """Non-blocking `bgapi` command: submit the job, then await its
         BACKGROUND_JOB result over the same socket (does NOT stall the reader the
         way a blocking `api originate` would). Returns the job result body."""
+        try:
+            _assert_esl_safe(command)  # boundary defense: no CR/LF/NUL on the wire
+        except ESLCommandError as e:
+            logger.error("ESL bgapi() rejected unsafe command: %s", e)
+            return None
         if not self._connected:
             logger.warning("ESL bgapi('%s') skipped — not connected", command.split()[0])
             return None
