@@ -1,0 +1,170 @@
+# =============================================================================
+# CI gate — the platform's first (audit P0/P1-8: "no CI exists").
+# =============================================================================
+# Runs the suites a human previously had to remember: the Makefile offline
+# tests (pytest lessons/homer + Lua specs), Kamailio config validation inside
+# the real image, frontend `tsc -b` + eslint, `docker compose config` for all
+# four compose files, shell syntax/shellcheck, and OpenTofu fmt+validate for
+# the infra modules.
+#
+# MAKE IT A REQUIRED GATE (one-time, repo admin):
+#   GitHub -> Settings -> Branches -> Add branch protection rule for `main`
+#   (and `unified`): enable "Require status checks to pass", select:
+#     offline-tests, kamailio-config, frontend-types, frontend-lint,
+#     compose-validate, shell-syntax, tofu-validate
+#   Or single line with gh (repeat per branch):
+#     gh api -X PUT repos/{owner}/{repo}/branches/main/protection -F required_status_checks[strict]=true -f "required_status_checks[contexts][]=offline-tests" -f "required_status_checks[contexts][]=frontend-types" -f "required_status_checks[contexts][]=frontend-lint" -f "required_status_checks[contexts][]=kamailio-config" -f "required_status_checks[contexts][]=compose-validate" -f "required_status_checks[contexts][]=shell-syntax" -f "required_status_checks[contexts][]=tofu-validate" -F enforce_admins=true -F required_pull_request_reviews=null -F restrictions=null
+#
+# KNOWN RED (2026-07-01): frontend-lint fails with 55 pre-existing errors —
+# the frontend expert is fixing them this wave. It is a separate job so it
+# cannot mask the other gates; once green it stays enforced (React #310 has
+# shipped three times and the linter is the structural defense).
+# =============================================================================
+name: CI
+
+on:
+  push:
+    branches: [main, unified, RCF-V1, Full-System]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # --- Backend + telephony offline suites (the documented `make test`) -------
+  offline-tests:
+    name: offline-tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Lua (bundled busted-shim runner uses it)
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends lua5.4
+      - name: Install pytest
+        run: python -m pip install pytest
+      - name: make test (Lua specs + SIP lessons + Homer pipeline)
+        run: make test
+
+  # --- Kamailio config validation inside the production image ----------------
+  # The entrypoint templates kamailio.cfg from env exactly as on the SBC VMs,
+  # then `-c -f` parses the config + loads modules and exits. Catches bad
+  # routing-script syntax, missing modules, and broken template placeholders
+  # before they reach an SBC.
+  kamailio-config:
+    name: kamailio-config
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the Kamailio image
+        run: docker build -t kamailio-ci ./docker/kamailio
+      # The image bakes kamailio.cfg/dispatcher.list from this checkout as the
+      # templates, so no mounts are needed — the entrypoint templates them with
+      # the dummy env below, then `kamailio -c` parses + loads modules and exits.
+      - name: kamailio -c (templated config check)
+        run: >
+          docker run --rm
+          -e EXTERNAL_SIP_IP=198.51.100.10
+          -e FREESWITCH_IP=198.51.100.20
+          -e FS_PUBLIC_IP=198.51.100.20
+          -e SBC_INTERNAL_IP=10.0.0.2
+          -e HOMER_IP=10.0.0.4
+          kamailio-ci -c -f /etc/kamailio/kamailio.cfg
+
+  # --- Frontend type gate (the documented pre-push check) ---------------------
+  frontend-types:
+    name: frontend-types
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: docker/ui/app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: docker/ui/app/package-lock.json
+      - run: npm ci
+      - name: tsc -b (same gate as the Docker build)
+        run: npx tsc -b
+
+  # --- Frontend lint (KNOWN RED until the frontend fix lands this wave) -------
+  frontend-lint:
+    name: frontend-lint
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: docker/ui/app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: docker/ui/app/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+
+  # --- Compose validation for all four deployment files -----------------------
+  compose-validate:
+    name: compose-validate
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        compose-file:
+          - docker-compose.yml
+          - docker-compose.sbc.yml
+          - docker-compose.media.yml
+          - docker-compose.services.yml
+    steps:
+      - uses: actions/checkout@v4
+      - name: docker compose config (${{ matrix.compose-file }})
+        run: docker compose --env-file .github/ci.env -f ${{ matrix.compose-file }} config -o /dev/null
+
+  # --- Shell syntax + shellcheck on the ops scripts ----------------------------
+  shell-syntax:
+    name: shell-syntax
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: bash -n every tracked shell script
+        run: |
+          set -e
+          git ls-files '*.sh' | while read -r f; do
+            case "$(head -1 "$f")" in
+              *sh*) bash -n "$f" && echo "OK  $f" ;;
+              *)    echo "SKIP $f (no shell shebang)" ;;
+            esac
+          done
+      - name: shellcheck the SRE/ops scripts (kept warning-clean)
+        run: >
+          shellcheck --severity=warning
+          scripts/backup/*.sh
+          scripts/monitoring/install_ops_agent.sh
+          scripts/verify_gcp_security.sh
+          docker/coturn/entrypoint.sh
+
+  # --- OpenTofu fmt + validate for the infra modules ---------------------------
+  tofu-validate:
+    name: tofu-validate
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        module: [infra/backups, infra/monitoring]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: opentofu/setup-opentofu@v1
+      - name: tofu fmt -check
+        run: tofu fmt -check -recursive ${{ matrix.module }}
+      - name: tofu validate (no backend, no state, no cloud access)
+        run: |
+          tofu -chdir=${{ matrix.module }} init -backend=false -input=false
+          tofu -chdir=${{ matrix.module }} validate

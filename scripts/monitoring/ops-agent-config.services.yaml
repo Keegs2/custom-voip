@@ -1,0 +1,26 @@
+# Google Cloud Ops Agent user config — SERVICES VM ONLY.
+# Placement: /etc/google-cloud-ops-agent/config.yaml
+# (installed by install_ops_agent.sh --with-heplify-prom)
+#
+# User config MERGES over the agent's built-in defaults, so host metrics and
+# syslog shipping (which carries the revup-alert paging lines) keep working —
+# this file only ADDS the heplify-server Prometheus scrape.
+#
+# heplify-server exports HEP/SIP pipeline metrics (packet rates per node,
+# method/response counters) on :9096; docker-compose.services.yml publishes it
+# loopback-only. Metrics land in Managed Prometheus as
+# prometheus.googleapis.com/heplify_* — future SLO automation feeds on them.
+metrics:
+  receivers:
+    heplify_prometheus:
+      type: prometheus
+      config:
+        scrape_configs:
+          - job_name: heplify
+            scrape_interval: 60s
+            static_configs:
+              - targets: ["127.0.0.1:9096"]
+  service:
+    pipelines:
+      heplify:
+        receivers: [heplify_prometheus]

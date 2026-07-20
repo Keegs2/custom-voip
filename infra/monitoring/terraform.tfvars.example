@@ -1,0 +1,15 @@
+# Copy to terraform.tfvars. Only notification_email is required — everything
+# else defaults to East ground truth (rugged-night-193017 / 34.24.133.82 /
+# 34.26.57.37 / the 4 production VM names).
+
+notification_email = "ops@example.com" # REQUIRED — who gets paged
+
+# Recommended: a PagerDuty Events v2 integration key so pages actually wake
+# someone (email alone is not paging).
+# pagerduty_service_key = ""
+
+# Optional SMS (must be verified once in Cloud Console after apply).
+# sms_number = "+15085551234"
+
+# Set false only if you manage the prober firewall rules elsewhere.
+# manage_uptime_firewall = true

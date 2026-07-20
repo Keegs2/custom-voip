@@ -158,11 +158,14 @@ pages look "glued to the top".
 
 ### Container (set in `AppLayout.tsx` — do not duplicate per page)
 
+All three gutters are **fluid (`clamp`)** so horizontal and vertical breathing
+room scale together across viewport sizes.
+
 | Token | Value | Meaning |
 |-------|-------|---------|
 | `PAGE_PADDING_X` | `clamp(24px, 3vw, 48px)` | left/right gutter — 24px on mobile → 48px on wide screens |
-| `PAGE_PADDING_TOP` | `40px` | comfortable top offset; first element (usually `PageHeader`) starts here |
-| `PAGE_PADDING_BOTTOM` | `80px` | tail so the last row clears the floating softphone widget |
+| `PAGE_PADDING_TOP` | `clamp(32px, 4vh, 48px)` | comfortable top offset (min **32px**, never glued); first element (usually `PageHeader`) starts here |
+| `PAGE_PADDING_BOTTOM` | `clamp(64px, 8vh, 96px)` | tail so the last row clears the floating softphone widget |
 | content `max-width` | `1280px` (app) / `1600px` (public `/` landing) | centered, readable measure |
 
 ### In-page rhythm (apply these inside your page)
@@ -176,9 +179,9 @@ pages look "glued to the top".
 
 ### Top-offset rule
 
-- The **40px top offset is provided by the layout, once.** A page's first child
-  (normally `<PageHeader>`) must have **no top margin/padding** — it sits flush
-  with the layout offset.
+- The **top offset (`clamp(32px, 4vh, 48px)`) is provided by the layout, once.**
+  A page's first child (normally `<PageHeader>`) must have **no top
+  margin/padding** — it sits flush with the layout offset.
 - `PageHeader` then enforces a **32px section gap** below itself (`mb-8`) plus a
   translucent-white hairline divider (`border-white/10`), so the first content
   block is uniformly spaced on every page.
