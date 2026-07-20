@@ -1,17 +1,19 @@
 import { useState, useEffect, useCallback, type FormEvent } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { cn } from '../../utils/cn';
-import { useAuth } from '../../contexts/AuthContext';
-import { useSoftphone } from '../../contexts/SoftphoneContext';
-import { useChat } from '../../contexts/ChatContext';
+import { useAuth } from '../../contexts/useAuth';
+import { useSoftphone } from '../../contexts/useSoftphone';
+import { useChat } from '../../contexts/useChat';
 import { PresenceIndicator } from '../softphone/PresenceIndicator';
 import type { PresenceStatus } from '../../types/softphone';
 import { ApiError } from '../../api/client';
+import { ucaasEntitled, voicemailEntitled } from '../auth/entitlements';
+import { consumeLoginRedirect } from '../auth/loginRedirect';
 import {
   IconRCF, IconTrunk, IconDocs,
   IconAdmin, IconSignal, IconTroubleshoot, IconVoicemail,
 } from '../icons/ProductIcons';
-import { Package, Shield, ChevronDown, Eye, EyeOff, Server, BookOpen, FolderOpen, MessageCircle, RadioTower, Mic, ListOrdered, Waves, Video, Webhook, Workflow, CalendarDays } from 'lucide-react';
+import { Package, Shield, ChevronDown, Eye, EyeOff, Server, BookOpen, FolderOpen, MessageCircle, RadioTower, Mic, ListOrdered, Waves, Video, Webhook, Workflow, CalendarDays, Bot, Hash, Route, Wallet, LayoutDashboard, SlidersHorizontal } from 'lucide-react';
 import { AccessRequestForm } from './AccessRequestForm';
 
 /* ─── Types ───────────────────────────────────────────────── */
@@ -46,6 +48,12 @@ const allProductNavItems: NavItemDef[] = [
   // RequireProgrammableVoice guards the route; RCF fails the accountTypes filter,
   // so it never appears for them.
   { label: 'Programmable Voice', icon: <Webhook size={16} strokeWidth={1.9} />, to: '/programmable-voice', color: '#c084fc', accountTypes: ['api', 'hybrid'] },
+  // Billing & Payments — a UNIVERSAL surface (every account type carries a
+  // prepaid balance), so no accountTypes filter: it shows for all authenticated
+  // customers AND admins. This is the customer-facing payments demo page
+  // (balance/ledger/methods/auto-recharge/machine-payment rails). RCF stays
+  // simple elsewhere, but billing is legitimately theirs to see.
+  { label: 'Billing & Payments', icon: <Wallet size={16} strokeWidth={1.9} />, to: '/billing', color: '#2dd4bf' },
   // The legacy /ivr drag-and-drop builder was retired; IVR editing now lives in
   // the admin-only Call Flow Builder (/flows, `flowsItem` below).
 ];
@@ -168,6 +176,8 @@ function SidebarLoginForm() {
   const { login } = useAuth();
 
   // All hooks declared unconditionally at the top — React #310 prevention
+  const navigate = useNavigate();
+  const location = useLocation();
   const [email, setEmail]           = useState('');
   const [password, setPassword]     = useState('');
   const [error, setError]           = useState<string | null>(null);
@@ -183,8 +193,11 @@ function SidebarLoginForm() {
     try {
       await login(email.trim(), password);
       // On success the AuthContext updates isAuthenticated → Sidebar re-renders
-      // automatically showing the nav. No redirect needed; user stays on the
-      // homepage (or wherever they already are).
+      // automatically showing the nav. If RequireAuth bounced the user here
+      // from a protected deep link, `state.from` carries the intended
+      // destination — honour it; otherwise stay put on the homepage.
+      const target = consumeLoginRedirect(location.state);
+      if (target) navigate(target, { replace: true });
     } catch (err) {
       if (err instanceof ApiError) {
         setError(
@@ -692,25 +705,25 @@ export function Sidebar() {
   const isSupport = user?.role === 'readonly';
   const showAdmin = isAdmin || isSupport;
 
-  // UCaaS gating. Admins always see the UCaaS surfaces (Voice Ops + Communications)
-  // so they can review every page we built — consistent with SoftphoneWidget's
-  // hasUcaas. `isAdmin` here is `isActualAdmin && !customerViewMode` (AuthContext),
-  // so when an admin "views as customer" the bypass collapses and the preview
-  // reflects the customer's real surface. RCF accounts are explicitly excluded:
-  // an rcf *customer* user has role 'user' (isAdmin false) and `account_type === 'rcf'`
-  // fails both remaining clauses, so hasUcaas is always false for an RCF customer.
-  // This preserves C-10 (RCF must see zero UCaaS surface).
-  const hasUcaas =
-    isAdmin ||
-    user?.account_type === 'ucaas' ||
-    (user?.account_type !== 'rcf' && user?.ucaas_enabled === true);
+  // UCaaS gating — the SHARED `ucaasEntitled` predicate (auth/entitlements.ts),
+  // the same source of truth RequireUcaas uses, so the nav can never show a
+  // route its guard bounces. Admins always see the UCaaS surfaces (Voice Ops +
+  // Communications). `isAdmin` here is `isActualAdmin && !customerViewMode`
+  // (AuthContext), so when an admin "views as customer" the bypass collapses
+  // and the preview reflects the customer's real surface. RCF accounts are
+  // excluded inside the predicate — hasUcaas is always false for an RCF
+  // customer. This preserves C-10 (RCF must see zero UCaaS surface).
+  const hasUcaas = ucaasEntitled(user, isAdmin);
 
-  // Voicemail visibility — its own entitlement, decoupled from account_type.
-  // Show when the customer carries `voicemail_enabled`, OR the legacy UCaaS/admin
-  // condition holds (provisioned extension via `credentials`, or an admin). An RCF
-  // customer with neither still sees nothing (C-10 / RCF simplicity preserved).
+  // Voicemail visibility — its own entitlement (shared `voicemailEntitled`,
+  // the predicate RequireVoicemail guards /voicemail with), narrowed for nav
+  // DISPLAY: legacy UCaaS accounts only surface the item once an extension is
+  // provisioned (`credentials`) or for admins. Because this is a strict subset
+  // of the route predicate, a visible nav item is always reachable. An RCF
+  // customer with neither flag still sees nothing (C-10 / RCF simplicity).
   const showVoicemail =
-    user?.voicemail_enabled === true || (hasUcaas && (Boolean(credentials) || isAdmin));
+    voicemailEntitled(user, isAdmin) &&
+    (user?.voicemail_enabled === true || Boolean(credentials) || isAdmin);
 
   /* ── Shared account-type predicate ─────────────────────── */
 
@@ -743,7 +756,7 @@ export function Sidebar() {
     const commPaths    = ['/communications', '/chat', '/conference', '/calendar', '/documents', '/voicemail'];
     // '/conferences/live' lives in Voice Ops; '/conference' (singular) is Comms.
     const voiceOpsPaths = ['/live-calls', '/recordings', '/queues', '/media-streams', '/conferences/live'];
-    const adminPaths   = ['/admin', '/call-quality', '/admin/platform', '/troubleshooting', '/flows'];
+    const adminPaths   = ['/admin', '/call-quality', '/admin/platform', '/admin/payments', '/troubleshooting', '/flows'];
     const docPaths     = docNavItems.map((i) => i.to);
     const inProducts = productPaths.some((p) => path === p || path.startsWith(p + '/'));
     const inComms    = commPaths.some((p) => path === p || path.startsWith(p + '/'));
@@ -795,9 +808,39 @@ export function Sidebar() {
     label: 'Customer Management', to: '/admin/customers', color: '#60a5fa', icon: <IconAdmin />,
     isActiveFn: (p) => p.startsWith('/admin') && !p.startsWith('/admin/platform'),
   };
+  // The three leapfrog surfaces live as tabs INSIDE the Platform shell but get
+  // their own prominent nav items. Platform Management stays highlighted for the
+  // routine platform tabs (carriers/cdrs/…) but NOT for the three leapfrog paths,
+  // so exactly one item lights up at a time.
   const platformItem: NavItemDef    = {
     label: 'Platform Management', to: '/admin/platform', color: '#60a5fa', icon: <Server size={15} strokeWidth={1.7} />,
-    isActiveFn: (p) => p.startsWith('/admin/platform'),
+    isActiveFn: (p) =>
+      p.startsWith('/admin/platform') &&
+      !p.startsWith('/admin/platform/ai-agents') &&
+      !p.startsWith('/admin/platform/toll-free') &&
+      !p.startsWith('/admin/platform/lco'),
+  };
+  const aiAgentsItem: NavItemDef    = {
+    label: 'AI Voice Agents', to: '/admin/platform/ai-agents', color: '#a78bfa', icon: <Bot size={15} strokeWidth={1.7} />,
+    isActiveFn: (p) => p.startsWith('/admin/platform/ai-agents'),
+  };
+  const tollFreeItem: NavItemDef    = {
+    label: 'Toll-Free / RespOrg', to: '/admin/platform/toll-free', color: '#f472b6', icon: <Hash size={15} strokeWidth={1.7} />,
+    isActiveFn: (p) => p.startsWith('/admin/platform/toll-free'),
+  };
+  const lcoItem: NavItemDef         = {
+    label: 'Least-Cost Outbound', to: '/admin/platform/lco', color: '#34d399', icon: <Route size={15} strokeWidth={1.7} />,
+    isActiveFn: (p) => p.startsWith('/admin/platform/lco'),
+  };
+  // Payments demo — two admin surfaces (exec-facing). The control panel drives
+  // scenarios; the dashboard shows revenue-by-rail + the three compliance gates.
+  const paymentsControlItem: NavItemDef = {
+    label: 'Payments Control', to: '/admin/payments/control', color: '#2dd4bf', icon: <SlidersHorizontal size={15} strokeWidth={1.7} />,
+    isActiveFn: (p) => p.startsWith('/admin/payments/control'),
+  };
+  const paymentsDashItem: NavItemDef = {
+    label: 'Revenue & Compliance', to: '/admin/payments/dashboard', color: '#22c55e', icon: <LayoutDashboard size={15} strokeWidth={1.7} />,
+    isActiveFn: (p) => p.startsWith('/admin/payments/dashboard'),
   };
   // Universal Call Flow Builder (P0 scaffold) — admin-only preview surface.
   const flowsItem: NavItemDef       = {
@@ -1125,10 +1168,24 @@ export function Sidebar() {
                       users, so the section still renders for them. */}
                   <SubGroupLabel label="Platform" />
                   {isAdmin && (
-                    <SidebarNavItem item={platformItem} onNavigate={closeMobile} small />
+                    <>
+                      <SidebarNavItem item={platformItem} onNavigate={closeMobile} small />
+                      <SidebarNavItem item={aiAgentsItem}  onNavigate={closeMobile} small />
+                      <SidebarNavItem item={tollFreeItem}  onNavigate={closeMobile} small />
+                      <SidebarNavItem item={lcoItem}       onNavigate={closeMobile} small />
+                    </>
                   )}
                   <SidebarNavItem item={callQualityItem} onNavigate={closeMobile} small />
                   <SidebarNavItem item={troubleItem}     onNavigate={closeMobile} small />
+
+                  {/* ── Payments (admin only) — exec demo surfaces ── */}
+                  {isAdmin && (
+                    <>
+                      <SubGroupLabel label="Payments" />
+                      <SidebarNavItem item={paymentsDashItem}    onNavigate={closeMobile} small />
+                      <SidebarNavItem item={paymentsControlItem} onNavigate={closeMobile} small />
+                    </>
+                  )}
                 </CollapsibleGroup>
               </>
             )}

@@ -4,7 +4,7 @@ import { updateCustomer } from '../../api/customers';
 import { listTiers, getCustomerTier, assignCustomerTier } from '../../api/tiers';
 import { Button } from '../../components/ui/Button';
 import { FormField } from '../../components/ui/FormField';
-import { useToast } from '../../components/ui/ToastContext';
+import { useToast } from '../../components/ui/Toast';
 import type { Customer, CustomerStatus, TrafficGrade } from '../../types/customer';
 
 interface CustomerEditFormProps {
@@ -99,7 +99,7 @@ export function CustomerEditForm({ customer, onCancel, onSaved }: CustomerEditFo
     <form
       onSubmit={handleSubmit}
       onClick={(e) => e.stopPropagation()}
-      style={{ padding: '28px 28px 24px' }}
+      style={{ paddingBottom: 18 }}
     >
       {/* General section */}
       <div style={sectionLabelStyle}>General</div>

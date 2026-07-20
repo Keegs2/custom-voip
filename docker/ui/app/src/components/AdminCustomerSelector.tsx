@@ -6,7 +6,7 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { listCustomers } from '../api/customers';
-import { useAuth } from '../contexts/AuthContext';
+import { useAuth } from '../contexts/useAuth';
 
 interface AdminCustomerSelectorProps {
   selectedCustomerId: number | undefined;

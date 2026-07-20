@@ -1,4 +1,4 @@
-import { type CSSProperties, useMemo } from 'react';
+import { type CSSProperties, useId, useMemo } from 'react';
 
 /**
  * HaArchitectureViz
@@ -416,9 +416,13 @@ const ALL_PACKETS: PacketConfig[] = [
 /* ─── Component ──────────────────────────────────────────────────────── */
 
 export function HaArchitectureViz() {
+  // Per-instance CSS keyframe namespace. useId (not Math.random — render must
+  // stay pure, react-hooks/purity) with non-identifier characters stripped,
+  // since React's id delimiters (":r0:" / "«r0»") are invalid in CSS names.
+  const rawId = useId();
   const uid = useMemo(
-    () => `ha-${Math.random().toString(36).substring(2, 8)}`,
-    [],
+    () => `ha-${rawId.replace(/[^a-zA-Z0-9_-]/g, '')}`,
+    [rawId],
   );
 
   const css = useMemo(() => {

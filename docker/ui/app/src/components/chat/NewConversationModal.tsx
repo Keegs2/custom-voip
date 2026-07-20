@@ -8,7 +8,7 @@ interface NewConversationModalProps {
   onClose: () => void;
   onCreated: (conv: Conversation) => void;
 }
-import { useAuth } from '../../contexts/AuthContext';
+import { useAuth } from '../../contexts/useAuth';
 
 /** Format an E.164 number for human display. "+17743260301" → "+1 (774) 326-0301" */
 function formatPhoneNumber(did: string): string {
@@ -56,7 +56,7 @@ export function NewConversationModal({ onClose, onCreated }: NewConversationModa
       });
     // Focus search on open
     setTimeout(() => searchRef.current?.focus(), 80);
-  }, [user?.id]);
+  }, [user?.id, user?.customer_id]);
 
   /* ─── Filter users ───────────────────────────────────────── */
 

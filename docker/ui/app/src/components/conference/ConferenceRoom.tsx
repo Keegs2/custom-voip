@@ -22,7 +22,7 @@ import {
   Mic, MicOff, Video, VideoOff, Monitor, MonitorOff,
   PhoneOff, Users, Square, Circle,
 } from 'lucide-react';
-import { useSoftphone } from '../../contexts/SoftphoneContext';
+import { useSoftphone } from '../../contexts/useSoftphone';
 import {
   getConferenceLiveStatus,
   kickMember,
@@ -566,6 +566,30 @@ function Lobby({ conferenceName, onJoin, onCancel }: LobbyProps) {
     rafIdRef.current = requestAnimationFrame(tick);
   }
 
+  /* ── Stop all preview resources ───────────────────────── */
+  // Declared BEFORE the mount effect that calls it in its cleanup —
+  // react-hooks/immutability rejects use-before-declaration even though the
+  // function declaration hoists at runtime.
+
+  function stopPreview() {
+    if (rafIdRef.current !== null) {
+      cancelAnimationFrame(rafIdRef.current);
+      rafIdRef.current = null;
+    }
+    if (analyserRef.current) {
+      analyserRef.current.disconnect();
+      analyserRef.current = null;
+    }
+    if (audioCtxRef.current) {
+      void audioCtxRef.current.close();
+      audioCtxRef.current = null;
+    }
+    if (previewStreamRef.current) {
+      previewStreamRef.current.getTracks().forEach((t) => t.stop());
+      previewStreamRef.current = null;
+    }
+  }
+
   /* ── Acquire preview stream on mount ──────────────────── */
 
   useEffect(() => {
@@ -614,28 +638,7 @@ function Lobby({ conferenceName, onJoin, onCancel }: LobbyProps) {
       cancelled = true;
       stopPreview();
     };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  /* ── Stop all preview resources ───────────────────────── */
-
-  function stopPreview() {
-    if (rafIdRef.current !== null) {
-      cancelAnimationFrame(rafIdRef.current);
-      rafIdRef.current = null;
-    }
-    if (analyserRef.current) {
-      analyserRef.current.disconnect();
-      analyserRef.current = null;
-    }
-    if (audioCtxRef.current) {
-      void audioCtxRef.current.close();
-      audioCtxRef.current = null;
-    }
-    if (previewStreamRef.current) {
-      previewStreamRef.current.getTracks().forEach((t) => t.stop());
-      previewStreamRef.current = null;
-    }
-  }
+  }, []);
 
   /* ── Switch to a specific audio or video device ──────── */
 
@@ -1163,9 +1166,13 @@ export function ConferenceRoom({
   }, [conferenceId]);
 
   useEffect(() => {
-    void fetchLiveStatus();
+    // First poll fires on the next macrotask so no state update runs
+    // synchronously inside the effect body (react-hooks/set-state-in-effect);
+    // the interval then keeps it fresh every 3s.
+    const initialPoll = setTimeout(() => void fetchLiveStatus(), 0);
     pollRef.current = setInterval(() => void fetchLiveStatus(), 3_000);
     return () => {
+      clearTimeout(initialPoll);
       if (pollRef.current) clearInterval(pollRef.current);
     };
   }, [fetchLiveStatus]);
@@ -1175,12 +1182,13 @@ export function ConferenceRoom({
    *
    * When makeCall completes and the SoftphoneContext sets activeCall, we
    * flip lobbyState so the conference grid replaces the "Joining..." state.
+   * Guarded render-phase adjustment (the React-endorsed "adjust state when
+   * props change" pattern, same as useInlineTrunkName/useNameEditor) instead
+   * of an effect — avoids the extra commit + react-hooks/set-state-in-effect.
    */
-  useEffect(() => {
-    if (activeCall && lobbyState === 'lobby') {
-      setLobbyState('joined');
-    }
-  }, [activeCall, lobbyState]);
+  if (activeCall && lobbyState === 'lobby') {
+    setLobbyState('joined');
+  }
 
   /* ── Recording ─────────────────────────────────────────── */
 

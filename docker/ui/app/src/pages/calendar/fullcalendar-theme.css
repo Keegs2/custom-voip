@@ -11,19 +11,19 @@
   --fc-neutral-bg-color: rgba(15, 17, 23, 0.5);
   --fc-neutral-text-color: #94a3b8;
 
-  /* Today highlight — teal accent matches the Calendar nav colour (#2dd4bf) */
-  --fc-today-bg-color: rgba(45, 212, 191, 0.07);
+  /* Today highlight — app blue accent (liquid-glass theme, #3b82f6) */
+  --fc-today-bg-color: rgba(59, 130, 246, 0.08);
 
   /* Now indicator (time grid) */
-  --fc-now-indicator-color: #2dd4bf;
+  --fc-now-indicator-color: #3b82f6;
 
   /* Events default (per-event colors override these inline) */
-  --fc-event-bg-color: rgba(45, 212, 191, 0.18);
-  --fc-event-border-color: rgba(45, 212, 191, 0.45);
+  --fc-event-bg-color: rgba(59, 130, 246, 0.18);
+  --fc-event-border-color: rgba(59, 130, 246, 0.45);
   --fc-event-text-color: #e2e8f0;
 
   /* List view */
-  --fc-list-event-hover-bg-color: rgba(45, 212, 191, 0.08);
+  --fc-list-event-hover-bg-color: rgba(59, 130, 246, 0.08);
 
   font-size: 0.85rem;
   color: #e2e8f0;
@@ -56,7 +56,7 @@
 /* Today's date number gets the accent */
 .rv-calendar .fc .fc-day-today .fc-daygrid-day-number,
 .rv-calendar .fc .fc-day-today .fc-col-header-cell-cushion {
-  color: #2dd4bf;
+  color: #3b82f6;
 }
 
 /* Days outside the current month — dimmed */
@@ -91,7 +91,7 @@
 
 /* "+N more" link */
 .rv-calendar .fc .fc-daygrid-more-link {
-  color: #2dd4bf;
+  color: #3b82f6;
   font-size: 0.66rem;
   font-weight: 700;
 }

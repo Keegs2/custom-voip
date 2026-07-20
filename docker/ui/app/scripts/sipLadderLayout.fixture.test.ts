@@ -57,15 +57,23 @@ const B_INV = '124667839 INVITE';
 const B_ACK = '124667839 ACK';
 const B_BYE = '124667840 BYE';
 
+// Nanosecond epoch stamps with a sub-µs tail exceed Number.MAX_SAFE_INTEGER,
+// so a bare literal would silently round (eslint no-loss-of-precision). Build
+// them as seconds*1e9 + nanos instead: the arithmetic rounds to the SAME
+// nearest double the production pipeline produces when it JSON-parses heplify
+// stamps, and the ladder's ordering/delta math works at µs granularity — far
+// above the ~256 ns double resolution at this magnitude.
+const tsNs = (sec: number, nanos: number): number => sec * 1_000_000_000 + nanos;
+
 // Derived from the fixture table: dedup survivor per hop (earliest directional
 // capture), stored timestamp kept verbatim — including the corrupted ones.
 const ROWS: Row[] = [
   // ── Call setup, A-leg ingress ──
   // The carrier INVITE's stored ts is the INGEST stamp (.725964951) — 16ms
   // late, AFTER the 100 Trying it provoked. seq + ts_corrected fix the order.
-  { seq: 0, ts: 1781107707725964951, method: 'INVITE', status: null, src: 'BW-ATL', dst: 'SBC-VIP', callid: A_LEG, cseq: A_INV, node: '100', ts_corrected: true },
+  { seq: 0, ts: tsNs(1781107707, 725964951), method: 'INVITE', status: null, src: 'BW-ATL', dst: 'SBC-VIP', callid: A_LEG, cseq: A_INV, node: '100', ts_corrected: true },
   { seq: 1, ts: 1781107707709698000, method: 'INVITE', status: 100, src: 'SBC-VIP', dst: 'BW-ATL', callid: A_LEG, cseq: A_INV, node: '100' },
-  { seq: 2, ts: 1781107707725832231, method: 'INVITE', status: null, src: 'SBC-1', dst: 'FreeSWITCH', callid: A_LEG, cseq: A_INV, node: '100,200', ts_corrected: true },
+  { seq: 2, ts: tsNs(1781107707, 725832231), method: 'INVITE', status: null, src: 'SBC-1', dst: 'FreeSWITCH', callid: A_LEG, cseq: A_INV, node: '100,200', ts_corrected: true },
   { seq: 3, ts: 1781107707711764000, method: 'INVITE', status: 100, src: 'FreeSWITCH', dst: 'SBC-1', callid: A_LEG, cseq: A_INV, node: '100,200' },
   // ── B-leg egress ──
   { seq: 4, ts: 1781107707742226000, method: 'INVITE', status: null, src: 'FreeSWITCH', dst: 'SBC-1', callid: B_LEG, cseq: B_INV, node: '100,200' },
@@ -85,7 +93,7 @@ const ROWS: Row[] = [
   // (inner RR consumed, outer Route = same box) — captured src==dst==SBC-VIP.
   { seq: 15, ts: 1781107716964553000, method: 'ACK', status: null, src: 'SBC-VIP', dst: 'SBC-VIP', callid: B_LEG, cseq: B_ACK, node: '100', hairpin: true },
   { seq: 16, ts: 1781107716968394000, method: 'INVITE', status: 200, src: 'FreeSWITCH', dst: 'SBC-1', callid: A_LEG, cseq: A_INV, node: '100,200' },
-  { seq: 17, ts: 1781107716969222690, method: 'INVITE', status: 200, src: 'SBC-VIP', dst: 'BW-ATL', callid: A_LEG, cseq: A_INV, node: '100' },
+  { seq: 17, ts: tsNs(1781107716, 969222690), method: 'INVITE', status: 200, src: 'SBC-VIP', dst: 'BW-ATL', callid: A_LEG, cseq: A_INV, node: '100' },
   { seq: 18, ts: 1781107716982023000, method: 'ACK', status: null, src: 'BW-ATL', dst: 'SBC-VIP', callid: A_LEG, cseq: A_ACK, node: '100' },
   { seq: 19, ts: 1781107716982951000, method: 'ACK', status: null, src: 'SBC-1', dst: 'FreeSWITCH', callid: A_LEG, cseq: A_ACK, node: '200' },
   // ── Teardown (caller hangs up) ──

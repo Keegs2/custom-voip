@@ -12,11 +12,16 @@
  * Because it reads the *saved* compiled artifact, a never-saved flow (or stale
  * compiled) returns 404 — we detect that and tell the admin to Save/Publish.
  *
- * React #310: ALL hooks (store-free here, but mutation + local state + effect)
- * are declared unconditionally at the top, before any early return. The Modal's
+ * React #310: ALL hooks (store-free here, but mutation + local state) are
+ * declared unconditionally at the top, before any early return. The Modal's
  * body branches on render-time values only.
+ *
+ * Freshness contract: the TOOLBAR mounts this component only while open
+ * (`{simulateOpen && <FlowSimulateModal …>}`), so every open starts from the
+ * lazy useState initialisers + a pristine mutation — no reset-on-open effect
+ * (react-hooks/set-state-in-effect).
  */
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { simulateFlow } from '../../api/callFlows';
 import type {
@@ -29,7 +34,7 @@ import type {
 import { Modal } from '../../components/ui/Modal';
 import { Button } from '../../components/ui/Button';
 import { CenteredSpinner } from '../../components/ui/Spinner';
-import { useToast } from '../../components/ui/ToastContext';
+import { useToast } from '../../components/ui/Toast';
 import { ApiError } from '../../api/client';
 
 interface FlowSimulateModalProps {
@@ -68,16 +73,6 @@ export function FlowSimulateModal({ open, onClose, flowId }: FlowSimulateModalPr
     onError: (e) =>
       toastErr(e instanceof ApiError ? e.message : 'Simulation failed'),
   });
-
-  // Reset the time field to "now" and clear stale results each time the modal
-  // opens, so a re-open always presents a fresh starting state.
-  const { reset } = simulateMutation;
-  useEffect(() => {
-    if (open) {
-      setWhen(nowLocalInput());
-      reset();
-    }
-  }, [open, reset]);
 
   // Derived (no hooks) — safe after the hooks above.
   const data = simulateMutation.data;

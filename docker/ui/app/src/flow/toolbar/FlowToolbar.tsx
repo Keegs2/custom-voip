@@ -41,7 +41,7 @@ import type { CallFlow } from '../../types/callFlow';
 import type { CallFlowDoc, EntryBinding, ProductKind } from '../model/types';
 import { Button } from '../../components/ui/Button';
 import { Modal } from '../../components/ui/Modal';
-import { useToast } from '../../components/ui/ToastContext';
+import { useToast } from '../../components/ui/Toast';
 import { ApiError } from '../../api/client';
 import { fmt } from '../../utils/format';
 import { FlowHistoryModal } from './FlowHistoryModal';
@@ -386,7 +386,12 @@ export function FlowToolbar() {
       </div>
 
       <FlowHistoryModal open={historyOpen} onClose={() => setHistoryOpen(false)} flowId={docId ?? null} />
-      <FlowSimulateModal open={simulateOpen} onClose={() => setSimulateOpen(false)} flowId={docId ?? null} />
+      {/* Mounted only while open: every open starts with fresh lazy-initialised
+          state ("now" timestamp, pristine mutation) — see the freshness contract
+          note in FlowSimulateModal. */}
+      {simulateOpen && (
+        <FlowSimulateModal open onClose={() => setSimulateOpen(false)} flowId={docId ?? null} />
+      )}
 
       {/* Overwrite-guard — shown when publish returns 409 because the live config
           has diverged. The server's detail names the DID + current vs new forward. */}

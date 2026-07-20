@@ -9,8 +9,8 @@ import {
 } from 'lucide-react';
 import { listMessages } from '../../api/chat';
 import type { Conversation, Message } from '../../types/chat';
-import { useChat } from '../../contexts/ChatContext';
-import { useAuth } from '../../contexts/AuthContext';
+import { useChat } from '../../contexts/useChat';
+import { useAuth } from '../../contexts/useAuth';
 import { MessageBubble } from './MessageBubble';
 import { MessageInput } from './MessageInput';
 import { TypingIndicator } from './TypingIndicator';
@@ -136,15 +136,15 @@ export function MessageThread({ conversation }: MessageThreadProps) {
   const avatarColor = nameColor(conversationTitle);
   const avatarInitial = conversationTitle.charAt(0).toUpperCase();
 
-  /* ─── Initial load ─────────────────────────────────────── */
+  /* ─── Initial load ─────────────────────────────────────────
+   * The parent (ChatPage) keys this component by conversation.id, so switching
+   * conversations REMOUNTS it: every useState/useRef above starts fresh (loading
+   * spinner, empty list, clean scroll state). No synchronous reset-setState in
+   * the effect body (react-hooks/set-state-in-effect) — only async .then/.catch
+   * updates below. */
 
   useEffect(() => {
     let cancelled = false;
-    setIsLoading(true);
-    setError(null);
-    setMessages([]);
-    setHasMore(true);
-    setShowScrollBtn(false);
 
     void listMessages(conversation.id).then((msgs) => {
       if (cancelled) return;

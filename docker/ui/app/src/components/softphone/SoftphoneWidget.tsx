@@ -1,7 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Phone } from 'lucide-react';
-import { useSoftphone } from '../../contexts/SoftphoneContext';
-import { useAuth } from '../../contexts/AuthContext';
+import { useSoftphone } from '../../contexts/useSoftphone';
+import { useAuth } from '../../contexts/useAuth';
+import { ErrorBoundary } from '../errors/ErrorBoundary';
+import { SoftphoneErrorFallback } from '../errors/fallbacks';
 import { PresenceIndicator } from './PresenceIndicator';
 import { DialPad } from './DialPad';
 import { ActiveCallView } from './ActiveCall';
@@ -666,7 +668,30 @@ const SOFTPHONE_STYLES = `
 
 /* ─── Main component ─────────────────────────────────────────── */
 
+/**
+ * Public softphone entry point — the inner widget is isolated behind its own
+ * ErrorBoundary so a render bug in the call CONTROLS can never white-screen a
+ * page (and page boundaries, inversely, keep page crashes away from the
+ * widget). The WebRTC session itself lives in SoftphoneContext ABOVE this
+ * boundary, so an in-progress call keeps its audio; the fallback's "Restore"
+ * remounts the controls fresh.
+ *
+ * NOTE: this wrapper adds NO hooks and must stay hook-free — the inner
+ * component's hooks-above-early-returns invariant (React #310, 3 prior
+ * incidents) is untouched.
+ */
 export function SoftphoneWidget() {
+  return (
+    <ErrorBoundary
+      scope="softphone"
+      fallback={(error, reset) => <SoftphoneErrorFallback error={error} onReset={reset} />}
+    >
+      <SoftphoneWidgetInner />
+    </ErrorBoundary>
+  );
+}
+
+function SoftphoneWidgetInner() {
   const {
     connectionState,
     activeCall,

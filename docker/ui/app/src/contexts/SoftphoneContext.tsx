@@ -1,7 +1,5 @@
 import {
-  createContext,
   useCallback,
-  useContext,
   useEffect,
   useRef,
   useState,
@@ -19,67 +17,10 @@ import type {
   SoftphoneConnectionState,
   WebRTCCredentials,
 } from '../types/softphone';
-import { useAuth } from './AuthContext';
-
-/* ─── Context shape ──────────────────────────────────────── */
-
-interface SoftphoneContextValue {
-  /** Current WebSocket + SIP registration state */
-  connectionState: SoftphoneConnectionState;
-  /** The currently active (or ringing) call, if any */
-  activeCall: ActiveCall | null;
-  /** An incoming call awaiting answer/reject — separate from activeCall so UI
-   *  can show the incoming banner while another call is ongoing */
-  incomingCall: ActiveCall | null;
-  /** The user's own presence status */
-  presence: PresenceStatus;
-  /** Whether the softphone widget is expanded */
-  isExpanded: boolean;
-  /** WebRTC credentials for the current user (null = no extension) */
-  credentials: WebRTCCredentials | null;
-  /** Unread voicemail count for badge display */
-  unreadVoicemailCount: number;
-  /** Audio input devices available */
-  audioInputDevices: MediaDeviceInfo[];
-  /** Audio output devices available */
-  audioOutputDevices: MediaDeviceInfo[];
-  /** Selected audio input device ID */
-  selectedMicId: string | null;
-  /** Selected audio output device ID */
-  selectedSpeakerId: string | null;
-
-  /* ── Video streams (null when audio-only call or no active call) ── */
-  localVideoStream: MediaStream | null;
-  remoteVideoStream: MediaStream | null;
-  /**
-   * Synchronous fallback to read the local stream directly from the VertoClient
-   * session. Use this when localVideoStream in state is null but the call is
-   * already active (e.g. ConferenceRoom mounts after onStreamChange fired).
-   */
-  getLocalStream: (callId: string) => MediaStream | null;
-
-  /* ── Actions ── */
-  makeCall: (destination: string, options?: { video?: boolean }) => Promise<void>;
-  startScreenShare: () => Promise<void>;
-  stopScreenShare: () => Promise<void>;
-  setCameraEnabled: (enabled: boolean) => void;
-  answerCall: () => Promise<void>;
-  rejectCall: () => void;
-  hangupCall: () => void;
-  holdCall: () => void;
-  unholdCall: () => void;
-  muteCall: () => void;
-  unmuteCall: () => void;
-  sendDTMF: (digit: string) => void;
-  setPresence: (status: PresenceStatus) => Promise<void>;
-  setExpanded: (expanded: boolean) => void;
-  selectMic: (deviceId: string) => void;
-  selectSpeaker: (deviceId: string) => void;
-  /** Force refresh of voicemail count (e.g. after viewing voicemails) */
-  refreshVoicemailCount: () => void;
-}
-
-const SoftphoneContext = createContext<SoftphoneContextValue | null>(null);
+import { useAuth } from './useAuth';
+// Context object + SoftphoneContextValue + useSoftphone live in ./useSoftphone
+// so this file exports only a component (react-refresh/only-export-components).
+import { SoftphoneContext, type SoftphoneContextValue } from './useSoftphone';
 
 /* ─── Provider ───────────────────────────────────────────── */
 
@@ -541,14 +482,4 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
       {children}
     </SoftphoneContext.Provider>
   );
-}
-
-/* ─── Hook ───────────────────────────────────────────────── */
-
-export function useSoftphone(): SoftphoneContextValue {
-  const ctx = useContext(SoftphoneContext);
-  if (!ctx) {
-    throw new Error('useSoftphone must be used within a SoftphoneProvider');
-  }
-  return ctx;
 }

@@ -15,6 +15,7 @@ import {
 } from '../../../api/voicemail';
 import { ApiError } from '../../../api/client';
 import { EncryptionBadge } from '../shared/EncryptionBadge';
+import { GLASS } from '../../../components/glass/glass';
 import type { AttachProduct, AttachableNumber } from '../../../types/voicemail';
 
 /* ─────────────────────────────────────────────────────────────────────────
@@ -24,7 +25,7 @@ import type { AttachProduct, AttachableNumber } from '../../../types/voicemail';
 type DeliveryModel = 'dedicated_did' | 'attached';
 type BuyMode = 'search' | 'port';
 
-const ACCENT = '#818cf8';
+const ACCENT = GLASS.accent;
 // Phase 1 attach supports RCF + Trunk only (both DID-keyed end-to-end). UCaaS-
 // extension attach is deferred to Phase 2, so the manual-entry product list and the
 // server picker (`/voicemail/attachable-numbers`) agree on just these two.

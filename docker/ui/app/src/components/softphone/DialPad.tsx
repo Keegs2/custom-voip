@@ -1,6 +1,6 @@
 import { useState, useCallback, type KeyboardEvent } from 'react';
 import { Phone } from 'lucide-react';
-import { useSoftphone } from '../../contexts/SoftphoneContext';
+import { useSoftphone } from '../../contexts/useSoftphone';
 
 const KEYS: { label: string; sub?: string }[] = [
   { label: '1', sub: '' },

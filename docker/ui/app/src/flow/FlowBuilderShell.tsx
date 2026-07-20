@@ -37,7 +37,7 @@ import { getCallFlow, listCallFlows } from '../api/callFlows';
 import { listCustomers } from '../api/customers';
 import { Button } from '../components/ui/Button';
 import { Modal } from '../components/ui/Modal';
-import { useToast } from '../components/ui/ToastContext';
+import { useToast } from '../components/ui/Toast';
 import { fmt } from '../utils/format';
 import type { EntryBinding, ProductKind } from './model/types';
 import { FlowToolbar } from './toolbar/FlowToolbar';

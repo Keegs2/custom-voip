@@ -5,7 +5,9 @@ import { ChatProvider } from './contexts/ChatContext';
 import { RequireAuth } from './components/auth/RequireAuth';
 import { RequireAdmin } from './components/auth/RequireAdmin';
 import { RequireUcaas } from './components/auth/RequireUcaas';
+import { RequireVoicemail } from './components/auth/RequireVoicemail';
 import { RequireProgrammableVoice } from './components/auth/RequireProgrammableVoice';
+import { RouteErrorBoundary } from './components/errors/RouteErrorBoundary';
 import { AppLayout } from './components/layout/AppLayout';
 import { DashboardPage } from './pages/DashboardPage';
 import { RcfPage } from './pages/RcfPage';
@@ -24,6 +26,11 @@ import { RatesAdminPage } from './pages/admin/RatesAdminPage';
 import { TiersAdminPage } from './pages/admin/TiersAdminPage';
 import { CarriersAdminPage } from './pages/admin/CarriersAdminPage';
 import { SippAdminPage } from './pages/admin/SippAdminPage';
+// Leapfrog wave — in-boundary AI voice agents, toll-free/RespOrg, least-cost outbound.
+// All three are admin platform surfaces (RequireAdmin via the Platform shell).
+import { AiAgentsAdminPage } from './pages/admin/AiAgentsAdminPage';
+import { TollFreeAdminPage } from './pages/admin/TollFreeAdminPage';
+import { LcoAdminPage } from './pages/admin/LcoAdminPage';
 // Homer moved to standalone Troubleshooting page
 import { TrunksAdminPage } from './pages/admin/TrunksAdminPage';
 import { DIDSearchPage } from './pages/admin/DIDSearchPage';
@@ -31,6 +38,13 @@ import { UserDetailPage } from './pages/admin/UserDetailPage';
 import { OnboardingAdminPage } from './pages/admin/OnboardingAdminPage';
 import { CallQualityPage } from './pages/CallQualityPage';
 import { AccountPage } from './pages/AccountPage';
+// Payments demo — exec-facing monetary-system demo (docs/PAYMENTS_SYSTEM_DESIGN.md
+// §9). Customer Billing & Payments page (any authenticated customer + admin), plus
+// two admin surfaces: the Exec Demo Control Panel and the Revenue/Compliance
+// dashboard (both RequireAdmin).
+import { PaymentsPage } from './pages/payments/PaymentsPage';
+import { PaymentsDemoControlPage } from './pages/admin/payments-demo/PaymentsDemoControlPage';
+import { PaymentsDashboardPage } from './pages/admin/payments-demo/PaymentsDashboardPage';
 // UCaaS communications pages — gated to ucaas/hybrid accounts via Sidebar nav (C-10).
 import { CommunicationsPage } from './pages/CommunicationsPage';
 import { ChatPage } from './pages/ChatPage';
@@ -94,6 +108,11 @@ export function App() {
               <Route path="docs/api"         element={<ApiDocsPage />} />
               <Route path="docs/integration" element={<Navigate to="/docs/api" replace />} />
               <Route path="call-quality" element={<CallQualityPage />} />
+              {/* Customer Billing & Payments — available to any authenticated
+                  customer and to admins (payments is a universal surface, not an
+                  account-type product). Reads the real ledger; the demo backend
+                  drives it through simulation providers. */}
+              <Route path="billing"          element={<PaymentsPage />} />
               <Route path="account"          element={<AccountPage />} />
 
               {/* UCaaS communications that live INSIDE AppLayout's content
@@ -179,23 +198,54 @@ export function App() {
                   </RequireAdmin>
                 }
               >
-                <Route index           element={<Navigate to="carriers" replace />} />
-                <Route path="carriers" element={<CarriersAdminPage />} />
-                <Route path="cdrs"     element={<CdrsAdminPage />} />
-                <Route path="rates"    element={<RatesAdminPage />} />
-                <Route path="tiers"    element={<TiersAdminPage />} />
-                <Route path="sipp"     element={<SippAdminPage />} />
-                <Route path="dids"     element={<DIDSearchPage />} />
+                <Route index            element={<Navigate to="carriers" replace />} />
+                <Route path="carriers"  element={<CarriersAdminPage />} />
+                <Route path="cdrs"      element={<CdrsAdminPage />} />
+                <Route path="rates"     element={<RatesAdminPage />} />
+                <Route path="tiers"     element={<TiersAdminPage />} />
+                <Route path="sipp"      element={<SippAdminPage />} />
+                <Route path="dids"      element={<DIDSearchPage />} />
+                {/* Leapfrog wave — admin-only (inherits RequireAdmin from this shell) */}
+                <Route path="ai-agents" element={<AiAgentsAdminPage />} />
+                <Route path="toll-free" element={<TollFreeAdminPage />} />
+                <Route path="lco"       element={<LcoAdminPage />} />
               </Route>
+
+              {/* Payments demo — admin surfaces. The Exec Demo Control Panel and
+                  the Revenue/Compliance dashboard. Each is individually
+                  RequireAdmin-wrapped (they are prominent nav items, not tabs of
+                  an existing shell). /admin/payments redirects to the dashboard. */}
+              <Route path="admin/payments" element={<Navigate to="/admin/payments/dashboard" replace />} />
+              <Route
+                path="admin/payments/control"
+                element={
+                  <RequireAdmin>
+                    <PaymentsDemoControlPage />
+                  </RequireAdmin>
+                }
+              />
+              <Route
+                path="admin/payments/dashboard"
+                element={
+                  <RequireAdmin>
+                    <PaymentsDashboardPage />
+                  </RequireAdmin>
+                }
+              />
             </Route>
           </Route>
 
-          {/* Full-screen pages — outside AppLayout (no max-width/padding) */}
+          {/* Full-screen pages — outside AppLayout (no max-width/padding).
+              Each full-screen page is wrapped in RouteErrorBoundary AFTER its
+              guards: a render crash shows the recoverable fallback instead of
+              white-screening the SPA (guards themselves are tiny and inert). */}
           <Route
             path="troubleshooting"
             element={
               <RequireAuth>
-                <TroubleshootingPage />
+                <RouteErrorBoundary>
+                  <TroubleshootingPage />
+                </RouteErrorBoundary>
               </RequireAuth>
             }
           />
@@ -209,7 +259,9 @@ export function App() {
             element={
               <RequireAuth>
                 <RequireAdmin>
-                  <CallFlowBuilderPage />
+                  <RouteErrorBoundary>
+                    <CallFlowBuilderPage />
+                  </RouteErrorBoundary>
                 </RequireAdmin>
               </RequireAuth>
             }
@@ -221,19 +273,37 @@ export function App() {
               of the center-gap + right-overflow bug). Gating is fully preserved:
               RequireAuth (layout route) → RequireUcaas (children) — an rcf or
               any non-UCaaS user is still redirected to the dashboard and renders
-              ZERO UCaaS content, exactly as when they were inside AppLayout. */}
+              ZERO UCaaS content, exactly as when they were inside AppLayout.
+              RouteErrorBoundary (which renders the Outlet) sits INSIDE the
+              guard so a page crash degrades to the in-place fallback. */}
           <Route element={<RequireAuth />}>
             <Route
               element={
                 <RequireUcaas>
-                  <Outlet />
+                  <RouteErrorBoundary />
                 </RequireUcaas>
               }
             >
               <Route path="chat"        element={<ChatPage />} />
               <Route path="conference"  element={<ConferencePage />} />
               <Route path="documents"   element={<DocumentsPage />} />
-              <Route path="voicemail"   element={<VoicemailPage />} />
+            </Route>
+
+            {/* Voicemail — the standalone Visual Voicemail product. Gated by
+                RequireVoicemail (voicemail_enabled === true OR UCaaS/admin),
+                NOT RequireUcaas: the flagship voicemail-only customer carries
+                only the `voicemail_enabled` entitlement, which the sidebar nav
+                already honours — route guard and nav now share ONE predicate
+                (components/auth/entitlements.ts). An rcf user with neither
+                flag is still bounced to the dashboard. */}
+            <Route
+              element={
+                <RequireVoicemail>
+                  <RouteErrorBoundary />
+                </RequireVoicemail>
+              }
+            >
+              <Route path="voicemail" element={<VoicemailPage />} />
             </Route>
           </Route>
 

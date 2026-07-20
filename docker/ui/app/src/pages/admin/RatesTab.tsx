@@ -1,70 +1,37 @@
-import { useQuery } from '@tanstack/react-query';
-import { listRates, getMarginsData } from '../../api/rates';
-import { Spinner } from '../../components/ui/Spinner';
+/**
+ * RatesTab — THIN composition page for the Rates admin area. Top-level data
+ * comes from the feature hooks; every surface is built from the glass kit.
+ * Presentational pieces live in pages/admin/billing/rates/.
+ *
+ * (RatesStatsGrid and MarginAnalysis are owned/glassified by another area and
+ * are composed here as-is.)
+ *
+ * React #310: all hooks sit at the top of useRatesData, before any return.
+ */
+
+import { useRatesData } from './billing/rates/hooks';
+import { LoadingState, ErrorState } from './billing/components/states';
+import { RatesAddForm } from './billing/rates/components/RatesAddForm';
+import { RatesTable } from './billing/rates/components/RatesTable';
 import { RatesStatsGrid } from './RatesStatsGrid';
-import { RatesTable } from './RatesTable';
-import { RatesAddForm } from './RatesAddForm';
 import { MarginAnalysis } from './MarginAnalysis';
 
-const RATES_LIMIT = 500;
-
 export function RatesTab() {
-  const {
-    data: ratesData,
-    isLoading: ratesLoading,
-    isError: ratesError,
-  } = useQuery({
-    queryKey: ['rates'],
-    queryFn: () => listRates({ limit: RATES_LIMIT }),
-  });
-
-  const {
-    data: margins,
-    isLoading: marginsLoading,
-  } = useQuery({
-    queryKey: ['margins'],
-    queryFn: getMarginsData,
-  });
-
-  const isLoading = ratesLoading || marginsLoading;
+  const { rates, margins, isLoading, isError } = useRatesData();
 
   if (isLoading) {
-    return (
-      <div className="flex items-center gap-2 text-[#718096] py-10">
-        <Spinner /> Loading rates…
-      </div>
-    );
+    return <LoadingState label="Loading rates…" />;
   }
 
-  if (ratesError) {
-    return (
-      <div
-        style={{
-          padding: '16px 20px',
-          borderRadius: 12,
-          background: 'rgba(239,68,68,0.08)',
-          border: '1px solid rgba(239,68,68,0.2)',
-          color: '#f87171',
-          fontSize: '0.875rem',
-        }}
-      >
-        Failed to load rates. Please try again.
-      </div>
-    );
+  if (isError) {
+    return <ErrorState message="Failed to load rates. Please try again." />;
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-      {/* Stats cards + warning banner */}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 32 }}>
       {margins && <RatesStatsGrid margins={margins} />}
-
-      {/* Add rate form */}
       <RatesAddForm />
-
-      {/* Sortable rates table */}
-      <RatesTable rates={Array.isArray(ratesData) ? ratesData : ratesData?.rates ?? ratesData?.items ?? []} />
-
-      {/* Margin analysis cards */}
+      <RatesTable rates={rates} />
       {margins && <MarginAnalysis margins={margins} />}
     </div>
   );

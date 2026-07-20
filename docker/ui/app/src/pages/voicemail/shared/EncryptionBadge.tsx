@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { GLASS } from '../../../components/glass/glass';
 
 /* ─── Lock glyph ──────────────────────────────────────────── */
 
@@ -12,7 +13,7 @@ function IconLock({ size = 13 }: { size?: number }) {
   );
 }
 
-const ACCENT = '#818cf8';
+const ACCENT = GLASS.accent;
 
 interface EncryptionBadgeProps {
   /** Compact pill (just the lock + label) vs. the default labelled chip. */
@@ -77,9 +78,11 @@ export function EncryptionBadge({ size = 'md', label = 'Encrypted at rest' }: En
             width: 268,
             padding: '12px 14px',
             borderRadius: 12,
-            background: '#161922',
+            background: 'rgba(18,21,30,0.92)',
             border: `1px solid ${ACCENT}30`,
-            boxShadow: '0 12px 40px rgba(0,0,0,0.6)',
+            boxShadow: '0 18px 48px -12px rgba(0,0,0,0.7)',
+            backdropFilter: 'blur(18px) saturate(160%)',
+            WebkitBackdropFilter: 'blur(18px) saturate(160%)',
             color: '#cbd5e0',
             fontSize: '0.74rem',
             lineHeight: 1.55,

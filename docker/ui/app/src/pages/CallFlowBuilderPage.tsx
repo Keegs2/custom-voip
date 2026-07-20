@@ -19,10 +19,12 @@ export function CallFlowBuilderPage() {
       <Sidebar />
 
       {/* The Sidebar is fixed at 240px on the left; offset the workspace by it
-          and let the builder consume every remaining pixel of width + height. */}
+          ONLY at md+ (`md:ml-60` = 240px) — below md the Sidebar is off-canvas
+          behind the hamburger topbar, so an unconditional margin would leave a
+          240px dead gutter. Let the builder consume every remaining pixel. */}
       <div
+        className="md:ml-60"
         style={{
-          marginLeft: 240,
           height: '100vh',
           display: 'flex',
           flexDirection: 'column',

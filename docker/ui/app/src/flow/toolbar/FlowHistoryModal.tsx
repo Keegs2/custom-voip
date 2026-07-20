@@ -24,7 +24,7 @@ import type { CallFlowDoc } from '../model/types';
 import { Modal } from '../../components/ui/Modal';
 import { Button } from '../../components/ui/Button';
 import { CenteredSpinner } from '../../components/ui/Spinner';
-import { useToast } from '../../components/ui/ToastContext';
+import { useToast } from '../../components/ui/Toast';
 import { ApiError } from '../../api/client';
 
 interface FlowHistoryModalProps {
@@ -34,8 +34,10 @@ interface FlowHistoryModalProps {
   flowId: number | null;
 }
 
-/** Shared React Query key for a flow's version list (invalidate after restore). */
-export function flowVersionsKey(flowId: number) {
+/** React Query key for a flow's version list (invalidate after restore).
+ *  Module-private: nothing imports it, and exporting a non-component from a
+ *  component file breaks fast refresh (react-refresh/only-export-components). */
+function flowVersionsKey(flowId: number) {
   return ['call-flow-versions', flowId] as const;
 }
 

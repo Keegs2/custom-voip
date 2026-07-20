@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Search, Plus, Users } from 'lucide-react';
 import type { Conversation } from '../../types/chat';
-import { useAuth } from '../../contexts/AuthContext';
+import { useAuth } from '../../contexts/useAuth';
 
 interface ConversationListProps {
   conversations: Conversation[];

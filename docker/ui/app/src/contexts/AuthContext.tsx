@@ -1,7 +1,5 @@
 import {
-  createContext,
   useCallback,
-  useContext,
   useEffect,
   useState,
   type ReactNode,
@@ -10,39 +8,11 @@ import { useNavigate } from 'react-router-dom';
 import { login as apiLogin, getMe } from '../api/auth';
 import { ApiError } from '../api/client';
 import type { User } from '../types/auth';
+// Context object + AuthContextValue + useAuth live in ./useAuth so this file
+// exports only a component (react-refresh/only-export-components).
+import { AuthContext } from './useAuth';
 
 const AUTH_TOKEN_KEY = 'auth_token';
-
-/* ─── Context shape ──────────────────────────────────────── */
-
-interface AuthContextValue {
-  user: User | null;
-  token: string | null;
-  isAuthenticated: boolean;
-  /**
-   * True only when role === 'admin' AND customerViewMode is false.
-   * Components that check this automatically hide admin-only UI in customer view.
-   */
-  isAdmin: boolean;
-  /**
-   * True when the user's real role is 'admin', regardless of customerViewMode.
-   * Use this only where you need to know the true role (e.g. showing the toggle
-   * itself), never for guarding admin-only content.
-   */
-  isActualAdmin: boolean;
-  /** When true, an admin is previewing the app as a customer would see it. */
-  customerViewMode: boolean;
-  /** Toggles customerViewMode on/off. Navigates to / when turning ON. */
-  toggleCustomerView: () => void;
-  /** True while the initial token validation is running on mount */
-  isLoading: boolean;
-  login: (email: string, password: string) => Promise<void>;
-  logout: () => void;
-  /** Re-fetches /auth/me and updates the user in context. Use after profile edits. */
-  refreshUser: () => Promise<void>;
-}
-
-const AuthContext = createContext<AuthContextValue | null>(null);
 
 /* ─── Provider ───────────────────────────────────────────── */
 
@@ -62,8 +32,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const persisted = localStorage.getItem(AUTH_TOKEN_KEY);
     if (!persisted) {
-      setIsLoading(false);
-      return;
+      // isLoading already initialised to false when no token was persisted
+      // (useState initializer above). This async clear only matters in the
+      // rare race where the token vanished between first render and this
+      // effect (e.g. logout in another tab) — run it on the next tick so no
+      // setState happens synchronously in the effect body
+      // (react-hooks/set-state-in-effect).
+      const t = setTimeout(() => setIsLoading(false), 0);
+      return () => clearTimeout(t);
     }
 
     let cancelled = false;
@@ -92,7 +68,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   /* ── Login ───────────────────────────────────────────────── */
@@ -147,14 +122,4 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       {children}
     </AuthContext.Provider>
   );
-}
-
-/* ─── Hook ───────────────────────────────────────────────── */
-
-export function useAuth(): AuthContextValue {
-  const ctx = useContext(AuthContext);
-  if (!ctx) {
-    throw new Error('useAuth must be used within an AuthProvider');
-  }
-  return ctx;
 }

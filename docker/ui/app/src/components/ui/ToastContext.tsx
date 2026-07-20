@@ -1,29 +1,12 @@
 import {
-  createContext,
   useCallback,
-  useContext,
-  useRef,
   useState,
   type ReactNode,
 } from 'react';
-
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
-export type ToastVariant = 'success' | 'error' | 'warning' | 'info';
-
-export interface ToastOptions {
-  title?: string;
-  message: string;
-  variant?: ToastVariant;
-  duration?: number;
-  persistent?: boolean;
-  action?: {
-    label: string;
-    onClick: () => void;
-  };
-}
+// Context object + useToast + the public toast types live in ./useToast so
+// this file exports only components (react-refresh/only-export-components).
+// Consumers import the hook from '@/components/ui/Toast'.
+import { ToastContext, type ToastOptions, type ToastVariant } from './useToast';
 
 interface ToastEntry extends Required<Omit<ToastOptions, 'title' | 'action'>> {
   id: number;
@@ -31,12 +14,6 @@ interface ToastEntry extends Required<Omit<ToastOptions, 'title' | 'action'>> {
   action?: ToastOptions['action'];
   /** true while the exit animation is playing */
   dismissing: boolean;
-}
-
-export interface ToastContextValue {
-  toast: (options: ToastOptions) => void;
-  toastOk: (message: string) => void;
-  toastErr: (message: string) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -117,10 +94,8 @@ function ToastCard({ toast, onDismiss }: ToastCardProps) {
   const color = VARIANT_COLOR[toast.variant];
   const [hovered, setHovered] = useState(false);
 
-  // Pause progress bar while hovered
-  const pausedRef = useRef(hovered);
-  pausedRef.current = hovered;
-
+  // Pause the progress bar while hovered — driven directly by state (a ref
+  // written during render is both dead weight and a react-hooks/refs violation).
   const animationState = hovered ? 'paused' : 'running';
   const animationClass = toast.dismissing ? 'toast-exit' : 'toast-enter';
 
@@ -276,12 +251,6 @@ function ToastCard({ toast, onDismiss }: ToastCardProps) {
   );
 }
 
-// ---------------------------------------------------------------------------
-// Context
-// ---------------------------------------------------------------------------
-
-const ToastContext = createContext<ToastContextValue | null>(null);
-
 let nextId = 0;
 
 // ---------------------------------------------------------------------------
@@ -403,16 +372,4 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       </div>
     </ToastContext.Provider>
   );
-}
-
-// ---------------------------------------------------------------------------
-// Hook
-// ---------------------------------------------------------------------------
-
-export function useToast(): ToastContextValue {
-  const ctx = useContext(ToastContext);
-  if (!ctx) {
-    throw new Error('useToast must be used within a ToastProvider');
-  }
-  return ctx;
 }

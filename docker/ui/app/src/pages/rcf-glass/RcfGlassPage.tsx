@@ -21,7 +21,7 @@
  */
 
 import { useState } from 'react';
-import { useAuth } from '../../contexts/AuthContext';
+import { useAuth } from '../../contexts/useAuth';
 import { AdminCustomerSelector } from '../../components/AdminCustomerSelector';
 import { GLASS } from '../../components/glass/glass';
 import { useRcfGlassData } from './hooks';

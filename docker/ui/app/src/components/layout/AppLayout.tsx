@@ -2,6 +2,7 @@ import { Outlet, useLocation } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { SoftphoneWidget } from '../softphone/SoftphoneWidget';
 import { GlassBackground } from '../glass/GlassBackground';
+import { RouteErrorBoundary } from '../errors/RouteErrorBoundary';
 
 /**
  * App-wide SPACING STANDARD — the single source of truth for the content
@@ -9,13 +10,19 @@ import { GlassBackground } from '../glass/GlassBackground';
  * centered column, so pages must NOT add their own top margin/padding (the
  * top offset is owned here). See docs/FRONTEND_GLASS_REFACTOR.md §7.
  *
- *  - PAGE_PADDING_X      left/right gutter — fluid, never cramped, never sprawling
- *  - PAGE_PADDING_TOP    comfortable top offset so content is not glued to the edge
- *  - PAGE_PADDING_BOTTOM generous tail so the last row clears the softphone widget
+ * All three gutters are FLUID (clamp) so horizontal and vertical breathing room
+ * scale together — never cramped on a laptop, never sprawling on a wide monitor.
+ *
+ *  - PAGE_PADDING_X      left/right gutter — 24px → 48px
+ *  - PAGE_PADDING_TOP    comfortable top offset so content is not glued to the
+ *                        edge — 32px → 48px (min 32px guarantees the offset even
+ *                        on short viewports)
+ *  - PAGE_PADDING_BOTTOM generous tail so the last row clears the softphone
+ *                        widget — 64px → 96px
  */
 const PAGE_PADDING_X = 'clamp(24px, 3vw, 48px)';
-const PAGE_PADDING_TOP = 40;
-const PAGE_PADDING_BOTTOM = 80;
+const PAGE_PADDING_TOP = 'clamp(32px, 4vh, 48px)';
+const PAGE_PADDING_BOTTOM = 'clamp(64px, 8vh, 96px)';
 
 export function AppLayout() {
   // The public landing page (index route) is a marketing surface and breathes
@@ -33,11 +40,14 @@ export function AppLayout() {
       */}
       <GlassBackground />
       <Sidebar />
-      {/* Main content — offset by fixed sidebar width on md+. position:relative +
-          zIndex:1 lifts the whole content column above the GlassBackground. */}
+      {/* Main content — offset by the fixed 240px sidebar ONLY at md+ via the
+          responsive class (`md:ml-60` = 240px): below md the Sidebar is
+          off-canvas behind the hamburger topbar, so an inline marginLeft would
+          leave a 240px dead gutter on phones/tablets (2026-07 audit P0).
+          position:relative + zIndex:1 lifts the content above GlassBackground. */}
       <main
-        className="min-h-screen flex flex-col"
-        style={{ marginLeft: 240, position: 'relative', zIndex: 1 }}
+        className="min-h-screen flex flex-col md:ml-60"
+        style={{ position: 'relative', zIndex: 1 }}
       >
         {/* Inner wrapper: fills main, centers content within the content column,
             and owns the app-wide spacing standard (top offset + gutters + tail).
@@ -55,7 +65,12 @@ export function AppLayout() {
             paddingBottom: PAGE_PADDING_BOTTOM,
           }}
         >
-          <Outlet />
+          {/* Per-route error boundary: a crash in ONE page renders an in-place
+              recoverable fallback while the sidebar + softphone (and an active
+              call) keep working. Auto-resets on navigation. */}
+          <RouteErrorBoundary>
+            <Outlet />
+          </RouteErrorBoundary>
         </div>
       </main>
 

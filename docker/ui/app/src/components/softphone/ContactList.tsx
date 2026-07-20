@@ -1,10 +1,10 @@
 import { useEffect, useState, useCallback } from 'react';
 import { Phone } from 'lucide-react';
 import { getDirectory } from '../../api/extensions';
-import { useSoftphone } from '../../contexts/SoftphoneContext';
+import { useSoftphone } from '../../contexts/useSoftphone';
 import { PresenceIndicator } from './PresenceIndicator';
 import type { Extension } from '../../types/softphone';
-import { useAuth } from '../../contexts/AuthContext';
+import { useAuth } from '../../contexts/useAuth';
 
 const IconSearch = () => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} style={{ width: 14, height: 14 }}>

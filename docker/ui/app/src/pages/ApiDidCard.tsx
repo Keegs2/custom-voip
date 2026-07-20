@@ -1,11 +1,24 @@
+/**
+ * ApiDidCard — one API DID rendered as a frosted, lift-on-hover glass card with
+ * inline Voice URL + Status Callback editors (each tracks its own dirty / saved
+ * flash state and saves independently via PATCH /api-dids/:id).
+ *
+ * Self-contained on the canonical glass kit (GlassCard / GlassChip / GLASS).
+ *
+ * React #310: all hooks sit unconditionally at the top of each component.
+ */
+
 import { useState, useCallback } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import type { ApiDid, ApiDidUpdate } from '../types/apiDid';
 import { apiRequest } from '../api/client';
-import { Badge } from '../components/ui/Badge';
+import { GlassCard, GlassChip } from '../components/glass/GlassCard';
+import { GLASS, hexToRgba } from '../components/glass/glass';
 import { Button } from '../components/ui/Button';
 import { useToast } from '../components/ui/Toast';
 import { fmt } from '../utils/format';
+
+const MONO = 'ui-monospace, SFMono-Regular, Menlo, monospace';
 
 interface ApiDidCardProps {
   did: ApiDid;
@@ -25,65 +38,37 @@ export function ApiDidCard({ did }: ApiDidCardProps) {
   const queryClient = useQueryClient();
   const { toastOk, toastErr } = useToast();
 
-  const [voiceField, setVoiceField] = useState<FieldState>({
-    value: did.voice_url,
-    savedFlash: false,
-  });
-
-  const [callbackField, setCallbackField] = useState<FieldState>({
-    value: did.status_callback ?? '',
-    savedFlash: false,
-  });
+  const [voiceField, setVoiceField] = useState<FieldState>({ value: did.voice_url, savedFlash: false });
+  const [callbackField, setCallbackField] = useState<FieldState>({ value: did.status_callback ?? '', savedFlash: false });
 
   const voiceIsDirty = voiceField.value !== did.voice_url;
   const callbackIsDirty = callbackField.value !== (did.status_callback ?? '');
 
-  // --- Voice URL mutation ---
   const voiceMutation = useMutation({
-    mutationFn: (value: string) =>
-      updateApiDid(did.id, { voice_url: value }),
-
+    mutationFn: (value: string) => updateApiDid(did.id, { voice_url: value }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['api-dids'] });
       setVoiceField((prev) => ({ ...prev, savedFlash: true }));
-      setTimeout(
-        () => setVoiceField((prev) => ({ ...prev, savedFlash: false })),
-        1800,
-      );
+      setTimeout(() => setVoiceField((prev) => ({ ...prev, savedFlash: false })), 1800);
       toastOk('Voice URL saved');
     },
-
-    onError: (error: Error) => {
-      toastErr(error.message ?? 'Failed to save voice URL');
-    },
+    onError: (error: Error) => toastErr(error.message ?? 'Failed to save voice URL'),
   });
 
-  // --- Status callback mutation ---
   const callbackMutation = useMutation({
-    mutationFn: (value: string) =>
-      updateApiDid(did.id, { status_callback: value.trim() || null }),
-
+    mutationFn: (value: string) => updateApiDid(did.id, { status_callback: value.trim() || null }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['api-dids'] });
       setCallbackField((prev) => ({ ...prev, savedFlash: true }));
-      setTimeout(
-        () => setCallbackField((prev) => ({ ...prev, savedFlash: false })),
-        1800,
-      );
+      setTimeout(() => setCallbackField((prev) => ({ ...prev, savedFlash: false })), 1800);
       toastOk('Status callback URL saved');
     },
-
-    onError: (error: Error) => {
-      toastErr(error.message ?? 'Failed to save status callback');
-    },
+    onError: (error: Error) => toastErr(error.message ?? 'Failed to save status callback'),
   });
 
   const handleVoiceSave = useCallback(() => {
     const trimmed = voiceField.value.trim();
-    if (!trimmed) {
-      toastErr('Voice URL cannot be empty');
-      return;
-    }
+    if (!trimmed) { toastErr('Voice URL cannot be empty'); return; }
     voiceMutation.mutate(trimmed);
   }, [voiceField.value, voiceMutation, toastErr]);
 
@@ -91,114 +76,69 @@ export function ApiDidCard({ did }: ApiDidCardProps) {
     callbackMutation.mutate(callbackField.value.trim());
   }, [callbackField.value, callbackMutation]);
 
-  const accent = '#a855f7';
+  const accent = did.enabled ? GLASS.accent : GLASS.textFaint;
 
   return (
-    <div
-      style={{
-        background: 'linear-gradient(135deg, rgba(30,33,48,0.9) 0%, rgba(19,21,29,0.95) 100%)',
-        border: '1px solid rgba(42,47,69,0.6)',
-        borderRadius: 16,
-        padding: '24px',
-        boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
-        transition: 'border-color 0.3s, box-shadow 0.3s',
-        position: 'relative',
-        overflow: 'hidden',
-      }}
-    >
-      {/* Top accent line */}
-      <div
-        style={{
-          position: 'absolute',
-          top: 0,
-          left: 32,
-          right: 32,
-          height: 2,
-          background: `linear-gradient(90deg, transparent, ${accent}80, transparent)`,
-          opacity: 0.35,
-        }}
-      />
-
-      {/* Header: DID + status badge */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'flex-start',
-          justifyContent: 'space-between',
-          gap: 12,
-          marginBottom: 20,
-        }}
-      >
-        <div style={{ minWidth: 0 }}>
-          <div
-            style={{
-              fontSize: '1.2rem',
-              fontWeight: 700,
-              color: '#e2e8f0',
-              lineHeight: 1.3,
-              whiteSpace: 'nowrap',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              letterSpacing: '-0.01em',
-            }}
-          >
-            {fmt(did.did)}
+    <GlassCard accent={accent}>
+      <div style={{ padding: '22px 24px' }}>
+        {/* Header: DID + status badge */}
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 20 }}>
+          <div style={{ minWidth: 0 }}>
+            <div
+              style={{
+                fontSize: '1.2rem',
+                fontWeight: 800,
+                fontFamily: MONO,
+                color: GLASS.text,
+                lineHeight: 1.3,
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                letterSpacing: '0.01em',
+                textShadow: '0 1px 12px rgba(0,0,0,0.5)',
+              }}
+            >
+              {fmt(did.did)}
+            </div>
+            <div style={{ fontSize: '0.72rem', fontFamily: MONO, color: GLASS.textMuted, marginTop: 3 }}>
+              {did.did}
+            </div>
           </div>
-          <div
-            style={{
-              fontSize: '0.72rem',
-              fontFamily: 'monospace',
-              color: '#718096',
-              marginTop: 3,
-            }}
-          >
-            {did.did}
-          </div>
+          <GlassChip label={did.enabled ? 'Active' : 'Disabled'} color={did.enabled ? GLASS.accent : GLASS.danger} dot />
         </div>
-        <div style={{ flexShrink: 0, marginTop: 2 }}>
-          <Badge variant={did.enabled ? 'active' : 'disabled'}>
-            {did.enabled ? 'Active' : 'Disabled'}
-          </Badge>
-        </div>
-      </div>
 
-      {/* Voice URL field */}
-      <UrlField
-        id={`apidid-voice-${did.id}`}
-        label="Voice URL"
-        value={voiceField.value}
-        placeholder="https://your-app.com/voice"
-        isDirty={voiceIsDirty}
-        savedFlash={voiceField.savedFlash}
-        isSaving={voiceMutation.isPending}
-        onChange={(v) => setVoiceField((prev) => ({ ...prev, value: v }))}
-        onSave={handleVoiceSave}
-        note="Called when a call arrives on this number"
-      />
-
-      {/* Status Callback URL field */}
-      <div
-        style={{
-          marginTop: 16,
-          paddingTop: 16,
-          borderTop: '1px solid rgba(42,47,69,0.5)',
-        }}
-      >
+        {/* Voice URL field */}
         <UrlField
-          id={`apidid-cb-${did.id}`}
-          label="Status Callback URL"
-          labelSuffix="optional"
-          value={callbackField.value}
-          placeholder="https://your-app.com/status"
-          isDirty={callbackIsDirty}
-          savedFlash={callbackField.savedFlash}
-          isSaving={callbackMutation.isPending}
-          onChange={(v) => setCallbackField((prev) => ({ ...prev, value: v }))}
-          onSave={handleCallbackSave}
-          note="Receives call lifecycle events (answered, completed, etc.)"
+          id={`apidid-voice-${did.id}`}
+          label="Voice URL"
+          value={voiceField.value}
+          placeholder="https://your-app.com/voice"
+          isDirty={voiceIsDirty}
+          savedFlash={voiceField.savedFlash}
+          isSaving={voiceMutation.isPending}
+          onChange={(v) => setVoiceField((prev) => ({ ...prev, value: v }))}
+          onSave={handleVoiceSave}
+          note="Called when a call arrives on this number"
         />
+
+        {/* Status Callback URL field */}
+        <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+          <UrlField
+            id={`apidid-cb-${did.id}`}
+            label="Status Callback URL"
+            labelSuffix="optional"
+            value={callbackField.value}
+            placeholder="https://your-app.com/status"
+            isDirty={callbackIsDirty}
+            savedFlash={callbackField.savedFlash}
+            isSaving={callbackMutation.isPending}
+            onChange={(v) => setCallbackField((prev) => ({ ...prev, value: v }))}
+            onSave={handleCallbackSave}
+            note="Receives call lifecycle events (answered, completed, etc.)"
+          />
+        </div>
       </div>
-    </div>
+    </GlassCard>
   );
 }
 
@@ -216,22 +156,21 @@ interface UrlFieldProps {
   note: string;
 }
 
-function UrlField({
-  id,
-  label,
-  labelSuffix,
-  value,
-  placeholder,
-  isDirty,
-  savedFlash,
-  isSaving,
-  onChange,
-  onSave,
-  note,
-}: UrlFieldProps) {
+function UrlField({ id, label, labelSuffix, value, placeholder, isDirty, savedFlash, isSaving, onChange, onSave, note }: UrlFieldProps) {
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') onSave();
   };
+
+  const border = savedFlash
+    ? hexToRgba(GLASS.success, 0.6)
+    : isDirty
+      ? hexToRgba(GLASS.accent, 0.55)
+      : 'rgba(255,255,255,0.12)';
+  const ring = savedFlash
+    ? `0 0 0 3px ${hexToRgba(GLASS.success, 0.2)}`
+    : isDirty
+      ? `0 0 0 3px ${hexToRgba(GLASS.accent, 0.18)}`
+      : 'inset 0 1px 0 rgba(255,255,255,0.04)';
 
   return (
     <div>
@@ -241,7 +180,7 @@ function UrlField({
           display: 'block',
           fontSize: '0.7rem',
           fontWeight: 700,
-          color: '#718096',
+          color: GLASS.textMuted,
           textTransform: 'uppercase',
           letterSpacing: '0.07em',
           marginBottom: 8,
@@ -252,7 +191,7 @@ function UrlField({
           <span
             style={{
               marginLeft: 6,
-              color: 'rgba(113,128,150,0.7)',
+              color: hexToRgba(GLASS.textMuted, 0.7),
               fontWeight: 400,
               textTransform: 'none',
               letterSpacing: 'normal',
@@ -276,50 +215,28 @@ function UrlField({
           style={{
             flex: 1,
             minWidth: 0,
-            fontSize: '0.88rem',
+            fontSize: '0.85rem',
+            fontFamily: MONO,
             padding: '8px 12px',
-            borderRadius: 8,
-            border: `1px solid ${
-              savedFlash
-                ? '#22c55e'
-                : isDirty
-                ? '#3b82f6'
-                : 'rgba(42,47,69,0.8)'
-            }`,
-            background: 'rgba(19,21,29,0.8)',
-            color: '#e2e8f0',
+            borderRadius: 10,
+            border: `1px solid ${border}`,
+            background: 'rgba(8,10,15,0.5)',
+            color: GLASS.text,
             outline: 'none',
             transition: 'border-color 0.15s, box-shadow 0.15s',
-            boxShadow: savedFlash
-              ? '0 0 0 3px rgba(34,197,94,0.2)'
-              : isDirty
-              ? '0 0 0 3px rgba(59,130,246,0.2)'
-              : 'none',
+            boxShadow: ring,
+            backdropFilter: 'blur(8px)',
+            WebkitBackdropFilter: 'blur(8px)',
             opacity: isSaving ? 0.5 : 1,
           }}
         />
 
-        <Button
-          variant="success"
-          size="sm"
-          disabled={!isDirty || isSaving}
-          loading={isSaving}
-          onClick={onSave}
-        >
+        <Button variant="success" size="sm" disabled={!isDirty || isSaving} loading={isSaving} onClick={onSave}>
           Save
         </Button>
       </div>
 
-      <div
-        style={{
-          marginTop: 8,
-          display: 'flex',
-          alignItems: 'center',
-          gap: 6,
-          fontSize: '0.72rem',
-          color: '#718096',
-        }}
-      >
+      <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.72rem', color: GLASS.textMuted }}>
         <span
           style={{
             display: 'inline-flex',
@@ -328,7 +245,7 @@ function UrlField({
             width: 14,
             height: 14,
             borderRadius: '50%',
-            border: '1px solid rgba(113,128,150,0.5)',
+            border: '1px solid rgba(148,163,184,0.5)',
             fontSize: '0.55rem',
             fontWeight: 700,
             flexShrink: 0,

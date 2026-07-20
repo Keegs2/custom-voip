@@ -1,7 +1,5 @@
 import {
-  createContext,
   useCallback,
-  useContext,
   useEffect,
   useRef,
   useState,
@@ -15,27 +13,10 @@ import {
   getUnreadCount,
 } from '../api/chat';
 import type { ChatEvent, Conversation, Message } from '../types/chat';
-import { useAuth } from './AuthContext';
-
-/* ─── Context shape ──────────────────────────────────────── */
-
-interface ChatContextValue {
-  /** All conversations for this user, sorted newest-first */
-  conversations: Conversation[];
-  /** Total unread count across all conversations — for sidebar badge */
-  totalUnread: number;
-  /** Map of conversationId -> Set of userIds currently typing */
-  typingUsers: Map<number, Set<number>>;
-  /** Whether the initial conversation list is loading */
-  isLoading: boolean;
-
-  sendMessage: (conversationId: number, content: string) => Promise<Message>;
-  markRead: (conversationId: number) => Promise<void>;
-  sendTyping: (conversationId: number) => void;
-  refreshConversations: () => void;
-}
-
-const ChatContext = createContext<ChatContextValue | null>(null);
+import { useAuth } from './useAuth';
+// Context object + ChatContextValue + useChat live in ./useChat so this file
+// exports only a component (react-refresh/only-export-components).
+import { ChatContext, type ChatContextValue } from './useChat';
 
 /* ─── Helpers ────────────────────────────────────────────── */
 
@@ -250,7 +231,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       // onclose fires immediately after — let it handle the reconnect
       ws.close();
     };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
 
   /* ─── Main effect — init on auth ────────────────────────── */
 
@@ -258,6 +239,9 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     if (!isAuthenticated) return;
 
     mountedRef.current = true;
+    // Snapshot the timer map for the cleanup below — the ref's `.current`
+    // could point elsewhere by the time cleanup runs (react-hooks/exhaustive-deps).
+    const typingClearTimers = typingClearTimersRef.current;
     void loadConversations();
     connectWs();
 
@@ -270,8 +254,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       }
 
       // Clear all typing timers
-      typingClearTimersRef.current.forEach((t) => clearTimeout(t));
-      typingClearTimersRef.current.clear();
+      typingClearTimers.forEach((t) => clearTimeout(t));
+      typingClearTimers.clear();
 
       wsRef.current?.close();
       wsRef.current = null;
@@ -366,14 +350,4 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       {children}
     </ChatContext.Provider>
   );
-}
-
-/* ─── Hook ───────────────────────────────────────────────── */
-
-export function useChat(): ChatContextValue {
-  const ctx = useContext(ChatContext);
-  if (!ctx) {
-    throw new Error('useChat must be used within a ChatProvider');
-  }
-  return ctx;
 }

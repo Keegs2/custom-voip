@@ -1,199 +1,96 @@
-import { useQuery } from '@tanstack/react-query';
-import { listTrunkTiers, listApiTiers } from '../../api/tiers';
-import { listCallPaths } from '../../api/trunks';
-import { Spinner } from '../../components/ui/Spinner';
-import { Badge } from '../../components/ui/Badge';
-import { TableWrap, Table, Thead, Th, Td } from '../../components/ui/Table';
-import { TierCard } from './TierCard';
+/**
+ * TiersTab — THIN composition page for the Tiers admin area. Trunk tiers, API
+ * tiers, and call-path packages, each in a frosted <SectionPanel>. Data comes
+ * from the feature hooks; presentational pieces live in
+ * pages/admin/billing/tiers/.
+ *
+ * React #310: all hooks sit at the top of useTiersData, before any return.
+ */
 
-interface SectionCardProps {
-  title: string;
-  description: string;
-  badge?: React.ReactNode;
-  children: React.ReactNode;
-}
+import { GlassChip } from '../../components/glass/GlassCard';
+import { GLASS } from '../../components/glass/glass';
+import { useTiersData } from './billing/tiers/hooks';
+import { SectionPanel } from './billing/components/SectionPanel';
+import { InlineLoading, ErrorState, EmptyState } from './billing/components/states';
+import { TierCard } from './billing/tiers/components/TierCard';
+import { CallPathsTable } from './billing/tiers/components/CallPathsTable';
 
-function SectionCard({ title, description, badge, children }: SectionCardProps) {
-  return (
-    <div
-      style={{
-        background: 'linear-gradient(135deg, rgba(30,33,48,0.9) 0%, rgba(19,21,29,0.95) 100%)',
-        border: '1px solid rgba(42,47,69,0.6)',
-        borderRadius: 16,
-        padding: '24px',
-        boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
-      }}
-    >
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'flex-start',
-          justifyContent: 'space-between',
-          gap: 12,
-          marginBottom: 24,
-          flexWrap: 'wrap',
-        }}
-      >
-        <div>
-          <h2
-            style={{
-              fontSize: '1rem',
-              fontWeight: 700,
-              color: '#e2e8f0',
-              margin: 0,
-              letterSpacing: '-0.01em',
-            }}
-          >
-            {title}
-          </h2>
-          <p style={{ fontSize: '0.875rem', color: '#718096', marginTop: 4, lineHeight: 1.5 }}>
-            {description}
-          </p>
-        </div>
-        {badge && <div style={{ flexShrink: 0 }}>{badge}</div>}
-      </div>
-      {children}
-    </div>
-  );
-}
+const CARD_GRID: React.CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
+  gap: 16,
+};
 
 export function TiersTab() {
-  const { data: trunkTiers, isLoading: trunkLoading, isError: trunkError } = useQuery({
-    queryKey: ['tiers', 'trunk'],
-    queryFn: listTrunkTiers,
-  });
-
-  const { data: apiTiers, isLoading: apiLoading, isError: apiError } = useQuery({
-    queryKey: ['tiers', 'api'],
-    queryFn: listApiTiers,
-  });
-
-  const { data: callPaths, isLoading: callPathsLoading, isError: callPathsError } = useQuery({
-    queryKey: ['trunks', 'call-paths'],
-    queryFn: listCallPaths,
-  });
+  const { trunkTiers, apiTiers, callPaths } = useTiersData();
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 32 }}>
       {/* Trunk Tiers */}
-      <SectionCard
+      <SectionPanel
+        eyebrow="SIP Trunking"
         title="SIP Trunk Tiers"
         description="Standard SIP trunk access. CPS and call paths are configured independently."
-        badge={<Badge variant="warn">5 CPS Standard</Badge>}
+        accent={GLASS.warning}
+        badge={<GlassChip label="5 CPS Standard" color={GLASS.warning} dot />}
       >
-        {trunkLoading && (
-          <div className="flex items-center gap-2.5 text-[#718096] py-6">
-            <Spinner /> Loading tiers…
-          </div>
+        {trunkTiers.isLoading && <InlineLoading label="Loading tiers…" />}
+        {trunkTiers.isError && <ErrorState message="Failed to load trunk tiers." />}
+        {!trunkTiers.isLoading && !trunkTiers.isError && (
+          (trunkTiers.data?.length ?? 0) === 0 ? (
+            <EmptyState title="No trunk tiers configured." />
+          ) : trunkTiers.data!.length === 1 ? (
+            <div style={CARD_GRID}>
+              <TierCard tier={trunkTiers.data![0]} tierType="trunk" fullWidth />
+            </div>
+          ) : (
+            <div style={CARD_GRID}>
+              {trunkTiers.data!.map((t, i) => (
+                <TierCard key={t.id} tier={t} tierType="trunk" index={i} />
+              ))}
+            </div>
+          )
         )}
-        {trunkError && (
-          <p className="text-red-400 text-sm py-4">Failed to load trunk tiers.</p>
-        )}
-        {!trunkLoading && !trunkError && (
-          <>
-            {(trunkTiers?.length ?? 0) === 0 ? (
-              <p className="text-[#718096] text-sm py-4">No trunk tiers configured.</p>
-            ) : trunkTiers!.length === 1 ? (
-              <div className="grid grid-cols-1">
-                <TierCard tier={trunkTiers![0]} tierType="trunk" fullWidth />
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                {trunkTiers!.map((t) => (
-                  <TierCard key={t.id} tier={t} tierType="trunk" />
-                ))}
-              </div>
-            )}
-          </>
-        )}
-      </SectionCard>
+      </SectionPanel>
 
       {/* API Calling Tiers */}
-      <SectionCard
+      <SectionPanel
+        eyebrow="API Calling"
         title="API Calling Tiers"
         description="Higher CPS limits with per-call billing for programmatic call control."
-        badge={<Badge variant="active">Up to 15 CPS</Badge>}
+        badge={<GlassChip label="Up to 15 CPS" color={GLASS.accent} dot />}
       >
-        {apiLoading && (
-          <div className="flex items-center gap-2.5 text-[#718096] py-6">
-            <Spinner /> Loading tiers…
-          </div>
+        {apiTiers.isLoading && <InlineLoading label="Loading tiers…" />}
+        {apiTiers.isError && <ErrorState message="Failed to load API tiers." />}
+        {!apiTiers.isLoading && !apiTiers.isError && (
+          (apiTiers.data?.length ?? 0) === 0 ? (
+            <EmptyState title="No API tiers configured." />
+          ) : (
+            <div style={CARD_GRID}>
+              {apiTiers.data!.map((t, i) => (
+                <TierCard key={t.id} tier={t} tierType="api" index={i} />
+              ))}
+            </div>
+          )
         )}
-        {apiError && (
-          <p className="text-red-400 text-sm py-4">Failed to load API tiers.</p>
-        )}
-        {!apiLoading && !apiError && (
-          <>
-            {(apiTiers?.length ?? 0) === 0 ? (
-              <p className="text-[#718096] text-sm py-4">No API tiers configured.</p>
-            ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                {apiTiers!.map((t) => (
-                  <TierCard key={t.id} tier={t} tierType="api" />
-                ))}
-              </div>
-            )}
-          </>
-        )}
-      </SectionCard>
+      </SectionPanel>
 
       {/* Call Path Packages */}
-      <SectionCard
+      <SectionPanel
+        eyebrow="Capacity"
         title="Call Path Packages"
         description="Call paths are purchased per-trunk and control concurrent call capacity. CPS and call paths are independent."
       >
-        {callPathsLoading && (
-          <div className="flex items-center gap-2.5 text-[#718096] py-6">
-            <Spinner /> Loading packages…
-          </div>
+        {callPaths.isLoading && <InlineLoading label="Loading packages…" />}
+        {callPaths.isError && <ErrorState message="Failed to load call path packages." />}
+        {!callPaths.isLoading && !callPaths.isError && (
+          (callPaths.data?.length ?? 0) === 0 ? (
+            <EmptyState title="No call path packages configured." />
+          ) : (
+            <CallPathsTable packages={callPaths.data!} />
+          )
         )}
-        {callPathsError && (
-          <p className="text-red-400 text-sm py-4">Failed to load call path packages.</p>
-        )}
-        {!callPathsLoading && !callPathsError && (
-          <>
-            {(callPaths?.length ?? 0) === 0 ? (
-              <p className="text-[#718096] text-sm py-4">No call path packages configured.</p>
-            ) : (
-              <TableWrap>
-                <Table>
-                  <Thead>
-                    <tr>
-                      <Th>Package</Th>
-                      <Th>Call Paths</Th>
-                      <Th>Monthly Fee</Th>
-                    </tr>
-                  </Thead>
-                  <tbody>
-                    {callPaths!.map((p) => (
-                      <tr key={p.id} className="hover:bg-white/[0.02] transition-colors">
-                        <Td>
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                            <span className="font-semibold text-[#e2e8f0]">
-                              {p.name || '--'}
-                            </span>
-                            {p.description && (
-                              <span className="text-[#718096] text-xs">
-                                {p.description}
-                              </span>
-                            )}
-                          </div>
-                        </Td>
-                        <Td className="tabular-nums">{p.call_paths ?? p.paths ?? '--'}</Td>
-                        <Td className="tabular-nums">
-                          {p.monthly_fee != null
-                            ? `$${Number(p.monthly_fee).toFixed(2)}/mo`
-                            : '--'}
-                        </Td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </Table>
-              </TableWrap>
-            )}
-          </>
-        )}
-      </SectionCard>
+      </SectionPanel>
     </div>
   );
 }

@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useRef } from 'react';
+import { GLASS, hexToRgba } from '../../../components/glass/glass';
 import { useVoicemailPlayer } from './useVoicemailPlayer';
 
 /* ─── Icons ───────────────────────────────────────────────── */
@@ -25,7 +26,7 @@ const IconPause = () => (
 
 /* ─── Helpers ─────────────────────────────────────────────── */
 
-const ACCENT = '#818cf8';
+const ACCENT = GLASS.accent;
 const BAR_COUNT = 56;
 const SPEEDS = [1, 1.5, 2] as const;
 
@@ -121,9 +122,13 @@ export function VoicemailPlayer({ messageId, durationMs, peaks, onFirstPlay }: V
         flexDirection: 'column',
         gap: 10,
         padding: 16,
-        borderRadius: 14,
-        background: 'rgba(15,17,23,0.6)',
-        border: `1px solid ${ACCENT}22`,
+        borderRadius: 16,
+        background:
+          'linear-gradient(160deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0.015) 100%)',
+        border: `1px solid ${hexToRgba(ACCENT, 0.22)}`,
+        backdropFilter: 'blur(16px) saturate(150%)',
+        WebkitBackdropFilter: 'blur(16px) saturate(150%)',
+        boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.08), 0 14px 40px -18px rgba(0,0,0,0.6)',
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
@@ -144,8 +149,8 @@ export function VoicemailPlayer({ messageId, durationMs, peaks, onFirstPlay }: V
             border: 'none',
             cursor: player.isLoading ? 'wait' : 'pointer',
             color: '#fff',
-            background: `linear-gradient(135deg, ${ACCENT} 0%, #6366f1 100%)`,
-            boxShadow: `0 4px 16px ${ACCENT}55`,
+            background: `linear-gradient(135deg, ${ACCENT} 0%, ${hexToRgba(ACCENT, 0.72)} 100%)`,
+            boxShadow: `0 4px 16px ${hexToRgba(ACCENT, 0.5)}`,
             transition: 'transform 0.1s',
           }}
           onMouseDown={(e) => { e.currentTarget.style.transform = 'scale(0.93)'; }}
@@ -159,7 +164,7 @@ export function VoicemailPlayer({ messageId, durationMs, peaks, onFirstPlay }: V
                 border: '2px solid rgba(255,255,255,0.4)',
                 borderTopColor: '#fff',
                 borderRadius: '50%',
-                animation: 'spin 0.8s linear infinite',
+                animation: 'glass-spin 0.8s linear infinite',
               }}
             />
           ) : player.isPlaying ? (

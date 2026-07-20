@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { searchCdrs } from '../../api/cdrs';
-import { useSoftphone } from '../../contexts/SoftphoneContext';
+import { useSoftphone } from '../../contexts/useSoftphone';
 import type { Cdr } from '../../types/cdr';
 
 const IconInbound = () => (
@@ -51,8 +51,8 @@ export function CallHistory() {
 
   useEffect(() => {
     let cancelled = false;
-    setIsLoading(true);
-
+    // isLoading already starts true (useState initial) — no synchronous
+    // setState in the effect body (react-hooks/set-state-in-effect).
     searchCdrs({ limit: 50, sort_by: 'start_time', sort_dir: 'desc' })
       .then((result) => {
         if (!cancelled) setCdrs(result.items);

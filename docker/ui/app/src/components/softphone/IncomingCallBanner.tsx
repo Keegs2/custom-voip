@@ -1,5 +1,5 @@
 import { createPortal } from 'react-dom';
-import { useSoftphone } from '../../contexts/SoftphoneContext';
+import { useSoftphone } from '../../contexts/useSoftphone';
 
 /* ─── Caller avatar with initials ────────────────────────────── */
 
