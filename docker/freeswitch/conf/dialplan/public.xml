@@ -37,6 +37,37 @@
     <!-- layer, not the dialplan.                       -->
     <!-- ============================================ -->
 
+    <!-- ============================================================= -->
+    <!-- EMERGENCY 911 / 933  (LIFE SAFETY — MUST BE FIRST)            -->
+    <!-- ============================================================= -->
+    <!--
+      MUST be the FIRST matchable extension in the `default` context. It is
+      placed ABOVE `local_extension` (the 2-6 digit matcher) because a 3-digit
+      "911"/"933" would otherwise be treated as an extension dial, fail, and drop
+      to voicemail — 911 would NEVER reach a PSAP for a registered softphone.
+
+      Carrier-grade routing, dispatchable location (RAY BAUM's Act), the Kari's
+      Law notification, and the 933 SHAKEN/E911 test echo are all handled in
+      scripts/emergency.lua. Keep this block first — do not move it below any
+      digit-matching extension.
+    -->
+    <extension name="emergency_911">
+      <condition field="destination_number" expression="^(911|933)$">
+        <action application="log" data="CRIT EMERGENCY dial (default ctx): $1 from ${caller_id_number} (${sip_from_uri})"/>
+        <action application="set" data="is_emergency=true"/>
+        <action application="set" data="emergency_number=$1"/>
+        <action application="set" data="call_start_time=${strftime(%Y-%m-%d %H:%M:%S)}"/>
+        <action application="lua" data="emergency.lua"/>
+        <!-- Failsafe: emergency.lua always terminates the call. If it ever
+             returns (e.g. failed to load) give an audible failure + hang up so
+             the call never silently dies. -->
+        <action application="log" data="CRIT EMERGENCY handler returned without completing for $1"/>
+        <action application="answer"/>
+        <action application="playback" data="tone_stream://%(400,200,440,620);loops=5"/>
+        <action application="hangup" data="NETWORK_OUT_OF_ORDER"/>
+      </condition>
+    </extension>
+
     <!-- ============================================ -->
     <!-- MULTI-TENANT LOCAL EXTENSION DIALING         -->
     <!-- ============================================ -->
@@ -317,6 +348,39 @@
   <!-- ============================================ -->
   <context name="public">
 
+    <!-- ============================================================= -->
+    <!-- EMERGENCY 911 / 933  (LIFE SAFETY — MUST BE FIRST)            -->
+    <!-- ============================================================= -->
+    <!--
+      MUST be the FIRST matchable extension in the `public` context. Trunk
+      customers (authenticated by Kamailio, X-Trunk-ID present) and any other
+      carrier/internal traffic enter here; a 3-digit "911"/"933" would otherwise
+      be swallowed by `local_extension_public` (2-6 digit matcher) or, for trunks,
+      by `trunk_outbound_from_kamailio` (which matches on the X-Trunk-ID header
+      regardless of the dialed digits) and be routed as a normal call with no
+      location, no callback, and no Kari's Law notification. Placing 911/933 first
+      guarantees emergency handling wins.
+
+      The former `emergency_911` extension at the BOTTOM of this context was DEAD
+      code — it sat below local_extension_public and never matched. It has been
+      removed; this is the single, correct emergency entry point (scripts/emergency.lua).
+    -->
+    <extension name="emergency_911">
+      <condition field="destination_number" expression="^(911|933)$">
+        <action application="log" data="CRIT EMERGENCY dial (public ctx): $1 from ${caller_id_number} (${sip_from_uri}) trunk=${sip_h_X-Trunk-ID}"/>
+        <action application="set" data="is_emergency=true"/>
+        <action application="set" data="emergency_number=$1"/>
+        <action application="set" data="call_start_time=${strftime(%Y-%m-%d %H:%M:%S)}"/>
+        <action application="lua" data="emergency.lua"/>
+        <!-- Failsafe: emergency.lua always terminates the call. If it ever
+             returns (e.g. failed to load) give an audible failure + hang up. -->
+        <action application="log" data="CRIT EMERGENCY handler returned without completing for $1"/>
+        <action application="answer"/>
+        <action application="playback" data="tone_stream://%(400,200,440,620);loops=5"/>
+        <action application="hangup" data="NETWORK_OUT_OF_ORDER"/>
+      </condition>
+    </extension>
+
     <!-- ============================================ -->
     <!-- ANTI-FRAUD: Block known attack patterns     -->
     <!-- ============================================ -->
@@ -493,6 +557,77 @@
       </condition>
     </extension>
 
+    <!-- ============================================================= -->
+    <!-- TEAMS -> PSTN OUTBOUND (Microsoft Teams Direct Routing)        -->
+    <!-- ============================================================= -->
+    <!--
+      Fires ONLY when the Teams-enabled Kamailio SBC tagged the call with
+      X-From-Teams: 1 (route[FROM_TEAMS]). DEFAULT-OFF / byte-identical when Teams
+      is not enabled: that header is never present, so this extension never matches
+      and falls through to the normal inbound handler below. A Teams enterprise-
+      voice user dialed the PSTN; bridge the dialed number out to Bandwidth
+      (reusing the carrier egress -> Kamailio route[TO_CARRIER]). FreeSWITCH is the
+      media anchor: it transcodes SRTP (Teams A-leg) <-> RTP (Bandwidth B-leg).
+
+      Placed BEFORE inbound_handler so a Teams-origin PSTN number is treated as an
+      OUTBOUND call, not looked up as an inbound DID.
+
+      MEDIA NOTE (rtp_secure_media): requests SRTP acceptance on the inbound Teams
+      A-leg. For robust production media a DEDICATED SRTP-enabled Teams sofia
+      profile is recommended (see report) — the per-call var is the interim path.
+
+      CALLER-ID / TOLL-FRAUD (backend CONTRACT): the presented number is the Teams
+      user's From (their Teams-assigned DID). The backend MUST validate the Teams
+      user owns that DID before allowing PSTN egress.
+    -->
+    <extension name="teams_outbound">
+      <!-- H-1 DEFENSE-IN-DEPTH: this Teams->PSTN carrier relay is INERT unless
+           Teams Direct Routing is EXPLICITLY enabled. The teams_enabled global is
+           exec-set from TEAMS_DIRECT_ROUTING_ENABLED (default "false") in
+           freeswitch.xml. With Teams OFF (the default), this first guard fails and
+           the extension never matches — the call falls through to inbound_handler
+           — so NO inbound INVITE can reach an outbound carrier bridge through this
+           extension regardless of what headers it carries. This is the belt to the
+           Kamailio inbound X-From-Teams scrub (route[STRIP_CLIENT_HEADERS]): even
+           if a forged X-From-Teams somehow reached FreeSWITCH, this extension stays
+           dead until Teams is turned on. -->
+      <condition field="${teams_enabled}" expression="^true$"/>
+      <condition field="${sip_h_X-From-Teams}" expression="^1$"/>
+      <condition field="destination_number" expression="^\+?1?\d{10,15}$">
+        <action application="log" data="INFO Teams->PSTN: ${caller_id_number} -> ${destination_number}"/>
+        <action application="set" data="direction=outbound"/>
+        <action application="set" data="product_type=teams"/>
+        <action application="set" data="carrier_used=teams_outbound"/>
+        <!-- M-2: mark this leg so the SBC's route[STIR_SIGN] downgrades SHAKEN
+             attestation to B. The From presented is the Teams user's own number,
+             whose Granite ownership is NOT verified at the SBC, so we must not
+             sign it with full attestation (A). -->
+        <action application="set" data="sip_h_X-Teams-Relay=1"/>
+        <action application="set" data="call_start_time=${strftime(%Y-%m-%d %H:%M:%S)}"/>
+        <!-- Accept SRTP on the inbound Teams A-leg; FS transcodes to RTP outbound. -->
+        <action application="set" data="rtp_secure_media=mandatory"/>
+        <action application="set" data="hangup_after_bridge=true"/>
+        <action application="set" data="continue_on_fail=true"/>
+        <!-- Present the Teams user's number to Bandwidth (Kamailio builds PAI from
+             X-Original-CID). Backend validates DID ownership (see contract above). -->
+        <action application="set" data="sip_h_X-Original-CID=${caller_id_number}"/>
+        <action application="export" data="origination_caller_id_number=${caller_id_number}"/>
+        <!-- RFC 4028 session timers on the Bandwidth B-leg. -->
+        <action application="export" data="sip_session_timeout=1800"/>
+        <action application="export" data="sip_minimum_session_expires=90"/>
+        <action application="export" data="enable_timer=true"/>
+        <!-- Primary: Bandwidth via Kamailio route[TO_CARRIER]. -->
+        <action application="set" data="sip_h_X-Carrier=primary"/>
+        <action application="bridge" data="{sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true}sofia/external/${destination_number}@${sbc_proxy_ip}:5060"/>
+        <!-- Failover: secondary carrier. -->
+        <action application="log" data="WARNING Teams->PSTN primary failed (${bridge_hangup_cause}), trying secondary"/>
+        <action application="set" data="sip_h_X-Carrier=secondary"/>
+        <action application="bridge" data="{sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true}sofia/external/${destination_number}@${sbc_proxy_ip}:5060"/>
+        <action application="log" data="ERR Teams->PSTN failed on all carriers: ${caller_id_number} -> ${destination_number}"/>
+        <action application="hangup" data="NORMAL_TEMPORARY_FAILURE"/>
+      </condition>
+    </extension>
+
     <!-- ============================================ -->
     <!-- INBOUND CALLS (Main Lua-based routing)     -->
     <!-- ============================================ -->
@@ -564,36 +699,16 @@
     </extension>
 
     <!-- ============================================ -->
-    <!-- EMERGENCY NUMBERS                          -->
+    <!-- EMERGENCY NUMBERS — moved to TOP of context -->
     <!-- ============================================ -->
     <!--
-      Route emergency calls through appropriate carrier
-      IMPORTANT: Ensure 911 routing is properly configured and tested
+      911/933 are now handled by the `emergency_911` extension at the TOP of this
+      context (scripts/emergency.lua). The former handler here was DEAD code: it
+      sat below `local_extension_public` (the 2-6 digit matcher) so 911/933 never
+      reached it. It also lacked dispatchable location (RAY BAUM's Act), a valid
+      callback DID, and the Kari's Law notification. Do NOT re-add an emergency
+      extension here — keep the single correct entry point at the top.
     -->
-    <extension name="emergency_911">
-      <condition field="destination_number" expression="^(911|933)$">
-        <action application="log" data="CRIT 911 CALL: from ${caller_id_number} (${sip_from_uri})"/>
-
-        <!-- Set emergency call flags -->
-        <action application="set" data="is_emergency=true"/>
-        <action application="set" data="emergency_callback=${caller_id_number}"/>
-
-        <!-- Route to emergency carrier via Kamailio proxy using external profile -->
-        <!-- External profile ensures public IP in Via/Contact/SDP headers -->
-        <!-- X-Carrier header tells Kamailio which Bandwidth IP to use -->
-        <action application="set" data="sip_h_X-Carrier=primary"/>
-        <action application="bridge" data="{sip_enable_soa=false}sofia/external/911@${sbc_proxy_ip}:5060"/>
-
-        <!-- If bridge fails, try secondary carrier -->
-        <action application="set" data="sip_h_X-Carrier=secondary"/>
-        <action application="bridge" data="{sip_enable_soa=false}sofia/external/911@${sbc_proxy_ip}:5060"/>
-
-        <!-- Absolute last resort -->
-        <action application="log" data="CRIT 911 ROUTING FAILED"/>
-        <action application="playback" data="ivr/ivr-call_cannot_be_completed_as_dialed.wav"/>
-        <action application="hangup" data="NETWORK_OUT_OF_ORDER"/>
-      </condition>
-    </extension>
 
     <!-- ============================================ -->
     <!-- CATCHALL - Reject Unknown                  -->

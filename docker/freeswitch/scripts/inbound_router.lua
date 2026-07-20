@@ -116,6 +116,13 @@ local rules = load_module("rules")
 -- the standalone voicemail handler (handlers/voicemail.lua) AND by the rcf/ucaas
 -- no-answer fallback (attached-mailbox encrypted deposit). Passed via ctx.
 local vm_record = load_module("vm_record")
+-- Least-Cost Outbound (LCO) carrier ordering (telephony half). Resolves the
+-- ordered carrier tokens for a destination (explicit X-LCO-Route/lco_route, else
+-- the backend-owned lco_routes DB view) and expands them into the SBC×carrier
+-- attempts array. FAIL-SAFE: returns nil when there is no LCO decision, so
+-- handlers/rcf.lua keeps its exact legacy {primary, secondary} ordering. Passed
+-- via ctx; nil when the module fails to load (handlers then use their default).
+local lco = load_module("lco")
 
 -- Ensure session exists
 if not session then
@@ -159,6 +166,11 @@ end
 local external_sip_ip = os.getenv("EXTERNAL_SIP_IP") or "auto"
 local sbc_proxy_ip = os.getenv("SBC_PROXY_IP") or "127.0.0.1"
 local sbc_proxy_ip_failover = os.getenv("SBC_PROXY_IP_FAILOVER") or sbc_proxy_ip
+
+-- Microsoft Teams Direct Routing gate. DEFAULT-OFF: when unset/false, the Teams
+-- DID lookup is NEVER run (no extra query) and the cascade + dispatch are
+-- byte-identical to today. Must match the SBC's TEAMS_DIRECT_ROUTING_ENABLED.
+local teams_enabled = (os.getenv("TEAMS_DIRECT_ROUTING_ENABLED") == "true")
 
 -- Per-attempt progress timeout in seconds (progress_timeout on each failover
 -- attempt). Fails the attempt only if NO provisional response (180/183)
@@ -240,6 +252,26 @@ local voice_url = nil
 local fallback_url = nil
 local trunk_id = nil
 local pass_caller_id = true
+
+-- Try Microsoft Teams DID lookup (PostgreSQL) — FIRST in the cascade, but ONLY
+-- when Teams Direct Routing is enabled. A Teams-enabled DID routes to Teams
+-- regardless of whether it also has RCF/API/trunk rows. FAIL-SAFE: db returns nil
+-- on a missing teams_dids view or any error, so we fall through to the normal
+-- cascade. When teams_enabled is false this function is never called.
+local function lookup_teams()
+    if not (db and db.lookup_teams_did) then return nil end
+    local t = db.lookup_teams_did(normalized_did)
+    if t then
+        freeswitch.consoleLog("DEBUG", "[" .. uuid .. "] Teams DID hit\n")
+        return {
+            product_type = "teams",
+            customer_id = tonumber(t.customer_id),
+            teams_tenant = t.teams_tenant,
+            traffic_grade = "standard",
+        }
+    end
+    return nil
+end
 
 -- Try RCF lookup (PostgreSQL)
 local function lookup_rcf()
@@ -382,10 +414,17 @@ local function lookup_voicemail()
 end
 
 freeswitch.consoleLog("DEBUG", "[" .. uuid .. "] STEP 1: DID lookup for " .. tostring(normalized_did) .. "\n")
--- Execute lookups in order: RCF -> API -> Trunk -> UCaaS Extension
--- Revenue-generating products (RCF, API, Trunk) take priority over UCaaS
+-- Execute lookups in order: [Teams] -> RCF -> API -> Trunk -> UCaaS Extension
+-- Teams (when enabled) resolves first so a Teams-enabled DID routes to Teams;
+-- revenue-generating products (RCF, API, Trunk) then take priority over UCaaS
 -- extensions; the extension lookup only runs when no earlier lookup matched.
-local routing = lookup_rcf()
+local routing = nil
+if teams_enabled then
+    routing = lookup_teams()
+end
+if not routing then
+    routing = lookup_rcf()
+end
 if not routing then
     routing = lookup_api_did()
 end
@@ -434,6 +473,17 @@ set_var("traffic_grade", traffic_grade)
 if trunk_id then
     set_var("trunk_id", tostring(trunk_id))
 end
+
+-- STIR/SHAKEN inbound verification status. When STIR/SHAKEN is enabled on the
+-- SBC, Kamailio's route[STIR_VERIFY] annotates the inbound INVITE with an
+-- X-STIR-Verstat header (TN-Validation-Passed | TN-Validation-Failed |
+-- No-TN-Validation). FreeSWITCH exposes received headers as $sip_h_<name>, so we
+-- capture it here — alongside the other CDR channel vars — as `stir_verstat` for
+-- the FS->CDR (mod_json_cdr) path. "not-verified" when absent (SHAKEN disabled or
+-- no Identity header on the inbound call). The API/CDR schema can persist this
+-- field later (their lane); we only expose the channel var here.
+local stir_verstat = get_var("sip_h_X-STIR-Verstat", nil)
+set_var("stir_verstat", (stir_verstat and stir_verstat ~= "") and stir_verstat or "not-verified")
 
 -- (Velocity/CPM rate limiting removed with Redis in RCF-V1 — see note at top.
 --  Per-DID concurrent call limits still apply in handlers/rcf.lua via mod_hash.)
@@ -499,11 +549,22 @@ local ctx = {
     schedule = schedule,
     rules = rules,
     vm_record = vm_record,
+    lco = lco,
 }
 
 freeswitch.consoleLog("DEBUG", "[" .. uuid .. "] STEP 2: Dispatching product_type=" .. tostring(product_type) .. "\n")
 
-if product_type == "rcf" then
+if product_type == "teams" then
+    -- Microsoft Teams Direct Routing (PSTN -> Teams) -> handlers/teams.lua
+    local handler = load_handler("teams")
+    if handler then
+        handler(ctx)
+    else
+        freeswitch.consoleLog("ERR", "[" .. uuid .. "] teams handler unavailable — rejecting\n")
+        hangup("NORMAL_TEMPORARY_FAILURE")
+    end
+
+elseif product_type == "rcf" then
     -- Remote Call Forwarding -> handlers/rcf.lua
     local handler = load_handler("rcf")
     if handler then

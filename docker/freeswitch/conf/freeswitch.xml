@@ -168,6 +168,20 @@
   <X-PRE-PROCESS cmd="exec-set" data="tts_default_voice=echo ${TTS_DEFAULT_VOICE:-slt}"/>
 
   <!-- ============================================ -->
+  <!-- MICROSOFT TEAMS DIRECT ROUTING (default-OFF) -->
+  <!-- ============================================ -->
+  <!-- H-1 defense-in-depth: the public.xml `teams_outbound` relay (Teams user ->
+       PSTN carrier bridge) is gated on this global so it is INERT unless Teams
+       Direct Routing is explicitly enabled. Default "false" -> the extension never
+       matches, so an inbound INVITE can never reach a carrier bridge through it
+       even if it carried a forged X-From-Teams (belt to the Kamailio inbound
+       X-* scrub). Set TEAMS_DIRECT_ROUTING_ENABLED=true ONLY on a Teams-enabled
+       deployment (must match the SBC's WITH_TEAMS build). Any value other than the
+       exact string "true" leaves the relay OFF (fail-safe). -->
+  <X-PRE-PROCESS cmd="set" data="teams_enabled=false"/>
+  <X-PRE-PROCESS cmd="exec-set" data="teams_enabled=echo ${TEAMS_DIRECT_ROUTING_ENABLED:-false}"/>
+
+  <!-- ============================================ -->
   <!-- DEFAULT TIMEOUTS                            -->
   <!-- ============================================ -->
   <X-PRE-PROCESS cmd="set" data="default_ring_timeout=30"/>

@@ -10,9 +10,14 @@
 # Prerequisites:
 #   - Copy .env.services.example to .env and fill in all REQUIRED values
 #   - PostgreSQL + PgBouncer running bare on this VM (port 6432)
-#   - Ensure firewall allows: 8080/tcp (UI HTTP), 8443/tcp (UI HTTPS),
-#     8088/tcp (API), 9060/udp+tcp (HEP), 9061/tcp (HEP TCP),
-#     3000/tcp (Grafana), 3100/tcp (qryn/Loki API)
+#   - Firewall (verify with scripts/verify_gcp_security.sh):
+#       8080/8443 (UI) + 8088 (API): office CIDRs + Google uptime probers ONLY
+#       9060/udp+tcp, 9061/tcp (HEP): VPC-internal ONLY (SBC/media VMs) — also
+#         bind-limited via HEP_BIND_IP below (set it to this VM's VPC IP)
+#       3000 (Grafana), 3100 (qryn): NOT internet-reachable — published on
+#         127.0.0.1 only (below); the UI proxies /grafana/ internally and the
+#         API reaches qryn/ClickHouse by service DNS. Operators use an IAP
+#         SSH tunnel for direct access.
 
 services:
   # FastAPI — RCF provisioning, CDR queries, health endpoints
@@ -74,6 +79,46 @@ services:
       - MEDIA_MAX_FRAMES=${MEDIA_MAX_FRAMES:-2000000}
       - MEDIA_MAX_DURATION_MS=${MEDIA_MAX_DURATION_MS:-14400000}
       - MEDIA_MAX_CONCURRENT_STREAMS=${MEDIA_MAX_CONCURRENT_STREAMS:-200}
+      # === Leapfrog: compliance-as-product — encryption at rest ================
+      # Envelope encryption for recordings + chat reuses the voicemail KMS/KEK
+      # model. Default provider 'local' wraps DEKs with an env KEK; set a strong
+      # ENVELOPE_LOCAL_KEK (Fernet key, comma-separated for rotation). Encryption
+      # of NEW recordings/chat is OFF by default so already-stored plaintext keeps
+      # serving; flip to 'true' to seal new writes (mixed state handled).
+      - RECORDINGS_ENCRYPTION=${RECORDINGS_ENCRYPTION:-false}
+      - CHAT_ENCRYPTION=${CHAT_ENCRYPTION:-false}
+      - ENVELOPE_LOCAL_KEK=${ENVELOPE_LOCAL_KEK:-}
+      - RECORDING_PLAYBACK_TTL=${RECORDING_PLAYBACK_TTL:-3600}
+      # === Leapfrog: in-boundary AI voice agents ==============================
+      # OFF by default. When enabled, providers default to SELF-HOSTED base URLs
+      # (no PHI/CPNI leaves the VPC); point *_BASE_URL at in-VPC vLLM/Whisper/Piper
+      # or set a cloud provider + *_API_KEY to explicitly opt out of in-boundary.
+      # AI_WS_PUBLIC_BASE = ws://<services-vm-vpc-ip>:8000 (what FS mod_audio_stream dials).
+      - AI_AGENTS_ENABLED=${AI_AGENTS_ENABLED:-false}
+      - AI_WS_PUBLIC_BASE=${AI_WS_PUBLIC_BASE:-ws://127.0.0.1:8000}
+      - AI_STT_PROVIDER=${AI_STT_PROVIDER:-whisper_http}
+      - AI_STT_BASE_URL=${AI_STT_BASE_URL:-}
+      - AI_LLM_PROVIDER=${AI_LLM_PROVIDER:-openai_compat}
+      - AI_LLM_BASE_URL=${AI_LLM_BASE_URL:-}
+      - AI_LLM_MODEL=${AI_LLM_MODEL:-}
+      - AI_TTS_PROVIDER=${AI_TTS_PROVIDER:-piper}
+      - AI_TTS_BASE_URL=${AI_TTS_BASE_URL:-}
+      # Cloud provider keys — only needed if an agent selects a cloud provider.
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - DEEPGRAM_API_KEY=${DEEPGRAM_API_KEY:-}
+      - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY:-}
+      # === Leapfrog: toll-free / RespOrg ======================================
+      # Live Somos/800 CR submission adapter — OFF by default (records local intent).
+      - SOMOS_CR_ENABLED=${SOMOS_CR_ENABLED:-false}
+      # === Payments DEMO (§9) — exec-facing simulation of all rails ============
+      # OFF by default: every /v1/payments/* route 404s and the provider factory
+      # returns Noop. Set PAYMENTS_DEMO_MODE=true to enable the demo (simulation
+      # providers + demo router, feeding the REAL ledger). Swap to live rails by
+      # leaving this false and supplying real Stripe/CDP keys in a later wave.
+      - PAYMENTS_DEMO_MODE=${PAYMENTS_DEMO_MODE:-false}
+      - PAYMENTS_DEMO_LATENCY_MS=${PAYMENTS_DEMO_LATENCY_MS:-300}
+      - PAYMENTS_DEMO_DEFAULT_OUTCOME=${PAYMENTS_DEMO_DEFAULT_OUTCOME:-success}
+      - AUTO_RECHARGE_MAX_FAILURES=${AUTO_RECHARGE_MAX_FAILURES:-3}
     ports:
       - "8088:8000"
     networks:
@@ -152,8 +197,12 @@ services:
       - CLICKHOUSE_DB=qryn
       - "CLICKHOUSE_AUTH=default:"
       - "NODE_OPTIONS=--max-old-space-size=4096"
+    # SEC (audit P0-6): loopback-only publish — qryn has NO auth of its own.
+    # In-cluster consumers (API homer.py, heplify, Grafana) use service DNS
+    # (http://qryn:3100), which does not touch this host port. Operators:
+    # IAP SSH tunnel. Override QRYN_BIND_IP only for a trusted-LAN dev box.
     ports:
-      - "3100:3100"
+      - "${QRYN_BIND_IP:-127.0.0.1}:3100:3100"
     depends_on:
       clickhouse-server:
         condition: service_healthy
@@ -168,10 +217,17 @@ services:
     # LOKIALLOWOUTOFORDER option required below (remotelog/loki.go).
     image: ghcr.io/sipcapture/heplify-server:1.60.3
     container_name: voip-heplify-server
+    # SEC (audit P0-6): HEP ingest must be reachable from the SBC/media VMs
+    # over the VPC but never from the internet. Defense in depth: set
+    # HEP_BIND_IP to this VM's VPC IP (10.142.0.103) in /opt/revup/.env so the
+    # host doesn't even listen on the external interface; the firewall rule is
+    # verified by scripts/verify_gcp_security.sh. 9096 (Prometheus metrics) is
+    # loopback-only for the Ops Agent scrape (scripts/monitoring/).
     ports:
-      - "9060:9060"
-      - "9060:9060/udp"
-      - "9061:9061/tcp"
+      - "${HEP_BIND_IP:-0.0.0.0}:9060:9060"
+      - "${HEP_BIND_IP:-0.0.0.0}:9060:9060/udp"
+      - "${HEP_BIND_IP:-0.0.0.0}:9061:9061/tcp"
+      - "127.0.0.1:9096:9096"
     environment:
       - "HEPLIFYSERVER_HEPADDR=0.0.0.0:9060"
       - "HEPLIFYSERVER_HEPTCPADDR=0.0.0.0:9061"
@@ -214,20 +270,29 @@ services:
     restart: unless-stopped
 
   # Grafana — SIP trace visualization and dashboards (replaces homer-app Angular UI)
+  # SEC (audit P0-6): admin password is REQUIRED (was defaulting to the
+  # well-known "sipcapture" with anonymous viewer on). Anonymous access is off
+  # by default; the primary SIP-debug UI is the native Troubleshooting page
+  # (React -> API -> qryn), which is unaffected. Grafana deep-links now prompt
+  # for login — use admin + GRAFANA_ADMIN_PASSWORD.
   grafana:
     image: grafana/grafana-oss:10.4.3
     container_name: voip-grafana
     environment:
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-sipcapture}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD must be set in /opt/revup/.env (openssl rand -hex 16)}
       - GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS=qxip-flow-panel
       - "GF_INSTALL_PLUGINS=https://github.com/metrico/grafana-flow/releases/download/v10.0.10/qxip-flow-panel-10.0.10.zip;qxip-flow-panel"
       - GF_SECURITY_ALLOW_EMBEDDING=true
-      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ENABLED=${GRAFANA_ANONYMOUS_ENABLED:-false}
       - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+      - GF_USERS_ALLOW_SIGN_UP=false
       - GF_SERVER_ROOT_URL=/grafana/
       - GF_SERVER_SERVE_FROM_SUB_PATH=true
+    # Loopback-only publish; reach Grafana via the UI's /grafana/ proxy (8443)
+    # or an IAP SSH tunnel. The UI container proxies to grafana:3000 by service
+    # DNS, which does not use this host port.
     ports:
-      - "3000:3000"
+      - "${GRAFANA_BIND_IP:-127.0.0.1}:3000:3000"
     volumes:
       - grafana_data:/var/lib/grafana
       - ./docker/homer/grafana/provisioning:/etc/grafana/provisioning

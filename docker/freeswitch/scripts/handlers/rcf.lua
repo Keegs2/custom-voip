@@ -132,6 +132,213 @@ end
 -- below calls ctx.rules.first_match(); RCF's routing behavior is unchanged.
 
 -- ===========================================================================
+-- TOLL-FRAUD CONTROLS (P0) — RCF international / premium-destination blocklist +
+-- per-customer & per-DID concurrency caps. Shared by BOTH the legacy
+-- single-forward path and the RICH routing_plan path below. Uses the SYNCHRONOUS
+-- PostgreSQL path (ctx.db) — NOT Redis (the redis-lua threading issue that
+-- removed Redis from the RCF path does not affect the sync db_client path).
+--
+-- Rollout-safe / fail-open discipline:
+--   * The premium/high-risk blocklist reads high_risk_prefixes (a table that
+--     already exists) — active immediately; fails OPEN on DB error.
+--   * The international gate + per-customer cap read the two NEW `customers`
+--     columns (international_calling_enabled, max_concurrent_calls). Until the
+--     backend migration adds them, get_customer_fraud_policy returns nil and
+--     those two controls are SKIPPED (fail open) — RCF keeps working. They
+--     activate automatically once the columns exist.
+--   * A definitive fraud positive (blocked prefix / intl-not-enabled with a
+--     readable policy) fails CLOSED (reject). A DB hiccup fails OPEN.
+-- ===========================================================================
+
+-- H-4: High-cost NANP NPAs that BILL LIKE INTERNATIONAL even though they are +1
+-- (Caribbean/Atlantic + North-American premium). A bare "+1 + 10 digits" test
+-- treats all of these as domestic, so a forward_to to e.g. +1-876 (Jamaica),
+-- +1-809 (Dom. Rep.), +1-473 (Grenada) would bypass the international gate. This
+-- list is BYTE-IDENTICAL to the backend _HIGH_COST_NANP_NPAS in
+-- docker/api/src/services/ai_agent.py (the AI transfer_call control) — ONE source
+-- of truth for the toll-fraud NPA policy. Blocked UNLESS the customer has
+-- international calling enabled (treated exactly like an international destination).
+local HIGH_COST_NANP_NPAS = {
+    ["242"]=true, ["246"]=true, ["264"]=true, ["268"]=true, ["284"]=true,
+    ["340"]=true, ["345"]=true, ["441"]=true, ["473"]=true, ["649"]=true,
+    ["658"]=true, ["664"]=true, ["721"]=true, ["758"]=true, ["767"]=true,
+    ["784"]=true, ["809"]=true, ["829"]=true, ["849"]=true, ["868"]=true,
+    ["869"]=true, ["876"]=true, ["900"]=true, ["976"]=true,
+}
+-- Premium / pay-per-call NANP NPAs — blocked even WITH international enabled
+-- (scam/premium-rate, never a legitimate destination). Mirrors the backend
+-- _PREMIUM_NANP_NPAS. Subset of HIGH_COST_NANP_NPAS.
+local PREMIUM_NANP_NPAS = { ["900"]=true, ["976"]=true }
+
+-- H-5: loud, ONE-TIME-per-process page when the per-customer fraud policy cannot
+-- be read (the international_calling_enabled/max_concurrent_calls columns are not
+-- yet present — a backend-migration ROLLOUT gap — as opposed to a transient DB
+-- error). We now FAIL CLOSED for international/high-cost-NPA destinations when the
+-- policy is unreadable, so surface the schema gap ONCE as a CRIT page (an operator
+-- must apply the migration) rather than spamming every call. A transient DB error
+-- already logs a per-call WARNING in db_client.get_customer_fraud_policy and does
+-- NOT page here. Domestic NANP is unaffected either way. ctx.fraud_policy_reason
+-- is stamped by fetch_fraud_policy below.
+local function fraud_policy_page(ctx)
+    if ctx.fraud_policy_reason ~= "schema_missing" then return end
+    local FLAG = "rcf_fraud_schema_paged"
+    local seen = nil
+    pcall(function() seen = freeswitch.getGlobalVariable(FLAG) end)
+    if seen == "1" then return end
+    pcall(function() freeswitch.setGlobalVariable(FLAG, "1") end)
+    freeswitch.consoleLog("CRIT", string.format(
+        "[%s] RCF FRAUD POLICY SCHEMA MISSING — customers.international_calling_enabled/"
+        .. "max_concurrent_calls not present. International + high-cost-NPA forwards are "
+        .. "now BLOCKED (fail-closed) until the backend migration is applied; domestic "
+        .. "NANP is unaffected. (Pages once per FreeSWITCH process.)\n",
+        tostring(ctx.uuid)))
+end
+
+-- Per-DID default concurrent-call cap when rcf_numbers.max_channels is 0/unset.
+-- SECURITY: 0 no longer means "unlimited" — an uncapped DID is uncapped toll
+-- fraud on a compromised forward_to. Env-tunable (RCF_DID_MAX_CONCURRENT_DEFAULT);
+-- sane non-zero default. To grant a DID effectively-unlimited concurrency,
+-- provision an explicit high max_channels on that DID.
+local function per_did_default()
+    local v = tonumber(os.getenv("RCF_DID_MAX_CONCURRENT_DEFAULT") or "")
+    if not v or v < 1 then v = 30 end
+    return math.floor(v)
+end
+
+-- Fetch the per-customer fraud policy ONCE per call. Returns the policy table, or
+-- nil when it cannot be read; ALSO stamps ctx.fraud_policy_reason so callers can
+-- distinguish a rollout schema gap ("schema_missing") from a transient DB error
+-- ("db_error") — H-5. nil handling is SPLIT by control:
+--   * International / high-cost-NPA gate -> FAIL CLOSED (dest_allowed blocks the
+--     dest) so a missing migration or a DB blip never leaves international ungated.
+--   * Per-customer concurrency cap -> still fail-OPEN (apply_concurrency_limits
+--     skips it) because the per-DID mod_hash cap is the verified backstop and
+--     always applies. DOMESTIC NANP keeps flowing on a nil policy either way.
+local function fetch_fraud_policy(ctx)
+    if not (ctx.db and ctx.db.get_customer_fraud_policy and ctx.customer_id) then
+        ctx.fraud_policy_reason = "no_db"
+        return nil
+    end
+    -- get_customer_fraud_policy returns (policy, reason): a table on success, or
+    -- nil + reason ("schema_missing" | "db_error" | "no_customer" | ...).
+    local ok, p, reason = pcall(ctx.db.get_customer_fraud_policy, ctx.customer_id)
+    if ok and type(p) == "table" then
+        ctx.fraud_policy_reason = nil
+        return p
+    end
+    ctx.fraud_policy_reason = (ok and reason) or "db_error"
+    return nil
+end
+
+-- Decide whether a PSTN destination may be dialed. Call with the RAW destination
+-- (E.164 with +, or 10/11-digit) — NOT a "+"-stripped carrier form, so E.164
+-- country-code detection is correct.
+--   returns (true, nil)            on allow
+--   returns (false, "<reason>")    on a fraud/policy BLOCK (fail CLOSED)
+-- Rules:
+--   * NANP (+1 + 10 digits): allowed EXCEPT (H-4) high-cost/premium NPAs. Premium
+--     NPAs (900/976) are ALWAYS blocked; the rest of HIGH_COST_NANP_NPAS bill like
+--     international and are blocked unless international_calling_enabled.
+--   * International (non-NANP): requires international_calling_enabled.
+--   * H-5 FAIL CLOSED: a nil/unreadable policy is treated as intl DISABLED — it
+--     blocks international AND the high-cost NPA list (a rollout schema gap / DB
+--     blip must never leave international ungated), while DOMESTIC NANP keeps
+--     flowing. The rollout schema gap also pages loudly once (fraud_policy_page).
+--   * Premium/high-risk blocklist (DB high_risk_prefixes): a 'blocked' match
+--     rejects; elevated/high/critical are ALLOWED but tagged (fraud_score /
+--     fraud_prefix), mirroring trunk_outbound / outbound_api — one source of truth.
+--     INDEPENDENT of the NPA list above (belt-and-suspenders).
+-- Local extensions (10xx) never reach here (callers skip them).
+local function dest_allowed(ctx, policy, dest_raw)
+    local e164 = ctx.normalize_did(dest_raw or "")
+    local digits = (e164:gsub("^%+", ""))
+    -- NANP == +1 followed by exactly 10 digits.
+    local is_nanp = e164:match("^%+1%d%d%d%d%d%d%d%d%d%d$") ~= nil
+    -- H-5: a nil/unreadable policy (rollout schema gap OR DB error) is treated as
+    -- international DISABLED (fail closed), NOT allowed.
+    local intl_enabled = (policy ~= nil) and policy.intl_enabled and true or false
+
+    if is_nanp then
+        -- H-4: gate high-cost / premium NANP NPAs (the 3 digits after +1). Without
+        -- this, +1-876 (Jamaica), +1-809, +1-473, +1-900 … slip through as
+        -- "domestic" and bypass the international gate entirely.
+        local npa = e164:match("^%+1(%d%d%d)")
+        if npa and PREMIUM_NANP_NPAS[npa] then
+            return false, "premium_npa:" .. npa
+        end
+        if npa and HIGH_COST_NANP_NPAS[npa] and not intl_enabled then
+            if policy == nil then
+                fraud_policy_page(ctx)  -- loud one-time page on a schema gap
+                return false, "high_cost_npa_policy_unavailable:" .. npa
+            end
+            return false, "high_cost_npa_intl_disabled:" .. npa
+        end
+    else
+        -- International (non-NANP) gate. H-5: FAIL CLOSED on a nil policy.
+        if policy == nil then
+            fraud_policy_page(ctx)
+            return false, "international_policy_unavailable"
+        elseif not intl_enabled then
+            return false, "international_not_enabled"
+        end
+    end
+
+    if ctx.db and ctx.db.check_high_risk_prefix then
+        local ok, risky, level, prefix = pcall(ctx.db.check_high_risk_prefix, digits)
+        if ok and risky then
+            if level == "blocked" then
+                return false, "blocked_prefix:" .. tostring(prefix)
+            end
+            ctx.set_var("fraud_score", (level == "critical") and "80" or "50")
+            ctx.set_var("fraud_prefix", tostring(prefix))
+            freeswitch.consoleLog("WARNING", string.format(
+                "[%s] RCF high-risk (non-blocking) dest=%s prefix=%s level=%s\n",
+                tostring(ctx.uuid), tostring(e164), tostring(prefix), tostring(level)))
+        end
+    end
+
+    return true, nil
+end
+
+-- Apply the per-customer + per-DID concurrent-call caps via mod_hash (no Redis).
+-- Returns true if the call may proceed, false if a cap was hit (the limit app
+-- already hung the session up with USER_BUSY / 486). Per-customer cap fails OPEN
+-- when policy is nil; per-DID cap always applies with a sane non-zero default.
+local function apply_concurrency_limits(ctx, policy)
+    local session = ctx.session
+
+    -- Per-customer cap (across ALL the customer's DIDs) — the real backstop
+    -- against a compromised forward_to flooding the customer's whole account.
+    -- Distinct mod_hash realm ("customer") from the per-DID realm ("inbound").
+    if policy and policy.max_concurrent and policy.max_concurrent > 0 and ctx.customer_id then
+        session:execute("limit",
+            "hash customer " .. tostring(ctx.customer_id) .. " "
+            .. tostring(policy.max_concurrent) .. " !USER_BUSY")
+        if not session:ready() then
+            freeswitch.consoleLog("WARNING", string.format(
+                "[%s] RCF customer %s rejected — %d concurrent-call cap reached\n",
+                tostring(ctx.uuid), tostring(ctx.customer_id), policy.max_concurrent))
+            return false
+        end
+    end
+
+    -- Per-DID cap (0/unset -> sane non-zero default; no longer "unlimited").
+    local per_did = tonumber(ctx.routing and ctx.routing.max_channels) or 0
+    if per_did <= 0 then per_did = per_did_default() end
+    if per_did > 0 then
+        session:execute("limit",
+            "hash inbound " .. ctx.normalized_did .. " " .. tostring(per_did) .. " !USER_BUSY")
+        if not session:ready() then
+            freeswitch.consoleLog("WARNING", string.format(
+                "[%s] RCF DID %s rejected — %d concurrent-call cap reached\n",
+                tostring(ctx.uuid), tostring(ctx.normalized_did), per_did))
+            return false
+        end
+    end
+    return true
+end
+
+-- ===========================================================================
 -- RICH RCF executor. Mirrors handlers/ucaas.lua find-me/follow-me but with RCF
 -- caller-ID policy + RCF local-ext (10xx) semantics, and reuses lib/sbc for the
 -- single-forward 4-attempt failover loop.
@@ -159,6 +366,11 @@ local function handle_rich_plan(ctx, plan)
     local multileg = ctx.multileg
     local sched = ctx.schedule
 
+    -- Toll-fraud policy fetched ONCE for this call (nil = fail open). `allowed`
+    -- gates each PSTN destination against the intl gate + premium blocklist.
+    local fraud_policy = fetch_fraud_policy(ctx)
+    local function allowed(to) return dest_allowed(ctx, fraud_policy, to) end
+
     -- Real SIP Call-ID for Homer A/B correlation on carrier legs (mirrors legacy).
     local sip_call_id = session:getVariable("sip_call_id") or uuid
 
@@ -184,7 +396,20 @@ local function handle_rich_plan(ctx, plan)
     -- byte-for-byte the legacy build_dial (progress_timeout + call_timeout, NO
     -- originate_timeout — never cancel a still-ringing forward).
     local function forward_pstn(dest, leg_timeout)
-        local attempts = {
+        -- LCO carrier ordering (fail-safe to the legacy literal — see the legacy
+        -- path's comment). `dest` is already the +-stripped carrier form; lib/lco
+        -- (via db_client) digit-strips it for the prefix match.
+        -- M-1: INBOUND RCF uses the DB LCO lookup ONLY — do NOT pass get_var (the
+        -- sip_h_X-LCO-Route / lco_route explicit-header source). An inbound caller
+        -- could otherwise inject X-LCO-Route to override the rate deck and collapse
+        -- the 4-attempt SBC×carrier failover. The explicit-header path stays ONLY
+        -- on the ESL-originated A-leg (outbound_api.lua), which is not attacker-
+        -- reachable. (Belt: kamailio.cfg route[STRIP_CLIENT_HEADERS] also scrubs it.)
+        local lco_carriers = ctx.lco and ctx.lco.resolve_carriers({
+            db = ctx.db, dest = dest, uuid = uuid,
+        }) or nil
+        local attempts = (lco_carriers and ctx.lco.build_attempts(
+                lco_carriers, sbc_proxy_ip, sbc_proxy_ip_failover)) or {
             { sbc = sbc_proxy_ip,          carrier = "primary",   label = "SBC-1 + primary carrier (Dallas)" },
             { sbc = sbc_proxy_ip_failover, carrier = "primary",   label = "SBC-2 + primary carrier (Dallas)" },
             { sbc = sbc_proxy_ip,          carrier = "secondary", label = "SBC-1 + secondary carrier (LA)" },
@@ -219,6 +444,15 @@ local function handle_rich_plan(ctx, plan)
         if rich_is_local_extension(to) then
             forward_local(to, leg_timeout)
         else
+            -- Toll-fraud gate on the RAW destination (intl gate + premium blocklist).
+            local ok, reason = allowed(to)
+            if not ok then
+                freeswitch.consoleLog("WARNING", string.format(
+                    "[%s] RICH RCF forward BLOCKED dest=%s reason=%s\n",
+                    uuid, tostring(to), tostring(reason)))
+                set_var("blocked_reason", reason)
+                return
+            end
             forward_pstn(carrier_dest(to), leg_timeout)
         end
     end
@@ -239,6 +473,14 @@ local function handle_rich_plan(ctx, plan)
                     "{ignore_early_media=false,call_timeout=%d}user/%s@%s",
                     leg_timeout, to, ctx.get_domain())
             end
+            -- Toll-fraud gate: skip a disallowed PSTN leg (advance to next).
+            local ok, reason = allowed(to)
+            if not ok then
+                freeswitch.consoleLog("WARNING", string.format(
+                    "[%s] RICH RCF sequential leg %d/%d BLOCKED dest=%s reason=%s (skipping)\n",
+                    uuid, idx, #r.legs, tostring(to), tostring(reason)))
+                return nil
+            end
             local inner = string.format(
                 "ignore_early_media=false,call_timeout=%d,sip_h_X-Carrier=primary,sip_h_X-CID=%s,%s",
                 leg_timeout, sip_call_id, session_timer.BRIDGE_OPTS)
@@ -258,7 +500,7 @@ local function handle_rich_plan(ctx, plan)
                 if rich_is_local_extension(to) then
                     local pfx = lt and ("[leg_timeout=" .. lt .. "]") or ""
                     channels[#channels + 1] = pfx .. string.format("user/%s@%s", to, domain)
-                else
+                elseif allowed(to) then
                     local lv = {}
                     if lt then lv[#lv + 1] = "leg_timeout=" .. lt end
                     lv[#lv + 1] = "sip_h_X-Carrier=primary"
@@ -266,6 +508,11 @@ local function handle_rich_plan(ctx, plan)
                     lv[#lv + 1] = session_timer.BRIDGE_OPTS
                     channels[#channels + 1] = "[" .. table.concat(lv, ",") .. "]" ..
                         string.format("sofia/external/%s@%s:5060", carrier_dest(to), sbc_proxy_ip)
+                else
+                    -- Toll-fraud gate: drop a disallowed PSTN endpoint from the simring.
+                    freeswitch.consoleLog("WARNING", string.format(
+                        "[%s] RICH RCF parallel endpoint BLOCKED dest=%s (dropping from simring)\n",
+                        uuid, tostring(to)))
                 end
             end
         end
@@ -496,16 +743,13 @@ local function handle_rich_plan(ctx, plan)
         pcall(function() session:execute("export", "origination_caller_id_name=" .. outbound_did) end)
     end
 
-    -- ----- per-DID concurrent call cap (mod_hash, mirror legacy) -------------
-    local max_concurrent = tonumber(routing.max_channels) or 0
-    if max_concurrent > 0 then
-        session:execute("limit", "hash inbound " .. normalized_did .. " " .. tostring(max_concurrent) .. " !USER_BUSY")
-        if not session:ready() then
-            freeswitch.consoleLog("WARNING", string.format(
-                "[%s] RICH RCF DID %s rejected — %d concurrent call limit reached\n",
-                uuid, normalized_did, max_concurrent))
-            return
-        end
+    -- ----- per-customer + per-DID concurrent call caps (mod_hash, no Redis) --
+    -- Per-customer cap (customers.max_concurrent_calls) is the backstop against a
+    -- compromised forward_to flooding the account; per-DID cap (rcf_numbers.
+    -- max_channels, 0 -> sane non-zero default) caps a single DID. Fail-open when
+    -- the policy is unreadable.
+    if not apply_concurrency_limits(ctx, fraud_policy) then
+        return  -- a cap was hit; the limit app already hung up the session (486)
     end
 
     -- ----- ring the matched rule, then fall back -----------------------------
@@ -595,6 +839,24 @@ return function(ctx)
             session:hangup("NORMAL_CLEARING")
         end)
         return
+    end
+
+    -- ================================================================
+    -- TOLL-FRAUD GATE (P0): international gate + premium/high-risk blocklist.
+    -- PSTN forwards only — local extensions (10xx) are never intl/blocked.
+    -- fraud_policy is fetched ONCE here and reused by the concurrency caps below.
+    -- ================================================================
+    local fraud_policy = fetch_fraud_policy(ctx)
+    if not is_local_forward then
+        local allow_ok, reason = dest_allowed(ctx, fraud_policy, forward_to)
+        if not allow_ok then
+            set_var("lua_routed", "true")
+            set_var("blocked_reason", reason)
+            hangup("CALL_REJECTED", string.format(
+                "[%s] RCF forward BLOCKED: DID=%s -> %s reason=%s",
+                uuid, normalized_did, forward_to, reason))
+            return
+        end
     end
 
     -- Set bridge parameters
@@ -727,27 +989,15 @@ return function(ctx)
     session_timer.export(session)
 
     -- ================================================================
-    -- Per-DID concurrent call limit (mod_hash, no Redis needed)
+    -- Concurrent call caps (mod_hash, no Redis): per-customer + per-DID.
     -- ================================================================
-    -- max_channels=0 means unlimited (default). When set >0, FreeSWITCH
-    -- tracks concurrent calls per DID using the in-memory hash backend.
-    -- If the limit is reached, the call is rejected with 486 Busy Here.
-    local max_concurrent = tonumber(routing.max_channels) or 0
-    if max_concurrent > 0 then
-        freeswitch.consoleLog("INFO", string.format(
-            "[inbound_router] Checking limit: DID %s, max %d concurrent\n",
-            normalized_did, max_concurrent
-        ))
-        session:execute("limit", "hash inbound " .. normalized_did .. " " .. tostring(max_concurrent) .. " !USER_BUSY")
-        -- If limit exceeded, session is already hung up with 486 Busy
-        -- Check if session is still active before continuing
-        if not session:ready() then
-            freeswitch.consoleLog("WARNING", string.format(
-                "[inbound_router] DID %s rejected — %d concurrent call limit reached\n",
-                normalized_did, max_concurrent
-            ))
-            return
-        end
+    -- Per-customer cap (customers.max_concurrent_calls) is the backstop against a
+    -- compromised forward_to flooding the whole account; per-DID cap
+    -- (rcf_numbers.max_channels; 0/unset -> sane non-zero default, no longer
+    -- "unlimited") caps a single DID. Both reject with 486 Busy Here when hit.
+    -- Fail-open when the per-customer policy is unreadable (see apply_concurrency_limits).
+    if not apply_concurrency_limits(ctx, fraud_policy) then
+        return  -- a cap was hit; the limit app already hung up the session (486)
     end
 
     -- ================================================================
@@ -773,8 +1023,26 @@ return function(ctx)
             session:execute("bridge", dial_string)
         end)
     else
-        -- PSTN: 4-attempt SBC + carrier failover loop (lib/sbc.lua)
-        local bridge_attempts = {
+        -- PSTN: SBC + carrier failover loop (lib/sbc.lua).
+        --
+        -- LCO (least-cost outbound): when the backend lco_routes view has a match
+        -- for this destination's prefix, lib/lco returns the ORDERED carrier tokens
+        -- and build_attempts expands them into the SAME 2-SBC × N-carrier structure.
+        -- FAIL-SAFE: no LCO decision (nil) -> the EXACT legacy
+        -- {primary,secondary}×{SBC-1,SBC-2} literal below, so the LIVE default path
+        -- is byte-identical until the backend populates lco_routes. Failover
+        -- semantics (lib/sbc TCP pre-check, progress_timeout, session timers) are
+        -- unchanged either way.
+        -- M-1: INBOUND uses the DB lookup ONLY — do NOT pass get_var. The explicit
+        -- sip_h_X-LCO-Route / lco_route header path is attacker-reachable on the
+        -- inbound leg (it would collapse the 4-attempt failover) and is kept ONLY on
+        -- the ESL-originated A-leg (outbound_api.lua). (Belt: kamailio.cfg
+        -- route[STRIP_CLIENT_HEADERS] also scrubs an inbound X-LCO-Route.)
+        local lco_carriers = ctx.lco and ctx.lco.resolve_carriers({
+            db = ctx.db, dest = normalize_did(forward_to), uuid = uuid,
+        }) or nil
+        local bridge_attempts = (lco_carriers and ctx.lco.build_attempts(
+                lco_carriers, sbc_proxy_ip, sbc_proxy_ip_failover)) or {
             { sbc = sbc_proxy_ip,          carrier = "primary",   label = "SBC-1 + primary carrier (Dallas)" },
             { sbc = sbc_proxy_ip_failover, carrier = "primary",   label = "SBC-2 + primary carrier (Dallas)" },
             { sbc = sbc_proxy_ip,          carrier = "secondary", label = "SBC-1 + secondary carrier (LA)" },

@@ -99,6 +99,24 @@
 5 sip:__BANDWIDTH_TC2_LA__:5060 0 0 weight=100;duid=bw-tc2-la
 
 # ============================================================
+# Group 6: Bandwidth TC3 - GRANITE_911 (E911 EMERGENCY trunk)
+# ============================================================
+# Dedicated Bandwidth E911 signaling IPs: Dallas and Atlanta.
+# Mapped from X-Carrier: emergency in route[TO_CARRIER] (set by FreeSWITCH
+# scripts/emergency.lua on a 911 dial).
+#
+# LIFE-SAFETY KEEPALIVE: 911 calls are rare, so without periodic OPTIONS the
+# GCE 30-second UDP NAT pinhole to the E911 trunk would be closed at the moment
+# a 911 call is placed — the FIRST 911 INVITE could be dropped/delayed waiting on
+# retransmission. Probing every ds_ping_interval seconds keeps the pinhole warm
+# so the first 911 INVITE goes straight through. NOT used for call routing —
+# actual routing is in route[TO_CARRIER] via $rd/$du.
+# IPs templated by entrypoint.sh from BANDWIDTH_E911_1 / BANDWIDTH_E911_2
+# (defaults: 67.231.1.137 Dallas / 67.231.12.71 Atlanta — GRANITE_911).
+6 sip:__BANDWIDTH_E911_1__:5060 0 0 weight=100;duid=bw-e911-dallas
+6 sip:__BANDWIDTH_E911_2__:5060 0 0 weight=100;duid=bw-e911-atlanta
+
+# ============================================================
 # Notes:
 # ============================================================
 # - Kamailio will probe each destination every ds_ping_interval seconds

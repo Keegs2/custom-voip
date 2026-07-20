@@ -52,6 +52,12 @@ end
 
 local redis = load_module("redis_client")
 local db = load_module("db_client")
+-- Least-Cost Outbound (LCO) carrier ordering. On the API-originated path we honor
+-- an EXPLICIT route only (channel var lco_route / SIP header X-LCO-Route the API
+-- sets when it originates) — NO DB lookup on this hot path (db is intentionally
+-- omitted from resolve_carriers below). FAIL-SAFE: no explicit route -> nil ->
+-- the default {primary, secondary} order below is byte-identical to before.
+local lco = load_module("lco")
 
 -- E.164 normalization helpers — single source of truth in lib/e164.lua.
 local e164 = load_module("e164")
@@ -196,9 +202,17 @@ end
 -- ============================================
 -- STEP 4: Select Carrier Gateway
 -- ============================================
--- API calls use carrier_primary (same carrier as all products in 2-carrier model)
--- traffic_grade is retained as a secondary factor for priority within the trunk
-local gateway = "carrier_primary"
+-- Default: carrier_primary then carrier_secondary (2-carrier model). LCO override:
+-- if the API set an explicit X-LCO-Route / lco_route, use that ordered token list
+-- instead. NO DB lookup here (db omitted) — the API carries its own route; the DB
+-- lco_routes view is used on the RCF/inbound-forward path (handlers/rcf.lua).
+-- traffic_grade is retained as a secondary factor for priority within the trunk.
+local lco_carriers = (lco and lco.resolve_carriers({
+    get_var = get_var, dest = normalized_dest, uuid = uuid,
+})) or { "primary", "secondary" }
+local primary_carrier = lco_carriers[1] or "primary"
+local secondary_carrier = lco_carriers[2]  -- may be nil (single-carrier route)
+local gateway = "carrier_" .. primary_carrier
 
 freeswitch.consoleLog("INFO", string.format(
     "[outbound_api] Routing via %s (product: api, traffic_grade: %s)\n",
@@ -286,12 +300,13 @@ else
     -- The internal profile does NOT apply ext-sip-ip to outbound calls.
     -- X-Carrier tells Kamailio which Bandwidth IP to route to.
     local dial_string = string.format(
-        "{origination_caller_id_number=%s,progress_timeout=%d,call_timeout=%d,ignore_early_media=false,sip_enable_soa=false,sip_h_X-Carrier=primary" ..
+        "{origination_caller_id_number=%s,progress_timeout=%d,call_timeout=%d,ignore_early_media=false,sip_enable_soa=false,sip_h_X-Carrier=%s" ..
         ",sip_h_X-CID=%s" ..
         ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true}sofia/external/%s@" .. sbc_proxy_ip .. ":5060",
         from_did ~= "" and from_did or "anonymous",
         bridge_progress_timeout,
         call_timeout,
+        primary_carrier,
         sip_call_id,
         normalized_dest:gsub("^%+", "")
     )
@@ -328,24 +343,27 @@ else
             uuid, disposition ~= "" and disposition or "unknown"
         ))
 
-        -- Try failover carrier (secondary = LA)
-        if gateway ~= "carrier_secondary" then
+        -- Try the next carrier in the LCO order (default: secondary = LA). Skip
+        -- when there is no distinct second carrier (a single-carrier LCO route).
+        if secondary_carrier and secondary_carrier ~= primary_carrier then
             freeswitch.consoleLog("INFO", string.format(
-                "[outbound_api] Primary bridge failed, trying carrier_secondary (product: api)\n"
+                "[outbound_api] Primary bridge failed, trying carrier_%s (product: api)\n",
+                secondary_carrier
             ))
 
             dial_string = string.format(
-                "{origination_caller_id_number=%s,progress_timeout=%d,call_timeout=%d,sip_enable_soa=false,sip_h_X-Carrier=secondary" ..
+                "{origination_caller_id_number=%s,progress_timeout=%d,call_timeout=%d,sip_enable_soa=false,sip_h_X-Carrier=%s" ..
                 ",sip_h_X-CID=%s" ..
                 ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true}sofia/external/%s@" .. sbc_proxy_ip .. ":5060",
                 from_did ~= "" and from_did or "anonymous",
                 bridge_progress_timeout,
                 call_timeout,
+                secondary_carrier,
                 sip_call_id,
                 normalized_dest:gsub("^%+", "")
             )
 
-            set_var("carrier_used", "carrier_secondary")
+            set_var("carrier_used", "carrier_" .. secondary_carrier)
 
             pcall(function()
                 session:execute("bridge", dial_string)

@@ -36,6 +36,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     kamailio-outbound-modules \
     # Websocket (if WebRTC needed later)
     kamailio-websocket-modules \
+    # STIR/SHAKEN (secsipid + secsipid_proc; pulls libsecsipid1). We are the VSP,
+    # so we sign outbound + verify inbound Identity headers. The module is only
+    # LOADED at runtime when STIR/SHAKEN is enabled (WITH_STIRSHAKEN, injected by
+    # entrypoint.sh when STIRSHAKEN_PRIVKEY_PATH is set) — installed here so
+    # enabling it needs only env + a provisioned signing cert, no image rebuild.
+    kamailio-secsipid-modules \
     # Cleanup
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
@@ -44,7 +50,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN mkdir -p /run/kamailio \
     && mkdir -p /var/log/kamailio \
     && mkdir -p /etc/kamailio/tls \
-    && chown -R kamailio:kamailio /run/kamailio /var/log/kamailio /etc/kamailio
+    && mkdir -p /var/lib/kamailio/secsipid-cache \
+    && chown -R kamailio:kamailio /run/kamailio /var/log/kamailio /etc/kamailio /var/lib/kamailio
 
 # Copy configuration templates (entrypoint.sh will template these at startup)
 COPY kamailio.cfg /etc/kamailio/kamailio.cfg.tmpl

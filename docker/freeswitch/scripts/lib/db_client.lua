@@ -514,6 +514,204 @@ function M.lookup_customer(customer_id)
     return row
 end
 
+-- ---------------------------------------------------------------------------
+-- Fraud / toll-fraud controls (RCF international + premium-destination blocklist).
+--
+-- These use the SYNCHRONOUS PostgreSQL path — NOT Redis. The redis-lua threading
+-- issue that removed Redis from the RCF path does NOT affect db_client (one
+-- persistent conn per mod_lua thread, connect_timeout=5). The `high_risk_prefixes`
+-- table is the ONE source of truth for the fraud-prefix blocklist: trunk_outbound
+-- and outbound_api read it via the Redis CACHE (hrp:{prefix}) of this same table;
+-- the RCF path reads the table DIRECTLY here so there is a single source extended
+-- to RCF without re-introducing Redis.
+-- ---------------------------------------------------------------------------
+
+-- Longest-prefix match of an outbound destination against high_risk_prefixes.
+-- `destination` must be the E.164 number WITHOUT the leading "+" (digits only):
+-- NANP carries the leading 1 (e.g. "17775556666"), international is CC+number
+-- (e.g. "5312345678"). Returns: is_risky(bool), risk_level(string|nil),
+-- prefix(string|nil). Seeded risk_level values: elevated|high|critical|blocked.
+--
+-- FAIL-OPEN: any DB error / no match -> (false, nil, nil), so a DB hiccup never
+-- blocks calls (consistent with the RCF degrade philosophy). A definitive
+-- 'blocked' match is the caller's cue to fail CLOSED (reject the forward).
+function M.check_high_risk_prefix(destination)
+    local digits = tostring(destination or ""):gsub("[^%d]", "")
+    if digits == "" then return false, nil, nil end
+
+    -- "<dest> LIKE prefix || '%'" == "destination starts with prefix". Prefixes
+    -- are digit strings (no LIKE metacharacters), longest match wins. The %% in
+    -- string.format renders a single literal % for SQL.
+    local sql = string.format([[
+        SELECT prefix, risk_level
+        FROM high_risk_prefixes
+        WHERE enabled = true AND %s LIKE prefix || '%%'
+        ORDER BY length(prefix) DESC
+        LIMIT 1
+    ]], sql_string(digits))
+
+    local cursor, err = execute_query(sql)
+    if not cursor then
+        freeswitch.consoleLog("WARNING",
+            "high_risk_prefixes lookup failed (fail-open): " .. tostring(err) .. "\n")
+        return false, nil, nil
+    end
+    local row = cursor:fetch({}, "a")
+    cursor:close()
+    if not row then return false, nil, nil end
+    return true, row.risk_level, row.prefix
+end
+
+-- Per-customer fraud policy (RCF international gate + concurrent-call cap).
+-- Reads the two columns the BACKEND adds to `customers` (contract — do NOT create
+-- them here, only READ):
+--   international_calling_enabled BOOLEAN NOT NULL DEFAULT false
+--   max_concurrent_calls         INTEGER NOT NULL DEFAULT 30
+-- Returns (policy, nil) on success where policy = { intl_enabled=bool,
+-- max_concurrent=int }; on failure returns (nil, reason) where reason is
+-- "schema_missing" (rollout: the columns not added yet — a PostgreSQL "does not
+-- exist" error), "db_error" (transient), "no_customer", or "invalid_customer".
+-- H-5: the RCF caller now FAILS CLOSED for INTERNATIONAL / high-cost-NPA
+-- destinations on a nil policy (a schema gap or a DB blip must never leave
+-- international ungated) while DOMESTIC NANP keeps flowing; the per-customer
+-- concurrency cap still fails OPEN (the per-DID mod_hash cap is the backstop). The
+-- reason lets the caller page loudly ONCE on the rollout gap vs a transient error.
+-- Enforcement of the real flag activates automatically once the columns exist and
+-- the query succeeds. (SEPARATE query from lookup_rcf on purpose: it keeps the LIVE
+-- hot-path DID lookup untouched, so a missing column can never break DID resolution.)
+function M.get_customer_fraud_policy(customer_id)
+    local clean_id = sql_number(customer_id)
+    if clean_id == "NULL" then return nil, "invalid_customer" end
+
+    local sql = string.format([[
+        SELECT international_calling_enabled, max_concurrent_calls
+        FROM customers
+        WHERE id = %s
+        LIMIT 1
+    ]], clean_id)
+
+    local cursor, err = execute_query(sql)
+    if not cursor then
+        -- Distinguish a ROLLOUT schema gap (columns not present -> PostgreSQL
+        -- "does not exist") from a transient DB error, so the caller can page
+        -- loudly ONCE on the former. Either way the caller FAILS CLOSED for intl.
+        local reason = "db_error"
+        if tostring(err):lower():find("does not exist", 1, true) then
+            reason = "schema_missing"
+        end
+        freeswitch.consoleLog("WARNING",
+            "customer fraud policy lookup failed (international now FAIL-CLOSED; reason="
+            .. reason .. " — is the international_calling_enabled/max_concurrent_calls "
+            .. "migration applied?): " .. tostring(err) .. "\n")
+        return nil, reason
+    end
+    local row = cursor:fetch({}, "a")
+    cursor:close()
+    if not row then return nil, "no_customer" end
+
+    local intl = (row.international_calling_enabled == "t"
+        or row.international_calling_enabled == true
+        or row.international_calling_enabled == "true"
+        or row.international_calling_enabled == "1")
+    return {
+        intl_enabled = intl,
+        max_concurrent = tonumber(row.max_concurrent_calls) or 0,
+    }, nil
+end
+
+-- Least-Cost Outbound (LCO) carrier ordering — READ-ONLY longest-prefix lookup.
+-- Reads the BACKEND-owned `lco_route` view (CONTRACT — telephony NEVER
+-- writes it; the backend owns the rate deck + LCO decision). Returns the ORDERED
+-- array of carrier tokens (x_carrier_value) for the destination's LONGEST matching
+-- prefix, or nil on no-match / ANY error.
+--
+-- FAIL-OPEN (nil): a missing view (rollout lag) or a DB hiccup returns nil, and
+-- the caller (lib/lco -> handlers/rcf) then keeps its DEFAULT carrier ordering —
+-- so LCO can never break or weaken the LIVE carrier failover path. Enforcement
+-- activates automatically once the backend creates + populates the view. This is
+-- a SEPARATE query from the DID lookups on purpose (a missing lco_route view can
+-- never break DID resolution).
+--
+-- Contract columns (see lib/lco.lua for the full contract): prefix TEXT,
+-- x_carrier_value TEXT (primary|secondary|tc1|tc2|tc4), priority INT. The view is
+-- pre-filtered on enabled rows by the backend, so there is no `enabled` column here.
+function M.lookup_lco_route(destination)
+    local digits = tostring(destination or ""):gsub("[^%d]", "")
+    if digits == "" then return nil end
+
+    -- Longest-prefix match, then order THAT prefix's carriers by priority. The
+    -- inner subquery pins the SINGLE longest matching prefix so carriers from a
+    -- shorter prefix never dilute the order. Prefixes are digit strings (no LIKE
+    -- metacharacters); %% renders a single literal % for SQL.
+    local sql = string.format([[
+        SELECT x_carrier_value
+        FROM lco_route
+        WHERE %s LIKE prefix || '%%'
+          AND length(prefix) = (
+              SELECT max(length(p.prefix)) FROM lco_route p
+              WHERE %s LIKE p.prefix || '%%'
+          )
+        ORDER BY priority ASC, x_carrier_value ASC
+        LIMIT 8
+    ]], sql_string(digits), sql_string(digits))
+
+    local cursor, err = execute_query(sql)
+    if not cursor then
+        freeswitch.consoleLog("WARNING",
+            "lco_route lookup failed (fail-open — is the lco_route view present?): "
+            .. tostring(err) .. "\n")
+        return nil
+    end
+
+    local out = {}
+    local row = cursor:fetch({}, "a")
+    while row do
+        if row.x_carrier_value and row.x_carrier_value ~= "" then
+            out[#out + 1] = row.x_carrier_value
+        end
+        row = cursor:fetch({}, "a")
+    end
+    cursor:close()
+
+    if #out == 0 then return nil end
+    return out
+end
+
+-- Microsoft Teams Direct Routing — READ-ONLY "is this DID Teams-enabled?" lookup.
+-- Reads the BACKEND-owned `teams_dids` view/table (CONTRACT — telephony NEVER
+-- writes it). Returns { customer_id, teams_tenant } on a hit, or nil.
+--
+-- FAIL-SAFE (nil): a missing view (Teams not provisioned / rollout lag) or a DB
+-- error returns nil, so the caller falls through to the normal RCF/API/trunk/UCaaS
+-- cascade — Teams can never break existing DID routing. The caller ALSO gates this
+-- behind TEAMS_DIRECT_ROUTING_ENABLED, so when Teams is off this query never runs.
+--
+-- Contract: teams_dids(did TEXT, customer_id INT, enabled BOOL[, teams_tenant TEXT]).
+-- Equivalent alternative the backend may prefer: a routing_target='teams' column on
+-- the existing DID tables — if chosen, repoint this query (read-only either way).
+function M.lookup_teams_did(did)
+    local clean_did = validate_did(did)
+    if not clean_did then return nil end
+
+    local sql = string.format([[
+        SELECT customer_id, teams_tenant
+        FROM teams_dids
+        WHERE did = %s AND enabled = true
+        LIMIT 1
+    ]], sql_string(clean_did))
+
+    local cursor, err = execute_query(sql)
+    if not cursor then
+        freeswitch.consoleLog("WARNING",
+            "teams_dids lookup failed (fail-open — is the teams_dids view present?): "
+            .. tostring(err) .. "\n")
+        return nil
+    end
+    local row = cursor:fetch({}, "a")
+    cursor:close()
+    return row
+end
+
 -- Get customer tier information
 -- Returns: { tier_name, cps_limit, per_call_fee, monthly_fee, features } or nil
 function M.get_customer_tier(customer_id, tier_type)

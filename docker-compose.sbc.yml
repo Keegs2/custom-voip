@@ -46,9 +46,63 @@ services:
       - BANDWIDTH_TC1_ATL=${BANDWIDTH_TC1_ATL:-67.231.13.185}
       - BANDWIDTH_TC2_DAL=${BANDWIDTH_TC2_DAL:-67.231.1.188}
       - BANDWIDTH_TC2_LA=${BANDWIDTH_TC2_LA:-67.231.4.138}
+      # Bandwidth TC3 / GRANITE_911 dedicated E911 emergency-trunk PoPs. Consumed
+      # by entrypoint.sh -> templated into BOTH kamailio.cfg (911 egress +
+      # Dallas<->Atlanta failover in route[TO_CARRIER]/CARRIER_FAILURE) AND
+      # dispatcher.list group 6 (life-safety OPTIONS keepalive). Defaults are the
+      # long-standing GRANITE_911 production IPs, so an unset var is byte-identical.
+      - BANDWIDTH_E911_1=${BANDWIDTH_E911_1:-67.231.1.137}
+      - BANDWIDTH_E911_2=${BANDWIDTH_E911_2:-67.231.12.71}
+      # --- STIR/SHAKEN (RFC 8224/8588) — DEFAULT-OFF -------------------------
+      # entrypoint.sh compiles the secsipid module + STIR_SIGN/STIR_VERIFY routes
+      # (all inside #!ifdef WITH_STIRSHAKEN) ONLY when STIRSHAKEN_PRIVKEY_PATH is
+      # set. Empty = feature OFF = byte-identical to today's config. To enable:
+      # mount the ES256 signing key (see the commented volume stub below), publish
+      # the cert at STIRSHAKEN_CERT_URL, and set these. iconectiv/SPC + FCC RMD
+      # provisioning is a process (see report), not code.
+      - STIRSHAKEN_PRIVKEY_PATH=${STIRSHAKEN_PRIVKEY_PATH:-}
+      - STIRSHAKEN_CERT_URL=${STIRSHAKEN_CERT_URL:-}
+      - STIRSHAKEN_ATTEST_DEFAULT=${STIRSHAKEN_ATTEST_DEFAULT:-A}
+      # Inbound verify is annotate-ONLY (never rejects). The route checks the
+      # literal string "yes" — keep this value 'yes' to arm verification.
+      - STIRSHAKEN_VERIFY=${STIRSHAKEN_VERIFY:-yes}
+      - STIRSHAKEN_CACHE_DIR=${STIRSHAKEN_CACHE_DIR:-/var/lib/kamailio/secsipid-cache}
+      # --- SIP-over-TLS (5061) — DEFAULT-OFF ---------------------------------
+      # entrypoint.sh compiles the WITH_TLS listener/module ONLY when enabled here
+      # OR implied by Teams. Cert/key paths are env-driven so a CA cert can be
+      # mounted (see the commented volume stub below); defaults are the image's
+      # self-signed dev cert (dev/local only).
+      - KAMAILIO_TLS_ENABLED=${KAMAILIO_TLS_ENABLED:-false}
+      - TLS_CERT_PATH=${TLS_CERT_PATH:-/etc/kamailio/tls/kamailio.crt}
+      - TLS_KEY_PATH=${TLS_KEY_PATH:-/etc/kamailio/tls/kamailio.key}
+      # --- Microsoft Teams Direct Routing — DEFAULT-OFF ----------------------
+      # Compiles the WITH_TEAMS SBC block (TLS transport, Teams trust, OPTIONS
+      # keepalive, route[TO_TEAMS]/[FROM_TEAMS]) ONLY when ENABLED=true AND
+      # TEAMS_SBC_FQDN is set (also forces TLS on). Empty/false = byte-identical
+      # to today. Proxies/nets default to Microsoft's global set. See report for
+      # the M365 tenant / DNS / public-CA-cert provisioning steps.
+      - TEAMS_DIRECT_ROUTING_ENABLED=${TEAMS_DIRECT_ROUTING_ENABLED:-false}
+      - TEAMS_SBC_FQDN=${TEAMS_SBC_FQDN:-}
+      - TEAMS_SBC_INSTANCE=${TEAMS_SBC_INSTANCE:-}
+      - TEAMS_SIP_PROXY_1=${TEAMS_SIP_PROXY_1:-sip.pstnhub.microsoft.com}
+      - TEAMS_SIP_PROXY_2=${TEAMS_SIP_PROXY_2:-sip2.pstnhub.microsoft.com}
+      - TEAMS_SIP_PROXY_3=${TEAMS_SIP_PROXY_3:-sip3.pstnhub.microsoft.com}
+      - TEAMS_NET_1=${TEAMS_NET_1:-52.112.0.0/14}
+      - TEAMS_NET_2=${TEAMS_NET_2:-52.122.0.0/15}
     volumes:
       - ./docker/kamailio/kamailio.cfg:/etc/kamailio/kamailio.cfg.tmpl:ro
       - ./docker/kamailio/dispatcher.list:/etc/kamailio/dispatcher.list.tmpl:ro
+      # STIR/SHAKEN ES256 signing private key (DEFAULT-OFF). Uncomment and point
+      # the host path at your provisioned key; the container path MUST equal
+      # STIRSHAKEN_PRIVKEY_PATH above. Keep the key file OUT of git.
+      #- ./secrets/stirshaken-signing.key:/etc/kamailio/stirshaken/signing.key:ro
+      # Persist secsipid's fetched verification certs across restarts (cache_dir).
+      # Mount path MUST equal STIRSHAKEN_CACHE_DIR. Harmless (empty) when OFF.
+      - kamailio_secsipid_cache:/var/lib/kamailio/secsipid-cache
+      # TLS / Teams cert (DEFAULT-OFF). Mount a CA-issued cert dir (Teams: a public
+      # CA cert whose CN/SAN = TEAMS_SBC_FQDN) read-only, then point TLS_CERT_PATH /
+      # TLS_KEY_PATH at the files inside. Keep private keys OUT of git.
+      #- ./secrets/kamailio-tls:/etc/kamailio/tls-mounted:ro
     deploy:
       resources:
         limits:
@@ -69,3 +123,10 @@ services:
       start_period: 5s
       retries: 3
     restart: unless-stopped
+
+volumes:
+  # secsipid verification-cert cache — persists fetched STIR/SHAKEN signer certs
+  # across container restarts so inbound verify doesn't re-fetch every boot.
+  # Empty/unused when STIR/SHAKEN is disabled (the default).
+  kamailio_secsipid_cache:
+    driver: local

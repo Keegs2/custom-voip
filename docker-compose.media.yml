@@ -59,6 +59,45 @@ services:
       # N seconds (bounds PDD); once ringing starts the call may ring to call_timeout.
       # Default 10 per CLAUDE.md — tune after live testing.
       - BRIDGE_PROGRESS_TIMEOUT=${BRIDGE_PROGRESS_TIMEOUT:-10}
+      # --- E911 / Kari's Law / RAY BAUM's Act (scripts/emergency.lua) --------
+      # os.getenv() inside mod_lua reads these from the container env, so they
+      # MUST be listed here to reach emergency.lua. All are OPTIONAL with safe
+      # defaults; unset == today's behavior.
+      #
+      # EMERGENCY_DEFAULT_CALLBACK: LAST-RESORT callback presented to the PSAP
+      # when a line has no per-line/DB callback. It MUST be a REAL DID on our
+      # Bandwidth account (carrier From-auth) or the 911 leg can be rejected.
+      # Empty by default — SET THIS PER ZONE before taking 911 traffic.
+      - EMERGENCY_DEFAULT_CALLBACK=${EMERGENCY_DEFAULT_CALLBACK:-}
+      # EMERGENCY_DEFAULT_LOCATION: fallback dispatchable location (Bandwidth
+      # by-reference key or civic text) when a line has none. Empty = none.
+      - EMERGENCY_DEFAULT_LOCATION=${EMERGENCY_DEFAULT_LOCATION:-}
+      # Kari's Law central-notification webhook (fire-and-forget, backgrounded so
+      # it can NEVER delay the PSAP bridge). Empty URL = webhook OFF (the CUSTOM
+      # emergency::dial ESL event still fires regardless).
+      - EMERGENCY_NOTIFY_URL=${EMERGENCY_NOTIFY_URL:-}
+      - EMERGENCY_NOTIFY_SECRET=${EMERGENCY_NOTIFY_SECRET:-}
+      - EMERGENCY_NOTIFY_TIMEOUT=${EMERGENCY_NOTIFY_TIMEOUT:-5}
+      # Overall 911 ring budget (time-to-answer) per attempt. Default 180 MATCHES
+      # emergency.lua's own default (unset == byte-identical). Life-safety: do NOT
+      # shorten below the script default — a still-ringing PSAP call must not be
+      # cancelled. (Values < 30 are ignored by the script and snap back to 180.)
+      - EMERGENCY_CALL_TIMEOUT=${EMERGENCY_CALL_TIMEOUT:-180}
+      # Per-DID default concurrent-call cap when rcf_numbers.max_channels is
+      # 0/unset (handlers/rcf.lua toll-fraud control). Default 30 matches the
+      # script default (unset == byte-identical).
+      - RCF_DID_MAX_CONCURRENT_DEFAULT=${RCF_DID_MAX_CONCURRENT_DEFAULT:-30}
+      # --- Microsoft Teams Direct Routing (DEFAULT-OFF) ---------------------
+      # When false, inbound_router.lua NEVER runs the Teams DID lookup and the
+      # teams handler is never reached — RCF/API/trunk/UCaaS behavior is
+      # byte-identical. MUST match the SBC's TEAMS_DIRECT_ROUTING_ENABLED. Enabling
+      # Teams also requires the SBC-side env (TEAMS_SBC_FQDN etc.) + a CA cert +
+      # DNS + M365 tenant config — see report.
+      - TEAMS_DIRECT_ROUTING_ENABLED=${TEAMS_DIRECT_ROUTING_ENABLED:-false}
+      # SRTP mode FS offers toward Teams on the PSTN->Teams B-leg (Teams requires
+      # SRTP). Default 'mandatory'; FS offers its supported suites incl.
+      # AES_CM_128_HMAC_SHA1_80. Read by handlers/teams.lua.
+      - TEAMS_SRTP_MODE=${TEAMS_SRTP_MODE:-mandatory}
     volumes:
       - ./docker/freeswitch/conf:/usr/local/freeswitch/conf
       - ./docker/freeswitch/scripts:/usr/local/freeswitch/scripts
@@ -124,19 +163,33 @@ services:
   # Shares TURN_SECRET/TURN_REALM with the Services VM API (webrtc.py mints
   # time-limited RFC 5766 credentials with the SAME secret). Host networking so
   # the advertised relay candidates use the VM's real public IP.
+  #
+  # SEC (audit P0-6): coturn cannot read env vars from turnserver.conf, so the
+  # entrypoint templates the runtime config from env and REFUSES to start when
+  # TURN_SECRET is unset or still the committed dev sentinel. The `:?` below
+  # additionally fails the deploy at compose level. Private-range relay peers
+  # are denied (VPC pivot protection) and external-ip is advertised for GCE
+  # 1:1 NAT. See docker/coturn/entrypoint.sh.
   coturn:
     image: coturn/coturn:4.6.2
     container_name: voip-coturn
     network_mode: host
+    entrypoint: ["/bin/sh", "/coturn/entrypoint.sh"]
+    command: []
     volumes:
       - ./docker/coturn/turnserver.conf:/etc/coturn/turnserver.conf:ro
+      - ./docker/coturn/entrypoint.sh:/coturn/entrypoint.sh:ro
       # Mount a CA-issued cert dir here (read-only) to arm turns: (TLS) on 5349.
       # e.g. host /etc/letsencrypt/live/turn.example.com -> /etc/coturn/certs
       - ${TURN_CERT_DIR:-./docker/coturn/certs}:/etc/coturn/certs:ro
     environment:
-      - TURN_SECRET=${TURN_SECRET}
+      - TURN_SECRET=${TURN_SECRET:?TURN_SECRET must be set in /opt/revup/.env (openssl rand -hex 32) and match the Services VM API}
       - TURN_REALM=${TURN_REALM:-voip.local}
-    command: ["-c", "/etc/coturn/turnserver.conf"]
+      # GCE 1:1 NAT: advertise the VM's PUBLIC IP in relay candidates, else
+      # clients get the 192.168.10.x internal address and relayed media dies.
+      - TURN_EXTERNAL_IP=${TURN_EXTERNAL_IP:-${EXTERNAL_SIP_IP}}
+      # Deny relaying to RFC1918/loopback/link-local (metadata server included).
+      - TURN_DENY_PRIVATE=${TURN_DENY_PRIVATE:-true}
     restart: unless-stopped
 
 networks:
