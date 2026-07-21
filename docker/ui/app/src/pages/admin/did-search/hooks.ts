@@ -19,6 +19,7 @@ import {
   listMyDids,
   getDidStats,
   syncDidInventory,
+  addDid,
   assignDid,
   unassignDid,
   requestDid,
@@ -112,6 +113,80 @@ export function useSyncInventory() {
     },
     onError: (err: Error) => toastErr(err.message ?? 'Sync failed'),
   });
+}
+
+// ── Add DID modal — form state + live mutation ──────────────────────────────────
+
+export interface UseAddDidFormResult {
+  did: string;
+  setDid: (v: string) => void;
+  state: string;
+  setState: (v: string) => void;
+  notes: string;
+  setNotes: (v: string) => void;
+  isPending: boolean;
+  submit: () => void;
+}
+
+/**
+ * Owns the add-DID modal fields + the live POST /numbers mutation. On success it
+ * toasts with the normalized (server-returned) number, invalidates the DID
+ * caches so the new row appears in the Inventory + Available tabs, resets the
+ * form, and calls `onDone`. The backend normalizes the number and stamps
+ * allocated_env from DEPLOY_ENV, so only did/state/notes are sent. The API
+ * client surfaces the backend `detail`, so 409/422 messages show through.
+ */
+export function useAddDidForm(open: boolean, onDone: () => void): UseAddDidFormResult {
+  const [did, setDid] = useState('');
+  const [state, setState] = useState('');
+  const [notes, setNotes] = useState('');
+  const { toastOk, toastErr } = useToast();
+  const qc = useQueryClient();
+
+  // Reset fields whenever the modal (re)opens so a prior entry never lingers.
+  // This uses React's "adjust state while rendering on prop change" pattern (a
+  // render-time setState, not an effect) — the modal stays mounted, so without
+  // this a cancelled entry would survive the next open.
+  const [wasOpen, setWasOpen] = useState(open);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open) {
+      setDid('');
+      setState('');
+      setNotes('');
+    }
+  }
+
+  const mutation = useMutation({
+    mutationFn: () =>
+      addDid({
+        did,
+        state: state.trim() || undefined,
+        notes: notes.trim() || undefined,
+      }),
+    onSuccess: (created) => {
+      toastOk(`${fmt(created.did)} added to inventory`);
+      invalidateDidQueries(qc);
+      setDid('');
+      setState('');
+      setNotes('');
+      onDone();
+    },
+    onError: (err: Error) => toastErr(err.message ?? 'Failed to add number'),
+  });
+
+  const submit = useCallback(() => mutation.mutate(), [mutation]);
+
+  return {
+    did,
+    setDid,
+    state,
+    setState,
+    notes,
+    setNotes,
+    isPending: mutation.isPending,
+    submit,
+  };
 }
 
 // ── Available tab ─────────────────────────────────────────────────────────────

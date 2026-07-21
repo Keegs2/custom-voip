@@ -7,7 +7,7 @@
  */
 
 import { useCallback, useState } from 'react';
-import { Phone, CheckCircle, Users, Clock, RefreshCw } from 'lucide-react';
+import { Phone, CheckCircle, Users, Clock, RefreshCw, Plus } from 'lucide-react';
 import { GlassPanel } from '../../../../components/glass/GlassCard';
 import { GLASS } from '../../../../components/glass/glass';
 import { Button } from '../../../../components/ui/Button';
@@ -24,6 +24,7 @@ import { StatusBadge, ProductPill, EnvBadge } from './Chips';
 import { Spinner, LoadingRow, EmptyRow } from './states';
 import { AssignModal } from './AssignModal';
 import { UnassignModal } from './UnassignModal';
+import { AddDidModal } from './AddDidModal';
 
 const COLS = 8;
 
@@ -36,6 +37,7 @@ export function InventoryTab() {
   const [offset, setOffset] = useState(0);
   const [assignTarget, setAssignTarget] = useState<DidInventoryItem | null>(null);
   const [unassignTarget, setUnassignTarget] = useState<DidInventoryItem | null>(null);
+  const [addOpen, setAddOpen] = useState(false);
 
   const { data: stats, isLoading: statsLoading } = useDidStats();
   const { filteredItems, total, isLoading, isFetching, hasFilters } = useInventoryData({
@@ -77,15 +79,25 @@ export function InventoryTab() {
               </span>
             )}
           </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            icon={<RefreshCw size={13} />}
-            loading={syncMutation.isPending}
-            onClick={() => syncMutation.mutate()}
-          >
-            Sync from Bandwidth
-          </Button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Button
+              variant="ghost"
+              size="sm"
+              icon={<Plus size={13} />}
+              onClick={() => setAddOpen(true)}
+            >
+              Add DID
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              icon={<RefreshCw size={13} />}
+              loading={syncMutation.isPending}
+              onClick={() => syncMutation.mutate()}
+            >
+              Sync from Bandwidth
+            </Button>
+          </div>
         </div>
 
         <FilterBar
@@ -177,6 +189,7 @@ export function InventoryTab() {
         onClose={() => setUnassignTarget(null)}
         onSuccess={() => setUnassignTarget(null)}
       />
+      <AddDidModal open={addOpen} onClose={() => setAddOpen(false)} />
     </div>
   );
 }

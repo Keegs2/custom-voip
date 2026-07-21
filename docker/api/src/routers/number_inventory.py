@@ -7,6 +7,7 @@ Provides a complete DID management system backed by the did_inventory table:
 Cross-references Bandwidth TN inventory with internal product tables
 (rcf_numbers, api_dids, trunk_dids) and manages the full DID lifecycle.
 """
+import os
 import re
 import logging
 from datetime import datetime, timezone
@@ -26,6 +27,12 @@ router = APIRouter()
 
 # E.164 pattern: + followed by 1-15 digits
 E164_PATTERN = re.compile(r"^\+[1-9]\d{1,14}$")
+
+# DEPLOY_ENV identifies which environment this API instance serves. Manual
+# inventory writes stamp it into did_inventory.allocated_env so the RCF
+# allocation guard (rcf._enforce_allocation_guard) can tell prod- vs
+# sandbox-owned DIDs apart. Default 'prod'; the sandbox box sets 'sandbox'.
+DEPLOY_ENV = (os.getenv("DEPLOY_ENV", "prod").strip().lower() or "prod")
 
 
 # ---------------------------------------------------------------------------
@@ -61,6 +68,23 @@ class NumberRequest(BaseModel):
         if v not in allowed:
             raise ValueError(f"product_type must be one of {allowed}")
         return v
+
+
+class AddDidRequest(BaseModel):
+    """Manually add a single DID to inventory (owned by this DEPLOY_ENV)."""
+    did: str
+    state: Optional[str] = None
+    notes: Optional[str] = None
+
+    @field_validator("did")
+    @classmethod
+    def validate_did(cls, v: str) -> str:
+        e164 = _normalize_did(v)
+        if not E164_PATTERN.match(e164):
+            raise ValueError(
+                f"Invalid DID: '{v}'. Must be E.164 (e.g., +16174544217)."
+            )
+        return e164
 
 
 # ---------------------------------------------------------------------------
@@ -113,8 +137,8 @@ async def _reconcile_product_tables() -> dict:
                 await conn.execute(
                     """
                     INSERT INTO did_inventory (did, customer_id, product_type, product_ref_id,
-                                               status, assigned_at, updated_at)
-                    VALUES ($1, $2, 'rcf', $3, 'assigned', $4, NOW())
+                                               status, assigned_at, updated_at, allocated_env)
+                    VALUES ($1, $2, 'rcf', $3, 'assigned', $4, NOW(), $5)
                     ON CONFLICT (did) DO UPDATE
                        SET customer_id = EXCLUDED.customer_id,
                            product_type = EXCLUDED.product_type,
@@ -123,7 +147,7 @@ async def _reconcile_product_tables() -> dict:
                            assigned_at = COALESCE(did_inventory.assigned_at, EXCLUDED.assigned_at),
                            updated_at = NOW()
                     """,
-                    row["did"], row["customer_id"], row["ref_id"], row["created_at"],
+                    row["did"], row["customer_id"], row["ref_id"], row["created_at"], DEPLOY_ENV,
                 )
                 by_product["rcf"] += 1
 
@@ -139,8 +163,8 @@ async def _reconcile_product_tables() -> dict:
                 await conn.execute(
                     """
                     INSERT INTO did_inventory (did, customer_id, product_type, product_ref_id,
-                                               status, assigned_at, updated_at)
-                    VALUES ($1, $2, 'api', $3, 'assigned', $4, NOW())
+                                               status, assigned_at, updated_at, allocated_env)
+                    VALUES ($1, $2, 'api', $3, 'assigned', $4, NOW(), $5)
                     ON CONFLICT (did) DO UPDATE
                        SET customer_id = EXCLUDED.customer_id,
                            product_type = EXCLUDED.product_type,
@@ -149,7 +173,7 @@ async def _reconcile_product_tables() -> dict:
                            assigned_at = COALESCE(did_inventory.assigned_at, EXCLUDED.assigned_at),
                            updated_at = NOW()
                     """,
-                    row["did"], row["customer_id"], row["ref_id"], row["created_at"],
+                    row["did"], row["customer_id"], row["ref_id"], row["created_at"], DEPLOY_ENV,
                 )
                 by_product["api"] += 1
 
@@ -166,8 +190,8 @@ async def _reconcile_product_tables() -> dict:
                 await conn.execute(
                     """
                     INSERT INTO did_inventory (did, customer_id, product_type, product_ref_id,
-                                               status, assigned_at, updated_at)
-                    VALUES ($1, $2, 'trunk', $3, 'assigned', $4, NOW())
+                                               status, assigned_at, updated_at, allocated_env)
+                    VALUES ($1, $2, 'trunk', $3, 'assigned', $4, NOW(), $5)
                     ON CONFLICT (did) DO UPDATE
                        SET customer_id = EXCLUDED.customer_id,
                            product_type = EXCLUDED.product_type,
@@ -176,7 +200,7 @@ async def _reconcile_product_tables() -> dict:
                            assigned_at = COALESCE(did_inventory.assigned_at, EXCLUDED.assigned_at),
                            updated_at = NOW()
                     """,
-                    row["did"], row["customer_id"], row["ref_id"], row["created_at"],
+                    row["did"], row["customer_id"], row["ref_id"], row["created_at"], DEPLOY_ENV,
                 )
                 by_product["trunk"] += 1
 
@@ -199,6 +223,7 @@ async def get_inventory(
     status: Optional[str] = Query(None, description="Filter by status"),
     customer_id: Optional[int] = Query(None, description="Filter by customer"),
     product_type: Optional[str] = Query(None, description="Filter by product type"),
+    allocated_env: Optional[str] = Query(None, description="Filter by owning environment (prod/sandbox/reserved)"),
     search: Optional[str] = Query(None, description="DID substring search"),
     state: Optional[str] = Query(None, description="Filter by state"),
     limit: int = Query(100, ge=1, le=1000),
@@ -207,6 +232,7 @@ async def get_inventory(
     """Return the full DID inventory with filters and pagination. Admin only."""
     query = """
         SELECT d.*,
+               d.allocated_env,
                c.name AS customer_name,
                u.name AS assigned_by_name,
                COUNT(*) OVER() AS total_count
@@ -231,6 +257,11 @@ async def get_inventory(
     if product_type is not None:
         query += f" AND d.product_type = ${idx}"
         values.append(product_type)
+        idx += 1
+
+    if allocated_env is not None:
+        query += f" AND d.allocated_env = ${idx}"
+        values.append(allocated_env)
         idx += 1
 
     if search is not None:
@@ -285,6 +316,12 @@ async def get_stats(admin: dict = Depends(require_admin)):
     )
     by_state = {r["state"]: r["cnt"] for r in state_rows}
 
+    # Ownership (allocated_env) breakdown — prod vs sandbox vs reserved
+    env_rows = await db.fetch_all_inventory(
+        "SELECT allocated_env, COUNT(*) AS cnt FROM did_inventory GROUP BY allocated_env"
+    )
+    by_env = {r["allocated_env"]: r["cnt"] for r in env_rows}
+
     total = sum(by_status.values())
     available = by_status.get("available", 0)
     assigned = by_status.get("assigned", 0)
@@ -298,7 +335,50 @@ async def get_stats(admin: dict = Depends(require_admin)):
         "by_status": by_status,
         "by_product": by_product,
         "by_state": by_state,
+        "by_env": by_env,
+        "deploy_env": DEPLOY_ENV,
     }
+
+
+@router.post("")
+async def add_did(body: AddDidRequest, admin: dict = Depends(require_admin)):
+    """Manually add a single DID to inventory as 'available'. Admin only.
+
+    The DID is stamped with this API instance's DEPLOY_ENV in allocated_env, so
+    the environment that adds it owns it for routing. Use this to seed a
+    sandbox-owned test DID (or a prod DID) that isn't sourced from Bandwidth.
+    """
+    e164 = body.did  # already normalized + validated to E.164 by AddDidRequest
+    admin_user_id = int(admin["sub"])
+
+    # Insert as available, owned by this environment. Never overwrite an existing
+    # row (its ownership must be preserved) — 0 rows affected => already present.
+    result = await db.execute(
+        """
+        INSERT INTO did_inventory (did, status, allocated_env, state, notes,
+                                   created_at, updated_at)
+        VALUES ($1, 'available', $2, $3, $4, NOW(), NOW())
+        ON CONFLICT (did) DO NOTHING
+        """,
+        e164, DEPLOY_ENV, body.state, body.notes,
+    )
+    if result == "INSERT 0 0":
+        raise HTTPException(
+            status_code=409,
+            detail=f"DID {e164} is already in inventory",
+        )
+
+    logger.info(
+        "DID added to inventory: did=%s, env=%s, by_user=%d",
+        e164, DEPLOY_ENV, admin_user_id,
+    )
+
+    row = await db.fetch_one(
+        "SELECT id, did, status, allocated_env, state, notes "
+        "FROM did_inventory WHERE did = $1",
+        e164,
+    )
+    return dict(row)
 
 
 @router.post("/sync")
@@ -360,11 +440,12 @@ async def sync_from_bandwidth(admin: dict = Depends(require_admin)):
                         tn.get("state", "") or None,
                         tn.get("lata", "") or None,
                         tn.get("rateCenter", "") or None,
+                        DEPLOY_ENV,
                     ))
                 await conn.executemany(
                     """
-                    INSERT INTO did_inventory (did, city, state, lata, rate_center, status)
-                    VALUES ($1, $2, $3, $4, $5, 'available')
+                    INSERT INTO did_inventory (did, city, state, lata, rate_center, status, allocated_env)
+                    VALUES ($1, $2, $3, $4, $5, 'available', $6)
                     ON CONFLICT (did) DO NOTHING
                     """,
                     insert_args,

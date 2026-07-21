@@ -5,6 +5,7 @@ import type {
   DidInventoryListResponse,
   DidStats,
   DidAssignRequest,
+  DidAddRequest,
   DidAvailableParams,
 } from '../types/didInventory';
 
@@ -87,6 +88,16 @@ export async function listMyDids(): Promise<DidInventoryItem[]> {
  */
 export async function syncDidInventory(): Promise<{ synced: number; message: string }> {
   return apiRequest<{ synced: number; message: string }>('POST', '/numbers/sync');
+}
+
+/**
+ * POST /numbers
+ * Admin endpoint — adds a single DID to inventory. The backend normalizes the
+ * number to E.164 and stamps allocated_env from its own DEPLOY_ENV. Returns the
+ * created inventory row (409 if already present, 422 if the number is invalid).
+ */
+export async function addDid(data: DidAddRequest): Promise<DidInventoryItem> {
+  return apiRequest<DidInventoryItem>('POST', '/numbers', data);
 }
 
 /**
