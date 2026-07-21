@@ -27,6 +27,12 @@ import {
   DOCS,
 } from '../styles';
 
+/** One row in a two-column status/meaning reference table. */
+export interface StatusRow {
+  status: string;
+  meaning: string;
+}
+
 /** One HTTP endpoint row: method pill + path + description. */
 export function Endpoint({
   method,
@@ -97,6 +103,35 @@ export function NoteCards({
           <div style={noteCardBody}>{body}</div>
         </div>
       ))}
+    </div>
+  );
+}
+
+/** A two-column Status / Meaning reference table (e.g. HTTP status codes). */
+export function StatusTable({ rows }: { rows: StatusRow[] }) {
+  return (
+    <div style={tableFrame}>
+      <table style={table}>
+        <thead>
+          <tr style={theadRow}>
+            {['Status', 'Meaning'].map((h) => (
+              <th key={h} style={th}>
+                {h}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, i) => (
+            <tr key={row.status} style={zebra(i)}>
+              <td style={tdNoWrap}>
+                <code style={codeCell}>{row.status}</code>
+              </td>
+              <td style={td}>{row.meaning}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

@@ -24,4 +24,10 @@ export interface ProductCardData {
   active: boolean;
   /** Route navigated to when an authenticated user clicks an active tile. */
   route?: string;
+  /**
+   * Slug of the public docs guide for this product (→ `/docs/{docsSlug}`). When
+   * set, the card renders a small "Read the guide" link — a low-friction "learn
+   * more" affordance that works for logged-out prospects (docs are public).
+   */
+  docsSlug?: string;
 }

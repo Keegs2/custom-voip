@@ -11,7 +11,8 @@
  */
 
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
+import { BookOpen, ArrowRight } from 'lucide-react';
 import { GlassCard } from '../../../components/glass/GlassCard';
 import { GLASS } from '../../../components/glass/glass';
 import type { ProductCardData } from '../types';
@@ -24,6 +25,7 @@ import {
   productBadgeText,
   productTitle,
   productSubtitle,
+  productDocsLink,
 } from '../styles';
 
 interface ProductCardProps {
@@ -41,6 +43,7 @@ interface ProductCardProps {
 export function ProductCard({ card, index, onRequestAccess }: ProductCardProps) {
   // ── ALL hooks first (React #310) ──────────────────────────────────────────
   const [hovered, setHovered] = useState(false);
+  const [docsHovered, setDocsHovered] = useState(false);
   const navigate = useNavigate();
 
   const accent = card.active ? GLASS.accent : GLASS.textFaint;
@@ -95,7 +98,25 @@ export function ProductCard({ card, index, onRequestAccess }: ProductCardProps) 
           </div>
 
           <div style={productTitle}>{card.title}</div>
-          <div style={productSubtitle}>{card.subtitle}</div>
+          <div style={{ ...productSubtitle, flex: 1 }}>{card.subtitle}</div>
+
+          {/* "Read the guide" — public docs link. stopPropagation so it navigates
+              to the guide instead of triggering the card's own click (which would
+              open Request Access / the product route). Works logged-out. */}
+          {card.docsSlug && (
+            <Link
+              to={`/docs/${card.docsSlug}`}
+              onClick={(e) => e.stopPropagation()}
+              onMouseEnter={() => setDocsHovered(true)}
+              onMouseLeave={() => setDocsHovered(false)}
+              style={productDocsLink(GLASS.accent, docsHovered)}
+              aria-label={`Read the ${card.title} guide`}
+            >
+              <BookOpen size={12} strokeWidth={2.2} />
+              Read the guide
+              <ArrowRight size={11} strokeWidth={2.4} style={{ opacity: docsHovered ? 1 : 0.6 }} />
+            </Link>
+          )}
         </div>
       </GlassCard>
     </div>

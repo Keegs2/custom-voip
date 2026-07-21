@@ -1,42 +1,15 @@
 /**
- * RCF User Guide — concise customer-facing documentation for Granite Shale RCF.
+ * Remote Call Forwarding — public product guide (route `/docs/rcf`).
  *
- * THIN page: composition only. The frosted-glass primitives, styles, and section
- * content live in the co-located feature folder (see docs/FRONTEND_GLASS_REFACTOR.md):
- *   styles.ts        → tokens + style builders (blue glass)
- *   types.ts         → local types
- *   components/      → DocsPageHeader, DocsAccordion, text/code/apiRefs, sections
- *
- * The ambient GlassBackground is mounted app-wide by AppLayout; this page only
- * composes glass surfaces on top. No top padding — the layout owns the offset.
+ * THIN page: hands the RCF guide content to the universal <ProductGuide>, which
+ * renders the shared plain-English → who → what → how → getting-started →
+ * "for developers" accordion structure. Content lives in `guides/rcf.tsx`.
+ * Public (outside RequireAuth), inside AppLayout — no top padding.
  */
 
-import { DocsPageHeader } from './components/DocsPageHeader';
-import {
-  GettingStartedSection,
-  ManagingRcfSection,
-  DIDManagementSection,
-  SupportSection,
-} from './components/RcfSections';
-import { readingColumn, sectionList } from './styles';
+import { ProductGuide } from './components/ProductGuide';
+import { rcfGuide } from './guides/rcf';
 
 export function RcfDocsPage() {
-  return (
-    <>
-      <DocsPageHeader
-        eyebrow="Customer Guide"
-        title="Granite Shale RCF"
-        subtitle="Manage your Remote Call Forwarding numbers"
-      />
-
-      <div style={readingColumn}>
-        <div style={sectionList}>
-          <GettingStartedSection />
-          <ManagingRcfSection />
-          <DIDManagementSection />
-          <SupportSection />
-        </div>
-      </div>
-    </>
-  );
+  return <ProductGuide data={rcfGuide} />;
 }

@@ -14,8 +14,19 @@ import { RcfPage } from './pages/RcfPage';
 import { RcfGlassPage } from './pages/rcf-glass/RcfGlassPage';
 import { TrunksPage } from './pages/TrunksPage';
 import { CallFlowBuilderPage } from './pages/CallFlowBuilderPage';
+// Public documentation — the /docs hub + one guide per product. These are
+// static content surfaces (no auth-gated API calls), so they live OUTSIDE
+// RequireAuth (inside AppLayout) exactly like the public `/` Dashboard, letting
+// a logged-out prospect read every guide before creating an account.
+import { DocsHubPage } from './pages/docs/DocsHubPage';
 import { RcfDocsPage } from './pages/docs/RcfDocsPage';
-import { ApiDocsPage } from './pages/docs/ApiDocsPage';
+import { ProgrammableVoiceDocsPage } from './pages/docs/ProgrammableVoiceDocsPage';
+import { SipTrunkingDocsPage } from './pages/docs/SipTrunkingDocsPage';
+import { UnifiedCommsDocsPage } from './pages/docs/UnifiedCommsDocsPage';
+import { AiAgentsDocsPage } from './pages/docs/AiAgentsDocsPage';
+import { TollFreeDocsPage } from './pages/docs/TollFreeDocsPage';
+import { BillingDocsPage } from './pages/docs/BillingDocsPage';
+import { PlatformDocsPage } from './pages/docs/PlatformDocsPage';
 import { TroubleshootingPage } from './pages/TroubleshootingPage';
 import { AdminPage } from './pages/admin/AdminPage';
 import { PlatformManagementPage } from './pages/admin/PlatformManagementPage';
@@ -88,6 +99,28 @@ export function App() {
             {/* Public — homepage is visible without authentication */}
             <Route index element={<DashboardPage />} />
 
+            {/* Public documentation — the /docs hub + one guide per product.
+                These are static content (no auth-gated API calls), so they live
+                OUTSIDE RequireAuth (but inside AppLayout for the chrome), exactly
+                like the public `/` Dashboard. A logged-out prospect can browse
+                every guide before signing up. Product-access gating elsewhere is
+                unaffected — docs are content only. */}
+            <Route path="docs"                        element={<DocsHubPage />} />
+            <Route path="docs/rcf"                    element={<RcfDocsPage />} />
+            <Route path="docs/programmable-voice"     element={<ProgrammableVoiceDocsPage />} />
+            <Route path="docs/sip-trunking"           element={<SipTrunkingDocsPage />} />
+            <Route path="docs/unified-communications" element={<UnifiedCommsDocsPage />} />
+            <Route path="docs/ai-agents"              element={<AiAgentsDocsPage />} />
+            <Route path="docs/toll-free"              element={<TollFreeDocsPage />} />
+            <Route path="docs/billing"                element={<BillingDocsPage />} />
+            <Route path="docs/platform"               element={<PlatformDocsPage />} />
+            {/* Redirects — old docs paths keep working. /docs/api → Programmable
+                Voice (the API DIDs product merged into it); /documentation →
+                the hub; /docs/integration → Programmable Voice. */}
+            <Route path="documentation"     element={<Navigate to="/docs" replace />} />
+            <Route path="docs/api"          element={<Navigate to="/docs/programmable-voice" replace />} />
+            <Route path="docs/integration"  element={<Navigate to="/docs/programmable-voice" replace />} />
+
             {/* Protected — all other routes require authentication */}
             <Route element={<RequireAuth />}>
               <Route path="rcf"        element={<RcfPage />} />
@@ -102,11 +135,9 @@ export function App() {
               {/* NOTE: the Universal Call Flow Builder (/flows) is routed
                   FULL-SCREEN, outside AppLayout (see below) — the node graph
                   needs the entire viewport, so it renders its own Sidebar
-                  instead of living inside AppLayout's centered max-width box. */}
-              <Route path="documentation" element={<Navigate to="/docs/rcf" replace />} />
-              <Route path="docs/rcf"         element={<RcfDocsPage />} />
-              <Route path="docs/api"         element={<ApiDocsPage />} />
-              <Route path="docs/integration" element={<Navigate to="/docs/api" replace />} />
+                  instead of living inside AppLayout's centered max-width box.
+                  The /docs/* documentation routes moved OUT of RequireAuth (see
+                  the public block above) so prospects can read them. */}
               <Route path="call-quality" element={<CallQualityPage />} />
               {/* Customer Billing & Payments — available to any authenticated
                   customer and to admins (payments is a universal surface, not an

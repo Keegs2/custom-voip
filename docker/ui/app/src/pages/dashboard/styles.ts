@@ -171,6 +171,27 @@ export const productSubtitle: CSSProperties = {
   lineHeight: 1.55,
 };
 
+/**
+ * "Read the guide" docs link at the foot of a product card. A subtle,
+ * low-friction "learn more" affordance that routes to the PUBLIC /docs guide, so
+ * it works for logged-out prospects too. `mt: auto` pins it to the card bottom.
+ */
+export function productDocsLink(accent: string, hovered: boolean): CSSProperties {
+  return {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 5,
+    marginTop: 14,
+    fontSize: '0.68rem',
+    fontWeight: 700,
+    letterSpacing: '0.02em',
+    color: hovered ? accent : GLASS.textFaint,
+    textDecoration: 'none',
+    transition: 'color 0.18s ease, gap 0.18s ease',
+    alignSelf: 'flex-start',
+  };
+}
+
 /* ── Capability card ────────────────────────────────────────────────────── */
 
 /** Responsive capabilities grid — 4-up on wide screens, wraps gracefully. */

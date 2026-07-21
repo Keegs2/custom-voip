@@ -10,11 +10,14 @@ import { ApiError } from '../../api/client';
 import { ucaasEntitled, voicemailEntitled } from '../auth/entitlements';
 import { consumeLoginRedirect } from '../auth/loginRedirect';
 import {
-  IconRCF, IconTrunk, IconDocs,
+  IconRCF, IconTrunk,
   IconAdmin, IconSignal, IconTroubleshoot, IconVoicemail,
 } from '../icons/ProductIcons';
 import { Package, Shield, ChevronDown, Eye, EyeOff, Server, BookOpen, FolderOpen, MessageCircle, RadioTower, Mic, ListOrdered, Waves, Video, Webhook, Workflow, CalendarDays, Bot, Hash, Route, Wallet, LayoutDashboard, SlidersHorizontal } from 'lucide-react';
 import { AccessRequestForm } from './AccessRequestForm';
+// Shared product-guide registry — the single source of truth for the public
+// /docs hub grid AND the Documentation nav group below, so they never drift.
+import { GUIDES } from '../../pages/docs/guides/registry';
 
 /* ─── Types ───────────────────────────────────────────────── */
 
@@ -118,11 +121,21 @@ const PRESENCE_OPTIONS: { value: PresenceStatus; label: string; color: string }[
   { value: 'offline',   label: 'Appear Offline', color: '#64748b' },
 ];
 
-/* ─── Documentation nav items ─────────────────────────────── */
-
+/* ─── Documentation nav items ─────────────────────────────────
+ * The Documentation group lists a link to the /docs hub plus every product
+ * guide, derived from the SHARED guide registry (docs/guides/registry.ts) so the
+ * hub grid and this nav never drift. These are PUBLIC content routes (outside
+ * RequireAuth), so the group also renders for logged-out prospects (see the
+ * unauthenticated branch below). Each item's icon is the product's registry icon;
+ * its colour is the product accent. */
 const docNavItems: NavItemDef[] = [
-  { label: 'RCF Guide',     icon: <IconRCF size={18} />,  to: '/docs/rcf', color: '#4ade80' },
-  { label: 'API Reference', icon: <IconDocs size={18} />, to: '/docs/api', color: '#3b82f6' },
+  { label: 'All Guides', icon: <BookOpen size={16} strokeWidth={1.9} />, to: '/docs', color: '#3b82f6' },
+  ...GUIDES.map((g): NavItemDef => ({
+    label: g.title,
+    icon: <g.icon size={16} strokeWidth={1.7} />,
+    to: `/docs/${g.slug}`,
+    color: g.accent,
+  })),
 ];
 
 /* ─── localStorage helpers ────────────────────────────────── */
@@ -1018,7 +1031,10 @@ export function Sidebar() {
           }}
         />
 
-        {/* ── Unauthenticated: login + request access ──────── */}
+        {/* ── Unauthenticated: login + request access + public docs ──
+            A prospect can browse every product guide before creating an account,
+            so the Documentation group (public /docs routes) renders here too —
+            identical to the authenticated version below. */}
         {!isAuthenticated && (
           <div
             style={{
@@ -1033,6 +1049,21 @@ export function Sidebar() {
           >
             <SidebarLoginForm />
             <AccessRequestForm />
+
+            <div style={{ padding: '4px 16px 16px' }}>
+              <CollapsibleGroup
+                id="documentation"
+                label="Documentation"
+                icon={<BookOpen size={11} strokeWidth={2.5} />}
+                isOpen={groupOpen.documentation}
+                onToggle={toggleGroup}
+                to="/docs"
+              >
+                {docNavItems.map((item) => (
+                  <SidebarNavItem key={item.to} item={item} onNavigate={closeMobile} small />
+                ))}
+              </CollapsibleGroup>
+            </div>
           </div>
         )}
 
@@ -1127,7 +1158,8 @@ export function Sidebar() {
               </>
             )}
 
-            {/* ── GROUP 3: Documentation ───────────────────── */}
+            {/* ── GROUP 3: Documentation (public content — same group the
+                unauthenticated branch renders) ───────────────── */}
             <div style={{ height: 6 }} />
             <CollapsibleGroup
               id="documentation"
@@ -1135,6 +1167,7 @@ export function Sidebar() {
               icon={<BookOpen size={11} strokeWidth={2.5} />}
               isOpen={groupOpen.documentation}
               onToggle={toggleGroup}
+              to="/docs"
             >
               {docNavItems.map((item) => (
                 <SidebarNavItem key={item.to} item={item} onNavigate={closeMobile} small />

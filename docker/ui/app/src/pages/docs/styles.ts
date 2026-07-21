@@ -62,6 +62,18 @@ export const sectionList: CSSProperties = {
   gap: 16,
 };
 
+/**
+ * Vertical rhythm between a product guide's titled frosted panels. Slightly
+ * more generous than the accordion `sectionList` (16px) because these are
+ * full-weight sections, not compact accordion rows — 20px keeps them distinct
+ * without sprawling, staying within the app spacing standard.
+ */
+export const guideSectionList: CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 20,
+};
+
 /* ─── Typography ─────────────────────────────────────────────────────────── */
 
 export const paragraph: CSSProperties = {
@@ -515,3 +527,308 @@ export const helpCard: CSSProperties = {
   backdropFilter: 'blur(8px)',
   WebkitBackdropFilter: 'blur(8px)',
 };
+
+/* ─── Product-guide layout ───────────────────────────────────────────────── */
+
+/**
+ * A titled reading section inside a product guide (e.g. "In plain English",
+ * "How it works"). Rendered on a frosted panel so the prose keeps strong
+ * contrast over the ambient backdrop.
+ */
+export const guideSectionTitle: CSSProperties = {
+  fontSize: '0.68rem',
+  fontWeight: 700,
+  letterSpacing: '0.12em',
+  textTransform: 'uppercase',
+  color: DOCS.accent,
+  margin: '0 0 14px',
+  display: 'flex',
+  alignItems: 'center',
+  gap: 9,
+};
+
+/** Lead paragraph — slightly larger + brighter than body copy for the opener. */
+export const guideLead: CSSProperties = {
+  margin: 0,
+  fontSize: '1.02rem',
+  color: DOCS.text,
+  lineHeight: 1.72,
+  fontWeight: 400,
+};
+
+/* ─── "Who it's for" checklist ───────────────────────────────────────────── */
+
+export const whoList: CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 10,
+  margin: 0,
+  padding: 0,
+  listStyle: 'none',
+};
+
+export const whoItem: CSSProperties = {
+  display: 'flex',
+  alignItems: 'flex-start',
+  gap: 12,
+  fontSize: '0.9rem',
+  color: DOCS.textMuted,
+  lineHeight: 1.6,
+};
+
+export function whoTick(accent = DOCS.accent): CSSProperties {
+  return {
+    width: 22,
+    height: 22,
+    borderRadius: 7,
+    flexShrink: 0,
+    marginTop: 1,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    background: hexToRgba(accent, 0.12),
+    border: `1px solid ${hexToRgba(accent, 0.3)}`,
+    color: accent,
+  };
+}
+
+/* ─── "What you get" feature list ────────────────────────────────────────── */
+
+export const featureGrid: CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+  gap: 14,
+};
+
+export function featureCard(accent = DOCS.accent): CSSProperties {
+  return {
+    padding: '16px 18px',
+    borderRadius: 14,
+    background: DOCS.scrim,
+    border: `1px solid ${hexToRgba(accent, 0.16)}`,
+    backdropFilter: 'blur(8px)',
+    WebkitBackdropFilter: 'blur(8px)',
+    display: 'flex',
+    gap: 13,
+    alignItems: 'flex-start',
+  };
+}
+
+export function featureDot(accent = DOCS.accent): CSSProperties {
+  return {
+    width: 30,
+    height: 30,
+    borderRadius: 9,
+    flexShrink: 0,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    background: `linear-gradient(135deg, ${hexToRgba(accent, 0.2)} 0%, ${hexToRgba(accent, 0.05)} 100%)`,
+    border: `1px solid ${hexToRgba(accent, 0.3)}`,
+    color: accent,
+    marginTop: 1,
+  };
+}
+
+export const featureTitle: CSSProperties = {
+  fontSize: '0.9rem',
+  fontWeight: 700,
+  color: DOCS.text,
+  marginBottom: 4,
+  letterSpacing: '-0.01em',
+};
+
+export const featureBody: CSSProperties = {
+  fontSize: '0.83rem',
+  color: DOCS.textMuted,
+  lineHeight: 1.6,
+};
+
+/* ─── "Getting started" steps ────────────────────────────────────────────── */
+
+export const stepsWrap: CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 12,
+  marginBottom: 22,
+};
+
+/* ─── Sign-up / next-step call-to-action ─────────────────────────────────── */
+
+export function ctaCard(accent = DOCS.accent): CSSProperties {
+  return {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 18,
+    padding: '22px 26px',
+    borderRadius: 16,
+    background: `linear-gradient(135deg, ${hexToRgba(accent, 0.14)} 0%, ${hexToRgba(accent, 0.04)} 100%)`,
+    border: `1px solid ${hexToRgba(accent, 0.32)}`,
+    backdropFilter: 'blur(12px)',
+    WebkitBackdropFilter: 'blur(12px)',
+    boxShadow: `inset 0 1px 0 rgba(255,255,255,0.1), 0 0 34px -14px ${hexToRgba(accent, 0.5)}`,
+  };
+}
+
+export const ctaTitle: CSSProperties = {
+  fontSize: '1.05rem',
+  fontWeight: 800,
+  color: '#ffffff',
+  letterSpacing: '-0.02em',
+  marginBottom: 4,
+};
+
+export const ctaBody: CSSProperties = {
+  fontSize: '0.85rem',
+  color: DOCS.textMuted,
+  lineHeight: 1.6,
+  maxWidth: 460,
+};
+
+export function ctaButton(accent = DOCS.accent): CSSProperties {
+  return {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 8,
+    padding: '11px 22px',
+    borderRadius: 10,
+    background: `linear-gradient(135deg, ${accent} 0%, ${hexToRgba(accent, 0.82)} 100%)`,
+    border: 'none',
+    color: '#ffffff',
+    fontSize: '0.86rem',
+    fontWeight: 700,
+    letterSpacing: '-0.01em',
+    cursor: 'pointer',
+    textDecoration: 'none',
+    whiteSpace: 'nowrap',
+    boxShadow: `0 4px 18px -6px ${hexToRgba(accent, 0.7)}`,
+    transition: 'transform 0.15s ease, box-shadow 0.15s ease',
+  };
+}
+
+export function ctaButtonGhost(accent = DOCS.accent): CSSProperties {
+  return {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 7,
+    padding: '11px 18px',
+    borderRadius: 10,
+    background: 'transparent',
+    border: `1px solid ${hexToRgba(accent, 0.4)}`,
+    color: DOCS.text,
+    fontSize: '0.84rem',
+    fontWeight: 600,
+    letterSpacing: '-0.01em',
+    cursor: 'pointer',
+    textDecoration: 'none',
+    whiteSpace: 'nowrap',
+    transition: 'background 0.15s ease, border-color 0.15s ease',
+  };
+}
+
+/* ─── Docs hub (landing) ─────────────────────────────────────────────────── */
+
+/** Wider reading measure for the hub grid than the single-guide column. */
+export const hubColumn: CSSProperties = {
+  maxWidth: 1180,
+  margin: '0 auto',
+};
+
+/** Intro prose block above the product-card grid. */
+export const hubIntro: CSSProperties = {
+  maxWidth: 720,
+  margin: '0 0 32px',
+};
+
+export const hubIntroLead: CSSProperties = {
+  fontSize: '1.05rem',
+  color: DOCS.text,
+  lineHeight: 1.75,
+  margin: '0 0 14px',
+};
+
+export const hubGrid: CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
+  gap: 16,
+};
+
+export const hubCardBody: CSSProperties = {
+  padding: '20px 22px 22px',
+  display: 'flex',
+  flexDirection: 'column',
+  height: '100%',
+};
+
+export function hubIconBox(accent = DOCS.accent): CSSProperties {
+  return {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    background: `linear-gradient(135deg, ${hexToRgba(accent, 0.22)} 0%, ${hexToRgba(accent, 0.05)} 100%)`,
+    border: `1px solid ${hexToRgba(accent, 0.34)}`,
+    color: accent,
+    flexShrink: 0,
+    marginBottom: 15,
+    boxShadow: `0 0 20px -6px ${hexToRgba(accent, 0.5)}`,
+  };
+}
+
+export const hubCardTitle: CSSProperties = {
+  fontSize: '1.02rem',
+  fontWeight: 700,
+  color: DOCS.text,
+  letterSpacing: '-0.01em',
+  marginBottom: 7,
+};
+
+export const hubCardPitch: CSSProperties = {
+  fontSize: '0.87rem',
+  color: DOCS.textMuted,
+  lineHeight: 1.62,
+  marginBottom: 14,
+  flex: 1,
+};
+
+export const hubCardMeta: CSSProperties = {
+  fontSize: '0.72rem',
+  color: DOCS.textFaint,
+  lineHeight: 1.5,
+  paddingTop: 12,
+  borderTop: '1px solid rgba(255,255,255,0.07)',
+};
+
+export function hubCardLink(accent = DOCS.accent): CSSProperties {
+  return {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 6,
+    fontSize: '0.78rem',
+    fontWeight: 700,
+    color: accent,
+    marginTop: 12,
+    letterSpacing: '-0.01em',
+  };
+}
+
+/* ─── Back-to-hub breadcrumb (top of each guide) ─────────────────────────── */
+
+export function backLink(hovered: boolean, accent = DOCS.accent): CSSProperties {
+  return {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 6,
+    fontSize: '0.76rem',
+    fontWeight: 600,
+    color: hovered ? accent : DOCS.textMuted,
+    textDecoration: 'none',
+    marginBottom: 16,
+    letterSpacing: '0.01em',
+    transition: 'color 0.15s ease',
+  };
+}

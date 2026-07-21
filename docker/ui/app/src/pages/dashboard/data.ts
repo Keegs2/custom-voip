@@ -53,6 +53,7 @@ export const PRODUCT_CARDS: ProductCardData[] = [
     subtitle: 'Intelligent DID forwarding with multi-zone redundancy',
     active: true,
     route: '/rcf',
+    docsSlug: 'rcf',
   },
   {
     icon: Phone,
@@ -60,6 +61,7 @@ export const PRODUCT_CARDS: ProductCardData[] = [
     subtitle: 'Enterprise SIP connectivity',
     active: true,
     route: '/trunks',
+    docsSlug: 'sip-trunking',
   },
   {
     icon: Webhook,
@@ -67,6 +69,7 @@ export const PRODUCT_CARDS: ProductCardData[] = [
     subtitle: 'Program your inbound numbers — webhook-driven call control with TwiML',
     active: true,
     route: '/programmable-voice',
+    docsSlug: 'programmable-voice',
   },
   {
     icon: Voicemail,
@@ -74,6 +77,8 @@ export const PRODUCT_CARDS: ProductCardData[] = [
     subtitle: 'Visual voicemail with transcription & encrypted storage',
     active: true,
     route: '/voicemail',
+    // Visual voicemail is documented within the Unified Communications guide.
+    docsSlug: 'unified-communications',
   },
   {
     icon: MessageCircle,
@@ -81,5 +86,6 @@ export const PRODUCT_CARDS: ProductCardData[] = [
     subtitle: 'Chat, meetings, calendar & documents',
     active: true,
     route: '/communications',
+    docsSlug: 'unified-communications',
   },
 ];
