@@ -6,6 +6,7 @@ import type {
   DidStats,
   DidAssignRequest,
   DidAddRequest,
+  DidAllocatedEnv,
   DidAvailableParams,
 } from '../types/didInventory';
 
@@ -123,6 +124,27 @@ export async function unassignDid(did: string): Promise<DidInventoryItem> {
   return apiRequest<DidInventoryItem>(
     'POST',
     `/numbers/${encodeURIComponent(did)}/unassign`,
+  );
+}
+
+/**
+ * POST /numbers/{did}/allocation
+ * Admin endpoint — changes which environment owns a DID for call routing
+ * (prod / sandbox / reserved). Returns the updated inventory row.
+ *
+ * 404 → DID not found, 422 → invalid env, 409 → this environment reads its
+ * inventory from a shared source-of-truth replica and cannot change ownership
+ * locally. The API client surfaces the backend `detail` as the thrown Error
+ * message, so callers can toast `err.message` directly.
+ */
+export async function setDidAllocation(
+  did: string,
+  allocated_env: DidAllocatedEnv,
+): Promise<DidInventoryItem> {
+  return apiRequest<DidInventoryItem>(
+    'POST',
+    `/numbers/${encodeURIComponent(did)}/allocation`,
+    { allocated_env },
   );
 }
 

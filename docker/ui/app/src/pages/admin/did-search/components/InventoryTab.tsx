@@ -24,6 +24,7 @@ import { StatusBadge, ProductPill, EnvBadge } from './Chips';
 import { Spinner, LoadingRow, EmptyRow } from './states';
 import { AssignModal } from './AssignModal';
 import { UnassignModal } from './UnassignModal';
+import { SetEnvModal } from './SetEnvModal';
 import { AddDidModal } from './AddDidModal';
 
 const COLS = 8;
@@ -37,6 +38,7 @@ export function InventoryTab() {
   const [offset, setOffset] = useState(0);
   const [assignTarget, setAssignTarget] = useState<DidInventoryItem | null>(null);
   const [unassignTarget, setUnassignTarget] = useState<DidInventoryItem | null>(null);
+  const [envTarget, setEnvTarget] = useState<DidInventoryItem | null>(null);
   const [addOpen, setAddOpen] = useState(false);
 
   const { data: stats, isLoading: statsLoading } = useDidStats();
@@ -139,7 +141,24 @@ export function InventoryTab() {
                     <td style={td({ muted: true })}>{item.state ?? '—'}</td>
                     <td style={td()}><StatusBadge status={item.status} /></td>
                     <td style={td()}>{item.product_type ? <ProductPill type={item.product_type} /> : <span style={dash}>—</span>}</td>
-                    <td style={td()}><EnvBadge env={item.allocated_env} /></td>
+                    <td style={td()}>
+                      <button
+                        type="button"
+                        onClick={() => setEnvTarget(item)}
+                        title="Change owning environment"
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          background: 'none',
+                          border: 'none',
+                          padding: 0,
+                          cursor: 'pointer',
+                          fontFamily: 'inherit',
+                        }}
+                      >
+                        <EnvBadge env={item.allocated_env} />
+                      </button>
+                    </td>
                     <td style={td({ muted: true })}>{item.customer_name ?? <span style={dash}>—</span>}</td>
                     <td style={td({ right: true })}>
                       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6 }}>
@@ -188,6 +207,11 @@ export function InventoryTab() {
         open={unassignTarget !== null}
         onClose={() => setUnassignTarget(null)}
         onSuccess={() => setUnassignTarget(null)}
+      />
+      <SetEnvModal
+        did={envTarget}
+        open={envTarget !== null}
+        onClose={() => setEnvTarget(null)}
       />
       <AddDidModal open={addOpen} onClose={() => setAddOpen(false)} />
     </div>

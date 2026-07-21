@@ -161,3 +161,10 @@ async def fetch_all_inventory(query: str, *args):
     """Execute a read-only query against the inventory pool, fetch all rows."""
     async with inventory_pool.acquire() as conn:
         return await conn.fetch(query, *args)
+
+
+def inventory_is_separate() -> bool:
+    """True when the inventory pool is a distinct read-replica (INVENTORY_READ_URL
+    set), i.e. this box reads inventory from a shared source-of-truth rather than
+    its own primary. Used to refuse ownership writes that would be shadowed."""
+    return _inventory_is_separate

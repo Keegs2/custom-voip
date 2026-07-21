@@ -22,6 +22,7 @@ import {
   addDid,
   assignDid,
   unassignDid,
+  setDidAllocation,
   requestDid,
 } from '../../../api/didInventory';
 import { listCustomers } from '../../../api/customers';
@@ -366,4 +367,58 @@ export function useUnassignAction(did: DidInventoryItem | null, onDone: () => vo
     onError: (err: Error) => toastErr(err.message ?? 'Failed to unassign number'),
   });
   return { isPending: mutation.isPending, submit: () => mutation.mutate() };
+}
+
+// ── Set-environment modal — env picker state + live mutation ────────────────────
+
+export interface UseSetAllocationResult {
+  selectedEnv: DidAllocatedEnv;
+  setSelectedEnv: (v: DidAllocatedEnv) => void;
+  isPending: boolean;
+  submit: () => void;
+}
+
+/**
+ * Owns the "move to environment" picker + the live POST /numbers/{did}/allocation
+ * mutation. `selectedEnv` seeds from the DID's current `allocated_env` (defaulting
+ * to 'prod'); it re-seeds whenever the target DID changes using the render-time
+ * "adjust state on prop change" pattern (a guarded setState, NOT an effect — this
+ * repo's eslint rejects set-state-in-effect). On success it toasts, invalidates the
+ * DID caches so the badge updates, and calls `onDone`. The API client surfaces the
+ * backend `detail`, so 404/409/422 messages (e.g. the shared-replica 409) show
+ * through unchanged.
+ */
+export function useSetAllocation(
+  did: DidInventoryItem | null,
+  onDone: () => void,
+): UseSetAllocationResult {
+  const [selectedEnv, setSelectedEnv] = useState<DidAllocatedEnv>(did?.allocated_env ?? 'prod');
+  const { toastOk, toastErr } = useToast();
+  const qc = useQueryClient();
+
+  // Re-seed the picker whenever the target DID changes (identity via id). Keeps
+  // a prior DID's selection from lingering when the modal is reused for another
+  // row. Render-time setState on prop change — not a useEffect.
+  const [lastDidId, setLastDidId] = useState<number | null>(did?.id ?? null);
+  if ((did?.id ?? null) !== lastDidId) {
+    setLastDidId(did?.id ?? null);
+    setSelectedEnv(did?.allocated_env ?? 'prod');
+  }
+
+  const mutation = useMutation({
+    mutationFn: () => setDidAllocation(did!.did, selectedEnv),
+    onSuccess: () => {
+      toastOk(`${fmt(did!.did)} moved to ${selectedEnv}`);
+      invalidateDidQueries(qc);
+      onDone();
+    },
+    onError: (err: Error) => toastErr(err.message ?? 'Failed to change environment'),
+  });
+
+  return {
+    selectedEnv,
+    setSelectedEnv,
+    isPending: mutation.isPending,
+    submit: () => mutation.mutate(),
+  };
 }

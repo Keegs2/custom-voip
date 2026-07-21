@@ -87,6 +87,19 @@ class AddDidRequest(BaseModel):
         return e164
 
 
+class AllocationRequest(BaseModel):
+    """Change which environment OWNS a DID for routing (did_inventory.allocated_env)."""
+    allocated_env: str
+
+    @field_validator("allocated_env")
+    @classmethod
+    def validate_allocated_env(cls, v: str) -> str:
+        allowed = ("prod", "sandbox", "reserved")
+        if v not in allowed:
+            raise ValueError(f"allocated_env must be one of {allowed}")
+        return v
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -699,6 +712,66 @@ async def unassign_did(
         "previous_customer_id": inv["customer_id"],
         "previous_product_type": inv["product_type"],
     }
+
+
+@router.post("/{did}/allocation")
+async def set_did_allocation(
+    did: str,
+    body: AllocationRequest,
+    admin: dict = Depends(require_admin),
+):
+    """Change a DID's owning environment (did_inventory.allocated_env). Admin only.
+
+    allocated_env tags which environment OWNS a DID for routing (prod/sandbox/
+    reserved) and is consulted by the RCF allocation guard. This mutates
+    ownership on the PRIMARY.
+
+    Split-brain guard: if inventory on this box is read from a shared
+    source-of-truth replica (INVENTORY_READ_URL set), writing allocated_env to
+    the local primary would be silently shadowed by the replica-backed reads/
+    guard. We refuse (409) rather than mislead — change ownership on the source
+    environment instead.
+    """
+    e164 = _normalize_did(did)
+    admin_user_id = int(admin["sub"])
+
+    if db.inventory_is_separate():
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Inventory on this environment is read from a shared "
+                "source-of-truth replica; change DID ownership on the source "
+                "environment, not here."
+            ),
+        )
+
+    # Look up the DID on the PRIMARY (this is a write path — do NOT use the
+    # inventory read pool).
+    inv = await db.fetch_one(
+        "SELECT id, status, allocated_env FROM did_inventory WHERE did = $1",
+        e164,
+    )
+    if not inv:
+        raise HTTPException(status_code=404, detail=f"DID {e164} not found in inventory")
+
+    old_env = inv["allocated_env"]
+
+    await db.execute(
+        "UPDATE did_inventory SET allocated_env = $1, updated_at = NOW() WHERE did = $2",
+        body.allocated_env, e164,
+    )
+
+    logger.info(
+        "DID allocation changed: did=%s %s -> %s by_user=%d",
+        e164, old_env, body.allocated_env, admin_user_id,
+    )
+
+    row = await db.fetch_one(
+        "SELECT id, did, status, allocated_env, customer_id, product_type, state "
+        "FROM did_inventory WHERE did = $1",
+        e164,
+    )
+    return dict(row)
 
 
 # ---------------------------------------------------------------------------
