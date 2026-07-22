@@ -92,12 +92,13 @@ fi
 say "archive_mode already on — continuing to stanza setup"
 
 # --- 3. Stanza + end-to-end check -------------------------------------------
-if sudo -u postgres pgbackrest --stanza="$STANZA" info > /dev/null 2>&1; then
-    say "stanza '${STANZA}' already exists"
-else
-    say "creating stanza '${STANZA}'"
-    sudo -u postgres pgbackrest --stanza="$STANZA" stanza-create
-fi
+# stanza-create initializes the repo info files (backup.info + archive.info). It
+# is idempotent — safe to run every time (a no-op if the stanza already exists and
+# is valid). Do NOT gate this on `pgbackrest info`: info exits 0 even when the
+# stanza was never created, which silently skips creation and makes `check` fail on
+# a fresh repo with "unable to load info file .../archive.info".
+say "ensuring stanza '${STANZA}' exists (stanza-create is idempotent)"
+sudo -u postgres pgbackrest --stanza="$STANZA" stanza-create
 
 say "running pgbackrest check (forces a WAL switch and verifies it lands in GCS)..."
 sudo -u postgres pgbackrest --stanza="$STANZA" check
