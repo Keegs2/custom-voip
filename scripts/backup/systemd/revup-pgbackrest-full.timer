@@ -1,0 +1,10 @@
+[Unit]
+Description=Weekly revup pgBackRest full backup (Sun 05:45 UTC)
+
+[Timer]
+OnCalendar=Sun *-*-* 05:45:00 UTC
+RandomizedDelaySec=600
+Persistent=true
+
+[Install]
+WantedBy=timers.target

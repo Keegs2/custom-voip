@@ -1,0 +1,15 @@
+# Daily DIFFERENTIAL pgBackRest backup (changes since the last full).
+# Placement: /etc/systemd/system/ (installed by install_backup_timers.sh)
+[Unit]
+Description=revup pgBackRest differential backup to GCS
+OnFailure=revup-alert@%p.service
+
+[Service]
+Type=oneshot
+User=postgres
+Group=postgres
+ExecStart=/usr/bin/pgbackrest --stanza=main --type=diff backup
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+TimeoutStartSec=4h

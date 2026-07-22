@@ -1,0 +1,15 @@
+# Weekly FULL pgBackRest backup to GCS (the PITR base).
+# Placement: /etc/systemd/system/ (installed by install_backup_timers.sh)
+[Unit]
+Description=revup pgBackRest FULL backup to GCS
+OnFailure=revup-alert@%p.service
+
+[Service]
+Type=oneshot
+User=postgres
+Group=postgres
+ExecStart=/usr/bin/pgbackrest --stanza=main --type=full backup
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+TimeoutStartSec=6h

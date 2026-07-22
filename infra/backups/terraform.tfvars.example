@@ -1,0 +1,13 @@
+# Copy to terraform.tfvars and adjust. Everything has ground-truth defaults
+# for East (rugged-night-193017 / us-east1-b) — the common case needs nothing.
+
+# bucket_name = "revup-db-backups"          # change if the global name is taken
+
+# Verify the actual SA/disk names before apply (single lines):
+#   gcloud compute instances describe services --zone us-east1-b --format='value(serviceAccounts[].email)'
+#   gcloud compute disks list --zones us-east1-b
+# backup_writer_service_account = ""        # empty = default compute SA
+# snapshot_disks                = ["services"]
+
+# Optional: read-only access for the restore-drill box (see DB_RESTORE_RUNBOOK.md)
+# drill_reader_service_account = ""

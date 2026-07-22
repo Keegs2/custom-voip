@@ -1,0 +1,12 @@
+# Replication-slot retained-WAL watchdog (see slot_wal_guard.sh header).
+# Emits its own specific revup-alert lines; OnFailure adds the generic one.
+# Placement: /etc/systemd/system/ (installed by install_backup_timers.sh)
+[Unit]
+Description=revup replication-slot WAL watchdog
+
+[Service]
+Type=oneshot
+User=postgres
+Group=postgres
+EnvironmentFile=-/etc/revup/backup.env
+ExecStart=/opt/revup/scripts/backup/slot_wal_guard.sh

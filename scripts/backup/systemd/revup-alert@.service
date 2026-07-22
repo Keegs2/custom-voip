@@ -1,0 +1,12 @@
+# Generic failure -> page bridge. Any revup unit that declares
+# OnFailure=revup-alert@%p.service lands here when it fails; we write a
+# "revup-alert" syslog line, which the Ops Agent ships to Cloud Logging, where
+# the infra/monitoring log-match alert policy pages on the tag.
+#
+# Placement: /etc/systemd/system/revup-alert@.service (install_backup_timers.sh)
+[Unit]
+Description=revup alert relay for failed unit %i
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/logger -p user.err -t revup-alert -- "unit-failed unit=%i host=%H — investigate with: journalctl -u %i -n 50"

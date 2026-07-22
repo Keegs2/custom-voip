@@ -1,0 +1,18 @@
+# Nightly logical dump of the voip DB to GCS (layer 1 safety net).
+# Placement: /etc/systemd/system/ (installed by install_backup_timers.sh)
+[Unit]
+Description=revup nightly pg_dump of voip DB to GCS
+OnFailure=revup-alert@%p.service
+# Don't fight the pgBackRest backup for I/O if schedules ever drift together.
+After=revup-pgbackrest-full.service revup-pgbackrest-diff.service
+
+[Service]
+Type=oneshot
+User=postgres
+Group=postgres
+EnvironmentFile=-/etc/revup/backup.env
+ExecStart=/opt/revup/scripts/backup/pg_dump_nightly.sh
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+TimeoutStartSec=2h

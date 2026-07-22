@@ -1,0 +1,10 @@
+[Unit]
+Description=Nightly revup pg_dump to GCS (07:17 UTC)
+
+[Timer]
+OnCalendar=*-*-* 07:17:00 UTC
+RandomizedDelaySec=900
+Persistent=true
+
+[Install]
+WantedBy=timers.target
