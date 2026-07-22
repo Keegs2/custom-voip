@@ -1,0 +1,14 @@
+# HA replication watchdog (see replication_guard.sh header). Emits a specific
+# revup-alert line when the east hot standby disconnects or lags; OnFailure adds
+# the generic one if the guard itself errors.
+# Placement: /etc/systemd/system/ (installed by install_backup_timers.sh)
+[Unit]
+Description=revup HA replication watchdog
+OnFailure=revup-alert@%p.service
+
+[Service]
+Type=oneshot
+User=postgres
+Group=postgres
+EnvironmentFile=-/etc/revup/backup.env
+ExecStart=/opt/revup/scripts/backup/replication_guard.sh

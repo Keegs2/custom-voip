@@ -44,7 +44,7 @@ variable "ui_https_port" {
 variable "instances" {
   description = "GCE instance names to cover with VM-down / disk / memory / CPU alerts"
   type        = list(string)
-  default     = ["poc-custom-voip", "kam-g2", "fs-media-v2", "services"]
+  default     = ["poc-custom-voip", "kam-g2", "fs-media-v2", "services", "east-db-standby"]
 }
 
 # --- Who gets paged -----------------------------------------------------------
