@@ -151,8 +151,13 @@ backups onto a scratch machine — **zero risk to production**.
    year — the TimescaleDB pre/post_restore dance is where people get burned.
 8. Tear down, then log it below.
 
+### Drill gotchas (from the 2026-07-22 drill — these correct the steps above)
+- **Debian keeps `postgresql.conf` / `pg_hba.conf` in `/etc/postgresql/16/main/`, NOT in the data dir**, so pgBackRest (which backs up only the data dir) does not restore them. `pg_ctl -D <datadir> start` (step 5) then fails with "could not access the server configuration file … postgresql.conf". Instead restore into `/var/lib/postgresql/16/main` (stop + clear the auto-created cluster first) and start with Debian's wrapper: `sudo pg_ctlcluster 16 main start`.
+- **Before starting, append to `/etc/postgresql/16/main/postgresql.conf`:** `shared_preload_libraries = 'timescaledb'` (a fresh install doesn't set it → hypertables/`cdrs` unreadable), AND `max_worker_processes` / `max_connections` / `max_locks_per_transaction` / `max_prepared_transactions` / `max_wal_senders` **≥ the primary's** — recovery aborts with "recovery aborted because of insufficient parameter settings" otherwise (prod `max_worker_processes` = 23). **Same requirement applies to the West/Central streaming replicas.**
+- WAL replay pulls segments from GCS via `restore_command` (pgBackRest `archive-get`); the target VM's SA needs bucket read — the default compute SA + `--scopes=cloud-platform` inherits the `objectAdmin` grant `infra/backups` makes, so no extra IAM.
+
 ### Drill log
 
 | Date | Operator | Layer drilled | Restore time (RTO) | Data as-of (RPO) | Notes |
 |---|---|---|---|---|---|
-| _none yet — run the first drill_ | | | | | |
+| 2026-07-22 | Keegan | pgBackRest physical (full + WAL) | ~15s data (6s restore + 7s WAL replay); full bare-box DR ~30min (VM create + PG/TimescaleDB install dominated) | ~2min (last txn 16:47:12Z; within 5-min archive_timeout) | ✅ Restored onto a clean e2-standard-4; byte-correct — Granite customer, test DID fwd `+17742184477` (current prod value), 337 cdrs, TimescaleDB intact. Hit the two gotchas above (Debian config layout; recovery params ≥ primary). |
