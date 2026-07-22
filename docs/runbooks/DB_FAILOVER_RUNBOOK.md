@@ -26,6 +26,7 @@ These ran on the dead `services` VM. Bring them up on the standby VM (or a fresh
 
 ## 4. Re-arm safety on the NEW primary
 - 🟢 Backups: the new primary needs its own WAL archiving + base backup. Re-run `sudo /opt/revup/scripts/backup/setup_pgbackrest.sh` (stage 2), `--type=full backup`, `install_backup_timers.sh`. (Same bucket is fine — pgBackRest handles the new timeline.)
+  - ⚠️ **Do this promptly.** The promoted box inherits `archive_mode=on` + prod's `archive_command` (copied by `pg_basebackup`), which FAILS until pgBackRest is configured here — validated in the 2026-07-22 test (`archive-push` errored on the new timeline). A failing `archive_command` makes PG **retain WAL** (pg_wal grows). If you can't configure pgBackRest immediately: `sudo -u postgres psql -c "ALTER SYSTEM SET archive_mode=off"` then restart to stop the buildup, and re-enable once pgBackRest is set up.
 - 🟢 Monitoring: add the new primary VM to `infra/monitoring` (uptime/VM alerts) + install the Ops Agent.
 
 ## 5. Rebuild a new standby
@@ -45,4 +46,4 @@ Today the standby is DB-only, so steps 2–4 take minutes. To turn failover into
 ## Failover-test log (drill this like the restore — promote on a quiet day, then rebuild)
 | Date | Operator | Promote time | Verified read-write + data | Notes |
 |---|---|---|---|---|
-| _none yet — run the first promote test_ | | | | |
+| 2026-07-22 | Keegan | **0.143 s** (`pg_ctlcluster 16 main promote`) | ✅ read-write (INSERT ok) + data intact (1 customer / 337 cdrs) | Isolated test (prod stayed primary); rebuilt back to a streaming standby via fresh `pg_basebackup` (self-heals). Finding: promoted box inherited prod's `archive_command` but had no pgBackRest config → archiving the new timeline failed (benign in test; Step 4 handles it for real). |
