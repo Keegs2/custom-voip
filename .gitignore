@@ -34,6 +34,10 @@ venv/
 *.tfstate.backup
 .terraform/
 
+# Terraform variable files — may hold secrets (PagerDuty key, etc.). Keep .example tracked.
+*.tfvars
+!*.tfvars.example
+
 # Keys and credentials
 .keys/
 *.json.key
