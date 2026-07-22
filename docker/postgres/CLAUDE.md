@@ -63,24 +63,28 @@ File: `pgbouncer.ini`
 
 **Critical:** asyncpg (used by FastAPI) must use `statement_cache_size=0` because PgBouncer transaction mode doesn't support prepared statements. This is configured in the API's `database.py`.
 
-## Multi-Zone Replication — PLANNED (NOT implemented in this repo)
+## Multi-Zone Replication — LIVE (as of 2026-07-22)
 
-> **Status: aspirational design only.** There is currently ZERO replication
-> configuration in `docker/postgres/`. No `primary_conninfo`, no replica role,
-> no standby tuning, no recovery/standby signal. `pgbouncer.ini` points at a
-> single host (`host=127.0.0.1 port=5432`). East runs as a standalone primary.
-> Read this section as the target design for the multi-datacenter expansion,
-> NOT as the current state. Do not assume replicas exist when reasoning about
-> failover or read routing today.
+> **Status: implemented in production.** Streaming physical replication is live.
+> The local-dev Docker setup in this directory is still single-node
+> (`pgbouncer.ini` → `host=127.0.0.1`), but the **bare-metal production** VMs run
+> a real primary + three replicas. Do NOT assume single-node when reasoning about
+> prod failover or read routing.
 
-Target design once the West/Central zones come online:
+**Production topology (bare-metal, not Docker):**
 
-- **Primary:** us-east1-b (services VM)
-- **Replicas (planned):** us-west1-b, us-central1-b via streaming replication — must be configured (replica role, `primary_conninfo`, standby tuning) before any zone can read locally
-- Each zone's FreeSWITCH would read from the local replica for DID lookups
-- All writes (provisioning, CDRs) go to the primary
-- Expected replication lag: ~100-500ms (acceptable for routing data)
-- **Until configured:** all zones must reach the East primary directly for DID lookups (cross-zone DB traffic), which is the current behavior.
+| Node | Role | IP | Zone |
+|------|------|----|------|
+| `services` | **Primary** (read-write) | 10.142.0.103 | us-east1-b |
+| `east-db-standby` | HA hot standby (failover target) | 10.142.0.87 | us-east1-c |
+| `west-db` | West-zone read replica (local DID lookups) | 10.138.0.2 | us-west1-b |
+| `sandbox_replica` | Dev/unified sandbox replica | 10.142.0.102 | us-east1-b |
+
+- Streaming replication via the `replicator` role + one physical slot per standby (`east_standby`, `west_standby`, `sandbox_replica`). Replay lag ~2ms same-region, ~130ms cross-region. TimescaleDB 2.26.3, PG 16.
+- **Each zone runs its OWN PgBouncer** on the local replica (`:6432` → local `:5432`, transaction pool, `scram-sha-256`). Zone FS/SBC point `DB_HOST` at the local replica; **all writes (CDRs, provisioning) go to the East primary via the API** (`API_HOST` stays East — a replica is read-only).
+- **Runbooks:** failover = `docs/runbooks/DB_FAILOVER_RUNBOOK.md` (promote `east-db-standby`); restore/PITR = `docs/runbooks/DB_RESTORE_RUNBOOK.md` (pgBackRest).
+- **Adding a new zone replica (Central reuses this):** `pg_basebackup` from the primary → recovery params (`max_worker_processes` etc.) **≥ primary** → **TimescaleDB pinned to the EXACT primary extension version** (`timescaledb-2-postgresql-16=<ver>` or PG won't start) → strip any `recovery_target`/`restore_command` from `postgresql.auto.conf` (clones inherit them from a prior `--type=immediate` restore and then pause instead of streaming) → stand up local PgBouncer (userlist generated from the replica's own `pg_authid`) + a `voip-media-<zone>`→replica `:6432` firewall rule (the media subnet is not covered by `default-allow-internal`).
+- **Gotchas:** replication slots are NOT in pgBackRest backups — recreate them after any restore before re-cloning standbys; Debian keeps PG config in `/etc`, so use `pg_ctlcluster` (not `pg_ctl -D`).
 
 ## Adding a New Table
 
