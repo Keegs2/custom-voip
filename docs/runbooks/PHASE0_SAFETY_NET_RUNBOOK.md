@@ -77,7 +77,7 @@ On the **services** VM:
 ---
 
 ## Step 4 — Close the call-quality alerting gap  (🟢 no new infra)
-The paging layer defends *reachability*, not *call quality* — **ASR/PDD/MOS don't page today** (the flagship SLO's real risk). Add `scripts/monitoring/asr_guard.sh` + `revup-asr-guard.{service,timer}` mirroring the existing `slot_wal_guard.sh` pattern: every ~10 min, query trailing-15-min inbound ASR from `cdrs`; if volume ≥ 20 and ASR < 50%, emit a `revup-alert` syslog line → lands on the CRITICAL log-match policy already provisioned in Step 1. Zero Terraform change. (PDD needs FS to persist it per-CDR first; MOS can get the same treatment after ASR proves the pattern.)
+The paging layer defends *reachability*, not *call quality* — **ASR/PDD/MOS don't page today** (the flagship SLO's real risk). Closed by `scripts/backup/asr_guard.sh` + `scripts/backup/systemd/revup-asr-guard.{service,timer}`, which mirror the existing `slot_wal_guard.sh` pattern: every ~10 min, query trailing-15-min inbound ASR from `cdrs`; if volume ≥ `ASR_GUARD_MIN_VOLUME` (default 20) and ASR < `ASR_GUARD_ASR_FLOOR` (default 50) percent, emit a `revup-alert` syslog line → lands on the CRITICAL log-match policy already provisioned in Step 1. `install_backup_timers.sh` (Step 2.10) installs + enables `revup-asr-guard.timer` alongside the other guards — zero Terraform change. **Verify:** `systemctl list-timers 'revup-*'` lists `revup-asr-guard`; force a run with `sudo systemctl start revup-asr-guard.service && journalctl -u revup-asr-guard.service -n 20 --no-pager` (expect an `asr-guard:` info line). (PDD needs FS to persist it per-CDR first; MOS can get the same treatment after ASR proves the pattern.)
 
 ---
 

@@ -12,6 +12,7 @@
 #   revup-pgdump.timer            daily 07:17 UTC  (nightly logical dump -> GCS)
 #   revup-cdr-archive.timer       monthly 1st 06:30 UTC (CDR export -> GCS)
 #   revup-slot-wal-guard.timer    every 15 min     (slot WAL watchdog)
+#   revup-asr-guard.timer         every 10 min     (inbound ASR watchdog)
 #   revup-pgbackrest-full.timer   Sun 05:45 UTC    (only if the stanza exists)
 #   revup-pgbackrest-diff.timer   Mon-Sat 05:45 UTC (only if the stanza exists)
 #
@@ -42,12 +43,12 @@ say "work dir /var/backups/revup ready (postgres-owned)"
 
 # --- Units -------------------------------------------------------------------
 install -m 0644 "${UNIT_SRC}"/revup-*.service "${UNIT_SRC}"/revup-*.timer /etc/systemd/system/
-chmod +x "${SRC_DIR}"/pg_dump_nightly.sh "${SRC_DIR}"/cdr_archive_monthly.sh "${SRC_DIR}"/slot_wal_guard.sh
+chmod +x "${SRC_DIR}"/pg_dump_nightly.sh "${SRC_DIR}"/cdr_archive_monthly.sh "${SRC_DIR}"/slot_wal_guard.sh "${SRC_DIR}"/asr_guard.sh
 systemctl daemon-reload
 say "units installed to /etc/systemd/system"
 
 # --- Enable timers -----------------------------------------------------------
-systemctl enable --now revup-pgdump.timer revup-cdr-archive.timer revup-slot-wal-guard.timer
+systemctl enable --now revup-pgdump.timer revup-cdr-archive.timer revup-slot-wal-guard.timer revup-asr-guard.timer
 
 # pgBackRest timers only make sense once the stanza exists (setup_pgbackrest.sh);
 # enabling them earlier would just generate failure pages.
