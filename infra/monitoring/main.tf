@@ -375,7 +375,7 @@ resource "google_monitoring_alert_policy" "revup_alert_log" {
   conditions {
     display_name = "syslog contains revup-alert"
     condition_matched_log {
-      filter = "resource.type=\"gce_instance\" AND logName:\"syslog\" AND textPayload:\"revup-alert\""
+      filter = "resource.type=\"gce_instance\" AND logName:\"syslog\" AND (jsonPayload.message:\"revup-alert\" OR textPayload:\"revup-alert\")"
     }
   }
 
