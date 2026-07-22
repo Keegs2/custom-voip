@@ -2,21 +2,68 @@
 <!--
   uac_short_call.xml - SIPp UAC scenario with SDP and configurable hold time.
 
-  Purpose: Make real calls through the full SBC/FreeSWITCH stack.  The built-in
-  "uac" scenario does not include an SDP body, so FreeSWITCH cannot process the
-  call properly.  This scenario sends an INVITE with PCMU SDP, waits for the
-  answer, holds for -d milliseconds (SIPp's default pause duration), then sends
-  BYE.
+  Purpose: Make real calls through the full SBC (Kamailio) / FreeSWITCH stack.
+  The built-in "uac" scenario does not include an SDP body, so FreeSWITCH
+  cannot process the call properly. This scenario sends an INVITE with PCMU
+  SDP, waits for the answer, holds for -d milliseconds, then tears the call
+  down with a BYE.
 
-  Usage:
-    sipp TARGET -sf /app/scenarios/uac_short_call.xml -s 9196 -d 2000 ...
+  Usage (as launched by sipp_api.py):
+    sipp SBC_HOST:5060 -sf /app/scenarios/uac_short_call.xml -s 9196 \
+         -m <calls> -r <rate> -d <hold_ms> ...
 
-  The -d flag sets the <pause/> duration in milliseconds (default 1000 if
-  omitted).
+  The launch target (SBC_HOST:5060) becomes [remote_ip]:[remote_port]; SIPp
+  connects to the Kamailio SBC, NOT directly to FreeSWITCH. -s sets [service]
+  (the dialed target, e.g. 9196 = FS echo). -d sets the <pause/> duration.
+
+  ============================================================================
+  IN-DIALOG ROUTING (test-path Record-Route — SINGLE plain RR)
+  ============================================================================
+  The SIPp generator runs INSIDE the zone's INTERNAL_SUBNET and sends this
+  INVITE straight to the SBC's own VPC IP (SBC_INTERNAL_IP), NOT the NLB VIP.
+  The SBC recognizes the source as SIPP_TESTING_IP (env TESTING_IP) and, for
+  this test path ONLY, inserts a SINGLE plain Record-Route on its FS-facing
+  internal socket:
+
+    Record-Route: <sip:10.138.0.100:5060;lr>          (SBC internal / VPC IP)
+
+  It does NOT apply the production carrier DOUBLE Record-Route
+  (VIP + SBC_INTERNAL;r2=on) here. That double-RR — together with the carrier
+  Contact->VIP rewrite and the carrier "self-loop redirect" in the SBC's
+  WITHINDIALOG route — is built for an EXTERNAL A-party (Bandwidth). Because
+  SIPp is INTERNAL, that carrier logic misrouted the test ACK/BYE OUT to the
+  carrier instead of back to FreeSWITCH (200 OK retransmit storm; BYE 481
+  Call/Transaction Does Not Exist), no matter how correctly this scenario
+  presented its Route set. THAT WAS AN SBC BUG, now fixed in kamailio.cfg:
+  a dialog tagged $dlg_var(test_path)=1 (set only when the INVITE source is
+  SIPP_TESTING_IP) takes a TEST-PATH fast exit in WITHINDIALOG that forwards
+  every in-dialog request straight to FS and skips all carrier topology
+  hiding. The production Bandwidth carrier path is untouched (SIPP_TESTING_IP
+  can never equal a carrier IP).
+
+  This scenario stays standards-correct and unchanged in body. Per RFC 3261
+  Section 12.2.1.1, a UAC with a non-empty route set whose top Route is loose
+  (;lr) sends in-dialog requests with Request-URI = the remote target (peer
+  Contact) and the route set as Route header(s):
+
+    1. <recv response="200" ... rrs="true"/>  captures the Record-Route set
+       (now a single entry) from the 200 OK into SIPp's [routes] keyword.
+    2. ACK and BYE use  [next_url]  as the Request-URI and inject  [routes]
+       as the Route header(s).
+
+  With the single plain RR, loose_route() at the SBC consumes its one own
+  Route and the TEST-PATH fast exit relays to FS in ONE hop — deterministic,
+  no retransmissions, clean 200 to the BYE.
+
+  NOTE: -rsa is NO LONGER required. After the SBC fix, in-dialog requests may
+  be sent to either the SBC internal IP (via [routes]) or, if you drop the
+  route-set handling, they still reach the right SBC because the test path no
+  longer depends on NLB behavior. Keep sending to SBC_INTERNAL_IP:5060 (the
+  scenario's remote target) for a single-SBC intra-VPC test.
 -->
-<scenario name="UAC short call with SDP">
+<scenario name="UAC short call with SDP (route-set aware)">
 
-  <!-- INVITE with SDP (PCMU/8000) -->
+  <!-- INVITE with SDP (PCMU/8000). Request-URI targets the SBC (remote_ip). -->
   <send retrans="500">
     <![CDATA[
       INVITE sip:[service]@[remote_ip]:[remote_port] SIP/2.0
@@ -47,14 +94,28 @@
   <recv response="180" optional="true" />
   <recv response="183" optional="true" />
 
-  <!-- Wait for 200 OK (call answered) -->
-  <recv response="200" rtd="true" />
+  <!--
+    Wait for 200 OK (call answered).
+    rrs="true"  -> capture the Record-Route set into [routes] for in-dialog use.
+    rtd="true"  -> record response time delay (setup timing).
+  -->
+  <recv response="200" rrs="true" rtd="true" />
 
-  <!-- ACK the 200 -->
+  <!--
+    ACK the 200 OK.
+    - Request-URI = [next_url]: SIPp sets this to the remote target (the peer's
+      Contact), which the SBC's loose_route() forwards on toward FreeSWITCH.
+    - [routes]: the captured Record-Route set, emitted as Route header(s) so
+      loose_route() at the SBC succeeds (double-RR ;r2=on consumption relays
+      to FS in one hop).
+    - [peer_tag_param]: adds the To-tag learned from the 200 OK.
+    ACK for a 2xx is its own transaction, so no retrans= here.
+  -->
   <send>
     <![CDATA[
-      ACK sip:[service]@[remote_ip]:[remote_port] SIP/2.0
+      ACK [next_url] SIP/2.0
       Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch]
+      [routes]
       From: "SIPp" <sip:sipp@[local_ip]:[local_port]>;tag=[pid]SIPpTag00[call_number]
       To: <sip:[service]@[remote_ip]:[remote_port]>[peer_tag_param]
       Call-ID: [call_id]
@@ -65,14 +126,19 @@
     ]]>
   </send>
 
-  <!-- Hold the call for -d milliseconds (default 1000ms) -->
+  <!-- Hold the call for -d milliseconds (default 1000ms if -d omitted) -->
   <pause />
 
-  <!-- BYE to tear down the call -->
+  <!--
+    BYE to tear down the call. Same route-set / remote-target handling as the
+    ACK: [next_url] Request-URI + [routes] Route header(s) so the in-dialog
+    BYE loose-routes through the SBC to FreeSWITCH and gets a clean 200.
+  -->
   <send retrans="500">
     <![CDATA[
-      BYE sip:[service]@[remote_ip]:[remote_port] SIP/2.0
+      BYE [next_url] SIP/2.0
       Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch]
+      [routes]
       From: "SIPp" <sip:sipp@[local_ip]:[local_port]>;tag=[pid]SIPpTag00[call_number]
       To: <sip:[service]@[remote_ip]:[remote_port]>[peer_tag_param]
       Call-ID: [call_id]
@@ -84,7 +150,7 @@
   </send>
 
   <!-- Wait for 200 OK to BYE -->
-  <recv response="200" />
+  <recv response="200" crlf="true" />
 
   <!-- Response time repartition table -->
   <ResponseTimeRepartition value="10, 20, 30, 40, 50, 100, 150, 200, 500, 1000" />
