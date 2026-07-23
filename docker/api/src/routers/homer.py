@@ -72,6 +72,7 @@ CANONICAL_ALIASES: list[dict[str, Any]] = [
     # Bandwidth TC2 - GraniteTelecommunicationsLLC_02
     {"alias": "Bandwidth TC2 (DAL)", "ip": "67.231.1.188", "port": 5060},
     {"alias": "Bandwidth TC2 (LA)", "ip": "67.231.4.138", "port": 5060},
+    # ── EAST ZONE (us-east1-b) ──
     {"alias": "NLB VIP (East)", "ip": "34.24.133.82", "port": 5060},
     {"alias": "SBC-1 East", "ip": "34.74.71.32", "port": 5060},
     {"alias": "SBC-1 East (Int)", "ip": "10.142.0.100", "port": 5060},
@@ -81,6 +82,24 @@ CANONICAL_ALIASES: list[dict[str, Any]] = [
     {"alias": "FreeSWITCH East (Ext)", "ip": "34.139.119.135", "port": 5080},
     {"alias": "Services East", "ip": "10.142.0.103", "port": 5432},
     {"alias": "Services East (Ext)", "ip": "34.26.57.37", "port": 9080},
+    # ── WEST ZONE (us-west1) ──
+    {"alias": "NLB VIP (West)", "ip": "35.252.214.40", "port": 5060},
+    {"alias": "SBC-1 West", "ip": "8.229.41.59", "port": 5060},
+    {"alias": "SBC-1 West (Int)", "ip": "10.138.0.100", "port": 5060},
+    {"alias": "SBC-2 West", "ip": "136.117.230.166", "port": 5060},
+    {"alias": "SBC-2 West (Int)", "ip": "10.138.0.101", "port": 5060},
+    {"alias": "FreeSWITCH West", "ip": "192.168.20.2", "port": 5080},
+    {"alias": "FreeSWITCH West (Ext)", "ip": "8.229.177.165", "port": 5080},
+    {"alias": "Services West", "ip": "10.138.0.2", "port": 5432},
+    # ── CENTRAL ZONE (us-central1-b) ──
+    {"alias": "NLB VIP (Central)", "ip": "35.253.133.230", "port": 5060},
+    {"alias": "SBC-1 Central", "ip": "34.41.188.100", "port": 5060},
+    {"alias": "SBC-1 Central (Int)", "ip": "10.128.0.100", "port": 5060},
+    {"alias": "SBC-2 Central", "ip": "35.184.151.64", "port": 5060},
+    {"alias": "SBC-2 Central (Int)", "ip": "10.128.0.101", "port": 5060},
+    {"alias": "FreeSWITCH Central", "ip": "192.168.30.2", "port": 5080},
+    {"alias": "FreeSWITCH Central (Ext)", "ip": "35.253.103.114", "port": 5080},
+    {"alias": "Services Central", "ip": "10.128.0.2", "port": 5432},
     {"alias": "Kamailio SBC", "ip": "0.0.0.0", "port": 5060},
 ]
 

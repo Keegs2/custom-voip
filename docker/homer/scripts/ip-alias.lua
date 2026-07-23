@@ -56,7 +56,8 @@ local aliases = {
     ["8.229.177.165"]  = "West-FreeSWITCH", -- West FS public
 
     -- Services (West) — replica DB / HEP relay
-    ["10.138.0.103"]   = "West-Services",   -- West services VM (DB replica)
+    ["10.138.0.2"]     = "West-Services",   -- West services VM (DB replica)
+    ["10.138.0.103"]   = "West-Services",   -- West services VM (legacy interface)
 
     -- =================== CENTRAL ZONE (us-central1-b) ===================
     -- Same collapse pattern: both interfaces of each node map to one
@@ -70,6 +71,9 @@ local aliases = {
     -- Media layer (Central FreeSWITCH)
     ["192.168.30.2"]   = "Central-FreeSWITCH", -- Central FS internal (media subnet)
     ["35.253.103.114"] = "Central-FreeSWITCH", -- Central FS public
+
+    -- Services (Central) — replica DB / HEP relay
+    ["10.128.0.2"]     = "Central-Services",   -- Central services VM (DB replica)
 }
 
 function aliasIPs()
