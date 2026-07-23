@@ -57,6 +57,19 @@ local aliases = {
 
     -- Services (West) — replica DB / HEP relay
     ["10.138.0.103"]   = "West-Services",   -- West services VM (DB replica)
+
+    -- =================== CENTRAL ZONE (us-central1-b) ===================
+    -- Same collapse pattern: both interfaces of each node map to one
+    -- "Central-*" name so each node is a single ladder column.
+    ["35.253.133.230"] = "Central-SBC-VIP", -- Central NLB VIP
+    ["10.128.0.100"]   = "Central-SBC-1",   -- Central SBC-1 internal (VPC)
+    ["34.41.188.100"]  = "Central-SBC-1",   -- Central SBC-1 public
+    ["10.128.0.101"]   = "Central-SBC-2",   -- Central SBC-2 internal (VPC)
+    ["35.184.151.64"]  = "Central-SBC-2",   -- Central SBC-2 public
+
+    -- Media layer (Central FreeSWITCH)
+    ["192.168.30.2"]   = "Central-FreeSWITCH", -- Central FS internal (media subnet)
+    ["35.253.103.114"] = "Central-FreeSWITCH", -- Central FS public
 }
 
 function aliasIPs()
