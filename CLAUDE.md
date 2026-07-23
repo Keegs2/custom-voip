@@ -9,7 +9,7 @@ Nationwide utility company deployment — carrier-grade, no POC shortcuts.
 
 ## Architecture
 
-4-VM deployment in GCP us-east1-b, expanding to 3 GCP zones. Each zone is self-contained for SIP/RTP — calls never cross zones.
+3-zone deployment in GCP — **East (us-east1-b), West (us-west1-b), and Central (us-central1-b) are all LIVE as of 2026-07-23.** Each zone is self-contained for SIP/RTP — calls never cross zones. (Started single-zone East; the 3-datacenter expansion is complete — see `GCP Production Topology` below and `docs/NATIONWIDE_PRODUCTION_ROLLOUT_PLAN.md`.)
 
 ```
 Bandwidth Carrier (67.231.2.12 / 216.82.238.134)
@@ -275,22 +275,47 @@ These env vars are set per-VM in `/opt/revup/.env`. Getting any of them wrong br
 | `JWT_SECRET_KEY` | (secret) | Required — API crashes without it |
 | `SBC_PROXY_IP` | `10.142.0.100` | Primary SBC — for ESL originate routing |
 
-## GCP Production Topology (East — us-east1-b)
+## GCP Production Topology (3 zones — East / West / Central, all LIVE 2026-07-23)
 
-Current production VMs (ground truth as of 2026-04-30):
+GCP Project: `rugged-night-193017`. All 3 zones carry carrier traffic. Each zone = 2 Kamailio SBCs + 1 FreeSWITCH + 1 local PG replica; the PG **primary + API + UI + Homer stay East-only**. Inbound: Bandwidth points at all 3 regional NLB VIPs (currently **distributing** across them). Outbound: per-zone nearest Bandwidth PoP.
 
+### East — us-east1-b (holds the PG primary + API + UI + Homer)
 | VM Name | Role | Machine Type | Internal IP | External IP | Subnet | Tags |
 |---------|------|-------------|-------------|-------------|--------|------|
 | `poc-custom-voip` | SBC-1 | n2-standard-4 | 10.142.0.100 | 34.74.71.32 | default | bypass-vpn, custom-voip, lb-health-check, voip-sbc |
 | `kam-g2` | SBC-2 | e2-standard-4 | 10.142.0.101 | 35.243.136.35 | default | bypass-vpn, lb-health-check, voip-sbc |
 | `fs-media-v2` | FreeSWITCH | e2-standard-8 | 192.168.10.2 | 34.139.119.135 | voip-media (192.168.10.0/24) | bypass-vpn, voip-media |
-| `services` | Services | e2-standard-4 | 10.142.0.103 | 34.26.57.37 | default | lb-health-check, voip-services |
+| `services` | Services (PG **primary** + API + UI + Homer + PgBouncer) | e2-standard-4 | 10.142.0.103 | 34.26.57.37 | default | lb-health-check, voip-services |
+| `east-db-standby` | PG hot standby (HA, us-east1-**c**) | e2-standard-4 | 10.142.0.87 | — | default | bypass-vpn, voip-db-standby |
 
-Static IPs: `poc-custom-voip` (SBC-1), `kam-g2-ip` (SBC-2), `fs-media-server` (media), `custom-voip-services-ip` (services), `sbc-vip` (34.24.133.82, NLB VIP).
+East NLB VIP `34.24.133.82` (`sbc-vip-udp`/`-tcp`, 5060) · instance group `sbc-group`. Egress PoP: **Dallas** (67.231.2.12).
 
-NLB: `sbc-vip-udp` (UDP 5060) + `sbc-vip-tcp` (TCP 5060) → 34.24.133.82. Instance groups: `sbc-group` (2 SBCs).
+### West — us-west1-b
+| VM Name | Role | Machine Type | Internal IP | External IP | Subnet | Tags |
+|---------|------|-------------|-------------|-------------|--------|------|
+| `west-sbc-1` | SBC-1 | e2-standard-4 | 10.138.0.100 | 8.229.41.59 | default | bypass-vpn, lb-health-check, voip-sbc |
+| `west-sbc-2` | SBC-2 | e2-standard-4 | 10.138.0.101 | 136.117.230.166 | default | bypass-vpn, lb-health-check, voip-sbc |
+| `west-fs` | FreeSWITCH | e2-standard-8 | 192.168.20.2 | 8.229.177.165 | voip-media-west (192.168.20.0/24) | bypass-vpn, voip-media |
+| `west-db` | PG replica + PgBouncer | e2-standard-4 | 10.138.0.2 | 136.118.180.103 | default | bypass-vpn, voip-db-standby |
+| `west-loadtest` | SIPp load-gen (banked harness) | e2-standard-4 | 10.138.0.3 | 104.198.3.25 | default | bypass-vpn, voip-loadtest |
 
-GCP Project: `rugged-night-193017`. Note: VM names are legacy — new regions will use `{region}-sbc-1`, `{region}-fs`, etc.
+West NLB VIP `35.252.214.40` (`west-sbc-vip-udp`/`-tcp`) · backend service `west-sbc-backend` + `west-sbc-group`. Egress PoP: **LA** (216.82.238.134).
+
+### Central — us-central1-b
+| VM Name | Role | Machine Type | Internal IP | External IP | Subnet | Tags |
+|---------|------|-------------|-------------|-------------|--------|------|
+| `central-sbc-1` | SBC-1 | e2-standard-4 | 10.128.0.100 | 34.41.188.100 | default | bypass-vpn, lb-health-check, voip-sbc |
+| `central-sbc-2` | SBC-2 | e2-standard-4 | 10.128.0.101 | 35.184.151.64 | default | bypass-vpn, lb-health-check, voip-sbc |
+| `central-fs` | FreeSWITCH | e2-standard-8 | 192.168.30.2 | 35.253.103.114 | voip-media-central (192.168.30.0/24) | bypass-vpn, voip-media |
+| `central-db` | PG replica + PgBouncer | e2-standard-4 | 10.128.0.2 | 136.112.210.141 | default | bypass-vpn, voip-db-standby |
+
+Central NLB VIP `35.253.133.230` (`central-sbc-vip-tcp`/`-udp`) · backend service `central-sbc-backend` + `central-sbc-group`. Egress PoP: **Dallas** (67.231.2.12, the default).
+
+**DB replication:** the East primary (`services` 10.142.0.103) streams to `east-db-standby` (HA), `west-db`, `central-db`, and `sandbox_replica` (fs-media 10.142.0.102) via physical slots `east_standby`/`west_standby`/`central_standby`/`sandbox_replica`. Each zone's FS/SBC read DID lookups from its **local** replica through a local PgBouncer (`:6432`, scram); **all writes (CDRs, provisioning) go to the East primary via the API** (`API_HOST`/`HOMER_IP` stay East in every zone's `.env`). Backups (pgBackRest full+WAL PITR, pg_dump, disk snapshots, CDR archive) run on the primary → `gs://revup-db-backups`.
+
+**Homer HEP:** all zones' SBCs + FS send HEP to the East Homer (`10.142.0.103:9060`, allowed by the tag-to-tag `voip-internal` firewall); IP→name aliases in `docker/homer/scripts/ip-alias.lua`.
+
+Static IPs are reserved per node (`{node}-ip`) + the three VIPs (`sbc-vip`/`west-sbc-vip`/`central-sbc-vip`). Note: East VM names are legacy (`poc-custom-voip`, `kam-g2`, `fs-media-v2`); West/Central follow the `{zone}-sbc-1`/`-fs`/`-db` convention. Not yet under OpenTofu state (Phase 5 import pending).
 
 ## Infrastructure as Code
 

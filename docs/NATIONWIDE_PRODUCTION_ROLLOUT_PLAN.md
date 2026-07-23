@@ -1,12 +1,33 @@
 # RCF Nationwide Production Rollout Plan
 
-**Status:** DRAFT for review — 2026-07-22
+**Status:** IN EXECUTION — updated **2026-07-23**. **3‑datacenter deployment COMPLETE + validated** (Phases 0–3 done). Remaining = HA/DR hardening (Phase 6 media HA, Phase 4 DR testing, Phase 7 gate) + IaC import (Phase 5). See §0.
 **Goal:** Take RCF-V1 from a single live zone (East) to a 3-datacenter nationwide GCP deployment with complete HA/DR (hot/cold + backups), pass full testing, and declare readiness for the first beta customer.
 **Branch:** `RCF-V1` (production). The `unified` MVP is on hold (see `project_unified_branch_strategy` memory).
 
 ---
 
-## 1. Where we actually are (ground truth, 2026-07-22)
+## 0. Status (2026-07-23) — 3‑DATACENTER DEPLOYMENT COMPLETE + VALIDATED
+
+The beta gate's **deploy criterion is MET**: East, West, and Central are all live, self-contained, and carrying real carrier traffic on local DB replicas.
+
+**Done:**
+- **Phase 0 — Safety net** ✅ — all 4 backup layers live (pgBackRest full+WAL PITR RPO ≤ 5 min, nightly pg_dump, monthly CDR archive, daily disk snapshots → `gs://revup-db-backups`), ops monitoring + paging live, restore drilled byte-correct. **PROVEN UNDER REAL FIRE:** the prod primary's data dir was accidentally wiped mid-rollout and recovered with **ZERO data loss in ~4 min** (pgBackRest `--type=immediate` restore + `pg_promote`).
+- **Phase 1 — East DB HA** ✅ — `east-db-standby` (10.142.0.87, us-east1-c) streaming hot standby; failover drilled (0.143 s promote). Runbook: `docs/runbooks/DB_FAILOVER_RUNBOOK.md`.
+- **Phase 2 — West live** ✅ — `west-db` (10.138.0.2) streaming replica + local PgBouncer; West FS/SBC cut to it; Bandwidth whitelisted; live-call validated (user-confirmed).
+- **Phase 3 — Central live** ✅ — full us-central1-b zone cloned from West (2 SBC + FS + `central-db` 10.128.0.2 replica + PgBouncer + regional NLB `35.253.133.230`); Bandwidth whitelisted; **validated by a live 29 s call** end-to-end (inbound → central-sbc-1 → central-fs → central-db DID lookup → bridge to Dallas → clean carrier teardown).
+- **Homer multi-zone** ✅ — all 3 zones' SBC/FS/VIP IPs aliased in `docker/homer/scripts/ip-alias.lua`; HEP firewall confirmed (`voip-internal` is tag-to-tag); zone-agnostic UI role classifier; heplify healthy.
+
+**Inbound is DISTRIBUTING** across all 3 regional VIPs on Bandwidth (not strict-primary) — good for HA. Sample: 4 live test calls spread 3×East / 1×Central, all `200`/NORMAL_CLEARING.
+
+**Remaining toward the full beta gate (HA/DR hardening):** Phase 6 (2nd FS per zone — media HA, the last per-zone SPOF; **recommended next**) → Phase 4 (DR/chaos testing) → Phase 7 (beta-readiness report) → Phase 5 (IaC import, locked last).
+
+**Open decision:** inbound routing policy — leave distributing (HA) vs geo-nearest-zone.
+
+**Banked:** the SIPp load-test harness (`west-loadtest` VM, `10.138.0.3`) proved West call *setup* to ~50 CPS but its in-dialog teardown could not be made to complete against the topology-hiding SBC from an intra-VPC source (3 telephony-expert fixes; carrier-safe test-path code committed, gated on `SIPP_TESTING_IP`). Banked in favor of live-call validation; the definitive proof is a real carrier call anyway.
+
+---
+
+## 1. Where we actually are (ground truth, 2026-07-22) — *historical starting point; superseded by §0 above*
 
 | Area | State | Reality |
 |------|-------|---------|
