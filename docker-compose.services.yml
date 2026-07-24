@@ -19,6 +19,7 @@ services:
   # Connects to bare-metal PostgreSQL via PgBouncer at 127.0.0.1:6432
   api:
     build: ./docker/api
+    image: voip-api:latest
     container_name: voip-api
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -58,6 +59,54 @@ services:
       timeout: 5s
       start_period: 10s
       retries: 3
+    restart: unless-stopped
+
+  # CDR Export Forwarder — OPT-IN scheduled runner (Equinox → FileMage FTP).
+  # Reuses the API image (built by the `api` service above) and runs the export
+  # loop. Gated behind the `cdr-export` profile, so it does NOT start with a
+  # plain `up -d`. Enable with:
+  #   docker compose -f docker-compose.services.yml --profile cdr-export up -d cdr-exporter
+  # Requires CDR_EXPORT_* in .env (incl. CDR_EXPORT_ENABLED=true) — otherwise
+  # run-loop idle-exits by design. See docker/api/src/services/cdr_export/README.md.
+  cdr-exporter:
+    build: ./docker/api
+    image: voip-api:latest
+    container_name: voip-cdr-exporter
+    profiles: ["cdr-export"]
+    command: ["python", "-m", "services.cdr_export", "run-loop"]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      # Same DB access as the api service (PgBouncer via host-gateway).
+      - DATABASE_URL=${DATABASE_URL:-postgresql://api:api_secret@host.docker.internal:6432/voip}
+      # CDR export configuration (all optional; defaults in config.py).
+      - CDR_EXPORT_ENABLED=${CDR_EXPORT_ENABLED:-false}
+      - CDR_EXPORT_FTP_HOST=${CDR_EXPORT_FTP_HOST:-10.142.0.71}
+      - CDR_EXPORT_FTP_PORT=${CDR_EXPORT_FTP_PORT:-21}
+      - CDR_EXPORT_FTP_USER=${CDR_EXPORT_FTP_USER:-}
+      - CDR_EXPORT_FTP_PASSWORD=${CDR_EXPORT_FTP_PASSWORD:-}
+      - CDR_EXPORT_FTP_DIR=${CDR_EXPORT_FTP_DIR:-/}
+      - CDR_EXPORT_FTP_PASSIVE=${CDR_EXPORT_FTP_PASSIVE:-true}
+      - CDR_EXPORT_FTP_TLS=${CDR_EXPORT_FTP_TLS:-false}
+      - CDR_EXPORT_FTP_TIMEOUT=${CDR_EXPORT_FTP_TIMEOUT:-30}
+      - CDR_EXPORT_BATCH_SIZE=${CDR_EXPORT_BATCH_SIZE:-5000}
+      - CDR_EXPORT_LAG_SECONDS=${CDR_EXPORT_LAG_SECONDS:-120}
+      - CDR_EXPORT_SKIP_EMPTY=${CDR_EXPORT_SKIP_EMPTY:-true}
+      - CDR_EXPORT_INTERVAL_SECONDS=${CDR_EXPORT_INTERVAL_SECONDS:-3600}
+      - CDR_EXPORT_LOCK_TTL_SECONDS=${CDR_EXPORT_LOCK_TTL_SECONDS:-900}
+      - CDR_EXPORT_FILENAME_PREFIX=${CDR_EXPORT_FILENAME_PREFIX:-CDR_}
+      - CDR_EXPORT_FILENAME_EXT=${CDR_EXPORT_FILENAME_EXT:-.csv}
+      - CDR_EXPORT_FILENAME_TS_FORMAT=${CDR_EXPORT_FILENAME_TS_FORMAT:-%Y%m%d%H%M%S}
+    networks:
+      - services-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
     restart: unless-stopped
 
   # Nginx — serves React SPA + Homer UI, reverse-proxies to API
