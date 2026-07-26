@@ -417,8 +417,22 @@ end
 --  Per-DID concurrent call limits still apply below via mod_hash.)
 
 -- ============================================
--- STEP 2: Route Based on Product Type
+-- STEP 2: Route Based on Product Type (on-net aware)
 -- ============================================
+-- On-net (internal) routing: when a forwarded/placed destination is a number
+-- this platform OWNS (any product), short-circuit the carrier and deliver the
+-- call into that DID's own product handler instead of hairpinning out through
+-- Bandwidth and back in. See docs/ONNET_ROUTING_DESIGN.md.
+--
+-- Structure:
+--   * The three product bodies are extracted VERBATIM into named terminators
+--     terminate_rcf / terminate_api / terminate_trunk (behavior-preserving for
+--     off-net) + a TERMINATORS dispatch map.
+--   * `ctx` threads cross-hop state (original caller, composed presented CID,
+--     hop counter, visited E.164 set, origin customer, sip_call_id).
+--   * terminate_rcf contains the on-net decision at the forward branch point;
+--     an RCF chain resolves in-memory (DB lookups only, NO SIP emitted per hop)
+--     until a terminal, which emits EXACTLY ONE B-leg (or zero for local/api).
 
 -- Helper: Check if forward_to is a local extension
 -- Local extensions are 4 digits starting with 10xx (e.g., 1001, 1002, 1003)
@@ -436,9 +450,71 @@ local function get_domain()
     return domain
 end
 
-freeswitch.consoleLog("DEBUG", "[" .. uuid .. "] STEP 2: Routing product_type=" .. tostring(product_type) .. "\n")
+-- MAX_HOPS: cap on internal RCF chain depth before hard-reject (design §6).
+local MAX_HOPS = 5
 
-if product_type == "rcf" then
+-- Hard reject helper (design §6): a resolved-but-unusable on-net destination
+-- must fail cleanly with NO carrier fallback. Set lua_routed=true so the
+-- dialplan's post-script fallback doesn't mask this with a 404/503.
+--   disabled/suspended terminal -> CALL_REJECTED (SIP 603)
+--   loop / hop-limit            -> EXCHANGE_ROUTING_ERROR (SIP 483)
+local function hard_reject(cause, log_msg)
+    set_var("lua_routed", "true")
+    hangup(cause, log_msg)
+end
+
+-- Normalize a resolved number_routing view row into booleans/numbers the
+-- terminators consume. luasql returns everything as strings ('t'/'f'/nil).
+local function normalize_dest(row)
+    if not row then return nil end
+    return {
+        did             = row.did,
+        product_type    = row.product_type,
+        customer_id     = tonumber(row.customer_id),
+        product_ref_id  = tonumber(row.product_ref_id),
+        product_enabled = (row.product_enabled == "t" or row.product_enabled == true),
+        customer_status = row.customer_status,
+        forward_to      = row.forward_to,
+        pass_caller_id  = (row.pass_caller_id == "t" or row.pass_caller_id == true),
+        ring_timeout    = tonumber(row.ring_timeout) or 30,
+        max_channels    = tonumber(row.max_channels) or 0,
+        product_name    = row.product_name,
+        voice_url       = row.voice_url,
+        fallback_url    = row.fallback_url,
+        trunk_id        = row.trunk_id,
+    }
+end
+
+-- ================================================================
+-- Terminator: RCF  (dest = terminal RCF routing row, ctx = cross-hop state)
+-- ================================================================
+-- BEHAVIOR-PRESERVING extraction of the original `product_type == "rcf"` body.
+-- The only structural change is the shadowed locals at the top, which point the
+-- verbatim body at the TERMINAL DID (dest.did) and the composed presented CID
+-- (ctx.presented_cid) instead of the module-level inbound-DID/original-caller
+-- values. For an off-net single-hop call dest.did == the inbound DID and
+-- ctx.presented_cid == original_caller_number, so output is byte-identical.
+local function terminate_rcf(dest, ctx)
+    -- Shadowed locals: the pasted body below is unchanged and reads these.
+    local uuid = ctx.uuid
+    local traffic_grade = ctx.traffic_grade
+    -- normalized_did is the SELF/terminal DID (drives outbound_caller_id / From
+    -- for Bandwidth auth, Diversion, limit-hash key, and all logs).
+    local normalized_did = dest.did
+    local forward_to = dest.forward_to
+    local ring_timeout = tonumber(dest.ring_timeout) or 30
+    -- Composed caller-ID identity ("last false hop wins", design §5).
+    local pass_caller_id = ctx.pass_effective
+    local original_caller_number = ctx.presented_cid
+    local original_caller_name = ctx.presented_name
+    -- routing.rcf_name / routing.max_channels came off the terminal row.
+    local routing = { rcf_name = dest.product_name, max_channels = dest.max_channels }
+    -- masking identity (E.164 + 10-digit) used ONLY in the pass=false branches.
+    -- For single-hop this equals the terminal DID (byte-identical to before);
+    -- for a chain it is the last masking hop's DID carried in presented_cid.
+    local masking_e164 = normalize_did(original_caller_number)
+    local masking_10 = to_10digit(original_caller_number)
+
     -- Remote Call Forwarding - Bridge to destination
     -- RCF terminates through the primary carrier (TC4 Dallas).
     -- Kamailio sets X-Inbound-TC header for logging/Homer visibility, but
@@ -447,21 +523,20 @@ if product_type == "rcf" then
     -- To enable trunk-affinity routing later, read X-Inbound-TC and map to carrier:
     --   local inbound_tc = get_var("sip_h_X-Inbound-TC", ""):match("^%s*(.-)%s*$") or ""
     --   if inbound_tc == "tc1" then carrier = "tc1" elseif inbound_tc == "tc2" then carrier = "tc2" end
-    local inbound_tc = get_var("sip_h_X-Inbound-TC", "")
+    local inbound_tc = ctx.inbound_tc or ""
 
     -- Use the actual SIP Call-ID from the inbound INVITE for X-CID correlation.
     -- The uuid is FreeSWITCH's internal session ID which differs from the SIP Call-ID
     -- that Homer/HEP captures on the A-leg. Using sip_call_id lets us correlate
     -- A-leg and B-leg in Homer. Fallback to uuid if sip_call_id is not set.
-    local sip_call_id = session:getVariable("sip_call_id") or uuid
-    inbound_tc = inbound_tc:match("^%s*(.-)%s*$") or ""
+    local sip_call_id = ctx.sip_call_id or uuid
     local carrier = "primary"  -- TC4 only — do not change until Bandwidth provisions all TCs
     freeswitch.consoleLog("INFO", string.format(
         "[inbound_router] Routing via carrier=%s (inbound_tc=%s, product: rcf, traffic_grade: %s)\n",
         carrier, inbound_tc, traffic_grade
     ))
 
-    local is_local_test = get_var("is_local_test", "false")
+    local is_local_test = ctx.is_local_test or "false"
     local is_local_forward = is_local_extension(forward_to)
 
     -- Check for test mode
@@ -566,9 +641,10 @@ if product_type == "rcf" then
         session:setVariable("effective_caller_id_number", outbound_original_cid)
         session:setVariable("effective_caller_id_name", original_caller_name)
     else
-        -- Override: called party sees the RCF DID, not the original caller
-        session:setVariable("effective_caller_id_number", outbound_did)
-        session:setVariable("effective_caller_id_name", outbound_did)
+        -- Override: called party sees the masking DID, not the original caller
+        -- (masking_* == terminal DID for single-hop; == last masking hop for a chain)
+        session:setVariable("effective_caller_id_number", masking_10)
+        session:setVariable("effective_caller_id_name", masking_10)
     end
 
     -- Diversion header indicates the call was forwarded and from which number
@@ -576,11 +652,11 @@ if product_type == "rcf" then
 
     -- X-Original-CID: Kamailio reads this to build P-Asserted-Identity
     -- Uses E.164 (+1XXXXXXXXXX) format. When pass_caller_id=true, this is the
-    -- original caller's number; when false, it's the RCF DID itself.
+    -- original caller's number; when false, it's the masking DID.
     if pass_caller_id then
         session:setVariable("sip_h_X-Original-CID", e164_original_cid)
     else
-        session:setVariable("sip_h_X-Original-CID", e164_did)
+        session:setVariable("sip_h_X-Original-CID", masking_e164)
     end
 
     -- X-Original-CID-Name: Display name for P-Asserted-Identity
@@ -629,7 +705,7 @@ if product_type == "rcf" then
                 "<sip:" .. e164_original_cid .. "@" .. external_sip_ip .. ">;party=calling;privacy=off;screen=yes")
         else
             session:setVariable("sip_h_Remote-Party-ID",
-                "<sip:" .. e164_did .. "@" .. external_sip_ip .. ">;party=calling;privacy=off;screen=yes")
+                "<sip:" .. masking_e164 .. "@" .. external_sip_ip .. ">;party=calling;privacy=off;screen=yes")
         end
 
         -- Export caller ID to B-leg for Bandwidth From header auth.
@@ -665,6 +741,8 @@ if product_type == "rcf" then
     -- max_channels=0 means unlimited (default). When set >0, FreeSWITCH
     -- tracks concurrent calls per DID using the in-memory hash backend.
     -- If the limit is reached, the call is rejected with 486 Busy Here.
+    -- On-net note (design §6): this runs against the TERMINAL DID only
+    -- (intermediate RCF hops emit no B-leg, so they have no concurrency).
     local max_concurrent = tonumber(routing.max_channels) or 0
     if max_concurrent > 0 then
         freeswitch.consoleLog("INFO", string.format(
@@ -813,8 +891,21 @@ if product_type == "rcf" then
             "[" .. uuid .. "] RCF bridge failed, returning 503 (DID was found, carrier unreachable)")
         return
     end
+end
 
-elseif product_type == "api" then
+-- ================================================================
+-- Terminator: API DID  (dest = terminal API routing row, ctx = state)
+-- ================================================================
+-- BEHAVIOR-PRESERVING extraction of the original `product_type == "api"` body.
+-- Answers on-platform and hands off to voice_webhook.lua. Emits ZERO carrier
+-- legs by construction (the answered channel can never fall through to a
+-- carrier), so no lua_routed flag is needed here.
+local function terminate_api(dest, ctx)
+    local uuid = ctx.uuid
+    local traffic_grade = ctx.traffic_grade
+    local voice_url = dest.voice_url
+    local fallback_url = dest.fallback_url
+
     -- API Calling - Execute webhook-driven voice control via voice_webhook.lua
     -- API product routes via primary carrier (same as all products in 2-carrier model)
     -- traffic_grade is used as a secondary factor for priority within the same trunk
@@ -858,8 +949,20 @@ elseif product_type == "api" then
         freeswitch.consoleLog("ERR", "[" .. uuid .. "] API DID has no voice_url configured — rejecting\n")
         hangup("NORMAL_TEMPORARY_FAILURE")
     end
+end
 
-elseif product_type == "trunk" then
+-- ================================================================
+-- Terminator: Trunk DID  (dest = terminal trunk routing row, ctx = state)
+-- ================================================================
+-- BEHAVIOR-PRESERVING extraction of the original `product_type == "trunk"` body.
+-- Bridges to the customer PBX via Kamailio using X-PBX-Dest (never X-Carrier).
+local function terminate_trunk(dest, ctx)
+    local uuid = ctx.uuid
+    local caller_id = ctx.caller_id
+    -- SELF/terminal trunk DID and its parent trunk id.
+    local normalized_did = dest.did
+    local trunk_id = dest.trunk_id
+
     -- SIP Trunk inbound — route call to customer's PBX
     -- Look up the customer's authorized IP(s) and bridge to their PBX
     freeswitch.consoleLog("DEBUG", string.format(
@@ -903,8 +1006,21 @@ elseif product_type == "trunk" then
         set_var("hangup_after_bridge", "true")
         set_var("continue_on_fail", "true")
 
-        -- Caller ID: pass the original caller through to the PBX
-        local original_caller = get_var("sip_from_user", caller_id)
+        -- Caller ID: present the composed identity to the PBX (design §5,
+        -- "last false hop wins"). ctx.pass_effective is TRUE for a direct trunk
+        -- inbound (no RCF hop ran) AND for an on-net RCF->trunk chain whose every
+        -- hop passed CID transparently; in that case present exactly what the
+        -- pre-on-net direct path presented -- the original caller from
+        -- sip_from_user (fallback caller_id) -- BYTE-FOR-BYTE UNCHANGED. Only when
+        -- an intermediate RCF hop masked (pass_caller_id=false) do we substitute
+        -- the masking DID (ctx.presented_cid) so the PBX sees the mask, not the
+        -- true caller. ctx.caller_id == the module-level caller_id_number.
+        local original_caller
+        if ctx.pass_effective then
+            original_caller = get_var("sip_from_user", caller_id)
+        else
+            original_caller = ctx.presented_cid
+        end
         set_var("effective_caller_id_number", original_caller)
 
         -- Build dial string to customer PBX through Kamailio SBC
@@ -944,6 +1060,191 @@ elseif product_type == "trunk" then
             ))
         end
     end
+end
+
+-- Product-agnostic dispatch map (design §2/§8). A future product enrolls by
+-- adding a UNION-ALL arm to number_routing + a terminator here — detection,
+-- the hop loop, loop/limit/reject, and CDR emission stay untouched.
+local TERMINATORS = {
+    rcf   = terminate_rcf,
+    api   = terminate_api,
+    trunk = terminate_trunk,
+}
+
+-- Set common CDR/terminal channel vars on the resolved TERMINAL destination,
+-- then dispatch to its product terminator (design §4/§5). customer_id is set to
+-- the TERMINAL customer so rate_cdr() (which rates customer_id) is unchanged.
+local function dispatch_terminal(dest, ctx)
+    set_var("customer_id", tostring(dest.customer_id))
+    set_var("product_type", dest.product_type)
+    set_var("terminating_customer_id", tostring(dest.customer_id))
+    set_var("origin_customer_id", tostring(ctx.origin_customer_id))
+    set_var("on_net", ctx.on_net and "true" or "false")
+    set_var("on_net_hops", tostring(ctx.hops))
+    if dest.trunk_id then
+        set_var("trunk_id", tostring(dest.trunk_id))
+    end
+    local fn = TERMINATORS[dest.product_type]
+    if not fn then
+        -- Should never happen (view only yields known product types) — fail
+        -- closed rather than fall through to the carrier.
+        hard_reject("EXCHANGE_ROUTING_ERROR", string.format(
+            "[%s] No terminator for product_type=%s — hard reject\n",
+            ctx.uuid, tostring(dest.product_type)))
+        return
+    end
+    fn(dest, ctx)
+end
+
+freeswitch.consoleLog("DEBUG", "[" .. uuid .. "] STEP 2: Routing product_type=" .. tostring(product_type) .. "\n")
+
+-- ================================================================
+-- Seed cross-hop context at the first (inbound) hop (design §2)
+-- ================================================================
+-- presented_cid / pass_effective start "transparent": the original caller is
+-- shown unless a masking (pass=false) hop overrides it. visited is seeded with
+-- the inbound DID so an immediate A->A forward is caught as a loop.
+local ctx = {
+    uuid                = uuid,
+    sip_call_id         = (session:getVariable("sip_call_id") or uuid),
+    inbound_tc          = (get_var("sip_h_X-Inbound-TC", ""):match("^%s*(.-)%s*$") or ""),
+    is_local_test       = get_var("is_local_test", "false"),
+    caller_id           = caller_id,
+    traffic_grade       = traffic_grade,
+    original_caller_number = original_caller_number,
+    original_caller_name   = original_caller_name,
+    presented_cid       = original_caller_number,
+    presented_name      = original_caller_name,
+    pass_effective      = true,
+    hops                = 0,
+    visited             = { [normalized_did] = true },
+    origin_customer_id  = customer_id,   -- first-hop (inbound DID) customer
+    origin_did          = normalized_did,
+}
+set_var("origin_customer_id", tostring(ctx.origin_customer_id))
+
+-- The first-hop routing row (from STEP 1) becomes the initial terminal
+-- candidate. For api/trunk inbound it IS the terminal (no chain). For rcf it is
+-- the first hop whose forward_to may itself be on-net (resolved in the loop).
+local first_dest = {
+    did             = normalized_did,
+    product_type    = product_type,
+    customer_id     = customer_id,
+    product_enabled = true,        -- STEP 1 lookups already filtered enabled/active
+    customer_status = "active",
+    forward_to      = forward_to,
+    pass_caller_id  = pass_caller_id,
+    ring_timeout    = ring_timeout,
+    max_channels    = tonumber(routing.max_channels) or 0,
+    product_name    = routing.rcf_name,
+    voice_url       = voice_url,
+    fallback_url    = fallback_url,
+    trunk_id        = trunk_id,
+}
+
+if product_type == "rcf" then
+    -- ============================================================
+    -- RCF branch point: 3-way on-net decision + in-memory chain
+    -- ============================================================
+    -- (design §2/§5/§6) — a chain of RCF->RCF forwards resolves entirely in
+    -- memory (DB lookups only, NO SIP per hop) until it reaches a terminal:
+    -- an off-net PSTN number, a local extension, or another product's DID.
+    -- EXACTLY ONE B-leg is ever emitted (by the terminal terminator).
+    local cur = first_dest
+
+    while true do
+        -- Compose caller-ID for THIS hop ("last false hop wins", design §5).
+        -- The terminal RCF hop participates too, so a single off-net RCF DID
+        -- yields exactly today's CID behavior.
+        if cur.pass_caller_id == false then
+            ctx.pass_effective = false
+            ctx.presented_cid = cur.did
+            ctx.presented_name = cur.did
+        end
+
+        local fwd = cur.forward_to
+
+        -- (1) Local extension terminal — existing user/<ext> bridge (unchanged).
+        if is_local_extension(fwd) then
+            ctx.on_net = ctx.on_net or false
+            dispatch_terminal(cur, ctx)
+            break
+        end
+
+        -- (2) Resolve forward_to against the on-net oracle.
+        local fwd_e164 = normalize_did(fwd)
+        local resolved = nil
+        if db then
+            local ok, row = pcall(function() return db.resolve_destination(fwd_e164) end)
+            if ok then
+                resolved = normalize_dest(row)
+            else
+                freeswitch.consoleLog("ERR", string.format(
+                    "[%s] resolve_destination failed for %s: %s — treating as off-net\n",
+                    uuid, fwd_e164, tostring(row)))
+            end
+        end
+
+        if not resolved then
+            -- (2a) OFF-NET: forward_to is not one of our DIDs. Terminate the
+            -- CURRENT RCF DID exactly as today (single carrier B-leg via the
+            -- 4-attempt failover loop). on_net reflects whether we short-
+            -- circuited any earlier hop in this chain.
+            dispatch_terminal(cur, ctx)
+            break
+        end
+
+        -- (2b) ON-NET: forward_to is a platform-owned DID.
+        -- Disabled/suspended terminal -> hard reject (no carrier fallback).
+        if (not resolved.product_enabled) or (resolved.customer_status ~= "active") then
+            hard_reject("CALL_REJECTED", string.format(
+                "[%s] On-net destination %s is disabled/suspended "
+                .. "(product_enabled=%s customer_status=%s) — 603\n",
+                uuid, fwd_e164, tostring(resolved.product_enabled),
+                tostring(resolved.customer_status)))
+            break
+        end
+
+        -- Loop guard: this DID already entered in the chain -> hard reject.
+        if ctx.visited[resolved.did] then
+            hard_reject("EXCHANGE_ROUTING_ERROR", string.format(
+                "[%s] Routing loop detected re-entering %s — 483\n",
+                uuid, resolved.did))
+            break
+        end
+
+        -- Count this on-net hop; enforce MAX_HOPS.
+        ctx.hops = ctx.hops + 1
+        ctx.visited[resolved.did] = true
+        ctx.on_net = true
+        freeswitch.consoleLog("INFO", string.format(
+            "[%s] ON-NET hop %d: %s -> %s (product=%s customer=%s)\n",
+            uuid, ctx.hops, cur.did, resolved.did, resolved.product_type,
+            tostring(resolved.customer_id)))
+
+        if ctx.hops > MAX_HOPS then
+            hard_reject("EXCHANGE_ROUTING_ERROR", string.format(
+                "[%s] On-net hop limit exceeded (>%d) at %s — 483\n",
+                uuid, MAX_HOPS, resolved.did))
+            break
+        end
+
+        -- If the resolved on-net destination is itself an RCF DID, keep
+        -- following the chain in memory (no SIP). Otherwise it is a terminal
+        -- of another product (api/trunk) — dispatch it and stop.
+        if resolved.product_type == "rcf" then
+            cur = resolved
+            -- loop again
+        else
+            dispatch_terminal(resolved, ctx)
+            break
+        end
+    end
+else
+    -- Non-RCF inbound (api / trunk): the first-hop DID is the terminal, exactly
+    -- as before. No chain, no on-net decision (a directly-dialed platform DID is
+    -- not a "forward" — off-net vs on-net only applies to a forwarding handoff).
+    dispatch_terminal(first_dest, ctx)
 end
 
 freeswitch.consoleLog("INFO", "[" .. uuid .. "] Inbound routing complete\n")

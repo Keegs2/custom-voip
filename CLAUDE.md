@@ -99,9 +99,22 @@ Each VM has its own `.env` file at `/opt/revup/.env`. The `.env` is NOT in git �
 3. Kamailio: topology hiding, rate limiting, dispatch to FreeSWITCH :5080
 4. FreeSWITCH: Lua `inbound_router.lua` runs
 5. Lua: PostgreSQL DID lookup → get forward_to number
-6. FreeSWITCH: bridge via `sofia/external/$forward_to@$SBC_PROXY_IP:5060`
-7. Kamailio: reads X-Carrier header → routes to Bandwidth Dallas or LA
-8. Bandwidth: delivers call to destination PSTN number
+6. **On-net check:** resolve `forward_to` against the `number_routing` view. If it's a platform-owned DID → deliver internally to that DID's product handler (see On-Net Routing below), NO carrier hairpin. If not ours → step 7.
+7. FreeSWITCH: bridge via `sofia/external/$forward_to@$SBC_PROXY_IP:5060`
+8. Kamailio: reads X-Carrier header → routes to Bandwidth Dallas or LA
+9. Bandwidth: delivers call to destination PSTN number
+
+### On-Net (Internal) Routing
+
+When a forwarded/placed destination is a number the platform **owns** (any product), FreeSWITCH short-circuits the carrier and delivers the call into that DID's own product handler instead of hairpinning out through Bandwidth and back in. Design: `docs/ONNET_ROUTING_DESIGN.md`.
+
+- **Oracle:** the `number_routing` view (`22_number_routing.sql`) — one `UNION ALL` over `rcf_numbers`/`api_dids`/`trunk_dids` joined to `customers`. `resolve_destination(did)` in `db_client.lua` does a single indexed point lookup (0 or 1 row). The view is **unfiltered** on enabled/active so the resolver can tell "not ours" (0 rows → keep carrier path) from "ours but disabled/suspended" (row present → hard reject).
+- **Chain:** an RCF DID whose `forward_to` is another RCF DID resolves the whole chain **in memory** (DB lookups only, NO SIP per hop) until a terminal (off-net PSTN / local ext / trunk DID / API DID). **Exactly one** carrier B-leg is emitted, and only if the terminal is off-net PSTN.
+- **Terminators** (`inbound_router.lua`): `terminate_rcf` / `terminate_api` / `terminate_trunk`, dispatched via a `TERMINATORS` map. A future product enrolls by adding a `number_routing` arm + a terminator (no rewrite of detection).
+- **Billing:** one CDR records BOTH parties — `customer_id`=terminal (so `rate_cdr()` is unchanged), plus `origin_customer_id`/`terminating_customer_id`/`on_net`/`on_net_hops` (`23_onnet_cdr_columns.sql`). Off-net: `origin_customer_id==customer_id`, `on_net=false`.
+- **Caller-ID:** honors each DID's `pass_caller_id`, composed across the chain — "last `false` hop wins" (the masking DID closest to the terminal shows). Outbound From stays the terminal DID for Bandwidth auth.
+- **Hard reject (no carrier fallback):** disabled/suspended terminal → `CALL_REJECTED` (603); loop (visited-set re-entry) or `hops>5` → `EXCHANGE_ROUTING_ERROR` (483). Sets `lua_routed=true` so the dialplan doesn't mask with 404.
+- **Migrations** apply on the prod primary (init scripts only run on first initdb) and replicate to all zones: `sudo -u postgres psql -d voip -f /opt/revup/docker/postgres/init/22_number_routing.sql` and `.../23_onnet_cdr_columns.sql`.
 
 ## Account Types
 
@@ -114,6 +127,8 @@ Each VM has its own `.env` file at `/opt/revup/.env`. The `.env` is NOT in git �
 | `ucaas` | UCaaS (Full-System branch only) | WebRTC, voicemail, conferencing, chat |
 
 **RCF customers NEVER see UCaaS features.** Only api/trunk/hybrid get those (Full-System branch).
+
+**On-net terminal is product-agnostic.** Any product's DID (rcf/api/trunk) can be the terminal of an on-net (internal) call — a forward that lands on a platform-owned number is delivered into that number's own handler (RCF bridge, API voice app, or trunk-to-PBX) instead of hairpinning through the carrier. This is a routing/billing optimization only; it does NOT change what any customer sees in the UI, and RCF customers still never see UCaaS. See On-Net Routing above and `docs/ONNET_ROUTING_DESIGN.md`.
 
 ## Testing
 

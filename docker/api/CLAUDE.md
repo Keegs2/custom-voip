@@ -132,7 +132,8 @@ In `TEST_MODE=true`, originate uses `loopback/` instead of `sofia/external/`.
 ### CDR Ingest (`routers/cdrs.py`)
 FreeSWITCH `mod_json_cdr` POSTs CDRs to `/v1/cdrs/ingest` after each call. The endpoint:
 - Accepts `application/json`, `x-www-form-urlencoded` (mod_json_cdr encode-values mode), or raw body
-- Extracts ~49 fields from the FreeSWITCH JSON CDR structure including full RTP quality metrics (the INSERT binds 49 positional params, `$1`–`$49`)
+- Extracts ~53 fields from the FreeSWITCH JSON CDR structure including full RTP quality metrics (the INSERT binds 53 positional params, `$1`–`$53`)
+- **On-net routing (`$50`–`$53`):** `origin_customer_id`, `terminating_customer_id`, `on_net`, `on_net_hops` record BOTH parties of an internal call. `customer_id` stays the TERMINAL customer (so `rate_cdr()` is unchanged). Off-net calls: `origin_customer_id==customer_id`, `on_net=false`. See `docs/ONNET_ROUTING_DESIGN.md`.
 - Handles duplicate detection via `WHERE NOT EXISTS (SELECT 1 FROM cdrs WHERE uuid = $1)`
 - Always returns 200 to prevent FreeSWITCH retry storms
 - No auth required (called over internal Docker network)

@@ -121,8 +121,8 @@ CDR ingestion and querying. The largest router file.
   - Resolves fields from multiple locations: `variables` dict, `callflow[0].caller_profile`, top-level `core-uuid`
   - Cleans caller_id_number (handles SIP `"Display" <+1234>` format)
   - Computes R-factor from MOS using piecewise linear approximation
-  - Extracts ~49 columns including full RTP quality metrics (jitter, packet loss, MOS, codec info)
-  - Explicit `::type` casts on all INSERT parameters for asyncpg/PgBouncer compatibility (the INSERT binds 49 positional params, `$1`–`$49`)
+  - Extracts ~53 columns including full RTP quality metrics (jitter, packet loss, MOS, codec info) and the on-net set `origin_customer_id`/`terminating_customer_id`/`on_net`/`on_net_hops` (records both parties of an internal call; `customer_id` stays the terminal so `rate_cdr()` is unchanged; off-net → `origin==customer`, `on_net=false`)
+  - Explicit `::type` casts on all INSERT parameters for asyncpg/PgBouncer compatibility (the INSERT binds 53 positional params, `$1`–`$53`; on-net columns are `$50::int`/`$51::int`/`$52::bool`/`$53::smallint`)
   - Duplicate detection via `WHERE NOT EXISTS` (the cdrs table uses a composite PK for TimescaleDB)
   - Always returns 200 to prevent FreeSWITCH retry storms
 - **Query**: `GET /v1/cdrs` with filters (customer, trunk, product_type, direction, destination, date range, rated_only). Defaults to last 24 hours.

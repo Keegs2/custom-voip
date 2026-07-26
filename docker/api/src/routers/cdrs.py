@@ -350,6 +350,26 @@ async def _process_cdr_body(body: dict) -> dict:
         if sbc_id is not None:
             sbc_id = str(sbc_id)[:30]
 
+        # ---- On-net (internal) routing ------------------------------------
+        # FreeSWITCH's inbound_router.lua sets these on every call:
+        #   * origin_customer_id      -- customer whose DID the call first entered
+        #   * terminating_customer_id -- customer whose DID actually handled it
+        #   * on_net                  -- true when the carrier hairpin was
+        #                                short-circuited (RCF->platform DID)
+        #   * on_net_hops             -- internal RCF hops resolved in-memory
+        # For off-net calls origin_customer_id == customer_id and on_net=false,
+        # so legacy rows/behavior are unaffected. customer_id itself is still the
+        # TERMINAL customer, so rate_cdr() is unchanged. See
+        # docs/ONNET_ROUTING_DESIGN.md section 4.
+        origin_customer_id = _safe_int(variables.get("origin_customer_id"))
+        terminating_customer_id = _safe_int(variables.get("terminating_customer_id"))
+        # on_net arrives as the FreeSWITCH channel-var string "true"/"false".
+        on_net_raw = variables.get("on_net")
+        on_net = None
+        if on_net_raw is not None:
+            on_net = str(on_net_raw).strip().lower() in ("true", "1", "t", "yes")
+        on_net_hops = _safe_int(variables.get("on_net_hops"))
+
         # ---- Logging: summarize what we extracted -------------------------
         extracted = []
         dropped = []
@@ -377,6 +397,9 @@ async def _process_cdr_body(body: dict) -> dict:
             "sbc_id": sbc_id,
             "trunk_id": trunk_id, "carrier_used": carrier_used,
             "answer_time": answer_time, "sip_code": sip_code,
+            "origin_customer_id": origin_customer_id,
+            "terminating_customer_id": terminating_customer_id,
+            "on_net": on_net, "on_net_hops": on_net_hops,
         }
         for fname, fval in field_checks.items():
             if fval is not None:
@@ -422,7 +445,8 @@ async def _process_cdr_body(body: dict) -> dict:
                 sip_from_user, sip_to_user,
                 hangup_cause_q850, sip_hangup_disposition,
                 sip_user_agent, network_addr, bridge_uuid,
-                sbc_id
+                sbc_id,
+                origin_customer_id, terminating_customer_id, on_net, on_net_hops
             )
             SELECT
                 $1::varchar,  $2::int,       $3::varchar,  $4::int,       $5::varchar,
@@ -444,7 +468,8 @@ async def _process_cdr_body(body: dict) -> dict:
                 $42::varchar, $43::varchar,
                 $44::smallint, $45::varchar,
                 $46::varchar, $47::varchar, $48::varchar,
-                $49::varchar
+                $49::varchar,
+                $50::int,     $51::int,      $52::bool,     $53::smallint
             WHERE NOT EXISTS (
                 SELECT 1 FROM cdrs WHERE uuid = $1::varchar
             )
@@ -498,6 +523,10 @@ async def _process_cdr_body(body: dict) -> dict:
             network_addr,           # $47 network_addr (str | None)
             bridge_uuid,            # $48 bridge_uuid (str | None)
             sbc_id,                 # $49 sbc_id (str | None)
+            origin_customer_id,      # $50 origin_customer_id (int | None)
+            terminating_customer_id,  # $51 terminating_customer_id (int | None)
+            on_net,                 # $52 on_net (bool | None)
+            on_net_hops,            # $53 on_net_hops (int | None)
         )
 
         if result and "INSERT 0 0" in result:
