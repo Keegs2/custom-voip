@@ -243,6 +243,60 @@ function M.lookup_rcf(did)
     return row
 end
 
+-- Resolve a destination number against the on-net routing oracle
+-- (the `number_routing` view: UNION ALL over rcf_numbers / api_dids /
+-- trunk_dids joined to customers). Used by inbound_router.lua to decide
+-- whether a forwarded/placed destination is a platform-owned DID and, if so,
+-- which product handler terminates it.
+--
+-- Mirrors lookup_rcf EXACTLY: same connection/pool, same validate_did input
+-- sanitization, same sql_string() escaping, same error handling, single row
+-- (or nil) via cursor:fetch({}, "a").
+--
+-- IMPORTANT: this query is deliberately UNFILTERED on enabled/active. The view
+-- yields 0 or 1 row (each product DID table has UNIQUE(did)). The caller must
+-- distinguish "not ours" (nil) from "ours but disabled/suspended" (row with
+-- product_enabled='f' or customer_status<>'active') and hard-reject the latter
+-- instead of falling back to the carrier. Do NOT add an enabled/active filter
+-- here -- return the flags and let inbound_router.lua decide.
+-- See docs/ONNET_ROUTING_DESIGN.md sections 1, 2, 6.
+--
+-- Returns the raw view row (all values are strings/nil as luasql returns them):
+--   did, product_type, customer_id, product_ref_id, product_enabled,
+--   customer_status, forward_to, pass_caller_id, ring_timeout, max_channels,
+--   product_name, voice_url, fallback_url, trunk_id
+function M.resolve_destination(did)
+    -- Validate and sanitize input (same guard as lookup_rcf)
+    local clean_did = validate_did(did)
+    if not clean_did then
+        freeswitch.consoleLog("WARN", "Invalid DID format for destination resolve: " .. tostring(did) .. "\n")
+        return nil
+    end
+
+    -- The WHERE did = $1 equality pushes into each UNION-ALL arm's hash index
+    -- (idx_rcf/api/trunk_did_lookup) -> 3 point lookups + small joins.
+    local sql = string.format([[
+        SELECT did, product_type, customer_id, product_ref_id,
+               product_enabled, customer_status, forward_to, pass_caller_id,
+               ring_timeout, max_channels, product_name, voice_url,
+               fallback_url, trunk_id
+        FROM number_routing
+        WHERE did = %s
+        LIMIT 1
+    ]], sql_string(clean_did))
+
+    local cursor, err = execute_query(sql)
+    if not cursor then
+        freeswitch.consoleLog("ERR", "Destination resolve failed: " .. tostring(err) .. "\n")
+        return nil
+    end
+
+    local row = cursor:fetch({}, "a")
+    cursor:close()
+
+    return row
+end
+
 -- Lookup API DID
 function M.lookup_api_did(did)
     -- Validate and sanitize input

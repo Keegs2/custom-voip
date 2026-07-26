@@ -31,13 +31,17 @@ Scripts in `init/` run alphabetically on first database creation:
 | `18_sbc_id_column.sql` | Idempotent ALTER adding `cdrs.sbc_id VARCHAR(30)` + partial index, for SBC failover tracking (backs `/v1/sbc/stats`). |
 | `19_onboarding_requests.sql` | `onboarding_requests` table — backs the onboarding intake/approval router. |
 | `20_rcf_max_channels.sql` | Idempotent ALTER adding `rcf_numbers.max_channels INT DEFAULT 0` (0 = unlimited); FreeSWITCH enforces via limit_hash. |
+| `21_cdr_export.sql` | Idempotent: `cdrs.exported_at` watermark + partial index; `cdr_export_log` / `cdr_export_lock` tables (backs the Equinox→FileMage CDR forwarder). Apply manually on prod primary. |
+| `22_number_routing.sql` | **On-net routing oracle:** `CREATE OR REPLACE VIEW number_routing` — `UNION ALL` over rcf_numbers/api_dids/trunk_dids JOIN customers, canonical columns, `GRANT SELECT TO freeswitch, api`. **Unfiltered on enabled/active** (resolver tells "not ours" from "ours but disabled"). Point lookup by `did` hits each arm's hash index. Apply manually on prod primary → replicates to all zones (view must exist before any replica is re-cloned). |
+| `23_onnet_cdr_columns.sql` | Idempotent ALTER adding `cdrs.origin_customer_id INT`, `terminating_customer_id INT`, `on_net BOOLEAN DEFAULT false`, `on_net_hops SMALLINT` + partial index on `origin_customer_id`. Records both parties of an on-net call; `customer_id` stays the terminal so `rate_cdr()` is unchanged. Apply manually on prod primary. |
 
 ## Hot-Path Tables (Call Setup)
 
 These are queried on EVERY inbound call — must be fast:
 
 - **`rcf_numbers`** — DID → forward_to lookup. Hash index on `did`. Queried by `inbound_router.lua` via `db_client.lua`.
-- **`customers`** — Status/limits check. Joined with rcf_numbers. Index on `(id, status)`.
+- **`number_routing`** (view) — on-net oracle. `resolve_destination(forward_to)` does one `WHERE did=$1` point lookup that pushes into each product arm's DID hash index (`idx_{rcf,api,trunk}_did_lookup`) → 3 point lookups + small joins, sub-ms, 0/1 row. Runs on EVERY RCF forward. Defined on the primary, inherited by every replica.
+- **`customers`** — Status/limits check. Joined with rcf_numbers (and every `number_routing` arm). Index on `(id, status)`.
 - **`trunk_auth_ips`** — IP-based SIP trunk auth. Hash index on `ip_address`. Queried by Kamailio sqlops.
 - **`high_risk_prefixes`** — IRSF fraud check. text_pattern_ops index for prefix matching.
 

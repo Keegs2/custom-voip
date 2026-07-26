@@ -57,12 +57,48 @@ inbound_router.lua executes:
      c. Trunk DID: PostgreSQL (trunk_dids JOIN sip_trunks JOIN customers)
   5. If no match -> UNALLOCATED_NUMBER (SIP 404)
   6. Set channel variables: customer_id, product_type, traffic_grade, trunk_id
-  7. Route based on product_type:
+  7. Route via named terminators + a TERMINATORS dispatch map:
      |
-     |-- "rcf" -> Bridge to forward_to number via carrier
-     |-- "api" -> Answer, then execute voice_webhook.lua
-     |-- "trunk" -> Bridge to customer PBX via Kamailio
+     |-- "rcf" -> terminate_rcf: ON-NET decision at the forward branch point
+     |            (see below), else Bridge to forward_to number via carrier
+     |-- "api" -> terminate_api: Answer, then execute voice_webhook.lua
+     |-- "trunk" -> terminate_trunk: Bridge to customer PBX via Kamailio
 ```
+
+### On-Net (Internal) Routing (design: `docs/ONNET_ROUTING_DESIGN.md`)
+
+The legacy "the only local check is `^10%d%d$`" model is RETIRED. `inbound_router.lua`
+now asks a real question on the call path: **is `forward_to` a platform-owned DID?**
+If so, the carrier hairpin is short-circuited and the call is delivered into that
+DID's own product handler.
+
+- **Oracle:** `db.resolve_destination(did)` queries the `number_routing` view
+  (UNION ALL over rcf_numbers/api_dids/trunk_dids JOIN customers) — one indexed
+  point lookup, 0 or 1 row. The view is **unfiltered on enabled/active** so the
+  resolver distinguishes "not ours" (nil → keep carrier path) from "ours but
+  disabled/suspended" (row present → hard reject). No Redis (Postgres-only).
+- **Terminators:** the three product bodies are extracted into
+  `terminate_rcf` / `terminate_api` / `terminate_trunk` (behavior-preserving for
+  off-net) + a `TERMINATORS` map. `ctx` threads cross-hop state
+  (original caller, composed `presented_cid`, `hops`, `visited` E.164 set,
+  `origin_customer_id`, `sip_call_id`).
+- **RCF chain:** an RCF→RCF forward resolves in memory (DB lookups only, NO SIP
+  per hop) until a terminal. **Exactly one** carrier B-leg is ever emitted, only
+  if the terminal is off-net PSTN. `max_channels` is enforced once on the
+  TERMINAL (intermediate hops emit no B-leg).
+- **CID composition:** honor each hop's `pass_caller_id`, "last `false` hop wins";
+  outbound From stays the terminal DID for Bandwidth auth (presented identity
+  flows via PAI/RPID). For a single-hop off-net RCF DID this is byte-identical to
+  the pre-on-net behavior.
+- **CDR:** `customer_id`=terminal (rate_cdr unchanged) + `origin_customer_id` /
+  `terminating_customer_id` / `on_net` / `on_net_hops`. Off-net:
+  `origin==customer`, `on_net=false`.
+- **Hard reject (never falls through to carrier), sets `lua_routed=true`:**
+  disabled/suspended terminal → `CALL_REJECTED` (603); loop (visited re-entry) or
+  `hops>MAX_HOPS` (=5) → `EXCHANGE_ROUTING_ERROR` (483).
+- **Extensibility:** a new product enrolls by adding one `number_routing` arm +
+  a `terminate_<product>` and registering it in `TERMINATORS`. Detection, the hop
+  loop, loop/limit/reject, and CDR emission are product-agnostic and untouched.
 
 ### RCF Bridge Details
 
@@ -110,9 +146,21 @@ inbound_router.lua (product_type == "rcf"):
   6. If all 4 attempts fail -> NORMAL_TEMPORARY_FAILURE (SIP 503)
      - lua_routed=true prevents dialplan from masking with 404
   |
-  Special case: forward_to is a local extension (is_local_extension)
+  Special case: forward_to is a local extension (is_local_extension, ^10xx)
      -> Single bridge attempt as user/{ext}@{domain} (no SBC/carrier failover)
+  |
+  Special case: forward_to is a platform-owned DID (resolve_destination hit)
+     -> ON-NET internal delivery via the terminator for that DID's product
+        (no carrier hairpin). RCF->RCF chains resolve in-memory to a terminal.
+        See "On-Net (Internal) Routing" above.
 ```
+
+**terminate_rcf note:** the RCF body now runs inside `terminate_rcf(dest, ctx)`.
+It operates on the **terminal** RCF DID (`dest.did`) and the **composed**
+presented CID (`ctx.presented_cid`); for a single-hop off-net call these equal
+the inbound DID and the original caller, so the emitted SIP/CID/failover is
+byte-identical to the pre-on-net script. The 4-attempt SBC×carrier loop, X-Carrier,
+X-CID=sip_call_id, session timers, and default media (no proxy_media) are unchanged.
 
 ---
 
@@ -151,12 +199,13 @@ media (it no longer strips the 183 body). Any script comment implying the 183
 body is stripped is obsolete.
 
 **Database tables queried:**
-- `rcf_numbers` JOIN `customers` -- RCF DID lookup
-- `api_dids` JOIN `customers` -- API DID lookup
-- `trunk_dids` JOIN `sip_trunks` JOIN `customers` -- Trunk DID lookup
+- `rcf_numbers` JOIN `customers` -- RCF DID lookup (STEP 1, inbound DID)
+- `api_dids` JOIN `customers` -- API DID lookup (STEP 1)
+- `trunk_dids` JOIN `sip_trunks` JOIN `customers` -- Trunk DID lookup (STEP 1)
+- `number_routing` view -- on-net oracle for `forward_to` (resolve_destination)
 
 **Channel variables set for CDR:**
-`customer_id`, `product_type`, `traffic_grade`, `trunk_id`, `carrier_used`, `forward_to`, `direction`, `call_start_time`, `hangup_cause`, `blocked_reason`, `fraud_score`, `lua_routed`
+`customer_id` (=terminal customer), `product_type`, `traffic_grade`, `trunk_id`, `carrier_used`, `forward_to`, `direction`, `call_start_time`, `hangup_cause`, `blocked_reason`, `fraud_score`, `lua_routed`, and the on-net set `origin_customer_id`, `terminating_customer_id`, `on_net`, `on_net_hops`.
 
 ### trunk_outbound.lua
 
@@ -266,6 +315,7 @@ PostgreSQL client with connection pooling.
 | Function | Table(s) | Returns |
 |---|---|---|
 | `lookup_rcf(did)` | rcf_numbers JOIN customers | forward_to, customer_id, pass_caller_id, ring_timeout, traffic_grade, cpm_limit, daily_limit |
+| `resolve_destination(did)` | `number_routing` view (rcf/api/trunk UNION ALL JOIN customers) | 0/1 row: did, product_type, customer_id, product_ref_id, product_enabled, customer_status, forward_to, pass_caller_id, ring_timeout, max_channels, product_name, voice_url, trunk_id. **UNFILTERED** on enabled/active — caller decides on-net vs hard-reject. |
 | `lookup_api_did(did)` | api_dids JOIN customers | voice_url, fallback_url, customer_id, traffic_grade, cpm_limit, daily_limit |
 | `lookup_trunk_did(did)` | trunk_dids JOIN sip_trunks JOIN customers | trunk_id, customer_id, max_channels, traffic_grade |
 | `lookup_trunk_by_ip(ip)` | trunk_auth_ips JOIN sip_trunks JOIN customers | trunk_id, customer_id, max_channels, cps_limit, traffic_grade |
@@ -277,7 +327,7 @@ PostgreSQL client with connection pooling.
 | `lookup_did_for_extension(ext)` | extensions | assigned_did |
 | `insert_cdr(cdr)` | cdrs | boolean success |
 
-All queries filter on `enabled=true` / `status='active'`.
+All queries filter on `enabled=true` / `status='active'` **except `resolve_destination`**, which is deliberately unfiltered so the on-net resolver can distinguish "not ours" (0 rows) from "ours but disabled/suspended" (row present → hard reject).
 
 ### lib/redis_client.lua
 
@@ -352,7 +402,8 @@ sip_trunks        (id, customer_id, max_channels, cps_limit, enabled)
 trunk_auth_ips    (trunk_id, ip_address, description)
 extensions        (extension, customer_id, display_name, assigned_did, status)
 cps_tiers         (id, name, tier_type, cps_limit, monthly_fee, per_call_fee, description, features, is_active, sort_order)
-cdrs              (uuid, customer_id, product_type, trunk_id, direction, caller_id, destination, start_time, end_time, duration_ms, hangup_cause, carrier_used, traffic_grade)
+cdrs              (uuid, customer_id, product_type, trunk_id, direction, caller_id, destination, start_time, end_time, duration_ms, hangup_cause, carrier_used, traffic_grade, origin_customer_id, terminating_customer_id, on_net, on_net_hops)
+number_routing    VIEW: UNION ALL over rcf_numbers/api_dids/trunk_dids JOIN customers (on-net oracle; resolve_destination)
 ```
 
 ---
