@@ -1,0 +1,588 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": { "type": "grafana", "uid": "-- Grafana --" },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [
+    {
+      "asDropdown": false,
+      "icon": "external link",
+      "includeVars": false,
+      "keepTime": true,
+      "tags": ["noc"],
+      "targetBlank": false,
+      "title": "NOC dashboards",
+      "tooltip": "Other Production NOC dashboards",
+      "type": "dashboards"
+    }
+  ],
+  "panels": [
+    {
+      "id": 100,
+      "type": "text",
+      "title": "",
+      "gridPos": { "h": 3, "w": 24, "x": 0, "y": 0 },
+      "transparent": true,
+      "options": {
+        "mode": "markdown",
+        "content": "## Call Quality\nAnswer/quality KPIs from the CDR hypertable (`voip-cdr-pg`). Long trends use the cheap continuous aggregate **`cdr_hourly_stats`** (customer-scoped, no zone/carrier dimension → those trends span all zones); recent/quality panels read raw **`cdrs`** and honour the **Zone** filter. RTP metrics (MOS / R-factor / jitter / loss / quality%) are **NULL on unanswered & unrated calls** and are filtered out. **PDD is approximated** as `answer_time - start_time` (time-to-answer) — true PDD to the first 18x needs Homer/SIP timing, not the CDR."
+      },
+      "fieldConfig": { "defaults": {}, "overrides": [] }
+    },
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "ASR trend per zone — hourly",
+      "description": "Answer-Seizure Ratio per zone per hour from raw cdrs (cdr_hourly_stats has no sbc_id, so zone attribution needs raw rows). answered / seized. Spans all zones side by side; NOT filtered by the Zone variable so zones can be compared.",
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 3 },
+      "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
+          "format": "time_series",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT $__timeGroup(start_time, '1h') AS time, CASE WHEN sbc_id IS NULL OR sbc_id = '' THEN 'unknown' ELSE split_part(sbc_id,'-',1) END AS zone, (count(*) FILTER (WHERE answer_time IS NOT NULL))::float / NULLIF(count(*), 0) AS asr FROM cdrs WHERE $__timeFilter(start_time) GROUP BY 1, 2 ORDER BY 1;"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "orange", "value": 0.4 },
+              { "color": "green", "value": 0.55 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "calcs": ["mean", "min"], "displayMode": "table", "placement": "right", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "ASR trend per carrier — hourly (Dallas / LA)",
+      "description": "ASR per carrier_used per hour on the selected zone. carrier_primary = Dallas (67.231.2.12), carrier_secondary = LA (216.82.238.134). 'local'/'default' excluded. Divergence between the two lines pinpoints a PoP-side answer problem.",
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 3 },
+      "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
+          "format": "time_series",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT $__timeGroup(start_time, '1h') AS time, CASE carrier_used WHEN 'carrier_primary' THEN 'Dallas (primary)' WHEN 'carrier_secondary' THEN 'LA (secondary)' ELSE carrier_used END AS carrier, (count(*) FILTER (WHERE answer_time IS NOT NULL))::float / NULLIF(count(*), 0) AS asr FROM cdrs WHERE $__timeFilter(start_time) AND carrier_used IN ('carrier_primary','carrier_secondary') AND split_part(coalesce(sbc_id,''),'-',1) LIKE '$zone' GROUP BY 1, 2 ORDER BY 1;"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "orange", "value": 0.4 },
+              { "color": "green", "value": 0.55 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "calcs": ["mean", "min"], "displayMode": "table", "placement": "right", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "ACD — avg call duration (hourly)",
+      "description": "Average answered-call duration in seconds, from cdr_hourly_stats.avg_duration_sec (already answered-only, cheap continuous aggregate). Customer-scoped aggregate has no zone dimension, so this is all-zones. A sudden ACD collapse often means calls answering then failing fast (dead air / media).",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
+          "format": "time_series",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT $__timeGroup(hour, '1h') AS time, sum(total_duration_sec)::float / NULLIF(sum(answered_calls), 0) AS acd_sec FROM cdr_hourly_stats WHERE $__timeFilter(hour) GROUP BY 1 ORDER BY 1;"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0,
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null } ] }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "calcs": ["mean"], "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "single", "sort": "none" }
+      }
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "PDD proxy — p50 / p95 time-to-answer (10m)",
+      "description": "APPROXIMATION of Post-Dial Delay: percentiles of (answer_time - start_time) over answered calls, 10-minute buckets, selected zone. This is CDR time-to-ANSWER, not true PDD to the first 18x provisional — true PDD needs Homer/SIP timing. Watch p95 for carrier slowness.",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
+          "format": "time_series",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT $__timeGroup(start_time, '10m') AS time, percentile_cont(0.5) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (answer_time - start_time))) AS p50_s, percentile_cont(0.95) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (answer_time - start_time))) AS p95_s FROM cdrs WHERE $__timeFilter(start_time) AND answer_time IS NOT NULL AND split_part(coalesce(sbc_id,''),'-',1) LIKE '$zone' GROUP BY 1 ORDER BY 1;"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0,
+          "decimals": 2,
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 3 },
+              { "color": "red", "value": 6 }
+            ]
+          }
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "p95_s" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } } ] },
+          { "matcher": { "id": "byName", "options": "p50_s" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } } ] }
+        ]
+      },
+      "options": {
+        "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "right", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    },
+    {
+      "id": 10,
+      "type": "row",
+      "title": "RTP quality — MOS / R-factor / jitter / loss (raw cdrs, answered+rated only)",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 20 },
+      "panels": []
+    },
+    {
+      "id": 11,
+      "type": "histogram",
+      "title": "MOS distribution",
+      "description": "Distribution of per-call MOS over the dashboard time range, selected zone, mos IS NOT NULL (unrated/unanswered excluded). A healthy carrier is bunched at 4.0-4.5. A left tail toward 3.x is audio degradation.",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 21 },
+      "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT mos FROM cdrs WHERE $__timeFilter(start_time) AND mos IS NOT NULL AND split_part(coalesce(sbc_id,''),'-',1) LIKE '$zone';"
+        }
+      ],
+      "options": {
+        "bucketSize": 0.1,
+        "legend": { "calcs": [], "displayMode": "list", "placement": "bottom", "showLegend": false }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": { "mode": "fixed", "fixedColor": "green" },
+          "custom": { "fillOpacity": 80, "gradientMode": "none" },
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null } ] }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "MOS trend — avg / p10 (10m)",
+      "description": "Mean MOS and the 10th-percentile (worst-decile) MOS per 10m, selected zone, answered+rated only. avg tells the headline; p10 exposes the worst calls even while the average looks fine.",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 21 },
+      "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
+          "format": "time_series",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT $__timeGroup(start_time, '10m') AS time, avg(mos) AS avg_mos, percentile_cont(0.1) WITHIN GROUP (ORDER BY mos) AS p10_mos FROM cdrs WHERE $__timeFilter(start_time) AND mos IS NOT NULL AND split_part(coalesce(sbc_id,''),'-',1) LIKE '$zone' GROUP BY 1 ORDER BY 1;"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 1,
+          "max": 5,
+          "decimals": 2,
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "orange", "value": 3.5 },
+              { "color": "green", "value": 4.0 }
+            ]
+          }
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "avg_mos" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } } ] },
+          { "matcher": { "id": "byName", "options": "p10_mos" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } } ] }
+        ]
+      },
+      "options": {
+        "legend": { "calcs": ["mean", "min"], "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "asc" }
+      }
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "R-factor trend — avg (10m)",
+      "description": "Average ITU R-factor per 10m, selected zone, r_factor IS NOT NULL. Toll-quality >= 80; 70-80 acceptable; < 70 users notice. Complements MOS (same underlying E-model).",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 21 },
+      "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
+          "format": "time_series",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT $__timeGroup(start_time, '10m') AS time, avg(r_factor) AS avg_r_factor FROM cdrs WHERE $__timeFilter(start_time) AND r_factor IS NOT NULL AND split_part(coalesce(sbc_id,''),'-',1) LIKE '$zone' GROUP BY 1 ORDER BY 1;"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "max": 100,
+          "decimals": 1,
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "orange", "value": 70 },
+              { "color": "green", "value": 80 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "calcs": ["mean", "min"], "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "single", "sort": "none" }
+      }
+    },
+    {
+      "id": 20,
+      "type": "timeseries",
+      "title": "Jitter — avg / p95 (10m)",
+      "description": "Average and p95 of jitter_avg_ms per 10m, selected zone, jitter_avg_ms IS NOT NULL. jitter_avg_ms is derived by the ingest as (jitter_min+jitter_max)/2. Sustained p95 above ~30ms drives MOS down.",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 29 },
+      "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
+          "format": "time_series",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT $__timeGroup(start_time, '10m') AS time, avg(jitter_avg_ms) AS avg_jitter_ms, percentile_cont(0.95) WITHIN GROUP (ORDER BY jitter_avg_ms) AS p95_jitter_ms FROM cdrs WHERE $__timeFilter(start_time) AND jitter_avg_ms IS NOT NULL AND split_part(coalesce(sbc_id,''),'-',1) LIKE '$zone' GROUP BY 1 ORDER BY 1;"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "min": 0,
+          "decimals": 1,
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 30 },
+              { "color": "red", "value": 60 }
+            ]
+          }
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "p95_jitter_ms" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } } ] },
+          { "matcher": { "id": "byName", "options": "avg_jitter_ms" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } } ] }
+        ]
+      },
+      "options": {
+        "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    },
+    {
+      "id": 21,
+      "type": "timeseries",
+      "title": "Packet loss % — avg / p95 (10m)",
+      "description": "Average and p95 of packet_loss_pct per 10m, selected zone, packet_loss_pct IS NOT NULL. Anything sustained above ~1% is audible. p95 catches the worst calls.",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 29 },
+      "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
+          "format": "time_series",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT $__timeGroup(start_time, '10m') AS time, avg(packet_loss_pct) AS avg_loss_pct, percentile_cont(0.95) WITHIN GROUP (ORDER BY packet_loss_pct) AS p95_loss_pct FROM cdrs WHERE $__timeFilter(start_time) AND packet_loss_pct IS NOT NULL AND split_part(coalesce(sbc_id,''),'-',1) LIKE '$zone' GROUP BY 1 ORDER BY 1;"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "decimals": 2,
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 1 },
+              { "color": "red", "value": 3 }
+            ]
+          }
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "p95_loss_pct" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } } ] },
+          { "matcher": { "id": "byName", "options": "avg_loss_pct" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } } ] }
+        ]
+      },
+      "options": {
+        "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    },
+    {
+      "id": 22,
+      "type": "timeseries",
+      "title": "Quality % trend — avg (10m)",
+      "description": "Average FreeSWITCH rtp_audio_in_quality_percentage per 10m, selected zone, quality_pct IS NOT NULL. This is FS's own composite call-quality score (0-100). Tracks MOS/R-factor but is a single ready-made number.",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 29 },
+      "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
+          "format": "time_series",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT $__timeGroup(start_time, '10m') AS time, avg(quality_pct) AS avg_quality_pct FROM cdrs WHERE $__timeFilter(start_time) AND quality_pct IS NOT NULL AND split_part(coalesce(sbc_id,''),'-',1) LIKE '$zone' GROUP BY 1 ORDER BY 1;"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "decimals": 1,
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "orange", "value": 90 },
+              { "color": "green", "value": 97 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "calcs": ["mean", "min"], "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "single", "sort": "none" }
+      }
+    },
+    {
+      "id": 30,
+      "type": "stat",
+      "title": "Rated-call quality snapshot — selected range/zone",
+      "description": "Headline quality averages over the current range + zone across answered, rated calls. 'Rated calls' = rows with a non-NULL mos (the RTP-metric denominator). If this count is low vs total volume, most calls are unrated and the quality panels above are a small sample.",
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 37 },
+      "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT count(*) FILTER (WHERE mos IS NOT NULL) AS \"Rated calls\", avg(mos) AS \"Avg MOS\", avg(r_factor) AS \"Avg R-factor\", avg(jitter_avg_ms) AS \"Avg jitter (ms)\", avg(packet_loss_pct) AS \"Avg loss %\", avg(quality_pct) AS \"Avg quality %\" FROM cdrs WHERE $__timeFilter(start_time) AND split_part(coalesce(sbc_id,''),'-',1) LIKE '$zone';"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "orientation": "horizontal",
+        "textMode": "value_and_name",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 2,
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "text", "value": null } ] }
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "Rated calls" }, "properties": [ { "id": "decimals", "value": 0 }, { "id": "color", "value": { "mode": "fixed", "fixedColor": "text" } } ] },
+          { "matcher": { "id": "byName", "options": "Avg MOS" }, "properties": [ { "id": "thresholds", "value": { "mode": "absolute", "steps": [ { "color": "red", "value": null }, { "color": "orange", "value": 3.5 }, { "color": "green", "value": 4.0 } ] } } ] },
+          { "matcher": { "id": "byName", "options": "Avg R-factor" }, "properties": [ { "id": "decimals", "value": 1 }, { "id": "thresholds", "value": { "mode": "absolute", "steps": [ { "color": "red", "value": null }, { "color": "orange", "value": 70 }, { "color": "green", "value": 80 } ] } } ] },
+          { "matcher": { "id": "byName", "options": "Avg jitter (ms)" }, "properties": [ { "id": "unit", "value": "ms" }, { "id": "thresholds", "value": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "orange", "value": 30 }, { "color": "red", "value": 60 } ] } } ] },
+          { "matcher": { "id": "byName", "options": "Avg loss %" }, "properties": [ { "id": "unit", "value": "percent" }, { "id": "thresholds", "value": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "orange", "value": 1 }, { "color": "red", "value": 3 } ] } } ] },
+          { "matcher": { "id": "byName", "options": "Avg quality %" }, "properties": [ { "id": "unit", "value": "percent" }, { "id": "decimals", "value": 1 }, { "id": "thresholds", "value": { "mode": "absolute", "steps": [ { "color": "red", "value": null }, { "color": "orange", "value": 90 }, { "color": "green", "value": 97 } ] } } ] }
+        ]
+      }
+    }
+  ],
+  "refresh": "1m",
+  "schemaVersion": 39,
+  "tags": ["noc", "voice", "quality"],
+  "templating": {
+    "list": [
+      {
+        "name": "zone",
+        "label": "Zone",
+        "description": "Filter raw-cdrs panels by zone, derived from split_part(sbc_id,'-',1). 'All' = SQL LIKE '%'. Note: the hourly-aggregate panels (ACD, and the per-zone ASR panel) span all zones regardless of this filter.",
+        "type": "custom",
+        "hide": 0,
+        "multi": false,
+        "includeAll": false,
+        "query": "All : %, East : east, West : west, Central : central",
+        "current": { "selected": true, "text": "All", "value": "%" },
+        "options": [
+          { "selected": true, "text": "All", "value": "%" },
+          { "selected": false, "text": "East", "value": "east" },
+          { "selected": false, "text": "West", "value": "west" },
+          { "selected": false, "text": "Central", "value": "central" }
+        ]
+      }
+    ]
+  },
+  "time": { "from": "now-6h", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Call Quality",
+  "uid": "noc-call-quality",
+  "version": 1,
+  "weekStart": ""
+}

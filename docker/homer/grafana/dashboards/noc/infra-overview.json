@@ -1,0 +1,684 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": { "type": "grafana", "uid": "-- Grafana --" },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [
+    {
+      "asDropdown": false,
+      "icon": "external link",
+      "includeVars": false,
+      "keepTime": true,
+      "tags": ["noc"],
+      "targetBlank": false,
+      "title": "NOC dashboards",
+      "tooltip": "Other Production NOC dashboards",
+      "type": "dashboards"
+    }
+  ],
+  "panels": [
+    {
+      "id": 100,
+      "type": "text",
+      "title": "",
+      "gridPos": { "h": 2, "w": 24, "x": 0, "y": 0 },
+      "transparent": true,
+      "options": {
+        "mode": "markdown",
+        "content": "## Production NOC · Infrastructure\nFleet wall-board — 14 production VMs across East / West / Central, the 3 SIP VIPs, and the API/UI front doors. Green = healthy. A VM tile goes **red when the hypervisor CPU metric is absent** (same signal as the `VM down (metrics absent)` alert). CPU/mem/disk in the table come from the Ops Agent."
+      },
+      "fieldConfig": { "defaults": {}, "overrides": [] }
+    },
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "VMs Up",
+      "description": "Count of production VMs currently emitting the hypervisor CPU metric, out of 14. A VM stops reporting within ~1-2 min of stopping/crashing.",
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 2 },
+      "datasource": { "type": "stackdriver", "uid": "gcp-monitoring" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "stackdriver", "uid": "gcp-monitoring" },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "rugged-night-193017",
+            "filters": [
+              "metric.type", "=", "compute.googleapis.com/instance/cpu/utilization",
+              "AND", "metadata.system_labels.name", "=~",
+              "poc-custom-voip|kam-g2|fs-media-v2|services|east-db-standby|west-sbc-1|west-sbc-2|west-fs|west-db|central-sbc-1|central-sbc-2|central-fs|central-db"
+            ],
+            "crossSeriesReducer": "REDUCE_COUNT",
+            "perSeriesAligner": "ALIGN_MEAN",
+            "alignmentPeriod": "+300s",
+            "groupBys": [],
+            "view": "FULL"
+          }
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "max": 14,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "orange", "value": 13 },
+              { "color": "green", "value": 14 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "SIP VIPs Up",
+      "description": "SIP NLB VIPs (East/West/Central) passing their uptime checks, out of 3. Fraction of probes passing per VIP averaged across checker regions; >0.5 counts as up.",
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 2 },
+      "datasource": { "type": "stackdriver", "uid": "gcp-monitoring" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "stackdriver", "uid": "gcp-monitoring" },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "rugged-night-193017",
+            "filters": [
+              "metric.type", "=", "monitoring.googleapis.com/uptime_check/check_passed",
+              "AND", "resource.label.host", "=~",
+              "34.24.133.82|35.252.214.40|35.253.133.230"
+            ],
+            "crossSeriesReducer": "REDUCE_COUNT_TRUE",
+            "perSeriesAligner": "ALIGN_FRACTION_TRUE",
+            "alignmentPeriod": "+300s",
+            "groupBys": ["resource.label.host"],
+            "view": "FULL"
+          }
+        }
+      ],
+      "transformations": [
+        {
+          "id": "reduce",
+          "options": {
+            "reducers": ["lastNotNull"],
+            "includeTimeField": false,
+            "mode": "seriesToRows"
+          }
+        },
+        {
+          "id": "filterByValue",
+          "options": {
+            "type": "include",
+            "match": "all",
+            "filters": [
+              { "fieldName": "Last", "config": { "id": "greater", "options": { "value": 0 } } }
+            ]
+          }
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["count"], "fields": "/^Last$/", "values": false },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "max": 3,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "orange", "value": 2 },
+              { "color": "green", "value": 3 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Front Doors (VIPs + API + UI)",
+      "description": "All five customer-visible uptime checks passing: 3 SIP VIPs + API /health + UI HTTPS. Counts hosts with >0 passing probe fraction.",
+      "gridPos": { "h": 4, "w": 5, "x": 8, "y": 2 },
+      "datasource": { "type": "stackdriver", "uid": "gcp-monitoring" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "stackdriver", "uid": "gcp-monitoring" },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "rugged-night-193017",
+            "filters": [
+              "metric.type", "=", "monitoring.googleapis.com/uptime_check/check_passed"
+            ],
+            "crossSeriesReducer": "REDUCE_COUNT_TRUE",
+            "perSeriesAligner": "ALIGN_FRACTION_TRUE",
+            "alignmentPeriod": "+300s",
+            "groupBys": ["resource.label.host"],
+            "view": "FULL"
+          }
+        }
+      ],
+      "transformations": [
+        {
+          "id": "reduce",
+          "options": {
+            "reducers": ["lastNotNull"],
+            "includeTimeField": false,
+            "mode": "seriesToRows"
+          }
+        },
+        {
+          "id": "filterByValue",
+          "options": {
+            "type": "include",
+            "match": "all",
+            "filters": [
+              { "fieldName": "Last", "config": { "id": "greater", "options": { "value": 0 } } }
+            ]
+          }
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["count"], "fields": "/^Last$/", "values": false },
+        "orientation": "auto",
+        "textMode": "value_and_name",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "max": 5,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "orange", "value": 4 },
+              { "color": "green", "value": 5 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Uptime Checks — Front Doors",
+      "description": "Per-endpoint uptime status. Each tile = fraction of probes passing across checker regions (1.0 = all regions green). SIP VIPs, API /health, UI HTTPS.",
+      "gridPos": { "h": 4, "w": 11, "x": 13, "y": 2 },
+      "datasource": { "type": "stackdriver", "uid": "gcp-monitoring" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "stackdriver", "uid": "gcp-monitoring" },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "rugged-night-193017",
+            "filters": [
+              "metric.type", "=", "monitoring.googleapis.com/uptime_check/check_passed"
+            ],
+            "crossSeriesReducer": "REDUCE_MEAN",
+            "perSeriesAligner": "ALIGN_FRACTION_TRUE",
+            "alignmentPeriod": "+300s",
+            "groupBys": ["resource.label.host"],
+            "view": "FULL"
+          },
+          "aliasBy": "{{resource.label.host}}"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "orientation": "horizontal",
+        "textMode": "value_and_name",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "orange", "value": 0.5 },
+              { "color": "green", "value": 0.99 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 10,
+      "type": "row",
+      "title": "East — us-east1",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 6 },
+      "panels": []
+    },
+    {
+      "id": 11,
+      "type": "stat",
+      "title": "East VMs",
+      "description": "Up/Down per East VM (hypervisor CPU metric present = UP). poc-custom-voip (SBC-1), kam-g2 (SBC-2), fs-media-v2 (FreeSWITCH), services (PG primary + API + UI + Homer), east-db-standby (HA standby).",
+      "gridPos": { "h": 5, "w": 24, "x": 0, "y": 7 },
+      "datasource": { "type": "stackdriver", "uid": "gcp-monitoring" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "stackdriver", "uid": "gcp-monitoring" },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "rugged-night-193017",
+            "filters": [
+              "metric.type", "=", "compute.googleapis.com/instance/cpu/utilization",
+              "AND", "metadata.system_labels.name", "=~",
+              "poc-custom-voip|kam-g2|fs-media-v2|services|east-db-standby"
+            ],
+            "crossSeriesReducer": "REDUCE_MEAN",
+            "perSeriesAligner": "ALIGN_MEAN",
+            "alignmentPeriod": "+300s",
+            "groupBys": ["metadata.system_labels.name"],
+            "view": "FULL"
+          },
+          "aliasBy": "{{metadata.system_labels.name}}"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "orientation": "horizontal",
+        "textMode": "name",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "noValue": "DOWN"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "mappings": [],
+          "noValue": "DOWN",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [ { "color": "green", "value": null } ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byRegexp", "options": ".*" },
+            "properties": [
+              { "id": "noValue", "value": "DOWN" }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 20,
+      "type": "row",
+      "title": "West — us-west1",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 12 },
+      "panels": []
+    },
+    {
+      "id": 21,
+      "type": "stat",
+      "title": "West VMs",
+      "description": "Up/Down per West VM. west-sbc-1, west-sbc-2, west-fs (FreeSWITCH), west-db (PG replica). west-loadtest is intentionally excluded from monitoring.",
+      "gridPos": { "h": 5, "w": 24, "x": 0, "y": 13 },
+      "datasource": { "type": "stackdriver", "uid": "gcp-monitoring" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "stackdriver", "uid": "gcp-monitoring" },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "rugged-night-193017",
+            "filters": [
+              "metric.type", "=", "compute.googleapis.com/instance/cpu/utilization",
+              "AND", "metadata.system_labels.name", "=~",
+              "west-sbc-1|west-sbc-2|west-fs|west-db"
+            ],
+            "crossSeriesReducer": "REDUCE_MEAN",
+            "perSeriesAligner": "ALIGN_MEAN",
+            "alignmentPeriod": "+300s",
+            "groupBys": ["metadata.system_labels.name"],
+            "view": "FULL"
+          },
+          "aliasBy": "{{metadata.system_labels.name}}"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "orientation": "horizontal",
+        "textMode": "name",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "noValue": "DOWN"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "mappings": [],
+          "noValue": "DOWN",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [ { "color": "green", "value": null } ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 30,
+      "type": "row",
+      "title": "Central — us-central1",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 18 },
+      "panels": []
+    },
+    {
+      "id": 31,
+      "type": "stat",
+      "title": "Central VMs",
+      "description": "Up/Down per Central VM. central-sbc-1, central-sbc-2, central-fs (FreeSWITCH), central-db (PG replica).",
+      "gridPos": { "h": 5, "w": 24, "x": 0, "y": 19 },
+      "datasource": { "type": "stackdriver", "uid": "gcp-monitoring" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "stackdriver", "uid": "gcp-monitoring" },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "rugged-night-193017",
+            "filters": [
+              "metric.type", "=", "compute.googleapis.com/instance/cpu/utilization",
+              "AND", "metadata.system_labels.name", "=~",
+              "central-sbc-1|central-sbc-2|central-fs|central-db"
+            ],
+            "crossSeriesReducer": "REDUCE_MEAN",
+            "perSeriesAligner": "ALIGN_MEAN",
+            "alignmentPeriod": "+300s",
+            "groupBys": ["metadata.system_labels.name"],
+            "view": "FULL"
+          },
+          "aliasBy": "{{metadata.system_labels.name}}"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "orientation": "horizontal",
+        "textMode": "name",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "noValue": "DOWN"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "mappings": [],
+          "noValue": "DOWN",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [ { "color": "green", "value": null } ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 40,
+      "type": "row",
+      "title": "Fleet resource table — all 14 VMs (CPU / mem / disk)",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 24 },
+      "panels": []
+    },
+    {
+      "id": 41,
+      "type": "table",
+      "title": "CPU % — by VM",
+      "description": "Hypervisor CPU utilization (compute.googleapis.com/instance/cpu/utilization), last value, per VM. Works without the Ops Agent.",
+      "gridPos": { "h": 12, "w": 8, "x": 0, "y": 25 },
+      "datasource": { "type": "stackdriver", "uid": "gcp-monitoring" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "stackdriver", "uid": "gcp-monitoring" },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "rugged-night-193017",
+            "filters": [
+              "metric.type", "=", "compute.googleapis.com/instance/cpu/utilization",
+              "AND", "metadata.system_labels.name", "=~",
+              "poc-custom-voip|kam-g2|fs-media-v2|services|east-db-standby|west-sbc-1|west-sbc-2|west-fs|west-db|central-sbc-1|central-sbc-2|central-fs|central-db"
+            ],
+            "crossSeriesReducer": "REDUCE_MEAN",
+            "perSeriesAligner": "ALIGN_MEAN",
+            "alignmentPeriod": "+300s",
+            "groupBys": ["metadata.system_labels.name"],
+            "view": "FULL"
+          },
+          "aliasBy": "{{metadata.system_labels.name}}"
+        }
+      ],
+      "transformations": [
+        { "id": "reduce", "options": { "reducers": ["lastNotNull"], "includeTimeField": false, "mode": "seriesToRows" } },
+        { "id": "organize", "options": { "renameByName": { "Field": "VM", "Last": "CPU" } } }
+      ],
+      "options": {
+        "showHeader": true,
+        "sortBy": [ { "displayName": "CPU", "desc": true } ],
+        "cellHeight": "sm"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "align": "auto", "filterable": true },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 0.7 },
+              { "color": "red", "value": 0.9 }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "CPU" },
+            "properties": [
+              { "id": "unit", "value": "percentunit" },
+              { "id": "custom.cellOptions", "value": { "type": "color-background", "mode": "gradient" } },
+              { "id": "custom.width", "value": 110 }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 42,
+      "type": "table",
+      "title": "Memory % used — by VM",
+      "description": "agent.googleapis.com/memory/percent_used (state=used), last value, per VM. Requires the Ops Agent (VMs without it show no row).",
+      "gridPos": { "h": 12, "w": 8, "x": 8, "y": 25 },
+      "datasource": { "type": "stackdriver", "uid": "gcp-monitoring" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "stackdriver", "uid": "gcp-monitoring" },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "rugged-night-193017",
+            "filters": [
+              "metric.type", "=", "agent.googleapis.com/memory/percent_used",
+              "AND", "metric.label.state", "=", "used",
+              "AND", "metadata.system_labels.name", "=~",
+              "poc-custom-voip|kam-g2|fs-media-v2|services|east-db-standby|west-sbc-1|west-sbc-2|west-fs|west-db|central-sbc-1|central-sbc-2|central-fs|central-db"
+            ],
+            "crossSeriesReducer": "REDUCE_MEAN",
+            "perSeriesAligner": "ALIGN_MEAN",
+            "alignmentPeriod": "+300s",
+            "groupBys": ["metadata.system_labels.name"],
+            "view": "FULL"
+          },
+          "aliasBy": "{{metadata.system_labels.name}}"
+        }
+      ],
+      "transformations": [
+        { "id": "reduce", "options": { "reducers": ["lastNotNull"], "includeTimeField": false, "mode": "seriesToRows" } },
+        { "id": "organize", "options": { "renameByName": { "Field": "VM", "Last": "Mem" } } }
+      ],
+      "options": {
+        "showHeader": true,
+        "sortBy": [ { "displayName": "Mem", "desc": true } ],
+        "cellHeight": "sm"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "align": "auto", "filterable": true },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 80 },
+              { "color": "red", "value": 90 }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "Mem" },
+            "properties": [
+              { "id": "unit", "value": "percent" },
+              { "id": "custom.cellOptions", "value": { "type": "color-background", "mode": "gradient" } },
+              { "id": "custom.width", "value": 110 }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 43,
+      "type": "table",
+      "title": "Disk % used — by VM (max real FS)",
+      "description": "agent.googleapis.com/disk/percent_used (state=used), tmpfs/udev/overlay/loop devices excluded, max across a VM's real filesystems, last value. Requires the Ops Agent.",
+      "gridPos": { "h": 12, "w": 8, "x": 16, "y": 25 },
+      "datasource": { "type": "stackdriver", "uid": "gcp-monitoring" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "stackdriver", "uid": "gcp-monitoring" },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "rugged-night-193017",
+            "filters": [
+              "metric.type", "=", "agent.googleapis.com/disk/percent_used",
+              "AND", "metric.label.state", "=", "used",
+              "AND", "metric.label.device", "!=~", "tmpfs|udev|overlay.*|/dev/loop.*",
+              "AND", "metadata.system_labels.name", "=~",
+              "poc-custom-voip|kam-g2|fs-media-v2|services|east-db-standby|west-sbc-1|west-sbc-2|west-fs|west-db|central-sbc-1|central-sbc-2|central-fs|central-db"
+            ],
+            "crossSeriesReducer": "REDUCE_MAX",
+            "perSeriesAligner": "ALIGN_MEAN",
+            "alignmentPeriod": "+300s",
+            "groupBys": ["metadata.system_labels.name"],
+            "view": "FULL"
+          },
+          "aliasBy": "{{metadata.system_labels.name}}"
+        }
+      ],
+      "transformations": [
+        { "id": "reduce", "options": { "reducers": ["lastNotNull"], "includeTimeField": false, "mode": "seriesToRows" } },
+        { "id": "organize", "options": { "renameByName": { "Field": "VM", "Last": "Disk" } } }
+      ],
+      "options": {
+        "showHeader": true,
+        "sortBy": [ { "displayName": "Disk", "desc": true } ],
+        "cellHeight": "sm"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "align": "auto", "filterable": true },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 75 },
+              { "color": "red", "value": 85 }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "Disk" },
+            "properties": [
+              { "id": "unit", "value": "percent" },
+              { "id": "custom.cellOptions", "value": { "type": "color-background", "mode": "gradient" } },
+              { "id": "custom.width", "value": 110 }
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "refresh": "1m",
+  "schemaVersion": 39,
+  "tags": ["noc", "infrastructure", "fleet"],
+  "templating": { "list": [] },
+  "time": { "from": "now-6h", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Production NOC · Infrastructure",
+  "uid": "noc-infra-overview",
+  "version": 1,
+  "weekStart": ""
+}

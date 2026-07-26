@@ -77,7 +77,8 @@ send HEP to port 9060 on the services VM. Only the backend storage and UI change
 | `clickhouse-users.xml` | ClickHouse user config (passwordless default user for internal Docker network) |
 | `grafana/provisioning/datasources/qryn.yml` | Auto-provisions qryn as Loki datasource in Grafana |
 | `grafana/provisioning/dashboards/dashboards.yml` | Auto-provisions dashboard directory in Grafana |
-| `grafana/dashboards/sip-search.json` | SIP search dashboard with logs, table, and flow diagram panels |
+| `grafana/dashboards/homer/sip-search.json` | SIP search dashboard with logs, table, and flow diagram panels (in the `homer/` subdir so its provider does not recurse into the `noc/` NOC dashboards) |
+| `grafana/dashboards/noc/*.json` | Production NOC dashboards (infra + voice-product), provisioned into the "Production NOC" Grafana folder by a second dashboards provider |
 | `scripts/ip-alias.lua` | heplify-server Lua script: rewrites HEP SrcIP/DstIP to friendly node names before Loki labels are generated |
 
 ## Key Configuration

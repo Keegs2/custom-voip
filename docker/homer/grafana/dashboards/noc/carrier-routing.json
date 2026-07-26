@@ -1,0 +1,492 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": { "type": "grafana", "uid": "-- Grafana --" },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [
+    {
+      "asDropdown": false,
+      "icon": "external link",
+      "includeVars": false,
+      "keepTime": true,
+      "tags": ["noc"],
+      "targetBlank": false,
+      "title": "NOC dashboards",
+      "tooltip": "Other Production NOC dashboards",
+      "type": "dashboards"
+    }
+  ],
+  "panels": [
+    {
+      "id": 100,
+      "type": "text",
+      "title": "",
+      "gridPos": { "h": 3, "w": 24, "x": 0, "y": 0 },
+      "transparent": true,
+      "options": {
+        "mode": "markdown",
+        "content": "## Carrier & Routing\nEgress carrier split, disposition (`hangup_cause` / `sip_code`), SBC failover balance, and on-net routing — from the CDR hypertable (`voip-cdr-pg`). **Carriers:** `carrier_primary` = Bandwidth **Dallas** (67.231.2.12), `carrier_secondary` = Bandwidth **LA** (216.82.238.134); `local` = on-net (no carrier), `default` = carrier unset at CDR time. **SBCs (6):** east/west/central × sbc-1/2 from `sbc_id` (set from the Kamailio `X-SBC-ID` header). Honours the **Zone** filter."
+      },
+      "fieldConfig": { "defaults": {}, "overrides": [] }
+    },
+    {
+      "id": 1,
+      "type": "piechart",
+      "title": "Carrier split — call count",
+      "description": "Share of calls by carrier_used over the range + zone. carrier_primary=Dallas, carrier_secondary=LA, local=on-net, default=unset. Heavy 'secondary' means primary is failing over.",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 3 },
+      "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT CASE carrier_used WHEN 'carrier_primary' THEN 'Dallas (primary)' WHEN 'carrier_secondary' THEN 'LA (secondary)' WHEN 'local' THEN 'On-net (local)' WHEN 'default' THEN 'Unset (default)' ELSE COALESCE(carrier_used, 'null') END AS carrier, count(*) AS calls FROM cdrs WHERE $__timeFilter(start_time) AND split_part(coalesce(sbc_id,''),'-',1) LIKE '$zone' GROUP BY 1 ORDER BY 2 DESC;"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": true },
+        "pieType": "donut",
+        "legend": { "displayMode": "table", "placement": "right", "showLegend": true, "values": ["value", "percent"] },
+        "tooltip": { "mode": "single", "sort": "desc" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": { "mode": "palette-classic" },
+          "mappings": [],
+          "custom": { "hideFrom": { "legend": false, "tooltip": false, "viz": false } }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 2,
+      "type": "table",
+      "title": "Per-carrier ASR / ACD — range + zone",
+      "description": "For each carrier_used: seized, answered, ASR, and ACD (avg answered duration). This is the routing-decision table — compare Dallas vs LA answer rates. local/default rows included for completeness.",
+      "gridPos": { "h": 8, "w": 16, "x": 8, "y": 3 },
+      "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT CASE carrier_used WHEN 'carrier_primary' THEN 'Dallas (primary)' WHEN 'carrier_secondary' THEN 'LA (secondary)' WHEN 'local' THEN 'On-net (local)' WHEN 'default' THEN 'Unset (default)' ELSE COALESCE(carrier_used, 'null') END AS carrier, count(*) AS seized, count(*) FILTER (WHERE answer_time IS NOT NULL) AS answered, (count(*) FILTER (WHERE answer_time IS NOT NULL))::float / NULLIF(count(*), 0) AS asr, avg(duration_ms) FILTER (WHERE answer_time IS NOT NULL) / 1000.0 AS acd_sec FROM cdrs WHERE $__timeFilter(start_time) AND split_part(coalesce(sbc_id,''),'-',1) LIKE '$zone' GROUP BY 1 ORDER BY seized DESC;"
+        }
+      ],
+      "transformations": [
+        { "id": "organize", "options": { "renameByName": { "carrier": "Carrier", "seized": "Seized", "answered": "Answered", "asr": "ASR", "acd_sec": "ACD (s)" } } }
+      ],
+      "options": {
+        "showHeader": true,
+        "sortBy": [ { "displayName": "Seized", "desc": true } ],
+        "cellHeight": "sm"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "align": "auto", "filterable": true },
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null } ] }
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "ASR" }, "properties": [
+            { "id": "unit", "value": "percentunit" },
+            { "id": "decimals", "value": 1 },
+            { "id": "custom.cellOptions", "value": { "type": "color-background", "mode": "gradient" } },
+            { "id": "thresholds", "value": { "mode": "absolute", "steps": [ { "color": "red", "value": null }, { "color": "orange", "value": 0.4 }, { "color": "green", "value": 0.55 } ] } }
+          ] },
+          { "matcher": { "id": "byName", "options": "ACD (s)" }, "properties": [ { "id": "unit", "value": "s" }, { "id": "decimals", "value": 1 } ] }
+        ]
+      }
+    },
+    {
+      "id": 10,
+      "type": "table",
+      "title": "Hangup cause distribution",
+      "description": "FreeSWITCH hangup_cause counts + share over the range + zone. NORMAL_CLEARING dominates healthy traffic; spikes in NO_ANSWER / USER_BUSY / CALL_REJECTED / NORMAL_TEMPORARY_FAILURE point at destination or carrier problems.",
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 11 },
+      "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT COALESCE(hangup_cause, 'UNKNOWN') AS hangup_cause, count(*) AS calls, round(100.0 * count(*) / NULLIF(sum(count(*)) OVER (), 0), 2) AS pct FROM cdrs WHERE $__timeFilter(start_time) AND split_part(coalesce(sbc_id,''),'-',1) LIKE '$zone' GROUP BY 1 ORDER BY calls DESC;"
+        }
+      ],
+      "transformations": [
+        { "id": "organize", "options": { "renameByName": { "hangup_cause": "Hangup cause", "calls": "Calls", "pct": "%" } } }
+      ],
+      "options": {
+        "showHeader": true,
+        "sortBy": [ { "displayName": "Calls", "desc": true } ],
+        "cellHeight": "sm"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "align": "auto", "filterable": true },
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null } ] }
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "%" }, "properties": [
+            { "id": "unit", "value": "percent" },
+            { "id": "custom.cellOptions", "value": { "type": "color-background", "mode": "gradient" } }
+          ] },
+          { "matcher": { "id": "byName", "options": "Calls" }, "properties": [ { "id": "custom.width", "value": 110 } ] }
+        ]
+      }
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "SIP response class over time (2xx / 3xx / 4xx / 5xx / 6xx)",
+      "description": "sip_code bucketed into response classes, 10-minutely, selected zone. sip_code comes from sip_term_status. NULL sip_code (never got a final response) shown as 'none'. A growing 4xx/5xx band is the earliest sign of a carrier/routing fault.",
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 11 },
+      "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
+          "format": "time_series",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT $__timeGroup(start_time, '10m') AS time, CASE WHEN sip_code IS NULL THEN 'none' WHEN sip_code BETWEEN 200 AND 299 THEN '2xx' WHEN sip_code BETWEEN 300 AND 399 THEN '3xx' WHEN sip_code BETWEEN 400 AND 499 THEN '4xx' WHEN sip_code BETWEEN 500 AND 599 THEN '5xx' WHEN sip_code BETWEEN 600 AND 699 THEN '6xx' ELSE 'other' END AS class, count(*) AS calls FROM cdrs WHERE $__timeFilter(start_time) AND split_part(coalesce(sbc_id,''),'-',1) LIKE '$zone' GROUP BY 1, 2 ORDER BY 1;"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "bars",
+            "lineWidth": 1,
+            "fillOpacity": 70,
+            "stacking": { "group": "A", "mode": "normal" },
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null } ] }
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "2xx" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } } ] },
+          { "matcher": { "id": "byName", "options": "3xx" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "blue" } } ] },
+          { "matcher": { "id": "byName", "options": "4xx" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } } ] },
+          { "matcher": { "id": "byName", "options": "5xx" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } } ] },
+          { "matcher": { "id": "byName", "options": "6xx" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "purple" } } ] },
+          { "matcher": { "id": "byName", "options": "none" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "text" } } ] }
+        ]
+      },
+      "options": {
+        "legend": { "calcs": ["sum"], "displayMode": "table", "placement": "right", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    },
+    {
+      "id": 12,
+      "type": "table",
+      "title": "Top SIP response codes",
+      "description": "Individual sip_code values with class + count over the range + zone. Drill-down for the response-class chart: e.g. 404 (not found), 486 (busy), 480 (unavailable), 503 (carrier congestion), 487 (canceled).",
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 20 },
+      "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT sip_code, CASE WHEN sip_code BETWEEN 200 AND 299 THEN '2xx' WHEN sip_code BETWEEN 300 AND 399 THEN '3xx' WHEN sip_code BETWEEN 400 AND 499 THEN '4xx' WHEN sip_code BETWEEN 500 AND 599 THEN '5xx' WHEN sip_code BETWEEN 600 AND 699 THEN '6xx' ELSE 'other' END AS class, count(*) AS calls FROM cdrs WHERE $__timeFilter(start_time) AND sip_code IS NOT NULL AND split_part(coalesce(sbc_id,''),'-',1) LIKE '$zone' GROUP BY 1, 2 ORDER BY calls DESC LIMIT 20;"
+        }
+      ],
+      "transformations": [
+        { "id": "organize", "options": { "renameByName": { "sip_code": "SIP code", "class": "Class", "calls": "Calls" } } }
+      ],
+      "options": {
+        "showHeader": true,
+        "sortBy": [ { "displayName": "Calls", "desc": true } ],
+        "cellHeight": "sm"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "align": "auto", "filterable": true },
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null } ] }
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "Class" }, "properties": [ { "id": "mappings", "value": [
+            { "type": "value", "options": { "2xx": { "color": "green", "index": 0 }, "3xx": { "color": "blue", "index": 1 }, "4xx": { "color": "orange", "index": 2 }, "5xx": { "color": "red", "index": 3 }, "6xx": { "color": "purple", "index": 4 } } }
+          ] }, { "id": "custom.cellOptions", "value": { "type": "color-text" } } ] }
+        ]
+      }
+    },
+    {
+      "id": 13,
+      "type": "table",
+      "title": "SBC distribution — failover balance (6 SBCs)",
+      "description": "Calls per sbc_id + that SBC's ASR over the range + zone. The two SBCs in a zone should carry roughly equal load (NLB round-robin); a lopsided split means one SBC is unhealthy and FreeSWITCH is failing over to its partner. Rows with a blank sbc_id (legacy / pre-header) collapse to 'unknown'.",
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 20 },
+      "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT CASE WHEN sbc_id IS NULL OR sbc_id = '' THEN 'unknown' ELSE sbc_id END AS sbc, count(*) AS calls, round(100.0 * count(*) / NULLIF(sum(count(*)) OVER (), 0), 1) AS pct, (count(*) FILTER (WHERE answer_time IS NOT NULL))::float / NULLIF(count(*), 0) AS asr FROM cdrs WHERE $__timeFilter(start_time) AND split_part(coalesce(sbc_id,''),'-',1) LIKE '$zone' GROUP BY 1 ORDER BY calls DESC;"
+        }
+      ],
+      "transformations": [
+        { "id": "organize", "options": { "renameByName": { "sbc": "SBC", "calls": "Calls", "pct": "% of load", "asr": "ASR" } } }
+      ],
+      "options": {
+        "showHeader": true,
+        "sortBy": [ { "displayName": "Calls", "desc": true } ],
+        "cellHeight": "sm"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "align": "auto", "filterable": true },
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null } ] }
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "% of load" }, "properties": [
+            { "id": "unit", "value": "percent" },
+            { "id": "custom.cellOptions", "value": { "type": "color-background", "mode": "gradient" } }
+          ] },
+          { "matcher": { "id": "byName", "options": "ASR" }, "properties": [
+            { "id": "unit", "value": "percentunit" },
+            { "id": "decimals", "value": 1 },
+            { "id": "thresholds", "value": { "mode": "absolute", "steps": [ { "color": "red", "value": null }, { "color": "orange", "value": 0.4 }, { "color": "green", "value": 0.55 } ] } },
+            { "id": "custom.cellOptions", "value": { "type": "color-text" } }
+          ] }
+        ]
+      }
+    },
+    {
+      "id": 20,
+      "type": "row",
+      "title": "On-net routing",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 29 },
+      "panels": []
+    },
+    {
+      "id": 21,
+      "type": "stat",
+      "title": "On-net % — range + zone",
+      "description": "Share of calls short-circuited internally: count(*) FILTER (WHERE on_net) / count(*) over the range + zone. Higher = more carrier egress avoided (cost + quality win).",
+      "gridPos": { "h": 7, "w": 6, "x": 0, "y": 30 },
+      "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT (count(*) FILTER (WHERE on_net))::float / NULLIF(count(*), 0) AS on_net_pct FROM cdrs WHERE $__timeFilter(start_time) AND split_part(coalesce(sbc_id,''),'-',1) LIKE '$zone';"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 1,
+          "min": 0,
+          "max": 1,
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "blue", "value": null } ] }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 22,
+      "type": "barchart",
+      "title": "On-net hops histogram",
+      "description": "Distribution of on_net_hops for on-net calls (on_net = true) over the range + zone. on_net_hops = number of internal RCF hops resolved in-memory before the call terminated. Most on-net calls are 1 hop; a long tail means chained forwards.",
+      "gridPos": { "h": 7, "w": 9, "x": 6, "y": 30 },
+      "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT COALESCE(on_net_hops, 0)::text AS hops, count(*) AS calls FROM cdrs WHERE $__timeFilter(start_time) AND on_net IS TRUE AND split_part(coalesce(sbc_id,''),'-',1) LIKE '$zone' GROUP BY 1 ORDER BY 1;"
+        }
+      ],
+      "options": {
+        "orientation": "auto",
+        "xTickLabelRotation": 0,
+        "showValue": "auto",
+        "stacking": "none",
+        "tooltip": { "mode": "single", "sort": "none" },
+        "legend": { "showLegend": false, "displayMode": "list", "placement": "bottom" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": { "mode": "fixed", "fixedColor": "blue" },
+          "custom": { "fillOpacity": 80, "gradientMode": "none", "lineWidth": 1 },
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "blue", "value": null } ] }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 23,
+      "type": "timeseries",
+      "title": "On-net vs off-net — hourly call count",
+      "description": "Calls per hour split into on-net (on_net = true) vs off-net (on_net false/NULL), selected zone. Tracks the internal-routing ratio over time as more DIDs come on-platform.",
+      "gridPos": { "h": 7, "w": 9, "x": 15, "y": 30 },
+      "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
+          "format": "time_series",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT $__timeGroup(start_time, '1h') AS time, count(*) FILTER (WHERE on_net IS TRUE) AS on_net, count(*) FILTER (WHERE on_net IS NOT TRUE) AS off_net FROM cdrs WHERE $__timeFilter(start_time) AND split_part(coalesce(sbc_id,''),'-',1) LIKE '$zone' GROUP BY 1 ORDER BY 1;"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 20,
+            "stacking": { "group": "A", "mode": "normal" },
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null } ] }
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "on_net" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "blue" } } ] },
+          { "matcher": { "id": "byName", "options": "off_net" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } } ] }
+        ]
+      },
+      "options": {
+        "legend": { "calcs": ["sum"], "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    },
+    {
+      "id": 30,
+      "type": "table",
+      "title": "Recent failed calls (last 200 in range)",
+      "description": "Failed seizures = answer_time IS NULL OR sip_code >= 400, most recent first, over the range + zone. Columns are the fields you need to open a ticket or a Homer trace: time, caller, destination, sip_code, hangup_cause, sbc_id, carrier_used. Limited to 200 rows.",
+      "gridPos": { "h": 12, "w": 24, "x": 0, "y": 37 },
+      "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT start_time AS \"time\", caller_id AS caller, destination, sip_code, COALESCE(hangup_cause, '') AS hangup_cause, COALESCE(sbc_id, '') AS sbc_id, CASE carrier_used WHEN 'carrier_primary' THEN 'Dallas' WHEN 'carrier_secondary' THEN 'LA' ELSE COALESCE(carrier_used, '') END AS carrier, direction FROM cdrs WHERE $__timeFilter(start_time) AND (answer_time IS NULL OR sip_code >= 400) AND split_part(coalesce(sbc_id,''),'-',1) LIKE '$zone' ORDER BY start_time DESC LIMIT 200;"
+        }
+      ],
+      "transformations": [
+        { "id": "organize", "options": { "renameByName": {
+          "time": "Time", "caller": "Caller", "destination": "Destination", "sip_code": "SIP", "hangup_cause": "Hangup cause", "sbc_id": "SBC", "carrier": "Carrier", "direction": "Dir"
+        } } }
+      ],
+      "options": {
+        "showHeader": true,
+        "sortBy": [ { "displayName": "Time", "desc": true } ],
+        "cellHeight": "sm",
+        "footer": { "show": false, "reducer": ["count"], "fields": "" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "align": "auto", "filterable": true },
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null } ] }
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "Time" }, "properties": [ { "id": "unit", "value": "time:YYYY-MM-DD HH:mm:ss" }, { "id": "custom.width", "value": 170 } ] },
+          { "matcher": { "id": "byName", "options": "SIP" }, "properties": [
+            { "id": "custom.width", "value": 70 },
+            { "id": "custom.cellOptions", "value": { "type": "color-text" } },
+            { "id": "thresholds", "value": { "mode": "absolute", "steps": [ { "color": "text", "value": null }, { "color": "orange", "value": 400 }, { "color": "red", "value": 500 } ] } }
+          ] },
+          { "matcher": { "id": "byName", "options": "Dir" }, "properties": [ { "id": "custom.width", "value": 90 } ] },
+          { "matcher": { "id": "byName", "options": "SBC" }, "properties": [ { "id": "custom.width", "value": 120 } ] },
+          { "matcher": { "id": "byName", "options": "Carrier" }, "properties": [ { "id": "custom.width", "value": 90 } ] }
+        ]
+      }
+    }
+  ],
+  "refresh": "1m",
+  "schemaVersion": 39,
+  "tags": ["noc", "voice", "carrier", "routing"],
+  "templating": {
+    "list": [
+      {
+        "name": "zone",
+        "label": "Zone",
+        "description": "Filter by zone, derived from split_part(sbc_id,'-',1). 'All' = SQL LIKE '%' (includes blank-sbc_id rows).",
+        "type": "custom",
+        "hide": 0,
+        "multi": false,
+        "includeAll": false,
+        "query": "All : %, East : east, West : west, Central : central",
+        "current": { "selected": true, "text": "All", "value": "%" },
+        "options": [
+          { "selected": true, "text": "All", "value": "%" },
+          { "selected": false, "text": "East", "value": "east" },
+          { "selected": false, "text": "West", "value": "west" },
+          { "selected": false, "text": "Central", "value": "central" }
+        ]
+      }
+    ]
+  },
+  "time": { "from": "now-6h", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Carrier & Routing",
+  "uid": "noc-carrier-routing",
+  "version": 1,
+  "weekStart": ""
+}

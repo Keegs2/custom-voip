@@ -1,0 +1,48 @@
+# CDR Postgres datasource — Production NOC (shared by infra + voice tracks).
+# ---------------------------------------------------------------------------
+# Read-only analytics access to the East PRIMARY Postgres (10.142.0.103), which
+# holds EVERY zone's CDRs (all zones' FreeSWITCH post CDRs to the East API) plus
+# the replication state (pg_stat_replication) the db-replication dashboard needs.
+#
+# UID is FIXED as `voip-cdr-pg` — dashboard JSON targets reference it by this uid
+# and the parallel voice-product NOC track relies on the same uid.
+#
+# ── CONNECTION — direct :5432, NOT PgBouncer :6432 ───────────────────────────
+# Grafana runs in the compose bridge network; Postgres runs bare on the VM host
+# (systemd). We reach it via the docker host-gateway alias `host.docker.internal`
+# (added to the grafana service in docker-compose.services.yml, exactly like the
+# `api` service already does for PgBouncer). We deliberately target the DIRECT
+# Postgres port 5432, NOT PgBouncer 6432: PgBouncer runs in transaction pooling
+# mode, which breaks prepared statements / session state that Grafana's SQL
+# datasource and ad-hoc analytics rely on. Direct 5432 avoids that whole class
+# of bug. (The Postgres server must accept connections from the Docker bridge
+# subnet on 5432 — see operator notes: a pg_hba line + listen_addresses.)
+#
+# ── AUTH — read-only role, password provided by the operator ─────────────────
+# User is `grafana_ro` (created by docker/postgres/init/22_grafana_ro.sql). The
+# password is NOT committed — it is templated from GRAFANA_DB_PASSWORD in
+# /opt/revup/.env and injected via secureJsonData. Grafana expands ${VAR}
+# tokens in provisioning files from its own process environment.
+apiVersion: 1
+
+datasources:
+  - name: VoIP CDR Postgres
+    uid: voip-cdr-pg
+    type: postgres
+    access: proxy
+    # Direct Postgres on the VM host, reached via the docker host-gateway alias.
+    url: host.docker.internal:5432
+    user: grafana_ro
+    isDefault: false
+    editable: false
+    jsonData:
+      database: voip
+      sslmode: disable            # same-host / bridge network, no TLS needed
+      postgresVersion: 1600       # PostgreSQL 16
+      timescaledb: true           # cdrs is a TimescaleDB hypertable
+      maxOpenConns: 8
+      maxIdleConns: 2
+      maxIdleConnsAuto: true
+      connMaxLifetime: 14400
+    secureJsonData:
+      password: ${GRAFANA_DB_PASSWORD}

@@ -41,3 +41,11 @@ venv/
 # Keys and credentials
 .keys/
 *.json.key
+
+# Grafana NOC / GCP monitoring secrets. Ignore everything under secrets/ EXCEPT
+# the tracked placeholder + README, so a real downloaded SA key dropped here
+# (any name) is never committed. On prod the operator edits the placeholder
+# ON THE VM (deploy is git-pull only), so the real key never flows back to git.
+secrets/*
+!secrets/gcp-monitoring-sa.json
+!secrets/README.md
