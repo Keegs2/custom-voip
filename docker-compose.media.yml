@@ -95,8 +95,12 @@ services:
     image: voip-ops-agent:latest
     container_name: voip-ops-agent
     network_mode: host
-    depends_on:
-      - freeswitch
+    # NO depends_on: freeswitch. A read-only diagnostic sidecar must NEVER be able
+    # to recreate/restart the co-located call server — `up -d --build ops-agent`
+    # with a depends_on would pull FreeSWITCH into the up-set and drop live calls.
+    # The agent talks ESL over the shared host netns (127.0.0.1:8021) and fails
+    # closed if FS is down (the ESL client returns a connection error → the agent
+    # just reports ok:false); the dependency is therefore both unnecessary and unsafe.
     environment:
       # Force the FS role: this VM has no Kamailio ctl socket, and we do NOT want
       # a TCP ESL probe at import time deciding the role — explicit is robust.
