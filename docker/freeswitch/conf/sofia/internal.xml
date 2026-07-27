@@ -265,6 +265,45 @@
     <param name="rtp-timeout-sec" value="60"/>
     <param name="rtp-hold-timeout-sec" value="1800"/>
 
+    <!-- ============================================ -->
+    <!-- RTP QUALITY / RTCP TRACKING (CDR MOS/loss)  -->
+    <!-- ============================================ -->
+    <!--
+      Enables FreeSWITCH's per-call RTP quality estimator on THIS (A-leg)
+      profile so mod_json_cdr emits MOS, quality %, R-factor inputs, jitter
+      variance, packet loss, and flaw totals into the CDR. Without an RTCP
+      interval, mod_sofia never sets SWITCH_RTP_FLAG_ENABLE_RTCP on the RTP
+      session, so switch_rtp.c's check_jitter()/estimate_mos() never runs and
+      these channel variables stay unset (NULL in the CDR):
+          rtp_audio_in_mos, rtp_audio_in_quality_percentage,
+          rtp_audio_in_flaw_total, rtp_audio_in_jitter_min_variance,
+          rtp_audio_in_jitter_max_variance, rtp_audio_in_mean_interval
+      (The raw arrival counters — rtp_audio_in_media_packet_count,
+      rtp_audio_in_skip_packet_count, rtp_audio_in_raw_bytes,
+      rtp_audio_in_media_bytes — are tracked whenever FS handles media and
+      are populated even without this, but they are NULL today because RCF
+      was never in a media-stat-emitting state on a completed A-leg. This
+      flips the whole set on.)
+
+      5000ms (RTCP every 5s):
+        - Purely LOCAL: the estimator is driven by INBOUND RTP arrival
+          timing (jitter/error periods measured on packets we receive from
+          the carrier). MOS/quality/loss are computed even if Bandwidth
+          ignores our RTCP entirely — we do not depend on receiving RTCP
+          Receiver Reports back. So the A-leg CDR stats are valid regardless
+          of carrier RTCP behavior.
+        - RTCP is bound on RTP-port+1 (rtcp-mux is NOT set, and Bandwidth
+          does not offer a=rtcp-mux), so RTCP stays inside the configured
+          16384-49151 RTP range and uses the same ext-rtp-ip as RTP — it
+          does NOT fight the GCE ext-rtp-ip / hairpin setup or the firewall.
+        - 5s (vs the common 1000ms) keeps outbound RTCP volume negligible at
+          10K concurrent calls while still yielding a stable end-of-call MOS.
+      Default media mode is unchanged (no proxy_media/bypass on the RCF path);
+      FS is already the RTP anchor for RCF, which is exactly what lets it
+      measure inbound quality.
+    -->
+    <param name="rtcp-audio-interval-msec" value="5000"/>
+
     <!-- Media options -->
     <param name="media-option" value="bypass-media-after-att-xfer"/>
     <param name="disable-hold" value="false"/>
