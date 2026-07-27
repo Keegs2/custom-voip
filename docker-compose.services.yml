@@ -38,6 +38,10 @@ services:
       - BANDWIDTH_SIP_PEER_ID=${BANDWIDTH_SIP_PEER_ID:-1162116}
       - TEST_MODE=${TEST_MODE:-false}
       - ENABLE_DOCS=${ENABLE_DOCS:-true}
+      # Shared bearer token the SBC carrier-monitor pollers present to
+      # POST /v1/carrier-status/report. Must match CARRIER_STATUS_TOKEN in the
+      # SBCs' .env. Unset => the endpoint fail-closes (rejects all reports).
+      - CARRIER_STATUS_TOKEN=${CARRIER_STATUS_TOKEN:-}
     ports:
       - "8088:8000"
     networks:
