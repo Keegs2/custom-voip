@@ -77,23 +77,34 @@ services:
     restart: unless-stopped
 
   # ---------------------------------------------------------------------------
-  # Carrier-trunk connectivity monitor (sidecar) — runs on EVERY SBC.
+  # revup-ops-agent (was: carrier-monitor) — runs on EVERY SBC.
   #
-  # Reads Kamailio's LIVE per-gateway carrier health (maintained by the
-  # dispatcher module's OPTIONS keepalive probes to Bandwidth) over the SHARED
-  # ctl binrpc UNIX socket via `kamcmd dispatcher.list`, then POSTs a per-carrier
-  # up/down snapshot to the central (East) services API. No new SIP listeners,
-  # no RPC on the network — it only reads a local socket and makes outbound POSTs.
-  # See docker/carrier-monitor/ for the poller + Dockerfile.
+  # TWO jobs in one process (see docker/carrier-monitor/):
+  #  1. Carrier poller (UNCHANGED from PR #8): reads Kamailio's LIVE per-gateway
+  #     carrier health over the SHARED ctl binrpc UNIX socket via
+  #     `kamcmd dispatcher.list` and POSTs an up/down snapshot to the East API.
+  #  2. Read-only NOC command API on OPS_AGENT_PORT (8710): the ted-next console's
+  #     single transport for SBC reads (kamcmd dispatcher.list/stats/htable, plus
+  #     host docker/git/journalctl). Allow-listed, fixed argv, shell=False,
+  #     fail-closed bearer auth. Role auto-detects as `sbc` (ctl socket present).
+  #
+  # SECURITY: the command API binds 0.0.0.0:8710 and is published on the VM. It is
+  # VPC-internal ONLY — the OPERATOR MUST add a firewall rule allowing tcp:8710
+  # from just the console host(s) (e.g. a `voip-ops-agent` tag → console SA/IP).
+  # No SIP listeners are added; Kamailio stays host-net, this stays on bridge.
   # ---------------------------------------------------------------------------
   carrier-monitor:
     build: ./docker/carrier-monitor
     container_name: voip-carrier-monitor
-    # Bridge network is fine: the sidecar reaches the ctl socket via the shared
-    # volume (not the network) and reaches the API over normal outbound HTTP.
-    # (Kamailio itself must stay host-net for SIP; this sidecar does not.)
+    # Bridge network + published port: the poller reaches the ctl socket via the
+    # shared volume (not the network) and POSTs outbound; the command API is
+    # reached by the console on the published 8710. (Kamailio must stay host-net
+    # for SIP; this agent does not.)
     depends_on:
       - kamailio
+    ports:
+      # Read-only NOC command API. VPC-internal; gate with a firewall rule.
+      - "${OPS_AGENT_PORT:-8710}:${OPS_AGENT_PORT:-8710}"
     environment:
       # Per-SBC identity (goes into the payload's sbc_id). MUST be unique per SBC.
       - SBC_ID=${SBC_ID:-east-sbc-1}
@@ -102,13 +113,32 @@ services:
       - CARRIER_STATUS_TOKEN=${CARRIER_STATUS_TOKEN}
       # Poll cadence in seconds (default 15).
       - POLL_INTERVAL=${POLL_INTERVAL:-15}
+      # ---- Ops-agent command API ----
+      # Force the SBC role (ctl socket also auto-detects it; explicit is robust).
+      - OPS_AGENT_ROLE=${OPS_AGENT_ROLE:-sbc}
+      # Bearer token the console must present on POST /run. Fail-closed: if unset,
+      # every /run is 401. MUST match the console's configured token.
+      - OPS_AGENT_TOKEN=${OPS_AGENT_TOKEN}
+      # Port the read-only command API listens on (default 8710).
+      - OPS_AGENT_PORT=${OPS_AGENT_PORT:-8710}
     volumes:
-      # SAME named volume the kamailio service mounts — this is how the sidecar
-      # sees /var/run/kamailio/kamailio_ctl. NOT :ro — connecting to a UNIX
-      # socket requires write permission on the socket inode, and a read-only
-      # bind mount makes connect() fail (EROFS) even for root. The sidecar only
-      # issues read-only RPCs (dispatcher.list) regardless of the mount mode.
+      # SAME named volume the kamailio service mounts — this is how the agent sees
+      # /var/run/kamailio/kamailio_ctl (poller + SBC-role kamcmd commands). NOT
+      # :ro — connecting to a UNIX socket needs write on the socket inode; a :ro
+      # bind makes connect() fail (EROFS) even for root. The agent only issues
+      # read-only RPCs regardless of the mount mode.
       - kamailio_ctl:/var/run/kamailio
+      # Host Docker socket (READ-ONLY) for host.docker_ps / host.docker_logs. The
+      # agent only runs `docker ps` / `docker logs` (reads); :ro is defense in
+      # depth (the daemon API is still reachable, but the agent never calls a
+      # mutating verb — the allow-list has none).
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # Repo checkout (READ-ONLY) for host.git_head (`git -C /opt/revup ...`).
+      - /opt/revup:/opt/revup:ro
+      # Host journal (READ-ONLY, best-effort) for host.journalctl. If absent the
+      # command reports "unavailable" gracefully; docker_logs still covers logs.
+      - /var/log/journal:/var/log/journal:ro
+      - /etc/machine-id:/etc/machine-id:ro
     deploy:
       resources:
         limits:

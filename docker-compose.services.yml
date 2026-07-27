@@ -113,6 +113,57 @@ services:
           memory: 64M
     restart: unless-stopped
 
+  # ---------------------------------------------------------------------------
+  # revup-ops-agent — READ-ONLY NOC command API for the services VM.
+  #
+  # Same image as the SBC carrier-monitor. On this VM it serves the `services`
+  # role: ONLY the host.* commands (docker ps/logs, git head, journalctl) — there
+  # is no Kamailio ctl socket and no local FreeSWITCH here, so no kamcmd/ESL
+  # commands are exposed (the role gate hides them; /healthz advertises only the
+  # host.* ids). The carrier POLLER is a no-op here (CARRIER_STATUS_URL unset) —
+  # it just idles; the command API is the point.
+  #
+  # SECURITY: OPS_AGENT_PORT (8710) is VPC-internal ONLY. The OPERATOR MUST add a
+  # firewall rule allowing tcp:8710 from just the console host(s). Fail-closed
+  # bearer auth (OPS_AGENT_TOKEN) gates every /run; unset => all /run are 401.
+  # ---------------------------------------------------------------------------
+  ops-agent:
+    build: ./docker/carrier-monitor
+    image: voip-ops-agent:latest
+    container_name: voip-ops-agent
+    ports:
+      # Read-only NOC command API. VPC-internal; gate with a firewall rule.
+      - "${OPS_AGENT_PORT:-8710}:${OPS_AGENT_PORT:-8710}"
+    environment:
+      # Force the services role (no ctl socket / no FS here anyway).
+      - OPS_AGENT_ROLE=${OPS_AGENT_ROLE:-services}
+      # Command API bearer token (fail-closed) + port.
+      - OPS_AGENT_TOKEN=${OPS_AGENT_TOKEN}
+      - OPS_AGENT_PORT=${OPS_AGENT_PORT:-8710}
+      # Carrier poller: no Kamailio here — leave unset; the poller idles.
+      - CARRIER_STATUS_URL=${CARRIER_STATUS_URL:-}
+      - CARRIER_STATUS_TOKEN=${CARRIER_STATUS_TOKEN:-}
+    volumes:
+      # Host Docker socket (READ-ONLY) for host.docker_ps / host.docker_logs of
+      # the services-VM containers (api, ui, grafana, qryn, clickhouse, …).
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # Repo checkout (READ-ONLY) for host.git_head.
+      - /opt/revup:/opt/revup:ro
+      # Host journal (READ-ONLY, best-effort) for host.journalctl (docker,
+      # pgbouncer, postgresql units run bare on this VM).
+      - /var/log/journal:/var/log/journal:ro
+      - /etc/machine-id:/etc/machine-id:ro
+    networks:
+      - services-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 128M
+        reservations:
+          memory: 32M
+    restart: unless-stopped
+
   # Nginx — serves React SPA + Homer UI, reverse-proxies to API
   ui:
     build: ./docker/ui
