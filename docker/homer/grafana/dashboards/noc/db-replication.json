@@ -488,7 +488,7 @@
               "AND", "metadata.system_labels.name", "=~",
               "services|east-db-standby|west-db|central-db"
             ],
-            "crossSeriesReducer": "REDUCE_NONE",
+            "crossSeriesReducer": "REDUCE_MEAN",
             "perSeriesAligner": "ALIGN_MEAN",
             "alignmentPeriod": "+60s",
             "groupBys": ["metadata.system_labels.name"],
@@ -547,7 +547,7 @@
               "AND", "metadata.system_labels.name", "=~",
               "services|east-db-standby|west-db|central-db"
             ],
-            "crossSeriesReducer": "REDUCE_NONE",
+            "crossSeriesReducer": "REDUCE_MEAN",
             "perSeriesAligner": "ALIGN_MEAN",
             "alignmentPeriod": "+60s",
             "groupBys": ["metadata.system_labels.name"],
@@ -656,6 +656,6 @@
   "timezone": "browser",
   "title": "Database & Replication",
   "uid": "noc-db-replication",
-  "version": 1,
+  "version": 2,
   "weekStart": ""
 }
