@@ -76,6 +76,10 @@ SELECT
         ELSE 'down'
     END AS status
 FROM carrier_trunk_status s
+-- Only the live Bandwidth carriers: Dallas (setid 2) + LA (setid 3). The TC1/TC2
+-- PoPs (setid 4/5) are unused, so they are excluded here structurally — even if a
+-- lagging poller ever reports one, it can never surface in the health view/map.
+WHERE s.setid IN (2, 3)
 GROUP BY s.duid;
 
 -- ---------------------------------------------------------------------------
