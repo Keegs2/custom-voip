@@ -16,7 +16,7 @@ from routers import (
     rcf, calls, trunks, cdrs, customers, health,
     auth, search, number_inventory,
     carriers, rates, tiers, sipp, sbc, homer,
-    onboarding, freeswitch,
+    onboarding, freeswitch, carrier_status,
 )
 from middleware.auth import JWTAuthMiddleware
 
@@ -118,6 +118,8 @@ app.include_router(sipp.router, prefix="/v1/sipp", tags=["SIPp"])
 app.include_router(sipp.router, prefix="/sipp", tags=["SIPp"])
 app.include_router(sbc.router, prefix="/v1/sbc", tags=["SBC"])
 app.include_router(sbc.router, prefix="/sbc", tags=["SBC"])
+app.include_router(carrier_status.router, prefix="/v1/carrier-status", tags=["Carrier Status"])
+app.include_router(carrier_status.router, prefix="/carrier-status", tags=["Carrier Status"])
 app.include_router(homer.router, prefix="/v1/homer", tags=["Homer"])
 app.include_router(homer.router, prefix="/homer", tags=["Homer"])
 app.include_router(onboarding.router, prefix="/v1/onboarding", tags=["Onboarding"])
