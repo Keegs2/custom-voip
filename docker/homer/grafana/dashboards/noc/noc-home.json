@@ -1,0 +1,1774 @@
+{
+  "uid": "noc-home",
+  "title": "Production NOC · Home",
+  "tags": [
+    "noc",
+    "home"
+  ],
+  "schemaVersion": 39,
+  "version": 1,
+  "timezone": "browser",
+  "editable": true,
+  "graphTooltip": 0,
+  "fiscalYearStartMonth": 0,
+  "weekStart": "",
+  "refresh": "30s",
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "templating": {
+    "list": []
+  },
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboards"
+      }
+    ]
+  },
+  "links": [
+    {
+      "asDropdown": false,
+      "icon": "external link",
+      "includeVars": false,
+      "keepTime": true,
+      "tags": [
+        "noc"
+      ],
+      "targetBlank": false,
+      "title": "NOC dashboards",
+      "tooltip": "All Production NOC dashboards",
+      "type": "dashboards"
+    }
+  ],
+  "description": "NOC home / wall-TV command board: US datacenter map framed by per-zone up/down, reachability, carrier connections and live call KPIs. Landing page for the Production NOC.",
+  "panels": [
+    {
+      "id": 1,
+      "type": "text",
+      "transparent": true,
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 2
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "**Live System Status** — 🟢 green = healthy · 🔴 red = attention · hover any tile or map dot for detail.  ·  **Map:** 🟢 datacenter (dot size = calls / hour) · 🔻 Bandwidth carrier PoP."
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Fleet VMs up",
+      "description": "Total production VMs reporting hypervisor CPU across all 3 datacenters. Expected 13 (5 East + 4 West + 4 Central; west-loadtest excluded). 🟢 13/13 · 🔴 any down.",
+      "datasource": {
+        "type": "stackdriver",
+        "uid": "gcp-monitoring"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 2,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "timeSeriesList",
+          "datasource": {
+            "type": "stackdriver",
+            "uid": "gcp-monitoring"
+          },
+          "timeSeriesList": {
+            "projectName": "rugged-night-193017",
+            "filters": [
+              "metric.type",
+              "=",
+              "compute.googleapis.com/instance/cpu/utilization",
+              "AND",
+              "metadata.system_labels.name",
+              "=~",
+              "poc-custom-voip|kam-g2|fs-media-v2|services|east-db-standby|west-sbc-1|west-sbc-2|west-fs|west-db|central-sbc-1|central-sbc-2|central-fs|central-db"
+            ],
+            "crossSeriesReducer": "REDUCE_COUNT",
+            "perSeriesAligner": "ALIGN_MEAN",
+            "alignmentPeriod": "+300s",
+            "groupBys": [],
+            "view": "FULL"
+          }
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "percentChangeColorMode": "standard"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 0,
+          "noValue": "DOWN",
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "0 / 13",
+                  "index": 0
+                },
+                "1": {
+                  "text": "1 / 13",
+                  "index": 1
+                },
+                "2": {
+                  "text": "2 / 13",
+                  "index": 2
+                },
+                "3": {
+                  "text": "3 / 13",
+                  "index": 3
+                },
+                "4": {
+                  "text": "4 / 13",
+                  "index": 4
+                },
+                "5": {
+                  "text": "5 / 13",
+                  "index": 5
+                },
+                "6": {
+                  "text": "6 / 13",
+                  "index": 6
+                },
+                "7": {
+                  "text": "7 / 13",
+                  "index": 7
+                },
+                "8": {
+                  "text": "8 / 13",
+                  "index": 8
+                },
+                "9": {
+                  "text": "9 / 13",
+                  "index": 9
+                },
+                "10": {
+                  "text": "10 / 13",
+                  "index": 10
+                },
+                "11": {
+                  "text": "11 / 13",
+                  "index": 11
+                },
+                "12": {
+                  "text": "12 / 13",
+                  "index": 12
+                },
+                "13": {
+                  "text": "13 / 13",
+                  "index": 13
+                }
+              }
+            },
+            {
+              "type": "special",
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "DOWN",
+                  "color": "red",
+                  "index": 10
+                }
+              }
+            }
+          ],
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 13
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Call volume · 15m",
+      "description": "Calls seized platform-wide in the last 15 minutes (all zones/products). Live traffic pulse; 0 during quiet periods is normal on this pre-beta box.",
+      "datasource": {
+        "type": "postgres",
+        "uid": "voip-cdr-pg"
+      },
+      "gridPos": {
+        "x": 4,
+        "y": 2,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "voip-cdr-pg"
+          },
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT count(*) AS calls FROM cdrs WHERE start_time > now() - interval '15 minutes';"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "percentChangeColorMode": "standard"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "noValue": "0",
+          "mappings": [],
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "CPS · peak 1h",
+      "description": "Peak calls-per-second over the last hour (max per-minute rate, all zones). 🟠 ≥ 350 · 🔴 ≥ 500 soft capacity.",
+      "datasource": {
+        "type": "postgres",
+        "uid": "voip-cdr-pg"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 2,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "voip-cdr-pg"
+          },
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT COALESCE(max(cps),0) AS cps FROM (SELECT count(*)::float/60.0 AS cps FROM cdrs WHERE start_time > now() - interval '1 hour' GROUP BY date_trunc('minute',start_time)) s;"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "percentChangeColorMode": "standard"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "cps",
+          "decimals": 1,
+          "noValue": "0",
+          "mappings": [],
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 350
+              },
+              {
+                "color": "red",
+                "value": 500
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "ASR · 15m",
+      "description": "Answer-seizure ratio (answered ÷ seized) in the last 15 minutes, all zones. 🟢 normal PSTN ~35–70%. '—' = no recent calls.",
+      "datasource": {
+        "type": "postgres",
+        "uid": "voip-cdr-pg"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 2,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "voip-cdr-pg"
+          },
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT (count(*) FILTER (WHERE answer_time IS NOT NULL))::float/NULLIF(count(*),0) AS asr FROM cdrs WHERE start_time > now() - interval '15 minutes';"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "percentChangeColorMode": "standard"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 0,
+          "noValue": "—",
+          "mappings": [],
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.15
+              },
+              {
+                "color": "green",
+                "value": 0.35
+              }
+            ]
+          },
+          "min": 0,
+          "max": 1
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "MOS · 15m",
+      "description": "Average call MOS of rated calls, last 15 minutes. 🟢 ≥ 4.0 · 🔴 < 3.6. '—' = no rated calls (RTP quality capture is a follow-up on the RCF path).",
+      "datasource": {
+        "type": "postgres",
+        "uid": "voip-cdr-pg"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 2,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "voip-cdr-pg"
+          },
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT avg(mos) AS mos FROM cdrs WHERE start_time > now() - interval '15 minutes' AND mos IS NOT NULL;"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "percentChangeColorMode": "standard"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 2,
+          "noValue": "—",
+          "mappings": [],
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 3.6
+              },
+              {
+                "color": "green",
+                "value": 4.0
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 7,
+      "type": "stat",
+      "title": "Packet loss · 15m",
+      "description": "Average packet-loss %% of rated calls, last 15 minutes. 🟢 < 1%% · 🔴 ≥ 3%%. '—' = no rated calls (same RTP dependency as MOS).",
+      "datasource": {
+        "type": "postgres",
+        "uid": "voip-cdr-pg"
+      },
+      "gridPos": {
+        "x": 20,
+        "y": 2,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "voip-cdr-pg"
+          },
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT avg(packet_loss_pct) AS loss FROM cdrs WHERE start_time > now() - interval '15 minutes' AND packet_loss_pct IS NOT NULL;"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "percentChangeColorMode": "standard"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "decimals": 1,
+          "noValue": "—",
+          "mappings": [],
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 3
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 8,
+      "type": "stat",
+      "title": "East · us-east1",
+      "description": "East datacenter — VMs reporting CPU (expect 5). 🟢 5/5 · 🔴 any down / DOWN if dark. Holds the DB primary + API + UI.",
+      "datasource": {
+        "type": "stackdriver",
+        "uid": "gcp-monitoring"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 6,
+        "w": 5,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "timeSeriesList",
+          "datasource": {
+            "type": "stackdriver",
+            "uid": "gcp-monitoring"
+          },
+          "timeSeriesList": {
+            "projectName": "rugged-night-193017",
+            "filters": [
+              "metric.type",
+              "=",
+              "compute.googleapis.com/instance/cpu/utilization",
+              "AND",
+              "metadata.system_labels.name",
+              "=~",
+              "poc-custom-voip|kam-g2|fs-media-v2|services|east-db-standby"
+            ],
+            "crossSeriesReducer": "REDUCE_COUNT",
+            "perSeriesAligner": "ALIGN_MEAN",
+            "alignmentPeriod": "+300s",
+            "groupBys": [],
+            "view": "FULL"
+          }
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "percentChangeColorMode": "standard"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 0,
+          "noValue": "DOWN",
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "0 / 5",
+                  "index": 0
+                },
+                "1": {
+                  "text": "1 / 5",
+                  "index": 1
+                },
+                "2": {
+                  "text": "2 / 5",
+                  "index": 2
+                },
+                "3": {
+                  "text": "3 / 5",
+                  "index": 3
+                },
+                "4": {
+                  "text": "4 / 5",
+                  "index": 4
+                },
+                "5": {
+                  "text": "5 / 5",
+                  "index": 5
+                }
+              }
+            },
+            {
+              "type": "special",
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "DOWN",
+                  "color": "red",
+                  "index": 10
+                }
+              }
+            }
+          ],
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 5
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 9,
+      "type": "stat",
+      "title": "West · us-west1",
+      "description": "West datacenter — VMs reporting CPU (expect 4). 🟢 4/4 · 🔴 any down.",
+      "datasource": {
+        "type": "stackdriver",
+        "uid": "gcp-monitoring"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 10,
+        "w": 5,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "timeSeriesList",
+          "datasource": {
+            "type": "stackdriver",
+            "uid": "gcp-monitoring"
+          },
+          "timeSeriesList": {
+            "projectName": "rugged-night-193017",
+            "filters": [
+              "metric.type",
+              "=",
+              "compute.googleapis.com/instance/cpu/utilization",
+              "AND",
+              "metadata.system_labels.name",
+              "=~",
+              "west-sbc-1|west-sbc-2|west-fs|west-db"
+            ],
+            "crossSeriesReducer": "REDUCE_COUNT",
+            "perSeriesAligner": "ALIGN_MEAN",
+            "alignmentPeriod": "+300s",
+            "groupBys": [],
+            "view": "FULL"
+          }
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "percentChangeColorMode": "standard"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 0,
+          "noValue": "DOWN",
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "0 / 4",
+                  "index": 0
+                },
+                "1": {
+                  "text": "1 / 4",
+                  "index": 1
+                },
+                "2": {
+                  "text": "2 / 4",
+                  "index": 2
+                },
+                "3": {
+                  "text": "3 / 4",
+                  "index": 3
+                },
+                "4": {
+                  "text": "4 / 4",
+                  "index": 4
+                }
+              }
+            },
+            {
+              "type": "special",
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "DOWN",
+                  "color": "red",
+                  "index": 10
+                }
+              }
+            }
+          ],
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 4
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 10,
+      "type": "stat",
+      "title": "Central · us-central1",
+      "description": "Central datacenter — VMs reporting CPU (expect 4). 🟢 4/4 · 🔴 any down.",
+      "datasource": {
+        "type": "stackdriver",
+        "uid": "gcp-monitoring"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 14,
+        "w": 5,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "timeSeriesList",
+          "datasource": {
+            "type": "stackdriver",
+            "uid": "gcp-monitoring"
+          },
+          "timeSeriesList": {
+            "projectName": "rugged-night-193017",
+            "filters": [
+              "metric.type",
+              "=",
+              "compute.googleapis.com/instance/cpu/utilization",
+              "AND",
+              "metadata.system_labels.name",
+              "=~",
+              "central-sbc-1|central-sbc-2|central-fs|central-db"
+            ],
+            "crossSeriesReducer": "REDUCE_COUNT",
+            "perSeriesAligner": "ALIGN_MEAN",
+            "alignmentPeriod": "+300s",
+            "groupBys": [],
+            "view": "FULL"
+          }
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "percentChangeColorMode": "standard"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 0,
+          "noValue": "DOWN",
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "0 / 4",
+                  "index": 0
+                },
+                "1": {
+                  "text": "1 / 4",
+                  "index": 1
+                },
+                "2": {
+                  "text": "2 / 4",
+                  "index": 2
+                },
+                "3": {
+                  "text": "3 / 4",
+                  "index": 3
+                },
+                "4": {
+                  "text": "4 / 4",
+                  "index": 4
+                }
+              }
+            },
+            {
+              "type": "special",
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "DOWN",
+                  "color": "red",
+                  "index": 10
+                }
+              }
+            }
+          ],
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 4
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 11,
+      "type": "geomap",
+      "title": "US datacenters · live regions, carriers & traffic",
+      "description": "Geographic view of the 3 GCP datacenters (green circles, sized by calls in the last hour) and the 2 Bandwidth carrier PoPs they egress to (orange triangles). Presence + live traffic only — this map is NOT the up/down source: authoritative health is the zone tiles to the left and the SIP-VIP reachability tiles to the right. Hover any marker for its name, coordinates and 1h call count.",
+      "datasource": {
+        "type": "postgres",
+        "uid": "voip-cdr-pg"
+      },
+      "gridPos": {
+        "x": 5,
+        "y": 6,
+        "w": 14,
+        "h": 12
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "voip-cdr-pg"
+          },
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT z.name, z.lat, z.lon, COALESCE(c.calls,0) AS calls_1h FROM (VALUES ('East',33.13::float8,-80.01::float8,'east'),('West',45.60::float8,-121.18::float8,'west'),('Central',41.26::float8,-95.86::float8,'central')) AS z(name,lat,lon,zk) LEFT JOIN (SELECT split_part(coalesce(sbc_id,''),'-',1) AS zone, count(*) AS calls FROM cdrs WHERE start_time > now() - interval '1 hour' GROUP BY 1) c ON c.zone=z.zk;"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "postgres",
+            "uid": "voip-cdr-pg"
+          },
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT * FROM (VALUES ('Bandwidth Dallas',32.78::float8,-96.80::float8),('Bandwidth LA',34.05::float8,-118.24::float8)) AS z(name,lat,lon);"
+        }
+      ],
+      "options": {
+        "view": {
+          "id": "coords",
+          "lat": 39.5,
+          "lon": -96.0,
+          "zoom": 4
+        },
+        "controls": {
+          "showZoom": true,
+          "mouseWheelZoom": false,
+          "showAttribution": true,
+          "showScale": false,
+          "showMeasure": false,
+          "showDebug": false
+        },
+        "tooltip": {
+          "mode": "details"
+        },
+        "basemap": {
+          "type": "carto",
+          "name": "Basemap",
+          "config": {
+            "theme": "dark",
+            "showLabels": true
+          }
+        },
+        "layers": [
+          {
+            "type": "markers",
+            "name": "Datacenters",
+            "tooltip": true,
+            "location": {
+              "mode": "coords",
+              "latitude": "lat",
+              "longitude": "lon"
+            },
+            "filterData": {
+              "id": "byRefId",
+              "options": "A"
+            },
+            "config": {
+              "showLegend": false,
+              "style": {
+                "size": {
+                  "field": "calls_1h",
+                  "min": 9,
+                  "max": 26
+                },
+                "color": {
+                  "fixed": "#37872d"
+                },
+                "opacity": 0.85,
+                "symbol": {
+                  "mode": "fixed",
+                  "fixed": "img/icons/marker/circle.svg"
+                },
+                "text": {
+                  "mode": "field",
+                  "field": "name",
+                  "fixed": ""
+                },
+                "textConfig": {
+                  "fontSize": 13,
+                  "textAlign": "center",
+                  "offsetY": -16
+                }
+              }
+            }
+          },
+          {
+            "type": "markers",
+            "name": "Bandwidth carrier PoPs",
+            "tooltip": true,
+            "location": {
+              "mode": "coords",
+              "latitude": "lat",
+              "longitude": "lon"
+            },
+            "filterData": {
+              "id": "byRefId",
+              "options": "B"
+            },
+            "config": {
+              "showLegend": false,
+              "style": {
+                "size": {
+                  "fixed": 9,
+                  "min": 2,
+                  "max": 15
+                },
+                "color": {
+                  "fixed": "#ff9830"
+                },
+                "opacity": 0.9,
+                "symbol": {
+                  "mode": "fixed",
+                  "fixed": "img/icons/marker/triangle.svg"
+                },
+                "text": {
+                  "mode": "field",
+                  "field": "name",
+                  "fixed": ""
+                },
+                "textConfig": {
+                  "fontSize": 11,
+                  "textAlign": "center",
+                  "offsetY": -16
+                }
+              }
+            }
+          }
+        ]
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "name"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Site"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "calls_1h"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Calls (1h)"
+              },
+              {
+                "id": "unit",
+                "value": "short"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "lat"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Latitude"
+              },
+              {
+                "id": "unit",
+                "value": "none"
+              },
+              {
+                "id": "decimals",
+                "value": 2
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "lon"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Longitude"
+              },
+              {
+                "id": "unit",
+                "value": "none"
+              },
+              {
+                "id": "decimals",
+                "value": 2
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 12,
+      "type": "stat",
+      "title": "East SIP VIP",
+      "description": "Carrier reachability into East — uptime pass-fraction of the NLB VIP 34.24.133.82:5060. 🟢 ≥ 99.9%.",
+      "datasource": {
+        "type": "stackdriver",
+        "uid": "gcp-monitoring"
+      },
+      "gridPos": {
+        "x": 19,
+        "y": 6,
+        "w": 5,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "timeSeriesList",
+          "datasource": {
+            "type": "stackdriver",
+            "uid": "gcp-monitoring"
+          },
+          "timeSeriesList": {
+            "projectName": "rugged-night-193017",
+            "filters": [
+              "metric.type",
+              "=",
+              "monitoring.googleapis.com/uptime_check/check_passed",
+              "AND",
+              "resource.label.host",
+              "=",
+              "34.24.133.82"
+            ],
+            "crossSeriesReducer": "REDUCE_MEAN",
+            "perSeriesAligner": "ALIGN_FRACTION_TRUE",
+            "alignmentPeriod": "+300s",
+            "groupBys": [
+              "resource.label.host"
+            ],
+            "view": "FULL"
+          },
+          "aliasBy": "{{resource.label.host}}"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "percentChangeColorMode": "standard"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 1,
+          "noValue": "DOWN",
+          "mappings": [],
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.99
+              },
+              {
+                "color": "green",
+                "value": 0.999
+              }
+            ]
+          },
+          "min": 0,
+          "max": 1
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 13,
+      "type": "stat",
+      "title": "West SIP VIP",
+      "description": "Carrier reachability into West — uptime pass-fraction of the NLB VIP 35.252.214.40:5060. 🟢 ≥ 99.9%.",
+      "datasource": {
+        "type": "stackdriver",
+        "uid": "gcp-monitoring"
+      },
+      "gridPos": {
+        "x": 19,
+        "y": 10,
+        "w": 5,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "timeSeriesList",
+          "datasource": {
+            "type": "stackdriver",
+            "uid": "gcp-monitoring"
+          },
+          "timeSeriesList": {
+            "projectName": "rugged-night-193017",
+            "filters": [
+              "metric.type",
+              "=",
+              "monitoring.googleapis.com/uptime_check/check_passed",
+              "AND",
+              "resource.label.host",
+              "=",
+              "35.252.214.40"
+            ],
+            "crossSeriesReducer": "REDUCE_MEAN",
+            "perSeriesAligner": "ALIGN_FRACTION_TRUE",
+            "alignmentPeriod": "+300s",
+            "groupBys": [
+              "resource.label.host"
+            ],
+            "view": "FULL"
+          },
+          "aliasBy": "{{resource.label.host}}"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "percentChangeColorMode": "standard"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 1,
+          "noValue": "DOWN",
+          "mappings": [],
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.99
+              },
+              {
+                "color": "green",
+                "value": 0.999
+              }
+            ]
+          },
+          "min": 0,
+          "max": 1
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 14,
+      "type": "stat",
+      "title": "Central SIP VIP",
+      "description": "Carrier reachability into Central — uptime pass-fraction of the NLB VIP 35.253.133.230:5060. 🟢 ≥ 99.9%.",
+      "datasource": {
+        "type": "stackdriver",
+        "uid": "gcp-monitoring"
+      },
+      "gridPos": {
+        "x": 19,
+        "y": 14,
+        "w": 5,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "timeSeriesList",
+          "datasource": {
+            "type": "stackdriver",
+            "uid": "gcp-monitoring"
+          },
+          "timeSeriesList": {
+            "projectName": "rugged-night-193017",
+            "filters": [
+              "metric.type",
+              "=",
+              "monitoring.googleapis.com/uptime_check/check_passed",
+              "AND",
+              "resource.label.host",
+              "=",
+              "35.253.133.230"
+            ],
+            "crossSeriesReducer": "REDUCE_MEAN",
+            "perSeriesAligner": "ALIGN_FRACTION_TRUE",
+            "alignmentPeriod": "+300s",
+            "groupBys": [
+              "resource.label.host"
+            ],
+            "view": "FULL"
+          },
+          "aliasBy": "{{resource.label.host}}"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "percentChangeColorMode": "standard"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 1,
+          "noValue": "DOWN",
+          "mappings": [],
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.99
+              },
+              {
+                "color": "green",
+                "value": 0.999
+              }
+            ]
+          },
+          "min": 0,
+          "max": 1
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 15,
+      "type": "stat",
+      "title": "Bandwidth Dallas · primary",
+      "description": "ASR of calls egressing via Bandwidth Dallas (67.231.2.12) in the last hour. 🔴 near-0 = carrier failing calls · 🟢 normal. '—' = no calls via Dallas. CDR-derived (reactive).",
+      "datasource": {
+        "type": "postgres",
+        "uid": "voip-cdr-pg"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 18,
+        "w": 6,
+        "h": 3
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "voip-cdr-pg"
+          },
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT (count(*) FILTER (WHERE answer_time IS NOT NULL))::float/NULLIF(count(*),0) AS asr FROM cdrs WHERE start_time > now() - interval '1 hour' AND carrier_used='carrier_primary';"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "percentChangeColorMode": "standard"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 0,
+          "noValue": "no calls",
+          "mappings": [],
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.15
+              },
+              {
+                "color": "green",
+                "value": 0.35
+              }
+            ]
+          },
+          "min": 0,
+          "max": 1
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 16,
+      "type": "stat",
+      "title": "Bandwidth LA · secondary",
+      "description": "ASR of calls egressing via Bandwidth LA (216.82.238.134) in the last hour. 🔴 near-0 = carrier failing · 🟢 normal. '—' = no calls via LA. CDR-derived (reactive).",
+      "datasource": {
+        "type": "postgres",
+        "uid": "voip-cdr-pg"
+      },
+      "gridPos": {
+        "x": 6,
+        "y": 18,
+        "w": 6,
+        "h": 3
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "voip-cdr-pg"
+          },
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT (count(*) FILTER (WHERE answer_time IS NOT NULL))::float/NULLIF(count(*),0) AS asr FROM cdrs WHERE start_time > now() - interval '1 hour' AND carrier_used='carrier_secondary';"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "percentChangeColorMode": "standard"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 0,
+          "noValue": "no calls",
+          "mappings": [],
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.15
+              },
+              {
+                "color": "green",
+                "value": 0.35
+              }
+            ]
+          },
+          "min": 0,
+          "max": 1
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 17,
+      "type": "stat",
+      "title": "Carrier egress · calls 1h",
+      "description": "Off-net calls that used a Bandwidth carrier (Dallas or LA) in the last hour — traffic leaving the platform to the PSTN. On-net internal calls excluded.",
+      "datasource": {
+        "type": "postgres",
+        "uid": "voip-cdr-pg"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 18,
+        "w": 6,
+        "h": 3
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "voip-cdr-pg"
+          },
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT count(*) AS calls FROM cdrs WHERE start_time > now() - interval '1 hour' AND carrier_used IN ('carrier_primary','carrier_secondary');"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "percentChangeColorMode": "standard"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "noValue": "0",
+          "mappings": [],
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 18,
+      "type": "stat",
+      "title": "On-net · 1h",
+      "description": "Share of calls in the last hour delivered internally (platform DID → platform DID) without hairpinning through a carrier. Higher = more efficient on-net routing.",
+      "datasource": {
+        "type": "postgres",
+        "uid": "voip-cdr-pg"
+      },
+      "gridPos": {
+        "x": 18,
+        "y": 18,
+        "w": 6,
+        "h": 3
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "voip-cdr-pg"
+          },
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT (count(*) FILTER (WHERE on_net))::float/NULLIF(count(*),0) AS onnet FROM cdrs WHERE start_time > now() - interval '1 hour';"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "percentChangeColorMode": "standard"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 0,
+          "noValue": "—",
+          "mappings": [],
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "min": 0,
+          "max": 1
+        },
+        "overrides": []
+      }
+    }
+  ]
+}

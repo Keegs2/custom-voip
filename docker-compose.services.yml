@@ -232,6 +232,10 @@ services:
       - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
       - GF_SERVER_ROOT_URL=/grafana/
       - GF_SERVER_SERVE_FROM_SUB_PATH=true
+      # Landing page = the NOC wall-TV command board (US map + up/down + KPIs).
+      # Opening /grafana/ (incl. anonymous viewers) lands here; the other NOC
+      # dashboards are one click away via the "NOC dashboards" nav link.
+      - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/var/lib/grafana/dashboards/noc/noc-home.json
       # ---- Production NOC datasource secrets/params (placeholders in .env) ----
       # Read-only Postgres role password (voip-cdr-pg datasource). Operator sets
       # GRAFANA_DB_PASSWORD in /opt/revup/.env; must match the grafana_ro role
