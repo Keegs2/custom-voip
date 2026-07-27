@@ -60,7 +60,7 @@
               "metric.type", "=", "compute.googleapis.com/instance/cpu/utilization",
               "AND", "metadata.system_labels.name", "=~", "${zone:raw}"
             ],
-            "crossSeriesReducer": "REDUCE_NONE",
+            "crossSeriesReducer": "REDUCE_MEAN",
             "perSeriesAligner": "ALIGN_MEAN",
             "alignmentPeriod": "+60s",
             "groupBys": ["metadata.system_labels.name"],
@@ -118,7 +118,7 @@
               "AND", "metric.label.state", "=", "used",
               "AND", "metadata.system_labels.name", "=~", "${zone:raw}"
             ],
-            "crossSeriesReducer": "REDUCE_NONE",
+            "crossSeriesReducer": "REDUCE_MEAN",
             "perSeriesAligner": "ALIGN_MEAN",
             "alignmentPeriod": "+60s",
             "groupBys": ["metadata.system_labels.name"],
@@ -177,7 +177,7 @@
               "AND", "metric.label.device", "!=~", "tmpfs|udev|overlay.*|/dev/loop.*",
               "AND", "metadata.system_labels.name", "=~", "${zone:raw}"
             ],
-            "crossSeriesReducer": "REDUCE_NONE",
+            "crossSeriesReducer": "REDUCE_MEAN",
             "perSeriesAligner": "ALIGN_MEAN",
             "alignmentPeriod": "+60s",
             "groupBys": ["metadata.system_labels.name", "metric.label.device"],
@@ -402,6 +402,6 @@
   "timezone": "browser",
   "title": "Infrastructure · Fleet Detail",
   "uid": "noc-infra-fleet",
-  "version": 1,
+  "version": 2,
   "weekStart": ""
 }
