@@ -33,7 +33,10 @@ fi
 
 # asr_percent|volume  over the trailing 15 minutes of inbound calls.
 # asr is NULL when volume is 0 (NULLIF guards the divide) — treated as no-traffic.
-ROW="$(psql -X -tA -F'|' -c \
+# -d voip is REQUIRED: `cdrs` lives in the voip DB. Without it, the postgres user
+# connects to its default `postgres` DB, the query errors ("relation cdrs does not
+# exist"), set -e exits non-zero, and the systemd unit's OnFailure pages every run.
+ROW="$(psql -d "${BACKUP_DB:-voip}" -X -tA -F'|' -c \
     "SELECT round(100.0 * count(*) FILTER (WHERE answer_time IS NOT NULL)
                   / NULLIF(count(*), 0)),
             count(*)
@@ -55,7 +58,10 @@ logger -t revup-backup -- "asr-guard: inbound asr=${ASR}% volume=${VOL} window=1
 
 if [ "$VOL" -ge "$ASR_GUARD_MIN_VOLUME" ] && [ "$ASR" -lt "$ASR_GUARD_ASR_FLOOR" ]; then
     logger -p user.err -t revup-alert -- "ASR ${ASR}% over 15m (vol=${VOL}) — inbound calls failing, check carrier/route/Homer"
-    exit 1
+    # exit 0, NOT 1: the guard did its job (it paged its own specific line above).
+    # Exiting non-zero would trip the unit's OnFailure and page a SECOND, generic
+    # "unit-failed" line. Reserve non-zero exits for actual script errors.
+    exit 0
 fi
 
 exit 0
