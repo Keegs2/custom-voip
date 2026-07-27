@@ -25,7 +25,7 @@ Two cadences drive a report (event-driven acceleration)
 Data source
 -----------
 Kamailio's `dispatcher` module already OPTIONS-probes the carrier gateways
-(setid 2-5 in dispatcher.list) every ds_ping_interval seconds and tracks each
+(setid 2,3 in dispatcher.list) every ds_ping_interval seconds and tracks each
 one's active/inactive state. We do NOT re-probe anything here — we simply read
 that authoritative live state out of the running Kamailio.
 
@@ -124,16 +124,17 @@ BACKOFF_MAX = _get_int("BACKOFF_MAX", 120, minimum=1)
 # --------------------------------------------------------------------------- #
 # Carrier gateway model
 #
-# We report ONLY carrier gateways. In dispatcher.list:
-#   setid 1     = FreeSWITCH backends (NOT a carrier) -> EXCLUDED
-#   setid 2-5   = Bandwidth carrier PoPs               -> reported
+# We report ONLY the live Bandwidth carriers. In dispatcher.list:
+#   setid 1     = FreeSWITCH backends (NOT a carrier)        -> EXCLUDED
+#   setid 2,3   = Bandwidth Dallas / LA (the live carriers)  -> reported
+#   setid 4,5   = Bandwidth TC1/TC2 PoPs (UNUSED)            -> EXCLUDED
 #
 # duid -> friendly name mapping (the dispatcher RPC does not carry a friendly
 # name, only the duid attribute we set in dispatcher.list). Any carrier duid
 # not in this map still gets reported with a derived fallback name.
 # --------------------------------------------------------------------------- #
 
-CARRIER_SETIDS = frozenset({2, 3, 4, 5})
+CARRIER_SETIDS = frozenset({2, 3})
 FS_SETID = 1  # FreeSWITCH — explicitly excluded from carrier reporting
 
 DUID_NAMES = {
@@ -277,7 +278,7 @@ def _host_from_uri(uri: str) -> str:
 def parse_dispatcher_list(text: str):
     """
     Parse `kamcmd dispatcher.list` text into a list of carrier trunk dicts
-    matching the payload contract. Returns only setid 2-5 gateways.
+    matching the payload contract. Returns only setid 2,3 gateways.
 
     Each dict: {duid, name, ip, setid, is_up, flags}.
     Never raises — on any structural surprise it returns whatever it parsed.
@@ -506,7 +507,7 @@ def poll_once() -> bool:
         # No carrier gateways parsed. Could be a transient startup race or a
         # rendering change. Log and skip rather than POST an empty carrier set.
         logging.warning(
-            "no carrier gateways (setid 2-5) found in dispatcher.list — skipping report"
+            "no carrier gateways (setid 2,3) found in dispatcher.list — skipping report"
         )
         return False
 

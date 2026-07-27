@@ -1002,7 +1002,7 @@
           "format": "table",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT COALESCE(h.name, z.name) AS name, z.lat, z.lon, CASE WHEN h.status = 'up' THEN 1 ELSE 0 END AS up, COALESCE(h.status,'unknown') AS status, COALESCE(h.up_sbcs,0) AS up_sbcs, COALESCE(h.total_sbcs,0) AS total_sbcs, CASE WHEN h.last_updated IS NULL THEN NULL ELSE round(EXTRACT(EPOCH FROM (now() - h.last_updated)))::int END AS probe_age_s FROM (VALUES ('bw-dallas-primary','Bandwidth Dallas',32.78::float8,-96.80::float8),('bw-la-secondary','Bandwidth LA',34.05::float8,-118.24::float8),('bw-tc1-ny','Bandwidth TC1 NY',40.71::float8,-74.01::float8),('bw-tc1-atl','Bandwidth TC1 ATL',33.75::float8,-84.39::float8),('bw-tc2-dal','Bandwidth TC2 Dallas',32.78::float8,-96.80::float8),('bw-tc2-la','Bandwidth TC2 LA',34.05::float8,-118.24::float8)) AS z(duid,name,lat,lon) LEFT JOIN carrier_trunk_health h ON h.duid = z.duid ORDER BY z.duid;"
+          "rawSql": "SELECT COALESCE(h.name, z.name) AS name, z.lat, z.lon, CASE WHEN h.status = 'up' THEN 1 ELSE 0 END AS up, COALESCE(h.status,'unknown') AS status, COALESCE(h.up_sbcs,0) AS up_sbcs, COALESCE(h.total_sbcs,0) AS total_sbcs, CASE WHEN h.last_updated IS NULL THEN NULL ELSE round(EXTRACT(EPOCH FROM (now() - h.last_updated)))::int END AS probe_age_s FROM (VALUES ('bw-dallas-primary','Bandwidth Dallas',32.78::float8,-96.80::float8),('bw-la-secondary','Bandwidth LA',34.05::float8,-118.24::float8)) AS z(duid,name,lat,lon) LEFT JOIN carrier_trunk_health h ON h.duid = z.duid ORDER BY z.duid;"
         }
       ],
       "options": {
