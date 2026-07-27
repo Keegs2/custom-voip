@@ -2,10 +2,25 @@
 """
 carrier_monitor.py — LIVE carrier-trunk connectivity poller (SBC sidecar).
 
-Runs as a co-located sidecar next to Kamailio on every SBC VM. Every
-POLL_INTERVAL seconds it reads the LIVE per-gateway health that Kamailio's
-dispatcher module maintains (via its OPTIONS keepalive probes to the Bandwidth
-carriers) and ships a compact per-carrier up/down snapshot to the central API.
+Runs as a co-located sidecar next to Kamailio on every SBC VM. It reads the LIVE
+per-gateway health that Kamailio's dispatcher module maintains (via its OPTIONS
+keepalive probes to the Bandwidth carriers) and ships a compact per-carrier
+up/down snapshot to the central API.
+
+Two cadences drive a report (event-driven acceleration)
+-------------------------------------------------------
+1. HEARTBEAT: at least every POLL_INTERVAL seconds a full snapshot is sent even
+   if nothing changed, so the API's view can never go stale.
+2. TRANSITION (fast path): every EVENT_CHECK_INTERVAL seconds (default 3s) we do
+   a CHEAP `kamcmd htable.get dsmon gen` read of a generation counter that
+   Kamailio's dispatcher event routes (event_route[dispatcher:dst-up|dst-down])
+   bump on EVERY carrier up/down transition. When that counter changes we fire a
+   full snapshot IMMEDIATELY — so a carrier flap is reported within a few
+   seconds instead of up to a full POLL_INTERVAL later. The cheap gen read does
+   NOT run dispatcher.list; only the trigger does. If the gen read ever fails
+   (Kamailio restarting, htable absent on an older config), we transparently
+   fall back to plain POLL_INTERVAL heartbeat polling — never breaking, never
+   hot-looping.
 
 Data source
 -----------
@@ -70,7 +85,23 @@ def _get_int(name: str, default: int, minimum: int = 1) -> int:
 SBC_ID = os.environ.get("SBC_ID", "unknown-sbc").strip() or "unknown-sbc"
 CARRIER_STATUS_URL = os.environ.get("CARRIER_STATUS_URL", "").strip()
 CARRIER_STATUS_TOKEN = os.environ.get("CARRIER_STATUS_TOKEN", "").strip()
+
+# POLL_INTERVAL is the STEADY-STATE HEARTBEAT: a full dispatcher.list snapshot +
+# report is sent at least this often even when nothing changes (so the API's
+# view never goes stale and a missed transition event self-heals within one
+# heartbeat). Default 15s.
 POLL_INTERVAL = _get_int("POLL_INTERVAL", 15, minimum=1)
+
+# EVENT_CHECK_INTERVAL is the fast EVENT-POLL cadence: how often we do the CHEAP
+# `kamcmd htable.get dsmon gen` read to detect a carrier up/down transition that
+# Kamailio's dispatcher event routes just recorded. On a detected change we fire
+# a full report immediately instead of waiting up to POLL_INTERVAL — cutting
+# transition-to-report latency from ~POLL_INTERVAL down to ~EVENT_CHECK_INTERVAL.
+# Default 3s. Clamped so it never exceeds POLL_INTERVAL (a longer event check
+# than the heartbeat would be pointless — the heartbeat would always win).
+EVENT_CHECK_INTERVAL = min(
+    _get_int("EVENT_CHECK_INTERVAL", 3, minimum=1), POLL_INTERVAL
+)
 
 # Path to the Kamailio ctl binrpc UNIX socket (shared volume). Matches the
 # `ctl` modparam and kamcmd's compiled-in default.
@@ -307,19 +338,20 @@ def parse_dispatcher_list(text: str):
 # kamcmd invocation
 # --------------------------------------------------------------------------- #
 
-def run_kamcmd_dispatcher_list() -> str:
+def _run_kamcmd(rpc_args, timeout: float) -> str:
     """
-    Run `kamcmd -s <socket> dispatcher.list` and return stdout.
-    Raises RuntimeError on any failure (missing binary, nonzero exit, timeout)
-    so the caller logs + skips this tick.
+    Run `kamcmd -s <socket> <rpc_args...>` and return stdout.
+    Raises RuntimeError on any failure (missing binary, nonzero exit, timeout,
+    empty output) so callers can log + skip. Shared by the full dispatcher.list
+    read and the cheap dsmon-gen read so both get identical hardened handling.
     """
-    cmd = [KAMCMD_BIN, "-s", KAMCMD_SOCKET, "dispatcher.list"]
+    cmd = [KAMCMD_BIN, "-s", KAMCMD_SOCKET, *rpc_args]
     try:
         proc = subprocess.run(
             cmd,
             capture_output=True,
             text=True,
-            timeout=max(5, min(POLL_INTERVAL, 30)),
+            timeout=timeout,
         )
     except FileNotFoundError as exc:
         raise RuntimeError(f"{KAMCMD_BIN} not found: {exc}") from exc
@@ -337,6 +369,70 @@ def run_kamcmd_dispatcher_list() -> str:
     if not proc.stdout or not proc.stdout.strip():
         raise RuntimeError("kamcmd returned empty output")
     return proc.stdout
+
+
+def run_kamcmd_dispatcher_list() -> str:
+    """
+    Run `kamcmd -s <socket> dispatcher.list` and return stdout.
+    Raises RuntimeError on any failure so the caller logs + skips this tick.
+    """
+    return _run_kamcmd(["dispatcher.list"], timeout=max(5, min(POLL_INTERVAL, 30)))
+
+
+# Pull the integer out of the `value:` line of an `htable.get dsmon gen` reply.
+# kamcmd renders the binrpc reply as an indented record, e.g.:
+#     {
+#         entry: 3
+#         size: 1
+#         slot: {
+#             {
+#                 name: gen
+#                 value: 7
+#                 type: int
+#             }
+#         }
+#     }
+# (A single-cell get is wrapped the same way htable.dump wraps cells.) We only
+# need the counter, so we grab the first integer `value:` field. Matching just
+# `value:` keeps this immune to whitespace/brace-layout differences across
+# kamcmd versions — the same resilience strategy as the dispatcher.list parser.
+_RE_HT_VALUE = re.compile(r"\bvalue:\s*(-?\d+)\b")
+
+
+def read_dsmon_gen():
+    """
+    CHEAP read of the dispatcher-event generation counter via
+    `kamcmd htable.get dsmon gen`. Returns the counter as an int, or None if it
+    cannot be read for ANY reason (Kamailio down/restarting, dsmon htable absent
+    on an older config, key not yet seeded, malformed output, kamcmd missing).
+
+    NEVER raises: a None return is the caller's signal to fall back to plain
+    time-based heartbeat polling for this tick. This must be lightweight — it
+    runs every EVENT_CHECK_INTERVAL (~3s) — so it uses a short fixed timeout and
+    does NOT invoke the heavy dispatcher.list RPC.
+    """
+    try:
+        # `htable.get <table> <key>` — a single-cell point read. Short timeout:
+        # this is a tiny local UNIX-socket RPC; if it can't answer in a couple
+        # seconds Kamailio is wedged and we'd rather fall through to heartbeat.
+        out = _run_kamcmd(["htable.get", "dsmon", "gen"], timeout=3)
+    except Exception as exc:  # noqa: BLE001 - fail-open: never propagate
+        # DBG not WARN: a transient miss here is harmless (heartbeat still
+        # fires) and would otherwise spam the log every EVENT_CHECK_INTERVAL
+        # while Kamailio is starting. The heartbeat path logs real problems.
+        logging.debug("dsmon gen read unavailable (will heartbeat): %s", exc)
+        return None
+
+    m = _RE_HT_VALUE.search(out)
+    if not m:
+        # Key absent (never seeded / wrong table) renders without a value line,
+        # or output shape was unexpected. Treat as "can't tell" -> heartbeat.
+        logging.debug("dsmon gen not found in htable.get output; will heartbeat")
+        return None
+    try:
+        return int(m.group(1))
+    except (TypeError, ValueError):
+        return None
 
 
 # --------------------------------------------------------------------------- #
@@ -441,8 +537,8 @@ def main() -> int:
     signal.signal(signal.SIGINT, _handle_signal)
 
     logging.info(
-        "starting: sbc_id=%s interval=%ds socket=%s url=%s token=%s",
-        SBC_ID, POLL_INTERVAL, KAMCMD_SOCKET,
+        "starting: sbc_id=%s heartbeat=%ds event_check=%ds socket=%s url=%s token=%s",
+        SBC_ID, POLL_INTERVAL, EVENT_CHECK_INTERVAL, KAMCMD_SOCKET,
         CARRIER_STATUS_URL or "<UNSET>",
         "set" if CARRIER_STATUS_TOKEN else "<UNSET>",
     )
@@ -453,32 +549,87 @@ def main() -> int:
             "CARRIER_STATUS_URL is not set; will keep polling and log until configured"
         )
 
+    # --- Event-aware loop state ---------------------------------------------- #
+    # last_gen           — last dsmon generation we successfully accounted for
+    #                      (None until we first read it, or whenever the read is
+    #                      unavailable — in which case we run pure heartbeat).
+    # last_full_time     — monotonic timestamp of the last FULL report ATTEMPT.
+    #                      Drives the heartbeat: a full report fires when
+    #                      POLL_INTERVAL has elapsed since this, regardless of
+    #                      events. Seeded to the past so tick #1 always reports
+    #                      an initial baseline snapshot.
+    # consecutive_failures — powers the exponential API backoff (unchanged).
+    last_gen = None
+    last_full_time = time.monotonic() - POLL_INTERVAL  # force an immediate first report
     consecutive_failures = 0
+
     while _RUNNING:
-        started = time.monotonic()
-        ok = poll_once()
+        tick_started = time.monotonic()
+        extra_backoff = 0
 
-        if ok:
-            consecutive_failures = 0
-            extra_backoff = 0
+        # CHEAP event check: read the dispatcher-event generation counter. None
+        # means "can't tell" (Kamailio starting, dsmon htable absent) -> we
+        # simply rely on the heartbeat this tick. read_dsmon_gen() is fail-open
+        # by contract (returns None, never raises) and never runs the heavy
+        # dispatcher.list RPC. The surrounding try is belt-and-suspenders: even
+        # a hypothetical future bug in the reader must degrade to heartbeat
+        # polling, never kill the loop — same posture as poll_once()'s catch.
+        try:
+            gen = read_dsmon_gen()
+        except Exception as exc:  # noqa: BLE001 - must never propagate
+            logging.debug("dsmon gen read raised (will heartbeat): %s", exc)
+            gen = None
+
+        # A transition is only asserted when we have BOTH a prior and a current
+        # reading and they differ. (last_gen None -> we just (re)gained the
+        # counter; don't treat that as a flap — the heartbeat covers baseline.)
+        transition = (
+            gen is not None and last_gen is not None and gen != last_gen
+        )
+        heartbeat_due = (time.monotonic() - last_full_time) >= POLL_INTERVAL
+        should_report = transition or heartbeat_due
+
+        if transition:
+            logging.info(
+                "carrier transition detected (dsmon gen %s -> %s) — reporting now",
+                last_gen, gen,
+            )
+
+        if should_report:
+            last_full_time = time.monotonic()
+            ok = poll_once()
+            if ok:
+                consecutive_failures = 0
+                # Only advance the accounted-for generation on a SUCCESSFUL
+                # report. If a transition report FAILED, we intentionally leave
+                # last_gen behind so the change is re-detected and retried on
+                # the next tick (bounded by the backoff below) rather than lost.
+                if gen is not None:
+                    last_gen = gen
+            else:
+                consecutive_failures += 1
+                # Exponential backoff on repeated failures, capped. Applied ON
+                # TOP of the tick interval so a down API can't become a request
+                # storm. Cap the exponent (at 30) before the shift so a long
+                # outage never computes an enormous power just to clamp it away.
+                exp = min(consecutive_failures - 1, 30)
+                extra_backoff = min(BACKOFF_BASE * (2 ** exp), BACKOFF_MAX)
+                if consecutive_failures > 1:
+                    logging.info(
+                        "%d consecutive failures — backing off extra %ds",
+                        consecutive_failures, extra_backoff,
+                    )
         else:
-            consecutive_failures += 1
-            # Exponential backoff on repeated failures, capped. Applied ON TOP
-            # of the normal interval so a down API can't become a request storm.
-            # Cap the exponent (at 30 -> 2**30) before multiplying so a very long
-            # outage never computes an enormous power just to clamp it away.
-            exp = min(consecutive_failures - 1, 30)
-            extra_backoff = min(BACKOFF_BASE * (2 ** exp), BACKOFF_MAX)
-            if consecutive_failures > 1:
-                logging.info(
-                    "%d consecutive failures — backing off extra %ds",
-                    consecutive_failures, extra_backoff,
-                )
+            # No report this tick. Track the current generation so the NEXT real
+            # change is measured against it. (Safe: with no report there was no
+            # transition, or we simply lack a prior reading to compare.)
+            if gen is not None:
+                last_gen = gen
 
-        # Sleep out the remainder of the interval (+ any backoff), in short
-        # slices so SIGTERM is honored within ~1s instead of a full interval.
-        elapsed = time.monotonic() - started
-        remaining = max(0.0, POLL_INTERVAL - elapsed) + extra_backoff
+        # Sleep the remainder of the EVENT_CHECK_INTERVAL (+ any backoff), in
+        # short slices so SIGTERM is honored within ~1s instead of a full tick.
+        elapsed = time.monotonic() - tick_started
+        remaining = max(0.0, EVENT_CHECK_INTERVAL - elapsed) + extra_backoff
         deadline = time.monotonic() + remaining
         while _RUNNING and time.monotonic() < deadline:
             time.sleep(min(1.0, deadline - time.monotonic()))
