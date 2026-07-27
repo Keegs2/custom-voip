@@ -178,6 +178,35 @@
     <param name="rtp-hold-timeout-sec" value="1800"/>
 
     <!-- ============================================ -->
+    <!-- RTP QUALITY / RTCP TRACKING (B-leg)         -->
+    <!-- ============================================ -->
+    <!--
+      Mirrors the internal profile so the carrier-facing B-leg also computes
+      RTP quality (useful for diagnosing carrier-side audio issues in Homer /
+      ad-hoc uuid_dump). This is NOT required for the CDR — json_cdr has
+      cdr-leg=a, so ONLY the internal/A-leg quality vars land in the CDR — but
+      it costs nothing and gives symmetric visibility.
+
+      Carrier (Bandwidth) safety:
+        - RTCP is bound on RTP-port+1. rtcp-mux is NOT enabled here and
+          Bandwidth does not offer a=rtcp-mux, so there is NO change to the
+          m=audio port, the SDP c= line, or the RTP path. FS simply also
+          emits small RTCP Sender Reports toward the carrier on the odd port.
+        - Enabling an RTCP interval adds an "a=rtcp:<port>" attribute to the
+          outbound SDP. Bandwidth ignores RTCP it does not use; it does not
+          reject the offer or tear the call down over it. RTP itself is
+          unchanged, so audio and the ext-rtp-ip / GCE hairpin behavior are
+          identical to before.
+        - The quality estimate is driven by INBOUND RTP arrival timing, so it
+          works even if the carrier never sends RTCP Receiver Reports back.
+      If a future carrier is found to be sensitive to the a=rtcp attribute on
+      the offer, remove THIS param only (leave the internal profile's intact):
+      the CDR (A-leg) stats are unaffected because they come from the internal
+      profile.
+    -->
+    <param name="rtcp-audio-interval-msec" value="5000"/>
+
+    <!-- ============================================ -->
     <!-- HOMER SIP CAPTURE (HEP)                     -->
     <!-- ============================================ -->
     <!--
