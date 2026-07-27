@@ -49,6 +49,12 @@ services:
     volumes:
       - ./docker/kamailio/kamailio.cfg:/etc/kamailio/kamailio.cfg.tmpl:ro
       - ./docker/kamailio/dispatcher.list:/etc/kamailio/dispatcher.list.tmpl:ro
+      # Shared ctl binrpc socket dir so the carrier-monitor sidecar can read
+      # LIVE dispatcher state (`kamcmd dispatcher.list`) over the SAME socket
+      # the healthcheck uses. Kamailio creates /run/kamailio/kamailio_ctl here
+      # (/var/run -> /run); the named volume inherits the image's kamailio-owned
+      # dir + perms on first mount, so Kamailio still writes the socket as usual.
+      - kamailio_ctl:/var/run/kamailio
     deploy:
       resources:
         limits:
@@ -69,3 +75,51 @@ services:
       start_period: 5s
       retries: 3
     restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Carrier-trunk connectivity monitor (sidecar) — runs on EVERY SBC.
+  #
+  # Reads Kamailio's LIVE per-gateway carrier health (maintained by the
+  # dispatcher module's OPTIONS keepalive probes to Bandwidth) over the SHARED
+  # ctl binrpc UNIX socket via `kamcmd dispatcher.list`, then POSTs a per-carrier
+  # up/down snapshot to the central (East) services API. No new SIP listeners,
+  # no RPC on the network — it only reads a local socket and makes outbound POSTs.
+  # See docker/carrier-monitor/ for the poller + Dockerfile.
+  # ---------------------------------------------------------------------------
+  carrier-monitor:
+    build: ./docker/carrier-monitor
+    container_name: voip-carrier-monitor
+    # Bridge network is fine: the sidecar reaches the ctl socket via the shared
+    # volume (not the network) and reaches the API over normal outbound HTTP.
+    # (Kamailio itself must stay host-net for SIP; this sidecar does not.)
+    depends_on:
+      - kamailio
+    environment:
+      # Per-SBC identity (goes into the payload's sbc_id). MUST be unique per SBC.
+      - SBC_ID=${SBC_ID:-east-sbc-1}
+      # Central API receiver (East services VM) + shared bearer token.
+      - CARRIER_STATUS_URL=${CARRIER_STATUS_URL}
+      - CARRIER_STATUS_TOKEN=${CARRIER_STATUS_TOKEN}
+      # Poll cadence in seconds (default 15).
+      - POLL_INTERVAL=${POLL_INTERVAL:-15}
+    volumes:
+      # SAME named volume the kamailio service mounts — this is how the sidecar
+      # sees /var/run/kamailio/kamailio_ctl. NOT :ro — connecting to a UNIX
+      # socket requires write permission on the socket inode, and a read-only
+      # bind mount makes connect() fail (EROFS) even for root. The sidecar only
+      # issues read-only RPCs (dispatcher.list) regardless of the mount mode.
+      - kamailio_ctl:/var/run/kamailio
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 128M
+        reservations:
+          memory: 32M
+    restart: unless-stopped
+
+volumes:
+  # Shared Kamailio ctl binrpc socket directory (kamailio writes, carrier-monitor
+  # reads). Named volume so ownership/perms of the mount point are inherited from
+  # the kamailio image (kamailio:kamailio) on first creation.
+  kamailio_ctl:

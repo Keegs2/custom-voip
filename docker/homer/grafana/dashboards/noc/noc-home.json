@@ -66,7 +66,7 @@
       },
       "options": {
         "mode": "markdown",
-        "content": "**Live System Status** — 🟢 green = healthy · 🔴 red = attention · hover any tile or map dot for detail.  ·  **Map:** 🟢 datacenter (dot size = calls / hour) · 🔻 Bandwidth carrier PoP."
+        "content": "**Live System Status** — 🟢 green = healthy · 🔴 red = attention · hover any tile or map dot for detail.  ·  **Map:** 🟢 datacenter (dot size = calls / hour) · 🔺 carrier trunk (🟢 up · 🔴 down — live OPTIONS probe)."
       }
     },
     {
@@ -970,7 +970,7 @@
       "id": 11,
       "type": "geomap",
       "title": "US datacenters · live regions, carriers & traffic",
-      "description": "Geographic view of the 3 GCP datacenters (green circles, sized by calls in the last hour) and the 2 Bandwidth carrier PoPs they egress to (orange triangles). Presence + live traffic only — this map is NOT the up/down source: authoritative health is the zone tiles to the left and the SIP-VIP reachability tiles to the right. Hover any marker for its name, coordinates and 1h call count.",
+      "description": "Geographic view of the 3 GCP datacenters (green, sized by calls in the last hour) and the Bandwidth carrier trunks. Carrier triangles are GREEN when the trunk is UP per the SBCs' live Kamailio-dispatcher OPTIONS probes (reachable from >=1 SBC) and RED when it is DOWN on every SBC or its status is stale (no fresh probe in 90s) / not yet reported. This is a proactive probe, independent of call traffic, so a dead carrier shows even at zero volume. Hover a triangle for status, SBCs up / reporting, and seconds since last probe. Datacenter up/down is the zone tiles to the left; SIP-VIP reachability is the tiles to the right. Hover any marker for detail.",
       "datasource": {
         "type": "postgres",
         "uid": "voip-cdr-pg"
@@ -1002,7 +1002,7 @@
           "format": "table",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT * FROM (VALUES ('Bandwidth Dallas',32.78::float8,-96.80::float8),('Bandwidth LA',34.05::float8,-118.24::float8)) AS z(name,lat,lon);"
+          "rawSql": "SELECT COALESCE(h.name, z.name) AS name, z.lat, z.lon, CASE WHEN h.status = 'up' THEN 1 ELSE 0 END AS up, COALESCE(h.status,'unknown') AS status, COALESCE(h.up_sbcs,0) AS up_sbcs, COALESCE(h.total_sbcs,0) AS total_sbcs, CASE WHEN h.last_updated IS NULL THEN NULL ELSE round(EXTRACT(EPOCH FROM (now() - h.last_updated)))::int END AS probe_age_s FROM (VALUES ('bw-dallas-primary','Bandwidth Dallas',32.78::float8,-96.80::float8),('bw-la-secondary','Bandwidth LA',34.05::float8,-118.24::float8),('bw-tc1-ny','Bandwidth TC1 NY',40.71::float8,-74.01::float8),('bw-tc1-atl','Bandwidth TC1 ATL',33.75::float8,-84.39::float8),('bw-tc2-dal','Bandwidth TC2 Dallas',32.78::float8,-96.80::float8),('bw-tc2-la','Bandwidth TC2 LA',34.05::float8,-118.24::float8)) AS z(duid,name,lat,lon) LEFT JOIN carrier_trunk_health h ON h.duid = z.duid ORDER BY z.duid;"
         }
       ],
       "options": {
@@ -1076,7 +1076,7 @@
           },
           {
             "type": "markers",
-            "name": "Bandwidth carrier PoPs",
+            "name": "Carrier trunks (up=green)",
             "tooltip": true,
             "location": {
               "mode": "coords",
@@ -1096,7 +1096,7 @@
                   "max": 15
                 },
                 "color": {
-                  "fixed": "#ff9830"
+                  "field": "up"
                 },
                 "opacity": 0.9,
                 "symbol": {
@@ -1192,6 +1192,114 @@
               {
                 "id": "decimals",
                 "value": 2
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "up"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Trunk status"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "thresholds"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "red",
+                      "value": null
+                    },
+                    {
+                      "color": "green",
+                      "value": 1
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "0": {
+                        "text": "DOWN",
+                        "index": 0
+                      },
+                      "1": {
+                        "text": "UP",
+                        "index": 1
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "status"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Dispatcher status"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "up_sbcs"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "SBCs up"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "total_sbcs"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "SBCs reporting"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "probe_age_s"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Last probe"
+              },
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "decimals",
+                "value": 0
               }
             ]
           }

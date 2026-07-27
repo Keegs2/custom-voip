@@ -50,6 +50,13 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
         if path.endswith("/cdrs/ingest") or path.endswith("/cdrs/ingest/bulk"):
             return await call_next(request)
 
+        # Exempt the carrier-status poller ingest (POST only). The SBC pollers
+        # authenticate with a SHARED BEARER token checked inside the router
+        # against CARRIER_STATUS_TOKEN — NOT a JWT — so it must bypass JWT
+        # validation here. The GET /carrier-status read stays JWT admin-only.
+        if path.endswith("/carrier-status/report") and request.method == "POST":
+            return await call_next(request)
+
         # WebSocket connections authenticate via query param, not header
         if path.startswith("/ws/"):
             return await call_next(request)
