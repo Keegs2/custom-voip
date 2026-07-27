@@ -235,24 +235,19 @@ services:
       # ---- Production NOC datasource secrets/params (placeholders in .env) ----
       # Read-only Postgres role password (voip-cdr-pg datasource). Operator sets
       # GRAFANA_DB_PASSWORD in /opt/revup/.env; must match the grafana_ro role
-      # password (docker/postgres/init/22_grafana_ro.sql).
+      # password (docker/postgres/init/24_grafana_ro.sql).
       - GRAFANA_DB_PASSWORD=${GRAFANA_DB_PASSWORD:-}
-      # GCP Monitoring service-account EMAIL (not a secret) for JWT auth. Operator
-      # sets GCM_SA_EMAIL in /opt/revup/.env; the SA's key is mounted below.
-      - GCM_SA_EMAIL=${GCM_SA_EMAIL:-}
+      # GCP Monitoring uses KEYLESS GCE metadata auth (the services VM's attached
+      # SA holds roles/monitoring.viewer) — no GCM_SA_EMAIL / key file needed; the
+      # org blocks SA-key creation, and keyless is better anyway.
     ports:
       - "3000:3000"
     volumes:
       - grafana_data:/var/lib/grafana
       - ./docker/homer/grafana/provisioning:/etc/grafana/provisioning
       - ./docker/homer/grafana/dashboards:/var/lib/grafana/dashboards
-      # GCP Monitoring service-account key (roles/monitoring.viewer). NOT in git.
-      # Operator drops the downloaded SA JSON key at ./secrets/gcp-monitoring-sa.json
-      # on the services VM; the gcp-monitoring datasource reads it via
-      # privateKeyPath (Grafana auto-extracts private_key from a *.json SA key).
-      # ro + :Z-free bind; missing file => the GCM datasource simply fails to
-      # auth (dashboards using qryn/postgres still work).
-      - ./secrets/gcp-monitoring-sa.json:/etc/grafana/gcp/gcp-monitoring-sa.json:ro
+      # (No SA-key mount — GCP Monitoring uses keyless GCE metadata auth via the
+      # services VM's attached service account. See gcp-monitoring.yml.)
     depends_on:
       - qryn
     networks:

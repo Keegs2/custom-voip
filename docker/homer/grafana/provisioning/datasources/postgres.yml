@@ -19,7 +19,7 @@
 # subnet on 5432 — see operator notes: a pg_hba line + listen_addresses.)
 #
 # ── AUTH — read-only role, password provided by the operator ─────────────────
-# User is `grafana_ro` (created by docker/postgres/init/22_grafana_ro.sql). The
+# User is `grafana_ro` (created by docker/postgres/init/24_grafana_ro.sql). The
 # password is NOT committed — it is templated from GRAFANA_DB_PASSWORD in
 # /opt/revup/.env and injected via secureJsonData. Grafana expands ${VAR}
 # tokens in provisioning files from its own process environment.

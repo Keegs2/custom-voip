@@ -11,36 +11,29 @@
 # UID is FIXED as `gcp-monitoring` — dashboard JSON targets reference it by this
 # uid, and the parallel voice-product NOC track relies on the same uid.
 #
-# ── AUTH — the operator MUST provide ONE of the two options below ────────────
-# We ship the JWT/service-account-key-FILE approach (default, matches the task
-# spec) because it is explicit and does not depend on the VM's attached SA or
-# API access scopes. NOTHING SECRET IS COMMITTED: the key file is mounted from
-# the host and referenced by path via `privateKeyPath`.
+# ── AUTH — GCE metadata auth (keyless), because the org blocks SA keys ────────
+# The org enforces constraints/iam.managed.disableServiceAccountKeyCreation, so
+# downloadable SA keys (JWT/key-file auth) cannot be created. This datasource
+# uses GCE metadata auth: Grafana borrows the `services` VM's attached SA
+# (562404538544-compute@..., cloud-platform scope) which holds
+# roles/monitoring.viewer. No key file, no secret, nothing to rotate. The
+# JWT/key-file notes below are retained ONLY for reference / orgs that allow keys.
 #
-#   privateKeyPath points at the file mounted into the container at
-#   /etc/grafana/gcp/gcp-monitoring-sa.json (see docker-compose.services.yml
-#   grafana volume mount). Grafana's google-sdk `readPrivateKeyFromFile()`
-#   AUTO-DETECTS a `.json` suffix and extracts the `private_key` field from a
-#   downloaded GCP service-account JSON key — so the operator mounts the RAW
-#   downloaded key JSON, no PEM extraction required.
-#   (Verified: grafana-google-sdk-go/pkg/utils/utils.go — if the path ends in
-#   ".json" it json.Unmarshal's it and reads `private_key`.)
+#   How it works: the grafana container (compose bridge net) reaches the GCE
+#   metadata server at 169.254.169.254 THROUGH the host, so Grafana mints tokens
+#   for the VM's attached SA with no key material. One-time grant (operator):
+#     gcloud projects add-iam-policy-binding rugged-night-193017 \
+#       --member serviceAccount:562404538544-compute@developer.gserviceaccount.com \
+#       --role roles/monitoring.viewer --condition=None
+#   The VM SA also needs the cloud-platform (or monitoring) access scope — the
+#   East `services` VM already has cloud-platform.
 #
-# The clientEmail is ALSO required for JWT auth and is NOT a secret (it is just
-# the SA's email). It is templated from an env var so nothing account-specific
-# is hardcoded; the operator sets GCM_SA_EMAIL in /opt/revup/.env.
-#
-# ── ALTERNATIVE (recommended, zero key files): GCE metadata auth ─────────────
-# Because Grafana runs on the East `services` GCE VM, you can instead attach a
-# service account with roles/monitoring.viewer to that VM (access scope must
-# include Cloud Monitoring / cloud-platform) and switch this file to:
-#     jsonData:
-#       authenticationType: gce
-#       defaultProject: rugged-night-193017
-# then delete the clientEmail/tokenUri/privateKeyPath lines and drop the volume
-# mount. The Docker bridge container can reach the 169.254.169.254 metadata
-# server through the host, so this works from inside the compose network.
-# See the operator notes returned with this change for the exact gcloud steps.
+# ── FOR REFERENCE ONLY — key-file (JWT) auth, if an org ever allows SA keys ───
+# Set authenticationType: jwt + clientEmail (the SA email, from GCM_SA_EMAIL —
+# not a secret) + tokenUri, and privateKeyPath pointing at a mounted *.json SA
+# key (Grafana's google-sdk auto-extracts `private_key` from a downloaded key
+# JSON — grafana-google-sdk-go/pkg/utils/utils.go). That path is BLOCKED here by
+# constraints/iam.managed.disableServiceAccountKeyCreation, hence GCE auth above.
 apiVersion: 1
 
 datasources:
@@ -51,11 +44,12 @@ datasources:
     isDefault: false
     editable: false
     jsonData:
-      authenticationType: jwt
+      # KEYLESS: Grafana borrows the services VM's attached service account via
+      # the GCE metadata server. The org enforces
+      # constraints/iam.managed.disableServiceAccountKeyCreation (no downloadable
+      # SA keys), so key-file (jwt) auth is unavailable. Requires the VM's SA
+      # (562404538544-compute@developer.gserviceaccount.com, cloud-platform scope)
+      # to hold roles/monitoring.viewer. The bridge container reaches the
+      # 169.254.169.254 metadata server via the host.
+      authenticationType: gce
       defaultProject: rugged-night-193017
-      tokenUri: https://oauth2.googleapis.com/token
-      universeDomain: googleapis.com
-      # SA email is not a secret — templated so no account is hardcoded in git.
-      clientEmail: ${GCM_SA_EMAIL}
-      # Mounted key file (raw downloaded GCP SA JSON). See compose volume mount.
-      privateKeyPath: /etc/grafana/gcp/gcp-monitoring-sa.json
