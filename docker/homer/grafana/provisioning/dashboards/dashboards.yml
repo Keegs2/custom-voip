@@ -1,5 +1,12 @@
 apiVersion: 1
 providers:
+  # Homer SIP-capture dashboards (sip-search, ladder). Rooted at the `homer/`
+  # SUBDIRECTORY, not the top-level dashboards dir. Grafana's file provider does
+  # `filepath.Walk` (recurses subdirectories — verified in v10.4.3
+  # pkg/services/provisioning/dashboards/file_reader.go), so if this stayed
+  # pointed at /var/lib/grafana/dashboards it would ALSO walk into `noc/` and
+  # double-provision the Production NOC dashboards. Each provider therefore owns
+  # a non-overlapping subtree: `homer/` here, `noc/` below.
   - name: Homer
     orgId: 1
     folder: Homer
@@ -7,5 +14,18 @@ providers:
     disableDeletion: false
     editable: true
     options:
-      path: /var/lib/grafana/dashboards
+      path: /var/lib/grafana/dashboards/homer
+      foldersFromFilesStructure: false
+
+  # Production NOC dashboards (infra track: infra-overview, infra-fleet,
+  # db-replication; voice track adds its JSONs to the SAME folder). All land in
+  # the fixed "Production NOC" folder. Rooted at `noc/`, disjoint from `homer/`.
+  - name: Production NOC
+    orgId: 1
+    folder: Production NOC
+    type: file
+    disableDeletion: false
+    editable: true
+    options:
+      path: /var/lib/grafana/dashboards/noc
       foldersFromFilesStructure: false

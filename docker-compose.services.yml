@@ -214,10 +214,15 @@ services:
       - services-network
     restart: unless-stopped
 
-  # Grafana — SIP trace visualization and dashboards (replaces homer-app Angular UI)
+  # Grafana — SIP trace visualization + Production NOC dashboards
   grafana:
     image: grafana/grafana-oss:10.4.3
     container_name: voip-grafana
+    # Reach the bare-metal Postgres on the VM host (voip-cdr-pg datasource →
+    # host.docker.internal:5432), same host-gateway trick the `api` service uses
+    # for PgBouncer. Grafana is in the bridge network; PG runs on the host.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-sipcapture}
       - GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS=qxip-flow-panel
@@ -227,12 +232,27 @@ services:
       - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
       - GF_SERVER_ROOT_URL=/grafana/
       - GF_SERVER_SERVE_FROM_SUB_PATH=true
+      # ---- Production NOC datasource secrets/params (placeholders in .env) ----
+      # Read-only Postgres role password (voip-cdr-pg datasource). Operator sets
+      # GRAFANA_DB_PASSWORD in /opt/revup/.env; must match the grafana_ro role
+      # password (docker/postgres/init/22_grafana_ro.sql).
+      - GRAFANA_DB_PASSWORD=${GRAFANA_DB_PASSWORD:-}
+      # GCP Monitoring service-account EMAIL (not a secret) for JWT auth. Operator
+      # sets GCM_SA_EMAIL in /opt/revup/.env; the SA's key is mounted below.
+      - GCM_SA_EMAIL=${GCM_SA_EMAIL:-}
     ports:
       - "3000:3000"
     volumes:
       - grafana_data:/var/lib/grafana
       - ./docker/homer/grafana/provisioning:/etc/grafana/provisioning
       - ./docker/homer/grafana/dashboards:/var/lib/grafana/dashboards
+      # GCP Monitoring service-account key (roles/monitoring.viewer). NOT in git.
+      # Operator drops the downloaded SA JSON key at ./secrets/gcp-monitoring-sa.json
+      # on the services VM; the gcp-monitoring datasource reads it via
+      # privateKeyPath (Grafana auto-extracts private_key from a *.json SA key).
+      # ro + :Z-free bind; missing file => the GCM datasource simply fails to
+      # auth (dashboards using qryn/postgres still work).
+      - ./secrets/gcp-monitoring-sa.json:/etc/grafana/gcp/gcp-monitoring-sa.json:ro
     depends_on:
       - qryn
     networks:

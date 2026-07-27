@@ -1,0 +1,61 @@
+# Google Cloud Monitoring (Stackdriver) datasource — Production NOC infra track.
+# ---------------------------------------------------------------------------
+# Feeds the fleet / uptime / DB-VM panels in the "Production NOC" dashboards.
+# `type: stackdriver` is the BUILT-IN core datasource shipped with
+# grafana/grafana-oss:10.4.3 (the plugin was renamed "Google Cloud Monitoring"
+# but the datasource `type` string stayed `stackdriver` — verified against
+# grafana v10.4.3 source: public/app/plugins/datasource/cloud-monitoring/plugin.json
+# still declares id "stackdriver"). NO plugin install needed — do not add it to
+# GF_INSTALL_PLUGINS.
+#
+# UID is FIXED as `gcp-monitoring` — dashboard JSON targets reference it by this
+# uid, and the parallel voice-product NOC track relies on the same uid.
+#
+# ── AUTH — the operator MUST provide ONE of the two options below ────────────
+# We ship the JWT/service-account-key-FILE approach (default, matches the task
+# spec) because it is explicit and does not depend on the VM's attached SA or
+# API access scopes. NOTHING SECRET IS COMMITTED: the key file is mounted from
+# the host and referenced by path via `privateKeyPath`.
+#
+#   privateKeyPath points at the file mounted into the container at
+#   /etc/grafana/gcp/gcp-monitoring-sa.json (see docker-compose.services.yml
+#   grafana volume mount). Grafana's google-sdk `readPrivateKeyFromFile()`
+#   AUTO-DETECTS a `.json` suffix and extracts the `private_key` field from a
+#   downloaded GCP service-account JSON key — so the operator mounts the RAW
+#   downloaded key JSON, no PEM extraction required.
+#   (Verified: grafana-google-sdk-go/pkg/utils/utils.go — if the path ends in
+#   ".json" it json.Unmarshal's it and reads `private_key`.)
+#
+# The clientEmail is ALSO required for JWT auth and is NOT a secret (it is just
+# the SA's email). It is templated from an env var so nothing account-specific
+# is hardcoded; the operator sets GCM_SA_EMAIL in /opt/revup/.env.
+#
+# ── ALTERNATIVE (recommended, zero key files): GCE metadata auth ─────────────
+# Because Grafana runs on the East `services` GCE VM, you can instead attach a
+# service account with roles/monitoring.viewer to that VM (access scope must
+# include Cloud Monitoring / cloud-platform) and switch this file to:
+#     jsonData:
+#       authenticationType: gce
+#       defaultProject: rugged-night-193017
+# then delete the clientEmail/tokenUri/privateKeyPath lines and drop the volume
+# mount. The Docker bridge container can reach the 169.254.169.254 metadata
+# server through the host, so this works from inside the compose network.
+# See the operator notes returned with this change for the exact gcloud steps.
+apiVersion: 1
+
+datasources:
+  - name: GCP Monitoring
+    uid: gcp-monitoring
+    type: stackdriver
+    access: proxy
+    isDefault: false
+    editable: false
+    jsonData:
+      authenticationType: jwt
+      defaultProject: rugged-night-193017
+      tokenUri: https://oauth2.googleapis.com/token
+      universeDomain: googleapis.com
+      # SA email is not a secret — templated so no account is hardcoded in git.
+      clientEmail: ${GCM_SA_EMAIL}
+      # Mounted key file (raw downloaded GCP SA JSON). See compose volume mount.
+      privateKeyPath: /etc/grafana/gcp/gcp-monitoring-sa.json
