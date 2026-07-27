@@ -18,9 +18,21 @@ variable "network" {
 
 # --- What we probe (East ground truth per CLAUDE.md, 2026-04-30) -------------
 variable "nlb_vip" {
-  description = "Passthrough-NLB VIP Bandwidth targets (TCP 5060 probe)"
+  description = "East passthrough-NLB VIP Bandwidth targets (TCP 5060 probe)"
   type        = string
   default     = "34.24.133.82"
+}
+
+variable "nlb_vip_west" {
+  description = "West passthrough-NLB VIP (TCP 5060 probe)"
+  type        = string
+  default     = "35.252.214.40"
+}
+
+variable "nlb_vip_central" {
+  description = "Central passthrough-NLB VIP (TCP 5060 probe)"
+  type        = string
+  default     = "35.253.133.230"
 }
 
 variable "services_public_ip" {
@@ -42,9 +54,16 @@ variable "ui_https_port" {
 }
 
 variable "instances" {
-  description = "GCE instance names to cover with VM-down / disk / memory / CPU alerts"
+  description = "GCE instance names to cover with VM-down / disk / memory / CPU alerts (13 always-on production VMs across the 3 zones; the idle west-loadtest test box is excluded so it never false-pages when stopped)"
   type        = list(string)
-  default     = ["poc-custom-voip", "kam-g2", "fs-media-v2", "services", "east-db-standby"]
+  default = [
+    # East (us-east1)
+    "poc-custom-voip", "kam-g2", "fs-media-v2", "services", "east-db-standby",
+    # West (us-west1) — west-loadtest excluded: idle/banked test box, would false-page when stopped
+    "west-sbc-1", "west-sbc-2", "west-fs", "west-db",
+    # Central (us-central1)
+    "central-sbc-1", "central-sbc-2", "central-fs", "central-db",
+  ]
 }
 
 # --- Who gets paged -----------------------------------------------------------
@@ -66,11 +85,23 @@ variable "sms_number" {
   default     = ""
 }
 
+variable "slack_channel_ids" {
+  description = "Existing Slack notification channel IDs (console-created, full resource names) added to every alert policy. Console-managed — NOT created by this module."
+  type        = list(string)
+  default     = []
+}
+
 # --- Thresholds ----------------------------------------------------------------
 variable "disk_percent_threshold" {
-  description = "Page when any real filesystem exceeds this used%% (replication-slot WAL, ClickHouse and PG can all silently fill the services disk)"
+  description = "CRITICAL page when any real filesystem exceeds this used%% (replication-slot WAL, ClickHouse and PG can all silently fill the services disk)"
   type        = number
   default     = 85
+}
+
+variable "disk_warn_percent_threshold" {
+  description = "WARNING (keep-an-eye) when a real filesystem exceeds this used%% — fires before the critical threshold so the disk can be triaged early"
+  type        = number
+  default     = 78
 }
 
 variable "memory_percent_threshold" {
