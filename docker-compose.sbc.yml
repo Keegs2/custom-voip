@@ -100,8 +100,13 @@ services:
     # shared volume (not the network) and POSTs outbound; the command API is
     # reached by the console on the published 8710. (Kamailio must stay host-net
     # for SIP; this agent does not.)
-    depends_on:
-      - kamailio
+    # NO depends_on: kamailio. A read-only diagnostic sidecar must NEVER be able
+    # to recreate/restart the co-located call server — `up -d --build carrier-monitor`
+    # with a depends_on would pull Kamailio into the up-set and drop live calls.
+    # The poller reads Kamailio's ctl binrpc socket via the shared `kamailio_ctl`
+    # named volume (which exists regardless of container start order), and it
+    # fails closed if Kamailio is down (kamcmd returns an error → the agent just
+    # reports ok:false); the dependency is therefore both unnecessary and unsafe.
     ports:
       # Read-only NOC command API. VPC-internal; gate with a firewall rule.
       - "${OPS_AGENT_PORT:-8710}:${OPS_AGENT_PORT:-8710}"
