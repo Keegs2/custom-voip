@@ -64,7 +64,7 @@ export function PlatformManagementPage() {
         />
 
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 24, position: 'relative' }}>
-          {/* Keystone logo with glow */}
+          {/* CRAG logo with glow */}
           <div style={{ flexShrink: 0 }}>
             <div
               style={{
@@ -80,8 +80,8 @@ export function PlatformManagementPage() {
               }}
             >
               <img
-                src="/keystone_logo.png"
-                alt="Keystone"
+                src="/crag.png"
+                alt="CRAG"
                 style={{
                   width: 40,
                   height: 40,
@@ -98,7 +98,7 @@ export function PlatformManagementPage() {
               style={{
                 fontSize: '0.6rem',
                 fontWeight: 700,
-                letterSpacing: '0.14em',
+                letterSpacing: '0.06em',
                 textTransform: 'uppercase',
                 color: ACCENT,
                 opacity: 0.8,

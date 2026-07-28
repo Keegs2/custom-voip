@@ -1,5 +1,6 @@
 /**
- * RCF User Guide — concise customer-facing documentation for Granite Keystone RCF.
+ * RCF User Guide — concise customer-facing documentation for Granite CRAG
+ * (Call Routing Application Gateway) RCF.
  */
 
 import { Phone, HelpCircle, LogIn } from 'lucide-react';
@@ -178,8 +179,8 @@ export function RcfDocsPage() {
     <div style={{ paddingTop: 20 }}>
       <PageHeaderCard
         eyebrow="Customer Guide"
-        title="Granite Keystone RCF"
-        subtitle="Manage your Remote Call Forwarding numbers"
+        title="Granite CRAG RCF"
+        subtitle="Call Routing Application Gateway — manage your Remote Call Forwarding numbers"
         accent={GREEN}
       />
 

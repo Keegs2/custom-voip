@@ -69,7 +69,7 @@ const SECTION_LABEL: React.CSSProperties = {
   fontWeight: 700,
   color: '#4a5568',
   textTransform: 'uppercase',
-  letterSpacing: '0.1em',
+  letterSpacing: '0.05em',
   marginBottom: 14,
 };
 
@@ -200,7 +200,7 @@ function QualityTrendChart({
           fontWeight: 700,
           color: '#4a5568',
           textTransform: 'uppercase',
-          letterSpacing: '0.09em',
+          letterSpacing: '0.05em',
           marginBottom: 8,
         }}
       >
@@ -455,7 +455,7 @@ function QualityStatCard({ label, value, accent }: QualityStatCardProps) {
           fontWeight: 700,
           color: '#4a5568',
           textTransform: 'uppercase',
-          letterSpacing: '0.1em',
+          letterSpacing: '0.05em',
           marginBottom: 8,
         }}
       >
@@ -617,7 +617,7 @@ function CdrTable({ cdrs, onSelect, selectedUuid }: CdrTableProps) {
     fontSize: '0.58rem',
     fontWeight: 700,
     textTransform: 'uppercase',
-    letterSpacing: '0.08em',
+    letterSpacing: '0.05em',
     color: '#4a5568',
     borderBottom: '1px solid rgba(42,47,69,0.5)',
     whiteSpace: 'nowrap',
@@ -783,12 +783,12 @@ function CdrTable({ cdrs, onSelect, selectedUuid }: CdrTableProps) {
                   </td>
 
                   {/* From */}
-                  <td style={{ padding: '6px 10px', fontFamily: 'monospace', color: '#94a3b8', whiteSpace: 'nowrap', fontSize: '0.72rem' }}>
+                  <td style={{ padding: '6px 10px', fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', color: '#94a3b8', whiteSpace: 'nowrap', fontSize: '0.72rem' }}>
                     {cdr.caller_id || '—'}
                   </td>
 
                   {/* To */}
-                  <td style={{ padding: '6px 10px', fontFamily: 'monospace', color: '#94a3b8', whiteSpace: 'nowrap', fontSize: '0.72rem' }}>
+                  <td style={{ padding: '6px 10px', fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', color: '#94a3b8', whiteSpace: 'nowrap', fontSize: '0.72rem' }}>
                     {cdr.destination}
                   </td>
 
@@ -853,7 +853,7 @@ function CdrTable({ cdrs, onSelect, selectedUuid }: CdrTableProps) {
                   </td>
 
                   {/* Hangup Cause */}
-                  <td style={{ padding: '6px 10px', color: '#4a5568', fontFamily: 'monospace', fontSize: '0.68rem', whiteSpace: 'nowrap' }}>
+                  <td style={{ padding: '6px 10px', color: '#4a5568', fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', fontSize: '0.68rem', whiteSpace: 'nowrap' }}>
                     {cdr.hangup_cause ?? '—'}
                   </td>
                 </tr>
@@ -941,7 +941,7 @@ function DetailRow({
           fontWeight: 700,
           color: '#4a5568',
           textTransform: 'uppercase',
-          letterSpacing: '0.07em',
+          letterSpacing: '0.05em',
           whiteSpace: 'nowrap',
           flexShrink: 0,
           width: 128,
@@ -954,7 +954,7 @@ function DetailRow({
         style={{
           fontSize: '0.75rem',
           color: accent ?? '#cbd5e0',
-          fontFamily: mono ? 'monospace' : 'inherit',
+          fontFamily: mono ? '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace' : 'inherit',
           wordBreak: 'break-all',
         }}
       >
@@ -973,7 +973,7 @@ function PanelSection({ title, children }: { title: string; children: React.Reac
           fontWeight: 700,
           color: '#3b82f6',
           textTransform: 'uppercase',
-          letterSpacing: '0.12em',
+          letterSpacing: '0.05em',
           marginBottom: 10,
           paddingBottom: 6,
           borderBottom: '1px solid rgba(59,130,246,0.2)',
@@ -1008,7 +1008,7 @@ function BigMetric({
         minWidth: 0,
       }}
     >
-      <div style={{ fontSize: '0.58rem', fontWeight: 700, color: '#4a5568', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 4 }}>
+      <div style={{ fontSize: '0.58rem', fontWeight: 700, color: '#4a5568', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
         {label}
       </div>
       <div style={{ fontSize: '1.6rem', fontWeight: 800, color, fontVariantNumeric: 'tabular-nums', lineHeight: 1 }}>
@@ -1089,7 +1089,7 @@ function CallDetailPanel({ cdr, onClose }: CallDetailPanelProps) {
                 fontWeight: 700,
                 color: '#3b82f6',
                 textTransform: 'uppercase',
-                letterSpacing: '0.12em',
+                letterSpacing: '0.05em',
                 marginBottom: 4,
               }}
             >
@@ -1097,7 +1097,7 @@ function CallDetailPanel({ cdr, onClose }: CallDetailPanelProps) {
             </div>
             <div
               style={{
-                fontFamily: 'monospace',
+                fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
                 fontSize: '0.7rem',
                 color: '#4a5568',
                 wordBreak: 'break-all',
@@ -1258,7 +1258,7 @@ function CallDetailPanel({ cdr, onClose }: CallDetailPanelProps) {
               {(d.rtp_audio_in_raw_bytes != null ||
                 d.rtp_audio_in_packet_count != null) && (
                 <div style={{ marginBottom: 10 }}>
-                  <div style={{ fontSize: '0.62rem', color: '#3b82f6', fontWeight: 700, marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+                  <div style={{ fontSize: '0.62rem', color: '#3b82f6', fontWeight: 700, marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                     Audio In (from carrier)
                   </div>
                   {d.rtp_audio_in_raw_bytes != null && (
@@ -1280,7 +1280,7 @@ function CallDetailPanel({ cdr, onClose }: CallDetailPanelProps) {
               {(d.rtp_audio_out_raw_bytes != null ||
                 d.rtp_audio_out_packet_count != null) && (
                 <div style={{ marginBottom: 10 }}>
-                  <div style={{ fontSize: '0.62rem', color: '#a855f7', fontWeight: 700, marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+                  <div style={{ fontSize: '0.62rem', color: '#a855f7', fontWeight: 700, marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                     Audio Out (to carrier)
                   </div>
                   {d.rtp_audio_out_raw_bytes != null && (
@@ -1300,7 +1300,7 @@ function CallDetailPanel({ cdr, onClose }: CallDetailPanelProps) {
                 d.jitter_max_ms != null ||
                 d.jitter_avg_ms != null) && (
                 <div style={{ marginBottom: 10 }}>
-                  <div style={{ fontSize: '0.62rem', color: '#f59e0b', fontWeight: 700, marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+                  <div style={{ fontSize: '0.62rem', color: '#f59e0b', fontWeight: 700, marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                     Jitter
                   </div>
                   {d.jitter_min_ms != null && (
@@ -1327,7 +1327,7 @@ function CallDetailPanel({ cdr, onClose }: CallDetailPanelProps) {
               {/* Codecs */}
               {(d.read_codec != null || d.write_codec != null) && (
                 <div>
-                  <div style={{ fontSize: '0.62rem', color: '#22c55e', fontWeight: 700, marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+                  <div style={{ fontSize: '0.62rem', color: '#22c55e', fontWeight: 700, marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                     Codecs
                   </div>
                   {d.read_codec != null && (

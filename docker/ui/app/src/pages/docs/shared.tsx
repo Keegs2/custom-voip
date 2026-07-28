@@ -41,7 +41,7 @@ export function H3({ children }: { children: React.ReactNode }) {
         margin: '28px 0 10px',
         fontSize: '0.72rem',
         fontWeight: 700,
-        letterSpacing: '0.1em',
+        letterSpacing: '0.05em',
         textTransform: 'uppercase',
         color: C.textFaint,
       }}
@@ -60,7 +60,7 @@ export function IC({ children }: { children: React.ReactNode }) {
         border: `1px solid ${C.borderSubtle}`,
         borderRadius: 4,
         padding: '1px 6px',
-        fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
+        fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
         fontSize: '0.78rem',
         color: '#79c0ff',
       }}
@@ -311,10 +311,10 @@ export function CodeBlock({ code, label }: { code: string; label?: string }) {
           style={{
             fontSize: '0.7rem',
             fontWeight: 700,
-            letterSpacing: '0.08em',
+            letterSpacing: '0.05em',
             textTransform: 'uppercase',
             color: '#60a5fa',
-            fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
+            fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
           }}
         >
           {label ?? 'code'}
@@ -328,7 +328,7 @@ export function CodeBlock({ code, label }: { code: string; label?: string }) {
             cursor: 'pointer',
             fontSize: '0.7rem',
             color: copied ? '#4ade80' : '#475569',
-            fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
+            fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
             padding: '2px 6px',
             borderRadius: 4,
             transition: 'color 0.2s',
@@ -344,7 +344,7 @@ export function CodeBlock({ code, label }: { code: string; label?: string }) {
           background: 'rgba(10,13,22,0.85)',
           padding: '16px 20px',
           overflowX: 'auto',
-          fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
+          fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
           fontSize: '0.78rem',
           lineHeight: 1.75,
         }}
@@ -400,7 +400,7 @@ export function Endpoint({
           fontSize: '0.68rem',
           fontWeight: 800,
           letterSpacing: '0.08em',
-          fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
+          fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
           flexShrink: 0,
         }}
       >
@@ -409,7 +409,7 @@ export function Endpoint({
       <code
         style={{
           color: '#93c5fd',
-          fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
+          fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
           fontSize: '0.82rem',
           flexShrink: 0,
         }}
@@ -468,12 +468,12 @@ export function ParamTable({ params }: { params: Param[] }) {
           {params.map((p, i) => (
             <tr key={p.name} style={{ background: i % 2 === 0 ? 'transparent' : 'rgba(10,13,22,0.28)' }}>
               <td style={{ padding: '9px 14px', borderBottom: '1px solid rgba(42,47,69,0.3)', whiteSpace: 'nowrap' }}>
-                <code style={{ color: '#60a5fa', fontFamily: 'monospace', fontSize: '0.8rem', fontWeight: 700 }}>
+                <code style={{ color: '#60a5fa', fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', fontSize: '0.8rem', fontWeight: 700 }}>
                   {p.name}
                 </code>
               </td>
               <td style={{ padding: '9px 14px', borderBottom: '1px solid rgba(42,47,69,0.3)', whiteSpace: 'nowrap' }}>
-                <code style={{ color: '#818cf8', fontFamily: 'monospace', fontSize: '0.78rem' }}>
+                <code style={{ color: '#818cf8', fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', fontSize: '0.78rem' }}>
                   {p.type}
                 </code>
               </td>
@@ -626,8 +626,8 @@ export function PageHeaderCard({ eyebrow, title, subtitle, accent }: PageHeaderC
             }}
           >
             <img
-              src="/keystone_logo.png"
-              alt="Keystone"
+              src="/crag.png"
+              alt="CRAG"
               style={{
                 width: 36,
                 height: 36,
@@ -644,7 +644,7 @@ export function PageHeaderCard({ eyebrow, title, subtitle, accent }: PageHeaderC
             style={{
               fontSize: '0.6rem',
               fontWeight: 700,
-              letterSpacing: '0.14em',
+              letterSpacing: '0.06em',
               textTransform: 'uppercase',
               color: accent,
               opacity: 0.85,

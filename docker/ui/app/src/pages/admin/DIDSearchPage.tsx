@@ -291,7 +291,7 @@ function Th({ children, right }: { children: React.ReactNode; right?: boolean })
         fontSize: '0.62rem',
         fontWeight: 700,
         color: '#475569',
-        letterSpacing: '0.08em',
+        letterSpacing: '0.05em',
         textTransform: 'uppercase',
         textAlign: right ? 'right' : 'left',
         borderBottom: '1px solid rgba(42,47,69,0.6)',
@@ -888,7 +888,7 @@ function InventoryTab() {
                     }}
                   >
                     <Td>
-                      <span style={{ fontFamily: 'monospace', fontSize: '0.82rem', color: '#93c5fd', letterSpacing: '0.03em' }}>
+                      <span style={{ fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', fontSize: '0.82rem', color: '#93c5fd', letterSpacing: '0.03em' }}>
                         {fmt(item.did)}
                       </span>
                     </Td>
@@ -1106,7 +1106,7 @@ function AvailableTab({ isAdmin }: AvailableTabProps) {
                     }}
                   >
                     <Td>
-                      <span style={{ fontFamily: 'monospace', fontSize: '0.82rem', color: '#93c5fd', letterSpacing: '0.03em' }}>
+                      <span style={{ fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', fontSize: '0.82rem', color: '#93c5fd', letterSpacing: '0.03em' }}>
                         {fmt(item.did)}
                       </span>
                     </Td>
@@ -1296,7 +1296,7 @@ function AssignmentsTab() {
                         }}
                       >
                         <Td>
-                          <span style={{ fontFamily: 'monospace', fontSize: '0.82rem', color: '#93c5fd', letterSpacing: '0.03em' }}>
+                          <span style={{ fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', fontSize: '0.82rem', color: '#93c5fd', letterSpacing: '0.03em' }}>
                             {fmt(item.did)}
                           </span>
                         </Td>
@@ -1421,7 +1421,7 @@ function MyNumbersTab() {
                     }}
                   >
                     <Td>
-                      <span style={{ fontFamily: 'monospace', fontSize: '0.82rem', color: '#93c5fd', letterSpacing: '0.03em' }}>
+                      <span style={{ fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', fontSize: '0.82rem', color: '#93c5fd', letterSpacing: '0.03em' }}>
                         {fmt(item.did)}
                       </span>
                     </Td>
@@ -1616,7 +1616,7 @@ export function DIDSearchPage() {
             </div>
           </div>
 
-          {/* Keystone branding strip */}
+          {/* CRAG branding strip */}
           <div
             style={{
               display: 'flex',
@@ -1637,13 +1637,13 @@ export function DIDSearchPage() {
               style={{
                 fontSize: '0.6rem',
                 fontWeight: 700,
-                letterSpacing: '0.18em',
+                letterSpacing: '0.06em',
                 textTransform: 'uppercase',
                 color: '#3b82f6',
                 opacity: 0.65,
               }}
             >
-              Granite Keystone · Telecom Number Management
+              Granite CRAG · Telecom Number Management
             </span>
             <div
               style={{

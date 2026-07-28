@@ -54,7 +54,7 @@ const styles = {
   sectionLabel: {
     fontSize: '0.62rem',
     fontWeight: 700,
-    letterSpacing: '0.08em',
+    letterSpacing: '0.05em',
     textTransform: 'uppercase' as const,
     color: '#718096',
     marginBottom: 10,
@@ -84,7 +84,7 @@ const styles = {
     border: '1px solid rgba(42,47,69,0.7)',
     borderRadius: 20,
     padding: '4px 10px',
-    fontFamily: 'monospace',
+    fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
     fontSize: '0.78rem',
     color: '#e2e8f0',
   } as React.CSSProperties,
@@ -254,7 +254,7 @@ function TrunkCard({ trunk, customerId }: TrunkCardProps) {
               {trunk.auth_type} auth
             </span>
           </div>
-          <span style={{ fontFamily: 'monospace', fontSize: '0.7rem', color: '#4a5568' }}>
+          <span style={{ fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', fontSize: '0.7rem', color: '#4a5568' }}>
             trunk#{trunk.id}
           </span>
         </div>
@@ -323,7 +323,7 @@ function TrunkCard({ trunk, customerId }: TrunkCardProps) {
               </span>
               {value !== null && value !== undefined && value !== '' ? (
                 <span style={{
-                  fontFamily: mono ? 'monospace' : 'inherit',
+                  fontFamily: mono ? '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace' : 'inherit',
                   fontSize: '0.8rem',
                   color: '#e2e8f0',
                   wordBreak: 'break-all',
@@ -331,7 +331,7 @@ function TrunkCard({ trunk, customerId }: TrunkCardProps) {
                   {value}
                 </span>
               ) : (
-                <span style={{ fontFamily: 'monospace', fontSize: '0.8rem', color: emptyColor ?? '#718096' }}>
+                <span style={{ fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', fontSize: '0.8rem', color: emptyColor ?? '#718096' }}>
                   {empty}
                 </span>
               )}
@@ -429,7 +429,7 @@ function TrunkCard({ trunk, customerId }: TrunkCardProps) {
                   }}
                   onClick={(e) => e.stopPropagation()}
                 >
-                  <span style={{ fontFamily: 'monospace', fontSize: '0.82rem', color: '#e2e8f0', flex: 1 }}>
+                  <span style={{ fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', fontSize: '0.82rem', color: '#e2e8f0', flex: 1 }}>
                     {ip.ip_address}
                   </span>
                   {ip.description && (
@@ -471,7 +471,7 @@ function TrunkCard({ trunk, customerId }: TrunkCardProps) {
               onChange={(e) => setNewIp(e.target.value)}
               onClick={(e) => e.stopPropagation()}
               placeholder="192.0.2.1"
-              style={{ ...styles.input, fontFamily: 'monospace', width: 140 }}
+              style={{ ...styles.input, fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', width: 140 }}
             />
             <input
               type="text"
@@ -526,7 +526,7 @@ function TrunkCard({ trunk, customerId }: TrunkCardProps) {
             onChange={(e) => setNewDid(e.target.value)}
             onClick={(e) => e.stopPropagation()}
             placeholder="+1XXXXXXXXXX"
-            style={{ ...styles.input, fontFamily: 'monospace', width: 180 }}
+            style={{ ...styles.input, fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', width: 180 }}
           />
           <Button
             type="submit"
@@ -656,7 +656,7 @@ export function CustomerTrunkSection({ customerId }: CustomerTrunkSectionProps) 
         <span style={{
           fontSize: '0.62rem',
           fontWeight: 700,
-          letterSpacing: '0.09em',
+          letterSpacing: '0.05em',
           textTransform: 'uppercase',
           color: '#718096',
         }}>
@@ -738,7 +738,7 @@ export function CustomerTrunkSection({ customerId }: CustomerTrunkSectionProps) 
         <div style={{
           fontSize: '0.62rem',
           fontWeight: 700,
-          letterSpacing: '0.08em',
+          letterSpacing: '0.05em',
           textTransform: 'uppercase',
           color: '#718096',
           marginBottom: 14,
@@ -750,7 +750,7 @@ export function CustomerTrunkSection({ customerId }: CustomerTrunkSectionProps) 
             <label style={{
               fontSize: '0.62rem',
               fontWeight: 700,
-              letterSpacing: '0.07em',
+              letterSpacing: '0.05em',
               textTransform: 'uppercase',
               color: '#4a5568',
             }}>
@@ -778,7 +778,7 @@ export function CustomerTrunkSection({ customerId }: CustomerTrunkSectionProps) 
             <label style={{
               fontSize: '0.62rem',
               fontWeight: 700,
-              letterSpacing: '0.07em',
+              letterSpacing: '0.05em',
               textTransform: 'uppercase',
               color: '#4a5568',
             }}>

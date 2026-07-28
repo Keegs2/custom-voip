@@ -143,7 +143,7 @@ export function CustomerApiSection({ customerId }: CustomerApiSectionProps) {
   return (
     <div style={{ paddingTop: 16, borderTop: '1px solid rgba(42,47,69,0.5)' }}>
       <div className="flex items-center justify-between mb-3">
-        <span className="text-[0.63rem] font-bold text-[#718096] uppercase tracking-[0.9px]">
+        <span className="text-[0.63rem] font-bold text-[#718096] uppercase tracking-[0.04em]">
           API Configuration
         </span>
         <button
@@ -185,7 +185,7 @@ export function CustomerApiSection({ customerId }: CustomerApiSectionProps) {
               {['DID', 'Voice URL', 'Status', ''].map((h) => (
                 <th
                   key={h}
-                  className="text-left px-2 py-[5px] text-[0.65rem] font-bold uppercase tracking-[0.6px] text-[#718096] border-b border-[#2a2f45]"
+                  className="text-left px-2 py-[5px] text-[0.65rem] font-bold uppercase tracking-[0.04em] text-[#718096] border-b border-[#2a2f45]"
                 >
                   {h}
                 </th>
@@ -248,12 +248,12 @@ export function CustomerApiSection({ customerId }: CustomerApiSectionProps) {
           borderRadius: 10,
         }}
       >
-        <div className="text-[0.65rem] font-bold text-[#718096] uppercase tracking-[0.7px] mb-2">
+        <div className="text-[0.65rem] font-bold text-[#718096] uppercase tracking-[0.04em] mb-2">
           Add API DID
         </div>
         <div className="flex flex-wrap gap-2 items-end">
           <div className="flex flex-col gap-1">
-            <label className="text-[0.65rem] font-bold text-[#718096] uppercase tracking-[0.6px]">
+            <label className="text-[0.65rem] font-bold text-[#718096] uppercase tracking-[0.04em]">
               DID
             </label>
             <input
@@ -266,7 +266,7 @@ export function CustomerApiSection({ customerId }: CustomerApiSectionProps) {
             />
           </div>
           <div className="flex flex-col gap-1">
-            <label className="text-[0.65rem] font-bold text-[#718096] uppercase tracking-[0.6px]">
+            <label className="text-[0.65rem] font-bold text-[#718096] uppercase tracking-[0.04em]">
               Voice URL
             </label>
             <input

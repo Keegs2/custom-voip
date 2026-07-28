@@ -61,7 +61,7 @@ function StatCard({ label, value, accent = '#3b82f6' }: StatCardProps) {
           fontWeight: 700,
           color: '#4a5568',
           textTransform: 'uppercase',
-          letterSpacing: '0.1em',
+          letterSpacing: '0.05em',
           marginBottom: 10,
         }}
       >
@@ -359,7 +359,7 @@ function RecentCallsTable({ cdrs }: RecentCallsTableProps) {
                   fontSize: '0.6rem',
                   fontWeight: 700,
                   textTransform: 'uppercase',
-                  letterSpacing: '0.08em',
+                  letterSpacing: '0.05em',
                   color: '#4a5568',
                   borderBottom: '1px solid rgba(42,47,69,0.5)',
                   whiteSpace: 'nowrap',
@@ -440,7 +440,7 @@ function RecentCallsTable({ cdrs }: RecentCallsTableProps) {
                 <td
                   style={{
                     padding: '7px 12px',
-                    fontFamily: 'monospace',
+                    fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
                     color: '#94a3b8',
                     whiteSpace: 'nowrap',
                   }}
@@ -452,7 +452,7 @@ function RecentCallsTable({ cdrs }: RecentCallsTableProps) {
                 <td
                   style={{
                     padding: '7px 12px',
-                    fontFamily: 'monospace',
+                    fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
                     color: '#94a3b8',
                     whiteSpace: 'nowrap',
                   }}
@@ -501,7 +501,7 @@ function RecentCallsTable({ cdrs }: RecentCallsTableProps) {
                   style={{
                     padding: '7px 12px',
                     color: '#4a5568',
-                    fontFamily: 'monospace',
+                    fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
                     fontSize: '0.72rem',
                     whiteSpace: 'nowrap',
                   }}
@@ -606,7 +606,7 @@ function CustomerUsageSection({ customerId, accent }: CustomerUsageSectionProps)
     fontWeight: 700,
     color: accent,
     textTransform: 'uppercase',
-    letterSpacing: '0.1em',
+    letterSpacing: '0.05em',
     marginBottom: 20,
   };
 
@@ -615,7 +615,7 @@ function CustomerUsageSection({ customerId, accent }: CustomerUsageSectionProps)
     fontWeight: 700,
     color: '#4a5568',
     textTransform: 'uppercase',
-    letterSpacing: '0.1em',
+    letterSpacing: '0.05em',
     marginBottom: 14,
   };
 
@@ -854,7 +854,7 @@ function AccountDetailView({ customer, onEdit, onDelete }: AccountDetailViewProp
               fontSize: '0.6rem',
               fontWeight: 700,
               textTransform: 'uppercase',
-              letterSpacing: '0.09em',
+              letterSpacing: '0.05em',
               color: '#4a5568',
             }}
           >
@@ -902,7 +902,7 @@ function AccountDetailView({ customer, onEdit, onDelete }: AccountDetailViewProp
             fontWeight: 700,
             color: '#3b82f6',
             textTransform: 'uppercase',
-            letterSpacing: '0.1em',
+            letterSpacing: '0.05em',
             marginBottom: 20,
           }}
         >
@@ -1296,7 +1296,7 @@ export function CustomerAccountPage() {
                     fontSize: '0.65rem',
                     fontWeight: 700,
                     textTransform: 'uppercase',
-                    letterSpacing: '0.07em',
+                    letterSpacing: '0.05em',
                     padding: '3px 8px',
                     borderRadius: 6,
                     background: customer.ucaas_enabled
@@ -1322,7 +1322,7 @@ export function CustomerAccountPage() {
               )}
               <span
                 style={{
-                  fontFamily: 'monospace',
+                  fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
                   fontSize: '0.78rem',
                   color: '#4a5568',
                   letterSpacing: '0.04em',
@@ -1344,7 +1344,7 @@ export function CustomerAccountPage() {
               fontWeight: 700,
               color: '#3b82f6',
               textTransform: 'uppercase',
-              letterSpacing: '0.1em',
+              letterSpacing: '0.05em',
               marginBottom: 4,
             }}
           >

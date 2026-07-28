@@ -162,7 +162,7 @@ export function SippResults({ response, isRunning, runningTimeout = 60 }: SippRe
               fontWeight: 700,
               color: '#4a5568',
               textTransform: 'uppercase',
-              letterSpacing: '0.08em',
+              letterSpacing: '0.05em',
               marginBottom: 12,
             }}
           >
@@ -208,7 +208,7 @@ export function SippResults({ response, isRunning, runningTimeout = 60 }: SippRe
               fontWeight: 700,
               color: '#4a5568',
               textTransform: 'uppercase',
-              letterSpacing: '0.08em',
+              letterSpacing: '0.05em',
               marginBottom: 12,
             }}
           >
@@ -290,7 +290,7 @@ function StatMini({ label, value, accent }: StatMiniProps) {
           fontWeight: 700,
           color: '#4a5568',
           textTransform: 'uppercase',
-          letterSpacing: '0.08em',
+          letterSpacing: '0.05em',
           marginBottom: 8,
         }}
       >

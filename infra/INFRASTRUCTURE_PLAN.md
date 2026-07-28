@@ -76,7 +76,7 @@ revup/
 
 ### Phase 1: Import East (half day)
 1. `brew install opentofu`
-2. Create GCS state bucket: `gsutil mb -l us-east1 gs://granite-keystone-tofu-state`
+2. Create GCS state bucket: `gsutil mb -l us-east1 gs://granite-crag-tofu-state`
 3. Write East module config matching current GCP state exactly
 4. `tofu init` → `tofu plan` (iterative: fix drift until 0 changes)
 5. `tofu apply` (imports existing resources into state)

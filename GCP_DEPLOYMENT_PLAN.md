@@ -69,13 +69,13 @@ for both SIP signaling and RTP media. No cross-zone RTP traffic ever occurs.
         └──────────┘  └──────────┘
 ```
 
-### Call Flow Stages (matches Granite Keystone HA animation)
+### Call Flow Stages (matches Granite CRAG HA animation)
 
 | Stage | Animation Name | Component | Description |
 |-------|---------------|-----------|-------------|
 | 1. Origination | Inbound Trunks | Bandwidth Dallas + LA PoPs | Dual carrier trunks deliver calls |
 | 2. Distribution | Key Distributor | Geo Load Balancer | Single anycast VIP routes to nearest healthy region |
-| 3. Processing | Signal Keys + Keystone Engine | Kamailio SBC pair + FreeSWITCH | Per-region call processing, RTP stays in-zone |
+| 3. Processing | Signal Keys + CRAG Engine | Kamailio SBC pair + FreeSWITCH | Per-region call processing, RTP stays in-zone |
 | 4. Termination | Dallas / LA / Backup PoP | Bandwidth outbound | Each region sends outbound via nearest carrier PoP |
 
 ---
@@ -413,7 +413,7 @@ TEST_MODE=false
 
 ## Failover Scenarios
 
-All failover is demonstrated in the Granite Keystone HA animation on the platform homepage
+All failover is demonstrated in the Granite CRAG HA animation on the platform homepage
 (HaArchitectureViz component — 64-second cycle showing 4 failure modes).
 
 ### Single SBC failure (e.g., east-sbc-2 dies)

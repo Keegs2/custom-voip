@@ -17,7 +17,7 @@ const GLASS_CARD: React.CSSProperties = {
 };
 
 const MONO: React.CSSProperties = {
-  fontFamily: 'ui-monospace, monospace',
+  fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
 };
 
 // ─── Role display helpers ───────────────────────────────────────────────────
@@ -712,7 +712,7 @@ export function SipLadder({ messages, correlations, pipelineWarnings }: SipLadde
                       fontSize: '0.62rem',
                       fontWeight: 600,
                       color: LADDER_COLORS.textFaint,
-                      letterSpacing: '0.08em',
+                      letterSpacing: '0.05em',
                       textTransform: 'uppercase',
                     }}
                   >

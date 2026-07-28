@@ -181,14 +181,14 @@ const sectionHeaderStyle: React.CSSProperties = {
 
 const sectionTitleStyle: React.CSSProperties = {
   fontSize: '0.7rem',
-  fontWeight: 700,
-  letterSpacing: '0.08em',
+  fontWeight: 600,
+  letterSpacing: '0.05em',
   textTransform: 'uppercase' as const,
   color: LADDER_COLORS.textMuted,
 };
 
 const headerNameStyle: React.CSSProperties = {
-  fontFamily: 'ui-monospace, monospace',
+  fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
   fontSize: '0.78rem',
   fontWeight: 600,
   color: LADDER_COLORS.textMuted,
@@ -199,7 +199,7 @@ const headerNameStyle: React.CSSProperties = {
 };
 
 const headerValueStyle: React.CSSProperties = {
-  fontFamily: 'ui-monospace, monospace',
+  fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
   fontSize: '0.78rem',
   color: LADDER_COLORS.text,
   wordBreak: 'break-all',
@@ -212,7 +212,7 @@ const importantHeaderNameStyle: React.CSSProperties = {
 };
 
 const rawBlockStyle: React.CSSProperties = {
-  fontFamily: 'ui-monospace, monospace',
+  fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
   fontSize: '0.72rem',
   lineHeight: 1.6,
   color: LADDER_COLORS.textMuted,
@@ -306,7 +306,7 @@ function SdpInfoCard({ sdpInfo }: { sdpInfo: SdpInfo }) {
           </div>
           <div
             style={{
-              fontFamily: 'ui-monospace, monospace',
+              fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
               fontSize: '0.8rem',
               fontWeight: 600,
               color: item.highlight ? '#60a5fa' : LADDER_COLORS.text,
@@ -373,7 +373,7 @@ export function PacketDetailPanel({ rawMsg, accentColor, onClose }: PacketDetail
           />
           <span
             style={{
-              fontFamily: 'ui-monospace, monospace',
+              fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
               fontSize: '0.78rem',
               fontWeight: 600,
               color: LADDER_COLORS.text,

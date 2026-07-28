@@ -667,7 +667,7 @@ trace in Homer and CDRs.
 | PG Primary | — | Manual (Phase 4: Patroni auto) | Cached DIDs work; uncached + provisioning fail; promote replica |
 
 All four primary modes (single SBC, zone/FS, full-zone, carrier-trunk) are
-demonstrated in the Granite Keystone HA animation on the platform homepage
+demonstrated in the Granite CRAG HA animation on the platform homepage
 (`HaArchitectureViz`).
 
 ---

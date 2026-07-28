@@ -140,7 +140,7 @@ function SbcRow({ sbc, colorIndex }: SbcRowProps) {
           />
           <span
             style={{
-              fontFamily: 'ui-monospace, "SFMono-Regular", Consolas, monospace',
+              fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
               fontSize: '0.8125rem',
               fontWeight: 600,
               color: '#e2e8f0',
@@ -155,7 +155,7 @@ function SbcRow({ sbc, colorIndex }: SbcRowProps) {
         <div style={{ textAlign: 'right' }}>
           <span
             style={{
-              fontFamily: 'ui-monospace, "SFMono-Regular", Consolas, monospace',
+              fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
               fontSize: '1rem',
               fontWeight: 700,
               color: color,
@@ -173,7 +173,7 @@ function SbcRow({ sbc, colorIndex }: SbcRowProps) {
         <div style={{ textAlign: 'right' }}>
           <span
             style={{
-              fontFamily: 'ui-monospace, "SFMono-Regular", Consolas, monospace',
+              fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
               fontSize: '1rem',
               fontWeight: 700,
               color: '#e2e8f0',
@@ -191,7 +191,7 @@ function SbcRow({ sbc, colorIndex }: SbcRowProps) {
         <div style={{ textAlign: 'right', minWidth: 52 }}>
           <span
             style={{
-              fontFamily: 'ui-monospace, "SFMono-Regular", Consolas, monospace',
+              fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
               fontSize: '1rem',
               fontWeight: 700,
               color: '#94a3b8',
@@ -321,7 +321,7 @@ export function SbcDistribution() {
             <div style={{ textAlign: 'right' }}>
               <span
                 style={{
-                  fontFamily: 'ui-monospace, "SFMono-Regular", Consolas, monospace',
+                  fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
                   fontSize: '1.5rem',
                   fontWeight: 800,
                   color: '#e2e8f0',

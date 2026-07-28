@@ -53,7 +53,7 @@ function SortableTh({ label, sortKey, current, asc, onSort }: SortableThProps) {
       <button
         type="button"
         onClick={() => onSort(sortKey)}
-        className="flex items-center gap-1 whitespace-nowrap text-[0.68rem] font-bold uppercase tracking-[0.7px] text-[#718096] hover:text-[#e2e8f0] transition-colors"
+        className="flex items-center gap-1 whitespace-nowrap text-[0.68rem] font-bold uppercase tracking-[0.04em] text-[#718096] hover:text-[#e2e8f0] transition-colors"
       >
         {label}
         <span className="text-[0.55rem] leading-none opacity-60">

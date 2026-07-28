@@ -1,7 +1,7 @@
 /**
- * API Reference — comprehensive developer documentation for the Granite Keystone
- * REST API. Covers authentication, RCF endpoints, CDR/usage, number inventory,
- * and integration patterns.
+ * API Reference — comprehensive developer documentation for the Granite CRAG
+ * (Call Routing Application Gateway) REST API. Covers authentication, RCF
+ * endpoints, CDR/usage, number inventory, and integration patterns.
  */
 
 import {
@@ -44,7 +44,7 @@ function ComingSoonBadge() {
         borderRadius: 999,
         fontSize: '0.58rem',
         fontWeight: 700,
-        letterSpacing: '0.07em',
+        letterSpacing: '0.05em',
         textTransform: 'uppercase',
         color: AMBER,
         background: `${AMBER}18`,
@@ -70,7 +70,7 @@ function ApiGettingStartedSection() {
       subtitle="Authentication, base URL, quick example, rate limits, and error codes."
     >
       <P>
-        The Keystone API is RESTful and JSON-based. Every request to a protected endpoint must include
+        The CRAG (Call Routing Application Gateway) API is RESTful and JSON-based. Every request to a protected endpoint must include
         an <IC>Authorization</IC> header with a valid JWT bearer token. Tokens are obtained by POSTing
         credentials to the login endpoint and are valid for <strong style={{ color: C.text }}>8 hours</strong>.
       </P>
@@ -81,7 +81,7 @@ function ApiGettingStartedSection() {
 
       <ParamTable
         params={[
-          { name: 'email',    type: 'string', required: true,  description: 'The email address associated with your Keystone account.' },
+          { name: 'email',    type: 'string', required: true,  description: 'The email address associated with your CRAG account.' },
           { name: 'password', type: 'string', required: true,  description: 'Your account password.' },
         ]}
       />
@@ -135,7 +135,7 @@ function ApiGettingStartedSection() {
         <Server size={16} style={{ color: BLUE, flexShrink: 0 }} />
         <div>
           <div style={{ fontSize: '0.78rem', fontWeight: 700, color: C.textMuted, marginBottom: 3 }}>Base URL</div>
-          <code style={{ color: '#93c5fd', fontFamily: 'monospace', fontSize: '0.82rem' }}>
+          <code style={{ color: '#93c5fd', fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', fontSize: '0.82rem' }}>
             https://{'<'}your-portal-url{'>'}/api
           </code>
         </div>
@@ -213,7 +213,7 @@ curl "https://your-portal-url/api/v1/rcf" \
             ].map((row, i) => (
               <tr key={row.status} style={{ background: i % 2 === 0 ? 'transparent' : 'rgba(10,13,22,0.28)' }}>
                 <td style={{ padding: '9px 14px', borderBottom: '1px solid rgba(42,47,69,0.3)', whiteSpace: 'nowrap' }}>
-                  <code style={{ color: '#60a5fa', fontFamily: 'monospace', fontSize: '0.8rem', fontWeight: 700 }}>
+                  <code style={{ color: '#60a5fa', fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', fontSize: '0.8rem', fontWeight: 700 }}>
                     {row.status}
                   </code>
                 </td>
@@ -613,7 +613,7 @@ function ApiIntegrationSection() {
                 fontSize: '0.78rem',
                 fontWeight: 800,
                 flexShrink: 0,
-                fontFamily: 'monospace',
+                fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
               }}
             >
               {step}
@@ -625,7 +625,7 @@ function ApiIntegrationSection() {
                   style={{
                     fontSize: '0.6rem',
                     fontWeight: 700,
-                    letterSpacing: '0.07em',
+                    letterSpacing: '0.05em',
                     textTransform: 'uppercase',
                     color: BLUE,
                     background: `${BLUE}14`,
@@ -655,7 +655,7 @@ function ApiIntegrationSection() {
       </Callout>
 
       <P>
-        Webhooks allow Keystone to push call event data to your systems in real time rather than
+        Webhooks allow CRAG to push call event data to your systems in real time rather than
         requiring your application to poll the CDR API. When enabled, the platform will POST to your
         registered HTTPS endpoint with a JSON payload for each of the following events:
       </P>
@@ -690,7 +690,7 @@ function ApiIntegrationSection() {
           >
             <div
               style={{
-                fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
+                fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
                 fontSize: '0.75rem',
                 fontWeight: 700,
                 color: AMBER,
@@ -764,7 +764,7 @@ function ApiIntegrationSection() {
               return (
                 <tr key={row.status} style={{ background: i % 2 === 0 ? 'transparent' : 'rgba(10,13,22,0.28)' }}>
                   <td style={{ padding: '9px 14px', borderBottom: '1px solid rgba(42,47,69,0.3)', whiteSpace: 'nowrap' }}>
-                    <code style={{ color: '#60a5fa', fontFamily: 'monospace', fontSize: '0.8rem', fontWeight: 700 }}>
+                    <code style={{ color: '#60a5fa', fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', fontSize: '0.8rem', fontWeight: 700 }}>
                       {row.status}
                     </code>
                   </td>
@@ -896,7 +896,7 @@ export function ApiDocsPage() {
       <PageHeaderCard
         eyebrow="Developer Reference"
         title="API Reference"
-        subtitle="RESTful API documentation for programmatic access to the Granite Keystone platform"
+        subtitle="RESTful API documentation for programmatic access to the Granite CRAG (Call Routing Application Gateway) platform"
         accent={BLUE}
       />
 

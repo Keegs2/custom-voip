@@ -208,7 +208,7 @@ function SortHeader({ label, field, currentField, currentDir, onSort }: SortHead
         fontWeight: 700,
         color: isActive ? '#60a5fa' : '#475569',
         textTransform: 'uppercase',
-        letterSpacing: '0.12em',
+        letterSpacing: '0.05em',
         whiteSpace: 'nowrap',
         background: 'rgba(59,130,246,0.04)',
         cursor: 'pointer',
@@ -295,7 +295,7 @@ function ForwardToCell({ entry, canEdit, pendingValue, onPendingChange }: Forwar
             border: `1px solid ${isDirty ? '#3b82f6' : 'rgba(59,130,246,0.25)'}`,
             background: 'rgba(15,17,23,0.85)',
             color: '#e2e8f0',
-            fontFamily: 'monospace',
+            fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
             outline: 'none',
             boxShadow: isDirty ? '0 0 0 3px rgba(59,130,246,0.18)' : '0 0 0 2px rgba(59,130,246,0.1)',
             opacity: mutation.isPending ? 0.5 : 1,
@@ -359,7 +359,7 @@ function ForwardToCell({ entry, canEdit, pendingValue, onPendingChange }: Forwar
         style={{
           fontSize: '0.84rem',
           color: savedFlash ? '#60a5fa' : '#3b82f6',
-          fontFamily: 'monospace',
+          fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
           fontWeight: 600,
           letterSpacing: '0.01em',
           borderBottom: canEdit ? `1px dashed rgba(59,130,246,${hovered ? '0.6' : '0.28'})` : 'none',
@@ -424,14 +424,14 @@ function TableRow({ entry, isAdmin, canEdit, pendingValue, onPendingChange }: Ta
               fontSize: '0.9rem',
               fontWeight: 700,
               color: '#e2e8f0',
-              fontFamily: 'monospace',
+              fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
               letterSpacing: '0.02em',
               lineHeight: 1.2,
             }}
           >
             {fmt(entry.did)}
           </div>
-          <div style={{ fontSize: '0.63rem', color: '#334155', fontFamily: 'monospace', marginTop: 3, letterSpacing: '0.01em' }}>
+          <div style={{ fontSize: '0.63rem', color: '#334155', fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', marginTop: 3, letterSpacing: '0.01em' }}>
             {entry.did}
           </div>
         </div>
@@ -701,7 +701,7 @@ function RcfPageHeader({ title, subtitle, totalNumbers, activeCount, disabledCou
       />
 
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 24 }}>
-        {/* Keystone logo with glow */}
+        {/* CRAG logo with glow */}
         <div style={{ flexShrink: 0, position: 'relative' }}>
           <div
             style={{
@@ -717,8 +717,8 @@ function RcfPageHeader({ title, subtitle, totalNumbers, activeCount, disabledCou
             }}
           >
             <img
-              src="/keystone_logo.png"
-              alt="Keystone"
+              src="/crag.png"
+              alt="CRAG"
               style={{
                 width: 36,
                 height: 36,
@@ -734,8 +734,8 @@ function RcfPageHeader({ title, subtitle, totalNumbers, activeCount, disabledCou
           <div
             style={{
               fontSize: '0.6rem',
-              fontWeight: 700,
-              letterSpacing: '0.14em',
+              fontWeight: 600,
+              letterSpacing: '0.06em',
               textTransform: 'uppercase',
               color: '#3b82f6',
               opacity: 0.8,
@@ -816,7 +816,7 @@ function RcfPageHeader({ title, subtitle, totalNumbers, activeCount, disabledCou
                     fontWeight: 600,
                     color: '#475569',
                     textTransform: 'uppercase',
-                    letterSpacing: '0.09em',
+                    letterSpacing: '0.05em',
                   }}
                 >
                   {label}
@@ -865,8 +865,8 @@ function EmptyState() {
         }}
       >
         <img
-          src="/keystone_logo.png"
-          alt="Keystone"
+          src="/crag.png"
+          alt="CRAG"
           style={{
             width: 44,
             height: 44,
@@ -1392,7 +1392,7 @@ function WeeklyChart({ days }: WeeklyChartProps) {
             <polyline points="1,12 5,7 8,9 12,4 15,6" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         </div>
-        <span style={{ fontSize: '0.68rem', fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+        <span style={{ fontSize: '0.68rem', fontWeight: 600, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
           7-Day Performance
         </span>
       </div>
@@ -1479,7 +1479,7 @@ function WeeklyChart({ days }: WeeklyChartProps) {
               textAnchor="end"
               fill="#334155"
               fontSize={8}
-              fontFamily="ui-monospace, monospace"
+              fontFamily={'"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace'}
             >
               {v}
             </text>
@@ -1494,7 +1494,7 @@ function WeeklyChart({ days }: WeeklyChartProps) {
               textAnchor="start"
               fill="#334155"
               fontSize={8}
-              fontFamily="ui-monospace, monospace"
+              fontFamily={'"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace'}
             >
               {v}%
             </text>
@@ -1962,7 +1962,7 @@ function CallActivityTab({ customerId }: CallActivityTabProps) {
               {/* Selected value */}
               <span style={{ flex: 1, minWidth: 0, textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {selectedDid ? (
-                  <span style={{ fontSize: '0.84rem', fontWeight: 700, color: '#4ade80', fontFamily: 'monospace', letterSpacing: '0.01em' }}>
+                  <span style={{ fontSize: '0.84rem', fontWeight: 700, color: '#4ade80', fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', letterSpacing: '0.01em' }}>
                     {selectedLabel}
                   </span>
                 ) : (
@@ -2104,7 +2104,7 @@ function CallActivityTab({ customerId }: CallActivityTabProps) {
                           }}
                         />
                         <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: '0.84rem', fontWeight: 700, color: isSelected ? '#4ade80' : '#e2e8f0', fontFamily: 'monospace', letterSpacing: '0.01em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          <div style={{ fontSize: '0.84rem', fontWeight: 700, color: isSelected ? '#4ade80' : '#e2e8f0', fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', letterSpacing: '0.01em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                             {fmt(entry.did)}
                           </div>
                           {entry.name && (
@@ -2194,7 +2194,7 @@ function CallActivityTab({ customerId }: CallActivityTabProps) {
                 <path d="M2 8l4 4 8-8" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
             </div>
-            <span style={{ fontSize: '0.55rem', fontWeight: 700, color: asrColor, textTransform: 'uppercase', letterSpacing: '0.12em', opacity: 0.85 }}>ASR</span>
+            <span style={{ fontSize: '0.55rem', fontWeight: 600, color: asrColor, textTransform: 'uppercase', letterSpacing: '0.05em', opacity: 0.85 }}>ASR</span>
           </div>
           <div style={{ fontSize: 'clamp(1.5rem, 3vw, 2rem)', fontWeight: 900, color: asrColor, letterSpacing: '-0.04em', lineHeight: 1, marginBottom: 3, fontVariantNumeric: 'tabular-nums', textShadow: `0 0 28px ${asrColor}44` }}>
             {stats.asr != null ? `${stats.asr.toFixed(1)}%` : '—'}
@@ -2213,7 +2213,7 @@ function CallActivityTab({ customerId }: CallActivityTabProps) {
                 <circle cx="8" cy="10" r="1.5" fill={avgMosColor} stroke="none" />
               </svg>
             </div>
-            <span style={{ fontSize: '0.55rem', fontWeight: 700, color: avgMosColor, textTransform: 'uppercase', letterSpacing: '0.12em', opacity: 0.85 }}>MOS</span>
+            <span style={{ fontSize: '0.55rem', fontWeight: 600, color: avgMosColor, textTransform: 'uppercase', letterSpacing: '0.05em', opacity: 0.85 }}>MOS</span>
           </div>
           <div style={{ fontSize: 'clamp(1.5rem, 3vw, 2rem)', fontWeight: 900, color: avgMosColor, letterSpacing: '-0.04em', lineHeight: 1, marginBottom: 3, fontVariantNumeric: 'tabular-nums', textShadow: `0 0 28px ${avgMosColor}44` }}>
             {stats.avgMos != null ? stats.avgMos.toFixed(1) : '—'}
@@ -2231,7 +2231,7 @@ function CallActivityTab({ customerId }: CallActivityTabProps) {
                 <path d="M3 5a2 2 0 0 1 2-2h1.28a.8.8 0 0 1 .758.547l.6 1.797a.8.8 0 0 1-.401.968l-.903.452a8.833 8.833 0 0 0 4.413 4.413l.452-.903a.8.8 0 0 1 .968-.401l1.797.6A.8.8 0 0 1 14 11.72V13a2 2 0 0 1-2 2h-.4C5.87 15 1 10.13 1 4.4V4a1 1 0 0 1 1-1h1z" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
             </div>
-            <span style={{ fontSize: '0.55rem', fontWeight: 700, color: '#60a5fa', textTransform: 'uppercase', letterSpacing: '0.12em', opacity: 0.85 }}>Total Calls</span>
+            <span style={{ fontSize: '0.55rem', fontWeight: 600, color: '#60a5fa', textTransform: 'uppercase', letterSpacing: '0.05em', opacity: 0.85 }}>Total Calls</span>
           </div>
           <div style={{ fontSize: 'clamp(1.5rem, 3vw, 2rem)', fontWeight: 900, color: '#60a5fa', letterSpacing: '-0.04em', lineHeight: 1, marginBottom: 3, fontVariantNumeric: 'tabular-nums', textShadow: '0 0 28px rgba(96,165,250,0.4)' }}>
             {stats.total.toLocaleString()}
@@ -2250,7 +2250,7 @@ function CallActivityTab({ customerId }: CallActivityTabProps) {
                 <path d="M8 5v3l2 2" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
             </div>
-            <span style={{ fontSize: '0.55rem', fontWeight: 700, color: acdColor, textTransform: 'uppercase', letterSpacing: '0.12em', opacity: 0.85 }}>ACD</span>
+            <span style={{ fontSize: '0.55rem', fontWeight: 600, color: acdColor, textTransform: 'uppercase', letterSpacing: '0.05em', opacity: 0.85 }}>ACD</span>
           </div>
           <div style={{ fontSize: 'clamp(1.5rem, 3vw, 2rem)', fontWeight: 900, color: acdColor, letterSpacing: '-0.04em', lineHeight: 1, marginBottom: 3, fontVariantNumeric: 'tabular-nums', textShadow: `0 0 28px ${acdColor}44` }}>
             {stats.acd != null ? (stats.acd >= 60 ? `${Math.floor(stats.acd / 60)}m ${Math.round(stats.acd % 60)}s` : `${Math.round(stats.acd)}s`) : '—'}
@@ -2284,7 +2284,7 @@ function CallActivityTab({ customerId }: CallActivityTabProps) {
             flexWrap: 'wrap',
           }}
         >
-          <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+          <span style={{ fontSize: '0.72rem', fontWeight: 600, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
             Recent Calls
           </span>
           {selectedDid && selectedLabel && (
@@ -2376,10 +2376,10 @@ function CallActivityTab({ customerId }: CallActivityTabProps) {
                       padding: '11px 14px',
                       textAlign: 'left',
                       fontSize: '0.6rem',
-                      fontWeight: 700,
+                      fontWeight: 600,
                       color: '#475569',
                       textTransform: 'uppercase',
-                      letterSpacing: '0.11em',
+                      letterSpacing: '0.05em',
                       whiteSpace: 'nowrap',
                     }}
                   >
@@ -2410,14 +2410,14 @@ function CallActivityTab({ customerId }: CallActivityTabProps) {
 
                     {/* From */}
                     <td style={{ padding: '12px 14px' }}>
-                      <span style={{ fontSize: '0.82rem', color: '#94a3b8', fontFamily: 'monospace', fontWeight: 500 }}>
+                      <span style={{ fontSize: '0.82rem', color: '#94a3b8', fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', fontWeight: 500 }}>
                         {fmt(cdr.caller_id)}
                       </span>
                     </td>
 
                     {/* To (DID) */}
                     <td style={{ padding: '12px 14px' }}>
-                      <span style={{ fontSize: '0.82rem', color: '#60a5fa', fontFamily: 'monospace', fontWeight: 600 }}>
+                      <span style={{ fontSize: '0.82rem', color: '#60a5fa', fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', fontWeight: 600 }}>
                         {fmt(cdr.destination)}
                       </span>
                     </td>
@@ -2549,7 +2549,7 @@ function DidFilterBar({
     >
       {/* NPA input */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 3, flexShrink: 0 }}>
-        <label style={{ fontSize: '0.56rem', fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.10em' }}>
+        <label style={{ fontSize: '0.56rem', fontWeight: 600, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
           Area Code (NPA)
         </label>
         <input
@@ -2574,7 +2574,7 @@ function DidFilterBar({
             ...inputBase,
             width: 56,
             padding: '6px 8px',
-            fontFamily: 'monospace',
+            fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
             textAlign: 'center',
             letterSpacing: '0.08em',
           }}
@@ -2583,7 +2583,7 @@ function DidFilterBar({
 
       {/* NXX input */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 3, flexShrink: 0 }}>
-        <label style={{ fontSize: '0.56rem', fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.10em' }}>
+        <label style={{ fontSize: '0.56rem', fontWeight: 600, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
           Exchange (NXX)
         </label>
         <input
@@ -2608,7 +2608,7 @@ function DidFilterBar({
             ...inputBase,
             width: 56,
             padding: '6px 8px',
-            fontFamily: 'monospace',
+            fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
             textAlign: 'center',
             letterSpacing: '0.08em',
           }}
@@ -2617,7 +2617,7 @@ function DidFilterBar({
 
       {/* State dropdown */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 3, flexShrink: 0 }}>
-        <label style={{ fontSize: '0.56rem', fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.10em' }}>
+        <label style={{ fontSize: '0.56rem', fontWeight: 600, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
           State
         </label>
         <select
@@ -2647,7 +2647,7 @@ function DidFilterBar({
 
       {/* Free text search */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 3, flex: '1 1 160px', minWidth: 140 }}>
-        <label style={{ fontSize: '0.56rem', fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.10em' }}>
+        <label style={{ fontSize: '0.56rem', fontWeight: 600, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
           Search
         </label>
         <div style={{ position: 'relative' }}>
@@ -2862,10 +2862,10 @@ function DidSectionHeader({
       <span
         style={{
           fontSize: '0.72rem',
-          fontWeight: 700,
+          fontWeight: 600,
           color: '#475569',
           textTransform: 'uppercase',
-          letterSpacing: '0.1em',
+          letterSpacing: '0.05em',
           flexShrink: 0,
         }}
       >
@@ -2901,10 +2901,10 @@ function DidTh({ children }: { children?: React.ReactNode }) {
         padding: '11px 16px',
         textAlign: 'left',
         fontSize: '0.6rem',
-        fontWeight: 700,
+        fontWeight: 600,
         color: '#475569',
         textTransform: 'uppercase',
-        letterSpacing: '0.11em',
+        letterSpacing: '0.05em',
         whiteSpace: 'nowrap',
         background: 'rgba(59,130,246,0.04)',
         borderBottom: '1px solid rgba(59,130,246,0.10)',
@@ -2994,7 +2994,7 @@ function RequestModal({ did, onConfirm, onCancel, isPending }: RequestModalProps
         </div>
         <div style={{ fontSize: '0.84rem', color: '#64748b', marginBottom: 20, lineHeight: 1.6 }}>
           You are requesting{' '}
-          <span style={{ fontFamily: 'monospace', color: '#60a5fa', fontWeight: 600 }}>
+          <span style={{ fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', color: '#60a5fa', fontWeight: 600 }}>
             {fmt(did.did)}
           </span>
           {did.city || did.state ? (
@@ -3226,7 +3226,7 @@ function ReleaseModal({ did, onConfirm, onCancel, isPending }: ReleaseModalProps
         {/* DID displayed prominently */}
         <div
           style={{
-            fontFamily: 'monospace',
+            fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
             fontSize: '1.25rem',
             fontWeight: 800,
             color: '#60a5fa',
@@ -3258,7 +3258,7 @@ function ReleaseModal({ did, onConfirm, onCancel, isPending }: ReleaseModalProps
 
         <div style={{ fontSize: '0.83rem', color: '#64748b', marginBottom: 24, lineHeight: 1.55 }}>
           Are you sure you want to release{' '}
-          <span style={{ fontFamily: 'monospace', color: '#94a3b8', fontWeight: 600 }}>{fmt(did.did)}</span>?
+          <span style={{ fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', color: '#94a3b8', fontWeight: 600 }}>{fmt(did.did)}</span>?
         </div>
 
         <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
@@ -3566,10 +3566,10 @@ function MyNumbersSection({ items, isLoading, isError, onRelease, onSwitchToNumb
 
                           <td style={{ padding: '13px 16px' }}>
                             <div>
-                              <div style={{ fontSize: '0.88rem', fontWeight: 700, color: '#e2e8f0', fontFamily: 'monospace', letterSpacing: '0.02em' }}>
+                              <div style={{ fontSize: '0.88rem', fontWeight: 700, color: '#e2e8f0', fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', letterSpacing: '0.02em' }}>
                                 {fmt(item.did)}
                               </div>
-                              <div style={{ fontSize: '0.63rem', color: '#334155', fontFamily: 'monospace', marginTop: 2, letterSpacing: '0.01em' }}>
+                              <div style={{ fontSize: '0.63rem', color: '#334155', fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', marginTop: 2, letterSpacing: '0.01em' }}>
                                 {item.did}
                               </div>
                             </div>
@@ -3577,7 +3577,7 @@ function MyNumbersSection({ items, isLoading, isError, onRelease, onSwitchToNumb
 
                           {/* NPA */}
                           <td style={{ padding: '13px 16px' }}>
-                            <span style={{ fontSize: '0.80rem', color: '#60a5fa', fontFamily: 'monospace', fontWeight: 600, letterSpacing: '0.04em' }}>
+                            <span style={{ fontSize: '0.80rem', color: '#60a5fa', fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', fontWeight: 600, letterSpacing: '0.04em' }}>
                               {extractNpa(item.did)}
                             </span>
                           </td>
@@ -3596,14 +3596,14 @@ function MyNumbersSection({ items, isLoading, isError, onRelease, onSwitchToNumb
                             <span
                               style={{
                                 fontSize: '0.67rem',
-                                fontWeight: 700,
+                                fontWeight: 600,
                                 color: '#60a5fa',
                                 background: 'rgba(59,130,246,0.10)',
                                 border: '1px solid rgba(59,130,246,0.22)',
                                 borderRadius: 5,
                                 padding: '3px 8px',
                                 textTransform: 'uppercase',
-                                letterSpacing: '0.08em',
+                                letterSpacing: '0.05em',
                               }}
                             >
                               {item.product_type ?? 'RCF'}
@@ -3701,20 +3701,20 @@ function MyNumbersSection({ items, isLoading, isError, onRelease, onSwitchToNumb
 
                                 {/* DID large */}
                                 <div>
-                                  <div style={{ fontSize: '0.58rem', fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.10em', marginBottom: 6 }}>
+                                  <div style={{ fontSize: '0.58rem', fontWeight: 600, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>
                                     Number
                                   </div>
-                                  <div style={{ fontFamily: 'monospace', fontSize: '1.15rem', fontWeight: 800, color: '#60a5fa', letterSpacing: '0.04em' }}>
+                                  <div style={{ fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', fontSize: '1.15rem', fontWeight: 800, color: '#60a5fa', letterSpacing: '0.04em' }}>
                                     {fmt(item.did)}
                                   </div>
-                                  <div style={{ fontSize: '0.67rem', color: '#334155', fontFamily: 'monospace', marginTop: 3 }}>
+                                  <div style={{ fontSize: '0.67rem', color: '#334155', fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', marginTop: 3 }}>
                                     {item.did}
                                   </div>
                                 </div>
 
                                 {/* Location */}
                                 <div>
-                                  <div style={{ fontSize: '0.58rem', fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.10em', marginBottom: 6 }}>
+                                  <div style={{ fontSize: '0.58rem', fontWeight: 600, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>
                                     Location
                                   </div>
                                   <div style={{ fontSize: '0.88rem', color: '#e2e8f0', fontWeight: 600, lineHeight: 1.4 }}>
@@ -3735,7 +3735,7 @@ function MyNumbersSection({ items, isLoading, isError, onRelease, onSwitchToNumb
 
                                 {/* Product & Status */}
                                 <div>
-                                  <div style={{ fontSize: '0.58rem', fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.10em', marginBottom: 6 }}>
+                                  <div style={{ fontSize: '0.58rem', fontWeight: 600, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>
                                     Product
                                   </div>
                                   <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -3744,14 +3744,14 @@ function MyNumbersSection({ items, isLoading, isError, onRelease, onSwitchToNumb
                                         display: 'inline-flex',
                                         alignSelf: 'flex-start',
                                         fontSize: '0.68rem',
-                                        fontWeight: 700,
+                                        fontWeight: 600,
                                         color: '#60a5fa',
                                         background: 'rgba(59,130,246,0.12)',
                                         border: '1px solid rgba(59,130,246,0.24)',
                                         borderRadius: 5,
                                         padding: '3px 9px',
                                         textTransform: 'uppercase',
-                                        letterSpacing: '0.08em',
+                                        letterSpacing: '0.05em',
                                       }}
                                     >
                                       {item.product_type ?? 'RCF'}
@@ -3762,7 +3762,7 @@ function MyNumbersSection({ items, isLoading, isError, onRelease, onSwitchToNumb
 
                                 {/* Assigned date */}
                                 <div>
-                                  <div style={{ fontSize: '0.58rem', fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.10em', marginBottom: 6 }}>
+                                  <div style={{ fontSize: '0.58rem', fontWeight: 600, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>
                                     Assigned Date
                                   </div>
                                   <div style={{ fontSize: '0.88rem', color: '#e2e8f0', fontWeight: 500 }}>
@@ -3859,7 +3859,7 @@ function PendingRequestsSection({ items }: { items: DidInventoryItem[] }) {
                 }}
               >
                 <td style={{ padding: '12px 16px' }}>
-                  <div style={{ fontSize: '0.88rem', fontWeight: 700, color: '#e2e8f0', fontFamily: 'monospace', letterSpacing: '0.02em' }}>
+                  <div style={{ fontSize: '0.88rem', fontWeight: 700, color: '#e2e8f0', fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', letterSpacing: '0.02em' }}>
                     {fmt(item.did)}
                   </div>
                 </td>
@@ -4058,10 +4058,10 @@ function AvailableNumbersSection({
                       >
                         <td style={{ padding: '13px 16px' }}>
                           <div>
-                            <div style={{ fontSize: '0.88rem', fontWeight: 700, color: '#e2e8f0', fontFamily: 'monospace', letterSpacing: '0.02em' }}>
+                            <div style={{ fontSize: '0.88rem', fontWeight: 700, color: '#e2e8f0', fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', letterSpacing: '0.02em' }}>
                               {fmt(item.did)}
                             </div>
-                            <div style={{ fontSize: '0.63rem', color: '#334155', fontFamily: 'monospace', marginTop: 2 }}>
+                            <div style={{ fontSize: '0.63rem', color: '#334155', fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', marginTop: 2 }}>
                               {item.did}
                             </div>
                           </div>
@@ -4072,7 +4072,7 @@ function AvailableNumbersSection({
                           <span
                             style={{
                               fontSize: '0.80rem',
-                              fontFamily: 'monospace',
+                              fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
                               fontWeight: 600,
                               color: '#60a5fa',
                               background: 'rgba(59,130,246,0.08)',
@@ -4545,7 +4545,7 @@ export function RcfPage() {
                     width: 56,
                     padding: '8px 8px',
                     fontSize: '0.83rem',
-                    fontFamily: 'monospace',
+                    fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
                     textAlign: 'center',
                     letterSpacing: '0.08em',
                     background: npaFilter.length === 3 ? 'rgba(19,21,29,0.85)' : 'rgba(19,21,29,0.65)',
@@ -4679,7 +4679,7 @@ export function RcfPage() {
                     <SortHeader label="Name"       field="name"       currentField={sortField} currentDir={sortDir} onSort={handleSort} />
                     <SortHeader label="Forward To" field="forward_to" currentField={sortField} currentDir={sortDir} onSort={handleSort} />
                     <SortHeader label="Status"     field="status"     currentField={sortField} currentDir={sortDir} onSort={handleSort} />
-                    <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: '0.6rem', fontWeight: 700, color: '#334155', textTransform: 'uppercase', letterSpacing: '0.1em', whiteSpace: 'nowrap', background: 'rgba(59,130,246,0.04)' }}>Caller ID</th>
+                    <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: '0.6rem', fontWeight: 600, color: '#334155', textTransform: 'uppercase', letterSpacing: '0.05em', whiteSpace: 'nowrap', background: 'rgba(59,130,246,0.04)' }}>Caller ID</th>
                     {isAdmin && (
                       <SortHeader label="Customer" field="customer" currentField={sortField} currentDir={sortDir} onSort={handleSort} />
                     )}

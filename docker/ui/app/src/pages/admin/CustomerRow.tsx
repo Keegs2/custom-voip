@@ -41,7 +41,7 @@ export function CustomerRow({ customer }: CustomerRowProps) {
       }}
     >
       <td style={tdStyle}>
-        <span style={{ color: '#4a5568', fontFamily: 'monospace', fontSize: '0.78rem' }}>
+        <span style={{ color: '#4a5568', fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', fontSize: '0.78rem' }}>
           #{customer.id}
         </span>
       </td>

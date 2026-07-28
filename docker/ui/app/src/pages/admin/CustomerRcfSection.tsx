@@ -280,7 +280,7 @@ function RcfForwardInput({
         boxShadow: saved ? '0 0 0 3px rgba(34,197,94,0.12)' : 'none',
         cursor: 'pointer',
         userSelect: 'none',
-        fontFamily: 'monospace',
+        fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
       }}
     >
       {entry.forward_to}
@@ -441,7 +441,7 @@ function RcfEntryRow({
         <RcfNameInput entry={entry} customerId={customerId} />
         <div
           style={{
-            fontFamily: 'monospace',
+            fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
             fontSize: '0.92rem',
             color: '#22c55e',
             fontWeight: 600,
@@ -824,7 +824,7 @@ export function CustomerRcfSection({ customerId }: CustomerRcfSectionProps) {
                 width: 155,
                 borderColor: didFocused ? 'rgba(59,130,246,0.7)' : 'rgba(42,47,69,0.7)',
                 boxShadow: didFocused ? '0 0 0 3px rgba(59,130,246,0.15)' : 'none',
-                fontFamily: 'monospace',
+                fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
               }}
             />
           </div>
@@ -855,7 +855,7 @@ export function CustomerRcfSection({ customerId }: CustomerRcfSectionProps) {
                 width: 155,
                 borderColor: fwdFocused ? 'rgba(59,130,246,0.7)' : 'rgba(42,47,69,0.7)',
                 boxShadow: fwdFocused ? '0 0 0 3px rgba(59,130,246,0.15)' : 'none',
-                fontFamily: 'monospace',
+                fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
               }}
             />
           </div>

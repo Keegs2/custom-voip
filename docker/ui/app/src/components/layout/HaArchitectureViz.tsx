@@ -3,14 +3,15 @@ import { type CSSProperties, useMemo } from 'react';
 /**
  * HaArchitectureViz
  *
- * SVG-based animated diagram visualising the Granite Keystone HA
- * call-routing architecture in a horizontal left-to-right flow.
+ * SVG-based animated diagram visualising the Granite CRAG (Call Routing
+ * Application Gateway) HA call-routing architecture in a horizontal
+ * left-to-right flow.
  *
  * Architecture (each location has two discrete SBC nodes):
  *
- *                                    ┌─ Granite East: [SBC-1][SBC-2] → [Keystone] ──┐
- *  [Inbound] → [Key Distributor] ────┼─ Granite Central:[SBC-1][SBC-2]→ [Keystone] ──┼→ [Dallas]
- *    Trunk      Primary (active)     └─ Granite West:  [SBC-1][SBC-2] → [Keystone] ──┤→ [LA]
+ *                                    ┌─ Granite East: [SBC-1][SBC-2] → [CRAG] ──┐
+ *  [Inbound] → [Key Distributor] ────┼─ Granite Central:[SBC-1][SBC-2]→ [CRAG] ──┼→ [Dallas]
+ *    Trunk      Primary (active)     └─ Granite West:  [SBC-1][SBC-2] → [CRAG] ──┤→ [LA]
  *               Hot Backup (standby)                                              └→ [Backup]
  *
  * Failover simulation — a 50-second CSS keyframe cycle drives five scenarios:
@@ -45,7 +46,7 @@ const COL = {
   locOut:  710,   // right edge of location containers — ksX(660) + 50
   sbc1X:   468,   // SBC-1 node centre (upper SBC within location)
   sbc2X:   468,   // SBC-2 node centre — same X as SBC-1, stacked vertically
-  ksX:     660,   // Keystone engine node centre (right of SBC column)
+  ksX:     660,   // CRAG engine node centre (right of SBC column)
   termX:   1120,  // Stage 4: termination trunk nodes (near right edge of 1200px viewBox)
 } as const;
 
@@ -206,7 +207,7 @@ const PATH_BKD_C2: PathDef = makeBackupKdToSbc(1, 2, 'bkd-c2');
 const PATH_BKD_W1: PathDef = makeBackupKdToSbc(2, 1, 'bkd-w1');
 const PATH_BKD_W2: PathDef = makeBackupKdToSbc(2, 2, 'bkd-w2');
 
-// Stage 3 internal: SBC → Keystone (within each location)
+// Stage 3 internal: SBC → CRAG (within each location)
 function makeSbcToKs(
   locIdx: number,
   sbcNum: 1 | 2,
@@ -233,7 +234,7 @@ const PATH_SBC2_KS_C: PathDef  = makeSbcToKs(1, 2, 'sbc2-central', 's2ks-c');
 const PATH_SBC1_KS_W: PathDef  = makeSbcToKs(2, 1, 'west-loc',     's1ks-w');
 const PATH_SBC2_KS_W: PathDef  = makeSbcToKs(2, 2, 'west-loc',     's2ks-w');
 
-// Stage 3→4: each location Keystone → each termination trunk (9 paths)
+// Stage 3→4: each location CRAG → each termination trunk (9 paths)
 function makeTermPath(
   locIdx: number,
   termIdx: number,
@@ -336,7 +337,7 @@ const ALL_PACKETS: PacketConfig[] = [
   ...makePackets('nlb-w1', 3, 0.5, 'west-loc',      false, 0.15, 13, false),
   ...makePackets('nlb-w2', 3, 0.5, 'west-loc',      false, 0.35, 13, false),
 
-  // ── Stage 3: SBC → Keystone ─────────────────────────────────────────────
+  // ── Stage 3: SBC → CRAG ─────────────────────────────────────────────
   ...makePackets('s1ks-e', 3, 0.35, 'sbc1-east',    false, 0.05, 14, true),
   ...makePackets('s2ks-e', 2, 0.35, 'normal',        false, 0.10, 14, true),
 
@@ -346,7 +347,7 @@ const ALL_PACKETS: PacketConfig[] = [
   ...makePackets('s1ks-w', 3, 0.35, 'west-loc',      false, 0.03, 14, true),
   ...makePackets('s2ks-w', 2, 0.35, 'west-loc',      false, 0.13, 14, true),
 
-  // ── Stage 4: Keystone → Termination ─────────────────────────────────────
+  // ── Stage 4: CRAG → Termination ─────────────────────────────────────
   ...makePackets('e-t0', 2, 0.5, 'term-dallas', true,  0.00, 14, true),
   ...makePackets('e-t1', 2, 0.5, 'normal',      true,  0.08, 14, true),
   ...makePackets('e-t2', 2, 0.5, 'normal',      true,  0.20, 14, true),
@@ -821,7 +822,7 @@ export function HaArchitectureViz() {
           style={{
             fontSize: '0.75rem',
             fontWeight: 700,
-            letterSpacing: '0.18em',
+            letterSpacing: '0.06em',
             textTransform: 'uppercase',
             color: '#3b82f6',
             textShadow: '0 0 24px rgba(59,130,246,0.45)',
@@ -869,7 +870,7 @@ export function HaArchitectureViz() {
         height="auto"
         preserveAspectRatio="xMidYMid meet"
         style={{ display: 'block' }}
-        aria-label="Keystone: inbound trunks route through a Primary Key Distributor (GCP Global Load Balancer) — with a Hot Backup Key Distributor on standby — to three Granite locations, each with dual Signal Keys and a Keystone Engine, terminating via Dallas, LA, and Backup PoP trunks. A 50-second animation cycles through five failover scenarios including Primary Key Distributor failure where the Hot Backup automatically takes over."
+        aria-label="CRAG (Call Routing Application Gateway): inbound trunks route through a Primary Key Distributor (GCP Global Load Balancer) — with a Hot Backup Key Distributor on standby — to three Granite locations, each with dual Signal Keys and a CRAG Engine, terminating via Dallas, LA, and Backup PoP trunks. A 50-second animation cycles through five failover scenarios including Primary Key Distributor failure where the Hot Backup automatically takes over."
       >
         <defs>
           {/* Grid background pattern */}
@@ -960,7 +961,7 @@ export function HaArchitectureViz() {
             </feMerge>
           </filter>
 
-          {/* Keystone / KD logo glow — blue halo */}
+          {/* CRAG / KD logo glow — blue halo */}
           <filter id={`${uid}-imgf`} x="-60%" y="-60%" width="220%" height="220%">
             <feGaussianBlur in="SourceGraphic" stdDeviation="2.8" result="blur" />
             <feColorMatrix in="blur" type="matrix"
@@ -1028,7 +1029,7 @@ export function HaArchitectureViz() {
           <path d={PATH_BKD_W1.d} stroke="rgba(59,130,246,0.07)" strokeWidth="0.7" strokeDasharray="4 3" />
           <path d={PATH_BKD_W2.d} stroke="rgba(59,130,246,0.07)" strokeWidth="0.7" strokeDasharray="4 3" />
 
-          {/* Stage 3 internal — SBC to Keystone (dashed) */}
+          {/* Stage 3 internal — SBC to CRAG (dashed) */}
           <path d={PATH_SBC1_KS_E.d} stroke="rgba(59,130,246,0.14)" strokeWidth="0.75" strokeDasharray="3 2.5" />
           <path d={PATH_SBC2_KS_E.d} stroke="rgba(59,130,246,0.14)" strokeWidth="0.75" strokeDasharray="3 2.5" />
           <path d={PATH_SBC1_KS_C.d} stroke="rgba(59,130,246,0.14)" strokeWidth="0.75" strokeDasharray="3 2.5" />
@@ -1047,7 +1048,7 @@ export function HaArchitectureViz() {
           Packets are split into two animated wrapper groups:
           - Primary KD layer: inbound + primary-fan packets — hides at 90%
           - Backup KD layer: backup-fan packets — appears at 90%
-          - Unaffected packets (SBC→Keystone, Keystone→Termination) are
+          - Unaffected packets (SBC→CRAG, CRAG→Termination) are
             outside both wrappers and run on their own per-group animations.
 
           We identify primary-layer packets as those using paths:
@@ -1128,7 +1129,7 @@ export function HaArchitectureViz() {
           y={136}
           textAnchor="middle"
           fontSize="6"
-          fontFamily="'SF Mono', 'Fira Code', 'Consolas', monospace"
+          fontFamily={'"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace'}
           letterSpacing="0.12em"
           fill="rgba(148,163,184,0.38)"
           fontWeight="700"
@@ -1163,7 +1164,7 @@ export function HaArchitectureViz() {
           x={VB_W - 8} y={VB_H - 6}
           textAnchor="end"
           fontSize="6"
-          fontFamily="'SF Mono', 'Fira Code', 'Consolas', monospace"
+          fontFamily={'"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace'}
           letterSpacing="0.12em"
           fill="rgba(59,130,246,0.18)"
           fontWeight="600"
@@ -1184,7 +1185,7 @@ function ColumnLabel({ text, x, y }: { text: string; x: number; y: number }) {
       x={x} y={y}
       textAnchor="middle"
       fontSize="7"
-      fontFamily="'SF Mono', 'Fira Code', 'Consolas', monospace"
+      fontFamily={'"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace'}
       letterSpacing="0.13em"
       fill="rgba(148,163,184,0.28)"
       fontWeight="600"
@@ -1235,7 +1236,7 @@ function InboundTrunkNode({
         <rect x="9"   y="2"  width="3" height="9"  rx="0.8" fill="rgba(96,165,250,0.60)" />
       </g>
       <text y={H / 2 + 9} textAnchor="middle" fontSize="6.5"
-        fontFamily="'SF Mono', 'Fira Code', 'Consolas', monospace"
+        fontFamily={'"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace'}
         letterSpacing="0.09em" fill="rgba(148,163,184,0.60)" fontWeight="600">
         {label}
       </text>
@@ -1279,14 +1280,14 @@ function NlbNode({
         preserveAspectRatio="xMidYMid meet"
       />
       <text y={S / 2 + 12} textAnchor="middle" fontSize={isBackup ? 6.5 : 7.5}
-        fontFamily="'SF Mono', 'Fira Code', 'Consolas', monospace"
+        fontFamily={'"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace'}
         letterSpacing="0.09em"
         fill={isBackup ? 'rgba(148,163,184,0.45)' : 'rgba(148,163,184,0.62)'}
         fontWeight="600">
         Key
       </text>
       <text y={S / 2 + 21} textAnchor="middle" fontSize={isBackup ? 5.5 : 6}
-        fontFamily="'SF Mono', 'Fira Code', 'Consolas', monospace"
+        fontFamily={'"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace'}
         letterSpacing="0.07em"
         fill={isBackup ? 'rgba(100,116,139,0.40)' : 'rgba(100,116,139,0.52)'}
         fontWeight="500">
@@ -1295,7 +1296,7 @@ function NlbNode({
       {/* Amber "STANDBY" indicator below the backup node only */}
       {isBackup && (
         <text y={S / 2 + 30} textAnchor="middle" fontSize="5"
-          fontFamily="'SF Mono', 'Fira Code', 'Consolas', monospace"
+          fontFamily={'"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace'}
           letterSpacing="0.10em"
           fill="rgba(245,158,11,0.55)"
           fontWeight="700">
@@ -1359,7 +1360,7 @@ function LocationGroup({
         x={x + 10}
         y={cy - LOC_HALF_H + 14}
         fontSize="6.5"
-        fontFamily="'SF Mono', 'Fira Code', 'Consolas', monospace"
+        fontFamily={'"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace'}
         letterSpacing="0.10em"
         fill="rgba(148,163,184,0.45)"
         fontWeight="700"
@@ -1379,7 +1380,7 @@ function LocationGroup({
         nodeClass={sbc2CentralClass ?? sbc2Class}
       />
 
-      {/* Keystone engine — right side of the container */}
+      {/* CRAG engine — right side of the container */}
       <KsNode uid={uid} cx={COL.ksX} cy={cy} />
     </g>
   );
@@ -1412,7 +1413,7 @@ function SbcNode({
         preserveAspectRatio="xMidYMid meet"
       />
       <text y={S / 2 + 9} textAnchor="middle" fontSize="6"
-        fontFamily="'SF Mono', 'Fira Code', 'Consolas', monospace"
+        fontFamily={'"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace'}
         letterSpacing="0.07em" fill="rgba(148,163,184,0.52)" fontWeight="600">
         {label}
       </text>
@@ -1420,14 +1421,14 @@ function SbcNode({
   );
 }
 
-/* ── Keystone Media Engine — logo image node ── */
+/* ── CRAG Media Engine — logo image node ── */
 function KsNode({ uid, cx, cy }: { uid: string; cx: number; cy: number }) {
   const S = 28;
   return (
     <g transform={`translate(${cx}, ${cy})`}>
       <circle r="28" fill={`url(#${uid}-ng)`} />
       <image
-        href="/keystone_logo.png"
+        href="/crag.png"
         x={-S / 2}
         y={-S / 2}
         width={S}
@@ -1436,9 +1437,9 @@ function KsNode({ uid, cx, cy }: { uid: string; cx: number; cy: number }) {
         preserveAspectRatio="xMidYMid meet"
       />
       <text y={S / 2 + 10} textAnchor="middle" fontSize="5"
-        fontFamily="'SF Mono', 'Fira Code', 'Consolas', monospace"
+        fontFamily={'"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace'}
         letterSpacing="0.06em" fill="rgba(96,165,250,0.45)" fontWeight="600">
-        Keystone Engine
+        CRAG Engine
       </text>
     </g>
   );
@@ -1482,12 +1483,12 @@ function TermNode({
       <circle r="3"   cx="0" cy="0" fill="rgba(52,211,153,0.40)" />
       <circle r="1.5" cx="0" cy="0" fill="rgba(167,243,208,0.92)" />
       <text y={H / 2 + 12} textAnchor="middle" fontSize="7.5"
-        fontFamily="'SF Mono', 'Fira Code', 'Consolas', monospace"
+        fontFamily={'"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace'}
         letterSpacing="0.09em" fill="rgba(148,163,184,0.62)" fontWeight="600">
         {label}
       </text>
       <text y={H / 2 + 21} textAnchor="middle" fontSize="6"
-        fontFamily="'SF Mono', 'Fira Code', 'Consolas', monospace"
+        fontFamily={'"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace'}
         letterSpacing="0.07em" fill="rgba(100,116,139,0.52)" fontWeight="500">
         {sublabel}
       </text>
@@ -1514,7 +1515,7 @@ function StatusIndicatorHtml({ uid }: { uid: string }) {
   });
 
   const textStyle = (color: string): CSSProperties => ({
-    fontFamily: "'SF Mono', 'Fira Code', 'Consolas', monospace",
+    fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
     fontSize: '0.60rem',
     fontWeight: 600,
     letterSpacing: '0.08em',
@@ -1522,7 +1523,7 @@ function StatusIndicatorHtml({ uid }: { uid: string }) {
   });
 
   const alertTextStyle: CSSProperties = {
-    fontFamily: "'SF Mono', 'Fira Code', 'Consolas', monospace",
+    fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
     fontSize: '0.65rem',
     fontWeight: 700,
     letterSpacing: '0.07em',

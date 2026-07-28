@@ -61,8 +61,8 @@ export function Badge({ variant, children, className }: BadgeProps) {
   return (
     <span
       className={cn(
-        'inline-flex items-center justify-center text-[0.65rem] font-bold',
-        'tracking-[0.5px] uppercase whitespace-nowrap',
+        'inline-flex items-center justify-center text-[0.65rem] font-semibold',
+        'uppercase whitespace-nowrap',
         variantClasses[variant],
         className,
       )}

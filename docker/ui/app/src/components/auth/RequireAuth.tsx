@@ -83,8 +83,6 @@ function FullPageSpinner() {
           style={{
             fontSize: '0.8rem',
             fontWeight: 600,
-            letterSpacing: '0.06em',
-            textTransform: 'uppercase',
             color: '#334155',
           }}
         >

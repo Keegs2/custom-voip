@@ -99,35 +99,35 @@ export function LoginPage() {
         {/* ── Brand header above card ───────────────────────── */}
         <div style={{ textAlign: 'center', marginBottom: 32 }}>
           <style>{`
-            @keyframes keystoneGlow {
+            @keyframes cragGlow {
               0%   { filter: drop-shadow(0 0 12px rgba(59, 130, 246, 0.3)) drop-shadow(0 0 24px rgba(59, 130, 246, 0.1)); }
               100% { filter: drop-shadow(0 0 20px rgba(59, 130, 246, 0.55)) drop-shadow(0 0 40px rgba(59, 130, 246, 0.22)); }
             }
-            @keyframes keystoneFloat {
+            @keyframes cragFloat {
               0%, 100% { transform: translateY(0px); }
               50%       { transform: translateY(-4px); }
             }
             /* Inner image — glow + float run continuously, never paused */
-            .keystone-hero-img {
-              animation: keystoneGlow 3s ease-in-out infinite alternate,
-                         keystoneFloat 6s ease-in-out infinite;
+            .crag-hero-img {
+              animation: cragGlow 3s ease-in-out infinite alternate,
+                         cragFloat 6s ease-in-out infinite;
             }
             /* Outer wrapper — scale hover is independent of the animation */
-            .keystone-hero-wrap {
+            .crag-hero-wrap {
               display: inline-block;
               transition: transform 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
             }
-            .keystone-hero-wrap:hover {
+            .crag-hero-wrap:hover {
               transform: scale(1.02);
             }
           `}</style>
 
-          {/* Hero branded image — contains "KEYSTONE" text + subtitle built in */}
-          <div className="keystone-hero-wrap">
+          {/* Hero branded image — contains "CRAG" text + subtitle built in */}
+          <div className="crag-hero-wrap">
             <img
-              src="/keystone_image.png"
-              alt="Granite Keystone — Unified Voice & Communications"
-              className="keystone-hero-img"
+              src="/crag.png"
+              alt="Granite CRAG — Call Routing Application Gateway"
+              className="crag-hero-img"
               style={{
                 width: 220,
                 height: 'auto',
@@ -141,7 +141,7 @@ export function LoginPage() {
             style={{
               fontSize: '0.7rem',
               fontWeight: 600,
-              letterSpacing: '0.12em',
+              letterSpacing: '0.05em',
               textTransform: 'uppercase',
               color: '#2d3a4a',
             }}
@@ -311,7 +311,7 @@ export function LoginPage() {
             color: '#1e293b',
           }}
         >
-          Granite Keystone &middot; v1.0
+          Granite CRAG &middot; v1.0
         </p>
       </div>
     </div>

@@ -332,7 +332,7 @@ export function TrunkCard({ trunk }: TrunkCardProps) {
               fontSize: '0.72rem',
               color: '#718096',
               marginTop: 3,
-              fontFamily: 'monospace',
+              fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
             }}
           >
             {trunk.customer_name && (
@@ -560,7 +560,7 @@ function StatBlock({ label, children }: StatBlockProps) {
           fontWeight: 700,
           color: '#718096',
           textTransform: 'uppercase',
-          letterSpacing: '0.07em',
+          letterSpacing: '0.05em',
           marginBottom: 8,
         }}
       >
@@ -694,7 +694,7 @@ function ExpandedSection({
             placeholder="203.0.113.50"
             style={{
               fontSize: '0.8rem',
-              fontFamily: 'monospace',
+              fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
               padding: '5px 10px',
               borderRadius: 6,
               border: '1px solid rgba(42,47,69,0.6)',
@@ -763,7 +763,7 @@ function ExpandedSection({
                   display: 'inline-flex',
                   alignItems: 'center',
                   fontSize: '0.75rem',
-                  fontFamily: 'monospace',
+                  fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
                   fontWeight: 600,
                   background: 'rgba(30,33,48,0.8)',
                   color: '#e2e8f0',
@@ -832,7 +832,7 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
         fontWeight: 700,
         color: '#718096',
         textTransform: 'uppercase',
-        letterSpacing: '0.07em',
+        letterSpacing: '0.05em',
         marginBottom: 8,
       }}
     >
@@ -858,7 +858,7 @@ function IpChip({ ip, onDelete }: IpChipProps) {
         borderRadius: 6,
         padding: '6px 12px',
         fontSize: '0.78rem',
-        fontFamily: 'monospace',
+        fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
         color: '#e2e8f0',
       }}
     >

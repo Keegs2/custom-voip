@@ -48,10 +48,10 @@ export function StatCard({ label, value, icon, className }: StatCardProps) {
       <p
         style={{
           fontSize: '0.68rem',
-          fontWeight: 700,
+          fontWeight: 600,
           color: '#4a5568',
           textTransform: 'uppercase',
-          letterSpacing: '0.1em',
+          letterSpacing: '0.05em',
           marginBottom: 10,
         }}
       >

@@ -257,7 +257,7 @@ function StatusBadge({ status }: StatusBadgeProps) {
           borderRadius: 4,
           fontSize: '0.7rem',
           fontWeight: 600,
-          fontFamily: 'ui-monospace, monospace',
+          fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
           background: bg,
           color,
           border: `1px solid ${border}`,
@@ -298,7 +298,7 @@ function StatusBadge({ status }: StatusBadgeProps) {
         borderRadius: 4,
         fontSize: '0.7rem',
         fontWeight: 600,
-        fontFamily: 'ui-monospace, monospace',
+        fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
         background: bg,
         color,
         border: `1px solid ${border}`,
@@ -394,7 +394,7 @@ function MsgCountBadge({ count }: MsgCountBadgeProps) {
         borderRadius: 10,
         fontSize: '0.7rem',
         fontWeight: 600,
-        fontFamily: 'ui-monospace, monospace',
+        fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
         background: 'rgba(59,130,246,0.12)',
         color: '#60a5fa',
         border: '1px solid rgba(59,130,246,0.25)',
@@ -418,7 +418,7 @@ function DurationBadge({ seconds }: DurationBadgeProps) {
       <span
         style={{
           fontSize: '0.78rem',
-          fontFamily: 'ui-monospace, monospace',
+          fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
           color: '#475569',
         }}
       >
@@ -435,7 +435,7 @@ function DurationBadge({ seconds }: DurationBadgeProps) {
         borderRadius: 4,
         fontSize: '0.7rem',
         fontWeight: 600,
-        fontFamily: 'ui-monospace, monospace',
+        fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
         background: 'rgba(168,85,247,0.12)',
         color: '#c084fc',
         border: '1px solid rgba(168,85,247,0.25)',
@@ -465,7 +465,7 @@ function ResultsTable({ callGroups, correlations, pipelineWarnings, startTime, e
     textAlign: 'left',
     fontSize: '0.7rem',
     fontWeight: 600,
-    letterSpacing: '0.08em',
+    letterSpacing: '0.05em',
     color: '#475569',
     textTransform: 'uppercase',
     whiteSpace: 'nowrap',
@@ -482,7 +482,7 @@ function ResultsTable({ callGroups, correlations, pipelineWarnings, startTime, e
   };
 
   const monoStyle: React.CSSProperties = {
-    fontFamily: 'ui-monospace, monospace',
+    fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
     fontSize: '0.78rem',
     color: '#94a3b8',
   };
@@ -928,7 +928,7 @@ export function TroubleshootingPage() {
                 onChange={(e) => setCallId(e.target.value)}
                 onKeyDown={handleKeyDown}
                 placeholder="SIP Call-ID"
-                style={{ ...inputStyle, fontFamily: 'ui-monospace, monospace', fontSize: '0.8rem' }}
+                style={{ ...inputStyle, fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', fontSize: '0.8rem' }}
                 onFocus={(e) => {
                   (e.target as HTMLInputElement).style.borderColor = 'rgba(59,130,246,0.6)';
                 }}
@@ -1117,7 +1117,7 @@ export function TroubleshootingPage() {
               justifyContent: 'space-between',
             }}
           >
-            <span style={{ fontSize: '0.8rem', fontWeight: 600, color: '#64748b', letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+            <span style={{ fontSize: '0.8rem', fontWeight: 600, color: '#64748b' }}>
               Results
             </span>
             {hasSearched && !isLoading && !isError && (
