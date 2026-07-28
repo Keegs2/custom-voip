@@ -122,7 +122,7 @@ export function IvrPalette() {
           fontSize: '0.65rem',
           fontWeight: 700,
           textTransform: 'uppercase',
-          letterSpacing: '0.10em',
+          letterSpacing: '0.05em',
           marginRight: 4,
           flexShrink: 0,
           color: '#334155',

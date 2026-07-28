@@ -43,7 +43,7 @@ const variantClasses: Record<ButtonVariant, string> = {
 const sizeClasses: Record<ButtonSize, string> = {
   default: 'text-[0.8rem] font-semibold rounded-md',
   sm:      'text-[0.72rem] font-semibold rounded-md',
-  xs:      'text-[0.65rem] font-bold uppercase tracking-wide rounded-md',
+  xs:      'text-[0.68rem] font-semibold rounded-md',
 };
 
 const sizeStyles: Record<ButtonSize, React.CSSProperties> = {

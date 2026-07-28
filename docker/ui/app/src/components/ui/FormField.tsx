@@ -38,7 +38,7 @@ const controlBase = [
   'disabled:opacity-50 disabled:cursor-not-allowed',
 ].join(' ');
 
-const labelBase = 'text-[0.68rem] font-bold text-[#4a5568] uppercase tracking-[0.8px]';
+const labelBase = 'text-[0.68rem] font-semibold text-[#4a5568] uppercase tracking-[0.04em]';
 
 export function FormField(props: FormFieldProps) {
   const { label, hint, error, required, className, fullWidth, as = 'input', ...rest } = props;

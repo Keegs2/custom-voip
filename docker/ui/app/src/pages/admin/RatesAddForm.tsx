@@ -10,7 +10,7 @@ const labelStyle: React.CSSProperties = {
   fontWeight: 700,
   color: '#4a5568',
   textTransform: 'uppercase',
-  letterSpacing: '0.08em',
+  letterSpacing: '0.05em',
   marginBottom: 6,
   display: 'block',
 };
@@ -173,7 +173,7 @@ export function RatesAddForm() {
               fontWeight: 700,
               color: '#3b82f6',
               textTransform: 'uppercase',
-              letterSpacing: '0.1em',
+              letterSpacing: '0.05em',
               marginBottom: 20,
             }}
           >

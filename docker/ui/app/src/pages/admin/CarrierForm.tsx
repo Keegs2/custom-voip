@@ -232,7 +232,7 @@ export function CarrierForm({ carrier, onSubmit, onCancel, submitLabel = 'Save' 
 
       {/* Product types */}
       <div>
-        <p className="text-[0.7rem] font-bold text-[#718096] uppercase tracking-[0.7px] mb-2">
+        <p className="text-[0.7rem] font-bold text-[#718096] uppercase tracking-[0.04em] mb-2">
           Product Types
         </p>
         <div className="flex flex-wrap gap-3">
@@ -249,7 +249,7 @@ export function CarrierForm({ carrier, onSubmit, onCancel, submitLabel = 'Save' 
 
       {/* Roles & options */}
       <div>
-        <p className="text-[0.7rem] font-bold text-[#718096] uppercase tracking-[0.7px] mb-2">
+        <p className="text-[0.7rem] font-bold text-[#718096] uppercase tracking-[0.04em] mb-2">
           Role &amp; Options
         </p>
         <div className="flex flex-wrap gap-3">

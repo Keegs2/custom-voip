@@ -187,7 +187,7 @@ function ExtensionRow({ ext, index }: ExtensionRowProps) {
       <td style={{ padding: '8px 14px', whiteSpace: 'nowrap' }}>
         <span
           style={{
-            fontFamily: 'monospace',
+            fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
             fontWeight: 700,
             fontSize: '0.9rem',
             color: '#0ea5e9',
@@ -249,7 +249,7 @@ function ExtensionRow({ ext, index }: ExtensionRowProps) {
       <td
         style={{
           padding: '8px 14px',
-          fontFamily: 'monospace',
+          fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
           fontSize: '0.78rem',
           color: ext.assigned_did ? '#94a3b8' : '#2d3748',
           whiteSpace: 'nowrap',
@@ -399,7 +399,7 @@ export function CustomerUcaasSection({ customerId }: CustomerUcaasSectionProps) 
               fontWeight: 700,
               color: '#0ea5e9',
               textTransform: 'uppercase',
-              letterSpacing: '0.08em',
+              letterSpacing: '0.05em',
             }}
           >
             UCaaS Extensions
@@ -525,7 +525,7 @@ export function CustomerUcaasSection({ customerId }: CustomerUcaasSectionProps) 
                       fontSize: '0.6rem',
                       fontWeight: 700,
                       textTransform: 'uppercase',
-                      letterSpacing: '0.08em',
+                      letterSpacing: '0.05em',
                       color: '#4a5568',
                       borderBottom: '1px solid rgba(42,47,69,0.5)',
                       whiteSpace: 'nowrap',

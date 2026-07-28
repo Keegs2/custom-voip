@@ -39,7 +39,7 @@ function DetailField({ label, value }: { label: string; value: React.ReactNode }
           fontWeight: 700,
           color: '#4a5568',
           textTransform: 'uppercase',
-          letterSpacing: '0.09em',
+          letterSpacing: '0.05em',
         }}
       >
         {label}
@@ -163,7 +163,7 @@ export function CustomerExpandedView({ customer, onEdit, onDelete }: CustomerExp
               fontSize: '0.6rem',
               fontWeight: 700,
               textTransform: 'uppercase',
-              letterSpacing: '0.09em',
+              letterSpacing: '0.05em',
               color: '#4a5568',
             }}
           >

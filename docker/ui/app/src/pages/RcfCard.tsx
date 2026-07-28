@@ -198,7 +198,7 @@ function ForwardToDisplay({ entry, pendingValue, canEdit, onPendingChange }: For
             boxSizing: 'border-box',
             fontSize: '1.3rem',
             fontWeight: 700,
-            fontFamily: 'monospace',
+            fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
             letterSpacing: '0.02em',
             padding: '10px 14px',
             borderRadius: 10,
@@ -285,7 +285,7 @@ function ForwardToDisplay({ entry, pendingValue, canEdit, onPendingChange }: For
         style={{
           fontSize: '1.45rem',
           fontWeight: 800,
-          fontFamily: 'monospace',
+          fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
           letterSpacing: '0.02em',
           color: savedFlash ? '#86efac' : '#4ade80',
           textShadow: savedFlash
@@ -409,7 +409,7 @@ function StatPill({
           fontWeight: 600,
           color: '#334155',
           textTransform: 'uppercase',
-          letterSpacing: '0.08em',
+          letterSpacing: '0.05em',
           whiteSpace: 'nowrap',
         }}
       >
@@ -816,7 +816,7 @@ export function RcfCard({ entry, pendingValue, onPendingChange }: RcfCardProps) 
                   borderRadius: 6,
                   padding: '3px 10px',
                   textTransform: 'uppercase',
-                  letterSpacing: '0.07em',
+                  letterSpacing: '0.05em',
                   whiteSpace: 'nowrap',
                 }}
               >
@@ -845,7 +845,7 @@ export function RcfCard({ entry, pendingValue, onPendingChange }: RcfCardProps) 
             style={{
               fontSize: '1.45rem',
               fontWeight: 800,
-              fontFamily: 'monospace',
+              fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
               letterSpacing: '0.01em',
               color: '#e2e8f0',
               lineHeight: 1.15,
@@ -905,7 +905,7 @@ export function RcfCard({ entry, pendingValue, onPendingChange }: RcfCardProps) 
                 fontWeight: 700,
                 color: 'rgba(74,222,128,0.65)',
                 textTransform: 'uppercase',
-                letterSpacing: '0.12em',
+                letterSpacing: '0.05em',
                 whiteSpace: 'nowrap',
               }}
             >

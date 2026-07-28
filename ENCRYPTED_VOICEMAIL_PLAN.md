@@ -1,4 +1,4 @@
-# Plan: Encrypted-at-Rest Voicemail for Granite Keystone
+# Plan: Encrypted-at-Rest Voicemail for Granite CRAG
 
 ## Context
 
@@ -152,7 +152,7 @@ PLAYBACK:
 
 ### KMS Key Hierarchy
 ```
-projects/granite-keystone-prod/locations/us-east1/keyRings/voicemail-prod/
+projects/granite-crag-prod/locations/us-east1/keyRings/voicemail-prod/
   cryptoKeys/customer-{customer_id}/  (Cloud HSM protection, FIPS 140-2 Level 3)
     versions/1 (auto-rotated every 90 days)
 ```

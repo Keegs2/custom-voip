@@ -147,7 +147,7 @@ export function ApiDidCard({ did }: ApiDidCardProps) {
           <div
             style={{
               fontSize: '0.72rem',
-              fontFamily: 'monospace',
+              fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
               color: '#718096',
               marginTop: 3,
             }}
@@ -243,7 +243,7 @@ function UrlField({
           fontWeight: 700,
           color: '#718096',
           textTransform: 'uppercase',
-          letterSpacing: '0.07em',
+          letterSpacing: '0.05em',
           marginBottom: 8,
         }}
       >

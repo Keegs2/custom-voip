@@ -27,7 +27,7 @@ interface DetailItemProps {
 function DetailItem({ label, value, mono }: DetailItemProps) {
   return (
     <div className="flex flex-col gap-0.5">
-      <span className="text-[0.65rem] font-bold uppercase tracking-[0.7px] text-[#718096]">
+      <span className="text-[0.65rem] font-bold uppercase tracking-[0.04em] text-[#718096]">
         {label}
       </span>
       <span
@@ -118,7 +118,7 @@ export function CdrExpandedRow({ cdr, colSpan, onRated }: CdrExpandedRowProps) {
         {(cdr.sbc_id || cdr.sip_from_user || cdr.sip_to_user || cdr.sip_user_agent || cdr.network_addr) && (
           <div className="mt-4 pt-3 border-t border-[#2a2f45]/50">
             <p
-              className="text-[0.65rem] font-bold uppercase tracking-[0.7px] text-[#4a5568] mb-3"
+              className="text-[0.65rem] font-bold uppercase tracking-[0.04em] text-[#4a5568] mb-3"
             >
               SIP Details
             </p>

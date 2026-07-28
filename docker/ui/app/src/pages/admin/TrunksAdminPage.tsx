@@ -123,7 +123,7 @@ function IpSection({ trunk }: { trunk: Trunk }) {
           fontWeight: 700,
           color: ACCENT,
           textTransform: 'uppercase',
-          letterSpacing: '0.1em',
+          letterSpacing: '0.05em',
           marginBottom: 12,
         }}
       >
@@ -151,7 +151,7 @@ function IpSection({ trunk }: { trunk: Trunk }) {
                 border: '1px solid rgba(42,47,69,0.5)',
               }}
             >
-              <span style={{ fontFamily: 'monospace', fontSize: '0.82rem', color: '#e2e8f0', flex: 1 }}>
+              <span style={{ fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', fontSize: '0.82rem', color: '#e2e8f0', flex: 1 }}>
                 {ip.ip_address}
               </span>
               {ip.description && (
@@ -402,7 +402,7 @@ function DidSection({ trunk }: { trunk: Trunk }) {
           fontWeight: 700,
           color: ACCENT,
           textTransform: 'uppercase',
-          letterSpacing: '0.1em',
+          letterSpacing: '0.05em',
           marginBottom: 12,
         }}
       >
@@ -430,7 +430,7 @@ function DidSection({ trunk }: { trunk: Trunk }) {
                 border: '1px solid rgba(42,47,69,0.5)',
               }}
             >
-              <span style={{ fontFamily: 'monospace', fontSize: '0.82rem', color: '#e2e8f0', flex: 1 }}>
+              <span style={{ fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', fontSize: '0.82rem', color: '#e2e8f0', flex: 1 }}>
                 {did.did}
               </span>
               <EnabledBadge enabled={did.enabled} />
@@ -498,7 +498,7 @@ function DidSection({ trunk }: { trunk: Trunk }) {
               background: '#0f1117',
               color: '#e2e8f0',
               fontSize: '0.82rem',
-              fontFamily: 'monospace',
+              fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
               outline: 'none',
               transition: 'border-color 0.15s',
             }}
@@ -571,7 +571,7 @@ function DidSection({ trunk }: { trunk: Trunk }) {
         >
           <div style={{ fontSize: '0.82rem', color: '#e2e8f0', marginBottom: 10, lineHeight: 1.5 }}>
             Assign{' '}
-            <span style={{ fontFamily: 'monospace', color: '#93c5fd' }}>{pendingLabel}</span>{' '}
+            <span style={{ fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', color: '#93c5fd' }}>{pendingLabel}</span>{' '}
             to this trunk? This DID will be routed to this trunk for all inbound calls.
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
@@ -639,7 +639,7 @@ function DropdownOption({
         borderBottom: '1px solid rgba(255,255,255,0.04)',
       }}
     >
-      <span style={{ fontFamily: 'monospace', fontSize: '0.82rem', color: '#e2e8f0', minWidth: 130 }}>
+      <span style={{ fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', fontSize: '0.82rem', color: '#e2e8f0', minWidth: 130 }}>
         {tn.tn}
       </span>
       <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>
@@ -697,7 +697,7 @@ function EditTrunkForm({ trunk, onSaved }: EditTrunkFormProps) {
           fontWeight: 700,
           color: ACCENT,
           textTransform: 'uppercase',
-          letterSpacing: '0.1em',
+          letterSpacing: '0.05em',
           marginBottom: 16,
         }}
       >
@@ -788,7 +788,7 @@ function ConnectionInfo() {
           fontWeight: 700,
           color: ACCENT,
           textTransform: 'uppercase',
-          letterSpacing: '0.1em',
+          letterSpacing: '0.05em',
           marginBottom: 12,
         }}
       >
@@ -808,7 +808,7 @@ function ConnectionInfo() {
         <div style={{ marginBottom: 6 }}>Point your customer&apos;s PBX to:</div>
         <div
           style={{
-            fontFamily: 'monospace',
+            fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
             fontSize: '0.95rem',
             color: ACCENT,
             fontWeight: 700,
@@ -1046,7 +1046,7 @@ function TrunkRow({ trunk, isExpanded, onToggleExpand, onToggleEnabled, onDelete
       >
         {/* ID */}
         <td style={CELL_STYLE}>
-          <span style={{ color: '#4a5568', fontFamily: 'monospace', fontSize: '0.78rem' }}>
+          <span style={{ color: '#4a5568', fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', fontSize: '0.78rem' }}>
             #{trunk.id}
           </span>
         </td>
@@ -1258,7 +1258,7 @@ function CreateTrunkForm({ onClose }: CreateTrunkFormProps) {
           fontWeight: 700,
           color: ACCENT,
           textTransform: 'uppercase',
-          letterSpacing: '0.1em',
+          letterSpacing: '0.05em',
           marginBottom: 20,
         }}
       >

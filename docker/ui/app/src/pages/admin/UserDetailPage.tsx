@@ -300,7 +300,7 @@ function HeaderCard({ data, isEditing, onEditToggle }: HeaderCardProps) {
                 fontSize: '0.65rem',
                 fontWeight: 700,
                 textTransform: 'uppercase',
-                letterSpacing: '0.08em',
+                letterSpacing: '0.05em',
                 padding: '2px 8px',
                 borderRadius: 5,
                 color: roleCfg.color,
@@ -320,7 +320,7 @@ function HeaderCard({ data, isEditing, onEditToggle }: HeaderCardProps) {
                   fontSize: '0.65rem',
                   fontWeight: 700,
                   textTransform: 'uppercase',
-                  letterSpacing: '0.08em',
+                  letterSpacing: '0.05em',
                   padding: '2px 8px',
                   borderRadius: 5,
                   color: accountTypeCfg.color,
@@ -357,7 +357,7 @@ function HeaderCard({ data, isEditing, onEditToggle }: HeaderCardProps) {
               Ext {extension.number}
             </div>
             {extension.did && (
-              <div style={{ fontSize: '0.8rem', color: '#94a3b8', fontFamily: 'monospace' }}>
+              <div style={{ fontSize: '0.8rem', color: '#94a3b8', fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace' }}>
                 {fmt(extension.did)}
               </div>
             )}
@@ -545,7 +545,7 @@ function StatCard({ icon, label, primary, secondary, accent, linkTo, linkLabel }
           fontWeight: 700,
           color: '#4a5568',
           textTransform: 'uppercase',
-          letterSpacing: '0.1em',
+          letterSpacing: '0.05em',
           marginBottom: 4,
         }}
       >
@@ -701,12 +701,12 @@ function ExtensionConfigCard({ extension }: ExtensionConfigCardProps) {
   const fields: Array<{ label: string; value: React.ReactNode; accent?: string }> = [
     {
       label: 'Extension',
-      value: <span style={{ fontFamily: 'monospace', color: '#60a5fa', fontSize: '0.95rem', fontWeight: 700 }}>{extension.number}</span>,
+      value: <span style={{ fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', color: '#60a5fa', fontSize: '0.95rem', fontWeight: 700 }}>{extension.number}</span>,
     },
     {
       label: 'Assigned DID',
       value: extension.did
-        ? <span style={{ fontFamily: 'monospace', color: '#e2e8f0' }}>{fmt(extension.did)}</span>
+        ? <span style={{ fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', color: '#e2e8f0' }}>{fmt(extension.did)}</span>
         : <span style={{ color: '#4a5568', fontStyle: 'italic' }}>None</span>,
     },
     {
@@ -724,13 +724,13 @@ function ExtensionConfigCard({ extension }: ExtensionConfigCardProps) {
     {
       label: 'Forward on Busy',
       value: extension.forward_on_busy
-        ? <span style={{ fontFamily: 'monospace', color: '#e2e8f0' }}>{fmt(extension.forward_on_busy)}</span>
+        ? <span style={{ fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', color: '#e2e8f0' }}>{fmt(extension.forward_on_busy)}</span>
         : <span style={{ color: '#4a5568', fontStyle: 'italic' }}>Not configured</span>,
     },
     {
       label: 'Forward on No Answer',
       value: extension.forward_on_no_answer
-        ? <span style={{ fontFamily: 'monospace', color: '#e2e8f0' }}>{fmt(extension.forward_on_no_answer)}</span>
+        ? <span style={{ fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', color: '#e2e8f0' }}>{fmt(extension.forward_on_no_answer)}</span>
         : <span style={{ color: '#4a5568', fontStyle: 'italic' }}>Not configured</span>,
     },
     {
@@ -771,7 +771,7 @@ function ExtensionConfigCard({ extension }: ExtensionConfigCardProps) {
                 fontWeight: 700,
                 color: '#4a5568',
                 textTransform: 'uppercase',
-                letterSpacing: '0.1em',
+                letterSpacing: '0.05em',
                 marginBottom: 6,
               }}
             >
@@ -902,7 +902,7 @@ function RecentCallsCard({ calls }: RecentCallsCardProps) {
                     fontWeight: 700,
                     color: '#334155',
                     textTransform: 'uppercase',
-                    letterSpacing: '0.1em',
+                    letterSpacing: '0.05em',
                     background: 'rgba(0,0,0,0.06)',
                     whiteSpace: 'nowrap',
                   }}
@@ -952,13 +952,13 @@ function RecentCallsCard({ calls }: RecentCallsCardProps) {
                     </span>
                   </td>
                   {/* Caller */}
-                  <td style={{ padding: '8px 12px', fontSize: '0.8rem', color: '#cbd5e0', fontFamily: 'monospace' }}>
+                  <td style={{ padding: '8px 12px', fontSize: '0.8rem', color: '#cbd5e0', fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace' }}>
                     {fmt(call.caller)}
                   </td>
                   {/* Arrow */}
                   <td style={{ padding: '8px 4px', color: '#334155', fontSize: '0.75rem' }}>→</td>
                   {/* Callee */}
-                  <td style={{ padding: '8px 12px', fontSize: '0.8rem', color: '#cbd5e0', fontFamily: 'monospace' }}>
+                  <td style={{ padding: '8px 12px', fontSize: '0.8rem', color: '#cbd5e0', fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace' }}>
                     {fmt(call.callee)}
                   </td>
                   {/* Duration */}
@@ -1207,7 +1207,7 @@ function SectionCard({ children, accent = '#3b82f6', title, icon }: SectionCardP
             fontWeight: 700,
             color: '#64748b',
             textTransform: 'uppercase',
-            letterSpacing: '0.1em',
+            letterSpacing: '0.05em',
           }}
         >
           {title}
@@ -1261,7 +1261,7 @@ function RcfCard({ rcf }: RcfCardProps) {
                     fontWeight: 700,
                     color: '#334155',
                     textTransform: 'uppercase',
-                    letterSpacing: '0.1em',
+                    letterSpacing: '0.05em',
                     background: 'rgba(0,0,0,0.06)',
                     whiteSpace: 'nowrap',
                   }}
@@ -1280,19 +1280,19 @@ function RcfCard({ rcf }: RcfCardProps) {
                   borderBottom: '1px solid rgba(255,255,255,0.03)',
                 }}
               >
-                <td style={{ padding: '8px 12px', fontSize: '0.8rem', color: '#cbd5e0', fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
+                <td style={{ padding: '8px 12px', fontSize: '0.8rem', color: '#cbd5e0', fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', whiteSpace: 'nowrap' }}>
                   {fmt(r.did)}
                 </td>
                 <td style={{ padding: '8px 12px', fontSize: '0.8rem', color: '#94a3b8' }}>
                   {r.name ?? <span style={{ color: '#4a5568', fontStyle: 'italic' }}>—</span>}
                 </td>
-                <td style={{ padding: '8px 12px', fontSize: '0.8rem', color: '#e2e8f0', fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
+                <td style={{ padding: '8px 12px', fontSize: '0.8rem', color: '#e2e8f0', fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', whiteSpace: 'nowrap' }}>
                   {fmt(r.forward_to)}
                 </td>
                 <td style={{ padding: '8px 12px', fontSize: '0.78rem', color: '#64748b', whiteSpace: 'nowrap' }}>
                   {r.ring_timeout}s
                 </td>
-                <td style={{ padding: '8px 12px', fontSize: '0.78rem', color: '#94a3b8', fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
+                <td style={{ padding: '8px 12px', fontSize: '0.78rem', color: '#94a3b8', fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', whiteSpace: 'nowrap' }}>
                   {r.failover_to ? fmt(r.failover_to) : <span style={{ color: '#4a5568', fontStyle: 'italic' }}>None</span>}
                 </td>
                 <td style={{ padding: '8px 12px', textAlign: 'center' }}>
@@ -1368,7 +1368,7 @@ function ApiDidCard({ api_dids }: ApiDidCardProps) {
                     fontWeight: 700,
                     color: '#334155',
                     textTransform: 'uppercase',
-                    letterSpacing: '0.1em',
+                    letterSpacing: '0.05em',
                     background: 'rgba(0,0,0,0.06)',
                     whiteSpace: 'nowrap',
                   }}
@@ -1387,14 +1387,14 @@ function ApiDidCard({ api_dids }: ApiDidCardProps) {
                   borderBottom: '1px solid rgba(255,255,255,0.03)',
                 }}
               >
-                <td style={{ padding: '8px 12px', fontSize: '0.8rem', color: '#cbd5e0', fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
+                <td style={{ padding: '8px 12px', fontSize: '0.8rem', color: '#cbd5e0', fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', whiteSpace: 'nowrap' }}>
                   {fmt(d.did)}
                 </td>
                 <td style={{ padding: '8px 12px', maxWidth: 320 }}>
                   <span
                     style={{
                       fontSize: '0.75rem',
-                      fontFamily: 'monospace',
+                      fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
                       color: '#94a3b8',
                       display: 'block',
                       overflow: 'hidden',
@@ -1477,7 +1477,7 @@ function TrunksCard({ trunks }: TrunksCardProps) {
                     fontWeight: 700,
                     color: '#334155',
                     textTransform: 'uppercase',
-                    letterSpacing: '0.1em',
+                    letterSpacing: '0.05em',
                     background: 'rgba(0,0,0,0.06)',
                     whiteSpace: 'nowrap',
                   }}
@@ -1619,7 +1619,7 @@ function EditUserPanel({ userId, user, onSuccess, onCancel }: EditUserPanelProps
     fontWeight: 700,
     color: '#64748b',
     textTransform: 'uppercase',
-    letterSpacing: '0.08em',
+    letterSpacing: '0.05em',
     marginBottom: 6,
   };
 
@@ -1672,7 +1672,7 @@ function EditUserPanel({ userId, user, onSuccess, onCancel }: EditUserPanelProps
             fontWeight: 700,
             color: '#64748b',
             textTransform: 'uppercase',
-            letterSpacing: '0.1em',
+            letterSpacing: '0.05em',
           }}
         >
           Edit User
@@ -2107,7 +2107,7 @@ function AllUsersTable({ users, searchTerm, onSelectUser }: AllUsersTableProps) 
             fontSize: '0.68rem',
             color: '#4a5568',
             textTransform: 'uppercase',
-            letterSpacing: '0.08em',
+            letterSpacing: '0.05em',
             fontWeight: 700,
           }}
         >
@@ -2135,7 +2135,7 @@ function AllUsersTable({ users, searchTerm, onSelectUser }: AllUsersTableProps) 
                     fontWeight: 700,
                     color: '#334155',
                     textTransform: 'uppercase',
-                    letterSpacing: '0.1em',
+                    letterSpacing: '0.05em',
                     background: 'rgba(0,0,0,0.06)',
                     whiteSpace: 'nowrap',
                   }}
@@ -2340,7 +2340,7 @@ function UserLookupPanel({ onSelectUser, customerId }: UserLookupPanelProps) {
               fontWeight: 700,
               color: '#64748b',
               textTransform: 'uppercase',
-              letterSpacing: '0.1em',
+              letterSpacing: '0.05em',
             }}
           >
             All Users
@@ -2640,7 +2640,7 @@ function CustomerPickerTable({ onSelectCustomer }: CustomerPickerTableProps) {
                           fontWeight: 700,
                           color: '#334155',
                           textTransform: 'uppercase',
-                          letterSpacing: '0.1em',
+                          letterSpacing: '0.05em',
                           whiteSpace: 'nowrap',
                         }}
                       >
@@ -2678,7 +2678,7 @@ function CustomerPickerTable({ onSelectCustomer }: CustomerPickerTableProps) {
                         }}
                       >
                         <td style={pickerTdStyle}>
-                          <span style={{ color: '#4a5568', fontFamily: 'monospace', fontSize: '0.78rem' }}>
+                          <span style={{ color: '#4a5568', fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', fontSize: '0.78rem' }}>
                             #{customer.id}
                           </span>
                         </td>
@@ -2841,7 +2841,7 @@ export function UserDetailPage() {
                 fontWeight: 700,
                 color: '#a855f7',
                 textTransform: 'uppercase',
-                letterSpacing: '0.1em',
+                letterSpacing: '0.05em',
               }}
             >
               Customer

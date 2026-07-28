@@ -292,9 +292,9 @@ function ProductCardEl({ card, onRequestAccess }: ProductCardElProps) {
             <span
               style={{
                 fontSize: '0.6rem',
-                fontWeight: 700,
+                fontWeight: 600,
                 color: '#60a5fa',
-                letterSpacing: '0.08em',
+                letterSpacing: '0.05em',
                 textTransform: 'uppercase',
               }}
             >
@@ -377,9 +377,9 @@ function ProductCardEl({ card, onRequestAccess }: ProductCardElProps) {
           <span
             style={{
               fontSize: '0.6rem',
-              fontWeight: 700,
+              fontWeight: 600,
               color: '#c084fc',
-              letterSpacing: '0.08em',
+              letterSpacing: '0.05em',
               textTransform: 'uppercase',
             }}
           >
@@ -419,8 +419,8 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
     <div
       style={{
         fontSize: '0.62rem',
-        fontWeight: 700,
-        letterSpacing: '0.14em',
+        fontWeight: 600,
+        letterSpacing: '0.06em',
         textTransform: 'uppercase',
         color: '#3b82f6',
         marginBottom: 20,
@@ -460,9 +460,7 @@ function RequestAccessCta() {
         style={{
           fontSize: '0.72rem',
           color: '#475569',
-          letterSpacing: '0.04em',
           marginBottom: 16,
-          textTransform: 'uppercase',
           fontWeight: 600,
         }}
       >
@@ -551,16 +549,16 @@ export function DashboardPage() {
             maxWidth: 760,
           }}
         >
-          {/* Keystone branded image with scan-line overlay */}
+          {/* CRAG branded image with scan-line overlay */}
           {/*
             Two-layer structure:
-            - .dash-keystone-hero-wrap  → outer; handles hover scale via CSS transition
-            - img.dash-keystone-hero    → inner; owns glow + float animation, never paused
+            - .dash-crag-hero-wrap  → outer; handles hover scale via CSS transition
+            - img.dash-crag-hero    → inner; owns glow + float animation, never paused
             Keeping them on separate elements prevents the animation transform and the
             hover scale transform from fighting on the same CSS property.
           */}
           <div
-            className="dash-keystone-hero-wrap"
+            className="dash-crag-hero-wrap"
             style={{
               position: 'relative',
               marginBottom: 32,
@@ -569,9 +567,9 @@ export function DashboardPage() {
             }}
           >
             <img
-              src="/keystone_image.png"
-              alt="Granite Keystone — Distributed Voice Infrastructure"
-              className="dash-keystone-hero"
+              src="/crag.png"
+              alt="Granite CRAG — Call Routing Application Gateway"
+              className="dash-crag-hero"
               style={{
                 width: 320,
                 height: 'auto',

@@ -51,7 +51,7 @@ function LocalStatCard({ label, value, icon, accent }: LocalStatCardProps) {
           fontWeight: 700,
           color: '#4a5568',
           textTransform: 'uppercase',
-          letterSpacing: '0.1em',
+          letterSpacing: '0.05em',
           marginBottom: 10,
         }}
       >

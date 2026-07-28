@@ -68,9 +68,9 @@ export function Th({ children, className }: ThProps) {
       style={{
         padding: '14px 20px',
         fontSize: '0.68rem',
-        fontWeight: 700,
+        fontWeight: 600,
         textTransform: 'uppercase',
-        letterSpacing: '0.08em',
+        letterSpacing: '0.05em',
         color: '#64748b',
         borderBottom: '1px solid rgba(42,47,69,0.6)',
       }}

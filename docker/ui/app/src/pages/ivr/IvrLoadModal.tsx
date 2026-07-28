@@ -148,7 +148,7 @@ export function IvrLoadModal({ open, onClose, onLoad, currentFlowId }: IvrLoadMo
                     {flow.name || 'Untitled'}
                   </span>
                   {flow.id === currentFlowId && (
-                    <span className="text-[0.65rem] font-bold uppercase tracking-wider text-[#3b82f6] bg-[#3b82f6]/10 px-1.5 py-0.5 rounded">
+                    <span className="text-[0.65rem] font-semibold uppercase tracking-[0.04em] text-[#3b82f6] bg-[#3b82f6]/10 px-1.5 py-0.5 rounded">
                       Current
                     </span>
                   )}

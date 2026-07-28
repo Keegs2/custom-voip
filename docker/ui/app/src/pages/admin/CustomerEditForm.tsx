@@ -18,7 +18,7 @@ const sectionLabelStyle: React.CSSProperties = {
   fontWeight: 700,
   color: '#3b82f6',
   textTransform: 'uppercase',
-  letterSpacing: '0.1em',
+  letterSpacing: '0.05em',
   marginBottom: 16,
 };
 

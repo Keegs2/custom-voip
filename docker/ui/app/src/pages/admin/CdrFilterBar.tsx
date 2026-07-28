@@ -97,7 +97,7 @@ export function CdrFilterBar({ filters, onChange, onSearch, onExport, searching 
     fontWeight: 700,
     color: '#4a5568',
     textTransform: 'uppercase',
-    letterSpacing: '0.08em',
+    letterSpacing: '0.05em',
     marginBottom: 8,
     display: 'block',
   };

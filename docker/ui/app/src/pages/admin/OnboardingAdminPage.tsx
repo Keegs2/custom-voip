@@ -107,7 +107,7 @@ const sectionLabel: React.CSSProperties = {
   fontWeight: 700,
   color: '#3b82f6',
   textTransform: 'uppercase',
-  letterSpacing: '0.1em',
+  letterSpacing: '0.05em',
   marginBottom: 12,
 };
 
@@ -197,7 +197,7 @@ function CredentialsModal({ result, onClose }: CredentialsModalProps) {
         >
           <div>
             <span style={fieldLabel}>Login Email</span>
-            <span style={{ ...fieldValue, fontFamily: 'monospace', fontSize: '0.85rem' }}>
+            <span style={{ ...fieldValue, fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', fontSize: '0.85rem' }}>
               {result.user.email}
             </span>
           </div>
@@ -215,7 +215,7 @@ function CredentialsModal({ result, onClose }: CredentialsModalProps) {
                   color: '#93c5fd',
                   fontSize: '0.9rem',
                   letterSpacing: '0.04em',
-                  fontFamily: 'monospace',
+                  fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
                   wordBreak: 'break-all',
                 }}
               >
@@ -266,7 +266,7 @@ function CredentialsModal({ result, onClose }: CredentialsModalProps) {
                     border: '1px solid rgba(42,47,69,0.5)',
                   }}
                 >
-                  <span style={{ fontFamily: 'monospace', fontSize: '0.82rem', color: '#cbd5e0' }}>
+                  <span style={{ fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', fontSize: '0.82rem', color: '#cbd5e0' }}>
                     {fmt(d.did)}
                   </span>
                   <span style={{ fontSize: '0.75rem', color: '#718096' }}>
@@ -550,7 +550,7 @@ function ProvisioningForm({ request, onApproved }: ProvisioningFormProps) {
                       onClick={(e) => e.stopPropagation()}
                       style={{ accentColor: '#3b82f6', width: 14, height: 14, flexShrink: 0 }}
                     />
-                    <span style={{ fontFamily: 'monospace', fontSize: '0.83rem', color: '#cbd5e0', flex: 1 }}>
+                    <span style={{ fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', fontSize: '0.83rem', color: '#cbd5e0', flex: 1 }}>
                       {fmt(d.did)}
                     </span>
                     {(d.city || d.state) && (
@@ -581,7 +581,7 @@ function ProvisioningForm({ request, onApproved }: ProvisioningFormProps) {
               <div key={did} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                 <span
                   style={{
-                    fontFamily: 'monospace',
+                    fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
                     fontSize: '0.8rem',
                     color: '#94a3b8',
                     minWidth: 160,
@@ -690,7 +690,7 @@ function ActiveDetail({ request }: { request: OnboardingRequest }) {
                   border: '1px solid rgba(42,47,69,0.5)',
                 }}
               >
-                <span style={{ fontFamily: 'monospace', fontSize: '0.83rem', color: '#cbd5e0' }}>
+                <span style={{ fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', fontSize: '0.83rem', color: '#cbd5e0' }}>
                   {fmt(d.did)}
                 </span>
                 <span style={{ fontSize: '0.78rem', color: '#718096' }}>
@@ -1086,19 +1086,19 @@ export function OnboardingAdminPage() {
             }}
           >
             <div style={{ width: 16, flexShrink: 0 }} />
-            <div style={{ flex: 1, fontSize: '0.65rem', fontWeight: 700, color: '#4a5568', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+            <div style={{ flex: 1, fontSize: '0.65rem', fontWeight: 700, color: '#4a5568', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
               Company / Contact
             </div>
-            <div style={{ width: 52, textAlign: 'center', fontSize: '0.65rem', fontWeight: 700, color: '#4a5568', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+            <div style={{ width: 52, textAlign: 'center', fontSize: '0.65rem', fontWeight: 700, color: '#4a5568', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
               DIDs
             </div>
-            <div style={{ width: 120, fontSize: '0.65rem', fontWeight: 700, color: '#4a5568', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+            <div style={{ width: 120, fontSize: '0.65rem', fontWeight: 700, color: '#4a5568', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
               Timeline
             </div>
-            <div style={{ width: 120, fontSize: '0.65rem', fontWeight: 700, color: '#4a5568', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+            <div style={{ width: 120, fontSize: '0.65rem', fontWeight: 700, color: '#4a5568', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
               Status
             </div>
-            <div style={{ width: 90, fontSize: '0.65rem', fontWeight: 700, color: '#4a5568', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+            <div style={{ width: 90, fontSize: '0.65rem', fontWeight: 700, color: '#4a5568', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
               Submitted
             </div>
           </div>

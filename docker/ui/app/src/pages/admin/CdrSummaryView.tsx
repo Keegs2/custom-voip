@@ -52,7 +52,7 @@ export function CdrSummaryView({ customerId }: CdrSummaryViewProps) {
     <div>
       {/* Group by selector */}
       <div className="flex items-center gap-3 mb-4">
-        <span className="text-[0.7rem] font-bold uppercase tracking-[0.7px] text-[#718096]">
+        <span className="text-[0.7rem] font-bold uppercase tracking-[0.04em] text-[#718096]">
           Group by
         </span>
         {(['day', 'hour', 'destination'] as GroupBy[]).map((g) => (

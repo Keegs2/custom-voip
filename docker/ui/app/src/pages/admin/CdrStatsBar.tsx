@@ -39,7 +39,7 @@ function StatPill({ label, value, accent }: StatPillProps) {
           fontSize: '0.62rem',
           fontWeight: 700,
           textTransform: 'uppercase',
-          letterSpacing: '0.08em',
+          letterSpacing: '0.05em',
           color: '#4a5568',
           marginBottom: 6,
           whiteSpace: 'nowrap',

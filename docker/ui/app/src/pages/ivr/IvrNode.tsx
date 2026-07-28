@@ -87,7 +87,7 @@ export function IvrNode({ node, isSelected, dispatch }: IvrNodeProps) {
 
       {/* Node body */}
       <div className="flex-1 min-w-0 py-3 pr-2">
-        <div className={cn('text-[0.68rem] font-bold uppercase tracking-[0.8px] mb-0.5', textClass)}>
+        <div className={cn('text-[0.68rem] font-bold uppercase tracking-[0.04em] mb-0.5', textClass)}>
           {node.type}
         </div>
         <div className="text-[0.85rem] text-[#e2e8f0] truncate leading-tight">

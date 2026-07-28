@@ -149,8 +149,8 @@ function SidebarLoginForm() {
       <p
         style={{
           fontSize: '0.6rem',
-          fontWeight: 700,
-          letterSpacing: '0.1em',
+          fontWeight: 600,
+          letterSpacing: '0.05em',
           textTransform: 'uppercase',
           color: '#334155',
           marginBottom: 10,
@@ -462,8 +462,8 @@ function CollapsibleGroup({ id, label, icon, isOpen, onToggle, children, to }: C
           userSelect: 'none',
           color: '#475569',
           fontSize: '0.6rem',
-          fontWeight: 700,
-          letterSpacing: '0.1em',
+          fontWeight: 600,
+          letterSpacing: '0.05em',
           textTransform: 'uppercase',
           transition: 'background 0.15s, color 0.15s',
         }}
@@ -535,8 +535,8 @@ function SubGroupLabel({ label }: { label: string }) {
       style={{
         padding: '6px 10px 2px',
         fontSize: '0.52rem',
-        fontWeight: 700,
-        letterSpacing: '0.1em',
+        fontWeight: 600,
+        letterSpacing: '0.05em',
         textTransform: 'uppercase',
         color: 'rgba(71, 85, 105, 0.6)',
         marginTop: 8,
@@ -741,8 +741,8 @@ export function Sidebar() {
             <span
               style={{
                 fontSize: '0.6rem',
-                fontWeight: 700,
-                letterSpacing: '0.08em',
+                fontWeight: 600,
+                letterSpacing: '0.05em',
                 textTransform: 'uppercase',
                 color: '#f59e0b',
               }}
@@ -778,8 +778,8 @@ export function Sidebar() {
           />
           <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <img
-              src="/keystone_logo.png"
-              alt="Granite Keystone"
+              src="/crag.png"
+              alt="Granite CRAG"
               style={{
                 height: 40,
                 width: 'auto',

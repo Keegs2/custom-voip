@@ -84,8 +84,8 @@ const inputBase: CSSProperties = {
 const labelStyle: CSSProperties = {
   display: 'block',
   fontSize: '0.62rem',
-  fontWeight: 700,
-  letterSpacing: '0.07em',
+  fontWeight: 600,
+  letterSpacing: '0.05em',
   textTransform: 'uppercase',
   color: '#475569',
   marginBottom: 4,
@@ -540,8 +540,8 @@ function ReviewRow({ label, value }: { label: string; value: string }) {
       <span
         style={{
           fontSize: '0.58rem',
-          fontWeight: 700,
-          letterSpacing: '0.08em',
+          fontWeight: 600,
+          letterSpacing: '0.05em',
           textTransform: 'uppercase',
           color: '#334155',
         }}
@@ -564,8 +564,8 @@ function ReviewRow({ label, value }: { label: string; value: string }) {
 
 const sectionHeadStyle: CSSProperties = {
   fontSize: '0.58rem',
-  fontWeight: 700,
-  letterSpacing: '0.1em',
+  fontWeight: 600,
+  letterSpacing: '0.05em',
   textTransform: 'uppercase',
   color: AMBER,
   marginBottom: 2,
@@ -809,7 +809,7 @@ export function AccessRequestForm() {
               userSelect: 'none',
             }}
           >
-            New to Granite Keystone?
+            New to Granite CRAG?
           </span>
 
           <button

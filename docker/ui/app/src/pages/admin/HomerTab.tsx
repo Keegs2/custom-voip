@@ -80,7 +80,7 @@ export function HomerTab() {
             The Homer SIP capture interface at{' '}
             <span
               style={{
-                fontFamily: 'monospace',
+                fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
                 color: '#93c5fd',
                 background: 'rgba(59,130,246,0.1)',
                 padding: '2px 6px',

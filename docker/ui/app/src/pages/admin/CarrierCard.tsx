@@ -175,7 +175,7 @@ export function CarrierCard({ carrier: initialCarrier }: CarrierCardProps) {
         </div>
         <div
           style={{
-            fontFamily: 'monospace',
+            fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
             fontSize: '0.75rem',
             color: '#718096',
             marginTop: 3,
@@ -207,7 +207,7 @@ export function CarrierCard({ carrier: initialCarrier }: CarrierCardProps) {
       {!isEditing && (
         <pre
           style={{
-            fontFamily: 'monospace',
+            fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
             fontSize: '0.75rem',
             background: 'rgba(15,17,23,0.8)',
             border: '1px solid rgba(42,47,69,0.6)',
