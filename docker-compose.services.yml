@@ -42,6 +42,10 @@ services:
       # POST /v1/carrier-status/report. Must match CARRIER_STATUS_TOKEN in the
       # SBCs' .env. Unset => the endpoint fail-closes (rejects all reports).
       - CARRIER_STATUS_TOKEN=${CARRIER_STATUS_TOKEN:-}
+      # Shared bearer token the SBC live-trunk feeder presents to POST
+      # /v1/live-trunk-stats/report. Must match LIVE_TRUNK_STATS_TOKEN in the
+      # SBCs' .env. Unset => the endpoint fail-closes (rejects all reports).
+      - LIVE_TRUNK_STATS_TOKEN=${LIVE_TRUNK_STATS_TOKEN:-}
     ports:
       - "8088:8000"
     networks:
