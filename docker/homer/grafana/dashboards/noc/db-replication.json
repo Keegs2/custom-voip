@@ -34,20 +34,20 @@
       "id": 100,
       "type": "text",
       "title": "",
-      "gridPos": { "h": 3, "w": 24, "x": 0, "y": 0 },
+      "gridPos": { "h": 2, "w": 24, "x": 0, "y": 0 },
       "transparent": true,
       "options": {
         "mode": "markdown",
-        "content": "## Database & Replication\nThe East `services` VM (10.142.0.103) is the **PG primary** and holds ALL zones' CDRs. It streams to `east-db-standby` (HA), `west-db`, and `central-db`. **Replication lag is carrier-critical** — a lagging replica serves stale DID lookups in its zone. Lag panels query `pg_stat_replication` on the primary via the `voip-cdr-pg` datasource; DB-VM CPU/mem/disk come from `gcp-monitoring`.\n\n_Note: replicas are labelled by `application_name` / `client_addr` as reported by the primary. If a standby's `application_name` is unset it shows as `walreceiver` — identify it by `client_addr` (west-db 10.138.0.2, central-db 10.128.0.2, east-db-standby 10.142.0.87)._"
+        "content": "## Database & Replication\nEast `services` VM (10.142.0.103) is the **PG primary** holding ALL zones' CDRs. It streams via **4 physical slots** — `east_standby` (HA), `west_standby`, `central_standby`, `sandbox_replica` — to the zone read-replicas that serve DID lookups. **A DISCONNECTED or LAGGING replica serves stale routing in its zone.** All SQL is real-time against the primary via `voip-cdr-pg`; DB-VM host metrics come from `gcp-monitoring`."
       },
       "fieldConfig": { "defaults": {}, "overrides": [] }
     },
     {
       "id": 1,
       "type": "stat",
-      "title": "Connected replicas",
-      "description": "Rows in pg_stat_replication on the primary. Expect 3 streaming standbys (east-db-standby, west-db, central-db) + any sandbox replica. Fewer = a standby disconnected.",
-      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 3 },
+      "title": "Primary status",
+      "description": "pg_is_in_recovery() on the primary. 1 = PRIMARY accepting writes (this query succeeding also proves the primary is up). 0 = the box is in recovery (a standby got promoted / split-brain) — writes are refused.",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 2 },
       "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
       "targets": [
         {
@@ -56,7 +56,7 @@
           "format": "table",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT count(*) AS connected_replicas FROM pg_stat_replication WHERE state = 'streaming';"
+          "rawSql": "SELECT CASE WHEN pg_is_in_recovery() THEN 0 ELSE 1 END AS primary_ok;"
         }
       ],
       "options": {
@@ -70,13 +70,65 @@
       "fieldConfig": {
         "defaults": {
           "unit": "short",
-          "mappings": [],
+          "mappings": [
+            { "type": "value", "options": {
+              "1": { "text": "PRIMARY · writes OK", "color": "green", "index": 0 },
+              "0": { "text": "IN RECOVERY", "color": "red", "index": 1 }
+            } }
+          ],
           "thresholds": {
             "mode": "absolute",
             "steps": [
               { "color": "red", "value": null },
-              { "color": "orange", "value": 2 },
-              { "color": "green", "value": 3 }
+              { "color": "green", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Replicas in sync",
+      "description": "Of the physical slots (expected: east_standby, west_standby, central_standby, sandbox_replica = 4), how many are active AND streaming AND < 10s replay lag, shown as in_sync / total. Green only when ALL are in sync; anything less is red (a standby is disconnected or lagging).",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 2 },
+      "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT count(*) FILTER (WHERE s.active AND r.state = 'streaming' AND COALESCE(EXTRACT(EPOCH FROM r.replay_lag), 0) < 10) AS in_sync, count(*) AS total FROM pg_replication_slots s LEFT JOIN pg_stat_replication r ON r.pid = s.active_pid WHERE s.slot_type = 'physical';"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "/^in_sync$/", "values": false },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "mappings": [
+            { "type": "value", "options": {
+              "4": { "text": "4 / 4 in sync", "color": "green", "index": 0 },
+              "3": { "text": "3 / 4 · 1 down", "color": "red", "index": 1 },
+              "2": { "text": "2 / 4 · 2 down", "color": "red", "index": 2 },
+              "1": { "text": "1 / 4 · 3 down", "color": "red", "index": 3 },
+              "0": { "text": "0 / 4 · all down", "color": "red", "index": 4 }
+            } }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 4 }
             ]
           }
         },
@@ -88,7 +140,7 @@
       "type": "stat",
       "title": "Max replay lag (bytes)",
       "description": "Largest replay-LSN byte gap across all streaming standbys right now (pg_wal_lsn_diff(pg_current_wal_lsn(), replay_lsn)). Same-region should be tiny; cross-region a bit higher. A large, GROWING value = a stuck replica.",
-      "gridPos": { "h": 5, "w": 6, "x": 6, "y": 3 },
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 2 },
       "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
       "targets": [
         {
@@ -129,7 +181,7 @@
       "type": "stat",
       "title": "Max replay lag (time)",
       "description": "Largest replay_lag interval across standbys, in seconds. This is wall-clock delay behind the primary. Carrier-critical: a zone reading a lagging replica serves stale routing.",
-      "gridPos": { "h": 5, "w": 6, "x": 12, "y": 3 },
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 2 },
       "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
       "targets": [
         {
@@ -167,52 +219,11 @@
       }
     },
     {
-      "id": 4,
-      "type": "stat",
-      "title": "Backend connections",
-      "description": "Total backends in pg_stat_activity on the primary. Watch against max_connections; PgBouncer fronts app traffic so this is mostly replication + admin + direct analytics.",
-      "gridPos": { "h": 5, "w": 6, "x": 18, "y": 3 },
-      "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
-      "targets": [
-        {
-          "refId": "A",
-          "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
-          "format": "table",
-          "editorMode": "code",
-          "rawQuery": true,
-          "rawSql": "SELECT count(*) AS backends FROM pg_stat_activity WHERE backend_type = 'client backend';"
-        }
-      ],
-      "options": {
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
-        "orientation": "auto",
-        "textMode": "value",
-        "colorMode": "background",
-        "graphMode": "none",
-        "justifyMode": "center"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              { "color": "green", "value": null },
-              { "color": "orange", "value": 150 },
-              { "color": "red", "value": 250 }
-            ]
-          }
-        },
-        "overrides": []
-      }
-    },
-    {
       "id": 10,
       "type": "table",
-      "title": "Replicas — live state (pg_stat_replication)",
-      "description": "One row per connected standby. write/flush/replay lag both as byte diffs and as intervals. sync_state=async is expected for these streaming replicas.",
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 8 },
+      "title": "All databases — status",
+      "description": "One row per database: the PRIMARY plus every expected physical replication slot (LEFT JOINed to pg_stat_replication, so a standby that is GONE still shows as a DISCONNECTED row rather than vanishing). STATUS is color-coded: WRITES OK / IN SYNC green, LAGGING orange, IN RECOVERY / DISCONNECTED red. This is the one-glance answer to 'are all DBs up and the replicas in sync?'.",
+      "gridPos": { "h": 7, "w": 24, "x": 0, "y": 6 },
       "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
       "targets": [
         {
@@ -221,30 +232,25 @@
           "format": "table",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT COALESCE(NULLIF(application_name, ''), 'walreceiver') AS replica, client_addr::text AS client_addr, state, sync_state, pg_wal_lsn_diff(pg_current_wal_lsn(), sent_lsn)   AS sent_lag_bytes, pg_wal_lsn_diff(pg_current_wal_lsn(), write_lsn)  AS write_lag_bytes, pg_wal_lsn_diff(pg_current_wal_lsn(), flush_lsn)  AS flush_lag_bytes, pg_wal_lsn_diff(pg_current_wal_lsn(), replay_lsn) AS replay_lag_bytes, EXTRACT(EPOCH FROM write_lag)  AS write_lag_s, EXTRACT(EPOCH FROM flush_lag)  AS flush_lag_s, EXTRACT(EPOCH FROM replay_lag) AS replay_lag_s FROM pg_stat_replication ORDER BY replay_lag_bytes DESC NULLS LAST;"
+          "rawSql": "SELECT 'PRIMARY (East)' AS database, 'primary' AS role, CASE WHEN pg_is_in_recovery() THEN 'IN RECOVERY' ELSE 'WRITES OK' END AS status, 0::numeric AS lag_bytes, 0::numeric AS lag_seconds, '-' AS state UNION ALL SELECT s.slot_name AS database, 'replica' AS role, CASE WHEN NOT s.active OR r.pid IS NULL THEN 'DISCONNECTED' WHEN r.state = 'streaming' AND COALESCE(EXTRACT(EPOCH FROM r.replay_lag), 0) < 10 THEN 'IN SYNC' ELSE 'LAGGING' END AS status, COALESCE(pg_wal_lsn_diff(pg_current_wal_lsn(), r.replay_lsn), 0)::numeric AS lag_bytes, COALESCE(EXTRACT(EPOCH FROM r.replay_lag), 0)::numeric AS lag_seconds, COALESCE(r.state, '-') AS state FROM pg_replication_slots s LEFT JOIN pg_stat_replication r ON r.pid = s.active_pid WHERE s.slot_type = 'physical' ORDER BY role, database;"
         }
       ],
       "transformations": [
         { "id": "organize", "options": {
           "renameByName": {
-            "replica": "Replica",
-            "client_addr": "Client Addr",
-            "state": "State",
-            "sync_state": "Sync",
-            "sent_lag_bytes": "Sent lag",
-            "write_lag_bytes": "Write lag",
-            "flush_lag_bytes": "Flush lag",
-            "replay_lag_bytes": "Replay lag",
-            "write_lag_s": "Write lag (s)",
-            "flush_lag_s": "Flush lag (s)",
-            "replay_lag_s": "Replay lag (s)"
+            "database": "Database",
+            "role": "Role",
+            "status": "Status",
+            "lag_bytes": "Replay lag",
+            "lag_seconds": "Replay lag (s)",
+            "state": "State"
           }
         } }
       ],
       "options": {
         "showHeader": true,
-        "sortBy": [ { "displayName": "Replay lag", "desc": true } ],
-        "cellHeight": "sm",
+        "sortBy": [ { "displayName": "Role", "desc": false } ],
+        "cellHeight": "md",
         "footer": { "show": false, "reducer": ["sum"], "fields": "" }
       },
       "fieldConfig": {
@@ -254,7 +260,24 @@
           "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null } ] }
         },
         "overrides": [
-          { "matcher": { "id": "byRegexp", "options": ".*lag$" },
+          {
+            "matcher": { "id": "byName", "options": "Status" },
+            "properties": [
+              { "id": "mappings", "value": [
+                { "type": "value", "options": {
+                  "WRITES OK": { "color": "green", "index": 0 },
+                  "IN SYNC": { "color": "green", "index": 1 },
+                  "LAGGING": { "color": "orange", "index": 2 },
+                  "DISCONNECTED": { "color": "red", "index": 3 },
+                  "IN RECOVERY": { "color": "red", "index": 4 }
+                } }
+              ] },
+              { "id": "custom.cellOptions", "value": { "type": "color-background", "mode": "basic" } },
+              { "id": "custom.width", "value": 180 }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "Replay lag" },
             "properties": [
               { "id": "unit", "value": "bytes" },
               { "id": "custom.cellOptions", "value": { "type": "color-background", "mode": "gradient" } },
@@ -265,7 +288,8 @@
               ] } }
             ]
           },
-          { "matcher": { "id": "byRegexp", "options": ".*lag \\(s\\)$" },
+          {
+            "matcher": { "id": "byName", "options": "Replay lag (s)" },
             "properties": [
               { "id": "unit", "value": "s" },
               { "id": "decimals", "value": 3 },
@@ -273,13 +297,17 @@
                 { "color": "green", "value": null },
                 { "color": "orange", "value": 5 },
                 { "color": "red", "value": 30 }
-              ] } }
+              ] } },
+              { "id": "custom.cellOptions", "value": { "type": "color-text" } }
             ]
           },
-          { "matcher": { "id": "byName", "options": "State" },
-            "properties": [ { "id": "mappings", "value": [
-              { "type": "value", "options": { "streaming": { "color": "green", "index": 0, "text": "streaming" } } }
-            ] } ]
+          {
+            "matcher": { "id": "byName", "options": "Database" },
+            "properties": [ { "id": "custom.width", "value": 200 } ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "Role" },
+            "properties": [ { "id": "custom.width", "value": 120 } ]
           }
         ]
       }
@@ -289,7 +317,7 @@
       "type": "timeseries",
       "title": "Replay lag over time (bytes) — per replica",
       "description": "Trend of each standby's replay-LSN byte gap. A flat-near-zero line is healthy; a rising ramp = that replica is falling behind (network, disk, or a long recovery conflict).",
-      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 16 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 13 },
       "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
       "targets": [
         {
@@ -335,7 +363,7 @@
       "type": "timeseries",
       "title": "Connections by state — over time",
       "description": "pg_stat_activity client backends grouped by state (active / idle / idle in transaction). Growing 'idle in transaction' can pin WAL and block VACUUM.",
-      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 16 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 13 },
       "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
       "targets": [
         {
@@ -375,7 +403,7 @@
       "type": "table",
       "title": "Database sizes",
       "description": "On-disk size of each database on the primary (pg_database_size). 'voip' grows with CDR volume; watch it against the services-VM disk.",
-      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 25 },
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 21 },
       "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
       "targets": [
         {
@@ -413,7 +441,7 @@
       "type": "table",
       "title": "Replication slots",
       "description": "pg_replication_slots on the primary. active=false on a physical slot means a standby is gone but the slot still pins WAL — a known services-VM disk-fill risk (see slot-WAL watchdog).",
-      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 25 },
+      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 21 },
       "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
       "targets": [
         {
@@ -462,11 +490,52 @@
       }
     },
     {
+      "id": 4,
+      "type": "stat",
+      "title": "Backend connections",
+      "description": "Total client backends in pg_stat_activity on the primary. Watch against max_connections; PgBouncer fronts app traffic so this is mostly replication + admin + direct analytics.",
+      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 21 },
+      "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT count(*) AS backends FROM pg_stat_activity WHERE backend_type = 'client backend';"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "center"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 150 },
+              { "color": "red", "value": 250 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
       "id": 30,
       "type": "row",
       "title": "DB VM host metrics (gcp-monitoring)",
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 32 },
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 28 },
       "panels": []
     },
     {
@@ -474,7 +543,7 @@
       "type": "timeseries",
       "title": "DB VM CPU utilization",
       "description": "compute.googleapis.com/instance/cpu/utilization for the DB VMs: services (primary), east-db-standby, west-db, central-db.",
-      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 33 },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 29 },
       "datasource": { "type": "stackdriver", "uid": "gcp-monitoring" },
       "targets": [
         {
@@ -532,7 +601,7 @@
       "type": "timeseries",
       "title": "DB VM memory % used",
       "description": "agent.googleapis.com/memory/percent_used (state=used) for the DB VMs. Ops Agent required.",
-      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 33 },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 29 },
       "datasource": { "type": "stackdriver", "uid": "gcp-monitoring" },
       "targets": [
         {
@@ -591,7 +660,7 @@
       "type": "timeseries",
       "title": "DB VM disk % used (real FS)",
       "description": "agent.googleapis.com/disk/percent_used (state=used), tmpfs/udev/overlay/loop excluded, for the DB VMs. The primary's disk fills from WAL/CDR/backups — this is the panel to watch. Ops Agent required.",
-      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 33 },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 29 },
       "datasource": { "type": "stackdriver", "uid": "gcp-monitoring" },
       "targets": [
         {
@@ -656,6 +725,6 @@
   "timezone": "browser",
   "title": "Database & Replication",
   "uid": "noc-db-replication",
-  "version": 2,
+  "version": 3,
   "weekStart": ""
 }
