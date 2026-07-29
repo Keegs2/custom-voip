@@ -201,8 +201,12 @@
     <!-- SNMP monitoring -->
     <!-- <load module="mod_snmp"/> -->
 
-    <!-- Prometheus metrics (aggregate FS exporter on :9102 — metrics plane) -->
-    <load module="mod_prometheus"/>
+    <!-- Prometheus metrics (aggregate FS exporter on :9102) — DISABLED.
+         mod_prometheus failed to build/load on the media VMs (missing
+         mod_prometheus.so → CRIT). Its two dashboard-referenced series
+         (freeswitch_sessions_total, freeswitch_calls_active) are now emitted by
+         the carrier-monitor ESL exporter on :9103 (ops_metrics.py) instead. -->
+    <!-- <load module="mod_prometheus"/> -->
 
     <!-- Event multicast -->
     <!-- <load module="mod_event_multicast"/> -->
