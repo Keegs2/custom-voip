@@ -36,8 +36,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     kamailio-outbound-modules \
     # Websocket (if WebRTC needed later)
     kamailio-websocket-modules \
-    # Prometheus metrics exporter (xhttp_prom on :8080 — /metrics scrape)
-    kamailio-prometheus-modules \
+    # NOTE: xhttp_prom (the Prometheus /metrics exporter used on :8080) is ALREADY
+    # provided by the installed kamailio packages above — there is NO separate
+    # "kamailio-prometheus-modules" package in the 5.8 repo. Do not re-add one.
     # Cleanup
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
