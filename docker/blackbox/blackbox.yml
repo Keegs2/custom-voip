@@ -1,0 +1,38 @@
+# blackbox_exporter config — app-service health probes (East services VM).
+# ---------------------------------------------------------------------------
+# Consumed by the blackbox-exporter service in docker-compose.services.yml
+# (--config.file=/etc/blackbox_exporter/config.yml). The services vmagent's
+# `blackbox` scrape job (docker/vmagent/scrape-services.yml) points each
+# probe target here via /probe?module=<name>&target=<url|host:port>, so every
+# platform service reports up/down as probe_success{service="<name>"} in
+# VictoriaMetrics.
+#
+# Two modules cover every case:
+#   http_2xx     — for services with a reliable HTTP health path (any 2xx = up).
+#   tcp_connect  — for services with no clean HTTP health path (TCP accept = up).
+#
+# All probes are intra-VM on the services-network bridge (service name → in
+# -network address), so ip4 is forced and no GCP firewall change is needed.
+modules:
+  # Any 2xx response on the probed URL marks the service up. `valid_status_codes`
+  # empty = accept the whole 2xx range (200 for /health & /api/health, 200 for
+  # ClickHouse /ping "Ok.", etc.) without pinning an exact code per target.
+  http_2xx:
+    prober: http
+    timeout: 5s
+    http:
+      valid_status_codes: []          # any 2xx (empty = the whole 2xx range)
+      # No valid_http_versions constraint on purpose: gate ONLY on the 2xx so a
+      # backend answering over HTTP/1.0 (e.g. ClickHouse /ping) is not false-downed.
+      method: GET
+      preferred_ip_protocol: ip4
+      ip_protocol_fallback: false
+
+  # Plain TCP accept — for services with no stable HTTP health path (qryn Loki
+  # API, heplify-server HEP TCP listener). A successful connect = up.
+  tcp_connect:
+    prober: tcp
+    timeout: 5s
+    tcp:
+      preferred_ip_protocol: ip4
+      ip_protocol_fallback: false
