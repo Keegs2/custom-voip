@@ -317,3 +317,49 @@ Never names/rebuilds `freeswitch`/`kamailio` except the deliberate windowed FS/S
 **New:** `docker/vmagent/{scrape-sbc,scrape-media,scrape-services,scrape-db}.yml` · `docker/vmalert/rules/trunk_rollup.yml` · `docker/homer/grafana/provisioning/datasources/victoriametrics.yml` · `docker/postgres/init/26_live_trunk_stats.sql` · `docker/api/src/routers/live_trunk_stats.py` · `docker/carrier-monitor/ops_metrics.py` · `docker/freeswitch/conf/autoload_configs/prometheus.conf.xml` · `docker-compose.db.yml`
 
 **Changed:** `docker-compose.{services,media,sbc}.yml` · `docker/freeswitch/Dockerfile` · `docker/freeswitch/conf/autoload_configs/modules.conf.xml` · `docker/kamailio/Dockerfile` · `docker/kamailio/kamailio.cfg` · `docker/carrier-monitor/ops_agent.py` · `docker/api/src/main.py` · `docker/api/src/middleware/auth.py` · `docker/homer/grafana/dashboards/noc/traffic-status.json` · `.env.{sbc,media,services}.example`
+
+---
+
+# Operational status — DEPLOYED & VERIFIED (2026-07-29)
+
+Live across all three zones; everything below lands in the East VictoriaMetrics (`10.142.0.103:8428`) and renders on the "Traffic Status" wall. Merged as PR #17 + fix PRs #18–#22 into RCF‑V1.
+
+## What's collecting, per VM
+
+| VM role | Exporters (port) | Source of truth |
+|---|---|---|
+| SBC ×6 (2/zone) | Kamailio `xhttp_prom` (`:8080`) · `node_exporter` (`:9100`) | `kamailio_trunk_cps`, `kamailio_trunk_active_calls{trunk,direction}`, `kamailio_dialog_*`, `kamailio_shmem_*`, node |
+| FreeSWITCH ×3 (1/zone) | ESL exporter in the carrier‑monitor sidecar (`:9103`) · `node_exporter` (`:9100`) | `freeswitch_sessions_total`, `freeswitch_calls_active`, `freeswitch_channels_active{direction,on_net}`, node — **mod_prometheus was dropped; the ESL exporter carries its aggregates** |
+| services (East) | VictoriaMetrics (`:8428`) · vmalert (`:8880`) · `node_exporter` (`:9100`) · `postgres_exporter` (`:9187`) · `pgbouncer_exporter` (`:9127`) | central store + primary DB (2657 `pg_*`, incl. per‑replica `pg_stat_replication` lag) + PgBouncer pool (76 `pgbouncer_*`) |
+| DB replicas (`west-db`,`central-db`) | — (deferred, see below) | replication lag is read centrally from the **primary's** exporter |
+
+Each zone runs a **host‑net vmagent** that scrapes only its local exporters (`127.0.0.1:<port>`) and remote‑writes to East. Verified: `sum(up) by (zone)` = east 9 / west 6 / central 6.
+
+## Gotchas hit during rollout — READ before re‑deploying or adding a zone
+
+1. **`kamailio-prometheus-modules` is not a real package** on the 5.8 bookworm repo. `xhttp_prom.so` already ships with the installed kamailio packages — do NOT add a package (build fails `Unable to locate package`). *(fix #18)*
+2. **Kamailio xhttp over TCP needs `tcp_accept_no_cl=yes`.** Kamailio uses one shared TCP reader that requires `Content-Length`; a Prometheus GET has none → core rejects it (`tcp_read bad request state=7 error=4`), empty scrape. UDP SIP (carrier/FS path) is unaffected. *(fix #19)*
+3. **FreeSWITCH `mod_prometheus` does not compile** into this FS image (`.so` absent → `[CRIT] cannot open shared object file` at boot). DROPPED; the ESL exporter (`:9103`) emits `freeswitch_sessions_total` (from ESL `status`) + `freeswitch_calls_active` (from `show calls count`). *(fix #20)*
+4. **vmagent env expansion is `%{VAR}`, not `${VAR}`** in the scrape config (`-envflag.enable` only reads *command‑line flags* from env). `${VAR}` stays literal → every VM stamps identical `zone`/`reporting_instance` → series collide. *(fix #21)*
+5. **`pgbouncer_exporter` ignores `DATA_SOURCE_NAME`** — pass the DSN via `--pgBouncer.connectionString`. *(fix #22)*
+6. **PgBouncer needs `ignore_startup_parameters = extra_float_digits`** — the `pq` driver sends that startup param and PgBouncer rejects unknown ones (`unsupported startup parameter: extra_float_digits`).
+7. **`metrics_ro` password must equal `METRICS_DB_PASSWORD`** in the services `.env`. If provisioned with a placeholder: `ALTER ROLE metrics_ro PASSWORD '<value>';`.
+8. **pg_hba source differs by exporter placement:** East `postgres_exporter` is bridge → `host voip metrics_ro 172.16.0.0/12 scram-sha-256`; a host‑net exporter on a DB VM → `127.0.0.1/32`.
+
+## Operator host‑config (bare PgBouncer + Postgres — NOT in the repo, per VM running a DB exporter)
+
+- `pg_hba.conf`: `host voip metrics_ro <172.16.0.0/12 | 127.0.0.1/32> scram-sha-256` → `SELECT pg_reload_conf();`
+- `metrics_ro` role: `pg_monitor` grant, created on the primary (replicates to standbys)
+- `pgbouncer.ini`: `stats_users = pgb_stats` **and** `ignore_startup_parameters = extra_float_digits` → `systemctl reload pgbouncer`
+- `userlist.txt`: `"pgb_stats" "<PGBOUNCER_STATS_PASSWORD>"` (plaintext works even with `auth_type = scram-sha-256`)
+
+## Adding a new zone
+
+1. **SBCs:** `.env` += `METRICS_ZONE`, `METRICS_REMOTE_WRITE_HOST=10.142.0.103`, `LIVE_TRUNK_STATS_URL/TOKEN` → `git pull` → `up -d --no-deps node-exporter vmagent` → `up -d --no-deps --build carrier-monitor kamailio`.
+2. **FS:** `.env` += `METRICS_ZONE`, `METRICS_REMOTE_WRITE_HOST`, `FS_NODE_ID` → `up -d --no-deps node-exporter vmagent` → `up -d --no-deps --build ops-agent` → rebuild `freeswitch` (for the `on_net` script).
+3. **Firewall:** `allow-vmagent-remote-write` already covers 10.x/192.168.x — extend `--source-ranges` only if the new zone uses a different subnet.
+4. `SBC_ID` / `FS_NODE_ID` become the `reporting_instance` label automatically. All merged fixes make it work first‑try.
+
+## Deferred (not blocking)
+
+- **DB‑replica HOST metrics** (CPU/disk of `west-db`/`central-db`): the replicas have no Docker/repo, so a bare `node_exporter` binary + a scraper would be needed. **Low priority** — replication lag is already covered centrally from the primary's `postgres_exporter`.
