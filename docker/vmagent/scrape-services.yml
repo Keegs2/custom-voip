@@ -30,3 +30,64 @@ scrape_configs:
   - job_name: pgbouncer
     static_configs:
       - targets: ["host.docker.internal:9127"]
+
+  # ---------------------------------------------------------------------------
+  # blackbox — app-service up/down for every platform service on this VM.
+  # Standard Prometheus blackbox relabel pattern: each target is the real probe
+  # URL/host:port; the `service` label is the friendly display name (the CONTRACT
+  # the NOC dashboard depends on). relabel: __address__ -> __param_target, pin
+  # __param_module, then rewrite __address__ to the in-network blackbox-exporter.
+  # Result: probe_success{service="<name>"} = 1 (up) / 0 (down).
+  #
+  # Two sub-jobs because the module differs per target:
+  #   blackbox_http  -> module=http_2xx  (services with a reliable HTTP health path)
+  #   blackbox_tcp   -> module=tcp_connect (services with no clean HTTP health path)
+  # ---------------------------------------------------------------------------
+  - job_name: blackbox_http
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    static_configs:
+      - targets: ["http://api:8000/health"]
+        labels:
+          service: "API"
+      - targets: ["http://clickhouse-server:8123/ping"]
+        labels:
+          service: "ClickHouse"
+      - targets: ["http://grafana:3000/api/health"]
+        labels:
+          service: "Grafana"
+      - targets: ["http://victoriametrics:8428/health"]
+        labels:
+          service: "VictoriaMetrics"
+    relabel_configs:
+      # Move the probe URL into the module's ?target= param.
+      - source_labels: [__address__]
+        target_label: __param_target
+      # Keep a human-readable `instance` = the probed URL (not blackbox's addr).
+      - source_labels: [__param_target]
+        target_label: instance
+      # Actually scrape the blackbox-exporter (in-network, by service name).
+      - target_label: __address__
+        replacement: blackbox-exporter:9115
+
+  - job_name: blackbox_tcp
+    metrics_path: /probe
+    params:
+      module: [tcp_connect]
+    static_configs:
+      # qryn (Homer Loki API) has no stable HTTP health path — TCP accept = up.
+      - targets: ["qryn:3100"]
+        labels:
+          service: "Homer (qryn)"
+      # heplify-server HEP TCP listener (HEPLIFYSERVER_HEPADDR=0.0.0.0:9060).
+      - targets: ["heplify-server:9060"]
+        labels:
+          service: "Homer (HEP)"
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115

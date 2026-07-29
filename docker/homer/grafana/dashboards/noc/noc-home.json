@@ -52,7 +52,7 @@
       "type": "dashboards"
     }
   ],
-  "description": "NOC home / wall-TV command board: a big US datacenter map framed by a left KPI rail — fleet VMs up, per-zone SIP VIP reachability + servers up/down, and live carrier trunk up/down. Landing page for the Production NOC.",
+  "description": "NOC home / wall-TV command board: a big US datacenter map framed by a left KPI rail — platform-services status, per-zone SIP VIP reachability + servers up/down, and live carrier trunk up/down. Landing page for the Production NOC.",
   "panels": [
     {
       "id": 1,
@@ -66,49 +66,36 @@
       },
       "options": {
         "mode": "markdown",
-        "content": "**Live System Status** — 🟢 green = healthy · 🔴 red = attention.  **Left rail:** Fleet VMs up · each datacenter's SIP VIP (reachable / unreachable) + servers up/down · Bandwidth carriers (UP / DOWN from live OPTIONS probes).  **Map:** 🟢 datacenter (dot size = calls / hour) · 🔺 carrier trunk (🟢 up · 🔴 down).  Hover any tile or map marker for detail."
+        "content": "**Live System Status** — 🟢 green = healthy · 🔴 red = attention.  **Left rail:** Platform services (UP / DOWN from live blackbox probes) · each datacenter's SIP VIP (reachable / unreachable) + servers up/down · Bandwidth carriers (UP / DOWN from live OPTIONS probes).  **Map:** 🟢 datacenter (dot size = calls / hour) · 🔺 carrier trunk (🟢 up · 🔴 down).  Hover any tile or map marker for detail."
       }
     },
     {
       "id": 2,
       "type": "stat",
-      "title": "Fleet VMs up",
-      "description": "Total production VMs reporting hypervisor CPU across all 3 datacenters. Expected 13 (5 East + 4 West + 4 Central; west-loadtest excluded). 🟢 13/13 · 🔴 any down.",
+      "title": "Platform services",
+      "description": "Live blackbox-probe status of the platform's core services (probe_success from VictoriaMetrics). Each cell is one probed service — 🟢 UP (probe_success=1) · 🔴 DOWN (0 or no data). Renders every service label automatically (API · ClickHouse · Homer qryn · Homer HEP · Grafana · VictoriaMetrics · any added later).",
       "datasource": {
-        "type": "stackdriver",
-        "uid": "gcp-monitoring"
+        "type": "prometheus",
+        "uid": "voip-metrics-vm"
       },
       "gridPos": {
         "x": 0,
         "y": 2,
         "w": 6,
-        "h": 4
+        "h": 6
       },
       "targets": [
         {
           "refId": "A",
-          "queryType": "timeSeriesList",
           "datasource": {
-            "type": "stackdriver",
-            "uid": "gcp-monitoring"
+            "type": "prometheus",
+            "uid": "voip-metrics-vm"
           },
-          "timeSeriesList": {
-            "projectName": "rugged-night-193017",
-            "filters": [
-              "metric.type",
-              "=",
-              "compute.googleapis.com/instance/cpu/utilization",
-              "AND",
-              "metadata.system_labels.name",
-              "=~",
-              "poc-custom-voip|kam-g2|fs-media-v2|services|east-db-standby|west-sbc-1|west-sbc-2|west-fs|west-db|central-sbc-1|central-sbc-2|central-fs|central-db"
-            ],
-            "crossSeriesReducer": "REDUCE_COUNT",
-            "perSeriesAligner": "ALIGN_MEAN",
-            "alignmentPeriod": "+300s",
-            "groupBys": [],
-            "view": "FULL"
-          }
+          "expr": "probe_success",
+          "instant": true,
+          "range": false,
+          "format": "time_series",
+          "legendFormat": "{{service}}"
         }
       ],
       "options": {
@@ -119,8 +106,8 @@
           "fields": "",
           "values": false
         },
-        "orientation": "auto",
-        "textMode": "value",
+        "orientation": "horizontal",
+        "textMode": "value_and_name",
         "colorMode": "background",
         "graphMode": "none",
         "justifyMode": "center",
@@ -133,65 +120,20 @@
           "unit": "none",
           "decimals": 0,
           "noValue": "DOWN",
+          "displayName": "${__field.labels.service}",
           "mappings": [
             {
               "type": "value",
               "options": {
                 "0": {
-                  "text": "0 / 13",
+                  "text": "DOWN",
+                  "color": "red",
                   "index": 0
                 },
                 "1": {
-                  "text": "1 / 13",
+                  "text": "UP",
+                  "color": "green",
                   "index": 1
-                },
-                "2": {
-                  "text": "2 / 13",
-                  "index": 2
-                },
-                "3": {
-                  "text": "3 / 13",
-                  "index": 3
-                },
-                "4": {
-                  "text": "4 / 13",
-                  "index": 4
-                },
-                "5": {
-                  "text": "5 / 13",
-                  "index": 5
-                },
-                "6": {
-                  "text": "6 / 13",
-                  "index": 6
-                },
-                "7": {
-                  "text": "7 / 13",
-                  "index": 7
-                },
-                "8": {
-                  "text": "8 / 13",
-                  "index": 8
-                },
-                "9": {
-                  "text": "9 / 13",
-                  "index": 9
-                },
-                "10": {
-                  "text": "10 / 13",
-                  "index": 10
-                },
-                "11": {
-                  "text": "11 / 13",
-                  "index": 11
-                },
-                "12": {
-                  "text": "12 / 13",
-                  "index": 12
-                },
-                "13": {
-                  "text": "13 / 13",
-                  "index": 13
                 }
               }
             },
@@ -202,7 +144,7 @@
                 "result": {
                   "text": "DOWN",
                   "color": "red",
-                  "index": 10
+                  "index": 2
                 }
               }
             }
@@ -219,7 +161,7 @@
               },
               {
                 "color": "green",
-                "value": 13
+                "value": 1
               }
             ]
           }
@@ -238,7 +180,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 6,
+        "y": 8,
         "w": 6,
         "h": 5
       },
@@ -507,7 +449,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 11,
+        "y": 13,
         "w": 6,
         "h": 5
       },
@@ -771,7 +713,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 16,
+        "y": 18,
         "w": 6,
         "h": 5
       },
@@ -1035,7 +977,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 21,
+        "y": 23,
         "w": 6,
         "h": 4
       },
@@ -1131,7 +1073,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 25,
+        "y": 27,
         "w": 6,
         "h": 4
       },
@@ -1229,7 +1171,7 @@
         "x": 6,
         "y": 2,
         "w": 18,
-        "h": 27
+        "h": 29
       },
       "targets": [
         {
