@@ -38,16 +38,227 @@
       "transparent": true,
       "options": {
         "mode": "markdown",
-        "content": "## Call Quality\nAnswer/quality KPIs from the CDR hypertable (`voip-cdr-pg`). Long trends use the cheap continuous aggregate **`cdr_hourly_stats`** (customer-scoped, no zone/carrier dimension → those trends span all zones); recent/quality panels read raw **`cdrs`** and honour the **Zone** filter. RTP metrics (MOS / R-factor / jitter / loss / quality%) are **NULL on unanswered & unrated calls** and are filtered out. **PDD is approximated** as `answer_time - start_time` (time-to-answer) — true PDD to the first 18x needs Homer/SIP timing, not the CDR."
+        "content": "## Call Quality\nThe full voice wall-board — top-line KPIs + answer/routing/quality — from the CDR hypertable (`voip-cdr-pg`). The **at-a-glance stat row** (ASR / Concurrent / CPS / Avg MOS / On-net %) is the last-15m live snapshot on the selected zone. Below: ASR/ACD/PDD trends, answered-vs-failed routing health, and RTP quality (MOS / R-factor / jitter / loss / quality%). Long trends use the cheap continuous aggregate **`cdr_hourly_stats`** (customer-scoped, no zone/carrier dimension → those trends span all zones); recent/quality panels read raw **`cdrs`** and honour the **Zone** filter. RTP metrics are **NULL on unanswered & unrated calls** and are filtered out. **PDD is approximated** as `answer_time - start_time` (time-to-answer) — true PDD to the first 18x needs Homer/SIP timing, not the CDR. Infrastructure health (VMs / VIPs / media nodes) lives on the Infrastructure / Home / Fleet dashboards."
       },
       "fieldConfig": { "defaults": {}, "overrides": [] }
+    },
+    {
+      "id": 40,
+      "type": "stat",
+      "title": "ASR — last 15m",
+      "description": "Answer-Seizure Ratio = answered_calls / total_calls over the last 15 minutes, on the selected zone. THE headline carrier metric. answered = answer_time IS NOT NULL. Green >= 55%, amber >= 40%, red below.",
+      "gridPos": { "h": 5, "w": 5, "x": 0, "y": 3 },
+      "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT (count(*) FILTER (WHERE answer_time IS NOT NULL))::float / NULLIF(count(*), 0) AS asr FROM cdrs WHERE start_time > now() - interval '15 minutes' AND split_part(coalesce(sbc_id,''),'-',1) LIKE '$zone';"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "center"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 1,
+          "min": 0,
+          "max": 1,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "orange", "value": 0.4 },
+              { "color": "green", "value": 0.55 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 41,
+      "type": "stat",
+      "title": "Concurrent calls (CDR-derived)",
+      "description": "Calls currently in progress right now, derived from CDR time-overlap: rows where answer_time <= now() < end_time (a call is up between answer and hangup). This is the RELIABLE concurrency source. active_calls is NOT used — it is only populated by the programmable-voice API path, not the RCF path that carries production traffic.",
+      "gridPos": { "h": 5, "w": 5, "x": 5, "y": 3 },
+      "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT count(*) AS concurrent FROM cdrs WHERE answer_time IS NOT NULL AND answer_time <= now() AND end_time > now() AND start_time > now() - interval '6 hours' AND split_part(coalesce(sbc_id,''),'-',1) LIKE '$zone';"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 3000 },
+              { "color": "red", "value": 6000 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 42,
+      "type": "stat",
+      "title": "CPS — last 1m",
+      "description": "Calls per second = count of seized calls (by start_time) in the last 60s / 60, on the selected zone. Rated capacity is ~500 CPS per zone; amber/red are set for the all-zones view. See Traffic Status for per-zone / per-node CPS.",
+      "gridPos": { "h": 5, "w": 5, "x": 10, "y": 3 },
+      "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT count(*)::float / 60.0 AS cps FROM cdrs WHERE start_time > now() - interval '1 minute' AND split_part(coalesce(sbc_id,''),'-',1) LIKE '$zone';"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "cps",
+          "decimals": 1,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 350 },
+              { "color": "red", "value": 500 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 43,
+      "type": "stat",
+      "title": "Avg MOS — last 15m",
+      "description": "Mean Opinion Score averaged over answered, rated calls in the last 15m (mos IS NOT NULL). MOS is NULL on unanswered/unrated calls and those are excluded. Carrier-good >= 4.0, degraded 3.5-4.0, poor < 3.5.",
+      "gridPos": { "h": 5, "w": 5, "x": 15, "y": 3 },
+      "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT avg(mos) AS avg_mos FROM cdrs WHERE start_time > now() - interval '15 minutes' AND mos IS NOT NULL AND split_part(coalesce(sbc_id,''),'-',1) LIKE '$zone';"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 2,
+          "min": 1,
+          "max": 5,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "orange", "value": 3.5 },
+              { "color": "green", "value": 4.0 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 44,
+      "type": "stat",
+      "title": "On-net % — last 15m",
+      "description": "Share of calls short-circuited internally (carrier hairpin avoided): count(*) FILTER (WHERE on_net) / count(*). New internal-routing metric. on_net is a boolean set by FreeSWITCH; NULL/false = off-net.",
+      "gridPos": { "h": 5, "w": 4, "x": 20, "y": 3 },
+      "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT (count(*) FILTER (WHERE on_net))::float / NULLIF(count(*), 0) AS on_net_pct FROM cdrs WHERE start_time > now() - interval '15 minutes' AND split_part(coalesce(sbc_id,''),'-',1) LIKE '$zone';"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 1,
+          "min": 0,
+          "max": 1,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [ { "color": "blue", "value": null } ]
+          }
+        },
+        "overrides": []
+      }
     },
     {
       "id": 1,
       "type": "timeseries",
       "title": "ASR trend per zone — hourly",
       "description": "Answer-Seizure Ratio per zone per hour from raw cdrs (cdr_hourly_stats has no sbc_id, so zone attribution needs raw rows). answered / seized. Spans all zones side by side; NOT filtered by the Zone variable so zones can be compared.",
-      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 3 },
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 8 },
       "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
       "targets": [
         {
@@ -94,7 +305,7 @@
       "type": "timeseries",
       "title": "ASR trend per carrier — hourly (Dallas / LA)",
       "description": "ASR per carrier_used per hour on the selected zone. carrier_primary = Dallas (67.231.2.12), carrier_secondary = LA (216.82.238.134). 'local'/'default' excluded. Divergence between the two lines pinpoints a PoP-side answer problem.",
-      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 3 },
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 8 },
       "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
       "targets": [
         {
@@ -141,7 +352,7 @@
       "type": "timeseries",
       "title": "ACD — avg call duration (hourly)",
       "description": "Average answered-call duration in seconds, from cdr_hourly_stats.avg_duration_sec (already answered-only, cheap continuous aggregate). Customer-scoped aggregate has no zone dimension, so this is all-zones. A sudden ACD collapse often means calls answering then failing fast (dead air / media).",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 17 },
       "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
       "targets": [
         {
@@ -180,7 +391,7 @@
       "type": "timeseries",
       "title": "PDD proxy — p50 / p95 time-to-answer (10m)",
       "description": "APPROXIMATION of Post-Dial Delay: percentiles of (answer_time - start_time) over answered calls, 10-minute buckets, selected zone. This is CDR time-to-ANSWER, not true PDD to the first 18x provisional — true PDD needs Homer/SIP timing. Watch p95 for carrier slowness.",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 17 },
       "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
       "targets": [
         {
@@ -226,11 +437,53 @@
       }
     },
     {
+      "id": 45,
+      "type": "timeseries",
+      "title": "Answered vs failed — per 5m",
+      "description": "Seized calls bucketed 5-minutely into answered (answer_time present) vs failed (never answered). Stacked. A rising failed band with flat answered = a routing/carrier problem.",
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 25 },
+      "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
+          "format": "time_series",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT $__timeGroup(start_time, '5m') AS time, count(*) FILTER (WHERE answer_time IS NOT NULL) AS answered, count(*) FILTER (WHERE answer_time IS NULL) AS failed FROM cdrs WHERE $__timeFilter(start_time) AND split_part(coalesce(sbc_id,''),'-',1) LIKE '$zone' GROUP BY 1 ORDER BY 1;"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "bars",
+            "lineWidth": 1,
+            "fillOpacity": 70,
+            "stacking": { "group": "A", "mode": "normal" },
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null } ] }
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "answered" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } } ] },
+          { "matcher": { "id": "byName", "options": "failed" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } } ] }
+        ]
+      },
+      "options": {
+        "legend": { "calcs": ["sum"], "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    },
+    {
       "id": 10,
       "type": "row",
       "title": "RTP quality — MOS / R-factor / jitter / loss (raw cdrs, answered+rated only)",
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 20 },
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 34 },
       "panels": []
     },
     {
@@ -238,7 +491,7 @@
       "type": "histogram",
       "title": "MOS distribution",
       "description": "Distribution of per-call MOS over the dashboard time range, selected zone, mos IS NOT NULL (unrated/unanswered excluded). A healthy carrier is bunched at 4.0-4.5. A left tail toward 3.x is audio degradation.",
-      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 21 },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 35 },
       "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
       "targets": [
         {
@@ -269,7 +522,7 @@
       "type": "timeseries",
       "title": "MOS trend — avg / p10 (10m)",
       "description": "Mean MOS and the 10th-percentile (worst-decile) MOS per 10m, selected zone, answered+rated only. avg tells the headline; p10 exposes the worst calls even while the average looks fine.",
-      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 21 },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 35 },
       "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
       "targets": [
         {
@@ -320,7 +573,7 @@
       "type": "timeseries",
       "title": "R-factor trend — avg (10m)",
       "description": "Average ITU R-factor per 10m, selected zone, r_factor IS NOT NULL. Toll-quality >= 80; 70-80 acceptable; < 70 users notice. Complements MOS (same underlying E-model).",
-      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 21 },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 35 },
       "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
       "targets": [
         {
@@ -368,7 +621,7 @@
       "type": "timeseries",
       "title": "Jitter — avg / p95 (10m)",
       "description": "Average and p95 of jitter_avg_ms per 10m, selected zone, jitter_avg_ms IS NOT NULL. jitter_avg_ms is derived by the ingest as (jitter_min+jitter_max)/2. Sustained p95 above ~30ms drives MOS down.",
-      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 29 },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 43 },
       "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
       "targets": [
         {
@@ -418,7 +671,7 @@
       "type": "timeseries",
       "title": "Packet loss % — avg / p95 (10m)",
       "description": "Average and p95 of packet_loss_pct per 10m, selected zone, packet_loss_pct IS NOT NULL. Anything sustained above ~1% is audible. p95 catches the worst calls.",
-      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 29 },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 43 },
       "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
       "targets": [
         {
@@ -468,7 +721,7 @@
       "type": "timeseries",
       "title": "Quality % trend — avg (10m)",
       "description": "Average FreeSWITCH rtp_audio_in_quality_percentage per 10m, selected zone, quality_pct IS NOT NULL. This is FS's own composite call-quality score (0-100). Tracks MOS/R-factor but is a single ready-made number.",
-      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 29 },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 43 },
       "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
       "targets": [
         {
@@ -516,7 +769,7 @@
       "type": "stat",
       "title": "Rated-call quality snapshot — selected range/zone",
       "description": "Headline quality averages over the current range + zone across answered, rated calls. 'Rated calls' = rows with a non-NULL mos (the RTP-metric denominator). If this count is low vs total volume, most calls are unrated and the quality panels above are a small sample.",
-      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 37 },
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 51 },
       "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
       "targets": [
         {

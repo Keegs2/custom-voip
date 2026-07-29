@@ -38,7 +38,7 @@
       "transparent": true,
       "options": {
         "mode": "markdown",
-        "content": "## Infrastructure · Fleet Detail\nPer-VM CPU / memory / disk / network time series. Use the **Zone** dropdown to focus East / West / Central (or All). Memory & disk come from the Ops Agent; CPU & network are available from the hypervisor even without it."
+        "content": "## Fleet Detail\nPer-VM CPU / memory / disk / network time series. Use the **Zone** dropdown to focus East / West / Central (or All). Memory & disk come from the Ops Agent; CPU & network are available from the hypervisor even without it."
       },
       "fieldConfig": { "defaults": {}, "overrides": [] }
     },
@@ -400,7 +400,7 @@
   "time": { "from": "now-6h", "to": "now" },
   "timepicker": {},
   "timezone": "browser",
-  "title": "Infrastructure · Fleet Detail",
+  "title": "Fleet Detail",
   "uid": "noc-infra-fleet",
   "version": 2,
   "weekStart": ""

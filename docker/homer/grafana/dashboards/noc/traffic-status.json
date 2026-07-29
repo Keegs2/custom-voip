@@ -173,14 +173,22 @@
           "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
           "expr": "sum by (trunk) (kamailio_trunk_active_calls{direction=\"inbound\", zone=~\"$zonere\"})",
           "instant": true,
+          "range": false,
+          "format": "table",
           "legendFormat": "{{trunk}}"
         }
       ],
+      "transformations": [
+        { "id": "labelsToFields", "options": { "mode": "columns", "keepLabels": ["trunk"] } },
+        { "id": "organize", "options": { "excludeByName": { "Time": true }, "renameByName": { "Value": "calls" } } }
+      ],
       "options": {
+        "xField": "trunk",
         "orientation": "horizontal",
         "xTickLabelRotation": 0,
-        "showValue": "auto",
+        "showValue": "always",
         "stacking": "none",
+        "colorByField": "trunk",
         "tooltip": { "mode": "single", "sort": "none" },
         "legend": { "showLegend": false, "displayMode": "list", "placement": "bottom" }
       },
@@ -208,14 +216,22 @@
           "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
           "expr": "sum by (trunk) (kamailio_trunk_active_calls{direction=\"outbound\", zone=~\"$zonere\"})",
           "instant": true,
+          "range": false,
+          "format": "table",
           "legendFormat": "{{trunk}}"
         }
       ],
+      "transformations": [
+        { "id": "labelsToFields", "options": { "mode": "columns", "keepLabels": ["trunk"] } },
+        { "id": "organize", "options": { "excludeByName": { "Time": true }, "renameByName": { "Value": "calls" } } }
+      ],
       "options": {
+        "xField": "trunk",
         "orientation": "horizontal",
         "xTickLabelRotation": 0,
-        "showValue": "auto",
+        "showValue": "always",
         "stacking": "none",
+        "colorByField": "trunk",
         "tooltip": { "mode": "single", "sort": "none" },
         "legend": { "showLegend": false, "displayMode": "list", "placement": "bottom" }
       },
@@ -235,7 +251,7 @@
       "type": "timeseries",
       "title": "Total call volume over time — hourly",
       "description": "Whole-platform offered volume: seized calls per hour from raw cdrs over the range (all zones). The headline traffic curve.",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 19 },
+      "gridPos": { "h": 8, "w": 9, "x": 0, "y": 19 },
       "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
       "targets": [
         {
@@ -253,10 +269,11 @@
           "min": 0,
           "color": { "mode": "fixed", "fixedColor": "blue" },
           "custom": {
-            "drawStyle": "bars",
-            "lineWidth": 1,
-            "fillOpacity": 60,
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 10,
             "showPoints": "never",
+            "stacking": { "group": "A", "mode": "none" },
             "spanNulls": false
           },
           "thresholds": { "mode": "absolute", "steps": [ { "color": "blue", "value": null } ] }
@@ -271,9 +288,9 @@
     {
       "id": 11,
       "type": "timeseries",
-      "title": "Per-zone distribution — hourly (stacked)",
-      "description": "Seized calls per hour per zone, stacked (zone from split_part(sbc_id,'-',1)). Watch load balance across East / West / Central. All zones shown regardless of the Zone filter.",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 19 },
+      "title": "Per-zone volume over time — hourly",
+      "description": "Seized calls per hour per zone as one line per zone (zone from split_part(sbc_id,'-',1)). Watch load balance across East / West / Central. All zones shown regardless of the Zone filter.",
+      "gridPos": { "h": 8, "w": 9, "x": 9, "y": 19 },
       "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
       "targets": [
         {
@@ -291,10 +308,10 @@
           "min": 0,
           "color": { "mode": "palette-classic" },
           "custom": {
-            "drawStyle": "bars",
-            "lineWidth": 1,
-            "fillOpacity": 70,
-            "stacking": { "group": "A", "mode": "normal" },
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "stacking": { "group": "A", "mode": "none" },
             "showPoints": "never",
             "spanNulls": false
           },
@@ -305,6 +322,39 @@
       "options": {
         "legend": { "calcs": ["sum"], "displayMode": "table", "placement": "right", "showLegend": true },
         "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    },
+    {
+      "id": 12,
+      "type": "piechart",
+      "title": "Per-zone split (range + zone)",
+      "description": "Share of calls by zone over the range + zone filter (zone from split_part(sbc_id,'-',1); blank sbc_id = 'unknown'). Total calls per zone as pie slices — the range-wide companion to the per-zone volume line chart.",
+      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 19 },
+      "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT CASE WHEN sbc_id IS NULL OR sbc_id = '' THEN 'unknown' ELSE split_part(sbc_id,'-',1) END AS zone, count(*) AS calls FROM cdrs WHERE $__timeFilter(start_time) AND split_part(coalesce(sbc_id,''),'-',1) LIKE '$zone' GROUP BY 1 ORDER BY 2 DESC;"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": true },
+        "pieType": "donut",
+        "legend": { "displayMode": "table", "placement": "right", "showLegend": true, "values": ["value", "percent"] },
+        "tooltip": { "mode": "single", "sort": "desc" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": { "mode": "palette-classic" },
+          "mappings": [],
+          "custom": { "hideFrom": { "legend": false, "tooltip": false, "viz": false } }
+        },
+        "overrides": []
       }
     },
     {
