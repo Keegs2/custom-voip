@@ -442,8 +442,12 @@ services:
     container_name: voip-pgbouncer-exporter
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    environment:
-      - DATA_SOURCE_NAME=postgresql://pgb_stats:${PGBOUNCER_STATS_PASSWORD}@host.docker.internal:6432/pgbouncer?sslmode=disable
+    # This exporter reads its DSN from the --pgBouncer.connectionString FLAG, NOT
+    # from DATA_SOURCE_NAME (which it ignores -> it would default to
+    # localhost:6543 and fail). ${PGBOUNCER_STATS_PASSWORD} is expanded by
+    # docker compose from .env; :6432 is the host PgBouncer (via host-gateway).
+    command:
+      - "--pgBouncer.connectionString=postgresql://pgb_stats:${PGBOUNCER_STATS_PASSWORD}@host.docker.internal:6432/pgbouncer?sslmode=disable"
     ports:
       - "9127:9127"
     networks:

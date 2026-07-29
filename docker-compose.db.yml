@@ -67,9 +67,11 @@ services:
     image: prometheuscommunity/pgbouncer-exporter:v0.10.2
     container_name: voip-pgbouncer-exporter
     network_mode: host
-    environment:
-      - DATA_SOURCE_NAME=postgresql://pgb_stats:${PGBOUNCER_STATS_PASSWORD}@127.0.0.1:6432/pgbouncer?sslmode=disable
-      - PGBOUNCER_EXPORTER_WEB_LISTEN_ADDRESS=:9127
+    # DSN comes from the --pgBouncer.connectionString FLAG, not DATA_SOURCE_NAME
+    # (which this exporter ignores -> defaults to localhost:6543 and fails).
+    command:
+      - "--pgBouncer.connectionString=postgresql://pgb_stats:${PGBOUNCER_STATS_PASSWORD}@127.0.0.1:6432/pgbouncer?sslmode=disable"
+      - "--web.listen-address=:9127"
     deploy:
       resources:
         limits:
