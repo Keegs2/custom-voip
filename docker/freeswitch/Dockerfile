@@ -142,6 +142,8 @@ RUN sed -i 's|#applications/mod_commands|applications/mod_commands|' build/modul
     sed -i 's|#event_handlers/mod_event_socket|event_handlers/mod_event_socket|' build/modules.conf.in && \
     sed -i 's|#event_handlers/mod_cdr_csv|event_handlers/mod_cdr_csv|' build/modules.conf.in && \
     sed -i 's|#event_handlers/mod_json_cdr|event_handlers/mod_json_cdr|' build/modules.conf.in && \
+    # mod_prometheus: aggregate FS metrics on :9102 (metrics plane — see OBSERVABILITY_METRICS_PLAN.md)
+    sed -i 's|#event_handlers/mod_prometheus|event_handlers/mod_prometheus|' build/modules.conf.in && \
     # Formats
     sed -i 's|#formats/mod_sndfile|formats/mod_sndfile|' build/modules.conf.in && \
     sed -i 's|#formats/mod_native_file|formats/mod_native_file|' build/modules.conf.in && \
@@ -319,6 +321,11 @@ EXPOSE 5090/udp 5090/tcp
 # RCF-V1: WebRTC (mod_verto WSS) disabled — no EXPOSE 8082/tcp
 # Event Socket
 EXPOSE 8021/tcp
+# Metrics plane (documentation only — FS runs host-net so these bind on the VM IP):
+#   9102 = mod_prometheus aggregate exporter; 9103 = ESL exporter (carrier-monitor sidecar).
+# See docs/OBSERVABILITY_METRICS_PLAN.md (RECONCILED REGISTRY port map).
+EXPOSE 9102/tcp
+EXPOSE 9103/tcp
 # RTP media — RCF-V1: expanded for 10K concurrent calls (host networking required)
 # Must match rtp-start-port/rtp-end-port in switch.conf.xml
 EXPOSE 16384-49151/udp

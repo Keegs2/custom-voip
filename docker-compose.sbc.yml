@@ -76,6 +76,73 @@ services:
       retries: 3
     restart: unless-stopped
 
+  # ===========================================================================
+  # Production metrics plane — per-zone vmagent + node_exporter (SBC role).
+  # See docs/OBSERVABILITY_METRICS_PLAN.md. Both are ADDITIVE, host-networked,
+  # and have NO depends_on: kamailio — they must never pull the co-located call
+  # server into an up-set. Deploy with `up -d --no-deps`.
+  # ===========================================================================
+
+  # vmagent (SBC role) — scrapes the local Kamailio xhttp_prom (:8080) and
+  # node_exporter (:9100) at 127.0.0.1 (both host-net on this VM) and
+  # remote-writes CROSS-ZONE to the East VictoriaMetrics. On-disk buffering
+  # (maxDiskUsagePerURL=2GB) survives a store or WAN blip without loss.
+  # `-envflag.enable=true` expands ${ZONE}/${INSTANCE_ID} in the scrape file.
+  # NO depends_on: kamailio (see the header) — deploy with `up -d --no-deps`.
+  vmagent:
+    image: victoriametrics/vmagent:v1.103.0
+    container_name: voip-vmagent
+    network_mode: host
+    command:
+      - "-promscrape.config=/etc/vmagent/scrape-sbc.yml"
+      - "-remoteWrite.url=http://${METRICS_REMOTE_WRITE_HOST:-10.142.0.103}:8428/api/v1/write"
+      - "-remoteWrite.tmpDataPath=/vmagent-data"
+      - "-remoteWrite.maxDiskUsagePerURL=2GB"
+      - "-httpListenAddr=:8429"
+      - "-envflag.enable=true"
+    environment:
+      - ZONE=${METRICS_ZONE}
+      - INSTANCE_ID=${SBC_ID}
+    volumes:
+      - ./docker/vmagent/scrape-sbc.yml:/etc/vmagent/scrape-sbc.yml:ro
+      - vmagent_data:/vmagent-data
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:8429/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          memory: 64M
+    restart: unless-stopped
+
+  # node_exporter — host CPU / memory / disk / network for this SBC VM.
+  # host-net + pid:host + read-only rootfs bind; binds :9100, scraped locally by
+  # the vmagent above. NO depends_on: kamailio.
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    container_name: voip-node-exporter
+    command:
+      - "--path.rootfs=/host"
+      - "--web.listen-address=:9100"
+    network_mode: host
+    pid: host
+    volumes:
+      - "/:/host:ro,rslave"
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 128M
+        reservations:
+          memory: 32M
+    restart: unless-stopped
+
   # ---------------------------------------------------------------------------
   # revup-ops-agent (was: carrier-monitor) — runs on EVERY SBC.
   #
@@ -126,6 +193,13 @@ services:
       - OPS_AGENT_TOKEN=${OPS_AGENT_TOKEN}
       # Port the read-only command API listens on (default 8710).
       - OPS_AGENT_PORT=${OPS_AGENT_PORT:-8710}
+      # ---- Live customer-trunk feeder (SBC role) ----
+      # POSTs per-customer-trunk stats to the East API (/v1/live-trunk-stats/report).
+      # Fail-closed: if URL/token are unset the feeder no-ops; the carrier-status
+      # poll above is unaffected. Token MUST equal the API's LIVE_TRUNK_STATS_TOKEN.
+      - LIVE_TRUNK_STATS_URL=${LIVE_TRUNK_STATS_URL:-}
+      - LIVE_TRUNK_STATS_TOKEN=${LIVE_TRUNK_STATS_TOKEN:-}
+      - LIVE_TRUNK_STATS_INTERVAL=${LIVE_TRUNK_STATS_INTERVAL:-15}
     volumes:
       # SAME named volume the kamailio service mounts — this is how the agent sees
       # /var/run/kamailio/kamailio_ctl (poller + SBC-role kamcmd commands). NOT
@@ -158,3 +232,6 @@ volumes:
   # reads). Named volume so ownership/perms of the mount point are inherited from
   # the kamailio image (kamailio:kamailio) on first creation.
   kamailio_ctl:
+  # vmagent remote_write on-disk buffer (survives store/WAN blips without loss).
+  vmagent_data:
+    driver: local

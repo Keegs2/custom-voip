@@ -1,0 +1,32 @@
+# vmagent scrape config — East services VM
+# ---------------------------------------------------------------------------
+# Runs on the compose bridge network (docker-compose.services.yml). node_exporter
+# is host-net and postgres/pgbouncer exporters are bridge but published on the
+# host, so this vmagent reaches all three via the docker host-gateway alias
+# `host.docker.internal` (added to the service with extra_hosts). It remote-writes
+# to VictoriaMetrics by service name (http://victoriametrics:8428) in-network.
+#
+# ${ZONE} / ${INSTANCE_ID} are expanded by vmagent at load time because the
+# container runs with `-envflag.enable=true`; the compose service sets
+#   ZONE=${METRICS_ZONE}  INSTANCE_ID=${SERVICES_NODE_ID}.
+global:
+  scrape_interval: 15s
+  external_labels:
+    zone: "${ZONE}"
+    reporting_instance: "${INSTANCE_ID}"
+
+scrape_configs:
+  # node_exporter — host CPU / memory / disk / network for the services VM.
+  - job_name: node
+    static_configs:
+      - targets: ["host.docker.internal:9100"]
+
+  # postgres_exporter — East PRIMARY health: replication lag / slots / sessions.
+  - job_name: postgres
+    static_configs:
+      - targets: ["host.docker.internal:9187"]
+
+  # pgbouncer_exporter — pool saturation (cl_waiting, sv_idle, …).
+  - job_name: pgbouncer
+    static_configs:
+      - targets: ["host.docker.internal:9127"]

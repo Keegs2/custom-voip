@@ -201,8 +201,8 @@
     <!-- SNMP monitoring -->
     <!-- <load module="mod_snmp"/> -->
 
-    <!-- Prometheus metrics (if available) -->
-    <!-- <load module="mod_prometheus"/> -->
+    <!-- Prometheus metrics (aggregate FS exporter on :9102 — metrics plane) -->
+    <load module="mod_prometheus"/>
 
     <!-- Event multicast -->
     <!-- <load module="mod_event_multicast"/> -->

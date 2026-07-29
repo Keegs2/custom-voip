@@ -1,0 +1,33 @@
+# vmagent scrape config — per-zone DB VMs (west-db / central-db)
+# ---------------------------------------------------------------------------
+# Runs host-networked on each per-zone PostgreSQL replica VM
+# (docker-compose.db.yml). node_exporter, postgres_exporter and
+# pgbouncer_exporter are all reachable on the VM loopback, so this vmagent
+# scrapes them at 127.0.0.1:<port> and remote-writes cross-zone to the East
+# VictoriaMetrics (${METRICS_REMOTE_WRITE_HOST:-10.142.0.103}:8428).
+#
+# ${ZONE} / ${INSTANCE_ID} are expanded by vmagent at load time because the
+# container runs with `-envflag.enable=true`; the compose service sets
+#   ZONE=${METRICS_ZONE}  INSTANCE_ID=${DB_NODE_ID}.
+global:
+  scrape_interval: 15s
+  external_labels:
+    zone: "${ZONE}"
+    reporting_instance: "${INSTANCE_ID}"
+
+scrape_configs:
+  # node_exporter — host CPU / memory / disk / network for this DB VM.
+  - job_name: node
+    static_configs:
+      - targets: ["127.0.0.1:9100"]
+
+  # postgres_exporter — replica health: replay lag / slots / sessions
+  # (db_role=replica stamped via the exporter's --set label in compose).
+  - job_name: postgres
+    static_configs:
+      - targets: ["127.0.0.1:9187"]
+
+  # pgbouncer_exporter — pool saturation on the zone-local PgBouncer.
+  - job_name: pgbouncer
+    static_configs:
+      - targets: ["127.0.0.1:9127"]

@@ -1,0 +1,29 @@
+# vmagent scrape config — SBC (Kamailio) VMs
+# ---------------------------------------------------------------------------
+# Runs host-networked on each SBC VM (docker-compose.sbc.yml). Kamailio is
+# host-net, so its xhttp_prom listener and the co-located node_exporter bind on
+# the VM interface — vmagent scrapes them at 127.0.0.1:<port>.
+#
+# ${ZONE} / ${INSTANCE_ID} are expanded by vmagent at load time because the
+# container runs with `-envflag.enable=true`; the compose service sets
+#   ZONE=${METRICS_ZONE}  INSTANCE_ID=${SBC_ID}
+# so every series is stamped with the originating zone + SBC identity WITHOUT
+# putting any customer identifier into a label (the cardinality contract).
+global:
+  scrape_interval: 15s
+  external_labels:
+    zone: "${ZONE}"
+    reporting_instance: "${INSTANCE_ID}"
+
+scrape_configs:
+  # Kamailio xhttp_prom — SBC health + per-carrier-trunk CPS / active calls.
+  # GET /metrics on the dedicated non-SIP listener (127.0.0.1:8080).
+  - job_name: kamailio
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["127.0.0.1:8080"]
+
+  # node_exporter — host CPU / memory / disk / network for this SBC VM.
+  - job_name: node
+    static_configs:
+      - targets: ["127.0.0.1:9100"]

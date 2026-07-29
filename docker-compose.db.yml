@@ -1,0 +1,121 @@
+# RCF-V1 Production — per-zone DB VM metrics (west-db / central-db)
+# Deploy: docker compose -f docker-compose.db.yml up -d --no-deps
+#
+# Runs on: the per-zone PostgreSQL REPLICA VMs (west-db 10.138.0.2,
+# central-db 10.128.0.2). PostgreSQL + PgBouncer run BARE on these VMs (systemd),
+# exactly like the East services VM — this compose file adds ONLY the metrics
+# plane (node/postgres/pgbouncer exporters + a per-zone vmagent). There is no
+# East primary here, so everything is host-networked and reaches the DB on the
+# VM loopback (127.0.0.1). The vmagent remote-writes CROSS-ZONE to the East
+# VictoriaMetrics; the `allow-vmagent-remote-write` firewall rule already covers
+# the west/central subnets. See docs/OBSERVABILITY_METRICS_PLAN.md.
+#
+# Prerequisites:
+#   - Copy .env.services.example-style keys into this VM's /opt/revup/.env:
+#     METRICS_ZONE (west|central), METRICS_REMOTE_WRITE_HOST (10.142.0.103),
+#     DB_NODE_ID (e.g. west-db / central-db), METRICS_DB_PASSWORD,
+#     PGBOUNCER_STATS_PASSWORD.
+#   - metrics_ro role + pgbouncer stats_user already exist (replicated from the
+#     East primary / configured in each VM's pgbouncer.ini).
+
+services:
+  # node_exporter — host CPU / memory / disk / network for this DB VM.
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    container_name: voip-node-exporter
+    command:
+      - "--path.rootfs=/host"
+      - "--web.listen-address=:9100"
+    network_mode: host
+    pid: host
+    volumes:
+      - "/:/host:ro,rslave"
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 128M
+        reservations:
+          memory: 32M
+    restart: unless-stopped
+
+  # postgres_exporter — REPLICA health: replay lag / slots / sessions. Connects
+  # DIRECT to Postgres :5432 (NOT PgBouncer :6432) on the VM loopback as the
+  # read-only metrics_ro role. PG_EXPORTER_CONSTANT_LABELS stamps db_role=replica
+  # so the East store can distinguish these from the primary's postgres metrics.
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.15.0
+    container_name: voip-postgres-exporter
+    network_mode: host
+    environment:
+      - DATA_SOURCE_NAME=postgresql://metrics_ro:${METRICS_DB_PASSWORD}@127.0.0.1:5432/voip?sslmode=disable
+      - PG_EXPORTER_CONSTANT_LABELS=db_role=replica
+      - PG_EXPORTER_WEB_LISTEN_ADDRESS=:9187
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 128M
+        reservations:
+          memory: 32M
+    restart: unless-stopped
+
+  # pgbouncer_exporter — pool saturation (cl_waiting, sv_idle, …) on the
+  # zone-local PgBouncer. Connects to the pgbouncer virtual database on the VM
+  # loopback as the pgb_stats user.
+  pgbouncer-exporter:
+    image: prometheuscommunity/pgbouncer-exporter:v0.10.2
+    container_name: voip-pgbouncer-exporter
+    network_mode: host
+    environment:
+      - DATA_SOURCE_NAME=postgresql://pgb_stats:${PGBOUNCER_STATS_PASSWORD}@127.0.0.1:6432/pgbouncer?sslmode=disable
+      - PGBOUNCER_EXPORTER_WEB_LISTEN_ADDRESS=:9127
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 128M
+        reservations:
+          memory: 32M
+    restart: unless-stopped
+
+  # vmagent (DB role) — scrapes the local node/postgres/pgbouncer exporters at
+  # 127.0.0.1 and remote-writes CROSS-ZONE to the East VictoriaMetrics. On-disk
+  # buffering (maxDiskUsagePerURL=2GB) survives a store or WAN blip without loss.
+  # `-envflag.enable=true` expands ${ZONE}/${INSTANCE_ID} in scrape-db.yml.
+  vmagent:
+    image: victoriametrics/vmagent:v1.103.0
+    container_name: voip-vmagent
+    network_mode: host
+    command:
+      - "-promscrape.config=/etc/vmagent/scrape-db.yml"
+      - "-remoteWrite.url=http://${METRICS_REMOTE_WRITE_HOST:-10.142.0.103}:8428/api/v1/write"
+      - "-remoteWrite.tmpDataPath=/vmagent-data"
+      - "-remoteWrite.maxDiskUsagePerURL=2GB"
+      - "-httpListenAddr=:8429"
+      - "-envflag.enable=true"
+    environment:
+      - ZONE=${METRICS_ZONE}
+      - INSTANCE_ID=${DB_NODE_ID}
+    volumes:
+      - ./docker/vmagent/scrape-db.yml:/etc/vmagent/scrape-db.yml:ro
+      - vmagent_data:/vmagent-data
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:8429/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          memory: 64M
+    restart: unless-stopped
+
+volumes:
+  # vmagent remote_write on-disk buffer (survives store/WAN blips without loss).
+  vmagent_data:
+    driver: local

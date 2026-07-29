@@ -1,0 +1,28 @@
+# vmalert recording rules — bounded NOC "Traffic Status" roll-ups.
+# ---------------------------------------------------------------------------
+# Loaded by the vmalert service (docker-compose.services.yml) via
+#   -rule=/etc/vmalert/rules/*.yml
+# and evaluated against VictoriaMetrics (datasource/remoteRead), with the
+# resulting series written back through remoteWrite. These pre-aggregate the
+# raw exporter metrics into fixed-size series so the wall-TV panels stay
+# constant-cardinality regardless of customer count (the cardinality contract).
+#
+# Metric names are the RECONCILED, authoritative names from the plan:
+#   kamailio_trunk_cps            (counter, labels: trunk<carrier>, direction)
+#   kamailio_trunk_active_calls   (gauge,   labels: trunk<carrier>, direction)
+#   freeswitch_calls_active       (gauge,   +freeswitch_node, zone from vmagent)
+groups:
+  - name: trunk_rollups
+    interval: 30s
+    rules:
+      # Per-direction CPS across all carriers, per zone (feeds "Total CPS").
+      - record: voip:cps:by_direction:rate1m
+        expr: sum by (direction, zone) (rate(kamailio_trunk_cps[1m]))
+
+      # Live connected calls per FreeSWITCH node, per zone.
+      - record: voip:calls_active:by_node
+        expr: sum by (freeswitch_node, zone) (freeswitch_calls_active)
+
+      # Ten busiest carrier trunks by active calls (in+out split preserved).
+      - record: voip:calls_active:top10_carrier
+        expr: topk(10, sum by (trunk, direction) (kamailio_trunk_active_calls))

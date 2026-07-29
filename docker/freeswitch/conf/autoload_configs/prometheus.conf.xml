@@ -1,0 +1,6 @@
+<configuration name="prometheus.conf" description="Prometheus Exporter">
+  <settings>
+    <param name="bind-addr" value="0.0.0.0"/>
+    <param name="port" value="9102"/>
+  </settings>
+</configuration>

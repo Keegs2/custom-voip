@@ -36,6 +36,13 @@ import sys
 # Both siblings live next to this file in /usr/local/bin (see Dockerfile COPY).
 import carrier_monitor
 import ops_api
+# Role catalog — its detected ROLE gates which metrics subsystem we start.
+import ops_commands
+# Role-specific metrics-plane feeders (each a daemon thread, fail-open):
+#   - ops_metrics       : FS ESL Prometheus exporter (:9103), FS role only.
+#   - live_trunk_feeder : per-customer-trunk stats → East API, SBC role only.
+import ops_metrics
+import live_trunk_feeder
 
 
 def main() -> int:
@@ -62,6 +69,27 @@ def main() -> int:
         ops_api.start_in_background()
     except Exception as exc:  # noqa: BLE001 - API must never block the poller
         log.error("failed to start ops-agent API thread: %s", exc)
+
+    # 1b) Start the metrics-plane feeder for THIS host's role, on its own daemon
+    #     thread(s). Same posture as the command API: role-gated (using the
+    #     catalog's already-detected ROLE — the same value /healthz advertises),
+    #     wrapped in try/except so a feeder failure NEVER blocks or perturbs the
+    #     carrier poller (the process's primary duty). Only the matching role's
+    #     feeder starts; the other is a no-op on this VM.
+    #
+    #   FS role  -> ops_metrics: FreeSWITCH ESL Prometheus exporter on :9103.
+    #   SBC role -> live_trunk_feeder: per-customer-trunk stats POSTed to the
+    #               East API on its own cadence (carrier-status poll untouched).
+    if ops_commands.ROLE == ops_commands.ROLE_FS:
+        try:
+            ops_metrics.start_in_background()
+        except Exception as exc:  # noqa: BLE001 - metrics must never block the poller
+            log.error("failed to start ops-metrics exporter thread: %s", exc)
+    elif ops_commands.ROLE == ops_commands.ROLE_SBC:
+        try:
+            live_trunk_feeder.start_in_background()
+        except Exception as exc:  # noqa: BLE001 - feeder must never block the poller
+            log.error("failed to start live-trunk feeder thread: %s", exc)
 
     # 2) Hand the MAIN thread to the UNCHANGED carrier poller. It installs its own
     #    signal handlers and blocks until SIGTERM/SIGINT, then returns 0. Its

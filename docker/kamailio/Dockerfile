@@ -36,6 +36,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     kamailio-outbound-modules \
     # Websocket (if WebRTC needed later)
     kamailio-websocket-modules \
+    # Prometheus metrics exporter (xhttp_prom on :8080 — /metrics scrape)
+    kamailio-prometheus-modules \
     # Cleanup
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
@@ -78,6 +80,10 @@ RUN openssl req -x509 -newkey rsa:4096 -keyout /etc/kamailio/tls/kamailio.key \
 
 # SIP ports: 5060 (UDP/TCP), 5061 (TLS)
 EXPOSE 5060/udp 5060/tcp 5061/tcp
+# Prometheus metrics scrape endpoint (xhttp_prom listener — see kamailio.cfg).
+# Documentation only; the listener binds SBC_INTERNAL_IP:8080 + 127.0.0.1:8080
+# on the host network (network_mode: host), so this EXPOSE is informational.
+EXPOSE 8080/tcp
 
 # Health check using kamcmd over the ctl binrpc UNIX socket.
 # -s pins the socket path (matches the ctl "binrpc" modparam in kamailio.cfg and

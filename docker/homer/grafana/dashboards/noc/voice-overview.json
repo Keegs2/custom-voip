@@ -131,7 +131,7 @@
       "id": 3,
       "type": "stat",
       "title": "CPS — last 1m",
-      "description": "Calls per second = count of seized calls (by start_time) in the last 60s / 60, on the selected zone. Rated capacity is ~500 CPS per zone; amber/red are set for the all-zones view. See Traffic & Capacity for per-zone headroom.",
+      "description": "Calls per second = count of seized calls (by start_time) in the last 60s / 60, on the selected zone. Rated capacity is ~500 CPS per zone; amber/red are set for the all-zones view. See Traffic Status for per-zone / per-node CPS.",
       "gridPos": { "h": 5, "w": 5, "x": 10, "y": 3 },
       "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
       "targets": [
