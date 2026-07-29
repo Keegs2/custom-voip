@@ -34,11 +34,11 @@
       "id": 100,
       "type": "text",
       "title": "",
-      "gridPos": { "h": 3, "w": 24, "x": 0, "y": 0 },
+      "gridPos": { "h": 2, "w": 24, "x": 0, "y": 0 },
       "transparent": true,
       "options": {
         "mode": "markdown",
-        "content": "## Traffic Status\nOne-glance offered load, connected calls, per-trunk volume, and routing disposition — all from the CDR hypertable (`voip-cdr-pg`). **CPS** = seizures/sec (rate of `start_time`); **connected calls** = CDR time-overlap (`answer_time <= t < end_time`) since CDRs are written at hangup (retrospective concurrency, NOT live ESL — `active_calls` is empty for the RCF traffic that dominates production). Zone = `split_part(sbc_id,'-',1)`. **Carriers:** `carrier_primary` = Bandwidth Dallas, `carrier_secondary` = Bandwidth LA, `local` = on-net. Per-zone/per-node timeseries always show every zone; the carrier / on-net / SIP panels honour the **Zone** filter."
+        "content": "## Traffic Status — live ops wall\n**Every panel is real-time** (VictoriaMetrics `voip-metrics-vm` — Kamailio + FreeSWITCH `mod_prometheus`, scraped ~15s), so this reflects the fleet as it is **right now**, not the retrospective CDR view (all CDR-delayed volume/ASR/carrier-split/hangup analytics moved to **Call Quality**). **CPS** = live seizures/sec; **connected calls** = FreeSWITCH `calls_active`; **dialogs** = Kamailio signaling concurrency; **Live ASR / failure %** = Kamailio INVITE reply-class rates over 5m. Carrier UP/DOWN is the only non-VM source — the SBCs' Kamailio-dispatcher OPTIONS probes via `carrier_trunk_health` (`voip-cdr-pg`), poller-fresh (~3–15s), not call-derived. `zone` label comes from `external_labels`; the **Zone** picker (`$zonere`) filters the SBC/dialog/ASR selectors. **Carriers:** Bandwidth Dallas (primary) · Bandwidth LA (secondary) · `local` = on-net."
       },
       "fieldConfig": { "defaults": {}, "overrides": [] }
     },
@@ -46,8 +46,8 @@
       "id": 1,
       "type": "stat",
       "title": "Total CPS — now (1m)",
-      "description": "Fleet-wide calls per second right now: seizures in the last 60s / 60, all zones. Rated capacity is ~500 CPS/zone; amber at 350, red at 500 on the all-zones view.",
-      "gridPos": { "h": 8, "w": 6, "x": 0, "y": 3 },
+      "description": "Fleet-wide calls per second right now: sum(rate(kamailio_trunk_cps[1m])) across all SBCs/zones. Rated capacity is ~500 CPS/zone; amber at 350, red at 500 on the all-zones view. Live from VictoriaMetrics (Kamailio mod_prometheus).",
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 2 },
       "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
       "targets": [
         {
@@ -86,11 +86,299 @@
       }
     },
     {
+      "id": 3,
+      "type": "stat",
+      "title": "Total connected calls — now",
+      "description": "Concurrent/active calls across the fleet at this instant — TRUE LIVE GAUGE from FreeSWITCH mod_prometheus (sum of freeswitch_calls_active over all media nodes), scraped every ~15s. Reflects calls actually up on the switches right now.",
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 2 },
+      "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
+          "expr": "sum(freeswitch_calls_active)",
+          "range": true,
+          "legendFormat": "connected"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "center"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "noValue": "0",
+          "mappings": [],
+          "color": { "mode": "fixed", "fixedColor": "blue" },
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "blue", "value": null } ] }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 40,
+      "type": "stat",
+      "title": "Live ASR (5m)",
+      "description": "Live answer-seizure ratio from Kamailio INVITE reply classes over the last 5 minutes: 2xx / (2xx + 4xx + 5xx + 6xx). Honours the Zone filter. Green >= 50%, amber < 50%, red < 30%. This is the live signaling ASR, independent of CDR write lag.",
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 2 },
+      "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
+          "expr": "sum(rate(kamailio_core_rcv_replies_2xx_invite{zone=~\"$zonere\"}[5m])) / clamp_min(sum(rate(kamailio_core_rcv_replies_2xx_invite{zone=~\"$zonere\"}[5m])) + sum(rate(kamailio_core_rcv_replies_4xx_invite{zone=~\"$zonere\"}[5m])) + sum(rate(kamailio_core_rcv_replies_5xx_invite{zone=~\"$zonere\"}[5m])) + sum(rate(kamailio_core_rcv_replies_6xx_invite{zone=~\"$zonere\"}[5m])), 0.001)",
+          "range": true,
+          "legendFormat": "ASR"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "center"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 1,
+          "min": 0,
+          "max": 1,
+          "noValue": "—",
+          "mappings": [],
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "orange", "value": 0.3 },
+              { "color": "green", "value": 0.5 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 41,
+      "type": "stat",
+      "title": "Live failure % (5m)",
+      "description": "Live INVITE failure fraction from Kamailio reply classes over 5m: (4xx + 5xx + 6xx) / (2xx + 4xx + 5xx + 6xx). Honours the Zone filter. Green < 10%, amber >= 10%, red >= 25%. Same denominator as Live ASR; the earliest live sign of a carrier/routing fault.",
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 2 },
+      "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
+          "expr": "(sum(rate(kamailio_core_rcv_replies_4xx_invite{zone=~\"$zonere\"}[5m])) + sum(rate(kamailio_core_rcv_replies_5xx_invite{zone=~\"$zonere\"}[5m])) + sum(rate(kamailio_core_rcv_replies_6xx_invite{zone=~\"$zonere\"}[5m]))) / clamp_min(sum(rate(kamailio_core_rcv_replies_2xx_invite{zone=~\"$zonere\"}[5m])) + sum(rate(kamailio_core_rcv_replies_4xx_invite{zone=~\"$zonere\"}[5m])) + sum(rate(kamailio_core_rcv_replies_5xx_invite{zone=~\"$zonere\"}[5m])) + sum(rate(kamailio_core_rcv_replies_6xx_invite{zone=~\"$zonere\"}[5m])), 0.001)",
+          "range": true,
+          "legendFormat": "failure"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "center"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 1,
+          "min": 0,
+          "max": 1,
+          "noValue": "—",
+          "mappings": [],
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 0.1 },
+              { "color": "red", "value": 0.25 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 42,
+      "type": "stat",
+      "title": "On-net % — now",
+      "description": "Live share of active FreeSWITCH channels that are on-net (short-circuited internally, no carrier egress): sum(freeswitch_channels_active{on_net=\"true\"}) / sum(freeswitch_channels_active{on_net=~\"true|false\"}). Higher = more carrier hairpin avoided (cost + quality win). Live gauge, all zones.",
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 2 },
+      "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
+          "expr": "sum(freeswitch_channels_active{on_net=\"true\"}) / clamp_min(sum(freeswitch_channels_active{on_net=~\"true|false\"}), 1)",
+          "range": true,
+          "legendFormat": "on-net"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 1,
+          "min": 0,
+          "max": 1,
+          "noValue": "0",
+          "mappings": [],
+          "color": { "mode": "fixed", "fixedColor": "blue" },
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "blue", "value": null } ] }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 43,
+      "type": "stat",
+      "title": "Active dialogs — now",
+      "description": "Live signaling concurrency: sum(kamailio_dialog_active_dialogs) across the SBCs, honouring the Zone filter. This is SIP dialog state (what Kamailio is tracking) as opposed to media legs (freeswitch_calls_active) — the two should track closely; a divergence points at leaked dialogs or media/signaling mismatch.",
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 2 },
+      "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
+          "expr": "sum(kamailio_dialog_active_dialogs{zone=~\"$zonere\"})",
+          "range": true,
+          "legendFormat": "dialogs"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "center"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "noValue": "0",
+          "mappings": [],
+          "color": { "mode": "fixed", "fixedColor": "purple" },
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "purple", "value": null } ] }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 44,
+      "type": "timeseries",
+      "title": "CPS over time — by zone (1m rate)",
+      "description": "Live calls-per-second per zone: sum by (zone)(rate(kamailio_trunk_cps[1m])), one line per zone. Watch load balance across East / West / Central. All zones shown regardless of the Zone filter.",
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 6 },
+      "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
+          "expr": "sum by (zone) (rate(kamailio_trunk_cps[1m]))",
+          "range": true,
+          "legendFormat": "{{zone}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "cps",
+          "min": 0,
+          "decimals": 1,
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null } ] }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "right", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    },
+    {
+      "id": 45,
+      "type": "timeseries",
+      "title": "Concurrency over time — media vs signaling",
+      "description": "Live concurrency: media (FreeSWITCH calls_active) vs signaling (SBC dialog_active_dialogs), both fleet-wide. They should track closely; a persistent gap points at leaked dialogs or a media/signaling mismatch. All zones.",
+      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 6 },
+      "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
+          "expr": "sum(freeswitch_calls_active)",
+          "range": true,
+          "legendFormat": "media (FS calls)"
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
+          "expr": "sum(kamailio_dialog_active_dialogs)",
+          "range": true,
+          "legendFormat": "signaling (SBC dialogs)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "decimals": 0,
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null } ] }
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "media (FS calls)" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "blue" } } ] },
+          { "matcher": { "id": "byName", "options": "signaling (SBC dialogs)" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "purple" } } ] }
+        ]
+      },
+      "options": {
+        "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "right", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    },
+    {
       "id": 2,
       "type": "timeseries",
       "title": "CPS per FreeSWITCH (1m rate)",
-      "description": "Calls per second per media node = seizures per 1-minute bucket / 60, one series per freeswitch_node. Shows how call-start load is distributed across the FreeSWITCH fleet. All nodes shown regardless of the Zone filter.",
-      "gridPos": { "h": 8, "w": 18, "x": 6, "y": 3 },
+      "description": "Calls per second per media node = seizures per 1-minute bucket / 60, one series per freeswitch_node. Shows how call-start load is distributed across the FreeSWITCH fleet. Honours the Zone filter. Live from VictoriaMetrics.",
+      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 6 },
       "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
       "targets": [
         {
@@ -125,47 +413,11 @@
       }
     },
     {
-      "id": 3,
-      "type": "stat",
-      "title": "Total connected calls — now",
-      "description": "Concurrent/active calls across the fleet at this instant — now a TRUE LIVE GAUGE from FreeSWITCH mod_prometheus (sum of freeswitch_calls_active over all media nodes), scraped every ~15s. This replaces the previous CDR time-overlap proxy (answer_time <= now AND end_time > now); CDRs land only at hangup, so that method was retrospective concurrency, not a live count. This panel now reflects calls actually up on the switches right now.",
-      "gridPos": { "h": 8, "w": 6, "x": 0, "y": 11 },
-      "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
-      "targets": [
-        {
-          "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
-          "expr": "sum(freeswitch_calls_active)",
-          "range": true,
-          "legendFormat": "connected"
-        }
-      ],
-      "options": {
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
-        "orientation": "auto",
-        "textMode": "value",
-        "colorMode": "background",
-        "graphMode": "area",
-        "justifyMode": "center"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "decimals": 0,
-          "noValue": "0",
-          "mappings": [],
-          "color": { "mode": "fixed", "fixedColor": "blue" },
-          "thresholds": { "mode": "absolute", "steps": [ { "color": "blue", "value": null } ] }
-        },
-        "overrides": []
-      }
-    },
-    {
       "id": 4,
       "type": "barchart",
       "title": "Calls per carrier trunk — inbound (live)",
-      "description": "Live inbound active calls per CARRIER trunk (Bandwidth PoP) from Kamailio's dialog profile: kamailio_trunk_active_calls{direction=\"inbound\"}, summed by the bounded carrier `trunk` label, instant snapshot. Was retrospective per-CUSTOMER-trunk CDR counts; per-customer-trunk detail now lives in the CRAG live_trunk_health drill-down. Honours the Zone filter.",
-      "gridPos": { "h": 8, "w": 9, "x": 6, "y": 11 },
+      "description": "Live inbound active calls per CARRIER trunk (Bandwidth PoP) from Kamailio's dialog profile: kamailio_trunk_active_calls{direction=\"inbound\"}, summed by the bounded carrier `trunk` label, instant snapshot. Honours the Zone filter.",
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 12 },
       "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
       "targets": [
         {
@@ -207,8 +459,8 @@
       "id": 5,
       "type": "barchart",
       "title": "Calls per carrier trunk — outbound (live)",
-      "description": "Live outbound active calls per CARRIER trunk (Bandwidth PoP) from Kamailio's dialog profile: kamailio_trunk_active_calls{direction=\"outbound\"}, summed by the bounded carrier `trunk` label, instant snapshot. Was retrospective per-CUSTOMER-trunk CDR counts; per-customer-trunk detail now lives in the CRAG live_trunk_health drill-down. Honours the Zone filter.",
-      "gridPos": { "h": 8, "w": 9, "x": 15, "y": 11 },
+      "description": "Live outbound active calls per CARRIER trunk (Bandwidth PoP) from Kamailio's dialog profile: kamailio_trunk_active_calls{direction=\"outbound\"}, summed by the bounded carrier `trunk` label, instant snapshot. Honours the Zone filter.",
+      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 12 },
       "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
       "targets": [
         {
@@ -247,256 +499,60 @@
       }
     },
     {
-      "id": 10,
+      "id": 46,
       "type": "timeseries",
-      "title": "Total call volume over time — hourly",
-      "description": "Whole-platform offered volume: seized calls per hour from raw cdrs over the range (all zones). The headline traffic curve.",
-      "gridPos": { "h": 8, "w": 9, "x": 0, "y": 19 },
-      "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
+      "title": "SIP INVITE reply-class rate (5m)",
+      "description": "Live Kamailio INVITE reply rate by response class over 5m: 2xx / 3xx / 4xx / 5xx / 6xx, sum(rate(kamailio_core_rcv_replies_Nxx_invite[5m])). Honours the Zone filter. A growing 4xx/5xx/6xx band is the earliest LIVE sign of a carrier/routing fault — this is the live replacement for the old CDR SIP-class panel.",
+      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 12 },
+      "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
-          "format": "time_series",
-          "editorMode": "code",
-          "rawQuery": true,
-          "rawSql": "SELECT $__timeGroup(start_time, '1h') AS time, count(*) AS calls FROM cdrs WHERE $__timeFilter(start_time) GROUP BY 1 ORDER BY 1;"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "min": 0,
-          "color": { "mode": "fixed", "fixedColor": "blue" },
-          "custom": {
-            "drawStyle": "line",
-            "lineWidth": 2,
-            "fillOpacity": 10,
-            "showPoints": "never",
-            "stacking": { "group": "A", "mode": "none" },
-            "spanNulls": false
-          },
-          "thresholds": { "mode": "absolute", "steps": [ { "color": "blue", "value": null } ] }
+          "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
+          "expr": "sum(rate(kamailio_core_rcv_replies_2xx_invite{zone=~\"$zonere\"}[5m]))",
+          "range": true,
+          "legendFormat": "2xx"
         },
-        "overrides": []
-      },
-      "options": {
-        "legend": { "calcs": ["sum"], "displayMode": "list", "placement": "bottom", "showLegend": true },
-        "tooltip": { "mode": "single", "sort": "none" }
-      }
-    },
-    {
-      "id": 11,
-      "type": "timeseries",
-      "title": "Per-zone volume over time — hourly",
-      "description": "Seized calls per hour per zone as one line per zone (zone from split_part(sbc_id,'-',1)). Watch load balance across East / West / Central. All zones shown regardless of the Zone filter.",
-      "gridPos": { "h": 8, "w": 9, "x": 9, "y": 19 },
-      "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
-      "targets": [
         {
-          "refId": "A",
-          "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
-          "format": "time_series",
-          "editorMode": "code",
-          "rawQuery": true,
-          "rawSql": "SELECT $__timeGroup(start_time, '1h') AS time, CASE WHEN sbc_id IS NULL OR sbc_id = '' THEN 'unknown' ELSE split_part(sbc_id,'-',1) END AS zone, count(*) AS calls FROM cdrs WHERE $__timeFilter(start_time) GROUP BY 1, 2 ORDER BY 1;"
+          "refId": "B",
+          "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
+          "expr": "sum(rate(kamailio_core_rcv_replies_3xx_invite{zone=~\"$zonere\"}[5m]))",
+          "range": true,
+          "legendFormat": "3xx"
+        },
+        {
+          "refId": "C",
+          "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
+          "expr": "sum(rate(kamailio_core_rcv_replies_4xx_invite{zone=~\"$zonere\"}[5m]))",
+          "range": true,
+          "legendFormat": "4xx"
+        },
+        {
+          "refId": "D",
+          "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
+          "expr": "sum(rate(kamailio_core_rcv_replies_5xx_invite{zone=~\"$zonere\"}[5m]))",
+          "range": true,
+          "legendFormat": "5xx"
+        },
+        {
+          "refId": "E",
+          "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
+          "expr": "sum(rate(kamailio_core_rcv_replies_6xx_invite{zone=~\"$zonere\"}[5m]))",
+          "range": true,
+          "legendFormat": "6xx"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "short",
+          "unit": "cps",
           "min": 0,
+          "decimals": 2,
           "color": { "mode": "palette-classic" },
           "custom": {
             "drawStyle": "line",
+            "lineInterpolation": "smooth",
             "lineWidth": 2,
             "fillOpacity": 10,
-            "stacking": { "group": "A", "mode": "none" },
-            "showPoints": "never",
-            "spanNulls": false
-          },
-          "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null } ] }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": { "calcs": ["sum"], "displayMode": "table", "placement": "right", "showLegend": true },
-        "tooltip": { "mode": "multi", "sort": "desc" }
-      }
-    },
-    {
-      "id": 12,
-      "type": "piechart",
-      "title": "Per-zone split (range + zone)",
-      "description": "Share of calls by zone over the range + zone filter (zone from split_part(sbc_id,'-',1); blank sbc_id = 'unknown'). Total calls per zone as pie slices — the range-wide companion to the per-zone volume line chart.",
-      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 19 },
-      "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
-      "targets": [
-        {
-          "refId": "A",
-          "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
-          "format": "table",
-          "editorMode": "code",
-          "rawQuery": true,
-          "rawSql": "SELECT CASE WHEN sbc_id IS NULL OR sbc_id = '' THEN 'unknown' ELSE split_part(sbc_id,'-',1) END AS zone, count(*) AS calls FROM cdrs WHERE $__timeFilter(start_time) AND split_part(coalesce(sbc_id,''),'-',1) LIKE '$zone' GROUP BY 1 ORDER BY 2 DESC;"
-        }
-      ],
-      "options": {
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": true },
-        "pieType": "donut",
-        "legend": { "displayMode": "table", "placement": "right", "showLegend": true, "values": ["value", "percent"] },
-        "tooltip": { "mode": "single", "sort": "desc" }
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "color": { "mode": "palette-classic" },
-          "mappings": [],
-          "custom": { "hideFrom": { "legend": false, "tooltip": false, "viz": false } }
-        },
-        "overrides": []
-      }
-    },
-    {
-      "id": 20,
-      "type": "piechart",
-      "title": "Carrier split — call count (range + zone)",
-      "description": "Share of calls by carrier_used over the range + zone. carrier_primary=Dallas, carrier_secondary=LA, local=on-net, default=unset. Heavy 'secondary' means primary is failing over.",
-      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 27 },
-      "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
-      "targets": [
-        {
-          "refId": "A",
-          "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
-          "format": "table",
-          "editorMode": "code",
-          "rawQuery": true,
-          "rawSql": "SELECT CASE carrier_used WHEN 'carrier_primary' THEN 'Dallas (primary)' WHEN 'carrier_secondary' THEN 'LA (secondary)' WHEN 'local' THEN 'On-net (local)' WHEN 'default' THEN 'Unset (default)' ELSE COALESCE(carrier_used, 'null') END AS carrier, count(*) AS calls FROM cdrs WHERE $__timeFilter(start_time) AND split_part(coalesce(sbc_id,''),'-',1) LIKE '$zone' GROUP BY 1 ORDER BY 2 DESC;"
-        }
-      ],
-      "options": {
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": true },
-        "pieType": "donut",
-        "legend": { "displayMode": "table", "placement": "right", "showLegend": true, "values": ["value", "percent"] },
-        "tooltip": { "mode": "single", "sort": "desc" }
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "color": { "mode": "palette-classic" },
-          "mappings": [],
-          "custom": { "hideFrom": { "legend": false, "tooltip": false, "viz": false } }
-        },
-        "overrides": []
-      }
-    },
-    {
-      "id": 21,
-      "type": "table",
-      "title": "Per-carrier ASR / ACD (range + zone)",
-      "description": "For each carrier_used: seized, answered, ASR, and ACD (avg answered duration). The routing-decision table — compare Dallas vs LA answer rates. local/default rows included.",
-      "gridPos": { "h": 8, "w": 10, "x": 8, "y": 27 },
-      "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
-      "targets": [
-        {
-          "refId": "A",
-          "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
-          "format": "table",
-          "editorMode": "code",
-          "rawQuery": true,
-          "rawSql": "SELECT CASE carrier_used WHEN 'carrier_primary' THEN 'Dallas (primary)' WHEN 'carrier_secondary' THEN 'LA (secondary)' WHEN 'local' THEN 'On-net (local)' WHEN 'default' THEN 'Unset (default)' ELSE COALESCE(carrier_used, 'null') END AS carrier, count(*) AS seized, count(*) FILTER (WHERE answer_time IS NOT NULL) AS answered, (count(*) FILTER (WHERE answer_time IS NOT NULL))::float / NULLIF(count(*), 0) AS asr, avg(duration_ms) FILTER (WHERE answer_time IS NOT NULL) / 1000.0 AS acd_sec FROM cdrs WHERE $__timeFilter(start_time) AND split_part(coalesce(sbc_id,''),'-',1) LIKE '$zone' GROUP BY 1 ORDER BY seized DESC;"
-        }
-      ],
-      "transformations": [
-        { "id": "organize", "options": { "renameByName": { "carrier": "Carrier", "seized": "Seized", "answered": "Answered", "asr": "ASR", "acd_sec": "ACD (s)" } } }
-      ],
-      "options": {
-        "showHeader": true,
-        "sortBy": [ { "displayName": "Seized", "desc": true } ],
-        "cellHeight": "sm"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "custom": { "align": "auto", "filterable": true },
-          "mappings": [],
-          "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null } ] }
-        },
-        "overrides": [
-          { "matcher": { "id": "byName", "options": "ASR" }, "properties": [
-            { "id": "unit", "value": "percentunit" },
-            { "id": "decimals", "value": 1 },
-            { "id": "custom.cellOptions", "value": { "type": "color-background", "mode": "gradient" } },
-            { "id": "thresholds", "value": { "mode": "absolute", "steps": [ { "color": "red", "value": null }, { "color": "orange", "value": 0.4 }, { "color": "green", "value": 0.55 } ] } }
-          ] },
-          { "matcher": { "id": "byName", "options": "ACD (s)" }, "properties": [ { "id": "unit", "value": "s" }, { "id": "decimals", "value": 1 } ] }
-        ]
-      }
-    },
-    {
-      "id": 22,
-      "type": "stat",
-      "title": "On-net % (range + zone)",
-      "description": "Share of calls short-circuited internally: count(*) FILTER (WHERE on_net) / count(*) over the range + zone. Higher = more carrier egress avoided (cost + quality win).",
-      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 27 },
-      "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
-      "targets": [
-        {
-          "refId": "A",
-          "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
-          "format": "table",
-          "editorMode": "code",
-          "rawQuery": true,
-          "rawSql": "SELECT (count(*) FILTER (WHERE on_net))::float / NULLIF(count(*), 0) AS on_net_pct FROM cdrs WHERE $__timeFilter(start_time) AND split_part(coalesce(sbc_id,''),'-',1) LIKE '$zone';"
-        }
-      ],
-      "options": {
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
-        "orientation": "auto",
-        "textMode": "value",
-        "colorMode": "background",
-        "graphMode": "none",
-        "justifyMode": "center"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "percentunit",
-          "decimals": 1,
-          "min": 0,
-          "max": 1,
-          "noValue": "—",
-          "mappings": [],
-          "thresholds": { "mode": "absolute", "steps": [ { "color": "blue", "value": null } ] }
-        },
-        "overrides": []
-      }
-    },
-    {
-      "id": 30,
-      "type": "timeseries",
-      "title": "SIP response class over time (2xx / 3xx / 4xx / 5xx / 6xx)",
-      "description": "sip_code bucketed into response classes, 10-minutely, selected zone. NULL sip_code (never got a final response) shown as 'none'. A growing 4xx/5xx band is the earliest sign of a carrier/routing fault.",
-      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 35 },
-      "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
-      "targets": [
-        {
-          "refId": "A",
-          "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
-          "format": "time_series",
-          "editorMode": "code",
-          "rawQuery": true,
-          "rawSql": "SELECT $__timeGroup(start_time, '10m') AS time, CASE WHEN sip_code IS NULL THEN 'none' WHEN sip_code BETWEEN 200 AND 299 THEN '2xx' WHEN sip_code BETWEEN 300 AND 399 THEN '3xx' WHEN sip_code BETWEEN 400 AND 499 THEN '4xx' WHEN sip_code BETWEEN 500 AND 599 THEN '5xx' WHEN sip_code BETWEEN 600 AND 699 THEN '6xx' ELSE 'other' END AS class, count(*) AS calls FROM cdrs WHERE $__timeFilter(start_time) AND split_part(coalesce(sbc_id,''),'-',1) LIKE '$zone' GROUP BY 1, 2 ORDER BY 1;"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "min": 0,
-          "color": { "mode": "palette-classic" },
-          "custom": {
-            "drawStyle": "bars",
-            "lineWidth": 1,
-            "fillOpacity": 70,
-            "stacking": { "group": "A", "mode": "normal" },
             "showPoints": "never",
             "spanNulls": false
           },
@@ -505,23 +561,70 @@
         "overrides": [
           { "matcher": { "id": "byName", "options": "2xx" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } } ] },
           { "matcher": { "id": "byName", "options": "3xx" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "blue" } } ] },
-          { "matcher": { "id": "byName", "options": "4xx" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } } ] },
-          { "matcher": { "id": "byName", "options": "5xx" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } } ] },
-          { "matcher": { "id": "byName", "options": "6xx" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "purple" } } ] },
-          { "matcher": { "id": "byName", "options": "none" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "text" } } ] }
+          { "matcher": { "id": "byName", "options": "4xx" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "yellow" } } ] },
+          { "matcher": { "id": "byName", "options": "5xx" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } } ] },
+          { "matcher": { "id": "byName", "options": "6xx" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } } ] }
         ]
       },
       "options": {
-        "legend": { "calcs": ["sum"], "displayMode": "table", "placement": "right", "showLegend": true },
+        "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "right", "showLegend": true },
         "tooltip": { "mode": "multi", "sort": "desc" }
       }
     },
     {
-      "id": 31,
-      "type": "table",
-      "title": "Top hangup causes (range + zone)",
-      "description": "FreeSWITCH hangup_cause counts + share over the range + zone. NORMAL_CLEARING dominates healthy traffic; spikes in NO_ANSWER / USER_BUSY / CALL_REJECTED / NORMAL_TEMPORARY_FAILURE point at destination or carrier problems. Top 15.",
-      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 35 },
+      "id": 47,
+      "type": "timeseries",
+      "title": "Live ASR trend (5m)",
+      "description": "The Live ASR stat as a trend line: 2xx / (2xx + 4xx + 5xx + 6xx) from Kamailio INVITE reply classes over 5m, honouring the Zone filter. Watch for a sustained dip below 50% (amber) / 30% (red).",
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 19 },
+      "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
+          "expr": "sum(rate(kamailio_core_rcv_replies_2xx_invite{zone=~\"$zonere\"}[5m])) / clamp_min(sum(rate(kamailio_core_rcv_replies_2xx_invite{zone=~\"$zonere\"}[5m])) + sum(rate(kamailio_core_rcv_replies_4xx_invite{zone=~\"$zonere\"}[5m])) + sum(rate(kamailio_core_rcv_replies_5xx_invite{zone=~\"$zonere\"}[5m])) + sum(rate(kamailio_core_rcv_replies_6xx_invite{zone=~\"$zonere\"}[5m])), 0.001)",
+          "range": true,
+          "legendFormat": "ASR"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "decimals": 1,
+          "color": { "mode": "thresholds" },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": false,
+            "thresholdsStyle": { "mode": "dashed" }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "orange", "value": 0.3 },
+              { "color": "green", "value": 0.5 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "calcs": ["mean", "min"], "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "single", "sort": "none" }
+      }
+    },
+    {
+      "id": 48,
+      "type": "stat",
+      "title": "Carrier reachability — UP / DOWN",
+      "description": "Live Bandwidth carrier trunk reachability from the SBCs' Kamailio-dispatcher OPTIONS probes (carrier_trunk_health, keyed by duid). The ONLY panel on this wall not sourced from VictoriaMetrics — it reads voip-cdr-pg, but the health view is poller-fresh (~3-15s), NOT call-derived. 🟢 UP (reachable from >=1 SBC) · 🔴 DOWN (dead on every SBC) · 🟠 STALE (no fresh probe in 90s). Proactive — a dead carrier shows even at zero call volume.",
+      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 19 },
       "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
       "targets": [
         {
@@ -530,30 +633,260 @@
           "format": "table",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT COALESCE(hangup_cause, 'UNKNOWN') AS hangup_cause, count(*) AS calls, round(100.0 * count(*) / NULLIF(sum(count(*)) OVER (), 0), 2) AS pct FROM cdrs WHERE $__timeFilter(start_time) AND split_part(coalesce(sbc_id,''),'-',1) LIKE '$zone' GROUP BY 1 ORDER BY calls DESC LIMIT 15;"
+          "rawSql": "SELECT 'Bandwidth Dallas (primary)' AS carrier, CASE WHEN status IS NULL THEN 2 WHEN last_updated IS NULL OR last_updated < now() - interval '90 seconds' THEN 2 WHEN status = 'up' THEN 1 ELSE 0 END AS carrier_up FROM carrier_trunk_health WHERE duid = 'bw-dallas-primary';"
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT 'Bandwidth LA (secondary)' AS carrier, CASE WHEN status IS NULL THEN 2 WHEN last_updated IS NULL OR last_updated < now() - interval '90 seconds' THEN 2 WHEN status = 'up' THEN 1 ELSE 0 END AS carrier_up FROM carrier_trunk_health WHERE duid = 'bw-la-secondary';"
         }
       ],
       "transformations": [
-        { "id": "organize", "options": { "renameByName": { "hangup_cause": "Hangup cause", "calls": "Calls", "pct": "%" } } }
+        { "id": "merge", "options": {} }
       ],
       "options": {
-        "showHeader": true,
-        "sortBy": [ { "displayName": "Calls", "desc": true } ],
-        "cellHeight": "sm"
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "/^carrier_up$/", "values": false },
+        "orientation": "horizontal",
+        "textMode": "value_and_name",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "wideLayout": true
       },
       "fieldConfig": {
         "defaults": {
-          "custom": { "align": "auto", "filterable": true },
-          "mappings": [],
-          "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null } ] }
+          "unit": "none",
+          "decimals": 0,
+          "noValue": "STALE",
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": { "text": "DOWN", "color": "red", "index": 0 },
+                "1": { "text": "UP", "color": "green", "index": 1 },
+                "2": { "text": "STALE", "color": "orange", "index": 2 }
+              }
+            }
+          ],
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 1 },
+              { "color": "orange", "value": 2 }
+            ]
+          }
         },
-        "overrides": [
-          { "matcher": { "id": "byName", "options": "%" }, "properties": [
-            { "id": "unit", "value": "percent" },
-            { "id": "custom.cellOptions", "value": { "type": "color-background", "mode": "gradient" } }
-          ] },
-          { "matcher": { "id": "byName", "options": "Calls" }, "properties": [ { "id": "custom.width", "value": 110 } ] }
-        ]
+        "overrides": []
+      }
+    },
+    {
+      "id": 49,
+      "type": "piechart",
+      "title": "On-net vs off-net (live)",
+      "description": "Live split of active FreeSWITCH channels by on_net label: sum by (on_net)(freeswitch_channels_active). on-net = short-circuited internally (no carrier egress), off-net = hairpinned to a carrier. All zones.",
+      "gridPos": { "h": 6, "w": 4, "x": 16, "y": 19 },
+      "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
+          "expr": "sum by (on_net) (freeswitch_channels_active)",
+          "instant": true,
+          "range": false,
+          "format": "table",
+          "legendFormat": "{{on_net}}"
+        }
+      ],
+      "transformations": [
+        { "id": "labelsToFields", "options": { "mode": "columns", "keepLabels": ["on_net"] } },
+        { "id": "organize", "options": { "excludeByName": { "Time": true }, "renameByName": { "Value": "channels" } } }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": true },
+        "pieType": "donut",
+        "legend": { "displayMode": "table", "placement": "bottom", "showLegend": true, "values": ["value", "percent"] },
+        "tooltip": { "mode": "single", "sort": "desc" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": { "mode": "palette-classic" },
+          "mappings": [],
+          "custom": { "hideFrom": { "legend": false, "tooltip": false, "viz": false } }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 50,
+      "type": "piechart",
+      "title": "Inbound vs outbound (live)",
+      "description": "Live split of active FreeSWITCH channels by direction: sum by (direction)(freeswitch_channels_active{direction=~\"inbound|outbound\"}). All zones.",
+      "gridPos": { "h": 6, "w": 4, "x": 20, "y": 19 },
+      "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
+          "expr": "sum by (direction) (freeswitch_channels_active{direction=~\"inbound|outbound\"})",
+          "instant": true,
+          "range": false,
+          "format": "table",
+          "legendFormat": "{{direction}}"
+        }
+      ],
+      "transformations": [
+        { "id": "labelsToFields", "options": { "mode": "columns", "keepLabels": ["direction"] } },
+        { "id": "organize", "options": { "excludeByName": { "Time": true }, "renameByName": { "Value": "channels" } } }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": true },
+        "pieType": "donut",
+        "legend": { "displayMode": "table", "placement": "bottom", "showLegend": true, "values": ["value", "percent"] },
+        "tooltip": { "mode": "single", "sort": "desc" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": { "mode": "palette-classic" },
+          "mappings": [],
+          "custom": { "hideFrom": { "legend": false, "tooltip": false, "viz": false } }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 51,
+      "type": "timeseries",
+      "title": "SBC memory headroom (shmem used %)",
+      "description": "Live Kamailio shared-memory utilisation per SBC: kamailio_shmem_used_size / kamailio_shmem_total_size, one line per reporting_instance. Green < 70%, amber >= 70%, red >= 85%. Rising shmem is an early warning of a dialog/tm leak or an under-provisioned SBC before it starts dropping calls.",
+      "gridPos": { "h": 5, "w": 12, "x": 0, "y": 25 },
+      "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
+          "expr": "kamailio_shmem_used_size / kamailio_shmem_total_size",
+          "range": true,
+          "legendFormat": "{{reporting_instance}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "decimals": 1,
+          "color": { "mode": "thresholds" },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": false,
+            "thresholdsStyle": { "mode": "dashed" }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 0.7 },
+              { "color": "red", "value": 0.85 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "calcs": ["last", "max"], "displayMode": "table", "placement": "right", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    },
+    {
+      "id": 52,
+      "type": "stat",
+      "title": "Blocked IPs — now",
+      "description": "Live count of source IPs currently blocked by Kamailio's pike (flood-detection) module: sum(kamailio_pike_blocked_ips). Green at 0; any non-zero is an active flood/attack indicator worth eyeballing. Fleet-wide.",
+      "gridPos": { "h": 5, "w": 6, "x": 12, "y": 25 },
+      "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
+          "expr": "sum(kamailio_pike_blocked_ips)",
+          "range": true,
+          "legendFormat": "blocked"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "center"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "noValue": "0",
+          "mappings": [],
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 53,
+      "type": "stat",
+      "title": "Dialogs per SBC — now",
+      "description": "Live signaling concurrency broken out per SBC: sum by (reporting_instance)(kamailio_dialog_active_dialogs), honouring the Zone filter. Shows how dialog load is distributed across the SBC fleet — a lopsided SBC points at an NLB imbalance or a stuck peer.",
+      "gridPos": { "h": 5, "w": 6, "x": 18, "y": 25 },
+      "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
+          "expr": "sum by (reporting_instance) (kamailio_dialog_active_dialogs{zone=~\"$zonere\"})",
+          "instant": true,
+          "range": false,
+          "format": "time_series",
+          "legendFormat": "{{reporting_instance}}"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "orientation": "auto",
+        "textMode": "value_and_name",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "wideLayout": true
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "noValue": "0",
+          "mappings": [],
+          "color": { "mode": "fixed", "fixedColor": "purple" },
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "purple", "value": null } ] }
+        },
+        "overrides": []
       }
     }
   ],
@@ -565,7 +898,7 @@
       {
         "name": "zone",
         "label": "Zone",
-        "description": "Filter by zone, derived from split_part(sbc_id,'-',1). 'All' = SQL LIKE '%' (includes blank-sbc_id rows). Fleet-wide timeseries (Total CPS, CPS per FreeSWITCH, volume, per-zone distribution) always show every zone; the carrier / on-net / SIP-class / hangup panels honour this filter.",
+        "description": "Filter by zone. On this live wall the picker maps to $zonere (the PromQL regex twin) and is applied as zone=~\"$zonere\" inside the SBC / dialog / ASR / SIP-class selectors. Fleet-wide trend panels (CPS-by-zone, concurrency, pies, memory) intentionally show every zone.",
         "type": "custom",
         "hide": 0,
         "multi": false,
