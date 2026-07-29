@@ -805,6 +805,211 @@
           { "matcher": { "id": "byName", "options": "Avg quality %" }, "properties": [ { "id": "unit", "value": "percent" }, { "id": "decimals", "value": 1 }, { "id": "thresholds", "value": { "mode": "absolute", "steps": [ { "color": "red", "value": null }, { "color": "orange", "value": 90 }, { "color": "green", "value": 97 } ] } } ] }
         ]
       }
+    },
+    {
+      "id": 50,
+      "type": "row",
+      "title": "Traffic & routing history (CDR)",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 57 },
+      "panels": []
+    },
+    {
+      "id": 60,
+      "type": "timeseries",
+      "title": "Total call volume over time — hourly",
+      "description": "Whole-platform offered volume: seized calls per hour from raw cdrs over the range (all zones). The headline traffic curve.",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 58 },
+      "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
+          "format": "time_series",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT $__timeGroup(start_time, '1h') AS time, count(*) AS calls FROM cdrs WHERE $__timeFilter(start_time) GROUP BY 1 ORDER BY 1;"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "color": { "mode": "fixed", "fixedColor": "blue" },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "stacking": { "group": "A", "mode": "none" },
+            "spanNulls": false
+          },
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "blue", "value": null } ] }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "calcs": ["sum"], "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "single", "sort": "none" }
+      }
+    },
+    {
+      "id": 61,
+      "type": "timeseries",
+      "title": "Per-zone volume over time — hourly",
+      "description": "Seized calls per hour per zone as one line per zone (zone from split_part(sbc_id,'-',1)). Watch load balance across East / West / Central. All zones shown regardless of the Zone filter.",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 58 },
+      "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
+          "format": "time_series",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT $__timeGroup(start_time, '1h') AS time, CASE WHEN sbc_id IS NULL OR sbc_id = '' THEN 'unknown' ELSE split_part(sbc_id,'-',1) END AS zone, count(*) AS calls FROM cdrs WHERE $__timeFilter(start_time) GROUP BY 1, 2 ORDER BY 1;"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "stacking": { "group": "A", "mode": "none" },
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null } ] }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "calcs": ["sum"], "displayMode": "table", "placement": "right", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    },
+    {
+      "id": 62,
+      "type": "piechart",
+      "title": "Carrier split — call count (range + zone)",
+      "description": "Share of calls by carrier_used over the range + zone. carrier_primary=Dallas, carrier_secondary=LA, local=on-net, default=unset. Heavy 'secondary' means primary is failing over.",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 66 },
+      "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT CASE carrier_used WHEN 'carrier_primary' THEN 'Dallas (primary)' WHEN 'carrier_secondary' THEN 'LA (secondary)' WHEN 'local' THEN 'On-net (local)' WHEN 'default' THEN 'Unset (default)' ELSE COALESCE(carrier_used, 'null') END AS carrier, count(*) AS calls FROM cdrs WHERE $__timeFilter(start_time) AND split_part(coalesce(sbc_id,''),'-',1) LIKE '$zone' GROUP BY 1 ORDER BY 2 DESC;"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": true },
+        "pieType": "donut",
+        "legend": { "displayMode": "table", "placement": "right", "showLegend": true, "values": ["value", "percent"] },
+        "tooltip": { "mode": "single", "sort": "desc" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": { "mode": "palette-classic" },
+          "mappings": [],
+          "custom": { "hideFrom": { "legend": false, "tooltip": false, "viz": false } }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 63,
+      "type": "timeseries",
+      "title": "SIP response class over time (2xx / 3xx / 4xx / 5xx / 6xx)",
+      "description": "sip_code bucketed into response classes, 10-minutely, selected zone. NULL sip_code (never got a final response) shown as 'none'. A growing 4xx/5xx band is the earliest sign of a carrier/routing fault.",
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 66 },
+      "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
+          "format": "time_series",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT $__timeGroup(start_time, '10m') AS time, CASE WHEN sip_code IS NULL THEN 'none' WHEN sip_code BETWEEN 200 AND 299 THEN '2xx' WHEN sip_code BETWEEN 300 AND 399 THEN '3xx' WHEN sip_code BETWEEN 400 AND 499 THEN '4xx' WHEN sip_code BETWEEN 500 AND 599 THEN '5xx' WHEN sip_code BETWEEN 600 AND 699 THEN '6xx' ELSE 'other' END AS class, count(*) AS calls FROM cdrs WHERE $__timeFilter(start_time) AND split_part(coalesce(sbc_id,''),'-',1) LIKE '$zone' GROUP BY 1, 2 ORDER BY 1;"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "bars",
+            "lineWidth": 1,
+            "fillOpacity": 70,
+            "stacking": { "group": "A", "mode": "normal" },
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null } ] }
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "2xx" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } } ] },
+          { "matcher": { "id": "byName", "options": "3xx" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "blue" } } ] },
+          { "matcher": { "id": "byName", "options": "4xx" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } } ] },
+          { "matcher": { "id": "byName", "options": "5xx" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } } ] },
+          { "matcher": { "id": "byName", "options": "6xx" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "purple" } } ] },
+          { "matcher": { "id": "byName", "options": "none" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "text" } } ] }
+        ]
+      },
+      "options": {
+        "legend": { "calcs": ["sum"], "displayMode": "table", "placement": "right", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    },
+    {
+      "id": 64,
+      "type": "table",
+      "title": "Top hangup causes (range + zone)",
+      "description": "FreeSWITCH hangup_cause counts + share over the range + zone. NORMAL_CLEARING dominates healthy traffic; spikes in NO_ANSWER / USER_BUSY / CALL_REJECTED / NORMAL_TEMPORARY_FAILURE point at destination or carrier problems. Top 15.",
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 74 },
+      "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT COALESCE(hangup_cause, 'UNKNOWN') AS hangup_cause, count(*) AS calls, round(100.0 * count(*) / NULLIF(sum(count(*)) OVER (), 0), 2) AS pct FROM cdrs WHERE $__timeFilter(start_time) AND split_part(coalesce(sbc_id,''),'-',1) LIKE '$zone' GROUP BY 1 ORDER BY calls DESC LIMIT 15;"
+        }
+      ],
+      "transformations": [
+        { "id": "organize", "options": { "renameByName": { "hangup_cause": "Hangup cause", "calls": "Calls", "pct": "%" } } }
+      ],
+      "options": {
+        "showHeader": true,
+        "sortBy": [ { "displayName": "Calls", "desc": true } ],
+        "cellHeight": "sm"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "align": "auto", "filterable": true },
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null } ] }
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "%" }, "properties": [
+            { "id": "unit", "value": "percent" },
+            { "id": "custom.cellOptions", "value": { "type": "color-background", "mode": "gradient" } }
+          ] },
+          { "matcher": { "id": "byName", "options": "Calls" }, "properties": [ { "id": "custom.width", "value": 110 } ] }
+        ]
+      }
     }
   ],
   "refresh": "1m",
