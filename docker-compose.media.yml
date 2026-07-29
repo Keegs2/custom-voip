@@ -105,6 +105,10 @@ services:
       # Force the FS role: this VM has no Kamailio ctl socket, and we do NOT want
       # a TCP ESL probe at import time deciding the role — explicit is robust.
       - OPS_AGENT_ROLE=${OPS_AGENT_ROLE:-fs}
+      # FS ESL Prometheus exporter (:9103) node label. MUST equal this VM's
+      # FS_NODE_ID so the exporter's freeswitch_node label matches the
+      # mod_prometheus scrape target label (scrape-media.yml). Hostname fallback.
+      - FREESWITCH_NODE=${FS_NODE_ID:-}
       # Local FreeSWITCH Event Socket (loopback of the shared host netns).
       - ESL_HOST=${OPS_AGENT_ESL_HOST:-127.0.0.1}
       - ESL_PORT=${OPS_AGENT_ESL_PORT:-8021}
@@ -126,6 +130,73 @@ services:
       # Host journal (READ-ONLY, best-effort) for host.journalctl.
       - /var/log/journal:/var/log/journal:ro
       - /etc/machine-id:/etc/machine-id:ro
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 128M
+        reservations:
+          memory: 32M
+    restart: unless-stopped
+
+  # ===========================================================================
+  # Production metrics plane — per-zone vmagent + node_exporter (media role).
+  # See docs/OBSERVABILITY_METRICS_PLAN.md. Both are ADDITIVE, host-networked,
+  # and have NO depends_on: freeswitch — they must never pull the co-located
+  # call server into an up-set. Deploy with `up -d --no-deps`.
+  # ===========================================================================
+
+  # vmagent (media role) — scrapes the local FreeSWITCH mod_prometheus (:9102),
+  # the ESL exporter (:9103) and node_exporter (:9100) at 127.0.0.1 (all host-net
+  # on this VM) and remote-writes CROSS-ZONE to the East VictoriaMetrics. On-disk
+  # buffering (maxDiskUsagePerURL=2GB) survives a store or WAN blip without loss.
+  # `-envflag.enable=true` expands ${ZONE}/${INSTANCE_ID} in the scrape file.
+  # NO depends_on: freeswitch (see the header) — deploy with `up -d --no-deps`.
+  vmagent:
+    image: victoriametrics/vmagent:v1.103.0
+    container_name: voip-vmagent
+    network_mode: host
+    command:
+      - "-promscrape.config=/etc/vmagent/scrape-media.yml"
+      - "-remoteWrite.url=http://${METRICS_REMOTE_WRITE_HOST:-10.142.0.103}:8428/api/v1/write"
+      - "-remoteWrite.tmpDataPath=/vmagent-data"
+      - "-remoteWrite.maxDiskUsagePerURL=2GB"
+      - "-httpListenAddr=:8429"
+      - "-envflag.enable=true"
+    environment:
+      - ZONE=${METRICS_ZONE}
+      - INSTANCE_ID=${FS_NODE_ID}
+    volumes:
+      - ./docker/vmagent/scrape-media.yml:/etc/vmagent/scrape-media.yml:ro
+      - vmagent_data:/vmagent-data
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:8429/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          memory: 64M
+    restart: unless-stopped
+
+  # node_exporter — host CPU / memory / disk / network for this media VM.
+  # host-net + pid:host + read-only rootfs bind; binds :9100, scraped locally by
+  # the vmagent above. NO depends_on: freeswitch.
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    container_name: voip-node-exporter
+    command:
+      - "--path.rootfs=/host"
+      - "--web.listen-address=:9100"
+    network_mode: host
+    pid: host
+    volumes:
+      - "/:/host:ro,rslave"
     deploy:
       resources:
         limits:
@@ -169,4 +240,7 @@ volumes:
   freeswitch_logs:
     driver: local
   redis_data:
+    driver: local
+  # vmagent remote_write on-disk buffer (survives store/WAN blips without loss).
+  vmagent_data:
     driver: local

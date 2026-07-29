@@ -313,6 +313,183 @@ services:
       - services-network
     restart: unless-stopped
 
+  # ===========================================================================
+  # Production metrics plane — VictoriaMetrics + vmalert + exporters + vmagent.
+  # See docs/OBSERVABILITY_METRICS_PLAN.md. This is the CENTRAL store (East):
+  # all zones' vmagents remote_write here, and Grafana's `voip-metrics-vm`
+  # datasource reads from it. qryn/ClickHouse (HEP/logs) is untouched.
+  # ===========================================================================
+
+  # VictoriaMetrics (vmsingle) — central time-series store for the whole fleet.
+  # Receives remote_write from every zone's vmagent and serves the Grafana
+  # Prometheus datasource + vmalert. 12-month retention, VPC-internal :8428.
+  victoriametrics:
+    image: victoriametrics/victoria-metrics:v1.103.0
+    container_name: voip-victoriametrics
+    command:
+      - "-retentionPeriod=12"
+      - "-httpListenAddr=:8428"
+    ports:
+      - "8428:8428"
+    volumes:
+      - victoriametrics_data:/victoria-metrics-data
+    networks:
+      - services-network
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:8428/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # vmalert — evaluates the recording rules in docker/vmalert/rules/*.yml against
+  # VictoriaMetrics and writes the bounded roll-ups back (datasource/remoteRead +
+  # remoteWrite all point at victoriametrics:8428). Alertmanager is optional/later
+  # — the recording rules are the immediate value. depends_on is SAFE here:
+  # neither vmalert nor victoriametrics is a call server.
+  vmalert:
+    image: victoriametrics/vmalert:v1.103.0
+    container_name: voip-vmalert
+    command:
+      - "-datasource.url=http://victoriametrics:8428"
+      - "-remoteWrite.url=http://victoriametrics:8428"
+      - "-remoteRead.url=http://victoriametrics:8428"
+      - "-rule=/etc/vmalert/rules/*.yml"
+      - "-httpListenAddr=:8880"
+    ports:
+      - "8880:8880"
+    volumes:
+      - ./docker/vmalert/rules:/etc/vmalert/rules:ro
+    depends_on:
+      victoriametrics:
+        condition: service_healthy
+    networks:
+      - services-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          memory: 64M
+    restart: unless-stopped
+
+  # node_exporter — host CPU / memory / disk / network for the services VM.
+  # host-net + pid:host + read-only rootfs bind so it sees real host metrics.
+  # Binds :9100 on the VM interface; the services vmagent scrapes it via
+  # host.docker.internal (it is on the bridge network).
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    container_name: voip-node-exporter
+    command:
+      - "--path.rootfs=/host"
+      - "--web.listen-address=:9100"
+    network_mode: host
+    pid: host
+    volumes:
+      - "/:/host:ro,rslave"
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 128M
+        reservations:
+          memory: 32M
+    restart: unless-stopped
+
+  # postgres_exporter — East PRIMARY health (replication lag / slots / sessions).
+  # Connects DIRECT to Postgres :5432 (NOT PgBouncer :6432 — transaction pooling
+  # breaks the exporter's session state) via the host-gateway alias, as a
+  # read-only metrics_ro role with pg_monitor. Bridge network, :9187.
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.15.0
+    container_name: voip-postgres-exporter
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      - DATA_SOURCE_NAME=postgresql://metrics_ro:${METRICS_DB_PASSWORD}@host.docker.internal:5432/voip?sslmode=disable
+    ports:
+      - "9187:9187"
+    networks:
+      - services-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 128M
+        reservations:
+          memory: 32M
+    restart: unless-stopped
+
+  # pgbouncer_exporter — pool saturation (cl_waiting, sv_idle, …) from the
+  # PgBouncer SHOW STATS/POOLS admin interface. Connects to the pgbouncer virtual
+  # database via the host-gateway alias as the pgb_stats user. Bridge net, :9127.
+  pgbouncer-exporter:
+    image: prometheuscommunity/pgbouncer-exporter:v0.10.2
+    container_name: voip-pgbouncer-exporter
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      - DATA_SOURCE_NAME=postgresql://pgb_stats:${PGBOUNCER_STATS_PASSWORD}@host.docker.internal:6432/pgbouncer?sslmode=disable
+    ports:
+      - "9127:9127"
+    networks:
+      - services-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 128M
+        reservations:
+          memory: 32M
+    restart: unless-stopped
+
+  # vmagent (services role) — scrapes the local node/postgres/pgbouncer exporters
+  # (via host.docker.internal) and remote-writes to VictoriaMetrics BY SERVICE
+  # NAME (in-network). Runs on the bridge network, unlike the host-net zone
+  # vmagents, because everything it scrapes here is reachable via the host
+  # gateway. `-envflag.enable=true` lets the scrape file expand ${ZONE}/
+  # ${INSTANCE_ID}. On-disk buffering survives short VictoriaMetrics restarts.
+  vmagent:
+    image: victoriametrics/vmagent:v1.103.0
+    container_name: voip-vmagent
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command:
+      - "-promscrape.config=/etc/vmagent/scrape-services.yml"
+      - "-remoteWrite.url=http://victoriametrics:8428/api/v1/write"
+      - "-remoteWrite.tmpDataPath=/vmagent-data"
+      - "-remoteWrite.maxDiskUsagePerURL=2GB"
+      - "-envflag.enable=true"
+    environment:
+      - ZONE=${METRICS_ZONE}
+      - INSTANCE_ID=${SERVICES_NODE_ID}
+    volumes:
+      - ./docker/vmagent/scrape-services.yml:/etc/vmagent/scrape-services.yml:ro
+      - vmagent_data:/vmagent-data
+    depends_on:
+      victoriametrics:
+        condition: service_healthy
+    networks:
+      - services-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          memory: 64M
+    restart: unless-stopped
+
 networks:
   services-network:
     driver: bridge
@@ -321,4 +498,8 @@ volumes:
   clickhouse_data:
     driver: local
   grafana_data:
+    driver: local
+  victoriametrics_data:
+    driver: local
+  vmagent_data:
     driver: local

@@ -57,6 +57,13 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
         if path.endswith("/carrier-status/report") and request.method == "POST":
             return await call_next(request)
 
+        # Exempt the live-trunk-stats feeder ingest (POST only). The SBC feeders
+        # authenticate with a SHARED BEARER token checked inside the router
+        # against LIVE_TRUNK_STATS_TOKEN — NOT a JWT — so it must bypass JWT
+        # validation here. The GET /live-trunk-stats read stays JWT admin-only.
+        if path.endswith("/live-trunk-stats/report") and request.method == "POST":
+            return await call_next(request)
+
         # WebSocket connections authenticate via query param, not header
         if path.startswith("/ws/"):
             return await call_next(request)

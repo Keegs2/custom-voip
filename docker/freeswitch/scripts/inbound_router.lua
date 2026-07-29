@@ -1190,6 +1190,11 @@ if product_type == "rcf" then
             -- CURRENT RCF DID exactly as today (single carrier B-leg via the
             -- 4-attempt failover loop). on_net reflects whether we short-
             -- circuited any earlier hop in this chain.
+            -- Pin the classification explicitly (carrier B-leg): dispatch_terminal
+            -- exports the `on_net` channel variable read by the ESL metrics
+            -- exporter to label live channels; leaving it implicit here would
+            -- rely on nil->"false" coercion. Preserves an earlier true hop.
+            ctx.on_net = ctx.on_net or false
             dispatch_terminal(cur, ctx)
             break
         end
@@ -1244,6 +1249,10 @@ else
     -- Non-RCF inbound (api / trunk): the first-hop DID is the terminal, exactly
     -- as before. No chain, no on-net decision (a directly-dialed platform DID is
     -- not a "forward" — off-net vs on-net only applies to a forwarding handoff).
+    -- A directly-dialed DID is off-net by definition; pin it explicitly so the
+    -- `on_net` channel variable (exported in dispatch_terminal for the ESL
+    -- metrics exporter's live-channel label) is deterministic, not nil-coerced.
+    ctx.on_net = false
     dispatch_terminal(first_dest, ctx)
 end
 

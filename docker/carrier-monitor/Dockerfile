@@ -66,12 +66,17 @@ COPY ops_agent.py /usr/local/bin/ops_agent.py
 COPY ops_api.py /usr/local/bin/ops_api.py
 COPY ops_commands.py /usr/local/bin/ops_commands.py
 COPY ops_esl.py /usr/local/bin/ops_esl.py
+# Metrics-plane feeders (role-gated, started by ops_agent.py — see that file):
+#   ops_metrics.py       : FS ESL Prometheus exporter (:9103), FS role.
+#   live_trunk_feeder.py : per-customer-trunk stats → East API, SBC role.
+COPY ops_metrics.py /usr/local/bin/ops_metrics.py
+COPY live_trunk_feeder.py /usr/local/bin/live_trunk_feeder.py
 RUN chmod +x /usr/local/bin/carrier_monitor.py /usr/local/bin/ops_agent.py
 
 # Byte-compile at build time — surfaces any syntax error in the image build, and
 # warms .pyc so first request is fast. (WORKDIR so bare `import ops_api` resolves.)
 WORKDIR /usr/local/bin
-RUN python3 -m py_compile carrier_monitor.py ops_agent.py ops_api.py ops_commands.py ops_esl.py
+RUN python3 -m py_compile carrier_monitor.py ops_agent.py ops_api.py ops_commands.py ops_esl.py ops_metrics.py live_trunk_feeder.py
 
 # Runs as root — deliberately. Two reasons, both necessary and low-risk here:
 #   1. The Kamailio `ctl` binrpc socket is mode 0600 owned by the `kamailio` user

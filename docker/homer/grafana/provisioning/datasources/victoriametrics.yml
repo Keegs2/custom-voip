@@ -1,0 +1,37 @@
+# VictoriaMetrics (Prometheus) datasource — Production NOC live-metrics track.
+# ---------------------------------------------------------------------------
+# The THIRD Grafana datasource (alongside `voip-cdr-pg` Postgres and `qryn`
+# Loki/HEP). Feeds the five LIVE "Traffic Status" panels — Total CPS, CPS per
+# FreeSWITCH, total connected calls, per-carrier-trunk in/out — that CDRs cannot
+# show (CDRs are written at hangup, so they cannot report calls in progress).
+#
+# UID is FIXED as `voip-metrics-vm` — the NOC dashboard JSON targets reference it
+# by this uid; changing it silently breaks every live panel.
+#
+# ── CONNECTION — in-network by service name ──────────────────────────────────
+# VictoriaMetrics (vmsingle) runs in the SAME compose bridge network as Grafana
+# (docker-compose.services.yml), so Grafana reaches it by service name at
+# http://victoriametrics:8428 — no host-gateway alias needed (unlike the Postgres
+# datasource, which must cross to the bare-metal host). VictoriaMetrics is
+# Prometheus-HTTP-API compatible, so Grafana's built-in `prometheus` datasource
+# type (shipped in grafana-oss:10.4.3) works unmodified.
+#
+# ── NO AUTH ──────────────────────────────────────────────────────────────────
+# VictoriaMetrics is VPC-internal and unauthenticated on :8428; there is no
+# secret to template, so this file carries no secureJsonData.
+apiVersion: 1
+
+datasources:
+  - name: VoIP Metrics (VictoriaMetrics)
+    uid: voip-metrics-vm
+    type: prometheus            # built-in in grafana-oss 10.4.3; VM is Prom-API compatible
+    access: proxy
+    url: http://victoriametrics:8428
+    isDefault: false
+    editable: false
+    jsonData:
+      httpMethod: POST
+      prometheusType: Prometheus
+      prometheusVersion: "2.40.0"
+      timeInterval: "15s"        # matches the vmagent global scrape_interval
+      manageAlerts: false        # recording/alerting rules live in vmalert, not Grafana
