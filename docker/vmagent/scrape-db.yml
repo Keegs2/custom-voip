@@ -6,14 +6,14 @@
 # scrapes them at 127.0.0.1:<port> and remote-writes cross-zone to the East
 # VictoriaMetrics (${METRICS_REMOTE_WRITE_HOST:-10.142.0.103}:8428).
 #
-# ${ZONE} / ${INSTANCE_ID} are expanded by vmagent at load time because the
+# %{ZONE} / %{INSTANCE_ID} are expanded by vmagent at load time because the
 # container runs with `-envflag.enable=true`; the compose service sets
 #   ZONE=${METRICS_ZONE}  INSTANCE_ID=${DB_NODE_ID}.
 global:
   scrape_interval: 15s
   external_labels:
-    zone: "${ZONE}"
-    reporting_instance: "${INSTANCE_ID}"
+    zone: "%{ZONE}"
+    reporting_instance: "%{INSTANCE_ID}"
 
 scrape_configs:
   # node_exporter — host CPU / memory / disk / network for this DB VM.

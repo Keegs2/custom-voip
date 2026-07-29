@@ -6,14 +6,14 @@
 # alongside the co-located node_exporter. (mod_prometheus / :9102 was dropped: it
 # failed to build/load; its two series moved into the :9103 ESL exporter.)
 #
-# ${ZONE} / ${INSTANCE_ID} are expanded by vmagent at load time because the
+# %{ZONE} / %{INSTANCE_ID} are expanded by vmagent at load time because the
 # container runs with `-envflag.enable=true`; the compose service sets
 #   ZONE=${METRICS_ZONE}  INSTANCE_ID=${FS_NODE_ID}.
 global:
   scrape_interval: 15s
   external_labels:
-    zone: "${ZONE}"
-    reporting_instance: "${INSTANCE_ID}"
+    zone: "%{ZONE}"
+    reporting_instance: "%{INSTANCE_ID}"
 
 scrape_configs:
   # FreeSWITCH ESL exporter (carrier-monitor sidecar, ops_metrics.py) — bounded

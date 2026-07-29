@@ -4,7 +4,7 @@
 # host-net, so its xhttp_prom listener and the co-located node_exporter bind on
 # the VM interface — vmagent scrapes them at 127.0.0.1:<port>.
 #
-# ${ZONE} / ${INSTANCE_ID} are expanded by vmagent at load time because the
+# %{ZONE} / %{INSTANCE_ID} are expanded by vmagent at load time because the
 # container runs with `-envflag.enable=true`; the compose service sets
 #   ZONE=${METRICS_ZONE}  INSTANCE_ID=${SBC_ID}
 # so every series is stamped with the originating zone + SBC identity WITHOUT
@@ -12,8 +12,8 @@
 global:
   scrape_interval: 15s
   external_labels:
-    zone: "${ZONE}"
-    reporting_instance: "${INSTANCE_ID}"
+    zone: "%{ZONE}"
+    reporting_instance: "%{INSTANCE_ID}"
 
 scrape_configs:
   # Kamailio xhttp_prom — SBC health + per-carrier-trunk CPS / active calls.
