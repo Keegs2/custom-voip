@@ -55,12 +55,36 @@ EMITTED METRICS (names/labels fixed by the reconciled registry — do NOT rename
   freeswitch_channels_active{freeswitch_node,direction,on_net}  gauge
   freeswitch_calls_bridged{freeswitch_node}                     gauge
   freeswitch_channels_total{freeswitch_node}                    gauge
+  freeswitch_sessions_total{freeswitch_node}                    counter
+  freeswitch_calls_active{freeswitch_node}                      gauge
   freeswitch_esl_scrape_ok{freeswitch_node}                     gauge (1 ok / 0 fail)
+
+mod_prometheus REPLACEMENT (freeswitch_sessions_total / freeswitch_calls_active)
+-------------------------------------------------------------------------------
+mod_prometheus (the aggregate FS exporter that used to serve :9102) failed to
+build/load on the media VMs, so its two dashboard-referenced series are emitted
+HERE instead, from the same poll loop over the SAME local Event Socket:
+
+  freeswitch_sessions_total — a monotonic COUNTER of "N session(s) since startup"
+    parsed from ESL `status`. It only resets when FreeSWITCH itself restarts,
+    which is exactly what PromQL `rate()` expects of a counter; the NOC panel
+    "CPS per FreeSWITCH" derives per-node CPS from `rate(...[1m])`.
+  freeswitch_calls_active — a GAUGE of currently-connected calls parsed from ESL
+    `show calls count` ("N total."). This is FreeSWITCH's own live call counter
+    (a "call" = a bridged/answered two-leg session), which is a truer "connected
+    calls now" figure than the channel-derived bridged proxy; the NOC panel
+    "Total connected calls" sums it fleet-wide.
+
+Both degrade fail-open identically to the channel metrics: a failed/garbled
+`status` or `show calls count` read keeps the LAST-GOOD value (0 before the first
+ever success) and flips freeswitch_esl_scrape_ok to 0 — it never raises, never
+blanks the existing channel series, and never blocks a scrape.
 """
 
 import json
 import logging
 import os
+import re
 import socket
 import threading
 import time
@@ -140,6 +164,68 @@ ONNET_VAR = "on_net"
 
 
 # --------------------------------------------------------------------------- #
+# mod_prometheus-replacement parsers (freeswitch_sessions_total / _calls_active).
+#
+# These pull two aggregate switch figures from two extra read-only ESL verbs run
+# in the SAME poll tick, and are parsed with anchored regexes tolerant of FS
+# version/format drift. Each parser returns Optional[int]: None means "couldn't
+# find it this tick" so the caller can keep the previous last-good value.
+# --------------------------------------------------------------------------- #
+
+# ESL `status` prints (among other lines):
+#     123 session(s) since startup
+# The " since startup" suffix is the disambiguator: `status` ALSO prints lines
+# like "0 session(s) - peak ..." and "0 session(s) per Sec ..." that we must NOT
+# match. Anchor on the whole "<int> session(s) since startup" phrase.
+_SESSIONS_SINCE_STARTUP_RE = re.compile(
+    r"(\d+)\s+session\(s\)\s+since\s+startup", re.IGNORECASE
+)
+
+# ESL `show calls count` prints a trailing summary line:
+#     N total.
+# (optionally preceded by a CSV table when there ARE calls). Match the LAST
+# "<int> total" occurrence so a stray "total" in a header/row can't win.
+_CALLS_TOTAL_RE = re.compile(r"(\d+)\s+total\b", re.IGNORECASE)
+
+
+def parse_sessions_total(raw: str):
+    """
+    Parse the cumulative "N session(s) since startup" counter from ESL `status`.
+
+    Returns int (>= 0) on success, or None if the line isn't found / unparseable
+    (caller then keeps the previous last-good value). Never raises.
+    """
+    if not raw:
+        return None
+    try:
+        m = _SESSIONS_SINCE_STARTUP_RE.search(raw)
+        if not m:
+            return None
+        return int(m.group(1))
+    except (ValueError, TypeError):
+        return None
+
+
+def parse_calls_active(raw: str):
+    """
+    Parse the current active-call count from ESL `show calls count` ("N total.").
+
+    Uses the LAST "<int> total" match so a table header/row containing the word
+    can't shadow the real summary. Returns int (>= 0) on success, or None if no
+    "<int> total" line is present (caller keeps last-good). Never raises.
+    """
+    if not raw:
+        return None
+    try:
+        matches = _CALLS_TOTAL_RE.findall(raw)
+        if not matches:
+            return None
+        return int(matches[-1])
+    except (ValueError, TypeError):
+        return None
+
+
+# --------------------------------------------------------------------------- #
 # The cached sample. A single module-level string, swapped atomically under a
 # lock by the poll thread and read (copied) by HTTP handler threads. A str
 # assignment is already atomic in CPython, but the lock makes the read/refresh
@@ -148,6 +234,16 @@ ONNET_VAR = "on_net"
 
 _SAMPLE_LOCK = threading.Lock()
 _CACHED_SAMPLE = ""  # set to a valid initial exposition by _init_sample()
+
+# Last-good values for the two mod_prometheus-replacement metrics. They are held
+# separately from the rendered sample string because they come from DIFFERENT ESL
+# verbs than the channel data: on a tick where `show channels as json` succeeds
+# but `status` / `show calls count` momentarily doesn't parse, we still re-render
+# the (fresh) channel series while carrying THESE forward at their last-good
+# value. Seeded to 0 so the very first exposition (before any success) is valid.
+# Guarded by _SAMPLE_LOCK (same lock as _CACHED_SAMPLE).
+_LAST_SESSIONS_TOTAL = 0
+_LAST_CALLS_ACTIVE = 0
 
 
 def _norm_direction(value) -> str:
@@ -255,8 +351,20 @@ def parse_channels(raw: str):
 # the renderer simple and explicit.
 # --------------------------------------------------------------------------- #
 
-def _render(buckets, total: int, bridged: int, scrape_ok: bool) -> str:
-    """Render the four gauges into a Prometheus text exposition string."""
+def _render(
+    buckets,
+    total: int,
+    bridged: int,
+    scrape_ok: bool,
+    sessions_total: int,
+    calls_active: int,
+) -> str:
+    """Render all metrics into a Prometheus text exposition string.
+
+    `sessions_total` (counter) and `calls_active` (gauge) are the
+    mod_prometheus-replacement figures; they are passed in (rather than read from
+    the module globals) so a caller can render a specific snapshot atomically.
+    """
     node = FREESWITCH_NODE
     lines = []
 
@@ -295,6 +403,32 @@ def _render(buckets, total: int, bridged: int, scrape_ok: bool) -> str:
         'freeswitch_channels_total{freeswitch_node="%s"} %d' % (node, total)
     )
 
+    # freeswitch_sessions_total{freeswitch_node} — mod_prometheus replacement.
+    # COUNTER: cumulative "N session(s) since startup" from ESL `status`. Monotone
+    # except across an FS restart (a reset PromQL rate() handles). Feeds the NOC
+    # "CPS per FreeSWITCH" panel via rate(freeswitch_sessions_total[1m]).
+    lines.append(
+        "# HELP freeswitch_sessions_total Cumulative FreeSWITCH sessions since "
+        "startup (from ESL `status`; replaces mod_prometheus)."
+    )
+    lines.append("# TYPE freeswitch_sessions_total counter")
+    lines.append(
+        'freeswitch_sessions_total{freeswitch_node="%s"} %d'
+        % (node, sessions_total)
+    )
+
+    # freeswitch_calls_active{freeswitch_node} — mod_prometheus replacement.
+    # GAUGE: current connected calls from ESL `show calls count` ("N total.").
+    # Feeds the NOC "Total connected calls" panel via sum(freeswitch_calls_active).
+    lines.append(
+        "# HELP freeswitch_calls_active Current active FreeSWITCH calls "
+        "(from ESL `show calls count`; replaces mod_prometheus)."
+    )
+    lines.append("# TYPE freeswitch_calls_active gauge")
+    lines.append(
+        'freeswitch_calls_active{freeswitch_node="%s"} %d' % (node, calls_active)
+    )
+
     # freeswitch_esl_scrape_ok{freeswitch_node}
     lines.append(
         "# HELP freeswitch_esl_scrape_ok 1 if the last ESL poll succeeded, 0 if "
@@ -316,7 +450,78 @@ def _init_sample():
     instead of an empty body."""
     global _CACHED_SAMPLE
     with _SAMPLE_LOCK:
-        _CACHED_SAMPLE = _render(_empty_buckets(), 0, 0, scrape_ok=False)
+        _CACHED_SAMPLE = _render(
+            _empty_buckets(), 0, 0, scrape_ok=False,
+            sessions_total=_LAST_SESSIONS_TOTAL,
+            calls_active=_LAST_CALLS_ACTIVE,
+        )
+
+
+def _refresh_aggregates():
+    """
+    Refresh the two mod_prometheus-replacement figures (sessions_total counter +
+    calls_active gauge) via two extra read-only ESL verbs, updating the last-good
+    module globals IN PLACE. Returns (sessions_total, calls_active) — always the
+    CURRENT best values (fresh where parsed this tick, else last-good).
+
+    Fully fail-open and INDEPENDENT of the channel read: this is called only after
+    the primary `show channels as json` read has already succeeded, and its own
+    failures NEVER flip scrape_ok or blank the channel series — a transient miss on
+    `status` / `show calls count` simply carries the previous value forward. Each
+    verb is isolated so one failing doesn't suppress the other. Never raises.
+    """
+    global _LAST_SESSIONS_TOTAL, _LAST_CALLS_ACTIVE
+
+    # --- sessions_total (counter) from `status` --------------------------------
+    try:
+        s_ok, s_out, s_err = esl_api("status", timeout=ESL_TIMEOUT)
+        if s_ok:
+            parsed = parse_sessions_total(s_out)
+            if parsed is not None:
+                with _SAMPLE_LOCK:
+                    _LAST_SESSIONS_TOTAL = parsed
+            else:
+                LOG.debug(
+                    "sessions_total: 'since startup' not found in status "
+                    "(keeping last-good %d)", _LAST_SESSIONS_TOTAL,
+                )
+        else:
+            LOG.debug(
+                "sessions_total: ESL status read failed (keeping last-good "
+                "%d): %s", _LAST_SESSIONS_TOTAL, s_err,
+            )
+    except Exception as exc:  # noqa: BLE001 - never let this poison the poll
+        LOG.debug(
+            "sessions_total: unexpected error (keeping last-good %d): %s",
+            _LAST_SESSIONS_TOTAL, exc,
+        )
+
+    # --- calls_active (gauge) from `show calls count` --------------------------
+    try:
+        c_ok, c_out, c_err = esl_api("show calls count", timeout=ESL_TIMEOUT)
+        if c_ok:
+            parsed = parse_calls_active(c_out)
+            if parsed is not None:
+                with _SAMPLE_LOCK:
+                    _LAST_CALLS_ACTIVE = parsed
+            else:
+                LOG.debug(
+                    "calls_active: 'N total' not found in show calls count "
+                    "(keeping last-good %d)", _LAST_CALLS_ACTIVE,
+                )
+        else:
+            LOG.debug(
+                "calls_active: ESL show calls count read failed (keeping "
+                "last-good %d): %s", _LAST_CALLS_ACTIVE, c_err,
+            )
+    except Exception as exc:  # noqa: BLE001 - never let this poison the poll
+        LOG.debug(
+            "calls_active: unexpected error (keeping last-good %d): %s",
+            _LAST_CALLS_ACTIVE, exc,
+        )
+
+    with _SAMPLE_LOCK:
+        return _LAST_SESSIONS_TOTAL, _LAST_CALLS_ACTIVE
 
 
 def _refresh_sample() -> bool:
@@ -326,6 +531,10 @@ def _refresh_sample() -> bool:
     Returns True on a successful ESL read (scrape_ok will be 1), False on ANY
     failure (the cache is refreshed with scrape_ok=0 but the LAST-GOOD counts are
     preserved so the wall doesn't blank on a transient ESL hiccup). Never raises.
+
+    The primary liveness signal is `show channels as json`; scrape_ok tracks ONLY
+    it. The two aggregate figures (sessions_total / calls_active) are refreshed via
+    _refresh_aggregates() as a fail-open side read and never gate scrape_ok.
     """
     global _CACHED_SAMPLE
     try:
@@ -349,12 +558,20 @@ def _refresh_sample() -> bool:
         _mark_scrape_failed()
         return False
 
-    sample = _render(buckets, total, bridged, scrape_ok=True)
+    # Channel read succeeded → also refresh the aggregate figures (fail-open;
+    # keeps last-good on any miss and never affects scrape_ok).
+    sessions_total, calls_active = _refresh_aggregates()
+
+    sample = _render(
+        buckets, total, bridged, scrape_ok=True,
+        sessions_total=sessions_total, calls_active=calls_active,
+    )
     with _SAMPLE_LOCK:
         _CACHED_SAMPLE = sample
     LOG.debug(
-        "metrics refreshed: total=%d bridged=%d node=%s", total, bridged,
-        FREESWITCH_NODE,
+        "metrics refreshed: total=%d bridged=%d sessions_total=%d "
+        "calls_active=%d node=%s",
+        total, bridged, sessions_total, calls_active, FREESWITCH_NODE,
     )
     return True
 

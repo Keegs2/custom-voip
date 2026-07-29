@@ -1,9 +1,10 @@
 # vmagent scrape config — Media (FreeSWITCH) VMs
 # ---------------------------------------------------------------------------
 # Runs host-networked on each FreeSWITCH VM (docker-compose.media.yml).
-# FreeSWITCH is host-net, so mod_prometheus (:9102) and the ESL exporter in the
-# carrier-monitor sidecar (:9103) bind on the VM interface — vmagent scrapes
-# them at 127.0.0.1:<port> alongside the co-located node_exporter.
+# FreeSWITCH is host-net, so the ESL exporter in the carrier-monitor sidecar
+# (:9103) binds on the VM interface — vmagent scrapes it at 127.0.0.1:9103
+# alongside the co-located node_exporter. (mod_prometheus / :9102 was dropped: it
+# failed to build/load; its two series moved into the :9103 ESL exporter.)
 #
 # ${ZONE} / ${INSTANCE_ID} are expanded by vmagent at load time because the
 # container runs with `-envflag.enable=true`; the compose service sets
@@ -15,20 +16,12 @@ global:
     reporting_instance: "${INSTANCE_ID}"
 
 scrape_configs:
-  # FreeSWITCH mod_prometheus — aggregate switch counters/gauges
-  # (freeswitch_sessions_total, freeswitch_calls_active, …). These are UNLABELED
-  # at the source, so stamp freeswitch_node here (matches the ESL exporter's
-  # emitted freeswitch_node and the FREESWITCH_NODE env = FS_NODE_ID) so the
-  # dashboard's `sum by (freeswitch_node)` renders one series per FS node.
-  - job_name: freeswitch
-    metrics_path: /metrics
-    static_configs:
-      - targets: ["127.0.0.1:9102"]
-        labels:
-          freeswitch_node: "${INSTANCE_ID}"
-
-  # FreeSWITCH ESL exporter (carrier-monitor sidecar, ops_metrics.py) —
-  # bounded live splits (freeswitch_channels_active{direction,on_net}, …).
+  # FreeSWITCH ESL exporter (carrier-monitor sidecar, ops_metrics.py) — bounded
+  # live splits (freeswitch_channels_active{direction,on_net}, …) PLUS the two
+  # aggregate series mod_prometheus used to serve on :9102
+  # (freeswitch_sessions_total, freeswitch_calls_active). The exporter stamps
+  # freeswitch_node itself (= FREESWITCH_NODE env = FS_NODE_ID), so the
+  # dashboard's `sum by (freeswitch_node)` / `sum(...)` resolve unchanged.
   - job_name: freeswitch_esl
     metrics_path: /metrics
     static_configs:
