@@ -82,7 +82,7 @@
         "x": 0,
         "y": 2,
         "w": 6,
-        "h": 6
+        "h": 9
       },
       "targets": [
         {
@@ -106,7 +106,7 @@
           "fields": "",
           "values": false
         },
-        "orientation": "horizontal",
+        "orientation": "auto",
         "textMode": "value_and_name",
         "colorMode": "background",
         "graphMode": "none",
@@ -180,7 +180,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 8,
+        "y": 11,
         "w": 6,
         "h": 5
       },
@@ -449,7 +449,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 13,
+        "y": 16,
         "w": 6,
         "h": 5
       },
@@ -713,7 +713,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 18,
+        "y": 21,
         "w": 6,
         "h": 5
       },
@@ -977,7 +977,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 23,
+        "y": 26,
         "w": 6,
         "h": 4
       },
@@ -1073,7 +1073,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 27,
+        "y": 30,
         "w": 6,
         "h": 4
       },
@@ -1171,7 +1171,7 @@
         "x": 6,
         "y": 2,
         "w": 18,
-        "h": 29
+        "h": 32
       },
       "targets": [
         {

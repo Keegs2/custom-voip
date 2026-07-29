@@ -60,6 +60,13 @@ scrape_configs:
       - targets: ["http://victoriametrics:8428/health"]
         labels:
           service: "VictoriaMetrics"
+      # heplify-server's Prometheus metrics endpoint (HEPLIFYSERVER_PROMADDR=
+      # 0.0.0.0:9096) — its real HTTP liveness surface. NOTE: HEP on :9060 is
+      # UDP (HEPADDR), so a TCP probe there always reads down; :9096 is the app's
+      # own HTTP metrics port and returns 200 while heplify-server is running.
+      - targets: ["http://heplify-server:9096/metrics"]
+        labels:
+          service: "Homer (HEP)"
     relabel_configs:
       # Move the probe URL into the module's ?target= param.
       - source_labels: [__address__]
@@ -80,10 +87,6 @@ scrape_configs:
       - targets: ["qryn:3100"]
         labels:
           service: "Homer (qryn)"
-      # heplify-server HEP TCP listener (HEPLIFYSERVER_HEPADDR=0.0.0.0:9060).
-      - targets: ["heplify-server:9060"]
-        labels:
-          service: "Homer (HEP)"
     relabel_configs:
       - source_labels: [__address__]
         target_label: __param_target
