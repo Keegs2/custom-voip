@@ -11,13 +11,12 @@ import { CustomerRow } from './CustomerRow';
 import type { AccountType, TrafficGrade } from '../../types/customer';
 
 const PAGE_SIZE = 25;
-const COL_COUNT = 7;
+const COL_COUNT = 6;
 
 interface CreateFormState {
   name: string;
   account_type: AccountType;
   traffic_grade: TrafficGrade;
-  credit_limit: string;
   daily_limit: string;
   cpm_limit: string;
   ucaas_enabled: boolean;
@@ -27,7 +26,6 @@ const INITIAL_CREATE: CreateFormState = {
   name: '',
   account_type: 'rcf',
   traffic_grade: 'standard',
-  credit_limit: '0',
   daily_limit: '500',
   cpm_limit: '60',
   ucaas_enabled: false,
@@ -55,7 +53,6 @@ export function CustomersAdminPage() {
         name: createForm.name.trim(),
         account_type: createForm.account_type,
         traffic_grade: createForm.traffic_grade,
-        credit_limit: parseFloat(createForm.credit_limit) || 0,
         daily_limit: parseFloat(createForm.daily_limit) || 0,
         cpm_limit: parseInt(createForm.cpm_limit, 10) || 0,
         // Only send ucaas_enabled for account types where it's meaningful
@@ -225,17 +222,9 @@ export function CustomersAdminPage() {
               <option value="premium">Premium</option>
               <option value="economy">Economy</option>
             </FormField>
-            {/* Billing / rate-limiting fields — hidden for RCF accounts */}
+            {/* Rate-limiting fields — hidden for RCF accounts */}
             {createForm.account_type !== 'rcf' && (
               <>
-                <FormField
-                  label="Credit Limit ($)"
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={createForm.credit_limit}
-                  onChange={(e) => updateCreateForm('credit_limit', (e.target as HTMLInputElement).value)}
-                />
                 <FormField
                   label="Daily Limit ($)"
                   type="number"
@@ -364,7 +353,6 @@ export function CustomersAdminPage() {
                   <Th>ID</Th>
                   <Th>Name</Th>
                   <Th>Type</Th>
-                  <Th>Balance</Th>
                   <Th>Status</Th>
                   <Th>Grade</Th>
                   <Th>Created</Th>

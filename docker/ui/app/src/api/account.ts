@@ -1,5 +1,5 @@
 import { apiRequest } from './client';
-import type { MyCustomer, TeamMember } from '../types/account';
+import type { BillingEstimate, MyCustomer, TeamMember } from '../types/account';
 
 /**
  * Fetch the authenticated caller's own customer account summary.
@@ -11,6 +11,28 @@ import type { MyCustomer, TeamMember } from '../types/account';
  */
 export async function getMyCustomer(): Promise<MyCustomer> {
   return apiRequest<MyCustomer>('GET', '/customers/me');
+}
+
+/**
+ * Fetch the authenticated caller's estimated monthly bill.
+ *
+ * `GET /customers/me/billing` — a READ-ONLY estimate derived from the
+ * customer's provisioned products. Real rating/invoicing happens in the
+ * external system (Equinox); this is guidance only. Like `getMyCustomer`,
+ * this throws `ApiError(404)` when the caller has no associated customer.
+ */
+export async function getMyBilling(): Promise<BillingEstimate> {
+  return apiRequest<BillingEstimate>('GET', '/customers/me/billing');
+}
+
+/**
+ * Fetch a specific customer's estimated monthly bill (admin-only).
+ *
+ * `GET /customers/{id}/billing` — the admin counterpart to `getMyBilling`,
+ * used by the customer 360 view to show the same read-only estimate.
+ */
+export async function getCustomerBilling(id: number): Promise<BillingEstimate> {
+  return apiRequest<BillingEstimate>('GET', `/customers/${id}/billing`);
 }
 
 /**

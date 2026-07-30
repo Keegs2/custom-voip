@@ -52,18 +52,6 @@ export function CustomerRow({ customer }: CustomerRowProps) {
         </span>
       </td>
       <td style={tdStyle}>{accountTypeBadge(customer.account_type)}</td>
-      <td style={tdStyle}>
-        <span
-          style={{
-            color: customer.balance < 0 ? '#f87171' : '#e2e8f0',
-            fontVariantNumeric: 'tabular-nums',
-            fontSize: '0.875rem',
-            fontWeight: customer.balance < 0 ? 600 : 400,
-          }}
-        >
-          ${customer.balance.toFixed(2)}
-        </span>
-      </td>
       <td style={tdStyle}>{statusBadge(customer.status)}</td>
       <td style={tdStyle}>{gradeBadge(customer.traffic_grade)}</td>
       <td style={{ ...tdStyle, color: '#4a5568', fontSize: '0.82rem' }}>

@@ -29,7 +29,6 @@ export function CustomerEditForm({ customer, onCancel, onSaved }: CustomerEditFo
   const [name, setName] = useState(customer.name);
   const [status, setStatus] = useState<CustomerStatus>(customer.status);
   const [grade, setGrade] = useState<TrafficGrade>(customer.traffic_grade);
-  const [creditLimit, setCreditLimit] = useState(String(customer.credit_limit ?? 0));
   const [dailyLimit, setDailyLimit] = useState(String(customer.daily_limit ?? 0));
   const [cpmLimit, setCpmLimit] = useState(String(customer.cpm_limit ?? 0));
   const [selectedTierId, setSelectedTierId] = useState<string>('__unchanged__');
@@ -60,7 +59,6 @@ export function CustomerEditForm({ customer, onCancel, onSaved }: CustomerEditFo
         name: name.trim(),
         status,
         traffic_grade: grade,
-        credit_limit: parseFloat(creditLimit) || 0,
         daily_limit: parseFloat(dailyLimit) || 0,
         cpm_limit: parseInt(cpmLimit, 10) || 0,
       }),
@@ -130,14 +128,6 @@ export function CustomerEditForm({ customer, onCancel, onSaved }: CustomerEditFo
           <option value="premium">Premium</option>
           <option value="economy">Economy</option>
         </FormField>
-        <FormField
-          label="Credit Limit ($)"
-          type="number"
-          min="0"
-          step="0.01"
-          value={creditLimit}
-          onChange={(e) => setCreditLimit((e.target as HTMLInputElement).value)}
-        />
         <FormField
           label="Daily Limit ($)"
           type="number"

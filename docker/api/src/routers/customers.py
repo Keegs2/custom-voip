@@ -1,11 +1,184 @@
 """Customer management endpoints."""
+from decimal import Decimal
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Optional
 from db import database as db
-from auth.dependencies import get_current_user
+from auth.dependencies import get_current_user, require_admin
 
 router = APIRouter()
+
+
+# ---------------------------------------------------------------------------
+# Billing estimate config
+# ---------------------------------------------------------------------------
+# This platform does NOT do real billing. CDRs are exported to an external
+# system (Equinox) which rates and invoices. The "billing estimate" below is a
+# READ-ONLY, best-effort projection of monthly recurring charges (MRC) only —
+# it never touches CDRs, rate_cdr(), the rates deck, or tier writes.
+#
+# Pricing model (see docker/postgres/init/07_cps_tiers.sql):
+#   - RCF:   flat per-line MRC; a "line" = one row in rcf_numbers for the customer.
+#   - Trunk: cps_tiers.monthly_fee (via customers.trunk_tier_id) + the trunk's
+#            call-path package MRC (sip_trunks.call_path_package_id ->
+#            call_path_packages.monthly_fee, summed across the customer's trunks).
+#   - API:   cps_tiers.monthly_fee (via customers.api_tier_id).
+RCF_LINE_MRC = Decimal("5.00")
+VOICEMAIL_BOX_MRC = Decimal("2.00")  # PLACEHOLDER — confirm with product
+
+_BILLING_DISCLAIMER = (
+    "Estimated monthly recurring charges. "
+    "Official invoicing is handled by your provider."
+)
+
+
+def _money(value) -> float:
+    """Coerce a Decimal / numeric / None money value to a plain float."""
+    if value is None:
+        return 0.0
+    return float(value)
+
+
+async def compute_billing_estimate(conn, customer_id: int) -> dict:
+    """Compute a READ-ONLY estimated monthly bill for one customer.
+
+    MRC only — no usage/CDR charges. Only the line items relevant to the
+    customer's ``account_type`` are included:
+      - rcf            -> RCF line
+      - trunk/hybrid   -> SIP Trunking line (CPS tier + call paths)
+      - api/hybrid     -> API Calling line (CPS tier)
+
+    ``conn`` is a live asyncpg connection (pool-acquired by the caller) so the
+    whole estimate reads from a single connection. All money is returned as
+    ``float``; all params carry explicit ``::type`` casts for asyncpg/PgBouncer.
+    """
+    row = await conn.fetchrow(
+        "SELECT account_type FROM customers WHERE id = $1::int",
+        customer_id,
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    account_type = row["account_type"]
+
+    line_items: list[dict] = []
+    total = Decimal("0")
+
+    # --- RCF -----------------------------------------------------------------
+    if account_type == "rcf":
+        line_row = await conn.fetchrow(
+            "SELECT COUNT(*)::int AS n FROM rcf_numbers WHERE customer_id = $1::int",
+            customer_id,
+        )
+        lines = line_row["n"]
+        subtotal = RCF_LINE_MRC * lines
+        total += subtotal
+        line_items.append({
+            "product": "rcf",
+            "label": "Remote Call Forwarding",
+            "qty": lines,
+            "unit": "line",
+            "unit_price": _money(RCF_LINE_MRC),
+            "subtotal": _money(subtotal),
+        })
+
+    # --- SIP Trunking --------------------------------------------------------
+    if account_type in ("trunk", "hybrid"):
+        # CPS tier MRC via customers.trunk_tier_id -> cps_tiers.monthly_fee
+        tier_row = await conn.fetchrow(
+            """
+            SELECT t.name AS name, t.monthly_fee AS monthly_fee
+            FROM customers c
+            LEFT JOIN cps_tiers t ON c.trunk_tier_id = t.id
+            WHERE c.id = $1::int
+            """,
+            customer_id,
+        )
+        tier_name = tier_row["name"] if tier_row and tier_row["name"] else "none"
+        tier_fee = Decimal(str(tier_row["monthly_fee"])) if tier_row and tier_row["monthly_fee"] is not None else Decimal("0")
+
+        # Call-path MRC: each trunk carries its own package FK
+        # (sip_trunks.call_path_package_id -> call_path_packages.monthly_fee).
+        # Sum the package fees across all of the customer's trunks, and total
+        # the concurrent call paths those packages provide.
+        cp_row = await conn.fetchrow(
+            """
+            SELECT COALESCE(SUM(p.monthly_fee), 0) AS fee,
+                   COALESCE(SUM(p.call_paths), 0)::int AS paths
+            FROM sip_trunks s
+            JOIN call_path_packages p ON s.call_path_package_id = p.id
+            WHERE s.customer_id = $1::int
+            """,
+            customer_id,
+        )
+        cp_fee = Decimal(str(cp_row["fee"])) if cp_row and cp_row["fee"] is not None else Decimal("0")
+        cp_paths = cp_row["paths"] if cp_row and cp_row["paths"] is not None else 0
+
+        subtotal = tier_fee + cp_fee
+        total += subtotal
+        line_items.append({
+            "product": "trunk",
+            "label": "SIP Trunking",
+            "subtotal": _money(subtotal),
+            "components": [
+                {"label": f"CPS tier — {tier_name}", "amount": _money(tier_fee)},
+                {"label": f"Call paths ({cp_paths})", "amount": _money(cp_fee)},
+            ],
+        })
+
+    # --- API Calling ---------------------------------------------------------
+    if account_type in ("api", "hybrid"):
+        tier_row = await conn.fetchrow(
+            """
+            SELECT t.name AS name, t.monthly_fee AS monthly_fee
+            FROM customers c
+            LEFT JOIN cps_tiers t ON c.api_tier_id = t.id
+            WHERE c.id = $1::int
+            """,
+            customer_id,
+        )
+        tier_name = tier_row["name"] if tier_row and tier_row["name"] else "none"
+        tier_fee = Decimal(str(tier_row["monthly_fee"])) if tier_row and tier_row["monthly_fee"] is not None else Decimal("0")
+
+        subtotal = tier_fee
+        total += subtotal
+        line_items.append({
+            "product": "api",
+            "label": "API Calling",
+            "subtotal": _money(subtotal),
+            "components": [
+                {"label": f"CPS tier — {tier_name}", "amount": _money(tier_fee)},
+            ],
+        })
+
+    # --- Visual Voicemail (NOT YET BUILT) ------------------------------------
+    # The VVM product does not exist on this branch — there is no voicemail /
+    # mailbox table in the schema — so the voicemail line is intentionally
+    # OMITTED. When the product ships, switch it on here with a box count like:
+    #
+    #   vm_row = await conn.fetchrow(
+    #       "SELECT COUNT(*)::int AS n FROM voicemail_boxes WHERE customer_id = $1::int",
+    #       customer_id,
+    #   )
+    #   boxes = vm_row["n"]
+    #   if boxes:
+    #       subtotal = VOICEMAIL_BOX_MRC * boxes
+    #       total += subtotal
+    #       line_items.append({
+    #           "product": "voicemail",
+    #           "label": "Visual Voicemail",
+    #           "qty": boxes,
+    #           "unit": "mailbox",
+    #           "unit_price": _money(VOICEMAIL_BOX_MRC),
+    #           "subtotal": _money(subtotal),
+    #       })
+
+    return {
+        "currency": "USD",
+        "disclaimer": _BILLING_DISCLAIMER,
+        "account_type": account_type,
+        "line_items": line_items,
+        "total_monthly_estimate": _money(total),
+    }
 
 
 class CustomerCreate(BaseModel):
@@ -99,7 +272,7 @@ async def get_my_customer(user: dict = Depends(get_current_user)):
     row = await db.fetch_one(
         """
         SELECT id, name, account_type, status, traffic_grade,
-               balance, credit_limit, daily_limit, cpm_limit,
+               daily_limit, cpm_limit,
                ucaas_enabled, created_at
         FROM customers WHERE id = $1::int
         """,
@@ -128,8 +301,6 @@ async def get_my_customer(user: dict = Depends(get_current_user)):
         "account_type": c["account_type"],
         "status": c["status"],
         "traffic_grade": c["traffic_grade"],
-        "balance": float(c["balance"]) if c["balance"] is not None else 0.0,
-        "credit_limit": float(c["credit_limit"]) if c["credit_limit"] is not None else 0.0,
         "daily_limit": c["daily_limit"],
         "cpm_limit": c["cpm_limit"],
         "ucaas_enabled": c["ucaas_enabled"],
@@ -140,6 +311,26 @@ async def get_my_customer(user: dict = Depends(get_current_user)):
             "trunks": trunk_count["n"],
         },
     }
+
+
+# NOTE: like `/me` above, this literal `/me/billing` route MUST be declared
+# BEFORE the dynamic `/{customer_id}/billing` route below, or FastAPI would try
+# to parse "me" as an int and 422 before reaching this handler.
+@router.get("/me/billing")
+async def get_my_billing(user: dict = Depends(get_current_user)):
+    """Estimated monthly recurring charges for the caller's OWN customer.
+
+    READ-ONLY projection (MRC only). Scope comes exclusively from the JWT; a
+    caller with no associated customer gets a 404 (no leak of other customers).
+    Official invoicing is handled externally (Equinox) — this is an estimate.
+    """
+    customer_id = user.get("customer_id")
+    if customer_id is None:
+        raise HTTPException(status_code=404, detail="No customer associated with this account")
+
+    pool = await db.get_pool()
+    async with pool.acquire() as conn:
+        return await compute_billing_estimate(conn, customer_id)
 
 
 @router.get("/{customer_id}")
@@ -157,6 +348,18 @@ async def get_customer(customer_id: int):
     if not result:
         raise HTTPException(status_code=404, detail="Customer not found")
     return dict(result)
+
+
+@router.get("/{customer_id}/billing")
+async def get_customer_billing(customer_id: int, admin: dict = Depends(require_admin)):
+    """Admin: estimated monthly recurring charges for any customer.
+
+    READ-ONLY projection (MRC only); official invoicing is external (Equinox).
+    404 if the customer does not exist.
+    """
+    pool = await db.get_pool()
+    async with pool.acquire() as conn:
+        return await compute_billing_estimate(conn, customer_id)
 
 
 @router.put("/{customer_id}")

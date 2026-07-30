@@ -2471,7 +2471,7 @@ function UserLookupPanel({ onSelectUser, customerId }: UserLookupPanelProps) {
 // ─── Customer Picker Table ────────────────────────────────────────────────────
 
 const CUSTOMER_PAGE_SIZE = 25;
-const CUSTOMER_COL_COUNT = 7;
+const CUSTOMER_COL_COUNT = 6;
 
 const pickerTdStyle: React.CSSProperties = {
   padding: '13px 16px',
@@ -2620,7 +2620,7 @@ function CustomerPickerTable({ onSelectCustomer }: CustomerPickerTableProps) {
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
                   <tr style={{ boxShadow: 'inset 0 -1px 0 0 rgba(59,130,246,0.12)', background: 'rgba(59,130,246,0.035)' }}>
-                    {['ID', 'Name', 'Type', 'Balance', 'Status', 'Grade', 'Created'].map((col) => (
+                    {['ID', 'Name', 'Type', 'Status', 'Grade', 'Created'].map((col) => (
                       <th
                         key={col}
                         style={{
@@ -2673,18 +2673,6 @@ function CustomerPickerTable({ onSelectCustomer }: CustomerPickerTableProps) {
                           </span>
                         </td>
                         <td style={pickerTdStyle}>{accountTypeBadge(customer.account_type)}</td>
-                        <td style={pickerTdStyle}>
-                          <span
-                            style={{
-                              color: customer.balance < 0 ? '#f87171' : '#e2e8f0',
-                              fontVariantNumeric: 'tabular-nums',
-                              fontSize: '0.875rem',
-                              fontWeight: customer.balance < 0 ? 600 : 400,
-                            }}
-                          >
-                            ${customer.balance.toFixed(2)}
-                          </span>
-                        </td>
                         <td style={pickerTdStyle}>{statusBadge(customer.status)}</td>
                         <td style={pickerTdStyle}>{gradeBadge(customer.traffic_grade)}</td>
                         <td style={{ ...pickerTdStyle, color: '#4a5568', fontSize: '0.82rem' }}>
