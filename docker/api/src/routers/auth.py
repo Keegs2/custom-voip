@@ -278,6 +278,44 @@ async def list_users(admin: dict = Depends(require_admin)):
     return results
 
 
+@router.get("/team")
+async def list_team(user: dict = Depends(get_current_user)):
+    """List the users belonging to the caller's own customer.
+
+    Scope is derived ONLY from the JWT (never a client-supplied id). Unlike
+    /users this is NOT admin-gated — any authenticated member of a customer may
+    see their team. A caller with no associated customer gets an empty list.
+    """
+    customer_id = user.get("customer_id")
+    if customer_id is None:
+        return []
+
+    rows = await db.fetch_all(
+        """SELECT u.id, u.email, u.name, u.role, u.status,
+                  u.created_at, u.last_login
+           FROM users u
+           WHERE u.customer_id = $1::int
+           ORDER BY u.created_at ASC""",
+        customer_id,
+    )
+
+    self_id = int(user["sub"])
+    results = []
+    for r in rows:
+        d = dict(r)
+        results.append({
+            "id": d["id"],
+            "email": d["email"],
+            "name": d["name"],
+            "role": d["role"],
+            "status": d["status"],
+            "created_at": d["created_at"].isoformat() if d["created_at"] is not None else None,
+            "last_login": d["last_login"].isoformat() if d["last_login"] is not None else None,
+            "is_self": d["id"] == self_id,
+        })
+    return results
+
+
 @router.put("/users/{user_id}")
 async def update_user(user_id: int, body: UserUpdate, admin: dict = Depends(require_admin)):
     """Update a user's details (admin only). If password is provided it will be re-hashed."""
