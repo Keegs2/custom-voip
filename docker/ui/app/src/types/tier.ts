@@ -5,6 +5,12 @@ export interface Tier {
   name: string;
   tier_type: TierType;
   cps_limit: number;
+  /**
+   * Included concurrent call paths bundled with the tier.
+   * Integer for trunk tiers (e.g. 20/50/100/250); null for API tiers
+   * (API Calling has no bundled call-path allotment).
+   */
+  call_paths?: number | null;
   monthly_fee: number;
   per_call_fee: number;
   description?: string | null;

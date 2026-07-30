@@ -129,140 +129,183 @@ export function CarrierForm({ carrier, onSubmit, onCancel, submitLabel = 'Save' 
   ]);
 
   return (
-    <div className="space-y-5">
-      {error && (
-        <p className="text-red-400 text-[0.82rem] bg-red-500/[0.08] border border-red-500/25 rounded-lg px-3 py-2">
-          {error}
+    <div className="-m-5 flex flex-col">
+      {/* Intro / subtitle — clarifies purpose beneath the modal title, with a divider */}
+      <div className="px-6 pt-5 pb-4 border-b border-[#2a2f45]">
+        <p className="text-[0.82rem] leading-relaxed text-[#718096]">
+          {carrier
+            ? 'Update the SIP trunk connection and routing options for this carrier.'
+            : 'Configure a SIP trunk connection to an upstream carrier. Fields marked with an asterisk are required.'}
         </p>
-      )}
+      </div>
 
-      {/* Core fields */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <FormField
-          label="Display Name"
-          required
-          value={displayName}
-          onChange={(e) => setDisplayName(e.target.value)}
-          placeholder="Acme Carrier"
-        />
-        <FormField
-          label="Description"
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          placeholder="Optional"
-        />
-        <FormField
-          label="SIP Proxy Hostname / IP"
-          required
-          value={sipProxy}
-          onChange={(e) => setSipProxy(e.target.value)}
-          placeholder="sip.carrier.com"
-        />
-        <FormField
-          label="Port"
-          type="number"
-          min="1"
-          max="65535"
-          value={port}
-          onChange={(e) => setPort(e.target.value)}
-        />
-        <FormField
-          as="select"
-          label="Transport"
-          value={transport}
-          onChange={(e) => setTransport(e.target.value as CarrierTransport)}
-        >
-          {TRANSPORTS.map((t) => (
-            <option key={t} value={t}>{t}</option>
-          ))}
-        </FormField>
-        <FormField
-          as="select"
-          label="Auth Type"
-          value={authType}
-          onChange={(e) => setAuthType(e.target.value as CarrierAuthType)}
-        >
-          {AUTH_TYPES.map((a) => (
-            <option key={a.value} value={a.value}>{a.label}</option>
-          ))}
-        </FormField>
-
-        {showCredentials && (
-          <>
-            <FormField
-              label="Username"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              placeholder="sip-user"
-            />
-            <FormField
-              label="Password"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder={carrier ? 'leave blank to keep unchanged' : ''}
-            />
-          </>
+      {/* Scrollable body — generous padding and consistent vertical rhythm between sections */}
+      <div className="px-6 py-6 space-y-8">
+        {error && (
+          <p className="text-red-400 text-[0.82rem] bg-red-500/[0.08] border border-red-500/25 rounded-lg px-4 py-3">
+            {error}
+          </p>
         )}
 
-        <FormField
-          label="Codec Preferences"
-          value={codecPrefs}
-          onChange={(e) => setCodecPrefs(e.target.value)}
-          placeholder="PCMU,PCMA"
-          hint="Comma-separated codec list"
-        />
-        <FormField
-          label="Max Channels"
-          type="number"
-          min="1"
-          value={maxChannels}
-          onChange={(e) => setMaxChannels(e.target.value)}
-          placeholder="unlimited"
-        />
-        <FormField
-          label="CPS Limit"
-          type="number"
-          min="1"
-          value={cpsLimit}
-          onChange={(e) => setCpsLimit(e.target.value)}
-          placeholder="unlimited"
-        />
+        {/* Identity */}
+        <FormSection
+          title="Identity"
+          description="How this carrier is labelled across the platform."
+        >
+          <FormField
+            label="Display Name"
+            required
+            value={displayName}
+            onChange={(e) => setDisplayName(e.target.value)}
+            placeholder="Acme Carrier"
+          />
+          <FormField
+            label="Description"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="Optional"
+          />
+        </FormSection>
+
+        {/* Connection */}
+        <FormSection
+          title="Connection"
+          description="Where SIP signaling is sent and how it is transported."
+        >
+          <FormField
+            fullWidth
+            label="SIP Proxy Hostname / IP"
+            required
+            value={sipProxy}
+            onChange={(e) => setSipProxy(e.target.value)}
+            placeholder="sip.carrier.com"
+          />
+          <FormField
+            label="Port"
+            type="number"
+            min="1"
+            max="65535"
+            value={port}
+            onChange={(e) => setPort(e.target.value)}
+          />
+          <FormField
+            as="select"
+            label="Transport"
+            value={transport}
+            onChange={(e) => setTransport(e.target.value as CarrierTransport)}
+          >
+            {TRANSPORTS.map((t) => (
+              <option key={t} value={t}>{t}</option>
+            ))}
+          </FormField>
+        </FormSection>
+
+        {/* Authentication */}
+        <FormSection
+          title="Authentication"
+          description="How the carrier authenticates this trunk."
+        >
+          <FormField
+            as="select"
+            label="Auth Type"
+            value={authType}
+            onChange={(e) => setAuthType(e.target.value as CarrierAuthType)}
+          >
+            {AUTH_TYPES.map((a) => (
+              <option key={a.value} value={a.value}>{a.label}</option>
+            ))}
+          </FormField>
+
+          {showCredentials && (
+            <>
+              <FormField
+                label="Username"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                placeholder="sip-user"
+              />
+              <FormField
+                label="Password"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder={carrier ? 'leave blank to keep unchanged' : ''}
+              />
+            </>
+          )}
+        </FormSection>
+
+        {/* Capacity & Media */}
+        <FormSection
+          title="Capacity & Media"
+          description="Optional limits and negotiated codecs. Leave blank for unlimited."
+        >
+          <FormField
+            fullWidth
+            label="Codec Preferences"
+            value={codecPrefs}
+            onChange={(e) => setCodecPrefs(e.target.value)}
+            placeholder="PCMU,PCMA"
+            hint="Comma-separated codec list"
+          />
+          <FormField
+            label="Max Channels"
+            type="number"
+            min="1"
+            value={maxChannels}
+            onChange={(e) => setMaxChannels(e.target.value)}
+            placeholder="unlimited"
+          />
+          <FormField
+            label="CPS Limit"
+            type="number"
+            min="1"
+            value={cpsLimit}
+            onChange={(e) => setCpsLimit(e.target.value)}
+            placeholder="unlimited"
+          />
+        </FormSection>
+
+        {/* Routing & Roles */}
+        <FormSection
+          title="Routing & Roles"
+          description="Which products use this carrier and how it behaves in the route plan."
+        >
+          <div className="col-span-2 space-y-4">
+            <div>
+              <p className="text-[0.68rem] font-semibold text-[#4a5568] uppercase tracking-[0.04em] mb-2.5">
+                Product Types
+              </p>
+              <div className="flex flex-wrap gap-2.5">
+                {PRODUCT_TYPE_OPTIONS.map((pt) => (
+                  <CheckboxPill
+                    key={pt}
+                    label={pt.toUpperCase()}
+                    checked={productTypes.has(pt)}
+                    onChange={() => toggleProductType(pt)}
+                  />
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <p className="text-[0.68rem] font-semibold text-[#4a5568] uppercase tracking-[0.04em] mb-2.5">
+                Role &amp; Options
+              </p>
+              <div className="flex flex-wrap gap-2.5">
+                <CheckboxPill label="Primary" checked={isPrimary} onChange={() => setIsPrimary((p) => !p)} />
+                <CheckboxPill label="Failover" checked={isFailover} onChange={() => setIsFailover((p) => !p)} />
+                <CheckboxPill label="Register" checked={register} onChange={() => setRegister((p) => !p)} />
+                <CheckboxPill label="Caller ID in From" checked={callerIdInFrom} onChange={() => setCallerIdInFrom((p) => !p)} />
+                <CheckboxPill label="Enabled" checked={enabled} onChange={() => setEnabled((p) => !p)} />
+              </div>
+            </div>
+          </div>
+        </FormSection>
       </div>
 
-      {/* Product types */}
-      <div>
-        <p className="text-[0.7rem] font-bold text-[#718096] uppercase tracking-[0.04em] mb-2">
-          Product Types
-        </p>
-        <div className="flex flex-wrap gap-3">
-          {PRODUCT_TYPE_OPTIONS.map((pt) => (
-            <CheckboxPill
-              key={pt}
-              label={pt.toUpperCase()}
-              checked={productTypes.has(pt)}
-              onChange={() => toggleProductType(pt)}
-            />
-          ))}
-        </div>
-      </div>
-
-      {/* Roles & options */}
-      <div>
-        <p className="text-[0.7rem] font-bold text-[#718096] uppercase tracking-[0.04em] mb-2">
-          Role &amp; Options
-        </p>
-        <div className="flex flex-wrap gap-3">
-          <CheckboxPill label="Primary" checked={isPrimary} onChange={() => setIsPrimary((p) => !p)} />
-          <CheckboxPill label="Failover" checked={isFailover} onChange={() => setIsFailover((p) => !p)} />
-          <CheckboxPill label="Register" checked={register} onChange={() => setRegister((p) => !p)} />
-          <CheckboxPill label="Caller ID in From" checked={callerIdInFrom} onChange={() => setCallerIdInFrom((p) => !p)} />
-          <CheckboxPill label="Enabled" checked={enabled} onChange={() => setEnabled((p) => !p)} />
-        </div>
-      </div>
-
-      {/* Footer actions */}
-      <div className="flex items-center gap-2 pt-1">
+      {/* Footer actions — separated by a top divider, right-aligned, primary uses blue brand */}
+      <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-[#2a2f45] bg-[#161925]/60 rounded-b-xl">
         <Button variant="ghost" onClick={onCancel} disabled={submitting}>
           Cancel
         </Button>
@@ -271,6 +314,38 @@ export function CarrierForm({ carrier, onSubmit, onCancel, submitLabel = 'Save' 
         </Button>
       </div>
     </div>
+  );
+}
+
+interface FormSectionProps {
+  title: string;
+  description?: string;
+  children: React.ReactNode;
+}
+
+/**
+ * A labelled group of form fields. Renders a section heading + optional
+ * description, then a responsive grid (single column on narrow widths,
+ * two columns from `sm` up). Use `fullWidth` on a FormField to make it
+ * span both columns.
+ */
+function FormSection({ title, description, children }: FormSectionProps) {
+  return (
+    <section>
+      <div className="mb-4">
+        <h3 className="text-[0.82rem] font-bold text-[#e2e8f0] tracking-[-0.01em]">
+          {title}
+        </h3>
+        {description && (
+          <p className="text-[0.75rem] text-[#718096] mt-1 leading-relaxed">
+            {description}
+          </p>
+        )}
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-5 gap-y-4">
+        {children}
+      </div>
+    </section>
   );
 }
 

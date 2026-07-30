@@ -109,7 +109,7 @@ async def list_trunk_tiers(admin: dict = Depends(require_admin)):
     """List trunk-type CPS tiers."""
     rows = await db.fetch_all(
         """
-        SELECT id, name, tier_type, cps_limit, monthly_fee, per_call_fee,
+        SELECT id, name, tier_type, cps_limit, call_paths, monthly_fee, per_call_fee,
                description, features, is_active, sort_order,
                created_at, updated_at
         FROM cps_tiers
@@ -125,7 +125,7 @@ async def list_api_tiers(admin: dict = Depends(require_admin)):
     """List API-type CPS tiers."""
     rows = await db.fetch_all(
         """
-        SELECT id, name, tier_type, cps_limit, monthly_fee, per_call_fee,
+        SELECT id, name, tier_type, cps_limit, call_paths, monthly_fee, per_call_fee,
                description, features, is_active, sort_order,
                created_at, updated_at
         FROM cps_tiers
@@ -141,7 +141,7 @@ async def get_tier(tier_id: int, admin: dict = Depends(require_admin)):
     """Get a single CPS tier by ID."""
     row = await db.fetch_one(
         """
-        SELECT id, name, tier_type, cps_limit, monthly_fee, per_call_fee,
+        SELECT id, name, tier_type, cps_limit, call_paths, monthly_fee, per_call_fee,
                description, features, is_active, sort_order,
                created_at, updated_at
         FROM cps_tiers
@@ -159,7 +159,7 @@ async def list_tiers(admin: dict = Depends(require_admin)):
     """List all CPS tiers."""
     rows = await db.fetch_all(
         """
-        SELECT id, name, tier_type, cps_limit, monthly_fee, per_call_fee,
+        SELECT id, name, tier_type, cps_limit, call_paths, monthly_fee, per_call_fee,
                description, features, is_active, sort_order,
                created_at, updated_at
         FROM cps_tiers
@@ -182,7 +182,7 @@ async def create_tier(body: TierCreate, admin: dict = Depends(require_admin)):
                 (name, tier_type, cps_limit, monthly_fee, per_call_fee,
                  description, features, is_active, sort_order)
             VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9)
-            RETURNING id, name, tier_type, cps_limit, monthly_fee, per_call_fee,
+            RETURNING id, name, tier_type, cps_limit, call_paths, monthly_fee, per_call_fee,
                       description, features, is_active, sort_order,
                       created_at, updated_at
             """,
@@ -225,7 +225,7 @@ async def update_tier(tier_id: int, body: TierUpdate, admin: dict = Depends(requ
         UPDATE cps_tiers
         SET {', '.join(updates)}, updated_at = NOW()
         WHERE id = ${idx}
-        RETURNING id, name, tier_type, cps_limit, monthly_fee, per_call_fee,
+        RETURNING id, name, tier_type, cps_limit, call_paths, monthly_fee, per_call_fee,
                   description, features, is_active, sort_order,
                   created_at, updated_at
     """

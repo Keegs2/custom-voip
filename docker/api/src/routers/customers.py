@@ -19,9 +19,11 @@ router = APIRouter()
 #
 # Pricing model (see docker/postgres/init/07_cps_tiers.sql):
 #   - RCF:   flat per-line MRC; a "line" = one row in rcf_numbers for the customer.
-#   - Trunk: cps_tiers.monthly_fee (via customers.trunk_tier_id) + the trunk's
-#            call-path package MRC (sip_trunks.call_path_package_id ->
-#            call_path_packages.monthly_fee, summed across the customer's trunks).
+#   - Trunk: cps_tiers.monthly_fee (via customers.trunk_tier_id) — a bundled
+#            "standard tier" whose fee already includes cps_tiers.call_paths
+#            concurrent call paths — PLUS any add-on call-path packages the trunks
+#            carry (sip_trunks.call_path_package_id -> call_path_packages.monthly_fee,
+#            summed across the customer's trunks) that stack on top of the bundle.
 #   - API:   cps_tiers.monthly_fee (via customers.api_tier_id).
 RCF_LINE_MRC = Decimal("5.00")
 VOICEMAIL_BOX_MRC = Decimal("2.00")  # PLACEHOLDER — confirm with product
@@ -88,10 +90,13 @@ async def compute_billing_estimate(conn, customer_id: int) -> dict:
 
     # --- SIP Trunking --------------------------------------------------------
     if account_type in ("trunk", "hybrid"):
-        # CPS tier MRC via customers.trunk_tier_id -> cps_tiers.monthly_fee
+        # CPS tier MRC via customers.trunk_tier_id -> cps_tiers.monthly_fee.
+        # Trunk tiers now BUNDLE a block of call paths (cps_tiers.call_paths); the
+        # tier fee already includes that bundle. Add-on packages stack on top.
         tier_row = await conn.fetchrow(
             """
-            SELECT t.name AS name, t.monthly_fee AS monthly_fee
+            SELECT t.name AS name, t.monthly_fee AS monthly_fee,
+                   t.call_paths AS call_paths
             FROM customers c
             LEFT JOIN cps_tiers t ON c.trunk_tier_id = t.id
             WHERE c.id = $1::int
@@ -100,6 +105,7 @@ async def compute_billing_estimate(conn, customer_id: int) -> dict:
         )
         tier_name = tier_row["name"] if tier_row and tier_row["name"] else "none"
         tier_fee = Decimal(str(tier_row["monthly_fee"])) if tier_row and tier_row["monthly_fee"] is not None else Decimal("0")
+        tier_call_paths = tier_row["call_paths"] if tier_row and tier_row["call_paths"] is not None else 0
 
         # Call-path MRC: each trunk carries its own package FK
         # (sip_trunks.call_path_package_id -> call_path_packages.monthly_fee).
@@ -125,8 +131,8 @@ async def compute_billing_estimate(conn, customer_id: int) -> dict:
             "label": "SIP Trunking",
             "subtotal": _money(subtotal),
             "components": [
-                {"label": f"CPS tier — {tier_name}", "amount": _money(tier_fee)},
-                {"label": f"Call paths ({cp_paths})", "amount": _money(cp_fee)},
+                {"label": f"CPS tier — {tier_name} (incl. {tier_call_paths} paths)", "amount": _money(tier_fee)},
+                {"label": f"Add-on call paths ({cp_paths})", "amount": _money(cp_fee)},
             ],
         })
 

@@ -10,7 +10,6 @@ const platformTabs: PlatformTab[] = [
   { label: 'CDRs',           to: '/admin/platform/cdrs'     },
   { label: 'Rates',          to: '/admin/platform/rates'    },
   { label: 'Tiers',          to: '/admin/platform/tiers'    },
-  { label: 'Testing',        to: '/admin/platform/sipp'     },
   { label: 'DID Search',     to: '/admin/platform/dids'     },
 ];
 
@@ -122,7 +121,7 @@ export function PlatformManagementPage() {
                 maxWidth: 500,
               }}
             >
-              Carrier trunks, CDR management, rates, tiers, and testing tools
+              Carrier trunks, CDR management, rates, and tiers
             </p>
           </div>
         </div>
