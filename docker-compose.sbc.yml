@@ -41,6 +41,11 @@ services:
       - TESTING_IP=${TESTING_IP:-}
       # Inbound carrier CPS flood backstop (new INVITEs/sec per Bandwidth IP)
       - BW_CPS_LIMIT=${BW_CPS_LIMIT:-100}
+      # FS-aware SIP-honest OPTIONS: when local FreeSWITCH is down, answer
+      # EXTERNAL SIP monitors (Bandwidth/DNS-checker/PBX) 503 instead of 200 so
+      # a dead-FS zone drains via carrier/DNS failover (the fail-open NLB can't).
+      # Default 1 (ON). Set to 0 to force legacy always-200 with no code change.
+      - FS_AWARE_OPTIONS=${FS_AWARE_OPTIONS:-1}
       # Bandwidth TC1/TC2 trunk-config signaling IPs (fixed PoPs, all zones)
       - BANDWIDTH_TC1_NY=${BANDWIDTH_TC1_NY:-67.231.9.142}
       - BANDWIDTH_TC1_ATL=${BANDWIDTH_TC1_ATL:-67.231.13.185}
