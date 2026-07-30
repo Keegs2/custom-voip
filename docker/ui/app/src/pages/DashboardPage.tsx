@@ -445,7 +445,7 @@ function RequestAccessCta() {
     <div
       style={{
         width: '100%',
-        maxWidth: 1400,
+        maxWidth: 'none',
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
@@ -630,7 +630,7 @@ export function DashboardPage() {
         <div
           style={{
             width: '100%',
-            maxWidth: 1400,
+            maxWidth: 'none',
             marginBottom: 48,
           }}
         >
@@ -665,7 +665,7 @@ export function DashboardPage() {
         {/* ──────────────────────────────────────────────────── */}
         <div
           className="animate-fade-in-up animation-delay-600"
-          style={{ width: '100%', maxWidth: 1400 }}
+          style={{ width: '100%', maxWidth: 'none' }}
         >
           <HaArchitectureViz />
         </div>
@@ -676,7 +676,7 @@ export function DashboardPage() {
         {!isAuthenticated && (
           <div
             className="animate-fade-in-up animation-delay-200"
-            style={{ width: '100%', maxWidth: 1400 }}
+            style={{ width: '100%', maxWidth: 'none' }}
           >
             <RequestAccessCta />
           </div>
@@ -688,7 +688,7 @@ export function DashboardPage() {
         <div
           style={{
             width: '100%',
-            maxWidth: 1400,
+            maxWidth: 'none',
             marginBottom: 72,
           }}
         >
