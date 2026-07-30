@@ -64,12 +64,17 @@ async def compute_billing_estimate(conn, customer_id: int) -> dict:
     total = Decimal("0")
 
     # --- RCF -----------------------------------------------------------------
-    if account_type == "rcf":
-        line_row = await conn.fetchrow(
-            "SELECT COUNT(*)::int AS n FROM rcf_numbers WHERE customer_id = $1::int",
-            customer_id,
-        )
-        lines = line_row["n"]
+    # RCF numbers can be provisioned on ANY account_type (e.g. a hybrid customer
+    # that also owns RCF numbers), so drive the line item off the ACTUAL
+    # provisioned line count — not the account_type label. Always run the COUNT;
+    # include the line when the customer has RCF numbers, OR when the account is
+    # pure-RCF (so a 0-line RCF account still shows an RCF line).
+    line_row = await conn.fetchrow(
+        "SELECT COUNT(*)::int AS n FROM rcf_numbers WHERE customer_id = $1::int",
+        customer_id,
+    )
+    lines = line_row["n"]
+    if lines > 0 or account_type == "rcf":
         subtotal = RCF_LINE_MRC * lines
         total += subtotal
         line_items.append({
