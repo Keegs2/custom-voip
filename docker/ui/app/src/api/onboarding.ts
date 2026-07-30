@@ -2,8 +2,6 @@ import { apiRequest } from './client';
 import type {
   OnboardingRequest,
   OnboardingSubmitPayload,
-  ApprovePayload,
-  ApproveResponse,
 } from '../types/onboarding';
 
 export interface OnboardingListParams {
@@ -66,25 +64,14 @@ export async function getOnboardingRequest(id: number): Promise<OnboardingReques
 }
 
 /**
- * POST /onboarding/{id}/verify-billing — admin endpoint.
- * Marks billing as verified, optionally recording notes.
+ * POST /onboarding/{id}/complete — admin endpoint.
+ * Marks the intake as completed (pending → completed), optionally recording notes.
  */
-export async function verifyBilling(
+export async function completeOnboarding(
   id: number,
   notes?: string,
 ): Promise<OnboardingRequest> {
-  return apiRequest('POST', `/onboarding/${id}/verify-billing`, { notes });
-}
-
-/**
- * POST /onboarding/{id}/approve — admin endpoint.
- * Approves the request, provisions DIDs, and creates the customer account.
- */
-export async function approveOnboarding(
-  id: number,
-  data: ApprovePayload,
-): Promise<ApproveResponse> {
-  return apiRequest('POST', `/onboarding/${id}/approve`, data);
+  return apiRequest('POST', `/onboarding/${id}/complete`, { notes });
 }
 
 /**
