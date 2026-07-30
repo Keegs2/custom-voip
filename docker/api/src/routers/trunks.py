@@ -49,10 +49,19 @@ async def _get_owned_trunk(trunk_id: int, customer_filter: int | None) -> dict:
 class TrunkCreate(BaseModel):
     customer_id: int
     trunk_name: str
-    max_channels: int
-    cps_limit: int = 5
+    # Capacity is resolved server-side. Send EITHER cps_tier_id (a trunk-type
+    # cps_tiers row: cps_limit + bundled call_paths -> max_channels), OR a custom
+    # config (both cps_limit AND max_channels). No misleading defaults — a bad
+    # default silently gives new trunks stale capacity that never reflects the
+    # customer's purchased tier.
+    cps_tier_id: Optional[int] = None
+    max_channels: Optional[int] = None
+    cps_limit: Optional[int] = None
     auth_type: str = "ip"  # ip, credential, both
     tech_prefix: Optional[str] = None
+    # Optional auth IPs to whitelist atomically with the create (validated via the
+    # same ::inet cast add_trunk_ip uses; a bad IP rolls back the whole create).
+    auth_ips: Optional[List[str]] = None
 
 
 class TrunkUpdate(BaseModel):
@@ -128,7 +137,14 @@ async def list_trunks(
 
 @router.post("")
 async def create_trunk(trunk: TrunkCreate, admin: dict = Depends(require_admin)):
-    """Create a new SIP trunk. Admin-only: provisioning / billing-affecting."""
+    """Create a new SIP trunk. Admin-only: provisioning / billing-affecting.
+
+    Capacity comes from the customer's purchased tier (send `cps_tier_id`, a
+    trunk-type `cps_tiers` row) or a custom config (send both `cps_limit` and
+    `max_channels`) — never a hardcoded default. Optionally whitelist `auth_ips`
+    at creation: the trunk row and its auth-IP rows are inserted in ONE
+    transaction, so a bad IP rolls back the whole create.
+    """
     # Verify customer
     customer = await db.fetch_one(
         "SELECT id, status FROM customers WHERE id = $1",
@@ -137,16 +153,112 @@ async def create_trunk(trunk: TrunkCreate, admin: dict = Depends(require_admin))
     if not customer:
         raise HTTPException(status_code=404, detail="Customer not found")
 
-    result = await db.fetch_one(
-        """
-        INSERT INTO sip_trunks (customer_id, trunk_name, max_channels, cps_limit, auth_type, tech_prefix)
-        VALUES ($1, $2, $3, $4, $5, $6)
-        RETURNING id, trunk_name, max_channels, cps_limit, enabled, created_at
-        """,
-        trunk.customer_id, trunk.trunk_name, trunk.max_channels,
-        trunk.cps_limit, trunk.auth_type, trunk.tech_prefix
-    )
-    return dict(result)
+    # --- Resolve capacity (cps_limit + max_channels) ------------------------
+    if trunk.cps_tier_id is not None:
+        # Tier-driven: CPS + bundled call paths come from the cps_tiers row.
+        tier = await db.fetch_one(
+            "SELECT cps_limit, call_paths FROM cps_tiers WHERE id = $1::int AND tier_type = 'trunk'",
+            trunk.cps_tier_id
+        )
+        if not tier:
+            raise HTTPException(
+                status_code=404,
+                detail="Trunk tier not found (no active cps_tiers row of tier_type='trunk' with that id)",
+            )
+        cps_limit = tier["cps_limit"]
+        max_channels = tier["call_paths"]
+        if max_channels is None:
+            # Defensive: reprice migration 28 (call_paths column populated) not yet
+            # applied on this DB. Fall back to an explicit request max_channels, else
+            # fail loudly rather than provisioning a 0/NULL-capacity trunk.
+            if trunk.max_channels is not None:
+                max_channels = trunk.max_channels
+            else:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        "Trunk tier has no bundled call paths — apply the tier "
+                        "reprice migration (28_tiers_reprice.sql) or provide "
+                        "max_channels / a custom config (cps_limit + max_channels)."
+                    ),
+                )
+    else:
+        # Custom config: both dimensions are required (no defaults).
+        if trunk.cps_limit is None or trunk.max_channels is None:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "Provide either cps_tier_id, or a custom config with BOTH "
+                    "cps_limit and max_channels."
+                ),
+            )
+        cps_limit = trunk.cps_limit
+        max_channels = trunk.max_channels
+
+    if cps_limit is None or cps_limit <= 0:
+        raise HTTPException(status_code=422, detail="cps_limit must be greater than 0")
+    if max_channels is None or max_channels <= 0:
+        raise HTTPException(status_code=422, detail="max_channels must be greater than 0")
+
+    # --- Normalize auth IPs (dedupe, preserve order) ------------------------
+    # Validation is deferred to the ::inet cast at INSERT time — the exact same
+    # mechanism add_trunk_ip relies on — so a malformed IP/CIDR aborts the
+    # transaction and rolls back the trunk row too (no half-created trunk).
+    auth_ips: List[str] = []
+    if trunk.auth_ips:
+        seen = set()
+        for ip in trunk.auth_ips:
+            if ip in seen:
+                continue
+            seen.add(ip)
+            auth_ips.append(ip)
+
+    # --- Create trunk + auth IPs in a SINGLE transaction --------------------
+    pool = await db.get_pool()
+    try:
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                result = await conn.fetchrow(
+                    """
+                    INSERT INTO sip_trunks (customer_id, trunk_name, max_channels, cps_limit, auth_type, tech_prefix)
+                    VALUES ($1::int, $2::text, $3::int, $4::int, $5::text, $6::text)
+                    RETURNING id, trunk_name, max_channels, cps_limit, enabled, created_at
+                    """,
+                    trunk.customer_id, trunk.trunk_name, max_channels,
+                    cps_limit, trunk.auth_type, trunk.tech_prefix
+                )
+                trunk_id = result["id"]
+                for ip in auth_ips:
+                    await conn.execute(
+                        """
+                        INSERT INTO trunk_auth_ips (trunk_id, ip_address)
+                        VALUES ($1::int, $2::inet)
+                        """,
+                        trunk_id, ip
+                    )
+    except HTTPException:
+        raise
+    except Exception as e:
+        # A bad IP/CIDR (::inet cast failure) or unique violation rolled the whole
+        # create back — surface a clear 422 instead of a raw 500.
+        raise HTTPException(
+            status_code=422,
+            detail=f"Trunk not created — invalid or duplicate auth IP: {e}",
+        )
+
+    # Invalidate the trunk_ip:{ip} cache for every inserted IP so FreeSWITCH/
+    # Kamailio pick up the new auth entries on the next call (same call add_trunk_ip
+    # uses on delete). Post-commit: cache misses are self-healing, so failures here
+    # must not fail an already-committed create.
+    for ip in auth_ips:
+        try:
+            await cache.invalidate_trunk_cache(ip)
+        except Exception as e:
+            logger.warning(f"trunk_ip cache invalidation failed for {ip}: {e}")
+
+    out = dict(result)
+    out["auth_ip_count"] = len(auth_ips)
+    return out
 
 
 # Call Path Packages

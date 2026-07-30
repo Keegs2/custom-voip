@@ -20,6 +20,12 @@ import { Spinner } from '../../components/ui/Spinner';
 import { FormField } from '../../components/ui/FormField';
 import { TableWrap, Table, Thead, Th } from '../../components/ui/Table';
 import { useToast } from '../../components/ui/ToastContext';
+import {
+  useTrunkCapacity,
+  useTrunkAuthIps,
+  TrunkCapacitySection,
+  TrunkAuthIpsSection,
+} from './TrunkCapacityFields';
 import type { Trunk, TrunkAuthType, TrunkIp, TrunkDid } from '../../types/trunk';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -41,16 +47,12 @@ interface CreateFormState {
   customer_id: string;
   trunk_name: string;
   auth_type: TrunkAuthType;
-  max_channels: string;
-  cps_limit: string;
 }
 
 const INITIAL_CREATE: CreateFormState = {
   customer_id: '',
   trunk_name: '',
   auth_type: 'ip',
-  max_channels: '10',
-  cps_limit: '5',
 };
 
 interface EditFormState {
@@ -1196,6 +1198,12 @@ function CreateTrunkForm({ onClose }: CreateTrunkFormProps) {
   const { toastOk, toastErr } = useToast();
   const [form, setForm] = useState<CreateFormState>(INITIAL_CREATE);
 
+  // Capacity + Authorized-IP controllers own their own state and the shared
+  // ['trunk-tiers'] query. Declared here (hooks-first, above any early return)
+  // so hook order stays stable — React #310.
+  const capacity = useTrunkCapacity();
+  const authIps = useTrunkAuthIps();
+
   const { data: customersData } = useQuery({
     queryKey: ['customers', { limit: 500 }],
     queryFn: () => listCustomers({ limit: 500 }),
@@ -1207,12 +1215,15 @@ function CreateTrunkForm({ onClose }: CreateTrunkFormProps) {
         customer_id: parseInt(form.customer_id, 10),
         trunk_name: form.trunk_name.trim(),
         auth_type: form.auth_type,
-        max_channels: parseInt(form.max_channels, 10) || 10,
-        cps_limit: parseInt(form.cps_limit, 10) || 5,
+        // tier → { cps_tier_id }; custom → { cps_limit, max_channels }
+        ...capacity.buildPayload(),
+        ...(authIps.ips.length > 0 ? { auth_ips: authIps.ips } : {}),
       }),
     onSuccess: (created) => {
       qc.invalidateQueries({ queryKey: ['trunks'] });
       setForm(INITIAL_CREATE);
+      capacity.reset();
+      authIps.reset();
       toastOk(`Trunk "${created.trunk_name}" created`);
       onClose();
     },
@@ -1223,6 +1234,8 @@ function CreateTrunkForm({ onClose }: CreateTrunkFormProps) {
     e.preventDefault();
     if (!form.customer_id) { toastErr('Please select a customer'); return; }
     if (!form.trunk_name.trim()) { toastErr('Trunk name is required'); return; }
+    const capacityError = capacity.validate();
+    if (capacityError) { toastErr(capacityError); return; }
     mutation.mutate();
   }
 
@@ -1298,24 +1311,28 @@ function CreateTrunkForm({ onClose }: CreateTrunkFormProps) {
           <option value="credentials">Credentials</option>
           <option value="both">Both</option>
         </FormField>
+      </div>
 
-        {/* Max Channels */}
-        <FormField
-          label="Max Channels"
-          type="number"
-          min="1"
-          value={form.max_channels}
-          onChange={(e) => setForm((p) => ({ ...p, max_channels: (e.target as HTMLInputElement).value }))}
-        />
+      {/* Capacity — purchased tier OR custom CPS / call paths */}
+      <div
+        style={{
+          marginBottom: 20,
+          paddingTop: 20,
+          borderTop: '1px solid rgba(59,130,246,0.12)',
+        }}
+      >
+        <TrunkCapacitySection ctl={capacity} />
+      </div>
 
-        {/* CPS Limit */}
-        <FormField
-          label="CPS Limit"
-          type="number"
-          min="1"
-          value={form.cps_limit}
-          onChange={(e) => setForm((p) => ({ ...p, cps_limit: (e.target as HTMLInputElement).value }))}
-        />
+      {/* Authorized IPs — optional whitelist at creation */}
+      <div
+        style={{
+          marginBottom: 20,
+          paddingTop: 20,
+          borderTop: '1px solid rgba(59,130,246,0.12)',
+        }}
+      >
+        <TrunkAuthIpsSection ctl={authIps} />
       </div>
 
       <div
@@ -1335,6 +1352,8 @@ function CreateTrunkForm({ onClose }: CreateTrunkFormProps) {
           size="sm"
           onClick={() => {
             setForm(INITIAL_CREATE);
+            capacity.reset();
+            authIps.reset();
             onClose();
           }}
         >
