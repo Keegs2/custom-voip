@@ -19,7 +19,6 @@ import { CdrsAdminPage } from './pages/admin/CdrsAdminPage';
 import { RatesAdminPage } from './pages/admin/RatesAdminPage';
 import { TiersAdminPage } from './pages/admin/TiersAdminPage';
 import { CarriersAdminPage } from './pages/admin/CarriersAdminPage';
-import { SippAdminPage } from './pages/admin/SippAdminPage';
 // Homer moved to standalone Troubleshooting page
 import { TrunksAdminPage } from './pages/admin/TrunksAdminPage';
 import { DIDSearchPage } from './pages/admin/DIDSearchPage';
@@ -103,7 +102,6 @@ export function App() {
                 <Route path="cdrs"     element={<CdrsAdminPage />} />
                 <Route path="rates"    element={<RatesAdminPage />} />
                 <Route path="tiers"    element={<TiersAdminPage />} />
-                <Route path="sipp"     element={<SippAdminPage />} />
                 <Route path="dids"     element={<DIDSearchPage />} />
               </Route>
             </Route>

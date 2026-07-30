@@ -9,6 +9,7 @@ CREATE TABLE cps_tiers (
     name VARCHAR(50) NOT NULL UNIQUE,
     tier_type VARCHAR(20) NOT NULL CHECK (tier_type IN ('trunk', 'api')),
     cps_limit INTEGER NOT NULL CHECK (cps_limit > 0),
+    call_paths INTEGER,  -- Bundled concurrent call paths for trunk tiers (NULL for api tiers)
     monthly_fee DECIMAL(10,2) NOT NULL DEFAULT 0,
     per_call_fee DECIMAL(10,4) NOT NULL DEFAULT 0,
     description TEXT,
@@ -64,53 +65,92 @@ CREATE TABLE cps_tier_changes (
 
 CREATE INDEX idx_tier_changes_customer ON cps_tier_changes(customer_id, created_at DESC);
 
--- Insert SIP Trunk CPS tier
--- All trunks get 5 CPS (call setup rate). No upgrades available.
--- Call paths (concurrent call capacity) are purchased separately per-trunk.
-INSERT INTO cps_tiers (name, tier_type, cps_limit, monthly_fee, per_call_fee, description, sort_order, features) VALUES
+-- Insert SIP Trunk CPS tiers (bundled "standard tiers").
+-- Each trunk tier bundles a CPS (call setup rate) + a block of concurrent call
+-- paths (call_paths) + one MRC. Tiers remain UPSELLABLE: customers can buy extra
+-- call paths on top via call_path_packages (sip_trunks.call_path_package_id).
+INSERT INTO cps_tiers (name, tier_type, cps_limit, call_paths, monthly_fee, per_call_fee, description, sort_order, features) VALUES
 (
     'trunk_standard',
     'trunk',
-    5,
-    0.00,
-    0.0000,
-    'Standard SIP trunk - 5 CPS call setup rate. Call paths purchased separately.',
     1,
-    '{"cps": 5, "support": "email", "features": ["basic_routing", "failover", "cdr_access"]}'
+    20,
+    25.00,
+    0.0000,
+    'Standard SIP trunk — 1 CPS, 20 concurrent call paths included. Buy extra call paths anytime.',
+    1,
+    '{"cps": 1, "call_paths": 20, "support": "email", "features": ["basic_routing", "failover", "cdr_access"]}'
+),
+(
+    'trunk_growth',
+    'trunk',
+    2,
+    50,
+    50.00,
+    0.0000,
+    'Growth SIP trunk — 2 CPS, 50 concurrent call paths included. Buy extra call paths anytime.',
+    2,
+    '{"cps": 2, "call_paths": 50, "support": "email", "features": ["basic_routing", "failover", "cdr_access"]}'
+),
+(
+    'trunk_business',
+    'trunk',
+    5,
+    100,
+    110.00,
+    0.0000,
+    'Business SIP trunk — 5 CPS, 100 concurrent call paths included. Buy extra call paths anytime.',
+    3,
+    '{"cps": 5, "call_paths": 100, "support": "priority", "features": ["basic_routing", "failover", "cdr_access"]}'
+),
+(
+    'trunk_enterprise',
+    'trunk',
+    10,
+    250,
+    240.00,
+    0.0000,
+    'Enterprise SIP trunk — 10 CPS, 250 concurrent call paths included. Buy extra call paths anytime.',
+    4,
+    '{"cps": 10, "call_paths": 250, "support": "dedicated", "features": ["basic_routing", "failover", "cdr_access", "sla_guarantee"]}'
 );
 
--- Insert API Calling CPS tiers
+-- Insert API Calling CPS tiers (premium product; call_paths is NULL — N/A for api).
 -- CPS controls call setup rate only; platform total capacity is 300 CPS.
-INSERT INTO cps_tiers (name, tier_type, cps_limit, monthly_fee, per_call_fee, description, sort_order, features) VALUES
+-- Customer-facing display names: Starter / Growth / Scale (internal names stable).
+INSERT INTO cps_tiers (name, tier_type, cps_limit, call_paths, monthly_fee, per_call_fee, description, sort_order, features) VALUES
 (
     'api_basic',
     'api',
     5,
-    49.00,
+    NULL,
+    99.00,
     0.0100,
-    'API Basic - 5 CPS, ideal for low-volume applications',
+    'Starter — 5 CPS. Programmable voice for launching applications.',
     10,
-    '{"cps": 5, "support": "email", "features": ["webhooks", "call_control", "basic_analytics"]}'
+    '{"cps": 5, "display_name": "Starter", "support": "email", "features": ["webhooks", "call_control", "basic_analytics"]}'
 ),
 (
     'api_standard',
     'api',
-    8,
-    149.00,
+    10,
+    NULL,
+    249.00,
     0.0080,
-    'API Standard - 8 CPS, for growing businesses',
+    'Growth — 10 CPS. Scaling programmable voice for growing businesses.',
     20,
-    '{"cps": 8, "support": "priority", "features": ["webhooks", "call_control", "advanced_analytics", "recordings", "conference"]}'
+    '{"cps": 10, "display_name": "Growth", "support": "priority", "features": ["webhooks", "call_control", "advanced_analytics", "recordings", "conference"]}'
 ),
 (
     'api_premium',
     'api',
-    15,
-    399.00,
+    25,
+    NULL,
+    599.00,
     0.0050,
-    'API Premium - 15 CPS, for high-volume operations',
+    'Scale — 25 CPS. High-volume programmable voice with premium SLA.',
     30,
-    '{"cps": 15, "support": "dedicated", "features": ["webhooks", "call_control", "advanced_analytics", "recordings", "conference", "transcription", "custom_tts", "sla_guarantee"]}'
+    '{"cps": 25, "display_name": "Scale", "support": "dedicated", "features": ["webhooks", "call_control", "advanced_analytics", "recordings", "conference", "transcription", "custom_tts", "sla_guarantee"]}'
 );
 
 -- Call Path packages (Metaswitch-style)
