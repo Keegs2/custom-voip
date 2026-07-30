@@ -5,7 +5,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { ApiError } from '../../api/client';
 import {
   IconRCF, IconTrunk, IconAPI, IconIVR, IconDocs,
-  IconAdmin, IconSignal, IconTroubleshoot,
+  IconAdmin, IconSignal, IconTroubleshoot, IconMyAccount,
 } from '../icons/ProductIcons';
 import { Package, Shield, ChevronDown, Clock, Eye, EyeOff, Server, BookOpen } from 'lucide-react';
 import { AccessRequestForm } from './AccessRequestForm';
@@ -637,6 +637,7 @@ export function Sidebar() {
     label: 'Platform Management', to: '/admin/platform', color: '#60a5fa', icon: <Server size={15} strokeWidth={1.7} />,
     isActiveFn: (p) => p.startsWith('/admin/platform'),
   };
+  const myAccountItem: NavItemDef   = { label: 'My Account',          to: '/my-account',      color: '#3b82f6', icon: <IconMyAccount size={17} /> };
   const callQualityItem: NavItemDef = { label: 'Call Quality',        to: '/call-quality',    color: '#22c55e', icon: <IconSignal size={17} /> };
   const troubleItem: NavItemDef     = { label: 'Troubleshooting',     to: '/troubleshooting', color: '#fbbf24', icon: <IconTroubleshoot size={17} /> };
 
@@ -852,6 +853,10 @@ export function Sidebar() {
                 <SidebarNavItem key={item.to} item={item} onNavigate={closeMobile} small />
               ))}
             </CollapsibleGroup>
+
+            {/* ── Standalone: My Account (all customer users) ─ */}
+            <div style={{ height: 6 }} />
+            <SidebarNavItem item={myAccountItem} onNavigate={closeMobile} small />
 
             {/* ── GROUP 2: Coming Soon ──────────────────────── */}
             <div style={{ height: 6 }} />

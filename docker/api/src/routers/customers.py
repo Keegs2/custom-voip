@@ -1,8 +1,9 @@
 """Customer management endpoints."""
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Optional
 from db import database as db
+from auth.dependencies import get_current_user
 
 router = APIRouter()
 
@@ -77,6 +78,68 @@ async def create_customer(customer: CustomerCreate):
         customer.traffic_grade, customer.daily_limit, customer.cpm_limit, ucaas_flag
     )
     return dict(result)
+
+
+# NOTE: This literal `/me` route MUST be declared BEFORE the dynamic
+# `/{customer_id}` route below. FastAPI matches routes in declaration order;
+# if `/{customer_id}` came first, a request to `/me` would try to parse "me"
+# as an int and fail with a 422 instead of reaching this handler.
+@router.get("/me")
+async def get_my_customer(user: dict = Depends(get_current_user)):
+    """Return the authenticated caller's OWN customer record + product counts.
+
+    Scope is derived ONLY from the JWT (never a client-supplied id). A caller
+    with no associated customer (e.g. a pure platform admin) gets a 404 so we
+    never leak the existence of other customers.
+    """
+    customer_id = user.get("customer_id")
+    if customer_id is None:
+        raise HTTPException(status_code=404, detail="No customer associated with this account")
+
+    row = await db.fetch_one(
+        """
+        SELECT id, name, account_type, status, traffic_grade,
+               balance, credit_limit, daily_limit, cpm_limit,
+               ucaas_enabled, created_at
+        FROM customers WHERE id = $1::int
+        """,
+        customer_id,
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="No customer associated with this account")
+
+    rcf_count = await db.fetch_one(
+        "SELECT COUNT(*)::int AS n FROM rcf_numbers WHERE customer_id = $1::int",
+        customer_id,
+    )
+    api_count = await db.fetch_one(
+        "SELECT COUNT(*)::int AS n FROM api_dids WHERE customer_id = $1::int",
+        customer_id,
+    )
+    trunk_count = await db.fetch_one(
+        "SELECT COUNT(*)::int AS n FROM sip_trunks WHERE customer_id = $1::int",
+        customer_id,
+    )
+
+    c = dict(row)
+    return {
+        "id": c["id"],
+        "name": c["name"],
+        "account_type": c["account_type"],
+        "status": c["status"],
+        "traffic_grade": c["traffic_grade"],
+        "balance": float(c["balance"]) if c["balance"] is not None else 0.0,
+        "credit_limit": float(c["credit_limit"]) if c["credit_limit"] is not None else 0.0,
+        "daily_limit": c["daily_limit"],
+        "cpm_limit": c["cpm_limit"],
+        "ucaas_enabled": c["ucaas_enabled"],
+        "created_at": c["created_at"].isoformat() if c["created_at"] is not None else None,
+        "counts": {
+            "rcf": rcf_count["n"],
+            "api_dids": api_count["n"],
+            "trunks": trunk_count["n"],
+        },
+    }
 
 
 @router.get("/{customer_id}")

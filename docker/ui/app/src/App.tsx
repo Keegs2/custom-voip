@@ -27,6 +27,7 @@ import { UserDetailPage } from './pages/admin/UserDetailPage';
 import { OnboardingAdminPage } from './pages/admin/OnboardingAdminPage';
 import { CallQualityPage } from './pages/CallQualityPage';
 import { AccountPage } from './pages/AccountPage';
+import { MyAccountPage } from './pages/MyAccountPage';
 
 /** Redirects /admin/user/:userId → /admin/customers/users/:userId */
 function UserDetailRedirect() {
@@ -60,6 +61,7 @@ export function App() {
               <Route path="docs/integration" element={<Navigate to="/docs/api" replace />} />
               <Route path="call-quality" element={<CallQualityPage />} />
               <Route path="account"          element={<AccountPage />} />
+              <Route path="my-account"       element={<MyAccountPage />} />
 
               {/* Redirects from old standalone paths to their new tab locations */}
               <Route path="admin/did-search" element={<Navigate to="/admin/platform/dids" replace />} />

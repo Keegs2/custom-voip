@@ -13,6 +13,7 @@ import {
   BarChart3,
   Wrench,
   Voicemail,
+  IdCard,
 } from 'lucide-react';
 
 interface IconProps {
@@ -62,4 +63,9 @@ export function IconTroubleshoot({ size = 18 }: IconProps) {
 /** Voicemail */
 export function IconVoicemail({ size = 18 }: IconProps) {
   return <Voicemail size={size} strokeWidth={1.6} />;
+}
+
+/** My Account — customer account hub */
+export function IconMyAccount({ size = 18 }: IconProps) {
+  return <IdCard size={size} strokeWidth={1.6} />;
 }
