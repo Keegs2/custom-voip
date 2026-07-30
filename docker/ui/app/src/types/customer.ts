@@ -6,8 +6,6 @@ export interface Customer {
   id: number;
   name: string;
   account_type: AccountType;
-  balance: number;
-  credit_limit: number;
   status: CustomerStatus;
   traffic_grade: TrafficGrade;
   daily_limit: number | null;
@@ -20,7 +18,6 @@ export interface Customer {
 export interface CustomerCreate {
   name: string;
   account_type: AccountType;
-  credit_limit?: number;
   status?: CustomerStatus;
   traffic_grade?: TrafficGrade;
   daily_limit?: number | null;
@@ -31,7 +28,6 @@ export interface CustomerCreate {
 export interface CustomerUpdate {
   name?: string;
   account_type?: AccountType;
-  credit_limit?: number;
   status?: CustomerStatus;
   traffic_grade?: TrafficGrade;
   daily_limit?: number | null;

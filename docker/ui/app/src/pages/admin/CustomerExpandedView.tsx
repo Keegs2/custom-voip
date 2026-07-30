@@ -1,10 +1,7 @@
-import { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { apiRequest } from '../../api/client';
+import { useQuery } from '@tanstack/react-query';
 import { getCustomerTier } from '../../api/tiers';
 import { Button } from '../../components/ui/Button';
 import { Spinner } from '../../components/ui/Spinner';
-import { useToast } from '../../components/ui/ToastContext';
 import { CustomerRcfSection } from './CustomerRcfSection';
 import { CustomerApiSection } from './CustomerApiSection';
 import { CustomerTrunkSection } from './CustomerTrunkSection';
@@ -16,9 +13,9 @@ interface CustomerExpandedViewProps {
   onDelete: () => void;
 }
 
-interface AddCreditResponse {
-  balance: number;
-}
+// NOTE: The customer "bank account" (balance / credit limit / add-credit) has
+// been removed platform-wide — the platform does not invoice; CDRs are rated
+// externally (Equinox). This orphaned view keeps only the operational fields.
 
 function DetailField({ label, value }: { label: string; value: React.ReactNode }) {
   return (
@@ -50,39 +47,10 @@ function DetailField({ label, value }: { label: string; value: React.ReactNode }
 }
 
 export function CustomerExpandedView({ customer, onEdit, onDelete }: CustomerExpandedViewProps) {
-  const qc = useQueryClient();
-  const { toastOk, toastErr } = useToast();
-  const [creditAmount, setCreditAmount] = useState('');
-
   const { data: tierData, isLoading: tierLoading } = useQuery({
     queryKey: ['customerTier', customer.id],
     queryFn: () => getCustomerTier(customer.id),
   });
-
-  const addCreditMutation = useMutation({
-    mutationFn: (amount: number) =>
-      apiRequest<AddCreditResponse>(
-        'POST',
-        `/customers/${customer.id}/credit?amount=${amount}`,
-      ),
-    onSuccess: (data) => {
-      qc.invalidateQueries({ queryKey: ['customers'] });
-      toastOk(`Added $${parseFloat(creditAmount).toFixed(2)} credit. New balance: $${data.balance.toFixed(2)}`);
-      setCreditAmount('');
-    },
-    onError: (err: Error) => toastErr(err.message),
-  });
-
-  function handleAddCredit(e: React.FormEvent) {
-    e.preventDefault();
-    e.stopPropagation();
-    const amount = parseFloat(creditAmount);
-    if (!amount || amount <= 0) {
-      toastErr('Enter a valid amount');
-      return;
-    }
-    addCreditMutation.mutate(amount);
-  }
 
   const showRcf = customer.account_type === 'rcf' || customer.account_type === 'hybrid';
   const showApi = customer.account_type === 'api' || customer.account_type === 'hybrid';
@@ -104,15 +72,6 @@ export function CustomerExpandedView({ customer, onEdit, onDelete }: CustomerExp
           marginBottom: 20,
         }}
       >
-        <DetailField
-          label="Balance"
-          value={
-            <span style={{ color: customer.balance < 0 ? '#f87171' : '#4ade80' }}>
-              ${customer.balance.toFixed(2)}
-            </span>
-          }
-        />
-        <DetailField label="Credit Limit" value={`$${customer.credit_limit.toFixed(2)}`} />
         <DetailField
           label="Daily Limit"
           value={customer.daily_limit != null ? `$${customer.daily_limit.toFixed(2)}` : '--'}
@@ -199,51 +158,6 @@ export function CustomerExpandedView({ customer, onEdit, onDelete }: CustomerExp
         >
           Edit Customer
         </Button>
-
-        {/* Add Credit */}
-        <form
-          onSubmit={handleAddCredit}
-          onClick={(e) => e.stopPropagation()}
-          style={{ display: 'flex', alignItems: 'center', gap: 8 }}
-        >
-          <input
-            type="number"
-            value={creditAmount}
-            onChange={(e) => setCreditAmount(e.target.value)}
-            onClick={(e) => e.stopPropagation()}
-            placeholder="Amount"
-            step="0.01"
-            min="0.01"
-            style={{
-              fontSize: '0.82rem',
-              padding: '7px 12px',
-              borderRadius: 8,
-              width: 120,
-              border: '1px solid rgba(42,47,69,0.8)',
-              background: 'rgba(13,15,21,0.9)',
-              color: '#e2e8f0',
-              outline: 'none',
-              transition: 'border-color 0.15s, box-shadow 0.15s',
-            }}
-            onFocus={(e) => {
-              e.currentTarget.style.borderColor = '#22c55e';
-              e.currentTarget.style.boxShadow = '0 0 0 3px rgba(34,197,94,0.12)';
-            }}
-            onBlur={(e) => {
-              e.currentTarget.style.borderColor = 'rgba(42,47,69,0.8)';
-              e.currentTarget.style.boxShadow = 'none';
-            }}
-          />
-          <Button
-            type="submit"
-            variant="success"
-            size="sm"
-            loading={addCreditMutation.isPending}
-            onClick={(e) => e.stopPropagation()}
-          >
-            Add Credit
-          </Button>
-        </form>
 
         {/* Delete — pushed to right */}
         <div style={{ marginLeft: 'auto' }}>

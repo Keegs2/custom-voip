@@ -17,14 +17,15 @@ import {
   Code2,
   Sparkles,
   AlertTriangle,
+  Receipt,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { apiRequest, ApiError } from '../api/client';
-import { getMyCustomer, listMyTeam } from '../api/account';
+import { getMyCustomer, getMyBilling, listMyTeam } from '../api/account';
 import { listRcf } from '../api/rcf';
 import { listTrunks } from '../api/trunks';
 import { listApiDids } from '../api/apiDids';
-import type { MyCustomer, TeamMember, TeamRole } from '../types/account';
+import type { MyCustomer, BillingLineItem, TeamMember, TeamRole } from '../types/account';
 import type { User } from '../types/auth';
 import type { AccountType } from '../types/customer';
 import { Badge } from '../components/ui/Badge';
@@ -292,23 +293,197 @@ function roleVariant(role: TeamRole): 'premium' | 'standard' {
   return role === 'admin' ? 'premium' : 'standard';
 }
 
+/* ═════════════════ Estimated monthly bill ═════════════════ */
+
+/** One product line on the estimate. Discriminates on `product` to render
+ *  either a `qty × unit_price` line (rcf/voicemail) or a subtotal with a
+ *  named component breakdown (trunk/api). */
+function BillLineRow({ item }: { item: BillingLineItem }) {
+  const hasBreakdown = item.product === 'trunk' || item.product === 'api';
+
+  return (
+    <div
+      className="glass-surface"
+      style={{
+        padding: '14px 18px',
+        borderRadius: 12,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: hasBreakdown ? 10 : 4,
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'baseline',
+          justifyContent: 'space-between',
+          gap: 16,
+        }}
+      >
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: '0.88rem', fontWeight: 700, color: COLORS.text }}>
+            {item.label}
+          </div>
+          {(item.product === 'rcf' || item.product === 'voicemail') && (
+            <div style={{ fontSize: '0.74rem', color: COLORS.muted, marginTop: 2 }}>
+              {item.qty.toLocaleString()} {item.unit}
+              {item.qty === 1 ? '' : 's'} × {fmtMoney(item.unit_price)}
+            </div>
+          )}
+        </div>
+        <div
+          style={{
+            fontSize: '0.95rem',
+            fontWeight: 700,
+            color: COLORS.text,
+            fontVariantNumeric: 'tabular-nums',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {fmtMoney(item.subtotal)}
+        </div>
+      </div>
+
+      {/* Component breakdown for trunk / api lines */}
+      {hasBreakdown && item.components.length > 0 && (
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 5,
+            paddingTop: 8,
+            borderTop: '1px solid rgba(59,130,246,0.10)',
+          }}
+        >
+          {item.components.map((c, i) => (
+            <div
+              key={`${c.label}-${i}`}
+              style={{
+                display: 'flex',
+                alignItems: 'baseline',
+                justifyContent: 'space-between',
+                gap: 12,
+                fontSize: '0.76rem',
+              }}
+            >
+              <span style={{ color: COLORS.secondary }}>{c.label}</span>
+              <span
+                style={{
+                  color: COLORS.secondary,
+                  fontVariantNumeric: 'tabular-nums',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {fmtMoney(c.amount)}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * READ-ONLY "Estimated monthly bill" card.
+ *
+ * The platform does not invoice — CDRs are rated externally (Equinox). This
+ * card fetches the server-computed estimate and lists each product line, a
+ * bold monthly total, and the server-authored disclaimer. Handles its own
+ * loading / empty / error states so it degrades gracefully.
+ */
+function MonthlyBillCard() {
+  const { data, isLoading, isError } = useQuery({
+    queryKey: ['my-billing'],
+    queryFn: getMyBilling,
+    retry: false,
+  });
+
+  return (
+    <Section
+      title="Estimated Monthly Bill"
+      subtitle="A read-only estimate — actual charges are billed separately"
+      icon={<Receipt size={18} strokeWidth={1.7} />}
+    >
+      {isLoading ? (
+        <div style={{ display: 'flex', justifyContent: 'center', padding: 32 }}>
+          <Spinner size="lg" />
+        </div>
+      ) : isError ? (
+        <InlineEmpty message="Unable to load your estimated bill right now." />
+      ) : !data || data.line_items.length === 0 ? (
+        <InlineEmpty message="No billable products are provisioned yet. Contact support to get started." />
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {/* Line items */}
+          {data.line_items.map((item, i) => (
+            <BillLineRow key={`${item.product}-${item.label}-${i}`} item={item} />
+          ))}
+
+          {/* Monthly total */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'baseline',
+              justifyContent: 'space-between',
+              gap: 16,
+              padding: '16px 18px',
+              borderRadius: 12,
+              background:
+                'linear-gradient(135deg, rgba(59,130,246,0.14) 0%, rgba(59,130,246,0.06) 100%)',
+              border: '1px solid rgba(59,130,246,0.24)',
+            }}
+          >
+            <span
+              style={{
+                fontSize: '0.72rem',
+                fontWeight: 700,
+                color: COLORS.primaryLight,
+                textTransform: 'uppercase',
+                letterSpacing: '0.05em',
+              }}
+            >
+              Estimated Monthly Total
+            </span>
+            <span
+              style={{
+                fontSize: '1.55rem',
+                fontWeight: 800,
+                color: COLORS.text,
+                lineHeight: 1,
+                fontVariantNumeric: 'tabular-nums',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {fmtMoney(data.total_monthly_estimate)}
+            </span>
+          </div>
+
+          {/* Server-authored disclaimer — shown verbatim */}
+          {data.disclaimer && (
+            <p
+              style={{
+                margin: '2px 2px 0',
+                fontSize: '0.72rem',
+                color: COLORS.muted,
+                lineHeight: 1.5,
+              }}
+            >
+              {data.disclaimer}
+            </p>
+          )}
+        </div>
+      )}
+    </Section>
+  );
+}
+
 /* ═════════════════ 1. Account Overview tab ═════════════════ */
 
 function OverviewTab({ customer }: { customer: MyCustomer }) {
-  // Credit usage: how much of the credit line is consumed.
-  // balance is the available/on-account amount; usage bar reflects the
-  // portion of the credit_limit that remains available.
-  const creditLimit = customer.credit_limit;
-  const available = customer.balance;
-  const usedFraction =
-    creditLimit > 0
-      ? Math.min(1, Math.max(0, 1 - available / creditLimit))
-      : 0;
-  const availablePct = Math.round((1 - usedFraction) * 100);
-
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-      {/* Identity + billing side by side on wide screens */}
+      {/* Identity + estimated bill side by side on wide screens */}
       <div
         style={{
           display: 'grid',
@@ -391,80 +566,8 @@ function OverviewTab({ customer }: { customer: MyCustomer }) {
           </div>
         </Section>
 
-        {/* Billing card */}
-        <Section title="Billing" subtitle="Balance &amp; credit line" icon={<ShieldCheck size={18} strokeWidth={1.7} />}>
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: '1fr 1fr',
-              gap: 12,
-              marginBottom: 18,
-            }}
-          >
-            <Tile
-              label="Balance"
-              value={fmtMoney(customer.balance)}
-              accent={customer.balance >= 0 ? COLORS.successLight : COLORS.error}
-              hint={customer.balance >= 0 ? 'Available' : 'Owed'}
-            />
-            <Tile label="Credit limit" value={fmtMoney(customer.credit_limit)} />
-          </div>
-
-          {/* Usage bar */}
-          {creditLimit > 0 && (
-            <div style={{ marginBottom: 18 }}>
-              <div
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  marginBottom: 6,
-                  fontSize: '0.7rem',
-                  color: COLORS.muted,
-                }}
-              >
-                <span>Available credit</span>
-                <span style={{ color: COLORS.secondary, fontVariantNumeric: 'tabular-nums' }}>
-                  {availablePct}%
-                </span>
-              </div>
-              <div
-                style={{
-                  height: 8,
-                  borderRadius: 999,
-                  background: 'rgba(255,255,255,0.05)',
-                  overflow: 'hidden',
-                }}
-                role="progressbar"
-                aria-valuenow={availablePct}
-                aria-valuemin={0}
-                aria-valuemax={100}
-                aria-label="Available credit"
-              >
-                <div
-                  style={{
-                    height: '100%',
-                    width: `${availablePct}%`,
-                    borderRadius: 999,
-                    background:
-                      availablePct > 20
-                        ? 'linear-gradient(90deg, #2563eb 0%, #3b82f6 100%)'
-                        : 'linear-gradient(90deg, #b45309 0%, #f59e0b 100%)',
-                    transition: 'width 0.3s ease',
-                  }}
-                />
-              </div>
-            </div>
-          )}
-
-          <div>
-            <DefRow label="Daily limit">
-              {customer.daily_limit != null ? fmtMoney(customer.daily_limit) : 'No limit'}
-            </DefRow>
-            <DefRow label="Cost-per-minute cap">
-              {customer.cpm_limit != null ? `$${customer.cpm_limit.toFixed(4)}/min` : 'No cap'}
-            </DefRow>
-          </div>
-        </Section>
+        {/* Estimated monthly bill — replaces the old balance/credit block */}
+        <MonthlyBillCard />
       </div>
 
       {/* Product counts */}

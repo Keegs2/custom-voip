@@ -3,12 +3,14 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getCustomer, deleteCustomer } from '../../api/customers';
 import { getCustomerTier } from '../../api/tiers';
+import { getCustomerBilling } from '../../api/account';
 import { apiRequest } from '../../api/client';
 import { getCustomerRecentCdrs, getCustomerCdrDailySummary } from '../../api/cdrs';
 import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
 import { Spinner } from '../../components/ui/Spinner';
 import { useToast } from '../../components/ui/ToastContext';
+import { fmtMoney } from '../../utils/format';
 import { CustomerEditForm } from './CustomerEditForm';
 import { CustomerRcfSection } from './CustomerRcfSection';
 import { CustomerApiSection } from './CustomerApiSection';
@@ -17,10 +19,6 @@ import { CustomerUcaasSection } from './CustomerUcaasSection';
 import type { Customer } from '../../types/customer';
 import type { Cdr } from '../../types/cdr';
 import type { CdrSummaryRow } from '../../types/rate';
-
-interface AddCreditResponse {
-  balance: number;
-}
 
 // ---- Stat card ----
 
@@ -704,6 +702,106 @@ function CustomerUsageSection({ customerId, accent }: CustomerUsageSectionProps)
   );
 }
 
+// ---- Estimated monthly bill (read-only reference) ----
+
+/**
+ * Compact, READ-ONLY estimated monthly bill for the admin 360.
+ *
+ * Mirrors the customer-facing estimate (`getCustomerBilling`). The platform
+ * does not invoice — CDRs are rated externally (Equinox) — so this is purely
+ * a reference. Degrades gracefully on load/empty/error.
+ */
+function CustomerBillingEstimate({ customerId, accent }: { customerId: number; accent: string }) {
+  const { data, isLoading, isError } = useQuery({
+    queryKey: ['customerBilling', customerId],
+    queryFn: () => getCustomerBilling(customerId),
+    retry: false,
+    staleTime: 60_000,
+  });
+
+  const labelStyle: React.CSSProperties = {
+    fontSize: '0.6rem',
+    fontWeight: 700,
+    color: accent,
+    textTransform: 'uppercase',
+    letterSpacing: '0.05em',
+    marginBottom: 18,
+  };
+
+  return (
+    <SectionCard accent={accent}>
+      <div style={labelStyle}>Estimated Monthly Bill</div>
+
+      {isLoading ? (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: '#718096', fontSize: '0.82rem', padding: '20px 0' }}>
+          <Spinner size="xs" /> Loading estimate…
+        </div>
+      ) : isError ? (
+        <div style={{ color: '#718096', fontSize: '0.82rem', padding: '8px 0' }}>
+          Unable to load the estimated bill.
+        </div>
+      ) : !data || data.line_items.length === 0 ? (
+        <div style={{ color: '#4a5568', fontSize: '0.82rem', padding: '8px 0' }}>
+          No billable products provisioned.
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {data.line_items.map((item, i) => (
+            <div
+              key={`${item.product}-${item.label}-${i}`}
+              style={{
+                display: 'flex',
+                alignItems: 'baseline',
+                justifyContent: 'space-between',
+                gap: 16,
+                fontSize: '0.82rem',
+                padding: '8px 0',
+                borderBottom: '1px solid rgba(42,47,69,0.4)',
+              }}
+            >
+              <span style={{ color: '#cbd5e0' }}>
+                {item.label}
+                {(item.product === 'rcf' || item.product === 'voicemail') && (
+                  <span style={{ color: '#4a5568', marginLeft: 8, fontSize: '0.74rem' }}>
+                    {item.qty.toLocaleString()} {item.unit}
+                    {item.qty === 1 ? '' : 's'} × {fmtMoney(item.unit_price)}
+                  </span>
+                )}
+              </span>
+              <span style={{ color: '#e2e8f0', fontWeight: 600, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
+                {fmtMoney(item.subtotal)}
+              </span>
+            </div>
+          ))}
+
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'baseline',
+              justifyContent: 'space-between',
+              gap: 16,
+              paddingTop: 12,
+            }}
+          >
+            <span style={{ fontSize: '0.65rem', fontWeight: 700, color: accent, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              Estimated Monthly Total
+            </span>
+            <span style={{ fontSize: '1.15rem', fontWeight: 800, color: '#e2e8f0', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
+              {fmtMoney(data.total_monthly_estimate)}
+            </span>
+          </div>
+
+          {data.disclaimer && (
+            <p style={{ margin: '4px 0 0', fontSize: '0.7rem', color: '#4a5568', lineHeight: 1.5 }}>
+              {data.disclaimer}
+            </p>
+          )}
+        </div>
+      )}
+    </SectionCard>
+  );
+}
+
 // ---- Account detail view ----
 
 interface AccountDetailViewProps {
@@ -715,28 +813,10 @@ interface AccountDetailViewProps {
 function AccountDetailView({ customer, onEdit, onDelete }: AccountDetailViewProps) {
   const qc = useQueryClient();
   const { toastOk, toastErr } = useToast();
-  const [creditAmount, setCreditAmount] = useState('');
 
   const { data: tierData, isLoading: tierLoading } = useQuery({
     queryKey: ['customerTier', customer.id],
     queryFn: () => getCustomerTier(customer.id),
-  });
-
-  const addCreditMutation = useMutation({
-    mutationFn: (amount: number) =>
-      apiRequest<AddCreditResponse>(
-        'POST',
-        `/customers/${customer.id}/credit?amount=${amount}`,
-      ),
-    onSuccess: (data) => {
-      qc.invalidateQueries({ queryKey: ['customer', customer.id] });
-      qc.invalidateQueries({ queryKey: ['customers'] });
-      toastOk(
-        `Added $${parseFloat(creditAmount).toFixed(2)} credit. New balance: $${data.balance.toFixed(2)}`,
-      );
-      setCreditAmount('');
-    },
-    onError: (err: Error) => toastErr(err.message),
   });
 
   const ucaasMutation = useMutation({
@@ -749,16 +829,6 @@ function AccountDetailView({ customer, onEdit, onDelete }: AccountDetailViewProp
     },
     onError: (err: Error) => toastErr(err.message),
   });
-
-  function handleAddCredit(e: React.FormEvent) {
-    e.preventDefault();
-    const amount = parseFloat(creditAmount);
-    if (!amount || amount <= 0) {
-      toastErr('Enter a valid amount');
-      return;
-    }
-    addCreditMutation.mutate(amount);
-  }
 
   const showRcf = customer.account_type === 'rcf' || customer.account_type === 'hybrid';
   const showApi = customer.account_type === 'api' || customer.account_type === 'hybrid';
@@ -781,22 +851,9 @@ function AccountDetailView({ customer, onEdit, onDelete }: AccountDetailViewProp
 
       {/* Account overview stat cards */}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14 }}>
-        {/* Balance, credit, and rate-limiting fields are meaningless for RCF accounts */}
+        {/* Rate-limiting fields are meaningless for RCF accounts */}
         {customer.account_type !== 'rcf' && (
           <>
-            <StatCard
-              label="Balance"
-              accent={customer.balance < 0 ? '#ef4444' : '#22c55e'}
-              value={
-                <span style={{ color: customer.balance < 0 ? '#f87171' : '#4ade80' }}>
-                  ${customer.balance.toFixed(2)}
-                </span>
-              }
-            />
-            <StatCard
-              label="Credit Limit"
-              value={`$${customer.credit_limit.toFixed(2)}`}
-            />
             <StatCard
               label="Daily Limit"
               value={customer.daily_limit != null ? `$${customer.daily_limit.toFixed(2)}` : '--'}
@@ -887,6 +944,9 @@ function AccountDetailView({ customer, onEdit, onDelete }: AccountDetailViewProp
           <CustomerUcaasSection customerId={customer.id} />
         </SectionCard>
       )}
+
+      {/* Estimated monthly bill — read-only reference (real billing is external) */}
+      <CustomerBillingEstimate customerId={customer.id} accent={headerAccent} />
 
       {/* Usage & Analytics */}
       <CustomerUsageSection customerId={customer.id} accent={headerAccent} />
@@ -991,48 +1051,6 @@ function AccountDetailView({ customer, onEdit, onDelete }: AccountDetailViewProp
               UCaaS {customer.ucaas_enabled ? 'Enabled' : 'Disabled'}
             </button>
           )}
-
-          {/* Add Credit form */}
-          <form
-            onSubmit={handleAddCredit}
-            style={{ display: 'flex', alignItems: 'center', gap: 8 }}
-          >
-            <input
-              type="number"
-              value={creditAmount}
-              onChange={(e) => setCreditAmount(e.target.value)}
-              placeholder="Amount ($)"
-              step="0.01"
-              min="0.01"
-              style={{
-                fontSize: '0.82rem',
-                padding: '7px 12px',
-                borderRadius: 8,
-                width: 130,
-                border: '1px solid rgba(42,47,69,0.8)',
-                background: 'rgba(13,15,21,0.9)',
-                color: '#e2e8f0',
-                outline: 'none',
-                transition: 'border-color 0.15s, box-shadow 0.15s',
-              }}
-              onFocus={(e) => {
-                e.currentTarget.style.borderColor = '#22c55e';
-                e.currentTarget.style.boxShadow = '0 0 0 3px rgba(34,197,94,0.12)';
-              }}
-              onBlur={(e) => {
-                e.currentTarget.style.borderColor = 'rgba(42,47,69,0.8)';
-                e.currentTarget.style.boxShadow = 'none';
-              }}
-            />
-            <Button
-              type="submit"
-              variant="success"
-              size="sm"
-              loading={addCreditMutation.isPending}
-            >
-              Add Credit
-            </Button>
-          </form>
 
           {/* Delete — pushed to the right */}
           <div style={{ marginLeft: 'auto' }}>
