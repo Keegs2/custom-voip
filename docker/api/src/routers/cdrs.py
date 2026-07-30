@@ -1,8 +1,9 @@
 """CDR (Call Detail Record) query and ingestion endpoints."""
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request, Depends
 from typing import Optional
 from datetime import datetime, timedelta, timezone
 from db import database as db
+from auth.dependencies import get_customer_filter
 import logging
 import re
 
@@ -694,9 +695,19 @@ async def query_cdrs(
     end_date: Optional[datetime] = None,
     rated_only: bool = False,
     limit: int = Query(default=100, le=1000),
-    offset: int = 0
+    offset: int = 0,
+    customer_filter: int | None = Depends(get_customer_filter),
 ):
-    """Query CDRs with filters."""
+    """Query CDRs with filters.
+
+    Tenant-scoped: a non-admin caller (JWT or API key) only ever sees their own
+    customer's CDRs; the requested `customer_id` filter is ignored for them.
+    Admins (customer_filter is None) may filter by any `customer_id`.
+    """
+    # Non-admins are hard-scoped to their own customer (ignore any client value).
+    if customer_filter is not None:
+        customer_id = customer_filter
+
     # Default to last 24 hours if no date range
     if not start_date:
         start_date = datetime.now(timezone.utc) - timedelta(hours=24)
