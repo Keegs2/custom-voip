@@ -209,7 +209,7 @@ function QualityTrendChart({
       <div
         style={{
           background: 'rgba(10,12,18,0.6)',
-          border: '1px solid rgba(42,47,69,0.35)',
+          border: '1px solid rgba(59,130,246,0.10)',
           borderRadius: 10,
           padding: '12px 12px 4px',
           overflowX: 'auto',
@@ -431,9 +431,8 @@ interface QualityStatCardProps {
 function QualityStatCard({ label, value, accent }: QualityStatCardProps) {
   return (
     <div
+      className="glass-surface glass-hover"
       style={{
-        background: 'linear-gradient(135deg, rgba(30,33,48,0.9) 0%, rgba(19,21,29,0.95) 100%)',
-        border: '1px solid rgba(42,47,69,0.6)',
         borderRadius: 12,
         padding: '16px 20px',
         position: 'relative',
@@ -641,14 +640,14 @@ function CdrTable({ cdrs, onSelect, selectedUuid }: CdrTableProps) {
               padding: '7px 12px 7px 32px',
               fontSize: '0.8rem',
               borderRadius: 8,
-              border: '1px solid rgba(42,47,69,0.7)',
-              background: 'rgba(13,15,21,0.9)',
+              border: '1px solid rgba(59,130,246,0.15)',
+              background: 'rgba(13,15,21,0.55)',
               color: '#e2e8f0',
               outline: 'none',
               boxSizing: 'border-box',
             }}
             onFocus={(e) => { e.currentTarget.style.borderColor = '#3b82f6'; }}
-            onBlur={(e) => { e.currentTarget.style.borderColor = 'rgba(42,47,69,0.7)'; }}
+            onBlur={(e) => { e.currentTarget.style.borderColor = 'rgba(59,130,246,0.15)'; }}
           />
         </div>
         <span
@@ -667,7 +666,7 @@ function CdrTable({ cdrs, onSelect, selectedUuid }: CdrTableProps) {
         style={{
           overflowX: 'auto',
           background: 'rgba(10,12,18,0.5)',
-          border: '1px solid rgba(42,47,69,0.35)',
+          border: '1px solid rgba(59,130,246,0.10)',
           borderRadius: 10,
         }}
       >
@@ -745,7 +744,7 @@ function CdrTable({ cdrs, onSelect, selectedUuid }: CdrTableProps) {
                   }}
                   onMouseEnter={(e) => {
                     if (!isSelected)
-                      e.currentTarget.style.background = 'rgba(255,255,255,0.03)';
+                      e.currentTarget.style.background = 'rgba(59,130,246,0.06)';
                   }}
                   onMouseLeave={(e) => {
                     if (!isSelected)
@@ -894,7 +893,7 @@ function paginationBtnStyle(disabled: boolean): React.CSSProperties {
     padding: '5px 14px',
     fontSize: '0.72rem',
     borderRadius: 6,
-    border: '1px solid rgba(42,47,69,0.6)',
+    border: `1px solid ${disabled ? 'rgba(59,130,246,0.12)' : 'rgba(59,130,246,0.3)'}`,
     background: disabled ? 'transparent' : 'rgba(59,130,246,0.08)',
     color: disabled ? '#2d3748' : '#60a5fa',
     cursor: disabled ? 'not-allowed' : 'pointer',
@@ -1327,7 +1326,7 @@ function CallDetailPanel({ cdr, onClose }: CallDetailPanelProps) {
               {/* Codecs */}
               {(d.read_codec != null || d.write_codec != null) && (
                 <div>
-                  <div style={{ fontSize: '0.62rem', color: '#22c55e', fontWeight: 700, marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  <div style={{ fontSize: '0.62rem', color: '#3b82f6', fontWeight: 700, marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                     Codecs
                   </div>
                   {d.read_codec != null && (
@@ -1421,14 +1420,12 @@ export function CustomerStatisticsTab({ customerId, accent }: CustomerStatistics
 
         {/* Quality Trends */}
         <div
+          className="glass-surface"
           style={{
-            background: 'linear-gradient(135deg, rgba(26,29,39,0.95) 0%, rgba(15,17,23,1) 100%)',
-            border: '1px solid rgba(42,47,69,0.6)',
             borderRadius: 16,
             padding: '24px 28px',
             position: 'relative',
             overflow: 'hidden',
-            boxShadow: '0 4px 24px rgba(0,0,0,0.25)',
           }}
         >
           <div
@@ -1450,38 +1447,34 @@ export function CustomerStatisticsTab({ customerId, accent }: CustomerStatistics
 
         {/* Quality Distribution */}
         <div
+          className="glass-surface"
           style={{
-            background: 'linear-gradient(135deg, rgba(26,29,39,0.95) 0%, rgba(15,17,23,1) 100%)',
-            border: '1px solid rgba(42,47,69,0.6)',
             borderRadius: 16,
             padding: '24px 28px',
             position: 'relative',
             overflow: 'hidden',
-            boxShadow: '0 4px 24px rgba(0,0,0,0.25)',
           }}
         >
           <div
             style={{
               position: 'absolute',
               top: 0, left: 40, right: 40, height: 2,
-              background: 'linear-gradient(90deg, transparent, #22c55e, transparent)',
+              background: 'linear-gradient(90deg, transparent, #3b82f6, transparent)',
               opacity: 0.45,
             }}
           />
-          <div style={ACCENT_LABEL('#22c55e')}>Quality Distribution (30-Day)</div>
+          <div style={ACCENT_LABEL('#3b82f6')}>Quality Distribution (30-Day)</div>
           <QualityDistribution cdrs={cdrs} />
         </div>
 
         {/* Full CDR Table */}
         <div
+          className="glass-surface"
           style={{
-            background: 'linear-gradient(135deg, rgba(26,29,39,0.95) 0%, rgba(15,17,23,1) 100%)',
-            border: '1px solid rgba(42,47,69,0.6)',
             borderRadius: 16,
             padding: '24px 28px',
             position: 'relative',
             overflow: 'hidden',
-            boxShadow: '0 4px 24px rgba(0,0,0,0.25)',
           }}
         >
           <div

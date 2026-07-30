@@ -18,7 +18,7 @@ interface PresetDefaults {
   [key: string]: unknown;
 }
 
-const PRESET_ACCENT = '#06b6d4';
+const PRESET_ACCENT = '#3b82f6';
 
 export function SippPresetGrid({ isRunning, onRun }: SippPresetGridProps) {
   const { data: presets, isLoading, isError } = useQuery({
@@ -64,26 +64,15 @@ export function SippPresetGrid({ isRunning, onRun }: SippPresetGridProps) {
         return (
           <div
             key={preset.id}
+            className="glass-surface glass-hover"
             style={{
-              background: 'linear-gradient(135deg, rgba(30,33,48,0.9) 0%, rgba(19,21,29,0.95) 100%)',
-              border: '1px solid rgba(42,47,69,0.6)',
               borderRadius: 16,
               padding: '20px',
               display: 'flex',
               flexDirection: 'column',
               gap: 16,
-              boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
-              transition: 'border-color 0.2s, box-shadow 0.2s',
               position: 'relative',
               overflow: 'hidden',
-            }}
-            onMouseEnter={(e) => {
-              (e.currentTarget as HTMLDivElement).style.borderColor = `${PRESET_ACCENT}40`;
-              (e.currentTarget as HTMLDivElement).style.boxShadow = `0 0 0 1px ${PRESET_ACCENT}20, 0 8px 30px rgba(0,0,0,0.4)`;
-            }}
-            onMouseLeave={(e) => {
-              (e.currentTarget as HTMLDivElement).style.borderColor = 'rgba(42,47,69,0.6)';
-              (e.currentTarget as HTMLDivElement).style.boxShadow = '0 4px 20px rgba(0,0,0,0.3)';
             }}
           >
             {/* Top accent line */}

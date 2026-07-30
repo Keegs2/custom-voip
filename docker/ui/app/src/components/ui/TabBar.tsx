@@ -13,14 +13,17 @@ interface TabBarProps {
 }
 
 export function TabBar({ tabs, activeTab, onTabChange, className }: TabBarProps) {
+  // Glass segmented control — a frosted track with a glowing active pill.
   return (
     <div
-      className={className}
+      className={['glass-surface', className].filter(Boolean).join(' ')}
       style={{
-        display: 'flex',
+        display: 'inline-flex',
         gap: 2,
-        borderBottom: '1px solid rgba(42,47,69,0.6)',
+        padding: 4,
+        borderRadius: 12,
         marginBottom: 24,
+        maxWidth: '100%',
         overflowX: 'auto',
       }}
       role="tablist"
@@ -35,33 +38,28 @@ export function TabBar({ tabs, activeTab, onTabChange, className }: TabBarProps)
             aria-selected={isActive}
             onClick={() => onTabChange(tab.id)}
             style={{
-              padding: '10px 18px',
+              padding: '8px 16px',
               fontSize: '0.875rem',
-              fontWeight: isActive ? 600 : 500,
+              fontWeight: isActive ? 700 : 500,
               whiteSpace: 'nowrap',
-              borderBottom: `2px solid ${isActive ? '#3b82f6' : 'transparent'}`,
-              marginBottom: -1,
-              color: isActive ? '#3b82f6' : '#718096',
-              background: 'transparent',
+              borderRadius: 9,
+              color: isActive ? '#e2e8f0' : '#718096',
+              background: isActive
+                ? 'linear-gradient(135deg, rgba(59,130,246,0.24) 0%, rgba(59,130,246,0.12) 100%)'
+                : 'transparent',
+              boxShadow: isActive
+                ? 'inset 0 1px 0 rgba(255,255,255,0.08), 0 0 16px rgba(59,130,246,0.22)'
+                : 'none',
               cursor: 'pointer',
               border: 'none',
-              borderBottomWidth: 2,
-              borderBottomStyle: 'solid',
-              borderBottomColor: isActive ? '#3b82f6' : 'transparent',
-              transition: 'color 0.15s, border-color 0.15s',
+              transition: 'color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease',
               outline: 'none',
             }}
             onMouseEnter={(e) => {
-              if (!isActive) {
-                (e.currentTarget as HTMLButtonElement).style.color = '#cbd5e0';
-                (e.currentTarget as HTMLButtonElement).style.borderBottomColor = 'rgba(54,60,87,0.6)';
-              }
+              if (!isActive) (e.currentTarget as HTMLButtonElement).style.color = '#cbd5e0';
             }}
             onMouseLeave={(e) => {
-              if (!isActive) {
-                (e.currentTarget as HTMLButtonElement).style.color = '#718096';
-                (e.currentTarget as HTMLButtonElement).style.borderBottomColor = 'transparent';
-              }
+              if (!isActive) (e.currentTarget as HTMLButtonElement).style.color = '#718096';
             }}
           >
             {tab.label}
@@ -73,8 +71,8 @@ export function TabBar({ tabs, activeTab, onTabChange, className }: TabBarProps)
                   fontSize: '0.62rem',
                   fontWeight: 700,
                   borderRadius: 20,
-                  background: 'rgba(30,33,48,0.8)',
-                  color: '#4a5568',
+                  background: isActive ? 'rgba(59,130,246,0.2)' : 'rgba(30,33,48,0.8)',
+                  color: isActive ? '#93c5fd' : '#4a5568',
                 }}
               >
                 {tab.count}

@@ -61,11 +61,6 @@ const controlStyle: React.CSSProperties = {
   padding: '8px 12px',
   height: 36,
   borderRadius: 8,
-  border: '1px solid rgba(42,47,69,0.8)',
-  background: 'rgba(19,21,29,0.8)',
-  color: '#e2e8f0',
-  outline: 'none',
-  transition: 'border-color 0.15s, box-shadow 0.15s',
 };
 
 interface CdrFilterBarProps {
@@ -105,13 +100,11 @@ export function CdrFilterBar({ filters, onChange, onSearch, onExport, searching 
   return (
     <form
       onSubmit={handleSubmit}
+      className="glass-surface"
       style={{
-        background: 'linear-gradient(135deg, rgba(30,33,48,0.9) 0%, rgba(19,21,29,0.95) 100%)',
-        border: '1px solid rgba(42,47,69,0.6)',
         borderRadius: 16,
         padding: '24px 28px',
         marginBottom: 20,
-        boxShadow: '0 4px 20px rgba(0,0,0,0.25)',
       }}
     >
       <div
@@ -126,6 +119,7 @@ export function CdrFilterBar({ filters, onChange, onSearch, onExport, searching 
         <div style={{ display: 'flex', flexDirection: 'column', minWidth: 180 }}>
           <label style={labelStyle}>Customer</label>
           <select
+            className="form-control"
             style={{ ...controlStyle, cursor: 'pointer' }}
             value={filters.customer_id}
             onChange={(e) => set('customer_id', e.target.value)}
@@ -141,6 +135,7 @@ export function CdrFilterBar({ filters, onChange, onSearch, onExport, searching 
         <div style={{ display: 'flex', flexDirection: 'column', minWidth: 110 }}>
           <label style={labelStyle}>Product</label>
           <select
+            className="form-control"
             style={{ ...controlStyle, cursor: 'pointer' }}
             value={filters.product_type}
             onChange={(e) => set('product_type', e.target.value)}
@@ -156,6 +151,7 @@ export function CdrFilterBar({ filters, onChange, onSearch, onExport, searching 
         <div style={{ display: 'flex', flexDirection: 'column', minWidth: 110 }}>
           <label style={labelStyle}>Direction</label>
           <select
+            className="form-control"
             style={{ ...controlStyle, cursor: 'pointer' }}
             value={filters.direction}
             onChange={(e) => set('direction', e.target.value)}
@@ -170,6 +166,7 @@ export function CdrFilterBar({ filters, onChange, onSearch, onExport, searching 
         <div style={{ display: 'flex', flexDirection: 'column', minWidth: 130 }}>
           <label style={labelStyle}>SBC</label>
           <select
+            className="form-control"
             style={{ ...controlStyle, cursor: 'pointer' }}
             value={filters.sbc_id}
             onChange={(e) => set('sbc_id', e.target.value)}
@@ -185,6 +182,7 @@ export function CdrFilterBar({ filters, onChange, onSearch, onExport, searching 
           <label style={labelStyle}>Start</label>
           <input
             type="datetime-local"
+            className="form-control"
             style={controlStyle}
             value={filters.start_from}
             onChange={(e) => set('start_from', e.target.value)}
@@ -196,6 +194,7 @@ export function CdrFilterBar({ filters, onChange, onSearch, onExport, searching 
           <label style={labelStyle}>End</label>
           <input
             type="datetime-local"
+            className="form-control"
             style={controlStyle}
             value={filters.start_to}
             onChange={(e) => set('start_to', e.target.value)}
@@ -207,6 +206,7 @@ export function CdrFilterBar({ filters, onChange, onSearch, onExport, searching 
           <label style={labelStyle}>Destination Prefix</label>
           <input
             type="text"
+            className="form-control"
             style={controlStyle}
             placeholder="e.g. 1800"
             value={filters.destination}

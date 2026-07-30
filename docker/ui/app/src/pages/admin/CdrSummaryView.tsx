@@ -174,7 +174,7 @@ export function CdrSummaryView({ customerId }: CdrSummaryViewProps) {
                       </span>
                     </Td>
                     <Td>
-                      <span className="tabular-nums text-[0.82rem] text-green-400">
+                      <span className="tabular-nums text-[0.82rem] text-[#60a5fa]">
                         ${row.total_cost.toFixed(4)}
                       </span>
                     </Td>

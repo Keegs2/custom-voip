@@ -95,13 +95,12 @@ export function CustomersAdminPage() {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       {/* Toolbar */}
       <div
+        className="glass-surface"
         style={{
           display: 'flex',
           alignItems: 'center',
           gap: 16,
           flexWrap: 'wrap',
-          background: 'linear-gradient(135deg, rgba(30,33,48,0.9) 0%, rgba(19,21,29,0.95) 100%)',
-          border: '1px solid rgba(42,47,69,0.6)',
           borderRadius: 12,
           padding: '20px 24px',
           marginBottom: 4,
@@ -118,8 +117,8 @@ export function CustomersAdminPage() {
               padding: '8px 14px',
               height: 36,
               borderRadius: 8,
-              border: '1px solid rgba(42,47,69,0.8)',
-              background: 'rgba(13,15,21,0.8)',
+              border: '1px solid rgba(59,130,246,0.15)',
+              background: 'rgba(13,15,21,0.55)',
               color: '#e2e8f0',
               outline: 'none',
               transition: 'border-color 0.15s, box-shadow 0.15s',
@@ -131,7 +130,7 @@ export function CustomersAdminPage() {
               e.currentTarget.style.boxShadow = '0 0 0 3px rgba(59,130,246,0.15)';
             }}
             onBlur={(e) => {
-              e.currentTarget.style.borderColor = 'rgba(42,47,69,0.8)';
+              e.currentTarget.style.borderColor = 'rgba(59,130,246,0.15)';
               e.currentTarget.style.boxShadow = 'none';
             }}
           />
@@ -153,12 +152,10 @@ export function CustomersAdminPage() {
       {showCreateForm && (
         <form
           onSubmit={handleCreateSubmit}
+          className="glass-surface"
           style={{
-            background: 'linear-gradient(135deg, rgba(30,33,48,0.9) 0%, rgba(19,21,29,0.95) 100%)',
-            border: '1px solid rgba(42,47,69,0.6)',
             borderRadius: 16,
             padding: '28px 28px 24px',
-            boxShadow: '0 4px 24px rgba(0,0,0,0.3)',
             position: 'relative',
             overflow: 'hidden',
           }}
@@ -314,7 +311,7 @@ export function CustomersAdminPage() {
               gap: 8,
               marginTop: 20,
               paddingTop: 20,
-              borderTop: '1px solid rgba(42,47,69,0.6)',
+              borderTop: '1px solid rgba(59,130,246,0.12)',
             }}
           >
             <Button type="submit" variant="primary" size="sm" loading={createMutation.isPending}>

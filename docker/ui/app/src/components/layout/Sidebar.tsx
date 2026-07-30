@@ -26,13 +26,13 @@ interface NavItemDef {
 /* ─── Nav item definitions ────────────────────────────────── */
 
 const allProductNavItems: NavItemDef[] = [
-  { label: 'RCF', icon: <IconRCF size={18} />, to: '/rcf', color: '#4ade80', accountTypes: ['rcf', 'hybrid'] },
+  { label: 'RCF', icon: <IconRCF size={18} />, to: '/rcf', color: '#3b82f6', accountTypes: ['rcf', 'hybrid'] },
 ];
 
 /* ─── Documentation nav items ─────────────────────────────── */
 
 const docNavItems: NavItemDef[] = [
-  { label: 'RCF Guide',     icon: <IconRCF size={18} />,  to: '/docs/rcf', color: '#4ade80' },
+  { label: 'RCF Guide',     icon: <IconRCF size={18} />,  to: '/docs/rcf', color: '#3b82f6' },
   { label: 'API Reference', icon: <IconDocs size={18} />, to: '/docs/api', color: '#3b82f6' },
 ];
 

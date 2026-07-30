@@ -168,7 +168,7 @@ function ExtensionRow({ ext, index }: ExtensionRowProps) {
     <tr
       onClick={isClickable ? handleClick : undefined}
       style={{
-        borderBottom: '1px solid rgba(42,47,69,0.22)',
+        borderBottom: '1px solid rgba(59,130,246,0.08)',
         background: index % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.012)',
         cursor: isClickable ? 'pointer' : 'default',
         transition: 'background 0.1s',
@@ -376,7 +376,7 @@ export function CustomerUcaasSection({ customerId }: CustomerUcaasSectionProps) 
   const hasUnassigned = extensions.some((e) => e.user_id === null);
 
   return (
-    <div style={{ paddingTop: 16, borderTop: '1px solid rgba(42,47,69,0.5)' }}>
+    <div style={{ paddingTop: 16, borderTop: '1px solid rgba(59,130,246,0.12)' }}>
 
       {/* Section header */}
       <div
@@ -499,10 +499,9 @@ export function CustomerUcaasSection({ customerId }: CustomerUcaasSectionProps) 
       {/* Extensions table */}
       {!isLoading && extensions.length > 0 && (
         <div
+          className="glass-surface"
           style={{
             overflowX: 'auto',
-            background: 'rgba(10,12,18,0.5)',
-            border: '1px solid rgba(42,47,69,0.35)',
             borderRadius: 10,
           }}
         >
@@ -527,7 +526,7 @@ export function CustomerUcaasSection({ customerId }: CustomerUcaasSectionProps) 
                       textTransform: 'uppercase',
                       letterSpacing: '0.05em',
                       color: '#4a5568',
-                      borderBottom: '1px solid rgba(42,47,69,0.5)',
+                      borderBottom: '1px solid rgba(59,130,246,0.12)',
                       whiteSpace: 'nowrap',
                     }}
                   >

@@ -28,8 +28,8 @@ function DetailField({ label, value }: { label: string; value: React.ReactNode }
         flexDirection: 'column',
         gap: 6,
         padding: '14px 16px',
-        background: 'rgba(255,255,255,0.025)',
-        border: '1px solid rgba(42,47,69,0.5)',
+        background: 'rgba(59,130,246,0.03)',
+        border: '1px solid rgba(59,130,246,0.10)',
         borderRadius: 10,
       }}
     >
@@ -184,8 +184,8 @@ export function CustomerExpandedView({ customer, onEdit, onDelete }: CustomerExp
           flexWrap: 'wrap',
           paddingTop: 16,
           paddingBottom: 20,
-          borderTop: '1px solid rgba(42,47,69,0.5)',
-          borderBottom: '1px solid rgba(42,47,69,0.5)',
+          borderTop: '1px solid rgba(59,130,246,0.12)',
+          borderBottom: '1px solid rgba(59,130,246,0.12)',
           marginBottom: 24,
         }}
       >

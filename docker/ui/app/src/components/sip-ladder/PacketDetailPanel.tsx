@@ -162,11 +162,9 @@ function extractSdpInfo(sdpBody: string): SdpInfo {
 // ─── Styles ─────────────────────────────────────────────────────────────────
 
 const panelStyle: React.CSSProperties = {
-  background: 'linear-gradient(135deg, rgba(19,21,29,0.98) 0%, rgba(15,17,23,0.95) 100%)',
-  border: `1px solid ${LADDER_COLORS.border}`,
-  borderRadius: 12,
   margin: '4px 0 8px',
   overflow: 'hidden',
+  borderRadius: 14,
 };
 
 const sectionHeaderStyle: React.CSSProperties = {
@@ -349,7 +347,7 @@ export function PacketDetailPanel({ rawMsg, accentColor, onClose }: PacketDetail
   const handleRawToggle = useCallback(() => setRawExpanded((p) => !p), []);
 
   return (
-    <div style={panelStyle}>
+    <div className="glass-surface" style={panelStyle}>
       {/* Top accent bar + close button */}
       <div
         style={{

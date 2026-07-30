@@ -146,7 +146,7 @@ const ROLE_CONFIG: Record<UserRole, { label: string; color: string }> = {
 };
 
 const ACCOUNT_TYPE_CONFIG: Record<AccountType, { label: string; color: string }> = {
-  RCF:    { label: 'RCF',    color: '#22c55e' },
+  RCF:    { label: 'RCF',    color: '#3b82f6' },
   API:    { label: 'API',    color: '#a855f7' },
   Trunk:  { label: 'Trunk',  color: '#f59e0b' },
   UCaaS:  { label: 'UCaaS',  color: '#0ea5e9' },
@@ -249,14 +249,12 @@ function HeaderCard({ data, isEditing, onEditToggle }: HeaderCardProps) {
 
   return (
     <div
+      className="glass-surface"
       style={{
-        background: 'linear-gradient(135deg, rgba(26,29,39,0.95) 0%, rgba(15,17,23,1) 100%)',
-        border: '1px solid rgba(42,47,69,0.6)',
         borderRadius: 16,
         padding: '24px 28px',
         position: 'relative',
         overflow: 'hidden',
-        boxShadow: '0 4px 24px rgba(0,0,0,0.25)',
         display: 'flex',
         gap: 28,
         flexWrap: 'wrap',
@@ -497,9 +495,8 @@ interface StatCardProps {
 function StatCard({ icon, label, primary, secondary, accent, linkTo, linkLabel }: StatCardProps) {
   return (
     <div
+      className="glass-surface glass-hover"
       style={{
-        background: 'linear-gradient(135deg, rgba(30,33,48,0.9) 0%, rgba(19,21,29,0.95) 100%)',
-        border: '1px solid rgba(42,47,69,0.6)',
         borderRadius: 14,
         padding: '18px 20px',
         position: 'relative',
@@ -1163,14 +1160,12 @@ interface SectionCardProps {
 function SectionCard({ children, accent = '#3b82f6', title, icon }: SectionCardProps) {
   return (
     <div
+      className="glass-surface"
       style={{
-        background: 'linear-gradient(135deg, rgba(26,29,39,0.95) 0%, rgba(15,17,23,1) 100%)',
-        border: '1px solid rgba(42,47,69,0.6)',
         borderRadius: 16,
         padding: '22px 24px',
         position: 'relative',
         overflow: 'hidden',
-        boxShadow: '0 4px 24px rgba(0,0,0,0.25)',
       }}
     >
       {/* Top accent */}
@@ -1226,7 +1221,7 @@ interface RcfCardProps {
 }
 
 function RcfCard({ rcf }: RcfCardProps) {
-  const accent = '#22c55e';
+  const accent = '#3b82f6';
   return (
     <SectionCard
       accent={accent}
@@ -1296,7 +1291,7 @@ function RcfCard({ rcf }: RcfCardProps) {
                   {r.failover_to ? fmt(r.failover_to) : <span style={{ color: '#4a5568', fontStyle: 'italic' }}>None</span>}
                 </td>
                 <td style={{ padding: '8px 12px', textAlign: 'center' }}>
-                  <span style={{ fontSize: '0.72rem', color: r.pass_caller_id ? '#22c55e' : '#64748b' }}>
+                  <span style={{ fontSize: '0.72rem', color: r.pass_caller_id ? '#60a5fa' : '#64748b' }}>
                     {r.pass_caller_id ? 'Pass' : 'Strip'}
                   </span>
                 </td>
@@ -1635,14 +1630,13 @@ function EditUserPanel({ userId, user, onSuccess, onCancel }: EditUserPanelProps
 
   return (
     <div
+      className="glass-surface"
       style={{
-        background: 'linear-gradient(135deg, rgba(26,29,39,0.98) 0%, rgba(15,17,23,1) 100%)',
-        border: '1px solid rgba(59,130,246,0.2)',
         borderRadius: 16,
         padding: '24px 28px',
         position: 'relative',
         overflow: 'hidden',
-        boxShadow: '0 4px 24px rgba(0,0,0,0.3)',
+        boxShadow: '0 0 0 1px rgba(59,130,246,0.2)',
       }}
     >
       {/* Top accent - blue to indicate edit mode */}
@@ -2158,7 +2152,7 @@ function AllUsersTable({ users, searchTerm, onSelectUser }: AllUsersTableProps) 
                   onMouseEnter={() => setHoveredRow(u.id)}
                   onMouseLeave={() => setHoveredRow(null)}
                   style={{
-                    background: isHovered ? 'rgba(255,255,255,0.025)' : 'transparent',
+                    background: isHovered ? 'rgba(59,130,246,0.06)' : 'transparent',
                     borderBottom: '1px solid rgba(255,255,255,0.03)',
                     cursor: 'pointer',
                     transition: 'background 0.1s',
@@ -2291,12 +2285,10 @@ function UserLookupPanel({ onSelectUser, customerId }: UserLookupPanelProps) {
 
   return (
     <div
+      className="glass-surface"
       style={{
-        background: 'linear-gradient(135deg, rgba(26,29,39,0.95) 0%, rgba(15,17,23,1) 100%)',
-        border: '1px solid rgba(42,47,69,0.6)',
         borderRadius: 16,
         padding: '20px 20px',
-        boxShadow: '0 4px 24px rgba(0,0,0,0.25)',
         position: 'relative',
         overflow: 'hidden',
       }}
@@ -2483,7 +2475,7 @@ const CUSTOMER_COL_COUNT = 7;
 
 const pickerTdStyle: React.CSSProperties = {
   padding: '13px 16px',
-  borderBottom: '1px solid rgba(42,47,69,0.45)',
+  boxShadow: 'inset 0 -1px 0 0 rgba(255,255,255,0.025)',
   verticalAlign: 'middle',
 };
 
@@ -2527,12 +2519,11 @@ function CustomerPickerTable({ onSelectCustomer }: CustomerPickerTableProps) {
       {/* Search toolbar */}
       <form
         onSubmit={handleSearch}
+        className="glass-surface"
         style={{
           display: 'flex',
           alignItems: 'center',
           gap: 12,
-          background: 'linear-gradient(135deg, rgba(30,33,48,0.9) 0%, rgba(19,21,29,0.95) 100%)',
-          border: '1px solid rgba(42,47,69,0.6)',
           borderRadius: 12,
           padding: '16px 20px',
         }}
@@ -2547,8 +2538,8 @@ function CustomerPickerTable({ onSelectCustomer }: CustomerPickerTableProps) {
             padding: '8px 14px',
             height: 36,
             borderRadius: 8,
-            border: '1px solid rgba(42,47,69,0.8)',
-            background: 'rgba(13,15,21,0.8)',
+            border: '1px solid rgba(59,130,246,0.15)',
+            background: 'rgba(13,15,21,0.55)',
             color: '#e2e8f0',
             outline: 'none',
             transition: 'border-color 0.15s, box-shadow 0.15s',
@@ -2560,7 +2551,7 @@ function CustomerPickerTable({ onSelectCustomer }: CustomerPickerTableProps) {
             e.currentTarget.style.boxShadow = '0 0 0 3px rgba(59,130,246,0.15)';
           }}
           onBlur={(e) => {
-            e.currentTarget.style.borderColor = 'rgba(42,47,69,0.8)';
+            e.currentTarget.style.borderColor = 'rgba(59,130,246,0.15)';
             e.currentTarget.style.boxShadow = 'none';
           }}
         />
@@ -2570,7 +2561,7 @@ function CustomerPickerTable({ onSelectCustomer }: CustomerPickerTableProps) {
             flexShrink: 0,
             padding: '8px 16px',
             borderRadius: 8,
-            border: '1px solid rgba(42,47,69,0.8)',
+            border: '1px solid rgba(59,130,246,0.15)',
             background: 'rgba(255,255,255,0.05)',
             color: '#94a3b8',
             fontSize: '0.82rem',
@@ -2619,17 +2610,16 @@ function CustomerPickerTable({ onSelectCustomer }: CustomerPickerTableProps) {
       {data && (
         <>
           <div
+            className="glass-surface"
             style={{
               borderRadius: 12,
-              border: '1px solid rgba(42,47,69,0.6)',
               overflow: 'hidden',
-              background: 'linear-gradient(135deg, rgba(26,29,39,0.95) 0%, rgba(15,17,23,1) 100%)',
             }}
           >
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
-                  <tr style={{ borderBottom: '1px solid rgba(42,47,69,0.6)', background: 'rgba(0,0,0,0.15)' }}>
+                  <tr style={{ boxShadow: 'inset 0 -1px 0 0 rgba(59,130,246,0.12)', background: 'rgba(59,130,246,0.035)' }}>
                     {['ID', 'Name', 'Type', 'Balance', 'Status', 'Grade', 'Created'].map((col) => (
                       <th
                         key={col}
@@ -2668,14 +2658,9 @@ function CustomerPickerTable({ onSelectCustomer }: CustomerPickerTableProps) {
                     (data.items ?? []).map((customer) => (
                       <tr
                         key={customer.id}
+                        className="glass-row-hover"
                         onClick={() => onSelectCustomer(customer)}
-                        style={{ transition: 'background 0.15s', cursor: 'pointer' }}
-                        onMouseEnter={(e) => {
-                          (e.currentTarget as HTMLTableRowElement).style.background = 'rgba(255,255,255,0.035)';
-                        }}
-                        onMouseLeave={(e) => {
-                          (e.currentTarget as HTMLTableRowElement).style.background = 'transparent';
-                        }}
+                        style={{ cursor: 'pointer' }}
                       >
                         <td style={pickerTdStyle}>
                           <span style={{ color: '#4a5568', fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', fontSize: '0.78rem' }}>
@@ -2724,7 +2709,7 @@ function CustomerPickerTable({ onSelectCustomer }: CustomerPickerTableProps) {
                 style={{
                   padding: '8px 20px',
                   borderRadius: 8,
-                  border: '1px solid rgba(42,47,69,0.6)',
+                  border: '1px solid rgba(59,130,246,0.25)',
                   background: 'rgba(255,255,255,0.04)',
                   color: '#60a5fa',
                   fontSize: '0.82rem',

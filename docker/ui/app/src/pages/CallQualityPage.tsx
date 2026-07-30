@@ -335,10 +335,8 @@ interface OverviewStatCardProps {
 function OverviewStatCard({ label, value, accent, sub }: OverviewStatCardProps) {
   return (
     <div
+      className="glass-surface glass-hover"
       style={{
-        background: 'linear-gradient(135deg, rgba(30,33,48,0.9) 0%, rgba(19,21,29,0.95) 100%)',
-        border: '1px solid rgba(42,47,69,0.6)',
-        borderRadius: 12,
         padding: '16px 20px',
         position: 'relative',
         overflow: 'hidden',
@@ -463,14 +461,15 @@ function CdrTable({ cdrs, customers, onSelect, selectedUuid }: CdrTableProps) {
   }
 
   const thStyle = (key?: SortKey): React.CSSProperties => ({
-    padding: '8px 10px',
+    padding: '9px 10px',
     textAlign: 'left',
     fontSize: '0.58rem',
     fontWeight: 700,
     textTransform: 'uppercase',
     letterSpacing: '0.05em',
     color: '#4a5568',
-    borderBottom: '1px solid rgba(42,47,69,0.5)',
+    background: 'rgba(59,130,246,0.035)',
+    boxShadow: 'inset 0 -1px 0 0 rgba(59,130,246,0.12)',
     whiteSpace: 'nowrap',
     cursor: key ? 'pointer' : 'default',
     userSelect: 'none',
@@ -487,19 +486,8 @@ function CdrTable({ cdrs, customers, onSelect, selectedUuid }: CdrTableProps) {
             placeholder="Search by number, UUID, customer, codec, cause…"
             value={search}
             onChange={(e) => { setSearch(e.target.value); setPage(0); }}
-            style={{
-              width: '100%',
-              padding: '7px 12px 7px 32px',
-              fontSize: '0.8rem',
-              borderRadius: 8,
-              border: '1px solid rgba(42,47,69,0.7)',
-              background: 'rgba(13,15,21,0.9)',
-              color: '#e2e8f0',
-              outline: 'none',
-              boxSizing: 'border-box',
-            }}
-            onFocus={(e) => { e.currentTarget.style.borderColor = '#22c55e'; }}
-            onBlur={(e) => { e.currentTarget.style.borderColor = 'rgba(42,47,69,0.7)'; }}
+            className="form-control"
+            style={{ padding: '7px 12px 7px 32px', fontSize: '0.8rem' }}
           />
         </div>
         <span style={{ fontSize: '0.72rem', color: '#4a5568', whiteSpace: 'nowrap' }}>
@@ -509,11 +497,10 @@ function CdrTable({ cdrs, customers, onSelect, selectedUuid }: CdrTableProps) {
 
       {/* Table */}
       <div
+        className="glass-surface"
         style={{
           overflowX: 'auto',
-          background: 'rgba(10,12,18,0.5)',
-          border: '1px solid rgba(42,47,69,0.35)',
-          borderRadius: 10,
+          borderRadius: 12,
         }}
       >
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.74rem', color: '#cbd5e0' }}>
@@ -544,7 +531,7 @@ function CdrTable({ cdrs, customers, onSelect, selectedUuid }: CdrTableProps) {
                 </td>
               </tr>
             )}
-            {pageItems.map((cdr, idx) => {
+            {pageItems.map((cdr) => {
               const answered = cdr.answer_time != null;
               const startDt = new Date(cdr.start_time);
               const isSelected = cdr.uuid === selectedUuid;
@@ -553,22 +540,13 @@ function CdrTable({ cdrs, customers, onSelect, selectedUuid }: CdrTableProps) {
               return (
                 <tr
                   key={cdr.uuid}
+                  className={isSelected ? undefined : 'glass-row-hover'}
                   onClick={() => onSelect(cdr)}
                   style={{
-                    borderBottom: '1px solid rgba(42,47,69,0.2)',
-                    background: isSelected
-                      ? 'rgba(34,197,94,0.07)'
-                      : idx % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.01)',
+                    background: isSelected ? 'rgba(59,130,246,0.1)' : undefined,
                     cursor: 'pointer',
                     transition: 'background 0.1s',
-                    outline: isSelected ? '1px solid rgba(34,197,94,0.25)' : 'none',
-                    outlineOffset: -1,
-                  }}
-                  onMouseEnter={(e) => {
-                    if (!isSelected) e.currentTarget.style.background = 'rgba(255,255,255,0.025)';
-                  }}
-                  onMouseLeave={(e) => {
-                    if (!isSelected) e.currentTarget.style.background = idx % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.01)';
+                    boxShadow: isSelected ? 'inset 3px 0 0 0 rgba(59,130,246,0.6)' : undefined,
                   }}
                 >
                   {/* Date/Time */}
@@ -722,9 +700,9 @@ function paginationBtnStyle(disabled: boolean): React.CSSProperties {
     padding: '5px 14px',
     fontSize: '0.72rem',
     borderRadius: 6,
-    border: '1px solid rgba(42,47,69,0.6)',
-    background: disabled ? 'transparent' : 'rgba(34,197,94,0.08)',
-    color: disabled ? '#2d3748' : '#4ade80',
+    border: `1px solid ${disabled ? 'rgba(255,255,255,0.06)' : 'rgba(59,130,246,0.35)'}`,
+    background: disabled ? 'transparent' : 'rgba(59,130,246,0.1)',
+    color: disabled ? '#2d3748' : '#60a5fa',
     cursor: disabled ? 'not-allowed' : 'pointer',
   };
 }
@@ -790,12 +768,12 @@ function PanelSection({ title, children }: { title: string; children: React.Reac
         style={{
           fontSize: '0.58rem',
           fontWeight: 700,
-          color: '#22c55e',
+          color: '#3b82f6',
           textTransform: 'uppercase',
           letterSpacing: '0.05em',
           marginBottom: 10,
           paddingBottom: 6,
-          borderBottom: '1px solid rgba(34,197,94,0.2)',
+          borderBottom: '1px solid rgba(59,130,246,0.2)',
         }}
       >
         {title}
@@ -858,8 +836,9 @@ function CallDetailPanel({ cdr, onClose }: CallDetailPanelProps) {
           maxWidth: '95vw',
           height: '100%',
           background: 'linear-gradient(180deg, rgba(22,25,36,0.99) 0%, rgba(13,15,21,1) 100%)',
-          borderLeft: '1px solid rgba(42,47,69,0.7)',
-          boxShadow: '-16px 0 48px rgba(0,0,0,0.5)',
+          backdropFilter: 'blur(18px) saturate(160%)',
+          WebkitBackdropFilter: 'blur(18px) saturate(160%)',
+          boxShadow: 'inset 1px 0 0 0 rgba(59,130,246,0.14), -16px 0 48px rgba(0,0,0,0.5)',
           display: 'flex',
           flexDirection: 'column',
           overflowY: 'auto',
@@ -869,7 +848,7 @@ function CallDetailPanel({ cdr, onClose }: CallDetailPanelProps) {
         <div
           style={{
             padding: '20px 24px 16px',
-            borderBottom: '1px solid rgba(42,47,69,0.5)',
+            borderBottom: '1px solid rgba(59,130,246,0.12)',
             display: 'flex',
             alignItems: 'flex-start',
             justifyContent: 'space-between',
@@ -882,7 +861,7 @@ function CallDetailPanel({ cdr, onClose }: CallDetailPanelProps) {
           }}
         >
           <div>
-            <div style={{ fontSize: '0.58rem', fontWeight: 700, color: '#22c55e', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
+            <div style={{ fontSize: '0.58rem', fontWeight: 700, color: '#3b82f6', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
               Call Detail
             </div>
             <div style={{ fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', fontSize: '0.7rem', color: '#4a5568', wordBreak: 'break-all' }}>
@@ -1014,7 +993,7 @@ function CallDetailPanel({ cdr, onClose }: CallDetailPanelProps) {
               )}
               {(d.read_codec != null || d.write_codec != null) && (
                 <div>
-                  <div style={{ fontSize: '0.62rem', color: '#22c55e', fontWeight: 700, marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Codecs</div>
+                  <div style={{ fontSize: '0.62rem', color: '#3b82f6', fontWeight: 700, marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Codecs</div>
                   {d.read_codec != null && <DetailRow label="Read Codec" value={d.read_codec} mono />}
                   {d.write_codec != null && <DetailRow label="Write Codec" value={d.write_codec} mono />}
                 </div>
@@ -1077,7 +1056,7 @@ interface PillSelectorProps<T extends string> {
   accent?: string;
 }
 
-function PillSelector<T extends string>({ options, value, onChange, accent = '#22c55e' }: PillSelectorProps<T>) {
+function PillSelector<T extends string>({ options, value, onChange, accent = '#3b82f6' }: PillSelectorProps<T>) {
   return (
     <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
       {options.map((opt) => {
@@ -1111,17 +1090,14 @@ function PillSelector<T extends string>({ options, value, onChange, accent = '#2
 // Section card wrapper
 // ---------------------------------------------------------------------------
 
-function SectionCard({ children, accent = '#22c55e' }: { children: React.ReactNode; accent?: string }) {
+function SectionCard({ children, accent = '#3b82f6' }: { children: React.ReactNode; accent?: string }) {
   return (
     <div
+      className="glass-surface glass-hover"
       style={{
-        background: 'linear-gradient(135deg, rgba(26,29,39,0.95) 0%, rgba(15,17,23,1) 100%)',
-        border: '1px solid rgba(42,47,69,0.6)',
-        borderRadius: 16,
         padding: '24px 28px',
         position: 'relative',
         overflow: 'hidden',
-        boxShadow: '0 4px 24px rgba(0,0,0,0.25)',
       }}
     >
       <div
@@ -1229,24 +1205,6 @@ export function CallQualityPage() {
     setAppliedFilters(defaults);
   }
 
-  const inputStyle: React.CSSProperties = {
-    padding: '7px 11px',
-    fontSize: '0.8rem',
-    borderRadius: 8,
-    border: '1px solid rgba(42,47,69,0.7)',
-    background: 'rgba(13,15,21,0.9)',
-    color: '#e2e8f0',
-    outline: 'none',
-    width: '100%',
-    boxSizing: 'border-box',
-  };
-
-  const selectStyle: React.CSSProperties = {
-    ...inputStyle,
-    appearance: 'none',
-    cursor: 'pointer',
-  };
-
   const labelStyle: React.CSSProperties = {
     fontSize: '0.6rem',
     fontWeight: 700,
@@ -1265,7 +1223,7 @@ export function CallQualityPage() {
         style={{
           paddingTop: 8,
           paddingBottom: 28,
-          borderBottom: '1px solid rgba(42,47,69,0.6)',
+          borderBottom: '1px solid rgba(59,130,246,0.12)',
           textAlign: 'center',
         }}
       >
@@ -1275,13 +1233,14 @@ export function CallQualityPage() {
             width: 48,
             height: 48,
             borderRadius: 14,
-            background: 'linear-gradient(135deg, rgba(34,197,94,0.20) 0%, rgba(34,197,94,0.10) 100%)',
-            border: '1px solid rgba(34,197,94,0.30)',
+            background: 'linear-gradient(135deg, rgba(59,130,246,0.20) 0%, rgba(59,130,246,0.10) 100%)',
+            border: '1px solid rgba(59,130,246,0.30)',
             display: 'inline-flex',
             alignItems: 'center',
             justifyContent: 'center',
-            color: '#22c55e',
+            color: '#3b82f6',
             marginBottom: 14,
+            boxShadow: '0 0 24px rgba(59,130,246,0.18)',
           }}
           aria-hidden="true"
         >
@@ -1312,21 +1271,18 @@ export function CallQualityPage() {
 
       {/* Filter bar */}
       <div
+        className="glass-surface glass-hover"
         style={{
-          background: 'linear-gradient(135deg, rgba(26,29,39,0.97) 0%, rgba(15,17,23,1) 100%)',
-          border: '1px solid rgba(42,47,69,0.7)',
-          borderRadius: 16,
           padding: '24px',
           position: 'relative',
           overflow: 'hidden',
-          boxShadow: '0 4px 24px rgba(0,0,0,0.25)',
         }}
       >
         <div
           style={{
             position: 'absolute',
             top: 0, left: 40, right: 40, height: 2,
-            background: 'linear-gradient(90deg, transparent, rgba(34,197,94,0.6), transparent)',
+            background: 'linear-gradient(90deg, transparent, rgba(59,130,246,0.6), transparent)',
           }}
         />
 
@@ -1334,7 +1290,7 @@ export function CallQualityPage() {
           style={{
             fontSize: '0.58rem',
             fontWeight: 700,
-            color: '#22c55e',
+            color: '#3b82f6',
             textTransform: 'uppercase',
             letterSpacing: '0.05em',
             marginBottom: 18,
@@ -1350,9 +1306,8 @@ export function CallQualityPage() {
             <select
               value={filters.customerId ?? ''}
               onChange={(e) => setFilters((p) => ({ ...p, customerId: e.target.value ? Number(e.target.value) : null }))}
-              style={selectStyle}
-              onFocus={(e) => { e.currentTarget.style.borderColor = '#22c55e'; }}
-              onBlur={(e) => { e.currentTarget.style.borderColor = 'rgba(42,47,69,0.7)'; }}
+              className="form-control"
+              style={{ appearance: 'none' }}
             >
               <option value="">All Customers</option>
               {customers.map((c) => (
@@ -1367,9 +1322,8 @@ export function CallQualityPage() {
             <select
               value={filters.trunkId ?? ''}
               onChange={(e) => setFilters((p) => ({ ...p, trunkId: e.target.value ? Number(e.target.value) : null }))}
-              style={selectStyle}
-              onFocus={(e) => { e.currentTarget.style.borderColor = '#22c55e'; }}
-              onBlur={(e) => { e.currentTarget.style.borderColor = 'rgba(42,47,69,0.7)'; }}
+              className="form-control"
+              style={{ appearance: 'none' }}
             >
               <option value="">All Trunks</option>
               {trunks.map((t) => (
@@ -1386,9 +1340,7 @@ export function CallQualityPage() {
               placeholder="e.g. +14155551234"
               value={filters.numberSearch}
               onChange={(e) => setFilters((p) => ({ ...p, numberSearch: e.target.value }))}
-              style={inputStyle}
-              onFocus={(e) => { e.currentTarget.style.borderColor = '#22c55e'; }}
-              onBlur={(e) => { e.currentTarget.style.borderColor = 'rgba(42,47,69,0.7)'; }}
+              className="form-control"
             />
           </div>
 
@@ -1399,9 +1351,8 @@ export function CallQualityPage() {
               type="date"
               value={filters.startDate}
               onChange={(e) => setFilters((p) => ({ ...p, startDate: e.target.value }))}
-              style={inputStyle}
-              onFocus={(e) => { e.currentTarget.style.borderColor = '#22c55e'; }}
-              onBlur={(e) => { e.currentTarget.style.borderColor = 'rgba(42,47,69,0.7)'; }}
+              className="form-control"
+              style={{ colorScheme: 'dark' }}
             />
           </div>
 
@@ -1412,9 +1363,8 @@ export function CallQualityPage() {
               type="date"
               value={filters.endDate}
               onChange={(e) => setFilters((p) => ({ ...p, endDate: e.target.value }))}
-              style={inputStyle}
-              onFocus={(e) => { e.currentTarget.style.borderColor = '#22c55e'; }}
-              onBlur={(e) => { e.currentTarget.style.borderColor = 'rgba(42,47,69,0.7)'; }}
+              className="form-control"
+              style={{ colorScheme: 'dark' }}
             />
           </div>
         </div>
@@ -1459,9 +1409,9 @@ export function CallQualityPage() {
               fontSize: '0.82rem',
               fontWeight: 700,
               borderRadius: 8,
-              border: '1px solid rgba(34,197,94,0.4)',
-              background: 'rgba(34,197,94,0.12)',
-              color: '#4ade80',
+              border: '1px solid rgba(59,130,246,0.4)',
+              background: 'rgba(59,130,246,0.14)',
+              color: '#93c5fd',
               cursor: isLoading ? 'not-allowed' : 'pointer',
               display: 'flex',
               alignItems: 'center',
@@ -1469,8 +1419,8 @@ export function CallQualityPage() {
               opacity: isLoading ? 0.7 : 1,
               transition: 'all 0.15s',
             }}
-            onMouseEnter={(e) => { if (!isLoading) e.currentTarget.style.background = 'rgba(34,197,94,0.2)'; }}
-            onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(34,197,94,0.12)'; }}
+            onMouseEnter={(e) => { if (!isLoading) e.currentTarget.style.background = 'rgba(59,130,246,0.22)'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(59,130,246,0.14)'; }}
           >
             {isLoading ? <Spinner size="xs" /> : <SearchIconSmall />}
             {isLoading ? 'Loading…' : 'Search'}
@@ -1528,12 +1478,12 @@ export function CallQualityPage() {
       )}
 
       {/* Quality overview cards */}
-      <SectionCard accent="#22c55e">
+      <SectionCard accent="#3b82f6">
         <div
           style={{
             fontSize: '0.6rem',
             fontWeight: 700,
-            color: '#22c55e',
+            color: '#3b82f6',
             textTransform: 'uppercase',
             letterSpacing: '0.05em',
             marginBottom: 16,
@@ -1584,12 +1534,12 @@ export function CallQualityPage() {
       </SectionCard>
 
       {/* Quality trends */}
-      <SectionCard accent="#22c55e">
+      <SectionCard accent="#3b82f6">
         <div
           style={{
             fontSize: '0.6rem',
             fontWeight: 700,
-            color: '#22c55e',
+            color: '#3b82f6',
             textTransform: 'uppercase',
             letterSpacing: '0.05em',
             marginBottom: 16,

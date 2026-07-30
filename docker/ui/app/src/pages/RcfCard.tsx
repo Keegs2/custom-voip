@@ -31,10 +31,11 @@ async function updateRcfMaxChannels(id: number, max_channels: number): Promise<R
   return apiRequest('PATCH', `/rcf/${id}`, { max_channels });
 }
 
-// ─── GreenToggle ──────────────────────────────────────────────────────────────
-// Compact on/off toggle using the RCF green accent.
+// ─── BlueToggle ───────────────────────────────────────────────────────────────
+// Compact on/off toggle using the platform blue accent (matches the table's
+// blue "ACTIVE" toggle). Off state stays neutral; disabled/off red is on the badge.
 
-function GreenToggle({
+function BlueToggle({
   checked,
   disabled,
   pending,
@@ -62,9 +63,9 @@ function GreenToggle({
         width: 36,
         height: 20,
         borderRadius: 10,
-        border: `1px solid ${checked ? 'rgba(74,222,128,0.55)' : 'rgba(255,255,255,0.10)'}`,
+        border: `1px solid ${checked ? 'rgba(59,130,246,0.55)' : 'rgba(255,255,255,0.10)'}`,
         background: checked
-          ? 'linear-gradient(135deg, #22c55e 0%, #16a34a 100%)'
+          ? 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)'
           : 'rgba(255,255,255,0.06)',
         cursor: disabled || pending ? 'not-allowed' : 'pointer',
         transition: 'background 0.22s ease, border-color 0.22s ease, box-shadow 0.22s',
@@ -72,7 +73,7 @@ function GreenToggle({
         flexShrink: 0,
         padding: 0,
         outline: 'none',
-        boxShadow: checked ? '0 0 8px rgba(74,222,128,0.35)' : 'none',
+        boxShadow: checked ? '0 0 8px rgba(59,130,246,0.35)' : 'none',
       }}
     >
       <span
@@ -94,9 +95,9 @@ function GreenToggle({
 // ─── StatusBadge ──────────────────────────────────────────────────────────────
 
 function StatusBadge({ enabled, pending }: { enabled: boolean; pending: boolean }) {
-  const color = enabled ? '#4ade80' : '#ef4444';
-  const bg = enabled ? 'rgba(74,222,128,0.12)' : 'rgba(239,68,68,0.12)';
-  const border = enabled ? 'rgba(74,222,128,0.28)' : 'rgba(239,68,68,0.28)';
+  const color = enabled ? '#60a5fa' : '#ef4444';
+  const bg = enabled ? 'rgba(59,130,246,0.12)' : 'rgba(239,68,68,0.12)';
+  const border = enabled ? 'rgba(59,130,246,0.28)' : 'rgba(239,68,68,0.28)';
   const label = pending ? '…' : enabled ? 'Active' : 'Disabled';
 
   return (
@@ -202,13 +203,13 @@ function ForwardToDisplay({ entry, pendingValue, canEdit, onPendingChange }: For
             letterSpacing: '0.02em',
             padding: '10px 14px',
             borderRadius: 10,
-            border: `1px solid ${isDirty ? 'rgba(74,222,128,0.6)' : 'rgba(74,222,128,0.3)'}`,
+            border: `1px solid ${isDirty ? 'rgba(59,130,246,0.6)' : 'rgba(59,130,246,0.3)'}`,
             background: 'rgba(15,17,23,0.90)',
-            color: '#4ade80',
+            color: '#60a5fa',
             outline: 'none',
             boxShadow: isDirty
-              ? '0 0 0 3px rgba(74,222,128,0.14)'
-              : '0 0 0 2px rgba(74,222,128,0.08)',
+              ? '0 0 0 3px rgba(59,130,246,0.14)'
+              : '0 0 0 2px rgba(59,130,246,0.08)',
             opacity: mutation.isPending ? 0.55 : 1,
             transition: 'border-color 0.15s, box-shadow 0.15s',
           }}
@@ -224,9 +225,9 @@ function ForwardToDisplay({ entry, pendingValue, canEdit, onPendingChange }: For
               borderRadius: 8,
               border: 'none',
               background: isDirty && !mutation.isPending
-                ? 'linear-gradient(135deg, #22c55e 0%, #16a34a 100%)'
-                : 'rgba(74,222,128,0.15)',
-              color: isDirty && !mutation.isPending ? '#fff' : 'rgba(74,222,128,0.4)',
+                ? 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)'
+                : 'rgba(59,130,246,0.15)',
+              color: isDirty && !mutation.isPending ? '#fff' : 'rgba(96,165,250,0.4)',
               fontSize: '0.78rem',
               fontWeight: 700,
               cursor: isDirty && !mutation.isPending ? 'pointer' : 'not-allowed',
@@ -235,7 +236,7 @@ function ForwardToDisplay({ entry, pendingValue, canEdit, onPendingChange }: For
               alignItems: 'center',
               justifyContent: 'center',
               gap: 6,
-              boxShadow: isDirty && !mutation.isPending ? '0 2px 10px rgba(34,197,94,0.35)' : 'none',
+              boxShadow: isDirty && !mutation.isPending ? '0 2px 10px rgba(59,130,246,0.35)' : 'none',
               transition: 'background 0.15s, color 0.15s',
               letterSpacing: '-0.01em',
             }}
@@ -287,10 +288,10 @@ function ForwardToDisplay({ entry, pendingValue, canEdit, onPendingChange }: For
           fontWeight: 800,
           fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
           letterSpacing: '0.02em',
-          color: savedFlash ? '#86efac' : '#4ade80',
+          color: savedFlash ? '#93c5fd' : '#60a5fa',
           textShadow: savedFlash
-            ? '0 0 16px rgba(74,222,128,0.45)'
-            : '0 0 12px rgba(74,222,128,0.22)',
+            ? '0 0 16px rgba(59,130,246,0.45)'
+            : '0 0 12px rgba(59,130,246,0.22)',
           transition: 'color 0.25s, text-shadow 0.25s',
           overflow: 'hidden',
           textOverflow: 'ellipsis',
@@ -314,14 +315,14 @@ function ForwardToDisplay({ entry, pendingValue, canEdit, onPendingChange }: For
             width: 26,
             height: 26,
             borderRadius: 7,
-            background: hovered ? 'rgba(74,222,128,0.12)' : 'transparent',
-            border: hovered ? '1px solid rgba(74,222,128,0.24)' : '1px solid transparent',
+            background: hovered ? 'rgba(59,130,246,0.12)' : 'transparent',
+            border: hovered ? '1px solid rgba(59,130,246,0.24)' : '1px solid transparent',
           }}
         >
           <svg
             viewBox="0 0 16 16"
             fill="none"
-            stroke="#4ade80"
+            stroke="#60a5fa"
             strokeWidth={1.8}
             strokeLinecap="round"
             strokeLinejoin="round"
@@ -373,10 +374,10 @@ function StatPill({
         padding: '8px 10px',
         borderRadius: 10,
         border: active
-          ? '1px solid rgba(74,222,128,0.28)'
+          ? '1px solid rgba(59,130,246,0.28)'
           : `1px solid ${hovered && isInteractive ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.06)'}`,
         background: active
-          ? 'rgba(74,222,128,0.08)'
+          ? 'rgba(59,130,246,0.08)'
           : hovered && isInteractive
           ? 'rgba(255,255,255,0.04)'
           : 'rgba(255,255,255,0.02)',
@@ -388,14 +389,14 @@ function StatPill({
         outline: 'none',
       }}
     >
-      <span style={{ color: active ? '#4ade80' : '#475569', display: 'flex', alignItems: 'center' }}>
+      <span style={{ color: active ? '#60a5fa' : '#475569', display: 'flex', alignItems: 'center' }}>
         {icon}
       </span>
       <span
         style={{
           fontSize: '0.62rem',
           fontWeight: 700,
-          color: active ? '#4ade80' : '#e2e8f0',
+          color: active ? '#60a5fa' : '#e2e8f0',
           whiteSpace: 'nowrap',
           letterSpacing: '0.01em',
           lineHeight: 1.2,
@@ -419,7 +420,7 @@ function StatPill({
         <span
           style={{
             fontSize: '0.5rem',
-            color: active ? 'rgba(74,222,128,0.5)' : 'rgba(148,163,184,0.4)',
+            color: active ? 'rgba(96,165,250,0.5)' : 'rgba(148,163,184,0.4)',
             fontStyle: 'italic',
             marginTop: 1,
             whiteSpace: 'nowrap',
@@ -505,8 +506,8 @@ function MaxChannelsPill({ entry, canEdit }: { entry: RcfEntry; canEdit: boolean
           gap: 4,
           padding: '6px 8px',
           borderRadius: 10,
-          border: '1px solid rgba(74,222,128,0.35)',
-          background: 'rgba(74,222,128,0.06)',
+          border: '1px solid rgba(59,130,246,0.35)',
+          background: 'rgba(59,130,246,0.06)',
         }}
       >
         <input
@@ -530,16 +531,16 @@ function MaxChannelsPill({ entry, canEdit }: { entry: RcfEntry; canEdit: boolean
             textAlign: 'center',
             fontSize: '0.72rem',
             fontWeight: 700,
-            color: '#4ade80',
+            color: '#60a5fa',
             background: 'rgba(15,17,23,0.85)',
-            border: '1px solid rgba(74,222,128,0.35)',
+            border: '1px solid rgba(59,130,246,0.35)',
             borderRadius: 5,
             padding: '3px 4px',
             outline: 'none',
             fontFamily: 'inherit',
           }}
         />
-        <span style={{ fontSize: '0.5rem', color: 'rgba(74,222,128,0.5)', fontStyle: 'italic' }}>
+        <span style={{ fontSize: '0.5rem', color: 'rgba(96,165,250,0.5)', fontStyle: 'italic' }}>
           0 = no limit
         </span>
       </div>
@@ -644,7 +645,7 @@ function RcfNameField({ entry, canEdit }: { entry: RcfEntry; canEdit: boolean })
             fontWeight: 600,
             color: '#94a3b8',
             background: 'rgba(15,17,23,0.85)',
-            border: '1px solid rgba(74,222,128,0.40)',
+            border: '1px solid rgba(59,130,246,0.40)',
             borderRadius: 5,
             outline: 'none',
             padding: '3px 7px',
@@ -663,7 +664,7 @@ function RcfNameField({ entry, canEdit }: { entry: RcfEntry; canEdit: boolean })
             padding: '3px 9px',
             borderRadius: 4,
             border: 'none',
-            background: 'linear-gradient(135deg, #22c55e 0%, #16a34a 100%)',
+            background: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
             color: '#fff',
             cursor: mutation.isPending ? 'not-allowed' : 'pointer',
             lineHeight: 1,
@@ -697,13 +698,13 @@ function RcfNameField({ entry, canEdit }: { entry: RcfEntry; canEdit: boolean })
         alignItems: 'center',
         gap: 5,
         paddingBottom: 1,
-        borderBottom: '1px dashed rgba(74,222,128,0.18)',
+        borderBottom: '1px dashed rgba(59,130,246,0.18)',
         transition: 'color 0.15s, border-color 0.15s',
       }}
     >
       {hasName ? value.trim() : 'Name this line — click to edit'}
       <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth={1.4} strokeLinecap="round" strokeLinejoin="round"
-        style={{ width: 10, height: 10, color: 'rgba(74,222,128,0.4)', flexShrink: 0 }}>
+        style={{ width: 10, height: 10, color: 'rgba(96,165,250,0.4)', flexShrink: 0 }}>
         <path d="M8.5 1.5l2 2L4 10H2v-2L8.5 1.5z" />
       </svg>
     </span>
@@ -734,8 +735,8 @@ export function RcfCard({ entry, pendingValue, onPendingChange }: RcfCardProps) 
   const enablePending = enableMutation.isPending;
 
   // ── Layout constants ──────────────────────────────────────────────────────────
-  const GREEN = '#4ade80';
-  const GREEN_DIM = 'rgba(74,222,128,0.22)';
+  const BLUE = '#3b82f6';
+  const BLUE_DIM = 'rgba(59,130,246,0.22)';
 
   return (
     <div
@@ -746,22 +747,23 @@ export function RcfCard({ entry, pendingValue, onPendingChange }: RcfCardProps) 
         WebkitBackdropFilter: 'blur(12px)',
         border: `1px solid ${
           cardHovered
-            ? 'rgba(74,222,128,0.22)'
+            ? 'rgba(59,130,246,0.22)'
             : enabled
-            ? 'rgba(74,222,128,0.12)'
+            ? 'rgba(59,130,246,0.12)'
             : 'rgba(42,47,69,0.6)'
         }`,
         borderRadius: 20,
         overflow: 'hidden',
-        transition: 'border-color 0.25s ease, box-shadow 0.25s ease',
+        transition: 'border-color 0.25s ease, box-shadow 0.25s ease, transform 0.25s ease',
+        transform: cardHovered ? 'translateY(-2px)' : 'none',
         boxShadow: cardHovered
-          ? `0 0 0 1px ${GREEN_DIM}, 0 20px 48px -12px rgba(0,0,0,0.60), 0 0 32px -8px rgba(74,222,128,0.08)`
+          ? `0 0 0 1px ${BLUE_DIM}, 0 20px 48px -12px rgba(0,0,0,0.60), 0 0 36px -8px rgba(59,130,246,0.18)`
           : '0 4px 24px -6px rgba(0,0,0,0.50)',
       }}
       onMouseEnter={() => setCardHovered(true)}
       onMouseLeave={() => setCardHovered(false)}
     >
-      {/* Top accent line — green tint, brighter on hover */}
+      {/* Top accent line — blue tint, brighter on hover */}
       <div
         style={{
           position: 'absolute',
@@ -769,13 +771,13 @@ export function RcfCard({ entry, pendingValue, onPendingChange }: RcfCardProps) 
           left: 32,
           right: 32,
           height: 1,
-          background: `linear-gradient(90deg, transparent, ${GREEN}55, transparent)`,
+          background: `linear-gradient(90deg, transparent, ${BLUE}55, transparent)`,
           opacity: cardHovered ? 1 : 0.35,
           transition: 'opacity 0.25s ease',
         }}
       />
 
-      {/* Ambient glow — subtle green radial in the top-left corner */}
+      {/* Ambient glow — subtle blue radial in the top-left corner */}
       <div
         style={{
           position: 'absolute',
@@ -784,7 +786,7 @@ export function RcfCard({ entry, pendingValue, onPendingChange }: RcfCardProps) 
           width: 160,
           height: 160,
           borderRadius: '50%',
-          background: `radial-gradient(circle, rgba(74,222,128,0.06) 0%, transparent 70%)`,
+          background: `radial-gradient(circle, rgba(59,130,246,0.08) 0%, transparent 70%)`,
           pointerEvents: 'none',
         }}
       />
@@ -811,8 +813,8 @@ export function RcfCard({ entry, pendingValue, onPendingChange }: RcfCardProps) 
                   fontSize: '0.68rem',
                   fontWeight: 700,
                   color: '#94a3b8',
-                  background: 'rgba(74,222,128,0.10)',
-                  border: '1px solid rgba(74,222,128,0.22)',
+                  background: 'rgba(59,130,246,0.10)',
+                  border: '1px solid rgba(59,130,246,0.22)',
                   borderRadius: 6,
                   padding: '3px 10px',
                   textTransform: 'uppercase',
@@ -823,7 +825,7 @@ export function RcfCard({ entry, pendingValue, onPendingChange }: RcfCardProps) 
                 {entry.customer_name}
               </span>
             )}
-            <GreenToggle
+            <BlueToggle
               checked={enabled}
               disabled={!canEdit}
               pending={enablePending}
@@ -872,7 +874,7 @@ export function RcfCard({ entry, pendingValue, onPendingChange }: RcfCardProps) 
             style={{
               flex: 1,
               height: 1,
-              background: 'linear-gradient(90deg, transparent, rgba(74,222,128,0.22))',
+              background: 'linear-gradient(90deg, transparent, rgba(59,130,246,0.22))',
             }}
           />
 
@@ -884,8 +886,8 @@ export function RcfCard({ entry, pendingValue, onPendingChange }: RcfCardProps) 
               gap: 5,
               padding: '3px 10px',
               borderRadius: 20,
-              background: 'rgba(74,222,128,0.06)',
-              border: '1px solid rgba(74,222,128,0.14)',
+              background: 'rgba(59,130,246,0.06)',
+              border: '1px solid rgba(59,130,246,0.14)',
               flexShrink: 0,
             }}
           >
@@ -895,15 +897,15 @@ export function RcfCard({ entry, pendingValue, onPendingChange }: RcfCardProps) 
               style={{ width: 18, height: 10 }}
             >
               {/* Arrow shaft */}
-              <line x1="1" y1="5" x2="14" y2="5" stroke={GREEN} strokeWidth={1.5} strokeLinecap="round" />
+              <line x1="1" y1="5" x2="14" y2="5" stroke={BLUE} strokeWidth={1.5} strokeLinecap="round" />
               {/* Arrowhead */}
-              <path d="M11 2l3 3-3 3" stroke={GREEN} strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" fill="none" />
+              <path d="M11 2l3 3-3 3" stroke={BLUE} strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" fill="none" />
             </svg>
             <span
               style={{
                 fontSize: '0.55rem',
                 fontWeight: 700,
-                color: 'rgba(74,222,128,0.65)',
+                color: 'rgba(96,165,250,0.75)',
                 textTransform: 'uppercase',
                 letterSpacing: '0.05em',
                 whiteSpace: 'nowrap',
@@ -918,7 +920,7 @@ export function RcfCard({ entry, pendingValue, onPendingChange }: RcfCardProps) 
             style={{
               flex: 1,
               height: 1,
-              background: 'linear-gradient(90deg, rgba(74,222,128,0.22), transparent)',
+              background: 'linear-gradient(90deg, rgba(59,130,246,0.22), transparent)',
             }}
           />
         </div>

@@ -23,12 +23,11 @@ interface StatPillProps {
 function StatPill({ label, value, accent }: StatPillProps) {
   return (
     <div
+      className="glass-surface glass-hover"
       style={{
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
-        background: 'linear-gradient(135deg, rgba(30,33,48,0.8) 0%, rgba(19,21,29,0.9) 100%)',
-        border: '1px solid rgba(42,47,69,0.6)',
         borderRadius: 12,
         padding: '10px 16px',
         minWidth: 90,
@@ -114,7 +113,7 @@ export function CdrStatsBar({ cdrs, total }: CdrStatsBarProps) {
       <StatPill
         label="Total Billed"
         value={fmtMoney4(stats.totalBilled)}
-        accent="#4ade80"
+        accent="#60a5fa"
       />
       <StatPill label="Total Cost" value={fmtMoney4(stats.totalCost)} accent="#f87171" />
       <StatPill label="Total Margin" value={fmtMoney4(stats.totalMargin)} accent={marginAccent} />

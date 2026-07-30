@@ -62,9 +62,10 @@ const TIMELINE_OPTIONS = [
   'Just exploring',
 ];
 
-const AMBER = '#f59e0b';
-const AMBER_DIM = 'rgba(245,158,11,0.12)';
-const AMBER_BORDER = 'rgba(245,158,11,0.25)';
+const ACCENT = '#3b82f6';
+const ACCENT_BRIGHT = '#60a5fa';
+const ACCENT_DIM = 'rgba(59,130,246,0.12)';
+const ACCENT_BORDER = 'rgba(59,130,246,0.30)';
 
 /* ─── Style helpers ───────────────────────────────────────── */
 
@@ -131,11 +132,11 @@ function StyledInput({ hasError, isFocused, onFocusChange, style, ...rest }: Sty
       onBlur={() => onFocusChange?.(false)}
       style={{
         ...inputBase,
-        border: `1px solid ${hasError ? 'rgba(239,68,68,0.55)' : isFocused ? AMBER : 'rgba(42,47,69,0.8)'}`,
+        border: `1px solid ${hasError ? 'rgba(239,68,68,0.55)' : isFocused ? ACCENT : 'rgba(42,47,69,0.8)'}`,
         boxShadow: hasError
           ? '0 0 0 2px rgba(239,68,68,0.12)'
           : isFocused
-          ? `0 0 0 2px rgba(245,158,11,0.12)`
+          ? `0 0 0 3px rgba(59,130,246,0.16)`
           : 'none',
         ...style,
       }}
@@ -157,11 +158,11 @@ function StyledSelect({ hasError, isFocused, onFocusChange, children, style, ...
       onBlur={() => onFocusChange?.(false)}
       style={{
         ...inputBase,
-        border: `1px solid ${hasError ? 'rgba(239,68,68,0.55)' : isFocused ? AMBER : 'rgba(42,47,69,0.8)'}`,
+        border: `1px solid ${hasError ? 'rgba(239,68,68,0.55)' : isFocused ? ACCENT : 'rgba(42,47,69,0.8)'}`,
         boxShadow: hasError
           ? '0 0 0 2px rgba(239,68,68,0.12)'
           : isFocused
-          ? `0 0 0 2px rgba(245,158,11,0.12)`
+          ? `0 0 0 3px rgba(59,130,246,0.16)`
           : 'none',
         appearance: 'none',
         cursor: 'pointer',
@@ -194,9 +195,9 @@ function StepIndicator({ current, total }: { current: number; total: number }) {
             height: 6,
             borderRadius: 3,
             background: i === current
-              ? AMBER
+              ? ACCENT
               : i < current
-              ? 'rgba(245,158,11,0.35)'
+              ? 'rgba(59,130,246,0.40)'
               : 'rgba(42,47,69,0.7)',
             transition: 'width 0.2s ease, background 0.2s ease',
           }}
@@ -277,17 +278,17 @@ function NavButtons({ onBack, onNext, onSubmit, isSubmitting, isLastStep }: NavB
           borderRadius: 7,
           background: isLastStep
             ? isSubmitting
-              ? 'rgba(245,158,11,0.35)'
-              : `linear-gradient(135deg, #d97706 0%, ${AMBER} 100%)`
-            : 'rgba(245,158,11,0.10)',
-          border: `1px solid ${isLastStep ? AMBER_BORDER : 'rgba(245,158,11,0.20)'}`,
-          color: isLastStep ? '#0f1117' : AMBER,
+              ? 'rgba(59,130,246,0.35)'
+              : `linear-gradient(135deg, #2563eb 0%, ${ACCENT} 100%)`
+            : 'rgba(59,130,246,0.10)',
+          border: `1px solid ${isLastStep ? ACCENT_BORDER : 'rgba(59,130,246,0.20)'}`,
+          color: isLastStep ? '#fff' : ACCENT_BRIGHT,
           fontSize: '0.72rem',
           fontWeight: 700,
           cursor: isSubmitting ? 'not-allowed' : 'pointer',
           transition: 'background 0.15s, box-shadow 0.15s',
           boxShadow: isLastStep && !isSubmitting
-            ? '0 2px 14px -4px rgba(245,158,11,0.45)'
+            ? '0 2px 14px -4px rgba(59,130,246,0.50)'
             : 'none',
           letterSpacing: '-0.01em',
         }}
@@ -567,7 +568,7 @@ const sectionHeadStyle: CSSProperties = {
   fontWeight: 600,
   letterSpacing: '0.05em',
   textTransform: 'uppercase',
-  color: AMBER,
+  color: ACCENT_BRIGHT,
   marginBottom: 2,
   opacity: 0.8,
 };
@@ -635,15 +636,15 @@ function SuccessState({ onReset }: SuccessStateProps) {
           width: 44,
           height: 44,
           borderRadius: '50%',
-          background: AMBER_DIM,
-          border: `1.5px solid ${AMBER_BORDER}`,
+          background: ACCENT_DIM,
+          border: `1.5px solid ${ACCENT_BORDER}`,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
           flexShrink: 0,
         }}
       >
-        <CheckCircle size={22} strokeWidth={1.8} style={{ color: AMBER }} />
+        <CheckCircle size={22} strokeWidth={1.8} style={{ color: ACCENT_BRIGHT }} />
       </div>
 
       <div>
@@ -824,9 +825,9 @@ export function AccessRequestForm() {
               gap: 4,
               padding: '6px 14px',
               borderRadius: 6,
-              border: `1px solid ${headerHovered && !expanded ? 'rgba(245,158,11,0.45)' : AMBER_BORDER}`,
-              background: expanded ? AMBER_DIM : headerHovered ? 'rgba(245,158,11,0.08)' : 'transparent',
-              color: AMBER,
+              border: `1px solid ${headerHovered && !expanded ? 'rgba(59,130,246,0.50)' : ACCENT_BORDER}`,
+              background: expanded ? ACCENT_DIM : headerHovered ? 'rgba(59,130,246,0.08)' : 'transparent',
+              color: ACCENT_BRIGHT,
               fontSize: '0.7rem',
               fontWeight: 700,
               cursor: 'pointer',
@@ -838,7 +839,7 @@ export function AccessRequestForm() {
             {expanded ? 'Close' : 'Request Access'}
             {!expanded && (
               <svg viewBox="0 0 10 10" fill="none" style={{ width: 8, height: 8 }}>
-                <path d="M1 9 9 1M9 1H3M9 1v6" stroke={AMBER} strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />
+                <path d="M1 9 9 1M9 1H3M9 1v6" stroke={ACCENT_BRIGHT} strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />
               </svg>
             )}
           </button>

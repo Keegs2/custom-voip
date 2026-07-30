@@ -15,7 +15,8 @@ import {
   PageHeaderCard,
 } from './shared';
 
-const GREEN = '#4ade80';
+// RCF brand accent — blue to match the unified glass design system.
+const ACCENT = '#3b82f6';
 
 /* ─── Getting Started ────────────────────────────────────── */
 
@@ -23,7 +24,7 @@ function GettingStartedSection() {
   return (
     <AccordionSection
       id="getting-started"
-      accent={GREEN}
+      accent={ACCENT}
       icon={<LogIn size={18} />}
       title="Getting Started"
       subtitle="Log in and verify your numbers are working."
@@ -31,7 +32,7 @@ function GettingStartedSection() {
       <P>
         Your administrator provides your login credentials. Navigate to your portal URL, sign in, and open the <strong style={{ color: C.text }}>RCF</strong> page from the sidebar. Confirm your numbers are listed, enabled, and forwarding to the correct destinations. Place a test call to verify.
       </P>
-      <Callout accent={GREEN}>
+      <Callout accent={ACCENT}>
         If you need your password reset, contact your administrator or email <strong style={{ color: C.text }}>solutions@granitenet.com</strong>.
       </Callout>
     </AccordionSection>
@@ -44,7 +45,7 @@ function ManagingRcfSection() {
   return (
     <AccordionSection
       id="managing-rcf"
-      accent={GREEN}
+      accent={ACCENT}
       icon={<Phone size={18} />}
       title="Managing Your RCF"
       subtitle="Everything you can do with your forwarding numbers — all from the RCF page."
@@ -55,7 +56,7 @@ function ManagingRcfSection() {
 
       <H3>Change a forwarding destination</H3>
       <P>
-        Click the green forwarding number on any card. Type the new destination in E.164 format (<IC>+17745551234</IC>) and click <strong style={{ color: C.text }}>Save</strong>. New calls immediately route to the updated number. Calls already in progress are not affected.
+        Click the blue forwarding number on any card. Type the new destination in E.164 format (<IC>+17745551234</IC>) and click <strong style={{ color: C.text }}>Save</strong>. New calls immediately route to the updated number. Calls already in progress are not affected.
       </P>
 
       <H3>Enable or disable a number</H3>
@@ -83,7 +84,7 @@ function ManagingRcfSection() {
         Switch to the <strong style={{ color: C.text }}>Call Activity</strong> tab to see recent calls, ASR%, average MOS, and a 7-day performance graph. Use the search bar to filter by number or date.
       </P>
 
-      <Callout accent={GREEN}>
+      <Callout accent={ACCENT}>
         Phone numbers use <strong style={{ color: C.text }}>E.164 format</strong>: a <IC>+</IC> followed by country code and number with no spaces. US example: <IC>+17745551234</IC>.
       </Callout>
     </AccordionSection>
@@ -96,7 +97,7 @@ function DIDManagementSection() {
   return (
     <AccordionSection
       id="did-management"
-      accent={GREEN}
+      accent={ACCENT}
       icon={<Phone size={18} />}
       title="DID Management"
       subtitle="Request new numbers, view your inventory, and release numbers you no longer need."
@@ -126,7 +127,7 @@ function DIDManagementSection() {
         Use the filter bar to narrow results by NPA (area code), NXX (exchange), state, or keyword. Filters can be combined to quickly find numbers in a specific city or region.
       </P>
 
-      <Callout accent={GREEN}>
+      <Callout accent={ACCENT}>
         Requested numbers require admin approval before they appear in your RCF lineup. Contact your administrator if a request has been pending for an extended period.
       </Callout>
     </AccordionSection>
@@ -139,7 +140,7 @@ function SupportSection() {
   return (
     <AccordionSection
       id="support"
-      accent={GREEN}
+      accent={ACCENT}
       icon={<HelpCircle size={18} />}
       title="Need Help?"
       subtitle="Quick checks and support contact."
@@ -147,7 +148,7 @@ function SupportSection() {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
         {[
           { q: 'Calls not forwarding?', a: 'Check the toggle is enabled and the forwarding number is correct.' },
-          { q: 'Wrong destination?', a: 'Click the green number to edit it. Use full E.164 format.' },
+          { q: 'Wrong destination?', a: 'Click the blue number to edit it. Use full E.164 format.' },
           { q: 'Destination not answering?', a: 'Call the forwarding number directly to confirm it works.' },
         ].map(({ q, a }, i) => (
           <div
@@ -165,7 +166,7 @@ function SupportSection() {
         ))}
       </div>
 
-      <Callout accent={GREEN}>
+      <Callout accent={ACCENT}>
         Email <strong style={{ color: C.text }}>solutions@granitenet.com</strong> with the affected DID and approximate time of the issue.
       </Callout>
     </AccordionSection>
@@ -181,7 +182,7 @@ export function RcfDocsPage() {
         eyebrow="Customer Guide"
         title="Granite CRAG RCF"
         subtitle="Call Routing Application Gateway — manage your Remote Call Forwarding numbers"
-        accent={GREEN}
+        accent={ACCENT}
       />
 
       <div style={{ padding: '0 0 60px' }}>

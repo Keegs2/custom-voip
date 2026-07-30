@@ -142,23 +142,12 @@ export function CarrierCard({ carrier: initialCarrier }: CarrierCardProps) {
 
   return (
     <div
+      className="glass-surface glass-hover"
       style={{
-        background: 'linear-gradient(135deg, rgba(30,33,48,0.9) 0%, rgba(19,21,29,0.95) 100%)',
-        border: '1px solid rgba(42,47,69,0.6)',
         borderRadius: 16,
         padding: '24px',
-        boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
-        transition: 'border-color 0.3s, box-shadow 0.3s',
         position: 'relative',
         overflow: 'hidden',
-      }}
-      onMouseEnter={(e) => {
-        (e.currentTarget as HTMLDivElement).style.borderColor = 'rgba(59,130,246,0.3)';
-        (e.currentTarget as HTMLDivElement).style.boxShadow = '0 0 0 1px rgba(59,130,246,0.15), 0 8px 30px rgba(0,0,0,0.4)';
-      }}
-      onMouseLeave={(e) => {
-        (e.currentTarget as HTMLDivElement).style.borderColor = 'rgba(42,47,69,0.6)';
-        (e.currentTarget as HTMLDivElement).style.boxShadow = '0 4px 20px rgba(0,0,0,0.3)';
       }}
     >
       {/* Header */}

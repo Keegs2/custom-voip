@@ -37,16 +37,14 @@ const SIP_SERVER = '34.74.71.32:5080';
 // Shared style tokens
 const styles = {
   card: {
-    background: 'linear-gradient(160deg, #1c1f2e 0%, #13151d 100%)',
-    border: '1px solid rgba(42,47,69,0.7)',
     borderRadius: 14,
     padding: 24,
     marginBottom: 24,
   } as React.CSSProperties,
 
   innerCard: {
-    background: '#0d0f17',
-    border: '1px solid rgba(42,47,69,0.5)',
+    background: 'rgba(13,15,23,0.55)',
+    border: '1px solid rgba(59,130,246,0.10)',
     borderRadius: 10,
     padding: '16px 20px',
   } as React.CSSProperties,
@@ -61,7 +59,7 @@ const styles = {
   } as React.CSSProperties,
 
   divider: {
-    borderTop: '1px solid rgba(42,47,69,0.5)',
+    borderTop: '1px solid rgba(59,130,246,0.12)',
     margin: '18px 0',
   } as React.CSSProperties,
 
@@ -69,8 +67,8 @@ const styles = {
     display: 'inline-flex',
     alignItems: 'center',
     gap: 6,
-    background: 'rgba(42,47,69,0.35)',
-    border: '1px solid rgba(42,47,69,0.6)',
+    background: 'rgba(59,130,246,0.06)',
+    border: '1px solid rgba(59,130,246,0.14)',
     borderRadius: 6,
     padding: '4px 10px',
     fontSize: '0.78rem',
@@ -80,8 +78,8 @@ const styles = {
     display: 'inline-flex',
     alignItems: 'center',
     gap: 8,
-    background: '#0d0f15',
-    border: '1px solid rgba(42,47,69,0.7)',
+    background: 'rgba(13,15,21,0.55)',
+    border: '1px solid rgba(59,130,246,0.15)',
     borderRadius: 20,
     padding: '4px 10px',
     fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
@@ -90,8 +88,8 @@ const styles = {
   } as React.CSSProperties,
 
   input: {
-    background: '#0d0f15',
-    border: '1px solid rgba(42,47,69,0.6)',
+    background: 'rgba(13,15,21,0.55)',
+    border: '1px solid rgba(59,130,246,0.15)',
     borderRadius: 7,
     padding: '6px 10px',
     color: '#e2e8f0',
@@ -100,8 +98,8 @@ const styles = {
   } as React.CSSProperties,
 
   select: {
-    background: '#0d0f15',
-    border: '1px solid rgba(42,47,69,0.6)',
+    background: 'rgba(13,15,21,0.55)',
+    border: '1px solid rgba(59,130,246,0.15)',
     borderRadius: 7,
     padding: '6px 10px',
     color: '#e2e8f0',
@@ -228,7 +226,7 @@ function TrunkCard({ trunk, customerId }: TrunkCardProps) {
   const showAuthIps = trunk.auth_type === 'ip' || trunk.auth_type === 'both';
 
   return (
-    <div style={styles.card}>
+    <div className="glass-surface" style={styles.card}>
 
       {/* ── Trunk header ── */}
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap', marginBottom: 16 }}>
@@ -422,8 +420,8 @@ function TrunkCard({ trunk, customerId }: TrunkCardProps) {
                     display: 'flex',
                     alignItems: 'center',
                     gap: 10,
-                    background: '#0d0f15',
-                    border: '1px solid rgba(42,47,69,0.6)',
+                    background: 'rgba(13,15,21,0.55)',
+                    border: '1px solid rgba(59,130,246,0.12)',
                     borderRadius: 8,
                     padding: '7px 12px',
                   }}
@@ -543,7 +541,7 @@ function TrunkCard({ trunk, customerId }: TrunkCardProps) {
       {/* ── Enable / Disable ── */}
       <div
         style={{
-          borderTop: '1px solid rgba(42,47,69,0.4)',
+          borderTop: '1px solid rgba(59,130,246,0.12)',
           paddingTop: 16,
           display: 'flex',
           justifyContent: 'flex-end',
@@ -649,7 +647,7 @@ export function CustomerTrunkSection({ customerId }: CustomerTrunkSectionProps) 
   const trunks = trunksData ?? [];
 
   return (
-    <div style={{ paddingTop: 20, borderTop: '1px solid rgba(42,47,69,0.5)' }}>
+    <div style={{ paddingTop: 20, borderTop: '1px solid rgba(59,130,246,0.12)' }}>
 
       {/* Section header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
@@ -727,11 +725,10 @@ export function CustomerTrunkSection({ customerId }: CustomerTrunkSectionProps) 
       <form
         onSubmit={handleCreateTrunk}
         onClick={(e) => e.stopPropagation()}
+        className="glass-surface"
         style={{
           marginTop: 8,
           padding: '20px 24px',
-          background: 'rgba(13,15,23,0.7)',
-          border: '1px solid rgba(42,47,69,0.55)',
           borderRadius: 12,
         }}
       >
@@ -763,8 +760,8 @@ export function CustomerTrunkSection({ customerId }: CustomerTrunkSectionProps) 
               onClick={(e) => e.stopPropagation()}
               placeholder="acme-primary"
               style={{
-                background: '#0d0f15',
-                border: '1px solid rgba(42,47,69,0.6)',
+                background: 'rgba(13,15,21,0.55)',
+                border: '1px solid rgba(59,130,246,0.15)',
                 borderRadius: 7,
                 padding: '7px 10px',
                 color: '#e2e8f0',
@@ -789,8 +786,8 @@ export function CustomerTrunkSection({ customerId }: CustomerTrunkSectionProps) 
               onChange={(e) => setNewTrunkAuth(e.target.value as TrunkAuthType)}
               onClick={(e) => e.stopPropagation()}
               style={{
-                background: '#0d0f15',
-                border: '1px solid rgba(42,47,69,0.6)',
+                background: 'rgba(13,15,21,0.55)',
+                border: '1px solid rgba(59,130,246,0.15)',
                 borderRadius: 7,
                 padding: '7px 10px',
                 color: '#e2e8f0',
