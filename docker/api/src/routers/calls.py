@@ -5,14 +5,17 @@ Implements tiered CPS (Calls Per Second) limits for API calling:
 - api_standard: 8 CPS, $0.008/call
 - api_premium: 15 CPS, $0.005/call
 """
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends
 from pydantic import BaseModel
 from typing import Optional
 import uuid
 import logging
 from db import database as db
 from db import redis_client as cache
-from services.esl_client import originate_call, get_call_status, hangup_call
+from auth.dependencies import get_customer_filter
+from services.esl_client import (
+    originate_call, get_call_status, hangup_call, transfer_call, send_dtmf,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -33,14 +36,39 @@ class CallCreate(BaseModel):
 
 
 class CallUpdate(BaseModel):
-    action: str  # hangup, transfer, hold
+    action: str  # hangup, transfer, dtmf
     target: Optional[str] = None  # For transfer
+    digits: Optional[str] = None  # For dtmf
+
+
+async def _get_owned_active_call(call_id: str, customer_filter: int | None) -> dict:
+    """Fetch an active call enforcing tenant isolation.
+
+    Returns 404 if the call is not active OR belongs to another customer (do NOT
+    leak existence cross-tenant with a 403). Admins (customer_filter is None) are
+    unrestricted.
+    """
+    active = await db.fetch_one(
+        "SELECT uuid, customer_id, state FROM active_calls WHERE uuid = $1::uuid",
+        call_id,
+    )
+    if not active:
+        raise HTTPException(status_code=404, detail="Active call not found")
+    if customer_filter is not None and active["customer_id"] != customer_filter:
+        raise HTTPException(status_code=404, detail="Active call not found")
+    return dict(active)
 
 
 @router.post("")
-async def create_call(call: CallCreate, background_tasks: BackgroundTasks):
+async def create_call(
+    call: CallCreate,
+    background_tasks: BackgroundTasks,
+    customer_filter: int | None = Depends(get_customer_filter),
+):
     """Initiate an outbound call via API.
 
+    Tenant-scoped: a non-admin caller (JWT or API key) may only originate from an
+    API DID owned by their own customer. Admins may originate from any DID.
     Enforces tiered CPS limits before allowing call origination.
     Returns 429 with upgrade recommendations if over CPS limit.
     """
@@ -59,17 +87,23 @@ async def create_call(call: CallCreate, background_tasks: BackgroundTasks):
         FROM api_dids a
         JOIN customers c ON a.customer_id = c.id
         LEFT JOIN cps_tiers t ON c.api_tier_id = t.id
-        WHERE a.did = $1 AND a.enabled = true
+        WHERE a.did = $1::varchar AND a.enabled = true
         """,
         call.from_did
     )
 
     if not did_info:
         raise HTTPException(status_code=404, detail="From DID not found or not enabled")
-    if did_info["status"] != "active":
-        raise HTTPException(status_code=400, detail="Customer is not active")
 
     customer_id = did_info["customer_id"]
+
+    # Tenant scope: non-admins may only originate from their OWN DID. Return 404
+    # (not 403) so a tenant cannot probe which DIDs belong to other customers.
+    if customer_filter is not None and customer_id != customer_filter:
+        raise HTTPException(status_code=404, detail="From DID not found or not enabled")
+
+    if did_info["status"] != "active":
+        raise HTTPException(status_code=400, detail="Customer is not active")
 
     # Get CPS limit from tier (use default if no tier configured)
     api_tier_name = did_info.get("api_tier_name") or DEFAULT_API_TIER
@@ -163,16 +197,25 @@ async def create_call(call: CallCreate, background_tasks: BackgroundTasks):
 
 
 @router.get("/{call_id}")
-async def get_call(call_id: str):
-    """Get call status by ID."""
-    # Check active calls first
+async def get_call(
+    call_id: str,
+    customer_filter: int | None = Depends(get_customer_filter),
+):
+    """Get call status by ID.
+
+    Tenant-scoped: a non-admin caller only sees calls tied to their own customer.
+    Cross-tenant / unknown call_ids return 404 (existence is not leaked).
+    """
+    # Check active calls first. Fold the tenant predicate into the WHERE so a
+    # cross-tenant uuid simply misses (admin passes NULL -> no restriction).
     active = await db.fetch_one(
         """
         SELECT uuid, customer_id, product_type, direction, caller_id, destination,
                start_time, answer_time, state
-        FROM active_calls WHERE uuid = $1
+        FROM active_calls
+        WHERE uuid = $1::uuid AND ($2::int IS NULL OR customer_id = $2::int)
         """,
-        call_id
+        call_id, customer_filter
     )
 
     if active:
@@ -188,15 +231,16 @@ async def get_call(call_id: str):
             "answer_time": str(active["answer_time"]) if active["answer_time"] else None,
         }
 
-    # Check CDRs for completed calls
+    # Check CDRs for completed calls (same tenant predicate).
     cdr = await db.fetch_one(
         """
         SELECT uuid, direction, caller_id, destination, start_time,
                answer_time, end_time, duration_ms, hangup_cause
-        FROM cdrs WHERE uuid = $1
+        FROM cdrs
+        WHERE uuid = $1::uuid AND ($2::int IS NULL OR customer_id = $2::int)
         ORDER BY start_time DESC LIMIT 1
         """,
-        call_id
+        call_id, customer_filter
     )
 
     if cdr:
@@ -216,16 +260,18 @@ async def get_call(call_id: str):
 
 
 @router.post("/{call_id}/update")
-async def update_call(call_id: str, update: CallUpdate):
-    """Modify a live call (hangup, transfer, etc.)."""
-    # Verify call exists and is active
-    active = await db.fetch_one(
-        "SELECT uuid, state FROM active_calls WHERE uuid = $1",
-        call_id
-    )
+async def update_call(
+    call_id: str,
+    update: CallUpdate,
+    customer_filter: int | None = Depends(get_customer_filter),
+):
+    """Modify a live call (hangup, transfer, dtmf).
 
-    if not active:
-        raise HTTPException(status_code=404, detail="Active call not found")
+    Tenant-scoped: a non-admin caller may only control calls tied to their own
+    customer (404-no-leak). Supported actions: hangup, transfer, dtmf.
+    """
+    # Ownership gate: 404 if the call is not active OR belongs to another tenant.
+    await _get_owned_active_call(call_id, customer_filter)
 
     if update.action == "hangup":
         success = await hangup_call(call_id)
@@ -236,8 +282,28 @@ async def update_call(call_id: str, update: CallUpdate):
     elif update.action == "transfer":
         if not update.target:
             raise HTTPException(status_code=400, detail="Transfer requires target")
-        # Implement transfer via ESL
-        raise HTTPException(status_code=501, detail="Transfer not yet implemented")
+        success = await transfer_call(call_id, update.target)
+        if success:
+            return {
+                "call_id": call_id,
+                "action": "transfer",
+                "target": update.target,
+                "status": "success",
+            }
+        raise HTTPException(status_code=500, detail="Failed to transfer call")
+
+    elif update.action == "dtmf":
+        if not update.digits:
+            raise HTTPException(status_code=400, detail="DTMF requires digits")
+        success = await send_dtmf(call_id, update.digits)
+        if success:
+            return {
+                "call_id": call_id,
+                "action": "dtmf",
+                "digits": update.digits,
+                "status": "success",
+            }
+        raise HTTPException(status_code=500, detail="Failed to send DTMF")
 
     else:
         raise HTTPException(status_code=400, detail=f"Unknown action: {update.action}")

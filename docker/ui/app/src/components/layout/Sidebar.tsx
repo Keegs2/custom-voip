@@ -26,7 +26,10 @@ interface NavItemDef {
 /* ─── Nav item definitions ────────────────────────────────── */
 
 const allProductNavItems: NavItemDef[] = [
-  { label: 'RCF', icon: <IconRCF size={18} />, to: '/rcf', color: '#3b82f6', accountTypes: ['rcf', 'hybrid'] },
+  { label: 'RCF',          icon: <IconRCF size={18} />,   to: '/rcf',      color: '#3b82f6', accountTypes: ['rcf', 'hybrid'] },
+  { label: 'SIP Trunking', icon: <IconTrunk size={18} />, to: '/trunks',   color: '#fbbf24', accountTypes: ['trunk', 'hybrid'] },
+  { label: 'API Calling',  icon: <IconAPI size={18} />,   to: '/api-dids', color: '#c084fc', accountTypes: ['api', 'hybrid'] },
+  { label: 'IVR Builder',  icon: <IconIVR size={18} />,   to: '/ivr',      color: '#22d3ee', accountTypes: ['api', 'hybrid', 'ucaas'] },
 ];
 
 /* ─── Documentation nav items ─────────────────────────────── */
@@ -43,11 +46,9 @@ interface ComingSoonItemDef {
   icon: React.ReactNode;
 }
 
-const COMING_SOON_ITEMS: ComingSoonItemDef[] = [
-  { label: 'SIP Trunking', icon: <IconTrunk size={18} /> },
-  { label: 'API Calling',  icon: <IconAPI size={18} /> },
-  { label: 'IVR Builder',  icon: <IconIVR size={18} /> },
-];
+// SIP Trunking, API Calling, and IVR Builder are now LIVE (gated by account_type
+// in allProductNavItems). No products are pre-launch right now.
+const COMING_SOON_ITEMS: ComingSoonItemDef[] = [];
 
 /* ─── localStorage helpers ────────────────────────────────── */
 
@@ -858,19 +859,23 @@ export function Sidebar() {
             <div style={{ height: 6 }} />
             <SidebarNavItem item={myAccountItem} onNavigate={closeMobile} small />
 
-            {/* ── GROUP 2: Coming Soon ──────────────────────── */}
-            <div style={{ height: 6 }} />
-            <CollapsibleGroup
-              id="comingSoon"
-              label="Coming Soon"
-              icon={<Clock size={11} strokeWidth={2.5} />}
-              isOpen={groupOpen.comingSoon}
-              onToggle={toggleGroup}
-            >
-              {COMING_SOON_ITEMS.map((item) => (
-                <ComingSoonNavItem key={item.label} item={item} />
-              ))}
-            </CollapsibleGroup>
+            {/* ── GROUP 2: Coming Soon (hidden while empty) ─── */}
+            {COMING_SOON_ITEMS.length > 0 && (
+              <>
+                <div style={{ height: 6 }} />
+                <CollapsibleGroup
+                  id="comingSoon"
+                  label="Coming Soon"
+                  icon={<Clock size={11} strokeWidth={2.5} />}
+                  isOpen={groupOpen.comingSoon}
+                  onToggle={toggleGroup}
+                >
+                  {COMING_SOON_ITEMS.map((item) => (
+                    <ComingSoonNavItem key={item.label} item={item} />
+                  ))}
+                </CollapsibleGroup>
+              </>
+            )}
 
             {/* ── GROUP 3: Documentation ───────────────────── */}
             <div style={{ height: 6 }} />
