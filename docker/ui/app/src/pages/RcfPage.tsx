@@ -6,6 +6,7 @@ import type { RcfEntry } from '../types/rcf';
 import { RcfCard } from './RcfCard';
 import { useAuth } from '../contexts/AuthContext';
 import { AdminCustomerSelector } from '../components/AdminCustomerSelector';
+import { listCustomers } from '../api/customers';
 import { fmt } from '../utils/format';
 import { apiRequest } from '../api/client';
 import { useToast } from '../components/ui/Toast';
@@ -643,17 +644,14 @@ function PaginationControls({
 interface RcfPageHeaderProps {
   title: string;
   subtitle: string;
-  totalNumbers: number;
-  activeCount: number;
-  disabledCount: number;
 }
 
-function RcfPageHeader({ title, subtitle, totalNumbers, activeCount, disabledCount }: RcfPageHeaderProps) {
+function RcfPageHeader({ title, subtitle }: RcfPageHeaderProps) {
   return (
     <div
       className="animate-fade-in-up glass-header"
       style={{
-        padding: '32px 36px 28px',
+        padding: '36px 36px 32px',
         marginBottom: 28,
       }}
     >
@@ -671,130 +669,67 @@ function RcfPageHeader({ title, subtitle, totalNumbers, activeCount, disabledCou
         }}
       />
 
-      <div style={{ position: 'relative', zIndex: 1, display: 'flex', alignItems: 'flex-start', gap: 24 }}>
-        {/* CRAG logo with glow */}
-        <div style={{ flexShrink: 0, position: 'relative' }}>
-          <div
+      {/* Centered hero — logo above title, subtitle beneath */}
+      <div
+        style={{
+          position: 'relative',
+          zIndex: 1,
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          textAlign: 'center',
+        }}
+      >
+        {/* CRAG logo with glow — small, centered above the title */}
+        <div
+          style={{
+            width: 52,
+            height: 52,
+            borderRadius: 14,
+            background: 'linear-gradient(135deg, rgba(59,130,246,0.18) 0%, rgba(59,130,246,0.08) 100%)',
+            border: '1px solid rgba(59,130,246,0.28)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            boxShadow: '0 0 24px rgba(59,130,246,0.20)',
+            marginBottom: 16,
+          }}
+        >
+          <img
+            src="/crag.png"
+            alt="CRAG"
             style={{
-              width: 56,
-              height: 56,
-              borderRadius: 14,
-              background: 'linear-gradient(135deg, rgba(59,130,246,0.18) 0%, rgba(59,130,246,0.08) 100%)',
-              border: '1px solid rgba(59,130,246,0.28)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              boxShadow: '0 0 24px rgba(59,130,246,0.20)',
+              width: 34,
+              height: 34,
+              objectFit: 'contain',
+              filter: 'drop-shadow(0 0 8px rgba(59,130,246,0.55)) brightness(1.1)',
             }}
-          >
-            <img
-              src="/crag.png"
-              alt="CRAG"
-              style={{
-                width: 36,
-                height: 36,
-                objectFit: 'contain',
-                filter: 'drop-shadow(0 0 8px rgba(59,130,246,0.55)) brightness(1.1)',
-              }}
-            />
-          </div>
+          />
         </div>
 
-        {/* Title + subtitle */}
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div
-            style={{
-              fontSize: '0.6rem',
-              fontWeight: 600,
-              letterSpacing: '0.06em',
-              textTransform: 'uppercase',
-              color: '#3b82f6',
-              opacity: 0.8,
-              marginBottom: 6,
-            }}
-          >
-            Remote Call Forwarding
-          </div>
-          <h1
-            style={{
-              fontSize: 'clamp(1.2rem, 2.5vw, 1.55rem)',
-              fontWeight: 800,
-              color: '#e2e8f0',
-              letterSpacing: '-0.025em',
-              lineHeight: 1.15,
-              margin: '0 0 8px',
-            }}
-          >
-            {title}
-          </h1>
-          <p
-            style={{
-              fontSize: '0.85rem',
-              color: '#718096',
-              lineHeight: 1.65,
-              margin: 0,
-              maxWidth: 500,
-            }}
-          >
-            {subtitle}
-          </p>
-        </div>
-
-        {/* Stats row — right aligned */}
-        {totalNumbers > 0 && (
-          <div
-            style={{
-              display: 'flex',
-              gap: 12,
-              flexShrink: 0,
-              alignSelf: 'center',
-            }}
-          >
-            {(
-              [
-                { value: totalNumbers, label: 'Total', color: '#60a5fa' },
-                { value: activeCount, label: 'Active', color: '#3b82f6' },
-                ...(disabledCount > 0 ? [{ value: disabledCount, label: 'Disabled', color: '#ef4444' }] : []),
-              ] as { value: number; label: string; color: string }[]
-            ).map(({ value, label, color }) => (
-              <div
-                key={label}
-                className="glass-surface glass-hover"
-                style={{
-                  textAlign: 'center',
-                  padding: '12px 16px',
-                  borderRadius: 12,
-                  minWidth: 68,
-                }}
-              >
-                <div
-                  style={{
-                    fontSize: '1.6rem',
-                    fontWeight: 800,
-                    color,
-                    lineHeight: 1,
-                    letterSpacing: '-0.03em',
-                    fontVariantNumeric: 'tabular-nums',
-                    marginBottom: 4,
-                  }}
-                >
-                  {value}
-                </div>
-                <div
-                  style={{
-                    fontSize: '0.62rem',
-                    fontWeight: 600,
-                    color: '#475569',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.05em',
-                  }}
-                >
-                  {label}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
+        <h1
+          style={{
+            fontSize: 'clamp(1.35rem, 2.6vw, 1.75rem)',
+            fontWeight: 800,
+            color: '#e2e8f0',
+            letterSpacing: '-0.025em',
+            lineHeight: 1.15,
+            margin: '0 0 8px',
+          }}
+        >
+          {title}
+        </h1>
+        <p
+          style={{
+            fontSize: '0.82rem',
+            color: '#718096',
+            lineHeight: 1.6,
+            margin: 0,
+            maxWidth: 520,
+          }}
+        >
+          {subtitle}
+        </p>
       </div>
     </div>
   );
@@ -4289,6 +4224,20 @@ export function RcfPage() {
   const [adminSelectedCustomer, setAdminSelectedCustomer] = useState<number | undefined>(undefined);
   const customerId = isAdmin ? adminSelectedCustomer : (user?.customer_id ?? undefined);
 
+  // Resolve the admin-scoped customer's display name for the header.
+  // Reuses the exact same query key/fn as AdminCustomerSelector so React Query
+  // dedupes it — no extra request. Only runs for admins.
+  const { data: adminCustomersData } = useQuery({
+    queryKey: ['customers-dropdown'],
+    queryFn: () => listCustomers({ limit: 500 }),
+    enabled: isAdmin,
+    staleTime: 60_000,
+  });
+  const adminSelectedCustomerName = useMemo(() => {
+    if (!isAdmin || adminSelectedCustomer === undefined) return null;
+    return adminCustomersData?.items.find((c) => c.id === adminSelectedCustomer)?.name ?? null;
+  }, [isAdmin, adminSelectedCustomer, adminCustomersData]);
+
   // Numbers tab state
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<number>(DEFAULT_PAGE_SIZE);
@@ -4384,9 +4333,12 @@ export function RcfPage() {
     }
   }
 
-  const pageTitle = user?.customer_name
-    ? `${user.customer_name}'s Numbers`
-    : 'Remote Call Forwarding';
+  // Header title: prefer the admin-scoped customer name, then the logged-in
+  // customer's name; fall back to the bare title (admin "All Customers").
+  const scopedCustomerName = adminSelectedCustomerName ?? user?.customer_name ?? null;
+  const pageTitle = scopedCustomerName
+    ? `${scopedCustomerName} Remote Call Forwarding Center`
+    : 'Remote Call Forwarding Center';
 
   // ── Render ────────────────────────────────────────────────────────────────────
 
@@ -4395,10 +4347,7 @@ export function RcfPage() {
       {/* Premium glass-morphism header */}
       <RcfPageHeader
         title={pageTitle}
-        subtitle="Manage your Remote Call Forwarding numbers and monitor call health — all in one place."
-        totalNumbers={isLoading ? 0 : serverTotal}
-        activeCount={isLoading ? 0 : activeCount}
-        disabledCount={isLoading ? 0 : disabledCount}
+        subtitle="Manage your Remote Call Forwarding numbers and monitor call health."
       />
 
       {/* Admin customer selector */}
@@ -4559,8 +4508,47 @@ export function RcfPage() {
                 )}
               </div>
 
-              {/* Count pill */}
+              {/* Spacer pushes the stat strip + count pill to the right */}
+              <div style={{ flex: '1 1 0', minWidth: 0 }} aria-hidden="true" />
+
+              {/* Stat chips — Total / Active / (Disabled when > 0). These live in
+                  the toolbar (shared by card + table views), not the header. */}
               {serverTotal > 0 && (
+                <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+                  {(
+                    [
+                      { value: serverTotal, label: 'Total', color: '#60a5fa' },
+                      { value: activeCount, label: 'Active', color: '#3b82f6' },
+                      ...(disabledCount > 0 ? [{ value: disabledCount, label: 'Disabled', color: '#f87171' }] : []),
+                    ] as { value: number; label: string; color: string }[]
+                  ).map(({ value, label, color }) => (
+                    <div
+                      key={label}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'baseline',
+                        gap: 5,
+                        fontSize: '0.72rem',
+                        fontWeight: 600,
+                        background: 'rgba(59,130,246,0.10)',
+                        border: '1px solid rgba(59,130,246,0.20)',
+                        borderRadius: 20,
+                        padding: '5px 13px',
+                        whiteSpace: 'nowrap',
+                        letterSpacing: '0.02em',
+                      }}
+                    >
+                      <span style={{ color, fontWeight: 800, fontVariantNumeric: 'tabular-nums' }}>{value}</span>
+                      <span style={{ color: '#718096', textTransform: 'uppercase', fontSize: '0.62rem', letterSpacing: '0.05em' }}>
+                        {label}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Count pill (shows filtered subset when a filter is active) */}
+              {serverTotal > 0 && (searchQuery || npaFilter.length === 3) && filteredEntries.length !== rawEntries.length && (
                 <div
                   style={{
                     fontSize: '0.72rem',
@@ -4575,9 +4563,7 @@ export function RcfPage() {
                     letterSpacing: '0.02em',
                   }}
                 >
-                  {(searchQuery || npaFilter.length === 3) && filteredEntries.length !== rawEntries.length
-                    ? `${filteredEntries.length} of ${serverTotal}`
-                    : `${serverTotal} ${serverTotal === 1 ? 'number' : 'numbers'}`}
+                  {`${filteredEntries.length} of ${serverTotal} shown`}
                 </div>
               )}
             </div>

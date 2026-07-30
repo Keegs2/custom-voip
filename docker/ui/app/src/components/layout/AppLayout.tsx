@@ -10,10 +10,10 @@ export function AppLayout() {
         className="min-h-screen flex flex-col"
         style={{ marginLeft: 240 }}
       >
-        {/* Inner wrapper: fills main, centers content within the content column */}
+        {/* Inner wrapper: fills the full width between the sidebar and the right edge */}
         <div
           className="flex-1 flex flex-col py-8 pb-20"
-          style={{ maxWidth: 1280, width: '100%', marginLeft: 'auto', marginRight: 'auto', paddingLeft: 'clamp(24px, 3vw, 48px)', paddingRight: 'clamp(24px, 3vw, 48px)' }}
+          style={{ width: '100%', paddingLeft: 'clamp(24px, 3vw, 48px)', paddingRight: 'clamp(24px, 3vw, 48px)' }}
         >
           <Outlet />
         </div>
