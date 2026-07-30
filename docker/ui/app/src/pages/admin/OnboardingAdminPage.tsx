@@ -88,8 +88,8 @@ const inputStyle: React.CSSProperties = {
   fontSize: '0.82rem',
   padding: '8px 12px',
   borderRadius: 8,
-  border: '1px solid rgba(42,47,69,0.8)',
-  background: 'rgba(13,15,21,0.8)',
+  border: '1px solid rgba(59,130,246,0.15)',
+  background: 'rgba(13,15,21,0.55)',
   color: '#e2e8f0',
   outline: 'none',
   boxSizing: 'border-box',
@@ -487,7 +487,7 @@ function ProvisioningForm({ request, onApproved }: ProvisioningFormProps) {
           border: '1px solid rgba(34,197,94,0.2)',
         }}
       >
-        <div style={{ ...sectionLabel, color: '#4ade80', marginBottom: 8 }}>Configure & Approve</div>
+        <div style={{ ...sectionLabel, color: '#60a5fa', marginBottom: 8 }}>Configure & Approve</div>
         <p style={{ fontSize: '0.82rem', color: '#718096', margin: 0 }}>
           Customer requested <strong style={{ color: '#cbd5e0' }}>{requestedCount}</strong> DID
           {requestedCount !== 1 ? 's' : ''}.
@@ -516,7 +516,7 @@ function ProvisioningForm({ request, onApproved }: ProvisioningFormProps) {
             style={{
               maxHeight: 220,
               overflowY: 'auto',
-              border: '1px solid rgba(42,47,69,0.7)',
+              border: '1px solid rgba(59,130,246,0.12)',
               borderRadius: 9,
               background: 'rgba(13,15,21,0.5)',
             }}
@@ -764,13 +764,12 @@ function OnboardingCard({ request, isExpanded, onToggle, onApproved }: Onboardin
 
   return (
     <div
+      className="glass-surface"
       style={{
-        background: 'linear-gradient(135deg, rgba(30,33,48,0.9) 0%, rgba(19,21,29,0.95) 100%)',
-        border: `1px solid ${isExpanded ? 'rgba(59,130,246,0.35)' : 'rgba(42,47,69,0.6)'}`,
         borderRadius: 14,
         overflow: 'hidden',
-        transition: 'border-color 0.15s',
-        boxShadow: isExpanded ? '0 4px 20px rgba(0,0,0,0.3)' : 'none',
+        transition: 'box-shadow 0.15s',
+        boxShadow: isExpanded ? '0 0 0 1px rgba(59,130,246,0.35), 0 8px 28px -8px rgba(59,130,246,0.25)' : undefined,
       }}
     >
       {/* Summary row */}
@@ -861,7 +860,7 @@ function OnboardingCard({ request, isExpanded, onToggle, onApproved }: Onboardin
             display: 'flex',
             flexDirection: 'column',
             gap: 24,
-            borderTop: '1px solid rgba(42,47,69,0.5)',
+            borderTop: '1px solid rgba(59,130,246,0.12)',
             paddingTop: 20,
           }}
         >
@@ -927,7 +926,7 @@ function OnboardingCard({ request, isExpanded, onToggle, onApproved }: Onboardin
           {isBillingVerified && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
               <ProvisioningForm request={request} onApproved={onApproved} />
-              <div style={{ borderTop: '1px solid rgba(42,47,69,0.4)', paddingTop: 16 }}>
+              <div style={{ borderTop: '1px solid rgba(59,130,246,0.12)', paddingTop: 16 }}>
                 <RejectForm request={request} onSuccess={handleRejectSuccess} />
               </div>
             </div>
@@ -976,9 +975,8 @@ export function OnboardingAdminPage() {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       {/* Status filter tabs */}
       <div
+        className="glass-surface"
         style={{
-          background: 'rgba(19,21,29,0.7)',
-          border: '1px solid rgba(42,47,69,0.5)',
           borderRadius: 12,
           padding: '6px 8px',
           overflowX: 'auto',
@@ -1058,13 +1056,12 @@ export function OnboardingAdminPage() {
       {/* Empty state */}
       {!isLoading && !isError && items.length === 0 && (
         <div
+          className="glass-surface"
           style={{
             padding: '60px 20px',
             textAlign: 'center',
             color: '#4a5568',
             fontSize: '0.9rem',
-            background: 'rgba(19,21,29,0.5)',
-            border: '1px solid rgba(42,47,69,0.4)',
             borderRadius: 14,
           }}
         >

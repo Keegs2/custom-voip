@@ -91,33 +91,18 @@ export function TierCard({ tier, tierType, fullWidth = false }: TierCardProps) {
 
   return (
     <div
+      className={cn('glass-surface glass-hover', fullWidth && 'col-span-full')}
       style={{
-        background: 'linear-gradient(135deg, rgba(30,33,48,0.9) 0%, rgba(19,21,29,0.95) 100%)',
-        border: `1px solid ${isApiStandard ? 'rgba(59,130,246,0.35)' : 'rgba(42,47,69,0.6)'}`,
         borderRadius: 16,
         padding: '24px',
         display: 'flex',
         flexDirection: 'column',
         gap: 20,
         boxShadow: isApiStandard
-          ? '0 0 20px rgba(59,130,246,0.1), 0 4px 20px rgba(0,0,0,0.3)'
-          : '0 4px 20px rgba(0,0,0,0.3)',
-        transition: 'border-color 0.3s, box-shadow 0.3s',
+          ? '0 0 20px rgba(59,130,246,0.1)'
+          : undefined,
         position: 'relative',
         overflow: 'hidden',
-      }}
-      className={cn(fullWidth && 'col-span-full')}
-      onMouseEnter={(e) => {
-        (e.currentTarget as HTMLDivElement).style.borderColor = `${accent.color}40`;
-        (e.currentTarget as HTMLDivElement).style.boxShadow = `0 0 0 1px ${accent.color}20, 0 8px 30px rgba(0,0,0,0.4)`;
-      }}
-      onMouseLeave={(e) => {
-        (e.currentTarget as HTMLDivElement).style.borderColor = isApiStandard
-          ? 'rgba(59,130,246,0.35)'
-          : 'rgba(42,47,69,0.6)';
-        (e.currentTarget as HTMLDivElement).style.boxShadow = isApiStandard
-          ? '0 0 20px rgba(59,130,246,0.1), 0 4px 20px rgba(0,0,0,0.3)'
-          : '0 4px 20px rgba(0,0,0,0.3)';
       }}
     >
       {/* Top accent line */}

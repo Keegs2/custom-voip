@@ -14,6 +14,7 @@ export function ApiDidsPage() {
       />
 
       <div
+        className="glass-surface"
         style={{
           display: 'flex',
           flexDirection: 'column',
@@ -21,9 +22,7 @@ export function ApiDidsPage() {
           justifyContent: 'center',
           padding: '80px 24px',
           textAlign: 'center',
-          background: 'linear-gradient(135deg, rgba(30,33,48,0.6) 0%, rgba(19,21,29,0.7) 100%)',
-          border: '1px solid rgba(42,47,69,0.4)',
-          borderRadius: 16,
+          borderRadius: 20,
         }}
       >
         {/* Icon */}
@@ -36,9 +35,10 @@ export function ApiDidsPage() {
             alignItems: 'center',
             justifyContent: 'center',
             marginBottom: 24,
-            background: 'linear-gradient(135deg, rgba(168,85,247,0.15) 0%, rgba(168,85,247,0.05) 100%)',
-            border: '1px solid rgba(168,85,247,0.25)',
-            color: '#a855f7',
+            background: 'linear-gradient(135deg, rgba(59,130,246,0.15) 0%, rgba(59,130,246,0.05) 100%)',
+            border: '1px solid rgba(59,130,246,0.25)',
+            color: '#60a5fa',
+            boxShadow: '0 0 24px rgba(59,130,246,0.18)',
           }}
         >
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} style={{ width: 32, height: 32 }}>
@@ -58,9 +58,9 @@ export function ApiDidsPage() {
             marginTop: 24,
             padding: '8px 16px',
             borderRadius: 8,
-            background: 'rgba(168,85,247,0.08)',
-            border: '1px solid rgba(168,85,247,0.2)',
-            color: '#c084fc',
+            background: 'rgba(59,130,246,0.08)',
+            border: '1px solid rgba(59,130,246,0.2)',
+            color: '#60a5fa',
             fontSize: '0.8rem',
             fontWeight: 600,
             letterSpacing: '0.02em',

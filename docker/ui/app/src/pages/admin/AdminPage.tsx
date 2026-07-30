@@ -22,17 +22,10 @@ export function AdminPage() {
 
       {/* ── Glass-morphism header ── */}
       <div
+        className="glass-header"
         style={{
-          position: 'relative',
-          background: 'rgba(19, 21, 29, 0.72)',
-          backdropFilter: 'blur(10px)',
-          WebkitBackdropFilter: 'blur(10px)',
-          border: '1px solid rgba(59,130,246,0.16)',
-          borderRadius: 20,
           padding: '32px 36px 28px',
           marginBottom: 28,
-          overflow: 'hidden',
-          boxShadow: '0 8px 40px -12px rgba(0,0,0,0.55), 0 0 0 1px rgba(59,130,246,0.06)',
         }}
       >
         {/* Top accent gradient line */}
@@ -134,9 +127,8 @@ export function AdminPage() {
 
       {/* ── Tab navigation bar ── */}
       <div
+        className="glass-surface"
         style={{
-          background: 'rgba(19,21,29,0.7)',
-          border: '1px solid rgba(42,47,69,0.5)',
           borderRadius: 12,
           padding: '6px 8px',
           marginBottom: 24,

@@ -200,14 +200,11 @@ interface StatCardProps {
 function DidStatCard({ label, value, accent, icon, delay = '0s' }: StatCardProps) {
   return (
     <div
-      className="animate-fade-in-up"
+      className="animate-fade-in-up glass-surface glass-hover"
       style={{
         animationDelay: delay,
         flex: 1,
         minWidth: 0,
-        background: 'rgba(19,21,29,0.70)',
-        backdropFilter: 'blur(8px)',
-        border: `1px solid ${accent}22`,
         borderRadius: 14,
         padding: '16px 18px',
         display: 'flex',
@@ -265,12 +262,8 @@ function GlassPanel({
 }) {
   return (
     <div
-      className={className}
+      className={className ? `glass-surface ${className}` : 'glass-surface'}
       style={{
-        background: 'rgba(19,21,29,0.70)',
-        backdropFilter: 'blur(10px)',
-        WebkitBackdropFilter: 'blur(10px)',
-        border: '1px solid rgba(42,47,69,0.6)',
         borderRadius: 16,
         overflow: 'hidden',
         ...style,
@@ -382,22 +375,13 @@ function FilterBar({
           value={search}
           onChange={(e) => onSearchChange(e.target.value)}
           placeholder={placeholder}
+          className="form-control"
           style={{
             width: '100%',
             padding: '6px 10px 6px 30px',
-            background: 'rgba(30,33,48,0.8)',
-            border: '1px solid rgba(42,47,69,0.8)',
             borderRadius: 8,
-            color: '#e2e8f0',
             fontSize: '0.78rem',
-            outline: 'none',
             boxSizing: 'border-box',
-          }}
-          onFocus={(e) => {
-            e.currentTarget.style.borderColor = 'rgba(59,130,246,0.5)';
-          }}
-          onBlur={(e) => {
-            e.currentTarget.style.borderColor = 'rgba(42,47,69,0.8)';
           }}
         />
         {search && (
@@ -1483,11 +1467,10 @@ interface InternalTabBarProps {
 function InternalTabBar({ tabs, activeId, onChange }: InternalTabBarProps) {
   return (
     <div
+      className="glass-surface"
       style={{
         display: 'flex',
         gap: 2,
-        background: 'rgba(0,0,0,0.25)',
-        border: '1px solid rgba(42,47,69,0.6)',
         borderRadius: 12,
         padding: 4,
         width: 'fit-content',

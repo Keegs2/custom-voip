@@ -16,8 +16,8 @@ const darkInput: React.CSSProperties = {
   fontSize: '0.82rem',
   padding: '5px 10px',
   borderRadius: 8,
-  border: '1px solid rgba(42,47,69,0.7)',
-  background: '#0d0f15',
+  border: '1px solid rgba(59,130,246,0.15)',
+  background: 'rgba(13,15,21,0.55)',
   color: '#e2e8f0',
   outline: 'none',
   fontFamily: 'inherit',
@@ -31,7 +31,7 @@ const inlineSaveBtn: React.CSSProperties = {
   padding: '4px 10px',
   borderRadius: 4,
   border: 'none',
-  background: '#22c55e',
+  background: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
   color: '#fff',
   cursor: 'pointer',
   flexShrink: 0,
@@ -275,9 +275,9 @@ function RcfForwardInput({
         display: 'inline-flex',
         alignItems: 'center',
         width: 160,
-        color: saved ? '#4ade80' : '#e2e8f0',
-        borderColor: saved ? 'rgba(34,197,94,0.55)' : 'rgba(42,47,69,0.7)',
-        boxShadow: saved ? '0 0 0 3px rgba(34,197,94,0.12)' : 'none',
+        color: saved ? '#60a5fa' : '#e2e8f0',
+        borderColor: saved ? 'rgba(59,130,246,0.55)' : 'rgba(59,130,246,0.15)',
+        boxShadow: saved ? '0 0 0 3px rgba(59,130,246,0.12)' : 'none',
         cursor: 'pointer',
         userSelect: 'none',
         fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
@@ -397,8 +397,8 @@ function RcfMaxChannelsInput({
         width: 80,
         cursor: 'pointer',
         userSelect: 'none',
-        color: entry.max_channels > 0 ? '#4ade80' : '#4a5568',
-        borderColor: entry.max_channels > 0 ? 'rgba(74,222,128,0.35)' : 'rgba(42,47,69,0.7)',
+        color: entry.max_channels > 0 ? '#60a5fa' : '#4a5568',
+        borderColor: entry.max_channels > 0 ? 'rgba(59,130,246,0.35)' : 'rgba(59,130,246,0.15)',
         fontStyle: entry.max_channels === 0 ? 'italic' : 'normal',
         fontSize: '0.78rem',
       }}
@@ -424,13 +424,12 @@ function RcfEntryRow({
 }) {
   return (
     <div
+      className="glass-surface glass-hover"
       style={{
         display: 'flex',
         alignItems: 'center',
         gap: 16,
         padding: '14px 16px',
-        background: 'rgba(13,15,23,0.7)',
-        border: '1px solid rgba(42,47,69,0.55)',
         borderRadius: 10,
         flexWrap: 'wrap',
       }}
@@ -443,7 +442,7 @@ function RcfEntryRow({
           style={{
             fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
             fontSize: '0.92rem',
-            color: '#22c55e',
+            color: '#60a5fa',
             fontWeight: 600,
             letterSpacing: '0.3px',
             whiteSpace: 'nowrap',
@@ -470,7 +469,7 @@ function RcfEntryRow({
         style={{
           width: 1,
           alignSelf: 'stretch',
-          background: 'rgba(42,47,69,0.5)',
+          background: 'rgba(59,130,246,0.15)',
           flexShrink: 0,
         }}
       />
@@ -527,7 +526,7 @@ function RcfEntryRow({
           style={{
             width: 1,
             height: 20,
-            background: 'rgba(42,47,69,0.5)',
+            background: 'rgba(59,130,246,0.15)',
           }}
         />
 
@@ -630,7 +629,7 @@ export function CustomerRcfSection({ customerId }: CustomerRcfSectionProps) {
   const count = entries.length;
 
   return (
-    <div style={{ paddingTop: 16, borderTop: '1px solid rgba(42,47,69,0.5)' }}>
+    <div style={{ paddingTop: 16, borderTop: '1px solid rgba(59,130,246,0.12)' }}>
 
       {/* Section header */}
       <div
@@ -658,9 +657,9 @@ export function CustomerRcfSection({ customerId }: CustomerRcfSectionProps) {
               style={{
                 fontSize: '0.62rem',
                 fontWeight: 700,
-                color: '#22c55e',
-                background: 'rgba(34,197,94,0.12)',
-                border: '1px solid rgba(34,197,94,0.25)',
+                color: '#60a5fa',
+                background: 'rgba(59,130,246,0.12)',
+                border: '1px solid rgba(59,130,246,0.25)',
                 borderRadius: 20,
                 padding: '1px 7px',
                 letterSpacing: '0.3px',
@@ -748,11 +747,10 @@ export function CustomerRcfSection({ customerId }: CustomerRcfSectionProps) {
       <form
         onSubmit={handleCreate}
         onClick={(e) => e.stopPropagation()}
+        className="glass-surface"
         style={{
           marginTop: entries.length > 0 ? 4 : 8,
           padding: '14px 16px',
-          background: 'rgba(13,15,23,0.7)',
-          border: '1px solid rgba(42,47,69,0.55)',
           borderRadius: 10,
         }}
       >
@@ -761,7 +759,7 @@ export function CustomerRcfSection({ customerId }: CustomerRcfSectionProps) {
           style={{
             fontSize: '0.62rem',
             fontWeight: 700,
-            color: '#22c55e',
+            color: '#60a5fa',
             textTransform: 'uppercase',
             letterSpacing: '0.8px',
             marginBottom: 12,
@@ -776,12 +774,12 @@ export function CustomerRcfSection({ customerId }: CustomerRcfSectionProps) {
               width: 14,
               height: 14,
               borderRadius: '50%',
-              background: 'rgba(34,197,94,0.15)',
-              border: '1px solid rgba(34,197,94,0.4)',
+              background: 'rgba(59,130,246,0.15)',
+              border: '1px solid rgba(59,130,246,0.4)',
               lineHeight: '13px',
               textAlign: 'center',
               fontSize: '0.7rem',
-              color: '#22c55e',
+              color: '#60a5fa',
             }}
           >
             +
@@ -887,7 +885,7 @@ export function CustomerRcfSection({ customerId }: CustomerRcfSectionProps) {
                 onChange={(e) => setPassCid(e.target.checked)}
                 onClick={(e) => e.stopPropagation()}
                 style={{
-                  accentColor: '#22c55e',
+                  accentColor: '#3b82f6',
                   width: 14,
                   height: 14,
                   cursor: 'pointer',

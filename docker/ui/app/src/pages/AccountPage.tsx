@@ -15,14 +15,10 @@ interface UpdateMeBody {
 
 const COLORS = {
   bg: '#0f1117',
-  card: '#1a1d2e',
   text: '#e2e8f0',
   secondary: '#94a3b8',
   muted: '#475569',
   border: 'rgba(42,47,69,0.6)',
-  inputBg: 'rgba(255,255,255,0.04)',
-  inputBorder: 'rgba(255,255,255,0.08)',
-  focusBorder: '#3b82f6',
   primary: '#3b82f6',
   success: '#22c55e',
   error: '#f87171',
@@ -87,30 +83,20 @@ interface TextInputProps {
 }
 
 function TextInput({ id, type = 'text', value, onChange, placeholder, autoComplete, disabled }: TextInputProps) {
-  const [focused, setFocused] = useState(false);
-
   const style: CSSProperties = {
-    padding: '9px 12px',
-    borderRadius: 6,
-    background: disabled ? 'rgba(255,255,255,0.02)' : COLORS.inputBg,
-    border: `1px solid ${focused ? COLORS.focusBorder : COLORS.inputBorder}`,
-    outline: 'none',
-    fontSize: '0.875rem',
-    color: disabled ? COLORS.muted : COLORS.text,
-    transition: 'border-color 0.15s',
-    width: '100%',
     boxSizing: 'border-box',
+    color: disabled ? COLORS.muted : COLORS.text,
     cursor: disabled ? 'not-allowed' : 'text',
+    opacity: disabled ? 0.6 : 1,
   };
 
   return (
     <input
       id={id}
+      className="form-control"
       type={type}
       value={value}
       onChange={(e) => onChange(e.target.value)}
-      onFocus={() => setFocused(true)}
-      onBlur={() => setFocused(false)}
       placeholder={placeholder}
       autoComplete={autoComplete}
       disabled={disabled}
@@ -195,10 +181,9 @@ function ProfileCard({ user, onRefresh }: ProfileCardProps) {
 
   return (
     <section
+      className="glass-surface"
       style={{
-        background: COLORS.card,
-        border: `1px solid ${COLORS.border}`,
-        borderRadius: 8,
+        borderRadius: 18,
         padding: '24px 28px',
         display: 'flex',
         flexDirection: 'column',
@@ -335,10 +320,9 @@ function PasswordCard({ onRefresh }: PasswordCardProps) {
 
   return (
     <section
+      className="glass-surface"
       style={{
-        background: COLORS.card,
-        border: `1px solid ${COLORS.border}`,
-        borderRadius: 8,
+        borderRadius: 18,
         padding: '24px 28px',
         display: 'flex',
         flexDirection: 'column',
@@ -405,7 +389,7 @@ function PasswordCard({ onRefresh }: PasswordCardProps) {
             style={{
               padding: '8px 20px',
               borderRadius: 6,
-              background: btnHover && !saving ? '#16a34a' : COLORS.success,
+              background: btnHover && !saving ? '#2563eb' : COLORS.primary,
               border: 'none',
               color: '#fff',
               fontSize: '0.825rem',

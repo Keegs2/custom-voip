@@ -68,11 +68,10 @@ export function CdrTable({ cdrs, customerNames }: CdrTableProps) {
   if (cdrs.length === 0) {
     return (
       <div
+        className="glass-surface"
         style={{
           textAlign: 'center',
           padding: '48px 24px',
-          background: 'linear-gradient(135deg, rgba(30,33,48,0.9) 0%, rgba(19,21,29,0.95) 100%)',
-          border: '1px solid rgba(42,47,69,0.6)',
           borderRadius: 16,
           color: '#718096',
           fontSize: '0.875rem',
@@ -161,7 +160,7 @@ export function CdrTable({ cdrs, customerNames }: CdrTableProps) {
                   </span>
                 </Td>
                 <Td>
-                  <span className="tabular-nums text-[0.82rem] text-green-400">
+                  <span className="tabular-nums text-[0.82rem] text-[#60a5fa]">
                     {fmtMoney4(cdr.total_cost)}
                   </span>
                 </Td>

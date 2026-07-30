@@ -39,7 +39,7 @@ const inlineSaveBtn: React.CSSProperties = {
   padding: '4px 10px',
   borderRadius: 4,
   border: 'none',
-  background: '#22c55e',
+  background: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
   color: '#fff',
   cursor: 'pointer',
   flexShrink: 0,
@@ -154,13 +154,13 @@ function TrunkNameField({
             flex: 1,
             minWidth: 80,
             background: 'rgba(19,21,29,0.8)',
-            border: '1px solid rgba(245,158,11,0.5)',
+            border: '1px solid rgba(59,130,246,0.5)',
             borderRadius: 6,
             outline: 'none',
             padding: '2px 8px',
             fontFamily: 'inherit',
             opacity: mutation.isPending ? 0.5 : 1,
-            boxShadow: '0 0 0 3px rgba(245,158,11,0.12)',
+            boxShadow: '0 0 0 3px rgba(59,130,246,0.14)',
           }}
         />
         <button
@@ -208,9 +208,9 @@ function TrunkNameField({
           <svg
             viewBox="0 0 24 24"
             fill="none"
-            stroke="#f59e0b"
+            stroke="#60a5fa"
             strokeWidth={1.5}
-            style={{ width: 14, height: 14, opacity: 0.6, flexShrink: 0 }}
+            style={{ width: 14, height: 14, opacity: 0.7, flexShrink: 0 }}
           >
             <path d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
@@ -221,8 +221,8 @@ function TrunkNameField({
         <div
           style={{
             fontSize: '0.6rem',
-            color: '#f59e0b',
-            opacity: 0.5,
+            color: '#60a5fa',
+            opacity: 0.6,
             marginTop: 2,
             letterSpacing: '0.03em',
           }}
@@ -288,17 +288,13 @@ export function TrunkCard({ trunk }: TrunkCardProps) {
 
   const lastHour = stats?.last_hour;
 
-  const accent = '#f59e0b';
+  const accent = '#3b82f6';
 
   return (
     <div
+      className="glass-surface glass-hover"
       style={{
-        background: 'linear-gradient(135deg, rgba(30,33,48,0.9) 0%, rgba(19,21,29,0.95) 100%)',
-        border: '1px solid rgba(42,47,69,0.6)',
-        borderRadius: 16,
         overflow: 'hidden',
-        boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
-        transition: 'border-color 0.3s, box-shadow 0.3s',
         position: 'relative',
       }}
     >
@@ -367,7 +363,7 @@ export function TrunkCard({ trunk }: TrunkCardProps) {
         style={{
           display: 'grid',
           gridTemplateColumns: 'repeat(4, 1fr)',
-          borderTop: '1px solid rgba(42,47,69,0.6)',
+          borderTop: '1px solid rgba(59,130,246,0.10)',
         }}
       >
         {/* Channels */}
@@ -494,14 +490,14 @@ export function TrunkCard({ trunk }: TrunkCardProps) {
           fontSize: '0.75rem',
           fontWeight: 600,
           color: '#718096',
-          borderTop: '1px solid rgba(42,47,69,0.6)',
+          borderTop: '1px solid rgba(59,130,246,0.10)',
           background: 'transparent',
           cursor: 'pointer',
           transition: 'background 0.15s, color 0.15s',
         }}
         onMouseEnter={(e) => {
-          (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.03)';
-          (e.currentTarget as HTMLButtonElement).style.color = '#e2e8f0';
+          (e.currentTarget as HTMLButtonElement).style.background = 'rgba(59,130,246,0.06)';
+          (e.currentTarget as HTMLButtonElement).style.color = '#60a5fa';
         }}
         onMouseLeave={(e) => {
           (e.currentTarget as HTMLButtonElement).style.background = 'transparent';
@@ -549,9 +545,9 @@ function StatBlock({ label, children }: StatBlockProps) {
         display: 'flex',
         flexDirection: 'column',
         gap: 0,
-        background: 'rgba(19,21,29,0.5)',
+        background: 'rgba(19,21,29,0.35)',
         padding: '12px 16px',
-        borderRight: '1px solid rgba(42,47,69,0.4)',
+        borderRight: '1px solid rgba(59,130,246,0.07)',
       }}
     >
       <span
@@ -631,7 +627,7 @@ function ExpandedSection({
   return (
     <div
       style={{
-        borderTop: '1px solid rgba(42,47,69,0.6)',
+        borderTop: '1px solid rgba(59,130,246,0.10)',
         padding: '20px 24px',
         display: 'flex',
         flexDirection: 'column',
@@ -692,15 +688,11 @@ function ExpandedSection({
             value={newIp}
             onChange={(e) => setNewIp(e.target.value)}
             placeholder="203.0.113.50"
+            className="form-control"
             style={{
               fontSize: '0.8rem',
               fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
               padding: '5px 10px',
-              borderRadius: 6,
-              border: '1px solid rgba(42,47,69,0.6)',
-              background: '#0d0f15',
-              color: '#e2e8f0',
-              outline: 'none',
               width: 160,
             }}
           />
@@ -709,14 +701,10 @@ function ExpandedSection({
             value={newDesc}
             onChange={(e) => setNewDesc(e.target.value)}
             placeholder="Description (optional)"
+            className="form-control"
             style={{
               fontSize: '0.8rem',
               padding: '5px 10px',
-              borderRadius: 6,
-              border: '1px solid rgba(42,47,69,0.6)',
-              background: '#0d0f15',
-              color: '#e2e8f0',
-              outline: 'none',
               width: 180,
             }}
           />
@@ -728,9 +716,9 @@ function ExpandedSection({
               fontWeight: 600,
               padding: '5px 14px',
               borderRadius: 6,
-              border: '1px solid rgba(245,158,11,0.3)',
-              background: 'rgba(245,158,11,0.1)',
-              color: '#fbbf24',
+              border: '1px solid rgba(59,130,246,0.3)',
+              background: 'rgba(59,130,246,0.12)',
+              color: '#60a5fa',
               cursor: 'pointer',
               opacity: addIpMutation.isPending ? 0.5 : 1,
             }}
@@ -767,7 +755,7 @@ function ExpandedSection({
                   fontWeight: 600,
                   background: 'rgba(30,33,48,0.8)',
                   color: '#e2e8f0',
-                  border: '1px solid rgba(42,47,69,0.6)',
+                  border: '1px solid rgba(59,130,246,0.15)',
                   padding: '4px 10px',
                   borderRadius: 6,
                 }}
@@ -854,7 +842,7 @@ function IpChip({ ip, onDelete }: IpChipProps) {
         alignItems: 'center',
         gap: 8,
         background: 'rgba(30,33,48,0.8)',
-        border: '1px solid rgba(42,47,69,0.6)',
+        border: '1px solid rgba(59,130,246,0.15)',
         borderRadius: 6,
         padding: '6px 12px',
         fontSize: '0.78rem',

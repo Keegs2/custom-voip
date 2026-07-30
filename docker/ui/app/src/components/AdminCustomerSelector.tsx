@@ -60,18 +60,25 @@ export function AdminCustomerSelector({ selectedCustomerId, onSelect, accent = '
         onChange={(e) => onSelect(e.target.value ? Number(e.target.value) : undefined)}
         style={{
           fontSize: '0.85rem',
-          padding: '8px 14px',
-          borderRadius: 8,
-          border: `1px solid ${selectedCustomerId ? accent + '50' : 'rgba(42,47,69,0.7)'}`,
-          background: '#0d0f15',
+          padding: '9px 14px',
+          borderRadius: 9,
+          border: '1px solid transparent',
+          background: 'linear-gradient(180deg, rgba(255,255,255,0.015) 0%, transparent 60%), rgba(15,17,23,0.6)',
+          backdropFilter: 'blur(8px)',
+          WebkitBackdropFilter: 'blur(8px)',
           color: '#e2e8f0',
           outline: 'none',
           minWidth: 240,
-          transition: 'border-color 0.15s',
+          transition: 'box-shadow 0.18s ease, background 0.18s ease',
           cursor: 'pointer',
+          boxShadow: `inset 0 1px 0 rgba(255,255,255,0.04), inset 0 0 0 1px ${selectedCustomerId ? accent + '55' : 'rgba(59,130,246,0.12)'}`,
         }}
-        onFocus={(e) => { e.currentTarget.style.borderColor = accent; }}
-        onBlur={(e) => { e.currentTarget.style.borderColor = selectedCustomerId ? accent + '50' : 'rgba(42,47,69,0.7)'; }}
+        onFocus={(e) => {
+          e.currentTarget.style.boxShadow = `inset 0 1px 0 rgba(255,255,255,0.06), inset 0 0 0 1px ${accent}, 0 0 0 3px ${accent}28, 0 4px 18px -6px ${accent}47`;
+        }}
+        onBlur={(e) => {
+          e.currentTarget.style.boxShadow = `inset 0 1px 0 rgba(255,255,255,0.04), inset 0 0 0 1px ${selectedCustomerId ? accent + '55' : 'rgba(59,130,246,0.12)'}`;
+        }}
       >
         <option value="">All Customers</option>
         {customers.map((c) => (

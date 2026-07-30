@@ -22,7 +22,7 @@ function gradeBadge(grade: TrafficGrade) {
 
 const tdStyle: React.CSSProperties = {
   padding: '13px 16px',
-  borderBottom: '1px solid rgba(42,47,69,0.45)',
+  boxShadow: 'inset 0 -1px 0 0 rgba(255,255,255,0.025)',
   verticalAlign: 'middle',
 };
 
@@ -31,14 +31,9 @@ export function CustomerRow({ customer }: CustomerRowProps) {
 
   return (
     <tr
+      className="glass-row-hover"
       onClick={() => navigate(`/admin/customers/${customer.id}`)}
-      style={{ transition: 'background 0.15s', cursor: 'pointer' }}
-      onMouseEnter={(e) => {
-        (e.currentTarget as HTMLTableRowElement).style.background = 'rgba(255,255,255,0.035)';
-      }}
-      onMouseLeave={(e) => {
-        (e.currentTarget as HTMLTableRowElement).style.background = 'transparent';
-      }}
+      style={{ cursor: 'pointer' }}
     >
       <td style={tdStyle}>
         <span style={{ color: '#4a5568', fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', fontSize: '0.78rem' }}>

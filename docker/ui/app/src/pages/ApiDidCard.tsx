@@ -91,17 +91,13 @@ export function ApiDidCard({ did }: ApiDidCardProps) {
     callbackMutation.mutate(callbackField.value.trim());
   }, [callbackField.value, callbackMutation]);
 
-  const accent = '#a855f7';
+  const accent = '#3b82f6';
 
   return (
     <div
+      className="glass-surface glass-hover"
       style={{
-        background: 'linear-gradient(135deg, rgba(30,33,48,0.9) 0%, rgba(19,21,29,0.95) 100%)',
-        border: '1px solid rgba(42,47,69,0.6)',
-        borderRadius: 16,
         padding: '24px',
-        boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
-        transition: 'border-color 0.3s, box-shadow 0.3s',
         position: 'relative',
         overflow: 'hidden',
       }}
@@ -181,7 +177,7 @@ export function ApiDidCard({ did }: ApiDidCardProps) {
         style={{
           marginTop: 16,
           paddingTop: 16,
-          borderTop: '1px solid rgba(42,47,69,0.5)',
+          borderTop: '1px solid rgba(59,130,246,0.10)',
         }}
       >
         <UrlField
@@ -284,7 +280,7 @@ function UrlField({
                 ? '#22c55e'
                 : isDirty
                 ? '#3b82f6'
-                : 'rgba(42,47,69,0.8)'
+                : 'rgba(59,130,246,0.14)'
             }`,
             background: 'rgba(19,21,29,0.8)',
             color: '#e2e8f0',

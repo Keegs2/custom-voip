@@ -126,13 +126,14 @@ export function AccordionSection({
 
   return (
     <div
+      className="glass-surface"
       style={{
-        border: `1px solid ${open ? accent + '40' : C.border}`,
         borderRadius: 14,
         overflow: 'hidden',
         marginBottom: 20,
-        transition: 'border-color 0.2s',
-        background: `linear-gradient(135deg, ${C.surface} 0%, ${C.surfaceAlt} 100%)`,
+        boxShadow: open
+          ? `inset 0 1px 0 0 rgba(255,255,255,0.06), 0 1px 2px rgba(0,0,0,0.35), 0 12px 34px -14px rgba(0,0,0,0.6), 0 0 0 1px ${accent}22, 0 8px 40px -10px ${accent}30`
+          : undefined,
       }}
     >
       {/* Header bar */}
@@ -569,18 +570,10 @@ interface PageHeaderCardProps {
 export function PageHeaderCard({ eyebrow, title, subtitle, accent }: PageHeaderCardProps) {
   return (
     <div
-      className="animate-fade-in-up"
+      className="animate-fade-in-up glass-header"
       style={{
-        position: 'relative',
-        background: 'rgba(19, 21, 29, 0.72)',
-        backdropFilter: 'blur(10px)',
-        WebkitBackdropFilter: 'blur(10px)',
-        border: `1px solid ${accent}28`,
-        borderRadius: 20,
         padding: '32px 36px 28px',
         marginBottom: 28,
-        overflow: 'hidden',
-        boxShadow: `0 8px 40px -12px rgba(0,0,0,0.55), 0 0 0 1px ${accent}0a`,
       }}
     >
       {/* Top accent rule */}
@@ -593,10 +586,11 @@ export function PageHeaderCard({ eyebrow, title, subtitle, accent }: PageHeaderC
           height: 2,
           background: `linear-gradient(90deg, transparent, ${accent}b0, transparent)`,
           borderRadius: '0 0 2px 2px',
+          zIndex: 1,
         }}
       />
 
-      {/* Radial glow */}
+      {/* Accent radial glow — layered over the surface's blue bleed */}
       <div
         style={{
           position: 'absolute',
@@ -606,10 +600,11 @@ export function PageHeaderCard({ eyebrow, title, subtitle, accent }: PageHeaderC
           height: 280,
           background: `radial-gradient(circle, ${accent}12 0%, transparent 70%)`,
           pointerEvents: 'none',
+          zIndex: 0,
         }}
       />
 
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 24 }}>
+      <div style={{ position: 'relative', zIndex: 1, display: 'flex', alignItems: 'flex-start', gap: 24 }}>
         {/* Logo badge */}
         <div style={{ flexShrink: 0, position: 'relative' }}>
           <div

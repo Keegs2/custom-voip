@@ -210,11 +210,11 @@ function SortHeader({ label, field, currentField, currentDir, onSort }: SortHead
         textTransform: 'uppercase',
         letterSpacing: '0.05em',
         whiteSpace: 'nowrap',
-        background: 'rgba(59,130,246,0.04)',
+        background: 'rgba(59,130,246,0.035)',
         cursor: 'pointer',
         userSelect: 'none',
         transition: 'color 0.15s',
-        borderBottom: '1px solid rgba(59,130,246,0.10)',
+        boxShadow: 'inset 0 -1px 0 0 rgba(59,130,246,0.12)',
       }}
     >
       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
@@ -404,18 +404,9 @@ interface TableRowProps {
 }
 
 function TableRow({ entry, isAdmin, canEdit, pendingValue, onPendingChange }: TableRowProps) {
-  const [hovered, setHovered] = useState(false);
-
   return (
-    <tr
-      style={{
-        borderBottom: '1px solid rgba(59,130,246,0.06)',
-        background: hovered ? 'rgba(59,130,246,0.05)' : 'transparent',
-        transition: 'background 0.18s ease',
-      }}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-    >
+    <tr className="glass-row-hover">
+      {/* borderless — separation & the blue light-up come from .glass-row-hover */}
       {/* DID */}
       <td style={{ padding: '14px 16px' }}>
         <div>
@@ -660,21 +651,13 @@ interface RcfPageHeaderProps {
 function RcfPageHeader({ title, subtitle, totalNumbers, activeCount, disabledCount }: RcfPageHeaderProps) {
   return (
     <div
-      className="animate-fade-in-up"
+      className="animate-fade-in-up glass-header"
       style={{
-        position: 'relative',
-        background: 'rgba(19, 21, 29, 0.72)',
-        backdropFilter: 'blur(10px)',
-        WebkitBackdropFilter: 'blur(10px)',
-        border: '1px solid rgba(59,130,246,0.16)',
-        borderRadius: 20,
         padding: '32px 36px 28px',
         marginBottom: 28,
-        overflow: 'hidden',
-        boxShadow: '0 8px 40px -12px rgba(0,0,0,0.55), 0 0 0 1px rgba(59,130,246,0.06)',
       }}
     >
-      {/* Top accent line */}
+      {/* Top glass-edge accent line — light hitting the leading edge */}
       <div
         style={{
           position: 'absolute',
@@ -684,23 +667,11 @@ function RcfPageHeader({ title, subtitle, totalNumbers, activeCount, disabledCou
           height: 2,
           background: 'linear-gradient(90deg, transparent, rgba(59,130,246,0.7), transparent)',
           borderRadius: '0 0 2px 2px',
+          zIndex: 1,
         }}
       />
 
-      {/* Subtle radial glow background */}
-      <div
-        style={{
-          position: 'absolute',
-          top: -60,
-          right: -60,
-          width: 280,
-          height: 280,
-          background: 'radial-gradient(circle, rgba(59,130,246,0.07) 0%, transparent 70%)',
-          pointerEvents: 'none',
-        }}
-      />
-
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 24 }}>
+      <div style={{ position: 'relative', zIndex: 1, display: 'flex', alignItems: 'flex-start', gap: 24 }}>
         {/* CRAG logo with glow */}
         <div style={{ flexShrink: 0, position: 'relative' }}>
           <div
@@ -788,11 +759,10 @@ function RcfPageHeader({ title, subtitle, totalNumbers, activeCount, disabledCou
             ).map(({ value, label, color }) => (
               <div
                 key={label}
+                className="glass-surface glass-hover"
                 style={{
                   textAlign: 'center',
                   padding: '12px 16px',
-                  background: 'rgba(15,17,23,0.55)',
-                  border: '1px solid rgba(59,130,246,0.12)',
                   borderRadius: 12,
                   minWidth: 68,
                 }}
@@ -1073,13 +1043,10 @@ function TabBar({ active, onChange }: TabBarProps) {
 
   return (
     <div
+      className="glass-surface"
       style={{
         display: 'flex',
         gap: 0,
-        background: 'rgba(15,17,23,0.55)',
-        backdropFilter: 'blur(8px)',
-        WebkitBackdropFilter: 'blur(8px)',
-        border: '1px solid rgba(59,130,246,0.12)',
         borderRadius: 12,
         padding: 4,
         marginBottom: 24,
@@ -1892,12 +1859,12 @@ function CallActivityTab({ customerId }: CallActivityTabProps) {
             backdropFilter: 'blur(12px)',
             WebkitBackdropFilter: 'blur(12px)',
             border: selectedDid
-              ? '1px solid rgba(74,222,128,0.28)'
+              ? '1px solid rgba(59,130,246,0.28)'
               : '1px solid rgba(42,47,69,0.6)',
             borderRadius: 14,
             padding: '12px 18px',
             boxShadow: selectedDid
-              ? '0 0 0 1px rgba(74,222,128,0.08), 0 6px 24px -6px rgba(0,0,0,0.4)'
+              ? '0 0 0 1px rgba(59,130,246,0.08), 0 6px 24px -6px rgba(0,0,0,0.4)'
               : '0 6px 24px -6px rgba(0,0,0,0.4)',
             transition: 'border-color 0.2s, box-shadow 0.2s',
             position: 'relative',
@@ -1911,8 +1878,8 @@ function CallActivityTab({ customerId }: CallActivityTabProps) {
                 width: 26,
                 height: 26,
                 borderRadius: 7,
-                background: selectedDid ? 'rgba(74,222,128,0.14)' : 'rgba(59,130,246,0.10)',
-                border: selectedDid ? '1px solid rgba(74,222,128,0.28)' : '1px solid rgba(59,130,246,0.20)',
+                background: selectedDid ? 'rgba(59,130,246,0.16)' : 'rgba(59,130,246,0.10)',
+                border: selectedDid ? '1px solid rgba(59,130,246,0.30)' : '1px solid rgba(59,130,246,0.20)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
@@ -1920,7 +1887,7 @@ function CallActivityTab({ customerId }: CallActivityTabProps) {
                 flexShrink: 0,
               }}
             >
-              <svg viewBox="0 0 16 16" fill="none" stroke={selectedDid ? '#4ade80' : '#60a5fa'} strokeWidth={1.7} style={{ width: 11, height: 11 }}>
+              <svg viewBox="0 0 16 16" fill="none" stroke="#60a5fa" strokeWidth={1.7} style={{ width: 11, height: 11 }}>
                 <path d="M3 5a2 2 0 0 1 2-2h1.28a.8.8 0 0 1 .758.547l.6 1.797a.8.8 0 0 1-.401.968l-.903.452a8.833 8.833 0 0 0 4.413 4.413l.452-.903a.8.8 0 0 1 .968-.401l1.797.6A.8.8 0 0 1 14 11.72V13a2 2 0 0 1-2 2h-.4C5.87 15 1 10.13 1 4.4V4a1 1 0 0 1 1-1h1z" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
             </div>
@@ -1942,18 +1909,18 @@ function CallActivityTab({ customerId }: CallActivityTabProps) {
                 padding: '7px 12px',
                 borderRadius: 10,
                 border: didDropdownOpen
-                  ? '1px solid rgba(74,222,128,0.55)'
+                  ? '1px solid rgba(59,130,246,0.55)'
                   : selectedDid
-                    ? '1px solid rgba(74,222,128,0.30)'
+                    ? '1px solid rgba(59,130,246,0.30)'
                     : '1px solid rgba(59,130,246,0.20)',
                 background: didDropdownOpen
-                  ? 'rgba(74,222,128,0.06)'
+                  ? 'rgba(59,130,246,0.06)'
                   : selectedDid
-                    ? 'rgba(74,222,128,0.05)'
+                    ? 'rgba(59,130,246,0.05)'
                     : 'rgba(15,17,23,0.5)',
                 cursor: 'pointer',
                 fontFamily: 'inherit',
-                boxShadow: didDropdownOpen ? '0 0 0 3px rgba(74,222,128,0.12)' : 'none',
+                boxShadow: didDropdownOpen ? '0 0 0 3px rgba(59,130,246,0.12)' : 'none',
                 transition: 'border-color 0.18s, background 0.18s, box-shadow 0.18s',
                 outline: 'none',
                 minWidth: 0,
@@ -1962,7 +1929,7 @@ function CallActivityTab({ customerId }: CallActivityTabProps) {
               {/* Selected value */}
               <span style={{ flex: 1, minWidth: 0, textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {selectedDid ? (
-                  <span style={{ fontSize: '0.84rem', fontWeight: 700, color: '#4ade80', fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', letterSpacing: '0.01em' }}>
+                  <span style={{ fontSize: '0.84rem', fontWeight: 700, color: '#60a5fa', fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', letterSpacing: '0.01em' }}>
                     {selectedLabel}
                   </span>
                 ) : (
@@ -1975,7 +1942,7 @@ function CallActivityTab({ customerId }: CallActivityTabProps) {
               <svg
                 viewBox="0 0 16 16"
                 fill="none"
-                stroke={selectedDid ? '#4ade80' : '#64748b'}
+                stroke={selectedDid ? '#60a5fa' : '#64748b'}
                 strokeWidth={2}
                 style={{
                   width: 12,
@@ -2001,10 +1968,10 @@ function CallActivityTab({ customerId }: CallActivityTabProps) {
                   background: 'rgba(15,17,23,0.97)',
                   backdropFilter: 'blur(16px)',
                   WebkitBackdropFilter: 'blur(16px)',
-                  border: '1px solid rgba(74,222,128,0.22)',
+                  border: '1px solid rgba(59,130,246,0.22)',
                   borderRadius: 12,
                   overflow: 'hidden',
-                  boxShadow: '0 16px 40px -8px rgba(0,0,0,0.7), 0 0 0 1px rgba(74,222,128,0.06)',
+                  boxShadow: '0 16px 40px -8px rgba(0,0,0,0.7), 0 0 0 1px rgba(59,130,246,0.06)',
                   animation: 'fadeInUp 0.12s ease',
                 }}
               >
@@ -2020,7 +1987,7 @@ function CallActivityTab({ customerId }: CallActivityTabProps) {
                     padding: '11px 14px',
                     border: 'none',
                     borderBottom: '1px solid rgba(42,47,69,0.6)',
-                    background: !selectedDid ? 'rgba(74,222,128,0.08)' : 'transparent',
+                    background: !selectedDid ? 'rgba(59,130,246,0.08)' : 'transparent',
                     cursor: 'pointer',
                     fontFamily: 'inherit',
                     textAlign: 'left',
@@ -2034,8 +2001,8 @@ function CallActivityTab({ customerId }: CallActivityTabProps) {
                       width: 28,
                       height: 28,
                       borderRadius: 7,
-                      background: !selectedDid ? 'rgba(74,222,128,0.18)' : 'rgba(255,255,255,0.05)',
-                      border: !selectedDid ? '1px solid rgba(74,222,128,0.35)' : '1px solid rgba(255,255,255,0.08)',
+                      background: !selectedDid ? 'rgba(59,130,246,0.18)' : 'rgba(255,255,255,0.05)',
+                      border: !selectedDid ? '1px solid rgba(59,130,246,0.35)' : '1px solid rgba(255,255,255,0.08)',
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
@@ -2043,7 +2010,7 @@ function CallActivityTab({ customerId }: CallActivityTabProps) {
                       transition: 'background 0.14s, border-color 0.14s',
                     }}
                   >
-                    <svg viewBox="0 0 16 16" fill="none" stroke={!selectedDid ? '#4ade80' : '#64748b'} strokeWidth={1.7} style={{ width: 11, height: 11 }}>
+                    <svg viewBox="0 0 16 16" fill="none" stroke={!selectedDid ? '#60a5fa' : '#64748b'} strokeWidth={1.7} style={{ width: 11, height: 11 }}>
                       <rect x="2" y="2" width="5" height="5" rx="1.2" />
                       <rect x="9" y="2" width="5" height="5" rx="1.2" />
                       <rect x="2" y="9" width="5" height="5" rx="1.2" />
@@ -2051,7 +2018,7 @@ function CallActivityTab({ customerId }: CallActivityTabProps) {
                     </svg>
                   </div>
                   <div>
-                    <div style={{ fontSize: '0.84rem', fontWeight: 800, color: !selectedDid ? '#4ade80' : '#e2e8f0', letterSpacing: '-0.01em' }}>
+                    <div style={{ fontSize: '0.84rem', fontWeight: 800, color: !selectedDid ? '#60a5fa' : '#e2e8f0', letterSpacing: '-0.01em' }}>
                       All Numbers
                     </div>
                     <div style={{ fontSize: '0.65rem', color: '#475569', marginTop: 1 }}>
@@ -2059,7 +2026,7 @@ function CallActivityTab({ customerId }: CallActivityTabProps) {
                     </div>
                   </div>
                   {!selectedDid && (
-                    <span style={{ marginLeft: 'auto', fontSize: '0.6rem', fontWeight: 700, color: '#4ade80', background: 'rgba(74,222,128,0.15)', border: '1px solid rgba(74,222,128,0.30)', borderRadius: 20, padding: '2px 8px', letterSpacing: '0.06em', textTransform: 'uppercase', flexShrink: 0 }}>
+                    <span style={{ marginLeft: 'auto', fontSize: '0.6rem', fontWeight: 700, color: '#60a5fa', background: 'rgba(59,130,246,0.15)', border: '1px solid rgba(59,130,246,0.30)', borderRadius: 20, padding: '2px 8px', letterSpacing: '0.06em', textTransform: 'uppercase', flexShrink: 0 }}>
                       Active
                     </span>
                   )}
@@ -2082,7 +2049,7 @@ function CallActivityTab({ customerId }: CallActivityTabProps) {
                           padding: '10px 14px',
                           border: 'none',
                           borderBottom: '1px solid rgba(42,47,69,0.35)',
-                          background: isSelected ? 'rgba(74,222,128,0.07)' : 'transparent',
+                          background: isSelected ? 'rgba(59,130,246,0.07)' : 'transparent',
                           cursor: 'pointer',
                           fontFamily: 'inherit',
                           textAlign: 'left',
@@ -2097,24 +2064,24 @@ function CallActivityTab({ customerId }: CallActivityTabProps) {
                             width: 7,
                             height: 7,
                             borderRadius: '50%',
-                            background: entry.enabled ? '#4ade80' : '#ef4444',
+                            background: entry.enabled ? '#60a5fa' : '#ef4444',
                             flexShrink: 0,
-                            boxShadow: entry.enabled ? '0 0 6px rgba(74,222,128,0.6)' : 'none',
+                            boxShadow: entry.enabled ? '0 0 6px rgba(59,130,246,0.6)' : 'none',
                             display: 'inline-block',
                           }}
                         />
                         <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: '0.84rem', fontWeight: 700, color: isSelected ? '#4ade80' : '#e2e8f0', fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', letterSpacing: '0.01em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          <div style={{ fontSize: '0.84rem', fontWeight: 700, color: isSelected ? '#60a5fa' : '#e2e8f0', fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', letterSpacing: '0.01em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                             {fmt(entry.did)}
                           </div>
                           {entry.name && (
-                            <div style={{ fontSize: '0.65rem', color: isSelected ? 'rgba(74,222,128,0.7)' : '#64748b', marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            <div style={{ fontSize: '0.65rem', color: isSelected ? 'rgba(59,130,246,0.7)' : '#64748b', marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                               {entry.name}
                             </div>
                           )}
                         </div>
                         {isSelected && (
-                          <svg viewBox="0 0 16 16" fill="none" stroke="#4ade80" strokeWidth={2.2} style={{ width: 13, height: 13, flexShrink: 0 }}>
+                          <svg viewBox="0 0 16 16" fill="none" stroke="#60a5fa" strokeWidth={2.2} style={{ width: 13, height: 13, flexShrink: 0 }}>
                             <path d="M2 8l4 4 8-8" strokeLinecap="round" strokeLinejoin="round" />
                           </svg>
                         )}
@@ -2155,21 +2122,21 @@ function CallActivityTab({ customerId }: CallActivityTabProps) {
                   width: 26,
                   height: 26,
                   borderRadius: 7,
-                  border: '1px solid rgba(74,222,128,0.30)',
-                  background: 'rgba(74,222,128,0.08)',
-                  color: '#4ade80',
+                  border: '1px solid rgba(59,130,246,0.30)',
+                  background: 'rgba(59,130,246,0.08)',
+                  color: '#60a5fa',
                   cursor: 'pointer',
                   padding: 0,
                   transition: 'background 0.15s, border-color 0.15s',
                   flexShrink: 0,
                 }}
                 onMouseEnter={(e) => {
-                  e.currentTarget.style.background = 'rgba(74,222,128,0.16)';
-                  e.currentTarget.style.borderColor = 'rgba(74,222,128,0.5)';
+                  e.currentTarget.style.background = 'rgba(59,130,246,0.16)';
+                  e.currentTarget.style.borderColor = 'rgba(59,130,246,0.5)';
                 }}
                 onMouseLeave={(e) => {
-                  e.currentTarget.style.background = 'rgba(74,222,128,0.08)';
-                  e.currentTarget.style.borderColor = 'rgba(74,222,128,0.30)';
+                  e.currentTarget.style.background = 'rgba(59,130,246,0.08)';
+                  e.currentTarget.style.borderColor = 'rgba(59,130,246,0.30)';
                 }}
               >
                 <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={2.2} style={{ width: 10, height: 10 }}>
@@ -2295,9 +2262,9 @@ function CallActivityTab({ customerId }: CallActivityTabProps) {
                 gap: 5,
                 fontSize: '0.65rem',
                 fontWeight: 700,
-                color: '#4ade80',
-                background: 'rgba(74,222,128,0.10)',
-                border: '1px solid rgba(74,222,128,0.25)',
+                color: '#60a5fa',
+                background: 'rgba(59,130,246,0.10)',
+                border: '1px solid rgba(59,130,246,0.25)',
                 borderRadius: 20,
                 padding: '2px 8px 2px 6px',
                 whiteSpace: 'nowrap',
@@ -2310,10 +2277,10 @@ function CallActivityTab({ customerId }: CallActivityTabProps) {
                   width: 5,
                   height: 5,
                   borderRadius: '50%',
-                  background: '#4ade80',
+                  background: '#60a5fa',
                   display: 'inline-block',
                   flexShrink: 0,
-                  boxShadow: '0 0 5px rgba(74,222,128,0.7)',
+                  boxShadow: '0 0 5px rgba(59,130,246,0.7)',
                 }}
               />
               {selectedLabel}
@@ -4483,18 +4450,18 @@ export function RcfPage() {
                     boxSizing: 'border-box',
                     padding: '9px 36px 9px 36px',
                     fontSize: '0.83rem',
-                    background: searchFocused ? 'rgba(19,21,29,0.85)' : 'rgba(19,21,29,0.65)',
+                    background: searchFocused ? 'rgba(19,21,29,0.82)' : 'rgba(19,21,29,0.55)',
                     backdropFilter: 'blur(8px)',
                     WebkitBackdropFilter: 'blur(8px)',
-                    border: `1px solid ${searchFocused ? 'rgba(59,130,246,0.45)' : 'rgba(59,130,246,0.12)'}`,
+                    border: '1px solid transparent',
                     borderRadius: 11,
                     color: '#e2e8f0',
                     outline: 'none',
                     fontFamily: 'inherit',
-                    transition: 'border-color 0.2s, box-shadow 0.2s, background 0.2s',
+                    transition: 'box-shadow 0.2s, background 0.2s',
                     boxShadow: searchFocused
-                      ? '0 0 0 3px rgba(59,130,246,0.14), 0 4px 16px rgba(0,0,0,0.3)'
-                      : '0 2px 8px rgba(0,0,0,0.2)',
+                      ? 'inset 0 1px 0 rgba(255,255,255,0.06), inset 0 0 0 1px rgba(59,130,246,0.5), 0 0 0 3px rgba(59,130,246,0.16), 0 4px 18px -6px rgba(59,130,246,0.28)'
+                      : 'inset 0 1px 0 rgba(255,255,255,0.04), inset 0 0 0 1px rgba(59,130,246,0.1), 0 2px 8px rgba(0,0,0,0.2)',
                   }}
                 />
                 {searchInput && (
@@ -4548,23 +4515,25 @@ export function RcfPage() {
                     fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
                     textAlign: 'center',
                     letterSpacing: '0.08em',
-                    background: npaFilter.length === 3 ? 'rgba(19,21,29,0.85)' : 'rgba(19,21,29,0.65)',
+                    background: npaFilter.length === 3 ? 'rgba(19,21,29,0.82)' : 'rgba(19,21,29,0.55)',
                     backdropFilter: 'blur(8px)',
                     WebkitBackdropFilter: 'blur(8px)',
-                    border: `1px solid ${npaFilter.length === 3 ? 'rgba(59,130,246,0.55)' : 'rgba(59,130,246,0.12)'}`,
+                    border: '1px solid transparent',
                     borderRadius: 9,
                     color: npaFilter.length === 3 ? '#60a5fa' : '#e2e8f0',
                     outline: 'none',
-                    boxShadow: npaFilter.length === 3 ? '0 0 0 3px rgba(59,130,246,0.14)' : '0 2px 8px rgba(0,0,0,0.2)',
-                    transition: 'border-color 0.2s, box-shadow 0.2s, color 0.2s',
+                    boxShadow: npaFilter.length === 3
+                      ? 'inset 0 1px 0 rgba(255,255,255,0.05), inset 0 0 0 1px rgba(59,130,246,0.55), 0 0 0 3px rgba(59,130,246,0.14)'
+                      : 'inset 0 1px 0 rgba(255,255,255,0.04), inset 0 0 0 1px rgba(59,130,246,0.1), 0 2px 8px rgba(0,0,0,0.2)',
+                    transition: 'box-shadow 0.2s, background 0.2s, color 0.2s',
                   }}
                   onFocus={(e) => {
-                    e.currentTarget.style.borderColor = 'rgba(59,130,246,0.45)';
-                    e.currentTarget.style.boxShadow = '0 0 0 3px rgba(59,130,246,0.14), 0 4px 16px rgba(0,0,0,0.3)';
+                    e.currentTarget.style.boxShadow = 'inset 0 1px 0 rgba(255,255,255,0.06), inset 0 0 0 1px rgba(59,130,246,0.5), 0 0 0 3px rgba(59,130,246,0.16), 0 4px 18px -6px rgba(59,130,246,0.28)';
                   }}
                   onBlur={(e) => {
-                    e.currentTarget.style.borderColor = npaFilter.length === 3 ? 'rgba(59,130,246,0.55)' : 'rgba(59,130,246,0.12)';
-                    e.currentTarget.style.boxShadow = npaFilter.length === 3 ? '0 0 0 3px rgba(59,130,246,0.14)' : '0 2px 8px rgba(0,0,0,0.2)';
+                    e.currentTarget.style.boxShadow = npaFilter.length === 3
+                      ? 'inset 0 1px 0 rgba(255,255,255,0.05), inset 0 0 0 1px rgba(59,130,246,0.55), 0 0 0 3px rgba(59,130,246,0.14)'
+                      : 'inset 0 1px 0 rgba(255,255,255,0.04), inset 0 0 0 1px rgba(59,130,246,0.1), 0 2px 8px rgba(0,0,0,0.2)';
                   }}
                 />
                 {npaFilter && (
@@ -4655,7 +4624,7 @@ export function RcfPage() {
                 ))}
               </div>
               {serverTotal > pageSize && (
-                <div style={{ marginTop: 20, background: 'rgba(19,21,29,0.65)', backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)', border: '1px solid rgba(59,130,246,0.10)', borderRadius: 14, overflow: 'hidden' }}>
+                <div className="glass-surface" style={{ marginTop: 20, borderRadius: 14, overflow: 'hidden' }}>
                   <PaginationControls
                     currentPage={page}
                     totalPages={totalPages}
@@ -4671,7 +4640,7 @@ export function RcfPage() {
 
           {/* Table View */}
           {!isLoading && !isError && sortedEntries.length > 0 && !useCardView && (
-            <div style={{ background: 'rgba(19,21,29,0.68)', backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)', border: '1px solid rgba(59,130,246,0.12)', borderRadius: 16, overflow: 'hidden', boxShadow: '0 8px 32px -8px rgba(0,0,0,0.45)' }}>
+            <div className="glass-surface" style={{ borderRadius: 16, overflow: 'hidden' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
                   <tr>
@@ -4679,7 +4648,7 @@ export function RcfPage() {
                     <SortHeader label="Name"       field="name"       currentField={sortField} currentDir={sortDir} onSort={handleSort} />
                     <SortHeader label="Forward To" field="forward_to" currentField={sortField} currentDir={sortDir} onSort={handleSort} />
                     <SortHeader label="Status"     field="status"     currentField={sortField} currentDir={sortDir} onSort={handleSort} />
-                    <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: '0.6rem', fontWeight: 600, color: '#334155', textTransform: 'uppercase', letterSpacing: '0.05em', whiteSpace: 'nowrap', background: 'rgba(59,130,246,0.04)' }}>Caller ID</th>
+                    <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: '0.6rem', fontWeight: 600, color: '#334155', textTransform: 'uppercase', letterSpacing: '0.05em', whiteSpace: 'nowrap', background: 'rgba(59,130,246,0.035)', boxShadow: 'inset 0 -1px 0 0 rgba(59,130,246,0.12)' }}>Caller ID</th>
                     {isAdmin && (
                       <SortHeader label="Customer" field="customer" currentField={sortField} currentDir={sortDir} onSort={handleSort} />
                     )}

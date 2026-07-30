@@ -33,9 +33,8 @@ interface StatCardProps {
 function StatCard({ label, value, accent = '#3b82f6' }: StatCardProps) {
   return (
     <div
+      className="glass-surface glass-hover"
       style={{
-        background: 'linear-gradient(135deg, rgba(30,33,48,0.9) 0%, rgba(19,21,29,0.95) 100%)',
-        border: '1px solid rgba(42,47,69,0.6)',
         borderRadius: 14,
         padding: '20px 24px',
         position: 'relative',
@@ -91,14 +90,12 @@ interface SectionCardProps {
 function SectionCard({ children, accent = '#3b82f6' }: SectionCardProps) {
   return (
     <div
+      className="glass-surface"
       style={{
-        background: 'linear-gradient(135deg, rgba(26,29,39,0.95) 0%, rgba(15,17,23,1) 100%)',
-        border: '1px solid rgba(42,47,69,0.6)',
         borderRadius: 16,
         padding: '28px 32px',
         position: 'relative',
         overflow: 'hidden',
-        boxShadow: '0 4px 24px rgba(0,0,0,0.25)',
       }}
     >
       <div
@@ -665,7 +662,7 @@ function CustomerUsageSection({ customerId, accent }: CustomerUsageSectionProps)
             <div
               style={{
                 background: 'rgba(10,12,18,0.7)',
-                border: '1px solid rgba(42,47,69,0.35)',
+                border: '1px solid rgba(59,130,246,0.10)',
                 borderRadius: 10,
                 padding: '16px 16px 6px',
               }}
@@ -693,7 +690,7 @@ function CustomerUsageSection({ customerId, accent }: CustomerUsageSectionProps)
             <div
               style={{
                 background: 'rgba(10,12,18,0.5)',
-                border: '1px solid rgba(42,47,69,0.35)',
+                border: '1px solid rgba(59,130,246,0.10)',
                 borderRadius: 10,
                 overflow: 'hidden',
               }}
@@ -769,7 +766,7 @@ function AccountDetailView({ customer, onEdit, onDelete }: AccountDetailViewProp
   const showUcaas = customer.account_type === 'ucaas' || customer.ucaas_enabled === true;
 
   const accountTypeAccentMap: Record<string, string> = {
-    rcf: '#22c55e',
+    rcf: '#3b82f6',
     api: '#a855f7',
     trunk: '#f59e0b',
     hybrid: '#3b82f6',
@@ -868,7 +865,7 @@ function AccountDetailView({ customer, onEdit, onDelete }: AccountDetailViewProp
 
       {/* Service sections */}
       {showRcf && (
-        <SectionCard accent="#22c55e">
+        <SectionCard accent="#3b82f6">
           <CustomerRcfSection customerId={customer.id} />
         </SectionCard>
       )}
@@ -1155,7 +1152,7 @@ export function CustomerAccountPage() {
 
   // ---- Derived display values ----
   const accountTypeAccent: Record<string, string> = {
-    rcf: '#22c55e',
+    rcf: '#3b82f6',
     api: '#a855f7',
     trunk: '#f59e0b',
     hybrid: '#3b82f6',
@@ -1203,14 +1200,12 @@ export function CustomerAccountPage() {
 
       {/* Header card */}
       <div
+        className="glass-surface"
         style={{
-          background: 'linear-gradient(135deg, rgba(30,33,48,0.95) 0%, rgba(19,21,29,0.98) 100%)',
-          border: '1px solid rgba(42,47,69,0.6)',
           borderRadius: 18,
           padding: '32px 40px',
           position: 'relative',
           overflow: 'hidden',
-          boxShadow: '0 8px 40px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.04)',
         }}
       >
         {/* Gradient accent top border */}

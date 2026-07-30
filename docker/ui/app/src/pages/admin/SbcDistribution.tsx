@@ -6,13 +6,13 @@ import { ApiError } from '../../api/client';
 // ─── Colour palette ────────────────────────────────────────────────────────
 // Each SBC slot maps to a distinct colour. SBC-3+ overflow uses purple.
 const SBC_COLORS: Record<number, string> = {
-  0: '#3b82f6', // blue   — SBC-1
-  1: '#06b6d4', // cyan   — SBC-2
-  2: '#8b5cf6', // purple — SBC-3+
+  0: '#3b82f6', // blue        — SBC-1
+  1: '#60a5fa', // light blue  — SBC-2
+  2: '#93c5fd', // pale blue   — SBC-3+
 };
 
 function sbcColor(index: number): string {
-  return SBC_COLORS[index] ?? '#8b5cf6';
+  return SBC_COLORS[index] ?? '#93c5fd';
 }
 
 // ─── Pulsing live indicator ─────────────────────────────────────────────────
@@ -266,16 +266,12 @@ export function SbcDistribution() {
   // ─── Render ──────────────────────────────────────────────────────────────
 
   const cardStyle: React.CSSProperties = {
-    background: 'rgba(15,17,23,0.75)',
-    border: '1px solid rgba(42,47,69,0.6)',
     borderRadius: 12,
     padding: '20px 24px',
-    backdropFilter: 'blur(8px)',
-    boxShadow: '0 4px 20px rgba(0,0,0,0.35)',
   };
 
   return (
-    <div style={cardStyle}>
+    <div className="glass-surface" style={cardStyle}>
       {/* ── Header ── */}
       <div
         style={{

@@ -61,11 +61,11 @@ function ApiDidUrlInput({
       placeholder="https://example.com/voice"
       className={[
         'text-[0.82rem] px-2 py-[4px] rounded-md w-full max-w-[220px]',
-        'border bg-[#0d0f15] text-[#e2e8f0] outline-none',
+        'border bg-[rgba(13,15,21,0.55)] text-[#e2e8f0] outline-none',
         'transition-[border-color,box-shadow] duration-150',
         'focus:border-[#3b82f6] focus:shadow-[0_0_0_3px_rgba(59,130,246,0.2)]',
         'placeholder:text-[#718096] disabled:opacity-50',
-        saved ? 'border-green-500/50 text-green-400' : 'border-[#2a2f45]',
+        saved ? 'border-[#3b82f6]/50 text-[#60a5fa]' : 'border-[#3b82f6]/15',
       ].join(' ')}
     />
   );
@@ -141,7 +141,7 @@ export function CustomerApiSection({ customerId }: CustomerApiSectionProps) {
   const tier = tierData?.tier;
 
   return (
-    <div style={{ paddingTop: 16, borderTop: '1px solid rgba(42,47,69,0.5)' }}>
+    <div style={{ paddingTop: 16, borderTop: '1px solid rgba(59,130,246,0.12)' }}>
       <div className="flex items-center justify-between mb-3">
         <span className="text-[0.63rem] font-bold text-[#718096] uppercase tracking-[0.04em]">
           API Configuration
@@ -185,7 +185,7 @@ export function CustomerApiSection({ customerId }: CustomerApiSectionProps) {
               {['DID', 'Voice URL', 'Status', ''].map((h) => (
                 <th
                   key={h}
-                  className="text-left px-2 py-[5px] text-[0.65rem] font-bold uppercase tracking-[0.04em] text-[#718096] border-b border-[#2a2f45]"
+                  className="text-left px-2 py-[5px] text-[0.65rem] font-bold uppercase tracking-[0.04em] text-[#718096] border-b border-[#3b82f6]/15"
                 >
                   {h}
                 </th>
@@ -194,7 +194,7 @@ export function CustomerApiSection({ customerId }: CustomerApiSectionProps) {
           </thead>
           <tbody>
             {entries.map((did) => (
-              <tr key={did.id} className="border-b border-[#2a2f45]/40 last:border-0">
+              <tr key={did.id} className="glass-row-hover border-b border-[#3b82f6]/10 last:border-0">
                 <td className="px-2 py-[6px] font-mono whitespace-nowrap text-[#e2e8f0]">
                   {did.did}
                 </td>
@@ -240,11 +240,10 @@ export function CustomerApiSection({ customerId }: CustomerApiSectionProps) {
       <form
         onSubmit={handleCreate}
         onClick={(e) => e.stopPropagation()}
+        className="glass-surface"
         style={{
           marginTop: 12,
           padding: '12px',
-          background: 'rgba(19,21,29,0.7)',
-          border: '1px solid rgba(42,47,69,0.6)',
           borderRadius: 10,
         }}
       >
@@ -262,7 +261,7 @@ export function CustomerApiSection({ customerId }: CustomerApiSectionProps) {
               onChange={(e) => setNewDid(e.target.value)}
               onClick={(e) => e.stopPropagation()}
               placeholder="+1XXXXXXXXXX"
-              className="text-[0.83rem] px-2 py-[5px] rounded-lg w-[150px] border border-[#2a2f45] bg-[#0d0f15] text-[#e2e8f0] outline-none focus:border-[#3b82f6] placeholder:text-[#718096]"
+              className="text-[0.83rem] px-2 py-[5px] rounded-lg w-[150px] border border-[#3b82f6]/15 bg-[rgba(13,15,21,0.55)] text-[#e2e8f0] outline-none focus:border-[#3b82f6] placeholder:text-[#718096]"
             />
           </div>
           <div className="flex flex-col gap-1">
@@ -275,7 +274,7 @@ export function CustomerApiSection({ customerId }: CustomerApiSectionProps) {
               onChange={(e) => setNewUrl(e.target.value)}
               onClick={(e) => e.stopPropagation()}
               placeholder="https://example.com/voice"
-              className="text-[0.83rem] px-2 py-[5px] rounded-lg w-[220px] border border-[#2a2f45] bg-[#0d0f15] text-[#e2e8f0] outline-none focus:border-[#3b82f6] placeholder:text-[#718096]"
+              className="text-[0.83rem] px-2 py-[5px] rounded-lg w-[220px] border border-[#3b82f6]/15 bg-[rgba(13,15,21,0.55)] text-[#e2e8f0] outline-none focus:border-[#3b82f6] placeholder:text-[#718096]"
             />
           </div>
           <Button

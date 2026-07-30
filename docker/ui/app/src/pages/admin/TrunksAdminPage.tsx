@@ -30,7 +30,7 @@ const COL_COUNT = 10;
 
 const CELL_STYLE: React.CSSProperties = {
   padding: '13px 16px',
-  borderBottom: '1px solid rgba(42,47,69,0.45)',
+  boxShadow: 'inset 0 -1px 0 0 rgba(255,255,255,0.025)',
   verticalAlign: 'middle',
   whiteSpace: 'nowrap',
 };
@@ -147,8 +147,8 @@ function IpSection({ trunk }: { trunk: Trunk }) {
                 gap: 10,
                 padding: '8px 12px',
                 borderRadius: 8,
-                background: 'rgba(15,17,23,0.6)',
-                border: '1px solid rgba(42,47,69,0.5)',
+                background: 'rgba(13,15,21,0.55)',
+                border: '1px solid rgba(59,130,246,0.10)',
               }}
             >
               <span style={{ fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', fontSize: '0.82rem', color: '#e2e8f0', flex: 1 }}>
@@ -426,8 +426,8 @@ function DidSection({ trunk }: { trunk: Trunk }) {
                 gap: 10,
                 padding: '8px 12px',
                 borderRadius: 8,
-                background: 'rgba(15,17,23,0.6)',
-                border: '1px solid rgba(42,47,69,0.5)',
+                background: 'rgba(13,15,21,0.55)',
+                border: '1px solid rgba(59,130,246,0.10)',
               }}
             >
               <span style={{ fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', fontSize: '0.82rem', color: '#e2e8f0', flex: 1 }}>
@@ -494,8 +494,8 @@ function DidSection({ trunk }: { trunk: Trunk }) {
               boxSizing: 'border-box',
               padding: '7px 10px',
               borderRadius: 6,
-              border: '1px solid rgba(42,47,69,0.6)',
-              background: '#0f1117',
+              border: '1px solid rgba(59,130,246,0.15)',
+              background: 'rgba(13,15,21,0.55)',
               color: '#e2e8f0',
               fontSize: '0.82rem',
               fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
@@ -506,7 +506,7 @@ function DidSection({ trunk }: { trunk: Trunk }) {
               (e.target as HTMLInputElement).style.borderColor = '#3b82f6';
             }}
             onBlurCapture={(e) => {
-              (e.target as HTMLInputElement).style.borderColor = 'rgba(42,47,69,0.6)';
+              (e.target as HTMLInputElement).style.borderColor = 'rgba(59,130,246,0.15)';
             }}
           />
 
@@ -520,7 +520,7 @@ function DidSection({ trunk }: { trunk: Trunk }) {
                 right: 0,
                 zIndex: 50,
                 background: '#181b28',
-                border: '1px solid rgba(42,47,69,0.6)',
+                border: '1px solid rgba(59,130,246,0.15)',
                 borderRadius: 8,
                 boxShadow: '0 8px 24px rgba(0,0,0,0.45)',
                 maxHeight: 220,
@@ -867,7 +867,7 @@ function TrunkExpanded({ trunk, onDelete }: TrunkExpandedProps) {
           style={{
             marginBottom: 28,
             paddingBottom: 28,
-            borderBottom: '1px solid rgba(42,47,69,0.5)',
+            borderBottom: '1px solid rgba(59,130,246,0.12)',
           }}
         >
           <EditTrunkForm trunk={trunk} onSaved={() => setIsEditing(false)} />
@@ -907,7 +907,7 @@ const inlineSaveBtn: React.CSSProperties = {
   padding: '4px 10px',
   borderRadius: 4,
   border: 'none',
-  background: '#22c55e',
+  background: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
   color: '#fff',
   cursor: 'pointer',
   flexShrink: 0,
@@ -1034,7 +1034,7 @@ function TrunkRow({ trunk, isExpanded, onToggleExpand, onToggleEnabled, onDelete
         }}
         onMouseEnter={(e) => {
           if (!isExpanded) {
-            (e.currentTarget as HTMLTableRowElement).style.background = 'rgba(255,255,255,0.018)';
+            (e.currentTarget as HTMLTableRowElement).style.background = 'rgba(59,130,246,0.05)';
           }
         }}
         onMouseLeave={(e) => {
@@ -1168,7 +1168,7 @@ function TrunkRow({ trunk, isExpanded, onToggleExpand, onToggleEnabled, onDelete
             colSpan={COL_COUNT}
             style={{
               padding: 0,
-              borderBottom: '1px solid rgba(42,47,69,0.6)',
+              borderBottom: '1px solid rgba(59,130,246,0.12)',
             }}
           >
             <TrunkExpanded
@@ -1229,12 +1229,10 @@ function CreateTrunkForm({ onClose }: CreateTrunkFormProps) {
   return (
     <form
       onSubmit={handleSubmit}
+      className="glass-surface"
       style={{
-        background: 'linear-gradient(135deg, rgba(30,33,48,0.9) 0%, rgba(19,21,29,0.95) 100%)',
-        border: '1px solid rgba(42,47,69,0.6)',
         borderRadius: 16,
         padding: '28px 28px 24px',
-        boxShadow: '0 4px 24px rgba(0,0,0,0.3)',
         position: 'relative',
         overflow: 'hidden',
       }}
@@ -1325,7 +1323,7 @@ function CreateTrunkForm({ onClose }: CreateTrunkFormProps) {
           display: 'flex',
           gap: 8,
           paddingTop: 20,
-          borderTop: '1px solid rgba(42,47,69,0.6)',
+          borderTop: '1px solid rgba(59,130,246,0.12)',
         }}
       >
         <Button type="submit" variant="primary" size="sm" loading={mutation.isPending}>
@@ -1401,13 +1399,12 @@ export function TrunksAdminPage() {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       {/* Toolbar */}
       <div
+        className="glass-surface"
         style={{
           display: 'flex',
           alignItems: 'center',
           gap: 16,
           flexWrap: 'wrap',
-          background: 'linear-gradient(135deg, rgba(30,33,48,0.9) 0%, rgba(19,21,29,0.95) 100%)',
-          border: '1px solid rgba(42,47,69,0.6)',
           borderRadius: 12,
           padding: '20px 24px',
           marginBottom: 4,
@@ -1424,8 +1421,8 @@ export function TrunksAdminPage() {
               padding: '8px 14px',
               height: 38,
               borderRadius: 8,
-              border: '1px solid rgba(42,47,69,0.8)',
-              background: 'rgba(13,15,21,0.8)',
+              border: '1px solid rgba(59,130,246,0.15)',
+              background: 'rgba(13,15,21,0.55)',
               color: '#e2e8f0',
               outline: 'none',
               transition: 'border-color 0.15s, box-shadow 0.15s',
@@ -1437,7 +1434,7 @@ export function TrunksAdminPage() {
               e.currentTarget.style.boxShadow = `0 0 0 3px rgba(245,158,11,0.15)`;
             }}
             onBlur={(e) => {
-              e.currentTarget.style.borderColor = 'rgba(42,47,69,0.8)';
+              e.currentTarget.style.borderColor = 'rgba(59,130,246,0.15)';
               e.currentTarget.style.boxShadow = 'none';
             }}
           />

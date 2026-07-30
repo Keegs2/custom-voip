@@ -126,23 +126,150 @@ body {
   color: #e2e8f0;
 }
 
-/* ─── Form control base styles ───────────────────────────── */
+/* ══════════════════════════════════════════════════════════════════════════
+   LIQUID-GLASS DESIGN SYSTEM
+   Blue-on-dark only (#3b82f6 accent). Borderless: depth is drawn with light,
+   ambient shadow, and negative space — never a hard 1px outline.
+
+   Building blocks:
+     .glass-surface   frosted translucent panel — backdrop blur+saturate, a top
+                      inner-highlight line (light catching the glass edge), and a
+                      soft ambient float shadow. NO hard border.
+     .glass-hover     opt-in blue light-up on :hover — accent glow bloom (layered
+                      box-shadow), a faint lift, and a brighter top sheen. Pair it
+                      with .glass-surface. GPU-cheap (transform + box-shadow only).
+     .glass-header    the premium page-hero variant of .glass-surface (larger blur,
+                      stronger top edge, radial accent bleed via ::after).
+     .glass-row-hover per-row hover for tables — CHEAP (bg tint + inset highlight +
+                      soft shadow, NO backdrop-filter) so long lists stay smooth.
+     .glass-input     borderless frosted input/select field (see .form-control).
+
+   The blue "light-up" is a layered box-shadow: an outer accent bloom
+   (rgba(59,130,246,…)) for the glow, an ambient black drop for float depth, plus
+   an inset top-highlight line for the glass sheen — all animated together over
+   ~200ms ease. Motion (the lift) is disabled under prefers-reduced-motion.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.glass-surface {
+  position: relative;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.02) 0%, transparent 42%),
+    linear-gradient(135deg, rgba(30, 33, 48, 0.72) 0%, rgba(19, 21, 29, 0.82) 100%);
+  backdrop-filter: blur(16px) saturate(160%);
+  -webkit-backdrop-filter: blur(16px) saturate(160%);
+  border: 1px solid transparent;      /* keeps layout box; no visible outline */
+  border-radius: 16px;
+  box-shadow:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.06),   /* top glass-edge highlight */
+    0 1px 2px rgba(0, 0, 0, 0.35),
+    0 12px 34px -14px rgba(0, 0, 0, 0.6);         /* soft ambient float */
+  transition: box-shadow 0.2s ease, transform 0.2s ease, background 0.2s ease;
+}
+
+.glass-hover:hover {
+  background:
+    linear-gradient(180deg, rgba(59, 130, 246, 0.05) 0%, transparent 46%),
+    linear-gradient(135deg, rgba(33, 38, 56, 0.8) 0%, rgba(20, 23, 33, 0.86) 100%);
+  box-shadow:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.1),          /* brighter sheen */
+    inset 0 0 0 1px rgba(59, 130, 246, 0.14),          /* faint blue edge */
+    0 2px 4px rgba(0, 0, 0, 0.35),
+    0 14px 40px -12px rgba(0, 0, 0, 0.62),
+    0 0 0 1px rgba(59, 130, 246, 0.1),
+    0 8px 40px -6px rgba(59, 130, 246, 0.35);          /* the blue glow bloom */
+}
+
+.glass-hover {
+  transition: box-shadow 0.2s ease, transform 0.2s ease, background 0.2s ease;
+}
+
+.glass-hover:hover {
+  transform: translateY(-2px);
+}
+
+/* Premium page-hero surface — deeper blur, stronger edge, radial accent bleed */
+.glass-header {
+  position: relative;
+  overflow: hidden;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.03) 0%, transparent 38%),
+    linear-gradient(135deg, rgba(24, 28, 42, 0.78) 0%, rgba(15, 17, 23, 0.86) 100%);
+  backdrop-filter: blur(22px) saturate(170%);
+  -webkit-backdrop-filter: blur(22px) saturate(170%);
+  border: 1px solid transparent;
+  border-radius: 20px;
+  box-shadow:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.08),
+    0 1px 2px rgba(0, 0, 0, 0.4),
+    0 20px 50px -18px rgba(0, 0, 0, 0.62);
+}
+
+/* Radial blue accent bleed behind the header content */
+.glass-header::after {
+  content: '';
+  position: absolute;
+  top: -80px;
+  right: -60px;
+  width: 340px;
+  height: 340px;
+  background: radial-gradient(circle, rgba(59, 130, 246, 0.1) 0%, transparent 68%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Cheap per-row hover for tables — no backdrop-filter (perf) */
+.glass-row-hover {
+  transition: background 0.18s ease, box-shadow 0.18s ease;
+}
+
+.glass-row-hover:hover {
+  background: rgba(59, 130, 246, 0.055);
+  box-shadow:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.05),
+    inset 3px 0 0 0 rgba(59, 130, 246, 0.55),          /* accent leading edge */
+    0 1px 12px -2px rgba(59, 130, 246, 0.16);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .glass-hover:hover { transform: none; }
+}
+
+/* ─── Form control base styles — borderless frosted glass ─── */
 .form-control {
   font-size: 0.875rem;
-  padding: 8px 12px;
-  border: 1.5px solid #2a2f45;
-  border-radius: 8px;
+  padding: 9px 12px;
+  border: 1px solid transparent;
+  border-radius: 9px;
   outline: none;
-  transition: border-color 0.15s, box-shadow 0.15s;
-  background: #1e2130;
+  transition: box-shadow 0.18s ease, background 0.18s ease;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.015) 0%, transparent 60%),
+    rgba(15, 17, 23, 0.55);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  box-shadow:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.04),
+    inset 0 0 0 1px rgba(59, 130, 246, 0.1);
   color: #e2e8f0;
   width: 100%;
   font-family: inherit;
 }
 
+.form-control:hover {
+  box-shadow:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.05),
+    inset 0 0 0 1px rgba(59, 130, 246, 0.2);
+}
+
 .form-control:focus {
-  border-color: #3b82f6;
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+  background:
+    linear-gradient(180deg, rgba(59, 130, 246, 0.04) 0%, transparent 60%),
+    rgba(15, 17, 23, 0.72);
+  box-shadow:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.06),
+    inset 0 0 0 1px rgba(59, 130, 246, 0.5),
+    0 0 0 3px rgba(59, 130, 246, 0.16),
+    0 4px 18px -6px rgba(59, 130, 246, 0.28);
 }
 
 .form-control::placeholder {

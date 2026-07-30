@@ -20,22 +20,7 @@ const inputStyle: React.CSSProperties = {
   padding: '8px 12px',
   borderRadius: 8,
   width: '100%',
-  border: '1px solid rgba(42,47,69,0.8)',
-  background: 'rgba(13,15,21,0.8)',
-  color: '#e2e8f0',
-  outline: 'none',
-  transition: 'border-color 0.15s, box-shadow 0.15s',
 };
-
-function handleFocus(e: React.FocusEvent<HTMLInputElement>) {
-  e.currentTarget.style.borderColor = '#3b82f6';
-  e.currentTarget.style.boxShadow = '0 0 0 3px rgba(59,130,246,0.15)';
-}
-
-function handleBlur(e: React.FocusEvent<HTMLInputElement>) {
-  e.currentTarget.style.borderColor = 'rgba(42,47,69,0.8)';
-  e.currentTarget.style.boxShadow = 'none';
-}
 
 interface FormState {
   prefix: string;
@@ -122,12 +107,11 @@ export function RatesAddForm() {
   return (
     <div>
       <div
+        className="glass-surface"
         style={{
           display: 'flex',
           alignItems: 'center',
           gap: 16,
-          background: 'linear-gradient(135deg, rgba(30,33,48,0.9) 0%, rgba(19,21,29,0.95) 100%)',
-          border: '1px solid rgba(42,47,69,0.6)',
           borderRadius: 12,
           padding: '16px 24px',
           marginBottom: isOpen ? 0 : 4,
@@ -143,13 +127,11 @@ export function RatesAddForm() {
 
       {isOpen && (
         <div
+          className="glass-surface"
           style={{
             marginTop: 16,
-            background: 'linear-gradient(135deg, rgba(30,33,48,0.9) 0%, rgba(19,21,29,0.95) 100%)',
-            border: '1px solid rgba(42,47,69,0.6)',
             borderRadius: 16,
             padding: '28px 28px 24px',
-            boxShadow: '0 4px 24px rgba(0,0,0,0.3)',
             position: 'relative',
             overflow: 'hidden',
           }}
@@ -187,12 +169,11 @@ export function RatesAddForm() {
                 Prefix <span style={{ color: '#f87171', marginLeft: 2 }}>*</span>
               </label>
               <input
+                className="form-control"
                 style={inputStyle}
                 placeholder="e.g. 1800"
                 value={form.prefix}
                 onChange={(e) => set('prefix', e.target.value)}
-                onFocus={handleFocus}
-                onBlur={handleBlur}
               />
             </div>
 
@@ -200,12 +181,11 @@ export function RatesAddForm() {
             <div style={{ display: 'flex', flexDirection: 'column' }} className="lg:col-span-2">
               <label style={labelStyle}>Description</label>
               <input
+                className="form-control"
                 style={inputStyle}
                 placeholder="e.g. US Toll-Free"
                 value={form.description}
                 onChange={(e) => set('description', e.target.value)}
-                onFocus={handleFocus}
-                onBlur={handleBlur}
               />
             </div>
 
@@ -215,6 +195,7 @@ export function RatesAddForm() {
                 Sell Rate / Min <span style={{ color: '#f87171', marginLeft: 2 }}>*</span>
               </label>
               <input
+                className="form-control"
                 style={inputStyle}
                 type="number"
                 step="0.0001"
@@ -222,8 +203,6 @@ export function RatesAddForm() {
                 placeholder="0.0100"
                 value={form.rate_per_min}
                 onChange={(e) => set('rate_per_min', e.target.value)}
-                onFocus={handleFocus}
-                onBlur={handleBlur}
               />
             </div>
 
@@ -233,6 +212,7 @@ export function RatesAddForm() {
                 Cost Rate / Min <span style={{ color: '#f87171', marginLeft: 2 }}>*</span>
               </label>
               <input
+                className="form-control"
                 style={inputStyle}
                 type="number"
                 step="0.0001"
@@ -240,8 +220,6 @@ export function RatesAddForm() {
                 placeholder="0.0060"
                 value={form.cost_per_min}
                 onChange={(e) => set('cost_per_min', e.target.value)}
-                onFocus={handleFocus}
-                onBlur={handleBlur}
               />
             </div>
 
@@ -276,14 +254,13 @@ export function RatesAddForm() {
             <div style={{ display: 'flex', flexDirection: 'column' }}>
               <label style={labelStyle}>Connection Fee</label>
               <input
+                className="form-control"
                 style={inputStyle}
                 type="number"
                 step="0.001"
                 min="0"
                 value={form.connection_fee}
                 onChange={(e) => set('connection_fee', e.target.value)}
-                onFocus={handleFocus}
-                onBlur={handleBlur}
               />
             </div>
 
@@ -291,14 +268,13 @@ export function RatesAddForm() {
             <div style={{ display: 'flex', flexDirection: 'column' }}>
               <label style={labelStyle}>Increment (s)</label>
               <input
+                className="form-control"
                 style={inputStyle}
                 type="number"
                 step="1"
                 min="1"
                 value={form.increment}
                 onChange={(e) => set('increment', e.target.value)}
-                onFocus={handleFocus}
-                onBlur={handleBlur}
               />
             </div>
           </div>

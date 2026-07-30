@@ -16,23 +16,30 @@ interface TdProps {
   colSpan?: number;
 }
 
-/** Scrollable table wrapper with rounded border */
+interface TrProps {
+  children: React.ReactNode;
+  className?: string;
+}
+
+/** Scrollable table wrapper — borderless liquid-glass panel */
 export function TableWrap({ children, className }: TableProps) {
   return (
     <div
-      className={cn(
-        'overflow-x-auto rounded-xl',
-        className,
-      )}
-      style={{
-        border: '1px solid rgba(42,47,69,0.6)',
-        boxShadow: '0 4px 16px rgba(0,0,0,0.25)',
-        borderRadius: 12,
-      }}
+      className={cn('glass-surface overflow-x-auto', className)}
+      style={{ borderRadius: 14 }}
     >
       {children}
     </div>
   );
+}
+
+/**
+ * Table row with a cheap, smooth per-row hover glow (blue background tint +
+ * inset accent leading-edge + soft shadow). No backdrop-filter — safe for long
+ * lists. Behaviour lives in the .glass-row-hover CSS class.
+ */
+export function Tr({ children, className }: TrProps) {
+  return <tr className={cn('glass-row-hover', className)}>{children}</tr>;
 }
 
 export function Table({ children, className }: TableProps) {
@@ -46,11 +53,14 @@ export function Table({ children, className }: TableProps) {
 }
 
 export function Thead({ children, className }: TableProps) {
+  // Quiet, refined header band — a whisper of tint + a hairline accent underline
+  // instead of a hard border.
   return (
     <thead
       className={cn(className)}
       style={{
-        background: 'rgba(19,21,29,0.9)',
+        background: 'rgba(59,130,246,0.035)',
+        boxShadow: 'inset 0 -1px 0 0 rgba(59,130,246,0.12)',
       }}
     >
       {children}
@@ -72,7 +82,6 @@ export function Th({ children, className }: ThProps) {
         textTransform: 'uppercase',
         letterSpacing: '0.05em',
         color: '#64748b',
-        borderBottom: '1px solid rgba(42,47,69,0.6)',
       }}
     >
       {children}
@@ -81,6 +90,8 @@ export function Th({ children, className }: ThProps) {
 }
 
 export function Td({ children, className, colSpan }: TdProps) {
+  // Borderless — row separation comes from the hover tint + generous padding,
+  // not a hard rule. A near-invisible inset hairline keeps rows legible at rest.
   return (
     <td
       colSpan={colSpan}
@@ -90,7 +101,7 @@ export function Td({ children, className, colSpan }: TdProps) {
       )}
       style={{
         padding: '14px 20px',
-        borderBottom: '1px solid rgba(42,47,69,0.35)',
+        boxShadow: 'inset 0 -1px 0 0 rgba(255,255,255,0.025)',
       }}
     >
       {children}

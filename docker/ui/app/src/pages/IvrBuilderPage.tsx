@@ -14,6 +14,7 @@ export function IvrBuilderPage() {
       />
 
       <div
+        className="glass-surface"
         style={{
           display: 'flex',
           flexDirection: 'column',
@@ -21,9 +22,7 @@ export function IvrBuilderPage() {
           justifyContent: 'center',
           padding: '80px 24px',
           textAlign: 'center',
-          background: 'linear-gradient(135deg, rgba(30,33,48,0.6) 0%, rgba(19,21,29,0.7) 100%)',
-          border: '1px solid rgba(42,47,69,0.4)',
-          borderRadius: 16,
+          borderRadius: 20,
         }}
       >
         <div
@@ -35,9 +34,10 @@ export function IvrBuilderPage() {
             alignItems: 'center',
             justifyContent: 'center',
             marginBottom: 24,
-            background: 'linear-gradient(135deg, rgba(34,211,238,0.15) 0%, rgba(34,211,238,0.05) 100%)',
-            border: '1px solid rgba(34,211,238,0.25)',
-            color: '#22d3ee',
+            background: 'linear-gradient(135deg, rgba(59,130,246,0.15) 0%, rgba(59,130,246,0.05) 100%)',
+            border: '1px solid rgba(59,130,246,0.25)',
+            color: '#60a5fa',
+            boxShadow: '0 0 24px rgba(59,130,246,0.18)',
           }}
         >
           <IconIVR size={32} />
@@ -55,9 +55,9 @@ export function IvrBuilderPage() {
             marginTop: 24,
             padding: '8px 16px',
             borderRadius: 8,
-            background: 'rgba(34,211,238,0.08)',
-            border: '1px solid rgba(34,211,238,0.2)',
-            color: '#22d3ee',
+            background: 'rgba(59,130,246,0.08)',
+            border: '1px solid rgba(59,130,246,0.2)',
+            color: '#60a5fa',
             fontSize: '0.8rem',
             fontWeight: 600,
             letterSpacing: '0.02em',

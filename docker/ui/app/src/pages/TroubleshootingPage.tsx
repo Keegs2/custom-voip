@@ -461,23 +461,22 @@ interface ResultsTableProps {
 function ResultsTable({ callGroups, correlations, pipelineWarnings, startTime, endTime }: ResultsTableProps) {
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
   const thStyle: React.CSSProperties = {
-    padding: '10px 14px',
+    padding: '11px 14px',
     textAlign: 'left',
     fontSize: '0.7rem',
-    fontWeight: 600,
+    fontWeight: 700,
     letterSpacing: '0.05em',
     color: '#475569',
     textTransform: 'uppercase',
     whiteSpace: 'nowrap',
-    borderBottom: '1px solid rgba(42,47,69,0.6)',
-    background: 'rgba(15,17,23,0.5)',
+    background: 'rgba(59,130,246,0.035)',
+    boxShadow: 'inset 0 -1px 0 0 rgba(59,130,246,0.12)',
   };
 
   const tdStyle: React.CSSProperties = {
     padding: '10px 14px',
     fontSize: '0.82rem',
     color: '#e2e8f0',
-    borderBottom: '1px solid rgba(42,47,69,0.4)',
     verticalAlign: 'middle',
   };
 
@@ -544,18 +543,12 @@ function ResultsTable({ callGroups, correlations, pipelineWarnings, startTime, e
             return (
               <React.Fragment key={`${row.callid}-${idx}`}>
               <tr
+                className={isExpanded ? undefined : 'glass-row-hover'}
                 onClick={() => setExpandedIdx(isExpanded ? null : idx)}
                 style={{
                   cursor: 'pointer',
                   transition: 'background 0.15s',
                   background: isExpanded ? 'rgba(59,130,246,0.08)' : undefined,
-                }}
-                onMouseEnter={(e) => {
-                  if (!isExpanded) (e.currentTarget as HTMLTableRowElement).style.background =
-                    'rgba(59,130,246,0.06)';
-                }}
-                onMouseLeave={(e) => {
-                  if (!isExpanded) (e.currentTarget as HTMLTableRowElement).style.background = '';
                 }}
                 title="Click to expand SIP ladder"
               >
@@ -645,19 +638,6 @@ function ResultsTable({ callGroups, correlations, pipelineWarnings, startTime, e
 }
 
 // ─── Input styling helper ─────────────────────────────────────────────────────
-
-const inputStyle: React.CSSProperties = {
-  width: '100%',
-  padding: '8px 12px',
-  background: 'rgba(255,255,255,0.04)',
-  border: '1px solid rgba(42,47,69,0.8)',
-  borderRadius: 8,
-  color: '#e2e8f0',
-  fontSize: '0.875rem',
-  outline: 'none',
-  boxSizing: 'border-box',
-  transition: 'border-color 0.15s',
-};
 
 const labelStyle: React.CSSProperties = {
   display: 'block',
@@ -761,20 +741,16 @@ export function TroubleshootingPage() {
       >
         {/* ── Page header ────────────────────────────────────────────── */}
         <div
+          className="glass-header"
           style={{
-            background: 'linear-gradient(135deg, rgba(26,29,39,0.95) 0%, rgba(19,21,29,0.9) 100%)',
-            border: '1px solid rgba(42,47,69,0.6)',
-            borderRadius: 16,
             padding: '24px 28px',
             marginBottom: 24,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            backdropFilter: 'blur(12px)',
-            boxShadow: '0 4px 24px rgba(0,0,0,0.3)',
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14, position: 'relative', zIndex: 1 }}>
             {/* Blue accent bar */}
             <div
               style={{
@@ -824,6 +800,8 @@ export function TroubleshootingPage() {
               transition: 'background 0.15s, border-color 0.15s',
               whiteSpace: 'nowrap',
               flexShrink: 0,
+              position: 'relative',
+              zIndex: 1,
             }}
             onMouseEnter={(e) => {
               const el = e.currentTarget as HTMLAnchorElement;
@@ -856,14 +834,10 @@ export function TroubleshootingPage() {
 
         {/* ── Search form ────────────────────────────────────────────── */}
         <div
+          className="glass-surface glass-hover"
           style={{
-            background: 'linear-gradient(135deg, rgba(26,29,39,0.95) 0%, rgba(19,21,29,0.9) 100%)',
-            border: '1px solid rgba(42,47,69,0.6)',
-            borderRadius: 16,
             padding: '24px 28px',
             marginBottom: 24,
-            backdropFilter: 'blur(12px)',
-            boxShadow: '0 4px 24px rgba(0,0,0,0.3)',
           }}
         >
           {/* Row 1: From, To, Call-ID */}
@@ -886,13 +860,7 @@ export function TroubleshootingPage() {
                 onChange={(e) => setFromUser(e.target.value)}
                 onKeyDown={handleKeyDown}
                 placeholder="Caller number or SIP user"
-                style={inputStyle}
-                onFocus={(e) => {
-                  (e.target as HTMLInputElement).style.borderColor = 'rgba(59,130,246,0.6)';
-                }}
-                onBlur={(e) => {
-                  (e.target as HTMLInputElement).style.borderColor = 'rgba(42,47,69,0.8)';
-                }}
+                className="form-control"
               />
             </div>
 
@@ -907,13 +875,7 @@ export function TroubleshootingPage() {
                 onChange={(e) => setToUser(e.target.value)}
                 onKeyDown={handleKeyDown}
                 placeholder="Destination number"
-                style={inputStyle}
-                onFocus={(e) => {
-                  (e.target as HTMLInputElement).style.borderColor = 'rgba(59,130,246,0.6)';
-                }}
-                onBlur={(e) => {
-                  (e.target as HTMLInputElement).style.borderColor = 'rgba(42,47,69,0.8)';
-                }}
+                className="form-control"
               />
             </div>
 
@@ -928,13 +890,8 @@ export function TroubleshootingPage() {
                 onChange={(e) => setCallId(e.target.value)}
                 onKeyDown={handleKeyDown}
                 placeholder="SIP Call-ID"
-                style={{ ...inputStyle, fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', fontSize: '0.8rem' }}
-                onFocus={(e) => {
-                  (e.target as HTMLInputElement).style.borderColor = 'rgba(59,130,246,0.6)';
-                }}
-                onBlur={(e) => {
-                  (e.target as HTMLInputElement).style.borderColor = 'rgba(42,47,69,0.8)';
-                }}
+                className="form-control"
+                style={{ fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', fontSize: '0.8rem' }}
               />
             </div>
           </div>
@@ -957,13 +914,8 @@ export function TroubleshootingPage() {
                 type="datetime-local"
                 value={startTime}
                 onChange={(e) => setStartTime(e.target.value)}
-                style={{ ...inputStyle, colorScheme: 'dark' }}
-                onFocus={(e) => {
-                  (e.target as HTMLInputElement).style.borderColor = 'rgba(59,130,246,0.6)';
-                }}
-                onBlur={(e) => {
-                  (e.target as HTMLInputElement).style.borderColor = 'rgba(42,47,69,0.8)';
-                }}
+                className="form-control"
+                style={{ colorScheme: 'dark' }}
               />
             </div>
 
@@ -976,13 +928,8 @@ export function TroubleshootingPage() {
                 type="datetime-local"
                 value={endTime}
                 onChange={(e) => setEndTime(e.target.value)}
-                style={{ ...inputStyle, colorScheme: 'dark' }}
-                onFocus={(e) => {
-                  (e.target as HTMLInputElement).style.borderColor = 'rgba(59,130,246,0.6)';
-                }}
-                onBlur={(e) => {
-                  (e.target as HTMLInputElement).style.borderColor = 'rgba(42,47,69,0.8)';
-                }}
+                className="form-control"
+                style={{ colorScheme: 'dark' }}
               />
             </div>
           </div>
@@ -1029,17 +976,17 @@ export function TroubleshootingPage() {
                 gap: 7,
                 padding: '9px 20px',
                 borderRadius: 8,
-                border: '1px solid rgba(34,197,94,0.4)',
+                border: '1px solid rgba(59,130,246,0.4)',
                 background: isLoading
-                  ? 'rgba(34,197,94,0.08)'
-                  : 'linear-gradient(135deg, rgba(34,197,94,0.2) 0%, rgba(22,163,74,0.15) 100%)',
-                color: '#4ade80',
+                  ? 'rgba(59,130,246,0.08)'
+                  : 'linear-gradient(135deg, rgba(59,130,246,0.24) 0%, rgba(37,99,235,0.18) 100%)',
+                color: '#93c5fd',
                 fontSize: '0.875rem',
                 fontWeight: 600,
                 cursor: isLoading ? 'not-allowed' : 'pointer',
                 opacity: isLoading ? 0.65 : 1,
                 transition: 'background 0.15s, border-color 0.15s',
-                boxShadow: isLoading ? 'none' : '0 0 12px rgba(34,197,94,0.15)',
+                boxShadow: isLoading ? 'none' : '0 0 12px rgba(59,130,246,0.18)',
               }}
             >
               {isLoading ? (
@@ -1098,12 +1045,8 @@ export function TroubleshootingPage() {
 
         {/* ── Results area ───────────────────────────────────────────── */}
         <div
+          className="glass-surface"
           style={{
-            background: 'linear-gradient(135deg, rgba(26,29,39,0.95) 0%, rgba(19,21,29,0.9) 100%)',
-            border: '1px solid rgba(42,47,69,0.6)',
-            borderRadius: 16,
-            backdropFilter: 'blur(12px)',
-            boxShadow: '0 4px 24px rgba(0,0,0,0.3)',
             overflow: 'hidden',
           }}
         >
@@ -1111,7 +1054,7 @@ export function TroubleshootingPage() {
           <div
             style={{
               padding: '16px 24px',
-              borderBottom: '1px solid rgba(42,47,69,0.6)',
+              borderBottom: '1px solid rgba(59,130,246,0.1)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',

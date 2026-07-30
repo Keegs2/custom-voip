@@ -60,10 +60,9 @@ export function SippResults({ response, isRunning, runningTimeout = 60 }: SippRe
   if (isRunning) {
     return (
       <div
+        className="glass-surface"
         style={{
           borderRadius: 16,
-          border: '1px solid rgba(59,130,246,0.3)',
-          background: 'linear-gradient(135deg, rgba(30,33,48,0.9) 0%, rgba(19,21,29,0.95) 100%)',
           padding: '40px',
           textAlign: 'center',
           boxShadow: '0 0 24px rgba(59,130,246,0.12)',
@@ -103,11 +102,11 @@ export function SippResults({ response, isRunning, runningTimeout = 60 }: SippRe
 
   return (
     <div
+      className="glass-surface"
       style={{
         borderRadius: 16,
         border: `1px solid ${verdictStyle.border}`,
-        background: 'linear-gradient(135deg, rgba(30,33,48,0.9) 0%, rgba(19,21,29,0.95) 100%)',
-        boxShadow: `0 0 20px ${verdictStyle.glow}, 0 4px 20px rgba(0,0,0,0.3)`,
+        boxShadow: `0 0 20px ${verdictStyle.glow}`,
         overflow: 'hidden',
       }}
     >
@@ -277,9 +276,8 @@ interface StatMiniProps {
 function StatMini({ label, value, accent }: StatMiniProps) {
   return (
     <div
+      className="glass-surface"
       style={{
-        background: 'rgba(19,21,29,0.8)',
-        border: '1px solid rgba(42,47,69,0.6)',
         borderRadius: 10,
         padding: '12px',
       }}
