@@ -1,7 +1,12 @@
 -- ==========================================================================
 -- 19_onboarding_requests.sql
 -- Onboarding pipeline for new RCF customer requests
--- Tracks intake submissions through admin review, billing, and provisioning
+-- Stores the public intake form and tracks a lightweight status.
+-- Status model: pending -> completed  (or -> rejected)
+--   Billing verification + provisioning are handled by an EXTERNAL system
+--   (integrated later); "completed" is a status-only transition here.
+-- NOTE: kept in sync with migration 27_onboarding_simplify.sql, which brings
+--   an already-initialized prod DB to this same 3-status state.
 -- ==========================================================================
 
 CREATE TABLE IF NOT EXISTS onboarding_requests (
@@ -21,24 +26,30 @@ CREATE TABLE IF NOT EXISTS onboarding_requests (
     monthly_volume VARCHAR(100) NOT NULL,
     timeline VARCHAR(100) NOT NULL,
 
-    -- Status workflow
+    -- Status workflow: pending -> completed (or -> rejected)
     status VARCHAR(20) NOT NULL DEFAULT 'pending'
-        CHECK (status IN ('pending', 'billing_verified', 'approved', 'provisioning', 'active', 'rejected')),
+        CONSTRAINT onboarding_requests_status_check
+        CHECK (status IN ('pending', 'completed', 'rejected')),
 
-    -- Billing verification gate
-    billing_verified_by INT REFERENCES users(id) ON DELETE SET NULL,
-    billing_verified_at TIMESTAMPTZ,
-    billing_notes TEXT,
+    -- Completion (status-only; external system handles actual provisioning)
+    completed_by INT REFERENCES users(id) ON DELETE SET NULL,
+    completed_at TIMESTAMPTZ,
 
-    -- Admin review
-    reviewed_by INT REFERENCES users(id) ON DELETE SET NULL,
-    reviewed_at TIMESTAMPTZ,
+    -- Admin notes
     admin_notes TEXT,
 
     -- Rejection
     rejected_by INT REFERENCES users(id) ON DELETE SET NULL,
     rejected_at TIMESTAMPTZ,
     rejection_reason TEXT,
+
+    -- Dormant columns (retained for a future external-billing integration;
+    -- no longer written by the API). See migration 27_onboarding_simplify.sql.
+    billing_verified_by INT REFERENCES users(id) ON DELETE SET NULL,
+    billing_verified_at TIMESTAMPTZ,
+    billing_notes TEXT,
+    reviewed_by INT REFERENCES users(id) ON DELETE SET NULL,
+    reviewed_at TIMESTAMPTZ,
 
     -- Provisioning config (set by admin at approve time)
     -- JSONB array: [{"did": "+16175551234", "forward_to": "+17745559876"}, ...]

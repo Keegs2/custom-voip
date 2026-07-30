@@ -1,22 +1,16 @@
-import { useState, useCallback } from 'react';
+import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   listOnboardingRequests,
-  verifyBilling,
-  approveOnboarding,
+  completeOnboarding,
   rejectOnboarding,
 } from '../../api/onboarding';
-import { listAvailableDids } from '../../api/didInventory';
 import type {
   OnboardingRequest,
   OnboardingStatus,
-  ApprovePayload,
-  ApproveResponse,
-  DIDConfigEntry,
 } from '../../types/onboarding';
 import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
-import { Modal } from '../../components/ui/Modal';
 import { Spinner } from '../../components/ui/Spinner';
 import { useToast } from '../../components/ui/ToastContext';
 import { fmt } from '../../utils/format';
@@ -31,35 +25,27 @@ interface StatusTab {
 }
 
 const STATUS_TABS: StatusTab[] = [
-  { label: 'All',              value: 'all'              },
-  { label: 'Pending',          value: 'pending'          },
-  { label: 'Billing Verified', value: 'billing_verified' },
-  { label: 'Provisioning',     value: 'provisioning'     },
-  { label: 'Active',           value: 'active'           },
-  { label: 'Rejected',         value: 'rejected'         },
+  { label: 'All',       value: 'all'       },
+  { label: 'Pending',   value: 'pending'   },
+  { label: 'Completed', value: 'completed' },
+  { label: 'Rejected',  value: 'rejected'  },
 ];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function statusBadgeVariant(status: OnboardingStatus) {
   switch (status) {
-    case 'pending':          return 'pending'          as const;
-    case 'billing_verified': return 'billing_verified' as const;
-    case 'provisioning':     return 'provisioning'     as const;
-    case 'active':           return 'active'           as const;
-    case 'approved':         return 'billing_verified' as const;
-    case 'rejected':         return 'rejected'         as const;
+    case 'pending':   return 'pending' as const;
+    case 'completed': return 'active'  as const;
+    case 'rejected':  return 'rejected' as const;
   }
 }
 
 function statusLabel(status: OnboardingStatus): string {
   switch (status) {
-    case 'pending':          return 'Pending';
-    case 'billing_verified': return 'Billing Verified';
-    case 'provisioning':     return 'Provisioning';
-    case 'active':           return 'Active';
-    case 'approved':         return 'Approved';
-    case 'rejected':         return 'Rejected';
+    case 'pending':   return 'Pending';
+    case 'completed': return 'Completed';
+    case 'rejected':  return 'Rejected';
   }
 }
 
@@ -135,206 +121,74 @@ function InfoPair({ label, value }: { label: string; value: string | null | unde
   );
 }
 
-// ─── Credentials Modal ────────────────────────────────────────────────────────
+// ─── Complete Form ────────────────────────────────────────────────────────────
 
-interface CredentialsModalProps {
-  result: ApproveResponse;
-  onClose: () => void;
-}
-
-function CredentialsModal({ result, onClose }: CredentialsModalProps) {
-  const [copied, setCopied] = useState(false);
-  const { toastOk } = useToast();
-
-  const handleCopy = useCallback(() => {
-    navigator.clipboard.writeText(result.user.temp_password).then(() => {
-      setCopied(true);
-      toastOk('Password copied to clipboard');
-      setTimeout(() => setCopied(false), 2500);
-    });
-  }, [result.user.temp_password, toastOk]);
-
-  return (
-    <Modal
-      open
-      onClose={onClose}
-      title="Account Provisioned"
-      maxWidth="max-w-md"
-      footer={
-        <Button variant="primary" size="sm" onClick={onClose}>
-          Done
-        </Button>
-      }
-    >
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-        {/* Success banner */}
-        <div
-          style={{
-            padding: '14px 16px',
-            borderRadius: 10,
-            background: 'rgba(34,197,94,0.08)',
-            border: '1px solid rgba(34,197,94,0.2)',
-            color: '#4ade80',
-            fontSize: '0.82rem',
-            lineHeight: 1.55,
-          }}
-        >
-          Customer <strong style={{ color: '#86efac' }}>{result.customer.name}</strong> has been
-          provisioned with {result.dids.length} DID{result.dids.length !== 1 ? 's' : ''}.
-        </div>
-
-        {/* Credentials block */}
-        <div
-          style={{
-            background: 'rgba(13,15,21,0.7)',
-            border: '1px solid rgba(42,47,69,0.7)',
-            borderRadius: 10,
-            padding: '16px 18px',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 14,
-          }}
-        >
-          <div>
-            <span style={fieldLabel}>Login Email</span>
-            <span style={{ ...fieldValue, fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', fontSize: '0.85rem' }}>
-              {result.user.email}
-            </span>
-          </div>
-
-          <div>
-            <span style={fieldLabel}>Temporary Password</span>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
-              <code
-                style={{
-                  flex: 1,
-                  padding: '8px 12px',
-                  borderRadius: 7,
-                  background: 'rgba(59,130,246,0.08)',
-                  border: '1px solid rgba(59,130,246,0.2)',
-                  color: '#93c5fd',
-                  fontSize: '0.9rem',
-                  letterSpacing: '0.04em',
-                  fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
-                  wordBreak: 'break-all',
-                }}
-              >
-                {result.user.temp_password}
-              </code>
-              <Button
-                variant="ghost"
-                size="xs"
-                onClick={handleCopy}
-                style={{ flexShrink: 0 }}
-              >
-                {copied ? 'Copied!' : 'Copy'}
-              </Button>
-            </div>
-          </div>
-        </div>
-
-        {/* Warning */}
-        <div
-          style={{
-            padding: '10px 14px',
-            borderRadius: 8,
-            background: 'rgba(245,158,11,0.08)',
-            border: '1px solid rgba(245,158,11,0.2)',
-            color: '#fbbf24',
-            fontSize: '0.78rem',
-            lineHeight: 1.5,
-          }}
-        >
-          This temporary password will not be shown again. Send it to the customer securely.
-        </div>
-
-        {/* Provisioned DIDs list */}
-        {result.dids.length > 0 && (
-          <div>
-            <div style={sectionLabel}>Provisioned DIDs</div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {result.dids.map((d) => (
-                <div
-                  key={d.did}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    padding: '7px 12px',
-                    borderRadius: 7,
-                    background: 'rgba(255,255,255,0.03)',
-                    border: '1px solid rgba(42,47,69,0.5)',
-                  }}
-                >
-                  <span style={{ fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', fontSize: '0.82rem', color: '#cbd5e0' }}>
-                    {fmt(d.did)}
-                  </span>
-                  <span style={{ fontSize: '0.75rem', color: '#718096' }}>
-                    → {fmt(d.forward_to)}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
-    </Modal>
-  );
-}
-
-// ─── Billing Verify Form ──────────────────────────────────────────────────────
-
-interface BillingVerifyFormProps {
+interface CompleteFormProps {
   request: OnboardingRequest;
-  onSuccess: () => void;
 }
 
-function BillingVerifyForm({ request, onSuccess }: BillingVerifyFormProps) {
+function CompleteForm({ request }: CompleteFormProps) {
   const qc = useQueryClient();
   const { toastOk, toastErr } = useToast();
   const [notes, setNotes] = useState('');
+  const [showForm, setShowForm] = useState(false);
 
   const mutation = useMutation({
-    mutationFn: () => verifyBilling(request.id, notes.trim() || undefined),
+    mutationFn: () => completeOnboarding(request.id, notes.trim() || undefined),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['onboarding-requests'] });
-      toastOk('Billing verified');
-      onSuccess();
+      toastOk('Intake marked completed');
     },
     onError: (err: Error) => toastErr(err.message),
   });
+
+  if (!showForm) {
+    return (
+      <Button variant="success" size="sm" onClick={() => setShowForm(true)}>
+        Complete
+      </Button>
+    );
+  }
 
   return (
     <div
       style={{
         padding: '16px 18px',
         borderRadius: 10,
-        background: 'rgba(59,130,246,0.04)',
-        border: '1px solid rgba(59,130,246,0.18)',
+        background: 'rgba(34,197,94,0.05)',
+        border: '1px solid rgba(34,197,94,0.2)',
         display: 'flex',
         flexDirection: 'column',
         gap: 12,
       }}
     >
-      <div style={{ ...sectionLabel, color: '#60a5fa' }}>Verify Billing</div>
+      <div style={{ ...sectionLabel, color: '#4ade80' }}>Complete Intake</div>
       <div>
         <label style={fieldLabel}>Notes (optional)</label>
         <textarea
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
-          placeholder="Credit check passed, billing address confirmed…"
+          placeholder="Handed off to billing/provisioning, account set up externally…"
           style={textareaStyle}
         />
       </div>
-      <Button
-        variant="success"
-        size="sm"
-        loading={mutation.isPending}
-        onClick={() => mutation.mutate()}
-        style={{ alignSelf: 'flex-start' }}
-      >
-        Mark Billing Verified
-      </Button>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <Button
+          variant="success"
+          size="sm"
+          loading={mutation.isPending}
+          onClick={() => mutation.mutate()}
+        >
+          Mark Completed
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => { setShowForm(false); setNotes(''); }}
+        >
+          Cancel
+        </Button>
+      </div>
     </div>
   );
 }
@@ -343,10 +197,9 @@ function BillingVerifyForm({ request, onSuccess }: BillingVerifyFormProps) {
 
 interface RejectFormProps {
   request: OnboardingRequest;
-  onSuccess: () => void;
 }
 
-function RejectForm({ request, onSuccess }: RejectFormProps) {
+function RejectForm({ request }: RejectFormProps) {
   const qc = useQueryClient();
   const { toastOk, toastErr } = useToast();
   const [reason, setReason] = useState('');
@@ -357,7 +210,6 @@ function RejectForm({ request, onSuccess }: RejectFormProps) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['onboarding-requests'] });
       toastOk('Request rejected');
-      onSuccess();
     },
     onError: (err: Error) => toastErr(err.message),
   });
@@ -392,7 +244,7 @@ function RejectForm({ request, onSuccess }: RejectFormProps) {
         <textarea
           value={reason}
           onChange={(e) => setReason(e.target.value)}
-          placeholder="Unable to verify billing, service area not covered…"
+          placeholder="Not a fit, unable to serve area, duplicate request…"
           style={textareaStyle}
         />
       </div>
@@ -417,288 +269,36 @@ function RejectForm({ request, onSuccess }: RejectFormProps) {
   );
 }
 
-// ─── Provisioning Form ────────────────────────────────────────────────────────
+// ─── Completed / Rejected detail ──────────────────────────────────────────────
 
-interface ProvisioningFormProps {
-  request: OnboardingRequest;
-  onApproved: (result: ApproveResponse) => void;
-}
-
-function ProvisioningForm({ request, onApproved }: ProvisioningFormProps) {
-  const qc = useQueryClient();
-  const { toastOk, toastErr } = useToast();
-  const [selectedDids, setSelectedDids] = useState<string[]>([]);
-  const [forwardMap, setForwardMap] = useState<Record<string, string>>({});
-  const [adminNotes, setAdminNotes] = useState('');
-  const [didSearch, setDidSearch] = useState('');
-
-  const { data: availableDids, isLoading: didsLoading } = useQuery({
-    queryKey: ['available-dids'],
-    queryFn: () => listAvailableDids({ limit: 500 }),
-  });
-
-  const mutation = useMutation({
-    mutationFn: () => {
-      const dids: DIDConfigEntry[] = selectedDids.map((did) => ({
-        did,
-        forward_to: forwardMap[did] ?? '',
-      }));
-      const payload: ApprovePayload = {
-        dids,
-        admin_notes: adminNotes.trim() || undefined,
-      };
-      return approveOnboarding(request.id, payload);
-    },
-    onSuccess: (result) => {
-      qc.invalidateQueries({ queryKey: ['onboarding-requests'] });
-      toastOk(`Approved — customer ${result.customer.name} provisioned`);
-      onApproved(result);
-    },
-    onError: (err: Error) => toastErr(err.message),
-  });
-
-  function toggleDid(did: string) {
-    setSelectedDids((prev) =>
-      prev.includes(did) ? prev.filter((d) => d !== did) : [...prev, did],
-    );
-  }
-
-  function setForward(did: string, value: string) {
-    setForwardMap((prev) => ({ ...prev, [did]: value }));
-  }
-
-  const filtered = (availableDids ?? []).filter((d) =>
-    !didSearch || d.did.includes(didSearch) || d.city?.toLowerCase().includes(didSearch.toLowerCase()),
-  );
-
-  const allForwardsFilled = selectedDids.length > 0
-    && selectedDids.every((d) => (forwardMap[d] ?? '').trim().length >= 10);
-
-  const requestedCount = parseInt(request.did_count, 10) || 1;
-
+function CompletedDetail({ request }: { request: OnboardingRequest }) {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-      {/* Header */}
-      <div
-        style={{
-          padding: '16px 18px',
-          borderRadius: 10,
-          background: 'rgba(34,197,94,0.05)',
-          border: '1px solid rgba(34,197,94,0.2)',
-        }}
-      >
-        <div style={{ ...sectionLabel, color: '#60a5fa', marginBottom: 8 }}>Configure & Approve</div>
-        <p style={{ fontSize: '0.82rem', color: '#718096', margin: 0 }}>
-          Customer requested <strong style={{ color: '#cbd5e0' }}>{requestedCount}</strong> DID
-          {requestedCount !== 1 ? 's' : ''}.
-          Select DIDs from inventory and set forwarding numbers.
-        </p>
-      </div>
-
-      {/* DID selector */}
-      <div>
-        <div style={sectionLabel}>Available DIDs</div>
-
-        <input
-          type="search"
-          value={didSearch}
-          onChange={(e) => setDidSearch(e.target.value)}
-          placeholder="Filter by number or city…"
-          style={{ ...inputStyle, marginBottom: 10 }}
-        />
-
-        {didsLoading ? (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#718096', fontSize: '0.82rem', padding: '12px 0' }}>
-            <Spinner size="xs" /> Loading available DIDs…
-          </div>
-        ) : (
-          <div
-            style={{
-              maxHeight: 220,
-              overflowY: 'auto',
-              border: '1px solid rgba(59,130,246,0.12)',
-              borderRadius: 9,
-              background: 'rgba(13,15,21,0.5)',
-            }}
-          >
-            {filtered.length === 0 ? (
-              <div style={{ padding: '20px', textAlign: 'center', color: '#4a5568', fontSize: '0.82rem' }}>
-                No available DIDs match your filter.
-              </div>
-            ) : (
-              filtered.map((d) => {
-                const isSelected = selectedDids.includes(d.did);
-                return (
-                  <div
-                    key={d.did}
-                    onClick={() => toggleDid(d.did)}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 12,
-                      padding: '9px 14px',
-                      cursor: 'pointer',
-                      background: isSelected ? 'rgba(59,130,246,0.08)' : 'transparent',
-                      borderBottom: '1px solid rgba(42,47,69,0.4)',
-                      transition: 'background 0.1s',
-                    }}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={isSelected}
-                      onChange={() => toggleDid(d.did)}
-                      onClick={(e) => e.stopPropagation()}
-                      style={{ accentColor: '#3b82f6', width: 14, height: 14, flexShrink: 0 }}
-                    />
-                    <span style={{ fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', fontSize: '0.83rem', color: '#cbd5e0', flex: 1 }}>
-                      {fmt(d.did)}
-                    </span>
-                    {(d.city || d.state) && (
-                      <span style={{ fontSize: '0.72rem', color: '#4a5568' }}>
-                        {[d.city, d.state].filter(Boolean).join(', ')}
-                      </span>
-                    )}
-                  </div>
-                );
-              })
-            )}
-          </div>
+    <div
+      style={{
+        padding: '16px 18px',
+        borderRadius: 10,
+        background: 'rgba(34,197,94,0.06)',
+        border: '1px solid rgba(34,197,94,0.18)',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 12,
+      }}
+    >
+      <div style={{ ...sectionLabel, color: '#4ade80' }}>Completion Details</div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px 24px' }}>
+        {request.completed_by_name && (
+          <InfoPair label="Completed By" value={request.completed_by_name} />
         )}
-
-        {selectedDids.length > 0 && (
-          <div style={{ marginTop: 6, fontSize: '0.75rem', color: '#60a5fa' }}>
-            {selectedDids.length} DID{selectedDids.length !== 1 ? 's' : ''} selected
-          </div>
+        {request.completed_at && (
+          <InfoPair label="Completed At" value={fmtDateTime(request.completed_at)} />
         )}
       </div>
-
-      {/* Forward-to inputs for each selected DID */}
-      {selectedDids.length > 0 && (
+      {request.admin_notes && (
         <div>
-          <div style={sectionLabel}>Forwarding Numbers</div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {selectedDids.map((did) => (
-              <div key={did} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <span
-                  style={{
-                    fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
-                    fontSize: '0.8rem',
-                    color: '#94a3b8',
-                    minWidth: 160,
-                    flexShrink: 0,
-                  }}
-                >
-                  {fmt(did)}
-                </span>
-                <span style={{ color: '#3b82f6', flexShrink: 0 }}>→</span>
-                <input
-                  type="tel"
-                  value={forwardMap[did] ?? ''}
-                  onChange={(e) => setForward(did, e.target.value)}
-                  placeholder="+1 (617) 555-0100"
-                  style={{ ...inputStyle, flex: 1 }}
-                />
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Admin notes */}
-      <div>
-        <label style={fieldLabel}>Admin Notes (optional)</label>
-        <textarea
-          value={adminNotes}
-          onChange={(e) => setAdminNotes(e.target.value)}
-          placeholder="Any notes about this account or provisioning setup…"
-          style={textareaStyle}
-        />
-      </div>
-
-      {/* Approve button */}
-      <Button
-        variant="primary"
-        size="default"
-        loading={mutation.isPending}
-        disabled={!allForwardsFilled}
-        onClick={() => mutation.mutate()}
-        style={{
-          alignSelf: 'flex-start',
-          boxShadow: allForwardsFilled ? '0 0 20px rgba(59,130,246,0.35)' : 'none',
-        }}
-      >
-        Approve & Provision
-      </Button>
-
-      {selectedDids.length > 0 && !allForwardsFilled && (
-        <p style={{ fontSize: '0.75rem', color: '#f59e0b', margin: '-12px 0 0' }}>
-          All selected DIDs need a forwarding number before approving.
-        </p>
-      )}
-    </div>
-  );
-}
-
-// ─── Active / Rejected detail ─────────────────────────────────────────────────
-
-function ActiveDetail({ request }: { request: OnboardingRequest }) {
-  const config = request.provisioning_config ?? [];
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <div
-        style={{
-          padding: '14px 18px',
-          borderRadius: 10,
-          background: 'rgba(34,197,94,0.06)',
-          border: '1px solid rgba(34,197,94,0.18)',
-        }}
-      >
-        <div style={{ ...sectionLabel, color: '#4ade80', marginBottom: 10 }}>Provisioned Account</div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px 24px' }}>
-          {request.customer_id && (
-            <InfoPair label="Customer ID" value={String(request.customer_id)} />
-          )}
-          {request.reviewed_by_name && (
-            <InfoPair label="Approved By" value={request.reviewed_by_name} />
-          )}
-          {request.reviewed_at && (
-            <InfoPair label="Approved At" value={fmtDateTime(request.reviewed_at)} />
-          )}
-          {request.admin_notes && (
-            <div style={{ gridColumn: '1 / -1' }}>
-              <InfoPair label="Admin Notes" value={request.admin_notes} />
-            </div>
-          )}
-        </div>
-      </div>
-
-      {config.length > 0 && (
-        <div>
-          <div style={sectionLabel}>Provisioned DIDs</div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {config.map((d) => (
-              <div
-                key={d.did}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  padding: '8px 14px',
-                  borderRadius: 8,
-                  background: 'rgba(255,255,255,0.03)',
-                  border: '1px solid rgba(42,47,69,0.5)',
-                }}
-              >
-                <span style={{ fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', fontSize: '0.83rem', color: '#cbd5e0' }}>
-                  {fmt(d.did)}
-                </span>
-                <span style={{ fontSize: '0.78rem', color: '#718096' }}>
-                  → {fmt(d.forward_to)}
-                </span>
-              </div>
-            ))}
-          </div>
+          <span style={fieldLabel}>Notes</span>
+          <p style={{ ...fieldValue, fontSize: '0.82rem', margin: 0, color: '#a7f3d0', lineHeight: 1.55 }}>
+            {request.admin_notes}
+          </p>
         </div>
       )}
     </div>
@@ -720,8 +320,8 @@ function RejectedDetail({ request }: { request: OnboardingRequest }) {
     >
       <div style={{ ...sectionLabel, color: '#f87171' }}>Rejection Details</div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px 24px' }}>
-        {request.rejected_by && request.reviewed_by_name && (
-          <InfoPair label="Rejected By" value={request.reviewed_by_name} />
+        {request.rejected_by_name && (
+          <InfoPair label="Rejected By" value={request.rejected_by_name} />
         )}
         {request.rejected_at && (
           <InfoPair label="Rejected At" value={fmtDateTime(request.rejected_at)} />
@@ -745,22 +345,12 @@ interface OnboardingCardProps {
   request: OnboardingRequest;
   isExpanded: boolean;
   onToggle: () => void;
-  onApproved: (result: ApproveResponse) => void;
 }
 
-function OnboardingCard({ request, isExpanded, onToggle, onApproved }: OnboardingCardProps) {
-  const isPending         = request.status === 'pending';
-  const isBillingVerified = request.status === 'billing_verified';
-  const isActive          = request.status === 'active';
-  const isRejected        = request.status === 'rejected';
-
-  function handleVerifySuccess() {
-    // Card will re-render from query invalidation
-  }
-
-  function handleRejectSuccess() {
-    // Card will re-render from query invalidation
-  }
+function OnboardingCard({ request, isExpanded, onToggle }: OnboardingCardProps) {
+  const isPending   = request.status === 'pending';
+  const isCompleted = request.status === 'completed';
+  const isRejected  = request.status === 'rejected';
 
   return (
     <div
@@ -888,51 +478,25 @@ function OnboardingCard({ request, isExpanded, onToggle, onApproved }: Onboardin
             </div>
           </div>
 
-          {/* Billing verified metadata (show when past pending) */}
-          {(isBillingVerified || isActive) && request.billing_verified_by_name && (
-            <div
-              style={{
-                padding: '12px 16px',
-                borderRadius: 9,
-                background: 'rgba(59,130,246,0.05)',
-                border: '1px solid rgba(59,130,246,0.15)',
-              }}
-            >
-              <div style={{ fontSize: '0.72rem', color: '#60a5fa', fontWeight: 600, marginBottom: 8 }}>
-                BILLING VERIFICATION
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 24px' }}>
-                <InfoPair label="Verified By" value={request.billing_verified_by_name} />
-                {request.billing_verified_at && (
-                  <InfoPair label="Verified At" value={fmtDateTime(request.billing_verified_at)} />
-                )}
-                {request.billing_notes && (
-                  <div style={{ gridColumn: '1 / -1' }}>
-                    <InfoPair label="Billing Notes" value={request.billing_notes} />
-                  </div>
-                )}
-              </div>
+          {/* Submission meta */}
+          <div>
+            <div style={sectionLabel}>Submission</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: '12px 24px' }}>
+              <InfoPair label="Submitted" value={fmtDateTime(request.created_at)} />
             </div>
-          )}
+          </div>
 
-          {/* Action sections */}
+          {/* Action / status sections */}
           {isPending && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-              <BillingVerifyForm request={request} onSuccess={handleVerifySuccess} />
-              <RejectForm request={request} onSuccess={handleRejectSuccess} />
-            </div>
-          )}
-
-          {isBillingVerified && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-              <ProvisioningForm request={request} onApproved={onApproved} />
-              <div style={{ borderTop: '1px solid rgba(59,130,246,0.12)', paddingTop: 16 }}>
-                <RejectForm request={request} onSuccess={handleRejectSuccess} />
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <CompleteForm request={request} />
+                <RejectForm request={request} />
               </div>
             </div>
           )}
 
-          {isActive && <ActiveDetail request={request} />}
+          {isCompleted && <CompletedDetail request={request} />}
           {isRejected && <RejectedDetail request={request} />}
         </div>
       )}
@@ -946,7 +510,6 @@ export function OnboardingAdminPage() {
   // ALL hooks unconditionally at the top — React rules-of-hooks
   const [activeFilter, setActiveFilter] = useState<FilterTab>('all');
   const [expandedId, setExpandedId] = useState<number | null>(null);
-  const [credentials, setCredentials] = useState<ApproveResponse | null>(null);
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ['onboarding-requests', { status: activeFilter }],
@@ -955,19 +518,6 @@ export function OnboardingAdminPage() {
         activeFilter === 'all' ? {} : { status: activeFilter },
       ),
   });
-
-  // Handlers — defined unconditionally
-  const handleToggle = useCallback((id: number) => {
-    setExpandedId((prev) => (prev === id ? null : id));
-  }, []);
-
-  const handleApproved = useCallback((result: ApproveResponse) => {
-    setCredentials(result);
-  }, []);
-
-  const handleCredentialsDone = useCallback(() => {
-    setCredentials(null);
-  }, []);
 
   const items: OnboardingRequest[] = data?.items ?? [];
 
@@ -1105,16 +655,10 @@ export function OnboardingAdminPage() {
               key={req.id}
               request={req}
               isExpanded={expandedId === req.id}
-              onToggle={() => handleToggle(req.id)}
-              onApproved={handleApproved}
+              onToggle={() => setExpandedId((prev) => (prev === req.id ? null : req.id))}
             />
           ))}
         </div>
-      )}
-
-      {/* Credentials modal — shown after a successful approval */}
-      {credentials && (
-        <CredentialsModal result={credentials} onClose={handleCredentialsDone} />
       )}
     </div>
   );
