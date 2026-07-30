@@ -41,6 +41,18 @@
 # Weight: 100, MaxLoad: 2000 concurrent calls
 # FS binds to the VM's internal VPC IP (local_ip_v4 = 10.142.0.100)
 # so dispatcher must target that IP, not 127.0.0.1
+#
+# FS-AWARE HEALTH: this destination is ACTIVELY PROBED with OPTIONS every
+# ds_ping_interval (5s) because ds_probing_mode=1 (probe ALL destinations,
+# not just flagged/inactive ones — see kamailio.cfg). FreeSWITCH answers
+# OPTIONS with 200 OK, so a healthy FS stays ACTIVE; a dead FS is marked
+# inactive after ds_probing_threshold (3) failed probes (~15s). That
+# transition fires event_route[dispatcher:dst-up|dst-down], which is matched
+# by port ":5080" (unique to FS — all Bandwidth destinations are :5060) to
+# maintain the fshealth=>fs_up flag consumed by GET /healthz and the
+# SIP-honest OPTIONS handler. The flags field stays 0: with ds_probing_mode=1
+# no explicit "probing" (2) flag is needed, and leaving it 0 keeps the long-
+# standing behavior byte-identical. Do NOT set flag 1 (inactive) here.
 1 sip:__FS_IP__:5080 0 0 weight=100;maxload=2000;duid=fs-primary
 
 # Add additional FreeSWITCH instances here for horizontal scaling:

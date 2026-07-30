@@ -51,6 +51,24 @@ TESTING_IP="${TESTING_IP:-255.255.255.255}"
 # legitimate load.
 BW_CPS_LIMIT="${BW_CPS_LIMIT:-100}"
 
+# FS_AWARE_OPTIONS: SIP-honest OPTIONS toggle. Default ON — when the local
+# FreeSWITCH is down, the OPTIONS keepalive handler answers EXTERNAL monitors
+# (Bandwidth / DNS health checker / customer PBX) with 503 instead of 200 so a
+# dead-FS zone drains via carrier/DNS failover (the fail-open NLB can't). Set to
+# 0 in the SBC .env to force legacy always-200 behavior with no code change.
+#
+# Implemented as a COMPILE-TIME define (mirrors WITH_TLS). We substitute the
+# __FS_AWARE_OPTIONS_DEFINE__ placeholder LINE with either the real #!define
+# (ON) or a comment (OFF), so the OPTIONS handler's `#!ifdef FS_AWARE_OPTIONS`
+# block is compiled in/out. Anything other than exactly "0" is treated as ON.
+if [ "${FS_AWARE_OPTIONS:-1}" = "0" ]; then
+  FS_AWARE_OPTIONS_DEFINE="# FS_AWARE_OPTIONS disabled via env (FS_AWARE_OPTIONS=0) — OPTIONS always 200"
+  FS_AWARE_OPTIONS=0
+else
+  FS_AWARE_OPTIONS_DEFINE="#!define FS_AWARE_OPTIONS"
+  FS_AWARE_OPTIONS=1
+fi
+
 # Bandwidth TC1/TC2 trunk-config signaling IPs (fixed PoPs, same for every
 # zone today — NOT swapped per zone like PRIMARY/SECONDARY). Env-driven for
 # maintainability; defaults are the long-standing production values, so an
@@ -89,6 +107,10 @@ sed -i "s|__INTERNAL_SUBNET__|${INTERNAL_SUBNET}|g" "$CONFIG"
 sed -i "s|__MEDIA_SUBNET__|${MEDIA_SUBNET}|g" "$CONFIG"
 sed -i "s|__TESTING_IP__|${TESTING_IP}|g" "$CONFIG"
 sed -i "s|__BW_CPS_LIMIT__|${BW_CPS_LIMIT}|g" "$CONFIG"
+# FS-aware OPTIONS toggle: replace the placeholder LINE with the #!define (ON)
+# or a comment (OFF). Replacement text has no '|' so the s|..|..| delimiter is
+# safe; '#' and '!' are literal in sed replacement text.
+sed -i "s|__FS_AWARE_OPTIONS_DEFINE__|${FS_AWARE_OPTIONS_DEFINE}|" "$CONFIG"
 # TC1/TC2 IPs appear in BOTH kamailio.cfg (#!define + routing/failover) and
 # dispatcher.list (keepalive groups 4-5) — template both from the same vars.
 sed -i "s|__BANDWIDTH_TC1_NY__|${BANDWIDTH_TC1_NY}|g" "$CONFIG" "$DISPATCH"
@@ -96,7 +118,7 @@ sed -i "s|__BANDWIDTH_TC1_ATL__|${BANDWIDTH_TC1_ATL}|g" "$CONFIG" "$DISPATCH"
 sed -i "s|__BANDWIDTH_TC2_DAL__|${BANDWIDTH_TC2_DAL}|g" "$CONFIG" "$DISPATCH"
 sed -i "s|__BANDWIDTH_TC2_LA__|${BANDWIDTH_TC2_LA}|g" "$CONFIG" "$DISPATCH"
 
-echo "Kamailio config templated: ADVERTISE_IP=${EXTERNAL_SIP_IP}, FS=${FREESWITCH_IP}, FS_PUBLIC_IP=${FS_PUBLIC_IP}, DB=${DB_HOST}:${DB_PORT}, Homer=${HOMER_IP}, HEP_ID=${HEP_CAPTURE_ID}, SBC_ID=${SBC_ID}, SBC_INTERNAL_IP=${SBC_INTERNAL_IP}, BW_PRIMARY=${BANDWIDTH_PRIMARY_IP}, BW_SECONDARY=${BANDWIDTH_SECONDARY_IP}, INTERNAL_SUBNET=${INTERNAL_SUBNET}, MEDIA_SUBNET=${MEDIA_SUBNET}"
+echo "Kamailio config templated: ADVERTISE_IP=${EXTERNAL_SIP_IP}, FS=${FREESWITCH_IP}, FS_PUBLIC_IP=${FS_PUBLIC_IP}, DB=${DB_HOST}:${DB_PORT}, Homer=${HOMER_IP}, HEP_ID=${HEP_CAPTURE_ID}, SBC_ID=${SBC_ID}, SBC_INTERNAL_IP=${SBC_INTERNAL_IP}, BW_PRIMARY=${BANDWIDTH_PRIMARY_IP}, BW_SECONDARY=${BANDWIDTH_SECONDARY_IP}, INTERNAL_SUBNET=${INTERNAL_SUBNET}, MEDIA_SUBNET=${MEDIA_SUBNET}, FS_AWARE_OPTIONS=${FS_AWARE_OPTIONS}"
 
 # Add the NLB VIP (EXTERNAL_SIP_IP / ADVERTISE_IP) to the loopback interface.
 #
