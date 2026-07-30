@@ -53,10 +53,19 @@ export interface CallPathPackage {
 export interface TrunkCreate {
   customer_id: number;
   trunk_name: string;
+  /**
+   * Capacity is set EITHER via a purchased tier OR custom values:
+   *   • `cps_tier_id` — server derives CPS + call paths from the tier.
+   *   • `cps_limit` + `max_channels` — explicit custom capacity.
+   * Send one shape or the other, never both.
+   */
+  cps_tier_id?: number;
   max_channels?: number;
   cps_limit?: number;
   auth_type?: TrunkAuthType;
   tech_prefix?: string | null;
+  /** IPv4 addresses (optional /CIDR) to whitelist at creation time. */
+  auth_ips?: string[];
   enabled?: boolean;
   package_name?: string | null;
 }

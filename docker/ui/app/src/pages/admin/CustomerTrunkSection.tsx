@@ -16,6 +16,12 @@ import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
 import { Spinner } from '../../components/ui/Spinner';
 import { useToast } from '../../components/ui/ToastContext';
+import {
+  useTrunkCapacity,
+  useTrunkAuthIps,
+  TrunkCapacitySection,
+  TrunkAuthIpsSection,
+} from './TrunkCapacityFields';
 import type { Trunk, TrunkIp, TrunkDid, TrunkAuthType } from '../../types/trunk';
 
 // ----- Types -----
@@ -594,6 +600,12 @@ export function CustomerTrunkSection({ customerId }: CustomerTrunkSectionProps) 
   const [newTrunkAuth, setNewTrunkAuth] = useState<TrunkAuthType>('ip');
   const [selectedTrunkId, setSelectedTrunkId] = useState<number | null>(null);
 
+  // Capacity + Authorized-IP controllers (own their state + the shared
+  // ['trunk-tiers'] query). Declared with the other hooks, above any early
+  // return, so hook order never changes — React #310.
+  const capacity = useTrunkCapacity();
+  const authIps = useTrunkAuthIps();
+
   // Fetch trunks list
   const { data: trunksData, isLoading, isError } = useQuery({
     queryKey: ['customerTrunks', customerId],
@@ -624,14 +636,17 @@ export function CustomerTrunkSection({ customerId }: CustomerTrunkSectionProps) 
       createTrunk({
         customer_id: customerId,
         trunk_name: newTrunkName.trim(),
-        max_channels: 10,
-        cps_limit: 5,
         auth_type: newTrunkAuth,
+        // tier → { cps_tier_id }; custom → { cps_limit, max_channels }
+        ...capacity.buildPayload(),
+        ...(authIps.ips.length > 0 ? { auth_ips: authIps.ips } : {}),
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['customerTrunks', customerId] });
       setNewTrunkName('');
       setNewTrunkAuth('ip');
+      capacity.reset();
+      authIps.reset();
       toastOk(`Trunk "${newTrunkName.trim()}" created`);
     },
     onError: (err: Error) => toastErr(err.message),
@@ -641,6 +656,8 @@ export function CustomerTrunkSection({ customerId }: CustomerTrunkSectionProps) 
     e.preventDefault();
     e.stopPropagation();
     if (!newTrunkName.trim()) { toastErr('Trunk name is required'); return; }
+    const capacityError = capacity.validate();
+    if (capacityError) { toastErr(capacityError); return; }
     createTrunkMutation.mutate();
   }
 
@@ -802,6 +819,19 @@ export function CustomerTrunkSection({ customerId }: CustomerTrunkSectionProps) 
               <option value="both">Both</option>
             </select>
           </div>
+        </div>
+
+        {/* Capacity — purchased tier OR custom CPS / call paths */}
+        <div style={{ marginTop: 20, maxWidth: 460 }} onClick={(e) => e.stopPropagation()}>
+          <TrunkCapacitySection ctl={capacity} />
+        </div>
+
+        {/* Authorized IPs — optional whitelist at creation */}
+        <div style={{ marginTop: 20, maxWidth: 460 }} onClick={(e) => e.stopPropagation()}>
+          <TrunkAuthIpsSection ctl={authIps} />
+        </div>
+
+        <div style={{ marginTop: 20 }}>
           <Button
             type="submit"
             variant="primary"
