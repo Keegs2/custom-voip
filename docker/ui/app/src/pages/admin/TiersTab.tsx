@@ -139,6 +139,76 @@ function SectionState({
 }
 
 // ---------------------------------------------------------------------------
+// Custom (>10 CPS) — enterprise ladder cap, sold via sales
+// ---------------------------------------------------------------------------
+
+/**
+ * "Contact sales" price treatment for the Custom tier. CPS above the self-serve
+ * cap (10) is an exponentially-priced premium lever quoted per-account, so we
+ * show a subtle blue badge instead of a number — mirroring how carriers gate
+ * high CPS to sales rather than publishing a rate.
+ */
+function ContactSalesBadge() {
+  return <Badge variant="premium">Contact&nbsp;sales</Badge>;
+}
+
+/**
+ * Terminal "Custom" row appended to the bottom of both the SIP Trunking and API
+ * Calling ladders. It is the premium/enterprise cap: CPS ">10", no published
+ * price. `withPaths` renders the extra trunk-only "Included Paths" cell so the
+ * single component serves both the 5-column trunk table and 4-column API table.
+ */
+function CustomTierRow({ withPaths, label }: { withPaths: boolean; label: string }) {
+  return (
+    // Reuses the shared `.glass-row-hover` class (identical hover language to
+    // every other row) and layers a soft, always-on blue tint + faint accent
+    // leading edge inline — so it reads as the premium cap of the ladder without
+    // adding any new CSS. The `Tr` wrapper takes only className, hence the raw
+    // <tr> here to carry the resting `style`.
+    <tr
+      className="glass-row-hover"
+      style={{
+        background: 'rgba(59,130,246,0.045)',
+        boxShadow: 'inset 3px 0 0 0 rgba(59,130,246,0.35)',
+      }}
+    >
+      <Td>
+        <div className="flex flex-col" style={{ gap: 2 }}>
+          <span className="font-semibold" style={{ color: '#93c5fd' }}>
+            Custom
+          </span>
+          <span className="text-[#718096] text-xs">Enterprise — quoted per account</span>
+        </div>
+      </Td>
+      <Td className="text-right tabular-nums text-[#cbd5e1]">&gt;10</Td>
+      {withPaths && <Td className="text-right tabular-nums text-[#718096]">Custom</Td>}
+      <Td className="text-right">
+        <div className="flex justify-end">
+          <ContactSalesBadge />
+        </div>
+      </Td>
+      <Td className="text-right tabular-nums text-[#718096]">{label}</Td>
+    </tr>
+  );
+}
+
+/**
+ * Muted, glass-consistent line placed under each tier ladder. Mirrors how
+ * carriers quality-gate high CPS: capacity above the published tiers is granted
+ * subject to a traffic-quality review (ASR / ACD).
+ */
+function CpsReviewNote() {
+  return (
+    <p
+      className="text-[#718096]"
+      style={{ fontSize: '0.72rem', lineHeight: 1.5, marginTop: 10 }}
+    >
+      Higher CPS is subject to traffic-quality review (ASR / ACD).
+    </p>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // SIP Trunking
 // ---------------------------------------------------------------------------
 
@@ -149,7 +219,11 @@ function TrunkTierRows({ tiers }: { tiers: Tier[] }) {
       <Thead>
         <tr>
           <Th>Tier</Th>
-          <Th className="text-right">CPS</Th>
+          <Th className="text-right">
+            <span title="Calls per second — the primary capacity driver and the premium pricing lever">
+              CPS
+            </span>
+          </Th>
           <Th className="text-right">Included Paths</Th>
           <Th className="text-right">Monthly</Th>
           <Th className="text-right">Per-Call</Th>
@@ -175,6 +249,8 @@ function TrunkTierRows({ tiers }: { tiers: Tier[] }) {
             </Tr>
           );
         })}
+        {/* Enterprise cap: CPS above the self-serve limit (10) is quoted by sales. */}
+        <CustomTierRow withPaths label="Custom" />
       </tbody>
     </Table>
   );
@@ -235,7 +311,11 @@ function ApiTierRows({ tiers }: { tiers: Tier[] }) {
       <Thead>
         <tr>
           <Th>Plan</Th>
-          <Th className="text-right">CPS</Th>
+          <Th className="text-right">
+            <span title="Calls per second — the primary capacity driver and the premium pricing lever">
+              CPS
+            </span>
+          </Th>
           <Th className="text-right">Monthly</Th>
           <Th className="text-right">Per-Call</Th>
         </tr>
@@ -259,6 +339,8 @@ function ApiTierRows({ tiers }: { tiers: Tier[] }) {
             </Tr>
           );
         })}
+        {/* Enterprise cap: CPS above the self-serve limit (10) is quoted by sales. */}
+        <CustomTierRow withPaths={false} label="--" />
       </tbody>
     </Table>
   );
@@ -315,6 +397,7 @@ export function TiersTab() {
               Tiers are a starting point — CPS and included paths are customizable, and every tier is
               upsellable with call-path add-ons below.
             </p>
+            <CpsReviewNote />
           </>
         )}
 
@@ -364,7 +447,10 @@ export function TiersTab() {
           emptyLabel="No API plans configured."
         />
         {!apiQuery.isLoading && !apiQuery.isError && apiTiers.length > 0 && (
-          <ApiTierRows tiers={apiTiers} />
+          <>
+            <ApiTierRows tiers={apiTiers} />
+            <CpsReviewNote />
+          </>
         )}
       </ProductSection>
 
