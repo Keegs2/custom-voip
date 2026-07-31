@@ -60,6 +60,13 @@ end
 local redis = load_module("redis_client")
 local redis_cps = load_module("redis_cps")
 local db = load_module("db_client")
+-- Shared canonical normalizer (Lua/Python/TS same algorithm). See
+-- lib/number_utils.lua. normalize_destination below delegates to it so there is
+-- ONE implementation on the call path.
+local number_utils = load_module("number_utils")
+if not number_utils then
+    freeswitch.consoleLog("ERR", "[api_outbound] number_utils failed to load — falling back to legacy inline normalization\n")
+end
 
 -- Ensure session exists
 if not session then
@@ -135,9 +142,34 @@ if destination == "" then
     return
 end
 
--- Normalize destination to E.164
+-- Normalize destination to canonical E.164 (with '+', country code preserved).
+-- Delegates to the shared number_utils.to_e164. This value (normalized_dest) is
+-- the OUTBOUND WIRE number sent to the carrier — it keeps its '+' and country
+-- code (do NOT force +1 on an international dial-out).
+--
+-- International-prefix handling stays HERE, before to_e164: a caller that dials
+-- the North-American international access code 011<CC><nsn> means "+<CC><nsn>",
+-- so we rewrite a leading 011 to '+' first (the canonical spec deliberately does
+-- not know the 011 access code). '*'/'#' feature codes never reach to_e164 and
+-- fall through to the lenient fallback, preserving prior behavior.
 local function normalize_destination(number)
-    local clean = number:gsub("[^%d+*#]", "")
+    number = number or ""
+    -- Rewrite the NANP international access code 011... -> +... before canonical.
+    local pre = number:gsub("[^%d+*#]", "")
+    if pre:match("^011%d") then
+        pre = "+" .. pre:gsub("^011", "")
+    end
+
+    if number_utils then
+        local canon = number_utils.to_e164(pre)
+        if canon then
+            return canon
+        end
+        -- to_e164 rejected it — fall through to legacy lenient (keeps *,# etc.)
+    end
+
+    -- Legacy lenient fallback (never nil). Operates on the *-preserving `pre`.
+    local clean = pre
     if clean:match("^%+") then
         return clean
     end
@@ -148,10 +180,6 @@ local function normalize_destination(number)
     end
     if digit_count == 11 and clean:match("^1%d+$") then
         return "+" .. clean
-    end
-    if clean:match("^011") then
-        -- International format, convert to +
-        return "+" .. clean:gsub("^011", "")
     end
     return "+" .. clean
 end
@@ -366,7 +394,7 @@ local dial_string = string.format(
     outbound_caller_name,
     bridge_progress_timeout,
     sip_call_id,
-    normalized_dest:gsub("^%+", "")  -- Remove + for carrier (carrier-dependent)
+    normalized_dest  -- full +E.164 (KEEP the '+' — preserves country code; matches RCF)
 )
 
 freeswitch.consoleLog("INFO", string.format(
@@ -452,7 +480,7 @@ else
                 outbound_caller_name,
                 bridge_progress_timeout,
                 sip_call_id,
-                normalized_dest:gsub("^%+", "")
+                normalized_dest  -- full +E.164 (KEEP the '+' — preserves country code)
             )
 
             set_var("carrier_used", "carrier_secondary")

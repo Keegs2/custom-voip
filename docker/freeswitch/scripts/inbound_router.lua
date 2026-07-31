@@ -54,6 +54,15 @@ else
     freeswitch.consoleLog("DEBUG", "[inbound_router] Modules loaded (db_client ready)\n")
 end
 
+-- Canonical phone-number normalizer shared across the switch (Lua), API
+-- (Python utils/phone.py) and UI (TS utils/phone.ts). See number_utils.lua for
+-- the spec + test vectors. normalize_did()/to_10digit() below delegate to it so
+-- there is ONE implementation on the call path.
+local number_utils = load_module("number_utils")
+if not number_utils then
+    freeswitch.consoleLog("ERR", "[inbound_router] number_utils failed to load — falling back to legacy inline normalization\n")
+end
+
 -- Ensure session exists
 if not session then
     freeswitch.consoleLog("ERR", "No session object - cannot route\n")
@@ -242,8 +251,14 @@ if did == "" then
     return
 end
 
--- Convert E.164 or 11-digit number to 10-digit format for carrier delivery
+-- Convert E.164 or 11-digit number to 10-digit format for carrier delivery.
+-- Delegates to the shared number_utils.to_10digit (same semantics). This value
+-- feeds ONLY the outbound From / caller-ID that Bandwidth authenticates against.
 local function to_10digit(number)
+    if number_utils then
+        return number_utils.to_10digit(number)
+    end
+    -- Legacy fallback (number_utils failed to load) — identical behavior.
     if not number or number == "" then return number end
     local digits = number:gsub("[^%d]", "")
     if #digits == 11 and digits:sub(1, 1) == "1" then
@@ -254,10 +269,30 @@ local function to_10digit(number)
     return digits
 end
 
--- Normalize DID to E.164 format
+-- Normalize a number to canonical E.164 (with '+', country code preserved).
+-- Delegates to the shared number_utils.to_e164 (the ONE cross-language impl).
+--
+-- CONTRACT: this wrapper is NON-nil — it is used both to normalize the inbound
+-- DID / forward_to (belt-and-suspenders; db_client canonicalizes the lookup key
+-- too) AND in caller-ID composition (masking_e164, e164_original_cid,
+-- e164_did), where a nil would break string concatenation and DROP THE LIVE
+-- CALL. So on a strict-spec failure we fall back to the previous lenient
+-- inline behavior instead of returning nil. Routing correctness rides on the
+-- canonical to_e164 (and the db_client lookup-key canonicalization); this
+-- fallback only protects malformed caller-ID from crashing an otherwise-valid
+-- call.
 local function normalize_did(number)
+    if number_utils then
+        local canon = number_utils.to_e164(number)
+        if canon then
+            return canon
+        end
+        -- to_e164 rejected it (returned nil) — fall through to legacy lenient.
+    end
+
+    -- Legacy lenient normalization (fallback only): never returns nil.
     -- Remove any non-digit characters except +
-    local clean = number:gsub("[^%d+]", "")
+    local clean = (number or ""):gsub("[^%d+]", "")
 
     -- If starts with +, keep as-is
     if clean:match("^%+") then

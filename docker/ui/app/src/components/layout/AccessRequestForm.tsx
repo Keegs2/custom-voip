@@ -751,7 +751,9 @@ export function AccessRequestForm() {
         company_name: formData.company_name,
         contact_name: formData.contact_name,
         email: formData.email,
-        phone: formData.phone,
+        // Human contact field, not a routable DID — light touch, just trim. We do
+        // NOT force E.164 here (see utils/phone.ts for the DID-normalization path).
+        phone: formData.phone.trim(),
         did_count: formData.did_count,
         porting: formData.porting,
         current_carrier: formData.current_carrier || undefined,

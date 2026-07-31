@@ -16,6 +16,7 @@ import httpx
 import orjson
 
 from db import redis_client as cache
+from utils import phone
 
 logger = logging.getLogger(__name__)
 
@@ -52,19 +53,24 @@ def _credentials_configured() -> bool:
 # Phone number normalization
 # ---------------------------------------------------------------------------
 
-def _to_e164(raw: str) -> str:
-    """Convert a Bandwidth 10-digit TN to E.164 (+1NPANXXXXXX).
+def _to_e164(raw: str) -> Optional[str]:
+    """Canonicalize a Bandwidth TN to +E.164, FAIL-SOFT.
 
-    Bandwidth returns bare 10-digit numbers (e.g. '6174544217').  Our DB
-    stores E.164 ('+16174544217').  Handle all common formats gracefully.
+    Bandwidth returns bare 10-digit numbers (e.g. '6174544217'); our DB stores
+    canonical E.164 ('+16174544217'). This delegates to utils.phone (the single
+    shared normalization algorithm) so synced inventory DIDs match the exact form
+    every write path and the number_routing view use.
+
+    Fail-soft on purpose: this runs while parsing a large paged inventory, and one
+    malformed/exotic TN must NOT abort the whole sync. On a normalization failure
+    we log and return ``None``; the caller (`_parse_tn_element`) records an empty
+    fullNumber, and the sync loop already skips TNs whose fullNumber is falsy.
     """
-    digits = raw.strip().lstrip("+")
-    if len(digits) == 10:
-        return f"+1{digits}"
-    if len(digits) == 11 and digits.startswith("1"):
-        return f"+{digits}"
-    # Already has country code or is non-NANPA — best effort
-    return f"+{digits}"
+    try:
+        return phone.normalize_e164(raw)
+    except ValueError as exc:
+        logger.warning("Skipping un-normalizable Bandwidth TN %r: %s", raw, exc)
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -75,7 +81,9 @@ def _parse_tn_element(elem: ET.Element) -> dict:
     """Convert a single <TelephoneNumber> XML element to a dict.
 
     Returns a dict with keys matching the downstream router expectations.
-    The fullNumber is normalized to E.164 for consistent comparison.
+    The fullNumber is normalized to E.164 for consistent comparison; if the TN
+    cannot be normalized it is recorded as "" (empty) so the sync loop skips it
+    rather than crashing the whole inventory pull.
     """
     def _text(tag: str) -> str:
         child = elem.find(tag)
@@ -83,7 +91,7 @@ def _parse_tn_element(elem: ET.Element) -> dict:
 
     raw_number = _text("FullNumber")
     return {
-        "fullNumber": _to_e164(raw_number),
+        "fullNumber": _to_e164(raw_number) or "",
         "rawNumber": raw_number,
         "city": _text("City"),
         "state": _text("State"),

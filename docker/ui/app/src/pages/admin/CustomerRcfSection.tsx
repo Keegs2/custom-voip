@@ -6,6 +6,8 @@ import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
 import { Spinner } from '../../components/ui/Spinner';
 import { useToast } from '../../components/ui/ToastContext';
+import { fmt } from '../../utils/format';
+import { normalizeNumberInput } from '../../utils/phone';
 import type { RcfEntry } from '../../types/rcf';
 
 interface CustomerRcfSectionProps {
@@ -205,13 +207,14 @@ function RcfForwardInput({
   });
 
   function handleSave() {
-    const trimmed = value.trim();
-    if (!trimmed) {
+    // Canonicalize to E.164 (strip separators, preserve country code) before write.
+    const normalized = normalizeNumberInput(value);
+    if (!normalized) {
       toastErr('Destination cannot be empty');
       return;
     }
-    if (trimmed === entry.forward_to) { setEditing(false); return; }
-    mutation.mutate(trimmed);
+    if (normalized === entry.forward_to) { setEditing(false); return; }
+    mutation.mutate(normalized);
   }
 
   function handleCancel() {
@@ -283,7 +286,7 @@ function RcfForwardInput({
         fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
       }}
     >
-      {entry.forward_to}
+      {fmt(entry.forward_to)}
     </div>
   );
 }
@@ -597,8 +600,9 @@ export function CustomerRcfSection({ customerId }: CustomerRcfSectionProps) {
     mutationFn: () =>
       createRcfEntry({
         customer_id: customerId,
-        did: newDid.trim(),
-        forward_to: newFwd.trim(),
+        // Canonicalize both the source DID and the forward target to E.164.
+        did: normalizeNumberInput(newDid),
+        forward_to: normalizeNumberInput(newFwd),
         pass_caller_id: passCid,
         ring_timeout: 30,
       }),

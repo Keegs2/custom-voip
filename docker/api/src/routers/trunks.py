@@ -16,11 +16,12 @@ Multi-tenant contract (mirrors routers/number_inventory.py):
 """
 import logging
 from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from typing import Optional, List
 from db import database as db
 from db import redis_client as cache
 from auth.dependencies import get_customer_filter, require_admin
+from utils import phone
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +79,20 @@ class TrunkIP(BaseModel):
 
 class TrunkDID(BaseModel):
     did: str
+
+    @field_validator("did")
+    @classmethod
+    def validate_did(cls, v: str) -> str:
+        """Store trunk DIDs as canonical +E.164 (BUG-1 fix).
+
+        A trunk DID is an inbound number the platform OWNS, so it must be stored in
+        the exact same canonical form as rcf_numbers.did / api_dids.did. Previously
+        the raw string was inserted verbatim; a non-canonical value (e.g. bare
+        '6174544217') never matches the number_routing view's `WHERE did = $1`
+        point lookup, making the DID invisible to on-net routing. Normalizing here
+        (shared utils.phone algorithm) closes that gap at the write path.
+        """
+        return phone.normalize_e164(v)
 
 
 class CallPathAssign(BaseModel):
