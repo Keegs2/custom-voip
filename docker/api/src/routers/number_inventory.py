@@ -7,7 +7,6 @@ Provides a complete DID management system backed by the did_inventory table:
 Cross-references Bandwidth TN inventory with internal product tables
 (rcf_numbers, api_dids, trunk_dids) and manages the full DID lifecycle.
 """
-import re
 import logging
 from datetime import datetime, timezone
 from typing import Optional
@@ -19,13 +18,11 @@ from db import database as db
 from db import redis_client as cache
 from auth.dependencies import require_admin, get_current_user, get_customer_filter
 from services.bandwidth_client import get_all_tns, _credentials_configured
+from utils import phone
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-# E.164 pattern: + followed by 1-15 digits
-E164_PATTERN = re.compile(r"^\+[1-9]\d{1,14}$")
 
 
 # ---------------------------------------------------------------------------
@@ -67,20 +64,18 @@ class NumberRequest(BaseModel):
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _normalize_did(did: str) -> str:
-    """Ensure a DID is in E.164 format (+1NPANXXXXXX).
+def _canonical_did(did: str) -> str:
+    """Canonicalize a DID path param to +E.164, or raise a clean 422.
 
-    Accepts: +16174544217, 16174544217, 6174544217
-    Returns: +16174544217
+    The DID arrives from the URL (``/{did}/assign`` etc.), so a malformed value is
+    a client error — surface 422 instead of letting the ValueError become a 500.
+    Uses utils.phone (shared canonical algorithm) so inventory/assignment DIDs
+    match the exact form stored by rcf/api/trunk write paths and the routing view.
     """
-    digits = did.strip().lstrip("+")
-    if len(digits) == 10:
-        return f"+1{digits}"
-    if len(digits) == 11 and digits.startswith("1"):
-        return f"+{digits}"
-    if did.startswith("+"):
-        return did
-    return f"+{digits}"
+    try:
+        return phone.normalize_e164(did)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
 
 
 async def _reconcile_product_tables() -> dict:
@@ -443,7 +438,7 @@ async def assign_did(
     For RCF: also creates the rcf_numbers record.
     Changes status from 'available' (or 'reserved') to 'assigned'.
     """
-    e164 = _normalize_did(did)
+    e164 = _canonical_did(did)
     admin_user_id = int(admin["sub"])
 
     # Verify customer exists and is active
@@ -550,7 +545,7 @@ async def unassign_did(
 
     Removes the product record (rcf_numbers, etc.) and sets status back to 'available'.
     """
-    e164 = _normalize_did(did)
+    e164 = _canonical_did(did)
     admin_user_id = int(admin["sub"])
 
     # Verify DID is currently assigned
@@ -813,7 +808,7 @@ async def request_number(
 
     Admin reviews and approves (via /assign) or the system auto-approves.
     """
-    e164 = _normalize_did(did)
+    e164 = _canonical_did(did)
     user_id = int(user["sub"])
     customer_id = user.get("customer_id")
 

@@ -29,6 +29,28 @@ do
     end
 end
 
+-- Shared canonical phone-number normalizer (Lua/Python/TS same algorithm).
+-- Loaded via loadfile() (same mod_lua workaround the callers use) so the DID
+-- LOOKUP KEY can be canonicalized to +E.164 regardless of which script called
+-- in. See lib/number_utils.lua for the spec + cross-language test vectors.
+-- Optional: if it fails to load, validate_did() falls back to its legacy
+-- clean-and-validate path (no canonicalization) and lookups still work for
+-- already-canonical keys.
+local number_utils
+do
+    local func, err = loadfile("/usr/local/freeswitch/scripts/lib/number_utils.lua")
+    if func then
+        local ok, mod = pcall(func)
+        if ok then
+            number_utils = mod
+        elseif freeswitch and freeswitch.consoleLog then
+            freeswitch.consoleLog("ERR", "[db_client] number_utils execute failed: " .. tostring(mod) .. "\n")
+        end
+    elseif freeswitch and freeswitch.consoleLog then
+        freeswitch.consoleLog("ERR", "[db_client] number_utils load failed: " .. tostring(err) .. "\n")
+    end
+end
+
 local M = {}
 
 -- Connection pool state
@@ -74,14 +96,49 @@ local function sql_number(num)
     return tostring(n)
 end
 
--- Validate E.164 phone number format
+-- Validate + CANONICALIZE a DID into the exact-match SQL lookup key.
+--
+-- This is the ONE place the DID lookup key is canonicalized. Every DID query
+-- function below (lookup_rcf / lookup_api_did / lookup_trunk_did /
+-- resolve_destination / lookup_extension_did) calls this at its top, so the
+-- `WHERE did = <key>` literal is ALWAYS canonical +E.164 regardless of what the
+-- caller passed (bare 10-digit, 1+NANP, formatted, already-+E.164, or an
+-- international number whose country code must be preserved).
+--
+-- Step 1 (canonicalization): run the input through the shared number_utils
+--   .to_e164 (same algorithm as the API/UI layers). On success the key is the
+--   canonical form (e.g. '5551234567' and '+15551234567' BOTH become
+--   '+15551234567'; '+447911123456' stays '+447911123456' — country code
+--   preserved, NOT forced to +1). This is what fixes cross-layer lookup misses.
+-- Step 2 (SQL-injection guard, UNCHANGED): whether canonicalized or falling
+--   back, the returned value MUST still be 10-15 digits with an optional single
+--   leading '+' and nothing else (^%+?%d+$). to_e164 output always satisfies
+--   this; the guard remains the hard backstop against anything unexpected.
+--
+-- If number_utils is unavailable OR to_e164 rejects the input, we fall back to
+-- the original clean-and-validate path (strip non [%d+], length/charset check)
+-- so behavior for already-canonical or odd inputs is unchanged.
 local function validate_did(did)
     if did == nil or type(did) ~= "string" then
         return nil
     end
-    -- Strip non-numeric except +
-    local clean = did:gsub("[^%d+]", "")
-    -- Must be 10-15 digits, optionally with + prefix
+
+    -- Step 1: canonicalize to +E.164 via the shared normalizer.
+    local clean
+    if number_utils then
+        local canon = number_utils.to_e164(did)
+        if canon then
+            clean = canon
+        end
+    end
+
+    -- Fallback: legacy clean (strip everything except digits and '+').
+    if not clean then
+        clean = did:gsub("[^%d+]", "")
+    end
+
+    -- Step 2: SQL-injection safety guard (unchanged semantics).
+    -- Must be 10-15 digits, optionally with a single + prefix.
     -- Note: Lua patterns don't support {n,m} quantifiers, so check length manually
     local digits = clean:gsub("%+", "")  -- Remove + for digit count
     local digit_count = #digits

@@ -20,6 +20,7 @@ import { Spinner } from '../../components/ui/Spinner';
 import { FormField } from '../../components/ui/FormField';
 import { TableWrap, Table, Thead, Th } from '../../components/ui/Table';
 import { useToast } from '../../components/ui/ToastContext';
+import { normalizeNumberInput } from '../../utils/phone';
 import {
   useTrunkCapacity,
   useTrunkAuthIps,
@@ -370,8 +371,11 @@ function DidSection({ trunk }: { trunk: Trunk }) {
 
   function handleAddDidClick(e: React.FormEvent) {
     e.preventDefault();
-    const value = inputValue.trim();
-    if (!value) { toastErr('DID is required'); return; }
+    if (!inputValue.trim()) { toastErr('DID is required'); return; }
+    // Canonicalize to E.164 so the confirmation dialog + the API call both use the
+    // canonical value (strip separators, preserve country code). Permissive — a
+    // plausible value is never blocked here; the API is the final arbiter.
+    const value = normalizeNumberInput(inputValue);
     // Stage the confirmation step
     setPendingDid(value);
     setPendingTN(selectedTN);

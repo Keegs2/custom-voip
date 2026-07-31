@@ -16,6 +16,7 @@ from auth.dependencies import get_customer_filter
 from services.esl_client import (
     originate_call, get_call_status, hangup_call, transfer_call, send_dtmf,
 )
+from utils import phone
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +73,21 @@ async def create_call(
     Enforces tiered CPS limits before allowing call origination.
     Returns 429 with upgrade recommendations if over CPS limit.
     """
+    # BUG-2 fix: canonicalize BOTH numbers before use (shared utils.phone rule).
+    # from_did is stored canonical (+E.164) in api_dids, so a raw/10-digit input
+    # ('6174544217') must be normalized BEFORE the `WHERE a.did = $1` match or the
+    # lookup misses and returns a false 404. `to` is normalized for idempotency and
+    # a canonical CDR destination (FreeSWITCH normalizes again on the B-leg — safe).
+    # A malformed number is a client error -> clean 422, not a downstream 500.
+    try:
+        from_did = phone.normalize_e164(call.from_did)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"Invalid from_did: {exc}")
+    try:
+        to = phone.normalize_forward_destination(call.to)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"Invalid destination 'to': {exc}")
+
     # Verify the from DID belongs to an API customer and get tier info
     did_info = await db.fetch_one(
         """
@@ -89,7 +105,7 @@ async def create_call(
         LEFT JOIN cps_tiers t ON c.api_tier_id = t.id
         WHERE a.did = $1::varchar AND a.enabled = true
         """,
-        call.from_did
+        from_did
     )
 
     if not did_info:
@@ -145,21 +161,21 @@ async def create_call(
     if velocity["calls_per_minute"] >= 120:  # API customers get higher limits
         raise HTTPException(status_code=429, detail="Rate limit exceeded (calls per minute)")
 
-    # Store call in active_calls table with tier info for billing
+    # Store call in active_calls table with tier info for billing (canonical numbers)
     await db.execute(
         """
         INSERT INTO active_calls (uuid, customer_id, product_type, direction, caller_id, destination)
         VALUES ($1, $2, 'api', 'outbound', $3, $4)
         """,
-        call_uuid, customer_id, call.from_did, call.to
+        call_uuid, customer_id, from_did, to
     )
 
     # Originate call via FreeSWITCH ESL
     try:
         success = await originate_call(
             uuid=call_uuid,
-            from_did=call.from_did,
-            to=call.to,
+            from_did=from_did,
+            to=to,
             customer_id=customer_id,
             traffic_grade=did_info["traffic_grade"],
             webhook_url=call.webhook_url or did_info["voice_url"],
@@ -189,8 +205,8 @@ async def create_call(
     return {
         "call_id": call_uuid,
         "status": "initiated",
-        "from": call.from_did,
-        "to": call.to,
+        "from": from_did,
+        "to": to,
         "tier": api_tier_name,
         "per_call_fee": per_call_fee
     }

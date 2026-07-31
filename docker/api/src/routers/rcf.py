@@ -1,73 +1,21 @@
 """RCF (Remote Call Forwarding) endpoints."""
-import re
 import logging
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, field_validator
 from typing import Optional
 from db import database as db
 from db import redis_client as cache
+from utils import phone
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-# E.164 pattern: + followed by 1-15 digits
-E164_PATTERN = re.compile(r'^\+[1-9]\d{1,14}$')
-
-# NANP 10-digit (e.g., 5087282017) or 11-digit with leading 1 (e.g., 15087282017)
-NANP_PATTERN = re.compile(r'^1?[2-9]\d{9}$')
-
-# Local extension pattern: 3-6 digits (typical PBX extensions like 1001, 1002, etc.)
-LOCAL_EXTENSION_PATTERN = re.compile(r'^\d{3,6}$')
-
-
-def validate_e164(phone: str) -> str:
-    """Validate and normalize phone number to E.164 format (DIDs only).
-    Accepts E.164 (+15087282017), 11-digit (15087282017), or 10-digit (5087282017).
-    """
-    if E164_PATTERN.match(phone):
-        return phone
-    if NANP_PATTERN.match(phone):
-        digits = phone if phone.startswith('1') and len(phone) == 11 else '1' + phone
-        return '+' + digits
-    raise ValueError(
-        f"Invalid phone number: '{phone}'. "
-        "Accepted formats: +15087282017, 15087282017, or 5087282017"
-    )
-
-
-def validate_forward_destination(dest: str) -> str:
-    """Validate forward-to destination: accepts E.164 or local extensions.
-
-    For local Zoiper/FreeSWITCH testing, we need to support:
-    - E.164 numbers: +15551234567 (PSTN destinations)
-    - Local extensions: 1001, 1002, 1003 (3-6 digit PBX extensions)
-
-    Args:
-        dest: Destination number (E.164 or local extension)
-
-    Returns:
-        Validated destination string
-
-    Raises:
-        ValueError: If destination doesn't match any valid pattern
-    """
-    # Accept E.164 format
-    if E164_PATTERN.match(dest):
-        return dest
-
-    # Accept NANP 10/11-digit and normalize to E.164
-    if NANP_PATTERN.match(dest):
-        digits = dest if dest.startswith('1') and len(dest) == 11 else '1' + dest
-        return '+' + digits
-
-    # Accept local extensions (3-6 digits, e.g., 1001, 1002)
-    if LOCAL_EXTENSION_PATTERN.match(dest):
-        return dest
-
-    raise ValueError(
-        f"Invalid destination: '{dest}'. "
-        "Accepted formats: +15087282017, 15087282017, 5087282017, or extension (1001)"
-    )
+# Number normalization is centralized in utils.phone — the single source of truth
+# shared (by identical algorithm) with the FreeSWITCH Lua and React TS layers.
+# DID fields must be canonical +E.164; forward/failover fields may also be a 3-6
+# digit local PBX extension. See utils/phone.py for the canonical rule + vectors.
+validate_e164 = phone.normalize_e164
+validate_forward_destination = phone.normalize_forward_destination
 
 
 class RCFCreate(BaseModel):

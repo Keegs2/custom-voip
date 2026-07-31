@@ -14,6 +14,12 @@ def normalize_did_query(raw: str) -> str:
     Accepts any common format:
         +16174544217, (617) 454-4217, 617-454-4217, 6174544217
     Returns the bare digit string for use in a SQL LIKE clause.
+
+    NOTE: This is intentionally NOT utils.phone.normalize_e164. This is the
+    READ/search side — a format-agnostic partial-match helper that deliberately
+    reduces input to bare digits so a substring `LIKE %digits%` matches DIDs
+    regardless of stored formatting or country code (e.g. '617' matches). The
+    canonical +E.164 normalizer is only for WRITE paths (what we persist/route on).
     """
     return re.sub(r"[^\d]", "", raw)
 

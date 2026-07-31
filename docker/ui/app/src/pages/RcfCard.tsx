@@ -7,6 +7,7 @@ import { Spinner } from '../components/ui/Spinner';
 import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
 import { fmt } from '../utils/format';
+import { normalizeNumberInput } from '../utils/phone';
 
 interface RcfCardProps {
   entry: RcfEntry;
@@ -156,22 +157,25 @@ function ForwardToDisplay({ entry, pendingValue, canEdit, onPendingChange }: For
   const isDirty = pendingValue !== entry.forward_to && pendingValue !== '';
 
   const mutation = useMutation({
-    mutationFn: (newValue: string) => updateRcfForwardTo(entry.did, newValue.trim()),
+    // newValue arrives already normalized from handleSave (canonical E.164).
+    mutationFn: (newValue: string) => updateRcfForwardTo(entry.did, newValue),
     onSuccess: (_data, newValue) => {
       void queryClient.invalidateQueries({ queryKey: ['rcf'] });
-      onPendingChange(entry.did, newValue.trim());
+      onPendingChange(entry.did, newValue);
       setEditing(false);
       setSavedFlash(true);
       setTimeout(() => setSavedFlash(false), 1800);
-      toastOk(`Saved — calls to ${fmt(entry.did)} now ring ${fmt(newValue.trim())}`);
+      toastOk(`Saved — calls to ${fmt(entry.did)} now ring ${fmt(newValue)}`);
     },
     onError: (error: Error) => toastErr(error.message ?? 'Failed to save'),
   });
 
   const handleSave = useCallback(() => {
-    const trimmed = pendingValue.trim();
-    if (!trimmed) { toastErr('Destination cannot be empty'); return; }
-    mutation.mutate(trimmed);
+    // Canonicalize to E.164 (strip separators, preserve country code) before the
+    // write hits the API. Permissive — a plausible value is never blocked here.
+    const normalized = normalizeNumberInput(pendingValue);
+    if (!normalized) { toastErr('Destination cannot be empty'); return; }
+    mutation.mutate(normalized);
   }, [pendingValue, mutation, toastErr]);
 
   const handleCancel = useCallback(() => {

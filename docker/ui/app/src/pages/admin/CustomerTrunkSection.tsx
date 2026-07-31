@@ -16,6 +16,7 @@ import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
 import { Spinner } from '../../components/ui/Spinner';
 import { useToast } from '../../components/ui/ToastContext';
+import { normalizeNumberInput } from '../../utils/phone';
 import {
   useTrunkCapacity,
   useTrunkAuthIps,
@@ -180,14 +181,17 @@ function TrunkCard({ trunk, customerId }: TrunkCardProps) {
     onError: (err: Error) => toastErr(err.message),
   });
 
-  // Add DID
+  // Add DID — canonicalize to E.164 before it hits the API (belt-and-suspenders:
+  // the backend validates trunk DIDs too).
   const addDidMutation = useMutation({
-    mutationFn: () =>
-      apiRequest<TrunkDid>('POST', `/trunks/${trunk.id}/dids`, { did: newDid.trim() }),
+    mutationFn: () => {
+      const did = normalizeNumberInput(newDid);
+      return apiRequest<TrunkDid>('POST', `/trunks/${trunk.id}/dids`, { did });
+    },
     onSuccess: () => {
       invalidateTrunks();
+      toastOk(`DID ${normalizeNumberInput(newDid)} assigned`);
       setNewDid('');
-      toastOk(`DID ${newDid.trim()} assigned`);
     },
     onError: (err: Error) => toastErr(err.message),
   });

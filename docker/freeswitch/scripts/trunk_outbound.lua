@@ -59,6 +59,13 @@ end
 local redis = load_module("redis_client")
 local redis_cps = load_module("redis_cps")
 local db = load_module("db_client")
+-- Shared canonical normalizer (Lua/Python/TS same algorithm). See
+-- lib/number_utils.lua. normalize_destination / normalize_did / to_10digit
+-- below delegate to it so there is ONE implementation on the call path.
+local number_utils = load_module("number_utils")
+if not number_utils then
+    freeswitch.consoleLog("ERR", "[trunk_outbound] number_utils failed to load — falling back to legacy inline normalization\n")
+end
 
 -- Ensure session exists
 if not session then
@@ -163,9 +170,35 @@ if destination == "" then
     return
 end
 
--- Normalize destination to E.164
+-- Normalize destination to canonical E.164 (with '+', country code preserved).
+-- Delegates to the shared number_utils.to_e164. This value (normalized_dest) is
+-- the OUTBOUND WIRE number sent to the carrier — it keeps its '+' and country
+-- code (do NOT force +1 on an international dial-out).
+--
+-- International-prefix handling stays HERE, before to_e164: a PBX that dials the
+-- North-American international access code 011<CC><nsn> means "+<CC><nsn>", so we
+-- rewrite a leading 011 to '+' first (the canonical spec deliberately does not
+-- know the 011 access code). '*'/'#' feature codes never reach to_e164 (they
+-- have no bare-10/11-digit or + form and fall through to the lenient fallback,
+-- preserving prior behavior).
 local function normalize_destination(number)
-    local clean = number:gsub("[^%d+*#]", "")
+    number = number or ""
+    -- Rewrite the NANP international access code 011... -> +... before canonical.
+    local pre = number:gsub("[^%d+*#]", "")
+    if pre:match("^011%d") then
+        pre = "+" .. pre:gsub("^011", "")
+    end
+
+    if number_utils then
+        local canon = number_utils.to_e164(pre)
+        if canon then
+            return canon
+        end
+        -- to_e164 rejected it — fall through to legacy lenient (keeps *,# etc.)
+    end
+
+    -- Legacy lenient fallback (never nil). Operates on the *-preserving `pre`.
+    local clean = pre
     if clean:match("^%+") then
         return clean
     end
@@ -176,14 +209,15 @@ local function normalize_destination(number)
     if digit_count == 11 and clean:match("^1%d+$") then
         return "+" .. clean
     end
-    if clean:match("^011") then
-        return "+" .. clean:gsub("^011", "")
-    end
     return "+" .. clean
 end
 
--- Convert E.164 to 10-digit format for carrier delivery
+-- Convert E.164 to 10-digit format for carrier delivery (From/caller-ID only).
 local function to_10digit(number)
+    if number_utils then
+        return number_utils.to_10digit(number)
+    end
+    -- Legacy fallback (number_utils failed to load) — identical behavior.
     if not number or number == "" then return number end
     local digits = number:gsub("[^%d]", "")
     if #digits == 11 and digits:sub(1, 1) == "1" then
@@ -194,9 +228,18 @@ local function to_10digit(number)
     return digits
 end
 
--- Normalize a number to E.164 for database comparison
+-- Normalize a number to canonical E.164 for DID (trunk_dids) comparison.
+-- Delegates to the shared number_utils.to_e164; non-nil (lenient fallback) so a
+-- malformed From never crashes caller-DID validation. The DB lookup key is ALSO
+-- canonicalized inside db_client.lookup_trunk_did, so this is belt-and-suspenders.
 local function normalize_did(number)
-    local clean = number:gsub("[^%d+]", "")
+    if number_utils then
+        local canon = number_utils.to_e164(number)
+        if canon then
+            return canon
+        end
+    end
+    local clean = (number or ""):gsub("[^%d+]", "")
     if clean:match("^%+") then
         return clean
     end
@@ -538,7 +581,7 @@ local dial_string = string.format(
     ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true}sofia/external/%s@" .. sbc_proxy_ip .. ":5060",
     bridge_progress_timeout,
     sip_call_id,
-    normalized_dest:gsub("^%+", "")  -- Remove + for carrier (carrier-dependent)
+    normalized_dest  -- full +E.164 (KEEP the '+' — preserves country code; matches RCF)
 )
 
 freeswitch.consoleLog("INFO", string.format(
@@ -589,7 +632,7 @@ if disposition ~= "SUCCESS" and session:ready() then
         ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true}sofia/external/%s@" .. sbc_proxy_ip .. ":5060",
         bridge_progress_timeout,
         sip_call_id,
-        normalized_dest:gsub("^%+", "")
+        normalized_dest  -- full +E.164 (KEEP the '+' — preserves country code)
     )
 
     pcall(function()

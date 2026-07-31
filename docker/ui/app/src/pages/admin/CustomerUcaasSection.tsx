@@ -5,6 +5,7 @@ import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
 import { Spinner } from '../../components/ui/Spinner';
 import { useToast } from '../../components/ui/ToastContext';
+import { fmt } from '../../utils/format';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -30,23 +31,6 @@ interface AutoProvisionResponse {
   count: number;
   provisioned: Extension[];
   message?: string;
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Format an E.164 phone number to +1 (XXX) XXX-XXXX for North American numbers,
- * or return the raw value for other regions.
- */
-function formatDid(did: string): string {
-  // North American: +1 followed by exactly 10 digits
-  const naMatch = did.match(/^\+1(\d{3})(\d{3})(\d{4})$/);
-  if (naMatch) {
-    return `+1 (${naMatch[1]}) ${naMatch[2]}-${naMatch[3]}`;
-  }
-  return did;
 }
 
 // ---------------------------------------------------------------------------
@@ -255,7 +239,7 @@ function ExtensionRow({ ext, index }: ExtensionRowProps) {
           whiteSpace: 'nowrap',
         }}
       >
-        {ext.assigned_did ? formatDid(ext.assigned_did) : '—'}
+        {ext.assigned_did ? fmt(ext.assigned_did) : '—'}
       </td>
 
       {/* Voicemail */}
