@@ -99,10 +99,12 @@ export function SipMessageRow({
     onToggleExpand(message.id);
   }, [message.id, onToggleExpand]);
 
-  // Early returns AFTER all hooks
+  // Early returns AFTER all hooks.
+  // The "SBC internal hops" filter governs BOTH the src==dst hairpin self-loops
+  // and the synthetic VIP↔SBC loopback connector — both are same-box internals.
   if (hideRetransmissions && message.isRetransmission) return null;
   if (hide100Trying && message.original.status === 100) return null;
-  if (hideHairpins && message.isHairpin) return null;
+  if (hideHairpins && (message.isHairpin || message.internalHandoff)) return null;
 
   const {
     sourceCol,
@@ -111,6 +113,7 @@ export function SipMessageRow({
     label,
     isRetransmission: isRetrans,
     isHairpin,
+    internalHandoff,
     tsCorrected,
     direction,
     timeDeltaMs,
@@ -149,11 +152,21 @@ export function SipMessageRow({
     timestampDisplay = `~${timestampDisplay}`;
   }
 
-  // Row opacity for retransmissions
-  const rowOpacity = isRetrans ? 0.4 : 1;
+  // Row opacity. Retransmissions dim to 0.4; the synthetic loopback connector
+  // reads even lighter than a real inferred hop so it never competes with a
+  // captured packet for attention.
+  const rowOpacity = isRetrans ? 0.4 : internalHandoff ? 0.6 : 1;
 
   // Row hover background
   const rowBg = isExpanded ? 'rgba(59,130,246,0.06)' : 'transparent';
+
+  // The connector is not a captured packet — no packet panel to open. Explain it
+  // on hover rather than inviting a click.
+  const rowTitle = internalHandoff
+    ? 'Internal loopback — the VIP and this SBC are the same Kamailio process (NLB is pass-through). No wire packet crosses this boundary.'
+    : message.original.raw_msg
+      ? 'Click to view packet details'
+      : undefined;
 
   return (
     <tr
@@ -172,7 +185,7 @@ export function SipMessageRow({
       onMouseLeave={(e) => {
         e.currentTarget.style.background = isExpanded ? 'rgba(59,130,246,0.06)' : 'transparent';
       }}
-      title={message.original.raw_msg ? 'Click to view packet details' : undefined}
+      title={rowTitle}
     >
       {/* Timestamp cell */}
       <td
@@ -272,9 +285,12 @@ export function SipMessageRow({
                         ? '50%' // Extend to center
                         : 0     // Extend to right edge
                       : 0,     // Middle cell: full width
-                  height: 2,
+                  // The loopback connector is a hair thinner than a real hop so it
+                  // reads as an internal handoff, not a captured packet.
+                  height: internalHandoff ? 1 : 2,
                   // Solid for wire-confirmed direction; dashed when the direction
-                  // was inferred from SIP semantics (collapsed HEP src/dst).
+                  // was inferred from SIP semantics (collapsed HEP src/dst) OR when
+                  // this is the synthetic same-box loopback connector.
                   ...(directionInferred
                     ? {
                         background: 'none',
@@ -339,8 +355,18 @@ export function SipMessageRow({
                   display: 'flex',
                   alignItems: 'center',
                   gap: 4,
+                  // The connector's label is italic + non-mono so it reads as an
+                  // annotation rather than a SIP method/status like a real hop.
+                  ...(internalHandoff
+                    ? { fontStyle: 'italic', fontWeight: 500, fontFamily: 'inherit' }
+                    : {}),
                 }}
               >
+                {internalHandoff && (
+                  <span aria-hidden style={{ fontStyle: 'normal', fontSize: '0.8rem', lineHeight: 1 }}>
+                    ⟳
+                  </span>
+                )}
                 {label}
                 {isRetrans && (
                   <span
@@ -354,22 +380,42 @@ export function SipMessageRow({
                     retrans
                   </span>
                 )}
-                {directionInferred && (
+                {/* Same-box loopback chip — mutually exclusive with the plain
+                    "inferred" chip so the connector is never double-tagged. */}
+                {internalHandoff ? (
                   <span
-                    title="Direction inferred from SIP headers (wire src/dst aliased to one node)"
+                    title="Internal loopback — the VIP and this SBC are the same Kamailio process (NLB is pass-through). No wire packet crosses this boundary."
                     style={{
                       fontSize: '0.58rem',
                       fontWeight: 600,
                       color: LADDER_COLORS.textFaint,
                       fontStyle: 'italic',
-                      border: `1px solid ${LADDER_COLORS.borderLight}`,
+                      border: `1px dashed ${LADDER_COLORS.borderLight}`,
                       borderRadius: 3,
                       padding: '0 3px',
                       letterSpacing: '0.02em',
                     }}
                   >
-                    inferred
+                    internal (same box)
                   </span>
+                ) : (
+                  directionInferred && (
+                    <span
+                      title="Direction inferred from SIP headers (wire src/dst aliased to one node)"
+                      style={{
+                        fontSize: '0.58rem',
+                        fontWeight: 600,
+                        color: LADDER_COLORS.textFaint,
+                        fontStyle: 'italic',
+                        border: `1px solid ${LADDER_COLORS.borderLight}`,
+                        borderRadius: 3,
+                        padding: '0 3px',
+                        letterSpacing: '0.02em',
+                      }}
+                    >
+                      inferred
+                    </span>
+                  )
                 )}
               </div>
             )}
