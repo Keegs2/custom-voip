@@ -153,10 +153,10 @@ export function SipMessageRow({
     timestampDisplay = `~${timestampDisplay}`;
   }
 
-  // Row opacity. Retransmissions dim to 0.4; the synthetic loopback connector
-  // reads even lighter than a real inferred hop so it never competes with a
-  // captured packet for attention.
-  const rowOpacity = isRetrans ? 0.4 : internalHandoff ? 0.6 : 1;
+  // Row opacity. Retransmissions dim to 0.4. The synthetic loopback connector is a
+  // deliberate "show-off" affordance, so it stays clearly legible (0.9) — a touch
+  // below a real captured hop, but never a barely-there hairline.
+  const rowOpacity = isRetrans ? 0.4 : internalHandoff ? 0.9 : 1;
 
   // Row hover background
   const rowBg = isExpanded ? 'rgba(59,130,246,0.06)' : 'transparent';
@@ -286,16 +286,25 @@ export function SipMessageRow({
                         ? '50%' // Extend to center
                         : 0     // Extend to right edge
                       : 0,     // Middle cell: full width
-                  // The loopback connector is a hair thinner than a real hop so it
-                  // reads as an internal handoff, not a captured packet.
-                  height: internalHandoff ? 1 : 2,
+                  // The loopback connector is a hair thinner than a real 2px hop but
+                  // still clearly readable — an obvious, intentional same-box bridge,
+                  // not a captured packet.
+                  height: internalHandoff ? 1.5 : 2,
                   // Solid for wire-confirmed direction; dashed when the direction
                   // was inferred from SIP semantics (collapsed HEP src/dst) OR when
-                  // this is the synthetic same-box loopback connector.
+                  // this is the synthetic same-box loopback connector. The loopback
+                  // uses a longer dash cadence + a soft glow so it reads as a
+                  // deliberate connector while staying visually distinct from a real
+                  // fine-dashed "inferred" hop.
                   ...(directionInferred
                     ? {
                         background: 'none',
-                        backgroundImage: `repeating-linear-gradient(90deg, ${color} 0px, ${color} 5px, transparent 5px, transparent 9px)`,
+                        backgroundImage: internalHandoff
+                          ? `repeating-linear-gradient(90deg, ${color} 0px, ${color} 7px, transparent 7px, transparent 12px)`
+                          : `repeating-linear-gradient(90deg, ${color} 0px, ${color} 5px, transparent 5px, transparent 9px)`,
+                        ...(internalHandoff
+                          ? { filter: `drop-shadow(0 0 3px ${color})` }
+                          : {}),
                       }
                     : { background: color }),
                   zIndex: 1,
@@ -389,9 +398,9 @@ export function SipMessageRow({
                     style={{
                       fontSize: '0.58rem',
                       fontWeight: 600,
-                      color: LADDER_COLORS.textFaint,
+                      color: LADDER_COLORS.internalHandoff,
                       fontStyle: 'italic',
-                      border: `1px dashed ${LADDER_COLORS.borderLight}`,
+                      border: `1px dashed ${LADDER_COLORS.internalHandoff}`,
                       borderRadius: 3,
                       padding: '0 3px',
                       letterSpacing: '0.02em',
