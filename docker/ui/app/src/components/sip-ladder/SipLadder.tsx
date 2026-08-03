@@ -504,10 +504,12 @@ export function SipLadder({ messages, correlations, pipelineWarnings }: SipLadde
     [layout.messages],
   );
 
-  // "SBC internal hops" covers both src==dst hairpins and the synthetic VIP↔SBC
-  // loopback connectors — both are same-box internals hidden by the one filter.
+  // "SBC internal hops" hides ONLY the src==dst hairpins (BYE/ACK re-traversal
+  // noise). The synthetic VIP↔SBC loopback connector is NOT hidden by it — it's a
+  // continuity aid (the opposite of noise), so it always shows and the call path
+  // reads end-to-end even in the clean/default view (hideHairpins defaults true).
   const hairpinCount = useMemo(
-    () => layout.messages.filter((m) => m.isHairpin || m.internalHandoff).length,
+    () => layout.messages.filter((m) => m.isHairpin).length,
     [layout.messages],
   );
 
@@ -515,7 +517,7 @@ export function SipLadder({ messages, correlations, pipelineWarnings }: SipLadde
     return layout.messages.filter((m) => {
       if (hideRetransmissions && m.isRetransmission) return false;
       if (hide100Trying && m.original.status === 100) return false;
-      if (hideHairpins && (m.isHairpin || m.internalHandoff)) return false;
+      if (hideHairpins && m.isHairpin) return false;
       return true;
     }).length;
   }, [layout.messages, hideRetransmissions, hide100Trying, hideHairpins]);
@@ -784,11 +786,11 @@ function MessageRowWithDetail({
   }, [onToggleExpand, message.id]);
 
   // Check visibility (must match SipMessageRow logic). The "SBC internal hops"
-  // filter covers both hairpins and the synthetic VIP↔SBC loopback connector.
+  // filter hides ONLY hairpins; the loopback connector always shows (continuity aid).
   const isHidden =
     (hideRetransmissions && message.isRetransmission) ||
     (hide100Trying && message.original.status === 100) ||
-    (hideHairpins && (message.isHairpin || message.internalHandoff));
+    (hideHairpins && message.isHairpin);
 
   if (isHidden) return null;
 

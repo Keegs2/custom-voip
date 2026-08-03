@@ -100,11 +100,12 @@ export function SipMessageRow({
   }, [message.id, onToggleExpand]);
 
   // Early returns AFTER all hooks.
-  // The "SBC internal hops" filter governs BOTH the src==dst hairpin self-loops
-  // and the synthetic VIP↔SBC loopback connector — both are same-box internals.
+  // The "SBC internal hops" filter hides ONLY the src==dst hairpin self-loops.
+  // The synthetic VIP↔SBC loopback connector always renders — it's the continuity
+  // aid that makes the call path read end-to-end, so it must survive the clean view.
   if (hideRetransmissions && message.isRetransmission) return null;
   if (hide100Trying && message.original.status === 100) return null;
-  if (hideHairpins && (message.isHairpin || message.internalHandoff)) return null;
+  if (hideHairpins && message.isHairpin) return null;
 
   const {
     sourceCol,
