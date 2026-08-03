@@ -86,6 +86,22 @@ export interface LadderMessage {
    * direction is derived, not captured. A message is NEVER rendered as a bare dot.
    */
   directionInferred: boolean;
+  /**
+   * True for a SYNTHETIC connector that bridges the VIP ↔ sibling-SBC boundary.
+   *
+   * The GCE NLB is pass-through: each SBC carries the NLB VIP on its own loopback
+   * (`ip addr add VIP/32 dev lo`), so the VIP alias (e.g. "Central-SBC-VIP") and
+   * the SBC's own internal-IP alias (e.g. "Central-SBC-1") are the SAME physical
+   * Kamailio process rendered as TWO columns. An inbound INVITE lands in the VIP
+   * column; the onward INVITE leaves from the SBC column — with no captured wire
+   * packet between them (it never touches the wire, it's the same box). This
+   * connector draws that internal loopback handoff so the path reads continuously.
+   *
+   * It is NOT a captured packet: it has no `raw_msg`, is non-clickable (aside from
+   * a tiny explanatory note), reuses the dashed `directionInferred` rendering, and
+   * is governed by the same "Hide SBC internal hops" filter as hairpins.
+   */
+  internalHandoff?: boolean;
 }
 
 // ─── Complete layout ────────────────────────────────────────────────────────

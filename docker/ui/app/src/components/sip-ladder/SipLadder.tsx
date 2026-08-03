@@ -337,7 +337,7 @@ function CallSummary({ layout }: CallSummaryProps) {
             Messages
           </span>
           <span style={{ ...MONO, fontSize: '0.82rem', fontWeight: 600, color: '#60a5fa' }}>
-            {layout.messages.length}
+            {layout.messages.filter((m) => !m.internalHandoff).length}
           </span>
         </div>
       </div>
@@ -504,8 +504,10 @@ export function SipLadder({ messages, correlations, pipelineWarnings }: SipLadde
     [layout.messages],
   );
 
+  // "SBC internal hops" covers both src==dst hairpins and the synthetic VIP↔SBC
+  // loopback connectors — both are same-box internals hidden by the one filter.
   const hairpinCount = useMemo(
-    () => layout.messages.filter((m) => m.isHairpin).length,
+    () => layout.messages.filter((m) => m.isHairpin || m.internalHandoff).length,
     [layout.messages],
   );
 
@@ -513,7 +515,7 @@ export function SipLadder({ messages, correlations, pipelineWarnings }: SipLadde
     return layout.messages.filter((m) => {
       if (hideRetransmissions && m.isRetransmission) return false;
       if (hide100Trying && m.original.status === 100) return false;
-      if (hideHairpins && m.isHairpin) return false;
+      if (hideHairpins && (m.isHairpin || m.internalHandoff)) return false;
       return true;
     }).length;
   }, [layout.messages, hideRetransmissions, hide100Trying, hideHairpins]);
@@ -658,6 +660,7 @@ export function SipLadder({ messages, correlations, pipelineWarnings }: SipLadde
           <LegendItem color={LADDER_COLORS.serverError} label="4xx/5xx" />
           <LegendItem color={LADDER_COLORS.ack} label="ACK" />
           <LegendItem color={LADDER_COLORS.bye} label="BYE" />
+          <LegendItem color={LADDER_COLORS.textFaint} label="⟳ internal loopback" dashed />
         </div>
       </div>
 
@@ -780,11 +783,12 @@ function MessageRowWithDetail({
     onToggleExpand(message.id);
   }, [onToggleExpand, message.id]);
 
-  // Check visibility (must match SipMessageRow logic)
+  // Check visibility (must match SipMessageRow logic). The "SBC internal hops"
+  // filter covers both hairpins and the synthetic VIP↔SBC loopback connector.
   const isHidden =
     (hideRetransmissions && message.isRetransmission) ||
     (hide100Trying && message.original.status === 100) ||
-    (hideHairpins && message.isHairpin);
+    (hideHairpins && (message.isHairpin || message.internalHandoff));
 
   if (isHidden) return null;
 
@@ -818,7 +822,7 @@ function MessageRowWithDetail({
           <td
             colSpan={numCols + 1}
             style={{
-              padding: '16px 20px',
+              padding: '14px 20px',
               background: 'rgba(59,130,246,0.03)',
               textAlign: 'center',
             }}
@@ -830,7 +834,9 @@ function MessageRowWithDetail({
                 fontStyle: 'italic',
               }}
             >
-              Raw SIP message not available for this packet
+              {message.internalHandoff
+                ? '⟳ Internal loopback — the VIP and this SBC are the same Kamailio process (the NLB is pass-through, the SBC carries the VIP on its own loopback). There is no wire packet to capture across this boundary; the connector only marks the same-box handoff.'
+                : 'Raw SIP message not available for this packet'}
             </span>
           </td>
         </tr>

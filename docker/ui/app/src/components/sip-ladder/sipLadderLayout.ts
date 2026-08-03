@@ -153,8 +153,15 @@ export function computeLayout(
     });
   }
 
+  // Post-pass: bridge the VIP ↔ sibling-SBC loopback boundary with synthetic
+  // connectors so the path reads continuously across the same-box handoff.
+  // Runs AFTER every message has its resolved source/dest columns and BEFORE the
+  // layout is returned. Purely additive — never mutates the real messages.
+  const withHandoffs = injectInternalHandoffs(processedMessages, finalNodes);
+
   // Calculate overall call duration. Display order may be causally corrected,
-  // so use min/max timestamps rather than first/last rows.
+  // so use min/max timestamps rather than first/last rows. Synthetic connectors
+  // carry a borrowed timestamp, so drive duration off the REAL messages only.
   let callDurationMs: number | null = null;
   if (sorted.length >= 2) {
     let minTs = Number.POSITIVE_INFINITY;
@@ -168,11 +175,216 @@ export function computeLayout(
 
   return {
     nodes: finalNodes,
-    messages: processedMessages,
+    messages: withHandoffs,
     aLegCallIds,
     bLegCallIds,
     callDurationMs,
   };
+}
+
+// ─── Internal loopback handoff (VIP ↔ sibling-SBC connector) ─────────────────
+
+/**
+ * Extracts the zone prefix of an aliased node name — everything up to and
+ * including the "SBC" token, minus the SBC token itself. This is what a VIP and
+ * its sibling SBC share:
+ *
+ *   "Central-SBC-VIP" → "CENTRAL-"     "Central-SBC-1" → "CENTRAL-"
+ *   "SBC-VIP"         → ""             "SBC-1"         → ""
+ *   "West-SBC-VIP"    → "WEST-"        "West-SBC-2"    → "WEST-"
+ *
+ * Two nodes belong to the same zone (same physical box family) when their zone
+ * prefixes are equal. Case-insensitive; returns `undefined` when the name has no
+ * "SBC" token (so a non-SBC node never accidentally matches a VIP).
+ */
+function zonePrefixOfSbcName(name: string): string | undefined {
+  const upper = name.toUpperCase();
+  const idx = upper.indexOf('SBC');
+  if (idx === -1) return undefined;
+  return upper.slice(0, idx);
+}
+
+/**
+ * Finds the sibling SBC column for a given VIP column: the `sbc`-role node in the
+ * SAME zone (matching zone prefix). Returns its column index, or `undefined` when
+ * no same-zone SBC column exists in the layout.
+ *
+ * When several SBC columns share the zone (a split node produces an A-leg and a
+ * B-leg column, and there can be SBC-1 / SBC-2), pick the one CLOSEST to the VIP
+ * so the connector bridges the smallest, most physically-adjacent gap. That is the
+ * A-leg (ingress) SBC for a request-in and stays adjacent for a response-out.
+ */
+function findSiblingSbcColumn(
+  vipCol: number,
+  nodes: ReadonlyArray<LadderNode>,
+): number | undefined {
+  const vipNode = nodes[vipCol];
+  if (!vipNode) return undefined;
+  const vipZone = zonePrefixOfSbcName(vipNode.displayLabel ?? vipNode.id);
+  if (vipZone === undefined) return undefined;
+
+  let best: number | undefined;
+  let bestDist = Number.POSITIVE_INFINITY;
+  for (let i = 0; i < nodes.length; i++) {
+    const node = nodes[i]!;
+    if (node.role !== 'sbc') continue;
+    if (zonePrefixOfSbcName(node.displayLabel ?? node.id) !== vipZone) continue;
+    const dist = Math.abs(i - vipCol);
+    if (dist < bestDist) {
+      bestDist = dist;
+      best = i;
+    }
+  }
+  return best;
+}
+
+/**
+ * Builds a synthetic "internal loopback handoff" connector message bridging the
+ * VIP ↔ sibling-SBC boundary. It is NOT a captured packet: no `raw_msg`, muted
+ * neutral color, `directionInferred` (so it reuses the dashed rendering) and
+ * `internalHandoff` (so the row can add the loopback affordance and the filter can
+ * govern it). Its timestamp is borrowed from the real message it bridges so
+ * ordering stays stable and no NaN ever enters the timeline.
+ */
+function makeHandoffMessage(
+  fromCol: number,
+  toCol: number,
+  anchor: LadderMessage,
+  idSuffix: string,
+): LadderMessage {
+  return {
+    // Deterministic, collision-proof id derived from the anchor row.
+    id: `${anchor.id}-handoff-${idSuffix}`,
+    // Reuse the anchor's original packet purely to satisfy the type / timestamp
+    // reads (CallSummary, timestamp gutter). The row is non-clickable because we
+    // force `raw_msg` to null on the copy below, so the packet body is never shown.
+    original: { ...anchor.original, raw_msg: null },
+    sourceCol: fromCol,
+    destCol: toCol,
+    direction: fromCol <= toCol ? 'right' : 'left',
+    color: LADDER_COLORS.textFaint,
+    label: 'internal loopback',
+    isRetransmission: false,
+    // Not a hairpin — hairpins are src==dst self-loops with their own glyph. This
+    // is a spanning connector between two DISTINCT columns of the same box.
+    isHairpin: false,
+    tsCorrected: false,
+    leg: anchor.leg,
+    // Zero elapsed time: it's the same box, no wire transit. Never null (avoids a
+    // "first message" absolute-time render) and never NaN.
+    timeDeltaMs: 0,
+    directionInferred: true,
+    internalHandoff: true,
+  };
+}
+
+/**
+ * Post-processing pass that injects synthetic dashed connectors across every
+ * VIP ↔ sibling-SBC boundary crossing, so the ladder reads as one continuous path
+ * even though the VIP and the SBC are the same physical Kamailio process (the NLB
+ * is pass-through and the SBC carries the VIP on its own loopback — there is no
+ * wire packet to capture across that boundary).
+ *
+ * Handles BOTH directions generically (covers requests AND responses on the A-leg):
+ *
+ *   • REQUEST-in : a real message whose DEST is the VIP column, where the leg's
+ *                  flow then continues from the sibling SBC column → inject VIP→SBC.
+ *   • RESPONSE-out: a real message whose SOURCE is the VIP column, preceded in the
+ *                  same leg by the sibling SBC column → inject SBC→VIP.
+ *
+ * Guards (all required before injecting):
+ *   - Both the VIP node and its same-zone sibling SBC node exist in the layout.
+ *   - There is a genuine column gap to bridge (VIP col ≠ sibling col).
+ *   - The bridged endpoint is NOT the VIP itself (never src==dst — those are the
+ *     existing hairpins with their own self-loop glyph).
+ *   - We do NOT bridge the sbc↔sbc A-leg/B-leg virtual split (both sides are `sbc`,
+ *     never `sbc-vip`, so the role checks below already exclude it).
+ *   - No duplicate connector for the same boundary crossing (dedup by from/to cols
+ *     around the same adjacency).
+ */
+function injectInternalHandoffs(
+  messages: ReadonlyArray<LadderMessage>,
+  nodes: ReadonlyArray<LadderNode>,
+): LadderMessage[] {
+  // Fast exit: nothing to do without at least one VIP column.
+  const hasVip = nodes.some((n) => n.role === 'sbc-vip');
+  if (!hasVip) return [...messages];
+
+  const roleOf = (col: number): NodeRole | undefined => nodes[col]?.role;
+  const touches = (m: LadderMessage, col: number): boolean =>
+    m.sourceCol === col || m.destCol === col;
+
+  // Phase 1: for every message, find the neighbouring REAL message in the SAME
+  // leg (previous + next). Precomputing this removes any dependence on the
+  // running output length, so cross-leg interleaving can never misplace a
+  // connector. (Real == not a synthetic handoff; the inputs are all real today,
+  // but we stay defensive so a re-run is idempotent.)
+  const prevRealInLeg: (LadderMessage | undefined)[] = new Array(messages.length);
+  const nextRealInLeg: (LadderMessage | undefined)[] = new Array(messages.length);
+  {
+    const lastByLeg = new Map<LadderMessage['leg'], LadderMessage>();
+    for (let i = 0; i < messages.length; i++) {
+      const m = messages[i]!;
+      if (m.internalHandoff) continue;
+      prevRealInLeg[i] = lastByLeg.get(m.leg);
+      lastByLeg.set(m.leg, m);
+    }
+    const nextByLeg = new Map<LadderMessage['leg'], LadderMessage>();
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i]!;
+      if (m.internalHandoff) continue;
+      nextRealInLeg[i] = nextByLeg.get(m.leg);
+      nextByLeg.set(m.leg, m);
+    }
+  }
+
+  // Phase 2: single forward walk emitting connectors inline, in place.
+  const out: LadderMessage[] = [];
+  // Dedup: one connector per (leg, fromCol, toCol) adjacency is plenty; a burst of
+  // retransmitted INVITEs into the VIP must not stack N identical connectors.
+  const emitted = new Set<string>();
+  const emitOnce = (from: number, to: number, anchor: LadderMessage, kind: 'in' | 'out'): void => {
+    if (from === to) return; // never src==dst (that's a hairpin, not a boundary)
+    const key = `${anchor.leg}:${from}->${to}`;
+    if (emitted.has(key)) return;
+    emitted.add(key);
+    out.push(makeHandoffMessage(from, to, anchor, `${kind}-${from}-${to}`));
+  };
+
+  for (let i = 0; i < messages.length; i++) {
+    const msg = messages[i]!;
+    if (msg.internalHandoff) {
+      out.push(msg);
+      continue;
+    }
+
+    // ── RESPONSE-out: curr SOURCE is the VIP, preceded in this leg by the ──
+    // sibling SBC. The response leaves the box from the VIP face; the prior hop
+    // sat on the sibling SBC. Bridge SBC → VIP just BEFORE this row.
+    if (!msg.isHairpin && roleOf(msg.sourceCol) === 'sbc-vip') {
+      const sibling = findSiblingSbcColumn(msg.sourceCol, nodes);
+      const prevReal = prevRealInLeg[i];
+      if (sibling !== undefined && prevReal && touches(prevReal, sibling)) {
+        emitOnce(sibling, msg.sourceCol, msg, 'out');
+      }
+    }
+
+    // Emit the real message itself.
+    out.push(msg);
+
+    // ── REQUEST-in: curr DEST is the VIP and the leg's next real hop continues ──
+    // from the sibling SBC (the onward INVITE from that SBC). Bridge VIP → SBC
+    // just AFTER this row, so the connector lands between the two real messages.
+    if (!msg.isHairpin && roleOf(msg.destCol) === 'sbc-vip') {
+      const sibling = findSiblingSbcColumn(msg.destCol, nodes);
+      const nextReal = nextRealInLeg[i];
+      if (sibling !== undefined && nextReal && touches(nextReal, sibling)) {
+        emitOnce(msg.destCol, sibling, msg, 'in');
+      }
+    }
+  }
+
+  return out;
 }
 
 // ─── Internal helpers ───────────────────────────────────────────────────────
