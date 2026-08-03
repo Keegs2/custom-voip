@@ -39,6 +39,12 @@ export const LADDER_COLORS = {
   // Retransmission
   retransmission: 'rgba(148,163,184,0.3)',
 
+  // Internal loopback connector (synthetic VIP ↔ sibling-SBC same-box handoff).
+  // A muted slate-cyan that is clearly readable against the dark ladder yet still
+  // reads as "inferred/internal" — distinct from every real SIP method/status hue,
+  // so the connector never masquerades as a captured packet.
+  internalHandoff: '#64748b',
+
   // Diagram elements
   columnLine: 'rgba(42,47,69,0.3)',
   arrowHead: '#e2e8f0',

@@ -262,7 +262,7 @@ function makeHandoffMessage(
     sourceCol: fromCol,
     destCol: toCol,
     direction: fromCol <= toCol ? 'right' : 'left',
-    color: LADDER_COLORS.textFaint,
+    color: LADDER_COLORS.internalHandoff,
     label: 'internal loopback',
     isRetransmission: false,
     // Not a hairpin — hairpins are src==dst self-loops with their own glyph. This
@@ -285,12 +285,27 @@ function makeHandoffMessage(
  * is pass-through and the SBC carries the VIP on its own loopback — there is no
  * wire packet to capture across that boundary).
  *
- * Handles BOTH directions generically (covers requests AND responses on the A-leg):
+ * Handles BOTH directions generically (covers requests AND responses on the A-leg).
+ * The trigger is a per-leg REACHABILITY test, NOT the immediate neighbour: a
+ * provisional response (`100 Trying VIP→carrier`) commonly sits between the inbound
+ * request and the onward request, so an "is my immediate neighbour on the sibling
+ * SBC?" heuristic silently misses the primary ingress bridge. Instead we ask
+ * whether the SAME leg contains the loopback's OTHER end anywhere in the causal
+ * direction:
  *
- *   • REQUEST-in : a real message whose DEST is the VIP column, where the leg's
- *                  flow then continues from the sibling SBC column → inject VIP→SBC.
- *   • RESPONSE-out: a real message whose SOURCE is the VIP column, preceded in the
- *                  same leg by the sibling SBC column → inject SBC→VIP.
+ *   • REQUEST-in  (VIP→SBC): a real message whose DEST is the VIP column, when the
+ *                  SAME leg has ANY message SOURCED FROM the sibling SBC at a LATER
+ *                  position (the onward INVITE from that SBC). Injected right AFTER
+ *                  the inbound-to-VIP row so it lands at the very top of the ladder.
+ *                  Dedup guarantees one VIP→SBC per leg, so firing on the FIRST
+ *                  inbound-to-VIP message is correct.
+ *   • RESPONSE-out (SBC→VIP): a real message whose SOURCE is the VIP and whose DEST
+ *                  is the carrier (a response leaving toward the carrier), when the
+ *                  SAME leg has an EARLIER message DESTINED TO the sibling SBC (the
+ *                  response that arrived at the SBC). Injected right BEFORE that
+ *                  outbound-from-VIP row. The "earlier dest to sibling" guard is
+ *                  false at the initial `100 Trying VIP→carrier`, so the connector
+ *                  never fires before any real response has reached the SBC.
  *
  * Guards (all required before injecting):
  *   - Both the VIP node and its same-zone sibling SBC node exist in the layout.
@@ -299,8 +314,9 @@ function makeHandoffMessage(
  *     existing hairpins with their own self-loop glyph).
  *   - We do NOT bridge the sbc↔sbc A-leg/B-leg virtual split (both sides are `sbc`,
  *     never `sbc-vip`, so the role checks below already exclude it).
- *   - No duplicate connector for the same boundary crossing (dedup by from/to cols
- *     around the same adjacency).
+ *   - `isHairpin` rows are skipped entirely (they are the self-loop copies).
+ *   - No duplicate connector for the same boundary crossing (dedup by leg + from/to
+ *     cols), so a burst of retransmitted INVITEs never stacks N connectors.
  */
 function injectInternalHandoffs(
   messages: ReadonlyArray<LadderMessage>,
@@ -311,38 +327,67 @@ function injectInternalHandoffs(
   if (!hasVip) return [...messages];
 
   const roleOf = (col: number): NodeRole | undefined => nodes[col]?.role;
-  const touches = (m: LadderMessage, col: number): boolean =>
-    m.sourceCol === col || m.destCol === col;
+  const isCarrierCol = (col: number): boolean => {
+    const r = roleOf(col);
+    return r === 'carrier-ingress' || r === 'carrier-egress';
+  };
 
-  // Phase 1: for every message, find the neighbouring REAL message in the SAME
-  // leg (previous + next). Precomputing this removes any dependence on the
-  // running output length, so cross-leg interleaving can never misplace a
-  // connector. (Real == not a synthetic handoff; the inputs are all real today,
-  // but we stay defensive so a re-run is idempotent.)
-  const prevRealInLeg: (LadderMessage | undefined)[] = new Array(messages.length);
-  const nextRealInLeg: (LadderMessage | undefined)[] = new Array(messages.length);
-  {
-    const lastByLeg = new Map<LadderMessage['leg'], LadderMessage>();
-    for (let i = 0; i < messages.length; i++) {
-      const m = messages[i]!;
-      if (m.internalHandoff) continue;
-      prevRealInLeg[i] = lastByLeg.get(m.leg);
-      lastByLeg.set(m.leg, m);
+  // Phase 1: per-leg positional index of the loopback's endpoints. For every leg,
+  // record — over REAL messages only, at their array position — the LAST position
+  // at which each column is a message SOURCE and the FIRST position at which each
+  // column is a message DEST. This lets the walk answer, in O(1):
+  //   • "does this leg have a LATER message sourced from the sibling SBC?"  →
+  //     lastSrcPosInLeg(leg, sibling) > i           (drives REQUEST-in)
+  //   • "does this leg have an EARLIER message destined to the sibling SBC?" →
+  //     firstDstPosInLeg(leg, sibling) < i          (drives RESPONSE-out)
+  // Precomputing decouples the trigger from the immediate neighbour, so a
+  // provisional response wedged between the inbound and onward requests can no
+  // longer suppress the ingress bridge. O(n) build, O(1) queries.
+  type Leg = LadderMessage['leg'];
+  const lastSrcPos = new Map<Leg, Map<number, number>>();
+  const firstDstPos = new Map<Leg, Map<number, number>>();
+  const bump = (
+    store: Map<Leg, Map<number, number>>,
+    leg: Leg,
+    col: number,
+    pos: number,
+    keepLatest: boolean,
+  ): void => {
+    let byCol = store.get(leg);
+    if (!byCol) {
+      byCol = new Map<number, number>();
+      store.set(leg, byCol);
     }
-    const nextByLeg = new Map<LadderMessage['leg'], LadderMessage>();
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const m = messages[i]!;
-      if (m.internalHandoff) continue;
-      nextRealInLeg[i] = nextByLeg.get(m.leg);
-      nextByLeg.set(m.leg, m);
+    const cur = byCol.get(col);
+    if (cur === undefined || (keepLatest ? pos > cur : pos < cur)) {
+      byCol.set(col, pos);
     }
+  };
+  for (let i = 0; i < messages.length; i++) {
+    const m = messages[i]!;
+    if (m.internalHandoff || m.isHairpin) continue;
+    bump(lastSrcPos, m.leg, m.sourceCol, i, true);
+    bump(firstDstPos, m.leg, m.destCol, i, false);
   }
+  const hasLaterSrc = (leg: Leg, col: number, pos: number): boolean => {
+    const p = lastSrcPos.get(leg)?.get(col);
+    return p !== undefined && p > pos;
+  };
+  const hasEarlierDst = (leg: Leg, col: number, pos: number): boolean => {
+    const p = firstDstPos.get(leg)?.get(col);
+    return p !== undefined && p < pos;
+  };
 
   // Phase 2: single forward walk emitting connectors inline, in place.
   const out: LadderMessage[] = [];
   // Dedup: one connector per (leg, fromCol, toCol) adjacency is plenty; a burst of
-  // retransmitted INVITEs into the VIP must not stack N identical connectors.
+  // retransmitted INVITEs into the VIP must not stack N identical connectors. Seed
+  // it from any connectors ALREADY present so a re-run of this pass on its own
+  // output stays idempotent (never re-injects a boundary that already has one).
   const emitted = new Set<string>();
+  for (const m of messages) {
+    if (m.internalHandoff) emitted.add(`${m.leg}:${m.sourceCol}->${m.destCol}`);
+  }
   const emitOnce = (from: number, to: number, anchor: LadderMessage, kind: 'in' | 'out'): void => {
     if (from === to) return; // never src==dst (that's a hairpin, not a boundary)
     const key = `${anchor.leg}:${from}->${to}`;
@@ -358,13 +403,18 @@ function injectInternalHandoffs(
       continue;
     }
 
-    // ── RESPONSE-out: curr SOURCE is the VIP, preceded in this leg by the ──
-    // sibling SBC. The response leaves the box from the VIP face; the prior hop
-    // sat on the sibling SBC. Bridge SBC → VIP just BEFORE this row.
-    if (!msg.isHairpin && roleOf(msg.sourceCol) === 'sbc-vip') {
+    // ── RESPONSE-out: curr SOURCE is the VIP and DEST is the carrier — a response ──
+    // leaving the box toward the carrier. It fires only once an EARLIER message in
+    // this leg already arrived at the sibling SBC (the real response reaching the
+    // SBC face). That guard is false at the initial `100 Trying VIP→carrier`, so the
+    // early provisional never triggers it. Bridge SBC → VIP just BEFORE this row.
+    if (
+      !msg.isHairpin &&
+      roleOf(msg.sourceCol) === 'sbc-vip' &&
+      isCarrierCol(msg.destCol)
+    ) {
       const sibling = findSiblingSbcColumn(msg.sourceCol, nodes);
-      const prevReal = prevRealInLeg[i];
-      if (sibling !== undefined && prevReal && touches(prevReal, sibling)) {
+      if (sibling !== undefined && hasEarlierDst(msg.leg, sibling, i)) {
         emitOnce(sibling, msg.sourceCol, msg, 'out');
       }
     }
@@ -372,13 +422,14 @@ function injectInternalHandoffs(
     // Emit the real message itself.
     out.push(msg);
 
-    // ── REQUEST-in: curr DEST is the VIP and the leg's next real hop continues ──
-    // from the sibling SBC (the onward INVITE from that SBC). Bridge VIP → SBC
-    // just AFTER this row, so the connector lands between the two real messages.
+    // ── REQUEST-in: curr DEST is the VIP and the SAME leg carries a LATER message ──
+    // sourced from the sibling SBC (the onward INVITE from that SBC), regardless of
+    // what the immediate next row is (it is usually the `100 Trying` back to the
+    // carrier). Bridge VIP → SBC just AFTER this row so the connector lands at the
+    // top of the ladder, between `INVITE BW→VIP` and the following rows.
     if (!msg.isHairpin && roleOf(msg.destCol) === 'sbc-vip') {
       const sibling = findSiblingSbcColumn(msg.destCol, nodes);
-      const nextReal = nextRealInLeg[i];
-      if (sibling !== undefined && nextReal && touches(nextReal, sibling)) {
+      if (sibling !== undefined && hasLaterSrc(msg.leg, sibling, i)) {
         emitOnce(msg.destCol, sibling, msg, 'in');
       }
     }
