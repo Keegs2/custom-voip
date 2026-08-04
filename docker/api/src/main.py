@@ -17,7 +17,6 @@ from routers import (
     auth, search, number_inventory,
     carriers, rates, tiers, sipp, sbc, homer,
     onboarding, freeswitch, carrier_status, live_trunk_stats,
-    api_credentials, ivr,
 )
 from middleware.auth import JWTAuthMiddleware
 
@@ -98,8 +97,6 @@ app.include_router(trunks.router, prefix="/v1/trunks", tags=["SIP Trunks"])
 app.include_router(cdrs.router, prefix="/v1/cdrs", tags=["CDRs"])
 app.include_router(search.router, prefix="/v1/search", tags=["Search"])
 app.include_router(number_inventory.router, prefix="/v1/numbers", tags=["Number Inventory"])
-app.include_router(api_credentials.router, prefix="/v1/api-credentials", tags=["API Credentials"])
-app.include_router(ivr.router, prefix="/v1/ivr", tags=["IVR"])
 
 # Backward-compatible routes (no /v1/ prefix) for testing
 app.include_router(customers.router, prefix="/customers", tags=["Customers"])
@@ -109,8 +106,6 @@ app.include_router(trunks.router, prefix="/trunks", tags=["SIP Trunks"])
 app.include_router(cdrs.router, prefix="/cdrs", tags=["CDRs"])
 app.include_router(search.router, prefix="/search", tags=["Search"])
 app.include_router(number_inventory.router, prefix="/numbers", tags=["Number Inventory"])
-app.include_router(api_credentials.router, prefix="/api-credentials", tags=["API Credentials"])
-app.include_router(ivr.router, prefix="/ivr", tags=["IVR"])
 
 # Carrier, Rate, Tier, and SIPp management routers
 app.include_router(carriers.router, prefix="/v1/carriers", tags=["Carriers"])

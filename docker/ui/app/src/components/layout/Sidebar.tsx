@@ -28,8 +28,6 @@ interface NavItemDef {
 const allProductNavItems: NavItemDef[] = [
   { label: 'RCF',          icon: <IconRCF size={18} />,   to: '/rcf',      color: '#3b82f6', accountTypes: ['rcf', 'hybrid'] },
   { label: 'SIP Trunking', icon: <IconTrunk size={18} />, to: '/trunks',   color: '#fbbf24', accountTypes: ['trunk', 'hybrid'] },
-  { label: 'API Calling',  icon: <IconAPI size={18} />,   to: '/api-dids', color: '#c084fc', accountTypes: ['api', 'hybrid'] },
-  { label: 'IVR Builder',  icon: <IconIVR size={18} />,   to: '/ivr',      color: '#22d3ee', accountTypes: ['api', 'hybrid', 'ucaas'] },
 ];
 
 /* ─── Documentation nav items ─────────────────────────────── */
@@ -46,9 +44,13 @@ interface ComingSoonItemDef {
   icon: React.ReactNode;
 }
 
-// SIP Trunking, API Calling, and IVR Builder are now LIVE (gated by account_type
-// in allProductNavItems). No products are pre-launch right now.
-const COMING_SOON_ITEMS: ComingSoonItemDef[] = [];
+// RCF and SIP Trunking are LIVE (gated by account_type in allProductNavItems).
+// API Calling and IVR Builder are pre-launch — shown here as disabled "Soon" items
+// until they graduate to live product portals.
+const COMING_SOON_ITEMS: ComingSoonItemDef[] = [
+  { label: 'API Calling', icon: <IconAPI size={18} /> },
+  { label: 'IVR Builder', icon: <IconIVR size={18} /> },
+];
 
 /* ─── localStorage helpers ────────────────────────────────── */
 
