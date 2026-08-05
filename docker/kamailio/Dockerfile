@@ -22,6 +22,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     kamailio-redis-modules \
     # JSON handling
     kamailio-json-modules \
+    # STIR/SHAKEN — secsipid.so + secsipid_proc.so (pulls libsecsipid1
+    # transitively). secsipid.so auto-loads secsipid_proc.so in its child-init
+    # callback (do NOT `loadmodule secsipid_proc.so`); the package only needs to
+    # be on disk. Signing (Identity/PASSporT) is env-gated OFF by default —
+    # see kamailio.cfg STIR_SHAKEN_SIGN + route[TO_CARRIER].
+    kamailio-secsipid-modules \
     # Utils (pike, htable, etc)
     kamailio-utils-modules \
     # Extra modules (uac, dialog, etc)
@@ -47,7 +53,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN mkdir -p /run/kamailio \
     && mkdir -p /var/log/kamailio \
     && mkdir -p /etc/kamailio/tls \
-    && chown -R kamailio:kamailio /run/kamailio /var/log/kamailio /etc/kamailio
+    # STIR/SHAKEN secsipid on-disk x5u cert cache (secsipid modparam cache_dir).
+    # Owned by the kamailio user because Kamailio drops privileges to it (-u/-g).
+    # Only written by the future verify path (Phase 2B); signing needs no fetch,
+    # but the dir must exist so cache_dir is valid at load time.
+    && mkdir -p /var/lib/kamailio/secsipid_cache \
+    && chown -R kamailio:kamailio /run/kamailio /var/log/kamailio /etc/kamailio /var/lib/kamailio
 
 # Copy configuration templates (entrypoint.sh will template these at startup)
 COPY kamailio.cfg /etc/kamailio/kamailio.cfg.tmpl

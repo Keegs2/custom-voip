@@ -272,10 +272,17 @@ end
 local caller_did = normalize_did(caller_did_raw or "")
 
 local validated_caller_did = nil
+-- STIR/SHAKEN attestation basis (Phase 2 Task 2.1): true ONLY when the calling
+-- number the PBX presented is a DID we can confirm belongs to THIS trunk (the
+-- ownership check below passes). The default-DID fallback (:294-316) substitutes
+-- a different trunk DID because the presented number could NOT be validated, so
+-- it is NOT ownership of the presented calling number -> attest B, not A.
+local caller_did_owned = false
 if db and caller_did ~= "" then
     local trunk_did_data = db.lookup_trunk_did(caller_did)
     if trunk_did_data and tostring(trunk_did_data.trunk_id) == tostring(trunk_id) then
         validated_caller_did = caller_did
+        caller_did_owned = true
         freeswitch.consoleLog("INFO", string.format(
             "[%s] Caller DID %s validated for trunk %s\n",
             uuid, caller_did, trunk_id
@@ -552,9 +559,27 @@ session:setVariable("sip_h_X-Original-CID", original_cid or outbound_did_10)
 session:setVariable("sip_h_Diversion",
     "<sip:" .. outbound_did_10 .. "@" .. external_sip_ip .. ">;reason=unconditional")
 
+-- ================================================================
+-- STIR/SHAKEN attestation (carrier-bound) — Phase 2 Task 2.1
+-- ================================================================
+-- Kamailio route[TO_CARRIER] reads X-Attestation ∈ {A,B,div} to choose the
+-- SHAKEN signing level, then strips it before relaying to Bandwidth (see
+-- kamailio.cfg "Step 8.5"). A trunk call is ORIGINATION (not diversion): attest
+-- A only when we own the presented calling number (caller_did_owned — the DID
+-- ownership check passed), otherwise B. Degrade safely to B if the check was
+-- indeterminate. Trunk does NOT echo X-In-Identity: an originated outbound call
+-- has no inbound carrier Identity to chain.
+--
+-- Set as a session variable (like sip_h_Diversion / sip_h_X-Original-CID above)
+-- so mod_sofia emits it on the outbound INVITE and it is present on BOTH the
+-- primary and the secondary/failover carrier bridge attempts below without
+-- editing either dial string.
+local stir_attest = caller_did_owned and "A" or "B"
+session:setVariable("sip_h_X-Attestation", stir_attest)
+
 freeswitch.consoleLog("INFO", string.format(
-    "[trunk_outbound] CID setup: outbound_cid=%s effective_cid=%s original_pbx=%s\n",
-    outbound_did_10, original_cid or outbound_did_10, caller_id
+    "[trunk_outbound] CID setup: outbound_cid=%s effective_cid=%s original_pbx=%s attest=%s\n",
+    outbound_did_10, original_cid or outbound_did_10, caller_id, stir_attest
 ))
 
 -- ================================================================

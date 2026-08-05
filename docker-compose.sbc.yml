@@ -46,6 +46,26 @@ services:
       # a dead-FS zone drains via carrier/DNS failover (the fail-open NLB can't).
       # Default 1 (ON). Set to 0 to force legacy always-200 with no code change.
       - FS_AWARE_OPTIONS=${FS_AWARE_OPTIONS:-1}
+      # STIR/SHAKEN outbound signing (secsipid). DARK BY DEFAULT (off). When
+      # STIR_SHAKEN_SIGN=on, Kamailio signs the outbound Identity/PASSporT in
+      # route[TO_CARRIER] using the cert at STIR_CERT_URL (x5u) + the private key
+      # at STIR_KEY_PATH. STIR_KEY_PATH is a SECRET mounted at runtime (a volume
+      # in the SBC .env / an override) — it is NOT baked into the image and NOT
+      # in git. STIR_SHAKEN_VERIFY is reserved for Phase 2B (no verify code yet).
+      - STIR_SHAKEN_SIGN=${STIR_SHAKEN_SIGN:-off}
+      - STIR_SHAKEN_VERIFY=${STIR_SHAKEN_VERIFY:-off}
+      - STIR_CERT_URL=${STIR_CERT_URL:-}
+      - STIR_KEY_PATH=${STIR_KEY_PATH:-}
+      # STIR/SHAKEN inbound VERIFY trust anchors (Phase 2B). Govern whether a
+      # fetched x5u cert is chained to a trusted STI-CA root. DEFAULT MODE 0 =
+      # structural + JWT-signature only (no chain), byte-identical to no-libopt.
+      # For true STI-PA trust set MODE=7 and point CA_FILE at the STI-PA root
+      # bundle (delivered per-SBC like the key; mount it read-only). Inert unless
+      # STIR_SHAKEN_VERIFY=on. STIR_VERIFY_CA_FILE/_INTER are only opened when the
+      # matching CertVerify bit is set, so an empty default never blocks a call.
+      - STIR_VERIFY_CERT_MODE=${STIR_VERIFY_CERT_MODE:-0}
+      - STIR_VERIFY_CA_FILE=${STIR_VERIFY_CA_FILE:-}
+      - STIR_VERIFY_CA_INTER=${STIR_VERIFY_CA_INTER:-}
       # Bandwidth TC1/TC2 trunk-config signaling IPs (fixed PoPs, all zones)
       - BANDWIDTH_TC1_NY=${BANDWIDTH_TC1_NY:-67.231.9.142}
       - BANDWIDTH_TC1_ATL=${BANDWIDTH_TC1_ATL:-67.231.13.185}
@@ -54,6 +74,14 @@ services:
     volumes:
       - ./docker/kamailio/kamailio.cfg:/etc/kamailio/kamailio.cfg.tmpl:ro
       - ./docker/kamailio/dispatcher.list:/etc/kamailio/dispatcher.list.tmpl:ro
+      # STIR/SHAKEN private key (SECRET) — mount READ-ONLY at the STIR_KEY_PATH
+      # set in .env. COMMENTED OUT so a dark deploy (signing OFF, no key on the
+      # VM yet) starts cleanly — a bind mount whose SOURCE is missing makes
+      # Compose fail to start the container. Uncomment + point at the real key on
+      # the VM ONLY when enabling signing (Phase 3), and keep the container path
+      # equal to STIR_KEY_PATH. The key is delivered per-SBC like .env — NEVER
+      # committed to git, NEVER baked into the image.
+      #   - /opt/revup/secrets/stir-key.pem:/etc/kamailio/stir/stir-key.pem:ro
       # Shared ctl binrpc socket dir so the carrier-monitor sidecar can read
       # LIVE dispatcher state (`kamcmd dispatcher.list`) over the SAME socket
       # the healthcheck uses. Kamailio creates /run/kamailio/kamailio_ctl here

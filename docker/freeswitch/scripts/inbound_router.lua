@@ -743,6 +743,43 @@ local function terminate_rcf(dest, ctx)
                 "<sip:" .. masking_e164 .. "@" .. external_sip_ip .. ">;party=calling;privacy=off;screen=yes")
         end
 
+        -- ================================================================
+        -- STIR/SHAKEN attestation (carrier-bound leg only) — Phase 2 Task 2.3/2.4
+        -- ================================================================
+        -- Kamailio route[TO_CARRIER] signs the outbound Identity (PASSporT) at
+        -- the carrier border. It reads two FS-set custom headers on this B-leg
+        -- (then strips them before relaying to Bandwidth — see kamailio.cfg
+        -- "Step 8.5"): X-Attestation ∈ {A,B,div} and X-In-Identity (the div base).
+        --
+        -- RCF is DIVERSION, not origination: we do NOT assert A on the original
+        -- caller's number. Mark this leg `div` so Kamailio builds an RFC 8946 /
+        -- ATIS-1000085 div PASSporT chained onto the preserved inbound Identity.
+        -- (Kamailio ALSO treats a present Diversion header as the div trigger, so
+        -- this is belt-and-suspenders with the sip_h_Diversion set above — but we
+        -- set it explicitly so the contract does not silently depend on Diversion.)
+        --
+        -- These are session variables (like sip_h_Diversion / sip_h_X-Original-CID
+        -- above), so mod_sofia emits them on the outbound INVITE and they PERSIST
+        -- across every iteration of the 4-attempt SBC×carrier failover loop below
+        -- (that loop only overrides X-Carrier / X-CID / the SBC IP per attempt).
+        -- They are set ONLY in this PSTN/carrier `else` branch — the local-
+        -- extension branch (user/<ext>) never reaches the carrier, so it must not
+        -- carry them.
+        session:setVariable("sip_h_X-Attestation", "div")
+
+        -- Echo the inbound SHAKEN Identity as the div base. Kamailio captured the
+        -- carrier's inbound Identity on the A-leg and handed it to FS as
+        -- X-In-Identity (Task 1.4). Read what we RECEIVED (sip_h_X-In-Identity)
+        -- and re-set it verbatim on this B-leg so Kamailio can re-emit it as the
+        -- base PASSporT (RFC 8946: a div is only valid chained onto a base).
+        -- If the inbound call carried NO Identity there is simply nothing to
+        -- echo — OMIT the header (never set an empty one); Kamailio then falls
+        -- back to a base PASSporT for the "div marked but no base" case.
+        local in_identity = get_var("sip_h_X-In-Identity", nil)
+        if in_identity and in_identity ~= "" then
+            session:setVariable("sip_h_X-In-Identity", in_identity)
+        end
+
         -- Export caller ID to B-leg for Bandwidth From header auth.
         pcall(function() session:execute("export", "origination_caller_id_number=" .. outbound_did) end)
         pcall(function() session:execute("export", "origination_caller_id_name=" .. outbound_did) end)
