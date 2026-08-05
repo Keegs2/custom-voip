@@ -205,6 +205,14 @@ async def _store_call_attestation(call_uuid: str, customer_id: int, variables: d
         inbound_verstat = _stir_str_or_none(variables.get("stir_verstat"))
         verstat_source = _stir_str_or_none(variables.get("stir_verstat_source"))
 
+        # sip_call_id is the INBOUND SIP Call-ID header of the A-leg (the only
+        # leg mod_json_cdr emits). It is the value heplify-server stores in the
+        # Loki `call_id` label, so it's the join key that lets Homer's SIP-trace
+        # search attach this attestation to each returned message. FreeSWITCH
+        # emits "" when unset; normalize "" -> NULL so a legitimately-absent
+        # Call-ID never masquerades as an empty-string match target.
+        sip_call_id = _stir_str_or_none(variables.get("sip_call_id"))
+
         # If NONE of the stir vars are present, this call was not in the
         # signing path (signing off / pre-STIR CDR) — skip the write entirely
         # rather than store an all-NULL row.
@@ -226,11 +234,13 @@ async def _store_call_attestation(call_uuid: str, customer_id: int, variables: d
             """
             INSERT INTO call_attestations (
                 call_id, customer_id, signed_attestation, attest_intent,
-                inbound_signed, inbound_attest, inbound_verstat, verstat_source
+                inbound_signed, inbound_attest, inbound_verstat, verstat_source,
+                sip_call_id
             )
             VALUES (
                 $1::text, $2::int, $3::text, $4::text,
-                $5::bool, $6::text, $7::text, $8::text
+                $5::bool, $6::text, $7::text, $8::text,
+                $9::text
             )
             ON CONFLICT (call_id) DO UPDATE SET
                 customer_id        = EXCLUDED.customer_id,
@@ -239,7 +249,8 @@ async def _store_call_attestation(call_uuid: str, customer_id: int, variables: d
                 inbound_signed     = EXCLUDED.inbound_signed,
                 inbound_attest     = EXCLUDED.inbound_attest,
                 inbound_verstat    = EXCLUDED.inbound_verstat,
-                verstat_source     = EXCLUDED.verstat_source
+                verstat_source     = EXCLUDED.verstat_source,
+                sip_call_id        = EXCLUDED.sip_call_id
             """,
             str(call_uuid),        # $1  call_id
             int(customer_id),      # $2  customer_id (terminal customer)
@@ -249,10 +260,13 @@ async def _store_call_attestation(call_uuid: str, customer_id: int, variables: d
             inbound_attest,        # $6  inbound_attest (str | None)
             inbound_verstat,       # $7  inbound_verstat (str | None)
             verstat_source,        # $8  verstat_source (str | None)
+            sip_call_id,           # $9  sip_call_id (str | None) — Homer join key
         )
         logger.info(
-            "STIR attestation: call_id=%s inbound_attest=%s verstat=%s -> signed=%s",
-            call_uuid, inbound_attest, inbound_verstat, signed_attestation,
+            "STIR attestation: call_id=%s sip_call_id=%s inbound_attest=%s "
+            "verstat=%s -> signed=%s",
+            call_uuid, sip_call_id, inbound_attest, inbound_verstat,
+            signed_attestation,
         )
     except Exception:
         # Never let attestation storage affect CDR ingest / the 200 contract.
