@@ -4,6 +4,11 @@
 *.pem
 *.crt
 
+# Exception: the PUBLIC STIR/SHAKEN x5u cert chain (leaf + intermediate, NO private
+# key) MUST be in git — it's bind-mounted + served by the Caddy x5u endpoint and
+# deploys via `git pull`. Verified key-free. The STI private key is never committed.
+!infra/stir/granite-shaken-8052-x5u.pem
+
 # OS files
 .DS_Store
 Thumbs.db

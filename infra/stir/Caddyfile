@@ -1,0 +1,68 @@
+# ============================================================================
+# STIR/SHAKEN x5u — public HTTPS static endpoint (Caddy)
+# ============================================================================
+# Serves ONLY our public STI certificate chain (leaf CN=SHAKEN 8052 +
+# Neustar SHAKEN CA-2 intermediate) at exactly:
+#
+#     https://{$X5U_DOMAIN}/stir/8052-2026.pem
+#
+# This is the `x5u` value embedded in every signed PASSporT. Other carriers'
+# STIR/SHAKEN verifiers fetch it over HTTPS to validate our Identity header.
+#
+# The on-disk source is infra/stir/granite-shaken-8052-x5u.pem (PUBLIC, no
+# private key), bind-mounted READ-ONLY at /srv/stir inside the container. We
+# map the URL path /stir/8052-2026.pem onto that single file with `rewrite`
+# so there is no second copy to drift out of sync.
+#
+# Automatic HTTPS: Caddy obtains + renews a public Let's Encrypt certificate
+# for {$X5U_DOMAIN} via the ACME HTTP-01 challenge on :80, then serves HTTPS
+# on :443 and redirects :80 -> :443. The ACME account + issued cert live in
+# Caddy's data dir, which is a NAMED VOLUME so they persist across restarts
+# (re-issuing repeatedly hits Let's Encrypt rate limits).
+#
+# SECURITY POSTURE:
+#   - Read-only static file server. NO reverse_proxy to anything.
+#   - Exactly one public content path; everything else -> 404.
+#   - No directory listing (file_server without `browse`).
+#   - This container shares NOTHING with docker-compose.services.yml.
+# ============================================================================
+
+# Global options — set the ACME contact email (env-driven, placeholder default).
+{
+	email {$X5U_ACME_EMAIL:admin@example.com}
+}
+
+# ----------------------------------------------------------------------------
+# The public x5u site. Caddy auto-provisions a Let's Encrypt cert for this
+# hostname (HTTP-01 on :80) and serves it on :443.
+# ----------------------------------------------------------------------------
+{$X5U_DOMAIN:certs.granitevoip.com} {
+
+	# Root for static content. The cert PEM is bind-mounted READ-ONLY here.
+	root * /srv/stir
+
+	# ---- Uptime probe (optional): GET /healthz -> 200 "ok" ----
+	# Handled before the cert matcher so monitors don't 404. No sensitive info.
+	@healthz path /healthz
+	handle @healthz {
+		header Content-Type "text/plain; charset=utf-8"
+		respond "ok" 200
+	}
+
+	# ---- The x5u certificate, served at EXACTLY /stir/8052-2026.pem ----
+	# Match only that one URL path; rewrite it onto the real on-disk filename
+	# so the returned bytes are granite-shaken-8052-x5u.pem verbatim.
+	@x5u path /stir/8052-2026.pem
+	handle @x5u {
+		# STIR/SHAKEN cert-chain media type (RFC 8555 / IANA) + 1-day cache.
+		header Content-Type "application/pem-certificate-chain"
+		header Cache-Control "public, max-age=86400"
+		rewrite * /granite-shaken-8052-x5u.pem
+		file_server
+	}
+
+	# ---- Everything else -> 404. No listing, no other paths, no proxy. ----
+	handle {
+		respond "Not Found" 404
+	}
+}
