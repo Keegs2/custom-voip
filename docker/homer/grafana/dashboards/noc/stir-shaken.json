@@ -1,0 +1,637 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": { "type": "grafana", "uid": "-- Grafana --" },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [
+    {
+      "asDropdown": false,
+      "icon": "external link",
+      "includeVars": false,
+      "keepTime": true,
+      "tags": ["noc"],
+      "targetBlank": false,
+      "title": "NOC dashboards",
+      "tooltip": "Other Production NOC dashboards",
+      "type": "dashboards"
+    }
+  ],
+  "panels": [
+    {
+      "id": 100,
+      "type": "text",
+      "title": "",
+      "gridPos": { "h": 3, "w": 24, "x": 0, "y": 0 },
+      "transparent": true,
+      "options": {
+        "mode": "markdown",
+        "content": "## STIR/SHAKEN — attestation & inbound verification\nLive from VictoriaMetrics (`voip-metrics-vm`) — the Kamailio SBCs' `xhttp_prom` counters, scraped per-zone by vmagent. Two families:\n- **Signed attestation** (`kamailio_stir_attest_signed_total{attestation, zone}`) — what WE signed on each **outbound carrier leg**. `A` full (authenticated origin, e.g. trunk/API) · `B` partial (SHAKEN default) · `C` gateway (RCF forward of an unsigned inbound) · **`div`** = chained onto a preserved inbound Identity (best outcome — we relayed the upstream attestation) · `unsigned` = nothing signed (fail-open / signing off).\n- **Inbound verstat** (`kamailio_stir_inbound_verstat_total{verstat, source, zone}`) — the inbound caller-verification result. `source=self` = our own `secsipid_check_identity`; `source=carrier` = Bandwidth's `verstat=` lifted off the P-Asserted-Identity.\n\n`zone` = **SBC_ID** (e.g. `east-sbc-1`); the **Zone** picker maps to a `zone=~\"$zone\"` regex (`east-.*` / `west-.*` / `central-.*`, or `.*` = all). Counters expose the `_total` suffix. All ratios/mixes are over the dashboard time range (`$__range`)."
+      },
+      "fieldConfig": { "defaults": {}, "overrides": [] }
+    },
+    {
+      "id": 1,
+      "type": "piechart",
+      "title": "Signed attestation mix ($__range)",
+      "description": "Share of outbound carrier legs by the attestation WE signed, over the selected range: sum by (attestation) (increase(kamailio_stir_attest_signed_total{zone=~\"$zone\"}[$__range])). Colour-mapped to the UI: A green, B amber, C gray, div blue, unsigned red. Honours the Zone filter.",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 3 },
+      "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
+          "expr": "sum by (attestation) (increase(kamailio_stir_attest_signed_total{zone=~\"$zone\"}[$__range]))",
+          "instant": true,
+          "range": false,
+          "legendFormat": "{{attestation}}"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": true },
+        "pieType": "donut",
+        "legend": { "displayMode": "table", "placement": "right", "showLegend": true, "values": ["value", "percent"] },
+        "tooltip": { "mode": "single", "sort": "desc" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "color": { "mode": "palette-classic" },
+          "mappings": [],
+          "custom": { "hideFrom": { "legend": false, "tooltip": false, "viz": false } }
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "A" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } } ] },
+          { "matcher": { "id": "byName", "options": "B" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "yellow" } } ] },
+          { "matcher": { "id": "byName", "options": "C" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "text" } } ] },
+          { "matcher": { "id": "byName", "options": "div" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "blue" } } ] },
+          { "matcher": { "id": "byName", "options": "unsigned" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } } ] }
+        ]
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "% div — chained (best outcome, $__range)",
+      "description": "Fraction of signed outbound legs that chained onto a preserved inbound Identity (attestation=div) over the range: sum(increase(...{attestation=\"div\"}[$__range])) / sum(increase(...[$__range])). Higher = more calls where we relayed the upstream attestation intact (the best STIR outcome). Honours the Zone filter.",
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 3 },
+      "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
+          "expr": "sum(increase(kamailio_stir_attest_signed_total{attestation=\"div\", zone=~\"$zone\"}[$__range])) / clamp_min(sum(increase(kamailio_stir_attest_signed_total{zone=~\"$zone\"}[$__range])), 1)",
+          "instant": true,
+          "range": false,
+          "legendFormat": "div"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 1,
+          "min": 0,
+          "max": 1,
+          "noValue": "0",
+          "mappings": [],
+          "color": { "mode": "fixed", "fixedColor": "blue" },
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "blue", "value": null } ] }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "% C — unsigned-inbound forwards ($__range)",
+      "description": "Fraction of signed outbound legs signed as gateway attestation C (RCF forward of an unsigned inbound call) over the range: sum(increase(...{attestation=\"C\"}[$__range])) / sum(increase(...[$__range])). Expected non-zero for RCF traffic; a sudden climb means more inbound calls arrived without a usable Identity. Honours the Zone filter.",
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 3 },
+      "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
+          "expr": "sum(increase(kamailio_stir_attest_signed_total{attestation=\"C\", zone=~\"$zone\"}[$__range])) / clamp_min(sum(increase(kamailio_stir_attest_signed_total{zone=~\"$zone\"}[$__range])), 1)",
+          "instant": true,
+          "range": false,
+          "legendFormat": "C"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 1,
+          "min": 0,
+          "max": 1,
+          "noValue": "0",
+          "mappings": [],
+          "color": { "mode": "fixed", "fixedColor": "text" },
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "text", "value": null } ] }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "% unsigned (fail-open, $__range)",
+      "description": "Fraction of outbound legs where NOTHING was signed (attestation=unsigned) over the range — fail-open path or signing disabled. Green < 5%, amber >= 5%, red >= 20%. This is the compliance-risk number: sustained non-trivial 'unsigned' means calls are leaving without a PASSporT. Honours the Zone filter.",
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 3 },
+      "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
+          "expr": "sum(increase(kamailio_stir_attest_signed_total{attestation=\"unsigned\", zone=~\"$zone\"}[$__range])) / clamp_min(sum(increase(kamailio_stir_attest_signed_total{zone=~\"$zone\"}[$__range])), 1)",
+          "instant": true,
+          "range": false,
+          "legendFormat": "unsigned"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 1,
+          "min": 0,
+          "max": 1,
+          "noValue": "0",
+          "mappings": [],
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 0.05 },
+              { "color": "red", "value": 0.2 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Total signed ($__range)",
+      "description": "Total outbound carrier legs Kamailio ran the signing block on over the range: sum(increase(kamailio_stir_attest_signed_total{zone=~\"$zone\"}[$__range])). The denominator for the % stats and the attestation-mix pie. Honours the Zone filter.",
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 3 },
+      "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
+          "expr": "sum(increase(kamailio_stir_attest_signed_total{zone=~\"$zone\"}[$__range]))",
+          "instant": true,
+          "range": false,
+          "legendFormat": "signed"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "noValue": "0",
+          "mappings": [],
+          "color": { "mode": "fixed", "fixedColor": "blue" },
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "blue", "value": null } ] }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Inbound verified (Passed, $__range)",
+      "description": "Fraction of inbound legs with a caller-verification result of TN-Validation-Passed over the range, across BOTH sources (self + carrier): sum(increase(...{verstat=\"TN-Validation-Passed\"}[$__range])) / sum(increase(...[$__range])). Green >= 50%, amber < 50%, red < 20%. Honours the Zone filter.",
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 7 },
+      "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
+          "expr": "sum(increase(kamailio_stir_inbound_verstat_total{verstat=\"TN-Validation-Passed\", zone=~\"$zone\"}[$__range])) / clamp_min(sum(increase(kamailio_stir_inbound_verstat_total{zone=~\"$zone\"}[$__range])), 1)",
+          "instant": true,
+          "range": false,
+          "legendFormat": "passed"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 1,
+          "min": 0,
+          "max": 1,
+          "noValue": "—",
+          "mappings": [],
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "orange", "value": 0.2 },
+              { "color": "green", "value": 0.5 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 7,
+      "type": "stat",
+      "title": "Inbound failed (Failed, $__range)",
+      "description": "Fraction of inbound legs whose caller-verification FAILED (verstat=TN-Validation-Failed) over the range: sum(increase(...{verstat=\"TN-Validation-Failed\"}[$__range])) / sum(increase(...[$__range])). This is the spoof/mismatch signal — green 0%, amber > 1%, red > 5%. Honours the Zone filter.",
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 7 },
+      "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
+          "expr": "sum(increase(kamailio_stir_inbound_verstat_total{verstat=\"TN-Validation-Failed\", zone=~\"$zone\"}[$__range])) / clamp_min(sum(increase(kamailio_stir_inbound_verstat_total{zone=~\"$zone\"}[$__range])), 1)",
+          "instant": true,
+          "range": false,
+          "legendFormat": "failed"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 1,
+          "min": 0,
+          "max": 1,
+          "noValue": "—",
+          "mappings": [],
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 0.01 },
+              { "color": "red", "value": 0.05 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 8,
+      "type": "stat",
+      "title": "Inbound with no TN-Validation ($__range)",
+      "description": "Fraction of inbound legs with No-TN-Validation (neither our own check nor a carrier verstat produced a result) over the range: sum(increase(...{verstat=\"No-TN-Validation\"}[$__range])) / sum(increase(...[$__range])). Informational — high values just mean upstream isn't providing SHAKEN, common on legacy PSTN origination. Honours the Zone filter.",
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 7 },
+      "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
+          "expr": "sum(increase(kamailio_stir_inbound_verstat_total{verstat=\"No-TN-Validation\", zone=~\"$zone\"}[$__range])) / clamp_min(sum(increase(kamailio_stir_inbound_verstat_total{zone=~\"$zone\"}[$__range])), 1)",
+          "instant": true,
+          "range": false,
+          "legendFormat": "no-tn"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 1,
+          "min": 0,
+          "max": 1,
+          "noValue": "—",
+          "mappings": [],
+          "color": { "mode": "fixed", "fixedColor": "text" },
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "text", "value": null } ] }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 9,
+      "type": "stat",
+      "title": "Total inbound verstat ($__range)",
+      "description": "Total inbound legs that recorded a verstat over the range: sum(increase(kamailio_stir_inbound_verstat_total{zone=~\"$zone\"}[$__range])). The denominator for the inbound % stats and the verstat mix pie. Honours the Zone filter.",
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 7 },
+      "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
+          "expr": "sum(increase(kamailio_stir_inbound_verstat_total{zone=~\"$zone\"}[$__range]))",
+          "instant": true,
+          "range": false,
+          "legendFormat": "verstat"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "noValue": "0",
+          "mappings": [],
+          "color": { "mode": "fixed", "fixedColor": "purple" },
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "purple", "value": null } ] }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Signing rate over time — by attestation (5m)",
+      "description": "Live per-attestation signing rate: sum by (attestation) (rate(kamailio_stir_attest_signed_total{zone=~\"$zone\"}[$__rate_interval])), one line per attestation class. A growing 'unsigned' band or a collapse in 'div' is the earliest sign of a signing-key / cert-URL fault or an upstream Identity regression. Honours the Zone filter.",
+      "gridPos": { "h": 8, "w": 16, "x": 0, "y": 11 },
+      "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
+          "expr": "sum by (attestation) (rate(kamailio_stir_attest_signed_total{zone=~\"$zone\"}[$__rate_interval]))",
+          "range": true,
+          "legendFormat": "{{attestation}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "cps",
+          "min": 0,
+          "decimals": 2,
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": { "mode": "none", "group": "A" }
+          },
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null } ] }
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "A" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } } ] },
+          { "matcher": { "id": "byName", "options": "B" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "yellow" } } ] },
+          { "matcher": { "id": "byName", "options": "C" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "text" } } ] },
+          { "matcher": { "id": "byName", "options": "div" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "blue" } } ] },
+          { "matcher": { "id": "byName", "options": "unsigned" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } } ] }
+        ]
+      },
+      "options": {
+        "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "right", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    },
+    {
+      "id": 11,
+      "type": "piechart",
+      "title": "Inbound verstat mix ($__range)",
+      "description": "Share of inbound legs by caller-verification result over the range: sum by (verstat) (increase(kamailio_stir_inbound_verstat_total{zone=~\"$zone\"}[$__range])). Passed green, Failed red, No-TN gray. Honours the Zone filter.",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 11 },
+      "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
+          "expr": "sum by (verstat) (increase(kamailio_stir_inbound_verstat_total{zone=~\"$zone\"}[$__range]))",
+          "instant": true,
+          "range": false,
+          "legendFormat": "{{verstat}}"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": true },
+        "pieType": "donut",
+        "legend": { "displayMode": "table", "placement": "bottom", "showLegend": true, "values": ["value", "percent"] },
+        "tooltip": { "mode": "single", "sort": "desc" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "color": { "mode": "palette-classic" },
+          "mappings": [],
+          "custom": { "hideFrom": { "legend": false, "tooltip": false, "viz": false } }
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "TN-Validation-Passed" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } } ] },
+          { "matcher": { "id": "byName", "options": "TN-Validation-Failed" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } } ] },
+          { "matcher": { "id": "byName", "options": "No-TN-Validation" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "text" } } ] }
+        ]
+      }
+    },
+    {
+      "id": 12,
+      "type": "piechart",
+      "title": "Verstat source — self vs carrier ($__range)",
+      "description": "Where the inbound verification result came from, over the range: sum by (source) (increase(kamailio_stir_inbound_verstat_total{zone=~\"$zone\"}[$__range])). self = our own secsipid_check_identity (Phase 2B) · carrier = Bandwidth's verstat= off the P-Asserted-Identity · none = neither. Honours the Zone filter.",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 19 },
+      "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
+          "expr": "sum by (source) (increase(kamailio_stir_inbound_verstat_total{zone=~\"$zone\"}[$__range]))",
+          "instant": true,
+          "range": false,
+          "legendFormat": "{{source}}"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": true },
+        "pieType": "pie",
+        "legend": { "displayMode": "table", "placement": "right", "showLegend": true, "values": ["value", "percent"] },
+        "tooltip": { "mode": "single", "sort": "desc" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "color": { "mode": "palette-classic" },
+          "mappings": [],
+          "custom": { "hideFrom": { "legend": false, "tooltip": false, "viz": false } }
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "self" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "blue" } } ] },
+          { "matcher": { "id": "byName", "options": "carrier" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "purple" } } ] },
+          { "matcher": { "id": "byName", "options": "none" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "text" } } ] }
+        ]
+      }
+    },
+    {
+      "id": 13,
+      "type": "table",
+      "title": "Attestation counts by zone (SBC) — $__range",
+      "description": "Per-zone (SBC_ID) signed-attestation breakdown over the range: sum by (zone, attestation) (increase(kamailio_stir_attest_signed_total{zone=~\"$zone\"}[$__range])), pivoted to one row per SBC with a column per attestation class. Lets you confirm each SBC/region is signing and spot a single zone that has slipped to 'unsigned'. Honours the Zone filter.",
+      "gridPos": { "h": 8, "w": 16, "x": 8, "y": 19 },
+      "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
+          "expr": "sum by (zone, attestation) (increase(kamailio_stir_attest_signed_total{zone=~\"$zone\"}[$__range]))",
+          "instant": true,
+          "range": false,
+          "format": "table",
+          "legendFormat": "__auto"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "groupingToMatrix",
+          "options": { "columnField": "attestation", "rowField": "zone", "valueField": "Value", "emptyValue": "zero" }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {},
+            "renameByName": { "zone\\attestation": "zone" }
+          }
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": { "show": true, "reducer": ["sum"], "countRows": false, "fields": "" },
+        "sortBy": [ { "displayName": "zone", "desc": false } ]
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "custom": {
+            "align": "auto",
+            "cellOptions": { "type": "auto" },
+            "filterable": false
+          },
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "text", "value": null } ] },
+          "mappings": []
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "unsigned" },
+            "properties": [
+              { "id": "custom.cellOptions", "value": { "type": "color-background", "mode": "gradient" } },
+              { "id": "color", "value": { "mode": "continuous-reds" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "div" },
+            "properties": [
+              { "id": "custom.cellOptions", "value": { "type": "color-background", "mode": "gradient" } },
+              { "id": "color", "value": { "mode": "continuous-blues" } }
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["noc", "voice", "stir-shaken", "compliance"],
+  "templating": {
+    "list": [
+      {
+        "name": "zone",
+        "label": "Zone",
+        "description": "Filter the STIR/SHAKEN panels by SBC zone. The value is a PromQL regex matched against the metrics' `zone` label (= SBC_ID, e.g. east-sbc-1 / east-sbc-2), applied as zone=~\"$zone\". All -> .* (every SBC), East -> east-.* (both East SBCs), West -> west-.*, Central -> central-.*.",
+        "type": "custom",
+        "hide": 0,
+        "multi": false,
+        "includeAll": false,
+        "query": "All : .*, East : east-.*, West : west-.*, Central : central-.*",
+        "current": { "selected": true, "text": "All", "value": ".*" },
+        "options": [
+          { "selected": true, "text": "All", "value": ".*" },
+          { "selected": false, "text": "East", "value": "east-.*" },
+          { "selected": false, "text": "West", "value": "west-.*" },
+          { "selected": false, "text": "Central", "value": "central-.*" }
+        ]
+      }
+    ]
+  },
+  "time": { "from": "now-6h", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "STIR/SHAKEN",
+  "uid": "noc-stir-shaken",
+  "version": 1,
+  "weekStart": "",
+  "description": "STIR/SHAKEN NOC board: outbound signed-attestation mix (A/B/C/div/unsigned) + signing rate, %div/%C/%unsigned compliance stats, inbound verstat mix (Passed/Failed/No-TN) and its self-vs-carrier source, plus a per-zone (SBC) attestation table. Live from VictoriaMetrics (voip-metrics-vm) Kamailio xhttp_prom counters. Zone dropdown focuses East / West / Central or All."
+}

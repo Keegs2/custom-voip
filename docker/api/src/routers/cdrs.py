@@ -146,6 +146,121 @@ def _clean_caller_id_number(raw: str | None) -> str | None:
     return raw
 
 
+def _stir_str_or_none(value) -> Optional[str]:
+    """Normalize a raw stir_* channel var to a stored string or NULL.
+
+    FreeSWITCH emits absent/unset attestation vars as the empty string "".
+    We store NULL for "" (and for actual absence) so the columns cleanly
+    distinguish "not present" from a real value. Any real value is stripped
+    and returned as-is.
+    """
+    if value is None:
+        return None
+    s = str(value).strip()
+    return s if s else None
+
+
+def _stir_bool_or_none(value) -> Optional[bool]:
+    """Normalize stir_inbound_signed ("1"/"0", absent) to bool or NULL.
+
+    "1" -> True, "0" -> False, "" / missing -> None. Also tolerant of the
+    channel-var string forms "true"/"false" just in case.
+    """
+    if value is None:
+        return None
+    s = str(value).strip().lower()
+    if s in ("1", "true", "t", "yes"):
+        return True
+    if s in ("0", "false", "f", "no"):
+        return False
+    return None
+
+
+async def _store_call_attestation(call_uuid: str, customer_id: int, variables: dict) -> None:
+    """Derive and UPSERT the STIR/SHAKEN attestation row for one call.
+
+    FAILURE-ISOLATED by contract: this is called AFTER the CDR is stored and
+    must NEVER raise, NEVER change the ingest response, and NEVER block CDR
+    ingest. Any error is logged and swallowed. Absent stir_* fields (signing
+    was off / old calls) simply write NULLs.
+
+    Reads 5 raw fact vars from the CDR `variables` object:
+        stir_attest_intent   -- A | B | div  (what we set outbound)
+        stir_inbound_signed  -- "1" | "0"    (had an inbound Identity to chain)
+        stir_inbound_attest  -- A | B | C | ""(orig carrier's caller attest, from PAI)
+        stir_verstat         -- TN-Validation-Passed|-Failed|No-TN-Validation|""
+        stir_verstat_source  -- self | carrier | ""
+
+    Derives the EFFECTIVE attestation WE emitted (not done in FreeSWITCH):
+        signed_attestation =
+            (attest_intent == "div" AND inbound_signed is False) ? "C"
+            : attest_intent
+    i.e. an RCF forward of an *unsigned* inbound actually emitted C; a *signed*
+    inbound chains as div; trunk/API are A/B.
+    """
+    try:
+        attest_intent = _stir_str_or_none(variables.get("stir_attest_intent"))
+        inbound_signed = _stir_bool_or_none(variables.get("stir_inbound_signed"))
+        inbound_attest = _stir_str_or_none(variables.get("stir_inbound_attest"))
+        inbound_verstat = _stir_str_or_none(variables.get("stir_verstat"))
+        verstat_source = _stir_str_or_none(variables.get("stir_verstat_source"))
+
+        # If NONE of the stir vars are present, this call was not in the
+        # signing path (signing off / pre-STIR CDR) — skip the write entirely
+        # rather than store an all-NULL row.
+        if (attest_intent is None and inbound_signed is None
+                and inbound_attest is None and inbound_verstat is None
+                and verstat_source is None):
+            return
+
+        # Derive the effective attestation we actually emitted outbound.
+        if attest_intent == "div" and inbound_signed is False:
+            signed_attestation = "C"
+        else:
+            signed_attestation = attest_intent
+
+        # UPSERT keyed by call_id. Explicit ::type casts on every parameter for
+        # asyncpg/PgBouncer (transaction-mode, statement_cache_size=0) so no
+        # type inference is needed even when values are None.
+        await db.execute(
+            """
+            INSERT INTO call_attestations (
+                call_id, customer_id, signed_attestation, attest_intent,
+                inbound_signed, inbound_attest, inbound_verstat, verstat_source
+            )
+            VALUES (
+                $1::text, $2::int, $3::text, $4::text,
+                $5::bool, $6::text, $7::text, $8::text
+            )
+            ON CONFLICT (call_id) DO UPDATE SET
+                customer_id        = EXCLUDED.customer_id,
+                signed_attestation = EXCLUDED.signed_attestation,
+                attest_intent      = EXCLUDED.attest_intent,
+                inbound_signed     = EXCLUDED.inbound_signed,
+                inbound_attest     = EXCLUDED.inbound_attest,
+                inbound_verstat    = EXCLUDED.inbound_verstat,
+                verstat_source     = EXCLUDED.verstat_source
+            """,
+            str(call_uuid),        # $1  call_id
+            int(customer_id),      # $2  customer_id (terminal customer)
+            signed_attestation,    # $3  signed_attestation (str | None)
+            attest_intent,         # $4  attest_intent (str | None)
+            inbound_signed,        # $5  inbound_signed (bool | None)
+            inbound_attest,        # $6  inbound_attest (str | None)
+            inbound_verstat,       # $7  inbound_verstat (str | None)
+            verstat_source,        # $8  verstat_source (str | None)
+        )
+        logger.info(
+            "STIR attestation: call_id=%s inbound_attest=%s verstat=%s -> signed=%s",
+            call_uuid, inbound_attest, inbound_verstat, signed_attestation,
+        )
+    except Exception:
+        # Never let attestation storage affect CDR ingest / the 200 contract.
+        logger.exception(
+            "STIR attestation: failed to store for call_id=%s (ignored)", call_uuid
+        )
+
+
 async def _process_cdr_body(body: dict) -> dict:
     """Extract fields from a parsed FreeSWITCH JSON CDR and insert into the database.
 
@@ -530,6 +645,13 @@ async def _process_cdr_body(body: dict) -> dict:
             on_net_hops,            # $53 on_net_hops (int | None)
         )
 
+        # ---- STIR/SHAKEN attestation (companion table, failure-isolated) --
+        # Derive + UPSERT the attestation row from the raw stir_* channel vars.
+        # Runs for BOTH new and duplicate CDRs (the UPSERT is idempotent, so a
+        # re-ingest just refreshes it). Never raises, never affects the CDR
+        # result or the ingest 200 contract — errors are logged internally.
+        await _store_call_attestation(str(call_uuid), int(customer_id), variables)
+
         if result and "INSERT 0 0" in result:
             logger.info("CDR ingest: duplicate skipped uuid=%s", call_uuid)
             return {"status": "duplicate", "uuid": call_uuid}
@@ -899,6 +1021,53 @@ async def get_cdr(cdr_uuid: str):
         if cdr.get(key) is not None:
             cdr[key] = float(cdr[key])
     return cdr
+
+
+@router.get("/{call_id}/attestation")
+async def get_cdr_attestation(
+    call_id: str,
+    customer_filter: int | None = Depends(get_customer_filter),
+):
+    """Get the STIR/SHAKEN attestation for a single call.
+
+    The per-call story: the caller's `inbound_attest` (verified via
+    `inbound_verstat`/`verstat_source`) -> the `signed_attestation` WE emitted.
+
+    Tenant-scoped and 404-no-leak: a non-admin caller can only read
+    attestations for their own customer's calls. A call that exists but
+    belongs to another customer returns the SAME 404 as a call that does not
+    exist, so ownership is never disclosed. Admins (customer_filter is None)
+    may read any call's attestation.
+    """
+    # Scope the lookup itself by customer for non-admins so a foreign-owned
+    # row is indistinguishable from a missing one (no existence leak).
+    if customer_filter is not None:
+        row = await db.fetch_one(
+            """
+            SELECT call_id, customer_id, signed_attestation, attest_intent,
+                   inbound_signed, inbound_attest, inbound_verstat,
+                   verstat_source, created_at
+            FROM call_attestations
+            WHERE call_id = $1 AND customer_id = $2
+            """,
+            call_id, customer_filter,
+        )
+    else:
+        row = await db.fetch_one(
+            """
+            SELECT call_id, customer_id, signed_attestation, attest_intent,
+                   inbound_signed, inbound_attest, inbound_verstat,
+                   verstat_source, created_at
+            FROM call_attestations
+            WHERE call_id = $1
+            """,
+            call_id,
+        )
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Attestation not found")
+
+    return dict(row)
 
 
 @router.post("/{cdr_uuid}/rate")

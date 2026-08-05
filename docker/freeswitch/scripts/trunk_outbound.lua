@@ -577,6 +577,32 @@ session:setVariable("sip_h_Diversion",
 local stir_attest = caller_did_owned and "A" or "B"
 session:setVariable("sip_h_X-Attestation", stir_attest)
 
+-- ================================================================
+-- STIR/SHAKEN CDR facts (T3) — record RAW facts only, never derive.
+-- ================================================================
+-- Same contract as inbound_router.lua's RCF carrier branch: these A-leg channel
+-- variables serialize verbatim into the posted CDR JSON (mod_json_cdr includes
+-- ALL channel vars) and are read by /v1/cdrs/ingest. A trunk call is
+-- ORIGINATION, not diversion:
+--   stir_attest_intent  = the X-Attestation we set (A when we own the presented
+--                         calling number, else B).
+--   stir_inbound_signed = "0" ALWAYS — an originated outbound trunk call has no
+--                         inbound carrier Identity to chain (trunk never echoes
+--                         X-In-Identity; see the attestation comment above).
+--   stir_verstat/_source = the inbound X-Verstat/-Source if any (normally empty
+--                         for an originated call — there is no inbound carrier
+--                         leg — but read defensively for a uniform CDR shape).
+--   stir_inbound_attest = the inbound caller attestation (A/B/C) if any (also
+--                         normally empty for an originated trunk call — no
+--                         inbound carrier leg carries P-Attestation-Indicator —
+--                         but read for the same uniform CDR shape).
+-- Additive + fail-safe: setting a channel var can never fail the call.
+set_var("stir_attest_intent", stir_attest)
+set_var("stir_inbound_signed", "0")
+set_var("stir_verstat", get_var("sip_h_X-Verstat", ""))
+set_var("stir_verstat_source", get_var("sip_h_X-Verstat-Source", ""))
+set_var("stir_inbound_attest", get_var("sip_h_X-Inbound-Attest", ""))
+
 freeswitch.consoleLog("INFO", string.format(
     "[trunk_outbound] CID setup: outbound_cid=%s effective_cid=%s original_pbx=%s attest=%s\n",
     outbound_did_10, original_cid or outbound_did_10, caller_id, stir_attest

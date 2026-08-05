@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { rateCdr } from '../../api/cdrs';
 import { Button } from '../../components/ui/Button';
 import { useToast } from '../../components/ui/Toast';
+import { AttestationChain } from '../../components/stir/AttestationChain';
 import type { Cdr } from '../../types/cdr';
 
 function fmtDateFull(iso: string | null | undefined): string {
@@ -143,6 +144,14 @@ export function CdrExpandedRow({ cdr, colSpan, onRated }: CdrExpandedRowProps) {
             </div>
           </div>
         )}
+
+        {/* STIR/SHAKEN attestation chain */}
+        <div className="mt-4 pt-3 border-t border-[#2a2f45]/50">
+          <p className="text-[0.65rem] font-bold uppercase tracking-[0.04em] text-[#4a5568] mb-3">
+            STIR / SHAKEN
+          </p>
+          <AttestationChain callId={cdr.uuid} />
+        </div>
 
         {!cdr.rated_at && (
           <div className="mt-4 pt-3 border-t border-[#2a2f45]/50">
