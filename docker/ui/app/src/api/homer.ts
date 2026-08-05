@@ -1,4 +1,5 @@
 import { apiRequest } from './client';
+import type { MessageAttestation } from '../types/stir';
 
 export interface HomerSearchParams {
   from_user?: string;
@@ -45,6 +46,13 @@ export interface HomerSearchResult {
   seq?: number;
   /** Raw SIP message body (full headers + SDP) from the Loki log line */
   raw_msg?: string | null;
+  /**
+   * STIR/SHAKEN attestation for the CALL this message belongs to. The API
+   * attaches the SAME object to every message sharing a Call-ID (it's per-call),
+   * or `null` when the call has no stored attestation (legacy / pre-deploy /
+   * signing-off). Absent on old/cached responses.
+   */
+  attestation?: MessageAttestation | null;
 }
 
 export interface HomerSearchResponse {

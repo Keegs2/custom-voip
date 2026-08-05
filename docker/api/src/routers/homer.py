@@ -25,6 +25,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from auth.dependencies import require_admin
+from db import database as db
 
 # Pure (stdlib-only) post-processing pipeline: dedup, SIP-causality ordering,
 # hairpin marking, seq assignment.  Lives in a separate module so unit tests
@@ -555,6 +556,84 @@ def _build_correlations(
     return correlations
 
 
+# ---------------------------------------------------------------------------
+# STIR/SHAKEN attestation enrichment
+# ---------------------------------------------------------------------------
+
+# The exact per-call attestation fields surfaced on each returned message. This
+# is the frontend column contract — keep it in sync with the SELECT below.
+_ATTEST_FIELDS = (
+    "signed_attestation",
+    "attest_intent",
+    "inbound_signed",
+    "inbound_attest",
+    "inbound_verstat",
+    "verstat_source",
+)
+
+
+async def _fetch_attestations_by_callid(
+    call_ids: list[str],
+) -> dict[str, dict[str, Any]]:
+    """Batch-fetch STIR/SHAKEN attestations for a set of SIP Call-IDs.
+
+    ONE indexed query over the whole page's Call-IDs:
+        SELECT ... FROM call_attestations WHERE sip_call_id = ANY($1::text[])
+    (never per-row). ``sip_call_id`` is the INBOUND SIP Call-ID FreeSWITCH stored
+    during CDR ingest — byte-identical to the ``callid`` heplify-server puts on
+    each captured message (the Loki ``call_id`` label), so the equality join
+    hits without any normalization. Returns a ``{sip_call_id: attestation}`` map
+    containing only Call-IDs that have a row; callers treat a miss as ``null``.
+
+    FAILURE-ISOLATED: any DB error (or an empty input) yields ``{}`` so the
+    search returns its calls WITHOUT attestation rather than failing. asyncpg /
+    PgBouncer: the explicit ``$1::text[]`` cast lets the batch bind work with
+    ``statement_cache_size=0`` and no per-value type inference.
+    """
+    if not call_ids:
+        return {}
+    try:
+        rows = await db.fetch_all(
+            """
+            SELECT sip_call_id, signed_attestation, attest_intent,
+                   inbound_signed, inbound_attest, inbound_verstat,
+                   verstat_source
+            FROM call_attestations
+            WHERE sip_call_id = ANY($1::text[])
+            """,
+            call_ids,
+        )
+    except Exception:
+        # Never let attestation enrichment break or slow the SIP-trace search.
+        logger.exception(
+            "Homer search: attestation lookup failed for %d Call-IDs (ignored)",
+            len(call_ids),
+        )
+        return {}
+
+    out: dict[str, dict[str, Any]] = {}
+    for r in rows:
+        cid = r["sip_call_id"]
+        if cid:
+            out[cid] = {f: r[f] for f in _ATTEST_FIELDS}
+    return out
+
+
+async def _attach_attestations(data: list[dict[str, Any]]) -> None:
+    """Attach an ``attestation`` object (or ``None``) to every message in-place.
+
+    Groups the page's messages by ``callid``, does a single batched lookup, and
+    stamps each message with its call's attestation. Every message carries the
+    key so the response shape is uniform: messages whose Call-ID has no stored
+    attestation (signing off, legacy calls, or a lookup failure) get
+    ``attestation: null``. Never raises.
+    """
+    call_ids = sorted({m["callid"] for m in data if m.get("callid")})
+    by_callid = await _fetch_attestations_by_callid(call_ids)
+    for m in data:
+        m["attestation"] = by_callid.get(m.get("callid") or "")
+
+
 @router.post("/search")
 async def search_sip_traces(
     body: HomerSearchRequest,
@@ -607,6 +686,14 @@ async def search_sip_traces(
                     the raw timestamp/timestamp_ns fields are NOT altered
       seq           int  — authoritative display order, 0..n-1, unique,
                     ascending; data is returned sorted by seq
+      attestation   obj|null — the call's STIR/SHAKEN attestation, joined by
+                    the message's Call-ID (== FreeSWITCH sip_call_id stored at
+                    CDR ingest). Same object on EVERY message of one Call-ID;
+                    null when the call has no stored attestation (signing off,
+                    legacy call) or the (failure-isolated, batched) lookup
+                    errored. Shape:
+                      {signed_attestation, attest_intent, inbound_signed,
+                       inbound_attest, inbound_verstat, verstat_source}
 
     Display order is derived from hard SIP-causality rules (a response never
     precedes its request at the same hop; a forwarded request copy at hop N+1
@@ -657,8 +744,12 @@ async def search_sip_traces(
         # SIP-causality ordering, hairpin marking, seq assignment) so the UI
         # receives the same per-message contract regardless of which path
         # produced the data.
-        def _respond(results: list, correlations: dict, truncated: bool = False) -> dict:
+        async def _respond(results: list, correlations: dict, truncated: bool = False) -> dict:
             data, pipeline_warnings = _finalize_pipeline(results)
+            # Additive: stamp each message with its call's STIR/SHAKEN
+            # attestation (or null). One batched, failure-isolated lookup — it
+            # never raises and never blocks the search on a DB hiccup.
+            await _attach_attestations(data)
             return {
                 "data": data,
                 "correlations": correlations,
@@ -669,7 +760,7 @@ async def search_sip_traces(
 
         # If no results or correlation disabled, return immediately
         if not initial_results or not body.correlate:
-            return _respond(initial_results, {})
+            return await _respond(initial_results, {})
 
         known_callids = _extract_callids(initial_results)
 
@@ -683,7 +774,7 @@ async def search_sip_traces(
                     "Skipping A/B correlation: %d call_ids exceeds limit of 50",
                     len(known_callids),
                 )
-            return _respond(initial_results, {})
+            return await _respond(initial_results, {})
 
         # Step 2: Correlation — search for X-CID headers to find B-leg messages.
         # Use a simple "X-CID:" filter (not a complex regex with all Call-IDs)
@@ -717,7 +808,7 @@ async def search_sip_traces(
         except HTTPException:
             # Correlation query failed — return initial results without correlation
             logger.warning("A/B correlation query failed, returning initial results only")
-            return _respond(initial_results, {})
+            return await _respond(initial_results, {})
 
         # Build the correlations map from X-CID data BEFORE stripping x_cid
         correlations = _build_correlations(known_callids, corr_results)
@@ -745,7 +836,7 @@ async def search_sip_traces(
         if not has_correlations:
             # No A/B correlation found — merge what we have and return.
             # All Call-IDs are independent calls, no B-legs to fetch.
-            return _respond(
+            return await _respond(
                 initial_results + corr_results,
                 correlations,
                 truncated=correlation_truncated,
@@ -767,7 +858,7 @@ async def search_sip_traces(
         except HTTPException:
             # ClickHouse query failed — merge initial + correlation results
             logger.warning("ClickHouse correlation query failed, returning partial results")
-            return _respond(
+            return await _respond(
                 initial_results + corr_results,
                 correlations,
                 truncated=correlation_truncated,
@@ -778,4 +869,4 @@ async def search_sip_traces(
         # handles any overlap) to ensure nothing is lost if the final
         # query itself hit its limit.
         all_results = initial_results + corr_results + final_results
-        return _respond(all_results, correlations, truncated=correlation_truncated)
+        return await _respond(all_results, correlations, truncated=correlation_truncated)

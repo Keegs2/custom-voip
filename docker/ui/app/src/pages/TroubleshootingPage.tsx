@@ -6,6 +6,13 @@ import { searchSipTraces } from '../api/homer';
 import type { HomerSearchParams, HomerSearchResult } from '../api/homer';
 import { fmt } from '../utils/format';
 import { SipLadder } from '../components/sip-ladder';
+import type { MessageAttestation } from '../types/stir';
+import {
+  attestColor,
+  attestLabel,
+  attestDescription,
+  verstatVerdict,
+} from '../components/stir/attestationColors';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -71,6 +78,12 @@ interface CallGroup {
   finalStatus: number | null;
   /** Duration in seconds from first INVITE to last BYE, or null if unavailable */
   durationSec: number | null;
+  /**
+   * STIR/SHAKEN attestation for this call. Per-call, so it's identical across
+   * the call's messages — we take the first message that carries a non-null
+   * `attestation`. `null` when the call has no stored attestation.
+   */
+  attestation: MessageAttestation | null;
 }
 
 /**
@@ -208,12 +221,19 @@ function groupMessagesByCall(
       }
     }
 
+    // Attestation is per-call: the API stamps the SAME object on every message
+    // sharing a Call-ID, so the first message that carries a non-null one is
+    // representative for the whole group. Falls back to null (no record).
+    const attestation =
+      messages.find((m) => m.attestation != null)?.attestation ?? null;
+
     callGroups.push({
       representative,
       callIds,
       messages,
       finalStatus,
       durationSec,
+      attestation,
     });
   }
 
@@ -447,6 +467,78 @@ function DurationBadge({ seconds }: DurationBadgeProps) {
   );
 }
 
+// ─── Attestation badge ───────────────────────────────────────────────────────
+
+interface AttestationBadgeProps {
+  attestation: MessageAttestation | null;
+}
+
+/**
+ * Compact STIR/SHAKEN badge for a call row: the primary `signed_attestation`
+ * (what WE emitted) as a small semantic-coloured pill (A=green, B=amber,
+ * C=gray, div=blue — via the shared `attestationColors`). The full chain lives
+ * in the call-detail/ladder view, so here we keep it to one pill and stash the
+ * fuller story — caller attestation + verstat ✓/✗ + source — in the `title`.
+ *
+ * `null` (no stored attestation: legacy / pre-deploy / signing-off) renders a
+ * subtle muted "—", never an error.
+ */
+function AttestationBadge({ attestation }: AttestationBadgeProps) {
+  if (attestation === null) {
+    return (
+      <span
+        title="No STIR/SHAKEN attestation on record for this call (legacy, unsigned, or pre-deploy)."
+        style={{
+          fontSize: '0.78rem',
+          fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
+          color: '#475569',
+        }}
+      >
+        —
+      </span>
+    );
+  }
+
+  const signedToken = attestColor(attestation.signed_attestation);
+
+  // Compose the hover "story": what the caller presented (attestation + verstat
+  // verdict glyph + source) and what we signed. Kept terse — one line per fact.
+  const verdict = verstatVerdict(attestation.inbound_verstat);
+  const verstatGlyph = verdict === 'pass' ? '✓' : verdict === 'fail' ? '✗' : '–';
+  const callerAttest = attestation.inbound_attest
+    ? `${attestLabel(attestation.inbound_attest)} (${attestDescription(attestation.inbound_attest)})`
+    : 'none';
+  const verstatText = attestation.inbound_verstat ?? 'No validation';
+  const sourceText = attestation.verstat_source
+    ? ` [${attestation.verstat_source}]`
+    : '';
+  const title = [
+    `Caller: ${callerAttest}`,
+    `Verification: ${verstatGlyph} ${verstatText}${sourceText}`,
+    `Signed: ${attestLabel(attestation.signed_attestation)} (${attestDescription(attestation.signed_attestation)})`,
+  ].join('\n');
+
+  return (
+    <span
+      title={title}
+      style={{
+        display: 'inline-block',
+        padding: '2px 8px',
+        borderRadius: 4,
+        fontSize: '0.7rem',
+        fontWeight: 700,
+        fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
+        background: signedToken.bg,
+        color: signedToken.text,
+        border: `1px solid ${signedToken.border}`,
+        whiteSpace: 'nowrap',
+      }}
+    >
+      {attestLabel(attestation.signed_attestation)}
+    </span>
+  );
+}
+
 // ─── Results table ────────────────────────────────────────────────────────────
 
 interface ResultsTableProps {
@@ -498,6 +590,7 @@ function ResultsTable({ callGroups, correlations, pipelineWarnings, startTime, e
             <th style={thStyle}>Source</th>
             <th style={thStyle}>Dest</th>
             <th style={thStyle}>Result</th>
+            <th style={thStyle}>Attestation</th>
             <th style={thStyle}>Duration</th>
             <th style={thStyle}>Messages</th>
             <th style={thStyle}>Node</th>
@@ -576,6 +669,9 @@ function ResultsTable({ callGroups, correlations, pipelineWarnings, startTime, e
                   <StatusBadge status={group.finalStatus} />
                 </td>
                 <td style={tdStyle}>
+                  <AttestationBadge attestation={group.attestation} />
+                </td>
+                <td style={tdStyle}>
                   <DurationBadge seconds={group.durationSec} />
                 </td>
                 <td style={tdStyle}>
@@ -587,7 +683,7 @@ function ResultsTable({ callGroups, correlations, pipelineWarnings, startTime, e
               </tr>
               {isExpanded && (
                 <tr>
-                  <td colSpan={10} style={{ padding: 0, border: 'none' }}>
+                  <td colSpan={11} style={{ padding: 0, border: 'none' }}>
                     <div style={{ padding: '0 8px 16px' }}>
                       {/* Secondary action: open in Grafana */}
                       <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '8px 8px 0' }}>
