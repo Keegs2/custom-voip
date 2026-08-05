@@ -414,33 +414,34 @@
     {
       "id": 10,
       "type": "timeseries",
-      "title": "Signing rate over time — by attestation (5m)",
-      "description": "Live per-attestation signing rate: sum by (attestation) (rate(kamailio_stir_attest_signed{zone=~\"$zone\"}[$__rate_interval])), one line per attestation class. A growing 'unsigned' band or a collapse in 'div' is the earliest sign of a signing-key / cert-URL fault or an upstream Identity regression. Honours the Zone filter.",
+      "title": "Signed calls over time — by attestation",
+      "description": "Signed outbound carrier legs per 5m bucket, stacked by attestation class: sum by (attestation) (increase(kamailio_stir_attest_signed{zone=~\"$zone\"}[$__interval])) with interval fixed at 5m. Bars are call COUNTS (not a rate), so the stack height is the total legs signed in that bucket and the legend 'sum' column is the per-attestation total over the range — the reporting view of how many calls got signed at each level (A/B/C/div/unsigned). A growing 'unsigned' band or a collapse in 'div' is the earliest sign of a signing-key / cert-URL fault or an upstream Identity regression. Honours the Zone filter.",
       "gridPos": { "h": 8, "w": 16, "x": 0, "y": 11 },
       "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
+      "interval": "5m",
       "targets": [
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
-          "expr": "sum by (attestation) (rate(kamailio_stir_attest_signed{zone=~\"$zone\"}[$__rate_interval]))",
+          "expr": "sum by (attestation) (increase(kamailio_stir_attest_signed{zone=~\"$zone\"}[$__interval]))",
           "range": true,
           "legendFormat": "{{attestation}}"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "cps",
+          "unit": "short",
           "min": 0,
-          "decimals": 2,
+          "decimals": 0,
           "color": { "mode": "palette-classic" },
           "custom": {
-            "drawStyle": "line",
-            "lineInterpolation": "smooth",
-            "lineWidth": 2,
-            "fillOpacity": 10,
+            "drawStyle": "bars",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 80,
             "showPoints": "never",
             "spanNulls": false,
-            "stacking": { "mode": "none", "group": "A" }
+            "stacking": { "mode": "normal", "group": "A" }
           },
           "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null } ] }
         },
@@ -453,7 +454,7 @@
         ]
       },
       "options": {
-        "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "right", "showLegend": true },
+        "legend": { "calcs": ["sum", "lastNotNull"], "displayMode": "table", "placement": "right", "showLegend": true },
         "tooltip": { "mode": "multi", "sort": "desc" }
       }
     },
@@ -599,6 +600,53 @@
             ]
           }
         ]
+      }
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "Signed attestation share over time (%) — reporting",
+      "description": "Reporting view: the SAME per-5m-bucket signed counts as the bars above — sum by (attestation) (increase(kamailio_stir_attest_signed{zone=~\"$zone\"}[$__interval])), interval fixed at 5m — but 100%-stacked so each bar shows the PERCENTAGE share of calls signed at each level (A/B/C/div/unsigned) in that bucket. Grafana's percent stacking normalises the VISUAL to 100% while the underlying values stay raw call counts (hence unit 'short', not percentunit); read the share off the stack, exact counts in the tooltip. This is the 'what fraction of calls got signed at each attestation over time' answer for reporting. Honours the Zone filter.",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 27 },
+      "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
+      "interval": "5m",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
+          "expr": "sum by (attestation) (increase(kamailio_stir_attest_signed{zone=~\"$zone\"}[$__interval]))",
+          "range": true,
+          "legendFormat": "{{attestation}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "decimals": 0,
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "bars",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 80,
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": { "mode": "percent", "group": "A" }
+          },
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null } ] }
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "A" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } } ] },
+          { "matcher": { "id": "byName", "options": "B" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "yellow" } } ] },
+          { "matcher": { "id": "byName", "options": "C" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "text" } } ] },
+          { "matcher": { "id": "byName", "options": "div" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "blue" } } ] },
+          { "matcher": { "id": "byName", "options": "unsigned" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } } ] }
+        ]
+      },
+      "options": {
+        "legend": { "calcs": ["mean"], "displayMode": "table", "placement": "right", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
       }
     }
   ],
