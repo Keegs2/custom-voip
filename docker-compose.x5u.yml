@@ -4,6 +4,13 @@
 # Deploy (on the East services VM):
 #     docker compose -f docker-compose.x5u.yml up -d
 #
+# ⚠️  NEVER add --remove-orphans to this command. This file shares the default
+#     Compose project ("revup", from the directory name) with
+#     docker-compose.services.yml, so Compose reports the services/monitoring
+#     containers as "orphans" — a HARMLESS warning. `--remove-orphans` would
+#     DELETE the entire services stack (API, UI, Homer, DB exporters, qryn, ...).
+#     Just ignore the orphan warning.
+#
 # WHAT THIS IS
 #   A single Caddy container that serves ONLY our public STI certificate chain
 #   at exactly  https://${X5U_DOMAIN}/stir/8052-2026.pem  — the `x5u` URL other
