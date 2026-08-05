@@ -1,0 +1,99 @@
+# ============================================================================
+# STIR/SHAKEN x5u — isolated public HTTPS static endpoint (Caddy)
+# ============================================================================
+# Deploy (on the East services VM):
+#     docker compose -f docker-compose.x5u.yml up -d
+#
+# WHAT THIS IS
+#   A single Caddy container that serves ONLY our public STI certificate chain
+#   at exactly  https://${X5U_DOMAIN}/stir/8052-2026.pem  — the `x5u` URL other
+#   carriers' STIR/SHAKEN verifiers fetch to validate our signed calls. We
+#   self-host because org policy (Domain Restricted Sharing) blocks public GCS;
+#   public reachability here is a firewall/network concern, not IAM.
+#
+# ISOLATION (does NOT touch the main services stack)
+#   - Separate compose file. Its own bridge network (x5u-net) and its own named
+#     volumes (x5u_caddy_data / x5u_caddy_config). Nothing here is shared with
+#     docker-compose.services.yml — that file is NOT modified.
+#   - Publishes ONLY host :80 and :443 (the main stack's UI is on :8080/:8443,
+#     so there is no collision). NOT host-networking.
+#   - Read-only static file server: read-only bind mounts, no reverse_proxy,
+#     no directory listing, one content path, everything else 404.
+#
+# PREREQUISITES (operator, on GCP — not done here)
+#   1. DNS:      certs.granitevoip.com  A  34.26.57.37   (the services VM's IP)
+#   2. Firewall: allow tcp:80 and tcp:443 to the services VM from the internet
+#                (0.0.0.0/0). :80 is REQUIRED for the Let's Encrypt HTTP-01 ACME
+#                challenge; :443 serves the cert. No other new ports.
+#   3. Copy infra/stir/.env.x5u.example to .env (or export the two vars) and set
+#      X5U_ACME_EMAIL to a real ops mailbox.
+#
+# PERSISTENCE
+#   The issued Let's Encrypt cert + ACME account live in the x5u_caddy_data
+#   volume so they survive restarts (re-issuing repeatedly hits LE rate limits).
+#
+# ROTATION (yearly, when the STI cert is renewed)
+#   1. Drop the new chain PEM into infra/stir/ (leaf + intermediate, no key).
+#   2. Serve it at a NEW path, e.g. /stir/8052-2027.pem — add a matching
+#      handle block in infra/stir/Caddyfile (keep the old path live during
+#      cutover so in-flight PASSporTs still verify).
+#   3. Update STIR_CERT_URL in the SBCs' .env to the new URL and redeploy the
+#      SBCs. Retire the old path after the old cert's notAfter.
+# ============================================================================
+
+services:
+  x5u:
+    image: caddy:2-alpine
+    container_name: x5u-caddy
+    # Publish ONLY 80/443. :80 = ACME HTTP-01 challenge + HTTP->HTTPS redirect;
+    # :443 = the HTTPS cert endpoint. Nothing else is exposed.
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      # Public hostname to serve + obtain the Let's Encrypt cert for.
+      - X5U_DOMAIN=${X5U_DOMAIN:-certs.granitevoip.com}
+      # ACME contact email (Let's Encrypt expiry notices). Placeholder default;
+      # set a real mailbox in .env before deploying.
+      - X5U_ACME_EMAIL=${X5U_ACME_EMAIL:-admin@example.com}
+    volumes:
+      # Caddy config (READ-ONLY). Caddy reads this on start/reload only.
+      - ./infra/stir/Caddyfile:/etc/caddy/Caddyfile:ro
+      # The cert directory (READ-ONLY). Contains ONLY the public PEM chain —
+      # NO private key. Mounted at the Caddyfile's `root` (/srv/stir).
+      - ./infra/stir:/srv/stir:ro
+      # Persist the issued LE cert + ACME account across restarts (rate limits).
+      - x5u_caddy_data:/data
+      # Persist Caddy's autosave config across restarts.
+      - x5u_caddy_config:/config
+    networks:
+      - x5u-net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 128M
+        reservations:
+          cpus: '0.05'
+          memory: 32M
+    # Uptime probe against the local /healthz route (plain HTTP on :80). wget
+    # ships in caddy:2-alpine (BusyBox). Independent of ACME/DNS being ready.
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:80/healthz || exit 1"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    restart: unless-stopped
+
+# Dedicated bridge network — isolated from the main stack's services-network.
+networks:
+  x5u-net:
+    driver: bridge
+
+# Dedicated named volumes — isolated from the main stack's volumes.
+volumes:
+  x5u_caddy_data:
+    driver: local
+  x5u_caddy_config:
+    driver: local
