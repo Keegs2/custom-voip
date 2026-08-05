@@ -62,8 +62,9 @@ docker ps --format '{{.Names}}' | grep -qx "$KAM" \
 [ -f "$COMPOSE_SBC" ]              || die "$COMPOSE_SBC missing — did you 'sudo git pull'?"
 ok "on SBC $(hostname); $KAM present"
 
-# compose -f flags (include the key-mount override only if it exists)
-compose_files(){ echo -f "$COMPOSE_SBC"; [ -f "$OVERRIDE" ] && echo -f "$OVERRIDE"; return 0; }
+# Build the `-f` compose args as a proper array (override included only if it
+# exists). Each token is its own element — never one "-f /path" string.
+build_compose_args(){ CF=(-f "$COMPOSE_SBC"); [ -f "$OVERRIDE" ] && CF+=(-f "$OVERRIDE"); return 0; }
 
 # ---------------- status ----------------
 if [ "$ACTION" = status ]; then
@@ -77,7 +78,7 @@ fi
 # ---------------- disable (fast rollback) ----------------
 if [ "$ACTION" = disable ]; then
   sed -i '/^STIR_SHAKEN_SIGN=/d' .env; echo 'STIR_SHAKEN_SIGN=off' >> .env
-  mapfile -t CF < <(compose_files)
+  build_compose_args
   docker compose "${CF[@]}" up -d kamailio
   sleep 4
   docker exec "$KAM" kamailio -c -f /etc/kamailio/kamailio.cfg >/dev/null 2>&1 \
@@ -122,7 +123,7 @@ sed -i '/^STIR_SHAKEN_SIGN=/d' .env; echo "STIR_SHAKEN_SIGN=$SIGN" >> .env
 
 # 7) build (installs secsipid) + (re)create, then HARD-verify config + health
 info "building + starting kamailio (signing=$SIGN) — brief restart; the NLB covers it ..."
-mapfile -t CF < <(compose_files)
+build_compose_args
 docker compose "${CF[@]}" up -d --build kamailio
 sleep 5
 if ! docker exec "$KAM" kamailio -c -f /etc/kamailio/kamailio.cfg >/tmp/_kamcheck.$$ 2>&1; then
