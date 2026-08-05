@@ -36,7 +36,7 @@
 # The public x5u site. Caddy auto-provisions a Let's Encrypt cert for this
 # hostname (HTTP-01 on :80) and serves it on :443.
 # ----------------------------------------------------------------------------
-{$X5U_DOMAIN:certs.granitevoip.com} {
+{$X5U_DOMAIN:fs-cert.granitevoip.com} {
 
 	# Root for static content. The cert PEM is bind-mounted READ-ONLY here.
 	root * /srv/stir

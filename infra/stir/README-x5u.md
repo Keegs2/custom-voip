@@ -4,7 +4,7 @@ Isolated, self-contained Caddy service that serves our public STI certificate
 chain so other carriers' STIR/SHAKEN verifiers can fetch it. The URL below is
 the `x5u` embedded in every signed PASSporT.
 
-**Served URL:** `https://certs.granitevoip.com/stir/8052-2026.pem`
+**Served URL:** `https://fs-cert.granitevoip.com/stir/8052-2026.pem`
 **On-disk source:** `infra/stir/granite-shaken-8052-x5u.pem` (leaf `CN=SHAKEN 8052`
 + Neustar SHAKEN CA-2 intermediate; **public, no private key** — served verbatim).
 
@@ -22,7 +22,7 @@ Only two env vars matter (`X5U_DOMAIN`, `X5U_ACME_EMAIL`) — see
 
 ## Prerequisites (operator, on GCP — not done in this repo)
 
-1. **DNS:** `certs.granitevoip.com  A  34.26.57.37` (the services VM public IP).
+1. **DNS:** `fs-cert.granitevoip.com  A  34.26.57.37` (the services VM public IP).
    Must exist before first start so the ACME HTTP-01 challenge can validate.
 2. **Firewall (VPC ingress to the services VM):**
    - `allow tcp:80 from 0.0.0.0/0` — Let's Encrypt HTTP-01 challenge + HTTP→HTTPS
@@ -40,7 +40,7 @@ trust store needed. The issued cert + ACME account persist in the
 `x5u_caddy_data` volume so restarts don't re-issue (Let's Encrypt rate limits).
 
 Note: the **served bytes** (our `CN=SHAKEN 8052` STI chain) and the **transport
-TLS cert** (Let's Encrypt for `certs.granitevoip.com`) are two different certs —
+TLS cert** (Let's Encrypt for `fs-cert.granitevoip.com`) are two different certs —
 the STI cert is the payload; the LE cert only secures the connection.
 
 ## Response headers on the cert path
