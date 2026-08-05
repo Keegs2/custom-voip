@@ -780,6 +780,39 @@ local function terminate_rcf(dest, ctx)
             session:setVariable("sip_h_X-In-Identity", in_identity)
         end
 
+        -- ================================================================
+        -- STIR/SHAKEN CDR facts (T3) — record RAW facts only, never derive.
+        -- ================================================================
+        -- These A-leg channel variables are serialized verbatim into the posted
+        -- CDR JSON (mod_json_cdr includes ALL channel vars — see
+        -- json_cdr.conf.xml, no channel-vars filter) and read by
+        -- /v1/cdrs/ingest. FS records ONLY what it knows on this carrier-bound
+        -- leg; the backend derives the EFFECTIVE attestation (div→C) from
+        -- stir_attest_intent + stir_inbound_signed. Additive + fail-safe: every
+        -- value defaults to empty/"0" and setting a channel var can never fail a
+        -- call. Set ONLY in this PSTN/carrier branch (a local-extension forward
+        -- never reaches the carrier, so it carries no STIR facts).
+        --
+        --   stir_attest_intent   = the X-Attestation we set on the B-leg (here
+        --                          always "div" — RCF is diversion).
+        --   stir_inbound_signed  = "1" if we had an inbound Identity to chain
+        --                          (X-In-Identity present on the A-leg), else "0".
+        --   stir_verstat         = the inbound X-Verstat value Kamailio stamped on
+        --                          the A-leg (self-verify OR carrier PAI), or "".
+        --   stir_verstat_source  = "self" / "carrier" / "" (the source marker
+        --                          Kamailio set alongside X-Verstat).
+        --   stir_inbound_attest  = the ORIGINATING carrier's attestation of the
+        --                          caller (A/B/C) that Kamailio lifted from the
+        --                          inbound P-Attestation-Indicator into internal
+        --                          X-Inbound-Attest, or "" if absent/unrecognized.
+        --                          COMPLEMENTARY to stir_verstat (pass/fail of
+        --                          THIS hop) — this is the caller's attestation.
+        set_var("stir_attest_intent", "div")
+        set_var("stir_inbound_signed", (in_identity and in_identity ~= "") and "1" or "0")
+        set_var("stir_verstat", get_var("sip_h_X-Verstat", ""))
+        set_var("stir_verstat_source", get_var("sip_h_X-Verstat-Source", ""))
+        set_var("stir_inbound_attest", get_var("sip_h_X-Inbound-Attest", ""))
+
         -- Export caller ID to B-leg for Bandwidth From header auth.
         pcall(function() session:execute("export", "origination_caller_id_number=" .. outbound_did) end)
         pcall(function() session:execute("export", "origination_caller_id_name=" .. outbound_did) end)

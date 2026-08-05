@@ -16,6 +16,7 @@ import { listCustomers } from '../api/customers';
 import { listTrunks } from '../api/trunks';
 import { Spinner } from '../components/ui/Spinner';
 import { IconSignal } from '../components/icons/ProductIcons';
+import { AttestationChain } from '../components/stir/AttestationChain';
 import type { Cdr, CallDirection, ProductType } from '../types/cdr';
 import type { Customer } from '../types/customer';
 import type { Trunk } from '../types/trunk';
@@ -945,6 +946,10 @@ function CallDetailPanel({ cdr, onClose }: CallDetailPanelProps) {
             <DetailRow label="SIP Code" value={sipCodeStr} />
             <DetailRow label="Carrier Used" value={d.carrier_used} />
             <DetailRow label="Traffic Grade" value={d.traffic_grade} />
+          </PanelSection>
+
+          <PanelSection title="STIR / SHAKEN">
+            <AttestationChain callId={d.uuid} />
           </PanelSection>
 
           {(d.mos != null || d.r_factor != null || d.flaw_total != null || d.packet_loss_pct != null) && (

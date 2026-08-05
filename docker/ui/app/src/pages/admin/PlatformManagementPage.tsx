@@ -10,6 +10,7 @@ const platformTabs: PlatformTab[] = [
   { label: 'CDRs',           to: '/admin/platform/cdrs'     },
   { label: 'Rates',          to: '/admin/platform/rates'    },
   { label: 'Tiers',          to: '/admin/platform/tiers'    },
+  { label: 'STIR/SHAKEN',    to: '/admin/platform/stir'     },
   { label: 'DID Search',     to: '/admin/platform/dids'     },
 ];
 
