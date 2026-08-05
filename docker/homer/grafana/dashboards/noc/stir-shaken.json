@@ -38,7 +38,7 @@
       "transparent": true,
       "options": {
         "mode": "markdown",
-        "content": "## STIR/SHAKEN — attestation & inbound verification\nLive from VictoriaMetrics (`voip-metrics-vm`) — the Kamailio SBCs' `xhttp_prom` counters, scraped per-zone by vmagent. Two families:\n- **Signed attestation** (`kamailio_stir_attest_signed_total{attestation, zone}`) — what WE signed on each **outbound carrier leg**. `A` full (authenticated origin, e.g. trunk/API) · `B` partial (SHAKEN default) · `C` gateway (RCF forward of an unsigned inbound) · **`div`** = chained onto a preserved inbound Identity (best outcome — we relayed the upstream attestation) · `unsigned` = nothing signed (fail-open / signing off).\n- **Inbound verstat** (`kamailio_stir_inbound_verstat_total{verstat, source, zone}`) — the inbound caller-verification result. `source=self` = our own `secsipid_check_identity`; `source=carrier` = Bandwidth's `verstat=` lifted off the P-Asserted-Identity.\n\n`zone` = **SBC_ID** (e.g. `east-sbc-1`); the **Zone** picker maps to a `zone=~\"$zone\"` regex (`east-.*` / `west-.*` / `central-.*`, or `.*` = all). Counters expose the `_total` suffix. All ratios/mixes are over the dashboard time range (`$__range`)."
+        "content": "## STIR/SHAKEN — attestation & inbound verification\nLive from VictoriaMetrics (`voip-metrics-vm`) — the Kamailio SBCs' `xhttp_prom` counters, scraped per-zone by vmagent. Two families:\n- **Signed attestation** (`kamailio_stir_attest_signed{attestation, zone}`) — what WE signed on each **outbound carrier leg**. `A` full (authenticated origin, e.g. trunk/API) · `B` partial (SHAKEN default) · `C` gateway (RCF forward of an unsigned inbound) · **`div`** = chained onto a preserved inbound Identity (best outcome — we relayed the upstream attestation) · `unsigned` = nothing signed (fail-open / signing off).\n- **Inbound verstat** (`kamailio_stir_inbound_verstat{verstat, source, zone}`) — the inbound caller-verification result. `source=self` = our own `secsipid_check_identity`; `source=carrier` = Bandwidth's `verstat=` lifted off the P-Asserted-Identity.\n\n`zone` = **SBC_ID** (e.g. `east-sbc-1`); the **Zone** picker maps to a `zone=~\"$zone\"` regex (`east-.*` / `west-.*` / `central-.*`, or `.*` = all). All ratios/mixes are over the dashboard time range (`$__range`)."
       },
       "fieldConfig": { "defaults": {}, "overrides": [] }
     },
@@ -46,14 +46,14 @@
       "id": 1,
       "type": "piechart",
       "title": "Signed attestation mix ($__range)",
-      "description": "Share of outbound carrier legs by the attestation WE signed, over the selected range: sum by (attestation) (increase(kamailio_stir_attest_signed_total{zone=~\"$zone\"}[$__range])). Colour-mapped to the UI: A green, B amber, C gray, div blue, unsigned red. Honours the Zone filter.",
+      "description": "Share of outbound carrier legs by the attestation WE signed, over the selected range: sum by (attestation) (increase(kamailio_stir_attest_signed{zone=~\"$zone\"}[$__range])). Colour-mapped to the UI: A green, B amber, C gray, div blue, unsigned red. Honours the Zone filter.",
       "gridPos": { "h": 8, "w": 8, "x": 0, "y": 3 },
       "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
       "targets": [
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
-          "expr": "sum by (attestation) (increase(kamailio_stir_attest_signed_total{zone=~\"$zone\"}[$__range]))",
+          "expr": "sum by (attestation) (increase(kamailio_stir_attest_signed{zone=~\"$zone\"}[$__range]))",
           "instant": true,
           "range": false,
           "legendFormat": "{{attestation}}"
@@ -93,7 +93,7 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
-          "expr": "sum(increase(kamailio_stir_attest_signed_total{attestation=\"div\", zone=~\"$zone\"}[$__range])) / clamp_min(sum(increase(kamailio_stir_attest_signed_total{zone=~\"$zone\"}[$__range])), 1)",
+          "expr": "sum(increase(kamailio_stir_attest_signed{attestation=\"div\", zone=~\"$zone\"}[$__range])) / clamp_min(sum(increase(kamailio_stir_attest_signed{zone=~\"$zone\"}[$__range])), 1)",
           "instant": true,
           "range": false,
           "legendFormat": "div"
@@ -132,7 +132,7 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
-          "expr": "sum(increase(kamailio_stir_attest_signed_total{attestation=\"C\", zone=~\"$zone\"}[$__range])) / clamp_min(sum(increase(kamailio_stir_attest_signed_total{zone=~\"$zone\"}[$__range])), 1)",
+          "expr": "sum(increase(kamailio_stir_attest_signed{attestation=\"C\", zone=~\"$zone\"}[$__range])) / clamp_min(sum(increase(kamailio_stir_attest_signed{zone=~\"$zone\"}[$__range])), 1)",
           "instant": true,
           "range": false,
           "legendFormat": "C"
@@ -171,7 +171,7 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
-          "expr": "sum(increase(kamailio_stir_attest_signed_total{attestation=\"unsigned\", zone=~\"$zone\"}[$__range])) / clamp_min(sum(increase(kamailio_stir_attest_signed_total{zone=~\"$zone\"}[$__range])), 1)",
+          "expr": "sum(increase(kamailio_stir_attest_signed{attestation=\"unsigned\", zone=~\"$zone\"}[$__range])) / clamp_min(sum(increase(kamailio_stir_attest_signed{zone=~\"$zone\"}[$__range])), 1)",
           "instant": true,
           "range": false,
           "legendFormat": "unsigned"
@@ -210,14 +210,14 @@
       "id": 5,
       "type": "stat",
       "title": "Total signed ($__range)",
-      "description": "Total outbound carrier legs Kamailio ran the signing block on over the range: sum(increase(kamailio_stir_attest_signed_total{zone=~\"$zone\"}[$__range])). The denominator for the % stats and the attestation-mix pie. Honours the Zone filter.",
+      "description": "Total outbound carrier legs Kamailio ran the signing block on over the range: sum(increase(kamailio_stir_attest_signed{zone=~\"$zone\"}[$__range])). The denominator for the % stats and the attestation-mix pie. Honours the Zone filter.",
       "gridPos": { "h": 4, "w": 4, "x": 20, "y": 3 },
       "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
       "targets": [
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
-          "expr": "sum(increase(kamailio_stir_attest_signed_total{zone=~\"$zone\"}[$__range]))",
+          "expr": "sum(increase(kamailio_stir_attest_signed{zone=~\"$zone\"}[$__range]))",
           "instant": true,
           "range": false,
           "legendFormat": "signed"
@@ -254,7 +254,7 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
-          "expr": "sum(increase(kamailio_stir_inbound_verstat_total{verstat=\"TN-Validation-Passed\", zone=~\"$zone\"}[$__range])) / clamp_min(sum(increase(kamailio_stir_inbound_verstat_total{zone=~\"$zone\"}[$__range])), 1)",
+          "expr": "sum(increase(kamailio_stir_inbound_verstat{verstat=\"TN-Validation-Passed\", zone=~\"$zone\"}[$__range])) / clamp_min(sum(increase(kamailio_stir_inbound_verstat{zone=~\"$zone\"}[$__range])), 1)",
           "instant": true,
           "range": false,
           "legendFormat": "passed"
@@ -300,7 +300,7 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
-          "expr": "sum(increase(kamailio_stir_inbound_verstat_total{verstat=\"TN-Validation-Failed\", zone=~\"$zone\"}[$__range])) / clamp_min(sum(increase(kamailio_stir_inbound_verstat_total{zone=~\"$zone\"}[$__range])), 1)",
+          "expr": "sum(increase(kamailio_stir_inbound_verstat{verstat=\"TN-Validation-Failed\", zone=~\"$zone\"}[$__range])) / clamp_min(sum(increase(kamailio_stir_inbound_verstat{zone=~\"$zone\"}[$__range])), 1)",
           "instant": true,
           "range": false,
           "legendFormat": "failed"
@@ -346,7 +346,7 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
-          "expr": "sum(increase(kamailio_stir_inbound_verstat_total{verstat=\"No-TN-Validation\", zone=~\"$zone\"}[$__range])) / clamp_min(sum(increase(kamailio_stir_inbound_verstat_total{zone=~\"$zone\"}[$__range])), 1)",
+          "expr": "sum(increase(kamailio_stir_inbound_verstat{verstat=\"No-TN-Validation\", zone=~\"$zone\"}[$__range])) / clamp_min(sum(increase(kamailio_stir_inbound_verstat{zone=~\"$zone\"}[$__range])), 1)",
           "instant": true,
           "range": false,
           "legendFormat": "no-tn"
@@ -378,14 +378,14 @@
       "id": 9,
       "type": "stat",
       "title": "Total inbound verstat ($__range)",
-      "description": "Total inbound legs that recorded a verstat over the range: sum(increase(kamailio_stir_inbound_verstat_total{zone=~\"$zone\"}[$__range])). The denominator for the inbound % stats and the verstat mix pie. Honours the Zone filter.",
+      "description": "Total inbound legs that recorded a verstat over the range: sum(increase(kamailio_stir_inbound_verstat{zone=~\"$zone\"}[$__range])). The denominator for the inbound % stats and the verstat mix pie. Honours the Zone filter.",
       "gridPos": { "h": 4, "w": 4, "x": 20, "y": 7 },
       "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
       "targets": [
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
-          "expr": "sum(increase(kamailio_stir_inbound_verstat_total{zone=~\"$zone\"}[$__range]))",
+          "expr": "sum(increase(kamailio_stir_inbound_verstat{zone=~\"$zone\"}[$__range]))",
           "instant": true,
           "range": false,
           "legendFormat": "verstat"
@@ -415,14 +415,14 @@
       "id": 10,
       "type": "timeseries",
       "title": "Signing rate over time — by attestation (5m)",
-      "description": "Live per-attestation signing rate: sum by (attestation) (rate(kamailio_stir_attest_signed_total{zone=~\"$zone\"}[$__rate_interval])), one line per attestation class. A growing 'unsigned' band or a collapse in 'div' is the earliest sign of a signing-key / cert-URL fault or an upstream Identity regression. Honours the Zone filter.",
+      "description": "Live per-attestation signing rate: sum by (attestation) (rate(kamailio_stir_attest_signed{zone=~\"$zone\"}[$__rate_interval])), one line per attestation class. A growing 'unsigned' band or a collapse in 'div' is the earliest sign of a signing-key / cert-URL fault or an upstream Identity regression. Honours the Zone filter.",
       "gridPos": { "h": 8, "w": 16, "x": 0, "y": 11 },
       "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
       "targets": [
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
-          "expr": "sum by (attestation) (rate(kamailio_stir_attest_signed_total{zone=~\"$zone\"}[$__rate_interval]))",
+          "expr": "sum by (attestation) (rate(kamailio_stir_attest_signed{zone=~\"$zone\"}[$__rate_interval]))",
           "range": true,
           "legendFormat": "{{attestation}}"
         }
@@ -461,14 +461,14 @@
       "id": 11,
       "type": "piechart",
       "title": "Inbound verstat mix ($__range)",
-      "description": "Share of inbound legs by caller-verification result over the range: sum by (verstat) (increase(kamailio_stir_inbound_verstat_total{zone=~\"$zone\"}[$__range])). Passed green, Failed red, No-TN gray. Honours the Zone filter.",
+      "description": "Share of inbound legs by caller-verification result over the range: sum by (verstat) (increase(kamailio_stir_inbound_verstat{zone=~\"$zone\"}[$__range])). Passed green, Failed red, No-TN gray. Honours the Zone filter.",
       "gridPos": { "h": 8, "w": 8, "x": 16, "y": 11 },
       "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
       "targets": [
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
-          "expr": "sum by (verstat) (increase(kamailio_stir_inbound_verstat_total{zone=~\"$zone\"}[$__range]))",
+          "expr": "sum by (verstat) (increase(kamailio_stir_inbound_verstat{zone=~\"$zone\"}[$__range]))",
           "instant": true,
           "range": false,
           "legendFormat": "{{verstat}}"
@@ -499,14 +499,14 @@
       "id": 12,
       "type": "piechart",
       "title": "Verstat source — self vs carrier ($__range)",
-      "description": "Where the inbound verification result came from, over the range: sum by (source) (increase(kamailio_stir_inbound_verstat_total{zone=~\"$zone\"}[$__range])). self = our own secsipid_check_identity (Phase 2B) · carrier = Bandwidth's verstat= off the P-Asserted-Identity · none = neither. Honours the Zone filter.",
+      "description": "Where the inbound verification result came from, over the range: sum by (source) (increase(kamailio_stir_inbound_verstat{zone=~\"$zone\"}[$__range])). self = our own secsipid_check_identity (Phase 2B) · carrier = Bandwidth's verstat= off the P-Asserted-Identity · none = neither. Honours the Zone filter.",
       "gridPos": { "h": 8, "w": 8, "x": 0, "y": 19 },
       "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
       "targets": [
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
-          "expr": "sum by (source) (increase(kamailio_stir_inbound_verstat_total{zone=~\"$zone\"}[$__range]))",
+          "expr": "sum by (source) (increase(kamailio_stir_inbound_verstat{zone=~\"$zone\"}[$__range]))",
           "instant": true,
           "range": false,
           "legendFormat": "{{source}}"
@@ -537,14 +537,14 @@
       "id": 13,
       "type": "table",
       "title": "Attestation counts by zone (SBC) — $__range",
-      "description": "Per-zone (SBC_ID) signed-attestation breakdown over the range: sum by (zone, attestation) (increase(kamailio_stir_attest_signed_total{zone=~\"$zone\"}[$__range])), pivoted to one row per SBC with a column per attestation class. Lets you confirm each SBC/region is signing and spot a single zone that has slipped to 'unsigned'. Honours the Zone filter.",
+      "description": "Per-zone (SBC_ID) signed-attestation breakdown over the range: sum by (zone, attestation) (increase(kamailio_stir_attest_signed{zone=~\"$zone\"}[$__range])), pivoted to one row per SBC with a column per attestation class. Lets you confirm each SBC/region is signing and spot a single zone that has slipped to 'unsigned'. Honours the Zone filter.",
       "gridPos": { "h": 8, "w": 16, "x": 8, "y": 19 },
       "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
       "targets": [
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
-          "expr": "sum by (zone, attestation) (increase(kamailio_stir_attest_signed_total{zone=~\"$zone\"}[$__range]))",
+          "expr": "sum by (zone, attestation) (increase(kamailio_stir_attest_signed{zone=~\"$zone\"}[$__range]))",
           "instant": true,
           "range": false,
           "format": "table",

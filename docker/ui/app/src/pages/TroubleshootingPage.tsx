@@ -474,14 +474,21 @@ interface AttestationBadgeProps {
 }
 
 /**
- * Compact STIR/SHAKEN badge for a call row: the primary `signed_attestation`
- * (what WE emitted) as a small semantic-coloured pill (A=green, B=amber,
- * C=gray, div=blue — via the shared `attestationColors`). The full chain lives
- * in the call-detail/ladder view, so here we keep it to one pill and stash the
- * fuller story — caller attestation + verstat ✓/✗ + source — in the `title`.
+ * Compact STIR/SHAKEN badge for a call row. One pill; the full chain lives in
+ * the call-detail/ladder view, so the fuller story — caller attestation +
+ * verstat ✓/✗ + source — is stashed in the `title` on hover.
  *
- * `null` (no stored attestation: legacy / pre-deploy / signing-off) renders a
- * subtle muted "—", never an error.
+ * Rendering (all via the shared `attestationColors`):
+ *   - base `A`/`B`/`C` → the single semantic-coloured letter (A=green, B=amber,
+ *     C=gray).
+ *   - `div` (diversion / forwarded call) → `div` is only the *mechanism*, so we
+ *     surface the level the call actually CARRIES: a two-tone "A→div" chain pill,
+ *     the carried level tinted by the caller's `inbound_attest` (A=green/B=amber/
+ *     C=gray) followed by the blue `div`. If `inbound_attest` is unknown, we fall
+ *     back to a plain blue `div`.
+ *   - an out-of-band value (e.g. a runtime "unsigned") → a muted "unsigned".
+ *   - `null` (no stored attestation: legacy / pre-deploy / signing-off) → a
+ *     subtle muted "—", never an error.
  */
 function AttestationBadge({ attestation }: AttestationBadgeProps) {
   if (attestation === null) {
@@ -499,10 +506,9 @@ function AttestationBadge({ attestation }: AttestationBadgeProps) {
     );
   }
 
-  const signedToken = attestColor(attestation.signed_attestation);
-
   // Compose the hover "story": what the caller presented (attestation + verstat
   // verdict glyph + source) and what we signed. Kept terse — one line per fact.
+  // Unchanged: the full three-line narrative still lives here on hover.
   const verdict = verstatVerdict(attestation.inbound_verstat);
   const verstatGlyph = verdict === 'pass' ? '✓' : verdict === 'fail' ? '✗' : '–';
   const callerAttest = attestation.inbound_attest
@@ -518,26 +524,64 @@ function AttestationBadge({ attestation }: AttestationBadgeProps) {
     `Signed: ${attestLabel(attestation.signed_attestation)} (${attestDescription(attestation.signed_attestation)})`,
   ].join('\n');
 
+  const signed = attestation.signed_attestation;
+
+  // `div` is only the *mechanism*. The meaningful signal is the attestation the
+  // call actually carries — the caller's preserved level (`inbound_attest`). So
+  // for a diversion we render a two-tone chain pill "A→div": the carried level
+  // coloured by the CALLER's attestation (A=green/B=amber/C=gray), then the blue
+  // `div` mechanism. If the caller's level is unknown (edge case) we fall back to
+  // a plain blue `div`.
+  if (signed === 'div' && attestation.inbound_attest !== null) {
+    const carriedToken = attestColor(attestation.inbound_attest); // caller's level colour
+    const divToken = attestColor('div'); // blue
+    return (
+      <span
+        title={title}
+        style={{
+          ...attestPillBase,
+          background: carriedToken.bg,
+          border: `1px solid ${carriedToken.border}`,
+        }}
+      >
+        <span style={{ color: carriedToken.text }}>{attestLabel(attestation.inbound_attest)}</span>
+        <span style={{ color: '#64748b', margin: '0 1px' }}>→</span>
+        <span style={{ color: divToken.text }}>div</span>
+      </span>
+    );
+  }
+
+  // Base A/B/C/div(no-caller): the single semantic-coloured letter, as before.
+  // Any out-of-band value (e.g. a runtime "unsigned") isn't part of the
+  // AttestationLevel union — render it as a muted "unsigned" rather than a hard
+  // semantic colour.
+  const isKnownLevel = signed === 'A' || signed === 'B' || signed === 'C' || signed === 'div';
+  const token = isKnownLevel ? attestColor(signed) : attestColor(null);
   return (
     <span
       title={title}
       style={{
-        display: 'inline-block',
-        padding: '2px 8px',
-        borderRadius: 4,
-        fontSize: '0.7rem',
-        fontWeight: 700,
-        fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
-        background: signedToken.bg,
-        color: signedToken.text,
-        border: `1px solid ${signedToken.border}`,
-        whiteSpace: 'nowrap',
+        ...attestPillBase,
+        background: token.bg,
+        color: token.text,
+        border: `1px solid ${token.border}`,
       }}
     >
-      {attestLabel(attestation.signed_attestation)}
+      {isKnownLevel ? attestLabel(signed) : 'unsigned'}
     </span>
   );
 }
+
+/** Shared pill chrome for the compact attestation badge (single & two-tone). */
+const attestPillBase = {
+  display: 'inline-block',
+  padding: '2px 8px',
+  borderRadius: 4,
+  fontSize: '0.7rem',
+  fontWeight: 700,
+  fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
+  whiteSpace: 'nowrap',
+} as const;
 
 // ─── Results table ────────────────────────────────────────────────────────────
 
