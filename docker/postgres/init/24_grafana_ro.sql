@@ -80,7 +80,8 @@ DECLARE
         'api_dids',        -- API DIDs (product/DID labels)
         'trunk_dids',      -- trunk DIDs (product/DID labels)
         'did_inventory',   -- full number inventory (optional on some branches)
-        'customers'        -- needed to label CDR rows by customer in dashboards
+        'customers',       -- needed to label CDR rows by customer in dashboards
+        'call_attestations'-- STIR/SHAKEN attestation levels (32_call_attestations.sql)
     ];
 BEGIN
     FOREACH tbl IN ARRAY read_targets LOOP

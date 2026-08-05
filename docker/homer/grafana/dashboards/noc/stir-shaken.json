@@ -415,17 +415,17 @@
       "id": 10,
       "type": "timeseries",
       "title": "Signed calls per hour — by attestation level",
-      "description": "Count of calls we signed at each attestation level, bucketed PER HOUR (one bar = one hour) and stacked: sum by (attestation) (increase(kamailio_stir_attest_signed{zone=~\"$zone\"}[$__interval])) with interval fixed at 1h. Bars are call COUNTS (not a rate); the stack height is how many calls we signed that HOUR, split by level — A full / B partial / C gateway (RCF forward of an UNSIGNED inbound) / div chained onto a preserved Identity / unsigned fail-open and the legend 'sum' column is the per-attestation total over the range — the reporting view of how many calls got signed at each level (A/B/C/div/unsigned). A growing 'unsigned' band or a collapse in 'div' is the earliest sign of a signing-key / cert-URL fault or an upstream Identity regression. Honours the Zone filter.",
+      "description": "Count of calls per hour by ACTUAL STIR/SHAKEN attestation LEVEL — A full / B partial / C gateway / unsigned — from the Postgres `call_attestations` table (NOT the raw metric). Unlike the metric-backed panels above, `div` is folded into the level it carries: a forwarded A-attested call (`signed_attestation='div'`) is counted as its preserved `inbound_attest` (A/B/C), so the stack reports the pure carried level. `div` only appears when the forward had no recorded inbound level (visibly flagged, not miscounted). NOTE: this panel is platform-wide — `call_attestations` lives only on the East primary and records EVERY zone's calls (all CDRs are written there via the API), so the **Zone picker does NOT apply here** (the metric-backed panels above still honour it). A growing 'unsigned' band or a collapse in A is the earliest sign of a signing-key / cert-URL fault or an upstream Identity regression.",
       "gridPos": { "h": 8, "w": 16, "x": 0, "y": 11 },
-      "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
-      "interval": "1h",
+      "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
-          "expr": "sum by (attestation) (increase(kamailio_stir_attest_signed{zone=~\"$zone\"}[$__interval]))",
-          "range": true,
-          "legendFormat": "{{attestation}}"
+          "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
+          "format": "time_series",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT $__timeGroupAlias(created_at, '1h'), CASE WHEN signed_attestation = 'div' THEN COALESCE(inbound_attest, 'div') ELSE signed_attestation END AS metric, COUNT(*) AS value FROM call_attestations WHERE $__timeFilter(created_at) GROUP BY 1, 2 ORDER BY 1"
         }
       ],
       "fieldConfig": {
@@ -449,12 +449,12 @@
           { "matcher": { "id": "byName", "options": "A" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } } ] },
           { "matcher": { "id": "byName", "options": "B" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "yellow" } } ] },
           { "matcher": { "id": "byName", "options": "C" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "text" } } ] },
-          { "matcher": { "id": "byName", "options": "div" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "blue" } } ] },
-          { "matcher": { "id": "byName", "options": "unsigned" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } } ] }
+          { "matcher": { "id": "byName", "options": "unsigned" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } } ] },
+          { "matcher": { "id": "byName", "options": "div" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "blue" } } ] }
         ]
       },
       "options": {
-        "legend": { "calcs": ["sum", "lastNotNull"], "displayMode": "table", "placement": "right", "showLegend": true },
+        "legend": { "calcs": ["sum"], "displayMode": "table", "placement": "right", "showLegend": true },
         "tooltip": { "mode": "multi", "sort": "desc" }
       }
     },
