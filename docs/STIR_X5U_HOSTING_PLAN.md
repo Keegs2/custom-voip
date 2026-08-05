@@ -2,7 +2,7 @@
 
 **Goal:** serve our public STI cert (leaf + intermediate) at an ATIS-1000074-compliant HTTPS URL **we own**, so `STIR_CERT_URL` (the x5u in every signed PASSporT) is fully under our control — no dependency on iconectiv's endpoint. Signing itself already works (local crypto test 12/12); this only serves the **public** cert so downstream carriers can fetch our public key to verify us.
 
-> **⚠️ APPROACH CHANGED (2026-08-05): GCS-public is NOT usable — the org enforces Domain Restricted Sharing (`iam.allowedPolicyMemberDomains`), which blocks `allUsers` (HTTP 412). We pivoted to serving the cert from a dedicated, isolated Caddy container on the services VM (public at the firewall layer, which that policy doesn't gate).** The live design + deploy/runbook is in **`infra/stir/README-x5u.md`** + `docker-compose.x5u.yml` + `infra/stir/Caddyfile`. URL: `https://certs.granitevoip.com/stir/8052-2026.pem`. The GCS sections below are retained only as the (blocked) original plan / reference.
+> **⚠️ APPROACH CHANGED (2026-08-05): GCS-public is NOT usable — the org enforces Domain Restricted Sharing (`iam.allowedPolicyMemberDomains`), which blocks `allUsers` (HTTP 412). We pivoted to serving the cert from a dedicated, isolated Caddy container on the services VM (public at the firewall layer, which that policy doesn't gate).** The live design + deploy/runbook is in **`infra/stir/README-x5u.md`** + `docker-compose.x5u.yml` + `infra/stir/Caddyfile`. URL: `https://fs-cert.granitevoip.com/stir/8052-2026.pem`. The GCS sections below are retained only as the (blocked) original plan / reference.
 
 ## Why self-hosting is fully compliant
 STIR/SHAKEN trust comes from (a) the cert chaining to an STI-PA-registered root — **Neustar Root, already in the trust list** — and (b) the cert's TNAuthList (**SPC 8052**) authorizing our TNs. It does **not** come from who hosts the file. The x5u is just a public URL returning the cert; any HTTPS host is valid and many SPs self-host. (RFC 8224/8225; ATIS-1000074 §5.3.1.)
@@ -12,20 +12,20 @@ STIR/SHAKEN trust comes from (a) the cert chaining to an STI-PA-registered root 
 
 ## The URL (ATIS-1000074 §5.3.1 — https, :443, no query/path-params/fragment/userinfo)
 - **Direct (core):** `https://storage.googleapis.com/granite-stir-x5u/stir/8052-2026.pem`
-- **Branded (optional):** `https://certs.granitevoip.com/stir/8052-2026.pem`
+- **Branded (optional):** `https://fs-cert.granitevoip.com/stir/8052-2026.pem`
 
 Versioned filename (`-2026`) ⇒ the object is **immutable** ⇒ long cache + clean annual rotation (new file, no cache-bust coordination).
 
 ## Architecture
 **Core requirement:** a **dedicated** GCS bucket with **public-read** on the cert object (the cert is public by design; the bucket holds nothing else). If the org enforces `constraints/storage.publicAccessPrevention`, an admin grants a **per-bucket exception** — low risk, only public certs live here.
 
-**Optional branding/HA layer:** front the bucket with an external HTTPS Load Balancer + backend bucket + Cloud CDN + a Google-managed cert on `certs.granitevoip.com` (Infoblox DNS, same as `trunk.granitevoip.com`). Same public-object requirement; adds a stable branded URL + global edge caching. Purely optional polish — the direct GCS URL is already compliant + highly available.
+**Optional branding/HA layer:** front the bucket with an external HTTPS Load Balancer + backend bucket + Cloud CDN + a Google-managed cert on `fs-cert.granitevoip.com` (Infoblox DNS, same as `trunk.granitevoip.com`). Same public-object requirement; adds a stable branded URL + global edge caching. Purely optional polish — the direct GCS URL is already compliant + highly available.
 
 ```
  verifier (any carrier)                        our control
         |  GET https x5u                         |
         v                                         |
- [ optional: HTTPS LB + Cloud CDN + managed cert ]  <-- certs.granitevoip.com
+ [ optional: HTTPS LB + Cloud CDN + managed cert ]  <-- fs-cert.granitevoip.com
         |                                         |
         v                                         |
  GCS bucket  gs://granite-stir-x5u  (public-read cert object only)

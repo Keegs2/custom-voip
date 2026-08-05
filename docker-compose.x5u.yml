@@ -21,7 +21,7 @@
 #     no directory listing, one content path, everything else 404.
 #
 # PREREQUISITES (operator, on GCP — not done here)
-#   1. DNS:      certs.granitevoip.com  A  34.26.57.37   (the services VM's IP)
+#   1. DNS:      fs-cert.granitevoip.com  A  34.26.57.37   (the services VM's IP)
 #   2. Firewall: allow tcp:80 and tcp:443 to the services VM from the internet
 #                (0.0.0.0/0). :80 is REQUIRED for the Let's Encrypt HTTP-01 ACME
 #                challenge; :443 serves the cert. No other new ports.
@@ -52,7 +52,7 @@ services:
       - "443:443"
     environment:
       # Public hostname to serve + obtain the Let's Encrypt cert for.
-      - X5U_DOMAIN=${X5U_DOMAIN:-certs.granitevoip.com}
+      - X5U_DOMAIN=${X5U_DOMAIN:-fs-cert.granitevoip.com}
       # ACME contact email (Let's Encrypt expiry notices). Placeholder default;
       # set a real mailbox in .env before deploying.
       - X5U_ACME_EMAIL=${X5U_ACME_EMAIL:-admin@example.com}
