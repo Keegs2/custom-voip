@@ -129,3 +129,31 @@ export async function requestDid(
     notes !== undefined ? { notes } : undefined,
   );
 }
+
+/**
+ * POST /numbers/{did}/request-release
+ * Customer endpoint (admin also allowed) — requests release of an assigned DID.
+ * Status transitions 'assigned' → 'release_requested'; an admin then approves
+ * via unassignDid() or denies via cancelDidRelease().
+ */
+export async function requestDidRelease(
+  did: string,
+  notes?: string,
+): Promise<DidInventoryItem> {
+  return apiRequest<DidInventoryItem>(
+    'POST',
+    `/numbers/${encodeURIComponent(did)}/request-release`,
+    notes !== undefined ? { notes } : undefined,
+  );
+}
+
+/**
+ * POST /numbers/{did}/cancel-release
+ * Customer withdraw OR admin deny — 'release_requested' → back to 'assigned'.
+ */
+export async function cancelDidRelease(did: string): Promise<DidInventoryItem> {
+  return apiRequest<DidInventoryItem>(
+    'POST',
+    `/numbers/${encodeURIComponent(did)}/cancel-release`,
+  );
+}

@@ -12,6 +12,7 @@ import {
   AlertCircle,
   ArrowRightLeft,
   Ban,
+  Undo2,
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { Button } from '../../components/ui/Button';
@@ -29,6 +30,7 @@ import {
   assignDid,
   unassignDid,
   requestDid,
+  cancelDidRelease,
 } from '../../api/didInventory';
 import { listCustomers } from '../../api/customers';
 import type { DidInventoryItem, DidStatus } from '../../types/didInventory';
@@ -112,6 +114,14 @@ function getStatusStyle(status: DidStatus): StatusStyle {
         border: 'rgba(239,68,68,0.28)',
         label: 'Suspended',
         icon: <Ban size={11} />,
+      };
+    case 'release_requested':
+      return {
+        bg: 'rgba(125,211,252,0.10)',
+        color: '#7dd3fc',
+        border: 'rgba(125,211,252,0.30)',
+        label: 'Release Requested',
+        icon: <Undo2 size={11} />,
       };
     default:
       return {
@@ -456,6 +466,7 @@ function FilterBar({
           <option value="">All Statuses</option>
           <option value="available">Available</option>
           <option value="assigned">Assigned</option>
+          <option value="release_requested">Release Requested</option>
           <option value="reserved">Reserved</option>
           <option value="porting_in">Porting In</option>
           <option value="porting_out">Porting Out</option>
@@ -688,6 +699,85 @@ function UnassignModal({ did, open, onClose, onSuccess }: UnassignModalProps) {
   );
 }
 
+// ─── Deny Release Confirm Modal ─────────────────────────────────────────────────
+// Admin DENY of a customer release request — cancel-release puts the DID back to
+// 'assigned'. Approval reuses UnassignModal (unassign accepts 'release_requested').
+
+interface DenyReleaseModalProps {
+  did: DidInventoryItem | null;
+  open: boolean;
+  onClose: () => void;
+  onSuccess: () => void;
+}
+
+function DenyReleaseModal({ did, open, onClose, onSuccess }: DenyReleaseModalProps) {
+  // Hooks always first
+  const { toastOk, toastErr } = useToast();
+  const queryClient = useQueryClient();
+
+  const denyMutation = useMutation({
+    mutationFn: () => cancelDidRelease(did!.did),
+    onSuccess: () => {
+      toastOk(`Release request denied — ${fmt(did!.did)} stays assigned`);
+      void queryClient.invalidateQueries({ queryKey: ['did-inventory'] });
+      void queryClient.invalidateQueries({ queryKey: ['did-stats'] });
+      void queryClient.invalidateQueries({ queryKey: ['did-my'] });
+      onSuccess();
+      onClose();
+    },
+    onError: (err: Error) => {
+      toastErr(err.message ?? 'Failed to deny release request');
+    },
+  });
+
+  // Guard after hooks
+  if (!did) return null;
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title="Deny Release Request"
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            variant="primary"
+            loading={denyMutation.isPending}
+            onClick={() => denyMutation.mutate()}
+          >
+            Deny Request
+          </Button>
+        </>
+      }
+    >
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <p style={{ fontSize: '0.85rem', color: '#94a3b8', lineHeight: 1.6 }}>
+          This will dismiss the pending release request for{' '}
+          <strong style={{ color: '#e2e8f0' }}>{fmt(did.did)}</strong>. The number stays
+          assigned to <strong style={{ color: '#e2e8f0' }}>{did.customer_name ?? 'its customer'}</strong>{' '}
+          and routing is unaffected.
+        </p>
+        <div
+          style={{
+            padding: '10px 14px',
+            background: 'rgba(125,211,252,0.07)',
+            border: '1px solid rgba(125,211,252,0.20)',
+            borderRadius: 8,
+            fontSize: '0.75rem',
+            color: '#7dd3fc',
+            lineHeight: 1.55,
+          }}
+        >
+          The customer can submit a new release request at any time.
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 // ─── Tab: Inventory ─────────────────────────────────────────────────────────────
 
 function InventoryTab() {
@@ -698,6 +788,7 @@ function InventoryTab() {
   const [offset, setOffset] = useState(0);
   const [assignTarget, setAssignTarget] = useState<DidInventoryItem | null>(null);
   const [unassignTarget, setUnassignTarget] = useState<DidInventoryItem | null>(null);
+  const [denyTarget, setDenyTarget] = useState<DidInventoryItem | null>(null);
   const { toastOk, toastErr } = useToast();
   const queryClient = useQueryClient();
 
@@ -784,6 +875,13 @@ function InventoryTab() {
           accent="#fbbf24"
           icon={<Clock size={17} />}
           delay="0.20s"
+        />
+        <DidStatCard
+          label="Release Requests"
+          value={statsLoading ? '—' : (statsData?.by_status?.release_requested ?? 0)}
+          accent="#7dd3fc"
+          icon={<Undo2 size={17} />}
+          delay="0.25s"
         />
       </div>
 
@@ -917,6 +1015,24 @@ function InventoryTab() {
                             Unassign
                           </Button>
                         )}
+                        {item.status === 'release_requested' && (
+                          <>
+                            <Button
+                              size="xs"
+                              variant="primary"
+                              onClick={() => setUnassignTarget(item)}
+                            >
+                              Approve Release
+                            </Button>
+                            <Button
+                              size="xs"
+                              variant="ghost"
+                              onClick={() => setDenyTarget(item)}
+                            >
+                              Deny
+                            </Button>
+                          </>
+                        )}
                       </div>
                     </Td>
                   </tr>
@@ -976,6 +1092,12 @@ function InventoryTab() {
         open={unassignTarget !== null}
         onClose={() => setUnassignTarget(null)}
         onSuccess={() => setUnassignTarget(null)}
+      />
+      <DenyReleaseModal
+        did={denyTarget}
+        open={denyTarget !== null}
+        onClose={() => setDenyTarget(null)}
+        onSuccess={() => setDenyTarget(null)}
       />
     </div>
   );

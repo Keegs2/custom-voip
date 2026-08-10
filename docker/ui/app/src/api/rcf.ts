@@ -37,10 +37,6 @@ export async function listRcf(params: RcfListParams = {}): Promise<RcfListRespon
   };
 }
 
-export async function getRcfEntry(id: number): Promise<RcfEntry> {
-  return apiRequest('GET', `/rcf/${id}`);
-}
-
 export async function createRcfEntry(data: RcfCreate): Promise<RcfEntry> {
   return apiRequest('POST', '/rcf', data);
 }
