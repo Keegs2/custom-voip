@@ -8,7 +8,6 @@ import {
   IconAdmin, IconSignal, IconTroubleshoot, IconMyAccount,
 } from '../icons/ProductIcons';
 import { Package, Shield, ChevronDown, Clock, Eye, EyeOff, Server, BookOpen } from 'lucide-react';
-import { AccessRequestForm } from './AccessRequestForm';
 
 /* ─── Types ───────────────────────────────────────────────── */
 
@@ -827,7 +826,6 @@ export function Sidebar() {
             }}
           >
             <SidebarLoginForm />
-            <AccessRequestForm />
           </div>
         )}
 

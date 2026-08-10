@@ -1,13 +1,23 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { AlertTriangle } from 'lucide-react';
 import {
   listOnboardingRequests,
   completeOnboarding,
   rejectOnboarding,
 } from '../../api/onboarding';
-import type {
-  OnboardingRequest,
-  OnboardingStatus,
+import {
+  ATTACH_TO_LABELS,
+  GOV_ID_TYPE_LABELS,
+  INTENDED_USE_LABELS,
+  PRODUCT_CHIP_LABELS,
+  PRODUCT_LABELS,
+  PRODUCT_ORDER,
+  type KycRecord,
+  type OnboardingRequest,
+  type OnboardingStatus,
+  type ProductKey,
+  type ProductsRecord,
 } from '../../types/onboarding';
 import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
@@ -117,6 +127,403 @@ function InfoPair({ label, value }: { label: string; value: string | null | unde
     <div>
       <span style={fieldLabel}>{label}</span>
       <span style={fieldValue}>{value || '—'}</span>
+    </div>
+  );
+}
+
+// ─── Products (products-v1) ───────────────────────────────────────────────────
+
+/** Small product chip — summary rows + detail header. `dim` marks the
+    implicit RCF chip on legacy (pre-products) requests. */
+function ProductChip({ product, dim }: { product: ProductKey; dim?: boolean }) {
+  return (
+    <span
+      style={{
+        flexShrink: 0,
+        fontSize: '0.58rem',
+        fontWeight: 700,
+        letterSpacing: '0.05em',
+        textTransform: 'uppercase',
+        color: dim ? '#718096' : '#93c5fd',
+        background: dim ? 'rgba(113,128,150,0.08)' : 'rgba(59,130,246,0.12)',
+        border: dim
+          ? '1px solid rgba(113,128,150,0.3)'
+          : '1px solid rgba(59,130,246,0.3)',
+        borderRadius: 4,
+        padding: '2px 6px',
+        whiteSpace: 'nowrap',
+      }}
+    >
+      {PRODUCT_CHIP_LABELS[product]}
+    </span>
+  );
+}
+
+/** Bordered per-product well inside the detail panel — same idiom as the
+    KYC high-volume block. */
+function ProductBlock({
+  product,
+  children,
+}: {
+  product: ProductKey;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      style={{
+        padding: '14px 16px',
+        borderRadius: 10,
+        background: 'rgba(59,130,246,0.05)',
+        border: '1px solid rgba(59,130,246,0.18)',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 12,
+      }}
+    >
+      <div style={{ ...sectionLabel, marginBottom: 0 }}>
+        {PRODUCT_LABELS[product]}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+const infoGrid: React.CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))',
+  gap: '12px 24px',
+};
+
+/**
+ * Requirements section of the detail panel.
+ * Product-aware requests render global sizing + one block per selected
+ * product; legacy rows (products NULL) keep the old top-level RCF fields.
+ */
+function RequirementsSection({ request }: { request: OnboardingRequest }) {
+  const products: ProductsRecord | null = request.products;
+
+  if (!products) {
+    return (
+      <div>
+        <div style={sectionLabel}>Requirements — Legacy RCF Intake</div>
+        <div style={infoGrid}>
+          <InfoPair label="DIDs Requested" value={request.did_count} />
+          <InfoPair label="Porting Existing Numbers?" value={request.porting} />
+          <InfoPair label="Current Carrier" value={request.current_carrier} />
+          <InfoPair label="Forwarding Setup" value={request.forwarding_setup} />
+          <InfoPair label="Monthly Volume" value={request.monthly_volume} />
+          <InfoPair label="Timeline" value={request.timeline} />
+        </div>
+      </div>
+    );
+  }
+
+  const selected = PRODUCT_ORDER.filter((p) => products.selected.includes(p));
+  const { rcf, trunk, api, voicemail } = products;
+
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        <div style={{ ...sectionLabel, marginBottom: 0 }}>
+          Products &amp; Requirements
+        </div>
+        {selected.map((p) => (
+          <ProductChip key={p} product={p} />
+        ))}
+      </div>
+
+      {/* Global sizing */}
+      <div style={{ ...infoGrid, marginTop: 12 }}>
+        <InfoPair label="Monthly Volume" value={request.monthly_volume} />
+        <InfoPair label="Timeline" value={request.timeline} />
+      </div>
+
+      {/* Per-product blocks, stable order */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 16 }}>
+        {rcf && (
+          <ProductBlock product="rcf">
+            <div style={infoGrid}>
+              <InfoPair label="DIDs Requested" value={rcf.did_count} />
+              <InfoPair label="Porting Existing Numbers?" value={rcf.porting} />
+              {rcf.current_carrier && (
+                <InfoPair label="Current Carrier" value={rcf.current_carrier} />
+              )}
+              <InfoPair label="Forwarding Setup" value={rcf.forwarding_setup} />
+            </div>
+          </ProductBlock>
+        )}
+
+        {trunk && (
+          <ProductBlock product="trunk">
+            <div style={infoGrid}>
+              <InfoPair
+                label="Concurrent Call Paths"
+                value={trunk.concurrent_call_paths.toLocaleString('en-US')}
+              />
+              <InfoPair label="PBX Vendor" value={trunk.pbx_vendor} />
+              <InfoPair label="DIDs Needed" value={trunk.dids_needed} />
+            </div>
+            <div>
+              <span style={fieldLabel}>
+                Signaling IPs ({trunk.signaling_ips.length}) — IP-authenticated,
+                no registration
+              </span>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 4 }}>
+                {trunk.signaling_ips.map((ip) => (
+                  <IpChip key={ip} ip={ip} />
+                ))}
+              </div>
+            </div>
+          </ProductBlock>
+        )}
+
+        {api && (
+          <ProductBlock product="api">
+            <div>
+              <span style={fieldLabel}>Use Case</span>
+              <p style={{ ...fieldValue, fontSize: '0.82rem', margin: 0, lineHeight: 1.55 }}>
+                {api.use_case}
+              </p>
+            </div>
+            <div style={infoGrid}>
+              <InfoPair
+                label="Expected Calls / Second"
+                value={
+                  api.expected_cps != null
+                    ? api.expected_cps.toLocaleString('en-US')
+                    : null
+                }
+              />
+              <InfoPair
+                label="Needs Numbers Provided?"
+                value={api.needs_numbers ? 'Yes' : 'No'}
+              />
+              <div>
+                <span style={fieldLabel}>Webhook URL</span>
+                {api.webhook_url ? (
+                  <span
+                    style={{
+                      ...fieldValue,
+                      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                      fontSize: '0.78rem',
+                      color: '#93c5fd',
+                      wordBreak: 'break-all',
+                    }}
+                  >
+                    {api.webhook_url}
+                  </span>
+                ) : (
+                  <span style={fieldValue}>—</span>
+                )}
+              </div>
+            </div>
+          </ProductBlock>
+        )}
+
+        {voicemail && (
+          <ProductBlock product="voicemail">
+            <div style={infoGrid}>
+              <InfoPair
+                label="Mailboxes"
+                value={voicemail.mailbox_count.toLocaleString('en-US')}
+              />
+              <InfoPair
+                label="Attach To"
+                value={ATTACH_TO_LABELS[voicemail.attach_to] ?? voicemail.attach_to}
+              />
+            </div>
+          </ProductBlock>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── KYC — Business verification (FCC Know-Your-Customer) ─────────────────────
+
+/** Amber warning chip — matches the admin warning idiom (#f59e0b family). */
+function WarningChip({ children }: { children: React.ReactNode }) {
+  return (
+    <span
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 6,
+        fontSize: '0.66rem',
+        fontWeight: 700,
+        letterSpacing: '0.04em',
+        textTransform: 'uppercase',
+        color: '#fbbf24',
+        background: 'rgba(245,158,11,0.09)',
+        border: '1px solid rgba(245,158,11,0.28)',
+        borderRadius: 6,
+        padding: '4px 10px',
+        whiteSpace: 'nowrap',
+      }}
+    >
+      <AlertTriangle size={12} strokeWidth={2.25} />
+      {children}
+    </span>
+  );
+}
+
+/** One originating-IP entry — mono chip, dark admin idiom. */
+function IpChip({ ip }: { ip: string }) {
+  return (
+    <span
+      style={{
+        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+        fontSize: '0.76rem',
+        color: '#93c5fd',
+        background: 'rgba(59,130,246,0.08)',
+        border: '1px solid rgba(59,130,246,0.22)',
+        borderRadius: 6,
+        padding: '3px 9px',
+        whiteSpace: 'nowrap',
+      }}
+    >
+      {ip}
+    </span>
+  );
+}
+
+function KycSection({ kyc }: { kyc: KycRecord | null }) {
+  if (!kyc) {
+    return (
+      <div>
+        <div style={sectionLabel}>KYC — Business Verification</div>
+        <div style={{ fontSize: '0.82rem', color: '#4a5568', fontStyle: 'italic' }}>
+          No KYC data (pre-KYC submission).
+        </div>
+      </div>
+    );
+  }
+
+  const s = kyc.standard;
+  const hv = kyc.high_volume;
+  const govIdLabel = GOV_ID_TYPE_LABELS[s.gov_id_type] ?? s.gov_id_type;
+
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+        <div style={{ ...sectionLabel, marginBottom: 0 }}>
+          KYC — Business Verification
+        </div>
+        {s.address_is_registered_agent_or_virtual && (
+          <WarningChip>Registered agent / virtual office address</WarningChip>
+        )}
+      </div>
+
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))',
+          gap: '12px 24px',
+          marginTop: 12,
+        }}
+      >
+        <InfoPair label="Legal Business Name" value={s.legal_business_name} />
+        <div>
+          <span style={fieldLabel}>Physical Address</span>
+          <span style={fieldValue}>
+            {s.address_line1}
+            {s.address_line2 ? `, ${s.address_line2}` : ''}
+            <br />
+            {s.city}, {s.state} {s.postal_code}
+          </span>
+        </div>
+        <div>
+          <span style={fieldLabel}>Government ID</span>
+          <span style={fieldValue}>
+            {govIdLabel}
+            <br />
+            <span
+              style={{
+                fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                fontSize: '0.8rem',
+                color: '#cbd5e1',
+              }}
+            >
+              {s.gov_id_number}
+            </span>
+          </span>
+        </div>
+        {s.state_of_registration && (
+          <InfoPair label="State of Registration" value={s.state_of_registration} />
+        )}
+        <InfoPair
+          label="Alternate Phone"
+          value={s.alternate_phone ? fmt(s.alternate_phone) : null}
+        />
+        <div>
+          <span style={fieldLabel}>Website</span>
+          {s.website ? (
+            <a
+              href={/^https?:\/\//i.test(s.website) ? s.website : `https://${s.website}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ ...fieldValue, color: '#60a5fa', textDecoration: 'none' }}
+            >
+              {s.website}
+            </a>
+          ) : (
+            <span style={fieldValue}>—</span>
+          )}
+        </div>
+      </div>
+
+      {hv && (
+        <div
+          style={{
+            marginTop: 16,
+            padding: '14px 16px',
+            borderRadius: 10,
+            background: 'rgba(59,130,246,0.05)',
+            border: '1px solid rgba(59,130,246,0.18)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 12,
+          }}
+        >
+          <div style={{ ...sectionLabel, marginBottom: 0 }}>High-Volume Calling</div>
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))',
+              gap: '12px 24px',
+            }}
+          >
+            <InfoPair
+              label="Intended Use"
+              value={INTENDED_USE_LABELS[hv.intended_use] ?? hv.intended_use}
+            />
+            <InfoPair
+              label="Expected Daily Calls"
+              value={
+                hv.expected_daily_calls != null
+                  ? hv.expected_daily_calls.toLocaleString('en-US')
+                  : null
+              }
+            />
+          </div>
+          {hv.intended_use_description && (
+            <div>
+              <span style={fieldLabel}>Use Description</span>
+              <p style={{ ...fieldValue, fontSize: '0.82rem', margin: 0, lineHeight: 1.55 }}>
+                {hv.intended_use_description}
+              </p>
+            </div>
+          )}
+          <div>
+            <span style={fieldLabel}>Originating IPs ({hv.originating_ips.length})</span>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 4 }}>
+              {hv.originating_ips.map((ip) => (
+                <IpChip key={ip} ip={ip} />
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -389,29 +796,61 @@ function OnboardingCard({ request, isExpanded, onToggle }: OnboardingCardProps) 
 
         {/* Company + contact */}
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div
-            style={{
-              fontSize: '0.9rem',
-              fontWeight: 700,
-              color: '#e2e8f0',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            {request.company_name}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+            <span
+              style={{
+                fontSize: '0.9rem',
+                fontWeight: 700,
+                color: '#e2e8f0',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {request.company_name}
+            </span>
+            {request.kyc?.high_volume && (
+              <span
+                style={{
+                  flexShrink: 0,
+                  fontSize: '0.58rem',
+                  fontWeight: 700,
+                  letterSpacing: '0.05em',
+                  textTransform: 'uppercase',
+                  color: '#93c5fd',
+                  background: 'rgba(59,130,246,0.12)',
+                  border: '1px solid rgba(59,130,246,0.3)',
+                  borderRadius: 4,
+                  padding: '2px 6px',
+                }}
+              >
+                High volume
+              </span>
+            )}
           </div>
           <div style={{ fontSize: '0.75rem', color: '#718096', marginTop: 2 }}>
             {request.contact_name} · {request.email}
           </div>
         </div>
 
-        {/* DID count */}
-        <div style={{ textAlign: 'center', flexShrink: 0 }}>
-          <div style={{ fontSize: '1rem', fontWeight: 700, color: '#3b82f6' }}>
-            {request.did_count}
-          </div>
-          <div style={{ fontSize: '0.65rem', color: '#4a5568', textTransform: 'uppercase' }}>DIDs</div>
+        {/* Product chips (legacy rows: dimmed implicit RCF) */}
+        <div
+          style={{
+            width: 150,
+            flexShrink: 0,
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: 4,
+            alignItems: 'center',
+          }}
+        >
+          {request.products ? (
+            PRODUCT_ORDER.filter((p) =>
+              request.products!.selected.includes(p),
+            ).map((p) => <ProductChip key={p} product={p} />)
+          ) : (
+            <ProductChip product="rcf" dim />
+          )}
         </div>
 
         {/* Timeline */}
@@ -465,18 +904,11 @@ function OnboardingCard({ request, isExpanded, onToggle }: OnboardingCardProps) 
             </div>
           </div>
 
-          {/* RCF Requirements */}
-          <div>
-            <div style={sectionLabel}>RCF Requirements</div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: '12px 24px' }}>
-              <InfoPair label="DIDs Requested" value={request.did_count} />
-              <InfoPair label="Porting Existing Numbers?" value={request.porting} />
-              <InfoPair label="Current Carrier" value={request.current_carrier} />
-              <InfoPair label="Forwarding Setup" value={request.forwarding_setup} />
-              <InfoPair label="Monthly Volume" value={request.monthly_volume} />
-              <InfoPair label="Timeline" value={request.timeline} />
-            </div>
-          </div>
+          {/* Products & requirements (legacy top-level RCF fields when products is null) */}
+          <RequirementsSection request={request} />
+
+          {/* KYC — Business verification (null on legacy pre-KYC rows) */}
+          <KycSection kyc={request.kyc} />
 
           {/* Submission meta */}
           <div>
@@ -636,8 +1068,8 @@ export function OnboardingAdminPage() {
             <div style={{ flex: 1, fontSize: '0.65rem', fontWeight: 700, color: '#4a5568', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
               Company / Contact
             </div>
-            <div style={{ width: 52, textAlign: 'center', fontSize: '0.65rem', fontWeight: 700, color: '#4a5568', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-              DIDs
+            <div style={{ width: 150, fontSize: '0.65rem', fontWeight: 700, color: '#4a5568', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              Products
             </div>
             <div style={{ width: 120, fontSize: '0.65rem', fontWeight: 700, color: '#4a5568', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
               Timeline

@@ -1,4 +1,4 @@
-import { type CSSProperties, useMemo } from 'react';
+import { type CSSProperties, useId, useMemo } from 'react';
 
 /**
  * HaArchitectureViz
@@ -36,36 +36,41 @@ import { type CSSProperties, useMemo } from 'react';
 /* ─── Geometry constants ─────────────────────────────────────────────── */
 
 const VB_W = 1200;
-const VB_H = 375;
+const VB_H = 540;
 
 // Column x-positions
 const COL = {
-  inbound: 80,    // Stage 1: inbound trunk node
-  nlb:     240,   // Stage 2: NLB / geo-router
-  locIn:   370,   // left edge of location containers
-  locOut:  710,   // right edge of location containers — ksX(660) + 50
-  sbc1X:   468,   // SBC-1 node centre (upper SBC within location)
-  sbc2X:   468,   // SBC-2 node centre — same X as SBC-1, stacked vertically
-  ksX:     660,   // CRAG engine node centre (right of SBC column)
-  termX:   1120,  // Stage 4: termination trunk nodes (near right edge of 1200px viewBox)
+  inbound: 74,    // Stage 1: inbound trunk node
+  nlb:     248,   // Stage 2: NLB / geo-router
+  locIn:   400,   // left edge of location containers
+  locOut:  775,   // right edge of location containers
+  sbc1X:   490,   // SBC-1 node centre (upper SBC within location)
+  sbc2X:   490,   // SBC-2 node centre — same X as SBC-1, stacked vertically
+  ksX:     700,   // CRAG engine node centre (right of SBC column)
+  termX:   1105,  // Stage 4: termination trunk nodes (near right edge of 1200px viewBox)
 } as const;
 
 // Row y-centres for each geographic location.
-// Spacing of 115px between rows; LOC_HALF_H=50 → 15px inter-container gap.
-const LOC_Y = [80, 195, 310] as const;   // Granite East, Granite Central, Granite West
-const LOC_HALF_H = 50;                    // half-height of each location container
-const LOC_W = COL.locOut - COL.locIn;    // 430px
+// Spacing of 164px between rows; LOC_HALF_H=76 → 12px inter-container gap.
+const LOC_Y = [124, 288, 452] as const;  // Granite East, Granite Central, Granite West
+const LOC_HALF_H = 76;                    // half-height of each location container
+const LOC_W = COL.locOut - COL.locIn;    // 375px
+const LOC_TITLE_H = 26;                   // region title-bar height inside container
 
 // SBC node offsets within a location (relative to location centre y).
-const SBC_OFFSET = 19; // SBC-1 is cy-19, SBC-2 is cy+19
+const SBC_OFFSET = 30; // SBC-1 is cy-30, SBC-2 is cy+30
 
-// Termination trunk y-positions — spread to match location row span.
-const TERM_Y = [100, 195, 290] as const;  // Dallas, LA, Backup
+// Termination trunk y-positions — slightly inset from the location row span
+// so the convergence fan keeps a gentle sweep.
+const TERM_Y = [140, 288, 436] as const;  // Dallas, LA, Backup
+
+// Inbound trunk y-centres — centred on the KD pair midpoint (288).
+const TRUNK_Y = [233, 343] as const;
 
 // Key Distributor y-positions — stacked vertically at the NLB column.
 // Primary is above centre, backup is below. Both converge toward the NLB x column.
-const KD_PRIMARY_Y = 160;  // primary — above centre row, clear of backup
-const KD_BACKUP_Y  = 235;  // backup  — 75px below primary, clear visual separation
+const KD_PRIMARY_Y = 236;  // primary — above centre row, clear of backup
+const KD_BACKUP_Y  = 340;  // backup  — 104px below primary, clear visual separation
 
 /* ─── SVG path helpers ───────────────────────────────────────────────── */
 
@@ -84,6 +89,15 @@ function cubicPath(
   x2: number, y2: number,
 ): string {
   return `M ${x1} ${y1} C ${cp1X} ${cp1Y} ${cp2X} ${cp2Y} ${x2} ${y2}`;
+}
+
+/** Rectangle with only the top two corners rounded — region title bars. */
+function topRoundedRect(
+  x: number, y: number,
+  w: number, h: number,
+  r: number,
+): string {
+  return `M ${x} ${y + h} V ${y + r} Q ${x} ${y} ${x + r} ${y} H ${x + w - r} Q ${x + w} ${y} ${x + w} ${y + r} V ${y + h} Z`;
 }
 
 /* ─── Failover group taxonomy ────────────────────────────────────────── */
@@ -133,29 +147,29 @@ interface PathDef {
 /* ─── Path definitions ───────────────────────────────────────────────── */
 
 // Stage 1→2: Dual inbound trunks → Primary Key Distributor
-// Trunk 1 (upper, y=155) and Trunk 2 (lower, y=240) fan into primary KD at KD_PRIMARY_Y.
-// Centre of the KD pair: (160+235)/2 = 197.5 ≈ 198. Trunks are 85px apart, centred on 198.
+// Trunk 1 (upper) and Trunk 2 (lower) fan into primary KD at KD_PRIMARY_Y.
+// TRUNK_Y is centred on the KD pair midpoint.
 const PATH_INBOUND1_NLB: PathDef = {
   id: 'in1-nlb',
   group: 'normal',
-  d: quadPath(COL.inbound + 20, 155, (COL.inbound + COL.nlb) / 2, 152, COL.nlb - 26, KD_PRIMARY_Y),
+  d: quadPath(COL.inbound + 32, TRUNK_Y[0], (COL.inbound + COL.nlb) / 2, TRUNK_Y[0] - 4, COL.nlb - 32, KD_PRIMARY_Y),
 };
 const PATH_INBOUND2_NLB: PathDef = {
   id: 'in2-nlb',
   group: 'normal',
-  d: quadPath(COL.inbound + 20, 240, (COL.inbound + COL.nlb) / 2, 243, COL.nlb - 26, KD_PRIMARY_Y),
+  d: quadPath(COL.inbound + 32, TRUNK_Y[1], (COL.inbound + COL.nlb) / 2, TRUNK_Y[1] + 4, COL.nlb - 32, KD_PRIMARY_Y),
 };
 
 // Stage 1→2 (backup): Dual inbound trunks → Backup Key Distributor (reroute-kd only)
 const PATH_INBOUND1_BACKUP: PathDef = {
   id: 'in1-bkd',
   group: 'reroute-kd',
-  d: quadPath(COL.inbound + 20, 155, (COL.inbound + COL.nlb) / 2, 170, COL.nlb - 26, KD_BACKUP_Y),
+  d: quadPath(COL.inbound + 32, TRUNK_Y[0], (COL.inbound + COL.nlb) / 2, TRUNK_Y[0] + 18, COL.nlb - 32, KD_BACKUP_Y),
 };
 const PATH_INBOUND2_BACKUP: PathDef = {
   id: 'in2-bkd',
   group: 'reroute-kd',
-  d: quadPath(COL.inbound + 20, 240, (COL.inbound + COL.nlb) / 2, 248, COL.nlb - 26, KD_BACKUP_Y),
+  d: quadPath(COL.inbound + 32, TRUNK_Y[1], (COL.inbound + COL.nlb) / 2, TRUNK_Y[1] + 6, COL.nlb - 32, KD_BACKUP_Y),
 };
 
 // Stage 2→3: Primary NLB → SBC-1 and SBC-2 for each location
@@ -172,7 +186,7 @@ function makeNlbToSbc(
   return {
     id,
     group,
-    d: quadPath(COL.nlb + 26, KD_PRIMARY_Y, cpX, targetY, COL.sbc1X - 14, targetY),
+    d: quadPath(COL.nlb + 32, KD_PRIMARY_Y, cpX, targetY, COL.sbc1X - 24, targetY),
   };
 }
 
@@ -196,7 +210,7 @@ function makeBackupKdToSbc(
   return {
     id,
     group: 'reroute-kd',
-    d: quadPath(COL.nlb + 26, KD_BACKUP_Y, cpX, targetY, COL.sbc1X - 14, targetY),
+    d: quadPath(COL.nlb + 32, KD_BACKUP_Y, cpX, targetY, COL.sbc1X - 24, targetY),
   };
 }
 
@@ -223,7 +237,7 @@ function makeSbcToKs(
   return {
     id,
     group,
-    d: cubicPath(COL.sbc1X + 14, y1, cp1X, y1, cp2X, y2, COL.ksX - 18, y2),
+    d: cubicPath(COL.sbc1X + 24, y1, cp1X, y1, cp2X, y2, COL.ksX - 30, y2),
   };
 }
 
@@ -241,9 +255,9 @@ function makeTermPath(
   group: FailoverGroup,
   id: string,
 ): PathDef {
-  const x1 = COL.ksX + 14;
+  const x1 = COL.ksX + 30;
   const y1 = LOC_Y[locIdx];
-  const x2 = COL.termX - 22;
+  const x2 = COL.termX - 44;
   const y2 = TERM_Y[termIdx];
   const cp1X = x1 + (x2 - x1) * 0.38;
   const cp2X = x1 + (x2 - x1) * 0.62;
@@ -417,9 +431,12 @@ const ALL_PACKETS: PacketConfig[] = [
 /* ─── Component ──────────────────────────────────────────────────────── */
 
 export function HaArchitectureViz() {
+  // useId is render-pure and unique per mounted instance; sanitise the
+  // ":r0:"-style value into a valid CSS identifier for class/keyframe names.
+  const reactId = useId();
   const uid = useMemo(
-    () => `ha-${Math.random().toString(36).substring(2, 8)}`,
-    [],
+    () => `ha-${reactId.replace(/[^a-zA-Z0-9_-]/g, '')}`,
+    [reactId],
   );
 
   const css = useMemo(() => {
@@ -797,73 +814,90 @@ export function HaArchitectureViz() {
 
   return (
     <>
-      {/* Prominent heading above the animation card */}
       <div
         style={{
           width: '100%',
-          maxWidth: 1560,
-          margin: '40px auto 16px',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: 14,
-        }}
-      >
-        {/* Left rule */}
-        <div
-          style={{
-            flex: 1,
-            height: 1,
-            background: 'linear-gradient(90deg, transparent, rgba(59,130,246,0.30))',
-          }}
-        />
-
-        <span
-          style={{
-            fontSize: '0.75rem',
-            fontWeight: 700,
-            letterSpacing: '0.06em',
-            textTransform: 'uppercase',
-            color: '#3b82f6',
-            textShadow: '0 0 24px rgba(59,130,246,0.45)',
-            whiteSpace: 'nowrap',
-          }}
-        >
-          High Availability Simulation
-        </span>
-
-        {/* Right rule */}
-        <div
-          style={{
-            flex: 1,
-            height: 1,
-            background: 'linear-gradient(90deg, rgba(59,130,246,0.30), transparent)',
-          }}
-        />
-      </div>
-
-      <div
-        style={{
-          width: '100%',
-          maxWidth: 1560,
           margin: '0 auto',
-          marginBottom: 48,
-          background: 'rgba(19, 21, 29, 0.70)',
-          backdropFilter: 'blur(10px)',
-          WebkitBackdropFilter: 'blur(10px)',
-          border: '1px solid rgba(59,130,246,0.12)',
-          borderRadius: 20,
-          padding: '24px 32px 20px',
-          boxShadow: '0 4px 24px -8px rgba(0,0,0,0.50)',
+          background: 'linear-gradient(180deg, #0d1626 0%, #0a111f 100%)',
+          border: '1px solid rgba(94,132,196,0.26)',
+          borderRadius: 14,
+          boxShadow: '0 28px 64px -32px rgba(0,0,0,0.70), 0 2px 8px -2px rgba(0,0,0,0.45)',
           overflow: 'hidden',
           position: 'relative',
         }}
       >
       <style dangerouslySetInnerHTML={{ __html: css }} />
 
-      {/* Status indicator — HTML element above the SVG, centered */}
-      <StatusIndicatorHtml uid={uid} />
+      {/* Azure keyline — engineered top edge */}
+      <div
+        style={{
+          height: 3,
+          background:
+            'linear-gradient(90deg, #2f7df6 0%, rgba(47,125,246,0.55) 45%, rgba(47,125,246,0.10) 100%)',
+        }}
+      />
 
+      {/* Card header — title + live tag left, status indicator right */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          flexWrap: 'wrap',
+          gap: '14px 28px',
+          padding: '20px 28px 18px',
+          borderBottom: '1px solid rgba(94,132,196,0.18)',
+        }}
+      >
+        <div style={{ minWidth: 260 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <span
+              style={{
+                background: 'var(--lg-azure, #2f7df6)',
+                color: '#ffffff',
+                fontSize: '0.60rem',
+                fontWeight: 700,
+                letterSpacing: '0.14em',
+                padding: '3px 8px',
+                borderRadius: 3,
+                lineHeight: 1.4,
+              }}
+            >
+              LIVE
+            </span>
+            <h3
+              style={{
+                fontFamily: '"Archivo", "IBM Plex Sans", sans-serif',
+                fontWeight: 800,
+                fontSize: '1.15rem',
+                letterSpacing: '-0.01em',
+                color: '#f2f6ff',
+                margin: 0,
+                lineHeight: 1.2,
+              }}
+            >
+              High Availability Simulation
+            </h3>
+          </div>
+          <p
+            style={{
+              margin: '6px 0 0',
+              fontSize: '0.8rem',
+              lineHeight: 1.5,
+              color: '#8ba1c4',
+              maxWidth: 560,
+            }}
+          >
+            Five production failover scenarios on a continuous 50-second cycle
+            — the same reroutes the live network runs.
+          </p>
+        </div>
+
+        <StatusIndicatorHtml uid={uid} />
+      </div>
+
+      {/* Diagram body */}
+      <div style={{ padding: '18px 22px 12px' }}>
       <svg
         viewBox={`0 0 ${VB_W} ${VB_H}`}
         width="100%"
@@ -1006,40 +1040,40 @@ export function HaArchitectureViz() {
         */}
         <g fill="none" clipPath={`url(#${uid}-clip)`}>
           {/* Stage 1→2: inbound → Primary KD */}
-          <path d={PATH_INBOUND1_NLB.d} stroke="rgba(59,130,246,0.22)" strokeWidth="1.0" />
-          <path d={PATH_INBOUND2_NLB.d} stroke="rgba(59,130,246,0.22)" strokeWidth="1.0" />
+          <path d={PATH_INBOUND1_NLB.d} stroke="rgba(59,130,246,0.30)" strokeWidth="1.2" />
+          <path d={PATH_INBOUND2_NLB.d} stroke="rgba(59,130,246,0.30)" strokeWidth="1.2" />
 
           {/* Stage 1→2: inbound → Backup KD (always visible, dimmer — dormant paths) */}
-          <path d={PATH_INBOUND1_BACKUP.d} stroke="rgba(59,130,246,0.10)" strokeWidth="0.75" strokeDasharray="4 3" />
-          <path d={PATH_INBOUND2_BACKUP.d} stroke="rgba(59,130,246,0.10)" strokeWidth="0.75" strokeDasharray="4 3" />
+          <path d={PATH_INBOUND1_BACKUP.d} stroke="rgba(59,130,246,0.14)" strokeWidth="0.9" strokeDasharray="5 4" />
+          <path d={PATH_INBOUND2_BACKUP.d} stroke="rgba(59,130,246,0.14)" strokeWidth="0.9" strokeDasharray="5 4" />
 
           {/* Stage 2→3 fan — Primary NLB to SBC pairs */}
-          <path d={PATH_NLB_E1.d} stroke="rgba(59,130,246,0.17)" strokeWidth="0.9" />
-          <path d={PATH_NLB_E2.d} stroke="rgba(59,130,246,0.17)" strokeWidth="0.9" />
-          <path d={PATH_NLB_C1.d} stroke="rgba(59,130,246,0.17)" strokeWidth="0.9" />
-          <path d={PATH_NLB_C2.d} stroke="rgba(59,130,246,0.17)" strokeWidth="0.9" />
-          <path d={PATH_NLB_W1.d} stroke="rgba(59,130,246,0.17)" strokeWidth="0.9" />
-          <path d={PATH_NLB_W2.d} stroke="rgba(59,130,246,0.17)" strokeWidth="0.9" />
+          <path d={PATH_NLB_E1.d} stroke="rgba(59,130,246,0.24)" strokeWidth="1.1" />
+          <path d={PATH_NLB_E2.d} stroke="rgba(59,130,246,0.24)" strokeWidth="1.1" />
+          <path d={PATH_NLB_C1.d} stroke="rgba(59,130,246,0.24)" strokeWidth="1.1" />
+          <path d={PATH_NLB_C2.d} stroke="rgba(59,130,246,0.24)" strokeWidth="1.1" />
+          <path d={PATH_NLB_W1.d} stroke="rgba(59,130,246,0.24)" strokeWidth="1.1" />
+          <path d={PATH_NLB_W2.d} stroke="rgba(59,130,246,0.24)" strokeWidth="1.1" />
 
           {/* Stage 2→3 fan — Backup KD to SBC pairs (always visible, dimmer) */}
-          <path d={PATH_BKD_E1.d} stroke="rgba(59,130,246,0.07)" strokeWidth="0.7" strokeDasharray="4 3" />
-          <path d={PATH_BKD_E2.d} stroke="rgba(59,130,246,0.07)" strokeWidth="0.7" strokeDasharray="4 3" />
-          <path d={PATH_BKD_C1.d} stroke="rgba(59,130,246,0.07)" strokeWidth="0.7" strokeDasharray="4 3" />
-          <path d={PATH_BKD_C2.d} stroke="rgba(59,130,246,0.07)" strokeWidth="0.7" strokeDasharray="4 3" />
-          <path d={PATH_BKD_W1.d} stroke="rgba(59,130,246,0.07)" strokeWidth="0.7" strokeDasharray="4 3" />
-          <path d={PATH_BKD_W2.d} stroke="rgba(59,130,246,0.07)" strokeWidth="0.7" strokeDasharray="4 3" />
+          <path d={PATH_BKD_E1.d} stroke="rgba(59,130,246,0.10)" strokeWidth="0.85" strokeDasharray="5 4" />
+          <path d={PATH_BKD_E2.d} stroke="rgba(59,130,246,0.10)" strokeWidth="0.85" strokeDasharray="5 4" />
+          <path d={PATH_BKD_C1.d} stroke="rgba(59,130,246,0.10)" strokeWidth="0.85" strokeDasharray="5 4" />
+          <path d={PATH_BKD_C2.d} stroke="rgba(59,130,246,0.10)" strokeWidth="0.85" strokeDasharray="5 4" />
+          <path d={PATH_BKD_W1.d} stroke="rgba(59,130,246,0.10)" strokeWidth="0.85" strokeDasharray="5 4" />
+          <path d={PATH_BKD_W2.d} stroke="rgba(59,130,246,0.10)" strokeWidth="0.85" strokeDasharray="5 4" />
 
           {/* Stage 3 internal — SBC to CRAG (dashed) */}
-          <path d={PATH_SBC1_KS_E.d} stroke="rgba(59,130,246,0.14)" strokeWidth="0.75" strokeDasharray="3 2.5" />
-          <path d={PATH_SBC2_KS_E.d} stroke="rgba(59,130,246,0.14)" strokeWidth="0.75" strokeDasharray="3 2.5" />
-          <path d={PATH_SBC1_KS_C.d} stroke="rgba(59,130,246,0.14)" strokeWidth="0.75" strokeDasharray="3 2.5" />
-          <path d={PATH_SBC2_KS_C.d} stroke="rgba(59,130,246,0.14)" strokeWidth="0.75" strokeDasharray="3 2.5" />
-          <path d={PATH_SBC1_KS_W.d} stroke="rgba(59,130,246,0.14)" strokeWidth="0.75" strokeDasharray="3 2.5" />
-          <path d={PATH_SBC2_KS_W.d} stroke="rgba(59,130,246,0.14)" strokeWidth="0.75" strokeDasharray="3 2.5" />
+          <path d={PATH_SBC1_KS_E.d} stroke="rgba(59,130,246,0.20)" strokeWidth="0.9" strokeDasharray="4 3" />
+          <path d={PATH_SBC2_KS_E.d} stroke="rgba(59,130,246,0.20)" strokeWidth="0.9" strokeDasharray="4 3" />
+          <path d={PATH_SBC1_KS_C.d} stroke="rgba(59,130,246,0.20)" strokeWidth="0.9" strokeDasharray="4 3" />
+          <path d={PATH_SBC2_KS_C.d} stroke="rgba(59,130,246,0.20)" strokeWidth="0.9" strokeDasharray="4 3" />
+          <path d={PATH_SBC1_KS_W.d} stroke="rgba(59,130,246,0.20)" strokeWidth="0.9" strokeDasharray="4 3" />
+          <path d={PATH_SBC2_KS_W.d} stroke="rgba(59,130,246,0.20)" strokeWidth="0.9" strokeDasharray="4 3" />
 
           {/* Stage 3→4 convergence fan — green-tinted */}
           {[...PATHS_EAST_TERM, ...PATHS_CENTRAL_TERM, ...PATHS_WEST_TERM].map((p) => (
-            <path key={p.id} d={p.d} stroke="rgba(52,211,153,0.12)" strokeWidth="0.8" />
+            <path key={p.id} d={p.d} stroke="rgba(52,211,153,0.18)" strokeWidth="1.0" />
           ))}
         </g>
 
@@ -1124,20 +1158,8 @@ export function HaArchitectureViz() {
 
         {/* ── Stage nodes ───────────────────────────────────────── */}
         {/* Dual redundant inbound trunks — stacked vertically */}
-        <text
-          x={COL.inbound}
-          y={136}
-          textAnchor="middle"
-          fontSize="6"
-          fontFamily={'"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace'}
-          letterSpacing="0.12em"
-          fill="rgba(148,163,184,0.38)"
-          fontWeight="700"
-        >
-          INBOUND
-        </text>
-        <InboundTrunkNode uid={uid} cy={155} label="Trunk 1" />
-        <InboundTrunkNode uid={uid} cy={240} label="Trunk 2" />
+        <InboundTrunkNode uid={uid} cy={TRUNK_Y[0]} label="Trunk 1" />
+        <InboundTrunkNode uid={uid} cy={TRUNK_Y[1]} label="Trunk 2" />
 
         {/* Primary and Backup Key Distributor nodes */}
         <NlbNode uid={uid} cy={KD_PRIMARY_Y} isBackup={false} nodeClass={`${uid}-node-kdprimary`} />
@@ -1154,24 +1176,12 @@ export function HaArchitectureViz() {
         <TermNode uid={uid} termIdx={2} label="Backup" sublabel="Trunk" nodeClass={undefined} />
 
         {/* ── Column header labels ───────────────────────────────── */}
-        <ColumnLabel text="ORIGINATION"  x={COL.inbound}                      y={22} />
-        <ColumnLabel text="DISTRIBUTION" x={COL.nlb}                          y={22} />
-        <ColumnLabel text="PROCESSING"   x={(COL.locIn + COL.locOut) / 2}     y={22} />
-        <ColumnLabel text="TERMINATION"  x={COL.termX}                        y={22} />
-
-        {/* ── Watermark ──────────────────────────────────────────── */}
-        <text
-          x={VB_W - 8} y={VB_H - 6}
-          textAnchor="end"
-          fontSize="6"
-          fontFamily={'"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace'}
-          letterSpacing="0.12em"
-          fill="rgba(59,130,246,0.18)"
-          fontWeight="600"
-        >
-          LIVE INFRASTRUCTURE
-        </text>
+        <ColumnLabel text="ORIGINATION"  x={COL.inbound}                      y={24} />
+        <ColumnLabel text="DISTRIBUTION" x={COL.nlb}                          y={24} />
+        <ColumnLabel text="PROCESSING"   x={(COL.locIn + COL.locOut) / 2}     y={24} />
+        <ColumnLabel text="TERMINATION"  x={COL.termX}                        y={24} />
       </svg>
+      </div>
       </div>
     </>
   );
@@ -1181,17 +1191,21 @@ export function HaArchitectureViz() {
 
 function ColumnLabel({ text, x, y }: { text: string; x: number; y: number }) {
   return (
-    <text
-      x={x} y={y}
-      textAnchor="middle"
-      fontSize="7"
-      fontFamily={'"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace'}
-      letterSpacing="0.13em"
-      fill="rgba(148,163,184,0.28)"
-      fontWeight="600"
-    >
-      {text}
-    </text>
+    <g>
+      <text
+        x={x} y={y}
+        textAnchor="middle"
+        fontSize="11.5"
+        fontFamily={'"Archivo", "IBM Plex Sans", sans-serif'}
+        letterSpacing="0.22em"
+        fill="rgba(168,193,232,0.80)"
+        fontWeight="700"
+      >
+        {text}
+      </text>
+      {/* Azure stage tick — echoes the landing tag mark */}
+      <rect x={x - 11} y={y + 7} width={22} height={2.5} fill="rgba(47,125,246,0.60)" />
+    </g>
   );
 }
 
@@ -1209,19 +1223,19 @@ function InboundTrunkNode({
   label: string;
 }) {
   const cx = COL.inbound;
-  const W  = 52;
-  const H  = 26;
-  const R  = 7;
+  const W  = 64;
+  const H  = 32;
+  const R  = 8;
 
   return (
     <g transform={`translate(${cx}, ${cy})`}>
-      <circle r="36" fill={`url(#${uid}-ng)`} />
+      <circle r="44" fill={`url(#${uid}-ng)`} />
       <rect
         x={-W / 2} y={-H / 2}
         width={W} height={H} rx={R}
         fill="rgba(15,17,23,0.75)"
-        stroke="rgba(59,130,246,0.30)"
-        strokeWidth="0.9"
+        stroke="rgba(59,130,246,0.38)"
+        strokeWidth="1.1"
       />
       {/* Top shimmer */}
       <rect
@@ -1230,14 +1244,14 @@ function InboundTrunkNode({
         fill="rgba(96,165,250,0.07)"
       />
       {/* Bandwidth / signal bars */}
-      <g transform="translate(-6, -7)" opacity="0.52">
-        <rect x="0"   y="7"  width="3" height="4"  rx="0.8" fill="rgba(96,165,250,0.60)" />
-        <rect x="4.5" y="5"  width="3" height="6"  rx="0.8" fill="rgba(96,165,250,0.60)" />
-        <rect x="9"   y="2"  width="3" height="9"  rx="0.8" fill="rgba(96,165,250,0.60)" />
+      <g transform="translate(-8, -8)" opacity="0.62">
+        <rect x="0"   y="8.5" width="3.8" height="5.5"  rx="1" fill="rgba(96,165,250,0.70)" />
+        <rect x="5.6" y="6"   width="3.8" height="8"    rx="1" fill="rgba(96,165,250,0.70)" />
+        <rect x="11.2" y="2.5" width="3.8" height="11.5" rx="1" fill="rgba(96,165,250,0.70)" />
       </g>
-      <text y={H / 2 + 9} textAnchor="middle" fontSize="6.5"
+      <text y={H / 2 + 14} textAnchor="middle" fontSize="9" stroke="rgba(8,14,26,0.85)" strokeWidth="3" paintOrder="stroke"
         fontFamily={'"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace'}
-        letterSpacing="0.09em" fill="rgba(148,163,184,0.60)" fontWeight="600">
+        letterSpacing="0.08em" fill="rgba(196,212,236,0.85)" fontWeight="600">
         {label}
       </text>
     </g>
@@ -1263,13 +1277,13 @@ function NlbNode({
 }) {
   const cx = COL.nlb;
   // Slightly smaller image for backup to reinforce subordinate role
-  const S  = isBackup ? 38 : 46;
+  const S  = isBackup ? 46 : 56;
 
   return (
     <g transform={`translate(${cx}, ${cy})`} className={nodeClass}>
       {/* Ambient glow halo — amber for backup, blue for primary */}
       <circle
-        r={isBackup ? 44 : 58}
+        r={isBackup ? 52 : 66}
         fill={isBackup ? `url(#${uid}-ag)` : `url(#${uid}-lg)`}
       />
       <image
@@ -1279,30 +1293,21 @@ function NlbNode({
         filter={`url(#${isBackup ? `${uid}-imgf-dim` : `${uid}-imgf`})`}
         preserveAspectRatio="xMidYMid meet"
       />
-      <text y={S / 2 + 12} textAnchor="middle" fontSize={isBackup ? 6.5 : 7.5}
-        fontFamily={'"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace'}
-        letterSpacing="0.09em"
-        fill={isBackup ? 'rgba(148,163,184,0.45)' : 'rgba(148,163,184,0.62)'}
-        fontWeight="600">
-        Key
-      </text>
-      <text y={S / 2 + 21} textAnchor="middle" fontSize={isBackup ? 5.5 : 6}
+      <text y={S / 2 + 14} textAnchor="middle" fontSize={isBackup ? 8.5 : 9.5} stroke="rgba(8,14,26,0.85)" strokeWidth="3" paintOrder="stroke"
         fontFamily={'"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace'}
         letterSpacing="0.07em"
-        fill={isBackup ? 'rgba(100,116,139,0.40)' : 'rgba(100,116,139,0.52)'}
-        fontWeight="500">
-        Distributor
+        fill={isBackup ? 'rgba(170,186,210,0.66)' : 'rgba(203,219,242,0.90)'}
+        fontWeight="600">
+        Key Distributor
       </text>
-      {/* Amber "STANDBY" indicator below the backup node only */}
-      {isBackup && (
-        <text y={S / 2 + 30} textAnchor="middle" fontSize="5"
-          fontFamily={'"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace'}
-          letterSpacing="0.10em"
-          fill="rgba(245,158,11,0.55)"
-          fontWeight="700">
-          STANDBY
-        </text>
-      )}
+      {/* Role tag — azure PRIMARY / amber STANDBY */}
+      <text y={S / 2 + 25} textAnchor="middle" fontSize="7" stroke="rgba(8,14,26,0.85)" strokeWidth="3" paintOrder="stroke"
+        fontFamily={'"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace'}
+        letterSpacing="0.14em"
+        fill={isBackup ? 'rgba(245,158,11,0.70)' : 'rgba(96,165,250,0.72)'}
+        fontWeight="700">
+        {isBackup ? 'STANDBY' : 'PRIMARY'}
+      </text>
     </g>
   );
 }
@@ -1325,47 +1330,64 @@ function LocationGroup({
   sbc2Class?: string;
   sbc2CentralClass?: string;
 }) {
-  const cy = LOC_Y[locIdx];
-  const x  = COL.locIn;
-  const h  = LOC_HALF_H * 2;
-  const R  = 9;
+  const cy  = LOC_Y[locIdx];
+  const x   = COL.locIn;
+  const h   = LOC_HALF_H * 2;
+  const R   = 10;
+  const top = cy - LOC_HALF_H;
 
   const sbc1Y = cy - SBC_OFFSET;
   const sbc2Y = cy + SBC_OFFSET;
 
   return (
     <g className={locClass}>
-      {/* Container background */}
+      {/* Container background — reads as a self-contained availability zone */}
       <rect
         x={x}
-        y={cy - LOC_HALF_H}
+        y={top}
         width={LOC_W}
         height={h}
         rx={R}
-        fill="rgba(15,17,23,0.52)"
-        stroke="rgba(59,130,246,0.18)"
-        strokeWidth="0.75"
+        fill="rgba(16,26,45,0.55)"
+        stroke="rgba(79,146,255,0.32)"
+        strokeWidth="1.1"
       />
-      {/* Top shimmer */}
-      <rect
-        x={x + 1}
-        y={cy - LOC_HALF_H + 1}
-        width={LOC_W - 2}
-        height={h * 0.22}
-        rx={R - 1}
-        fill="rgba(96,165,250,0.045)"
+      {/* Title bar — rounded top corners only */}
+      <path
+        d={topRoundedRect(x + 0.6, top + 0.6, LOC_W - 1.2, LOC_TITLE_H, R - 1)}
+        fill="rgba(47,125,246,0.10)"
       />
-      {/* Location name */}
+      <line
+        x1={x} y1={top + LOC_TITLE_H}
+        x2={x + LOC_W} y2={top + LOC_TITLE_H}
+        stroke="rgba(79,146,255,0.24)"
+        strokeWidth="1"
+      />
+      {/* Zone tick + name */}
+      <rect x={x + 14} y={top + 10.5} width={9} height={5} fill="rgba(47,125,246,0.85)" />
       <text
-        x={x + 10}
-        y={cy - LOC_HALF_H + 14}
-        fontSize="6.5"
-        fontFamily={'"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace'}
-        letterSpacing="0.10em"
-        fill="rgba(148,163,184,0.45)"
+        x={x + 31}
+        y={top + 18}
+        fontSize="12"
+        fontFamily={'"Archivo", "IBM Plex Sans", sans-serif'}
+        letterSpacing="0.14em"
+        fill="#d3e2fb"
         fontWeight="700"
       >
-        {label}
+        {label.toUpperCase()}
+      </text>
+      {/* Zone descriptor — right side of title bar */}
+      <text
+        x={x + LOC_W - 14}
+        y={top + 17.5}
+        textAnchor="end"
+        fontSize="7.5"
+        fontFamily={'"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace'}
+        letterSpacing="0.12em"
+        fill="rgba(143,176,232,0.55)"
+        fontWeight="600"
+      >
+        INDEPENDENT ZONE
       </text>
 
       {/* SBC-1 (upper) */}
@@ -1400,11 +1422,11 @@ function SbcNode({
   label: string;
   nodeClass?: string;
 }) {
-  const S = 30;
+  const S = 36;
 
   return (
     <g transform={`translate(${cx}, ${cy})`} className={nodeClass}>
-      <circle r="26" fill={`url(#${uid}-ng)`} />
+      <circle r="30" fill={`url(#${uid}-ng)`} />
       <image
         href="/signal_key.png"
         x={-S / 2} y={-S / 2}
@@ -1412,9 +1434,9 @@ function SbcNode({
         filter={`url(#${uid}-imgf)`}
         preserveAspectRatio="xMidYMid meet"
       />
-      <text y={S / 2 + 9} textAnchor="middle" fontSize="6"
+      <text y={S / 2 + 11} textAnchor="middle" fontSize="8.5" stroke="rgba(8,14,26,0.85)" strokeWidth="3" paintOrder="stroke"
         fontFamily={'"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace'}
-        letterSpacing="0.07em" fill="rgba(148,163,184,0.52)" fontWeight="600">
+        letterSpacing="0.06em" fill="rgba(196,212,236,0.82)" fontWeight="600">
         {label}
       </text>
     </g>
@@ -1423,10 +1445,10 @@ function SbcNode({
 
 /* ── CRAG Media Engine — logo image node ── */
 function KsNode({ uid, cx, cy }: { uid: string; cx: number; cy: number }) {
-  const S = 28;
+  const S = 44;
   return (
     <g transform={`translate(${cx}, ${cy})`}>
-      <circle r="28" fill={`url(#${uid}-ng)`} />
+      <circle r="38" fill={`url(#${uid}-ng)`} />
       <image
         href="/crag.png"
         x={-S / 2}
@@ -1436,9 +1458,9 @@ function KsNode({ uid, cx, cy }: { uid: string; cx: number; cy: number }) {
         filter={`url(#${uid}-imgf)`}
         preserveAspectRatio="xMidYMid meet"
       />
-      <text y={S / 2 + 10} textAnchor="middle" fontSize="5"
+      <text y={S / 2 + 13} textAnchor="middle" fontSize="8.5" stroke="rgba(8,14,26,0.85)" strokeWidth="3" paintOrder="stroke"
         fontFamily={'"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace'}
-        letterSpacing="0.06em" fill="rgba(96,165,250,0.45)" fontWeight="600">
+        letterSpacing="0.06em" fill="rgba(147,197,253,0.80)" fontWeight="600">
         CRAG Engine
       </text>
     </g>
@@ -1461,46 +1483,51 @@ function TermNode({
 }) {
   const cx = COL.termX;
   const cy = TERM_Y[termIdx];
-  const W  = 60;
-  const H  = 34;
-  const R  = 8;
+  const W  = 76;
+  const H  = 42;
+  const R  = 9;
 
   return (
     <g transform={`translate(${cx}, ${cy})`} className={nodeClass}>
-      <circle r="42" fill={`url(#${uid}-tg)`} />
+      <circle r="52" fill={`url(#${uid}-tg)`} />
       <rect
         x={-W / 2} y={-H / 2}
         width={W} height={H} rx={R}
         fill="rgba(15,17,23,0.72)"
-        stroke="rgba(52,211,153,0.28)"
-        strokeWidth="0.9"
+        stroke="rgba(52,211,153,0.36)"
+        strokeWidth="1.1"
       />
       <rect
         x={-W / 2 + 1} y={-H / 2 + 1}
         width={W - 2} height={H * 0.28} rx={R - 1}
         fill="rgba(52,211,153,0.06)"
       />
-      <circle r="3"   cx="0" cy="0" fill="rgba(52,211,153,0.40)" />
-      <circle r="1.5" cx="0" cy="0" fill="rgba(167,243,208,0.92)" />
-      <text y={H / 2 + 12} textAnchor="middle" fontSize="7.5"
+      <circle r="3.5" cx="0" cy="0" fill="rgba(52,211,153,0.40)" />
+      <circle r="1.8" cx="0" cy="0" fill="rgba(167,243,208,0.92)" />
+      <text y={H / 2 + 15} textAnchor="middle" fontSize="10" stroke="rgba(8,14,26,0.85)" strokeWidth="3" paintOrder="stroke"
         fontFamily={'"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace'}
-        letterSpacing="0.09em" fill="rgba(148,163,184,0.62)" fontWeight="600">
+        letterSpacing="0.08em" fill="rgba(196,222,210,0.88)" fontWeight="600">
         {label}
       </text>
-      <text y={H / 2 + 21} textAnchor="middle" fontSize="6"
+      <text y={H / 2 + 26} textAnchor="middle" fontSize="7.5" stroke="rgba(8,14,26,0.85)" strokeWidth="3" paintOrder="stroke"
         fontFamily={'"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace'}
-        letterSpacing="0.07em" fill="rgba(100,116,139,0.52)" fontWeight="500">
+        letterSpacing="0.07em" fill="rgba(134,158,150,0.62)" fontWeight="500">
         {sublabel}
       </text>
     </g>
   );
 }
 
-/* ── Status indicator — HTML element rendered above the SVG ── */
+/* ── Status indicator — colour-keyed chip in the card header ── */
+/*
+ * The six state rows are absolutely stacked inside a fixed-height chip and
+ * toggled by the existing 50s step-start animation classes — the chip is
+ * styling only; timings and class taxonomy are unchanged.
+ */
 function StatusIndicatorHtml({ uid }: { uid: string }) {
   const dotStyle = (color: string): CSSProperties => ({
-    width: 8,
-    height: 8,
+    width: 9,
+    height: 9,
     borderRadius: '50%',
     background: color,
     flexShrink: 0,
@@ -1514,96 +1541,92 @@ function StatusIndicatorHtml({ uid }: { uid: string }) {
     background: color,
   });
 
-  const textStyle = (color: string): CSSProperties => ({
-    fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
-    fontSize: '0.60rem',
-    fontWeight: 600,
-    letterSpacing: '0.08em',
-    color,
-  });
-
-  const alertTextStyle: CSSProperties = {
-    fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
-    fontSize: '0.65rem',
-    fontWeight: 700,
-    letterSpacing: '0.07em',
-    color: 'rgba(252,165,165,0.95)',
-    textShadow: '0 0 10px rgba(239,68,68,0.50)',
-  };
-
-  const rowStyle: CSSProperties = {
+  const rowStyle = (accent: string, bg: string, border: string): CSSProperties => ({
     display: 'flex',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: 7,
-    height: 18,
+    gap: 10,
     position: 'absolute',
     inset: 0,
+    padding: '0 16px',
+    borderRadius: 8,
+    border: `1px solid ${border}`,
+    borderLeft: `3px solid ${accent}`,
+    background: bg,
+  });
+
+  const okRow = rowStyle(
+    'rgba(34,197,94,0.90)', 'rgba(34,197,94,0.07)', 'rgba(34,197,94,0.30)',
+  );
+  const alertRow: CSSProperties = {
+    ...rowStyle('rgba(239,68,68,0.95)', 'rgba(239,68,68,0.08)', 'rgba(239,68,68,0.35)'),
+    opacity: 0,
   };
 
+  const okText: CSSProperties = {
+    fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
+    fontSize: '0.74rem',
+    fontWeight: 600,
+    letterSpacing: '0.05em',
+    color: 'rgba(167,243,208,0.95)',
+    whiteSpace: 'nowrap',
+  };
+
+  const alertText: CSSProperties = {
+    fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
+    fontSize: '0.74rem',
+    fontWeight: 700,
+    letterSpacing: '0.04em',
+    color: 'rgba(254,202,202,0.98)',
+    textShadow: '0 0 12px rgba(239,68,68,0.45)',
+    whiteSpace: 'nowrap',
+  };
+
+  const alertDot = (
+    <div style={{ position: 'relative', width: 9, height: 9, flexShrink: 0 }}>
+      <div style={haloStyle('rgba(239,68,68,0.30)')} className={`${uid}-alert-halo`} />
+      <div style={dotStyle('rgba(239,68,68,0.95)')} />
+    </div>
+  );
+
   return (
-    <div
-      style={{
-        position: 'relative',
-        height: 18,
-        marginBottom: 8,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-      }}
-    >
+    <div style={{ position: 'relative', height: 40, width: 350, maxWidth: '100%' }}>
       {/* Normal — green */}
-      <div className={`${uid}-status-normal`} style={rowStyle}>
-        <div style={{ position: 'relative', width: 8, height: 8 }}>
+      <div className={`${uid}-status-normal`} style={okRow}>
+        <div style={{ position: 'relative', width: 9, height: 9, flexShrink: 0 }}>
           <div style={haloStyle('rgba(34,197,94,0.18)')} />
           <div style={dotStyle('rgba(34,197,94,0.90)')} />
         </div>
-        <span style={textStyle('rgba(134,239,172,0.80)')}>All Systems Operational</span>
+        <span style={okText}>All Systems Operational</span>
       </div>
 
       {/* Failover: Signal Key 2 Granite Central */}
-      <div className={`${uid}-status-sbc2c`} style={{ ...rowStyle, opacity: 0 }}>
-        <div style={{ position: 'relative', width: 9, height: 9 }}>
-          <div style={haloStyle('rgba(239,68,68,0.30)')} className={`${uid}-alert-halo`} />
-          <div style={dotStyle('rgba(239,68,68,0.95)')} />
-        </div>
-        <span style={alertTextStyle}>Failover: Signal Key 2 Granite Central</span>
+      <div className={`${uid}-status-sbc2c`} style={alertRow}>
+        {alertDot}
+        <span style={alertText}>Failover: Signal Key 2 Granite Central</span>
       </div>
 
       {/* Failover: Granite West Zone */}
-      <div className={`${uid}-status-west`} style={{ ...rowStyle, opacity: 0 }}>
-        <div style={{ position: 'relative', width: 9, height: 9 }}>
-          <div style={haloStyle('rgba(239,68,68,0.30)')} className={`${uid}-alert-halo`} />
-          <div style={dotStyle('rgba(239,68,68,0.95)')} />
-        </div>
-        <span style={alertTextStyle}>Failover: Granite West Zone</span>
+      <div className={`${uid}-status-west`} style={alertRow}>
+        {alertDot}
+        <span style={alertText}>Failover: Granite West Zone</span>
       </div>
 
       {/* Failover: Dallas PoP */}
-      <div className={`${uid}-status-dallas`} style={{ ...rowStyle, opacity: 0 }}>
-        <div style={{ position: 'relative', width: 9, height: 9 }}>
-          <div style={haloStyle('rgba(239,68,68,0.30)')} className={`${uid}-alert-halo`} />
-          <div style={dotStyle('rgba(239,68,68,0.95)')} />
-        </div>
-        <span style={alertTextStyle}>Failover: Dallas PoP</span>
+      <div className={`${uid}-status-dallas`} style={alertRow}>
+        {alertDot}
+        <span style={alertText}>Failover: Dallas PoP</span>
       </div>
 
       {/* Failover: Signal Key 1 Granite East */}
-      <div className={`${uid}-status-sbc1e`} style={{ ...rowStyle, opacity: 0 }}>
-        <div style={{ position: 'relative', width: 9, height: 9 }}>
-          <div style={haloStyle('rgba(239,68,68,0.30)')} className={`${uid}-alert-halo`} />
-          <div style={dotStyle('rgba(239,68,68,0.95)')} />
-        </div>
-        <span style={alertTextStyle}>Failover: Signal Key 1 Granite East</span>
+      <div className={`${uid}-status-sbc1e`} style={alertRow}>
+        {alertDot}
+        <span style={alertText}>Failover: Signal Key 1 Granite East</span>
       </div>
 
       {/* Failover: Primary Key Distributor */}
-      <div className={`${uid}-status-kdprimary`} style={{ ...rowStyle, opacity: 0 }}>
-        <div style={{ position: 'relative', width: 9, height: 9 }}>
-          <div style={haloStyle('rgba(239,68,68,0.30)')} className={`${uid}-alert-halo`} />
-          <div style={dotStyle('rgba(239,68,68,0.95)')} />
-        </div>
-        <span style={alertTextStyle}>Failover: Primary Key Distributor</span>
+      <div className={`${uid}-status-kdprimary`} style={alertRow}>
+        {alertDot}
+        <span style={alertText}>Failover: Primary Key Distributor</span>
       </div>
     </div>
   );
