@@ -2,7 +2,13 @@
 
 Provides a complete DID management system backed by the did_inventory table:
   - Admin: full inventory, stats, Bandwidth sync, assign/unassign
-  - Customer: browse available numbers, view own numbers, request a number
+  - Customer: browse available numbers, view own numbers, request a number,
+    request/cancel release of an assigned number
+
+Release workflow (request-based): customer POST /{did}/request-release sets
+'assigned' -> 'release_requested'; admin approves via POST /{did}/unassign
+(accepts 'release_requested') or denies via POST /{did}/cancel-release
+(back to 'assigned', also available to the customer to withdraw).
 
 Cross-references Bandwidth TN inventory with internal product tables
 (rcf_numbers, api_dids, trunk_dids) and manages the full DID lifecycle.
@@ -44,6 +50,11 @@ class AssignRequest(BaseModel):
 
 
 class UnassignRequest(BaseModel):
+    notes: Optional[str] = None
+
+
+class ReleaseRequest(BaseModel):
+    """Body for request-release / cancel-release. Notes are appended to the audit trail."""
     notes: Optional[str] = None
 
 
@@ -544,18 +555,20 @@ async def unassign_did(
     """Unassign a DID from a customer. Admin only.
 
     Removes the product record (rcf_numbers, etc.) and sets status back to 'available'.
+    Accepts 'assigned', 'reserved', and 'release_requested' — the latter makes this
+    endpoint the admin APPROVAL of a customer release request (see /request-release).
     """
     e164 = _canonical_did(did)
     admin_user_id = int(admin["sub"])
 
-    # Verify DID is currently assigned
+    # Verify DID is currently assigned (or pending release approval)
     inv = await db.fetch_one(
         "SELECT id, status, customer_id, product_type, product_ref_id FROM did_inventory WHERE did = $1",
         e164,
     )
     if not inv:
         raise HTTPException(status_code=404, detail=f"DID {e164} not found in inventory")
-    if inv["status"] not in ("assigned", "reserved"):
+    if inv["status"] not in ("assigned", "reserved", "release_requested"):
         raise HTTPException(
             status_code=409,
             detail=f"DID {e164} has status '{inv['status']}' and is not currently assigned",
@@ -699,7 +712,7 @@ async def get_my_numbers(
                        c.name AS customer_name
                   FROM did_inventory d
                   LEFT JOIN customers c ON d.customer_id = c.id
-                 WHERE d.status IN ('assigned', 'reserved')
+                 WHERE d.status IN ('assigned', 'reserved', 'release_requested')
                 UNION
                 SELECT r.did, 'rcf' AS product_type, 'assigned' AS status,
                        NULL AS city, NULL AS state,
@@ -710,7 +723,7 @@ async def get_my_numbers(
                   JOIN customers c ON r.customer_id = c.id
                  WHERE r.did NOT IN (
                        SELECT di.did FROM did_inventory di
-                        WHERE di.status IN ('assigned', 'reserved'))
+                        WHERE di.status IN ('assigned', 'reserved', 'release_requested'))
                 UNION
                 SELECT a.did, 'api' AS product_type, 'assigned' AS status,
                        NULL AS city, NULL AS state,
@@ -721,7 +734,7 @@ async def get_my_numbers(
                   JOIN customers c ON a.customer_id = c.id
                  WHERE a.did NOT IN (
                        SELECT di.did FROM did_inventory di
-                        WHERE di.status IN ('assigned', 'reserved'))
+                        WHERE di.status IN ('assigned', 'reserved', 'release_requested'))
                 UNION
                 SELECT td.did, 'trunk' AS product_type, 'assigned' AS status,
                        NULL AS city, NULL AS state,
@@ -733,7 +746,7 @@ async def get_my_numbers(
                   JOIN customers c ON t.customer_id = c.id
                  WHERE td.did NOT IN (
                        SELECT di.did FROM did_inventory di
-                        WHERE di.status IN ('assigned', 'reserved'))
+                        WHERE di.status IN ('assigned', 'reserved', 'release_requested'))
               ) combined
              ORDER BY did
              LIMIT 500
@@ -751,7 +764,7 @@ async def get_my_numbers(
                   FROM did_inventory d
                   LEFT JOIN customers c ON d.customer_id = c.id
                  WHERE d.customer_id = $1
-                   AND d.status IN ('assigned', 'reserved')
+                   AND d.status IN ('assigned', 'reserved', 'release_requested')
                 UNION
                 SELECT r.did, 'rcf' AS product_type, 'assigned' AS status,
                        NULL AS city, NULL AS state,
@@ -864,4 +877,141 @@ async def request_number(
         "customer_id": customer_id,
         "product_type": body.product_type,
         "message": "Number reserved. An administrator will review and complete the assignment.",
+    }
+
+
+@router.post("/{did}/request-release")
+async def request_release(
+    did: str,
+    body: ReleaseRequest = ReleaseRequest(),
+    user: dict = Depends(get_current_user),
+    customer_filter: int | None = Depends(get_customer_filter),
+):
+    """Request release of an assigned DID. Customer self-service (admin also allowed).
+
+    Sets status 'assigned' -> 'release_requested'. An admin then APPROVES via
+    POST /{did}/unassign (which accepts 'release_requested') or DENIES via
+    POST /{did}/cancel-release. Non-admins may only act on their own customer's
+    DIDs — cross-tenant / unknown DIDs return 404 (no existence leak, house
+    authz style per routers/rcf.py).
+    """
+    e164 = _canonical_did(did)
+    user_id = int(user["sub"])
+
+    inv = await db.fetch_one(
+        "SELECT id, status, customer_id, product_type FROM did_inventory WHERE did = $1",
+        e164,
+    )
+    # 404-no-leak: to a non-admin, a DID owned by another tenant is
+    # indistinguishable from a DID that does not exist (checked BEFORE the
+    # status guard so 409s can't leak cross-tenant state either).
+    if not inv or (customer_filter is not None and inv["customer_id"] != customer_filter):
+        raise HTTPException(status_code=404, detail=f"DID {e164} not found in inventory")
+    if inv["status"] == "release_requested":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Release already requested for DID {e164} — awaiting admin review",
+        )
+    if inv["status"] != "assigned":
+        raise HTTPException(
+            status_code=409,
+            detail=f"DID {e164} has status '{inv['status']}' and cannot be released",
+        )
+
+    now = datetime.now(timezone.utc)
+    audit = f"[{now.isoformat()}] Release requested by {user.get('email', user_id)} (user {user_id})"
+    if body.notes:
+        audit += f": {body.notes}"
+
+    result = await db.execute(
+        """
+        UPDATE did_inventory
+           SET status = 'release_requested',
+               notes = COALESCE(notes || E'\\n', '') || $1,
+               updated_at = $2
+         WHERE did = $3 AND status = 'assigned'
+        """,
+        audit, now, e164,
+    )
+    if result == "UPDATE 0":
+        # Lost a race: status changed between the guard and the update.
+        raise HTTPException(
+            status_code=409,
+            detail=f"DID {e164} is no longer in 'assigned' status",
+        )
+
+    logger.info(
+        "DID release requested: did=%s, customer_id=%s, product=%s, by_user=%d",
+        e164, inv["customer_id"], inv["product_type"], user_id,
+    )
+
+    return {
+        "status": "release_requested",
+        "did": e164,
+        "customer_id": inv["customer_id"],
+        "product_type": inv["product_type"],
+        "message": "Release requested. An administrator will review and complete the release.",
+    }
+
+
+@router.post("/{did}/cancel-release")
+async def cancel_release(
+    did: str,
+    body: ReleaseRequest = ReleaseRequest(),
+    user: dict = Depends(get_current_user),
+    customer_filter: int | None = Depends(get_customer_filter),
+):
+    """Cancel a pending release request. Customer self-service (admin also allowed).
+
+    Sets status 'release_requested' -> 'assigned'. This is also the admin DENY
+    action for a customer release request. Same 404-no-leak tenant guard as
+    request-release.
+    """
+    e164 = _canonical_did(did)
+    user_id = int(user["sub"])
+
+    inv = await db.fetch_one(
+        "SELECT id, status, customer_id, product_type FROM did_inventory WHERE did = $1",
+        e164,
+    )
+    if not inv or (customer_filter is not None and inv["customer_id"] != customer_filter):
+        raise HTTPException(status_code=404, detail=f"DID {e164} not found in inventory")
+    if inv["status"] != "release_requested":
+        raise HTTPException(
+            status_code=409,
+            detail=f"DID {e164} has status '{inv['status']}' — no pending release request to cancel",
+        )
+
+    now = datetime.now(timezone.utc)
+    audit = f"[{now.isoformat()}] Release request cancelled by {user.get('email', user_id)} (user {user_id})"
+    if body.notes:
+        audit += f": {body.notes}"
+
+    result = await db.execute(
+        """
+        UPDATE did_inventory
+           SET status = 'assigned',
+               notes = COALESCE(notes || E'\\n', '') || $1,
+               updated_at = $2
+         WHERE did = $3 AND status = 'release_requested'
+        """,
+        audit, now, e164,
+    )
+    if result == "UPDATE 0":
+        raise HTTPException(
+            status_code=409,
+            detail=f"DID {e164} is no longer in 'release_requested' status",
+        )
+
+    logger.info(
+        "DID release request cancelled: did=%s, customer_id=%s, product=%s, by_user=%d",
+        e164, inv["customer_id"], inv["product_type"], user_id,
+    )
+
+    return {
+        "status": "assigned",
+        "did": e164,
+        "customer_id": inv["customer_id"],
+        "product_type": inv["product_type"],
+        "message": "Release request cancelled. The number remains assigned.",
     }

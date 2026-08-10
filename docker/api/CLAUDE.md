@@ -189,14 +189,14 @@ All endpoints are mounted at both `/v1/<path>` and `/<path>` (backward compatibi
 | `POST` | `/v1/customers/{id}/credit` | Add credit to balance |
 
 ### RCF (Remote Call Forwarding)
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/v1/rcf` | List RCF numbers (filter by customer_id, enabled) |
-| `POST` | `/v1/rcf` | Create RCF number |
-| `GET` | `/v1/rcf/{did}` | Get RCF config by DID |
-| `PUT` | `/v1/rcf/{identifier}` | Update RCF (by ID or DID) |
-| `PATCH` | `/v1/rcf/{identifier}` | Partial update (alias for PUT) |
-| `DELETE` | `/v1/rcf/{identifier}` | Delete RCF number (by ID or DID) |
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `GET` | `/v1/rcf` | User (tenant-scoped) | List RCF numbers (non-admins forced to own customer_id — the query param is ignored for them; admins filter by customer_id, enabled) |
+| `POST` | `/v1/rcf` | Admin | Create RCF number (provisioning) |
+| `GET` | `/v1/rcf/{did}` | User (tenant-scoped) | Get RCF config by DID (cross-tenant → 404, no existence leak) |
+| `PUT` | `/v1/rcf/{identifier}` | User (tenant-scoped; max_channels admin-only) | Update RCF (by ID or DID); cross-tenant → 404 |
+| `PATCH` | `/v1/rcf/{identifier}` | User (tenant-scoped; max_channels admin-only) | Partial update (alias for PUT) |
+| `DELETE` | `/v1/rcf/{identifier}` | Admin | Delete RCF number (by ID or DID); customer number release is request-based via `/v1/numbers/{did}/request-release` (admin approves with `/v1/numbers/{did}/unassign`) |
 
 ### Calls (API Calling)
 | Method | Path | Description |
@@ -249,8 +249,12 @@ All endpoints are mounted at both `/v1/<path>` and `/<path>` (backward compatibi
 | `POST` | `/v1/numbers/{did}/assign` | Admin | Assign DID to customer (creates product record) |
 | `POST` | `/v1/numbers/{did}/unassign` | Admin | Unassign DID (removes product record) |
 | `GET` | `/v1/numbers/available` | User | Browse available DIDs with filters |
-| `GET` | `/v1/numbers/my` | User | Customer's assigned numbers |
+| `GET` | `/v1/numbers/my` | User | Customer's assigned numbers (includes `status`, e.g. `release_requested`) |
 | `POST` | `/v1/numbers/{did}/request` | User | Reserve a number for admin review |
+| `POST` | `/v1/numbers/{did}/request-release` | User (tenant-scoped) | Request release of an assigned DID: `assigned` → `release_requested` (cross-tenant → 404, no existence leak; 409 if not `assigned`) |
+| `POST` | `/v1/numbers/{did}/cancel-release` | User (tenant-scoped) | Cancel a pending release request: back to `assigned` (also the admin DENY action) |
+
+**Release workflow (request-based):** customers cannot unassign directly. Customer `POST /{did}/request-release` → status `release_requested` → admin approves via `POST /{did}/unassign` (accepts `assigned`, `reserved`, AND `release_requested`) or denies via `POST /{did}/cancel-release`. Status list lives in `34_release_requested_status.sql`.
 
 ### Carriers (Admin only)
 Carrier gateway management — backed by `carrier_gateways` (Bandwidth Dallas/LA).
@@ -307,15 +311,18 @@ SIP trace search via qryn (Loki-compatible API over ClickHouse). Homer 10 — no
 | `POST` | `/v1/homer/search` | Search SIP traces with A/B-leg correlation (qryn LogQL + direct ClickHouse) |
 
 ### Onboarding
-New-RCF-customer intake pipeline (`pending → billing_verified → approve → active`, or `rejected`). Backed by `onboarding_requests`.
+New-customer intake pipeline (`pending → completed`, or `→ rejected` — status-only since migration 27; billing/provisioning are external). Backed by `onboarding_requests`.
 | Method | Path | Auth | Description |
 |---|---|---|---|
-| `POST` | `/v1/onboarding` | None | Public intake form submission |
-| `GET` | `/v1/onboarding` | Admin | List onboarding requests |
-| `GET` | `/v1/onboarding/{request_id}` | Admin | Get request detail |
-| `POST` | `/v1/onboarding/{request_id}/verify-billing` | Admin | Mark billing verified |
-| `POST` | `/v1/onboarding/{request_id}/approve` | Admin | Approve + provision (creates customer/user/RCF) |
+| `POST` | `/v1/onboarding` | None | Public intake form submission (KYC + products payloads REQUIRED — see below) |
+| `GET` | `/v1/onboarding` | Admin | List onboarding requests (includes decoded `kyc` + `products`) |
+| `GET` | `/v1/onboarding/{request_id}` | Admin | Get request detail (includes decoded `kyc` + `products`) |
+| `POST` | `/v1/onboarding/{request_id}/complete` | Admin | Mark complete (status-only; no provisioning) |
 | `POST` | `/v1/onboarding/{request_id}/reject` | Admin | Reject request |
+
+**FCC KYC capture (FCC 26-27 FNPRM, adopted 2026-04-30):** the public POST requires a nested `kyc` object, validated server-side and persisted to `onboarding_requests.kyc` JSONB (migration `35_onboarding_kyc.sql`) as `{standard, high_volume|null, submitted_at, form_version: 'fcc-26-27-fnprm-v1'}`. `standard` (all customers): legal business name, structured physical address + registered-agent/virtual-office self-disclosure (FNPRM red flag), government ID (`ein` — strict NN-NNNNNNN — / `state_registration` — requires `state_of_registration` — / `duns` / `other`), alternate phone (E.164-normalized, must differ from the main phone), optional website. `high_volume` (required iff `is_high_volume=true`; threshold not yet fixed by the FCC — self-declared): intended use (Literal enum; `other` requires a description), 1-20 originating IPs (IPv4/IPv6/CIDR ≤ /24 v4, ≤ /64 v6 — syntactic validation only), optional expected daily calls. Pre-KYC rows have `kyc IS NULL` and remain fully operable through the admin endpoints. **Retention: 4 years per FCC 26-27 — operational policy (no automated purge here); do not delete onboarding rows (even rejected) younger than 4 years.** Admin review of the KYC data (gov-ID/formation-record verification) happens before `complete` — the endpoint itself has no KYC-specific logic.
+
+**Product-aware intake (products-v1):** the public POST also requires a `products` object — applicants select one or more products and supply exactly the setup information each selected product needs to provision. Shape: `{selected: ['rcf'|'trunk'|'api'|'voicemail', ...] (min 1, no duplicates), rcf?, trunk?, api?, voicemail?}` — each product block must be **present iff selected** (validated both directions). Per-product required info: **rcf** = did_count / porting / forwarding_setup (exact form option strings; `current_carrier` required when porting Yes/Both); **trunk** = 1-10 `signaling_ips` (IP/CIDR, same validator as KYC originating IPs — the platform is **IP-peering only, no REGISTER auth**, so the PBX/SBC public signaling IPs are mandatory to provision a trunk) + `concurrent_call_paths` 1-1000 + optional pbx_vendor/dids_needed; **api** = use_case + needs_numbers + optional expected_cps (1-1000) / webhook_url (http(s), ≤255); **voicemail** = mailbox_count 1-10000 + attach_to (`existing_numbers`/`new_numbers`/`unsure`). Persisted to nullable `onboarding_requests.products` JSONB (migration `36_onboarding_products.sql`) as the validated payload + `form_version: 'products-v1'`. The legacy top-level RCF fields (did_count/porting/current_carrier/forwarding_setup) are now optional on the POST and nullable in the DB; when 'rcf' is selected they are backfilled from `products.rcf` so pre-products admin queries stay meaningful (non-RCF submissions store NULLs). Pre-products rows have `products IS NULL` and remain fully operable through the admin endpoints.
 
 ### Docs (when ENABLE_DOCS=true)
 | Method | Path | Description |
