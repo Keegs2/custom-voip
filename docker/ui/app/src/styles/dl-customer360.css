@@ -1,0 +1,142 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   dl-customer360.css — page-scoped daylight styles for the admin Customer 360
+   (CustomerAccountPage + the per-product sections it composes).
+
+   The `dlx3-` prefix marks these as scoped to the customer-360 page family,
+   NOT part of the shared DAYLIGHT CONSOLE system in index.css and NOT the
+   admin-area `dlx-*` set in dl-admin.css (which this page also imports and
+   reuses — never redefines). Every value references the shared `--rcf-*`
+   custom properties declared on `.dl-scope`. Hand-written @media only
+   (never Tailwind md:* — see the container-build gotcha in CLAUDE.md).
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ─── Trend chart card — tinted box inside the white Usage panel.
+   Mirrors the fresh CallQualityPage chart treatment (ink hairline grid,
+   white-filled dots, low-opacity area gradient — no glow, no dark boxes). ─── */
+.dlx3-chart-box {
+  background: var(--rcf-tint);
+  border: 1px solid var(--rcf-line-soft);
+  border-radius: 10px;
+  padding: 12px 12px 4px;
+  min-width: 0;
+}
+
+.dlx3-chart-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--rcf-ink-soft);
+  margin-bottom: 8px;
+}
+
+/* Series swatch dot in the chart title */
+.dlx3-chart-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* ─── Stat tile row — the 360 overview + usage summary tiles ─── */
+.dlx3-tiles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.dlx3-tiles > .dl-tile {
+  flex: 1 1 150px;
+  min-width: 0;
+}
+
+/* ─── One product entry row (RCF number) — tinted item that hosts the
+   inline editors. Column layout collapses on narrow screens. ─── */
+.dlx3-prodrow {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 700px) {
+  .dlx3-prodrow { gap: 12px; }
+}
+
+/* Hairline vertical divider between the identity block and the editors */
+.dlx3-vdiv {
+  width: 1px;
+  align-self: stretch;
+  background: var(--rcf-line);
+  flex-shrink: 0;
+}
+
+@media (max-width: 700px) {
+  .dlx3-vdiv { display: none; }
+}
+
+/* ─── Click-to-edit value chip — a dl-chip that advertises editability
+   (dashed underline affordance + hover tint, 150ms family). ─── */
+.dlx3-editchip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-family: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--rcf-ink);
+  background: var(--rcf-card);
+  border: 1px solid var(--rcf-line);
+  border-radius: 7px;
+  padding: 5px 11px;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+  transition: border-color var(--rcf-ease), background var(--rcf-ease), color var(--rcf-ease), box-shadow var(--rcf-ease);
+}
+
+.dlx3-editchip:hover {
+  border-color: rgba(47, 125, 246, 0.45);
+  background: var(--rcf-tint-hover);
+}
+
+/* Brief post-save confirmation flash (azure, not a blinking dot) */
+.dlx3-editchip-saved {
+  color: var(--rcf-azure-deep);
+  border-color: rgba(47, 125, 246, 0.55);
+  box-shadow: 0 0 0 3px rgba(47, 125, 246, 0.12);
+}
+
+/* Empty/unset value ("No Limit", "Add label…") */
+.dlx3-editchip-empty {
+  color: var(--rcf-ink-dim);
+  font-style: italic;
+  font-weight: 500;
+}
+
+/* ─── Click-to-edit text label (RCF entry name) — quiet inline text with a
+   dashed underline; sans face because it is a label, not a value. ─── */
+.dlx3-editlabel {
+  display: inline-block;
+  max-width: 100%;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--rcf-ink);
+  letter-spacing: -0.01em;
+  padding: 1px 0 2px;
+  border-bottom: 1px dashed rgba(47, 125, 246, 0.35);
+  cursor: pointer;
+  user-select: none;
+  transition: color var(--rcf-ease), border-color var(--rcf-ease);
+}
+
+.dlx3-editlabel:hover { color: var(--rcf-azure-deep); border-bottom-color: var(--rcf-azure); }
+
+.dlx3-editlabel-empty {
+  color: var(--rcf-ink-dim);
+  font-weight: 500;
+  font-style: italic;
+}

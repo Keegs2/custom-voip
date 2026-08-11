@@ -1,8 +1,18 @@
+/**
+ * CarrierForm — create/edit form for a carrier gateway.
+ *
+ * Styling: the shared DAYLIGHT CONSOLE system (`dl-*` in index.css, the
+ * admin `dlx-*` layer in styles/dl-admin.css, and the platform-scoped
+ * `dlx2-*` layer in styles/dl-platform.css). Renders inside a dl-panel
+ * body (the add-carrier panel on CarriersTab, or a CarrierCard in edit
+ * mode) — it contributes fields and its own footer actions only.
+ *
+ * React #310: every hook is called unconditionally at the top.
+ */
 import { useState, useCallback } from 'react';
-import { FormField } from '../../components/ui/FormField';
-import { Button } from '../../components/ui/Button';
-import { cn } from '../../utils/cn';
 import type { Carrier, CarrierCreate, CarrierTransport, CarrierAuthType } from '../../types/carrier';
+import '../../styles/dl-admin.css';
+import '../../styles/dl-platform.css';
 
 type CarrierFormValues = CarrierCreate;
 
@@ -129,190 +139,243 @@ export function CarrierForm({ carrier, onSubmit, onCancel, submitLabel = 'Save' 
   ]);
 
   return (
-    <div className="-m-5 flex flex-col">
-      {/* Intro / subtitle — clarifies purpose beneath the modal title, with a divider */}
-      <div className="px-6 pt-5 pb-4 border-b border-[#2a2f45]">
-        <p className="text-[0.82rem] leading-relaxed text-[#718096]">
-          {carrier
-            ? 'Update the SIP trunk connection and routing options for this carrier.'
-            : 'Configure a SIP trunk connection to an upstream carrier. Fields marked with an asterisk are required.'}
-        </p>
-      </div>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+      {/* Intro — clarifies purpose beneath the panel title */}
+      <p style={{ fontSize: '0.8rem', lineHeight: 1.55, color: 'var(--rcf-ink-dim)', margin: 0 }}>
+        {carrier
+          ? 'Update the SIP trunk connection and routing options for this carrier.'
+          : 'Configure a SIP trunk connection to an upstream carrier. Fields marked with an asterisk are required.'}
+      </p>
 
-      {/* Scrollable body — generous padding and consistent vertical rhythm between sections */}
-      <div className="px-6 py-6 space-y-8">
-        {error && (
-          <p className="text-red-400 text-[0.82rem] bg-red-500/[0.08] border border-red-500/25 rounded-lg px-4 py-3">
-            {error}
-          </p>
-        )}
+      {error && <div className="dl-banner dl-banner-err">{error}</div>}
 
-        {/* Identity */}
-        <FormSection
-          title="Identity"
-          description="How this carrier is labelled across the platform."
-        >
-          <FormField
-            label="Display Name"
-            required
+      {/* Identity */}
+      <FormSection
+        title="Identity"
+        description="How this carrier is labelled across the platform."
+      >
+        <Field label="Display Name" required>
+          <input
+            className="dl-input"
             value={displayName}
             onChange={(e) => setDisplayName(e.target.value)}
             placeholder="Acme Carrier"
           />
-          <FormField
-            label="Description"
+        </Field>
+        <Field label="Description">
+          <input
+            className="dl-input"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             placeholder="Optional"
           />
-        </FormSection>
+        </Field>
+      </FormSection>
 
-        {/* Connection */}
-        <FormSection
-          title="Connection"
-          description="Where SIP signaling is sent and how it is transported."
-        >
-          <FormField
-            fullWidth
-            label="SIP Proxy Hostname / IP"
-            required
+      {/* Connection */}
+      <FormSection
+        title="Connection"
+        description="Where SIP signaling is sent and how it is transported."
+      >
+        <Field label="SIP Proxy Hostname / IP" required fullWidth>
+          <input
+            className="dl-input dl-input-mono"
             value={sipProxy}
             onChange={(e) => setSipProxy(e.target.value)}
             placeholder="sip.carrier.com"
           />
-          <FormField
-            label="Port"
+        </Field>
+        <Field label="Port">
+          <input
+            className="dl-input dl-input-mono"
             type="number"
             min="1"
             max="65535"
             value={port}
             onChange={(e) => setPort(e.target.value)}
           />
-          <FormField
-            as="select"
-            label="Transport"
+        </Field>
+        <Field label="Transport">
+          <select
+            className="dl-input"
             value={transport}
             onChange={(e) => setTransport(e.target.value as CarrierTransport)}
           >
             {TRANSPORTS.map((t) => (
               <option key={t} value={t}>{t}</option>
             ))}
-          </FormField>
-        </FormSection>
+          </select>
+        </Field>
+      </FormSection>
 
-        {/* Authentication */}
-        <FormSection
-          title="Authentication"
-          description="How the carrier authenticates this trunk."
-        >
-          <FormField
-            as="select"
-            label="Auth Type"
+      {/* Authentication */}
+      <FormSection
+        title="Authentication"
+        description="How the carrier authenticates this trunk."
+      >
+        <Field label="Auth Type">
+          <select
+            className="dl-input"
             value={authType}
             onChange={(e) => setAuthType(e.target.value as CarrierAuthType)}
           >
             {AUTH_TYPES.map((a) => (
               <option key={a.value} value={a.value}>{a.label}</option>
             ))}
-          </FormField>
+          </select>
+        </Field>
 
-          {showCredentials && (
-            <>
-              <FormField
-                label="Username"
+        {showCredentials && (
+          <>
+            <Field label="Username">
+              <input
+                className="dl-input"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 placeholder="sip-user"
               />
-              <FormField
-                label="Password"
+            </Field>
+            <Field label="Password">
+              <input
+                className="dl-input"
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder={carrier ? 'leave blank to keep unchanged' : ''}
               />
-            </>
-          )}
-        </FormSection>
+            </Field>
+          </>
+        )}
+      </FormSection>
 
-        {/* Capacity & Media */}
-        <FormSection
-          title="Capacity & Media"
-          description="Optional limits and negotiated codecs. Leave blank for unlimited."
-        >
-          <FormField
-            fullWidth
-            label="Codec Preferences"
+      {/* Capacity & Media */}
+      <FormSection
+        title="Capacity & Media"
+        description="Optional limits and negotiated codecs. Leave blank for unlimited."
+      >
+        <Field label="Codec Preferences" hint="Comma-separated codec list" fullWidth>
+          <input
+            className="dl-input dl-input-mono"
             value={codecPrefs}
             onChange={(e) => setCodecPrefs(e.target.value)}
             placeholder="PCMU,PCMA"
-            hint="Comma-separated codec list"
           />
-          <FormField
-            label="Max Channels"
+        </Field>
+        <Field label="Max Channels">
+          <input
+            className="dl-input"
             type="number"
             min="1"
             value={maxChannels}
             onChange={(e) => setMaxChannels(e.target.value)}
             placeholder="unlimited"
           />
-          <FormField
-            label="CPS Limit"
+        </Field>
+        <Field label="CPS Limit">
+          <input
+            className="dl-input"
             type="number"
             min="1"
             value={cpsLimit}
             onChange={(e) => setCpsLimit(e.target.value)}
             placeholder="unlimited"
           />
-        </FormSection>
+        </Field>
+      </FormSection>
 
-        {/* Routing & Roles */}
-        <FormSection
-          title="Routing & Roles"
-          description="Which products use this carrier and how it behaves in the route plan."
-        >
-          <div className="col-span-2 space-y-4">
-            <div>
-              <p className="text-[0.68rem] font-semibold text-[#4a5568] uppercase tracking-[0.04em] mb-2.5">
-                Product Types
-              </p>
-              <div className="flex flex-wrap gap-2.5">
-                {PRODUCT_TYPE_OPTIONS.map((pt) => (
-                  <CheckboxPill
-                    key={pt}
-                    label={pt.toUpperCase()}
-                    checked={productTypes.has(pt)}
-                    onChange={() => toggleProductType(pt)}
-                  />
-                ))}
-              </div>
-            </div>
-
-            <div>
-              <p className="text-[0.68rem] font-semibold text-[#4a5568] uppercase tracking-[0.04em] mb-2.5">
-                Role &amp; Options
-              </p>
-              <div className="flex flex-wrap gap-2.5">
-                <CheckboxPill label="Primary" checked={isPrimary} onChange={() => setIsPrimary((p) => !p)} />
-                <CheckboxPill label="Failover" checked={isFailover} onChange={() => setIsFailover((p) => !p)} />
-                <CheckboxPill label="Register" checked={register} onChange={() => setRegister((p) => !p)} />
-                <CheckboxPill label="Caller ID in From" checked={callerIdInFrom} onChange={() => setCallerIdInFrom((p) => !p)} />
-                <CheckboxPill label="Enabled" checked={enabled} onChange={() => setEnabled((p) => !p)} />
-              </div>
+      {/* Routing & Roles */}
+      <FormSection
+        title="Routing & Roles"
+        description="Which products use this carrier and how it behaves in the route plan."
+        grid={false}
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div>
+            <span className="dl-flabel">Product Types</span>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+              {PRODUCT_TYPE_OPTIONS.map((pt) => (
+                <CheckboxPill
+                  key={pt}
+                  label={pt.toUpperCase()}
+                  checked={productTypes.has(pt)}
+                  onChange={() => toggleProductType(pt)}
+                />
+              ))}
             </div>
           </div>
-        </FormSection>
-      </div>
 
-      {/* Footer actions — separated by a top divider, right-aligned, primary uses blue brand */}
-      <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-[#2a2f45] bg-[#161925]/60 rounded-b-xl">
-        <Button variant="ghost" onClick={onCancel} disabled={submitting}>
+          <div>
+            <span className="dl-flabel">Role &amp; Options</span>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+              <CheckboxPill label="Primary" checked={isPrimary} onChange={() => setIsPrimary((p) => !p)} />
+              <CheckboxPill label="Failover" checked={isFailover} onChange={() => setIsFailover((p) => !p)} />
+              <CheckboxPill label="Register" checked={register} onChange={() => setRegister((p) => !p)} />
+              <CheckboxPill label="Caller ID in From" checked={callerIdInFrom} onChange={() => setCallerIdInFrom((p) => !p)} />
+              <CheckboxPill label="Enabled" checked={enabled} onChange={() => setEnabled((p) => !p)} />
+            </div>
+          </div>
+        </div>
+      </FormSection>
+
+      {/* Footer actions */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          paddingTop: 18,
+          borderTop: '1px solid var(--rcf-line)',
+        }}
+      >
+        <button
+          type="button"
+          className="dl-btn dl-btn-primary"
+          onClick={() => void handleSubmit()}
+          disabled={submitting}
+        >
+          {submitting ? 'Saving…' : submitLabel}
+        </button>
+        <button
+          type="button"
+          className="dl-btn dl-btn-ghost"
+          onClick={onCancel}
+          disabled={submitting}
+        >
           Cancel
-        </Button>
-        <Button onClick={handleSubmit} loading={submitting}>
-          {submitLabel}
-        </Button>
+        </button>
       </div>
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+ * Local presentation helpers
+ * ──────────────────────────────────────────────────────────────────────── */
+
+interface FieldProps {
+  label: string;
+  required?: boolean;
+  hint?: string;
+  fullWidth?: boolean;
+  children: React.ReactNode;
+}
+
+/** Vertical dl-flabel + field group. `fullWidth` spans the whole form grid. */
+function Field({ label, required, hint, fullWidth, children }: FieldProps) {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        ...(fullWidth ? { gridColumn: '1 / -1' } : {}),
+      }}
+    >
+      <span className="dl-flabel">
+        {label}
+        {required && <span style={{ color: 'var(--rcf-red)', marginLeft: 3 }}>*</span>}
+      </span>
+      {children}
+      {hint && <span className="dl-help">{hint}</span>}
     </div>
   );
 }
@@ -320,31 +383,29 @@ export function CarrierForm({ carrier, onSubmit, onCancel, submitLabel = 'Save' 
 interface FormSectionProps {
   title: string;
   description?: string;
+  /** When false, children render in a plain column instead of the field grid. */
+  grid?: boolean;
   children: React.ReactNode;
 }
 
 /**
- * A labelled group of form fields. Renders a section heading + optional
- * description, then a responsive grid (single column on narrow widths,
- * two columns from `sm` up). Use `fullWidth` on a FormField to make it
- * span both columns.
+ * A labelled group of form fields — daylight section title + optional dim
+ * description, then a responsive auto-fill field grid (`dlx-form-grid`).
  */
-function FormSection({ title, description, children }: FormSectionProps) {
+function FormSection({ title, description, grid = true, children }: FormSectionProps) {
   return (
     <section>
-      <div className="mb-4">
-        <h3 className="text-[0.82rem] font-bold text-[#e2e8f0] tracking-[-0.01em]">
+      <div style={{ marginBottom: 12 }}>
+        <h3 className="dl-section-title" style={{ marginBottom: description ? 4 : 0 }}>
           {title}
         </h3>
         {description && (
-          <p className="text-[0.75rem] text-[#718096] mt-1 leading-relaxed">
+          <p style={{ fontSize: '0.74rem', lineHeight: 1.5, color: 'var(--rcf-ink-dim)', margin: 0 }}>
             {description}
           </p>
         )}
       </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-5 gap-y-4">
-        {children}
-      </div>
+      {grid ? <div className="dlx-form-grid">{children}</div> : children}
     </section>
   );
 }
@@ -357,29 +418,24 @@ interface CheckboxPillProps {
 
 function CheckboxPill({ label, checked, onChange }: CheckboxPillProps) {
   return (
-    <label
-      className={cn(
-        'flex items-center gap-2 px-3 py-1.5 rounded-lg cursor-pointer',
-        'border text-[0.8rem] font-medium transition-[background,border-color] duration-150 select-none',
-        checked
-          ? 'bg-blue-500/[0.12] border-blue-500/30 text-blue-300'
-          : 'bg-transparent border-[#2a2f45] text-[#718096] hover:border-[#363c57] hover:text-[#e2e8f0]',
-      )}
-    >
+    <label className={checked ? 'dlx2-checkpill dlx2-checkpill-on' : 'dlx2-checkpill'}>
       <input
         type="checkbox"
         checked={checked}
         onChange={onChange}
-        className="sr-only"
+        style={{
+          position: 'absolute',
+          width: 1,
+          height: 1,
+          padding: 0,
+          margin: -1,
+          overflow: 'hidden',
+          clip: 'rect(0 0 0 0)',
+          whiteSpace: 'nowrap',
+          border: 0,
+        }}
       />
-      <span
-        className={cn(
-          'w-3.5 h-3.5 rounded border flex items-center justify-center flex-shrink-0',
-          checked
-            ? 'bg-blue-500 border-blue-500 text-white'
-            : 'border-[#2a2f45]',
-        )}
-      >
+      <span className="dlx2-checkpill-box" aria-hidden="true">
         {checked && (
           <svg width="9" height="7" viewBox="0 0 9 7" fill="none">
             <path d="M1 3.5L3.5 6L8 1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />

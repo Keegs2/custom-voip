@@ -1,5 +1,13 @@
+/**
+ * CdrFilterBar — the CDR search filter slab (/admin/platform/cdrs).
+ *
+ * Styling: the shared DAYLIGHT CONSOLE system (`dl-*` in index.css plus the
+ * page-scoped `dlx4-*` layer in styles/dl-platform-b.css). Renders INSIDE the
+ * PlatformManagementPage shell — one white `dl-panel` holding the labelled
+ * filter fields and the Search / Export CSV actions. Filter state, defaults,
+ * and the filters→params mapping are unchanged.
+ */
 import { useQuery } from '@tanstack/react-query';
-import { Button } from '../../components/ui/Button';
 import { listCustomers } from '../../api/customers';
 import type { CdrSearchParams } from '../../types/cdr';
 import type { ProductType, CallDirection } from '../../types/cdr';
@@ -56,13 +64,6 @@ export function filtersToParams(filters: CdrFilters, limit: number, offset: numb
   return params;
 }
 
-const controlStyle: React.CSSProperties = {
-  fontSize: '0.875rem',
-  padding: '8px 12px',
-  height: 36,
-  borderRadius: 8,
-};
-
 interface CdrFilterBarProps {
   filters: CdrFilters;
   onChange: (filters: CdrFilters) => void;
@@ -87,168 +88,138 @@ export function CdrFilterBar({ filters, onChange, onSearch, onExport, searching 
     onSearch();
   }
 
-  const labelStyle: React.CSSProperties = {
-    fontSize: '0.65rem',
-    fontWeight: 700,
-    color: '#4a5568',
-    textTransform: 'uppercase',
-    letterSpacing: '0.05em',
-    marginBottom: 8,
-    display: 'block',
-  };
-
   return (
-    <form
-      onSubmit={handleSubmit}
-      className="glass-surface"
-      style={{
-        borderRadius: 16,
-        padding: '24px 28px',
-        marginBottom: 20,
-      }}
-    >
-      <div
-        style={{
-          display: 'flex',
-          flexWrap: 'wrap',
-          gap: 16,
-          alignItems: 'flex-end',
-        }}
-      >
-        {/* Customer */}
-        <div style={{ display: 'flex', flexDirection: 'column', minWidth: 180 }}>
-          <label style={labelStyle}>Customer</label>
-          <select
-            className="form-control"
-            style={{ ...controlStyle, cursor: 'pointer' }}
-            value={filters.customer_id}
-            onChange={(e) => set('customer_id', e.target.value)}
-          >
-            <option value="">All Customers</option>
-            {(customersData?.items ?? []).map((c) => (
-              <option key={c.id} value={String(c.id)}>{c.name}</option>
-            ))}
-          </select>
-        </div>
+    <section className="dl-panel">
+      <form onSubmit={handleSubmit} className="dl-panel-body">
+        <div className="dlx4-filterbar">
+          {/* Customer */}
+          <div style={{ display: 'flex', flexDirection: 'column', minWidth: 180 }}>
+            <label className="dl-flabel">Customer</label>
+            <select
+              className="dl-input"
+              value={filters.customer_id}
+              onChange={(e) => set('customer_id', e.target.value)}
+            >
+              <option value="">All Customers</option>
+              {(customersData?.items ?? []).map((c) => (
+                <option key={c.id} value={String(c.id)}>{c.name}</option>
+              ))}
+            </select>
+          </div>
 
-        {/* Product type */}
-        <div style={{ display: 'flex', flexDirection: 'column', minWidth: 110 }}>
-          <label style={labelStyle}>Product</label>
-          <select
-            className="form-control"
-            style={{ ...controlStyle, cursor: 'pointer' }}
-            value={filters.product_type}
-            onChange={(e) => set('product_type', e.target.value)}
-          >
-            <option value="">All</option>
-            <option value="rcf">RCF</option>
-            <option value="api">API</option>
-            <option value="trunk">Trunk</option>
-          </select>
-        </div>
+          {/* Product type */}
+          <div style={{ display: 'flex', flexDirection: 'column', minWidth: 110 }}>
+            <label className="dl-flabel">Product</label>
+            <select
+              className="dl-input"
+              value={filters.product_type}
+              onChange={(e) => set('product_type', e.target.value)}
+            >
+              <option value="">All</option>
+              <option value="rcf">RCF</option>
+              <option value="api">API</option>
+              <option value="trunk">Trunk</option>
+            </select>
+          </div>
 
-        {/* Direction */}
-        <div style={{ display: 'flex', flexDirection: 'column', minWidth: 110 }}>
-          <label style={labelStyle}>Direction</label>
-          <select
-            className="form-control"
-            style={{ ...controlStyle, cursor: 'pointer' }}
-            value={filters.direction}
-            onChange={(e) => set('direction', e.target.value)}
-          >
-            <option value="">All</option>
-            <option value="inbound">Inbound</option>
-            <option value="outbound">Outbound</option>
-          </select>
-        </div>
+          {/* Direction */}
+          <div style={{ display: 'flex', flexDirection: 'column', minWidth: 110 }}>
+            <label className="dl-flabel">Direction</label>
+            <select
+              className="dl-input"
+              value={filters.direction}
+              onChange={(e) => set('direction', e.target.value)}
+            >
+              <option value="">All</option>
+              <option value="inbound">Inbound</option>
+              <option value="outbound">Outbound</option>
+            </select>
+          </div>
 
-        {/* SBC */}
-        <div style={{ display: 'flex', flexDirection: 'column', minWidth: 130 }}>
-          <label style={labelStyle}>SBC</label>
-          <select
-            className="form-control"
-            style={{ ...controlStyle, cursor: 'pointer' }}
-            value={filters.sbc_id}
-            onChange={(e) => set('sbc_id', e.target.value)}
-          >
-            <option value="">All SBCs</option>
-            <option value="east-sbc-1">east-sbc-1</option>
-            <option value="east-sbc-2">east-sbc-2</option>
-          </select>
-        </div>
+          {/* SBC */}
+          <div style={{ display: 'flex', flexDirection: 'column', minWidth: 130 }}>
+            <label className="dl-flabel">SBC</label>
+            <select
+              className="dl-input"
+              value={filters.sbc_id}
+              onChange={(e) => set('sbc_id', e.target.value)}
+            >
+              <option value="">All SBCs</option>
+              <option value="east-sbc-1">east-sbc-1</option>
+              <option value="east-sbc-2">east-sbc-2</option>
+            </select>
+          </div>
 
-        {/* Start date */}
-        <div style={{ display: 'flex', flexDirection: 'column' }}>
-          <label style={labelStyle}>Start</label>
-          <input
-            type="datetime-local"
-            className="form-control"
-            style={controlStyle}
-            value={filters.start_from}
-            onChange={(e) => set('start_from', e.target.value)}
-          />
-        </div>
-
-        {/* End date */}
-        <div style={{ display: 'flex', flexDirection: 'column' }}>
-          <label style={labelStyle}>End</label>
-          <input
-            type="datetime-local"
-            className="form-control"
-            style={controlStyle}
-            value={filters.start_to}
-            onChange={(e) => set('start_to', e.target.value)}
-          />
-        </div>
-
-        {/* Destination prefix */}
-        <div style={{ display: 'flex', flexDirection: 'column', minWidth: 150 }}>
-          <label style={labelStyle}>Destination Prefix</label>
-          <input
-            type="text"
-            className="form-control"
-            style={controlStyle}
-            placeholder="e.g. 1800"
-            value={filters.destination}
-            onChange={(e) => set('destination', e.target.value)}
-          />
-        </div>
-
-        {/* Rated only */}
-        <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
-          <label
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              cursor: 'pointer',
-              fontSize: '0.875rem',
-              color: '#718096',
-              whiteSpace: 'nowrap',
-              userSelect: 'none',
-              height: 36,
-            }}
-          >
+          {/* Start date */}
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+            <label className="dl-flabel">Start</label>
             <input
-              type="checkbox"
-              style={{ width: 16, height: 16, borderRadius: 4, accentColor: '#3b82f6', cursor: 'pointer' }}
-              checked={filters.rated_only}
-              onChange={(e) => set('rated_only', e.target.checked)}
+              type="datetime-local"
+              className="dl-input"
+              value={filters.start_from}
+              onChange={(e) => set('start_from', e.target.value)}
             />
-            Rated only
-          </label>
-        </div>
+          </div>
 
-        {/* Actions — pushed to end */}
-        <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', marginLeft: 'auto', paddingLeft: 8 }}>
-          <Button type="submit" variant="primary" size="sm" loading={searching}>
-            Search
-          </Button>
-          <Button type="button" variant="ghost" size="sm" onClick={onExport}>
-            Export CSV
-          </Button>
+          {/* End date */}
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+            <label className="dl-flabel">End</label>
+            <input
+              type="datetime-local"
+              className="dl-input"
+              value={filters.start_to}
+              onChange={(e) => set('start_to', e.target.value)}
+            />
+          </div>
+
+          {/* Destination prefix */}
+          <div style={{ display: 'flex', flexDirection: 'column', minWidth: 150 }}>
+            <label className="dl-flabel">Destination Prefix</label>
+            <input
+              type="text"
+              className="dl-input"
+              placeholder="e.g. 1800"
+              value={filters.destination}
+              onChange={(e) => set('destination', e.target.value)}
+            />
+          </div>
+
+          {/* Rated only */}
+          <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
+            <label
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                cursor: 'pointer',
+                fontSize: '0.8rem',
+                color: 'var(--rcf-ink-soft)',
+                whiteSpace: 'nowrap',
+                userSelect: 'none',
+                height: 36,
+              }}
+            >
+              <input
+                type="checkbox"
+                style={{ width: 15, height: 15, accentColor: 'var(--rcf-azure)', cursor: 'pointer' }}
+                checked={filters.rated_only}
+                onChange={(e) => set('rated_only', e.target.checked)}
+              />
+              Rated only
+            </label>
+          </div>
+
+          {/* Actions — pushed to end */}
+          <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', marginLeft: 'auto', paddingLeft: 8 }}>
+            <button type="submit" className="dl-btn dl-btn-primary" disabled={searching}>
+              {searching ? 'Searching…' : 'Search'}
+            </button>
+            <button type="button" className="dl-btn dl-btn-ghost" onClick={onExport}>
+              Export CSV
+            </button>
+          </div>
         </div>
-      </div>
-    </form>
+      </form>
+    </section>
   );
 }

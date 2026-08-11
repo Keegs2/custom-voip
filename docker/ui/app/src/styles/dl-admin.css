@@ -1,0 +1,385 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   dl-admin.css — page-scoped daylight styles for the Customer Management
+   admin area (AdminPage shell + OnboardingAdminPage, CustomersAdminPage,
+   TrunksAdminPage, UserDetailPage).
+
+   The `dlx-` prefix marks these as page-scoped, NOT part of the shared
+   DAYLIGHT CONSOLE system in index.css. If a page outside the admin area
+   reaches for one of these, promote it into the shared `dl-*` block. Every
+   value references the shared `--rcf-*` custom properties declared on
+   `.dl-scope` — no re-stated magic numbers for color or rhythm.
+   Hand-written @media only (never Tailwind md:* — see CLAUDE.md).
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ─── Composed toolbar row — search form + count + primary action ─── */
+.dlx-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: var(--rcf-zone);
+}
+
+.dlx-toolbar-form {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1 1 320px;
+  min-width: 240px;
+}
+
+/* ─── Standard daylight table cell ─── */
+.dlx-td {
+  padding: 12px 16px;
+  font-size: 0.82rem;
+  color: var(--rcf-ink-soft);
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+/* ─── Compact button modifier (row-level actions) ─── */
+.dlx-btn-sm {
+  padding: 5px 11px;
+  font-size: 0.7rem;
+  border-radius: 6px;
+}
+
+/* ─── Tinted success button — mirrors .dl-btn-danger's tinted idiom ─── */
+.dlx-btn-ok {
+  background: rgba(22, 163, 74, 0.07);
+  border: 1px solid rgba(22, 163, 74, 0.3);
+  color: var(--rcf-green);
+}
+
+.dlx-btn-ok:hover:not(:disabled) {
+  background: rgba(22, 163, 74, 0.13);
+  border-color: rgba(22, 163, 74, 0.45);
+}
+
+.dlx-btn-ok:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* ─── Quiet azure text button (back links, inline nav) ─── */
+.dlx-linkbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  appearance: none;
+  background: none;
+  border: none;
+  padding: 4px 0;
+  font-family: inherit;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--rcf-azure-deep);
+  cursor: pointer;
+  text-decoration: none;
+  transition: color var(--rcf-ease);
+}
+
+.dlx-linkbtn:hover { color: var(--rcf-azure); }
+
+/* ─── Daylight segmented control (status filter, capacity mode) ─── */
+.dlx-seg {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 10px;
+  background: var(--rcf-tint);
+  border: 1px solid var(--rcf-line);
+}
+
+.dlx-seg-btn {
+  appearance: none;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  padding: 6px 14px;
+  font-family: inherit;
+  font-size: 0.76rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--rcf-ink-dim);
+  background: transparent;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color var(--rcf-ease), background var(--rcf-ease), border-color var(--rcf-ease), box-shadow var(--rcf-ease);
+}
+
+.dlx-seg-btn:hover:not(.dlx-seg-btn-active) {
+  color: var(--rcf-azure-deep);
+  background: rgba(47, 125, 246, 0.06);
+}
+
+.dlx-seg-btn-active {
+  color: var(--rcf-azure-deep);
+  background: var(--rcf-card);
+  border-color: rgba(47, 125, 246, 0.35);
+  box-shadow: 0 1px 3px rgba(14, 23, 38, 0.08);
+  font-weight: 700;
+}
+
+.dlx-seg-btn:focus-visible {
+  outline: 2px solid var(--rcf-azure);
+  outline-offset: -2px;
+}
+
+/* ─── Expandable-row detail panel (trunks table, onboarding queue) ───
+   One-shot 0fr → 1fr expand + fade, reduced-motion safe (mirrors the RCF
+   console's expand idiom without reusing the rcf-* shipped API). */
+.dlx-xwrap {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  animation: dlx-x-open 0.34s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.dlx-xwrap > div {
+  overflow: hidden;
+  min-height: 0;
+}
+
+@keyframes dlx-x-open {
+  from { grid-template-rows: 0fr; opacity: 0; }
+  to   { grid-template-rows: 1fr; opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dlx-xwrap { animation: none; grid-template-rows: 1fr; opacity: 1; }
+}
+
+.dlx-xpanel {
+  background: #f7fafd;
+  border-top: 1px solid var(--rcf-line);
+  border-bottom: 1px solid var(--rcf-line);
+  padding: 22px 26px 20px;
+  box-shadow: inset 2px 0 0 0 var(--rcf-azure);
+}
+
+/* ─── Bordered tinted wells (product blocks, outcome details) ─── */
+.dlx-well {
+  padding: 14px 16px;
+  border-radius: 10px;
+  background: rgba(47, 125, 246, 0.04);
+  border: 1px solid rgba(47, 125, 246, 0.18);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.dlx-well-ok {
+  background: rgba(22, 163, 74, 0.05);
+  border-color: rgba(22, 163, 74, 0.22);
+}
+
+.dlx-well-err {
+  background: rgba(220, 38, 38, 0.04);
+  border-color: rgba(220, 38, 38, 0.2);
+}
+
+/* ─── Info pair grid + label/value (read-only detail fields) ─── */
+.dlx-info-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 12px 24px;
+}
+
+.dlx-ilabel {
+  display: block;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--rcf-ink-dim);
+  margin-bottom: 4px;
+}
+
+.dlx-ivalue {
+  font-size: 0.84rem;
+  color: var(--rcf-ink);
+  line-height: 1.5;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* ─── Amber warning chip — genuine warnings ONLY (KYC red flags) ─── */
+.dlx-warnchip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.64rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #92400e;
+  background: rgba(180, 83, 9, 0.08);
+  border: 1px solid rgba(180, 83, 9, 0.28);
+  border-radius: 6px;
+  padding: 4px 10px;
+  white-space: nowrap;
+}
+
+/* ─── Searchable-dropdown card (available-TN picker) ─── */
+.dlx-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 50;
+  background: var(--rcf-card);
+  border: 1px solid var(--rcf-line);
+  border-radius: 9px;
+  box-shadow:
+    0 1px 2px rgba(14, 23, 38, 0.06),
+    0 16px 36px -14px rgba(14, 23, 38, 0.3);
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.dlx-dropdown-opt {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--rcf-line-soft);
+  transition: background var(--rcf-ease);
+}
+
+.dlx-dropdown-opt:last-child { border-bottom: none; }
+
+.dlx-dropdown-opt:hover { background: var(--rcf-tint-hover); }
+
+.dlx-dropdown-opt-hi { background: rgba(47, 125, 246, 0.1); }
+
+/* ─── Small round remove (✕) button — destructive, stays red ─── */
+.dlx-xbtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1px solid rgba(220, 38, 38, 0.24);
+  background: rgba(220, 38, 38, 0.06);
+  color: var(--rcf-red);
+  font-size: 0.68rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: background var(--rcf-ease), border-color var(--rcf-ease);
+}
+
+.dlx-xbtn:hover:not(:disabled) {
+  background: rgba(220, 38, 38, 0.13);
+  border-color: rgba(220, 38, 38, 0.45);
+}
+
+.dlx-xbtn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ─── Form grid — responsive field columns inside panels ─── */
+.dlx-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 16px 20px;
+}
+
+/* ─── Clickable toggle row (UCaaS add-on, enabled switch rows) ─── */
+.dlx-checkrow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  border-radius: 10px;
+  background: var(--rcf-tint);
+  border: 1px solid var(--rcf-line-soft);
+  cursor: pointer;
+  user-select: none;
+  transition: background var(--rcf-ease), border-color var(--rcf-ease);
+}
+
+.dlx-checkrow:hover { background: var(--rcf-tint-hover); }
+
+.dlx-checkrow-on {
+  background: rgba(47, 125, 246, 0.06);
+  border-color: rgba(47, 125, 246, 0.28);
+}
+
+/* ─── Daylight toggle switch (enabled/disabled in edit forms) ─── */
+.dlx-switch {
+  position: relative;
+  width: 38px;
+  height: 22px;
+  border-radius: 11px;
+  border: 1px solid #c3cfe2;
+  background: #dde5f0;
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease, opacity 0.2s ease;
+  padding: 0;
+  flex-shrink: 0;
+  outline: none;
+}
+
+.dlx-switch::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 1px 3px rgba(14, 23, 38, 0.35);
+  transition: left 0.2s ease;
+}
+
+.dlx-switch-on {
+  background: linear-gradient(135deg, var(--rcf-azure) 0%, var(--rcf-azure-deep) 100%);
+  border-color: var(--rcf-azure-deep);
+}
+
+.dlx-switch-on::after { left: 18px; }
+
+.dlx-switch:disabled { cursor: not-allowed; opacity: 0.55; }
+
+.dlx-switch:focus-visible {
+  outline: 2px solid var(--rcf-azure);
+  outline-offset: 2px;
+}
+
+/* ─── Search input with a leading icon (user filter) ─── */
+.dlx-searchwrap {
+  position: relative;
+  flex: 1 1 240px;
+  min-width: 200px;
+}
+
+.dlx-searchwrap > svg {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--rcf-ink-dim);
+  pointer-events: none;
+}
+
+.dlx-search-clear {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--rcf-ink-dim);
+  cursor: pointer;
+  transition: color var(--rcf-ease);
+}
+
+.dlx-search-clear:hover { color: var(--rcf-ink-soft); }

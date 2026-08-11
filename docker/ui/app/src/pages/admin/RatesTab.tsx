@@ -1,6 +1,14 @@
-import { TableWrap, Table, Thead, Th, Td } from '../../components/ui/Table';
-import { Badge } from '../../components/ui/Badge';
-import { cn } from '../../utils/cn';
+/**
+ * RatesTab — rate decks + least-cost-routing comparison (/admin/platform/rates).
+ *
+ * Styling: the shared DAYLIGHT CONSOLE system (`dl-*` in index.css, plus the
+ * admin `dlx-*` layer in styles/dl-admin.css and the platform-scoped `dlx2-*`
+ * layer in styles/dl-platform.css). Renders INSIDE the PlatformManagementPage
+ * shell, which owns the paper canvas (`dl-scope`) — this page contributes
+ * only the intro, the example-data note, and the rate-deck table panels.
+ */
+import '../../styles/dl-admin.css';
+import '../../styles/dl-platform.css';
 
 /* ════════════════════════════════════════════════════════════════════════
  *  EXAMPLE / PLACEHOLDER RATING DATA
@@ -177,6 +185,8 @@ function fmtRate4(val: number | null | undefined): string {
   return `$${val.toFixed(4)}`;
 }
 
+const MONO_FONT = '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace';
+
 /* ════════════════════════════════════════════════════════════════════════
  *  Reusable LCR rate table
  * ════════════════════════════════════════════════════════════════════════ */
@@ -190,71 +200,80 @@ interface LcrRateTableProps {
 
 /**
  * Renders a rate matrix as destination rows × carrier columns. The cheapest
- * carrier per row is highlighted with the blue brand accent and an "LCR" badge,
+ * carrier per row is highlighted with the azure accent and an "LCR" tag,
  * making the least-cost route scannable at a glance.
  */
 function LcrRateTable({ carriers, rows, destinationLabel }: LcrRateTableProps) {
   return (
-    <TableWrap>
-      <Table>
-        <Thead>
-          <tr>
-            <Th>{destinationLabel}</Th>
-            <Th>Prefix</Th>
-            {carriers.map((carrier) => (
-              <Th key={carrier.id} className="!text-right">
-                {carrier.name}
-              </Th>
-            ))}
-          </tr>
-        </Thead>
-        <tbody>
-          {rows.map((row) => {
-            const winnerId = cheapestCarrierId(row, carriers);
-            return (
-              <tr key={`${row.destination}::${row.prefix}`} className="glass-row-hover">
-                <Td>
-                  <span className="font-medium text-[#e2e8f0]">{row.destination}</span>
-                </Td>
-                <Td>
-                  <span className="font-mono tabular-nums text-[0.8rem] text-[#94a3b8]">
+    <section className="dl-panel">
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 640 }}>
+          <thead>
+            <tr>
+              <th className="dl-th">{destinationLabel}</th>
+              <th className="dl-th">Prefix</th>
+              {carriers.map((carrier) => (
+                <th key={carrier.id} className="dl-th" style={{ textAlign: 'right' }}>
+                  {carrier.name}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => {
+              const winnerId = cheapestCarrierId(row, carriers);
+              return (
+                <tr key={`${row.destination}::${row.prefix}`} className="dl-row">
+                  <td className="dlx-td" style={{ color: 'var(--rcf-ink)', fontWeight: 600 }}>
+                    {row.destination}
+                  </td>
+                  <td
+                    className="dlx-td"
+                    style={{
+                      fontFamily: MONO_FONT,
+                      fontSize: '0.76rem',
+                      color: 'var(--rcf-ink-dim)',
+                      fontVariantNumeric: 'tabular-nums',
+                    }}
+                  >
                     {row.prefix}
-                  </span>
-                </Td>
-                {carriers.map((carrier) => {
-                  const rate = row.rates[carrier.id];
-                  const isWinner = carrier.id === winnerId && rate != null;
-                  return (
-                    <Td key={carrier.id} className="!text-right">
-                      {rate == null ? (
-                        <span className="text-[#475569] text-[0.82rem]">—</span>
-                      ) : (
-                        <span
-                          className={cn(
-                            'inline-flex items-center justify-end gap-2 font-mono tabular-nums text-[0.82rem] whitespace-nowrap',
-                            isWinner ? 'font-semibold text-blue-300' : 'text-[#cbd5e0]',
-                          )}
-                        >
-                          {isWinner && (
-                            <Badge
-                              variant="rcf"
-                              className="!min-w-0 !px-1.5 !py-0.5 !text-[0.55rem] !tracking-[0.08em]"
-                            >
-                              LCR
-                            </Badge>
-                          )}
-                          {fmtRate4(rate)}
-                        </span>
-                      )}
-                    </Td>
-                  );
-                })}
-              </tr>
-            );
-          })}
-        </tbody>
-      </Table>
-    </TableWrap>
+                  </td>
+                  {carriers.map((carrier) => {
+                    const rate = row.rates[carrier.id];
+                    const isWinner = carrier.id === winnerId && rate != null;
+                    return (
+                      <td key={carrier.id} className="dlx-td" style={{ textAlign: 'right' }}>
+                        {rate == null ? (
+                          <span style={{ color: 'var(--rcf-ink-dim)' }}>—</span>
+                        ) : (
+                          <span
+                            className={isWinner ? 'dlx2-lcr-win' : undefined}
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              justifyContent: 'flex-end',
+                              gap: 8,
+                              fontFamily: MONO_FONT,
+                              fontSize: '0.78rem',
+                              fontVariantNumeric: 'tabular-nums',
+                              whiteSpace: 'nowrap',
+                              ...(isWinner ? {} : { color: 'var(--rcf-ink-soft)' }),
+                            }}
+                          >
+                            {isWinner && <span className="dl-tag">LCR</span>}
+                            {fmtRate4(rate)}
+                          </span>
+                        )}
+                      </td>
+                    );
+                  })}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </section>
   );
 }
 
@@ -270,34 +289,10 @@ interface SectionHeaderProps {
 
 function SectionHeader({ eyebrow, title, description }: SectionHeaderProps) {
   return (
-    <div style={{ marginBottom: 14 }}>
-      <div
-        style={{
-          fontSize: '0.6rem',
-          fontWeight: 700,
-          letterSpacing: '0.06em',
-          textTransform: 'uppercase',
-          color: '#3b82f6',
-          opacity: 0.85,
-          marginBottom: 6,
-        }}
-      >
-        {eyebrow}
-      </div>
-      <h2
-        style={{
-          fontSize: '1.05rem',
-          fontWeight: 700,
-          color: '#e2e8f0',
-          letterSpacing: '-0.015em',
-          margin: '0 0 4px',
-        }}
-      >
-        {title}
-      </h2>
-      <p style={{ fontSize: '0.82rem', color: '#718096', lineHeight: 1.6, margin: 0, maxWidth: 640 }}>
-        {description}
-      </p>
+    <div className="dlx2-secintro">
+      <span className="dl-tag">{eyebrow}</span>
+      <h2 className="dlx2-secintro-title">{title}</h2>
+      <p className="dlx2-secintro-sub">{description}</p>
     </div>
   );
 }
@@ -308,74 +303,44 @@ function SectionHeader({ eyebrow, title, description }: SectionHeaderProps) {
 
 export function RatesTab() {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 32 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
       {/* ── Page intro ── */}
       <div>
-        <h1
+        <h2
           style={{
-            fontSize: '1.35rem',
-            fontWeight: 800,
-            color: '#e2e8f0',
-            letterSpacing: '-0.02em',
-            margin: '0 0 6px',
+            fontFamily: '"Archivo", "IBM Plex Sans", sans-serif',
+            fontSize: '1.1rem',
+            fontWeight: 700,
+            letterSpacing: '-0.018em',
+            color: 'var(--rcf-ink)',
+            margin: '0 0 5px',
           }}
         >
           Rate Decks &amp; Least-Cost Routing
-        </h1>
-        <p style={{ fontSize: '0.88rem', color: '#718096', lineHeight: 1.6, margin: 0, maxWidth: 680 }}>
+        </h2>
+        <p style={{ fontSize: '0.84rem', color: 'var(--rcf-ink-soft)', lineHeight: 1.55, margin: 0, maxWidth: '72ch' }}>
           Side-by-side wholesale termination rates across carriers, with the least-cost route
           highlighted per destination. Toll-free inbound is rated separately below.
         </p>
       </div>
 
-      {/* ── Example-data banner (muted, glass, blue-accented) ── */}
-      <div
-        className="glass-surface"
-        role="note"
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 14,
-          borderRadius: 12,
-          padding: '13px 18px',
-          borderLeft: '3px solid rgba(59,130,246,0.55)',
-        }}
-      >
-        <span
-          aria-hidden
-          style={{
-            flexShrink: 0,
-            width: 22,
-            height: 22,
-            borderRadius: '50%',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            background: 'rgba(59,130,246,0.14)',
-            color: '#93c5fd',
-            fontSize: '0.72rem',
-            fontWeight: 800,
-            fontFamily: 'Georgia, serif',
-            fontStyle: 'italic',
-          }}
-        >
-          i
-        </span>
-        <p style={{ margin: 0, fontSize: '0.82rem', color: '#94a3b8', lineHeight: 1.55 }}>
-          <strong style={{ color: '#cbd5e0', fontWeight: 700 }}>Example data.</strong>{' '}
+      {/* ── Example-data note ── */}
+      <div className="dl-note" role="note">
+        <span>
+          <strong style={{ color: 'var(--rcf-ink)', fontWeight: 700 }}>Example data.</strong>{' '}
           These rates are illustrative placeholders. Live pricing will be sourced from the
           LCR engine — carriers, destinations, and per-minute rates below are representative
           only.
-        </p>
+        </span>
       </div>
 
       {/* ── Interstate / long-distance LCR comparison ── */}
       <section>
         <SectionHeader
           eyebrow="Outbound Termination"
-          title="Interstate &amp; Long-Distance Rates"
+          title="Interstate & Long-Distance Rates"
           description="Per-minute termination cost by destination across wholesale carriers. The cheapest
-            carrier for each destination is the LCR winner, highlighted in blue."
+            carrier for each destination is the LCR winner, highlighted in azure."
         />
         <LcrRateTable
           carriers={EXAMPLE_CARRIERS}

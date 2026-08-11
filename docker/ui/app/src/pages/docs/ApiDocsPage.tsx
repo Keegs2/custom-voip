@@ -2,6 +2,9 @@
  * API Reference — comprehensive developer documentation for the Granite CRAG
  * (Call Routing Application Gateway) REST API. Covers authentication, RCF
  * endpoints, CDR/usage, number inventory, and integration patterns.
+ *
+ * Styling: the shared DAYLIGHT CONSOLE system (`dl-*` in index.css) plus the
+ * docs-only `dlx-*` primitives in src/styles/dl-docs.css.
  */
 
 import {
@@ -12,8 +15,8 @@ import {
   Server,
 } from 'lucide-react';
 
+import { C, MONO } from './tokens';
 import {
-  C,
   P,
   H3,
   IC,
@@ -24,35 +27,19 @@ import {
   Endpoint,
   ParamTable,
   ReqRes,
-  PageHeaderCard,
+  DocsHeader,
 } from './shared';
 
-/* ─── Accent colour for this page ───────────────────────── */
+/* ─── Accent colours for this page (daylight tokens) ────── */
 
-const BLUE = '#3b82f6';
-const AMBER = '#f59e0b';
+const BLUE = '#2f7df6';
+const AMBER = '#b45309';
 
 /* ─── "Coming Soon" badge ────────────────────────────────── */
 
 function ComingSoonBadge() {
   return (
-    <span
-      style={{
-        display: 'inline-block',
-        marginLeft: 10,
-        padding: '2px 8px',
-        borderRadius: 999,
-        fontSize: '0.58rem',
-        fontWeight: 700,
-        letterSpacing: '0.05em',
-        textTransform: 'uppercase',
-        color: AMBER,
-        background: `${AMBER}18`,
-        border: `1px solid ${AMBER}35`,
-        verticalAlign: 'middle',
-        lineHeight: 1.8,
-      }}
-    >
+    <span className="dlx-tag-warn" style={{ marginLeft: 2 }}>
       Coming Soon
     </span>
   );
@@ -64,7 +51,6 @@ function ApiGettingStartedSection() {
   return (
     <AccordionSection
       id="api-getting-started"
-      accent={BLUE}
       icon={<Key size={18} />}
       title="Getting Started"
       subtitle="Authentication, base URL, quick example, rate limits, and error codes."
@@ -120,22 +106,11 @@ function ApiGettingStartedSection() {
       {/* ── Base URL ─────────────────────────────────── */}
       <H3>Base URL</H3>
 
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 12,
-          padding: '14px 18px',
-          borderRadius: 8,
-          background: 'rgba(10,13,22,0.55)',
-          border: '1px solid rgba(59,130,246,0.18)',
-          marginBottom: 20,
-        }}
-      >
+      <div className="dlx-endpoint" style={{ alignItems: 'center', marginBottom: 20 }}>
         <Server size={16} style={{ color: BLUE, flexShrink: 0 }} />
         <div>
-          <div style={{ fontSize: '0.78rem', fontWeight: 700, color: C.textMuted, marginBottom: 3 }}>Base URL</div>
-          <code style={{ color: '#93c5fd', fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', fontSize: '0.82rem' }}>
+          <div style={{ fontSize: '0.72rem', fontWeight: 700, color: C.textFaint, marginBottom: 3 }}>Base URL</div>
+          <code style={{ color: C.text, fontFamily: MONO, fontSize: '0.82rem', fontWeight: 600 }}>
             https://{'<'}your-portal-url{'>'}/api
           </code>
         </div>
@@ -168,33 +143,12 @@ curl "https://your-portal-url/api/v1/rcf" \
       {/* ── Error codes ──────────────────────────────── */}
       <H3>HTTP status codes</H3>
 
-      <div
-        style={{
-          borderRadius: 8,
-          overflow: 'hidden',
-          border: '1px solid rgba(59,130,246,0.18)',
-          marginBottom: 20,
-        }}
-      >
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' }}>
+      <div className="dlx-table-wrap">
+        <table className="dlx-table">
           <thead>
-            <tr style={{ background: 'rgba(10,13,22,0.7)' }}>
+            <tr>
               {['Status', 'Meaning'].map(h => (
-                <th
-                  key={h}
-                  style={{
-                    padding: '9px 14px',
-                    textAlign: 'left',
-                    color: '#475569',
-                    fontWeight: 700,
-                    letterSpacing: '0.06em',
-                    fontSize: '0.67rem',
-                    textTransform: 'uppercase',
-                    borderBottom: '1px solid rgba(59,130,246,0.15)',
-                  }}
-                >
-                  {h}
-                </th>
+                <th key={h} className="dl-th">{h}</th>
               ))}
             </tr>
           </thead>
@@ -210,16 +164,12 @@ curl "https://your-portal-url/api/v1/rcf" \
               { status: '409 Conflict',       meaning: 'DID already exists. Use PUT to update an existing entry.' },
               { status: '422 Unprocessable',  meaning: 'Validation error — request body was parseable but failed field-level validation.' },
               { status: '500 Server Error',   meaning: 'Unexpected server-side error. Contact Granite support if this persists.' },
-            ].map((row, i) => (
-              <tr key={row.status} style={{ background: i % 2 === 0 ? 'transparent' : 'rgba(10,13,22,0.28)' }}>
-                <td style={{ padding: '9px 14px', borderBottom: '1px solid rgba(42,47,69,0.3)', whiteSpace: 'nowrap' }}>
-                  <code style={{ color: '#60a5fa', fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', fontSize: '0.8rem', fontWeight: 700 }}>
-                    {row.status}
-                  </code>
+            ].map(row => (
+              <tr key={row.status}>
+                <td>
+                  <code className="dlx-td-code">{row.status}</code>
                 </td>
-                <td style={{ padding: '9px 14px', borderBottom: '1px solid rgba(42,47,69,0.3)', color: C.textMuted, lineHeight: 1.55 }}>
-                  {row.meaning}
-                </td>
+                <td>{row.meaning}</td>
               </tr>
             ))}
           </tbody>
@@ -254,7 +204,6 @@ function ApiRcfSection() {
   return (
     <AccordionSection
       id="api-rcf"
-      accent={BLUE}
       icon={<Code size={18} />}
       title="RCF Endpoints"
       subtitle="Create, read, update, and delete Remote Call Forwarding numbers programmatically."
@@ -466,7 +415,6 @@ function ApiNumbersSection() {
   return (
     <AccordionSection
       id="api-numbers"
-      accent={BLUE}
       icon={<Phone size={18} />}
       title="Number Inventory Endpoints"
       subtitle="Browse available DIDs, view your assigned numbers, and request new numbers for your account."
@@ -553,7 +501,6 @@ function ApiIntegrationSection() {
   return (
     <AccordionSection
       id="api-integration"
-      accent={BLUE}
       icon={<Zap size={18} />}
       title="Integration Patterns"
       subtitle="Quick start walkthrough, webhook events, error handling with retry, and bulk provisioning."
@@ -588,54 +535,12 @@ function ApiIntegrationSection() {
             body: 'Place a test call and verify it reaches the forwarding destination.',
           },
         ].map(({ step, tag, title, body }) => (
-          <div
-            key={step}
-            style={{
-              display: 'flex',
-              gap: 16,
-              padding: '16px 18px',
-              borderRadius: 10,
-              background: 'rgba(13,17,23,0.45)',
-              border: `1px solid ${C.borderSubtle}`,
-            }}
-          >
-            <div
-              style={{
-                width: 28,
-                height: 28,
-                borderRadius: '50%',
-                background: `${BLUE}18`,
-                border: `1px solid ${BLUE}35`,
-                color: BLUE,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontSize: '0.78rem',
-                fontWeight: 800,
-                flexShrink: 0,
-                fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
-              }}
-            >
-              {step}
-            </div>
+          <div key={step} className="dlx-item" style={{ display: 'flex', gap: 16, padding: '16px 18px' }}>
+            <div className="dlx-step-num">{step}</div>
             <div style={{ flex: 1 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 5 }}>
                 <div style={{ fontSize: '0.87rem', fontWeight: 700, color: C.text }}>{title}</div>
-                <span
-                  style={{
-                    fontSize: '0.6rem',
-                    fontWeight: 700,
-                    letterSpacing: '0.05em',
-                    textTransform: 'uppercase',
-                    color: BLUE,
-                    background: `${BLUE}14`,
-                    border: `1px solid ${BLUE}28`,
-                    borderRadius: 4,
-                    padding: '1px 6px',
-                  }}
-                >
-                  {tag}
-                </span>
+                <span className="dl-tag">{tag}</span>
               </div>
               <div style={{ fontSize: '0.82rem', color: C.textMuted, lineHeight: 1.7 }}>{body}</div>
             </div>
@@ -660,7 +565,7 @@ function ApiIntegrationSection() {
         registered HTTPS endpoint with a JSON payload for each of the following events:
       </P>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 20 }}>
+      <div className="dlx-notegrid" style={{ marginBottom: 20 }}>
         {[
           {
             event: 'call.started',
@@ -679,29 +584,9 @@ function ApiIntegrationSection() {
             desc: 'Fires when ring timeout expires and the call is redirected to the failover destination. Includes both primary and failover numbers.',
           },
         ].map(({ event, desc }) => (
-          <div
-            key={event}
-            style={{
-              padding: '14px 16px',
-              borderRadius: 10,
-              background: `${AMBER}06`,
-              border: `1px solid ${AMBER}20`,
-            }}
-          >
-            <div
-              style={{
-                fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
-                fontSize: '0.75rem',
-                fontWeight: 700,
-                color: AMBER,
-                marginBottom: 8,
-              }}
-            >
-              {event}
-            </div>
-            <div style={{ fontSize: '0.81rem', color: C.textMuted, lineHeight: 1.6 }}>
-              {desc}
-            </div>
+          <div key={event} className="dlx-notecard dlx-notecard-warn">
+            <div className="dlx-notecard-title">{event}</div>
+            <div className="dlx-notecard-body">{desc}</div>
           </div>
         ))}
       </div>
@@ -714,33 +599,12 @@ function ApiIntegrationSection() {
         classifies which status codes are safe to retry and which require intervention.
       </P>
 
-      <div
-        style={{
-          borderRadius: 8,
-          overflow: 'hidden',
-          border: `1px solid rgba(59,130,246,0.18)`,
-          marginBottom: 20,
-        }}
-      >
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' }}>
+      <div className="dlx-table-wrap">
+        <table className="dlx-table">
           <thead>
-            <tr style={{ background: 'rgba(10,13,22,0.7)' }}>
+            <tr>
               {['Status', 'Retryable', 'Action'].map(h => (
-                <th
-                  key={h}
-                  style={{
-                    padding: '9px 14px',
-                    textAlign: 'left',
-                    color: '#475569',
-                    fontWeight: 700,
-                    letterSpacing: '0.06em',
-                    fontSize: '0.67rem',
-                    textTransform: 'uppercase',
-                    borderBottom: '1px solid rgba(59,130,246,0.15)',
-                  }}
-                >
-                  {h}
-                </th>
+                <th key={h} className="dl-th">{h}</th>
               ))}
             </tr>
           </thead>
@@ -754,38 +618,24 @@ function ApiIntegrationSection() {
               { status: '429 Too Many Reqs', retry: 'backoff', action: 'Rate limit hit. Honour the Retry-After header and use exponential backoff.' },
               { status: '500 Server Error',  retry: 'backoff', action: 'Transient server error. Retry with exponential backoff up to 3 times.' },
               { status: '503 Unavailable',   retry: 'backoff', action: 'Platform temporarily unavailable. Retry after 30s, then 60s, then 120s.' },
-            ].map((row, i) => {
-              const retryColor =
+            ].map(row => {
+              const retryClass =
                 row.retry === 'no'
-                  ? { color: '#475569', bg: 'rgba(71,85,105,0.15)' }
+                  ? 'dl-tag dl-tag-slate'
                   : row.retry === 'reauth'
-                  ? { color: '#c084fc', bg: 'rgba(168,85,247,0.12)' }
-                  : { color: AMBER, bg: `${AMBER}14` };
+                  ? 'dl-tag'
+                  : 'dlx-tag-warn';
               return (
-                <tr key={row.status} style={{ background: i % 2 === 0 ? 'transparent' : 'rgba(10,13,22,0.28)' }}>
-                  <td style={{ padding: '9px 14px', borderBottom: '1px solid rgba(42,47,69,0.3)', whiteSpace: 'nowrap' }}>
-                    <code style={{ color: '#60a5fa', fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', fontSize: '0.8rem', fontWeight: 700 }}>
-                      {row.status}
-                    </code>
+                <tr key={row.status}>
+                  <td>
+                    <code className="dlx-td-code">{row.status}</code>
                   </td>
-                  <td style={{ padding: '9px 14px', borderBottom: '1px solid rgba(42,47,69,0.3)', whiteSpace: 'nowrap' }}>
-                    <span
-                      style={{
-                        display: 'inline-block',
-                        padding: '2px 7px',
-                        borderRadius: 4,
-                        fontSize: '0.67rem',
-                        fontWeight: 700,
-                        background: retryColor.bg,
-                        color: retryColor.color,
-                      }}
-                    >
+                  <td>
+                    <span className={retryClass}>
                       {row.retry === 'no' ? 'no' : row.retry === 'reauth' ? 'reauth' : 'backoff'}
                     </span>
                   </td>
-                  <td style={{ padding: '9px 14px', borderBottom: '1px solid rgba(42,47,69,0.3)', color: C.textMuted, lineHeight: 1.55 }}>
-                    {row.action}
-                  </td>
+                  <td>{row.action}</td>
                 </tr>
               );
             })}
@@ -829,7 +679,6 @@ def api_request_with_retry(method, url, **kwargs):
       />
 
       <NoteCards
-        accent={BLUE}
         items={[
           {
             title: 'Check before create',
@@ -892,16 +741,15 @@ def api_request_with_retry(method, url, **kwargs):
 
 export function ApiDocsPage() {
   return (
-    <div style={{ paddingTop: 20 }}>
-      <PageHeaderCard
-        eyebrow="Developer Reference"
-        title="API Reference"
-        subtitle="RESTful API documentation for programmatic access to the Granite CRAG (Call Routing Application Gateway) platform"
-        accent={BLUE}
-      />
+    <div className="dl-scope">
+      <div className="dl-shell">
+        <DocsHeader
+          crumb="API Reference"
+          title="API Reference"
+          subtitle="RESTful API documentation for programmatic access to the Granite CRAG (Call Routing Application Gateway) platform"
+        />
 
-      <div style={{ padding: '0 0 60px' }}>
-        <div style={{ maxWidth: 1080, margin: '0 auto' }}>
+        <div className="dlx-docs-col dl-stack fx-load fx-load-d1">
           <ApiGettingStartedSection />
           <ApiRcfSection />
           <ApiNumbersSection />

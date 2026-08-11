@@ -1,6 +1,22 @@
+/**
+ * OnboardingAdminPage — the customer onboarding intake queue
+ * (/admin/onboarding).
+ *
+ * Queue rows expand into a detail panel: Contact / Products & Requirements /
+ * KYC — Business Verification (FCC 26-27) / Submission, plus the
+ * Complete / Reject action flows for pending rows.
+ *
+ * Styling: the shared DAYLIGHT CONSOLE system (`dl-*` in index.css, plus the
+ * page-scoped `dlx-*` primitives in styles/dl-admin.css). Renders INSIDE the
+ * AdminPage shell, which owns the paper canvas (`dl-scope`) — this page
+ * contributes the status filter, the queue table panel, and the detail views.
+ * The amber warning chip is reserved for genuine KYC red flags.
+ *
+ * React #310: every hook is called unconditionally at the top.
+ */
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle } from 'lucide-react';
+import { AlertTriangle, ChevronRight } from 'lucide-react';
 import {
   listOnboardingRequests,
   completeOnboarding,
@@ -19,11 +35,13 @@ import {
   type ProductKey,
   type ProductsRecord,
 } from '../../types/onboarding';
-import { Badge } from '../../components/ui/Badge';
-import { Button } from '../../components/ui/Button';
 import { Spinner } from '../../components/ui/Spinner';
 import { useToast } from '../../components/ui/ToastContext';
 import { fmt } from '../../utils/format';
+import '../../styles/dl-admin.css';
+
+const MONO = '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace';
+const COL_COUNT = 6;
 
 // ─── Status filter tabs ───────────────────────────────────────────────────────
 
@@ -43,19 +61,23 @@ const STATUS_TABS: StatusTab[] = [
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function statusBadgeVariant(status: OnboardingStatus) {
-  switch (status) {
-    case 'pending':   return 'pending' as const;
-    case 'completed': return 'active'  as const;
-    case 'rejected':  return 'rejected' as const;
-  }
-}
-
 function statusLabel(status: OnboardingStatus): string {
   switch (status) {
     case 'pending':   return 'Pending';
     case 'completed': return 'Completed';
     case 'rejected':  return 'Rejected';
+  }
+}
+
+/** Green = completed, red = rejected, azure tag = awaiting review. */
+function StatusPill({ status }: { status: OnboardingStatus }) {
+  switch (status) {
+    case 'completed':
+      return <span className="dl-pill dl-pill-on">Completed</span>;
+    case 'rejected':
+      return <span className="dl-pill dl-pill-off">Rejected</span>;
+    case 'pending':
+      return <span className="dl-tag">Pending</span>;
   }
 }
 
@@ -77,56 +99,13 @@ function fmtDateTime(iso: string): string {
   });
 }
 
-// ─── Shared input styles ──────────────────────────────────────────────────────
-
-const inputStyle: React.CSSProperties = {
-  width: '100%',
-  fontSize: '0.82rem',
-  padding: '8px 12px',
-  borderRadius: 8,
-  border: '1px solid rgba(59,130,246,0.15)',
-  background: 'rgba(13,15,21,0.55)',
-  color: '#e2e8f0',
-  outline: 'none',
-  boxSizing: 'border-box',
-};
-
-const textareaStyle: React.CSSProperties = {
-  ...inputStyle,
-  resize: 'vertical',
-  minHeight: 72,
-  fontFamily: 'inherit',
-};
-
-const sectionLabel: React.CSSProperties = {
-  fontSize: '0.6rem',
-  fontWeight: 700,
-  color: '#3b82f6',
-  textTransform: 'uppercase',
-  letterSpacing: '0.05em',
-  marginBottom: 12,
-};
-
-const fieldLabel: React.CSSProperties = {
-  fontSize: '0.72rem',
-  fontWeight: 600,
-  color: '#718096',
-  marginBottom: 4,
-  display: 'block',
-};
-
-const fieldValue: React.CSSProperties = {
-  fontSize: '0.875rem',
-  color: '#e2e8f0',
-};
-
 // ─── Info pair (read-only display field) ──────────────────────────────────────
 
 function InfoPair({ label, value }: { label: string; value: string | null | undefined }) {
   return (
     <div>
-      <span style={fieldLabel}>{label}</span>
-      <span style={fieldValue}>{value || '—'}</span>
+      <span className="dlx-ilabel">{label}</span>
+      <span className="dlx-ivalue">{value || '—'}</span>
     </div>
   );
 }
@@ -137,23 +116,7 @@ function InfoPair({ label, value }: { label: string; value: string | null | unde
     implicit RCF chip on legacy (pre-products) requests. */
 function ProductChip({ product, dim }: { product: ProductKey; dim?: boolean }) {
   return (
-    <span
-      style={{
-        flexShrink: 0,
-        fontSize: '0.58rem',
-        fontWeight: 700,
-        letterSpacing: '0.05em',
-        textTransform: 'uppercase',
-        color: dim ? '#718096' : '#93c5fd',
-        background: dim ? 'rgba(113,128,150,0.08)' : 'rgba(59,130,246,0.12)',
-        border: dim
-          ? '1px solid rgba(113,128,150,0.3)'
-          : '1px solid rgba(59,130,246,0.3)',
-        borderRadius: 4,
-        padding: '2px 6px',
-        whiteSpace: 'nowrap',
-      }}
-    >
+    <span className={dim ? 'dl-tag dl-tag-slate' : 'dl-tag'}>
       {PRODUCT_CHIP_LABELS[product]}
     </span>
   );
@@ -169,30 +132,14 @@ function ProductBlock({
   children: React.ReactNode;
 }) {
   return (
-    <div
-      style={{
-        padding: '14px 16px',
-        borderRadius: 10,
-        background: 'rgba(59,130,246,0.05)',
-        border: '1px solid rgba(59,130,246,0.18)',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 12,
-      }}
-    >
-      <div style={{ ...sectionLabel, marginBottom: 0 }}>
+    <div className="dlx-well">
+      <h4 className="dl-section-title" style={{ marginBottom: 0 }}>
         {PRODUCT_LABELS[product]}
-      </div>
+      </h4>
       {children}
     </div>
   );
 }
-
-const infoGrid: React.CSSProperties = {
-  display: 'grid',
-  gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))',
-  gap: '12px 24px',
-};
 
 /**
  * Requirements section of the detail panel.
@@ -205,8 +152,8 @@ function RequirementsSection({ request }: { request: OnboardingRequest }) {
   if (!products) {
     return (
       <div>
-        <div style={sectionLabel}>Requirements — Legacy RCF Intake</div>
-        <div style={infoGrid}>
+        <h3 className="dl-section-title">Requirements — Legacy RCF Intake</h3>
+        <div className="dlx-info-grid">
           <InfoPair label="DIDs Requested" value={request.did_count} />
           <InfoPair label="Porting Existing Numbers?" value={request.porting} />
           <InfoPair label="Current Carrier" value={request.current_carrier} />
@@ -224,16 +171,16 @@ function RequirementsSection({ request }: { request: OnboardingRequest }) {
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-        <div style={{ ...sectionLabel, marginBottom: 0 }}>
+        <h3 className="dl-section-title" style={{ marginBottom: 0 }}>
           Products &amp; Requirements
-        </div>
+        </h3>
         {selected.map((p) => (
           <ProductChip key={p} product={p} />
         ))}
       </div>
 
       {/* Global sizing */}
-      <div style={{ ...infoGrid, marginTop: 12 }}>
+      <div className="dlx-info-grid" style={{ marginTop: 14 }}>
         <InfoPair label="Monthly Volume" value={request.monthly_volume} />
         <InfoPair label="Timeline" value={request.timeline} />
       </div>
@@ -242,7 +189,7 @@ function RequirementsSection({ request }: { request: OnboardingRequest }) {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 16 }}>
         {rcf && (
           <ProductBlock product="rcf">
-            <div style={infoGrid}>
+            <div className="dlx-info-grid">
               <InfoPair label="DIDs Requested" value={rcf.did_count} />
               <InfoPair label="Porting Existing Numbers?" value={rcf.porting} />
               {rcf.current_carrier && (
@@ -255,7 +202,7 @@ function RequirementsSection({ request }: { request: OnboardingRequest }) {
 
         {trunk && (
           <ProductBlock product="trunk">
-            <div style={infoGrid}>
+            <div className="dlx-info-grid">
               <InfoPair
                 label="Concurrent Call Paths"
                 value={trunk.concurrent_call_paths.toLocaleString('en-US')}
@@ -264,7 +211,7 @@ function RequirementsSection({ request }: { request: OnboardingRequest }) {
               <InfoPair label="DIDs Needed" value={trunk.dids_needed} />
             </div>
             <div>
-              <span style={fieldLabel}>
+              <span className="dlx-ilabel">
                 Signaling IPs ({trunk.signaling_ips.length}) — IP-authenticated,
                 no registration
               </span>
@@ -280,12 +227,12 @@ function RequirementsSection({ request }: { request: OnboardingRequest }) {
         {api && (
           <ProductBlock product="api">
             <div>
-              <span style={fieldLabel}>Use Case</span>
-              <p style={{ ...fieldValue, fontSize: '0.82rem', margin: 0, lineHeight: 1.55 }}>
+              <span className="dlx-ilabel">Use Case</span>
+              <p className="dlx-ivalue" style={{ margin: 0, fontSize: '0.82rem', lineHeight: 1.55 }}>
                 {api.use_case}
               </p>
             </div>
-            <div style={infoGrid}>
+            <div className="dlx-info-grid">
               <InfoPair
                 label="Expected Calls / Second"
                 value={
@@ -299,21 +246,21 @@ function RequirementsSection({ request }: { request: OnboardingRequest }) {
                 value={api.needs_numbers ? 'Yes' : 'No'}
               />
               <div>
-                <span style={fieldLabel}>Webhook URL</span>
+                <span className="dlx-ilabel">Webhook URL</span>
                 {api.webhook_url ? (
                   <span
+                    className="dlx-ivalue"
                     style={{
-                      ...fieldValue,
-                      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                      fontFamily: MONO,
                       fontSize: '0.78rem',
-                      color: '#93c5fd',
+                      color: 'var(--rcf-azure-deep)',
                       wordBreak: 'break-all',
                     }}
                   >
                     {api.webhook_url}
                   </span>
                 ) : (
-                  <span style={fieldValue}>—</span>
+                  <span className="dlx-ivalue">—</span>
                 )}
               </div>
             </div>
@@ -322,7 +269,7 @@ function RequirementsSection({ request }: { request: OnboardingRequest }) {
 
         {voicemail && (
           <ProductBlock product="voicemail">
-            <div style={infoGrid}>
+            <div className="dlx-info-grid">
               <InfoPair
                 label="Mailboxes"
                 value={voicemail.mailbox_count.toLocaleString('en-US')}
@@ -341,47 +288,20 @@ function RequirementsSection({ request }: { request: OnboardingRequest }) {
 
 // ─── KYC — Business verification (FCC Know-Your-Customer) ─────────────────────
 
-/** Amber warning chip — matches the admin warning idiom (#f59e0b family). */
+/** Amber warning chip — a GENUINE warning (KYC red flag), so amber stays. */
 function WarningChip({ children }: { children: React.ReactNode }) {
   return (
-    <span
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 6,
-        fontSize: '0.66rem',
-        fontWeight: 700,
-        letterSpacing: '0.04em',
-        textTransform: 'uppercase',
-        color: '#fbbf24',
-        background: 'rgba(245,158,11,0.09)',
-        border: '1px solid rgba(245,158,11,0.28)',
-        borderRadius: 6,
-        padding: '4px 10px',
-        whiteSpace: 'nowrap',
-      }}
-    >
+    <span className="dlx-warnchip">
       <AlertTriangle size={12} strokeWidth={2.25} />
       {children}
     </span>
   );
 }
 
-/** One originating-IP entry — mono chip, dark admin idiom. */
+/** One originating-IP entry — mono daylight chip. */
 function IpChip({ ip }: { ip: string }) {
   return (
-    <span
-      style={{
-        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-        fontSize: '0.76rem',
-        color: '#93c5fd',
-        background: 'rgba(59,130,246,0.08)',
-        border: '1px solid rgba(59,130,246,0.22)',
-        borderRadius: 6,
-        padding: '3px 9px',
-        whiteSpace: 'nowrap',
-      }}
-    >
+    <span className="dl-chip" style={{ fontSize: '0.74rem', padding: '3px 9px' }}>
       {ip}
     </span>
   );
@@ -391,8 +311,8 @@ function KycSection({ kyc }: { kyc: KycRecord | null }) {
   if (!kyc) {
     return (
       <div>
-        <div style={sectionLabel}>KYC — Business Verification</div>
-        <div style={{ fontSize: '0.82rem', color: '#4a5568', fontStyle: 'italic' }}>
+        <h3 className="dl-section-title">KYC — Business Verification</h3>
+        <div style={{ fontSize: '0.82rem', color: 'var(--rcf-ink-dim)', fontStyle: 'italic' }}>
           No KYC data (pre-KYC submission).
         </div>
       </div>
@@ -406,26 +326,19 @@ function KycSection({ kyc }: { kyc: KycRecord | null }) {
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-        <div style={{ ...sectionLabel, marginBottom: 0 }}>
+        <h3 className="dl-section-title" style={{ marginBottom: 0 }}>
           KYC — Business Verification
-        </div>
+        </h3>
         {s.address_is_registered_agent_or_virtual && (
           <WarningChip>Registered agent / virtual office address</WarningChip>
         )}
       </div>
 
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))',
-          gap: '12px 24px',
-          marginTop: 12,
-        }}
-      >
+      <div className="dlx-info-grid" style={{ marginTop: 14 }}>
         <InfoPair label="Legal Business Name" value={s.legal_business_name} />
         <div>
-          <span style={fieldLabel}>Physical Address</span>
-          <span style={fieldValue}>
+          <span className="dlx-ilabel">Physical Address</span>
+          <span className="dlx-ivalue">
             {s.address_line1}
             {s.address_line2 ? `, ${s.address_line2}` : ''}
             <br />
@@ -433,17 +346,11 @@ function KycSection({ kyc }: { kyc: KycRecord | null }) {
           </span>
         </div>
         <div>
-          <span style={fieldLabel}>Government ID</span>
-          <span style={fieldValue}>
+          <span className="dlx-ilabel">Government ID</span>
+          <span className="dlx-ivalue">
             {govIdLabel}
             <br />
-            <span
-              style={{
-                fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-                fontSize: '0.8rem',
-                color: '#cbd5e1',
-              }}
-            >
+            <span style={{ fontFamily: MONO, fontSize: '0.8rem', color: 'var(--rcf-ink-soft)' }}>
               {s.gov_id_number}
             </span>
           </span>
@@ -456,43 +363,27 @@ function KycSection({ kyc }: { kyc: KycRecord | null }) {
           value={s.alternate_phone ? fmt(s.alternate_phone) : null}
         />
         <div>
-          <span style={fieldLabel}>Website</span>
+          <span className="dlx-ilabel">Website</span>
           {s.website ? (
             <a
               href={/^https?:\/\//i.test(s.website) ? s.website : `https://${s.website}`}
               target="_blank"
               rel="noopener noreferrer"
-              style={{ ...fieldValue, color: '#60a5fa', textDecoration: 'none' }}
+              className="dlx-ivalue"
+              style={{ color: 'var(--rcf-azure-deep)', textDecoration: 'none', fontWeight: 600 }}
             >
               {s.website}
             </a>
           ) : (
-            <span style={fieldValue}>—</span>
+            <span className="dlx-ivalue">—</span>
           )}
         </div>
       </div>
 
       {hv && (
-        <div
-          style={{
-            marginTop: 16,
-            padding: '14px 16px',
-            borderRadius: 10,
-            background: 'rgba(59,130,246,0.05)',
-            border: '1px solid rgba(59,130,246,0.18)',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 12,
-          }}
-        >
-          <div style={{ ...sectionLabel, marginBottom: 0 }}>High-Volume Calling</div>
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))',
-              gap: '12px 24px',
-            }}
-          >
+        <div className="dlx-well" style={{ marginTop: 16 }}>
+          <h4 className="dl-section-title" style={{ marginBottom: 0 }}>High-Volume Calling</h4>
+          <div className="dlx-info-grid">
             <InfoPair
               label="Intended Use"
               value={INTENDED_USE_LABELS[hv.intended_use] ?? hv.intended_use}
@@ -508,14 +399,14 @@ function KycSection({ kyc }: { kyc: KycRecord | null }) {
           </div>
           {hv.intended_use_description && (
             <div>
-              <span style={fieldLabel}>Use Description</span>
-              <p style={{ ...fieldValue, fontSize: '0.82rem', margin: 0, lineHeight: 1.55 }}>
+              <span className="dlx-ilabel">Use Description</span>
+              <p className="dlx-ivalue" style={{ margin: 0, fontSize: '0.82rem', lineHeight: 1.55 }}>
                 {hv.intended_use_description}
               </p>
             </div>
           )}
           <div>
-            <span style={fieldLabel}>Originating IPs ({hv.originating_ips.length})</span>
+            <span className="dlx-ilabel">Originating IPs ({hv.originating_ips.length})</span>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 4 }}>
               {hv.originating_ips.map((ip) => (
                 <IpChip key={ip} ip={ip} />
@@ -551,50 +442,46 @@ function CompleteForm({ request }: CompleteFormProps) {
 
   if (!showForm) {
     return (
-      <Button variant="success" size="sm" onClick={() => setShowForm(true)}>
+      <button type="button" className="dl-btn dlx-btn-ok" onClick={() => setShowForm(true)}>
         Complete
-      </Button>
+      </button>
     );
   }
 
   return (
-    <div
-      style={{
-        padding: '16px 18px',
-        borderRadius: 10,
-        background: 'rgba(34,197,94,0.05)',
-        border: '1px solid rgba(34,197,94,0.2)',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 12,
-      }}
-    >
-      <div style={{ ...sectionLabel, color: '#4ade80' }}>Complete Intake</div>
+    <div className="dlx-well dlx-well-ok">
+      <h4 className="dl-section-title" style={{ marginBottom: 0, color: 'var(--rcf-green)' }}>
+        Complete Intake
+      </h4>
       <div>
-        <label style={fieldLabel}>Notes (optional)</label>
+        <label className="dl-flabel" htmlFor={`complete-notes-${request.id}`}>
+          Notes (optional)
+        </label>
         <textarea
+          id={`complete-notes-${request.id}`}
+          className="dl-input"
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
           placeholder="Handed off to billing/provisioning, account set up externally…"
-          style={textareaStyle}
+          style={{ width: '100%', resize: 'vertical', minHeight: 72 }}
         />
       </div>
       <div style={{ display: 'flex', gap: 8 }}>
-        <Button
-          variant="success"
-          size="sm"
-          loading={mutation.isPending}
+        <button
+          type="button"
+          className="dl-btn dlx-btn-ok"
+          disabled={mutation.isPending}
           onClick={() => mutation.mutate()}
         >
-          Mark Completed
-        </Button>
-        <Button
-          variant="ghost"
-          size="sm"
+          {mutation.isPending ? 'Completing…' : 'Mark Completed'}
+        </button>
+        <button
+          type="button"
+          className="dl-btn dl-btn-ghost"
           onClick={() => { setShowForm(false); setNotes(''); }}
         >
           Cancel
-        </Button>
+        </button>
       </div>
     </div>
   );
@@ -623,54 +510,46 @@ function RejectForm({ request }: RejectFormProps) {
 
   if (!showForm) {
     return (
-      <Button
-        variant="danger"
-        size="sm"
-        onClick={() => setShowForm(true)}
-      >
+      <button type="button" className="dl-btn dl-btn-danger" onClick={() => setShowForm(true)}>
         Reject
-      </Button>
+      </button>
     );
   }
 
   return (
-    <div
-      style={{
-        padding: '16px 18px',
-        borderRadius: 10,
-        background: 'rgba(239,68,68,0.04)',
-        border: '1px solid rgba(239,68,68,0.18)',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 12,
-      }}
-    >
-      <div style={{ ...sectionLabel, color: '#f87171' }}>Reject Request</div>
+    <div className="dlx-well dlx-well-err">
+      <h4 className="dl-section-title" style={{ marginBottom: 0, color: 'var(--rcf-red)' }}>
+        Reject Request
+      </h4>
       <div>
-        <label style={fieldLabel}>Reason (optional)</label>
+        <label className="dl-flabel" htmlFor={`reject-reason-${request.id}`}>
+          Reason (optional)
+        </label>
         <textarea
+          id={`reject-reason-${request.id}`}
+          className="dl-input"
           value={reason}
           onChange={(e) => setReason(e.target.value)}
           placeholder="Not a fit, unable to serve area, duplicate request…"
-          style={textareaStyle}
+          style={{ width: '100%', resize: 'vertical', minHeight: 72 }}
         />
       </div>
       <div style={{ display: 'flex', gap: 8 }}>
-        <Button
-          variant="danger"
-          size="sm"
-          loading={mutation.isPending}
+        <button
+          type="button"
+          className="dl-btn dl-btn-danger"
+          disabled={mutation.isPending}
           onClick={() => mutation.mutate()}
         >
-          Confirm Reject
-        </Button>
-        <Button
-          variant="ghost"
-          size="sm"
+          {mutation.isPending ? 'Rejecting…' : 'Confirm Reject'}
+        </button>
+        <button
+          type="button"
+          className="dl-btn dl-btn-ghost"
           onClick={() => { setShowForm(false); setReason(''); }}
         >
           Cancel
-        </Button>
+        </button>
       </div>
     </div>
   );
@@ -680,18 +559,10 @@ function RejectForm({ request }: RejectFormProps) {
 
 function CompletedDetail({ request }: { request: OnboardingRequest }) {
   return (
-    <div
-      style={{
-        padding: '16px 18px',
-        borderRadius: 10,
-        background: 'rgba(34,197,94,0.06)',
-        border: '1px solid rgba(34,197,94,0.18)',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 12,
-      }}
-    >
-      <div style={{ ...sectionLabel, color: '#4ade80' }}>Completion Details</div>
+    <div className="dlx-well dlx-well-ok">
+      <h4 className="dl-section-title" style={{ marginBottom: 0, color: 'var(--rcf-green)' }}>
+        Completion Details
+      </h4>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px 24px' }}>
         {request.completed_by_name && (
           <InfoPair label="Completed By" value={request.completed_by_name} />
@@ -702,8 +573,8 @@ function CompletedDetail({ request }: { request: OnboardingRequest }) {
       </div>
       {request.admin_notes && (
         <div>
-          <span style={fieldLabel}>Notes</span>
-          <p style={{ ...fieldValue, fontSize: '0.82rem', margin: 0, color: '#a7f3d0', lineHeight: 1.55 }}>
+          <span className="dlx-ilabel">Notes</span>
+          <p className="dlx-ivalue" style={{ margin: 0, fontSize: '0.82rem', lineHeight: 1.55 }}>
             {request.admin_notes}
           </p>
         </div>
@@ -714,18 +585,10 @@ function CompletedDetail({ request }: { request: OnboardingRequest }) {
 
 function RejectedDetail({ request }: { request: OnboardingRequest }) {
   return (
-    <div
-      style={{
-        padding: '16px 18px',
-        borderRadius: 10,
-        background: 'rgba(239,68,68,0.05)',
-        border: '1px solid rgba(239,68,68,0.18)',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 12,
-      }}
-    >
-      <div style={{ ...sectionLabel, color: '#f87171' }}>Rejection Details</div>
+    <div className="dlx-well dlx-well-err">
+      <h4 className="dl-section-title" style={{ marginBottom: 0, color: 'var(--rcf-red)' }}>
+        Rejection Details
+      </h4>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px 24px' }}>
         {request.rejected_by_name && (
           <InfoPair label="Rejected By" value={request.rejected_by_name} />
@@ -736,8 +599,8 @@ function RejectedDetail({ request }: { request: OnboardingRequest }) {
       </div>
       {request.rejection_reason && (
         <div>
-          <span style={fieldLabel}>Reason</span>
-          <p style={{ ...fieldValue, fontSize: '0.82rem', margin: 0, color: '#fca5a5', lineHeight: 1.55 }}>
+          <span className="dlx-ilabel">Reason</span>
+          <p className="dlx-ivalue" style={{ margin: 0, fontSize: '0.82rem', lineHeight: 1.55 }}>
             {request.rejection_reason}
           </p>
         </div>
@@ -746,62 +609,54 @@ function RejectedDetail({ request }: { request: OnboardingRequest }) {
   );
 }
 
-// ─── Onboarding Card ──────────────────────────────────────────────────────────
+// ─── Queue row (+ expandable detail) ──────────────────────────────────────────
 
-interface OnboardingCardProps {
+interface OnboardingRowProps {
   request: OnboardingRequest;
   isExpanded: boolean;
   onToggle: () => void;
 }
 
-function OnboardingCard({ request, isExpanded, onToggle }: OnboardingCardProps) {
+function OnboardingRow({ request, isExpanded, onToggle }: OnboardingRowProps) {
   const isPending   = request.status === 'pending';
   const isCompleted = request.status === 'completed';
   const isRejected  = request.status === 'rejected';
 
   return (
-    <div
-      className="glass-surface"
-      style={{
-        borderRadius: 14,
-        overflow: 'hidden',
-        transition: 'box-shadow 0.15s',
-        boxShadow: isExpanded ? '0 0 0 1px rgba(59,130,246,0.35), 0 8px 28px -8px rgba(59,130,246,0.25)' : undefined,
-      }}
-    >
+    <>
       {/* Summary row */}
-      <div
+      <tr
+        className="dl-row"
         onClick={onToggle}
         style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 20,
-          padding: '16px 20px',
           cursor: 'pointer',
           userSelect: 'none',
+          background: isExpanded ? '#eef4fe' : undefined,
         }}
       >
         {/* Expand chevron */}
-        <span
-          style={{
-            color: '#475569',
-            fontSize: '0.75rem',
-            transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)',
-            transition: 'transform 0.15s',
-            flexShrink: 0,
-          }}
-        >
-          ▶
-        </span>
+        <td className="dlx-td" style={{ width: 34, paddingRight: 0 }}>
+          <ChevronRight
+            size={15}
+            strokeWidth={2}
+            stroke="var(--rcf-ink-dim)"
+            style={{
+              display: 'block',
+              transition: 'transform 0.15s ease',
+              transform: isExpanded ? 'rotate(90deg)' : 'none',
+            }}
+            aria-hidden="true"
+          />
+        </td>
 
         {/* Company + contact */}
-        <div style={{ flex: 1, minWidth: 0 }}>
+        <td className="dlx-td" style={{ whiteSpace: 'normal', minWidth: 220 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
             <span
               style={{
-                fontSize: '0.9rem',
+                fontSize: '0.86rem',
                 fontWeight: 700,
-                color: '#e2e8f0',
+                color: 'var(--rcf-ink)',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap',
@@ -810,129 +665,105 @@ function OnboardingCard({ request, isExpanded, onToggle }: OnboardingCardProps) 
               {request.company_name}
             </span>
             {request.kyc?.high_volume && (
-              <span
-                style={{
-                  flexShrink: 0,
-                  fontSize: '0.58rem',
-                  fontWeight: 700,
-                  letterSpacing: '0.05em',
-                  textTransform: 'uppercase',
-                  color: '#93c5fd',
-                  background: 'rgba(59,130,246,0.12)',
-                  border: '1px solid rgba(59,130,246,0.3)',
-                  borderRadius: 4,
-                  padding: '2px 6px',
-                }}
-              >
-                High volume
-              </span>
+              <span className="dl-tag" style={{ flexShrink: 0 }}>High volume</span>
             )}
           </div>
-          <div style={{ fontSize: '0.75rem', color: '#718096', marginTop: 2 }}>
+          <div style={{ fontSize: '0.74rem', color: 'var(--rcf-ink-dim)', marginTop: 2 }}>
             {request.contact_name} · {request.email}
           </div>
-        </div>
+        </td>
 
         {/* Product chips (legacy rows: dimmed implicit RCF) */}
-        <div
-          style={{
-            width: 150,
-            flexShrink: 0,
-            display: 'flex',
-            flexWrap: 'wrap',
-            gap: 4,
-            alignItems: 'center',
-          }}
-        >
-          {request.products ? (
-            PRODUCT_ORDER.filter((p) =>
-              request.products!.selected.includes(p),
-            ).map((p) => <ProductChip key={p} product={p} />)
-          ) : (
-            <ProductChip product="rcf" dim />
-          )}
-        </div>
+        <td className="dlx-td" style={{ whiteSpace: 'normal', width: 160 }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'center' }}>
+            {request.products ? (
+              PRODUCT_ORDER.filter((p) =>
+                request.products!.selected.includes(p),
+              ).map((p) => <ProductChip key={p} product={p} />)
+            ) : (
+              <ProductChip product="rcf" dim />
+            )}
+          </div>
+        </td>
 
         {/* Timeline */}
-        <div
+        <td
+          className="dlx-td"
           style={{
-            fontSize: '0.75rem',
-            color: '#718096',
-            flexShrink: 0,
-            maxWidth: 120,
+            color: 'var(--rcf-ink-dim)',
+            fontSize: '0.76rem',
+            maxWidth: 130,
             overflow: 'hidden',
             textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
           }}
         >
           {request.timeline}
-        </div>
+        </td>
 
-        {/* Status badge */}
-        <div style={{ flexShrink: 0 }}>
-          <Badge variant={statusBadgeVariant(request.status)}>
-            {statusLabel(request.status)}
-          </Badge>
-        </div>
+        {/* Status */}
+        <td className="dlx-td">
+          <StatusPill status={request.status} />
+        </td>
 
         {/* Submitted date */}
-        <div style={{ fontSize: '0.72rem', color: '#4a5568', flexShrink: 0 }}>
+        <td className="dlx-td" style={{ color: 'var(--rcf-ink-dim)', fontSize: '0.74rem' }}>
           {fmtDate(request.created_at)}
-        </div>
-      </div>
+        </td>
+      </tr>
 
       {/* Detail panel */}
       {isExpanded && (
-        <div
-          style={{
-            padding: '0 20px 24px',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 24,
-            borderTop: '1px solid rgba(59,130,246,0.12)',
-            paddingTop: 20,
-          }}
-        >
-          {/* Contact Info */}
-          <div>
-            <div style={sectionLabel}>Contact Information</div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: '12px 24px' }}>
-              <InfoPair label="Company" value={request.company_name} />
-              <InfoPair label="Contact Name" value={request.contact_name} />
-              <InfoPair label="Email" value={request.email} />
-              <InfoPair label="Phone" value={request.phone ? fmt(request.phone) : null} />
-            </div>
-          </div>
+        <tr>
+          <td colSpan={COL_COUNT} style={{ padding: 0 }}>
+            <div className="dlx-xwrap">
+              <div>
+                <div className="dlx-xpanel">
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+                    {/* Contact Info */}
+                    <div>
+                      <h3 className="dl-section-title">Contact Information</h3>
+                      <div className="dlx-info-grid">
+                        <InfoPair label="Company" value={request.company_name} />
+                        <InfoPair label="Contact Name" value={request.contact_name} />
+                        <InfoPair label="Email" value={request.email} />
+                        <InfoPair label="Phone" value={request.phone ? fmt(request.phone) : null} />
+                      </div>
+                    </div>
 
-          {/* Products & requirements (legacy top-level RCF fields when products is null) */}
-          <RequirementsSection request={request} />
+                    {/* Products & requirements (legacy top-level RCF fields when products is null) */}
+                    <RequirementsSection request={request} />
 
-          {/* KYC — Business verification (null on legacy pre-KYC rows) */}
-          <KycSection kyc={request.kyc} />
+                    {/* KYC — Business verification (null on legacy pre-KYC rows) */}
+                    <KycSection kyc={request.kyc} />
 
-          {/* Submission meta */}
-          <div>
-            <div style={sectionLabel}>Submission</div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: '12px 24px' }}>
-              <InfoPair label="Submitted" value={fmtDateTime(request.created_at)} />
-            </div>
-          </div>
+                    {/* Submission meta */}
+                    <div>
+                      <h3 className="dl-section-title">Submission</h3>
+                      <div className="dlx-info-grid">
+                        <InfoPair label="Submitted" value={fmtDateTime(request.created_at)} />
+                      </div>
+                    </div>
 
-          {/* Action / status sections */}
-          {isPending && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <CompleteForm request={request} />
-                <RejectForm request={request} />
+                    {/* Action / status sections */}
+                    {isPending && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                        <div style={{ display: 'flex', gap: 8 }}>
+                          <CompleteForm request={request} />
+                          <RejectForm request={request} />
+                        </div>
+                      </div>
+                    )}
+
+                    {isCompleted && <CompletedDetail request={request} />}
+                    {isRejected && <RejectedDetail request={request} />}
+                  </div>
+                </div>
               </div>
             </div>
-          )}
-
-          {isCompleted && <CompletedDetail request={request} />}
-          {isRejected && <RejectedDetail request={request} />}
-        </div>
+          </td>
+        </tr>
       )}
-    </div>
+    </>
   );
 }
 
@@ -954,53 +785,29 @@ export function OnboardingAdminPage() {
   const items: OnboardingRequest[] = data?.items ?? [];
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-      {/* Status filter tabs */}
-      <div
-        className="glass-surface"
-        style={{
-          borderRadius: 12,
-          padding: '6px 8px',
-          overflowX: 'auto',
-        }}
-      >
-        <nav
-          style={{ display: 'flex', gap: 4 }}
-          role="tablist"
-          aria-label="Onboarding request filter"
-        >
+    <div className="dl-stack">
+      {/* Status filter — daylight segmented control */}
+      <div style={{ display: 'flex', justifyContent: 'center' }}>
+        <div className="dlx-seg" role="tablist" aria-label="Onboarding request filter">
           {STATUS_TABS.map((tab) => {
             const isActive = activeFilter === tab.value;
             return (
               <button
                 key={tab.value}
+                type="button"
                 role="tab"
                 aria-selected={isActive}
+                className={isActive ? 'dlx-seg-btn dlx-seg-btn-active' : 'dlx-seg-btn'}
                 onClick={() => {
                   setActiveFilter(tab.value);
                   setExpandedId(null);
-                }}
-                style={{
-                  padding: '7px 16px',
-                  fontSize: '0.83rem',
-                  fontWeight: isActive ? 600 : 500,
-                  whiteSpace: 'nowrap',
-                  borderRadius: 8,
-                  border: isActive ? '1px solid rgba(59,130,246,0.4)' : '1px solid transparent',
-                  color: isActive ? '#e2e8f0' : '#718096',
-                  background: isActive
-                    ? 'linear-gradient(135deg, rgba(59,130,246,0.13) 0%, rgba(59,130,246,0.06) 100%)'
-                    : 'transparent',
-                  cursor: 'pointer',
-                  transition: 'color 0.15s, background 0.15s, border-color 0.15s',
-                  boxShadow: isActive ? '0 0 10px rgba(59,130,246,0.14)' : 'none',
                 }}
               >
                 {tab.label}
               </button>
             );
           })}
-        </nav>
+        </div>
       </div>
 
       {/* Loading state */}
@@ -1010,8 +817,8 @@ export function OnboardingAdminPage() {
             display: 'flex',
             alignItems: 'center',
             gap: 10,
-            color: '#718096',
-            fontSize: '0.875rem',
+            color: 'var(--rcf-ink-dim)',
+            fontSize: '0.85rem',
             padding: '32px 0',
           }}
         >
@@ -1021,76 +828,53 @@ export function OnboardingAdminPage() {
 
       {/* Error state */}
       {isError && (
-        <div
-          style={{
-            padding: '16px 20px',
-            borderRadius: 12,
-            background: 'rgba(239,68,68,0.08)',
-            border: '1px solid rgba(239,68,68,0.2)',
-            color: '#f87171',
-            fontSize: '0.875rem',
-          }}
-        >
+        <div className="dl-banner dl-banner-err">
           Failed to load onboarding requests.
         </div>
       )}
 
       {/* Empty state */}
       {!isLoading && !isError && items.length === 0 && (
-        <div
-          className="glass-surface"
-          style={{
-            padding: '60px 20px',
-            textAlign: 'center',
-            color: '#4a5568',
-            fontSize: '0.9rem',
-            borderRadius: 14,
-          }}
-        >
+        <div className="dl-empty" style={{ padding: '56px 20px' }}>
           No onboarding requests
           {activeFilter !== 'all' ? ` with status "${statusLabel(activeFilter as OnboardingStatus)}"` : ''}.
         </div>
       )}
 
-      {/* Request list */}
+      {/* Request queue */}
       {!isLoading && items.length > 0 && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {/* Column headers */}
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 20,
-              padding: '0 20px',
-            }}
-          >
-            <div style={{ width: 16, flexShrink: 0 }} />
-            <div style={{ flex: 1, fontSize: '0.65rem', fontWeight: 700, color: '#4a5568', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-              Company / Contact
-            </div>
-            <div style={{ width: 150, fontSize: '0.65rem', fontWeight: 700, color: '#4a5568', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-              Products
-            </div>
-            <div style={{ width: 120, fontSize: '0.65rem', fontWeight: 700, color: '#4a5568', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-              Timeline
-            </div>
-            <div style={{ width: 120, fontSize: '0.65rem', fontWeight: 700, color: '#4a5568', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-              Status
-            </div>
-            <div style={{ width: 90, fontSize: '0.65rem', fontWeight: 700, color: '#4a5568', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-              Submitted
-            </div>
+        <section className="dl-panel">
+          <div className="dl-panel-head">
+            <h2 className="dl-panel-title">Intake Queue</h2>
+            <span className="dl-count">
+              {items.length} request{items.length === 1 ? '' : 's'}
+            </span>
           </div>
-
-          {items.map((req) => (
-            <OnboardingCard
-              key={req.id}
-              request={req}
-              isExpanded={expandedId === req.id}
-              onToggle={() => setExpandedId((prev) => (prev === req.id ? null : req.id))}
-            />
-          ))}
-        </div>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 760 }}>
+              <thead>
+                <tr>
+                  <th className="dl-th" style={{ width: 34 }} aria-label="Expand" />
+                  <th className="dl-th">Company / Contact</th>
+                  <th className="dl-th">Products</th>
+                  <th className="dl-th">Timeline</th>
+                  <th className="dl-th">Status</th>
+                  <th className="dl-th">Submitted</th>
+                </tr>
+              </thead>
+              <tbody>
+                {items.map((req) => (
+                  <OnboardingRow
+                    key={req.id}
+                    request={req}
+                    isExpanded={expandedId === req.id}
+                    onToggle={() => setExpandedId((prev) => (prev === req.id ? null : req.id))}
+                  />
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
       )}
     </div>
   );

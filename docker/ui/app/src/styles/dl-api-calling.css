@@ -1,0 +1,259 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   dl-api-calling.css — page-scoped daylight styles for ApiDidsPage
+   (the API Calling coming-soon showcase).
+
+   The `dlx7-` prefix marks these as page-scoped, NOT part of the shared
+   DAYLIGHT CONSOLE system in index.css (and independent of the sibling
+   dl-voicemail.css — pages stay self-contained). Every value references the
+   shared `--rcf-*` custom properties declared on `.dl-scope`; the code
+   vignette's dark-navy surface and syntax palette echo the docs pages'
+   established ink-on-dark code treatment (dl-docs.css). Hand-written @media
+   only (never Tailwind md:* — see the container-build gotcha in CLAUDE.md).
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ─── Hero — positioning copy beside the request/response vignette ─── */
+.dlx7-hero {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 32px;
+  padding: 28px;
+  align-items: center;
+}
+
+@media (min-width: 880px) {
+  .dlx7-hero {
+    grid-template-columns: minmax(0, 10fr) minmax(0, 9fr);
+    gap: 44px;
+    padding: 34px 36px;
+  }
+}
+
+.dlx7-hero-title {
+  font-family: "Archivo", "IBM Plex Sans", sans-serif;
+  font-weight: 700;
+  font-size: clamp(1.1rem, 1.7vw, 1.32rem);
+  letter-spacing: -0.02em;
+  line-height: 1.22;
+  color: var(--rcf-ink);
+  margin: 0 0 10px;
+}
+
+.dlx7-hero-copy {
+  font-size: 0.84rem;
+  line-height: 1.65;
+  color: var(--rcf-ink-soft);
+  margin: 0 0 18px;
+  max-width: 52ch;
+}
+
+/* Azure-tick lines — same square accent as the breadcrumb tick */
+.dlx7-ticks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.dlx7-ticks li {
+  position: relative;
+  padding-left: 18px;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: var(--rcf-ink-soft);
+}
+
+.dlx7-ticks li::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0.44em;
+  width: 6px;
+  height: 6px;
+  background: var(--rcf-azure);
+  border-radius: 1px;
+}
+
+/* ─── Code vignette — one composed request/response card on the docs
+   pages' ink-on-dark navy code surface. Static; no live data. ─── */
+.dlx7-vignette {
+  border-radius: 12px;
+  overflow: hidden;
+  background: #0f1a2e;
+  border: 1px solid #0b1424;
+  box-shadow:
+    0 1px 2px rgba(14, 23, 38, 0.05),
+    0 18px 40px -22px rgba(29, 99, 221, 0.35);
+  user-select: none;
+}
+
+/* Section bars — request (method + path) and response (status) */
+.dlx7-vg-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 14px;
+  background: #0b1322;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.dlx7-vg-bar-resp {
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+/* Solid POST chip — same grammar as the docs method chips */
+.dlx7-vg-method {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 9px;
+  border-radius: 5px;
+  background: #16a34a;
+  color: #ffffff;
+  font-family: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  flex-shrink: 0;
+}
+
+.dlx7-vg-path {
+  flex: 1;
+  font-family: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: #e6edf8;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 201 chip — quiet outlined green, not a solid block */
+.dlx7-vg-status {
+  flex: 1;
+  font-family: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: #5fd39a;
+  white-space: nowrap;
+}
+
+/* Right-side section word — "request" / "response" */
+.dlx7-vg-side {
+  font-family: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.58rem;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: #7d92b5;
+  flex-shrink: 0;
+}
+
+/* JSON bodies — the docs code-body treatment, scaled to vignette size */
+.dlx7-vg-code {
+  margin: 0;
+  padding: 14px 16px;
+  font-family: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.73rem;
+  line-height: 1.7;
+  white-space: pre;
+  overflow-x: auto;
+}
+
+.dlx7-vg-code-resp {
+  padding-bottom: 16px;
+}
+
+/* Syntax palette — matches the docs pages' code coloring */
+.dlx7-k { color: #6fb0ff; }
+.dlx7-s { color: #5fd39a; }
+.dlx7-p { color: #7d92b5; }
+
+.dlx7-vg-caption {
+  margin: 10px 2px 0;
+  font-size: 0.64rem;
+  color: var(--rcf-ink-dim);
+  text-align: right;
+}
+
+/* ─── Capability grid — icon-led rows, generous whitespace rhythm, with the
+   daylight hairline grammar: a single vertical rule between the columns ─── */
+.dlx7-caps {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 22px 44px;
+  padding: 24px 24px 26px;
+}
+
+@media (min-width: 720px) {
+  .dlx7-caps {
+    position: relative;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 26px 64px;
+    padding: 26px 36px 30px;
+  }
+
+  /* Column rule — centered in the column gap, inset from the panel edges */
+  .dlx7-caps::before {
+    content: '';
+    position: absolute;
+    top: 28px;
+    bottom: 32px;
+    left: 50%;
+    width: 1px;
+    background: var(--rcf-line-soft);
+  }
+}
+
+.dlx7-cap {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  min-width: 0;
+}
+
+.dlx7-cap-chip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  background: #e4eeff;
+  border: 1px solid rgba(47, 125, 246, 0.18);
+  color: var(--rcf-azure-deep);
+  transition: background var(--rcf-ease), border-color var(--rcf-ease), color var(--rcf-ease);
+}
+
+.dlx7-cap:hover .dlx7-cap-chip {
+  background: var(--rcf-azure);
+  border-color: var(--rcf-azure);
+  color: #ffffff;
+}
+
+.dlx7-cap-title {
+  font-family: "Archivo", "IBM Plex Sans", sans-serif;
+  font-weight: 700;
+  font-size: 0.84rem;
+  letter-spacing: -0.01em;
+  color: var(--rcf-ink);
+  margin: 1px 0 4px;
+}
+
+.dlx7-cap-line {
+  font-size: 0.76rem;
+  line-height: 1.55;
+  color: var(--rcf-ink-soft);
+  margin: 0;
+  max-width: 44ch;
+}
+
+/* ─── Quiet closing line ─── */
+.dlx7-close {
+  margin-top: var(--rcf-zone);
+  text-align: center;
+  font-size: 0.78rem;
+  line-height: 1.6;
+  color: var(--rcf-ink-dim);
+}

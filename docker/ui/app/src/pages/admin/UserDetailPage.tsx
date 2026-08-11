@@ -1,14 +1,49 @@
+/**
+ * UserDetailPage — admin user search + 360 view
+ * (/admin/customers/users and /admin/customers/users/:userId).
+ *
+ * Three states: customer picker → per-customer user list → user 360
+ * (profile header, presence, stat tiles, extension config, devices, recent
+ * calls, per-product sections, quick actions, and the inline edit panel).
+ *
+ * Styling: the shared DAYLIGHT CONSOLE system (`dl-*` in index.css, plus the
+ * page-scoped `dlx-*` primitives in styles/dl-admin.css). Renders INSIDE the
+ * AdminPage shell, which owns the paper canvas (`dl-scope`) — this page
+ * contributes toolbars, result tables, and profile panels only.
+ *
+ * React #310: every hook in every component below is called unconditionally
+ * at the top of its function, before any early return.
+ */
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  ArrowDownLeft,
+  ArrowUpRight,
+  ChevronLeft,
+  Code2,
+  ExternalLink,
+  MessageSquare,
+  MonitorSmartphone,
+  Pencil,
+  Phone,
+  PhoneForwarded,
+  Search,
+  Settings,
+  Share2,
+  Users,
+  Voicemail,
+  X,
+  Zap,
+} from 'lucide-react';
 import { apiRequest } from '../../api/client';
 import { listUsers } from '../../api/auth';
 import { listCustomers } from '../../api/customers';
 import type { User } from '../../types/auth';
 import type { Customer as PlatformCustomer } from '../../types/customer';
-import { Badge } from '../../components/ui/Badge';
 import { Spinner } from '../../components/ui/Spinner';
 import { fmt, fmtDuration } from '../../utils/format';
+import '../../styles/dl-admin.css';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -123,50 +158,37 @@ interface UpdateUserPayload {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
+const MONO = '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace';
+const ARCHIVO = '"Archivo", "IBM Plex Sans", sans-serif';
+
+/** Daylight ink/status palette — semantics preserved:
+    green = reachable, red = busy/dnd (do-not-ring), amber = away (a genuine
+    "may not answer" warning state), slate = offline. */
 const PRESENCE_CONFIG: Record<PresenceStatus, { label: string; color: string }> = {
-  available: { label: 'Available',      color: '#22c55e' },
-  away:      { label: 'Away',           color: '#f59e0b' },
-  busy:      { label: 'Busy',           color: '#ef4444' },
-  dnd:       { label: 'Do Not Disturb', color: '#ef4444' },
-  offline:   { label: 'Offline',        color: '#64748b' },
+  available: { label: 'Available',      color: '#15803d' },
+  away:      { label: 'Away',           color: '#b45309' },
+  busy:      { label: 'Busy',           color: '#b91c1c' },
+  dnd:       { label: 'Do Not Disturb', color: '#b91c1c' },
+  offline:   { label: 'Offline',        color: '#5d6f8c' },
 };
 
+/** Call outcome colors — green answered, red failed, amber busy (genuine
+    delivery warning), slate for no-answer/cancelled. */
 const CALL_RESULT_COLOR: Record<CallResult, string> = {
-  answered:    '#22c55e',
-  failed:      '#ef4444',
-  busy:        '#f59e0b',
-  'no-answer': '#64748b',
-  cancelled:   '#64748b',
+  answered:    '#15803d',
+  failed:      '#b91c1c',
+  busy:        '#b45309',
+  'no-answer': '#5d6f8c',
+  cancelled:   '#5d6f8c',
 };
 
-const ROLE_CONFIG: Record<UserRole, { label: string; color: string }> = {
-  admin:    { label: 'Admin',     color: '#a855f7' },
-  user:     { label: 'User',      color: '#0ea5e9' },
-  readonly: { label: 'Read-Only', color: '#64748b' },
+const ROLE_LABEL: Record<UserRole, string> = {
+  admin:    'Admin',
+  user:     'User',
+  readonly: 'Read-Only',
 };
-
-const ACCOUNT_TYPE_CONFIG: Record<AccountType, { label: string; color: string }> = {
-  RCF:    { label: 'RCF',    color: '#3b82f6' },
-  API:    { label: 'API',    color: '#a855f7' },
-  Trunk:  { label: 'Trunk',  color: '#f59e0b' },
-  UCaaS:  { label: 'UCaaS',  color: '#0ea5e9' },
-  Hybrid: { label: 'Hybrid', color: '#3b82f6' },
-};
-
-const AVATAR_COLORS = [
-  '#3b82f6', '#8b5cf6', '#06b6d4', '#10b981',
-  '#f59e0b', '#ef4444', '#ec4899', '#6366f1',
-];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function getAvatarColor(name: string): string {
-  let hash = 0;
-  for (let i = 0; i < name.length; i++) {
-    hash = (hash * 31 + name.charCodeAt(i)) & 0xffffffff;
-  }
-  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
-}
 
 function fmtRelativeTime(iso: string | null): string {
   if (!iso) return 'Never';
@@ -200,6 +222,32 @@ async function fetchUser360(userId: number): Promise<User360Response> {
   return apiRequest<User360Response>('GET', `/search/user/${userId}/360`);
 }
 
+// ─── Small daylight chips ─────────────────────────────────────────────────────
+
+function RoleTag({ role }: { role: UserRole }) {
+  return (
+    <span className={role === 'admin' ? 'dl-tag' : 'dl-tag dl-tag-slate'}>
+      {ROLE_LABEL[role] ?? role}
+    </span>
+  );
+}
+
+function UserStatusPill({ status }: { status: 'active' | 'disabled' | 'suspended' }) {
+  return (
+    <span className={status === 'active' ? 'dl-pill dl-pill-on' : 'dl-pill dl-pill-off'}>
+      {status}
+    </span>
+  );
+}
+
+function EnabledStatusTag({ enabled }: { enabled: boolean }) {
+  return (
+    <span className={enabled ? 'dl-pill dl-pill-on' : 'dl-pill dl-pill-off'}>
+      {enabled ? 'Active' : 'Disabled'}
+    </span>
+  );
+}
+
 // ─── Avatar ───────────────────────────────────────────────────────────────────
 
 interface AvatarProps {
@@ -207,29 +255,44 @@ interface AvatarProps {
   size?: number;
 }
 
+/** The one azure-tinted identity mark (dl-avatar), sized as needed. */
 function Avatar({ name, size = 64 }: AvatarProps) {
-  const color = getAvatarColor(name);
   return (
     <div
-      style={{
-        width: size,
-        height: size,
-        borderRadius: size * 0.25,
-        background: `linear-gradient(135deg, ${color}30 0%, ${color}18 100%)`,
-        border: `2px solid ${color}50`,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        fontSize: size * 0.4,
-        fontWeight: 800,
-        color: color,
-        flexShrink: 0,
-        letterSpacing: '-0.02em',
-        boxShadow: `0 0 24px ${color}20`,
-      }}
+      className="dl-avatar"
+      aria-hidden="true"
+      style={{ width: size, height: size, fontSize: size * 0.38 }}
     >
       {name.charAt(0).toUpperCase()}
     </div>
+  );
+}
+
+// ─── Section panel wrapper ────────────────────────────────────────────────────
+
+interface SectionCardProps {
+  children: React.ReactNode;
+  title: string;
+  icon?: React.ReactNode;
+  actions?: React.ReactNode;
+  /** Render children flush against the panel edges (tables). */
+  flush?: boolean;
+}
+
+function SectionCard({ children, title, icon, actions, flush }: SectionCardProps) {
+  return (
+    <section className="dl-panel">
+      <div className="dl-panel-head" style={{ flexWrap: 'nowrap' }}>
+        {icon && (
+          <span aria-hidden="true" style={{ display: 'inline-flex', color: 'var(--rcf-azure-deep)', flexShrink: 0 }}>
+            {icon}
+          </span>
+        )}
+        <h3 className="dl-panel-title" style={{ margin: 0, flex: 1, minWidth: 0 }}>{title}</h3>
+        {actions && <div style={{ flexShrink: 0 }}>{actions}</div>}
+      </div>
+      {flush ? children : <div className="dl-panel-body">{children}</div>}
+    </section>
   );
 }
 
@@ -243,348 +306,179 @@ interface HeaderCardProps {
 
 function HeaderCard({ data, isEditing, onEditToggle }: HeaderCardProps) {
   const { user, extension, presence } = data;
-  const presenceCfg   = PRESENCE_CONFIG[presence?.status ?? 'offline'];
-  const roleCfg       = ROLE_CONFIG[user.role];
-  const accountTypeCfg = user.account_type ? ACCOUNT_TYPE_CONFIG[user.account_type] : null;
+  const presenceCfg = PRESENCE_CONFIG[presence?.status ?? 'offline'];
 
   return (
-    <div
-      className="glass-surface"
-      style={{
-        borderRadius: 16,
-        padding: '24px 28px',
-        position: 'relative',
-        overflow: 'hidden',
-        display: 'flex',
-        gap: 28,
-        flexWrap: 'wrap',
-        alignItems: 'center',
-      }}
-    >
-      {/* Top accent */}
+    <section className="dl-panel">
       <div
-        style={{
-          position: 'absolute',
-          top: 0,
-          left: 40,
-          right: 40,
-          height: 2,
-          background: 'linear-gradient(90deg, transparent, rgba(59,130,246,0.8), transparent)',
-          opacity: 0.5,
-        }}
-      />
-
-      {/* Left: Avatar + identity */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 18, flex: '1 1 240px', minWidth: 0 }}>
-        <Avatar name={user.name} size={60} />
-        <div style={{ minWidth: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 4 }}>
-            <h2
+        className="dl-panel-body"
+        style={{ display: 'flex', gap: 28, flexWrap: 'wrap', alignItems: 'center' }}
+      >
+        {/* Left: Avatar + identity */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16, flex: '1 1 260px', minWidth: 0 }}>
+          <Avatar name={user.name} size={56} />
+          <div style={{ minWidth: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
+              <h2
+                style={{
+                  margin: 0,
+                  fontFamily: ARCHIVO,
+                  fontSize: '1.12rem',
+                  fontWeight: 700,
+                  color: 'var(--rcf-ink)',
+                  letterSpacing: '-0.018em',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {user.name}
+              </h2>
+              <RoleTag role={user.role} />
+              <UserStatusPill status={user.status} />
+              {user.account_type && (
+                <span className="dl-tag dl-tag-slate">{user.account_type}</span>
+              )}
+            </div>
+            <div
               style={{
-                margin: 0,
-                fontSize: '1.2rem',
-                fontWeight: 800,
-                color: '#e2e8f0',
-                letterSpacing: '-0.02em',
+                fontSize: '0.8rem',
+                color: 'var(--rcf-ink-dim)',
+                fontFamily: MONO,
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap',
               }}
             >
-              {user.name}
-            </h2>
-            <span
-              style={{
-                fontSize: '0.65rem',
-                fontWeight: 700,
-                textTransform: 'uppercase',
-                letterSpacing: '0.05em',
-                padding: '2px 8px',
-                borderRadius: 5,
-                color: roleCfg.color,
-                background: `${roleCfg.color}18`,
-                border: `1px solid ${roleCfg.color}35`,
-                flexShrink: 0,
-              }}
-            >
-              {roleCfg.label}
-            </span>
-            <Badge variant={user.status === 'active' ? 'active' : user.status === 'suspended' ? 'suspended' : 'disabled'}>
-              {user.status}
-            </Badge>
-            {accountTypeCfg && (
-              <span
+              {user.email}
+            </div>
+          </div>
+        </div>
+
+        {/* Center: Extension & DID */}
+        <div style={{ flex: '1 1 200px', textAlign: 'center', minWidth: 0 }}>
+          {extension ? (
+            <>
+              <div
                 style={{
-                  fontSize: '0.65rem',
+                  fontFamily: ARCHIVO,
+                  fontSize: '1.7rem',
                   fontWeight: 700,
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.05em',
-                  padding: '2px 8px',
-                  borderRadius: 5,
-                  color: accountTypeCfg.color,
-                  background: `${accountTypeCfg.color}18`,
-                  border: `1px solid ${accountTypeCfg.color}35`,
-                  flexShrink: 0,
+                  color: 'var(--rcf-azure-deep)',
+                  fontVariantNumeric: 'tabular-nums',
+                  letterSpacing: '-0.02em',
+                  lineHeight: 1,
+                  marginBottom: 5,
                 }}
               >
-                {accountTypeCfg.label}
-              </span>
-            )}
-          </div>
-          <div style={{ fontSize: '0.8rem', color: '#64748b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {user.email}
-          </div>
-        </div>
-      </div>
-
-      {/* Center: Extension & DID */}
-      <div style={{ flex: '1 1 200px', textAlign: 'center', minWidth: 0 }}>
-        {extension ? (
-          <>
-            <div
-              style={{
-                fontSize: '2rem',
-                fontWeight: 800,
-                color: '#60a5fa',
-                fontVariantNumeric: 'tabular-nums',
-                letterSpacing: '-0.03em',
-                lineHeight: 1,
-                marginBottom: 4,
-              }}
-            >
-              Ext {extension.number}
-            </div>
-            {extension.did && (
-              <div style={{ fontSize: '0.8rem', color: '#94a3b8', fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace' }}>
-                {fmt(extension.did)}
+                Ext {extension.number}
               </div>
-            )}
-            <Link
-              to={`/admin/customers/${user.customer_id}`}
-              style={{
-                display: 'inline-block',
-                marginTop: 6,
-                fontSize: '0.78rem',
-                color: '#60a5fa',
-                textDecoration: 'none',
-                transition: 'color 0.1s',
-              }}
-              onMouseEnter={(e) => { (e.currentTarget as HTMLAnchorElement).style.color = '#93c5fd'; }}
-              onMouseLeave={(e) => { (e.currentTarget as HTMLAnchorElement).style.color = '#60a5fa'; }}
-            >
-              {user.customer_name}
-              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={2} style={{ width: 11, height: 11, marginLeft: 4, verticalAlign: 'middle' }}>
-                <path d="M6 3h7v7M13 3 3 13" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            </Link>
-          </>
-        ) : (
-          <div style={{ fontSize: '0.82rem', color: '#4a5568', fontStyle: 'italic' }}>
-            No extension assigned
-          </div>
-        )}
-      </div>
-
-      {/* Right: Presence + last login + edit toggle */}
-      <div style={{ flex: '0 0 auto', textAlign: 'right', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
-        {/* Edit button */}
-        <button
-          type="button"
-          onClick={onEditToggle}
-          title={isEditing ? 'Close editor' : 'Edit this user'}
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 6,
-            padding: '6px 12px',
-            borderRadius: 8,
-            background: isEditing ? 'rgba(59,130,246,0.18)' : 'rgba(255,255,255,0.05)',
-            border: `1px solid ${isEditing ? 'rgba(59,130,246,0.45)' : 'rgba(255,255,255,0.1)'}`,
-            color: isEditing ? '#93c5fd' : '#94a3b8',
-            fontSize: '0.78rem',
-            fontWeight: 600,
-            cursor: 'pointer',
-            fontFamily: 'inherit',
-            transition: 'background 0.15s, border-color 0.15s, color 0.15s',
-            marginBottom: 8,
-          }}
-          onMouseEnter={(e) => {
-            if (!isEditing) {
-              (e.currentTarget as HTMLButtonElement).style.background = 'rgba(59,130,246,0.1)';
-              (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(59,130,246,0.3)';
-              (e.currentTarget as HTMLButtonElement).style.color = '#60a5fa';
-            }
-          }}
-          onMouseLeave={(e) => {
-            if (!isEditing) {
-              (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.05)';
-              (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(255,255,255,0.1)';
-              (e.currentTarget as HTMLButtonElement).style.color = '#94a3b8';
-            }
-          }}
-        >
-          {isEditing ? (
-            <>
-              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={2} style={{ width: 12, height: 12 }}>
-                <path d="M4 4l8 8M12 4l-8 8" strokeLinecap="round" />
-              </svg>
-              Close
+              {extension.did && (
+                <div style={{ fontSize: '0.8rem', color: 'var(--rcf-ink-soft)', fontFamily: MONO }}>
+                  {fmt(extension.did)}
+                </div>
+              )}
+              <Link
+                to={`/admin/customers/${user.customer_id}`}
+                className="dlx-linkbtn"
+                style={{ marginTop: 6 }}
+              >
+                {user.customer_name}
+                <ExternalLink size={11} strokeWidth={2} aria-hidden="true" />
+              </Link>
             </>
           ) : (
-            <>
-              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={2} style={{ width: 12, height: 12 }}>
-                <path d="M11.5 2.5a2.121 2.121 0 0 1 3 3L5 15l-4 1 1-4 9.5-9.5Z" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-              Edit User
-            </>
+            <div style={{ fontSize: '0.82rem', color: 'var(--rcf-ink-dim)', fontStyle: 'italic' }}>
+              No extension assigned
+            </div>
           )}
-        </button>
-
-        {/* Presence */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'flex-end', marginBottom: 4 }}>
-          <span
-            style={{
-              width: 10,
-              height: 10,
-              borderRadius: '50%',
-              background: presenceCfg.color,
-              flexShrink: 0,
-              boxShadow: `0 0 8px ${presenceCfg.color}80`,
-            }}
-          />
-          <span style={{ fontSize: '0.85rem', fontWeight: 600, color: '#e2e8f0' }}>
-            {presenceCfg.label}
-          </span>
         </div>
 
-        {/* Presence message */}
-        {presence?.message && (
-          <div style={{ fontSize: '0.72rem', color: '#64748b', fontStyle: 'italic', marginBottom: 4, maxWidth: 180, textAlign: 'right' }}>
-            &ldquo;{presence.message}&rdquo;
-          </div>
-        )}
+        {/* Right: Edit toggle + presence + last login */}
+        <div style={{ flex: '0 0 auto', textAlign: 'right', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 5 }}>
+          <button
+            type="button"
+            className={isEditing ? 'dl-btn dl-btn-primary dlx-btn-sm' : 'dl-btn dl-btn-ghost dlx-btn-sm'}
+            onClick={onEditToggle}
+            title={isEditing ? 'Close editor' : 'Edit this user'}
+            style={{ marginBottom: 6 }}
+          >
+            {isEditing ? (
+              <>
+                <X size={12} strokeWidth={2.25} aria-hidden="true" />
+                Close
+              </>
+            ) : (
+              <>
+                <Pencil size={12} strokeWidth={2} aria-hidden="true" />
+                Edit User
+              </>
+            )}
+          </button>
 
-        {/* Last login */}
-        <div style={{ fontSize: '0.7rem', color: '#475569' }}>
-          Last login: {fmtRelativeTime(user.last_login)}
+          {/* Presence */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'flex-end' }}>
+            <span
+              aria-hidden="true"
+              style={{
+                width: 9,
+                height: 9,
+                borderRadius: '50%',
+                background: presenceCfg.color,
+                flexShrink: 0,
+              }}
+            />
+            <span style={{ fontSize: '0.84rem', fontWeight: 700, color: 'var(--rcf-ink)' }}>
+              {presenceCfg.label}
+            </span>
+          </div>
+
+          {/* Presence message */}
+          {presence?.message && (
+            <div style={{ fontSize: '0.72rem', color: 'var(--rcf-ink-dim)', fontStyle: 'italic', maxWidth: 180, textAlign: 'right' }}>
+              &ldquo;{presence.message}&rdquo;
+            </div>
+          )}
+
+          {/* Last login */}
+          <div style={{ fontSize: '0.7rem', color: 'var(--rcf-ink-dim)' }}>
+            Last login: {fmtRelativeTime(user.last_login)}
+          </div>
+
+          {/* Presence updated */}
+          {presence?.updated_at && (
+            <div style={{ fontSize: '0.68rem', color: 'var(--rcf-ink-dim)' }}>
+              Status updated {fmtRelativeTime(presence.updated_at)}
+            </div>
+          )}
         </div>
-
-        {/* Presence updated */}
-        {presence?.updated_at && (
-          <div style={{ fontSize: '0.68rem', color: '#334155', marginTop: 2 }}>
-            Status updated {fmtRelativeTime(presence.updated_at)}
-          </div>
-        )}
       </div>
-    </div>
+    </section>
   );
 }
 
-// ─── Stat Cards ───────────────────────────────────────────────────────────────
+// ─── Stat tiles ───────────────────────────────────────────────────────────────
 
-interface StatCardProps {
+interface StatTileProps {
   icon: React.ReactNode;
   label: string;
   primary: string;
   secondary?: string;
-  accent: string;
   linkTo?: string;
   linkLabel?: string;
 }
 
-function StatCard({ icon, label, primary, secondary, accent, linkTo, linkLabel }: StatCardProps) {
+function StatTile({ icon, label, primary, secondary, linkTo, linkLabel }: StatTileProps) {
   return (
-    <div
-      className="glass-surface glass-hover"
-      style={{
-        borderRadius: 14,
-        padding: '18px 20px',
-        position: 'relative',
-        overflow: 'hidden',
-        flex: '1 1 160px',
-        minWidth: 0,
-      }}
-    >
-      {/* Top accent */}
-      <div
-        style={{
-          position: 'absolute',
-          top: 0,
-          left: 0,
-          right: 0,
-          height: 2,
-          background: `linear-gradient(90deg, transparent, ${accent}99, transparent)`,
-        }}
-      />
-
-      {/* Icon */}
-      <div
-        style={{
-          width: 36,
-          height: 36,
-          borderRadius: 10,
-          background: `${accent}14`,
-          border: `1px solid ${accent}28`,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          color: accent,
-          marginBottom: 12,
-        }}
-      >
-        {icon}
-      </div>
-
-      {/* Label */}
-      <div
-        style={{
-          fontSize: '0.6rem',
-          fontWeight: 700,
-          color: '#4a5568',
-          textTransform: 'uppercase',
-          letterSpacing: '0.05em',
-          marginBottom: 4,
-        }}
-      >
+    <div className="dl-tile" style={{ flex: '1 1 180px' }}>
+      <span className="dl-tile-label" style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}>
+        <span aria-hidden="true" style={{ display: 'inline-flex', color: 'var(--rcf-azure-deep)' }}>{icon}</span>
         {label}
-      </div>
-
-      {/* Primary */}
-      <div
-        style={{
-          fontSize: '1rem',
-          fontWeight: 700,
-          color: '#e2e8f0',
-          fontVariantNumeric: 'tabular-nums',
-          marginBottom: secondary ? 2 : 0,
-        }}
-      >
-        {primary}
-      </div>
-
-      {/* Secondary */}
-      {secondary && (
-        <div style={{ fontSize: '0.72rem', color: '#64748b' }}>
-          {secondary}
-        </div>
-      )}
-
-      {/* Link */}
+      </span>
+      <span className="dl-tile-value" style={{ fontSize: '1.05rem' }}>{primary}</span>
+      {secondary && <span className="dl-tile-hint">{secondary}</span>}
       {linkTo && linkLabel && (
-        <Link
-          to={linkTo}
-          style={{
-            display: 'inline-block',
-            marginTop: 8,
-            fontSize: '0.7rem',
-            color: accent,
-            textDecoration: 'none',
-            opacity: 0.7,
-            transition: 'opacity 0.1s',
-          }}
-          onMouseEnter={(e) => { (e.currentTarget as HTMLAnchorElement).style.opacity = '1'; }}
-          onMouseLeave={(e) => { (e.currentTarget as HTMLAnchorElement).style.opacity = '0.7'; }}
-        >
+        <Link to={linkTo} className="dlx-linkbtn" style={{ fontSize: '0.7rem', padding: 0 }}>
           {linkLabel} →
         </Link>
       )}
@@ -628,61 +522,31 @@ function StatusGrid({ data }: StatusGridProps) {
 
   return (
     <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-      {/* Calls */}
-      <StatCard
-        accent="#0ea5e9"
+      <StatTile
         label="Calls"
         primary={callPrimary}
         secondary={callSecondary}
         linkTo={didLookupLink}
         linkLabel={didLookupLink ? 'View in DID Lookup' : undefined}
-        icon={
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} style={{ width: 18, height: 18 }}>
-            <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.6 1h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L7.91 8.6a16 16 0 0 0 6.05 6.05l1.96-1.84a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 14.92Z" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        }
+        icon={<Phone size={13} strokeWidth={1.8} />}
       />
-
-      {/* Voicemail */}
-      <StatCard
-        accent="#f59e0b"
+      <StatTile
         label="Voicemail"
         primary={vmPrimary}
         secondary={vmSecondary}
-        icon={
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} style={{ width: 18, height: 18 }}>
-            <circle cx="6.5" cy="12" r="4.5" />
-            <circle cx="17.5" cy="12" r="4.5" />
-            <line x1="6.5" y1="16.5" x2="17.5" y2="16.5" />
-          </svg>
-        }
+        icon={<Voicemail size={13} strokeWidth={1.8} />}
       />
-
-      {/* Chat */}
-      <StatCard
-        accent="#8b5cf6"
+      <StatTile
         label="Chat"
         primary={chatPrimary}
         secondary={chatSecondary}
-        icon={
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} style={{ width: 18, height: 18 }}>
-            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2Z" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        }
+        icon={<MessageSquare size={13} strokeWidth={1.8} />}
       />
-
-      {/* Devices */}
-      <StatCard
-        accent={devices.length > 0 ? '#22c55e' : '#64748b'}
+      <StatTile
         label="Devices"
         primary={devicePrimary}
         secondary={deviceSecondary}
-        icon={
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} style={{ width: 18, height: 18 }}>
-            <rect x="2" y="3" width="20" height="14" rx="2" />
-            <path d="M8 21h8M12 17v4" strokeLinecap="round" />
-          </svg>
-        }
+        icon={<MonitorSmartphone size={13} strokeWidth={1.8} />}
       />
     </div>
   );
@@ -695,86 +559,62 @@ interface ExtensionConfigCardProps {
 }
 
 function ExtensionConfigCard({ extension }: ExtensionConfigCardProps) {
-  const fields: Array<{ label: string; value: React.ReactNode; accent?: string }> = [
+  const fields: Array<{ label: string; value: React.ReactNode }> = [
     {
       label: 'Extension',
-      value: <span style={{ fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', color: '#60a5fa', fontSize: '0.95rem', fontWeight: 700 }}>{extension.number}</span>,
+      value: <span style={{ fontFamily: MONO, color: 'var(--rcf-azure-deep)', fontSize: '0.92rem', fontWeight: 700 }}>{extension.number}</span>,
     },
     {
       label: 'Assigned DID',
       value: extension.did
-        ? <span style={{ fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', color: '#e2e8f0' }}>{fmt(extension.did)}</span>
-        : <span style={{ color: '#4a5568', fontStyle: 'italic' }}>None</span>,
+        ? <span style={{ fontFamily: MONO, color: 'var(--rcf-ink)' }}>{fmt(extension.did)}</span>
+        : <span style={{ color: 'var(--rcf-ink-dim)', fontStyle: 'italic' }}>None</span>,
     },
     {
       label: 'Voicemail',
       value: extension.voicemail_enabled
-        ? <span style={{ color: '#22c55e', fontWeight: 600 }}>Enabled</span>
-        : <span style={{ color: '#64748b' }}>Disabled</span>,
+        ? <span style={{ color: 'var(--rcf-green)', fontWeight: 700 }}>Enabled</span>
+        : <span style={{ color: 'var(--rcf-ink-dim)' }}>Disabled</span>,
     },
     {
       label: 'Do Not Disturb',
       value: extension.dnd
-        ? <span style={{ color: '#ef4444', fontWeight: 600 }}>On</span>
-        : <span style={{ color: '#64748b' }}>Off</span>,
+        ? <span style={{ color: 'var(--rcf-red)', fontWeight: 700 }}>On</span>
+        : <span style={{ color: 'var(--rcf-ink-dim)' }}>Off</span>,
     },
     {
       label: 'Forward on Busy',
       value: extension.forward_on_busy
-        ? <span style={{ fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', color: '#e2e8f0' }}>{fmt(extension.forward_on_busy)}</span>
-        : <span style={{ color: '#4a5568', fontStyle: 'italic' }}>Not configured</span>,
+        ? <span style={{ fontFamily: MONO, color: 'var(--rcf-ink)' }}>{fmt(extension.forward_on_busy)}</span>
+        : <span style={{ color: 'var(--rcf-ink-dim)', fontStyle: 'italic' }}>Not configured</span>,
     },
     {
       label: 'Forward on No Answer',
       value: extension.forward_on_no_answer
-        ? <span style={{ fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', color: '#e2e8f0' }}>{fmt(extension.forward_on_no_answer)}</span>
-        : <span style={{ color: '#4a5568', fontStyle: 'italic' }}>Not configured</span>,
+        ? <span style={{ fontFamily: MONO, color: 'var(--rcf-ink)' }}>{fmt(extension.forward_on_no_answer)}</span>
+        : <span style={{ color: 'var(--rcf-ink-dim)', fontStyle: 'italic' }}>Not configured</span>,
     },
     {
       label: 'Forward Timeout',
       value: extension.forward_timeout_sec != null
-        ? <span style={{ color: '#94a3b8' }}>{extension.forward_timeout_sec}s</span>
-        : <span style={{ color: '#4a5568', fontStyle: 'italic' }}>—</span>,
+        ? <span style={{ color: 'var(--rcf-ink-soft)' }}>{extension.forward_timeout_sec}s</span>
+        : <span style={{ color: 'var(--rcf-ink-dim)', fontStyle: 'italic' }}>—</span>,
     },
   ];
 
   return (
-    <SectionCard accent="#0ea5e9" title="Extension Configuration" icon={
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} style={{ width: 16, height: 16 }}>
-        <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2Z" />
-        <circle cx="12" cy="12" r="3" />
-      </svg>
-    }>
+    <SectionCard title="Extension Configuration" icon={<Settings size={15} strokeWidth={1.8} />}>
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
+          gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))',
           gap: 8,
         }}
       >
         {fields.map(({ label, value }) => (
-          <div
-            key={label}
-            style={{
-              padding: '12px 16px',
-              borderRadius: 10,
-              background: 'rgba(255,255,255,0.02)',
-              border: '1px solid rgba(255,255,255,0.04)',
-            }}
-          >
-            <div
-              style={{
-                fontSize: '0.58rem',
-                fontWeight: 700,
-                color: '#4a5568',
-                textTransform: 'uppercase',
-                letterSpacing: '0.05em',
-                marginBottom: 6,
-              }}
-            >
-              {label}
-            </div>
-            <div style={{ fontSize: '0.85rem' }}>{value}</div>
+          <div key={label} className="dl-item" style={{ padding: '11px 14px' }}>
+            <div className="dl-fact-label">{label}</div>
+            <div style={{ fontSize: '0.84rem' }}>{value}</div>
           </div>
         ))}
       </div>
@@ -790,24 +630,9 @@ interface DevicesCardProps {
 
 function DevicesCard({ devices }: DevicesCardProps) {
   return (
-    <SectionCard accent="#22c55e" title="Registered Devices" icon={
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} style={{ width: 16, height: 16 }}>
-        <rect x="2" y="3" width="20" height="14" rx="2" />
-        <path d="M8 21h8M12 17v4" strokeLinecap="round" />
-      </svg>
-    }>
+    <SectionCard title="Registered Devices" icon={<MonitorSmartphone size={15} strokeWidth={1.8} />}>
       {devices.length === 0 ? (
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 12,
-            padding: '20px 0',
-            color: '#4a5568',
-            fontSize: '0.82rem',
-          }}
-        >
-          <span style={{ fontSize: '1.2rem', opacity: 0.3 }}>○</span>
+        <div className="dl-empty">
           No SIP endpoints currently registered. The user may not be logged into a softphone or device.
         </div>
       ) : (
@@ -815,31 +640,24 @@ function DevicesCard({ devices }: DevicesCardProps) {
           {devices.map((device) => (
             <div
               key={device.id}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 16,
-                padding: '12px 16px',
-                borderRadius: 10,
-                background: 'rgba(34,197,94,0.04)',
-                border: '1px solid rgba(34,197,94,0.12)',
-              }}
+              className="dl-item"
+              style={{ display: 'flex', alignItems: 'center', gap: 14 }}
             >
-              <div
+              <span
+                aria-hidden="true"
                 style={{
                   width: 8,
                   height: 8,
                   borderRadius: '50%',
-                  background: '#22c55e',
+                  background: 'var(--rcf-green)',
                   flexShrink: 0,
-                  boxShadow: '0 0 6px rgba(34,197,94,0.6)',
                 }}
               />
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: '0.82rem', fontWeight: 600, color: '#e2e8f0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                <div style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--rcf-ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {device.user_agent}
                 </div>
-                <div style={{ fontSize: '0.7rem', color: '#64748b', marginTop: 2 }}>
+                <div style={{ fontSize: '0.72rem', color: 'var(--rcf-ink-dim)', marginTop: 2 }}>
                   {device.ip_address} · Registered {fmtRelativeTime(device.registered_at)} · Expires {fmtRelativeTime(device.expires_at)}
                 </div>
               </div>
@@ -860,68 +678,36 @@ interface RecentCallsCardProps {
 function RecentCallsCard({ calls }: RecentCallsCardProps) {
   if (calls.length === 0) {
     return (
-      <SectionCard accent="#64748b" title="Recent Calls" icon={
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} style={{ width: 16, height: 16 }}>
-          <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.6 1h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L7.91 8.6a16 16 0 0 0 6.05 6.05l1.96-1.84a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 14.92Z" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      }>
-        <div style={{ padding: '20px 0', textAlign: 'center', color: '#4a5568', fontSize: '0.82rem', fontStyle: 'italic' }}>
-          No recent calls found for this user.
-        </div>
+      <SectionCard title="Recent Calls" icon={<Phone size={15} strokeWidth={1.8} />}>
+        <div className="dl-empty">No recent calls found for this user.</div>
       </SectionCard>
     );
   }
 
   return (
-    <SectionCard accent="#0ea5e9" title={`Recent Calls (${calls.length})`} icon={
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} style={{ width: 16, height: 16 }}>
-        <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.6 1h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L7.91 8.6a16 16 0 0 0 6.05 6.05l1.96-1.84a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 14.92Z" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
-    }>
-      <div
-        style={{
-          borderRadius: 10,
-          border: '1px solid rgba(255,255,255,0.05)',
-          overflow: 'hidden',
-          background: 'rgba(0,0,0,0.2)',
-        }}
-      >
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+    <SectionCard
+      title={`Recent Calls (${calls.length})`}
+      icon={<Phone size={15} strokeWidth={1.8} />}
+      flush
+    >
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 640 }}>
           <thead>
-            <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
-              {['Dir', 'Caller', '', 'Callee', 'Duration', 'Result', 'Time'].map((col) => (
-                <th
-                  key={col}
-                  style={{
-                    padding: '9px 12px',
-                    textAlign: 'left',
-                    fontSize: '0.58rem',
-                    fontWeight: 700,
-                    color: '#334155',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.05em',
-                    background: 'rgba(0,0,0,0.06)',
-                    whiteSpace: 'nowrap',
-                  }}
-                >
+            <tr>
+              {['Dir', 'Caller', '', 'Callee', 'Duration', 'Result', 'Time'].map((col, i) => (
+                <th key={`${col}-${i}`} className="dl-th">
                   {col}
                 </th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {calls.map((call, i) => {
-              const resultColor = CALL_RESULT_COLOR[call.result] ?? '#64748b';
+            {calls.map((call) => {
+              const resultColor = CALL_RESULT_COLOR[call.result] ?? '#5d6f8c';
               return (
-                <tr
-                  key={call.id}
-                  style={{
-                    background: i % 2 === 1 ? 'rgba(255,255,255,0.015)' : 'transparent',
-                    borderBottom: '1px solid rgba(255,255,255,0.03)',
-                  }}
-                >
+                <tr key={call.id} className="dl-row">
                   {/* Direction */}
-                  <td style={{ padding: '8px 12px', width: 36 }}>
+                  <td className="dlx-td" style={{ width: 40 }}>
                     <span
                       title={call.direction}
                       style={{
@@ -931,48 +717,43 @@ function RecentCallsCard({ calls }: RecentCallsCardProps) {
                         width: 22,
                         height: 22,
                         borderRadius: 6,
-                        background: call.direction === 'inbound'
-                          ? 'rgba(14,165,233,0.12)'
-                          : 'rgba(168,85,247,0.12)',
-                        color: call.direction === 'inbound' ? '#0ea5e9' : '#a855f7',
+                        background: 'rgba(47, 125, 246, 0.09)',
+                        border: '1px solid rgba(47, 125, 246, 0.2)',
+                        color: 'var(--rcf-azure-deep)',
                       }}
                     >
                       {call.direction === 'inbound' ? (
-                        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={2} style={{ width: 10, height: 10 }}>
-                          <path d="M14 2L2 14M2 14h8M2 14V6" strokeLinecap="round" strokeLinejoin="round" />
-                        </svg>
+                        <ArrowDownLeft size={12} strokeWidth={2.25} aria-hidden="true" />
                       ) : (
-                        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={2} style={{ width: 10, height: 10 }}>
-                          <path d="M2 14L14 2M14 2H6M14 2v8" strokeLinecap="round" strokeLinejoin="round" />
-                        </svg>
+                        <ArrowUpRight size={12} strokeWidth={2.25} aria-hidden="true" />
                       )}
                     </span>
                   </td>
                   {/* Caller */}
-                  <td style={{ padding: '8px 12px', fontSize: '0.8rem', color: '#cbd5e0', fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace' }}>
+                  <td className="dlx-td" style={{ fontFamily: MONO, fontSize: '0.78rem', color: 'var(--rcf-ink)' }}>
                     {fmt(call.caller)}
                   </td>
                   {/* Arrow */}
-                  <td style={{ padding: '8px 4px', color: '#334155', fontSize: '0.75rem' }}>→</td>
+                  <td className="dlx-td" style={{ padding: '12px 4px', color: 'var(--rcf-ink-dim)', fontSize: '0.75rem' }}>→</td>
                   {/* Callee */}
-                  <td style={{ padding: '8px 12px', fontSize: '0.8rem', color: '#cbd5e0', fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace' }}>
+                  <td className="dlx-td" style={{ fontFamily: MONO, fontSize: '0.78rem', color: 'var(--rcf-ink)' }}>
                     {fmt(call.callee)}
                   </td>
                   {/* Duration */}
-                  <td style={{ padding: '8px 12px', fontSize: '0.78rem', color: '#64748b', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                  <td className="dlx-td" style={{ color: 'var(--rcf-ink-dim)', fontSize: '0.78rem', textAlign: 'right' }}>
                     {call.duration > 0 ? fmtDuration(call.duration) : '—'}
                   </td>
                   {/* Result badge */}
-                  <td style={{ padding: '8px 12px', textAlign: 'center' }}>
+                  <td className="dlx-td" style={{ textAlign: 'center' }}>
                     <span
                       style={{
-                        fontSize: '0.63rem',
+                        fontSize: '0.62rem',
                         fontWeight: 700,
                         textTransform: 'uppercase',
                         letterSpacing: '0.04em',
                         color: resultColor,
-                        background: `${resultColor}14`,
-                        border: `1px solid ${resultColor}28`,
+                        background: `${resultColor}12`,
+                        border: `1px solid ${resultColor}38`,
                         borderRadius: 4,
                         padding: '2px 7px',
                         whiteSpace: 'nowrap',
@@ -982,7 +763,7 @@ function RecentCallsCard({ calls }: RecentCallsCardProps) {
                     </span>
                   </td>
                   {/* Time */}
-                  <td style={{ padding: '8px 12px', fontSize: '0.72rem', color: '#475569', whiteSpace: 'nowrap', textAlign: 'right' }}>
+                  <td className="dlx-td" style={{ fontSize: '0.72rem', color: 'var(--rcf-ink-dim)', textAlign: 'right' }}>
                     {fmtTimestamp(call.timestamp)}
                   </td>
                 </tr>
@@ -1009,208 +790,42 @@ function QuickActions({ data }: QuickActionsProps) {
     : '/admin/did-search';
 
   return (
-    <SectionCard accent="#a855f7" title="Quick Actions" icon={
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} style={{ width: 16, height: 16 }}>
-        <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
-    }>
+    <SectionCard title="Quick Actions" icon={<Zap size={15} strokeWidth={1.8} />}>
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
         {/* View Customer */}
         <Link
           to={`/admin/customers/${user.customer_id}`}
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 7,
-            padding: '9px 16px',
-            borderRadius: 9,
-            background: 'rgba(59,130,246,0.1)',
-            border: '1px solid rgba(59,130,246,0.25)',
-            color: '#60a5fa',
-            textDecoration: 'none',
-            fontSize: '0.82rem',
-            fontWeight: 600,
-            transition: 'background 0.15s, border-color 0.15s',
-          }}
-          onMouseEnter={(e) => {
-            const el = e.currentTarget as HTMLAnchorElement;
-            el.style.background = 'rgba(59,130,246,0.18)';
-            el.style.borderColor = 'rgba(59,130,246,0.45)';
-          }}
-          onMouseLeave={(e) => {
-            const el = e.currentTarget as HTMLAnchorElement;
-            el.style.background = 'rgba(59,130,246,0.1)';
-            el.style.borderColor = 'rgba(59,130,246,0.25)';
-          }}
+          className="dl-btn dl-btn-ghost"
+          style={{ textDecoration: 'none' }}
         >
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} style={{ width: 14, height: 14 }}>
-            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" />
-            <path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" strokeLinecap="round" />
-          </svg>
+          <Users size={14} strokeWidth={2} aria-hidden="true" />
           View Customer
-          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={2} style={{ width: 11, height: 11, opacity: 0.6 }}>
-            <path d="M6 3h7v7M13 3 3 13" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
+          <ExternalLink size={11} strokeWidth={2} style={{ opacity: 0.6 }} aria-hidden="true" />
         </Link>
 
         {/* View in DID Lookup */}
         <Link
           to={didSearchUrl}
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 7,
-            padding: '9px 16px',
-            borderRadius: 9,
-            background: 'rgba(14,165,233,0.1)',
-            border: '1px solid rgba(14,165,233,0.25)',
-            color: '#38bdf8',
-            textDecoration: 'none',
-            fontSize: '0.82rem',
-            fontWeight: 600,
-            transition: 'background 0.15s, border-color 0.15s',
-          }}
-          onMouseEnter={(e) => {
-            const el = e.currentTarget as HTMLAnchorElement;
-            el.style.background = 'rgba(14,165,233,0.18)';
-            el.style.borderColor = 'rgba(14,165,233,0.45)';
-          }}
-          onMouseLeave={(e) => {
-            const el = e.currentTarget as HTMLAnchorElement;
-            el.style.background = 'rgba(14,165,233,0.1)';
-            el.style.borderColor = 'rgba(14,165,233,0.25)';
-          }}
+          className="dl-btn dl-btn-ghost"
+          style={{ textDecoration: 'none' }}
         >
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} style={{ width: 14, height: 14 }}>
-            <circle cx="11" cy="11" r="7" />
-            <path d="m21 21-4.35-4.35" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
+          <Search size={14} strokeWidth={2} aria-hidden="true" />
           View in DID Lookup
         </Link>
 
         {/* Toggle DND — placeholder */}
-        <button
-          type="button"
-          disabled
-          title="Coming soon"
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 7,
-            padding: '9px 16px',
-            borderRadius: 9,
-            background: 'rgba(239,68,68,0.06)',
-            border: '1px solid rgba(239,68,68,0.15)',
-            color: '#64748b',
-            fontSize: '0.82rem',
-            fontWeight: 600,
-            cursor: 'not-allowed',
-            opacity: 0.55,
-          }}
-        >
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} style={{ width: 14, height: 14 }}>
-            <circle cx="12" cy="12" r="10" />
-            <line x1="4.93" y1="4.93" x2="19.07" y2="19.07" />
-          </svg>
+        <button type="button" className="dl-btn dl-btn-ghost" disabled title="Coming soon">
           Toggle DND
-          <span style={{ fontSize: '0.58rem', color: '#475569', letterSpacing: '0.04em', textTransform: 'uppercase' }}>soon</span>
+          <span className="dl-tag dl-tag-slate" style={{ fontSize: '0.55rem', padding: '1px 6px' }}>soon</span>
         </button>
 
         {/* Reset Extension — placeholder */}
-        <button
-          type="button"
-          disabled
-          title="Coming soon"
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 7,
-            padding: '9px 16px',
-            borderRadius: 9,
-            background: 'rgba(245,158,11,0.06)',
-            border: '1px solid rgba(245,158,11,0.15)',
-            color: '#64748b',
-            fontSize: '0.82rem',
-            fontWeight: 600,
-            cursor: 'not-allowed',
-            opacity: 0.55,
-          }}
-        >
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} style={{ width: 14, height: 14 }}>
-            <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" strokeLinecap="round" strokeLinejoin="round" />
-            <path d="M3 3v5h5" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
+        <button type="button" className="dl-btn dl-btn-ghost" disabled title="Coming soon">
           Reset Extension
-          <span style={{ fontSize: '0.58rem', color: '#475569', letterSpacing: '0.04em', textTransform: 'uppercase' }}>soon</span>
+          <span className="dl-tag dl-tag-slate" style={{ fontSize: '0.55rem', padding: '1px 6px' }}>soon</span>
         </button>
       </div>
     </SectionCard>
-  );
-}
-
-// ─── Section Card Wrapper ─────────────────────────────────────────────────────
-
-interface SectionCardProps {
-  children: React.ReactNode;
-  accent?: string;
-  title: string;
-  icon?: React.ReactNode;
-}
-
-function SectionCard({ children, accent = '#3b82f6', title, icon }: SectionCardProps) {
-  return (
-    <div
-      className="glass-surface"
-      style={{
-        borderRadius: 16,
-        padding: '22px 24px',
-        position: 'relative',
-        overflow: 'hidden',
-      }}
-    >
-      {/* Top accent */}
-      <div
-        style={{
-          position: 'absolute',
-          top: 0,
-          left: 40,
-          right: 40,
-          height: 2,
-          background: `linear-gradient(90deg, transparent, ${accent}, transparent)`,
-          opacity: 0.5,
-        }}
-      />
-
-      {/* Section header */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          marginBottom: 16,
-        }}
-      >
-        {icon && (
-          <span style={{ color: accent, display: 'flex', alignItems: 'center' }}>
-            {icon}
-          </span>
-        )}
-        <h3
-          style={{
-            margin: 0,
-            fontSize: '0.72rem',
-            fontWeight: 700,
-            color: '#64748b',
-            textTransform: 'uppercase',
-            letterSpacing: '0.05em',
-          }}
-        >
-          {title}
-        </h3>
-      </div>
-
-      {children}
-    </div>
   );
 }
 
@@ -1221,97 +836,46 @@ interface RcfCardProps {
 }
 
 function RcfCard({ rcf }: RcfCardProps) {
-  const accent = '#3b82f6';
   return (
     <SectionCard
-      accent={accent}
       title={`RCF Numbers (${rcf.length})`}
-      icon={
-        // PhoneForwarded
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} style={{ width: 16, height: 16 }}>
-          <polyline points="19 8 23 12 19 16" strokeLinecap="round" strokeLinejoin="round" />
-          <line x1="23" y1="12" x2="13" y2="12" strokeLinecap="round" />
-          <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.6 1h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L7.91 8.6a16 16 0 0 0 6.05 6.05l1.96-1.84a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 14.92Z" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      }
+      icon={<PhoneForwarded size={15} strokeWidth={1.8} />}
+      flush
     >
-      <div
-        style={{
-          borderRadius: 10,
-          border: '1px solid rgba(255,255,255,0.05)',
-          overflow: 'hidden',
-          background: 'rgba(0,0,0,0.2)',
-        }}
-      >
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 640 }}>
           <thead>
-            <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+            <tr>
               {['DID', 'Name', 'Forward To', 'Timeout', 'Failover', 'Caller ID', 'Status'].map((col) => (
-                <th
-                  key={col}
-                  style={{
-                    padding: '9px 12px',
-                    textAlign: 'left',
-                    fontSize: '0.58rem',
-                    fontWeight: 700,
-                    color: '#334155',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.05em',
-                    background: 'rgba(0,0,0,0.06)',
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  {col}
-                </th>
+                <th key={col} className="dl-th">{col}</th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {rcf.map((r, i) => (
-              <tr
-                key={r.id}
-                style={{
-                  background: i % 2 === 1 ? 'rgba(255,255,255,0.015)' : 'transparent',
-                  borderBottom: '1px solid rgba(255,255,255,0.03)',
-                }}
-              >
-                <td style={{ padding: '8px 12px', fontSize: '0.8rem', color: '#cbd5e0', fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', whiteSpace: 'nowrap' }}>
+            {rcf.map((r) => (
+              <tr key={r.id} className="dl-row">
+                <td className="dlx-td" style={{ fontFamily: MONO, fontSize: '0.78rem', color: 'var(--rcf-ink)', fontWeight: 600 }}>
                   {fmt(r.did)}
                 </td>
-                <td style={{ padding: '8px 12px', fontSize: '0.8rem', color: '#94a3b8' }}>
-                  {r.name ?? <span style={{ color: '#4a5568', fontStyle: 'italic' }}>—</span>}
+                <td className="dlx-td">
+                  {r.name ?? <span style={{ color: 'var(--rcf-ink-dim)', fontStyle: 'italic' }}>—</span>}
                 </td>
-                <td style={{ padding: '8px 12px', fontSize: '0.8rem', color: '#e2e8f0', fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', whiteSpace: 'nowrap' }}>
+                <td className="dlx-td" style={{ fontFamily: MONO, fontSize: '0.78rem', color: 'var(--rcf-azure-deep)', fontWeight: 600 }}>
                   {fmt(r.forward_to)}
                 </td>
-                <td style={{ padding: '8px 12px', fontSize: '0.78rem', color: '#64748b', whiteSpace: 'nowrap' }}>
+                <td className="dlx-td" style={{ color: 'var(--rcf-ink-dim)', fontSize: '0.78rem' }}>
                   {r.ring_timeout}s
                 </td>
-                <td style={{ padding: '8px 12px', fontSize: '0.78rem', color: '#94a3b8', fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', whiteSpace: 'nowrap' }}>
-                  {r.failover_to ? fmt(r.failover_to) : <span style={{ color: '#4a5568', fontStyle: 'italic' }}>None</span>}
+                <td className="dlx-td" style={{ fontFamily: MONO, fontSize: '0.78rem' }}>
+                  {r.failover_to ? fmt(r.failover_to) : <span style={{ color: 'var(--rcf-ink-dim)', fontStyle: 'italic' }}>None</span>}
                 </td>
-                <td style={{ padding: '8px 12px', textAlign: 'center' }}>
-                  <span style={{ fontSize: '0.72rem', color: r.pass_caller_id ? '#60a5fa' : '#64748b' }}>
+                <td className="dlx-td" style={{ textAlign: 'center' }}>
+                  <span style={{ fontSize: '0.74rem', color: r.pass_caller_id ? 'var(--rcf-azure-deep)' : 'var(--rcf-ink-dim)', fontWeight: 600 }}>
                     {r.pass_caller_id ? 'Pass' : 'Strip'}
                   </span>
                 </td>
-                <td style={{ padding: '8px 12px', textAlign: 'center' }}>
-                  <span
-                    style={{
-                      fontSize: '0.63rem',
-                      fontWeight: 700,
-                      textTransform: 'uppercase',
-                      letterSpacing: '0.04em',
-                      color: r.enabled ? accent : '#64748b',
-                      background: r.enabled ? `${accent}14` : 'rgba(100,116,139,0.1)',
-                      border: `1px solid ${r.enabled ? `${accent}28` : 'rgba(100,116,139,0.2)'}`,
-                      borderRadius: 4,
-                      padding: '2px 7px',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    {r.enabled ? 'Active' : 'Disabled'}
-                  </span>
+                <td className="dlx-td" style={{ textAlign: 'center' }}>
+                  <EnabledStatusTag enabled={r.enabled} />
                 </td>
               </tr>
             ))}
@@ -1329,68 +893,33 @@ interface ApiDidCardProps {
 }
 
 function ApiDidCard({ api_dids }: ApiDidCardProps) {
-  const accent = '#a855f7';
   return (
     <SectionCard
-      accent={accent}
       title={`API DIDs (${api_dids.length})`}
-      icon={
-        // Code brackets
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} style={{ width: 16, height: 16 }}>
-          <polyline points="16 18 22 12 16 6" strokeLinecap="round" strokeLinejoin="round" />
-          <polyline points="8 6 2 12 8 18" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      }
+      icon={<Code2 size={15} strokeWidth={1.8} />}
+      flush
     >
-      <div
-        style={{
-          borderRadius: 10,
-          border: '1px solid rgba(255,255,255,0.05)',
-          overflow: 'hidden',
-          background: 'rgba(0,0,0,0.2)',
-        }}
-      >
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 520 }}>
           <thead>
-            <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+            <tr>
               {['DID', 'Voice URL', 'Status'].map((col) => (
-                <th
-                  key={col}
-                  style={{
-                    padding: '9px 12px',
-                    textAlign: 'left',
-                    fontSize: '0.58rem',
-                    fontWeight: 700,
-                    color: '#334155',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.05em',
-                    background: 'rgba(0,0,0,0.06)',
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  {col}
-                </th>
+                <th key={col} className="dl-th">{col}</th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {api_dids.map((d, i) => (
-              <tr
-                key={d.did}
-                style={{
-                  background: i % 2 === 1 ? 'rgba(255,255,255,0.015)' : 'transparent',
-                  borderBottom: '1px solid rgba(255,255,255,0.03)',
-                }}
-              >
-                <td style={{ padding: '8px 12px', fontSize: '0.8rem', color: '#cbd5e0', fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', whiteSpace: 'nowrap' }}>
+            {api_dids.map((d) => (
+              <tr key={d.did} className="dl-row">
+                <td className="dlx-td" style={{ fontFamily: MONO, fontSize: '0.78rem', color: 'var(--rcf-ink)', fontWeight: 600 }}>
                   {fmt(d.did)}
                 </td>
-                <td style={{ padding: '8px 12px', maxWidth: 320 }}>
+                <td className="dlx-td" style={{ maxWidth: 320, whiteSpace: 'normal' }}>
                   <span
                     style={{
-                      fontSize: '0.75rem',
-                      fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
-                      color: '#94a3b8',
+                      fontSize: '0.74rem',
+                      fontFamily: MONO,
+                      color: 'var(--rcf-azure-deep)',
                       display: 'block',
                       overflow: 'hidden',
                       textOverflow: 'ellipsis',
@@ -1401,23 +930,8 @@ function ApiDidCard({ api_dids }: ApiDidCardProps) {
                     {d.voice_url}
                   </span>
                 </td>
-                <td style={{ padding: '8px 12px', textAlign: 'center' }}>
-                  <span
-                    style={{
-                      fontSize: '0.63rem',
-                      fontWeight: 700,
-                      textTransform: 'uppercase',
-                      letterSpacing: '0.04em',
-                      color: d.enabled ? accent : '#64748b',
-                      background: d.enabled ? `${accent}14` : 'rgba(100,116,139,0.1)',
-                      border: `1px solid ${d.enabled ? `${accent}28` : 'rgba(100,116,139,0.2)'}`,
-                      borderRadius: 4,
-                      padding: '2px 7px',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    {d.enabled ? 'Active' : 'Disabled'}
-                  </span>
+                <td className="dlx-td" style={{ textAlign: 'center' }}>
+                  <EnabledStatusTag enabled={d.enabled} />
                 </td>
               </tr>
             ))}
@@ -1435,91 +949,38 @@ interface TrunksCardProps {
 }
 
 function TrunksCard({ trunks }: TrunksCardProps) {
-  const accent = '#f59e0b';
   return (
     <SectionCard
-      accent={accent}
       title={`SIP Trunks (${trunks.length})`}
-      icon={
-        // Network / share icon
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} style={{ width: 16, height: 16 }}>
-          <circle cx="18" cy="5" r="3" />
-          <circle cx="6" cy="12" r="3" />
-          <circle cx="18" cy="19" r="3" />
-          <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" strokeLinecap="round" />
-          <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" strokeLinecap="round" />
-        </svg>
-      }
+      icon={<Share2 size={15} strokeWidth={1.8} />}
+      flush
     >
-      <div
-        style={{
-          borderRadius: 10,
-          border: '1px solid rgba(255,255,255,0.05)',
-          overflow: 'hidden',
-          background: 'rgba(0,0,0,0.2)',
-        }}
-      >
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 560 }}>
           <thead>
-            <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+            <tr>
               {['Trunk Name', 'Max Channels', 'DIDs', 'Auth IPs', 'Status'].map((col) => (
-                <th
-                  key={col}
-                  style={{
-                    padding: '9px 12px',
-                    textAlign: 'left',
-                    fontSize: '0.58rem',
-                    fontWeight: 700,
-                    color: '#334155',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.05em',
-                    background: 'rgba(0,0,0,0.06)',
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  {col}
-                </th>
+                <th key={col} className="dl-th">{col}</th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {trunks.map((t, i) => (
-              <tr
-                key={t.id}
-                style={{
-                  background: i % 2 === 1 ? 'rgba(255,255,255,0.015)' : 'transparent',
-                  borderBottom: '1px solid rgba(255,255,255,0.03)',
-                }}
-              >
-                <td style={{ padding: '8px 12px', fontSize: '0.82rem', fontWeight: 600, color: '#e2e8f0' }}>
+            {trunks.map((t) => (
+              <tr key={t.id} className="dl-row">
+                <td className="dlx-td" style={{ color: 'var(--rcf-ink)', fontWeight: 700, fontSize: '0.82rem' }}>
                   {t.trunk_name}
                 </td>
-                <td style={{ padding: '8px 12px', fontSize: '0.8rem', color: '#94a3b8', fontVariantNumeric: 'tabular-nums' }}>
+                <td className="dlx-td" style={{ fontVariantNumeric: 'tabular-nums' }}>
                   {t.max_channels}
                 </td>
-                <td style={{ padding: '8px 12px', fontSize: '0.8rem', color: '#94a3b8', fontVariantNumeric: 'tabular-nums' }}>
+                <td className="dlx-td" style={{ fontVariantNumeric: 'tabular-nums' }}>
                   {t.did_count}
                 </td>
-                <td style={{ padding: '8px 12px', fontSize: '0.8rem', color: '#94a3b8', fontVariantNumeric: 'tabular-nums' }}>
+                <td className="dlx-td" style={{ fontVariantNumeric: 'tabular-nums' }}>
                   {t.ip_count}
                 </td>
-                <td style={{ padding: '8px 12px', textAlign: 'center' }}>
-                  <span
-                    style={{
-                      fontSize: '0.63rem',
-                      fontWeight: 700,
-                      textTransform: 'uppercase',
-                      letterSpacing: '0.04em',
-                      color: t.enabled ? accent : '#64748b',
-                      background: t.enabled ? `${accent}14` : 'rgba(100,116,139,0.1)',
-                      border: `1px solid ${t.enabled ? `${accent}28` : 'rgba(100,116,139,0.2)'}`,
-                      borderRadius: 4,
-                      padding: '2px 7px',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    {t.enabled ? 'Active' : 'Disabled'}
-                  </span>
+                <td className="dlx-td" style={{ textAlign: 'center' }}>
+                  <EnabledStatusTag enabled={t.enabled} />
                 </td>
               </tr>
             ))}
@@ -1594,212 +1055,100 @@ function EditUserPanel({ userId, user, onSuccess, onCancel }: EditUserPanelProps
     }
   }
 
-  const inputStyle: React.CSSProperties = {
-    width: '100%',
-    boxSizing: 'border-box',
-    padding: '9px 12px',
-    fontSize: '0.875rem',
-    background: 'rgba(255,255,255,0.04)',
-    border: '1px solid rgba(255,255,255,0.08)',
-    borderRadius: 6,
-    color: '#e2e8f0',
-    outline: 'none',
-    fontFamily: 'inherit',
-    transition: 'border-color 0.15s, box-shadow 0.15s',
-  };
-
-  const labelStyle: React.CSSProperties = {
-    display: 'block',
-    fontSize: '0.68rem',
-    fontWeight: 700,
-    color: '#64748b',
-    textTransform: 'uppercase',
-    letterSpacing: '0.05em',
-    marginBottom: 6,
-  };
-
-  function handleInputFocus(e: React.FocusEvent<HTMLInputElement | HTMLSelectElement>) {
-    e.currentTarget.style.borderColor = 'rgba(59,130,246,0.5)';
-    e.currentTarget.style.boxShadow   = '0 0 0 3px rgba(59,130,246,0.1)';
-  }
-
-  function handleInputBlur(e: React.FocusEvent<HTMLInputElement | HTMLSelectElement>) {
-    e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)';
-    e.currentTarget.style.boxShadow   = 'none';
-  }
-
   return (
-    <div
-      className="glass-surface"
-      style={{
-        borderRadius: 16,
-        padding: '24px 28px',
-        position: 'relative',
-        overflow: 'hidden',
-        boxShadow: '0 0 0 1px rgba(59,130,246,0.2)',
-      }}
-    >
-      {/* Top accent - blue to indicate edit mode */}
-      <div
-        style={{
-          position: 'absolute',
-          top: 0,
-          left: 40,
-          right: 40,
-          height: 2,
-          background: 'linear-gradient(90deg, transparent, rgba(59,130,246,0.9), transparent)',
-          opacity: 0.7,
-        }}
-      />
-
-      {/* Section header */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 20 }}>
-        <span style={{ color: '#3b82f6', display: 'flex', alignItems: 'center' }}>
-          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={2} style={{ width: 14, height: 14 }}>
-            <path d="M11.5 2.5a2.121 2.121 0 0 1 3 3L5 15l-4 1 1-4 9.5-9.5Z" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </span>
-        <h3
-          style={{
-            margin: 0,
-            fontSize: '0.72rem',
-            fontWeight: 700,
-            color: '#64748b',
-            textTransform: 'uppercase',
-            letterSpacing: '0.05em',
-          }}
-        >
-          Edit User
-        </h3>
-      </div>
-
+    <SectionCard title="Edit User" icon={<Pencil size={14} strokeWidth={2} />}>
       {/* Banner */}
       {banner && (
         <div
-          style={{
-            padding: '10px 14px',
-            borderRadius: 8,
-            marginBottom: 20,
-            background: banner.type === 'success' ? 'rgba(34,197,94,0.08)' : 'rgba(239,68,68,0.08)',
-            border: `1px solid ${banner.type === 'success' ? 'rgba(34,197,94,0.25)' : 'rgba(239,68,68,0.25)'}`,
-            color: banner.type === 'success' ? '#4ade80' : '#f87171',
-            fontSize: '0.82rem',
-            fontWeight: 500,
-          }}
+          role="status"
+          className={banner.type === 'success' ? 'dl-banner dl-banner-ok' : 'dl-banner dl-banner-err'}
+          style={{ marginBottom: 20 }}
         >
           {banner.message}
         </div>
       )}
 
       {/* Form grid */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
-          gap: '16px 20px',
-          marginBottom: 20,
-        }}
-      >
+      <div className="dlx-form-grid" style={{ marginBottom: 20 }}>
         {/* Name */}
         <div>
-          <label style={labelStyle}>Name</label>
+          <label className="dl-flabel" htmlFor="edit-user-name">Name</label>
           <input
+            id="edit-user-name"
             type="text"
+            className="dl-input"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            onFocus={handleInputFocus}
-            onBlur={handleInputBlur}
-            style={inputStyle}
             disabled={saving}
             placeholder="Full name"
+            style={{ width: '100%' }}
           />
         </div>
 
         {/* Email */}
         <div>
-          <label style={labelStyle}>Email</label>
+          <label className="dl-flabel" htmlFor="edit-user-email">Email</label>
           <input
+            id="edit-user-email"
             type="email"
+            className="dl-input"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            onFocus={handleInputFocus}
-            onBlur={handleInputBlur}
-            style={inputStyle}
             disabled={saving}
             placeholder="user@example.com"
+            style={{ width: '100%' }}
           />
         </div>
 
         {/* Role */}
         <div>
-          <label style={labelStyle}>Role</label>
+          <label className="dl-flabel" htmlFor="edit-user-role">Role</label>
           <select
+            id="edit-user-role"
+            className="dl-input"
             value={role}
             onChange={(e) => setRole(e.target.value as UserRole)}
-            onFocus={handleInputFocus}
-            onBlur={handleInputBlur}
             disabled={saving}
-            style={{
-              ...inputStyle,
-              appearance: 'none',
-              WebkitAppearance: 'none',
-              cursor: 'pointer',
-              paddingRight: 32,
-            }}
+            style={{ width: '100%' }}
           >
-            <option value="admin"    style={{ background: '#1a1d2e', color: '#e2e8f0' }}>Admin</option>
-            <option value="user"     style={{ background: '#1a1d2e', color: '#e2e8f0' }}>User</option>
-            <option value="readonly" style={{ background: '#1a1d2e', color: '#e2e8f0' }}>Read-Only</option>
+            <option value="admin">Admin</option>
+            <option value="user">User</option>
+            <option value="readonly">Read-Only</option>
           </select>
         </div>
 
         {/* Status */}
         <div>
-          <label style={labelStyle}>Status</label>
+          <label className="dl-flabel" htmlFor="edit-user-status">Status</label>
           <select
+            id="edit-user-status"
+            className="dl-input"
             value={status}
             onChange={(e) => setStatus(e.target.value as 'active' | 'disabled')}
-            onFocus={handleInputFocus}
-            onBlur={handleInputBlur}
             disabled={saving}
-            style={{
-              ...inputStyle,
-              appearance: 'none',
-              WebkitAppearance: 'none',
-              cursor: 'pointer',
-              paddingRight: 32,
-            }}
+            style={{ width: '100%' }}
           >
-            <option value="active"   style={{ background: '#1a1d2e', color: '#e2e8f0' }}>Active</option>
-            <option value="disabled" style={{ background: '#1a1d2e', color: '#e2e8f0' }}>Disabled</option>
+            <option value="active">Active</option>
+            <option value="disabled">Disabled</option>
           </select>
         </div>
 
         {/* Customer */}
         <div>
-          <label style={labelStyle}>Customer</label>
+          <label className="dl-flabel" htmlFor="edit-user-customer">Customer</label>
           <select
+            id="edit-user-customer"
+            className="dl-input"
             value={customerId}
             onChange={(e) => setCustomerId(parseInt(e.target.value, 10))}
-            onFocus={handleInputFocus}
-            onBlur={handleInputBlur}
             disabled={saving || customersLoading}
-            style={{
-              ...inputStyle,
-              appearance: 'none',
-              WebkitAppearance: 'none',
-              cursor: saving || customersLoading ? 'wait' : 'pointer',
-              paddingRight: 32,
-              color: customersLoading ? '#64748b' : '#e2e8f0',
-            }}
+            style={{ width: '100%', cursor: saving || customersLoading ? 'wait' : 'pointer' }}
           >
             {customersLoading ? (
-              <option value={customerId} style={{ background: '#1a1d2e', color: '#64748b' }}>
-                Loading customers…
-              </option>
+              <option value={customerId}>Loading customers…</option>
             ) : (
               sortedCustomers.map((c) => (
-                <option key={c.id} value={c.id} style={{ background: '#1a1d2e', color: '#e2e8f0' }}>
+                <option key={c.id} value={c.id}>
                   {c.name}{c.status !== 'active' ? ` (${c.status})` : ''}
                 </option>
               ))
@@ -1809,17 +1158,19 @@ function EditUserPanel({ userId, user, onSuccess, onCancel }: EditUserPanelProps
 
         {/* New Password */}
         <div>
-          <label style={labelStyle}>New Password (leave blank to keep current)</label>
+          <label className="dl-flabel" htmlFor="edit-user-password">
+            New Password (leave blank to keep current)
+          </label>
           <input
+            id="edit-user-password"
             type="password"
+            className="dl-input"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            onFocus={handleInputFocus}
-            onBlur={handleInputBlur}
-            style={inputStyle}
             disabled={saving}
             placeholder="Leave blank to keep current"
             autoComplete="new-password"
+            style={{ width: '100%' }}
           />
         </div>
       </div>
@@ -1828,29 +1179,9 @@ function EditUserPanel({ userId, user, onSuccess, onCancel }: EditUserPanelProps
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
         <button
           type="button"
+          className="dl-btn dl-btn-primary"
           onClick={handleSave}
           disabled={saving}
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 7,
-            padding: '9px 20px',
-            borderRadius: 8,
-            background: saving ? 'rgba(59,130,246,0.5)' : '#3b82f6',
-            border: '1px solid rgba(59,130,246,0.4)',
-            color: '#fff',
-            fontSize: '0.85rem',
-            fontWeight: 600,
-            cursor: saving ? 'not-allowed' : 'pointer',
-            fontFamily: 'inherit',
-            transition: 'background 0.15s',
-          }}
-          onMouseEnter={(e) => {
-            if (!saving) (e.currentTarget as HTMLButtonElement).style.background = '#2563eb';
-          }}
-          onMouseLeave={(e) => {
-            if (!saving) (e.currentTarget as HTMLButtonElement).style.background = '#3b82f6';
-          }}
         >
           {saving ? (
             <>
@@ -1858,52 +1189,20 @@ function EditUserPanel({ userId, user, onSuccess, onCancel }: EditUserPanelProps
               Saving…
             </>
           ) : (
-            <>
-              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={2} style={{ width: 12, height: 12 }}>
-                <path d="M13 2H5L2 5v9h12V2Z" strokeLinecap="round" strokeLinejoin="round" />
-                <path d="M10 2v4H5V2M5 9h6" strokeLinecap="round" />
-              </svg>
-              Save Changes
-            </>
+            'Save Changes'
           )}
         </button>
 
         <button
           type="button"
+          className="dl-btn dl-btn-ghost"
           onClick={onCancel}
           disabled={saving}
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 6,
-            padding: '9px 16px',
-            borderRadius: 8,
-            background: 'transparent',
-            border: '1px solid rgba(255,255,255,0.08)',
-            color: '#94a3b8',
-            fontSize: '0.85rem',
-            fontWeight: 600,
-            cursor: saving ? 'not-allowed' : 'pointer',
-            fontFamily: 'inherit',
-            transition: 'border-color 0.15s, color 0.15s',
-          }}
-          onMouseEnter={(e) => {
-            if (!saving) {
-              (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(255,255,255,0.18)';
-              (e.currentTarget as HTMLButtonElement).style.color = '#e2e8f0';
-            }
-          }}
-          onMouseLeave={(e) => {
-            if (!saving) {
-              (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(255,255,255,0.08)';
-              (e.currentTarget as HTMLButtonElement).style.color = '#94a3b8';
-            }
-          }}
         >
           Cancel
         </button>
       </div>
-    </div>
+    </SectionCard>
   );
 }
 
@@ -1939,8 +1238,8 @@ function User360View({ userId }: User360ViewProps) {
           justifyContent: 'center',
           gap: 12,
           padding: '72px 0',
-          color: '#64748b',
-          fontSize: '0.875rem',
+          color: 'var(--rcf-ink-dim)',
+          fontSize: '0.85rem',
         }}
       >
         <Spinner size="md" />
@@ -1952,16 +1251,7 @@ function User360View({ userId }: User360ViewProps) {
   if (isError) {
     const msg = error instanceof Error ? error.message : 'Unknown error';
     return (
-      <div
-        style={{
-          padding: '16px 20px',
-          borderRadius: 12,
-          background: 'rgba(239,68,68,0.06)',
-          border: '1px solid rgba(239,68,68,0.18)',
-          color: '#f87171',
-          fontSize: '0.875rem',
-        }}
-      >
+      <div className="dl-banner dl-banner-err">
         <strong style={{ display: 'block', marginBottom: 4 }}>Failed to load user details</strong>
         {msg}
       </div>
@@ -1971,7 +1261,7 @@ function User360View({ userId }: User360ViewProps) {
   if (!data) return null;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+    <div className="dl-stack">
       {/* Header card */}
       <HeaderCard
         data={data}
@@ -1993,17 +1283,12 @@ function User360View({ userId }: User360ViewProps) {
       <StatusGrid data={data} />
 
       {/* Extension config + Devices (two-column where space allows) */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(420px, 1fr))', gap: 16 }}>
+      <div className="dl-grid2">
         {data.extension ? (
           <ExtensionConfigCard extension={data.extension} />
         ) : (
-          <SectionCard accent="#64748b" title="Extension Configuration" icon={
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} style={{ width: 16, height: 16 }}>
-              <circle cx="12" cy="12" r="10" />
-              <line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" />
-            </svg>
-          }>
-            <div style={{ color: '#4a5568', fontSize: '0.82rem', fontStyle: 'italic', padding: '8px 0' }}>
+          <SectionCard title="Extension Configuration" icon={<Settings size={15} strokeWidth={1.8} />}>
+            <div style={{ color: 'var(--rcf-ink-dim)', fontSize: '0.82rem', fontStyle: 'italic', padding: '8px 0' }}>
               No extension assigned to this user.
             </div>
           </SectionCard>
@@ -2032,8 +1317,6 @@ function User360View({ userId }: User360ViewProps) {
   );
 }
 
-// ─── Main Page ────────────────────────────────────────────────────────────────
-
 // ─── All Users Table ──────────────────────────────────────────────────────────
 
 interface AllUsersTableProps {
@@ -2043,8 +1326,6 @@ interface AllUsersTableProps {
 }
 
 function AllUsersTable({ users, searchTerm, onSelectUser }: AllUsersTableProps) {
-  const [hoveredRow, setHoveredRow] = useState<number | null>(null);
-
   const term = searchTerm.trim().toLowerCase();
   const filtered = term.length === 0
     ? users
@@ -2061,15 +1342,7 @@ function AllUsersTable({ users, searchTerm, onSelectUser }: AllUsersTableProps) 
 
   if (filtered.length === 0) {
     return (
-      <div
-        style={{
-          padding: '40px 20px',
-          textAlign: 'center',
-          color: '#4a5568',
-          fontSize: '0.85rem',
-          fontStyle: 'italic',
-        }}
-      >
+      <div className="dl-empty" style={{ margin: '0 20px 20px' }}>
         {term.length > 0
           ? `No users match "${searchTerm}"`
           : 'No users found.'}
@@ -2078,115 +1351,91 @@ function AllUsersTable({ users, searchTerm, onSelectUser }: AllUsersTableProps) 
   }
 
   return (
-    <div
-      style={{
-        borderRadius: 10,
-        border: '1px solid rgba(255,255,255,0.05)',
-        overflow: 'hidden',
-        background: 'rgba(0,0,0,0.2)',
-      }}
-    >
-      {/* Row count label */}
+    <div>
+      {/* Row count strip */}
       <div
         style={{
-          padding: '9px 16px',
-          borderBottom: '1px solid rgba(255,255,255,0.04)',
+          padding: '9px 20px',
+          borderBottom: '1px solid var(--rcf-line-soft)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
+          gap: 12,
         }}
       >
         <span
           style={{
-            fontSize: '0.68rem',
-            color: '#4a5568',
+            fontSize: '0.64rem',
+            color: 'var(--rcf-ink-dim)',
             textTransform: 'uppercase',
-            letterSpacing: '0.05em',
+            letterSpacing: '0.07em',
             fontWeight: 700,
           }}
         >
           {filtered.length} user{filtered.length !== 1 ? 's' : ''}
           {term.length > 0 && users.length !== filtered.length && (
-            <span style={{ color: '#334155', fontWeight: 400, marginLeft: 6 }}>
+            <span style={{ fontWeight: 400, marginLeft: 6, textTransform: 'none', letterSpacing: 0 }}>
               of {users.length} total
             </span>
           )}
         </span>
-        <span style={{ fontSize: '0.68rem', color: '#334155' }}>Click a row to open 360 view</span>
+        <span style={{ fontSize: '0.68rem', color: 'var(--rcf-ink-dim)' }}>
+          Click a row to open 360 view
+        </span>
       </div>
 
       <div style={{ overflowX: 'auto' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 640 }}>
           <thead>
-            <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+            <tr>
               {['Name', 'Email', 'Role', 'Customer', 'Status', 'Last Login'].map((col) => (
-                <th
-                  key={col}
-                  style={{
-                    padding: '9px 12px',
-                    textAlign: 'left',
-                    fontSize: '0.58rem',
-                    fontWeight: 700,
-                    color: '#334155',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.05em',
-                    background: 'rgba(0,0,0,0.06)',
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  {col}
-                </th>
+                <th key={col} className="dl-th">{col}</th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {filtered.map((u) => {
-              const avatarColor = getAvatarColor(u.name);
-              const isHovered = hoveredRow === u.id;
-              const roleCfg = ROLE_CONFIG[u.role] ?? ROLE_CONFIG.user;
+            {filtered.map((u) => (
+              <tr
+                key={u.id}
+                className="dl-row"
+                onClick={() => onSelectUser(u.id)}
+                style={{ cursor: 'pointer' }}
+              >
+                {/* Name + mini avatar */}
+                <td className="dlx-td">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <span className="dl-avatar dl-avatar-sm" aria-hidden="true">
+                      {u.name.charAt(0).toUpperCase()}
+                    </span>
+                    <span style={{ fontSize: '0.82rem', color: 'var(--rcf-ink)', fontWeight: 600 }}>
+                      {u.name}
+                    </span>
+                  </div>
+                </td>
 
-              return (
-                <tr
-                  key={u.id}
-                  onClick={() => onSelectUser(u.id)}
-                  onMouseEnter={() => setHoveredRow(u.id)}
-                  onMouseLeave={() => setHoveredRow(null)}
-                  style={{
-                    background: isHovered ? 'rgba(59,130,246,0.06)' : 'transparent',
-                    borderBottom: '1px solid rgba(255,255,255,0.03)',
-                    cursor: 'pointer',
-                    transition: 'background 0.1s',
-                  }}
-                >
-                  {/* Name + mini avatar */}
-                  <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-                      <div
-                        style={{
-                          width: 28,
-                          height: 28,
-                          borderRadius: 7,
-                          background: `${avatarColor}22`,
-                          border: `1px solid ${avatarColor}44`,
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          fontSize: '0.75rem',
-                          fontWeight: 700,
-                          color: avatarColor,
-                          flexShrink: 0,
-                        }}
-                      >
-                        {u.name.charAt(0).toUpperCase()}
-                      </div>
-                      <span style={{ fontSize: '0.82rem', color: '#e2e8f0', fontWeight: 500 }}>
-                        {u.name}
-                      </span>
-                    </div>
-                  </td>
+                {/* Email */}
+                <td className="dlx-td" style={{ fontFamily: MONO, fontSize: '0.76rem', maxWidth: 220 }}>
+                  <span
+                    style={{
+                      display: 'block',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                    title={u.email}
+                  >
+                    {u.email}
+                  </span>
+                </td>
 
-                  {/* Email */}
-                  <td style={{ padding: '10px 12px', fontSize: '0.78rem', color: '#94a3b8', maxWidth: 220 }}>
+                {/* Role */}
+                <td className="dlx-td">
+                  <RoleTag role={(u.role as UserRole) ?? 'user'} />
+                </td>
+
+                {/* Customer */}
+                <td className="dlx-td" style={{ maxWidth: 180 }}>
+                  {u.customer_name ? (
                     <span
                       style={{
                         display: 'block',
@@ -2194,65 +1443,28 @@ function AllUsersTable({ users, searchTerm, onSelectUser }: AllUsersTableProps) 
                         textOverflow: 'ellipsis',
                         whiteSpace: 'nowrap',
                       }}
-                      title={u.email}
+                      title={u.customer_name}
                     >
-                      {u.email}
+                      {u.customer_name}
                     </span>
-                  </td>
+                  ) : (
+                    <span style={{ color: 'var(--rcf-ink-dim)', fontStyle: 'italic' }}>—</span>
+                  )}
+                </td>
 
-                  {/* Role */}
-                  <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
-                    <span
-                      style={{
-                        fontSize: '0.63rem',
-                        fontWeight: 700,
-                        textTransform: 'uppercase',
-                        letterSpacing: '0.04em',
-                        color: roleCfg.color,
-                        background: `${roleCfg.color}18`,
-                        border: `1px solid ${roleCfg.color}35`,
-                        borderRadius: 4,
-                        padding: '2px 7px',
-                        whiteSpace: 'nowrap',
-                      }}
-                    >
-                      {roleCfg.label}
-                    </span>
-                  </td>
+                {/* Status */}
+                <td className="dlx-td">
+                  <span className={u.status === 'active' ? 'dl-pill dl-pill-on' : 'dl-pill dl-pill-off'}>
+                    {u.status}
+                  </span>
+                </td>
 
-                  {/* Customer */}
-                  <td style={{ padding: '10px 12px', fontSize: '0.8rem', color: '#94a3b8', maxWidth: 180 }}>
-                    {u.customer_name ? (
-                      <span
-                        style={{
-                          display: 'block',
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap',
-                        }}
-                        title={u.customer_name}
-                      >
-                        {u.customer_name}
-                      </span>
-                    ) : (
-                      <span style={{ color: '#334155', fontStyle: 'italic' }}>—</span>
-                    )}
-                  </td>
-
-                  {/* Status */}
-                  <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
-                    <Badge variant={u.status === 'active' ? 'active' : 'disabled'}>
-                      {u.status}
-                    </Badge>
-                  </td>
-
-                  {/* Last Login */}
-                  <td style={{ padding: '10px 12px', fontSize: '0.75rem', color: '#64748b', whiteSpace: 'nowrap' }}>
-                    {fmtRelativeTime(u.last_login)}
-                  </td>
-                </tr>
-              );
-            })}
+                {/* Last Login */}
+                <td className="dlx-td" style={{ fontSize: '0.74rem', color: 'var(--rcf-ink-dim)' }}>
+                  {fmtRelativeTime(u.last_login)}
+                </td>
+              </tr>
+            ))}
           </tbody>
         </table>
       </div>
@@ -2284,138 +1496,33 @@ function UserLookupPanel({ onSelectUser, customerId }: UserLookupPanelProps) {
     : allUsers;
 
   return (
-    <div
-      className="glass-surface"
-      style={{
-        borderRadius: 16,
-        padding: '20px 20px',
-        position: 'relative',
-        overflow: 'hidden',
-      }}
-    >
-      {/* Top accent */}
-      <div
-        style={{
-          position: 'absolute',
-          top: 0,
-          left: 40,
-          right: 40,
-          height: 2,
-          background: 'linear-gradient(90deg, transparent, rgba(168,85,247,0.7), transparent)',
-          opacity: 0.5,
-        }}
-      />
-
-      {/* Section header + search bar row */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 16,
-          marginBottom: 16,
-          flexWrap: 'wrap',
-        }}
-      >
-        {/* Title */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-          <span style={{ color: '#a855f7', display: 'flex', alignItems: 'center' }}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} style={{ width: 15, height: 15 }}>
-              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" strokeLinecap="round" strokeLinejoin="round" />
-              <circle cx="9" cy="7" r="4" />
-              <path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" strokeLinecap="round" />
-            </svg>
-          </span>
-          <h3
-            style={{
-              margin: 0,
-              fontSize: '0.72rem',
-              fontWeight: 700,
-              color: '#64748b',
-              textTransform: 'uppercase',
-              letterSpacing: '0.05em',
-            }}
-          >
-            All Users
-          </h3>
-        </div>
+    <section className="dl-panel">
+      {/* Panel head: title + filter input */}
+      <div className="dl-panel-head" style={{ flexWrap: 'wrap' }}>
+        <span aria-hidden="true" style={{ display: 'inline-flex', color: 'var(--rcf-azure-deep)', flexShrink: 0 }}>
+          <Users size={15} strokeWidth={1.8} />
+        </span>
+        <h3 className="dl-panel-title" style={{ margin: 0 }}>All Users</h3>
 
         {/* Filter search input */}
-        <div style={{ position: 'relative', flex: '1 1 240px', minWidth: 200 }}>
-          {/* Search icon */}
-          <span
-            aria-hidden="true"
-            style={{
-              position: 'absolute',
-              left: 12,
-              top: '50%',
-              transform: 'translateY(-50%)',
-              color: '#475569',
-              display: 'flex',
-              alignItems: 'center',
-              pointerEvents: 'none',
-            }}
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} style={{ width: 15, height: 15 }}>
-              <circle cx="11" cy="11" r="7" />
-              <path d="m21 21-4.35-4.35" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </span>
-
+        <div className="dlx-searchwrap" style={{ marginLeft: 'auto' }}>
+          <Search size={14} strokeWidth={2} aria-hidden="true" />
           <input
             type="text"
+            className="dl-input"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             placeholder="Filter by name, email, role, customer, status…"
-            style={{
-              width: '100%',
-              boxSizing: 'border-box',
-              padding: '8px 36px 8px 34px',
-              fontSize: '0.82rem',
-              background: 'rgba(255,255,255,0.04)',
-              border: '1px solid rgba(255,255,255,0.08)',
-              borderRadius: 8,
-              color: '#e2e8f0',
-              outline: 'none',
-              fontFamily: 'inherit',
-              transition: 'border-color 0.15s, box-shadow 0.15s',
-            }}
-            onFocus={(e) => {
-              e.currentTarget.style.borderColor = 'rgba(59,130,246,0.5)';
-              e.currentTarget.style.boxShadow = '0 0 0 3px rgba(59,130,246,0.12)';
-            }}
-            onBlur={(e) => {
-              e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)';
-              e.currentTarget.style.boxShadow = 'none';
-            }}
+            style={{ width: '100%', paddingLeft: 34, paddingRight: 32 }}
           />
-
-          {/* Clear button */}
           {searchTerm.length > 0 && (
             <button
               type="button"
+              className="dlx-search-clear"
               onClick={() => setSearchTerm('')}
               title="Clear filter"
-              style={{
-                position: 'absolute',
-                right: 8,
-                top: '50%',
-                transform: 'translateY(-50%)',
-                background: 'transparent',
-                border: 'none',
-                color: '#475569',
-                cursor: 'pointer',
-                padding: 3,
-                borderRadius: 4,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-              onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = '#94a3b8'; }}
-              onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = '#475569'; }}
             >
-              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={2} style={{ width: 12, height: 12 }}>
-                <path d="M4 4l8 8M12 4l-8 8" strokeLinecap="round" />
-              </svg>
+              <X size={12} strokeWidth={2.25} aria-hidden="true" />
             </button>
           )}
         </div>
@@ -2429,8 +1536,8 @@ function UserLookupPanel({ onSelectUser, customerId }: UserLookupPanelProps) {
             alignItems: 'center',
             gap: 10,
             padding: '40px 20px',
-            color: '#64748b',
-            fontSize: '0.875rem',
+            color: 'var(--rcf-ink-dim)',
+            fontSize: '0.85rem',
             justifyContent: 'center',
           }}
         >
@@ -2440,18 +1547,11 @@ function UserLookupPanel({ onSelectUser, customerId }: UserLookupPanelProps) {
       )}
 
       {isError && (
-        <div
-          style={{
-            padding: '14px 18px',
-            borderRadius: 10,
-            background: 'rgba(239,68,68,0.06)',
-            border: '1px solid rgba(239,68,68,0.18)',
-            color: '#f87171',
-            fontSize: '0.82rem',
-          }}
-        >
-          <strong style={{ display: 'block', marginBottom: 3 }}>Failed to load users</strong>
-          {error instanceof Error ? error.message : 'Unknown error'}
+        <div className="dl-panel-body">
+          <div className="dl-banner dl-banner-err">
+            <strong style={{ display: 'block', marginBottom: 3 }}>Failed to load users</strong>
+            {error instanceof Error ? error.message : 'Unknown error'}
+          </div>
         </div>
       )}
 
@@ -2462,35 +1562,27 @@ function UserLookupPanel({ onSelectUser, customerId }: UserLookupPanelProps) {
           onSelectUser={onSelectUser}
         />
       )}
-    </div>
+    </section>
   );
 }
-
-// ─── Page ─────────────────────────────────────────────────────────────────────
 
 // ─── Customer Picker Table ────────────────────────────────────────────────────
 
 const CUSTOMER_PAGE_SIZE = 25;
 const CUSTOMER_COL_COUNT = 6;
 
-const pickerTdStyle: React.CSSProperties = {
-  padding: '13px 16px',
-  boxShadow: 'inset 0 -1px 0 0 rgba(255,255,255,0.025)',
-  verticalAlign: 'middle',
-};
-
-function accountTypeBadge(type: PlatformCustomer['account_type']) {
-  return <Badge variant={type}>{type.toUpperCase()}</Badge>;
+function accountTypeTag(type: PlatformCustomer['account_type']) {
+  return <span className="dl-tag">{type.toUpperCase()}</span>;
 }
 
-function statusBadge(status: PlatformCustomer['status']) {
-  if (status === 'active') return <Badge variant="active">Active</Badge>;
-  if (status === 'suspended') return <Badge variant="suspended">Suspended</Badge>;
-  return <Badge variant="closed">Closed</Badge>;
+function customerStatusPill(status: PlatformCustomer['status']) {
+  if (status === 'active') return <span className="dl-pill dl-pill-on">Active</span>;
+  if (status === 'suspended') return <span className="dl-pill dl-pill-off">Suspended</span>;
+  return <span className="dl-tag dl-tag-slate">Closed</span>;
 }
 
-function gradeBadge(grade: PlatformCustomer['traffic_grade']) {
-  return <Badge variant={grade}>{grade}</Badge>;
+function gradeTag(grade: PlatformCustomer['traffic_grade']) {
+  return <span className="dl-tag dl-tag-slate">{grade}</span>;
 }
 
 interface CustomerPickerTableProps {
@@ -2515,167 +1607,80 @@ function CustomerPickerTable({ onSelectCustomer }: CustomerPickerTableProps) {
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+    <div className="dl-stack">
       {/* Search toolbar */}
-      <form
-        onSubmit={handleSearch}
-        className="glass-surface"
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 12,
-          borderRadius: 12,
-          padding: '16px 20px',
-        }}
-      >
-        <input
-          type="search"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search customers…"
-          style={{
-            fontSize: '0.85rem',
-            padding: '8px 14px',
-            height: 36,
-            borderRadius: 8,
-            border: '1px solid rgba(59,130,246,0.15)',
-            background: 'rgba(13,15,21,0.55)',
-            color: '#e2e8f0',
-            outline: 'none',
-            transition: 'border-color 0.15s, box-shadow 0.15s',
-            flex: 1,
-            maxWidth: 400,
-          }}
-          onFocus={(e) => {
-            e.currentTarget.style.borderColor = '#3b82f6';
-            e.currentTarget.style.boxShadow = '0 0 0 3px rgba(59,130,246,0.15)';
-          }}
-          onBlur={(e) => {
-            e.currentTarget.style.borderColor = 'rgba(59,130,246,0.15)';
-            e.currentTarget.style.boxShadow = 'none';
-          }}
-        />
-        <button
-          type="submit"
-          style={{
-            flexShrink: 0,
-            padding: '8px 16px',
-            borderRadius: 8,
-            border: '1px solid rgba(59,130,246,0.15)',
-            background: 'rgba(255,255,255,0.05)',
-            color: '#94a3b8',
-            fontSize: '0.82rem',
-            fontWeight: 600,
-            cursor: 'pointer',
-            fontFamily: 'inherit',
-            transition: 'background 0.15s, color 0.15s',
-          }}
-          onMouseEnter={(e) => {
-            (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.1)';
-            (e.currentTarget as HTMLButtonElement).style.color = '#e2e8f0';
-          }}
-          onMouseLeave={(e) => {
-            (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.05)';
-            (e.currentTarget as HTMLButtonElement).style.color = '#94a3b8';
-          }}
-        >
-          Search
-        </button>
-      </form>
+      <div className="dlx-toolbar" style={{ marginBottom: 0 }}>
+        <form onSubmit={handleSearch} className="dlx-toolbar-form">
+          <input
+            type="search"
+            className="dl-input"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search customers…"
+            style={{ flex: 1, maxWidth: 400 }}
+          />
+          <button type="submit" className="dl-btn dl-btn-ghost" style={{ flexShrink: 0 }}>
+            Search
+          </button>
+        </form>
+      </div>
 
       {/* Loading */}
       {isLoading && (
-        <div className="flex items-center gap-2.5 text-[#718096] py-12">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: 'var(--rcf-ink-dim)', fontSize: '0.85rem', padding: '48px 0' }}>
           <Spinner /> Loading customers…
         </div>
       )}
 
       {/* Error */}
       {isError && (
-        <div
-          style={{
-            padding: '16px 20px',
-            borderRadius: 12,
-            background: 'rgba(239,68,68,0.08)',
-            border: '1px solid rgba(239,68,68,0.2)',
-            color: '#f87171',
-            fontSize: '0.875rem',
-          }}
-        >
-          Failed to load customers.
-        </div>
+        <div className="dl-banner dl-banner-err">Failed to load customers.</div>
       )}
 
       {/* Table */}
       {data && (
         <>
-          <div
-            className="glass-surface"
-            style={{
-              borderRadius: 12,
-              overflow: 'hidden',
-            }}
-          >
+          <section className="dl-panel">
             <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 640 }}>
                 <thead>
-                  <tr style={{ boxShadow: 'inset 0 -1px 0 0 rgba(59,130,246,0.12)', background: 'rgba(59,130,246,0.035)' }}>
+                  <tr>
                     {['ID', 'Name', 'Type', 'Status', 'Grade', 'Created'].map((col) => (
-                      <th
-                        key={col}
-                        style={{
-                          padding: '10px 16px',
-                          textAlign: 'left',
-                          fontSize: '0.6rem',
-                          fontWeight: 700,
-                          color: '#334155',
-                          textTransform: 'uppercase',
-                          letterSpacing: '0.05em',
-                          whiteSpace: 'nowrap',
-                        }}
-                      >
-                        {col}
-                      </th>
+                      <th key={col} className="dl-th">{col}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
                   {(data.items ?? []).length === 0 ? (
                     <tr>
-                      <td
-                        colSpan={CUSTOMER_COL_COUNT}
-                        style={{
-                          padding: '48px 16px',
-                          textAlign: 'center',
-                          color: '#718096',
-                          fontSize: '0.875rem',
-                        }}
-                      >
-                        No customers found.
+                      <td colSpan={CUSTOMER_COL_COUNT} style={{ padding: 0 }}>
+                        <div className="dl-empty" style={{ border: 'none', borderRadius: 0 }}>
+                          No customers found.
+                        </div>
                       </td>
                     </tr>
                   ) : (
                     (data.items ?? []).map((customer) => (
                       <tr
                         key={customer.id}
-                        className="glass-row-hover"
+                        className="dl-row"
                         onClick={() => onSelectCustomer(customer)}
                         style={{ cursor: 'pointer' }}
                       >
-                        <td style={pickerTdStyle}>
-                          <span style={{ color: '#4a5568', fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', fontSize: '0.78rem' }}>
+                        <td className="dlx-td">
+                          <span style={{ color: 'var(--rcf-ink-dim)', fontFamily: MONO, fontSize: '0.76rem' }}>
                             #{customer.id}
                           </span>
                         </td>
-                        <td style={pickerTdStyle}>
-                          <span style={{ color: '#e2e8f0', fontWeight: 600, fontSize: '0.875rem' }}>
+                        <td className="dlx-td">
+                          <span style={{ color: 'var(--rcf-ink)', fontWeight: 700, fontSize: '0.85rem' }}>
                             {customer.name}
                           </span>
                         </td>
-                        <td style={pickerTdStyle}>{accountTypeBadge(customer.account_type)}</td>
-                        <td style={pickerTdStyle}>{statusBadge(customer.status)}</td>
-                        <td style={pickerTdStyle}>{gradeBadge(customer.traffic_grade)}</td>
-                        <td style={{ ...pickerTdStyle, color: '#4a5568', fontSize: '0.82rem' }}>
+                        <td className="dlx-td">{accountTypeTag(customer.account_type)}</td>
+                        <td className="dlx-td">{customerStatusPill(customer.status)}</td>
+                        <td className="dlx-td">{gradeTag(customer.traffic_grade)}</td>
+                        <td className="dlx-td" style={{ color: 'var(--rcf-ink-dim)', fontSize: '0.78rem' }}>
                           {customer.created_at
                             ? new Date(customer.created_at).toLocaleDateString()
                             : '--'}
@@ -2686,36 +1691,19 @@ function CustomerPickerTable({ onSelectCustomer }: CustomerPickerTableProps) {
                 </tbody>
               </table>
             </div>
-          </div>
+          </section>
 
           {/* Load more */}
           {(data.items ?? []).length + offset < (data.total ?? 0) && (
-            <div style={{ textAlign: 'center', paddingBottom: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, paddingBottom: 8 }}>
               <button
                 type="button"
+                className="dl-btn dl-btn-ghost"
                 onClick={() => setOffset((o) => o + CUSTOMER_PAGE_SIZE)}
-                style={{
-                  padding: '8px 20px',
-                  borderRadius: 8,
-                  border: '1px solid rgba(59,130,246,0.25)',
-                  background: 'rgba(255,255,255,0.04)',
-                  color: '#60a5fa',
-                  fontSize: '0.82rem',
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  fontFamily: 'inherit',
-                  transition: 'background 0.15s, color 0.15s',
-                }}
-                onMouseEnter={(e) => {
-                  (e.currentTarget as HTMLButtonElement).style.background = 'rgba(96,165,250,0.1)';
-                }}
-                onMouseLeave={(e) => {
-                  (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.04)';
-                }}
               >
                 Load more
               </button>
-              <span style={{ marginLeft: 12, fontSize: '0.78rem', color: '#4a5568' }}>
+              <span style={{ fontSize: '0.78rem', color: 'var(--rcf-ink-dim)' }}>
                 Showing {(data.items ?? []).length + offset} of {data.total ?? 0}
               </span>
             </div>
@@ -2769,7 +1757,7 @@ export function UserDetailPage() {
   const showCustomerPicker = !show360View && selectedCustomer == null;
 
   return (
-    <div style={{ paddingTop: 4 }}>
+    <div>
       {/* ── State 1: Customer picker ────────────────────────── */}
       {showCustomerPicker && (
         <CustomerPickerTable onSelectCustomer={handleSelectCustomer} />
@@ -2779,53 +1767,26 @@ export function UserDetailPage() {
       {showUserList && (
         <>
           {/* Back to customers */}
-          <div style={{ marginBottom: 20 }}>
-            <button
-              type="button"
-              onClick={handleBackToCustomers}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 6,
-                background: 'transparent',
-                border: 'none',
-                color: '#60a5fa',
-                fontSize: '0.8rem',
-                fontWeight: 600,
-                cursor: 'pointer',
-                padding: '4px 0',
-                fontFamily: 'inherit',
-              }}
-              onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = '#93c5fd'; }}
-              onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = '#60a5fa'; }}
-            >
-              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={2} style={{ width: 13, height: 13 }}>
-                <path d="M10 3L5 8l5 5" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
+          <div style={{ marginBottom: 18 }}>
+            <button type="button" className="dlx-linkbtn" onClick={handleBackToCustomers}>
+              <ChevronLeft size={13} strokeWidth={2.25} aria-hidden="true" />
               Back to customers
             </button>
           </div>
 
           {/* Customer subheading */}
-          <div style={{ marginBottom: 20 }}>
-            <span
-              style={{
-                fontSize: '0.65rem',
-                fontWeight: 700,
-                color: '#a855f7',
-                textTransform: 'uppercase',
-                letterSpacing: '0.05em',
-              }}
-            >
-              Customer
-            </span>
+          <div style={{ marginBottom: 18 }}>
+            <div className="dl-crumb">
+              <span>Customer</span>
+            </div>
             <h2
               style={{
-                margin: '4px 0 0',
+                margin: '6px 0 0',
+                fontFamily: ARCHIVO,
                 fontSize: '1.05rem',
                 fontWeight: 700,
-                color: '#e2e8f0',
-                letterSpacing: '-0.01em',
+                color: 'var(--rcf-ink)',
+                letterSpacing: '-0.015em',
               }}
             >
               {selectedCustomer.name}
@@ -2846,26 +1807,10 @@ export function UserDetailPage() {
           <div style={{ marginBottom: 16 }}>
             <button
               type="button"
+              className="dlx-linkbtn"
               onClick={selectedCustomer != null ? handleBackToUsers : handleBackToCustomers}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 6,
-                background: 'transparent',
-                border: 'none',
-                color: '#60a5fa',
-                fontSize: '0.8rem',
-                fontWeight: 600,
-                cursor: 'pointer',
-                padding: '4px 0',
-                fontFamily: 'inherit',
-              }}
-              onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = '#93c5fd'; }}
-              onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = '#60a5fa'; }}
             >
-              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={2} style={{ width: 13, height: 13 }}>
-                <path d="M10 3L5 8l5 5" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
+              <ChevronLeft size={13} strokeWidth={2.25} aria-hidden="true" />
               {selectedCustomer != null ? `Back to ${selectedCustomer.name} users` : 'Back to customers'}
             </button>
           </div>

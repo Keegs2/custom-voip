@@ -665,26 +665,6 @@ function PaginationControls({
     pageNumbers.push(totalPages);
   }
 
-  const btnStyle = (active: boolean, disabled: boolean): React.CSSProperties => ({
-    display: 'inline-flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    minWidth: 32,
-    height: 32,
-    padding: '0 8px',
-    borderRadius: 7,
-    fontSize: '0.78rem',
-    fontWeight: active ? 700 : 500,
-    cursor: disabled ? 'not-allowed' : 'pointer',
-    border: active ? '1px solid rgba(47,125,246,0.5)' : '1px solid #d5deeb',
-    background: active ? 'rgba(47,125,246,0.1)' : '#ffffff',
-    color: active ? AZURE_DEEP : disabled ? '#b6c2d4' : INK_DIM,
-    opacity: disabled ? 0.55 : 1,
-    transition: 'background 0.12s, color 0.12s, border-color 0.12s',
-    userSelect: 'none',
-    fontFamily: 'inherit',
-  });
-
   return (
     <div
       style={{
@@ -725,7 +705,7 @@ function PaginationControls({
           type="button"
           disabled={currentPage === 1}
           onClick={() => onPageChange(currentPage - 1)}
-          style={btnStyle(false, currentPage === 1)}
+          className="rcf-pgbtn"
           aria-label="Previous page"
         >
           <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={2} style={{ width: 11, height: 11 }}>
@@ -737,7 +717,12 @@ function PaginationControls({
           p === 'ellipsis' ? (
             <span key={`ell-${i}`} style={{ color: INK_FAINT, padding: '0 4px', fontSize: '0.78rem' }}>…</span>
           ) : (
-            <button key={p} type="button" onClick={() => onPageChange(p)} style={btnStyle(currentPage === p, false)}>
+            <button
+              key={p}
+              type="button"
+              onClick={() => onPageChange(p)}
+              className={currentPage === p ? 'rcf-pgbtn rcf-pgbtn-active' : 'rcf-pgbtn'}
+            >
               {p}
             </button>
           ),
@@ -747,7 +732,7 @@ function PaginationControls({
           type="button"
           disabled={currentPage === totalPages}
           onClick={() => onPageChange(currentPage + 1)}
-          style={btnStyle(false, currentPage === totalPages)}
+          className="rcf-pgbtn"
           aria-label="Next page"
         >
           <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={2} style={{ width: 11, height: 11 }}>
@@ -1054,7 +1039,7 @@ function TabBar({ active, onChange }: TabBarProps) {
               style={{
                 display: 'inline-flex',
                 color: isActive ? 'var(--rcf-azure-deep)' : 'inherit',
-                transition: 'color 0.16s',
+                transition: 'color 0.15s ease',
               }}
             >
               {tab.icon}
@@ -1283,9 +1268,9 @@ function WeeklyChart({ days }: WeeklyChartProps) {
   const hoveredDay = hoveredIdx !== null ? days[hoveredIdx] : null;
 
   return (
-    <div className="rcf-panel" style={{ padding: '16px 20px' }}>
+    <div className="rcf-panel" style={{ padding: '18px 20px 16px' }}>
       {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
         <div
           style={{
             width: 22,
@@ -2031,7 +2016,7 @@ function CallActivityTab({ customerId }: CallActivityTabProps) {
       )}
 
       {/* ── Quality stat strip — one slab, left-keyline figures ── */}
-      <div className="rcf-panel fx-load fx-load-d1" style={{ padding: '18px 22px' }}>
+      <div className="rcf-panel fx-load fx-load-d1" style={{ padding: '20px 24px' }}>
         <div className="rcf-statline" style={{ marginTop: 0, gap: '12px 36px' }}>
           <div className="rcf-stat">
             <div className="rcf-stat-value" style={{ color: AZURE_DEEP }}>
@@ -3870,7 +3855,7 @@ export function RcfPage() {
           <>
             {/* Toolbar: Search + NPA filter + count */}
             {!isLoading && !isError && (
-              <div className="fx-load fx-load-d2" style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
+              <div className="fx-load fx-load-d2" style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
                 {/* Search bar */}
                 <div style={{ position: 'relative', flex: '1 1 240px', minWidth: 200 }}>
                   <span
@@ -3973,9 +3958,6 @@ export function RcfPage() {
                     </button>
                   )}
                 </div>
-
-                {/* Spacer pushes the count pill to the right */}
-                <div style={{ flex: '1 1 0', minWidth: 0 }} aria-hidden="true" />
 
                 {/* Count pill (shows filtered subset when a filter is active) */}
                 {serverTotal > 0 && (searchQuery || npaFilter.length === 3) && filteredEntries.length !== rawEntries.length && (
@@ -4083,97 +4065,6 @@ export function RcfPage() {
           <DIDManagementTab customerId={customerId} onSwitchTab={setActiveTab} />
         )}
       </div>
-    </div>
-  );
-}
-
-// ─── PortalHeader (kept for other pages that import it) ──────────────────────
-
-interface PortalHeaderProps {
-  icon: React.ReactNode;
-  title: string;
-  subtitle: string;
-  badgeVariant?: 'rcf' | 'api' | 'trunk';
-  userEmail?: string | null;
-}
-
-const ACCENT_BY_VARIANT: Record<string, string> = {
-  rcf: '#3b82f6',
-  api: '#a855f7',
-  trunk: '#f59e0b',
-};
-
-export function PortalHeader({ icon, title, subtitle, badgeVariant = 'rcf', userEmail }: PortalHeaderProps) {
-  const accent = ACCENT_BY_VARIANT[badgeVariant] ?? '#3b82f6';
-
-  return (
-    <div
-      style={{
-        marginBottom: 36,
-        paddingTop: 8,
-        paddingBottom: 28,
-        borderBottom: '1px solid rgba(42,47,69,0.6)',
-        textAlign: 'center',
-      }}
-    >
-      <div
-        style={{
-          width: 48,
-          height: 48,
-          borderRadius: 14,
-          display: 'inline-flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          background: `linear-gradient(135deg, ${accent}20 0%, ${accent}10 100%)`,
-          border: `1px solid ${accent}30`,
-          color: accent,
-          marginBottom: 14,
-        }}
-        aria-hidden="true"
-      >
-        {icon}
-      </div>
-
-      <h1
-        style={{
-          fontSize: '1.5rem',
-          fontWeight: 800,
-          letterSpacing: '-0.02em',
-          color: '#e2e8f0',
-          lineHeight: 1.15,
-          margin: '0 0 6px',
-        }}
-      >
-        {title}
-      </h1>
-
-      {userEmail && (
-        <div
-          style={{
-            fontSize: '0.78rem',
-            color: accent,
-            fontWeight: 600,
-            letterSpacing: '0.01em',
-            marginBottom: 6,
-          }}
-        >
-          {userEmail}
-        </div>
-      )}
-
-      <p
-        style={{
-          fontSize: '0.85rem',
-          color: '#718096',
-          marginTop: 2,
-          lineHeight: 1.6,
-          maxWidth: 480,
-          marginLeft: 'auto',
-          marginRight: 'auto',
-        }}
-      >
-        {subtitle}
-      </p>
     </div>
   );
 }

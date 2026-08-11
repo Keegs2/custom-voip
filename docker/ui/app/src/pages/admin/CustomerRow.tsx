@@ -1,60 +1,54 @@
+/**
+ * CustomerRow — one clickable row in the admin customers table.
+ * Daylight console styling (`dl-*` primitives); used only by
+ * CustomersAdminPage, which owns the surrounding panel + table.
+ */
 import { useNavigate } from 'react-router-dom';
-import { Badge } from '../../components/ui/Badge';
 import type { Customer, AccountType, CustomerStatus, TrafficGrade } from '../../types/customer';
 
 interface CustomerRowProps {
   customer: Customer;
 }
 
-function accountTypeBadge(type: AccountType) {
-  return <Badge variant={type}>{type.toUpperCase()}</Badge>;
+const MONO = '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace';
+
+function accountTypeTag(type: AccountType) {
+  return <span className="dl-tag">{type.toUpperCase()}</span>;
 }
 
-function statusBadge(status: CustomerStatus) {
-  if (status === 'active') return <Badge variant="active">Active</Badge>;
-  if (status === 'suspended') return <Badge variant="suspended">Suspended</Badge>;
-  return <Badge variant="closed">Closed</Badge>;
+function statusPill(status: CustomerStatus) {
+  if (status === 'active') return <span className="dl-pill dl-pill-on">Active</span>;
+  if (status === 'suspended') return <span className="dl-pill dl-pill-off">Suspended</span>;
+  return <span className="dl-tag dl-tag-slate">Closed</span>;
 }
 
-function gradeBadge(grade: TrafficGrade) {
-  return <Badge variant={grade}>{grade}</Badge>;
+function gradeTag(grade: TrafficGrade) {
+  return <span className="dl-tag dl-tag-slate">{grade}</span>;
 }
-
-const tdStyle: React.CSSProperties = {
-  padding: '13px 16px',
-  boxShadow: 'inset 0 -1px 0 0 rgba(255,255,255,0.025)',
-  verticalAlign: 'middle',
-};
 
 export function CustomerRow({ customer }: CustomerRowProps) {
   const navigate = useNavigate();
 
   return (
     <tr
-      className="glass-row-hover"
+      className="dl-row"
       onClick={() => navigate(`/admin/customers/${customer.id}`)}
       style={{ cursor: 'pointer' }}
     >
-      <td style={tdStyle}>
-        <span style={{ color: '#4a5568', fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', fontSize: '0.78rem' }}>
+      <td className="dlx-td">
+        <span style={{ color: 'var(--rcf-ink-dim)', fontFamily: MONO, fontSize: '0.76rem' }}>
           #{customer.id}
         </span>
       </td>
-      <td style={tdStyle}>
-        <span
-          style={{
-            color: '#e2e8f0',
-            fontWeight: 600,
-            fontSize: '0.875rem',
-          }}
-        >
+      <td className="dlx-td">
+        <span style={{ color: 'var(--rcf-ink)', fontWeight: 700, fontSize: '0.85rem' }}>
           {customer.name}
         </span>
       </td>
-      <td style={tdStyle}>{accountTypeBadge(customer.account_type)}</td>
-      <td style={tdStyle}>{statusBadge(customer.status)}</td>
-      <td style={tdStyle}>{gradeBadge(customer.traffic_grade)}</td>
-      <td style={{ ...tdStyle, color: '#4a5568', fontSize: '0.82rem' }}>
+      <td className="dlx-td">{accountTypeTag(customer.account_type)}</td>
+      <td className="dlx-td">{statusPill(customer.status)}</td>
+      <td className="dlx-td">{gradeTag(customer.traffic_grade)}</td>
+      <td className="dlx-td" style={{ color: 'var(--rcf-ink-dim)', fontSize: '0.78rem' }}>
         {customer.created_at
           ? new Date(customer.created_at).toLocaleDateString()
           : '--'}

@@ -1,0 +1,355 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   dl-call-quality.css — page-scoped daylight styles for CallQualityPage.
+
+   The `dlx-` prefix marks these as page-scoped, NOT part of the shared
+   DAYLIGHT CONSOLE system in index.css. If another page reaches for one of
+   these, promote it into the shared `dl-*` block (flag for consolidation).
+   Every value references the shared `--rcf-*` custom properties declared on
+   `.dl-scope` — no re-stated magic numbers for color or rhythm.
+   Hand-written @media only (never Tailwind md:* — see CLAUDE.md).
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ─── Quality stat strip — left-keyline figures on one white slab (the
+   RcfPage Call Activity language). Keyline color is neutral by default;
+   status-measured figures override it inline (green/amber/red). ─── */
+.dlx-statline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px 36px;
+}
+
+.dlx-stat {
+  min-width: 108px;
+  padding-left: 14px;
+  border-left: 3px solid var(--rcf-azure);
+}
+
+.dlx-stat-dim {
+  border-left-color: #c6d2e4;
+}
+
+.dlx-stat-value {
+  font-family: "Archivo", "IBM Plex Sans", sans-serif;
+  font-weight: 700;
+  font-size: 1.3rem;
+  line-height: 1.05;
+  letter-spacing: -0.01em;
+  color: var(--rcf-ink);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.dlx-stat-label {
+  margin-top: 5px;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--rcf-ink-dim);
+  white-space: nowrap;
+}
+
+/* ─── Filter toolbar internals ─── */
+.dlx-filter-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 14px 16px;
+}
+
+/* ─── Segmented pill selector (direction / product type) ─── */
+.dlx-seg {
+  display: inline-flex;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+
+.dlx-seg-btn {
+  appearance: none;
+  font-family: inherit;
+  font-size: 0.74rem;
+  font-weight: 600;
+  padding: 5px 14px;
+  border-radius: 20px;
+  border: 1px solid #cdd8e8;
+  background: #ffffff;
+  color: var(--rcf-ink-dim);
+  cursor: pointer;
+  transition: background var(--rcf-ease), color var(--rcf-ease), border-color var(--rcf-ease);
+}
+
+.dlx-seg-btn:hover:not(.dlx-seg-btn-active) {
+  background: #f2f6fc;
+  border-color: #a3b6d3;
+  color: var(--rcf-ink-soft);
+}
+
+.dlx-seg-btn:focus-visible {
+  outline: 2px solid var(--rcf-azure);
+  outline-offset: 1px;
+}
+
+.dlx-seg-btn-active {
+  border-color: rgba(47, 125, 246, 0.5);
+  background: rgba(47, 125, 246, 0.1);
+  color: var(--rcf-azure-deep);
+  font-weight: 700;
+}
+
+/* ─── Trend chart cards — tinted boxes inside the white Quality Trends
+   panel (dl-tile family: tint fill, soft hairline, 10px radius). ─── */
+.dlx-chart-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+}
+
+@media (min-width: 920px) {
+  .dlx-chart-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+.dlx-chart-box {
+  background: var(--rcf-tint);
+  border: 1px solid var(--rcf-line-soft);
+  border-radius: 10px;
+  padding: 12px 12px 4px;
+  min-width: 0;
+}
+
+.dlx-chart-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--rcf-ink-soft);
+  margin-bottom: 8px;
+}
+
+/* Series swatch dot in the chart title */
+.dlx-chart-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* ─── Sortable table headers — used together with the shared .dl-th ─── */
+.dlx-th-sort {
+  cursor: pointer;
+  transition: color var(--rcf-ease), background var(--rcf-ease);
+}
+
+.dlx-th-sort:hover {
+  color: var(--rcf-ink-soft);
+  background: #eef3fa;
+}
+
+.dlx-th-active,
+.dlx-th-active:hover { color: var(--rcf-azure-deep); }
+
+/* Selected CDR row — open-state tint + azure keyline (rcf-nrow-open family) */
+.dlx-row-active,
+.dlx-row-active:hover {
+  background: #eef4fe;
+  box-shadow: inset 2px 0 0 0 var(--rcf-azure);
+}
+
+/* ─── Pagination buttons (mirrors the console pagination family) ─── */
+.dlx-pgbtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 7px;
+  font-size: 0.76rem;
+  font-weight: 600;
+  font-family: inherit;
+  border: 1px solid #d5deeb;
+  background: #ffffff;
+  color: var(--rcf-ink-dim);
+  cursor: pointer;
+  user-select: none;
+  transition: background var(--rcf-ease), color var(--rcf-ease), border-color var(--rcf-ease);
+}
+
+.dlx-pgbtn:hover:not(:disabled) {
+  background: var(--rcf-tint-hover);
+  border-color: #b7c7dd;
+  color: var(--rcf-ink-soft);
+}
+
+.dlx-pgbtn:disabled {
+  color: #b6c2d4;
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* ─── Call detail sheet — white elevated panel sliding from the right ─── */
+.dlx-sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(14, 23, 38, 0.34);
+  z-index: 1000;
+  display: flex;
+  justify-content: flex-end;
+  animation: dlx-fade 0.18s ease;
+}
+
+.dlx-sheet {
+  width: 480px;
+  max-width: 95vw;
+  height: 100%;
+  background: var(--rcf-card);
+  border-left: 1px solid var(--rcf-line);
+  box-shadow: -28px 0 64px rgba(14, 23, 38, 0.22);
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  animation: dlx-slide-in 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes dlx-fade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes dlx-slide-in {
+  from { transform: translateX(24px); opacity: 0; }
+  to   { transform: translateX(0); opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dlx-sheet-backdrop,
+  .dlx-sheet { animation: none; }
+}
+
+.dlx-sheet-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px 22px 14px;
+  background: var(--rcf-card);
+  border-bottom: 1px solid var(--rcf-line);
+}
+
+.dlx-sheet-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--rcf-ink-dim);
+}
+
+.dlx-sheet-eyebrow::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  background: var(--rcf-azure);
+  border-radius: 1px;
+  flex-shrink: 0;
+}
+
+.dlx-sheet-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-radius: 7px;
+  border: 1px solid #cdd8e8;
+  background: #ffffff;
+  color: var(--rcf-ink-dim);
+  cursor: pointer;
+  transition: background var(--rcf-ease), color var(--rcf-ease), border-color var(--rcf-ease);
+}
+
+.dlx-sheet-close:hover {
+  background: #f2f6fc;
+  border-color: #b5c4da;
+  color: var(--rcf-ink);
+}
+
+.dlx-sheet-close:focus-visible {
+  outline: 2px solid var(--rcf-azure);
+  outline-offset: 1px;
+}
+
+/* Section heading inside the sheet (dl-section-title family) */
+.dlx-sheet-section {
+  margin-bottom: 22px;
+}
+
+.dlx-sheet-section-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--rcf-ink-soft);
+  margin-bottom: 10px;
+  padding-bottom: 7px;
+  border-bottom: 1px solid var(--rcf-line);
+}
+
+.dlx-sheet-section-title::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  background: var(--rcf-azure);
+  border-radius: 1px;
+  flex-shrink: 0;
+}
+
+/* Sub-group micro heading (Audio In / Audio Out / Jitter / Codecs) */
+.dlx-sheet-subhead {
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--rcf-ink-dim);
+  margin-bottom: 4px;
+}
+
+/* Key → value detail row */
+.dlx-drow {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--rcf-line-soft);
+}
+
+.dlx-drow-label {
+  flex-shrink: 0;
+  width: 128px;
+  padding-top: 2px;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--rcf-ink-dim);
+  white-space: nowrap;
+}
+
+.dlx-drow-value {
+  min-width: 0;
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--rcf-ink);
+  word-break: break-all;
+}

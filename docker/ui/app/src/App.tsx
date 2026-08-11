@@ -8,6 +8,7 @@ import { RcfPage } from './pages/RcfPage';
 import { ApiDidsPage } from './pages/ApiDidsPage';
 import { TrunksPage } from './pages/TrunksPage';
 import { IvrBuilderPage } from './pages/IvrBuilderPage';
+import { VisualVoicemailPage } from './pages/VisualVoicemailPage';
 import { RcfDocsPage } from './pages/docs/RcfDocsPage';
 import { ApiDocsPage } from './pages/docs/ApiDocsPage';
 import { TroubleshootingPage } from './pages/TroubleshootingPage';
@@ -26,7 +27,6 @@ import { DIDSearchPage } from './pages/admin/DIDSearchPage';
 import { UserDetailPage } from './pages/admin/UserDetailPage';
 import { OnboardingAdminPage } from './pages/admin/OnboardingAdminPage';
 import { CallQualityPage } from './pages/CallQualityPage';
-import { AccountPage } from './pages/AccountPage';
 import { MyAccountPage } from './pages/MyAccountPage';
 
 /** Redirects /admin/user/:userId → /admin/customers/users/:userId */
@@ -55,12 +55,15 @@ export function App() {
               <Route path="api-dids"   element={<ApiDidsPage />} />
               <Route path="trunks"     element={<TrunksPage />} />
               <Route path="ivr"        element={<IvrBuilderPage />} />
+              <Route path="voicemail"  element={<VisualVoicemailPage />} />
               <Route path="documentation" element={<Navigate to="/docs/rcf" replace />} />
               <Route path="docs/rcf"         element={<RcfDocsPage />} />
               <Route path="docs/api"         element={<ApiDocsPage />} />
               <Route path="docs/integration" element={<Navigate to="/docs/api" replace />} />
               <Route path="call-quality" element={<CallQualityPage />} />
-              <Route path="account"          element={<AccountPage />} />
+              {/* Old bookmarks: the standalone Account Settings page is retired —
+                  its content lives in MyAccountPage's "Your Account" tab. */}
+              <Route path="account"          element={<Navigate to="/my-account" replace />} />
               <Route path="my-account"       element={<MyAccountPage />} />
 
               {/* Redirects from old standalone paths to their new tab locations */}

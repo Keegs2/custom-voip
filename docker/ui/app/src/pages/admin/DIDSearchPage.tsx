@@ -1,11 +1,29 @@
-import { useState, useCallback } from 'react';
+/**
+ * DIDSearchPage — cross-product DID inventory / number management
+ * (/admin/platform/dids).
+ *
+ * Styling: the shared DAYLIGHT CONSOLE system (`dl-*` in index.css, plus the
+ * admin `dlx-*` layer in styles/dl-admin.css, the platform `dlx2-*` layer in
+ * styles/dl-platform.css, and the page-scoped `dlx4-*` layer in
+ * styles/dl-platform-b.css). Renders INSIDE the PlatformManagementPage shell,
+ * which owns the paper canvas (`dl-scope`) — this page contributes only the
+ * section identity, the stat-tile strip, the tab control, and the inventory
+ * panels. Status tags keep their semantics on paper (available=azure,
+ * assigned=green, reserved=amber, suspended=red, porting=slate,
+ * release_requested=sky — the distinct lifecycle state).
+ *
+ * All queries, mutations, filters, pagination, and the release-request
+ * approve/deny flows are unchanged.
+ *
+ * React #310: every hook is called unconditionally at the top.
+ */
+import { useEffect, useState, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Phone,
   RefreshCw,
   Search,
   X,
-  MapPin,
   Users,
   CheckCircle,
   Clock,
@@ -15,9 +33,6 @@ import {
   Undo2,
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
-import { Button } from '../../components/ui/Button';
-import { Modal } from '../../components/ui/Modal';
-import { FormField } from '../../components/ui/FormField';
 import { Spinner } from '../../components/ui/Spinner';
 import { useToast } from '../../components/ui/ToastContext';
 import { fmt } from '../../utils/format';
@@ -34,6 +49,9 @@ import {
 } from '../../api/didInventory';
 import { listCustomers } from '../../api/customers';
 import type { DidInventoryItem, DidStatus } from '../../types/didInventory';
+import '../../styles/dl-admin.css';
+import '../../styles/dl-platform.css';
+import '../../styles/dl-platform-b.css';
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
 
@@ -55,12 +73,17 @@ const US_STATES = [
   'DC',
 ];
 
-// ─── Status badge helper ────────────────────────────────────────────────────────
+// Light-tuned accents for the stat-tile keylines (semantics preserved).
+const ACCENT_AZURE = 'var(--rcf-azure)';
+const ACCENT_GREEN = '#16a34a';
+const ACCENT_AMBER = '#d97706';
+const ACCENT_SKY = '#0284c7';
+
+// ─── Status tag ─────────────────────────────────────────────────────────────────
 
 interface StatusStyle {
-  bg: string;
-  color: string;
-  border: string;
+  /** Tone modifier combined with the shared .dl-tag base. */
+  toneClass: string;
   label: string;
   icon: React.ReactNode;
 }
@@ -68,267 +91,132 @@ interface StatusStyle {
 function getStatusStyle(status: DidStatus): StatusStyle {
   switch (status) {
     case 'available':
-      return {
-        bg: 'rgba(59,130,246,0.12)',
-        color: '#60a5fa',
-        border: 'rgba(59,130,246,0.30)',
-        label: 'Available',
-        icon: <CheckCircle size={11} />,
-      };
+      return { toneClass: '', label: 'Available', icon: <CheckCircle size={11} /> };
     case 'assigned':
-      return {
-        bg: 'rgba(34,197,94,0.12)',
-        color: '#4ade80',
-        border: 'rgba(34,197,94,0.30)',
-        label: 'Assigned',
-        icon: <CheckCircle size={11} />,
-      };
+      return { toneClass: 'dlx4-tag-green', label: 'Assigned', icon: <CheckCircle size={11} /> };
     case 'reserved':
-      return {
-        bg: 'rgba(245,158,11,0.12)',
-        color: '#fbbf24',
-        border: 'rgba(245,158,11,0.30)',
-        label: 'Reserved',
-        icon: <Clock size={11} />,
-      };
+      return { toneClass: 'dlx4-tag-amber', label: 'Reserved', icon: <Clock size={11} /> };
     case 'porting_in':
-      return {
-        bg: 'rgba(168,85,247,0.12)',
-        color: '#c084fc',
-        border: 'rgba(168,85,247,0.30)',
-        label: 'Porting In',
-        icon: <ArrowRightLeft size={11} />,
-      };
+      return { toneClass: 'dl-tag-slate', label: 'Porting In', icon: <ArrowRightLeft size={11} /> };
     case 'porting_out':
-      return {
-        bg: 'rgba(168,85,247,0.12)',
-        color: '#c084fc',
-        border: 'rgba(168,85,247,0.30)',
-        label: 'Porting Out',
-        icon: <ArrowRightLeft size={11} />,
-      };
+      return { toneClass: 'dl-tag-slate', label: 'Porting Out', icon: <ArrowRightLeft size={11} /> };
     case 'suspended':
-      return {
-        bg: 'rgba(239,68,68,0.10)',
-        color: '#f87171',
-        border: 'rgba(239,68,68,0.28)',
-        label: 'Suspended',
-        icon: <Ban size={11} />,
-      };
+      return { toneClass: 'dlx4-tag-red', label: 'Suspended', icon: <Ban size={11} /> };
     case 'release_requested':
-      return {
-        bg: 'rgba(125,211,252,0.10)',
-        color: '#7dd3fc',
-        border: 'rgba(125,211,252,0.30)',
-        label: 'Release Requested',
-        icon: <Undo2 size={11} />,
-      };
+      return { toneClass: 'dlx4-tag-sky', label: 'Release Requested', icon: <Undo2 size={11} /> };
     default:
-      return {
-        bg: 'rgba(100,116,139,0.12)',
-        color: '#94a3b8',
-        border: 'rgba(100,116,139,0.25)',
-        label: status,
-        icon: <AlertCircle size={11} />,
-      };
+      return { toneClass: 'dl-tag-slate', label: status, icon: <AlertCircle size={11} /> };
   }
 }
 
 function StatusBadge({ status }: { status: DidStatus }) {
   const s = getStatusStyle(status);
   return (
-    <span
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 4,
-        padding: '3px 8px',
-        borderRadius: 6,
-        background: s.bg,
-        color: s.color,
-        border: `1px solid ${s.border}`,
-        fontSize: '0.65rem',
-        fontWeight: 700,
-        letterSpacing: '0.05em',
-        textTransform: 'uppercase',
-        whiteSpace: 'nowrap',
-      }}
-    >
+    <span className={`dl-tag dlx4-stag ${s.toneClass}`.trim()}>
       {s.icon}
       {s.label}
     </span>
   );
 }
 
-// ─── Product pill ───────────────────────────────────────────────────────────────
-
-const PRODUCT_COLORS: Record<string, { bg: string; color: string; border: string }> = {
-  rcf:   { bg: 'rgba(59,130,246,0.12)',  color: '#60a5fa',  border: 'rgba(59,130,246,0.28)' },
-  api:   { bg: 'rgba(168,85,247,0.12)', color: '#c084fc',  border: 'rgba(168,85,247,0.28)' },
-  trunk: { bg: 'rgba(245,158,11,0.12)', color: '#fbbf24',  border: 'rgba(245,158,11,0.28)' },
-  ucaas: { bg: 'rgba(34,197,94,0.12)',  color: '#4ade80',  border: 'rgba(34,197,94,0.28)' },
-};
+// ─── Product tag ────────────────────────────────────────────────────────────────
 
 function ProductPill({ type }: { type: string }) {
-  const c = PRODUCT_COLORS[type] ?? {
-    bg: 'rgba(100,116,139,0.12)',
-    color: '#94a3b8',
-    border: 'rgba(100,116,139,0.25)',
-  };
+  return <span className="dl-tag">{type.toUpperCase()}</span>;
+}
+
+// ─── Mono DID cell ──────────────────────────────────────────────────────────────
+
+function DidCell({ did }: { did: string }) {
   return (
     <span
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        padding: '2px 7px',
-        borderRadius: 5,
-        background: c.bg,
-        color: c.color,
-        border: `1px solid ${c.border}`,
-        fontSize: '0.62rem',
-        fontWeight: 700,
-        letterSpacing: '0.06em',
-        textTransform: 'uppercase',
-        whiteSpace: 'nowrap',
-      }}
+      className="dlx4-mono"
+      style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--rcf-azure-deep)' }}
     >
-      {type.toUpperCase()}
+      {fmt(did)}
     </span>
   );
 }
 
-// ─── Stat card ──────────────────────────────────────────────────────────────────
+// ─── Stat tile ──────────────────────────────────────────────────────────────────
 
-interface StatCardProps {
+interface StatTileProps {
   label: string;
   value: number | string;
   accent: string;
   icon: React.ReactNode;
-  delay?: string;
 }
 
-function DidStatCard({ label, value, accent, icon, delay = '0s' }: StatCardProps) {
+function DidStatTile({ label, value, accent, icon }: StatTileProps) {
   return (
-    <div
-      className="animate-fade-in-up glass-surface glass-hover"
-      style={{
-        animationDelay: delay,
-        flex: 1,
-        minWidth: 0,
-        borderRadius: 14,
-        padding: '16px 18px',
-        display: 'flex',
-        alignItems: 'center',
-        gap: 14,
-      }}
-    >
+    <div className="dl-tile" style={{ boxShadow: `inset 3px 0 0 0 ${accent}` }}>
+      <div className="dl-tile-label" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <span style={{ color: accent, display: 'inline-flex' }}>{icon}</span>
+        {label}
+      </div>
+      <div className="dl-tile-value">
+        {typeof value === 'number' ? value.toLocaleString() : value}
+      </div>
+    </div>
+  );
+}
+
+// ─── Daylight modal (local — the shared Modal is dark-glass) ────────────────────
+
+interface DaylightModalProps {
+  open: boolean;
+  onClose: () => void;
+  title: string;
+  children: React.ReactNode;
+  footer?: React.ReactNode;
+}
+
+function DaylightModal({ open, onClose, title, children, footer }: DaylightModalProps) {
+  // Close on Escape key
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [open, onClose]);
+
+  // Prevent body scroll while modal is open
+  useEffect(() => {
+    if (open) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+    return () => { document.body.style.overflow = ''; };
+  }, [open]);
+
+  if (!open) return null;
+
+  return (
+    <div className="dlx4-modal-backdrop" role="dialog" aria-modal="true">
       <div
-        style={{
-          width: 40,
-          height: 40,
-          borderRadius: 10,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          background: `${accent}18`,
-          border: `1px solid ${accent}30`,
-          color: accent,
-          flexShrink: 0,
-        }}
-      >
-        {icon}
-      </div>
-      <div>
-        <div
-          style={{
-            fontSize: '1.4rem',
-            fontWeight: 800,
-            color: '#e2e8f0',
-            letterSpacing: '-0.03em',
-            lineHeight: 1,
-            marginBottom: 3,
-          }}
-        >
-          {typeof value === 'number' ? value.toLocaleString() : value}
+        style={{ position: 'absolute', inset: 0 }}
+        onClick={onClose}
+        aria-hidden="true"
+      />
+      <div className="dlx4-modal">
+        <div className="dlx4-modal-head">
+          <h2 className="dlx4-modal-title">{title}</h2>
+          <button
+            type="button"
+            className="dlx4-modal-close"
+            onClick={onClose}
+            aria-label="Close modal"
+          >
+            <X size={14} />
+          </button>
         </div>
-        <div style={{ fontSize: '0.7rem', color: '#64748b', fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase' }}>
-          {label}
-        </div>
+        <div className="dlx4-modal-body">{children}</div>
+        {footer && <div className="dlx4-modal-foot">{footer}</div>}
       </div>
     </div>
-  );
-}
-
-// ─── Glass container ────────────────────────────────────────────────────────────
-
-function GlassPanel({
-  children,
-  style,
-  className,
-}: {
-  children: React.ReactNode;
-  style?: React.CSSProperties;
-  className?: string;
-}) {
-  return (
-    <div
-      className={className ? `glass-surface ${className}` : 'glass-surface'}
-      style={{
-        borderRadius: 16,
-        overflow: 'hidden',
-        ...style,
-      }}
-    >
-      {children}
-    </div>
-  );
-}
-
-// ─── Table primitives ───────────────────────────────────────────────────────────
-
-function Th({ children, right }: { children: React.ReactNode; right?: boolean }) {
-  return (
-    <th
-      style={{
-        padding: '10px 14px',
-        fontSize: '0.62rem',
-        fontWeight: 700,
-        color: '#475569',
-        letterSpacing: '0.05em',
-        textTransform: 'uppercase',
-        textAlign: right ? 'right' : 'left',
-        borderBottom: '1px solid rgba(42,47,69,0.6)',
-        background: 'rgba(0,0,0,0.15)',
-        whiteSpace: 'nowrap',
-      }}
-    >
-      {children}
-    </th>
-  );
-}
-
-function Td({
-  children,
-  muted,
-  right,
-}: {
-  children: React.ReactNode;
-  muted?: boolean;
-  right?: boolean;
-}) {
-  return (
-    <td
-      style={{
-        padding: '11px 14px',
-        fontSize: '0.8rem',
-        color: muted ? '#64748b' : '#e2e8f0',
-        borderBottom: '1px solid rgba(42,47,69,0.35)',
-        textAlign: right ? 'right' : 'left',
-        verticalAlign: 'middle',
-      }}
-    >
-      {children}
-    </td>
   );
 }
 
@@ -361,55 +249,29 @@ function FilterBar({
         display: 'flex',
         flexWrap: 'wrap',
         gap: 10,
-        padding: '14px 16px',
-        borderBottom: '1px solid rgba(42,47,69,0.45)',
-        background: 'rgba(0,0,0,0.08)',
+        padding: '12px 20px',
+        borderBottom: '1px solid var(--rcf-line)',
+        background: 'var(--rcf-tint)',
         alignItems: 'center',
       }}
     >
       {/* Search */}
-      <div style={{ position: 'relative', flex: '1 1 220px', minWidth: 180 }}>
-        <Search
-          size={14}
-          style={{
-            position: 'absolute',
-            left: 10,
-            top: '50%',
-            transform: 'translateY(-50%)',
-            color: '#475569',
-            pointerEvents: 'none',
-          }}
-        />
+      <div className="dlx-searchwrap">
+        <Search size={14} />
         <input
           type="text"
+          className="dl-input"
           value={search}
           onChange={(e) => onSearchChange(e.target.value)}
           placeholder={placeholder}
-          className="form-control"
-          style={{
-            width: '100%',
-            padding: '6px 10px 6px 30px',
-            borderRadius: 8,
-            fontSize: '0.78rem',
-            boxSizing: 'border-box',
-          }}
+          style={{ width: '100%', paddingLeft: 34 }}
         />
         {search && (
           <button
             type="button"
+            className="dlx-search-clear"
             onClick={() => onSearchChange('')}
-            style={{
-              position: 'absolute',
-              right: 8,
-              top: '50%',
-              transform: 'translateY(-50%)',
-              color: '#475569',
-              background: 'none',
-              border: 'none',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-            }}
+            aria-label="Clear search"
           >
             <X size={12} />
           </button>
@@ -418,23 +280,10 @@ function FilterBar({
 
       {/* State filter */}
       <select
+        className="dl-input"
         value={stateFilter}
         onChange={(e) => onStateChange(e.target.value)}
-        style={{
-          padding: '6px 28px 6px 10px',
-          background: 'rgba(30,33,48,0.8)',
-          border: '1px solid rgba(42,47,69,0.8)',
-          borderRadius: 8,
-          color: stateFilter ? '#e2e8f0' : '#475569',
-          fontSize: '0.78rem',
-          outline: 'none',
-          cursor: 'pointer',
-          minWidth: 100,
-          appearance: 'none',
-          backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23475569' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E")`,
-          backgroundRepeat: 'no-repeat',
-          backgroundPosition: 'calc(100% - 8px) center',
-        }}
+        style={{ minWidth: 110 }}
       >
         <option value="">All States</option>
         {US_STATES.map((s) => (
@@ -445,23 +294,10 @@ function FilterBar({
       {/* Status filter */}
       {!hideStatus && (
         <select
+          className="dl-input"
           value={statusFilter}
           onChange={(e) => onStatusChange(e.target.value as DidStatus | '')}
-          style={{
-            padding: '6px 28px 6px 10px',
-            background: 'rgba(30,33,48,0.8)',
-            border: '1px solid rgba(42,47,69,0.8)',
-            borderRadius: 8,
-            color: statusFilter ? '#e2e8f0' : '#475569',
-            fontSize: '0.78rem',
-            outline: 'none',
-            cursor: 'pointer',
-            minWidth: 130,
-            appearance: 'none',
-            backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23475569' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E")`,
-            backgroundRepeat: 'no-repeat',
-            backgroundPosition: 'calc(100% - 8px) center',
-          }}
+          style={{ minWidth: 150 }}
         >
           <option value="">All Statuses</option>
           <option value="available">Available</option>
@@ -527,48 +363,42 @@ function AssignModal({ did, open, onClose, onSuccess }: AssignModalProps) {
   if (!did) return null;
 
   const customers = customersData?.items ?? [];
+  const pending = assignMutation.isPending;
 
   return (
-    <Modal
+    <DaylightModal
       open={open}
       onClose={onClose}
       title={`Assign ${fmt(did.did)}`}
       footer={
         <>
-          <Button variant="ghost" onClick={onClose}>
+          <button type="button" className="dl-btn dl-btn-ghost" onClick={onClose}>
             Cancel
-          </Button>
-          <Button
-            variant="primary"
-            loading={assignMutation.isPending}
-            disabled={!customerId || assignMutation.isPending}
+          </button>
+          <button
+            type="button"
+            className="dl-btn dl-btn-primary"
+            disabled={!customerId || pending}
             onClick={() => assignMutation.mutate()}
           >
-            Assign Number
-          </Button>
+            {pending ? 'Assigning…' : 'Assign Number'}
+          </button>
         </>
       }
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
         {/* DID info row */}
-        <div
-          style={{
-            padding: '10px 14px',
-            background: 'rgba(59,130,246,0.06)',
-            border: '1px solid rgba(59,130,246,0.18)',
-            borderRadius: 10,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 10,
-          }}
-        >
-          <Phone size={14} color="#60a5fa" />
+        <div className="dlx-well" style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+          <Phone size={15} style={{ color: 'var(--rcf-azure-deep)', flexShrink: 0 }} />
           <div>
-            <div style={{ fontSize: '0.9rem', fontWeight: 700, color: '#e2e8f0', letterSpacing: '0.02em' }}>
+            <div
+              className="dlx4-mono"
+              style={{ fontSize: '0.9rem', fontWeight: 700, color: 'var(--rcf-ink)' }}
+            >
               {fmt(did.did)}
             </div>
             {(did.city || did.state) && (
-              <div style={{ fontSize: '0.72rem', color: '#64748b', marginTop: 2 }}>
+              <div style={{ fontSize: '0.72rem', color: 'var(--rcf-ink-dim)', marginTop: 2 }}>
                 {[did.city, did.state].filter(Boolean).join(', ')}
                 {did.rate_center && ` · ${did.rate_center}`}
               </div>
@@ -577,49 +407,58 @@ function AssignModal({ did, open, onClose, onSuccess }: AssignModalProps) {
         </div>
 
         {/* Customer selector */}
-        <FormField
-          as="select"
-          label="Customer"
-          required
-          value={customerId}
-          onChange={(e) => setCustomerId((e.target as HTMLSelectElement).value)}
-          disabled={customersLoading}
-        >
-          <option value="">
-            {customersLoading ? 'Loading customers…' : 'Select a customer'}
-          </option>
-          {customers.map((c) => (
-            <option key={c.id} value={String(c.id)}>
-              {c.name}
+        <div>
+          <label className="dl-flabel">Customer</label>
+          <select
+            className="dl-input"
+            style={{ width: '100%' }}
+            required
+            value={customerId}
+            onChange={(e) => setCustomerId(e.target.value)}
+            disabled={customersLoading}
+          >
+            <option value="">
+              {customersLoading ? 'Loading customers…' : 'Select a customer'}
             </option>
-          ))}
-        </FormField>
+            {customers.map((c) => (
+              <option key={c.id} value={String(c.id)}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+        </div>
 
         {/* Product type selector */}
-        <FormField
-          as="select"
-          label="Product Type"
-          required
-          value={productType}
-          onChange={(e) => setProductType((e.target as HTMLSelectElement).value)}
-        >
-          {PRODUCT_TYPES.map((pt) => (
-            <option key={pt.value} value={pt.value}>
-              {pt.label}
-            </option>
-          ))}
-        </FormField>
+        <div>
+          <label className="dl-flabel">Product Type</label>
+          <select
+            className="dl-input"
+            style={{ width: '100%' }}
+            required
+            value={productType}
+            onChange={(e) => setProductType(e.target.value)}
+          >
+            {PRODUCT_TYPES.map((pt) => (
+              <option key={pt.value} value={pt.value}>
+                {pt.label}
+              </option>
+            ))}
+          </select>
+        </div>
 
         {/* Notes */}
-        <FormField
-          as="textarea"
-          label="Notes (optional)"
-          value={notes}
-          onChange={(e) => setNotes((e.target as HTMLTextAreaElement).value)}
-          placeholder="Internal note about this assignment…"
-        />
+        <div>
+          <label className="dl-flabel">Notes (optional)</label>
+          <textarea
+            className="dl-input"
+            style={{ width: '100%', minHeight: 72, resize: 'vertical' }}
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            placeholder="Internal note about this assignment…"
+          />
+        </div>
       </div>
-    </Modal>
+    </DaylightModal>
   );
 }
 
@@ -655,47 +494,40 @@ function UnassignModal({ did, open, onClose, onSuccess }: UnassignModalProps) {
   // Guard after hooks
   if (!did) return null;
 
+  const pending = unassignMutation.isPending;
+
   return (
-    <Modal
+    <DaylightModal
       open={open}
       onClose={onClose}
       title="Unassign Number"
       footer={
         <>
-          <Button variant="ghost" onClick={onClose}>
+          <button type="button" className="dl-btn dl-btn-ghost" onClick={onClose}>
             Cancel
-          </Button>
-          <Button
-            variant="danger"
-            loading={unassignMutation.isPending}
+          </button>
+          <button
+            type="button"
+            className="dl-btn dl-btn-danger"
+            disabled={pending}
             onClick={() => unassignMutation.mutate()}
           >
-            Unassign
-          </Button>
+            {pending ? 'Unassigning…' : 'Unassign'}
+          </button>
         </>
       }
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-        <p style={{ fontSize: '0.85rem', color: '#94a3b8', lineHeight: 1.6 }}>
-          This will remove <strong style={{ color: '#e2e8f0' }}>{fmt(did.did)}</strong> from{' '}
-          <strong style={{ color: '#e2e8f0' }}>{did.customer_name ?? 'this customer'}</strong> and
+        <p style={{ fontSize: '0.85rem', color: 'var(--rcf-ink-soft)', lineHeight: 1.6, margin: 0 }}>
+          This will remove <strong style={{ color: 'var(--rcf-ink)' }}>{fmt(did.did)}</strong> from{' '}
+          <strong style={{ color: 'var(--rcf-ink)' }}>{did.customer_name ?? 'this customer'}</strong> and
           return it to the available pool. This action takes effect immediately.
         </p>
-        <div
-          style={{
-            padding: '10px 14px',
-            background: 'rgba(239,68,68,0.07)',
-            border: '1px solid rgba(239,68,68,0.20)',
-            borderRadius: 8,
-            fontSize: '0.75rem',
-            color: '#f87171',
-            lineHeight: 1.55,
-          }}
-        >
+        <div className="dl-banner dl-banner-err" style={{ fontSize: '0.75rem' }}>
           Any active routing rules for this number will stop working immediately.
         </div>
       </div>
-    </Modal>
+    </DaylightModal>
   );
 }
 
@@ -733,48 +565,41 @@ function DenyReleaseModal({ did, open, onClose, onSuccess }: DenyReleaseModalPro
   // Guard after hooks
   if (!did) return null;
 
+  const pending = denyMutation.isPending;
+
   return (
-    <Modal
+    <DaylightModal
       open={open}
       onClose={onClose}
       title="Deny Release Request"
       footer={
         <>
-          <Button variant="ghost" onClick={onClose}>
+          <button type="button" className="dl-btn dl-btn-ghost" onClick={onClose}>
             Cancel
-          </Button>
-          <Button
-            variant="primary"
-            loading={denyMutation.isPending}
+          </button>
+          <button
+            type="button"
+            className="dl-btn dl-btn-primary"
+            disabled={pending}
             onClick={() => denyMutation.mutate()}
           >
-            Deny Request
-          </Button>
+            {pending ? 'Denying…' : 'Deny Request'}
+          </button>
         </>
       }
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-        <p style={{ fontSize: '0.85rem', color: '#94a3b8', lineHeight: 1.6 }}>
+        <p style={{ fontSize: '0.85rem', color: 'var(--rcf-ink-soft)', lineHeight: 1.6, margin: 0 }}>
           This will dismiss the pending release request for{' '}
-          <strong style={{ color: '#e2e8f0' }}>{fmt(did.did)}</strong>. The number stays
-          assigned to <strong style={{ color: '#e2e8f0' }}>{did.customer_name ?? 'its customer'}</strong>{' '}
+          <strong style={{ color: 'var(--rcf-ink)' }}>{fmt(did.did)}</strong>. The number stays
+          assigned to <strong style={{ color: 'var(--rcf-ink)' }}>{did.customer_name ?? 'its customer'}</strong>{' '}
           and routing is unaffected.
         </p>
-        <div
-          style={{
-            padding: '10px 14px',
-            background: 'rgba(125,211,252,0.07)',
-            border: '1px solid rgba(125,211,252,0.20)',
-            borderRadius: 8,
-            fontSize: '0.75rem',
-            color: '#7dd3fc',
-            lineHeight: 1.55,
-          }}
-        >
+        <div className="dl-note" role="note">
           The customer can submit a new release request at any time.
         </div>
       </div>
-    </Modal>
+    </DaylightModal>
   );
 }
 
@@ -840,84 +665,69 @@ function InventoryTab() {
 
   const items = data?.items ?? [];
   const total = data?.total ?? 0;
+  const filtered = Boolean(search || statusFilter || stateFilter);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-      {/* Stats bar */}
-      <div
-        className="animate-fade-in-up"
-        style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}
-      >
-        <DidStatCard
+    <div className="dl-stack">
+      {/* Stats strip */}
+      <div className="dlx4-tiles">
+        <DidStatTile
           label="Total Numbers"
           value={statsLoading ? '—' : (statsData?.total ?? 0)}
-          accent="#3b82f6"
-          icon={<Phone size={17} />}
-          delay="0.05s"
+          accent={ACCENT_AZURE}
+          icon={<Phone size={12} />}
         />
-        <DidStatCard
+        <DidStatTile
           label="Available"
           value={statsLoading ? '—' : (statsData?.available ?? 0)}
-          accent="#60a5fa"
-          icon={<CheckCircle size={17} />}
-          delay="0.10s"
+          accent={ACCENT_AZURE}
+          icon={<CheckCircle size={12} />}
         />
-        <DidStatCard
+        <DidStatTile
           label="Assigned"
           value={statsLoading ? '—' : (statsData?.assigned ?? 0)}
-          accent="#4ade80"
-          icon={<Users size={17} />}
-          delay="0.15s"
+          accent={ACCENT_GREEN}
+          icon={<Users size={12} />}
         />
-        <DidStatCard
+        <DidStatTile
           label="Reserved"
           value={statsLoading ? '—' : (statsData?.reserved ?? 0)}
-          accent="#fbbf24"
-          icon={<Clock size={17} />}
-          delay="0.20s"
+          accent={ACCENT_AMBER}
+          icon={<Clock size={12} />}
         />
-        <DidStatCard
+        <DidStatTile
           label="Release Requests"
           value={statsLoading ? '—' : (statsData?.by_status?.release_requested ?? 0)}
-          accent="#7dd3fc"
-          icon={<Undo2 size={17} />}
-          delay="0.25s"
+          accent={ACCENT_SKY}
+          icon={<Undo2 size={12} />}
         />
       </div>
 
-      {/* Table */}
-      <GlassPanel className="animate-fade-in-up" style={{ animationDelay: '0.25s' }}>
-        {/* Table toolbar */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            padding: '14px 16px',
-            borderBottom: '1px solid rgba(42,47,69,0.45)',
-          }}
-        >
-          <div style={{ fontSize: '0.78rem', color: '#64748b' }}>
-            {isFetching ? (
-              <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <Spinner size="xs" /> Loading…
-              </span>
-            ) : (
-              <span>
-                <strong style={{ color: '#94a3b8' }}>{total.toLocaleString()}</strong> numbers
-                {(search || statusFilter || stateFilter) && ' (filtered)'}
-              </span>
-            )}
-          </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            icon={<RefreshCw size={13} />}
-            loading={syncMutation.isPending}
+      {/* Inventory panel */}
+      <section className="dl-panel">
+        <div className="dl-panel-head">
+          <h2 className="dl-panel-title">DID Inventory</h2>
+          {isFetching ? (
+            <span
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: '0.74rem', color: 'var(--rcf-ink-dim)' }}
+            >
+              <Spinner size="xs" /> Loading…
+            </span>
+          ) : (
+            <span className="dl-count">
+              {total.toLocaleString()} numbers{filtered ? ' (filtered)' : ''}
+            </span>
+          )}
+          <button
+            type="button"
+            className="dl-btn dl-btn-ghost dlx-btn-sm"
+            style={{ marginLeft: 'auto' }}
+            disabled={syncMutation.isPending}
             onClick={() => syncMutation.mutate()}
           >
-            Sync from Bandwidth
-          </Button>
+            <RefreshCw size={13} />
+            {syncMutation.isPending ? 'Syncing…' : 'Sync from Bandwidth'}
+          </button>
         </div>
 
         <FilterBar
@@ -931,110 +741,95 @@ function InventoryTab() {
 
         {/* Table */}
         <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 760 }}>
             <thead>
               <tr>
-                <Th>DID</Th>
-                <Th>City</Th>
-                <Th>State</Th>
-                <Th>Status</Th>
-                <Th>Product</Th>
-                <Th>Customer</Th>
-                <Th right>Actions</Th>
+                <th className="dl-th">DID</th>
+                <th className="dl-th">City</th>
+                <th className="dl-th">State</th>
+                <th className="dl-th">Status</th>
+                <th className="dl-th">Product</th>
+                <th className="dl-th">Customer</th>
+                <th className="dl-th" style={{ textAlign: 'right' }}>Actions</th>
               </tr>
             </thead>
             <tbody>
               {isLoading ? (
                 <tr>
-                  <td colSpan={7} style={{ textAlign: 'center', padding: 48, color: '#475569' }}>
+                  <td colSpan={7} style={{ textAlign: 'center', padding: 48 }}>
                     <Spinner size="sm" />
                   </td>
                 </tr>
               ) : items.length === 0 ? (
                 <tr>
-                  <td colSpan={7} style={{ textAlign: 'center', padding: 48, color: '#475569', fontSize: '0.82rem' }}>
+                  <td colSpan={7} style={{ textAlign: 'center', padding: 48, color: 'var(--rcf-ink-dim)', fontSize: '0.82rem' }}>
                     No numbers found
-                    {(search || statusFilter || stateFilter) && ' matching those filters'}
+                    {filtered && ' matching those filters'}
                   </td>
                 </tr>
               ) : (
                 items.map((item) => (
-                  <tr
-                    key={item.id}
-                    style={{ transition: 'background 0.1s' }}
-                    onMouseEnter={(e) => {
-                      (e.currentTarget as HTMLTableRowElement).style.background = 'rgba(255,255,255,0.025)';
-                    }}
-                    onMouseLeave={(e) => {
-                      (e.currentTarget as HTMLTableRowElement).style.background = '';
-                    }}
-                  >
-                    <Td>
-                      <span style={{ fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', fontSize: '0.82rem', color: '#93c5fd', letterSpacing: '0.03em' }}>
-                        {fmt(item.did)}
-                      </span>
-                    </Td>
-                    <Td muted>{item.city ?? '—'}</Td>
-                    <Td muted>{item.state ?? '—'}</Td>
-                    <Td>
-                      <StatusBadge status={item.status} />
-                    </Td>
-                    <Td>
+                  <tr key={item.id} className="dl-row">
+                    <td className="dlx-td"><DidCell did={item.did} /></td>
+                    <td className="dlx-td" style={{ color: 'var(--rcf-ink-dim)' }}>{item.city ?? '—'}</td>
+                    <td className="dlx-td" style={{ color: 'var(--rcf-ink-dim)' }}>{item.state ?? '—'}</td>
+                    <td className="dlx-td"><StatusBadge status={item.status} /></td>
+                    <td className="dlx-td">
                       {item.product_type ? (
                         <ProductPill type={item.product_type} />
                       ) : (
-                        <span style={{ color: '#334155', fontSize: '0.75rem' }}>—</span>
+                        <span style={{ color: 'var(--rcf-ink-dim)', fontSize: '0.75rem' }}>—</span>
                       )}
-                    </Td>
-                    <Td>
+                    </td>
+                    <td className="dlx-td">
                       {item.customer_name ? (
-                        <span style={{ fontSize: '0.78rem', color: '#94a3b8' }}>
+                        <span style={{ fontSize: '0.8rem', color: 'var(--rcf-ink-soft)' }}>
                           {item.customer_name}
                         </span>
                       ) : (
-                        <span style={{ color: '#334155', fontSize: '0.75rem' }}>—</span>
+                        <span style={{ color: 'var(--rcf-ink-dim)', fontSize: '0.75rem' }}>—</span>
                       )}
-                    </Td>
-                    <Td right>
+                    </td>
+                    <td className="dlx-td" style={{ textAlign: 'right' }}>
                       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6 }}>
                         {item.status === 'available' && (
-                          <Button
-                            size="xs"
-                            variant="primary"
+                          <button
+                            type="button"
+                            className="dl-btn dl-btn-primary dlx-btn-sm"
                             onClick={() => setAssignTarget(item)}
                           >
                             Assign
-                          </Button>
+                          </button>
                         )}
                         {item.status === 'assigned' && (
-                          <Button
-                            size="xs"
-                            variant="danger"
+                          <button
+                            type="button"
+                            className="dl-btn dl-btn-danger dlx-btn-sm"
                             onClick={() => setUnassignTarget(item)}
                           >
                             Unassign
-                          </Button>
+                          </button>
                         )}
                         {item.status === 'release_requested' && (
                           <>
-                            <Button
-                              size="xs"
-                              variant="primary"
+                            <button
+                              type="button"
+                              className="dl-btn dl-btn-primary dlx-btn-sm"
                               onClick={() => setUnassignTarget(item)}
                             >
                               Approve Release
-                            </Button>
-                            <Button
-                              size="xs"
-                              variant="ghost"
+                            </button>
+                            <button
+                              type="button"
+                              className="dl-btn dl-btn-ghost dlx-btn-sm"
                               onClick={() => setDenyTarget(item)}
                             >
                               Deny
-                            </Button>
+                            </button>
                           </>
                         )}
                       </div>
-                    </Td>
+                    </td>
                   </tr>
                 ))
               )}
@@ -1049,36 +844,36 @@ function InventoryTab() {
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',
-              padding: '12px 16px',
-              borderTop: '1px solid rgba(42,47,69,0.45)',
-              background: 'rgba(0,0,0,0.08)',
+              padding: '12px 20px',
+              borderTop: '1px solid var(--rcf-line)',
+              background: 'var(--rcf-tint)',
             }}
           >
-            <span style={{ fontSize: '0.72rem', color: '#475569' }}>
+            <span style={{ fontSize: '0.74rem', color: 'var(--rcf-ink-dim)', fontVariantNumeric: 'tabular-nums' }}>
               Showing {Math.min(offset + PAGE_SIZE, total).toLocaleString()} of{' '}
               {total.toLocaleString()}
             </span>
             <div style={{ display: 'flex', gap: 8 }}>
-              <Button
-                size="xs"
-                variant="ghost"
+              <button
+                type="button"
+                className="dlx4-pgbtn"
                 disabled={offset === 0}
                 onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}
               >
                 Previous
-              </Button>
-              <Button
-                size="xs"
-                variant="ghost"
+              </button>
+              <button
+                type="button"
+                className="dlx4-pgbtn"
                 disabled={offset + PAGE_SIZE >= total}
                 onClick={() => setOffset(offset + PAGE_SIZE)}
               >
                 Next
-              </Button>
+              </button>
             </div>
           </div>
         )}
-      </GlassPanel>
+      </section>
 
       {/* Modals */}
       <AssignModal
@@ -1144,22 +939,11 @@ function AvailableTab({ isAdmin }: AvailableTabProps) {
   const handleStateChange = useCallback((v: string) => setStateFilter(v), []);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-      <GlassPanel className="animate-fade-in-up">
-        {/* Toolbar */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            padding: '14px 16px',
-            borderBottom: '1px solid rgba(42,47,69,0.45)',
-          }}
-        >
-          <div style={{ fontSize: '0.78rem', color: '#64748b' }}>
-            <strong style={{ color: '#94a3b8' }}>{items.length.toLocaleString()}</strong>{' '}
-            available numbers
-          </div>
+    <div className="dl-stack">
+      <section className="dl-panel">
+        <div className="dl-panel-head">
+          <h2 className="dl-panel-title">Available Numbers</h2>
+          <span className="dl-count">{items.length.toLocaleString()} available</span>
         </div>
 
         <FilterBar
@@ -1173,80 +957,68 @@ function AvailableTab({ isAdmin }: AvailableTabProps) {
           hideStatus
         />
 
-        {/* Number grid / table */}
+        {/* Number table */}
         <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 680 }}>
             <thead>
               <tr>
-                <Th>DID</Th>
-                <Th>City</Th>
-                <Th>State</Th>
-                <Th>LATA</Th>
-                <Th>Rate Center</Th>
-                <Th right>Action</Th>
+                <th className="dl-th">DID</th>
+                <th className="dl-th">City</th>
+                <th className="dl-th">State</th>
+                <th className="dl-th">LATA</th>
+                <th className="dl-th">Rate Center</th>
+                <th className="dl-th" style={{ textAlign: 'right' }}>Action</th>
               </tr>
             </thead>
             <tbody>
               {isLoading ? (
                 <tr>
-                  <td colSpan={6} style={{ textAlign: 'center', padding: 48, color: '#475569' }}>
+                  <td colSpan={6} style={{ textAlign: 'center', padding: 48 }}>
                     <Spinner size="sm" />
                   </td>
                 </tr>
               ) : items.length === 0 ? (
                 <tr>
-                  <td colSpan={6} style={{ textAlign: 'center', padding: 48, color: '#475569', fontSize: '0.82rem' }}>
+                  <td colSpan={6} style={{ textAlign: 'center', padding: 48, color: 'var(--rcf-ink-dim)', fontSize: '0.82rem' }}>
                     No available numbers
                     {(search || stateFilter) && ' matching those filters'}
                   </td>
                 </tr>
               ) : (
                 items.map((item) => (
-                  <tr
-                    key={item.id}
-                    onMouseEnter={(e) => {
-                      (e.currentTarget as HTMLTableRowElement).style.background = 'rgba(255,255,255,0.025)';
-                    }}
-                    onMouseLeave={(e) => {
-                      (e.currentTarget as HTMLTableRowElement).style.background = '';
-                    }}
-                  >
-                    <Td>
-                      <span style={{ fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', fontSize: '0.82rem', color: '#93c5fd', letterSpacing: '0.03em' }}>
-                        {fmt(item.did)}
-                      </span>
-                    </Td>
-                    <Td muted>{item.city ?? '—'}</Td>
-                    <Td muted>{item.state ?? '—'}</Td>
-                    <Td muted>{item.lata ?? '—'}</Td>
-                    <Td muted>{item.rate_center ?? '—'}</Td>
-                    <Td right>
+                  <tr key={item.id} className="dl-row">
+                    <td className="dlx-td"><DidCell did={item.did} /></td>
+                    <td className="dlx-td" style={{ color: 'var(--rcf-ink-dim)' }}>{item.city ?? '—'}</td>
+                    <td className="dlx-td" style={{ color: 'var(--rcf-ink-dim)' }}>{item.state ?? '—'}</td>
+                    <td className="dlx-td" style={{ color: 'var(--rcf-ink-dim)' }}>{item.lata ?? '—'}</td>
+                    <td className="dlx-td" style={{ color: 'var(--rcf-ink-dim)' }}>{item.rate_center ?? '—'}</td>
+                    <td className="dlx-td" style={{ textAlign: 'right' }}>
                       {isAdmin ? (
-                        <Button
-                          size="xs"
-                          variant="primary"
+                        <button
+                          type="button"
+                          className="dl-btn dl-btn-primary dlx-btn-sm"
                           onClick={() => setAssignTarget(item)}
                         >
                           Assign
-                        </Button>
+                        </button>
                       ) : (
-                        <Button
-                          size="xs"
-                          variant="primary"
-                          loading={requestMutation.isPending}
+                        <button
+                          type="button"
+                          className="dl-btn dl-btn-primary dlx-btn-sm"
+                          disabled={requestMutation.isPending}
                           onClick={() => requestMutation.mutate(item.did)}
                         >
-                          Request
-                        </Button>
+                          {requestMutation.isPending ? 'Requesting…' : 'Request'}
+                        </button>
                       )}
-                    </Td>
+                    </td>
                   </tr>
                 ))
               )}
             </tbody>
           </table>
         </div>
-      </GlassPanel>
+      </section>
 
       {/* Assign modal — admin only */}
       {isAdmin && (
@@ -1299,29 +1071,21 @@ function AssignmentsTab() {
   const customerGroups = Object.entries(byCustomer).sort(([a], [b]) => a.localeCompare(b));
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-      <GlassPanel className="animate-fade-in-up">
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            padding: '14px 16px',
-            borderBottom: '1px solid rgba(42,47,69,0.45)',
-          }}
-        >
-          <div style={{ fontSize: '0.78rem', color: '#64748b' }}>
-            {isFetching ? (
-              <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <Spinner size="xs" /> Loading…
-              </span>
-            ) : (
-              <span>
-                <strong style={{ color: '#94a3b8' }}>{items.length.toLocaleString()}</strong> assigned numbers
-                {(search || stateFilter) && ' (filtered)'}
-              </span>
-            )}
-          </div>
+    <div className="dl-stack">
+      <section className="dl-panel">
+        <div className="dl-panel-head">
+          <h2 className="dl-panel-title">Assignments</h2>
+          {isFetching ? (
+            <span
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: '0.74rem', color: 'var(--rcf-ink-dim)' }}
+            >
+              <Spinner size="xs" /> Loading…
+            </span>
+          ) : (
+            <span className="dl-count">
+              {items.length.toLocaleString()} assigned{(search || stateFilter) ? ' (filtered)' : ''}
+            </span>
+          )}
         </div>
 
         <FilterBar
@@ -1336,92 +1100,65 @@ function AssignmentsTab() {
         />
 
         {isLoading ? (
-          <div style={{ textAlign: 'center', padding: 48, color: '#475569' }}>
+          <div style={{ textAlign: 'center', padding: 48 }}>
             <Spinner size="sm" />
           </div>
         ) : customerGroups.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: 48, color: '#475569', fontSize: '0.82rem' }}>
+          <div style={{ textAlign: 'center', padding: 48, color: 'var(--rcf-ink-dim)', fontSize: '0.82rem' }}>
             No assigned numbers found
           </div>
         ) : (
-          <div style={{ padding: '0 0 8px' }}>
+          <div style={{ paddingBottom: 4 }}>
             {customerGroups.map(([customerName, dids]) => (
               <div key={customerName}>
                 {/* Customer group header */}
-                <div
-                  style={{
-                    padding: '10px 16px 8px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 8,
-                    borderBottom: '1px solid rgba(42,47,69,0.35)',
-                    background: 'rgba(0,0,0,0.12)',
-                  }}
-                >
-                  <Users size={13} color="#3b82f6" />
-                  <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#93c5fd', letterSpacing: '0.02em' }}>
-                    {customerName}
-                  </span>
+                <div className="dlx4-grouphead">
+                  <Users size={13} style={{ color: 'var(--rcf-azure-deep)' }} />
                   <span
                     style={{
-                      marginLeft: 4,
-                      fontSize: '0.62rem',
+                      fontSize: '0.78rem',
                       fontWeight: 700,
-                      color: '#475569',
-                      background: 'rgba(59,130,246,0.10)',
-                      border: '1px solid rgba(59,130,246,0.18)',
-                      padding: '1px 7px',
-                      borderRadius: 4,
+                      color: 'var(--rcf-ink)',
+                      letterSpacing: '-0.01em',
                     }}
                   >
-                    {dids.length}
+                    {customerName}
                   </span>
+                  <span className="dl-count">{dids.length}</span>
                 </div>
 
                 {/* DIDs in this group */}
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead>
                     <tr>
-                      <Th>DID</Th>
-                      <Th>City / State</Th>
-                      <Th>Product</Th>
-                      <Th>Assigned</Th>
-                      <Th>Notes</Th>
-                      <Th right>Actions</Th>
+                      <th className="dl-th">DID</th>
+                      <th className="dl-th">City / State</th>
+                      <th className="dl-th">Product</th>
+                      <th className="dl-th">Assigned</th>
+                      <th className="dl-th">Notes</th>
+                      <th className="dl-th" style={{ textAlign: 'right' }}>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
                     {dids.map((item) => (
-                      <tr
-                        key={item.id}
-                        onMouseEnter={(e) => {
-                          (e.currentTarget as HTMLTableRowElement).style.background = 'rgba(255,255,255,0.025)';
-                        }}
-                        onMouseLeave={(e) => {
-                          (e.currentTarget as HTMLTableRowElement).style.background = '';
-                        }}
-                      >
-                        <Td>
-                          <span style={{ fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', fontSize: '0.82rem', color: '#93c5fd', letterSpacing: '0.03em' }}>
-                            {fmt(item.did)}
-                          </span>
-                        </Td>
-                        <Td muted>
+                      <tr key={item.id} className="dl-row">
+                        <td className="dlx-td"><DidCell did={item.did} /></td>
+                        <td className="dlx-td" style={{ color: 'var(--rcf-ink-dim)' }}>
                           {[item.city, item.state].filter(Boolean).join(', ') || '—'}
-                        </Td>
-                        <Td>
+                        </td>
+                        <td className="dlx-td">
                           {item.product_type ? (
                             <ProductPill type={item.product_type} />
                           ) : (
-                            <span style={{ color: '#334155' }}>—</span>
+                            <span style={{ color: 'var(--rcf-ink-dim)' }}>—</span>
                           )}
-                        </Td>
-                        <Td muted>
+                        </td>
+                        <td className="dlx-td" style={{ color: 'var(--rcf-ink-dim)' }}>
                           {item.assigned_at
                             ? new Date(item.assigned_at).toLocaleDateString()
                             : '—'}
-                        </Td>
-                        <Td muted>
+                        </td>
+                        <td className="dlx-td" style={{ color: 'var(--rcf-ink-dim)' }}>
                           <span
                             style={{
                               maxWidth: 180,
@@ -1433,16 +1170,16 @@ function AssignmentsTab() {
                           >
                             {item.notes ?? '—'}
                           </span>
-                        </Td>
-                        <Td right>
-                          <Button
-                            size="xs"
-                            variant="danger"
+                        </td>
+                        <td className="dlx-td" style={{ textAlign: 'right' }}>
+                          <button
+                            type="button"
+                            className="dl-btn dl-btn-danger dlx-btn-sm"
                             onClick={() => setUnassignTarget(item)}
                           >
                             Unassign
-                          </Button>
-                        </Td>
+                          </button>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -1451,7 +1188,7 @@ function AssignmentsTab() {
             ))}
           </div>
         )}
-      </GlassPanel>
+      </section>
 
       <UnassignModal
         did={unassignTarget}
@@ -1476,79 +1213,59 @@ function MyNumbersTab() {
   });
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-      <GlassPanel className="animate-fade-in-up">
-        <div
-          style={{
-            padding: '14px 16px',
-            borderBottom: '1px solid rgba(42,47,69,0.45)',
-          }}
-        >
-          <span style={{ fontSize: '0.78rem', color: '#64748b' }}>
-            <strong style={{ color: '#94a3b8' }}>{items.length}</strong> numbers assigned to your account
-          </span>
+    <div className="dl-stack">
+      <section className="dl-panel">
+        <div className="dl-panel-head">
+          <h2 className="dl-panel-title">My Numbers</h2>
+          <span className="dl-count">{items.length} assigned to your account</span>
         </div>
 
         <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 720 }}>
             <thead>
               <tr>
-                <Th>DID</Th>
-                <Th>City</Th>
-                <Th>State</Th>
-                <Th>Product</Th>
-                <Th>Status</Th>
-                <Th>Assigned</Th>
-                <Th>Notes</Th>
+                <th className="dl-th">DID</th>
+                <th className="dl-th">City</th>
+                <th className="dl-th">State</th>
+                <th className="dl-th">Product</th>
+                <th className="dl-th">Status</th>
+                <th className="dl-th">Assigned</th>
+                <th className="dl-th">Notes</th>
               </tr>
             </thead>
             <tbody>
               {isLoading ? (
                 <tr>
-                  <td colSpan={7} style={{ textAlign: 'center', padding: 48, color: '#475569' }}>
+                  <td colSpan={7} style={{ textAlign: 'center', padding: 48 }}>
                     <Spinner size="sm" />
                   </td>
                 </tr>
               ) : items.length === 0 ? (
                 <tr>
-                  <td colSpan={7} style={{ textAlign: 'center', padding: 48, color: '#475569', fontSize: '0.82rem' }}>
+                  <td colSpan={7} style={{ textAlign: 'center', padding: 48, color: 'var(--rcf-ink-dim)', fontSize: '0.82rem' }}>
                     No numbers are currently assigned to your account
                   </td>
                 </tr>
               ) : (
                 items.map((item) => (
-                  <tr
-                    key={item.id}
-                    onMouseEnter={(e) => {
-                      (e.currentTarget as HTMLTableRowElement).style.background = 'rgba(255,255,255,0.025)';
-                    }}
-                    onMouseLeave={(e) => {
-                      (e.currentTarget as HTMLTableRowElement).style.background = '';
-                    }}
-                  >
-                    <Td>
-                      <span style={{ fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', fontSize: '0.82rem', color: '#93c5fd', letterSpacing: '0.03em' }}>
-                        {fmt(item.did)}
-                      </span>
-                    </Td>
-                    <Td muted>{item.city ?? '—'}</Td>
-                    <Td muted>{item.state ?? '—'}</Td>
-                    <Td>
+                  <tr key={item.id} className="dl-row">
+                    <td className="dlx-td"><DidCell did={item.did} /></td>
+                    <td className="dlx-td" style={{ color: 'var(--rcf-ink-dim)' }}>{item.city ?? '—'}</td>
+                    <td className="dlx-td" style={{ color: 'var(--rcf-ink-dim)' }}>{item.state ?? '—'}</td>
+                    <td className="dlx-td">
                       {item.product_type ? (
                         <ProductPill type={item.product_type} />
                       ) : (
-                        <span style={{ color: '#334155' }}>—</span>
+                        <span style={{ color: 'var(--rcf-ink-dim)' }}>—</span>
                       )}
-                    </Td>
-                    <Td>
-                      <StatusBadge status={item.status} />
-                    </Td>
-                    <Td muted>
+                    </td>
+                    <td className="dlx-td"><StatusBadge status={item.status} /></td>
+                    <td className="dlx-td" style={{ color: 'var(--rcf-ink-dim)' }}>
                       {item.assigned_at
                         ? new Date(item.assigned_at).toLocaleDateString()
                         : '—'}
-                    </Td>
-                    <Td muted>
+                    </td>
+                    <td className="dlx-td" style={{ color: 'var(--rcf-ink-dim)' }}>
                       <span
                         style={{
                           maxWidth: 200,
@@ -1560,85 +1277,25 @@ function MyNumbersTab() {
                       >
                         {item.notes ?? '—'}
                       </span>
-                    </Td>
+                    </td>
                   </tr>
                 ))
               )}
             </tbody>
           </table>
         </div>
-      </GlassPanel>
+      </section>
     </div>
   );
 }
 
-// ─── Tab bar ────────────────────────────────────────────────────────────────────
+// ─── Page ───────────────────────────────────────────────────────────────────────
 
 interface Tab {
   id: string;
   label: string;
   icon: React.ReactNode;
 }
-
-interface InternalTabBarProps {
-  tabs: Tab[];
-  activeId: string;
-  onChange: (id: string) => void;
-}
-
-function InternalTabBar({ tabs, activeId, onChange }: InternalTabBarProps) {
-  return (
-    <div
-      className="glass-surface"
-      style={{
-        display: 'flex',
-        gap: 2,
-        borderRadius: 12,
-        padding: 4,
-        width: 'fit-content',
-      }}
-    >
-      {tabs.map((tab) => {
-        const isActive = tab.id === activeId;
-        return (
-          <button
-            key={tab.id}
-            type="button"
-            onClick={() => onChange(tab.id)}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-              padding: '7px 14px',
-              borderRadius: 9,
-              border: 'none',
-              background: isActive
-                ? 'rgba(59,130,246,0.15)'
-                : 'transparent',
-              color: isActive ? '#60a5fa' : '#64748b',
-              fontSize: '0.78rem',
-              fontWeight: isActive ? 700 : 500,
-              cursor: 'pointer',
-              transition: 'background 0.15s, color 0.15s',
-              whiteSpace: 'nowrap',
-              outline: 'none',
-              boxShadow: isActive
-                ? 'inset 0 0 0 1px rgba(59,130,246,0.25)'
-                : 'none',
-            }}
-          >
-            <span style={{ opacity: isActive ? 1 : 0.6, display: 'flex', alignItems: 'center' }}>
-              {tab.icon}
-            </span>
-            {tab.label}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
-// ─── Page ───────────────────────────────────────────────────────────────────────
 
 export function DIDSearchPage() {
   // All hooks unconditionally at the very top
@@ -1661,142 +1318,51 @@ export function DIDSearchPage() {
   const tabs = isAdmin ? adminTabs : customerTabs;
 
   return (
-    <div style={{ minHeight: '100vh' }}>
-      <div
-        style={{
-          width: '100%',
-          padding: '40px 0 80px',
-        }}
-      >
-        {/* ── Page Header ── */}
-        <div
-          className="animate-fade-in-up"
-          style={{ marginBottom: 32 }}
+    <div className="dl-stack">
+      {/* ── Section identity ── */}
+      <div>
+        <h2
+          style={{
+            fontFamily: '"Archivo", "IBM Plex Sans", sans-serif',
+            fontSize: '0.95rem',
+            fontWeight: 700,
+            letterSpacing: '-0.01em',
+            color: 'var(--rcf-ink)',
+            margin: 0,
+          }}
         >
-          {/* Logo + title row */}
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 16,
-              marginBottom: 8,
-            }}
-          >
-            <div
-              style={{
-                width: 44,
-                height: 44,
-                borderRadius: 12,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                background: 'linear-gradient(135deg, rgba(59,130,246,0.22) 0%, rgba(59,130,246,0.08) 100%)',
-                border: '1px solid rgba(59,130,246,0.30)',
-                boxShadow: '0 0 20px rgba(59,130,246,0.15)',
-                flexShrink: 0,
-                color: '#60a5fa',
-              }}
-            >
-              <Phone size={20} strokeWidth={1.75} />
-            </div>
-
-            <div>
-              <h1
-                style={{
-                  fontSize: '1.5rem',
-                  fontWeight: 800,
-                  color: '#e2e8f0',
-                  letterSpacing: '-0.03em',
-                  lineHeight: 1.1,
-                }}
-              >
-                Number Management
-              </h1>
-              <p style={{ fontSize: '0.78rem', color: '#64748b', marginTop: 3 }}>
-                {isAdmin
-                  ? 'Full DID lifecycle management — inventory, assignments, and Bandwidth sync'
-                  : 'Browse available numbers and manage your assigned DIDs'}
-              </p>
-            </div>
-          </div>
-
-          {/* CRAG branding strip */}
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              marginTop: 12,
-              marginBottom: 24,
-            }}
-          >
-            <div
-              style={{
-                width: 24,
-                height: 1,
-                background: 'linear-gradient(90deg, transparent, rgba(59,130,246,0.5))',
-              }}
-            />
-            <span
-              style={{
-                fontSize: '0.6rem',
-                fontWeight: 700,
-                letterSpacing: '0.06em',
-                textTransform: 'uppercase',
-                color: '#3b82f6',
-                opacity: 0.65,
-              }}
-            >
-              Granite CRAG · Telecom Number Management
-            </span>
-            <div
-              style={{
-                flex: 1,
-                height: 1,
-                background: 'linear-gradient(90deg, rgba(59,130,246,0.5), transparent)',
-              }}
-            />
-          </div>
-
-          {/* Location marker pill */}
-          <div
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 5,
-              padding: '3px 10px',
-              borderRadius: 20,
-              background: 'rgba(59,130,246,0.08)',
-              border: '1px solid rgba(59,130,246,0.18)',
-            }}
-          >
-            <MapPin size={11} color="#3b82f6" />
-            <span style={{ fontSize: '0.65rem', fontWeight: 600, color: '#64748b' }}>
-              US DID Inventory · Bandwidth-powered
-            </span>
-          </div>
-        </div>
-
-        {/* ── Tab navigation ── */}
-        <div
-          className="animate-fade-in-up"
-          style={{ marginBottom: 24, animationDelay: '0.08s' }}
-        >
-          <InternalTabBar
-            tabs={tabs}
-            activeId={activeTab}
-            onChange={setActiveTab}
-          />
-        </div>
-
-        {/* ── Tab content ── */}
-        <div className="animate-fade-in-up" style={{ animationDelay: '0.12s' }}>
-          {activeTab === 'inventory' && isAdmin && <InventoryTab />}
-          {activeTab === 'available' && <AvailableTab isAdmin={isAdmin} />}
-          {activeTab === 'assignments' && isAdmin && <AssignmentsTab />}
-          {activeTab === 'my-numbers' && !isAdmin && <MyNumbersTab />}
-        </div>
+          Number Management
+        </h2>
+        <p style={{ fontSize: '0.78rem', color: 'var(--rcf-ink-dim)', margin: '3px 0 0' }}>
+          {isAdmin
+            ? 'Full DID lifecycle management — inventory, assignments, and Bandwidth sync.'
+            : 'Browse available numbers and manage your assigned DIDs.'}
+        </p>
       </div>
+
+      {/* ── Tab navigation ── */}
+      <div className="dlx-seg" role="tablist" aria-label="Number management views" style={{ alignSelf: 'flex-start' }}>
+        {tabs.map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            role="tab"
+            aria-selected={activeTab === tab.id}
+            className={activeTab === tab.id ? 'dlx-seg-btn dlx-seg-btn-active' : 'dlx-seg-btn'}
+            onClick={() => setActiveTab(tab.id)}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+          >
+            {tab.icon}
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {/* ── Tab content ── */}
+      {activeTab === 'inventory' && isAdmin && <InventoryTab />}
+      {activeTab === 'available' && <AvailableTab isAdmin={isAdmin} />}
+      {activeTab === 'assignments' && isAdmin && <AssignmentsTab />}
+      {activeTab === 'my-numbers' && !isAdmin && <MyNumbersTab />}
     </div>
   );
 }

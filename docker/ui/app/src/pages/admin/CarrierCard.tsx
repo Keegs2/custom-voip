@@ -1,3 +1,14 @@
+/**
+ * CarrierCard — one carrier gateway: identity, connection facts, live
+ * connectivity test, edit/enable/delete actions.
+ *
+ * Styling: the shared DAYLIGHT CONSOLE system (`dl-*` in index.css, plus the
+ * admin `dlx-*` layer in styles/dl-admin.css). Renders as a dl-panel inside
+ * the CarriersTab card grid — the PlatformManagementPage shell owns the
+ * canvas.
+ *
+ * React #310: every hook is called unconditionally at the top.
+ */
 import { useState, useCallback } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
@@ -5,22 +16,13 @@ import {
   deleteCarrier,
   testCarrier,
 } from '../../api/carriers';
-import { Badge } from '../../components/ui/Badge';
-import { Button } from '../../components/ui/Button';
 import { useToast } from '../../components/ui/Toast';
-import { cn } from '../../utils/cn';
 import { CarrierForm } from './CarrierForm';
 import type { Carrier, CarrierCreate, CarrierTestResult } from '../../types/carrier';
+import '../../styles/dl-admin.css';
 
 interface CarrierCardProps {
   carrier: Carrier;
-}
-
-function productBadgeVariant(pt: string) {
-  if (pt === 'rcf') return 'rcf' as const;
-  if (pt === 'api') return 'api' as const;
-  if (pt === 'trunk') return 'trunk' as const;
-  return 'standard' as const;
 }
 
 function authLabel(authType: string): string {
@@ -28,6 +30,8 @@ function authLabel(authType: string): string {
   if (authType === 'none') return 'None';
   return 'IP-based';
 }
+
+const MONO_FONT = '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace';
 
 export function CarrierCard({ carrier: initialCarrier }: CarrierCardProps) {
   const qc = useQueryClient();
@@ -119,9 +123,20 @@ export function CarrierCard({ carrier: initialCarrier }: CarrierCardProps) {
     : String(initialCarrier.codec_prefs ?? 'PCMU,PCMA');
 
   const connLines: Array<[string, React.ReactNode]> = [
-    ['SIP Proxy', `${initialCarrier.sip_proxy}:${initialCarrier.port}`],
-    ['Transport', (initialCarrier.transport ?? 'UDP').toUpperCase()],
-    ['Auth', authLabel(initialCarrier.auth_type)],
+    [
+      'SIP Proxy',
+      <span style={{ fontFamily: MONO_FONT, fontSize: '0.78rem' }}>
+        {initialCarrier.sip_proxy}:{initialCarrier.port}
+      </span>,
+    ],
+    [
+      'Transport',
+      <span className="dl-tag dl-tag-slate">{(initialCarrier.transport ?? 'UDP').toUpperCase()}</span>,
+    ],
+    [
+      'Auth',
+      <span className="dl-tag dl-tag-slate">{authLabel(initialCarrier.auth_type)}</span>,
+    ],
     ['Codecs', codecsDisplay],
     ['Registration', initialCarrier.register ? 'Yes' : 'No'],
   ];
@@ -141,90 +156,59 @@ export function CarrierCard({ carrier: initialCarrier }: CarrierCardProps) {
   }
 
   return (
-    <div
-      className="glass-surface glass-hover"
-      style={{
-        borderRadius: 16,
-        padding: '24px',
-        position: 'relative',
-        overflow: 'hidden',
-      }}
-    >
-      {/* Header */}
-      <div style={{ marginBottom: 20 }}>
+    <section className="dl-panel">
+      {/* ── Header — identity + status/role tags ── */}
+      <div style={{ padding: '16px 20px 14px', borderBottom: '1px solid var(--rcf-line)' }}>
         <div
           style={{
-            fontSize: '1rem',
+            fontFamily: '"Archivo", "IBM Plex Sans", sans-serif',
+            fontSize: '0.95rem',
             fontWeight: 700,
-            color: '#e2e8f0',
             letterSpacing: '-0.01em',
+            color: 'var(--rcf-ink)',
           }}
         >
           {initialCarrier.display_name || initialCarrier.gateway_name}
         </div>
         <div
           style={{
-            fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
-            fontSize: '0.75rem',
-            color: '#718096',
+            fontFamily: MONO_FONT,
+            fontSize: '0.72rem',
+            color: 'var(--rcf-ink-dim)',
             marginTop: 3,
           }}
         >
           {initialCarrier.gateway_name}
         </div>
 
-        {/* Badges */}
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 12 }}>
-          <Badge variant={initialCarrier.enabled ? 'active' : 'disabled'}>
+        {/* Status pill + role/product tags */}
+        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, marginTop: 12 }}>
+          <span className={initialCarrier.enabled ? 'dl-pill dl-pill-on' : 'dl-pill dl-pill-off'}>
             {initialCarrier.enabled ? 'Enabled' : 'Disabled'}
-          </Badge>
-          {initialCarrier.is_primary && (
-            <Badge variant="premium">Primary</Badge>
-          )}
-          {initialCarrier.is_failover && (
-            <Badge variant="standard">Failover</Badge>
-          )}
+          </span>
+          {initialCarrier.is_primary && <span className="dl-tag">Primary</span>}
+          {initialCarrier.is_failover && <span className="dl-tag dl-tag-slate">Failover</span>}
           {(initialCarrier.product_types ?? []).map((pt) => (
-            <Badge key={pt} variant={productBadgeVariant(pt)}>
-              {pt}
-            </Badge>
+            <span key={pt} className="dl-tag dl-tag-slate">{pt}</span>
           ))}
         </div>
       </div>
 
-      {/* Connection details monospace block */}
-      {!isEditing && (
-        <pre
-          style={{
-            fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
-            fontSize: '0.75rem',
-            background: 'rgba(15,17,23,0.8)',
-            border: '1px solid rgba(42,47,69,0.6)',
-            borderRadius: 10,
-            padding: '12px 16px',
-            marginBottom: 16,
-            overflowX: 'auto',
-            lineHeight: 1.7,
-          }}
-        >
-          {connLines.map(([key, val]) => (
-            <span key={key} style={{ display: 'block' }}>
-              <span style={{ color: '#718096' }}>{String(key).padEnd(12, ' ')}</span>
-              <span style={{ color: '#93c5fd' }}>{val}</span>
-            </span>
-          ))}
-        </pre>
-      )}
+      <div className="dl-panel-body">
+        {/* Connection details */}
+        {!isEditing && (
+          <div className="dl-kvbox" style={{ marginBottom: 16 }}>
+            {connLines.map(([key, val]) => (
+              <div key={key} className="dl-kv">
+                <span className="dl-kv-label">{key}</span>
+                <span className="dl-kv-value">{val}</span>
+              </div>
+            ))}
+          </div>
+        )}
 
-      {/* Edit form */}
-      {isEditing && (
-        <div
-          style={{
-            borderTop: '1px solid rgba(42,47,69,0.6)',
-            paddingTop: 16,
-            marginBottom: 16,
-          }}
-        >
+        {/* Edit form */}
+        {isEditing && (
           <CarrierForm
             carrier={initialCarrier}
             submitLabel="Save Changes"
@@ -233,61 +217,64 @@ export function CarrierCard({ carrier: initialCarrier }: CarrierCardProps) {
               await updateMutation.mutateAsync(values);
             }}
           />
-        </div>
-      )}
+        )}
 
-      {/* Actions bar */}
-      {!isEditing && (
-        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
-          <Button
-            size="sm"
-            variant="ghost"
-            loading={testing}
-            onClick={handleTest}
-          >
-            Test Connection
-          </Button>
-
-          {/* Inline test result */}
-          {testResult && (
-            <span
-              className={cn(
-                'text-[0.78rem] font-semibold',
-                testResult.reachable ? 'text-green-400' : 'text-red-400',
-              )}
+        {/* Actions bar */}
+        {!isEditing && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
+            <button
+              type="button"
+              className="dl-btn dl-btn-ghost dlx-btn-sm"
+              onClick={() => void handleTest()}
+              disabled={testing}
             >
-              {testResult.reachable
-                ? `Reachable${testResult.latency_ms != null ? ` ${testResult.latency_ms}ms` : ''}`
-                : `Unreachable — ${testResult.error ?? 'connection timeout'}`}
-            </span>
-          )}
+              {testing ? 'Testing…' : 'Test Connection'}
+            </button>
 
-          <span style={{ flex: 1 }} />
+            <span style={{ flex: 1 }} />
 
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => setIsEditing(true)}
+            <button
+              type="button"
+              className="dl-btn dl-btn-ghost dlx-btn-sm"
+              onClick={() => setIsEditing(true)}
+            >
+              Edit
+            </button>
+            <button
+              type="button"
+              className={
+                initialCarrier.enabled
+                  ? 'dl-btn dl-btn-ghost dlx-btn-sm'
+                  : 'dl-btn dlx-btn-ok dlx-btn-sm'
+              }
+              onClick={() => void toggleEnabled()}
+            >
+              {initialCarrier.enabled ? 'Disable' : 'Enable'}
+            </button>
+            <button
+              type="button"
+              className="dl-btn dl-btn-danger dlx-btn-sm"
+              onClick={handleDelete}
+              disabled={deleteMutation.isPending}
+            >
+              {deleteMutation.isPending ? 'Deleting…' : 'Delete'}
+            </button>
+          </div>
+        )}
+
+        {/* Connectivity test result — green banner when reachable, red when not */}
+        {!isEditing && testResult && (
+          <div
+            className={testResult.reachable ? 'dl-banner dl-banner-ok' : 'dl-banner dl-banner-err'}
+            style={{ marginTop: 12 }}
+            role="status"
           >
-            Edit
-          </Button>
-          <Button
-            size="sm"
-            variant={initialCarrier.enabled ? 'ghost' : 'success'}
-            onClick={toggleEnabled}
-          >
-            {initialCarrier.enabled ? 'Disable' : 'Enable'}
-          </Button>
-          <Button
-            size="sm"
-            variant="danger"
-            onClick={handleDelete}
-            loading={deleteMutation.isPending}
-          >
-            Delete
-          </Button>
-        </div>
-      )}
-    </div>
+            {testResult.reachable
+              ? `Reachable${testResult.latency_ms != null ? ` — ${testResult.latency_ms}ms` : ''}`
+              : `Unreachable — ${testResult.error ?? 'connection timeout'}`}
+          </div>
+        )}
+      </div>
+    </section>
   );
 }

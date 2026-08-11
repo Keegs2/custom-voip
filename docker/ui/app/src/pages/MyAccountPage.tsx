@@ -1,9 +1,24 @@
+/**
+ * MyAccountPage — the customer's self-service account console.
+ *
+ * Tabs: Overview (identity + estimated bill + product counts), Users & Access
+ * (read-only team roster), Products (per-product provisioning lists), and
+ * Your Account (identity facts + display name + password, PUT /auth/me —
+ * absorbed the retired standalone /account page).
+ *
+ * Styling: the shared DAYLIGHT CONSOLE system (`dl-*` classes in index.css,
+ * aliased from the RCF console primitives) — paper canvas, quiet breadcrumb
+ * header, white panels, ink text, azure accents.
+ *
+ * React #310: every hook in every component below is called unconditionally at
+ * the top of its function, before any early return.
+ */
+
 import {
   useState,
   useMemo,
   useCallback,
   type FormEvent,
-  type CSSProperties,
   type ReactNode,
 } from 'react';
 import { useQuery } from '@tanstack/react-query';
@@ -28,31 +43,22 @@ import { listApiDids } from '../api/apiDids';
 import type { MyCustomer, BillingLineItem, TeamMember, TeamRole } from '../types/account';
 import type { User } from '../types/auth';
 import type { AccountType } from '../types/customer';
-import { Badge } from '../components/ui/Badge';
 import { Spinner } from '../components/ui/Spinner';
 import { fmt, fmtMoney } from '../utils/format';
 
-/* ─── Design tokens ──────────────────────────────────────── */
+/* ─── Design tokens (mirror the .rcf-scope / .dl-scope CSS vars) ─── */
 
-const COLORS = {
-  bg: '#0f1117',
-  text: '#e2e8f0',
-  secondary: '#94a3b8',
-  muted: '#475569',
-  faint: '#334155',
-  border: 'rgba(42,47,69,0.6)',
-  primary: '#3b82f6',
-  primaryLight: '#60a5fa',
-  success: '#22c55e',
-  successLight: '#4ade80',
-  warning: '#f59e0b',
-  error: '#f87171',
-} as const;
+const INK = '#0e1726';
+const INK_SOFT = '#46566f';
+const INK_DIM = '#5d6f8c';
+const AZURE_DEEP = '#1d63dd';
 
 const MONO =
   '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace';
 
-/* ─── Shared body for the update-me PUT (mirrors AccountPage) ── */
+const ARCHIVO = '"Archivo", "IBM Plex Sans", sans-serif';
+
+/* ─── Shared body for the update-me PUT (/auth/me) ───────── */
 
 interface UpdateMeBody {
   name?: string;
@@ -93,135 +99,79 @@ const ROLE_LABEL: Record<TeamRole, string> = {
   readonly: 'Read-only',
 };
 
-/* ─── Section shell — a titled glass surface ─────────────── */
+/* ─── Daylight chips (replace the dark Badge component on this page) ─── */
+
+/** Green/red status pill (active vs suspended/disabled); slate tag for closed. */
+function StatusChip({ status }: { status: string }) {
+  if (status === 'closed') {
+    return <span className="dl-tag dl-tag-slate">{status}</span>;
+  }
+  const on = status === 'active';
+  return (
+    <span className={on ? 'dl-pill dl-pill-on' : 'dl-pill dl-pill-off'}>{status}</span>
+  );
+}
+
+/** Boolean enabled/disabled pill for product rows. */
+function EnabledPill({ enabled }: { enabled: boolean }) {
+  return (
+    <span className={enabled ? 'dl-pill dl-pill-on' : 'dl-pill dl-pill-off'}>
+      {enabled ? 'Active' : 'Disabled'}
+    </span>
+  );
+}
+
+/* ─── Section shell — a titled daylight panel ─────────────── */
 
 interface SectionProps {
   title: string;
   subtitle?: string;
   icon: ReactNode;
   actions?: ReactNode;
+  /** Render children flush against the panel edges (tables). */
+  flush?: boolean;
   children: ReactNode;
 }
 
-function Section({ title, subtitle, icon, actions, children }: SectionProps) {
+function Section({ title, subtitle, icon, actions, flush, children }: SectionProps) {
   return (
-    <section
-      className="glass-surface"
-      style={{ borderRadius: 18, padding: '24px 28px', overflow: 'hidden' }}
-    >
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'flex-start',
-          justifyContent: 'space-between',
-          gap: 16,
-          marginBottom: 22,
-          flexWrap: 'wrap',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
-          <span
-            style={{
-              width: 36,
-              height: 36,
-              borderRadius: 10,
-              flexShrink: 0,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: COLORS.primaryLight,
-              background:
-                'linear-gradient(135deg, rgba(59,130,246,0.16) 0%, rgba(59,130,246,0.07) 100%)',
-              border: '1px solid rgba(59,130,246,0.24)',
-            }}
-          >
-            {icon}
-          </span>
-          <div style={{ minWidth: 0 }}>
-            <h2
-              style={{
-                margin: 0,
-                fontSize: '0.98rem',
-                fontWeight: 700,
-                color: COLORS.text,
-                letterSpacing: '-0.01em',
-                lineHeight: 1.2,
-              }}
-            >
-              {title}
-            </h2>
-            {subtitle && (
-              <p
-                style={{
-                  margin: '3px 0 0',
-                  fontSize: '0.78rem',
-                  color: COLORS.muted,
-                  lineHeight: 1.4,
-                }}
-              >
-                {subtitle}
-              </p>
-            )}
-          </div>
+    <section className="dl-panel">
+      <div className="dl-panel-head" style={{ flexWrap: 'nowrap' }}>
+        <span
+          aria-hidden="true"
+          style={{ display: 'inline-flex', color: AZURE_DEEP, flexShrink: 0 }}
+        >
+          {icon}
+        </span>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <h2 className="dl-panel-title" style={{ margin: 0 }}>{title}</h2>
+          {subtitle && (
+            <p style={{ margin: '2px 0 0', fontSize: '0.72rem', color: INK_DIM, lineHeight: 1.4 }}>
+              {subtitle}
+            </p>
+          )}
         </div>
         {actions && <div style={{ flexShrink: 0 }}>{actions}</div>}
       </div>
-      {children}
+      {flush ? children : <div className="dl-panel-body">{children}</div>}
     </section>
   );
 }
 
-/* ─── Glass metric tile ──────────────────────────────────── */
+/* ─── Stat tile ──────────────────────────────────────────── */
 
 interface TileProps {
   label: string;
   value: ReactNode;
   hint?: ReactNode;
-  accent?: string;
 }
 
-function Tile({ label, value, hint, accent = COLORS.primary }: TileProps) {
+function Tile({ label, value, hint }: TileProps) {
   return (
-    <div
-      className="glass-surface"
-      style={{
-        padding: '16px 18px',
-        borderRadius: 14,
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 6,
-        minWidth: 0,
-      }}
-    >
-      <span
-        style={{
-          fontSize: '0.62rem',
-          fontWeight: 600,
-          color: COLORS.muted,
-          textTransform: 'uppercase',
-          letterSpacing: '0.06em',
-        }}
-      >
-        {label}
-      </span>
-      <span
-        style={{
-          fontSize: '1.35rem',
-          fontWeight: 800,
-          color: COLORS.text,
-          lineHeight: 1.1,
-          fontVariantNumeric: 'tabular-nums',
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-        }}
-      >
-        {value}
-      </span>
-      {hint && (
-        <span style={{ fontSize: '0.7rem', color: accent, fontWeight: 500 }}>
-          {hint}
-        </span>
-      )}
+    <div className="dl-tile">
+      <span className="dl-tile-label">{label}</span>
+      <span className="dl-tile-value">{value}</span>
+      {hint && <span className="dl-tile-hint">{hint}</span>}
     </div>
   );
 }
@@ -230,30 +180,9 @@ function Tile({ label, value, hint, accent = COLORS.primary }: TileProps) {
 
 function DefRow({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        gap: 16,
-        padding: '11px 0',
-        borderBottom: `1px solid ${COLORS.border}`,
-      }}
-    >
-      <span style={{ fontSize: '0.78rem', color: COLORS.muted, fontWeight: 500 }}>
-        {label}
-      </span>
-      <span
-        style={{
-          fontSize: '0.82rem',
-          color: COLORS.text,
-          fontWeight: 600,
-          textAlign: 'right',
-          minWidth: 0,
-        }}
-      >
-        {children}
-      </span>
+    <div className="dl-kv" style={{ padding: '10px 0' }}>
+      <span className="dl-kv-label">{label}</span>
+      <span className="dl-kv-value">{children}</span>
     </div>
   );
 }
@@ -261,36 +190,7 @@ function DefRow({ label, children }: { label: string; children: ReactNode }) {
 /* ─── Empty state within a section ───────────────────────── */
 
 function InlineEmpty({ message }: { message: string }) {
-  return (
-    <div
-      style={{
-        padding: '28px 20px',
-        textAlign: 'center',
-        borderRadius: 12,
-        border: '1px dashed rgba(59,130,246,0.14)',
-        background: 'rgba(59,130,246,0.02)',
-        color: COLORS.muted,
-        fontSize: '0.82rem',
-      }}
-    >
-      {message}
-    </div>
-  );
-}
-
-/* ─── Status → badge variant maps ────────────────────────── */
-
-function statusVariant(status: string): 'active' | 'suspended' | 'closed' | 'disabled' {
-  switch (status) {
-    case 'active': return 'active';
-    case 'suspended': return 'suspended';
-    case 'closed': return 'closed';
-    default: return 'disabled';
-  }
-}
-
-function roleVariant(role: TeamRole): 'premium' | 'standard' {
-  return role === 'admin' ? 'premium' : 'standard';
+  return <div className="dl-empty">{message}</div>;
 }
 
 /* ═════════════════ Estimated monthly bill ═════════════════ */
@@ -303,14 +203,8 @@ function BillLineRow({ item }: { item: BillingLineItem }) {
 
   return (
     <div
-      className="glass-surface"
-      style={{
-        padding: '14px 18px',
-        borderRadius: 12,
-        display: 'flex',
-        flexDirection: 'column',
-        gap: hasBreakdown ? 10 : 4,
-      }}
+      className="dl-item"
+      style={{ display: 'flex', flexDirection: 'column', gap: hasBreakdown ? 10 : 4 }}
     >
       <div
         style={{
@@ -321,11 +215,11 @@ function BillLineRow({ item }: { item: BillingLineItem }) {
         }}
       >
         <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: '0.88rem', fontWeight: 700, color: COLORS.text }}>
+          <div style={{ fontSize: '0.84rem', fontWeight: 700, color: INK }}>
             {item.label}
           </div>
           {(item.product === 'rcf' || item.product === 'voicemail') && (
-            <div style={{ fontSize: '0.74rem', color: COLORS.muted, marginTop: 2 }}>
+            <div style={{ fontSize: '0.72rem', color: INK_DIM, marginTop: 2 }}>
               {item.qty.toLocaleString()} {item.unit}
               {item.qty === 1 ? '' : 's'} × {fmtMoney(item.unit_price)}
             </div>
@@ -333,9 +227,9 @@ function BillLineRow({ item }: { item: BillingLineItem }) {
         </div>
         <div
           style={{
-            fontSize: '0.95rem',
+            fontSize: '0.9rem',
             fontWeight: 700,
-            color: COLORS.text,
+            color: INK,
             fontVariantNumeric: 'tabular-nums',
             whiteSpace: 'nowrap',
           }}
@@ -352,7 +246,7 @@ function BillLineRow({ item }: { item: BillingLineItem }) {
             flexDirection: 'column',
             gap: 5,
             paddingTop: 8,
-            borderTop: '1px solid rgba(59,130,246,0.10)',
+            borderTop: '1px solid var(--rcf-line)',
           }}
         >
           {item.components.map((c, i) => (
@@ -363,13 +257,13 @@ function BillLineRow({ item }: { item: BillingLineItem }) {
                 alignItems: 'baseline',
                 justifyContent: 'space-between',
                 gap: 12,
-                fontSize: '0.76rem',
+                fontSize: '0.74rem',
               }}
             >
-              <span style={{ color: COLORS.secondary }}>{c.label}</span>
+              <span style={{ color: INK_SOFT }}>{c.label}</span>
               <span
                 style={{
-                  color: COLORS.secondary,
+                  color: INK_SOFT,
                   fontVariantNumeric: 'tabular-nums',
                   whiteSpace: 'nowrap',
                 }}
@@ -403,7 +297,7 @@ function MonthlyBillCard() {
     <Section
       title="Estimated Monthly Bill"
       subtitle="A read-only estimate — actual charges are billed separately"
-      icon={<Receipt size={18} strokeWidth={1.7} />}
+      icon={<Receipt size={16} strokeWidth={1.8} />}
     >
       {isLoading ? (
         <div style={{ display: 'flex', justifyContent: 'center', padding: 32 }}>
@@ -427,32 +321,33 @@ function MonthlyBillCard() {
               alignItems: 'baseline',
               justifyContent: 'space-between',
               gap: 16,
-              padding: '16px 18px',
-              borderRadius: 12,
-              background:
-                'linear-gradient(135deg, rgba(59,130,246,0.14) 0%, rgba(59,130,246,0.06) 100%)',
-              border: '1px solid rgba(59,130,246,0.24)',
+              padding: '15px 16px',
+              borderRadius: 10,
+              background: 'rgba(47, 125, 246, 0.07)',
+              border: '1px solid rgba(47, 125, 246, 0.22)',
             }}
           >
             <span
               style={{
-                fontSize: '0.72rem',
+                fontSize: '0.66rem',
                 fontWeight: 700,
-                color: COLORS.primaryLight,
+                color: AZURE_DEEP,
                 textTransform: 'uppercase',
-                letterSpacing: '0.05em',
+                letterSpacing: '0.08em',
               }}
             >
               Estimated Monthly Total
             </span>
             <span
               style={{
-                fontSize: '1.55rem',
-                fontWeight: 800,
-                color: COLORS.text,
+                fontFamily: ARCHIVO,
+                fontSize: '1.4rem',
+                fontWeight: 700,
+                color: INK,
                 lineHeight: 1,
                 fontVariantNumeric: 'tabular-nums',
                 whiteSpace: 'nowrap',
+                letterSpacing: '-0.01em',
               }}
             >
               {fmtMoney(data.total_monthly_estimate)}
@@ -464,8 +359,8 @@ function MonthlyBillCard() {
             <p
               style={{
                 margin: '2px 2px 0',
-                fontSize: '0.72rem',
-                color: COLORS.muted,
+                fontSize: '0.7rem',
+                color: INK_DIM,
                 lineHeight: 1.5,
               }}
             >
@@ -482,47 +377,23 @@ function MonthlyBillCard() {
 
 function OverviewTab({ customer }: { customer: MyCustomer }) {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+    <div className="dl-stack">
       {/* Identity + estimated bill side by side on wide screens */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))',
-          gap: 20,
-        }}
-      >
+      <div className="dl-grid2">
         {/* Identity card */}
-        <Section title="Account" subtitle="Your organization on the platform" icon={<IdCard size={18} strokeWidth={1.7} />}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 20 }}>
-            <div
-              style={{
-                width: 52,
-                height: 52,
-                borderRadius: 14,
-                flexShrink: 0,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontSize: '1.3rem',
-                fontWeight: 800,
-                color: COLORS.primaryLight,
-                textTransform: 'uppercase',
-                background:
-                  'linear-gradient(135deg, rgba(59,130,246,0.22) 0%, rgba(59,130,246,0.10) 100%)',
-                border: '1px solid rgba(59,130,246,0.30)',
-                boxShadow: '0 0 20px rgba(59,130,246,0.14)',
-              }}
-              aria-hidden="true"
-            >
+        <Section title="Account" subtitle="Your organization on the platform" icon={<IdCard size={16} strokeWidth={1.8} />}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 16 }}>
+            <div className="dl-avatar" aria-hidden="true" style={{ width: 50, height: 50 }}>
               {customer.name.charAt(0) || '?'}
             </div>
             <div style={{ minWidth: 0 }}>
               <div
                 style={{
-                  fontSize: '1.15rem',
-                  fontWeight: 800,
-                  color: COLORS.text,
-                  letterSpacing: '-0.02em',
+                  fontFamily: ARCHIVO,
+                  fontSize: '1.05rem',
+                  fontWeight: 700,
+                  color: INK,
+                  letterSpacing: '-0.015em',
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
                   whiteSpace: 'nowrap',
@@ -531,8 +402,8 @@ function OverviewTab({ customer }: { customer: MyCustomer }) {
                 {customer.name}
               </div>
               <div style={{ display: 'flex', gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
-                <Badge variant={customer.account_type}>{customer.account_type}</Badge>
-                <Badge variant={statusVariant(customer.status)}>{customer.status}</Badge>
+                <span className="dl-tag">{customer.account_type}</span>
+                <StatusChip status={customer.status} />
               </div>
             </div>
           </div>
@@ -540,11 +411,11 @@ function OverviewTab({ customer }: { customer: MyCustomer }) {
           <div>
             <DefRow label="Account type">{accountTypeLabel(customer.account_type)}</DefRow>
             <DefRow label="Traffic grade">
-              <Badge variant={customer.traffic_grade}>{customer.traffic_grade}</Badge>
+              <span className="dl-tag dl-tag-slate">{customer.traffic_grade}</span>
             </DefRow>
             <DefRow label="Member since">{fmtDate(customer.created_at)}</DefRow>
             <DefRow label="Account ID">
-              <span style={{ fontFamily: MONO, fontSize: '0.78rem', color: COLORS.secondary }}>
+              <span style={{ fontFamily: MONO, fontSize: '0.78rem', color: INK_SOFT }}>
                 #{customer.id}
               </span>
             </DefRow>
@@ -557,8 +428,8 @@ function OverviewTab({ customer }: { customer: MyCustomer }) {
                   padding: '11px 0 0',
                 }}
               >
-                <Sparkles size={14} style={{ color: COLORS.primaryLight, flexShrink: 0 }} />
-                <span style={{ fontSize: '0.78rem', color: COLORS.secondary }}>
+                <Sparkles size={14} style={{ color: AZURE_DEEP, flexShrink: 0 }} />
+                <span style={{ fontSize: '0.78rem', color: INK_SOFT }}>
                   UCaaS features enabled
                 </span>
               </div>
@@ -571,7 +442,7 @@ function OverviewTab({ customer }: { customer: MyCustomer }) {
       </div>
 
       {/* Product counts */}
-      <Section title="Your Numbers" subtitle="Provisioned across all products" icon={<Boxes size={18} strokeWidth={1.7} />}>
+      <Section title="Your Numbers" subtitle="Provisioned across all products" icon={<Boxes size={16} strokeWidth={1.8} />}>
         <div
           style={{
             display: 'grid',
@@ -579,9 +450,9 @@ function OverviewTab({ customer }: { customer: MyCustomer }) {
             gap: 14,
           }}
         >
-          <Tile label="RCF numbers" value={customer.counts.rcf} accent={COLORS.primaryLight} hint="Remote Call Forwarding" />
-          <Tile label="SIP trunks" value={customer.counts.trunks} accent={COLORS.successLight} hint="SIP Trunking" />
-          <Tile label="API DIDs" value={customer.counts.api_dids} accent={COLORS.primaryLight} hint="Programmable Voice" />
+          <Tile label="RCF numbers" value={customer.counts.rcf} hint="Remote Call Forwarding" />
+          <Tile label="SIP trunks" value={customer.counts.trunks} hint="SIP Trunking" />
+          <Tile label="API DIDs" value={customer.counts.api_dids} hint="Programmable Voice" />
         </div>
       </Section>
     </div>
@@ -602,7 +473,8 @@ function TeamTab() {
     <Section
       title="Users &amp; Access"
       subtitle="User accounts associated with your organization"
-      icon={<Users size={18} strokeWidth={1.7} />}
+      icon={<Users size={16} strokeWidth={1.8} />}
+      flush={!isLoading && !isError && members.length > 0}
     >
       {isLoading ? (
         <div style={{ display: 'flex', justifyContent: 'center', padding: 40 }}>
@@ -614,24 +486,11 @@ function TeamTab() {
         <InlineEmpty message="No user accounts are associated with this account yet." />
       ) : (
         <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 640 }}>
             <thead>
               <tr>
                 {['User', 'Email', 'Role', 'Status', 'Last login'].map((h) => (
-                  <th
-                    key={h}
-                    style={{
-                      textAlign: 'left',
-                      padding: '10px 14px',
-                      fontSize: '0.6rem',
-                      fontWeight: 700,
-                      color: COLORS.muted,
-                      textTransform: 'uppercase',
-                      letterSpacing: '0.05em',
-                      whiteSpace: 'nowrap',
-                      borderBottom: '1px solid rgba(59,130,246,0.12)',
-                    }}
-                  >
+                  <th key={h} className="dl-th">
                     {h}
                   </th>
                 ))}
@@ -639,35 +498,17 @@ function TeamTab() {
             </thead>
             <tbody>
               {members.map((m) => (
-                <tr key={m.id} className="glass-row-hover">
-                  <td style={{ padding: '13px 14px' }}>
+                <tr key={m.id} className="dl-row">
+                  <td style={{ padding: '12px 16px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                      <span
-                        style={{
-                          width: 30,
-                          height: 30,
-                          borderRadius: '50%',
-                          flexShrink: 0,
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          fontSize: '0.72rem',
-                          fontWeight: 700,
-                          color: COLORS.primaryLight,
-                          textTransform: 'uppercase',
-                          background:
-                            'linear-gradient(135deg, rgba(59,130,246,0.28) 0%, rgba(59,130,246,0.14) 100%)',
-                          border: '1px solid rgba(59,130,246,0.3)',
-                        }}
-                        aria-hidden="true"
-                      >
+                      <span className="dl-avatar dl-avatar-sm" aria-hidden="true">
                         {(m.name || m.email).charAt(0)}
                       </span>
                       <span
                         style={{
-                          fontSize: '0.85rem',
+                          fontSize: '0.84rem',
                           fontWeight: 600,
-                          color: COLORS.text,
+                          color: INK,
                           display: 'inline-flex',
                           alignItems: 'center',
                           gap: 7,
@@ -675,20 +516,7 @@ function TeamTab() {
                       >
                         {m.name || '—'}
                         {m.is_self && (
-                          <span
-                            style={{
-                              fontSize: '0.55rem',
-                              fontWeight: 700,
-                              letterSpacing: '0.06em',
-                              textTransform: 'uppercase',
-                              color: COLORS.primaryLight,
-                              background: 'rgba(59,130,246,0.15)',
-                              border: '1px solid rgba(59,130,246,0.3)',
-                              borderRadius: 999,
-                              padding: '2px 7px',
-                              lineHeight: 1.4,
-                            }}
-                          >
+                          <span className="dl-tag" style={{ fontSize: '0.55rem', padding: '1px 6px' }}>
                             You
                           </span>
                         )}
@@ -697,25 +525,27 @@ function TeamTab() {
                   </td>
                   <td
                     style={{
-                      padding: '13px 14px',
-                      fontSize: '0.8rem',
-                      color: COLORS.secondary,
+                      padding: '12px 16px',
+                      fontSize: '0.78rem',
+                      color: INK_SOFT,
                       fontFamily: MONO,
                     }}
                   >
                     {m.email}
                   </td>
-                  <td style={{ padding: '13px 14px' }}>
-                    <Badge variant={roleVariant(m.role)}>{ROLE_LABEL[m.role]}</Badge>
+                  <td style={{ padding: '12px 16px' }}>
+                    <span className={m.role === 'admin' ? 'dl-tag' : 'dl-tag dl-tag-slate'}>
+                      {ROLE_LABEL[m.role]}
+                    </span>
                   </td>
-                  <td style={{ padding: '13px 14px' }}>
-                    <Badge variant={statusVariant(m.status)}>{m.status}</Badge>
+                  <td style={{ padding: '12px 16px' }}>
+                    <StatusChip status={m.status} />
                   </td>
                   <td
                     style={{
-                      padding: '13px 14px',
-                      fontSize: '0.78rem',
-                      color: COLORS.muted,
+                      padding: '12px 16px',
+                      fontSize: '0.76rem',
+                      color: INK_DIM,
                       whiteSpace: 'nowrap',
                     }}
                   >
@@ -733,26 +563,28 @@ function TeamTab() {
 
 /* ═════════════════ 3. Products & Services tab ═════════════════ */
 
-/** A compact status pill for product rows. */
-function StatusPill({ enabled }: { enabled: boolean }) {
-  return (
-    <Badge variant={enabled ? 'active' : 'disabled'}>
-      {enabled ? 'Active' : 'Disabled'}
-    </Badge>
-  );
-}
-
 function ProductRow({ children }: { children: ReactNode }) {
   return (
     <div
-      className="glass-surface"
+      className="dl-item"
+      style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}
+    >
+      {children}
+    </div>
+  );
+}
+
+/** Small uppercase field caption used inside product rows. */
+function RowCaption({ children }: { children: ReactNode }) {
+  return (
+    <div
       style={{
-        padding: '14px 18px',
-        borderRadius: 12,
-        display: 'flex',
-        alignItems: 'center',
-        gap: 14,
-        flexWrap: 'wrap',
+        fontSize: '0.6rem',
+        fontWeight: 700,
+        color: INK_DIM,
+        textTransform: 'uppercase',
+        letterSpacing: '0.07em',
+        marginBottom: 3,
       }}
     >
       {children}
@@ -773,8 +605,8 @@ function RcfProductSection() {
     <Section
       title="Remote Call Forwarding"
       subtitle="Numbers that forward inbound calls to your destinations"
-      icon={<PhoneForwarded size={18} strokeWidth={1.7} />}
-      actions={<Badge variant="rcf">{rows.length} number{rows.length === 1 ? '' : 's'}</Badge>}
+      icon={<PhoneForwarded size={16} strokeWidth={1.8} />}
+      actions={<span className="dl-count">{rows.length} number{rows.length === 1 ? '' : 's'}</span>}
     >
       {isLoading ? (
         <div style={{ display: 'flex', justifyContent: 'center', padding: 32 }}>
@@ -791,44 +623,42 @@ function RcfProductSection() {
               <div style={{ minWidth: 160, flex: '1 1 160px' }}>
                 <div
                   style={{
-                    fontSize: '0.92rem',
+                    fontSize: '0.88rem',
                     fontWeight: 700,
-                    color: COLORS.text,
+                    color: INK,
                     fontFamily: MONO,
                     letterSpacing: '0.02em',
                   }}
                 >
                   {fmt(r.did)}
                 </div>
-                <div style={{ fontSize: '0.72rem', color: COLORS.muted, marginTop: 2 }}>
+                <div style={{ fontSize: '0.72rem', color: INK_DIM, marginTop: 2 }}>
                   {r.name ?? 'No label'}
                 </div>
               </div>
 
               <div style={{ minWidth: 150, flex: '1 1 150px' }}>
-                <div style={{ fontSize: '0.62rem', color: COLORS.muted, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 3 }}>
-                  Forwards to
-                </div>
-                <div style={{ fontSize: '0.84rem', color: COLORS.primaryLight, fontFamily: MONO, fontWeight: 600 }}>
+                <RowCaption>Forwards to</RowCaption>
+                <div style={{ fontSize: '0.82rem', color: AZURE_DEEP, fontFamily: MONO, fontWeight: 600 }}>
                   {fmt(r.forward_to)}
                 </div>
               </div>
 
-              <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', fontSize: '0.75rem', color: COLORS.secondary }}>
+              <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', fontSize: '0.74rem', color: INK_SOFT }}>
                 <span>
-                  <span style={{ color: COLORS.muted }}>Caller ID:</span>{' '}
+                  <span style={{ color: INK_DIM }}>Caller ID:</span>{' '}
                   {r.pass_caller_id ? 'Pass-through' : 'Show DID'}
                 </span>
                 <span>
-                  <span style={{ color: COLORS.muted }}>Channels:</span> {r.max_channels}
+                  <span style={{ color: INK_DIM }}>Channels:</span> {r.max_channels}
                 </span>
                 <span>
-                  <span style={{ color: COLORS.muted }}>Ring:</span> {r.ring_timeout}s
+                  <span style={{ color: INK_DIM }}>Ring:</span> {r.ring_timeout}s
                 </span>
               </div>
 
               <div style={{ marginLeft: 'auto' }}>
-                <StatusPill enabled={r.enabled} />
+                <EnabledPill enabled={r.enabled} />
               </div>
             </ProductRow>
           ))}
@@ -850,8 +680,8 @@ function TrunkProductSection() {
     <Section
       title="SIP Trunks"
       subtitle="IP-authenticated SIP trunks for your PBX"
-      icon={<Server size={18} strokeWidth={1.7} />}
-      actions={<Badge variant="trunk">{rows.length} trunk{rows.length === 1 ? '' : 's'}</Badge>}
+      icon={<Server size={16} strokeWidth={1.8} />}
+      actions={<span className="dl-count">{rows.length} trunk{rows.length === 1 ? '' : 's'}</span>}
     >
       {isLoading ? (
         <div style={{ display: 'flex', justifyContent: 'center', padding: 32 }}>
@@ -866,36 +696,36 @@ function TrunkProductSection() {
           {rows.map((t) => (
             <ProductRow key={t.id}>
               <div style={{ minWidth: 160, flex: '1 1 160px' }}>
-                <div style={{ fontSize: '0.9rem', fontWeight: 700, color: COLORS.text }}>
+                <div style={{ fontSize: '0.86rem', fontWeight: 700, color: INK }}>
                   {t.trunk_name}
                 </div>
                 {t.package_name && (
-                  <div style={{ fontSize: '0.72rem', color: COLORS.muted, marginTop: 2 }}>
+                  <div style={{ fontSize: '0.72rem', color: INK_DIM, marginTop: 2 }}>
                     {t.package_name}
                   </div>
                 )}
               </div>
 
-              <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', fontSize: '0.75rem', color: COLORS.secondary }}>
+              <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', fontSize: '0.74rem', color: INK_SOFT }}>
                 <span>
-                  <span style={{ color: COLORS.muted }}>Auth:</span> {t.auth_type}
+                  <span style={{ color: INK_DIM }}>Auth:</span> {t.auth_type}
                 </span>
                 <span>
-                  <span style={{ color: COLORS.muted }}>Auth IPs:</span> {t.ip_count ?? 0}
+                  <span style={{ color: INK_DIM }}>Auth IPs:</span> {t.ip_count ?? 0}
                 </span>
                 <span>
-                  <span style={{ color: COLORS.muted }}>DIDs:</span> {t.did_count ?? 0}
+                  <span style={{ color: INK_DIM }}>DIDs:</span> {t.did_count ?? 0}
                 </span>
                 <span>
-                  <span style={{ color: COLORS.muted }}>Channels:</span> {t.max_channels}
+                  <span style={{ color: INK_DIM }}>Channels:</span> {t.max_channels}
                 </span>
                 <span>
-                  <span style={{ color: COLORS.muted }}>CPS:</span> {t.cps_limit}
+                  <span style={{ color: INK_DIM }}>CPS:</span> {t.cps_limit}
                 </span>
               </div>
 
               <div style={{ marginLeft: 'auto' }}>
-                <StatusPill enabled={t.enabled} />
+                <EnabledPill enabled={t.enabled} />
               </div>
             </ProductRow>
           ))}
@@ -917,8 +747,8 @@ function ApiDidProductSection() {
     <Section
       title="API DIDs"
       subtitle="Programmable voice numbers routed to your webhooks"
-      icon={<Code2 size={18} strokeWidth={1.7} />}
-      actions={<Badge variant="api">{rows.length} DID{rows.length === 1 ? '' : 's'}</Badge>}
+      icon={<Code2 size={16} strokeWidth={1.8} />}
+      actions={<span className="dl-count">{rows.length} DID{rows.length === 1 ? '' : 's'}</span>}
     >
       {isLoading ? (
         <div style={{ display: 'flex', justifyContent: 'center', padding: 32 }}>
@@ -933,19 +763,17 @@ function ApiDidProductSection() {
           {rows.map((d) => (
             <ProductRow key={d.id}>
               <div style={{ minWidth: 150, flex: '0 1 auto' }}>
-                <div style={{ fontSize: '0.9rem', fontWeight: 700, color: COLORS.text, fontFamily: MONO }}>
+                <div style={{ fontSize: '0.86rem', fontWeight: 700, color: INK, fontFamily: MONO }}>
                   {fmt(d.did)}
                 </div>
               </div>
 
               <div style={{ minWidth: 200, flex: '1 1 200px' }}>
-                <div style={{ fontSize: '0.62rem', color: COLORS.muted, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 3 }}>
-                  Voice webhook
-                </div>
+                <RowCaption>Voice webhook</RowCaption>
                 <div
                   style={{
-                    fontSize: '0.78rem',
-                    color: COLORS.primaryLight,
+                    fontSize: '0.76rem',
+                    color: AZURE_DEEP,
                     fontFamily: MONO,
                     overflow: 'hidden',
                     textOverflow: 'ellipsis',
@@ -958,7 +786,7 @@ function ApiDidProductSection() {
               </div>
 
               <div style={{ marginLeft: 'auto' }}>
-                <StatusPill enabled={d.enabled} />
+                <EnabledPill enabled={d.enabled} />
               </div>
             </ProductRow>
           ))}
@@ -973,24 +801,11 @@ function UcaasProductSection() {
     <Section
       title="UCaaS"
       subtitle="Unified communications features are enabled for your account"
-      icon={<Sparkles size={18} strokeWidth={1.7} />}
-      actions={<Badge variant="ucaas">Enabled</Badge>}
+      icon={<Sparkles size={16} strokeWidth={1.8} />}
+      actions={<span className="dl-tag">Enabled</span>}
     >
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 12,
-          padding: '16px 18px',
-          borderRadius: 12,
-          background: 'rgba(59,130,246,0.04)',
-          border: '1px solid rgba(59,130,246,0.14)',
-          color: COLORS.secondary,
-          fontSize: '0.82rem',
-          lineHeight: 1.5,
-        }}
-      >
-        <Sparkles size={18} style={{ color: COLORS.primaryLight, flexShrink: 0 }} />
+      <div className="dl-note" style={{ alignItems: 'center', padding: '14px 16px', fontSize: '0.8rem' }}>
+        <Sparkles size={17} style={{ color: AZURE_DEEP, flexShrink: 0 }} />
         <span>
           Extensions and voicemail are available on your account. Your administrator
           can configure UCaaS features — contact support for details.
@@ -1009,13 +824,13 @@ function ProductsTab({ customer }: { customer: MyCustomer }) {
   const showUcaas = customer.ucaas_enabled === true && type !== 'rcf';
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+    <div className="dl-stack">
       {showRcf && <RcfProductSection />}
       {showTrunk && <TrunkProductSection />}
       {showApi && <ApiDidProductSection />}
       {showUcaas && <UcaasProductSection />}
       {!showRcf && !showTrunk && !showApi && !showUcaas && (
-        <Section title="Products" subtitle="No products configured" icon={<Boxes size={18} strokeWidth={1.7} />}>
+        <Section title="Products" subtitle="No products configured" icon={<Boxes size={16} strokeWidth={1.8} />}>
           <InlineEmpty message="No products are configured for your account. Contact support to get started." />
         </Section>
       )}
@@ -1023,7 +838,7 @@ function ProductsTab({ customer }: { customer: MyCustomer }) {
   );
 }
 
-/* ═════════════════ 4. Profile & Security tab ═════════════════ */
+/* ═════════════════ 4. Your Account tab ═════════════════ */
 
 function ProfileInput({
   id,
@@ -1042,91 +857,48 @@ function ProfileInput({
   autoComplete?: string;
   disabled?: boolean;
 }) {
-  const style: CSSProperties = {
-    boxSizing: 'border-box',
-    color: disabled ? COLORS.muted : COLORS.text,
-    cursor: disabled ? 'not-allowed' : 'text',
-    opacity: disabled ? 0.6 : 1,
-  };
   return (
     <input
       id={id}
-      className="form-control"
+      className="dl-input"
       type={type}
       value={value}
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}
       autoComplete={autoComplete}
       disabled={disabled}
-      style={style}
+      style={{ width: '100%' }}
     />
   );
 }
 
 function FieldLabel({ htmlFor, children }: { htmlFor: string; children: ReactNode }) {
   return (
-    <label
-      htmlFor={htmlFor}
-      style={{
-        fontSize: '0.72rem',
-        fontWeight: 600,
-        color: COLORS.secondary,
-        letterSpacing: '0.04em',
-        textTransform: 'uppercase',
-      }}
-    >
+    <label htmlFor={htmlFor} className="dl-flabel" style={{ marginBottom: 0 }}>
       {children}
     </label>
   );
 }
 
 function StatusBanner({ type, message }: { type: 'success' | 'error'; message: string }) {
-  const color = type === 'success' ? COLORS.success : COLORS.error;
   return (
-    <div
-      role="status"
-      style={{
-        padding: '10px 14px',
-        borderRadius: 8,
-        background: `${color}14`,
-        border: `1px solid ${color}40`,
-        color,
-        fontSize: '0.8rem',
-        fontWeight: 500,
-      }}
-    >
+    <div role="status" className={type === 'success' ? 'dl-banner dl-banner-ok' : 'dl-banner dl-banner-err'}>
       {message}
     </div>
   );
 }
 
 function SubmitButton({ saving, label }: { saving: boolean; label: string }) {
-  const [hover, setHover] = useState(false);
   return (
-    <button
-      type="submit"
-      disabled={saving}
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
-      style={{
-        padding: '9px 22px',
-        borderRadius: 8,
-        background: hover && !saving ? '#2563eb' : COLORS.primary,
-        border: 'none',
-        color: '#fff',
-        fontSize: '0.82rem',
-        fontWeight: 600,
-        cursor: saving ? 'not-allowed' : 'pointer',
-        opacity: saving ? 0.65 : 1,
-        transition: 'background 0.15s, opacity 0.15s',
-      }}
-    >
+    <button type="submit" className="dl-btn dl-btn-primary" disabled={saving}>
       {saving ? 'Saving…' : label}
     </button>
   );
 }
 
-/** Edit display name — reuses the exact PUT /auth/me call from AccountPage. */
+/** Identity facts + edit display name — the retired standalone /account page's
+ *  Profile card, merged here: read-only Email / Role / Customer / Last Login
+ *  grid plus the exact PUT /auth/me display-name form. */
 function ProfileCard({ user, onRefresh }: { user: User; onRefresh: () => Promise<void> }) {
   const [name, setName] = useState(user.name ?? '');
   const [saving, setSaving] = useState(false);
@@ -1157,21 +929,13 @@ function ProfileCard({ user, onRefresh }: { user: User; onRefresh: () => Promise
   );
 
   return (
-    <Section title="Profile" subtitle="Your personal display details" icon={<IdCard size={18} strokeWidth={1.7} />}>
+    <Section title="Profile" subtitle="Your identity on the platform" icon={<IdCard size={16} strokeWidth={1.8} />}>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '14px 20px', marginBottom: 20 }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           <FieldLabel htmlFor="my-email">Email</FieldLabel>
           <div
-            style={{
-              padding: '9px 12px',
-              borderRadius: 8,
-              background: 'rgba(255,255,255,0.02)',
-              border: `1px solid ${COLORS.border}`,
-              fontSize: '0.85rem',
-              color: COLORS.muted,
-              userSelect: 'all',
-              fontFamily: MONO,
-            }}
+            className="dl-ro"
+            style={{ userSelect: 'all', fontFamily: MONO, fontSize: '0.8rem' }}
             id="my-email"
           >
             {user.email}
@@ -1179,23 +943,25 @@ function ProfileCard({ user, onRefresh }: { user: User; onRefresh: () => Promise
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           <FieldLabel htmlFor="my-role">Role</FieldLabel>
-          <div
-            style={{
-              padding: '9px 12px',
-              borderRadius: 8,
-              background: 'rgba(255,255,255,0.02)',
-              border: `1px solid ${COLORS.border}`,
-              fontSize: '0.85rem',
-              color: COLORS.muted,
-            }}
-            id="my-role"
-          >
+          <div className="dl-ro" id="my-role">
             {ROLE_LABEL[user.role]}
+          </div>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <FieldLabel htmlFor="my-customer">Customer</FieldLabel>
+          <div className="dl-ro" id="my-customer">
+            {user.customer_name ?? 'None'}
+          </div>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <FieldLabel htmlFor="my-last-login">Last Login</FieldLabel>
+          <div className="dl-ro" id="my-last-login">
+            {fmtDateTime(user.last_login)}
           </div>
         </div>
       </div>
 
-      <div style={{ height: 1, background: COLORS.border, marginBottom: 20 }} />
+      <div style={{ height: 1, background: 'var(--rcf-line)', marginBottom: 20 }} />
 
       <form onSubmit={handleSave} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxWidth: 420 }}>
@@ -1218,7 +984,7 @@ function ProfileCard({ user, onRefresh }: { user: User; onRefresh: () => Promise
   );
 }
 
-/** Change password — reuses the exact PUT /auth/me call + validation from AccountPage. */
+/** Change password — the exact PUT /auth/me call + validation from the retired /account page. */
 function PasswordCard({ onRefresh }: { onRefresh: () => Promise<void> }) {
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -1264,7 +1030,7 @@ function PasswordCard({ onRefresh }: { onRefresh: () => Promise<void> }) {
   );
 
   return (
-    <Section title="Change Password" subtitle="Keep your sign-in secure" icon={<ShieldCheck size={18} strokeWidth={1.7} />}>
+    <Section title="Change Password" subtitle="Keep your sign-in secure" icon={<ShieldCheck size={16} strokeWidth={1.8} />}>
       <form onSubmit={handleSave} style={{ display: 'flex', flexDirection: 'column', gap: 16, maxWidth: 420 }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           <FieldLabel htmlFor="cur-pw">Current password</FieldLabel>
@@ -1313,7 +1079,7 @@ function PasswordCard({ onRefresh }: { onRefresh: () => Promise<void> }) {
 
 function SecurityTab({ user, onRefresh }: { user: User; onRefresh: () => Promise<void> }) {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+    <div className="dl-stack">
       <ProfileCard user={user} onRefresh={onRefresh} />
       <PasswordCard onRefresh={onRefresh} />
     </div>
@@ -1332,11 +1098,7 @@ interface TabDef {
 
 function AccountTabBar({ active, onChange, tabs }: { active: Tab; onChange: (t: Tab) => void; tabs: TabDef[] }) {
   return (
-    <div
-      className="glass-surface"
-      style={{ display: 'flex', gap: 4, borderRadius: 14, padding: 5, marginBottom: 24, flexWrap: 'wrap' }}
-      role="tablist"
-    >
+    <div className="dl-tabs fx-load fx-load-d1" role="tablist">
       {tabs.map((t) => {
         const isActive = active === t.id;
         return (
@@ -1346,29 +1108,15 @@ function AccountTabBar({ active, onChange, tabs }: { active: Tab; onChange: (t: 
             role="tab"
             aria-selected={isActive}
             onClick={() => onChange(t.id)}
-            style={{
-              flex: '1 1 140px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: 8,
-              padding: '10px 16px',
-              borderRadius: 10,
-              border: 'none',
-              cursor: 'pointer',
-              fontSize: '0.83rem',
-              fontWeight: isActive ? 700 : 500,
-              fontFamily: 'inherit',
-              color: isActive ? COLORS.text : '#64748b',
-              background: isActive
-                ? 'linear-gradient(135deg, rgba(59,130,246,0.22) 0%, rgba(59,130,246,0.12) 100%)'
-                : 'transparent',
-              boxShadow: isActive ? '0 0 14px rgba(59,130,246,0.18), inset 0 1px 0 rgba(255,255,255,0.06)' : 'none',
-              transition: 'all 0.18s ease',
-              whiteSpace: 'nowrap',
-            }}
+            className={isActive ? 'dl-tab dl-tab-active' : 'dl-tab'}
           >
-            <span style={{ color: isActive ? COLORS.primaryLight : '#475569', display: 'inline-flex' }}>
+            <span
+              style={{
+                display: 'inline-flex',
+                color: isActive ? 'var(--rcf-azure-deep)' : 'inherit',
+                transition: 'color 0.15s ease',
+              }}
+            >
               {t.icon}
             </span>
             {t.label}
@@ -1376,6 +1124,43 @@ function AccountTabBar({ active, onChange, tabs }: { active: Tab; onChange: (t: 
         );
       })}
     </div>
+  );
+}
+
+/* ═════════════════ Quiet page header ═════════════════ */
+
+function MyAccountHeader({ customer, loaded }: { customer: MyCustomer | undefined; loaded: boolean }) {
+  const counts = customer?.counts;
+  const metrics: { value: number; label: string }[] = [];
+  if (counts) {
+    if (counts.rcf > 0) metrics.push({ value: counts.rcf, label: 'RCF Numbers' });
+    if (counts.trunks > 0) metrics.push({ value: counts.trunks, label: 'SIP Trunks' });
+    if (counts.api_dids > 0) metrics.push({ value: counts.api_dids, label: 'API DIDs' });
+  }
+
+  return (
+    <header className="dl-header fx-load">
+      <div className="dl-header-id">
+        <div className="dl-crumb">
+          <span>My Account</span>
+          <span className="dl-crumb-sep" aria-hidden="true">/</span>
+          <span>Granite CRAG</span>
+        </div>
+        <h1 className="dl-title">{customer ? customer.name : 'My Account'}</h1>
+        <p className="dl-sub">Your organization, users, products, and sign-in security in one place.</p>
+      </div>
+
+      {loaded && metrics.length > 0 && (
+        <div className="dl-metrics">
+          {metrics.map((m) => (
+            <div className="dl-metric" key={m.label}>
+              <div className="dl-metric-value">{m.value.toLocaleString()}</div>
+              <div className="dl-metric-label">{m.label}</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </header>
   );
 }
 
@@ -1402,7 +1187,7 @@ export function MyAccountPage() {
       { id: 'overview', label: 'Overview', icon: <IdCard size={15} strokeWidth={1.8} /> },
       { id: 'team', label: 'Users & Access', icon: <Users size={15} strokeWidth={1.8} /> },
       { id: 'products', label: 'Products', icon: <Boxes size={15} strokeWidth={1.8} /> },
-      { id: 'security', label: 'Profile & Security', icon: <ShieldCheck size={15} strokeWidth={1.8} /> },
+      { id: 'security', label: 'Your Account', icon: <ShieldCheck size={15} strokeWidth={1.8} /> },
     ],
     [],
   );
@@ -1413,66 +1198,52 @@ export function MyAccountPage() {
   const noCustomer = isError && error instanceof ApiError && error.status === 404;
 
   return (
-    <div style={{ minHeight: '100%', background: COLORS.bg, padding: '32px 32px 56px', width: '100%' }}>
-      {/* Header */}
-      <div style={{ marginBottom: 26 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <span
+    <div className="dl-scope">
+      <div className="dl-shell">
+        <MyAccountHeader customer={customer} loaded={!isLoading} />
+
+        {isLoading ? (
+          <div
             style={{
-              width: 40,
-              height: 40,
-              borderRadius: 12,
               display: 'flex',
+              flexDirection: 'column',
               alignItems: 'center',
               justifyContent: 'center',
-              color: COLORS.primaryLight,
-              background: 'linear-gradient(135deg, rgba(59,130,246,0.18) 0%, rgba(59,130,246,0.08) 100%)',
-              border: '1px solid rgba(59,130,246,0.28)',
-              boxShadow: '0 0 20px rgba(59,130,246,0.16)',
+              gap: 14,
+              padding: '80px 24px',
+              color: INK_DIM,
             }}
           >
-            <IdCard size={22} strokeWidth={1.7} />
-          </span>
-          <div>
-            <h1 style={{ margin: 0, fontSize: '1.55rem', fontWeight: 800, color: COLORS.text, letterSpacing: '-0.03em', lineHeight: 1.1 }}>
-              My Account
-            </h1>
-            <p style={{ margin: '4px 0 0', fontSize: '0.85rem', color: COLORS.muted }}>
-              {customer ? customer.name : 'Your account, team, products, and security'}
-            </p>
+            <Spinner size="lg" />
+            <span style={{ fontSize: '0.85rem' }}>Loading your account…</span>
           </div>
-        </div>
+        ) : (
+          <>
+            <AccountTabBar active={activeTab} onChange={setActiveTab} tabs={tabs} />
+
+            <div className="fx-load fx-load-d2">
+              {/* Overview / Team / Products depend on the customer record. */}
+              {activeTab === 'overview' &&
+                (customer ? (
+                  <OverviewTab customer={customer} />
+                ) : (
+                  <NoCustomerNotice noCustomer={noCustomer} />
+                ))}
+
+              {activeTab === 'team' && <TeamTab />}
+
+              {activeTab === 'products' &&
+                (customer ? (
+                  <ProductsTab customer={customer} />
+                ) : (
+                  <NoCustomerNotice noCustomer={noCustomer} />
+                ))}
+
+              {activeTab === 'security' && <SecurityTab user={user} onRefresh={refreshUser} />}
+            </div>
+          </>
+        )}
       </div>
-
-      {isLoading ? (
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14, padding: '80px 24px', color: COLORS.muted }}>
-          <Spinner size="lg" />
-          <span style={{ fontSize: '0.85rem' }}>Loading your account…</span>
-        </div>
-      ) : (
-        <>
-          <AccountTabBar active={activeTab} onChange={setActiveTab} tabs={tabs} />
-
-          {/* Overview / Team / Products depend on the customer record. */}
-          {activeTab === 'overview' &&
-            (customer ? (
-              <OverviewTab customer={customer} />
-            ) : (
-              <NoCustomerNotice noCustomer={noCustomer} />
-            ))}
-
-          {activeTab === 'team' && <TeamTab />}
-
-          {activeTab === 'products' &&
-            (customer ? (
-              <ProductsTab customer={customer} />
-            ) : (
-              <NoCustomerNotice noCustomer={noCustomer} />
-            ))}
-
-          {activeTab === 'security' && <SecurityTab user={user} onRefresh={refreshUser} />}
-        </>
-      )}
     </div>
   );
 }
@@ -1483,27 +1254,17 @@ function NoCustomerNotice({ noCustomer }: { noCustomer: boolean }) {
     <Section
       title={noCustomer ? 'No customer account' : 'Unable to load account'}
       subtitle={noCustomer ? 'Your login is not associated with a customer' : 'Please try again shortly'}
-      icon={<AlertTriangle size={18} strokeWidth={1.7} />}
+      icon={<AlertTriangle size={16} strokeWidth={1.8} />}
     >
       <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 12,
-          padding: '16px 18px',
-          borderRadius: 12,
-          background: 'rgba(245,158,11,0.06)',
-          border: '1px solid rgba(245,158,11,0.18)',
-          color: COLORS.secondary,
-          fontSize: '0.82rem',
-          lineHeight: 1.5,
-        }}
+        className="dl-banner dl-banner-warn"
+        style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px' }}
       >
-        <AlertTriangle size={18} style={{ color: COLORS.warning, flexShrink: 0 }} />
+        <AlertTriangle size={18} style={{ flexShrink: 0 }} />
         <span>
           {noCustomer
-            ? 'This account is not linked to a customer. You can still manage your profile and password under Profile & Security.'
-            : 'We could not load your account details right now. Your profile and password are still available under Profile & Security.'}
+            ? 'This account is not linked to a customer. You can still manage your profile and password under Your Account.'
+            : 'We could not load your account details right now. Your profile and password are still available under Your Account.'}
         </span>
       </div>
     </Section>

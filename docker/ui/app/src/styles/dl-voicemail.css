@@ -1,0 +1,318 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   dl-voicemail.css — page-scoped daylight styles for VisualVoicemailPage.
+
+   The `dlx6-` prefix marks these as page-scoped, NOT part of the shared
+   DAYLIGHT CONSOLE system in index.css (and not generic to the portal
+   coming-soon pages in dl-portal-pages.css). Every value references the
+   shared `--rcf-*` custom properties declared on `.dl-scope` — no re-stated
+   magic numbers for color or rhythm. Hand-written @media only (never
+   Tailwind md:* — see the container-build gotcha in CLAUDE.md).
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ─── Hero — positioning copy beside the inbox vignette ─── */
+.dlx6-hero {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 32px;
+  padding: 28px;
+  align-items: center;
+}
+
+@media (min-width: 880px) {
+  .dlx6-hero {
+    grid-template-columns: minmax(0, 10fr) minmax(0, 9fr);
+    gap: 44px;
+    padding: 34px 36px;
+  }
+}
+
+.dlx6-hero-title {
+  font-family: "Archivo", "IBM Plex Sans", sans-serif;
+  font-weight: 700;
+  font-size: clamp(1.1rem, 1.7vw, 1.32rem);
+  letter-spacing: -0.02em;
+  line-height: 1.22;
+  color: var(--rcf-ink);
+  margin: 0 0 10px;
+}
+
+.dlx6-hero-copy {
+  font-size: 0.84rem;
+  line-height: 1.65;
+  color: var(--rcf-ink-soft);
+  margin: 0 0 18px;
+  max-width: 52ch;
+}
+
+/* Azure-tick lines — same square accent as the breadcrumb tick */
+.dlx6-ticks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.dlx6-ticks li {
+  position: relative;
+  padding-left: 18px;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: var(--rcf-ink-soft);
+}
+
+.dlx6-ticks li::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0.44em;
+  width: 6px;
+  height: 6px;
+  background: var(--rcf-azure);
+  border-radius: 1px;
+}
+
+/* ─── Inbox vignette — a miniature of the product, rendered in CSS ─── */
+.dlx6-vignette {
+  background: var(--rcf-card);
+  border: 1px solid var(--rcf-line);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow:
+    0 1px 2px rgba(14, 23, 38, 0.05),
+    0 18px 40px -22px rgba(29, 99, 221, 0.35);
+  user-select: none;
+}
+
+.dlx6-vg-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  background: var(--rcf-tint);
+  border-bottom: 1px solid var(--rcf-line);
+  color: var(--rcf-ink-soft);
+}
+
+.dlx6-vg-title {
+  flex: 1;
+  font-family: "Archivo", "IBM Plex Sans", sans-serif;
+  font-weight: 700;
+  font-size: 0.7rem;
+  letter-spacing: 0.02em;
+  color: var(--rcf-ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dlx6-vg-count {
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--rcf-azure-deep);
+  background: rgba(47, 125, 246, 0.09);
+  border: 1px solid rgba(47, 125, 246, 0.24);
+  border-radius: 999px;
+  padding: 1px 8px;
+  white-space: nowrap;
+}
+
+/* Message rows */
+.dlx6-msg {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  padding: 12px 14px;
+}
+
+.dlx6-msg + .dlx6-msg {
+  border-top: 1px solid var(--rcf-line-soft);
+}
+
+/* Unread — azure inset keyline, same accent grammar as .dl-row:hover */
+.dlx6-msg-unread {
+  box-shadow: inset 2px 0 0 0 var(--rcf-azure);
+}
+
+.dlx6-msg-read {
+  opacity: 0.62;
+}
+
+.dlx6-play {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  margin-top: 1px;
+  border-radius: 50%;
+  background: rgba(47, 125, 246, 0.1);
+  border: 1px solid rgba(47, 125, 246, 0.28);
+  color: var(--rcf-azure-deep);
+}
+
+.dlx6-play-solid {
+  background: var(--rcf-azure);
+  border-color: var(--rcf-azure);
+  color: #ffffff;
+  box-shadow: 0 6px 14px -6px rgba(47, 125, 246, 0.7);
+}
+
+.dlx6-msg-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.dlx6-msg-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.dlx6-msg-from {
+  font-family: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--rcf-ink);
+  white-space: nowrap;
+}
+
+.dlx6-msg-when {
+  font-size: 0.62rem;
+  color: var(--rcf-ink-dim);
+  white-space: nowrap;
+}
+
+/* Static waveform — played portion azure, remainder hairline. No motion. */
+.dlx6-wave {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 18px;
+  margin: 6px 0 4px;
+}
+
+.dlx6-wave i {
+  flex: 1;
+  min-width: 2px;
+  max-width: 4px;
+  border-radius: 2px;
+  background: var(--rcf-line);
+}
+
+.dlx6-wave i.dlx6-on {
+  background: var(--rcf-azure);
+}
+
+.dlx6-msg-snippet {
+  margin-top: 4px;
+  font-size: 0.7rem;
+  line-height: 1.45;
+  color: var(--rcf-ink-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dlx6-msg-dur {
+  flex-shrink: 0;
+  margin-top: 2px;
+  font-size: 0.64rem;
+  font-weight: 600;
+  color: var(--rcf-ink-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.dlx6-vg-caption {
+  margin: 10px 2px 0;
+  font-size: 0.64rem;
+  color: var(--rcf-ink-dim);
+  text-align: right;
+}
+
+/* ─── Capability grid — icon-led rows, generous whitespace rhythm, with the
+   daylight hairline grammar: a single vertical rule between the columns ─── */
+.dlx6-caps {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 22px 44px;
+  padding: 24px 24px 26px;
+}
+
+@media (min-width: 720px) {
+  .dlx6-caps {
+    position: relative;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 26px 64px;
+    padding: 26px 36px 30px;
+  }
+
+  /* Column rule — centered in the column gap, inset from the panel edges */
+  .dlx6-caps::before {
+    content: '';
+    position: absolute;
+    top: 28px;
+    bottom: 32px;
+    left: 50%;
+    width: 1px;
+    background: var(--rcf-line-soft);
+  }
+}
+
+.dlx6-cap {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  min-width: 0;
+}
+
+.dlx6-cap-chip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  background: #e4eeff;
+  border: 1px solid rgba(47, 125, 246, 0.18);
+  color: var(--rcf-azure-deep);
+  transition: background var(--rcf-ease), border-color var(--rcf-ease), color var(--rcf-ease);
+}
+
+.dlx6-cap:hover .dlx6-cap-chip {
+  background: var(--rcf-azure);
+  border-color: var(--rcf-azure);
+  color: #ffffff;
+}
+
+.dlx6-cap-title {
+  font-family: "Archivo", "IBM Plex Sans", sans-serif;
+  font-weight: 700;
+  font-size: 0.84rem;
+  letter-spacing: -0.01em;
+  color: var(--rcf-ink);
+  margin: 1px 0 4px;
+}
+
+.dlx6-cap-line {
+  font-size: 0.76rem;
+  line-height: 1.55;
+  color: var(--rcf-ink-soft);
+  margin: 0;
+  max-width: 44ch;
+}
+
+/* ─── Quiet closing line ─── */
+.dlx6-close {
+  margin-top: var(--rcf-zone);
+  text-align: center;
+  font-size: 0.78rem;
+  line-height: 1.6;
+  color: var(--rcf-ink-dim);
+}

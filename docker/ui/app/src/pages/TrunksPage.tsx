@@ -17,17 +17,18 @@
  * `src/api/trunks.ts` (listTrunks, getTrunkIps, addTrunkIp, deleteTrunkIp,
  * getTrunkDids, getTrunkStats). No new endpoints are invented.
  *
+ * Styling: the shared DAYLIGHT CONSOLE system (`dl-*` classes in index.css,
+ * aliased from the RCF console primitives) — paper canvas, quiet breadcrumb
+ * header, white panels, ink text, azure accents.
+ *
  * React #310: every hook in every component below is called unconditionally at
  * the top of its function, before any early return.
  */
 
-import { useMemo, useState, type ReactNode, type CSSProperties } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 
-import { PortalHeader } from './RcfPage';
 import { IconTrunk } from '../components/icons/ProductIcons';
-import { Badge } from '../components/ui/Badge';
-import { Button } from '../components/ui/Button';
 import { Spinner } from '../components/ui/Spinner';
 import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
@@ -44,10 +45,16 @@ import {
 } from '../api/trunks';
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   Constants + shared tokens
+   Constants + shared tokens (mirror the .rcf-scope / .dl-scope CSS vars)
    ═══════════════════════════════════════════════════════════════════════════ */
 
-const ACCENT = '#3b82f6';
+const INK = '#0e1726';
+const INK_SOFT = '#46566f';
+const INK_DIM = '#5d6f8c';
+const AZURE_DEEP = '#1d63dd';
+const RED = '#b91c1c';
+
+const MONO = '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace';
 
 /** Human-readable label for each auth mode, shown in the connection panel. */
 const AUTH_LABEL: Record<TrunkAuthType, string> = {
@@ -102,58 +109,18 @@ function isValidIpv4(input: string): boolean {
    Small presentational helpers
    ═══════════════════════════════════════════════════════════════════════════ */
 
-const sectionLabelStyle: CSSProperties = {
-  fontSize: '0.7rem',
-  fontWeight: 700,
-  color: '#718096',
-  textTransform: 'uppercase',
-  letterSpacing: '0.05em',
-  margin: '0 0 12px',
-};
-
-function SectionLabel({ children }: { children: ReactNode }) {
-  return <h3 style={sectionLabelStyle}>{children}</h3>;
+/** Uppercase section opener with the shared azure tick. */
+function SectionTitle({ children }: { children: ReactNode }) {
+  return <h3 className="dl-section-title" style={{ marginBottom: 12 }}>{children}</h3>;
 }
 
-/** A frosted-glass metric tile (label + large value) for live activity. */
+/** A daylight metric tile (label + large value) for live activity. */
 function StatTile({ label, value, hint }: { label: string; value: ReactNode; hint?: string }) {
   return (
-    <div
-      className="glass-surface"
-      style={{
-        padding: '14px 16px',
-        borderRadius: 14,
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 8,
-        minWidth: 0,
-      }}
-    >
-      <span
-        style={{
-          fontSize: '0.66rem',
-          fontWeight: 700,
-          color: '#718096',
-          textTransform: 'uppercase',
-          letterSpacing: '0.05em',
-        }}
-      >
-        {label}
-      </span>
-      <span
-        style={{
-          fontSize: '1.5rem',
-          fontWeight: 700,
-          color: '#e2e8f0',
-          fontVariantNumeric: 'tabular-nums',
-          lineHeight: 1.05,
-        }}
-      >
-        {value}
-      </span>
-      {hint && (
-        <span style={{ fontSize: '0.68rem', color: '#475569', lineHeight: 1.3 }}>{hint}</span>
-      )}
+    <div className="dl-tile">
+      <span className="dl-tile-label">{label}</span>
+      <span className="dl-tile-value">{value}</span>
+      {hint && <span className="dl-tile-hint">{hint}</span>}
     </div>
   );
 }
@@ -170,11 +137,12 @@ function InfoBadge() {
         width: 15,
         height: 15,
         borderRadius: '50%',
-        border: '1px solid rgba(96,165,250,0.5)',
-        color: '#60a5fa',
+        border: '1px solid rgba(47,125,246,0.45)',
+        color: AZURE_DEEP,
         fontSize: '0.6rem',
         fontWeight: 700,
         flexShrink: 0,
+        marginTop: 1,
       }}
     >
       i
@@ -198,7 +166,7 @@ function LiveActivity({ trunkId, maxChannels }: { trunkId: number; maxChannels: 
   const active = s?.current_channels ?? s?.active_channels ?? 0;
   const cap = s?.max_channels ?? maxChannels ?? 0;
   const utilPct = cap > 0 ? Math.min(100, Math.round((active / cap) * 100)) : 0;
-  const utilBarColor = utilPct >= 80 ? '#ef4444' : utilPct >= 50 ? '#f59e0b' : '#22c55e';
+  const utilBarColor = utilPct >= 80 ? '#dc2626' : utilPct >= 50 ? '#d97706' : '#16a34a';
   const lastHour = s?.last_hour;
 
   const loading = statsQuery.isLoading;
@@ -208,36 +176,32 @@ function LiveActivity({ trunkId, maxChannels }: { trunkId: number; maxChannels: 
       <div
         style={{
           display: 'flex',
-          alignItems: 'center',
+          alignItems: 'baseline',
           justifyContent: 'space-between',
           gap: 12,
-          marginBottom: 12,
           flexWrap: 'wrap',
         }}
       >
-        <SectionLabel>Live activity</SectionLabel>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+        <SectionTitle>Live activity</SectionTitle>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 12 }}>
           <span
             aria-hidden="true"
             style={{
-              width: 7,
-              height: 7,
+              width: 6,
+              height: 6,
               borderRadius: '50%',
-              background: statsQuery.isError ? '#ef4444' : '#22c55e',
-              boxShadow: statsQuery.isError
-                ? '0 0 6px rgba(239,68,68,0.6)'
-                : '0 0 6px rgba(34,197,94,0.6)',
+              background: statsQuery.isError ? '#dc2626' : '#16a34a',
               flexShrink: 0,
             }}
           />
-          <span style={{ fontSize: '0.66rem', color: '#64748b', letterSpacing: '0.02em' }}>
+          <span style={{ fontSize: '0.66rem', color: INK_DIM, letterSpacing: '0.02em' }}>
             {statsQuery.isError ? 'Offline' : 'Live · auto-refresh 15s'}
           </span>
         </div>
       </div>
 
       {statsQuery.isError ? (
-        <p style={{ fontSize: '0.82rem', color: '#f87171', margin: 0 }}>
+        <p style={{ fontSize: '0.82rem', color: RED, margin: 0 }}>
           Live statistics are temporarily unavailable. Your trunk keeps running — this only
           affects the dashboard.
         </p>
@@ -258,7 +222,7 @@ function LiveActivity({ trunkId, maxChannels }: { trunkId: number; maxChannels: 
                 ) : (
                   <>
                     {active}
-                    <span style={{ fontSize: '0.95rem', fontWeight: 500, color: '#718096' }}>
+                    <span style={{ fontSize: '0.92rem', fontWeight: 500, color: INK_DIM }}>
                       {' '}/ {cap}
                     </span>
                   </>
@@ -295,7 +259,7 @@ function LiveActivity({ trunkId, maxChannels }: { trunkId: number; maxChannels: 
                   display: 'flex',
                   justifyContent: 'space-between',
                   fontSize: '0.66rem',
-                  color: '#64748b',
+                  color: INK_DIM,
                   marginBottom: 6,
                 }}
               >
@@ -305,13 +269,7 @@ function LiveActivity({ trunkId, maxChannels }: { trunkId: number; maxChannels: 
                 </span>
               </div>
               <div
-                style={{
-                  width: '100%',
-                  height: 6,
-                  borderRadius: 6,
-                  background: 'rgba(42,47,69,0.8)',
-                  overflow: 'hidden',
-                }}
+                className="dl-meter"
                 role="progressbar"
                 aria-valuenow={utilPct}
                 aria-valuemin={0}
@@ -319,13 +277,8 @@ function LiveActivity({ trunkId, maxChannels }: { trunkId: number; maxChannels: 
                 aria-label={`Channel utilization: ${utilPct}%`}
               >
                 <div
-                  style={{
-                    height: '100%',
-                    width: `${utilPct}%`,
-                    borderRadius: 6,
-                    backgroundColor: utilBarColor,
-                    transition: 'width 0.3s ease',
-                  }}
+                  className="dl-meter-fill"
+                  style={{ width: `${utilPct}%`, backgroundColor: utilBarColor }}
                 />
               </div>
             </div>
@@ -342,28 +295,9 @@ function LiveActivity({ trunkId, maxChannels }: { trunkId: number; maxChannels: 
 
 function ConfigRow({ label, value }: { label: string; value: ReactNode }) {
   return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'baseline',
-        justifyContent: 'space-between',
-        gap: 16,
-        padding: '9px 0',
-        borderBottom: '1px solid rgba(59,130,246,0.08)',
-      }}
-    >
-      <span style={{ fontSize: '0.75rem', color: '#718096', flexShrink: 0 }}>{label}</span>
-      <span
-        style={{
-          fontSize: '0.85rem',
-          color: '#e2e8f0',
-          fontWeight: 600,
-          textAlign: 'right',
-          minWidth: 0,
-        }}
-      >
-        {value}
-      </span>
+    <div className="dl-kv">
+      <span className="dl-kv-label">{label}</span>
+      <span className="dl-kv-value">{value}</span>
     </div>
   );
 }
@@ -371,15 +305,8 @@ function ConfigRow({ label, value }: { label: string; value: ReactNode }) {
 function PlanSummary({ trunk }: { trunk: Trunk }) {
   return (
     <section aria-label="Plan and capacity">
-      <SectionLabel>Plan &amp; capacity</SectionLabel>
-      <div
-        style={{
-          background: 'rgba(15,17,23,0.4)',
-          border: '1px solid rgba(59,130,246,0.10)',
-          borderRadius: 12,
-          padding: '4px 16px 8px',
-        }}
-      >
+      <SectionTitle>Plan &amp; capacity</SectionTitle>
+      <div className="dl-kvbox">
         <ConfigRow
           label="Call-path package"
           value={trunk.package_name ?? 'Standard'}
@@ -389,7 +316,7 @@ function PlanSummary({ trunk }: { trunk: Trunk }) {
           value={
             <>
               {trunk.max_channels}
-              <span style={{ color: '#718096', fontWeight: 500 }}> concurrent</span>
+              <span style={{ color: INK_DIM, fontWeight: 500 }}> concurrent</span>
             </>
           }
         />
@@ -398,7 +325,7 @@ function PlanSummary({ trunk }: { trunk: Trunk }) {
           value={
             <>
               {trunk.cps_limit}
-              <span style={{ color: '#718096', fontWeight: 500 }}> calls/sec</span>
+              <span style={{ color: INK_DIM, fontWeight: 500 }}> calls/sec</span>
             </>
           }
         />
@@ -406,15 +333,7 @@ function PlanSummary({ trunk }: { trunk: Trunk }) {
         {trunk.tech_prefix ? (
           <ConfigRow
             label="Tech prefix"
-            value={
-              <span
-                style={{
-                  fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
-                }}
-              >
-                {trunk.tech_prefix}
-              </span>
-            }
+            value={<span style={{ fontFamily: MONO }}>{trunk.tech_prefix}</span>}
           />
         ) : null}
       </div>
@@ -425,7 +344,7 @@ function PlanSummary({ trunk }: { trunk: Trunk }) {
           gap: 7,
           margin: '10px 2px 0',
           fontSize: '0.72rem',
-          color: '#718096',
+          color: INK_DIM,
           lineHeight: 1.5,
         }}
       >
@@ -456,35 +375,20 @@ function ConnectionPanel({
 }) {
   return (
     <section aria-label="Connection and setup">
-      <SectionLabel>Connection &amp; setup</SectionLabel>
+      <SectionTitle>Connection &amp; setup</SectionTitle>
 
-      <div
-        style={{
-          background: 'rgba(15,17,23,0.4)',
-          border: '1px solid rgba(59,130,246,0.10)',
-          borderRadius: 12,
-          padding: '4px 16px 8px',
-        }}
-      >
+      <div className="dl-kvbox">
         <ConfigRow
           label="SBC / SIP host"
           value={
-            <span style={{ color: '#94a3b8', fontWeight: 500, fontStyle: 'italic' }}>
+            <span style={{ color: INK_DIM, fontWeight: 500, fontStyle: 'italic' }}>
               Issued at provisioning
             </span>
           }
         />
         <ConfigRow
           label="Signaling"
-          value={
-            <span
-              style={{
-                fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
-              }}
-            >
-              SIP · UDP/5060
-            </span>
-          }
+          value={<span style={{ fontFamily: MONO }}>SIP · UDP/5060</span>}
         />
         <ConfigRow label="Authentication" value={AUTH_LABEL[trunk.auth_type]} />
         <ConfigRow
@@ -495,7 +399,7 @@ function ConnectionPanel({
             ) : (
               <>
                 {ips?.length ?? 0}
-                <span style={{ color: '#718096', fontWeight: 500 }}>
+                <span style={{ color: INK_DIM, fontWeight: 500 }}>
                   {' '}
                   IP{(ips?.length ?? 0) === 1 ? '' : 's'}
                 </span>
@@ -505,24 +409,13 @@ function ConnectionPanel({
         />
       </div>
 
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'flex-start',
-          gap: 8,
-          marginTop: 12,
-          padding: '10px 12px',
-          borderRadius: 10,
-          background: 'rgba(59,130,246,0.06)',
-          border: '1px solid rgba(59,130,246,0.16)',
-        }}
-      >
+      <div className="dl-note" style={{ marginTop: 12 }}>
         <InfoBadge />
-        <p style={{ margin: 0, fontSize: '0.75rem', color: '#94a3b8', lineHeight: 1.55 }}>
+        <p style={{ margin: 0 }}>
           {(trunk.auth_type === 'ip' || trunk.auth_type === 'both') ? (
             <>
               Point your PBX or SBC at the platform SIP host issued to you during onboarding, and
-              make sure calls originate from one of your <strong style={{ color: '#cbd5e0' }}>authorized
+              make sure calls originate from one of your <strong style={{ color: INK }}>authorized
               source IPs</strong> below — traffic from any other address is rejected.
             </>
           ) : (
@@ -556,30 +449,27 @@ function IpRow({
   const [hovered, setHovered] = useState(false);
   return (
     <div
+      className="dl-item"
       style={{
         display: 'flex',
         alignItems: 'center',
         gap: 10,
-        background: 'rgba(30,33,48,0.8)',
-        border: '1px solid rgba(59,130,246,0.15)',
-        borderRadius: 8,
-        padding: '7px 12px',
+        padding: '8px 14px',
         opacity: deleting ? 0.5 : 1,
-        transition: 'opacity 0.15s',
       }}
     >
       <span
         style={{
           fontSize: '0.82rem',
-          fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
-          color: '#e2e8f0',
+          fontFamily: MONO,
+          color: INK,
           fontWeight: 600,
         }}
       >
         {ip.ip_address}
       </span>
       {ip.description && (
-        <span style={{ fontSize: '0.72rem', color: '#718096' }}>{ip.description}</span>
+        <span style={{ fontSize: '0.72rem', color: INK_DIM }}>{ip.description}</span>
       )}
       {canManage && (
         <button
@@ -594,7 +484,7 @@ function IpRow({
             marginLeft: 'auto',
             background: 'none',
             border: 'none',
-            color: hovered ? '#f87171' : '#718096',
+            color: hovered ? RED : INK_DIM,
             cursor: deleting ? 'not-allowed' : 'pointer',
             padding: '0 2px',
             fontSize: '1.05rem',
@@ -675,7 +565,7 @@ function AuthIpManager({ trunkId, canManage }: { trunkId: number; canManage: boo
 
   return (
     <section aria-label="Authorized IP addresses">
-      <SectionLabel>
+      <SectionTitle>
         Authorized source IPs{' '}
         <span
           style={{
@@ -683,29 +573,29 @@ function AuthIpManager({ trunkId, canManage }: { trunkId: number; canManage: boo
             textTransform: 'none',
             letterSpacing: 'normal',
             fontSize: '0.68rem',
-            color: '#718096',
+            color: INK_DIM,
           }}
         >
           (addresses permitted to send calls on this trunk)
         </span>
-      </SectionLabel>
+      </SectionTitle>
 
       {ipsQuery.isLoading && (
         <div
-          style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#718096', fontSize: '0.8rem' }}
+          style={{ display: 'flex', alignItems: 'center', gap: 8, color: INK_DIM, fontSize: '0.8rem' }}
         >
           <Spinner size="xs" /> Loading IPs…
         </div>
       )}
 
       {ipsQuery.isError && (
-        <p style={{ fontSize: '0.82rem', color: '#f87171', margin: 0 }}>
+        <p style={{ fontSize: '0.82rem', color: RED, margin: 0 }}>
           Could not load authorized IPs. Refresh the page to try again.
         </p>
       )}
 
       {!ipsQuery.isLoading && !ipsQuery.isError && ips !== null && ips.length === 0 && (
-        <p style={{ fontSize: '0.82rem', color: '#f59e0b', margin: '0 0 4px' }}>
+        <p style={{ fontSize: '0.82rem', color: '#92400e', margin: '0 0 4px' }}>
           No authorized IPs yet — add your PBX or SBC address below to start sending traffic.
         </p>
       )}
@@ -727,9 +617,9 @@ function AuthIpManager({ trunkId, canManage }: { trunkId: number; canManage: boo
       {canManage ? (
         <form
           onSubmit={handleAdd}
-          style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'flex-start', marginTop: 12 }}
+          style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'flex-start', marginTop: 14 }}
         >
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             <input
               type="text"
               value={newIp}
@@ -738,16 +628,15 @@ function AuthIpManager({ trunkId, canManage }: { trunkId: number; canManage: boo
               placeholder="203.0.113.50"
               aria-label="New authorized IP address"
               aria-invalid={showError}
-              className="form-control"
+              className="dl-input dl-input-mono"
               style={{
                 width: 170,
                 fontSize: '0.82rem',
-                fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
-                boxShadow: showError ? 'inset 0 0 0 1px rgba(239,68,68,0.6)' : undefined,
+                borderColor: showError ? 'rgba(220,38,38,0.6)' : undefined,
               }}
             />
             {showError && (
-              <span style={{ fontSize: '0.66rem', color: '#f87171' }}>
+              <span style={{ fontSize: '0.66rem', color: RED }}>
                 Invalid IPv4 address
               </span>
             )}
@@ -758,15 +647,19 @@ function AuthIpManager({ trunkId, canManage }: { trunkId: number; canManage: boo
             onChange={(e) => setNewDesc(e.target.value)}
             placeholder="Description (optional)"
             aria-label="Description for the new IP"
-            className="form-control"
+            className="dl-input"
             style={{ width: 200, fontSize: '0.82rem' }}
           />
-          <Button type="submit" variant="ghost" size="sm" loading={addMutation.isPending}>
-            Add IP
-          </Button>
+          <button
+            type="submit"
+            className="dl-btn dl-btn-primary"
+            disabled={addMutation.isPending}
+          >
+            {addMutation.isPending ? 'Adding…' : 'Add IP'}
+          </button>
         </form>
       ) : (
-        <p style={{ fontSize: '0.72rem', color: '#718096', marginTop: 10 }}>
+        <p style={{ fontSize: '0.72rem', color: INK_DIM, marginTop: 10 }}>
           Read-only access — contact an administrator to change authorized IPs.
         </p>
       )}
@@ -789,24 +682,24 @@ function DidList({ trunkId }: { trunkId: number }) {
 
   return (
     <section aria-label="Assigned DIDs">
-      <SectionLabel>Inbound DIDs routed to this trunk</SectionLabel>
+      <SectionTitle>Inbound DIDs routed to this trunk</SectionTitle>
 
       {didsQuery.isLoading && (
         <div
-          style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#718096', fontSize: '0.8rem' }}
+          style={{ display: 'flex', alignItems: 'center', gap: 8, color: INK_DIM, fontSize: '0.8rem' }}
         >
           <Spinner size="xs" /> Loading DIDs…
         </div>
       )}
 
       {didsQuery.isError && (
-        <p style={{ fontSize: '0.82rem', color: '#f87171', margin: 0 }}>
+        <p style={{ fontSize: '0.82rem', color: RED, margin: 0 }}>
           Could not load DIDs. Refresh the page to try again.
         </p>
       )}
 
       {!didsQuery.isLoading && !didsQuery.isError && dids !== null && dids.length === 0 && (
-        <p style={{ fontSize: '0.82rem', color: '#718096', margin: 0 }}>
+        <p style={{ fontSize: '0.82rem', color: INK_DIM, margin: 0 }}>
           No DIDs are currently routed to this trunk. Contact your account team to assign numbers.
         </p>
       )}
@@ -816,20 +709,9 @@ function DidList({ trunkId }: { trunkId: number }) {
           {dids.map((d) => (
             <span
               key={d.id}
+              className="dl-chip"
               title={d.enabled ? 'Active' : 'Disabled'}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 7,
-                fontSize: '0.8rem',
-                fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
-                fontWeight: 600,
-                background: 'rgba(30,33,48,0.8)',
-                color: d.enabled ? '#e2e8f0' : '#64748b',
-                border: '1px solid rgba(59,130,246,0.15)',
-                padding: '5px 11px',
-                borderRadius: 8,
-              }}
+              style={d.enabled ? undefined : { color: INK_DIM }}
             >
               <span
                 aria-hidden="true"
@@ -837,7 +719,7 @@ function DidList({ trunkId }: { trunkId: number }) {
                   width: 6,
                   height: 6,
                   borderRadius: '50%',
-                  background: d.enabled ? '#22c55e' : '#475569',
+                  background: d.enabled ? '#16a34a' : '#b6c2d4',
                   flexShrink: 0,
                 }}
               />
@@ -864,103 +746,34 @@ function TrunkPanel({ trunk, canManage }: { trunk: Trunk; canManage: boolean }) 
   });
 
   return (
-    <div
-      className="glass-surface"
-      style={{ borderRadius: 20, overflow: 'hidden', position: 'relative' }}
-    >
-      {/* Top accent line */}
-      <div
-        aria-hidden="true"
-        style={{
-          position: 'absolute',
-          top: 0,
-          left: 32,
-          right: 32,
-          height: 2,
-          background: `linear-gradient(90deg, transparent, ${ACCENT}80, transparent)`,
-          opacity: 0.4,
-        }}
-      />
-
+    <div className="dl-panel">
       {/* Header */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'flex-start',
-          justifyContent: 'space-between',
-          gap: 12,
-          padding: '24px 28px 18px',
-        }}
-      >
-        <div style={{ minWidth: 0 }}>
+      <div className="dl-panel-head" style={{ padding: '16px 20px' }}>
+        <div style={{ minWidth: 0, flex: 1 }}>
           <div
+            className="dl-panel-title"
             style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 10,
-              fontSize: '1.15rem',
-              fontWeight: 700,
-              color: '#e2e8f0',
-              letterSpacing: '-0.01em',
+              fontSize: '0.95rem',
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
             }}
           >
-            <span
-              aria-hidden="true"
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                width: 34,
-                height: 34,
-                borderRadius: 10,
-                background: 'linear-gradient(135deg, rgba(59,130,246,0.15) 0%, rgba(59,130,246,0.05) 100%)',
-                border: '1px solid rgba(59,130,246,0.25)',
-                color: '#60a5fa',
-                flexShrink: 0,
-              }}
-            >
-              <IconTrunk size={18} />
-            </span>
-            <span
-              style={{
-                whiteSpace: 'nowrap',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-              }}
-            >
-              {trunk.trunk_name}
-            </span>
+            {trunk.trunk_name}
           </div>
-          <div
-            style={{
-              fontSize: '0.72rem',
-              color: '#718096',
-              marginTop: 6,
-              marginLeft: 44,
-            }}
-          >
+          <div style={{ fontSize: '0.72rem', color: INK_DIM, marginTop: 4 }}>
             {AUTH_LABEL[trunk.auth_type]} · {trunk.max_channels} call path
             {trunk.max_channels === 1 ? '' : 's'} · {trunk.cps_limit} CPS
           </div>
         </div>
-        <Badge variant={trunk.enabled ? 'active' : 'disabled'}>
+        <span className={trunk.enabled ? 'dl-pill dl-pill-on' : 'dl-pill dl-pill-off'}>
           {trunk.enabled ? 'Active' : 'Disabled'}
-        </Badge>
+        </span>
       </div>
 
       {/* Suspended notice */}
       {!trunk.enabled && (
-        <div
-          style={{
-            margin: '0 28px 4px',
-            padding: '10px 14px',
-            borderRadius: 10,
-            background: 'rgba(239,68,68,0.08)',
-            border: '1px solid rgba(239,68,68,0.2)',
-            fontSize: '0.78rem',
-            color: '#fca5a5',
-          }}
-        >
+        <div className="dl-banner dl-banner-err" style={{ margin: '16px 20px 0' }}>
           This trunk is currently disabled — calls will be rejected. Contact your account team to
           re-enable it.
         </div>
@@ -968,23 +781,13 @@ function TrunkPanel({ trunk, canManage }: { trunk: Trunk; canManage: boolean }) 
 
       {/* Body — sections */}
       <div
-        style={{
-          padding: '18px 28px 28px',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 28,
-        }}
+        className="dl-panel-body"
+        style={{ display: 'flex', flexDirection: 'column', gap: 28 }}
       >
         <LiveActivity trunkId={trunk.id} maxChannels={trunk.max_channels} />
 
         {/* Two-column: plan + connection */}
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
-            gap: 28,
-          }}
-        >
+        <div className="dl-grid2" style={{ gap: 28 }}>
           <PlanSummary trunk={trunk} />
           <ConnectionPanel
             trunk={trunk}
@@ -1004,44 +807,18 @@ function TrunkPanel({ trunk, canManage }: { trunk: Trunk; canManage: boolean }) 
    States: gate / loading / error / empty
    ═══════════════════════════════════════════════════════════════════════════ */
 
-function CenteredGlass({ children }: { children: ReactNode }) {
+function CenteredPanel({ children }: { children: ReactNode }) {
   return (
-    <div
-      className="glass-surface"
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: '72px 24px',
-        textAlign: 'center',
-        borderRadius: 20,
-      }}
-    >
-      {children}
+    <div className="dl-panel fx-load fx-load-d2">
+      <div className="dl-center">{children}</div>
     </div>
   );
 }
 
 function TrunkIconBadge() {
   return (
-    <div
-      aria-hidden="true"
-      style={{
-        width: 64,
-        height: 64,
-        borderRadius: 16,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        marginBottom: 20,
-        background: 'linear-gradient(135deg, rgba(59,130,246,0.15) 0%, rgba(59,130,246,0.05) 100%)',
-        border: '1px solid rgba(59,130,246,0.25)',
-        color: '#60a5fa',
-        boxShadow: '0 0 24px rgba(59,130,246,0.18)',
-      }}
-    >
-      <IconTrunk size={32} />
+    <div className="dl-center-icon" aria-hidden="true">
+      <IconTrunk size={28} />
     </div>
   );
 }
@@ -1049,98 +826,122 @@ function TrunkIconBadge() {
 /** Shown when a non-trunk account somehow reaches this page. */
 function NotAvailableState() {
   return (
-    <CenteredGlass>
+    <CenteredPanel>
       <TrunkIconBadge />
-      <h2 style={{ fontSize: '1.2rem', fontWeight: 700, color: '#e2e8f0', margin: '0 0 8px' }}>
+      <h2 style={{ fontSize: '1.05rem', fontWeight: 700, color: INK, margin: 0 }}>
         SIP Trunking isn&apos;t part of your plan
       </h2>
-      <p style={{ fontSize: '0.88rem', color: '#718096', maxWidth: 440, lineHeight: 1.6, margin: 0 }}>
+      <p style={{ fontSize: '0.84rem', color: INK_DIM, maxWidth: 440, lineHeight: 1.6, margin: 0 }}>
         Your account isn&apos;t set up for SIP trunking. If you&apos;d like to connect a PBX or SBC
         to our network, contact your account team to add a trunk.
       </p>
-    </CenteredGlass>
+    </CenteredPanel>
   );
 }
 
 /** Shown when the customer is a trunk account but has no trunk provisioned. */
 function EmptyState() {
   return (
-    <CenteredGlass>
+    <CenteredPanel>
       <TrunkIconBadge />
-      <h2 style={{ fontSize: '1.2rem', fontWeight: 700, color: '#e2e8f0', margin: '0 0 8px' }}>
+      <h2 style={{ fontSize: '1.05rem', fontWeight: 700, color: INK, margin: 0 }}>
         Your SIP trunk isn&apos;t provisioned yet
       </h2>
       <p
         style={{
-          fontSize: '0.88rem',
-          color: '#718096',
+          fontSize: '0.84rem',
+          color: INK_DIM,
           maxWidth: 460,
           lineHeight: 1.6,
-          margin: '0 0 20px',
+          margin: '0 0 8px',
         }}
       >
         Trunk provisioning is handled by our team. Contact us to get set up — once your trunk is
         live, you&apos;ll manage its authorized IPs and watch live activity right here.
       </p>
-      <div
-        style={{
-          padding: '8px 16px',
-          borderRadius: 8,
-          background: 'rgba(59,130,246,0.08)',
-          border: '1px solid rgba(59,130,246,0.2)',
-          color: '#60a5fa',
-          fontSize: '0.78rem',
-          fontWeight: 600,
-          letterSpacing: '0.02em',
-        }}
-      >
+      <div className="dl-tag" style={{ padding: '6px 14px', fontSize: '0.68rem' }}>
         Contact your account team to get started
       </div>
-    </CenteredGlass>
+    </CenteredPanel>
   );
 }
 
 function LoadingState() {
   return (
-    <CenteredGlass>
+    <CenteredPanel>
       <Spinner size="lg" />
-      <p style={{ fontSize: '0.85rem', color: '#718096', marginTop: 14 }}>Loading your trunks…</p>
-    </CenteredGlass>
+      <p style={{ fontSize: '0.84rem', color: INK_DIM, margin: 0 }}>Loading your trunks…</p>
+    </CenteredPanel>
   );
 }
 
 function ErrorState({ onRetry }: { onRetry: () => void }) {
   return (
-    <CenteredGlass>
+    <CenteredPanel>
       <div
+        className="dl-center-icon"
         aria-hidden="true"
-        style={{
-          width: 56,
-          height: 56,
-          borderRadius: 14,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          marginBottom: 18,
-          background: 'rgba(239,68,68,0.10)',
-          border: '1px solid rgba(239,68,68,0.25)',
-          color: '#f87171',
-        }}
+        style={{ background: 'rgba(220,38,38,0.08)', color: '#dc2626' }}
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} style={{ width: 26, height: 26 }}>
           <path d="M12 9v4M12 17h.01M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
       </div>
-      <h2 style={{ fontSize: '1.1rem', fontWeight: 700, color: '#e2e8f0', margin: '0 0 8px' }}>
+      <h2 style={{ fontSize: '1rem', fontWeight: 700, color: INK, margin: 0 }}>
         Couldn&apos;t load your trunks
       </h2>
-      <p style={{ fontSize: '0.85rem', color: '#718096', maxWidth: 400, lineHeight: 1.6, margin: '0 0 18px' }}>
+      <p style={{ fontSize: '0.82rem', color: INK_DIM, maxWidth: 400, lineHeight: 1.6, margin: '0 0 6px' }}>
         Something went wrong fetching your trunk details. Please try again.
       </p>
-      <Button variant="primary" onClick={onRetry}>
+      <button type="button" className="dl-btn dl-btn-primary" onClick={onRetry}>
         Retry
-      </Button>
-    </CenteredGlass>
+      </button>
+    </CenteredPanel>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Quiet page header — breadcrumb, title, description, inline metrics
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+function TrunksPageHeader({
+  title,
+  subtitle,
+  total,
+  active,
+  loaded,
+}: {
+  title: string;
+  subtitle: string;
+  total: number;
+  active: number;
+  loaded: boolean;
+}) {
+  return (
+    <header className="dl-header fx-load">
+      <div className="dl-header-id">
+        <div className="dl-crumb">
+          <span>SIP Trunking</span>
+          <span className="dl-crumb-sep" aria-hidden="true">/</span>
+          <span>Granite CRAG</span>
+        </div>
+        <h1 className="dl-title">{title}</h1>
+        <p className="dl-sub">{subtitle}</p>
+      </div>
+
+      {loaded && (
+        <div className="dl-metrics">
+          <div className="dl-metric">
+            <div className="dl-metric-value">{total.toLocaleString()}</div>
+            <div className="dl-metric-label">Trunks</div>
+          </div>
+          <div className="dl-metric">
+            <div className="dl-metric-value">{active.toLocaleString()}</div>
+            <div className="dl-metric-label">Active</div>
+          </div>
+        </div>
+      )}
+    </header>
   );
 }
 
@@ -1173,6 +974,7 @@ export function TrunksPage() {
   });
 
   const trunks = useMemo(() => trunksQuery.data?.items ?? [], [trunksQuery.data]);
+  const activeTrunks = useMemo(() => trunks.filter((t) => t.enabled).length, [trunks]);
 
   const subtitle = isTrunkAccount
     ? 'View your trunk, manage authorized IPs, and monitor live activity.'
@@ -1190,10 +992,10 @@ export function TrunksPage() {
     body = <EmptyState />;
   } else {
     body = (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+      <div className="dl-stack fx-load fx-load-d2" style={{ gap: 24 }}>
         {trunks.length > 1 && (
-          <p style={{ fontSize: '0.8rem', color: '#718096', margin: 0 }}>
-            You have <strong style={{ color: '#cbd5e0' }}>{trunks.length}</strong> trunks.
+          <p style={{ fontSize: '0.8rem', color: INK_DIM, margin: 0 }}>
+            You have <strong style={{ color: INK_SOFT }}>{trunks.length}</strong> trunks.
           </p>
         )}
         {trunks.map((trunk) => (
@@ -1204,14 +1006,17 @@ export function TrunksPage() {
   }
 
   return (
-    <div style={{ width: '100%' }}>
-      <PortalHeader
-        icon={<IconTrunk size={24} />}
-        title={user?.customer_name ? `${user.customer_name}'s SIP Trunks` : 'SIP Trunks'}
-        subtitle={subtitle}
-        badgeVariant="trunk"
-      />
-      {body}
+    <div className="dl-scope">
+      <div className="dl-shell">
+        <TrunksPageHeader
+          title={user?.customer_name ?? 'SIP Trunking Console'}
+          subtitle={subtitle}
+          total={trunks.length}
+          active={activeTrunks}
+          loaded={allowed && !trunksQuery.isLoading && !trunksQuery.isError}
+        />
+        {body}
+      </div>
     </div>
   );
 }

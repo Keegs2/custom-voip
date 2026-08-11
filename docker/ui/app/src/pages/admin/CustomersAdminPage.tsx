@@ -1,14 +1,22 @@
+/**
+ * CustomersAdminPage — searchable, paginated customer list + inline create
+ * form (/admin/customers).
+ *
+ * Styling: the shared DAYLIGHT CONSOLE system (`dl-*` in index.css, plus the
+ * page-scoped `dlx-*` primitives in styles/dl-admin.css). Renders INSIDE the
+ * AdminPage shell, which owns the paper canvas (`dl-scope`) — this page
+ * contributes only the toolbar, the create-form panel, and the table panel.
+ *
+ * React #310: every hook is called unconditionally at the top.
+ */
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { listCustomers, createCustomer } from '../../api/customers';
-import { Button } from '../../components/ui/Button';
 import { Spinner } from '../../components/ui/Spinner';
-import { Pagination } from '../../components/ui/Pagination';
-import { TableWrap, Table, Thead, Th } from '../../components/ui/Table';
-import { FormField } from '../../components/ui/FormField';
 import { useToast } from '../../components/ui/ToastContext';
 import { CustomerRow } from './CustomerRow';
 import type { AccountType, TrafficGrade } from '../../types/customer';
+import '../../styles/dl-admin.css';
 
 const PAGE_SIZE = 25;
 const COL_COUNT = 6;
@@ -30,6 +38,22 @@ const INITIAL_CREATE: CreateFormState = {
   cpm_limit: '60',
   ucaas_enabled: false,
 };
+
+/** Vertical label + dl-input field group (create form). */
+function Field({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column' }}>
+      <span className="dl-flabel">{label}</span>
+      {children}
+    </div>
+  );
+}
 
 export function CustomersAdminPage() {
   const qc = useQueryClient();
@@ -88,305 +112,255 @@ export function CustomersAdminPage() {
     setCreateForm((prev) => ({ ...prev, [key]: value }));
   }
 
+  const shown = (data?.items ?? []).length + offset;
+  const total = data?.total ?? 0;
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-      {/* Toolbar */}
-      <div
-        className="glass-surface"
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 16,
-          flexWrap: 'wrap',
-          borderRadius: 12,
-          padding: '20px 24px',
-          marginBottom: 4,
-        }}
-      >
-        <form onSubmit={handleSearch} style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1 }}>
+    <div className="dl-stack">
+      {/* ── Toolbar — search + create toggle ── */}
+      <div className="dlx-toolbar" style={{ marginBottom: 0 }}>
+        <form onSubmit={handleSearch} className="dlx-toolbar-form">
           <input
             type="search"
+            className="dl-input"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search customers…"
-            style={{
-              fontSize: '0.85rem',
-              padding: '8px 14px',
-              height: 36,
-              borderRadius: 8,
-              border: '1px solid rgba(59,130,246,0.15)',
-              background: 'rgba(13,15,21,0.55)',
-              color: '#e2e8f0',
-              outline: 'none',
-              transition: 'border-color 0.15s, box-shadow 0.15s',
-              flex: 1,
-              maxWidth: 400,
-            }}
-            onFocus={(e) => {
-              e.currentTarget.style.borderColor = '#3b82f6';
-              e.currentTarget.style.boxShadow = '0 0 0 3px rgba(59,130,246,0.15)';
-            }}
-            onBlur={(e) => {
-              e.currentTarget.style.borderColor = 'rgba(59,130,246,0.15)';
-              e.currentTarget.style.boxShadow = 'none';
-            }}
+            style={{ flex: 1, maxWidth: 400 }}
           />
-          <Button type="submit" variant="ghost" size="sm" style={{ flexShrink: 0 }}>
+          <button type="submit" className="dl-btn dl-btn-ghost" style={{ flexShrink: 0 }}>
             Search
-          </Button>
+          </button>
         </form>
-        <Button
-          variant="primary"
-          size="sm"
+        <button
+          type="button"
+          className="dl-btn dl-btn-primary"
           onClick={() => setShowCreateForm((v) => !v)}
-          style={{ flexShrink: 0, marginLeft: 4 }}
+          style={{ flexShrink: 0, marginLeft: 'auto' }}
         >
           {showCreateForm ? 'Cancel' : '+ New Customer'}
-        </Button>
+        </button>
       </div>
 
-      {/* Create form */}
+      {/* ── Create form ── */}
       {showCreateForm && (
-        <form
-          onSubmit={handleCreateSubmit}
-          className="glass-surface"
-          style={{
-            borderRadius: 16,
-            padding: '28px 28px 24px',
-            position: 'relative',
-            overflow: 'hidden',
-          }}
-        >
-          {/* Top accent line */}
-          <div
-            style={{
-              position: 'absolute',
-              top: 0,
-              left: 32,
-              right: 32,
-              height: 2,
-              background: 'linear-gradient(90deg, transparent, #3b82f6, transparent)',
-              opacity: 0.6,
-            }}
-          />
-          <div
-            style={{
-              fontSize: '0.65rem',
-              fontWeight: 700,
-              color: '#3b82f6',
-              textTransform: 'uppercase',
-              letterSpacing: '0.05em',
-              marginBottom: 20,
-            }}
-          >
-            New Customer
+        <section className="dl-panel">
+          <div className="dl-panel-head">
+            <h2 className="dl-panel-title">New Customer</h2>
           </div>
-          <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
-            <FormField
-              label="Name"
-              value={createForm.name}
-              onChange={(e) =>
-                updateCreateForm('name', (e.target as HTMLInputElement).value)
-              }
-              placeholder="Acme Corp"
-              required
-            />
-            <FormField
-              label="Account Type"
-              as="select"
-              value={createForm.account_type}
-              onChange={(e) => {
-                const newType = (e.target as HTMLSelectElement).value as AccountType;
-                updateCreateForm('account_type', newType);
-                // Reset ucaas_enabled when switching to a type where it doesn't apply
-                if (newType === 'rcf' || newType === 'ucaas') {
-                  updateCreateForm('ucaas_enabled', false);
-                }
-              }}
-            >
-              <option value="rcf">RCF</option>
-              <option value="api">API</option>
-              <option value="trunk">Trunk</option>
-              <option value="hybrid">Hybrid</option>
-              <option value="ucaas">UCaaS</option>
-            </FormField>
-            <FormField
-              label="Traffic Grade"
-              as="select"
-              value={createForm.traffic_grade}
-              onChange={(e) =>
-                updateCreateForm('traffic_grade', (e.target as HTMLSelectElement).value as TrafficGrade)
-              }
-            >
-              <option value="standard">Standard</option>
-              <option value="premium">Premium</option>
-              <option value="economy">Economy</option>
-            </FormField>
-            {/* Rate-limiting fields — hidden for RCF accounts */}
-            {createForm.account_type !== 'rcf' && (
-              <>
-                <FormField
-                  label="Daily Limit ($)"
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={createForm.daily_limit}
-                  onChange={(e) => updateCreateForm('daily_limit', (e.target as HTMLInputElement).value)}
+          <form onSubmit={handleCreateSubmit} className="dl-panel-body">
+            <div className="dlx-form-grid">
+              <Field label="Name">
+                <input
+                  className="dl-input"
+                  value={createForm.name}
+                  onChange={(e) => updateCreateForm('name', e.target.value)}
+                  placeholder="Acme Corp"
+                  required
                 />
-                <FormField
-                  label="CPM Limit"
-                  type="number"
-                  min="0"
-                  value={createForm.cpm_limit}
-                  onChange={(e) => updateCreateForm('cpm_limit', (e.target as HTMLInputElement).value)}
+              </Field>
+              <Field label="Account Type">
+                <select
+                  className="dl-input"
+                  value={createForm.account_type}
+                  onChange={(e) => {
+                    const newType = e.target.value as AccountType;
+                    updateCreateForm('account_type', newType);
+                    // Reset ucaas_enabled when switching to a type where it doesn't apply
+                    if (newType === 'rcf' || newType === 'ucaas') {
+                      updateCreateForm('ucaas_enabled', false);
+                    }
+                  }}
+                >
+                  <option value="rcf">RCF</option>
+                  <option value="api">API</option>
+                  <option value="trunk">Trunk</option>
+                  <option value="hybrid">Hybrid</option>
+                  <option value="ucaas">UCaaS</option>
+                </select>
+              </Field>
+              <Field label="Traffic Grade">
+                <select
+                  className="dl-input"
+                  value={createForm.traffic_grade}
+                  onChange={(e) =>
+                    updateCreateForm('traffic_grade', e.target.value as TrafficGrade)
+                  }
+                >
+                  <option value="standard">Standard</option>
+                  <option value="premium">Premium</option>
+                  <option value="economy">Economy</option>
+                </select>
+              </Field>
+              {/* Rate-limiting fields — hidden for RCF accounts */}
+              {createForm.account_type !== 'rcf' && (
+                <>
+                  <Field label="Daily Limit ($)">
+                    <input
+                      className="dl-input"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={createForm.daily_limit}
+                      onChange={(e) => updateCreateForm('daily_limit', e.target.value)}
+                    />
+                  </Field>
+                  <Field label="CPM Limit">
+                    <input
+                      className="dl-input"
+                      type="number"
+                      min="0"
+                      value={createForm.cpm_limit}
+                      onChange={(e) => updateCreateForm('cpm_limit', e.target.value)}
+                    />
+                  </Field>
+                </>
+              )}
+            </div>
+
+            {/* UCaaS add-on toggle — only relevant for api/trunk/hybrid */}
+            {(createForm.account_type === 'api' || createForm.account_type === 'trunk' || createForm.account_type === 'hybrid') && (
+              <div
+                className={createForm.ucaas_enabled ? 'dlx-checkrow dlx-checkrow-on' : 'dlx-checkrow'}
+                style={{ marginTop: 16 }}
+                onClick={() => updateCreateForm('ucaas_enabled', !createForm.ucaas_enabled)}
+              >
+                <input
+                  id="create-ucaas-enabled"
+                  type="checkbox"
+                  checked={createForm.ucaas_enabled}
+                  onChange={(e) => updateCreateForm('ucaas_enabled', e.target.checked)}
+                  onClick={(e) => e.stopPropagation()}
+                  style={{ width: 15, height: 15, accentColor: 'var(--rcf-azure)', cursor: 'pointer', flexShrink: 0 }}
                 />
-              </>
+                <label
+                  htmlFor="create-ucaas-enabled"
+                  style={{
+                    fontSize: '0.82rem',
+                    fontWeight: 700,
+                    color: createForm.ucaas_enabled ? 'var(--rcf-azure-deep)' : 'var(--rcf-ink-soft)',
+                    cursor: 'pointer',
+                    transition: 'color 0.15s ease',
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  UCaaS Enabled
+                </label>
+                <span style={{ fontSize: '0.72rem', color: 'var(--rcf-ink-dim)', marginLeft: 4 }}>
+                  Grants softphone, chat, and voicemail access
+                </span>
+              </div>
             )}
-          </div>
-          {/* UCaaS add-on toggle — only relevant for api/trunk/hybrid */}
-          {(createForm.account_type === 'api' || createForm.account_type === 'trunk' || createForm.account_type === 'hybrid') && (
+
             <div
               style={{
                 display: 'flex',
-                alignItems: 'center',
                 gap: 10,
-                marginTop: 16,
-                padding: '12px 16px',
-                background: createForm.ucaas_enabled ? 'rgba(14,165,233,0.06)' : 'rgba(255,255,255,0.02)',
-                border: `1px solid ${createForm.ucaas_enabled ? 'rgba(14,165,233,0.25)' : 'rgba(42,47,69,0.5)'}`,
-                borderRadius: 10,
-                transition: 'background 0.15s, border-color 0.15s',
-                cursor: 'pointer',
-                userSelect: 'none',
+                marginTop: 20,
+                paddingTop: 20,
+                borderTop: '1px solid var(--rcf-line)',
               }}
-              onClick={() => updateCreateForm('ucaas_enabled', !createForm.ucaas_enabled)}
             >
-              <input
-                id="create-ucaas-enabled"
-                type="checkbox"
-                checked={createForm.ucaas_enabled}
-                onChange={(e) => updateCreateForm('ucaas_enabled', e.target.checked)}
-                onClick={(e) => e.stopPropagation()}
-                style={{ width: 15, height: 15, accentColor: '#0ea5e9', cursor: 'pointer', flexShrink: 0 }}
-              />
-              <label
-                htmlFor="create-ucaas-enabled"
-                style={{
-                  fontSize: '0.82rem',
-                  fontWeight: 600,
-                  color: createForm.ucaas_enabled ? '#38bdf8' : '#64748b',
-                  cursor: 'pointer',
-                  transition: 'color 0.15s',
-                }}
-                onClick={(e) => e.stopPropagation()}
+              <button
+                type="submit"
+                className="dl-btn dl-btn-primary"
+                disabled={createMutation.isPending}
               >
-                UCaaS Enabled
-              </label>
-              <span
-                style={{
-                  fontSize: '0.72rem',
-                  color: '#4a5568',
-                  marginLeft: 4,
+                {createMutation.isPending ? 'Creating…' : 'Create Customer'}
+              </button>
+              <button
+                type="button"
+                className="dl-btn dl-btn-ghost"
+                onClick={() => {
+                  setShowCreateForm(false);
+                  setCreateForm(INITIAL_CREATE);
                 }}
               >
-                Grants softphone, chat, and voicemail access
-              </span>
+                Cancel
+              </button>
             </div>
-          )}
-
-          <div
-            style={{
-              display: 'flex',
-              gap: 8,
-              marginTop: 20,
-              paddingTop: 20,
-              borderTop: '1px solid rgba(59,130,246,0.12)',
-            }}
-          >
-            <Button type="submit" variant="primary" size="sm" loading={createMutation.isPending}>
-              Create Customer
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() => {
-                setShowCreateForm(false);
-                setCreateForm(INITIAL_CREATE);
-              }}
-            >
-              Cancel
-            </Button>
-          </div>
-        </form>
+          </form>
+        </section>
       )}
 
-      {/* Loading / error states */}
+      {/* ── Loading / error states ── */}
       {isLoading && (
-        <div className="flex items-center gap-2.5 text-[#718096] py-12">
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            color: 'var(--rcf-ink-dim)',
+            fontSize: '0.85rem',
+            padding: '48px 0',
+          }}
+        >
           <Spinner /> Loading customers…
         </div>
       )}
 
       {isError && (
-        <div
-          style={{
-            padding: '16px 20px',
-            borderRadius: 12,
-            background: 'rgba(239,68,68,0.08)',
-            border: '1px solid rgba(239,68,68,0.2)',
-            color: '#f87171',
-            fontSize: '0.875rem',
-          }}
-        >
-          Failed to load customers.
-        </div>
+        <div className="dl-banner dl-banner-err">Failed to load customers.</div>
       )}
 
-      {/* Table */}
+      {/* ── Table ── */}
       {data && (
         <>
-          <TableWrap>
-            <Table>
-              <Thead>
-                <tr>
-                  <Th>ID</Th>
-                  <Th>Name</Th>
-                  <Th>Type</Th>
-                  <Th>Status</Th>
-                  <Th>Grade</Th>
-                  <Th>Created</Th>
-                </tr>
-              </Thead>
-              <tbody>
-                {(data.items ?? []).length === 0 ? (
+          <section className="dl-panel">
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 640 }}>
+                <thead>
                   <tr>
-                    <td
-                      colSpan={COL_COUNT}
-                      style={{
-                        padding: '48px 16px',
-                        textAlign: 'center',
-                        color: '#718096',
-                        fontSize: '0.875rem',
-                      }}
-                    >
-                      No customers found.
-                    </td>
+                    {['ID', 'Name', 'Type', 'Status', 'Grade', 'Created'].map((h) => (
+                      <th key={h} className="dl-th">{h}</th>
+                    ))}
                   </tr>
-                ) : (
-                  (data.items ?? []).map((customer) => (
-                    <CustomerRow key={customer.id} customer={customer} />
-                  ))
-                )}
-              </tbody>
-            </Table>
-          </TableWrap>
+                </thead>
+                <tbody>
+                  {(data.items ?? []).length === 0 ? (
+                    <tr>
+                      <td colSpan={COL_COUNT} style={{ padding: 0 }}>
+                        <div className="dl-empty" style={{ border: 'none', borderRadius: 0 }}>
+                          No customers found.
+                        </div>
+                      </td>
+                    </tr>
+                  ) : (
+                    (data.items ?? []).map((customer) => (
+                      <CustomerRow key={customer.id} customer={customer} />
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
 
-          <Pagination
-            shown={(data.items ?? []).length + offset}
-            total={data.total ?? 0}
-            onLoadMore={() => setOffset((o) => o + PAGE_SIZE)}
-          />
+          {/* ── Pagination — "shown of total" + load more ── */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 12,
+              fontSize: '0.8rem',
+              color: 'var(--rcf-ink-dim)',
+            }}
+          >
+            <span>
+              Showing{' '}
+              <span style={{ color: 'var(--rcf-ink)', fontWeight: 700 }}>{shown}</span> of{' '}
+              <span style={{ color: 'var(--rcf-ink)', fontWeight: 700 }}>{total}</span>
+            </span>
+            {shown < total && (
+              <button
+                type="button"
+                className="dl-btn dl-btn-ghost"
+                onClick={() => setOffset((o) => o + PAGE_SIZE)}
+              >
+                Load More
+              </button>
+            )}
+          </div>
         </>
       )}
     </div>

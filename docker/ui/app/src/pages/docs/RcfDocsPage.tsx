@@ -1,22 +1,25 @@
 /**
  * RCF User Guide — concise customer-facing documentation for Granite CRAG
  * (Call Routing Application Gateway) RCF.
+ *
+ * Styling: the shared DAYLIGHT CONSOLE system (`dl-*` in index.css) plus the
+ * docs-only `dlx-*` primitives in src/styles/dl-docs.css.
  */
 
 import { Phone, HelpCircle, LogIn } from 'lucide-react';
 
+import { C } from './tokens';
 import {
-  C,
   P,
   H3,
   IC,
   Callout,
   AccordionSection,
-  PageHeaderCard,
+  DocsHeader,
 } from './shared';
 
-// RCF brand accent — blue to match the unified glass design system.
-const ACCENT = '#3b82f6';
+// RCF brand accent — azure to match the daylight console system.
+const ACCENT = '#2f7df6';
 
 /* ─── Getting Started ────────────────────────────────────── */
 
@@ -24,7 +27,6 @@ function GettingStartedSection() {
   return (
     <AccordionSection
       id="getting-started"
-      accent={ACCENT}
       icon={<LogIn size={18} />}
       title="Getting Started"
       subtitle="Log in and verify your numbers are working."
@@ -45,7 +47,6 @@ function ManagingRcfSection() {
   return (
     <AccordionSection
       id="managing-rcf"
-      accent={ACCENT}
       icon={<Phone size={18} />}
       title="Managing Your RCF"
       subtitle="Everything you can do with your forwarding numbers — all from the RCF page."
@@ -97,7 +98,6 @@ function DIDManagementSection() {
   return (
     <AccordionSection
       id="did-management"
-      accent={ACCENT}
       icon={<Phone size={18} />}
       title="DID Management"
       subtitle="Request new numbers, view your inventory, and release numbers you no longer need."
@@ -140,26 +140,17 @@ function SupportSection() {
   return (
     <AccordionSection
       id="support"
-      accent={ACCENT}
       icon={<HelpCircle size={18} />}
       title="Need Help?"
       subtitle="Quick checks and support contact."
     >
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 16 }}>
         {[
           { q: 'Calls not forwarding?', a: 'Check the toggle is enabled and the forwarding number is correct.' },
           { q: 'Wrong destination?', a: 'Click the blue number to edit it. Use full E.164 format.' },
           { q: 'Destination not answering?', a: 'Call the forwarding number directly to confirm it works.' },
         ].map(({ q, a }, i) => (
-          <div
-            key={i}
-            style={{
-              padding: '12px 16px',
-              borderRadius: 8,
-              background: 'rgba(13,17,23,0.45)',
-              border: `1px solid ${C.borderSubtle}`,
-            }}
-          >
+          <div key={i} className="dlx-item">
             <span style={{ fontSize: '0.83rem', fontWeight: 700, color: C.text }}>{q}</span>{' '}
             <span style={{ fontSize: '0.81rem', color: C.textMuted }}>{a}</span>
           </div>
@@ -177,16 +168,15 @@ function SupportSection() {
 
 export function RcfDocsPage() {
   return (
-    <div style={{ paddingTop: 20 }}>
-      <PageHeaderCard
-        eyebrow="Customer Guide"
-        title="Granite CRAG RCF"
-        subtitle="Call Routing Application Gateway — manage your Remote Call Forwarding numbers"
-        accent={ACCENT}
-      />
+    <div className="dl-scope">
+      <div className="dl-shell">
+        <DocsHeader
+          crumb="RCF Guide"
+          title="Granite CRAG RCF"
+          subtitle="Call Routing Application Gateway — manage your Remote Call Forwarding numbers"
+        />
 
-      <div style={{ padding: '0 0 60px' }}>
-        <div style={{ maxWidth: 1080, margin: '0 auto' }}>
+        <div className="dlx-docs-col dl-stack fx-load fx-load-d1">
           <GettingStartedSection />
           <ManagingRcfSection />
           <DIDManagementSection />

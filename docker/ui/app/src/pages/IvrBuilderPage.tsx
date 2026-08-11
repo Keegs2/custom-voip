@@ -1,69 +1,68 @@
-import { PortalHeader } from './RcfPage';
+/**
+ * IvrBuilderPage — the visual IVR flow designer's portal page.
+ *
+ * The builder ships in Phase 2, so the page is a quiet daylight header plus a
+ * composed coming-soon state — same copy and semantics as the original
+ * placeholder, restyled into the shared DAYLIGHT CONSOLE system (`dl-*`
+ * classes in index.css; page-scoped `dlx-*` in dl-portal-pages.css).
+ *
+ * React #310: every hook is called unconditionally at the top, before any
+ * early return.
+ */
+
 import { useAuth } from '../contexts/AuthContext';
 import { IconIVR } from '../components/icons/ProductIcons';
+import '../styles/dl-portal-pages.css';
+
+/* ─── Design tokens (mirror the .dl-scope CSS vars) ─── */
+const INK = '#0e1726';
+const INK_DIM = '#5d6f8c';
 
 export function IvrBuilderPage() {
+  // ── ALL hooks unconditionally at the top — React #310 guard ──
   useAuth(); // ensure authenticated
+
   return (
-    <div>
-      <PortalHeader
-        icon={<IconIVR size={24} />}
-        title="IVR Builder"
-        subtitle="Visual drag-and-drop IVR flow designer."
-        badgeVariant="rcf"
-      />
+    <div className="dl-scope">
+      <div className="dl-shell">
+        {/* Quiet page header — breadcrumb, calm title, one-line description */}
+        <header className="dl-header fx-load">
+          <div className="dl-header-id">
+            <div className="dl-crumb">
+              <span>IVR Builder</span>
+              <span className="dl-crumb-sep" aria-hidden="true">/</span>
+              <span>Granite CRAG</span>
+            </div>
+            <h1 className="dl-title">IVR Builder</h1>
+            <p className="dl-sub">Visual drag-and-drop IVR flow designer.</p>
+          </div>
+        </header>
 
-      <div
-        className="glass-surface"
-        style={{
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          padding: '80px 24px',
-          textAlign: 'center',
-          borderRadius: 20,
-        }}
-      >
-        <div
-          style={{
-            width: 64,
-            height: 64,
-            borderRadius: 16,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            marginBottom: 24,
-            background: 'linear-gradient(135deg, rgba(59,130,246,0.15) 0%, rgba(59,130,246,0.05) 100%)',
-            border: '1px solid rgba(59,130,246,0.25)',
-            color: '#60a5fa',
-            boxShadow: '0 0 24px rgba(59,130,246,0.18)',
-          }}
-        >
-          <IconIVR size={32} />
-        </div>
-
-        <h2 style={{ fontSize: '1.25rem', fontWeight: 700, color: '#e2e8f0', marginBottom: 8 }}>
-          Coming in Phase 2
-        </h2>
-        <p style={{ fontSize: '0.9rem', color: '#718096', maxWidth: 420, lineHeight: 1.6 }}>
-          Visual IVR flow builder with drag-and-drop nodes, DTMF menus,
-          time-based routing, and webhook integration are under active development.
-        </p>
-        <div
-          style={{
-            marginTop: 24,
-            padding: '8px 16px',
-            borderRadius: 8,
-            background: 'rgba(59,130,246,0.08)',
-            border: '1px solid rgba(59,130,246,0.2)',
-            color: '#60a5fa',
-            fontSize: '0.8rem',
-            fontWeight: 600,
-            letterSpacing: '0.02em',
-          }}
-        >
-          Under Construction
+        {/* Coming-soon state */}
+        <div className="dl-panel fx-load fx-load-d1">
+          <div className="dl-center">
+            <div className="dl-center-icon" aria-hidden="true">
+              <IconIVR size={28} />
+            </div>
+            <h2 style={{ fontSize: '1.05rem', fontWeight: 700, color: INK, margin: 0 }}>
+              Coming in Phase 2
+            </h2>
+            <p
+              style={{
+                fontSize: '0.84rem',
+                color: INK_DIM,
+                maxWidth: 460,
+                lineHeight: 1.6,
+                margin: '0 0 8px',
+              }}
+            >
+              Visual IVR flow builder with drag-and-drop nodes, DTMF menus,
+              time-based routing, and webhook integration are under active development.
+            </p>
+            <div className="dl-tag" style={{ padding: '6px 14px', fontSize: '0.68rem' }}>
+              Coming soon
+            </div>
+          </div>
         </div>
       </div>
     </div>

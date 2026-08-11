@@ -1,13 +1,30 @@
+/**
+ * CustomerAccountPage — the admin Customer 360 (/admin/customers/:customerId):
+ * identity header, account tiles, per-product sections (rendered strictly by
+ * account_type — rcf/hybrid → RCF, api/hybrid → API, trunk/hybrid → trunks,
+ * ucaas or ucaas_enabled → UCaaS), the read-only estimated monthly bill,
+ * usage & analytics (30-day chart + recent calls), the inline edit form, and
+ * account actions (UCaaS add-on toggle, delete).
+ *
+ * Styling: the shared DAYLIGHT CONSOLE system (`dl-*` in index.css, plus the
+ * admin-area `dlx-*` primitives in styles/dl-admin.css and the page-scoped
+ * `dlx3-*` primitives in styles/dl-customer360.css). Renders INSIDE the
+ * AdminPage shell, which owns the paper canvas (`dl-scope`) — this page
+ * contributes only the back link, panels, and tables. Presentation only:
+ * every query, mutation payload, confirm() and toast is unchanged.
+ *
+ * React #310: every hook in every component below is called unconditionally
+ * at the top of its function, before any early return.
+ */
 import { useState, useId } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { Activity, ChevronLeft, Receipt, Settings } from 'lucide-react';
 import { getCustomer, deleteCustomer } from '../../api/customers';
 import { getCustomerTier } from '../../api/tiers';
 import { getCustomerBilling } from '../../api/account';
 import { apiRequest } from '../../api/client';
 import { getCustomerRecentCdrs, getCustomerCdrDailySummary } from '../../api/cdrs';
-import { Badge } from '../../components/ui/Badge';
-import { Button } from '../../components/ui/Button';
 import { Spinner } from '../../components/ui/Spinner';
 import { useToast } from '../../components/ui/ToastContext';
 import { fmtMoney } from '../../utils/format';
@@ -16,103 +33,57 @@ import { CustomerRcfSection } from './CustomerRcfSection';
 import { CustomerApiSection } from './CustomerApiSection';
 import { CustomerTrunkSection } from './CustomerTrunkSection';
 import { CustomerUcaasSection } from './CustomerUcaasSection';
-import type { Customer } from '../../types/customer';
+import type { Customer, CustomerStatus } from '../../types/customer';
 import type { Cdr } from '../../types/cdr';
 import type { CdrSummaryRow } from '../../types/rate';
+import '../../styles/dl-admin.css';
+import '../../styles/dl-customer360.css';
 
-// ---- Stat card ----
+// ─── Constants ───────────────────────────────────────────────────────────────
 
-interface StatCardProps {
+const MONO = '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace';
+const ARCHIVO = '"Archivo", "IBM Plex Sans", sans-serif';
+
+/** Daylight chart series — azure primary (matches the console accent). */
+const CHART_AZURE = '#2f7df6';
+
+// ─── Small daylight chips ─────────────────────────────────────────────────────
+
+function StatusPill({ status }: { status: CustomerStatus }) {
+  if (status === 'active') return <span className="dl-pill dl-pill-on">Active</span>;
+  if (status === 'suspended') return <span className="dl-pill dl-pill-off">Suspended</span>;
+  return <span className="dl-tag dl-tag-slate">Closed</span>;
+}
+
+/** Initials for the dl-avatar identity mark. */
+function initials(name: string): string {
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((w) => w[0])
+    .join('');
+}
+
+// ─── Stat tile ────────────────────────────────────────────────────────────────
+
+interface StatTileProps {
   label: string;
   value: React.ReactNode;
-  accent?: string;
+  hint?: string;
 }
 
-function StatCard({ label, value, accent = '#3b82f6' }: StatCardProps) {
+function StatTile({ label, value, hint }: StatTileProps) {
   return (
-    <div
-      className="glass-surface glass-hover"
-      style={{
-        borderRadius: 14,
-        padding: '20px 24px',
-        position: 'relative',
-        overflow: 'hidden',
-        flex: '1 1 140px',
-        minWidth: 0,
-      }}
-    >
-      {/* Top accent line */}
-      <div
-        style={{
-          position: 'absolute',
-          top: 0,
-          left: 0,
-          right: 0,
-          height: 2,
-          background: `linear-gradient(90deg, transparent, ${accent}99, transparent)`,
-        }}
-      />
-      <div
-        style={{
-          fontSize: '0.6rem',
-          fontWeight: 700,
-          color: '#4a5568',
-          textTransform: 'uppercase',
-          letterSpacing: '0.05em',
-          marginBottom: 10,
-        }}
-      >
-        {label}
-      </div>
-      <div
-        style={{
-          fontSize: '1.05rem',
-          fontWeight: 700,
-          color: '#e2e8f0',
-          fontVariantNumeric: 'tabular-nums',
-        }}
-      >
-        {value}
-      </div>
+    <div className="dl-tile">
+      <span className="dl-tile-label">{label}</span>
+      <span className="dl-tile-value" style={{ fontSize: '1.05rem' }}>{value}</span>
+      {hint && <span className="dl-tile-hint">{hint}</span>}
     </div>
   );
 }
 
-// ---- Section card wrapper ----
-
-interface SectionCardProps {
-  children: React.ReactNode;
-  accent?: string;
-}
-
-function SectionCard({ children, accent = '#3b82f6' }: SectionCardProps) {
-  return (
-    <div
-      className="glass-surface"
-      style={{
-        borderRadius: 16,
-        padding: '28px 32px',
-        position: 'relative',
-        overflow: 'hidden',
-      }}
-    >
-      <div
-        style={{
-          position: 'absolute',
-          top: 0,
-          left: 40,
-          right: 40,
-          height: 2,
-          background: `linear-gradient(90deg, transparent, ${accent}, transparent)`,
-          opacity: 0.55,
-        }}
-      />
-      {children}
-    </div>
-  );
-}
-
-// ---- Usage & Analytics ----
+// ─── Usage & Analytics ────────────────────────────────────────────────────────
 
 interface UsageSummary {
   totalCalls: number;
@@ -155,14 +126,17 @@ function fmtDuration(sec: number): string {
   return m > 0 ? `${m}m ${s}s` : `${s}s`;
 }
 
-// ---- Bar chart (pure SVG, no library) ----
+// ─── Daily volume chart (pure SVG, no library) ───────────────────────────────
+// Recolored for the daylight canvas following the fresh CallQualityPage
+// treatment: ink-scale axes/labels, hairline ink grid, azure series,
+// white-filled dots with colored strokes, low-opacity area gradient.
+// No glow filters, no dark boxes.
 
-interface DailyBarChartProps {
+interface DailyVolumeChartProps {
   rows: CdrSummaryRow[];
-  accent: string;
 }
 
-function DailyBarChart({ rows, accent }: DailyBarChartProps) {
+function DailyVolumeChart({ rows }: DailyVolumeChartProps) {
   const gradientId = useId();
 
   // Aggregate rows by date
@@ -248,8 +222,8 @@ function DailyBarChart({ rows, accent }: DailyBarChartProps) {
       >
         <defs>
           <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor={accent} stopOpacity={0.4} />
-            <stop offset="100%" stopColor={accent} stopOpacity={0.03} />
+            <stop offset="0%" stopColor={CHART_AZURE} stopOpacity={0.14} />
+            <stop offset="100%" stopColor={CHART_AZURE} stopOpacity={0} />
           </linearGradient>
         </defs>
 
@@ -258,11 +232,11 @@ function DailyBarChart({ rows, accent }: DailyBarChartProps) {
           <g key={value}>
             <line
               x1={PAD_L} y1={y} x2={W - PAD_R} y2={y}
-              stroke="rgba(255,255,255,0.06)" strokeWidth={1}
+              stroke="rgba(14,23,38,0.05)" strokeWidth={1}
             />
             <text
               x={PAD_L - 8} y={y + 4}
-              textAnchor="end" fontSize={10} fill="#4a5568"
+              textAnchor="end" fontSize={10} fill="#7c8ba3"
               fontFamily="system-ui, -apple-system, sans-serif"
             >
               {value}
@@ -277,8 +251,8 @@ function DailyBarChart({ rows, accent }: DailyBarChartProps) {
         <path
           d={linePath}
           fill="none"
-          stroke={accent}
-          strokeWidth={2.5}
+          stroke={CHART_AZURE}
+          strokeWidth={2}
           strokeLinecap="round"
           strokeLinejoin="round"
         />
@@ -286,7 +260,7 @@ function DailyBarChart({ rows, accent }: DailyBarChartProps) {
         {/* Data points */}
         {points.map((p, i) => (
           <g key={slots[i].date}>
-            <circle cx={p.x} cy={p.y} r={3} fill="#0f1117" stroke={accent} strokeWidth={1.5} />
+            <circle cx={p.x} cy={p.y} r={2.5} fill="#ffffff" stroke={CHART_AZURE} strokeWidth={1.5} />
             <title>{slots[i].label}: {slots[i].calls} calls</title>
           </g>
         ))}
@@ -299,7 +273,7 @@ function DailyBarChart({ rows, accent }: DailyBarChartProps) {
             <text
               key={slot.date}
               x={x} y={H - 8}
-              textAnchor="middle" fontSize={10} fill="#4a5568"
+              textAnchor="middle" fontSize={10} fill="#8b99b0"
               fontFamily="system-ui, -apple-system, sans-serif"
             >
               {slot.label}
@@ -311,7 +285,7 @@ function DailyBarChart({ rows, accent }: DailyBarChartProps) {
   );
 }
 
-// ---- Recent calls table ----
+// ─── Recent calls table ───────────────────────────────────────────────────────
 
 interface RecentCallsTableProps {
   cdrs: Cdr[];
@@ -320,14 +294,7 @@ interface RecentCallsTableProps {
 function RecentCallsTable({ cdrs }: RecentCallsTableProps) {
   if (cdrs.length === 0) {
     return (
-      <div
-        style={{
-          padding: '32px 0',
-          textAlign: 'center',
-          color: '#4a5568',
-          fontSize: '0.82rem',
-        }}
-      >
+      <div className="dl-empty" style={{ border: 'none', borderRadius: 0 }}>
         No call records yet. CDRs will appear here after calls are processed.
       </div>
     );
@@ -335,38 +302,16 @@ function RecentCallsTable({ cdrs }: RecentCallsTableProps) {
 
   return (
     <div style={{ overflowX: 'auto' }}>
-      <table
-        style={{
-          width: '100%',
-          borderCollapse: 'collapse',
-          fontSize: '0.78rem',
-          color: '#cbd5e0',
-        }}
-      >
+      <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 640 }}>
         <thead>
           <tr>
             {['Date / Time', 'Dir', 'From', 'To', 'Duration', 'Status', 'Hangup Cause'].map((h) => (
-              <th
-                key={h}
-                style={{
-                  padding: '8px 12px',
-                  textAlign: 'left',
-                  fontSize: '0.6rem',
-                  fontWeight: 700,
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.05em',
-                  color: '#4a5568',
-                  borderBottom: '1px solid rgba(42,47,69,0.5)',
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                {h}
-              </th>
+              <th key={h} className="dl-th">{h}</th>
             ))}
           </tr>
         </thead>
         <tbody>
-          {cdrs.map((cdr, idx) => {
+          {cdrs.map((cdr) => {
             const answered = cdr.answer_time != null;
             const startDt = new Date(cdr.start_time);
             const dateStr = startDt.toLocaleDateString(undefined, {
@@ -381,126 +326,50 @@ function RecentCallsTable({ cdrs }: RecentCallsTableProps) {
             });
 
             return (
-              <tr
-                key={cdr.uuid}
-                style={{
-                  borderBottom: '1px solid rgba(42,47,69,0.25)',
-                  background: idx % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.012)',
-                }}
-              >
+              <tr key={cdr.uuid} className="dl-row">
                 {/* Date/Time */}
-                <td style={{ padding: '7px 12px', whiteSpace: 'nowrap' }}>
-                  <div style={{ color: '#a0aec0', fontVariantNumeric: 'tabular-nums' }}>
+                <td className="dlx-td">
+                  <div style={{ color: 'var(--rcf-ink)', fontVariantNumeric: 'tabular-nums', fontSize: '0.78rem' }}>
                     {dateStr}
                   </div>
-                  <div
-                    style={{
-                      color: '#4a5568',
-                      fontSize: '0.7rem',
-                      fontVariantNumeric: 'tabular-nums',
-                    }}
-                  >
+                  <div style={{ color: 'var(--rcf-ink-dim)', fontSize: '0.7rem', fontVariantNumeric: 'tabular-nums' }}>
                     {timeStr}
                   </div>
                 </td>
 
                 {/* Direction */}
-                <td style={{ padding: '7px 12px' }}>
-                  <span
-                    style={{
-                      display: 'inline-block',
-                      fontSize: '0.6rem',
-                      fontWeight: 700,
-                      textTransform: 'uppercase',
-                      letterSpacing: '0.06em',
-                      padding: '2px 7px',
-                      borderRadius: 4,
-                      background:
-                        cdr.direction === 'inbound'
-                          ? 'rgba(59,130,246,0.15)'
-                          : 'rgba(168,85,247,0.15)',
-                      color:
-                        cdr.direction === 'inbound' ? '#60a5fa' : '#c084fc',
-                      border:
-                        cdr.direction === 'inbound'
-                          ? '1px solid rgba(59,130,246,0.25)'
-                          : '1px solid rgba(168,85,247,0.25)',
-                    }}
-                  >
+                <td className="dlx-td">
+                  <span className={cdr.direction === 'inbound' ? 'dl-tag' : 'dl-tag dl-tag-slate'}>
                     {cdr.direction === 'inbound' ? 'In' : 'Out'}
                   </span>
                 </td>
 
                 {/* From */}
-                <td
-                  style={{
-                    padding: '7px 12px',
-                    fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
-                    color: '#94a3b8',
-                    whiteSpace: 'nowrap',
-                  }}
-                >
+                <td className="dlx-td" style={{ fontFamily: MONO, fontSize: '0.78rem', color: 'var(--rcf-ink-soft)' }}>
                   {cdr.caller_id || '—'}
                 </td>
 
                 {/* To */}
-                <td
-                  style={{
-                    padding: '7px 12px',
-                    fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
-                    color: '#94a3b8',
-                    whiteSpace: 'nowrap',
-                  }}
-                >
+                <td className="dlx-td" style={{ fontFamily: MONO, fontSize: '0.78rem', color: 'var(--rcf-ink-soft)' }}>
                   {cdr.destination}
                 </td>
 
                 {/* Duration */}
-                <td
-                  style={{
-                    padding: '7px 12px',
-                    fontVariantNumeric: 'tabular-nums',
-                    color: '#718096',
-                    whiteSpace: 'nowrap',
-                  }}
-                >
+                <td className="dlx-td" style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--rcf-ink-dim)' }}>
                   {cdr.duration_seconds > 0 ? fmtDuration(cdr.duration_seconds) : '—'}
                 </td>
 
-                {/* Status */}
-                <td style={{ padding: '7px 12px' }}>
-                  <span
-                    style={{
-                      display: 'inline-block',
-                      fontSize: '0.6rem',
-                      fontWeight: 700,
-                      textTransform: 'uppercase',
-                      letterSpacing: '0.06em',
-                      padding: '2px 7px',
-                      borderRadius: 4,
-                      background: answered
-                        ? 'rgba(34,197,94,0.12)'
-                        : 'rgba(239,68,68,0.12)',
-                      color: answered ? '#4ade80' : '#f87171',
-                      border: answered
-                        ? '1px solid rgba(34,197,94,0.2)'
-                        : '1px solid rgba(239,68,68,0.2)',
-                    }}
-                  >
-                    {answered ? 'Answered' : 'No Answer'}
-                  </span>
+                {/* Status — green answered; slate for no-answer (not an error) */}
+                <td className="dlx-td">
+                  {answered ? (
+                    <span className="dl-pill dl-pill-on">Answered</span>
+                  ) : (
+                    <span className="dl-tag dl-tag-slate">No Answer</span>
+                  )}
                 </td>
 
                 {/* Hangup Cause */}
-                <td
-                  style={{
-                    padding: '7px 12px',
-                    color: '#4a5568',
-                    fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
-                    fontSize: '0.72rem',
-                    whiteSpace: 'nowrap',
-                  }}
-                >
+                <td className="dlx-td" style={{ fontFamily: MONO, fontSize: '0.72rem', color: 'var(--rcf-ink-dim)' }}>
                   {cdr.hangup_cause ?? '—'}
                 </td>
               </tr>
@@ -512,60 +381,40 @@ function RecentCallsTable({ cdrs }: RecentCallsTableProps) {
   );
 }
 
-// ---- Usage summary stat cards ----
+// ─── Usage summary stat tiles ─────────────────────────────────────────────────
 
-interface UsageSummaryCardsProps {
-  summary: UsageSummary;
-  accent: string;
-}
-
-function UsageSummaryCards({ summary, accent }: UsageSummaryCardsProps) {
+function UsageSummaryTiles({ summary }: { summary: UsageSummary }) {
   return (
-    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
-      <StatCard
-        label="Total Calls (30d)"
-        accent={accent}
-        value={summary.totalCalls.toLocaleString()}
-      />
-      <StatCard
+    <div className="dlx3-tiles">
+      <StatTile label="Total Calls (30d)" value={summary.totalCalls.toLocaleString()} />
+      <StatTile
         label="Answered / ASR"
-        accent={accent}
         value={
           <span>
             {summary.answeredCalls.toLocaleString()}{' '}
-            <span style={{ fontSize: '0.78rem', color: '#718096' }}>
+            <span style={{ fontSize: '0.78rem', color: 'var(--rcf-ink-dim)', fontWeight: 600 }}>
               ({summary.asr}%)
             </span>
           </span>
         }
       />
-      <StatCard
-        label="Total Minutes"
-        accent={accent}
-        value={summary.totalMinutes.toLocaleString()}
-      />
-      <StatCard
+      <StatTile label="Total Minutes" value={summary.totalMinutes.toLocaleString()} />
+      <StatTile
         label="Avg Duration"
-        accent={accent}
         value={summary.avgDurationSec > 0 ? fmtDuration(summary.avgDurationSec) : '—'}
       />
-      <StatCard
-        label="Total Cost"
-        accent={accent}
-        value={`$${summary.totalCost.toFixed(2)}`}
-      />
+      <StatTile label="Total Cost" value={`$${summary.totalCost.toFixed(2)}`} />
     </div>
   );
 }
 
-// ---- Main usage section ----
+// ─── Main usage section ───────────────────────────────────────────────────────
 
 interface CustomerUsageSectionProps {
   customerId: number;
-  accent: string;
 }
 
-function CustomerUsageSection({ customerId, accent }: CustomerUsageSectionProps) {
+function CustomerUsageSection({ customerId }: CustomerUsageSectionProps) {
   const thirtyDaysAgo = new Date();
   thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
@@ -596,113 +445,73 @@ function CustomerUsageSection({ customerId, accent }: CustomerUsageSectionProps)
   const recentCdrs = recentData?.items ?? [];
   const computedSummary = computeSummary(summaryRows);
 
-  const sectionLabelStyle: React.CSSProperties = {
-    fontSize: '0.6rem',
-    fontWeight: 700,
-    color: accent,
-    textTransform: 'uppercase',
-    letterSpacing: '0.05em',
-    marginBottom: 20,
-  };
-
-  const subLabelStyle: React.CSSProperties = {
-    fontSize: '0.6rem',
-    fontWeight: 700,
-    color: '#4a5568',
-    textTransform: 'uppercase',
-    letterSpacing: '0.05em',
-    marginBottom: 14,
-  };
-
   return (
-    <SectionCard accent={accent}>
-      <div style={sectionLabelStyle}>Usage &amp; Analytics</div>
+    <section className="dl-panel">
+      <div className="dl-panel-head">
+        <span aria-hidden="true" style={{ display: 'inline-flex', color: 'var(--rcf-azure-deep)', flexShrink: 0 }}>
+          <Activity size={15} strokeWidth={2} />
+        </span>
+        <h3 className="dl-panel-title" style={{ margin: 0 }}>Usage &amp; Analytics</h3>
+      </div>
 
-      {isLoading && (
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 10,
-            color: '#718096',
-            fontSize: '0.82rem',
-            padding: '32px 0',
-          }}
-        >
-          <Spinner size="xs" /> Loading analytics…
-        </div>
-      )}
+      <div className="dl-panel-body">
+        {isLoading && (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 10,
+              color: 'var(--rcf-ink-dim)',
+              fontSize: '0.82rem',
+              padding: '24px 0',
+            }}
+          >
+            <Spinner size="xs" /> Loading analytics…
+          </div>
+        )}
 
-      {!isLoading && isError && (
-        <div
-          style={{
-            padding: '12px 16px',
-            borderRadius: 10,
-            background: 'rgba(239,68,68,0.08)',
-            border: '1px solid rgba(239,68,68,0.18)',
-            color: '#f87171',
-            fontSize: '0.8rem',
-          }}
-        >
-          Unable to load usage data. The CDR service may be unavailable.
-        </div>
-      )}
+        {!isLoading && isError && (
+          <div className="dl-banner dl-banner-err">
+            Unable to load usage data. The CDR service may be unavailable.
+          </div>
+        )}
 
-      {!isLoading && !isError && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
+        {!isLoading && !isError && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
 
-          {/* Summary stat cards */}
-          <UsageSummaryCards summary={computedSummary} accent={accent} />
+            {/* Summary stat tiles */}
+            <UsageSummaryTiles summary={computedSummary} />
 
-          {/* Daily volume chart */}
-          <div>
-            <div style={subLabelStyle}>Daily Call Volume — Last 30 Days</div>
-            <div
-              style={{
-                background: 'rgba(10,12,18,0.7)',
-                border: '1px solid rgba(59,130,246,0.10)',
-                borderRadius: 10,
-                padding: '16px 16px 6px',
-              }}
-            >
+            {/* Daily volume chart */}
+            <div className="dlx3-chart-box">
+              <div className="dlx3-chart-title">
+                <span className="dlx3-chart-dot" style={{ background: CHART_AZURE }} aria-hidden="true" />
+                Daily Call Volume — Last 30 Days
+              </div>
               {summaryRows.length === 0 ? (
-                <div
-                  style={{
-                    padding: '32px 0',
-                    textAlign: 'center',
-                    color: '#4a5568',
-                    fontSize: '0.82rem',
-                  }}
-                >
+                <div className="dl-empty" style={{ border: 'none', background: 'transparent', marginBottom: 8 }}>
                   No call records yet. CDRs will appear here after calls are processed.
                 </div>
               ) : (
-                <DailyBarChart rows={summaryRows} accent={accent} />
+                <DailyVolumeChart rows={summaryRows} />
               )}
             </div>
-          </div>
 
-          {/* Recent calls table */}
-          <div>
-            <div style={subLabelStyle}>Recent Calls</div>
-            <div
-              style={{
-                background: 'rgba(10,12,18,0.5)',
-                border: '1px solid rgba(59,130,246,0.10)',
-                borderRadius: 10,
-                overflow: 'hidden',
-              }}
-            >
-              <RecentCallsTable cdrs={recentCdrs} />
+            {/* Recent calls table */}
+            <div>
+              <h4 className="dl-section-title">Recent Calls</h4>
+              <div style={{ border: '1px solid var(--rcf-line-soft)', borderRadius: 10, overflow: 'hidden' }}>
+                <RecentCallsTable cdrs={recentCdrs} />
+              </div>
             </div>
           </div>
-        </div>
-      )}
-    </SectionCard>
+        )}
+      </div>
+    </section>
   );
 }
 
-// ---- Estimated monthly bill (read-only reference) ----
+// ─── Estimated monthly bill (read-only reference) ─────────────────────────────
 
 /**
  * Compact, READ-ONLY estimated monthly bill for the admin 360.
@@ -711,7 +520,7 @@ function CustomerUsageSection({ customerId, accent }: CustomerUsageSectionProps)
  * does not invoice — CDRs are rated externally (Equinox) — so this is purely
  * a reference. Degrades gracefully on load/empty/error.
  */
-function CustomerBillingEstimate({ customerId, accent }: { customerId: number; accent: string }) {
+function CustomerBillingEstimate({ customerId }: { customerId: number }) {
   const { data, isLoading, isError } = useQuery({
     queryKey: ['customerBilling', customerId],
     queryFn: () => getCustomerBilling(customerId),
@@ -719,90 +528,86 @@ function CustomerBillingEstimate({ customerId, accent }: { customerId: number; a
     staleTime: 60_000,
   });
 
-  const labelStyle: React.CSSProperties = {
-    fontSize: '0.6rem',
-    fontWeight: 700,
-    color: accent,
-    textTransform: 'uppercase',
-    letterSpacing: '0.05em',
-    marginBottom: 18,
-  };
-
   return (
-    <SectionCard accent={accent}>
-      <div style={labelStyle}>Estimated Monthly Bill</div>
+    <section className="dl-panel">
+      <div className="dl-panel-head">
+        <span aria-hidden="true" style={{ display: 'inline-flex', color: 'var(--rcf-azure-deep)', flexShrink: 0 }}>
+          <Receipt size={15} strokeWidth={2} />
+        </span>
+        <h3 className="dl-panel-title" style={{ margin: 0 }}>Estimated Monthly Bill</h3>
+      </div>
 
-      {isLoading ? (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: '#718096', fontSize: '0.82rem', padding: '20px 0' }}>
-          <Spinner size="xs" /> Loading estimate…
-        </div>
-      ) : isError ? (
-        <div style={{ color: '#718096', fontSize: '0.82rem', padding: '8px 0' }}>
-          Unable to load the estimated bill.
-        </div>
-      ) : !data || data.line_items.length === 0 ? (
-        <div style={{ color: '#4a5568', fontSize: '0.82rem', padding: '8px 0' }}>
-          No billable products provisioned.
-        </div>
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {data.line_items.map((item, i) => (
+      <div className="dl-panel-body">
+        {isLoading ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: 'var(--rcf-ink-dim)', fontSize: '0.82rem', padding: '8px 0' }}>
+            <Spinner size="xs" /> Loading estimate…
+          </div>
+        ) : isError ? (
+          <div style={{ color: 'var(--rcf-ink-dim)', fontSize: '0.82rem', padding: '4px 0' }}>
+            Unable to load the estimated bill.
+          </div>
+        ) : !data || data.line_items.length === 0 ? (
+          <div className="dl-empty">No billable products provisioned.</div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+            <div className="dl-kvbox">
+              {data.line_items.map((item, i) => (
+                <div key={`${item.product}-${item.label}-${i}`} className="dl-kv">
+                  <span className="dl-kv-label" style={{ color: 'var(--rcf-ink-soft)' }}>
+                    {item.label}
+                    {(item.product === 'rcf' || item.product === 'voicemail') && (
+                      <span style={{ color: 'var(--rcf-ink-dim)', marginLeft: 8, fontSize: '0.72rem' }}>
+                        {item.qty.toLocaleString()} {item.unit}
+                        {item.qty === 1 ? '' : 's'} × {fmtMoney(item.unit_price)}
+                      </span>
+                    )}
+                  </span>
+                  <span className="dl-kv-value" style={{ fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
+                    {fmtMoney(item.subtotal)}
+                  </span>
+                </div>
+              ))}
+            </div>
+
             <div
-              key={`${item.product}-${item.label}-${i}`}
               style={{
                 display: 'flex',
                 alignItems: 'baseline',
                 justifyContent: 'space-between',
                 gap: 16,
-                fontSize: '0.82rem',
-                padding: '8px 0',
-                borderBottom: '1px solid rgba(42,47,69,0.4)',
+                paddingTop: 14,
               }}
             >
-              <span style={{ color: '#cbd5e0' }}>
-                {item.label}
-                {(item.product === 'rcf' || item.product === 'voicemail') && (
-                  <span style={{ color: '#4a5568', marginLeft: 8, fontSize: '0.74rem' }}>
-                    {item.qty.toLocaleString()} {item.unit}
-                    {item.qty === 1 ? '' : 's'} × {fmtMoney(item.unit_price)}
-                  </span>
-                )}
+              <span className="dl-fact-label" style={{ marginBottom: 0, color: 'var(--rcf-azure-deep)' }}>
+                Estimated Monthly Total
               </span>
-              <span style={{ color: '#e2e8f0', fontWeight: 600, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
-                {fmtMoney(item.subtotal)}
+              <span
+                style={{
+                  fontFamily: ARCHIVO,
+                  fontSize: '1.2rem',
+                  fontWeight: 700,
+                  color: 'var(--rcf-ink)',
+                  fontVariantNumeric: 'tabular-nums',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {fmtMoney(data.total_monthly_estimate)}
               </span>
             </div>
-          ))}
 
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'baseline',
-              justifyContent: 'space-between',
-              gap: 16,
-              paddingTop: 12,
-            }}
-          >
-            <span style={{ fontSize: '0.65rem', fontWeight: 700, color: accent, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-              Estimated Monthly Total
-            </span>
-            <span style={{ fontSize: '1.15rem', fontWeight: 800, color: '#e2e8f0', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
-              {fmtMoney(data.total_monthly_estimate)}
-            </span>
+            {data.disclaimer && (
+              <p className="dl-help" style={{ margin: '6px 0 0' }}>
+                {data.disclaimer}
+              </p>
+            )}
           </div>
-
-          {data.disclaimer && (
-            <p style={{ margin: '4px 0 0', fontSize: '0.7rem', color: '#4a5568', lineHeight: 1.5 }}>
-              {data.disclaimer}
-            </p>
-          )}
-        </div>
-      )}
-    </SectionCard>
+        )}
+      </div>
+    </section>
   );
 }
 
-// ---- Account detail view ----
+// ─── Account detail view ──────────────────────────────────────────────────────
 
 interface AccountDetailViewProps {
   customer: Customer;
@@ -835,45 +640,35 @@ function AccountDetailView({ customer, onEdit, onDelete }: AccountDetailViewProp
   const showTrunk = customer.account_type === 'trunk' || customer.account_type === 'hybrid';
   const showUcaas = customer.account_type === 'ucaas' || customer.ucaas_enabled === true;
 
-  const accountTypeAccentMap: Record<string, string> = {
-    rcf: '#3b82f6',
-    api: '#a855f7',
-    trunk: '#f59e0b',
-    hybrid: '#3b82f6',
-    ucaas: '#0ea5e9',
-  };
-  const headerAccent = accountTypeAccentMap[customer.account_type] ?? '#3b82f6';
-
   const tier = tierData?.tier;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+    <div className="dl-stack">
 
-      {/* Account overview stat cards */}
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14 }}>
+      {/* Account overview tiles */}
+      <div className="dlx3-tiles">
         {/* Rate-limiting fields are meaningless for RCF accounts */}
         {customer.account_type !== 'rcf' && (
           <>
-            <StatCard
+            <StatTile
               label="Daily Limit"
               value={customer.daily_limit != null ? `$${customer.daily_limit.toFixed(2)}` : '--'}
             />
-            <StatCard
+            <StatTile
               label="CPM Limit"
               value={customer.cpm_limit != null ? String(customer.cpm_limit) : '--'}
             />
           </>
         )}
-        <StatCard
+        <StatTile
           label="Fraud Score"
-          accent={customer.fraud_score > 70 ? '#ef4444' : '#3b82f6'}
           value={
-            <span style={{ color: customer.fraud_score > 70 ? '#f87171' : '#e2e8f0' }}>
+            <span style={{ color: customer.fraud_score > 70 ? 'var(--rcf-red)' : undefined }}>
               {customer.fraud_score ?? 0}
             </span>
           }
         />
-        <StatCard
+        <StatTile
           label="Created"
           value={
             customer.created_at
@@ -889,182 +684,83 @@ function AccountDetailView({ customer, onEdit, onDelete }: AccountDetailViewProp
 
       {/* CPS Tier line */}
       {tierLoading && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#718096', fontSize: '0.8rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--rcf-ink-dim)', fontSize: '0.8rem' }}>
           <Spinner size="xs" /> Loading tier…
         </div>
       )}
       {!tierLoading && tier && (
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            fontSize: '0.82rem',
-            color: '#718096',
-          }}
-        >
-          <span
-            style={{
-              fontSize: '0.6rem',
-              fontWeight: 700,
-              textTransform: 'uppercase',
-              letterSpacing: '0.05em',
-              color: '#4a5568',
-            }}
-          >
-            CPS Tier:
-          </span>
-          <span style={{ color: '#e2e8f0', fontWeight: 600 }}>{tier.name}</span>
-          <span style={{ color: '#4a5568' }}>—</span>
-          <span>{tier.cps_limit} CPS</span>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, fontSize: '0.82rem' }}>
+          <span className="dl-fact-label" style={{ marginBottom: 0 }}>CPS Tier</span>
+          <span style={{ color: 'var(--rcf-ink)', fontWeight: 700 }}>{tier.name}</span>
+          <span style={{ color: 'var(--rcf-ink-dim)' }}>— {tier.cps_limit} CPS</span>
         </div>
       )}
 
-      {/* Service sections */}
-      {showRcf && (
-        <SectionCard accent="#3b82f6">
-          <CustomerRcfSection customerId={customer.id} />
-        </SectionCard>
-      )}
-
-      {showApi && (
-        <SectionCard accent="#a855f7">
-          <CustomerApiSection customerId={customer.id} />
-        </SectionCard>
-      )}
-
-      {showTrunk && (
-        <SectionCard accent="#f59e0b">
-          <CustomerTrunkSection customerId={customer.id} />
-        </SectionCard>
-      )}
-
-      {showUcaas && (
-        <SectionCard accent="#0ea5e9">
-          <CustomerUcaasSection customerId={customer.id} />
-        </SectionCard>
-      )}
+      {/* Service sections — strictly account_type-driven */}
+      {showRcf && <CustomerRcfSection customerId={customer.id} />}
+      {showApi && <CustomerApiSection customerId={customer.id} />}
+      {showTrunk && <CustomerTrunkSection customerId={customer.id} />}
+      {showUcaas && <CustomerUcaasSection customerId={customer.id} />}
 
       {/* Estimated monthly bill — read-only reference (real billing is external) */}
-      <CustomerBillingEstimate customerId={customer.id} accent={headerAccent} />
+      <CustomerBillingEstimate customerId={customer.id} />
 
       {/* Usage & Analytics */}
-      <CustomerUsageSection customerId={customer.id} accent={headerAccent} />
+      <CustomerUsageSection customerId={customer.id} />
 
       {/* Account Actions — at the bottom */}
-      <SectionCard accent="#3b82f6">
-        <div
-          style={{
-            fontSize: '0.6rem',
-            fontWeight: 700,
-            color: '#3b82f6',
-            textTransform: 'uppercase',
-            letterSpacing: '0.05em',
-            marginBottom: 20,
-          }}
-        >
-          Account Actions
+      <section className="dl-panel">
+        <div className="dl-panel-head">
+          <span aria-hidden="true" style={{ display: 'inline-flex', color: 'var(--rcf-azure-deep)', flexShrink: 0 }}>
+            <Settings size={15} strokeWidth={2} />
+          </span>
+          <h3 className="dl-panel-title" style={{ margin: 0 }}>Account Actions</h3>
         </div>
         <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 16,
-            flexWrap: 'wrap',
-          }}
+          className="dl-panel-body"
+          style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}
         >
-          <Button variant="primary" size="sm" onClick={onEdit}>
+          <button type="button" className="dl-btn dl-btn-primary" onClick={onEdit}>
             Edit Customer
-          </Button>
+          </button>
 
           {/* UCaaS add-on toggle — only for api/trunk/hybrid */}
           {(customer.account_type === 'api' || customer.account_type === 'trunk' || customer.account_type === 'hybrid') && (
-            <button
-              type="button"
-              disabled={ucaasMutation.isPending}
-              onClick={() => ucaasMutation.mutate(!customer.ucaas_enabled)}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 7,
-                fontSize: '0.8rem',
-                fontWeight: 600,
-                padding: '6px 14px',
-                borderRadius: 8,
-                cursor: ucaasMutation.isPending ? 'wait' : 'pointer',
-                border: `1px solid ${customer.ucaas_enabled ? 'rgba(14,165,233,0.35)' : 'rgba(100,116,139,0.30)'}`,
-                background: customer.ucaas_enabled
-                  ? 'rgba(14,165,233,0.10)'
-                  : 'rgba(100,116,139,0.08)',
-                color: customer.ucaas_enabled ? '#38bdf8' : '#64748b',
-                transition: 'background 0.15s, border-color 0.15s, color 0.15s',
-                opacity: ucaasMutation.isPending ? 0.6 : 1,
-              }}
-              onMouseEnter={(e) => {
-                if (!ucaasMutation.isPending) {
-                  e.currentTarget.style.background = customer.ucaas_enabled
-                    ? 'rgba(239,68,68,0.10)'
-                    : 'rgba(14,165,233,0.10)';
-                  e.currentTarget.style.borderColor = customer.ucaas_enabled
-                    ? 'rgba(239,68,68,0.35)'
-                    : 'rgba(14,165,233,0.35)';
-                  e.currentTarget.style.color = customer.ucaas_enabled ? '#f87171' : '#38bdf8';
-                }
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = customer.ucaas_enabled
-                  ? 'rgba(14,165,233,0.10)'
-                  : 'rgba(100,116,139,0.08)';
-                e.currentTarget.style.borderColor = customer.ucaas_enabled
-                  ? 'rgba(14,165,233,0.35)'
-                  : 'rgba(100,116,139,0.30)';
-                e.currentTarget.style.color = customer.ucaas_enabled ? '#38bdf8' : '#64748b';
-              }}
-            >
-              {/* Toggle track */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={customer.ucaas_enabled === true}
+                aria-label="UCaaS add-on"
+                className={customer.ucaas_enabled ? 'dlx-switch dlx-switch-on' : 'dlx-switch'}
+                disabled={ucaasMutation.isPending}
+                onClick={() => ucaasMutation.mutate(!customer.ucaas_enabled)}
+              />
               <span
                 style={{
-                  position: 'relative',
-                  display: 'inline-block',
-                  width: 28,
-                  height: 16,
-                  borderRadius: 8,
-                  background: customer.ucaas_enabled ? '#0ea5e9' : 'rgba(100,116,139,0.35)',
-                  transition: 'background 0.2s',
-                  flexShrink: 0,
+                  fontSize: '0.8rem',
+                  fontWeight: 700,
+                  color: customer.ucaas_enabled ? 'var(--rcf-azure-deep)' : 'var(--rcf-ink-dim)',
                 }}
               >
-                <span
-                  style={{
-                    position: 'absolute',
-                    top: 2,
-                    left: customer.ucaas_enabled ? 14 : 2,
-                    width: 12,
-                    height: 12,
-                    borderRadius: '50%',
-                    background: '#fff',
-                    transition: 'left 0.2s',
-                    boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
-                  }}
-                />
+                UCaaS {customer.ucaas_enabled ? 'Enabled' : 'Disabled'}
               </span>
-              UCaaS {customer.ucaas_enabled ? 'Enabled' : 'Disabled'}
-            </button>
+            </div>
           )}
 
           {/* Delete — pushed to the right */}
           <div style={{ marginLeft: 'auto' }}>
-            <Button variant="danger" size="sm" onClick={onDelete}>
+            <button type="button" className="dl-btn dl-btn-danger" onClick={onDelete}>
               Delete Customer
-            </Button>
+            </button>
           </div>
         </div>
-      </SectionCard>
+      </section>
     </div>
   );
 }
 
-// ---- CustomerAccountPage ----
+// ─── CustomerAccountPage ──────────────────────────────────────────────────────
 
 export function CustomerAccountPage() {
   const { customerId: customerIdParam } = useParams<{ customerId: string }>();
@@ -1115,18 +811,9 @@ export function CustomerAccountPage() {
   // ---- Loading state ----
   if (isLoading) {
     return (
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: 12,
-          padding: '80px 0',
-          color: '#718096',
-          fontSize: '0.9rem',
-        }}
-      >
-        <Spinner /> Loading customer…
+      <div className="dl-center">
+        <Spinner />
+        <span style={{ color: 'var(--rcf-ink-dim)', fontSize: '0.88rem' }}>Loading customer…</span>
       </div>
     );
   }
@@ -1134,241 +821,98 @@ export function CustomerAccountPage() {
   // ---- Error state ----
   if (isError || !customer) {
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 20, paddingTop: 8 }}>
-        <button
-          onClick={() => navigate('/admin/customers')}
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 6,
-            background: 'none',
-            border: 'none',
-            color: '#718096',
-            fontSize: '0.85rem',
-            cursor: 'pointer',
-            padding: '4px 0',
-            width: 'fit-content',
-          }}
-        >
-          <LeftArrow /> Back to Customers
-        </button>
-        <div
-          style={{
-            padding: '16px 20px',
-            borderRadius: 12,
-            background: 'rgba(239,68,68,0.08)',
-            border: '1px solid rgba(239,68,68,0.2)',
-            color: '#f87171',
-            fontSize: '0.875rem',
-          }}
-        >
+      <div className="dl-stack">
+        <div>
+          <button
+            type="button"
+            className="dlx-linkbtn"
+            onClick={() => navigate('/admin/customers')}
+          >
+            <ChevronLeft size={13} strokeWidth={2.25} aria-hidden="true" />
+            Back to Customers
+          </button>
+        </div>
+        <div className="dl-banner dl-banner-err">
           Failed to load customer. The account may not exist.
         </div>
       </div>
     );
   }
 
-  // ---- Derived display values ----
-  const accountTypeAccent: Record<string, string> = {
-    rcf: '#3b82f6',
-    api: '#a855f7',
-    trunk: '#f59e0b',
-    hybrid: '#3b82f6',
-    ucaas: '#0ea5e9',
-  };
-  const headerAccent = accountTypeAccent[customer.account_type] ?? '#3b82f6';
-
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 24, paddingTop: 8 }}>
+    <div className="dl-stack">
 
-      {/* Back button */}
+      {/* Back link */}
       <div>
         <button
+          type="button"
+          className="dlx-linkbtn"
           onClick={() => navigate('/admin/customers')}
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 6,
-            background: 'none',
-            border: '1px solid rgba(42,47,69,0.5)',
-            borderRadius: 8,
-            color: '#718096',
-            fontSize: '0.82rem',
-            cursor: 'pointer',
-            padding: '6px 14px',
-            transition: 'color 0.15s, border-color 0.15s, background 0.15s',
-          }}
-          onMouseEnter={(e) => {
-            const el = e.currentTarget;
-            el.style.color = '#e2e8f0';
-            el.style.borderColor = 'rgba(59,130,246,0.4)';
-            el.style.background = 'rgba(59,130,246,0.06)';
-          }}
-          onMouseLeave={(e) => {
-            const el = e.currentTarget;
-            el.style.color = '#718096';
-            el.style.borderColor = 'rgba(42,47,69,0.5)';
-            el.style.background = 'none';
-          }}
         >
-          <LeftArrow />
+          <ChevronLeft size={13} strokeWidth={2.25} aria-hidden="true" />
           Customers
         </button>
       </div>
 
-      {/* Header card */}
-      <div
-        className="glass-surface"
-        style={{
-          borderRadius: 18,
-          padding: '32px 40px',
-          position: 'relative',
-          overflow: 'hidden',
-        }}
-      >
-        {/* Gradient accent top border */}
+      {/* ── Identity header — composed panel row ── */}
+      <section className="dl-panel">
         <div
-          style={{
-            position: 'absolute',
-            top: 0,
-            left: 0,
-            right: 0,
-            height: 3,
-            background: `linear-gradient(90deg, transparent 0%, ${headerAccent}99 40%, ${headerAccent} 50%, ${headerAccent}99 60%, transparent 100%)`,
-          }}
-        />
+          className="dl-panel-body"
+          style={{ display: 'flex', alignItems: 'center', gap: 18, flexWrap: 'wrap' }}
+        >
+          {/* Customer avatar */}
+          <span className="dl-avatar" style={{ width: 52, height: 52, fontSize: '1.1rem' }} aria-hidden="true">
+            {initials(customer.name)}
+          </span>
 
-        {/* Radial glow in corner */}
-        <div
-          style={{
-            position: 'absolute',
-            top: -60,
-            right: -60,
-            width: 240,
-            height: 240,
-            borderRadius: '50%',
-            background: `radial-gradient(circle, ${headerAccent}12 0%, transparent 70%)`,
-            pointerEvents: 'none',
-          }}
-        />
-
-        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 24, flexWrap: 'wrap' }}>
-          {/* Customer icon */}
-          <div
-            style={{
-              width: 56,
-              height: 56,
-              borderRadius: 16,
-              background: `linear-gradient(135deg, ${headerAccent}25 0%, ${headerAccent}10 100%)`,
-              border: `1px solid ${headerAccent}35`,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: headerAccent,
-              flexShrink: 0,
-              boxShadow: `0 0 20px ${headerAccent}20`,
-            }}
-          >
-            <UserIcon />
-          </div>
-
-          {/* Name + badges */}
+          {/* Name + chips */}
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 8 }}>
-              <h1
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 7 }}>
+              <h2
                 style={{
-                  fontSize: '1.75rem',
-                  fontWeight: 800,
-                  color: '#e2e8f0',
-                  letterSpacing: '-0.025em',
                   margin: 0,
+                  fontFamily: ARCHIVO,
+                  fontSize: '1.25rem',
+                  fontWeight: 700,
+                  color: 'var(--rcf-ink)',
+                  letterSpacing: '-0.018em',
                   lineHeight: 1.15,
                 }}
               >
                 {customer.name}
-              </h1>
-              <Badge variant={customer.status}>
-                {customer.status.charAt(0).toUpperCase() + customer.status.slice(1)}
-              </Badge>
+              </h2>
+              <StatusPill status={customer.status} />
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-              <Badge variant={customer.account_type}>
-                {customer.account_type.toUpperCase()}
-              </Badge>
-              <Badge variant={customer.traffic_grade}>
-                {customer.traffic_grade}
-              </Badge>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <span className="dl-tag">{customer.account_type.toUpperCase()}</span>
+              <span className="dl-tag dl-tag-slate">{customer.traffic_grade}</span>
               {/* UCaaS add-on indicator for api/trunk/hybrid customers */}
               {(customer.account_type === 'api' || customer.account_type === 'trunk' || customer.account_type === 'hybrid') && (
-                <span
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 5,
-                    fontSize: '0.65rem',
-                    fontWeight: 700,
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.05em',
-                    padding: '3px 8px',
-                    borderRadius: 6,
-                    background: customer.ucaas_enabled
-                      ? 'rgba(14,165,233,0.12)'
-                      : 'rgba(100,116,139,0.10)',
-                    border: customer.ucaas_enabled
-                      ? '1px solid rgba(14,165,233,0.30)'
-                      : '1px solid rgba(100,116,139,0.20)',
-                    color: customer.ucaas_enabled ? '#38bdf8' : '#475569',
-                  }}
-                >
-                  <span
-                    style={{
-                      width: 5,
-                      height: 5,
-                      borderRadius: '50%',
-                      background: customer.ucaas_enabled ? '#0ea5e9' : '#475569',
-                      flexShrink: 0,
-                    }}
-                  />
+                <span className={customer.ucaas_enabled ? 'dl-tag' : 'dl-tag dl-tag-slate'}>
                   UCaaS {customer.ucaas_enabled ? 'Enabled' : 'Disabled'}
                 </span>
               )}
-              <span
-                style={{
-                  fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
-                  fontSize: '0.78rem',
-                  color: '#4a5568',
-                  letterSpacing: '0.04em',
-                }}
-              >
+              <span style={{ fontFamily: MONO, fontSize: '0.76rem', color: 'var(--rcf-ink-dim)', letterSpacing: '0.04em' }}>
                 #{customer.id}
               </span>
             </div>
           </div>
         </div>
-      </div>
+      </section>
 
-      {/* Edit form (shown above tabs when editing) */}
+      {/* Edit form (shown in place of the overview when editing) */}
       {isEditing && (
-        <SectionCard accent="#3b82f6">
-          <div
-            style={{
-              fontSize: '0.6rem',
-              fontWeight: 700,
-              color: '#3b82f6',
-              textTransform: 'uppercase',
-              letterSpacing: '0.05em',
-              marginBottom: 4,
-            }}
-          >
-            Edit Customer
+        <section className="dl-panel">
+          <div className="dl-panel-head">
+            <h3 className="dl-panel-title" style={{ margin: 0 }}>Edit Customer</h3>
           </div>
           <CustomerEditForm
             customer={customer}
             onCancel={() => setIsEditing(false)}
             onSaved={handleSaved}
           />
-        </SectionCard>
+        </section>
       )}
 
       {/* Overview */}
@@ -1380,40 +924,5 @@ export function CustomerAccountPage() {
         />
       )}
     </div>
-  );
-}
-
-// ---- Inline SVG icons ----
-
-function LeftArrow() {
-  return (
-    <svg
-      viewBox="0 0 16 16"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={2}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      style={{ width: 14, height: 14, flexShrink: 0 }}
-    >
-      <path d="M10 3L5 8l5 5" />
-    </svg>
-  );
-}
-
-function UserIcon() {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.5}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      style={{ width: 26, height: 26 }}
-    >
-      <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-      <circle cx="12" cy="7" r="4" />
-    </svg>
   );
 }

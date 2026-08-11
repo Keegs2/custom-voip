@@ -1,0 +1,303 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   dl-platform-b.css — page-scoped daylight styles for the second wave of
+   Platform Management pages (CdrsTab + CDR sub-components, StirSummaryPage,
+   DIDSearchPage).
+
+   The `dlx4-` prefix marks these as page-scoped, NOT part of the shared
+   DAYLIGHT CONSOLE system in index.css (and distinct from the Customer
+   Management `dlx-` layer in dl-admin.css and the platform `dlx2-` layer in
+   dl-platform.css, both of which these pages import and reuse — never
+   duplicate). If a page outside this area reaches for one of these, promote
+   it into the shared `dl-*` block. Every value references the shared
+   `--rcf-*` custom properties declared on `.dl-scope` — no re-stated magic
+   numbers for color or rhythm.
+   Hand-written @media only (never Tailwind md:* — see CLAUDE.md).
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ─── Stat strip — left-keyline figures on one white slab (the statline
+   language from the Call Quality console). Keyline is azure by default;
+   status-measured figures override it inline (green/amber/red). ─── */
+.dlx4-statline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px 36px;
+}
+
+.dlx4-stat {
+  min-width: 104px;
+  padding-left: 14px;
+  border-left: 3px solid var(--rcf-azure);
+}
+
+.dlx4-stat-dim {
+  border-left-color: #c6d2e4;
+}
+
+.dlx4-stat-value {
+  font-family: "Archivo", "IBM Plex Sans", sans-serif;
+  font-weight: 700;
+  font-size: 1.25rem;
+  line-height: 1.05;
+  letter-spacing: -0.01em;
+  color: var(--rcf-ink);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.dlx4-stat-label {
+  margin-top: 5px;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--rcf-ink-dim);
+  white-space: nowrap;
+}
+
+/* ─── CDR filter field row — labelled fields that wrap on one slab ─── */
+.dlx4-filterbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px 16px;
+  align-items: flex-end;
+}
+
+/* ─── Mono numeric value (DIDs, timestamps, UUIDs) ─── */
+.dlx4-mono {
+  font-family: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.76rem;
+  letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ─── Semantic tag tones — combined with the shared .dl-tag base.
+   Status colors keep their semantics on paper: green=good/assigned,
+   amber=warn/reserved, red=bad/suspended, sky=release-requested (the
+   distinct azure/sky lifecycle state), slate=neutral/porting.
+   Compound selectors on purpose: index.css is injected LAST in the Vite
+   bundle, so a bare single-class modifier would lose to `.dl-tag` on
+   source order — the extra specificity keeps the tone in charge. ─── */
+.dl-tag.dlx4-tag-green {
+  color: var(--rcf-green);
+  background: rgba(22, 163, 74, 0.08);
+  border-color: rgba(22, 163, 74, 0.28);
+}
+
+.dl-tag.dlx4-tag-amber {
+  color: #92400e;
+  background: rgba(180, 83, 9, 0.08);
+  border-color: rgba(180, 83, 9, 0.28);
+}
+
+.dl-tag.dlx4-tag-red {
+  color: var(--rcf-red);
+  background: rgba(220, 38, 38, 0.06);
+  border-color: rgba(220, 38, 38, 0.26);
+}
+
+.dl-tag.dlx4-tag-sky {
+  color: #0369a1;
+  background: rgba(2, 132, 199, 0.08);
+  border-color: rgba(2, 132, 199, 0.3);
+}
+
+/* Status tag with a leading glyph (lucide icon) */
+.dlx4-stag { gap: 5px; }
+
+/* ─── Open/expanded CDR row — tint + azure keyline (rcf-nrow-open family).
+   Compound selector beats `.dl-row:hover` from the later-injected index.css. ─── */
+tr.dl-row.dlx4-row-open,
+tr.dl-row.dlx4-row-open:hover {
+  background: #eef4fe;
+  box-shadow: inset 2px 0 0 0 var(--rcf-azure);
+}
+
+/* ─── Micro section heading inside an expanded detail panel ─── */
+.dlx4-subhead {
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--rcf-ink-soft);
+  margin: 0 0 10px;
+}
+
+.dlx4-xsection {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--rcf-line);
+}
+
+/* ─── STIR breakdown card grid ─── */
+.dlx4-stir-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--rcf-stack);
+  align-items: start;
+}
+
+@media (min-width: 880px) {
+  .dlx4-stir-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* Series swatch dot before a breakdown label */
+.dlx4-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+/* ─── DID stat-tile strip ─── */
+.dlx4-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+}
+
+/* ─── Compact pagination buttons (prev/next) ─── */
+.dlx4-pgbtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  height: 30px;
+  padding: 0 14px;
+  border-radius: 7px;
+  font-size: 0.74rem;
+  font-weight: 600;
+  font-family: inherit;
+  border: 1px solid #d5deeb;
+  background: #ffffff;
+  color: var(--rcf-ink-dim);
+  cursor: pointer;
+  user-select: none;
+  transition: background var(--rcf-ease), color var(--rcf-ease), border-color var(--rcf-ease);
+}
+
+.dlx4-pgbtn:hover:not(:disabled) {
+  background: var(--rcf-tint-hover);
+  border-color: #b7c7dd;
+  color: var(--rcf-ink-soft);
+}
+
+.dlx4-pgbtn:disabled {
+  color: #b6c2d4;
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* ─── Daylight modal — white elevated dialog on a dimmed paper scrim ─── */
+.dlx4-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(14, 23, 38, 0.38);
+  animation: dlx4-fade 0.18s ease;
+}
+
+.dlx4-modal {
+  position: relative;
+  width: 100%;
+  max-width: 480px;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--rcf-card);
+  border: 1px solid var(--rcf-line);
+  border-radius: 14px;
+  box-shadow:
+    0 1px 2px rgba(14, 23, 38, 0.08),
+    0 32px 80px -24px rgba(14, 23, 38, 0.45);
+  animation: dlx4-pop 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes dlx4-fade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes dlx4-pop {
+  from { transform: translateY(10px); opacity: 0; }
+  to   { transform: translateY(0); opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dlx4-modal-backdrop,
+  .dlx4-modal { animation: none; }
+}
+
+.dlx4-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 20px 13px;
+  border-bottom: 1px solid var(--rcf-line);
+}
+
+.dlx4-modal-title {
+  font-family: "Archivo", "IBM Plex Sans", sans-serif;
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--rcf-ink);
+  margin: 0;
+}
+
+.dlx4-modal-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 7px;
+  border: 1px solid #cdd8e8;
+  background: #ffffff;
+  color: var(--rcf-ink-dim);
+  cursor: pointer;
+  transition: background var(--rcf-ease), color var(--rcf-ease), border-color var(--rcf-ease);
+}
+
+.dlx4-modal-close:hover {
+  background: #f2f6fc;
+  border-color: #b5c4da;
+  color: var(--rcf-ink);
+}
+
+.dlx4-modal-close:focus-visible {
+  outline: 2px solid var(--rcf-azure);
+  outline-offset: 1px;
+}
+
+.dlx4-modal-body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 18px 20px;
+}
+
+.dlx4-modal-foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 13px 20px;
+  border-top: 1px solid var(--rcf-line);
+}
+
+/* ─── Group header row inside the Assignments panel ─── */
+.dlx4-grouphead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px 9px;
+  background: var(--rcf-tint);
+  border-top: 1px solid var(--rcf-line);
+  border-bottom: 1px solid var(--rcf-line-soft);
+}

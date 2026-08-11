@@ -1,19 +1,34 @@
+/**
+ * CustomerApiSection — API Calling panel on the admin Customer 360
+ * (api/hybrid accounts): tier line, DID table with inline voice-URL editing,
+ * enable/disable/delete, and the add-DID form.
+ *
+ * Styling: the shared DAYLIGHT CONSOLE system (`dl-*` in index.css, plus the
+ * admin-area `dlx-*` primitives in dl-admin.css). Renders its own dl-panel.
+ * Presentation only: every query, mutation payload, confirm() and toast is
+ * unchanged (including the blur-to-save voice-URL semantics).
+ *
+ * React #310: every hook in every component below is called unconditionally
+ * at the top of its function, before any early return.
+ */
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
+import { Code2 } from 'lucide-react';
 import { listApiDids, createApiDid, updateApiDid, deleteApiDid } from '../../api/apiDids';
 import { getCustomerTier } from '../../api/tiers';
-import { Badge } from '../../components/ui/Badge';
-import { Button } from '../../components/ui/Button';
 import { Spinner } from '../../components/ui/Spinner';
 import { useToast } from '../../components/ui/ToastContext';
 import type { ApiDid } from '../../types/apiDid';
+import '../../styles/dl-admin.css';
 
 interface CustomerApiSectionProps {
   customerId: number;
 }
 
-// Inline editable voice URL field
+const MONO = '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace';
+
+// Inline editable voice URL field — blur (or Enter → blur) saves when changed
 function ApiDidUrlInput({
   did,
   customerId,
@@ -52,6 +67,7 @@ function ApiDidUrlInput({
   return (
     <input
       type="url"
+      className="dl-input dl-input-mono"
       value={value}
       onChange={(e) => setValue(e.target.value)}
       onBlur={handleBlur}
@@ -59,14 +75,19 @@ function ApiDidUrlInput({
       onClick={(e) => e.stopPropagation()}
       disabled={mutation.isPending}
       placeholder="https://example.com/voice"
-      className={[
-        'text-[0.82rem] px-2 py-[4px] rounded-md w-full max-w-[220px]',
-        'border bg-[rgba(13,15,21,0.55)] text-[#e2e8f0] outline-none',
-        'transition-[border-color,box-shadow] duration-150',
-        'focus:border-[#3b82f6] focus:shadow-[0_0_0_3px_rgba(59,130,246,0.2)]',
-        'placeholder:text-[#718096] disabled:opacity-50',
-        saved ? 'border-[#3b82f6]/50 text-[#60a5fa]' : 'border-[#3b82f6]/15',
-      ].join(' ')}
+      style={{
+        width: '100%',
+        maxWidth: 260,
+        padding: '5px 10px',
+        fontSize: '0.78rem',
+        ...(saved
+          ? {
+              borderColor: 'rgba(47, 125, 246, 0.55)',
+              color: 'var(--rcf-azure-deep)',
+              boxShadow: '0 0 0 3px rgba(47, 125, 246, 0.12)',
+            }
+          : {}),
+      }}
     />
   );
 }
@@ -141,153 +162,149 @@ export function CustomerApiSection({ customerId }: CustomerApiSectionProps) {
   const tier = tierData?.tier;
 
   return (
-    <div style={{ paddingTop: 16, borderTop: '1px solid rgba(59,130,246,0.12)' }}>
-      <div className="flex items-center justify-between mb-3">
-        <span className="text-[0.63rem] font-bold text-[#718096] uppercase tracking-[0.04em]">
-          API Configuration
+    <section className="dl-panel">
+      {/* ── Panel head ── */}
+      <div className="dl-panel-head" style={{ flexWrap: 'nowrap' }}>
+        <span aria-hidden="true" style={{ display: 'inline-flex', color: 'var(--rcf-azure-deep)', flexShrink: 0 }}>
+          <Code2 size={15} strokeWidth={2} />
         </span>
+        <h3 className="dl-panel-title" style={{ margin: 0 }}>API Configuration</h3>
+        {!isLoading && !isError && (
+          <span className="dl-count">{entries.length === 1 ? '1 DID' : `${entries.length} DIDs`}</span>
+        )}
         <button
           type="button"
+          className="dlx-linkbtn"
+          style={{ marginLeft: 'auto', flexShrink: 0 }}
           onClick={(e) => { e.stopPropagation(); navigate('/api-dids'); }}
-          className="text-[0.72rem] text-[#3b82f6] hover:underline"
         >
-          Manage API DIDs
+          Manage API DIDs →
         </button>
       </div>
 
-      {/* Tier info line */}
-      {tier && (
-        <div className="text-[0.8rem] text-[#718096] mb-3">
-          API Tier:{' '}
-          <strong className="text-[#e2e8f0]">{tier.name}</strong>
-          {' '}&mdash; {tier.cps_limit} CPS
-        </div>
-      )}
-
-      {isLoading && (
-        <div className="flex items-center gap-2 text-[#718096] text-[0.8rem] py-2">
-          <Spinner size="xs" /> Loading…
-        </div>
-      )}
-
-      {isError && (
-        <p className="text-red-400 text-[0.8rem]">Could not load API DIDs.</p>
-      )}
-
-      {!isLoading && !isError && entries.length === 0 && (
-        <p className="text-[#718096] text-[0.8rem]">No API DIDs configured.</p>
-      )}
-
-      {!isLoading && entries.length > 0 && (
-        <table className="w-full text-[0.8rem] border-collapse">
-          <thead>
-            <tr>
-              {['DID', 'Voice URL', 'Status', ''].map((h) => (
-                <th
-                  key={h}
-                  className="text-left px-2 py-[5px] text-[0.65rem] font-bold uppercase tracking-[0.04em] text-[#718096] border-b border-[#3b82f6]/15"
-                >
-                  {h}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {entries.map((did) => (
-              <tr key={did.id} className="glass-row-hover border-b border-[#3b82f6]/10 last:border-0">
-                <td className="px-2 py-[6px] font-mono whitespace-nowrap text-[#e2e8f0]">
-                  {did.did}
-                </td>
-                <td className="px-2 py-[6px]">
-                  <ApiDidUrlInput did={did} customerId={customerId} />
-                </td>
-                <td className="px-2 py-[6px]">
-                  <Badge variant={did.enabled ? 'active' : 'disabled'}>
-                    {did.enabled ? 'Active' : 'Off'}
-                  </Badge>
-                </td>
-                <td className="px-2 py-[6px]">
-                  <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                    <Button
-                      variant="ghost"
-                      size="xs"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        toggleMutation.mutate({ id: did.id, enabled: !did.enabled });
-                      }}
-                    >
-                      {did.enabled ? 'Disable' : 'Enable'}
-                    </Button>
-                    <Button
-                      variant="danger"
-                      size="xs"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleDelete(did);
-                      }}
-                    >
-                      Delete
-                    </Button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-
-      {/* Add API DID form */}
-      <form
-        onSubmit={handleCreate}
-        onClick={(e) => e.stopPropagation()}
-        className="glass-surface"
-        style={{
-          marginTop: 12,
-          padding: '12px',
-          borderRadius: 10,
-        }}
-      >
-        <div className="text-[0.65rem] font-bold text-[#718096] uppercase tracking-[0.04em] mb-2">
-          Add API DID
-        </div>
-        <div className="flex flex-wrap gap-2 items-end">
-          <div className="flex flex-col gap-1">
-            <label className="text-[0.65rem] font-bold text-[#718096] uppercase tracking-[0.04em]">
-              DID
-            </label>
-            <input
-              type="tel"
-              value={newDid}
-              onChange={(e) => setNewDid(e.target.value)}
-              onClick={(e) => e.stopPropagation()}
-              placeholder="+1XXXXXXXXXX"
-              className="text-[0.83rem] px-2 py-[5px] rounded-lg w-[150px] border border-[#3b82f6]/15 bg-[rgba(13,15,21,0.55)] text-[#e2e8f0] outline-none focus:border-[#3b82f6] placeholder:text-[#718096]"
-            />
+      <div className="dl-panel-body">
+        {/* Tier info line */}
+        {tier && (
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 14, fontSize: '0.82rem' }}>
+            <span className="dl-fact-label" style={{ marginBottom: 0 }}>API Tier</span>
+            <span style={{ color: 'var(--rcf-ink)', fontWeight: 700 }}>{tier.name}</span>
+            <span style={{ color: 'var(--rcf-ink-dim)' }}>— {tier.cps_limit} CPS</span>
           </div>
-          <div className="flex flex-col gap-1">
-            <label className="text-[0.65rem] font-bold text-[#718096] uppercase tracking-[0.04em]">
-              Voice URL
-            </label>
-            <input
-              type="url"
-              value={newUrl}
-              onChange={(e) => setNewUrl(e.target.value)}
-              onClick={(e) => e.stopPropagation()}
-              placeholder="https://example.com/voice"
-              className="text-[0.83rem] px-2 py-[5px] rounded-lg w-[220px] border border-[#3b82f6]/15 bg-[rgba(13,15,21,0.55)] text-[#e2e8f0] outline-none focus:border-[#3b82f6] placeholder:text-[#718096]"
-            />
+        )}
+
+        {isLoading && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--rcf-ink-dim)', fontSize: '0.8rem', padding: '8px 0' }}>
+            <Spinner size="xs" /> Loading…
           </div>
-          <Button
-            type="submit"
-            variant="primary"
-            size="sm"
-            loading={createMutation.isPending}
-            onClick={(e) => e.stopPropagation()}
-          >
-            Create
-          </Button>
-        </div>
-      </form>
-    </div>
+        )}
+
+        {isError && <div className="dl-banner dl-banner-err">Could not load API DIDs.</div>}
+
+        {!isLoading && !isError && entries.length === 0 && (
+          <div className="dl-empty" style={{ marginBottom: 12 }}>No API DIDs configured.</div>
+        )}
+
+        {!isLoading && entries.length > 0 && (
+          <div style={{ overflowX: 'auto', border: '1px solid var(--rcf-line-soft)', borderRadius: 10, marginBottom: 16 }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 560 }}>
+              <thead>
+                <tr>
+                  {['DID', 'Voice URL', 'Status', ''].map((h) => (
+                    <th key={h} className="dl-th">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {entries.map((did) => (
+                  <tr key={did.id} className="dl-row">
+                    <td className="dlx-td" style={{ fontFamily: MONO, fontWeight: 600, color: 'var(--rcf-ink)' }}>
+                      {did.did}
+                    </td>
+                    <td className="dlx-td" style={{ whiteSpace: 'normal', minWidth: 220 }}>
+                      <ApiDidUrlInput did={did} customerId={customerId} />
+                    </td>
+                    <td className="dlx-td">
+                      <span className={did.enabled ? 'dl-pill dl-pill-on' : 'dl-pill dl-pill-off'}>
+                        {did.enabled ? 'Active' : 'Off'}
+                      </span>
+                    </td>
+                    <td className="dlx-td" style={{ textAlign: 'right' }}>
+                      <div
+                        style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6 }}
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <button
+                          type="button"
+                          className="dl-btn dl-btn-ghost dlx-btn-sm"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleMutation.mutate({ id: did.id, enabled: !did.enabled });
+                          }}
+                        >
+                          {did.enabled ? 'Disable' : 'Enable'}
+                        </button>
+                        <button
+                          type="button"
+                          className="dl-btn dl-btn-danger dlx-btn-sm"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDelete(did);
+                          }}
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* Add API DID form */}
+        <form
+          onSubmit={handleCreate}
+          onClick={(e) => e.stopPropagation()}
+          style={{ paddingTop: 16, borderTop: '1px solid var(--rcf-line)' }}
+        >
+          <h4 className="dl-section-title">Add API DID</h4>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, alignItems: 'flex-end' }}>
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              <span className="dl-flabel">DID</span>
+              <input
+                type="tel"
+                className="dl-input dl-input-mono"
+                value={newDid}
+                onChange={(e) => setNewDid(e.target.value)}
+                onClick={(e) => e.stopPropagation()}
+                placeholder="+1XXXXXXXXXX"
+                style={{ width: 160 }}
+              />
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              <span className="dl-flabel">Voice URL</span>
+              <input
+                type="url"
+                className="dl-input dl-input-mono"
+                value={newUrl}
+                onChange={(e) => setNewUrl(e.target.value)}
+                onClick={(e) => e.stopPropagation()}
+                placeholder="https://example.com/voice"
+                style={{ width: 240 }}
+              />
+            </div>
+            <button
+              type="submit"
+              className="dl-btn dl-btn-primary"
+              disabled={createMutation.isPending}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {createMutation.isPending ? 'Creating…' : 'Create'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </section>
   );
 }
