@@ -11,11 +11,16 @@ FCC Know-Your-Customer (KYC) capture — FCC 26-27 FNPRM (adopted 2026-04-30):
 originating voice service providers must collect/verify/retain (4 years) for
 ALL customers: legal name, physical address, government-issued identification
 number, alternate telephone number; for HIGH-VOLUME customers additionally the
-intended use of service and the originating IP address(es). The FCC has not
-yet fixed the high-volume threshold (comment sought), so high-volume status is
-self-declared on the form. Captured here as the validated `kyc` payload on the
-public POST, persisted to `onboarding_requests.kyc` JSONB (migration
-35_onboarding_kyc.sql). Verification (gov-ID copies / formation records) and
+intended use of service and the originating IP address(es). The FNPRM directs
+each provider to define its own high-volume threshold. GRANITE'S THRESHOLDS
+(form_version fcc-26-27-fnprm-v2): more than 1 call per second (CPS), OR more
+than 1,000 concurrent call paths — crossing EITHER makes the customer
+high-volume. Every applicant declares `declared_peak_cps` and
+`declared_max_concurrent_calls` on the KYC payload; the validator forces
+`is_high_volume=true` (and the high_volume block) when either threshold is
+exceeded. Voluntary opt-in below the thresholds remains allowed. Captured here
+as the validated `kyc` payload on the public POST, persisted to
+`onboarding_requests.kyc` JSONB (migration 35_onboarding_kyc.sql). Verification (gov-ID copies / formation records) and
 the 4-year retention enforcement are ADMIN/OPERATIONAL steps, out of scope for
 this intake endpoint — admins review the KYC data before completing a request.
 
@@ -52,7 +57,7 @@ router = APIRouter()
 # Pydantic models
 # ---------------------------------------------------------------------------
 
-KYC_FORM_VERSION = "fcc-26-27-fnprm-v1"
+KYC_FORM_VERSION = "fcc-26-27-fnprm-v2"
 
 # EIN: exactly NN-NNNNNNN (IRS employer identification number format).
 _EIN_RE = re.compile(r"^\d{2}-\d{7}$")
@@ -166,7 +171,10 @@ class KycStandard(BaseModel):
 class KycHighVolume(BaseModel):
     """FCC 26-27 additional KYC — required iff the customer is high-volume.
 
-    (The FCC has not yet fixed the high-volume threshold; self-declared.)
+    Granite's provider-defined thresholds (FCC 26-27 directs each provider to
+    set its own): >1 CPS or >1,000 concurrent call paths — either trips it.
+    Enforced by KycPayload.validate_high_volume from the declared capacity
+    fields; voluntary opt-in below the thresholds is still allowed.
     """
     intended_use: Literal[
         "marketing", "education", "political_campaign", "notifications_alerts",
@@ -195,14 +203,41 @@ class KycHighVolume(BaseModel):
 
 class KycPayload(BaseModel):
     """The `kyc` object on the public intake POST. Stored in
-    onboarding_requests.kyc as {standard, high_volume, submitted_at,
-    form_version} — see 35_onboarding_kyc.sql."""
+    onboarding_requests.kyc as {standard, high_volume, declared_peak_cps,
+    declared_max_concurrent_calls, submitted_at, form_version} — see
+    35_onboarding_kyc.sql (capacity declarations ride in the JSONB; no
+    migration needed)."""
     is_high_volume: bool
     standard: KycStandard
     high_volume: Optional[KycHighVolume] = None
+    # Capacity declarations — REQUIRED; they drive Granite's provider-defined
+    # high-volume threshold under FCC 26-27 (see validate_high_volume).
+    declared_peak_cps: int = Field(
+        ge=1, le=1000,
+        description="The customer's expected peak calls per second",
+    )
+    declared_max_concurrent_calls: int = Field(
+        ge=1, le=100_000,
+        description="Expected peak simultaneous calls (call paths)",
+    )
 
     @model_validator(mode="after")
     def validate_high_volume(self) -> "KycPayload":
+        # Granite's high-volume thresholds (provider-defined per FCC 26-27):
+        # crossing EITHER makes the customer high-volume.
+        exceeds_threshold = (
+            self.declared_peak_cps > 1
+            or self.declared_max_concurrent_calls > 1000
+        )
+        if exceeds_threshold and not self.is_high_volume:
+            raise ValueError(
+                "is_high_volume must be true (with the high_volume block): "
+                f"declared capacity (peak {self.declared_peak_cps} CPS, "
+                f"{self.declared_max_concurrent_calls} concurrent call paths) "
+                "exceeds Granite's high-volume threshold under the FCC's "
+                "Know-Your-Customer rules (FCC 26-27) — more than 1 CPS or "
+                "more than 1,000 concurrent call paths"
+            )
         if self.is_high_volume and self.high_volume is None:
             raise ValueError(
                 "high_volume KYC data is required when is_high_volume=true "
@@ -395,6 +430,12 @@ class OnboardingSubmit(BaseModel):
             )
         return self
 
+    # NOTE (fcc-26-27-fnprm-v2): the legacy 50,000+ calls/month high-volume
+    # rule was REPLACED by Granite's capacity thresholds (>1 CPS or >1,000
+    # concurrent call paths), enforced in KycPayload.validate_high_volume from
+    # the declared_peak_cps / declared_max_concurrent_calls fields.
+    # monthly_volume remains informational only.
+
 
 class CompleteRequest(BaseModel):
     notes: Optional[str] = None
@@ -427,8 +468,9 @@ async def submit_onboarding_request(body: OnboardingSubmit):
     """Submit a new onboarding request. Public endpoint (no auth required).
 
     Persists the FCC 26-27 KYC payload alongside the intake form:
-    {standard, high_volume|null, submitted_at, form_version}. Retained 4 years
-    (operational policy) per FCC 26-27.
+    {standard, high_volume|null, declared_peak_cps,
+    declared_max_concurrent_calls, submitted_at, form_version}. Retained
+    4 years (operational policy) per FCC 26-27.
 
     Persists the product selection + per-product setup info to `products`
     JSONB (36_onboarding_products.sql): the validated ProductsPayload +
@@ -442,6 +484,10 @@ async def submit_onboarding_request(body: OnboardingSubmit):
         "high_volume": (
             body.kyc.high_volume.model_dump() if body.kyc.high_volume else None
         ),
+        # Capacity declarations driving Granite's high-volume threshold
+        # (>1 CPS or >1,000 concurrent call paths) under FCC 26-27.
+        "declared_peak_cps": body.kyc.declared_peak_cps,
+        "declared_max_concurrent_calls": body.kyc.declared_max_concurrent_calls,
         "submitted_at": datetime.now(timezone.utc).isoformat(),
         "form_version": KYC_FORM_VERSION,
     }
