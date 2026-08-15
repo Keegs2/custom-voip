@@ -119,15 +119,18 @@ interface SortHeaderProps {
   currentField: SortField;
   currentDir: SortDir;
   onSort: (field: SortField) => void;
+  /** Optional fixed column width (px) — presentation only, keeps Label from crowding */
+  width?: number;
 }
 
-function SortHeader({ label, field, currentField, currentDir, onSort }: SortHeaderProps) {
+function SortHeader({ label, field, currentField, currentDir, onSort, width }: SortHeaderProps) {
   const isActive = currentField === field;
   return (
     <th
       onClick={() => onSort(field)}
       aria-sort={isActive ? (currentDir === 'asc' ? 'ascending' : 'descending') : 'none'}
       className={`rcf-th rcf-th-sort${isActive ? ' rcf-th-active' : ''}`}
+      style={width !== undefined ? { width } : undefined}
     >
       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
         {label}
@@ -543,59 +546,67 @@ function NumberRow({ entry, isAdmin, canEdit, expanded, onToggle, onCollapse }: 
         }}
       >
         {/* Chevron affordance */}
-        <td style={{ padding: '14px 4px 14px 16px', width: 30 }}>
+        <td style={{ padding: '15px 4px 15px 18px', width: 34 }}>
           <svg
             viewBox="0 0 16 16"
             fill="none"
             stroke={expanded ? AZURE_DEEP : INK_FAINT}
-            strokeWidth={2}
+            strokeWidth={1.75}
             strokeLinecap="round"
             strokeLinejoin="round"
             className={`rcf-chev${expanded ? ' rcf-chev-open' : ''}`}
-            style={{ width: 12, height: 12 }}
+            style={{ width: 13, height: 13 }}
           >
             <path d="M6 3l5 5-5 5" />
           </svg>
         </td>
 
-        {/* Number */}
-        <td style={{ padding: '13px 16px' }}>
-          <div style={{ fontSize: '0.9rem', fontWeight: 700, color: INK, fontFamily: MONO, letterSpacing: '0.02em', lineHeight: 1.2 }}>
+        {/* Number — muted when disabled so state reads before the pill */}
+        <td style={{ padding: '15px 16px', whiteSpace: 'nowrap' }}>
+          <span style={{ fontSize: '0.92rem', fontWeight: 600, color: entry.enabled ? INK : INK_SOFT, fontVariantNumeric: 'tabular-nums', lineHeight: 1.3 }}>
             {fmt(entry.did)}
-          </div>
-          <div style={{ fontSize: '0.62rem', color: INK_DIM, fontFamily: MONO, marginTop: 3, letterSpacing: '0.01em' }}>
-            {entry.did}
-          </div>
-        </td>
-
-        {/* Label */}
-        <td style={{ padding: '13px 16px' }}>
-          <span style={{ fontSize: '0.83rem', color: entry.name ? INK_SOFT : '#a7b3c8', fontStyle: entry.name ? 'normal' : 'italic' }}>
-            {entry.name ?? 'No label'}
           </span>
         </td>
 
-        {/* Destination */}
-        <td style={{ padding: '13px 16px' }}>
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-            <svg viewBox="0 0 18 10" fill="none" style={{ width: 16, height: 9, flexShrink: 0 }} aria-hidden="true">
-              <line x1="1" y1="5" x2="14" y2="5" stroke={AZURE} strokeWidth={1.5} strokeLinecap="round" />
-              <path d="M11 2l3 3-3 3" stroke={AZURE} strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />
+        {/* Forwards to — azure means "this forward is live"; disabled goes quiet */}
+        <td style={{ padding: '15px 16px', whiteSpace: 'nowrap' }}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 9 }}>
+            <svg viewBox="0 0 16 10" fill="none" style={{ width: 14, height: 9, flexShrink: 0, opacity: 0.55 }} aria-hidden="true">
+              <line x1="1" y1="5" x2="13" y2="5" stroke={INK_DIM} strokeWidth={1.5} strokeLinecap="round" />
+              <path d="M10 2l3 3-3 3" stroke={INK_DIM} strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />
             </svg>
-            <span style={{ fontSize: '0.85rem', fontWeight: 700, color: AZURE_DEEP, fontFamily: MONO, letterSpacing: '0.01em' }}>
+            <span style={{ fontSize: '0.92rem', fontWeight: 600, color: entry.enabled ? AZURE_DEEP : INK_DIM, fontVariantNumeric: 'tabular-nums', lineHeight: 1.3 }}>
               {fmt(entry.forward_to)}
             </span>
           </span>
         </td>
 
+        {/* Label */}
+        <td style={{ padding: '15px 16px' }}>
+          <span
+            style={{
+              display: 'block',
+              maxWidth: 280,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              fontSize: '0.85rem',
+              color: entry.name ? INK_SOFT : '#a7b3c8',
+              fontStyle: entry.name ? 'normal' : 'italic',
+            }}
+          >
+            {entry.name ?? 'No label'}
+          </span>
+        </td>
+
         {/* Status */}
-        <td style={{ padding: '13px 16px' }}>
+        <td style={{ padding: '15px 16px' }}>
           <StatusPill enabled={entry.enabled} />
         </td>
 
         {/* Customer (admin only) */}
         {isAdmin && (
-          <td style={{ padding: '13px 16px' }}>
+          <td style={{ padding: '15px 16px' }}>
             <span
               style={{
                 fontSize: '0.74rem',
@@ -2253,23 +2264,51 @@ function DidFilterBar({
 }: DidFilterBarProps) {
   const hasActive = filters.npa || filters.nxx || filters.state || filters.search;
 
+  // Inline toolbar label — same voice as the Numbers-tab NPA filter.
+  const labelStyle: React.CSSProperties = {
+    fontSize: '0.68rem',
+    fontWeight: 700,
+    color: INK_DIM,
+    whiteSpace: 'nowrap',
+    letterSpacing: '0.06em',
+  };
+
   return (
     <div
       style={{
-        padding: compact ? '10px 16px' : '12px 20px',
+        padding: compact ? '12px 16px' : '14px 20px',
         borderBottom: '1px solid var(--rcf-line)',
         display: 'flex',
         alignItems: 'center',
-        gap: 8,
+        gap: 12,
         flexWrap: 'wrap',
         background: 'var(--rcf-tint)',
       }}
     >
-      {/* NPA input */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 3, flexShrink: 0 }}>
-        <label style={{ fontSize: '0.56rem', fontWeight: 700, color: INK_FAINT, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-          Area Code (NPA)
-        </label>
+      {/* Free text search — leads the toolbar, same composition as the Numbers tab */}
+      <div style={{ position: 'relative', flex: '1 1 220px', minWidth: 180 }}>
+        <span
+          aria-hidden="true"
+          style={{ position: 'absolute', left: 13, top: '50%', transform: 'translateY(-50%)', color: '#9aa9c0', display: 'flex', alignItems: 'center', pointerEvents: 'none' }}
+        >
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={2} style={{ width: 14, height: 14 }}>
+            <path d="m19 19-4.35-4.35M15 9A6 6 0 1 1 3 9a6 6 0 0 1 12 0Z" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </span>
+        <input
+          type="text"
+          className="rcf-input"
+          value={filters.search}
+          onChange={(e) => onFiltersChange({ ...filters, search: e.target.value })}
+          placeholder="Filter by city, rate center, or number…"
+          aria-label="Search numbers"
+          style={{ width: '100%', padding: '9px 12px 9px 36px' }}
+        />
+      </div>
+
+      {/* NPA (area code) */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+        <label style={labelStyle}>NPA</label>
         <input
           type="text"
           className="rcf-input rcf-input-mono"
@@ -2281,15 +2320,21 @@ function DidFilterBar({
           placeholder="617"
           maxLength={3}
           inputMode="numeric"
-          style={{ width: 58, padding: '6px 8px', textAlign: 'center', fontSize: '0.78rem' }}
+          title="Filter by area code (NPA)"
+          style={{
+            width: 58,
+            padding: '9px 8px',
+            textAlign: 'center',
+            letterSpacing: '0.08em',
+            color: filters.npa.length === 3 ? AZURE_DEEP : undefined,
+            borderColor: filters.npa.length === 3 ? 'rgba(47,125,246,0.55)' : undefined,
+          }}
         />
       </div>
 
-      {/* NXX input */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 3, flexShrink: 0 }}>
-        <label style={{ fontSize: '0.56rem', fontWeight: 700, color: INK_FAINT, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-          Exchange (NXX)
-        </label>
+      {/* NXX (exchange) */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+        <label style={labelStyle}>NXX</label>
         <input
           type="text"
           className="rcf-input rcf-input-mono"
@@ -2301,88 +2346,74 @@ function DidFilterBar({
           placeholder="454"
           maxLength={3}
           inputMode="numeric"
-          style={{ width: 58, padding: '6px 8px', textAlign: 'center', fontSize: '0.78rem' }}
+          title="Filter by exchange (NXX)"
+          style={{
+            width: 58,
+            padding: '9px 8px',
+            textAlign: 'center',
+            letterSpacing: '0.08em',
+            color: filters.nxx.length === 3 ? AZURE_DEEP : undefined,
+            borderColor: filters.nxx.length === 3 ? 'rgba(47,125,246,0.55)' : undefined,
+          }}
         />
       </div>
 
-      {/* State dropdown */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 3, flexShrink: 0 }}>
-        <label style={{ fontSize: '0.56rem', fontWeight: 700, color: INK_FAINT, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-          State
-        </label>
+      {/* State */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+        <label style={labelStyle}>STATE</label>
         <select
           className="rcf-input"
           value={filters.state}
           onChange={(e) => onFiltersChange({ ...filters, state: e.target.value })}
-          style={{ padding: '6px 28px 6px 8px', minWidth: 88, fontSize: '0.78rem' }}
+          aria-label="Filter by state"
+          style={{ padding: '9px 32px 9px 12px', minWidth: 96, fontSize: '0.8rem' }}
         >
-          <option value="">All States</option>
+          <option value="">All</option>
           {availableStates.map((s) => (
             <option key={s} value={s}>{s}</option>
           ))}
         </select>
       </div>
 
-      {/* Free text search */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 3, flex: '1 1 160px', minWidth: 140 }}>
-        <label style={{ fontSize: '0.56rem', fontWeight: 700, color: INK_FAINT, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-          Search
-        </label>
-        <div style={{ position: 'relative' }}>
-          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={2} style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)', width: 12, height: 12, color: '#9aa9c0', pointerEvents: 'none' }}>
-            <path d="m19 19-4.35-4.35M15 9A6 6 0 1 1 3 9a6 6 0 0 1 12 0Z" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-          <input
-            type="text"
-            className="rcf-input"
-            value={filters.search}
-            onChange={(e) => onFiltersChange({ ...filters, search: e.target.value })}
-            placeholder="City, rate center, DID…"
-            style={{ width: '100%', padding: '6px 8px 6px 26px', fontSize: '0.78rem' }}
-          />
-        </div>
-      </div>
-
-      {/* Result count pill */}
-      <div style={{ marginLeft: 'auto', flexShrink: 0, alignSelf: 'flex-end', paddingBottom: 1 }}>
+      {/* Result count pill — azure only when a filter narrows the set */}
+      <div style={{ marginLeft: 'auto', flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10 }}>
         <span
           style={{
-            fontSize: '0.67rem',
+            fontSize: '0.72rem',
             fontWeight: 600,
             color: hasActive ? AZURE_DEEP : INK_DIM,
-            background: hasActive ? 'rgba(47,125,246,0.09)' : '#ffffff',
-            border: `1px solid ${hasActive ? 'rgba(47,125,246,0.28)' : '#d5deeb'}`,
+            background: hasActive ? 'rgba(47,125,246,0.08)' : '#ffffff',
+            border: `1px solid ${hasActive ? 'rgba(47,125,246,0.22)' : '#d5deeb'}`,
             borderRadius: 20,
-            padding: '3px 10px',
-            transition: 'all 0.2s',
+            padding: '5px 13px',
+            whiteSpace: 'nowrap',
+            letterSpacing: '0.02em',
+            transition: 'color var(--rcf-ease), background var(--rcf-ease), border-color var(--rcf-ease)',
           }}
         >
-          {hasActive ? `${resultCount} of ${totalCount}` : `${totalCount} total`}
+          {hasActive ? `${resultCount} of ${totalCount} shown` : `${totalCount} total`}
         </span>
-      </div>
 
-      {/* Clear all button */}
-      {hasActive && (
-        <button
-          type="button"
-          onClick={() => onFiltersChange({ npa: '', nxx: '', state: '', search: '' })}
-          style={{
-            alignSelf: 'flex-end',
-            padding: '4px 10px',
-            borderRadius: 6,
-            border: 'none',
-            background: 'transparent',
-            color: INK_DIM,
-            fontSize: '0.68rem',
-            cursor: 'pointer',
-            fontFamily: 'inherit',
-            textDecoration: 'underline',
-            marginBottom: 1,
-          }}
-        >
-          Clear
-        </button>
-      )}
+        {/* Clear all */}
+        {hasActive && (
+          <button
+            type="button"
+            onClick={() => onFiltersChange({ npa: '', nxx: '', state: '', search: '' })}
+            style={{
+              padding: 0,
+              border: 'none',
+              background: 'transparent',
+              color: INK_DIM,
+              fontSize: '0.72rem',
+              cursor: 'pointer',
+              fontFamily: 'inherit',
+              textDecoration: 'underline',
+            }}
+          >
+            Clear
+          </button>
+        )}
+      </div>
     </div>
   );
 }
@@ -2428,8 +2459,8 @@ function didStatusBadge(status: DidInventoryItem['status']): React.ReactNode {
     porting_in:  { bg: 'rgba(29,99,221,0.07)',   color: AZURE_DEEP, border: 'rgba(29,99,221,0.24)',   label: 'Porting In' },
     porting_out: { bg: 'rgba(29,99,221,0.07)',   color: AZURE_DEEP, border: 'rgba(29,99,221,0.24)',   label: 'Porting Out' },
     suspended:   { bg: 'rgba(220,38,38,0.07)',   color: RED,        border: 'rgba(220,38,38,0.26)',   label: 'Suspended' },
-    // Quiet slate pending state — release is awaiting engineering review
-    release_requested: { bg: 'rgba(93,111,140,0.1)', color: INK_SOFT, border: 'rgba(93,111,140,0.32)', label: 'Release Requested' },
+    // Sky pending state — the release is in flight, awaiting engineering review
+    release_requested: { bg: 'rgba(2,132,199,0.08)', color: '#0369a1', border: 'rgba(2,132,199,0.28)', label: 'Release Requested' },
   };
   const s = styles[status] ?? styles.available;
   return (
@@ -2437,16 +2468,17 @@ function didStatusBadge(status: DidInventoryItem['status']): React.ReactNode {
       style={{
         display: 'inline-flex',
         alignItems: 'center',
-        gap: 5,
-        fontSize: '0.67rem',
+        gap: 6,
+        fontSize: '0.64rem',
         fontWeight: 700,
         color: s.color,
         background: s.bg,
         border: `1px solid ${s.border}`,
-        borderRadius: 20,
-        padding: '3px 9px',
+        borderRadius: 999,
+        padding: '3px 10px',
         whiteSpace: 'nowrap',
-        letterSpacing: '0.03em',
+        letterSpacing: '0.05em',
+        textTransform: 'uppercase',
       }}
     >
       <span
@@ -2588,7 +2620,7 @@ function RequestModal({ did, onConfirm, onCancel, isPending }: RequestModalProps
         </div>
         <div style={{ fontSize: '0.84rem', color: INK_SOFT, marginBottom: 18, lineHeight: 1.6 }}>
           You are requesting{' '}
-          <span style={{ fontFamily: MONO, color: AZURE_DEEP, fontWeight: 600 }}>
+          <span style={{ color: AZURE_DEEP, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
             {fmt(did.did)}
           </span>
           {did.city || did.state ? (
@@ -2713,14 +2745,14 @@ function RequestReleaseModal({ did, onConfirm, onCancel, isPending }: RequestRel
           Request Number Release
         </div>
 
-        {/* DID displayed prominently */}
+        {/* DID displayed prominently — body font per the table standard */}
         <div
           style={{
-            fontFamily: MONO,
-            fontSize: '1.25rem',
-            fontWeight: 800,
+            fontSize: '1.3rem',
+            fontWeight: 700,
             color: AZURE_DEEP,
-            letterSpacing: '0.04em',
+            fontVariantNumeric: 'tabular-nums',
+            letterSpacing: '-0.01em',
             marginBottom: 16,
           }}
         >
@@ -2728,8 +2760,6 @@ function RequestReleaseModal({ did, onConfirm, onCancel, isPending }: RequestRel
         </div>
 
         <div style={{ fontSize: '0.83rem', color: INK_SOFT, marginBottom: 14, lineHeight: 1.6 }}>
-          Submit a release request for{' '}
-          <span style={{ fontFamily: MONO, color: INK, fontWeight: 600 }}>{fmt(did.did)}</span>?
           Release requests are routed to Granite engineering for review — call forwarding
           continues to work until the release is approved.
         </div>
@@ -2919,124 +2949,93 @@ function MyNumbersSection({
               <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 640 }}>
                 <thead>
                   <tr>
-                    <DidTh></DidTh>
-                    <DidTh>DID</DidTh>
-                    <DidTh>NPA</DidTh>
-                    <DidTh>City</DidTh>
-                    <DidTh>State</DidTh>
+                    <th className="rcf-th" style={{ width: 34, padding: '11px 4px 11px 18px' }} aria-label="Expand" />
+                    <DidTh>Number</DidTh>
+                    <DidTh>Location</DidTh>
                     <DidTh>Product</DidTh>
                     <DidTh>Status</DidTh>
                     <DidTh>Assigned</DidTh>
-                    <DidTh></DidTh>
+                    <th className="rcf-th" aria-label="Actions" />
                   </tr>
                 </thead>
                 <tbody>
-                  {filtered.map((item, idx) => {
+                  {filtered.map((item) => {
                     const isExpanded = expandedId === item.id;
+                    const location = [item.city, item.state].filter(Boolean).join(', ');
+                    const pendingRelease = item.status === 'release_requested';
                     return (
                       <Fragment key={item.id}>
                         <tr
-                          className="rcf-row"
-                          style={{
-                            animation: 'fx-rise 0.3s ease both',
-                            animationDelay: `${idx * 40}ms`,
-                            cursor: 'pointer',
-                            background: isExpanded ? '#eef4fe' : undefined,
-                          }}
+                          className={`rcf-row rcf-nrow${isExpanded ? ' rcf-nrow-open' : ''}`}
+                          role="button"
+                          tabIndex={0}
+                          aria-expanded={isExpanded}
                           onClick={() => setExpandedId(isExpanded ? null : item.id)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setExpandedId(isExpanded ? null : item.id); }
+                            if (e.key === 'Escape' && isExpanded) { e.preventDefault(); setExpandedId(null); }
+                          }}
                         >
-                          {/* Expand chevron */}
-                          <td style={{ padding: '13px 8px 13px 16px', width: 28 }}>
+                          {/* Chevron affordance — same glyph family as the Numbers table */}
+                          <td style={{ padding: '15px 4px 15px 18px', width: 34 }}>
                             <svg
                               viewBox="0 0 16 16"
                               fill="none"
                               stroke={isExpanded ? AZURE_DEEP : INK_FAINT}
-                              strokeWidth={2}
+                              strokeWidth={1.75}
                               strokeLinecap="round"
-                              style={{
-                                width: 12,
-                                height: 12,
-                                transform: isExpanded ? 'rotate(180deg)' : 'rotate(0deg)',
-                                transition: 'transform 0.2s',
-                                display: 'block',
-                              }}
+                              strokeLinejoin="round"
+                              className={`rcf-chev${isExpanded ? ' rcf-chev-open' : ''}`}
+                              style={{ width: 13, height: 13 }}
                             >
-                              <path d="M3 6l5 5 5-5" />
+                              <path d="M6 3l5 5-5 5" />
                             </svg>
                           </td>
 
-                          <td style={{ padding: '13px 16px' }}>
-                            <div>
-                              <div style={{ fontSize: '0.88rem', fontWeight: 700, color: INK, fontFamily: MONO, letterSpacing: '0.02em' }}>
-                                {fmt(item.did)}
-                              </div>
-                              <div style={{ fontSize: '0.62rem', color: INK_DIM, fontFamily: MONO, marginTop: 2, letterSpacing: '0.01em' }}>
-                                {item.did}
-                              </div>
-                            </div>
-                          </td>
-
-                          {/* NPA */}
-                          <td style={{ padding: '13px 16px' }}>
-                            <span style={{ fontSize: '0.8rem', color: AZURE_DEEP, fontFamily: MONO, fontWeight: 600, letterSpacing: '0.04em' }}>
-                              {extractNpa(item.did)}
+                          {/* Number — quiets to slate while a release is pending */}
+                          <td style={{ padding: '15px 16px', whiteSpace: 'nowrap' }}>
+                            <span style={{ fontSize: '0.92rem', fontWeight: 600, color: pendingRelease ? INK_SOFT : INK, fontVariantNumeric: 'tabular-nums', lineHeight: 1.3 }}>
+                              {fmt(item.did)}
                             </span>
                           </td>
 
-                          <td style={{ padding: '13px 16px' }}>
-                            <span style={{ fontSize: '0.82rem', color: item.city ? INK_SOFT : '#b6c2d4', fontStyle: item.city ? 'normal' : 'italic' }}>
-                              {item.city ?? '—'}
+                          {/* Location — city/state merged, quiet em-dash when unknown */}
+                          <td style={{ padding: '15px 16px' }}>
+                            <span style={{ fontSize: '0.85rem', color: location ? INK_SOFT : '#a7b3c8', whiteSpace: 'nowrap' }}>
+                              {location || '—'}
                             </span>
                           </td>
-                          <td style={{ padding: '13px 16px' }}>
-                            <span style={{ fontSize: '0.82rem', color: item.state ? INK_SOFT : '#b6c2d4', fontWeight: item.state ? 600 : 400 }}>
-                              {item.state ?? '—'}
-                            </span>
+
+                          <td style={{ padding: '15px 16px' }}>
+                            <span className="dl-tag">{item.product_type ?? 'RCF'}</span>
                           </td>
-                          <td style={{ padding: '13px 16px' }}>
-                            <span
-                              style={{
-                                fontSize: '0.67rem',
-                                fontWeight: 700,
-                                color: AZURE_DEEP,
-                                background: 'rgba(47,125,246,0.08)',
-                                border: '1px solid rgba(47,125,246,0.22)',
-                                borderRadius: 5,
-                                padding: '3px 8px',
-                                textTransform: 'uppercase',
-                                letterSpacing: '0.05em',
-                              }}
-                            >
-                              {item.product_type ?? 'RCF'}
-                            </span>
-                          </td>
-                          <td style={{ padding: '13px 16px' }}>
+                          <td style={{ padding: '15px 16px' }}>
                             {didStatusBadge(item.status)}
                           </td>
-                          <td style={{ padding: '13px 16px' }}>
-                            <span style={{ fontSize: '0.78rem', color: INK_DIM, fontVariantNumeric: 'tabular-nums' }}>
+                          <td style={{ padding: '15px 16px' }}>
+                            <span style={{ fontSize: '0.8rem', color: INK_DIM, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
                               {fmtAssignedDate(item.assigned_at)}
                             </span>
                           </td>
 
                           {/* Release action — request flow (pending state shows Cancel) */}
-                          <td style={{ padding: '10px 16px' }} onClick={(e) => e.stopPropagation()}>
-                            {item.status === 'release_requested' ? (
+                          <td style={{ padding: '11px 18px 11px 16px', textAlign: 'right' }} onClick={(e) => e.stopPropagation()}>
+                            {pendingRelease ? (
                               <button
                                 type="button"
                                 className="rcf-btn rcf-btn-ghost"
-                                style={{ padding: '6px 13px', fontSize: '0.72rem', gap: 5, whiteSpace: 'nowrap', color: AZURE_DEEP, borderColor: 'rgba(47,125,246,0.35)' }}
+                                style={{ padding: '7px 14px', fontSize: '0.74rem', gap: 6, whiteSpace: 'nowrap', color: AZURE_DEEP, borderColor: 'rgba(47,125,246,0.35)' }}
                                 onClick={() => onCancelRelease(item)}
                                 disabled={cancelingDid === item.did}
                                 title="Withdraw the pending release request — the number stays assigned"
                               >
                                 {cancelingDid === item.did ? (
-                                  <svg viewBox="0 0 16 16" style={{ width: 10, height: 10, animation: 'fx-spin 0.7s linear infinite' }}>
-                                    <circle cx="8" cy="8" r="6" fill="none" stroke="rgba(93,111,140,0.35)" strokeWidth={2} />
-                                    <path d="M8 2a6 6 0 0 1 6 6" stroke={INK_SOFT} strokeWidth={2} fill="none" strokeLinecap="round" />
+                                  <svg viewBox="0 0 16 16" style={{ width: 11, height: 11, animation: 'fx-spin 0.7s linear infinite' }}>
+                                    <circle cx="8" cy="8" r="6" fill="none" stroke="rgba(47,125,246,0.3)" strokeWidth={2} />
+                                    <path d="M8 2a6 6 0 0 1 6 6" stroke={AZURE_DEEP} strokeWidth={2} fill="none" strokeLinecap="round" />
                                   </svg>
                                 ) : (
-                                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.8} style={{ width: 10, height: 10 }}>
+                                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.75} style={{ width: 11, height: 11 }}>
                                     <path d="M6 4L2.5 7.5 6 11M2.5 7.5H10a3.5 3.5 0 0 1 0 7H8" strokeLinecap="round" strokeLinejoin="round" />
                                   </svg>
                                 )}
@@ -3046,11 +3045,11 @@ function MyNumbersSection({
                               <button
                                 type="button"
                                 className="rcf-btn rcf-btn-ghost"
-                                style={{ padding: '6px 13px', fontSize: '0.72rem', gap: 5, whiteSpace: 'nowrap' }}
+                                style={{ padding: '7px 14px', fontSize: '0.74rem', gap: 6, whiteSpace: 'nowrap' }}
                                 onClick={() => onRequestRelease(item)}
                                 title="Request release of this number — reviewed by Granite engineering"
                               >
-                                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.8} style={{ width: 10, height: 10 }}>
+                                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.75} style={{ width: 11, height: 11 }}>
                                   <path d="M4 12L12 4M12 4H6M12 4v6" strokeLinecap="round" strokeLinejoin="round" />
                                 </svg>
                                 Request Release
@@ -3063,7 +3062,7 @@ function MyNumbersSection({
                         {isExpanded && (
                           <tr>
                             <td
-                              colSpan={9}
+                              colSpan={7}
                               style={{
                                 padding: '0 20px 20px 20px',
                                 background: '#f7fafd',
@@ -3101,10 +3100,11 @@ function MyNumbersSection({
                                   <div style={{ fontSize: '0.58rem', fontWeight: 700, color: INK_FAINT, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>
                                     Number
                                   </div>
-                                  <div style={{ fontFamily: MONO, fontSize: '1.15rem', fontWeight: 800, color: AZURE_DEEP, letterSpacing: '0.04em' }}>
+                                  <div style={{ fontSize: '1.1rem', fontWeight: 700, color: AZURE_DEEP, fontVariantNumeric: 'tabular-nums', letterSpacing: '-0.01em' }}>
                                     {fmt(item.did)}
                                   </div>
-                                  <div style={{ fontSize: '0.67rem', color: INK_DIM, fontFamily: MONO, marginTop: 3 }}>
+                                  {/* Raw E.164 — detail context only */}
+                                  <div style={{ fontSize: '0.68rem', color: INK_DIM, fontFamily: MONO, marginTop: 3 }}>
                                     {item.did}
                                   </div>
                                 </div>
@@ -3135,24 +3135,8 @@ function MyNumbersSection({
                                   <div style={{ fontSize: '0.58rem', fontWeight: 700, color: INK_FAINT, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>
                                     Product
                                   </div>
-                                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                                    <span
-                                      style={{
-                                        display: 'inline-flex',
-                                        alignSelf: 'flex-start',
-                                        fontSize: '0.68rem',
-                                        fontWeight: 700,
-                                        color: AZURE_DEEP,
-                                        background: 'rgba(47,125,246,0.09)',
-                                        border: '1px solid rgba(47,125,246,0.24)',
-                                        borderRadius: 5,
-                                        padding: '3px 9px',
-                                        textTransform: 'uppercase',
-                                        letterSpacing: '0.05em',
-                                      }}
-                                    >
-                                      {item.product_type ?? 'RCF'}
-                                    </span>
+                                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 6 }}>
+                                    <span className="dl-tag">{item.product_type ?? 'RCF'}</span>
                                     {didStatusBadge(item.status)}
                                   </div>
                                 </div>
@@ -3214,44 +3198,39 @@ function PendingRequestsSection({ items }: { items: DidInventoryItem[] }) {
         <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 440 }}>
           <thead>
             <tr>
-              <DidTh>DID</DidTh>
-              <DidTh>City</DidTh>
-              <DidTh>State</DidTh>
+              <DidTh>Number</DidTh>
+              <DidTh>Location</DidTh>
               <DidTh>Requested</DidTh>
               <DidTh>Status</DidTh>
             </tr>
           </thead>
           <tbody>
-            {items.map((item, idx) => (
-              <tr
-                key={item.id}
-                className="rcf-row"
-                style={{
-                  animation: 'fx-rise 0.3s ease both',
-                  animationDelay: `${idx * 40}ms`,
-                }}
-              >
-                <td style={{ padding: '12px 16px' }}>
-                  <div style={{ fontSize: '0.88rem', fontWeight: 700, color: INK, fontFamily: MONO, letterSpacing: '0.02em' }}>
-                    {fmt(item.did)}
-                  </div>
-                </td>
-                <td style={{ padding: '12px 16px' }}>
-                  <span style={{ fontSize: '0.82rem', color: INK_SOFT }}>{item.city ?? '—'}</span>
-                </td>
-                <td style={{ padding: '12px 16px' }}>
-                  <span style={{ fontSize: '0.82rem', color: INK_SOFT, fontWeight: 600 }}>{item.state ?? '—'}</span>
-                </td>
-                <td style={{ padding: '12px 16px' }}>
-                  <span style={{ fontSize: '0.78rem', color: INK_DIM, fontVariantNumeric: 'tabular-nums' }}>
-                    {fmtAssignedDate(item.assigned_at)}
-                  </span>
-                </td>
-                <td style={{ padding: '12px 16px' }}>
-                  {didStatusBadge(item.status)}
-                </td>
-              </tr>
-            ))}
+            {items.map((item) => {
+              const location = [item.city, item.state].filter(Boolean).join(', ');
+              return (
+                <tr key={item.id} className="rcf-row">
+                  {/* Number — softened: not active until the request is approved */}
+                  <td style={{ padding: '15px 16px', whiteSpace: 'nowrap' }}>
+                    <span style={{ fontSize: '0.92rem', fontWeight: 600, color: INK_SOFT, fontVariantNumeric: 'tabular-nums', lineHeight: 1.3 }}>
+                      {fmt(item.did)}
+                    </span>
+                  </td>
+                  <td style={{ padding: '15px 16px' }}>
+                    <span style={{ fontSize: '0.85rem', color: location ? INK_SOFT : '#a7b3c8', whiteSpace: 'nowrap' }}>
+                      {location || '—'}
+                    </span>
+                  </td>
+                  <td style={{ padding: '15px 16px' }}>
+                    <span style={{ fontSize: '0.8rem', color: INK_DIM, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
+                      {fmtAssignedDate(item.assigned_at)}
+                    </span>
+                  </td>
+                  <td style={{ padding: '15px 16px' }}>
+                    {didStatusBadge(item.status)}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -3402,82 +3381,44 @@ function AvailableNumbersSection({
             </div>
           ) : (
             <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 640 }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 560 }}>
                 <thead>
                   <tr>
-                    <DidTh>DID</DidTh>
-                    <DidTh>NPA</DidTh>
-                    <DidTh>State</DidTh>
-                    <DidTh>City</DidTh>
+                    <DidTh>Number</DidTh>
+                    <DidTh>Location</DidTh>
                     <DidTh>Rate Center</DidTh>
-                    <DidTh>Action</DidTh>
+                    <th className="rcf-th" aria-label="Actions" />
                   </tr>
                 </thead>
                 <tbody>
-                  {filtered.map((item, idx) => {
+                  {filtered.map((item) => {
                     const isRequesting = requestingDid === item.did;
+                    const location = [item.city, item.state].filter(Boolean).join(', ');
                     return (
-                      <tr
-                        key={item.id}
-                        className="rcf-row"
-                        style={{
-                          animation: 'fx-rise 0.3s ease both',
-                          animationDelay: `${Math.min(idx * 30, 400)}ms`,
-                        }}
-                      >
-                        <td style={{ padding: '13px 16px' }}>
-                          <div>
-                            <div style={{ fontSize: '0.88rem', fontWeight: 700, color: INK, fontFamily: MONO, letterSpacing: '0.02em' }}>
-                              {fmt(item.did)}
-                            </div>
-                            <div style={{ fontSize: '0.62rem', color: INK_DIM, fontFamily: MONO, marginTop: 2 }}>
-                              {item.did}
-                            </div>
-                          </div>
-                        </td>
-
-                        {/* NPA column */}
-                        <td style={{ padding: '13px 16px' }}>
-                          <span
-                            style={{
-                              fontSize: '0.8rem',
-                              fontFamily: MONO,
-                              fontWeight: 600,
-                              color: AZURE_DEEP,
-                              background: 'rgba(47,125,246,0.07)',
-                              border: '1px solid rgba(47,125,246,0.18)',
-                              borderRadius: 5,
-                              padding: '2px 7px',
-                              letterSpacing: '0.06em',
-                              display: 'inline-block',
-                            }}
-                          >
-                            {extractNpa(item.did)}
+                      <tr key={item.id} className="rcf-row">
+                        <td style={{ padding: '15px 16px', whiteSpace: 'nowrap' }}>
+                          <span style={{ fontSize: '0.92rem', fontWeight: 600, color: INK, fontVariantNumeric: 'tabular-nums', lineHeight: 1.3 }}>
+                            {fmt(item.did)}
                           </span>
                         </td>
 
-                        {/* State — prominent */}
-                        <td style={{ padding: '13px 16px' }}>
-                          <span style={{ fontSize: '0.82rem', color: item.state ? INK_SOFT : '#b6c2d4', fontWeight: item.state ? 700 : 400 }}>
-                            {item.state ?? '—'}
+                        {/* Location — city/state merged (list is pre-sorted by state) */}
+                        <td style={{ padding: '15px 16px' }}>
+                          <span style={{ fontSize: '0.85rem', color: location ? INK_SOFT : '#a7b3c8', whiteSpace: 'nowrap' }}>
+                            {location || '—'}
                           </span>
                         </td>
-
-                        <td style={{ padding: '13px 16px' }}>
-                          <span style={{ fontSize: '0.82rem', color: item.city ? INK_SOFT : '#b6c2d4', fontStyle: item.city ? 'normal' : 'italic' }}>
-                            {item.city ?? '—'}
-                          </span>
-                        </td>
-                        <td style={{ padding: '13px 16px' }}>
-                          <span style={{ fontSize: '0.78rem', color: INK_DIM }}>
+                        <td style={{ padding: '15px 16px' }}>
+                          <span style={{ fontSize: '0.8rem', color: INK_DIM, whiteSpace: 'nowrap' }}>
                             {item.rate_center ?? '—'}
                           </span>
                         </td>
-                        <td style={{ padding: '10px 16px' }}>
+                        <td style={{ padding: '11px 18px 11px 16px', textAlign: 'right' }}>
                           <button
                             type="button"
                             className="rcf-btn rcf-btn-primary"
-                            style={{ padding: '7px 16px', fontSize: '0.75rem' }}
+                            // No glow in-table — a column of shadowed CTAs reads heavy
+                            style={{ padding: '7px 16px', fontSize: '0.75rem', boxShadow: 'none' }}
                             onClick={() => onRequest(item)}
                             disabled={isRequesting}
                           >
@@ -4015,11 +3956,11 @@ export function RcfPage() {
                   <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: isAdmin ? 760 : 640 }}>
                     <thead>
                       <tr>
-                        <th className="rcf-th" style={{ width: 30, padding: '11px 4px 11px 16px' }} aria-label="Expand" />
-                        <SortHeader label="Number"      field="did"        currentField={sortField} currentDir={sortDir} onSort={handleSort} />
-                        <SortHeader label="Label"       field="name"       currentField={sortField} currentDir={sortDir} onSort={handleSort} />
-                        <SortHeader label="Forwards To" field="forward_to" currentField={sortField} currentDir={sortDir} onSort={handleSort} />
-                        <SortHeader label="Status"      field="status"     currentField={sortField} currentDir={sortDir} onSort={handleSort} />
+                        <th className="rcf-th" style={{ width: 34, padding: '11px 4px 11px 18px' }} aria-label="Expand" />
+                        <SortHeader label="Number"      field="did"        width={190} currentField={sortField} currentDir={sortDir} onSort={handleSort} />
+                        <SortHeader label="Forwards To" field="forward_to" width={230} currentField={sortField} currentDir={sortDir} onSort={handleSort} />
+                        <SortHeader label="Label"       field="name"                   currentField={sortField} currentDir={sortDir} onSort={handleSort} />
+                        <SortHeader label="Status"      field="status"     width={120} currentField={sortField} currentDir={sortDir} onSort={handleSort} />
                         {isAdmin && (
                           <SortHeader label="Customer" field="customer" currentField={sortField} currentDir={sortDir} onSort={handleSort} />
                         )}
