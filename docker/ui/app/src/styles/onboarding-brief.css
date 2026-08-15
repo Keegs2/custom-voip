@@ -1,0 +1,583 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   onboarding-brief.css — print-first styles for the Solutions-Engineer
+   Onboarding Intake Brief (/admin/onboarding/print/:id).
+
+   This is a LETTER-SIZE PRINT DOCUMENT, not a console page: dark ink on
+   white, Archivo display / Public Sans body (with system fallbacks — print
+   must not depend on webfont delivery), daylight-azure section ticks used
+   sparingly, and `break-inside: avoid` on every block so nothing splits
+   across a page boundary. On screen the sheet renders as a centered
+   letter-width preview on a cool gray backdrop; @media print strips the
+   chrome so the browser's Save-as-PDF is the artifact.
+
+   Prefix `obb-` (OnBoarding Brief) — page-scoped, not part of the shared
+   daylight console system.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+@page {
+  size: letter;
+  margin: 0.55in 0.6in;
+}
+
+.obb-scope {
+  /* Print palette — ink-navy on paper white, one azure accent family. */
+  --obb-ink: #0e1726;
+  --obb-soft: #3d4c63;
+  --obb-dim: #5d6f8c;
+  --obb-faint: #8b99ad;
+  --obb-azure: #1d63dd;
+  --obb-line: #d7dfea;
+  --obb-line-soft: #e9eef5;
+  --obb-tint: #f4f7fb;
+  --obb-green: #15803d;
+  --obb-red: #b91c1c;
+  --obb-amber: #92400e;
+  --obb-amber-line: #c8956a;
+  --obb-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --obb-display: "Archivo", "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+
+  min-height: 100vh;
+  background: #e8ecf2;
+  padding: 28px 16px 56px;
+  font-family: "Public Sans", "IBM Plex Sans", -apple-system, "Segoe UI",
+    "Helvetica Neue", Arial, sans-serif;
+  color: var(--obb-ink);
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+/* The letter sheet — screen preview mirrors the @page geometry. */
+.obb-sheet {
+  width: 8.5in;
+  min-height: 11in;
+  margin: 0 auto;
+  padding: 0.55in 0.6in;
+  background: #ffffff;
+  box-shadow:
+    0 1px 2px rgba(14, 23, 38, 0.1),
+    0 18px 44px -18px rgba(14, 23, 38, 0.35);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+/* ─── Screen-only toolbar above the sheet ─── */
+.obb-toolbar {
+  width: 8.5in;
+  margin: 0 auto 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.obb-toolbar-note {
+  font-size: 0.76rem;
+  color: #56647a;
+}
+
+.obb-toolbar-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.obb-btn {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border-radius: 8px;
+  border: 1px solid var(--obb-azure);
+  background: var(--obb-azure);
+  color: #ffffff;
+  font-family: inherit;
+  font-size: 0.78rem;
+  font-weight: 700;
+  padding: 7px 14px;
+  cursor: pointer;
+}
+
+.obb-btn:hover { background: #1a58c4; }
+
+.obb-btn-quiet {
+  background: #ffffff;
+  color: var(--obb-azure);
+}
+
+.obb-btn-quiet:hover { background: #eef4fe; }
+
+/* ─── Masthead ─── */
+.obb-masthead {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  padding-bottom: 12px;
+  border-bottom: 2.5px solid var(--obb-ink);
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+.obb-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--obb-display);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--obb-soft);
+}
+
+.obb-brand::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  background: var(--obb-azure);
+  border-radius: 1.5px;
+}
+
+.obb-doc-title {
+  margin: 6px 0 0;
+  font-family: var(--obb-display);
+  font-size: 23px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  color: var(--obb-ink);
+}
+
+.obb-masthead-meta {
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.obb-req-id {
+  font-family: var(--obb-mono);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--obb-ink);
+}
+
+.obb-submitted {
+  margin-top: 3px;
+  font-size: 10.5px;
+  color: var(--obb-dim);
+}
+
+.obb-status {
+  display: inline-block;
+  margin-top: 6px;
+  font-family: var(--obb-display);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 3px 9px;
+  border-radius: 4px;
+  border: 1.25px solid currentColor;
+}
+
+.obb-status-pending   { color: var(--obb-azure); background: rgba(29, 99, 221, 0.06); }
+.obb-status-completed { color: var(--obb-green); background: rgba(21, 128, 61, 0.06); }
+.obb-status-rejected  { color: var(--obb-red);   background: rgba(185, 28, 28, 0.06); }
+
+/* ─── High-volume banner — must be unmissable ─── */
+.obb-hv-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 8px 14px;
+  background: rgba(180, 83, 9, 0.09);
+  border: 1px solid var(--obb-amber-line);
+  border-left: 5px solid #b45309;
+  border-radius: 4px;
+  color: var(--obb-amber);
+  font-family: var(--obb-display);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+.obb-hv-banner svg { flex-shrink: 0; }
+
+.obb-hv-banner-sub {
+  margin-left: auto;
+  font-family: var(--obb-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  color: #7c3f10;
+  white-space: nowrap;
+}
+
+/* ─── Section scaffolding ─── */
+.obb-sec {
+  margin-top: 15px;
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+.obb-sec-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 9px;
+  padding-bottom: 5px;
+  border-bottom: 1px solid var(--obb-line);
+  font-family: var(--obb-display);
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: var(--obb-ink);
+}
+
+.obb-sec-title::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  background: var(--obb-azure);
+  border-radius: 1px;
+  flex-shrink: 0;
+}
+
+.obb-sec-title-note {
+  margin-left: auto;
+  font-family: inherit;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  color: var(--obb-faint);
+}
+
+.obb-missing {
+  margin: 0;
+  font-size: 11.5px;
+  font-style: italic;
+  color: var(--obb-dim);
+}
+
+/* ─── Contact card — the "call this person" block ─── */
+.obb-contact {
+  display: grid;
+  grid-template-columns: 1.35fr 1fr 1fr;
+  gap: 4px 22px;
+  padding: 11px 14px;
+  border: 1px solid var(--obb-line);
+  border-left: 4px solid var(--obb-azure);
+  border-radius: 4px;
+  background: var(--obb-tint);
+}
+
+.obb-contact-name {
+  font-family: var(--obb-display);
+  font-size: 15.5px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: var(--obb-ink);
+}
+
+.obb-contact-company {
+  margin-top: 1px;
+  font-size: 11px;
+  color: var(--obb-soft);
+}
+
+.obb-contact-legal {
+  margin-top: 3px;
+  font-size: 9.5px;
+  color: var(--obb-dim);
+}
+
+.obb-contact-cell { align-self: center; }
+
+.obb-klabel {
+  display: block;
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--obb-dim);
+  margin-bottom: 2px;
+}
+
+.obb-mono {
+  font-family: var(--obb-mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--obb-ink);
+  overflow-wrap: anywhere;
+}
+
+.obb-contact a { color: var(--obb-ink); text-decoration: none; }
+
+/* ─── Facts grid (KYC digest) ─── */
+.obb-facts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 9px 26px;
+}
+
+.obb-fact-value {
+  font-size: 11.5px;
+  color: var(--obb-ink);
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+/* ─── Red-flag callout — unmissable ─── */
+.obb-redflag {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin-bottom: 10px;
+  padding: 8px 12px;
+  border: 1.5px solid var(--obb-red);
+  border-radius: 4px;
+  background: rgba(185, 28, 28, 0.05);
+  color: var(--obb-red);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.45;
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+.obb-redflag svg { flex-shrink: 0; margin-top: 1px; }
+
+.obb-redflag-tag {
+  font-family: var(--obb-display);
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-right: 4px;
+}
+
+/* ─── Product blocks ─── */
+.obb-products {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(3.15in, 1fr));
+  gap: 10px;
+}
+
+.obb-product {
+  border: 1px solid var(--obb-line);
+  border-radius: 4px;
+  padding: 8px 11px 6px;
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+.obb-product-name {
+  margin: 0 0 6px;
+  font-family: var(--obb-display);
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  color: var(--obb-azure);
+}
+
+.obb-pf {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 14px;
+  padding: 3px 0;
+  border-bottom: 1px solid var(--obb-line-soft);
+  font-size: 10.5px;
+}
+
+.obb-pf:last-child { border-bottom: none; }
+
+.obb-pf-label { color: var(--obb-dim); flex-shrink: 0; }
+
+.obb-pf-value {
+  font-weight: 600;
+  color: var(--obb-ink);
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.obb-pf-block { padding: 3px 0; border-bottom: 1px solid var(--obb-line-soft); font-size: 10.5px; }
+.obb-pf-block:last-child { border-bottom: none; }
+.obb-pf-block .obb-pf-label { display: block; margin-bottom: 2px; }
+.obb-pf-block p { margin: 0; color: var(--obb-ink); line-height: 1.4; }
+
+/* Mono IP list (trunk signaling / HV originating IPs) */
+.obb-iplist {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  margin-top: 2px;
+}
+
+.obb-ip {
+  font-family: var(--obb-mono);
+  font-size: 9.5px;
+  font-weight: 600;
+  color: var(--obb-ink);
+  background: var(--obb-tint);
+  border: 1px solid var(--obb-line);
+  border-radius: 3px;
+  padding: 1.5px 6px;
+  white-space: nowrap;
+}
+
+/* ─── Capacity & compliance table ─── */
+.obb-captable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+
+.obb-captable th {
+  text-align: left;
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--obb-dim);
+  padding: 0 10px 4px 0;
+  border-bottom: 1px solid var(--obb-line);
+}
+
+.obb-captable td {
+  padding: 5px 10px 5px 0;
+  border-bottom: 1px solid var(--obb-line-soft);
+  color: var(--obb-ink);
+  vertical-align: baseline;
+}
+
+.obb-captable td.obb-cap-num {
+  font-family: var(--obb-mono);
+  font-weight: 700;
+  font-size: 12px;
+}
+
+.obb-cap-threshold { color: var(--obb-dim); }
+
+.obb-verdict {
+  display: inline-block;
+  font-family: var(--obb-display);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: 3px;
+  border: 1.25px solid currentColor;
+}
+
+.obb-verdict-over  { color: var(--obb-red);   background: rgba(185, 28, 28, 0.05); }
+.obb-verdict-under { color: var(--obb-green); background: rgba(21, 128, 61, 0.05); }
+
+/* High-volume enhanced-KYC record sub-block */
+.obb-hvrec {
+  margin-top: 10px;
+  padding: 8px 12px;
+  border: 1px solid var(--obb-amber-line);
+  border-radius: 4px;
+  background: rgba(180, 83, 9, 0.05);
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+.obb-hvrec-title {
+  margin: 0 0 6px;
+  font-family: var(--obb-display);
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--obb-amber);
+}
+
+.obb-hvrec .obb-facts { grid-template-columns: 1fr 1fr; }
+
+/* ─── SE action checklist ─── */
+.obb-check {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.obb-check li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 5px 0;
+  border-bottom: 1px dashed var(--obb-line-soft);
+  font-size: 11.5px;
+  color: var(--obb-ink);
+  line-height: 1.45;
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+.obb-check li:last-child { border-bottom: none; }
+
+.obb-checkbox {
+  flex-shrink: 0;
+  width: 11px;
+  height: 11px;
+  margin-top: 2.5px;
+  border: 1.5px solid var(--obb-dim);
+  border-radius: 2px;
+}
+
+.obb-check li.obb-check-critical { color: var(--obb-red); font-weight: 700; }
+.obb-check li.obb-check-critical .obb-checkbox { border-color: var(--obb-red); }
+
+/* ─── Footer ─── */
+.obb-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 18px;
+  padding-top: 8px;
+  border-top: 1px solid var(--obb-line);
+  font-size: 8.5px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--obb-faint);
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+/* ─── Loading / error (screen only) ─── */
+.obb-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 40vh;
+  font-size: 0.9rem;
+  color: #56647a;
+}
+
+/* ─── Print: strip the screen chrome, let @page own the geometry ─── */
+@media print {
+  html, body { background: #ffffff !important; }
+
+  .obb-scope {
+    min-height: 0;
+    background: #ffffff;
+    padding: 0;
+  }
+
+  .obb-sheet {
+    width: auto;
+    min-height: 0;
+    margin: 0;
+    padding: 0;
+    box-shadow: none;
+  }
+
+  .obb-noprint { display: none !important; }
+}

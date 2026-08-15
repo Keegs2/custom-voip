@@ -16,7 +16,7 @@
  */
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, ChevronRight } from 'lucide-react';
+import { AlertTriangle, ChevronRight, Download, Eye } from 'lucide-react';
 import {
   listOnboardingRequests,
   completeOnboarding,
@@ -618,9 +618,28 @@ interface OnboardingRowProps {
 }
 
 function OnboardingRow({ request, isExpanded, onToggle }: OnboardingRowProps) {
+  // ALL hooks unconditionally at the top — React rules-of-hooks
+  const [downloading, setDownloading] = useState(false);
+  const { toastErr } = useToast();
+
   const isPending   = request.status === 'pending';
   const isCompleted = request.status === 'completed';
   const isRejected  = request.status === 'rejected';
+
+  /** Generates the SE brief client-side and downloads a real .pdf file. */
+  const handleDownloadBrief = async () => {
+    if (downloading) return;
+    setDownloading(true);
+    try {
+      // Dynamic import keeps @react-pdf/renderer out of the main bundle.
+      const { downloadBriefPdf } = await import('./onboardingBriefPdf');
+      await downloadBriefPdf(request);
+    } catch {
+      toastErr('PDF generation failed — try again.');
+    } finally {
+      setDownloading(false);
+    }
+  };
 
   return (
     <>
@@ -719,6 +738,65 @@ function OnboardingRow({ request, isExpanded, onToggle }: OnboardingRowProps) {
               <div>
                 <div className="dlx-xpanel">
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+                    {/* Detail header row — intake # + SE brief export */}
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: 12,
+                        flexWrap: 'wrap',
+                      }}
+                    >
+                      <span
+                        style={{
+                          fontFamily: MONO,
+                          fontSize: '0.74rem',
+                          fontWeight: 600,
+                          color: 'var(--rcf-ink-dim)',
+                        }}
+                      >
+                        Intake #{request.id}
+                      </span>
+                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                        <button
+                          type="button"
+                          className="dl-btn dl-btn-ghost dlx-btn-sm"
+                          title="On-screen preview of the SE brief"
+                          style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            window.open(
+                              `/admin/onboarding/print/${request.id}`,
+                              '_blank',
+                              'noopener',
+                            );
+                          }}
+                        >
+                          <Eye size={13} strokeWidth={2.25} />
+                          Preview
+                        </button>
+                        <button
+                          type="button"
+                          className="dl-btn dl-btn-primary dlx-btn-sm"
+                          title="Download the SE intake brief as a PDF"
+                          disabled={downloading}
+                          style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void handleDownloadBrief();
+                          }}
+                        >
+                          {downloading ? (
+                            <Spinner size="xs" />
+                          ) : (
+                            <Download size={13} strokeWidth={2.25} />
+                          )}
+                          {downloading ? 'Generating…' : 'Download PDF'}
+                        </button>
+                      </div>
+                    </div>
+
                     {/* Contact Info */}
                     <div>
                       <h3 className="dl-section-title">Contact Information</h3>
