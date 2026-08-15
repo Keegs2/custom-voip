@@ -6,7 +6,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
 } from 'react';
-import { ArrowRight, Check, CheckCircle, X } from 'lucide-react';
+import { ArrowRight, Check, CheckCircle, Lock, X } from 'lucide-react';
 import { submitOnboardingRequest } from '../../api/onboarding';
 import { ApiError } from '../../api/client';
 import { LandingSelect } from './LandingSelect';
@@ -30,18 +30,32 @@ import {
 
    Wide, single-form replacement for the sidebar AccessRequestForm
    wizard, extended with FCC Know-Your-Customer capture (FCC 26-27
-   FNPRM): a "Business verification" group (legal name, physical
-   address, government ID, alternate phone) and a self-declared
-   "High-volume calling" group (intended use + originating IPs).
+   FNPRM, form_version fcc-26-27-fnprm-v2): a "Business verification"
+   group (legal name, physical address, government ID, alternate
+   phone), REQUIRED capacity declarations (peak CPS + peak concurrent
+   call paths, under "Products & requirements"), and a "High-volume
+   calling" group (intended use + originating IPs) — voluntary below
+   Granite's thresholds, forced on and locked above them: more than
+   1 call/sec OR more than 1,000 concurrent call paths (the backend
+   422s over-threshold submissions without the HV block; monthly
+   volume is informational only).
    Layout: a shallow header row (identity copy + TED card), then a
-   full-width panel with two parallel form tracks — regular intake
-   (Contact + Products & requirements) left, KYC right — that stack
+   full-width panel with two parallel form tracks — WHO THEY ARE left
+   (Contact + Business verification/KYC), WHAT THEY NEED right (product
+   picker + per-product setup blocks, then Capacity & timeline, then
+   the input-driven High-volume declaration) — stacking identity-first
    below ~1000px. The products group (products-v1) is a multi-select
    card picker (RCF / Trunking / API / Voicemail); each selection
-   reveals a compact titled sub-block of setup fields. Company name
-   is no longer asked directly — it's populated from the KYC legal
-   business name. Client-side validation mirrors the backend so most
-   422s never happen. Styling lives in index.css ("LANDING PAGE").
+   reveals a compact titled sub-block of setup fields. ONE unified
+   IP-chip field (visible when trunking is selected OR high-volume is
+   on; label/helper adapt) feeds BOTH payload slots on submit:
+   products.trunk.signaling_ips (cap 10 whenever trunk is selected)
+   and kyc.high_volume.originating_ips (cap 20 otherwise). Company
+   name is no longer asked directly — it's populated from the KYC
+   legal business name. Client-side validation mirrors the backend so
+   most 422s never happen. Success renders a composed receipt —
+   request #, product chips, high-volume status, TED next steps.
+   Styling lives in index.css ("LANDING PAGE").
    ───────────────────────────────────────────────────────────── */
 
 /* ─── Form model (top-level mirrors AccessRequestForm) ─────── */
@@ -57,8 +71,8 @@ interface IntakeForm {
   porting: string;
   current_carrier: string;
   forwarding_setup: string;
-  /* SIP Trunking */
-  trunk_signaling_ips: string[];
+  /* SIP Trunking — signaling IPs come from the unified originating_ips
+     field below (one input feeds both payload slots) */
   trunk_call_paths: string;
   trunk_pbx_vendor: string;
   trunk_dids_needed: string;
@@ -70,7 +84,10 @@ interface IntakeForm {
   /* Visual Voicemail */
   vm_mailbox_count: string;
   vm_attach_to: string; // human label
-  /* Global sizing */
+  /* Global sizing — capacity declarations are REQUIRED (KYC v2) and drive
+     Granite's high-volume threshold; monthly volume is informational. */
+  declared_peak_cps: string;
+  declared_max_concurrent_calls: string;
   monthly_volume: string;
   timeline: string;
   /* KYC — business verification (labels for selects, raw text otherwise) */
@@ -90,6 +107,10 @@ interface IntakeForm {
   is_high_volume: boolean;
   intended_use: string; // human label
   intended_use_description: string;
+  /* UNIFIED IP capture — one IpChipInput that fills BOTH payload slots:
+     products.trunk.signaling_ips (when trunk is selected, cap 10) and
+     kyc.high_volume.originating_ips (when high-volume is on, cap 20).
+     Server 422s from either loc land on this single field. */
   originating_ips: string[];
   expected_daily_calls: string;
 }
@@ -105,7 +126,6 @@ const EMPTY_FORM: IntakeForm = {
   porting: '',
   current_carrier: '',
   forwarding_setup: '',
-  trunk_signaling_ips: [],
   trunk_call_paths: '',
   trunk_pbx_vendor: '',
   trunk_dids_needed: '',
@@ -115,6 +135,8 @@ const EMPTY_FORM: IntakeForm = {
   api_needs_numbers: false,
   vm_mailbox_count: '',
   vm_attach_to: '',
+  declared_peak_cps: '',
+  declared_max_concurrent_calls: '',
   monthly_volume: '',
   timeline: '',
   legal_business_name: '',
@@ -157,8 +179,26 @@ const VOLUME_OPTIONS = [
   '50,000+',
 ];
 
-/** Monthly-volume choice that auto-suggests the high-volume declaration. */
-const HIGH_VOLUME_TRIGGER = '50,000+';
+/* Granite's defined high-volume thresholds (fcc-26-27-fnprm-v2). The FCC's
+   KYC FNPRM (FCC 26-27) requires enhanced KYC for high-volume calling but
+   leaves the numeric threshold to each provider — Granite's: MORE than
+   1 call per second, OR MORE than 1,000 concurrent call paths (strictly
+   greater — exactly 1 CPS / exactly 1,000 paths is not high-volume).
+   Crossing EITHER makes the declaration REQUIRED: the toggle locks on and
+   the backend 422s over-threshold submissions without the high_volume
+   block. Monthly volume no longer triggers anything — informational only. */
+const HV_CPS_THRESHOLD = 1;
+const HV_CONCURRENT_THRESHOLD = 1000;
+
+/** Live lock trigger — true when the declared capacity exceeds Granite's
+    high-volume threshold. Mirrors the backend's strict > comparisons; blank
+    or non-numeric input (Number('') → 0, NaN fails >) never locks. */
+function capacityOverThreshold(cpsRaw: string, concurrentRaw: string): boolean {
+  return (
+    Number(cpsRaw) > HV_CPS_THRESHOLD ||
+    Number(concurrentRaw) > HV_CONCURRENT_THRESHOLD
+  );
+}
 
 const TIMELINE_OPTIONS = [
   'ASAP',
@@ -173,7 +213,9 @@ const TIMELINE_OPTIONS = [
 
 const PRODUCT_CARDS: Record<ProductKey, { name: string; desc: string }> = {
   rcf: {
-    name: 'RCF — Remote Call Forwarding',
+    // One-line title like its row-mates — the sub-block title (and chips
+    // elsewhere) carry the RCF shorthand.
+    name: 'Remote Call Forwarding',
     desc: 'Numbers that forward anywhere on the PSTN',
   },
   trunk: {
@@ -194,7 +236,10 @@ const PRODUCT_CARDS: Record<ProductKey, { name: string; desc: string }> = {
 const PRODUCT_FIELDS: Record<ProductKey, Array<keyof IntakeForm>> = {
   rcf: ['did_count', 'porting', 'current_carrier', 'forwarding_setup'],
   trunk: [
-    'trunk_signaling_ips',
+    // originating_ips is the unified IP field — trunk's signaling-IP
+    // requirement is one of its two consumers, so toggling trunk clears
+    // any stale error on it (it re-validates on submit either way).
+    'originating_ips',
     'trunk_call_paths',
     'trunk_pbx_vendor',
     'trunk_dids_needed',
@@ -329,9 +374,6 @@ function validate(data: IntakeForm): FieldErrors {
   }
 
   if (data.products.includes('trunk')) {
-    if (data.trunk_signaling_ips.length === 0) {
-      errs.trunk_signaling_ips = 'Add at least one IP address or CIDR block';
-    }
     if (!data.trunk_call_paths.trim()) {
       errs.trunk_call_paths = 'Required';
     } else {
@@ -367,8 +409,40 @@ function validate(data: IntakeForm): FieldErrors {
     }
   }
 
+  /* Capacity declarations — REQUIRED (KYC v2), mirror the backend ranges. */
+  if (!data.declared_peak_cps.trim()) {
+    errs.declared_peak_cps = 'Required';
+  } else {
+    const rangeErr = intInRange(data.declared_peak_cps.trim(), 1, 1000);
+    if (rangeErr) errs.declared_peak_cps = rangeErr;
+  }
+  if (!data.declared_max_concurrent_calls.trim()) {
+    errs.declared_max_concurrent_calls = 'Required';
+  } else {
+    const rangeErr = intInRange(
+      data.declared_max_concurrent_calls.trim(),
+      1,
+      100_000,
+    );
+    if (rangeErr) errs.declared_max_concurrent_calls = rangeErr;
+  }
+
   if (!data.monthly_volume) errs.monthly_volume = 'Please select an option';
   if (!data.timeline) errs.timeline = 'Please select an option';
+
+  /* Granite's FCC-KYC high-volume threshold — the UI locks the toggle on
+     above 1 CPS / 1,000 call paths, so this only fires if that invariant is
+     ever broken (belt and braces against a backend 422). */
+  if (
+    capacityOverThreshold(
+      data.declared_peak_cps,
+      data.declared_max_concurrent_calls,
+    ) &&
+    !data.is_high_volume
+  ) {
+    errs.declared_peak_cps =
+      'The high-volume declaration is required above 1 call/sec or 1,000 concurrent call paths';
+  }
 
   /* Business verification */
   if (!data.legal_business_name.trim()) errs.legal_business_name = 'Required';
@@ -403,15 +477,28 @@ function validate(data: IntakeForm): FieldErrors {
     errs.alternate_phone = 'Must differ from the primary phone';
   }
 
+  /* Unified IP field — required whenever either consumer needs it:
+     trunk selected (IP-authenticated signaling) or high-volume on (FCC
+     originating IPs). Trunk's tighter backend cap (10 vs 20) applies
+     whenever trunk is selected. */
+  if (
+    (data.products.includes('trunk') || data.is_high_volume) &&
+    data.originating_ips.length === 0
+  ) {
+    errs.originating_ips = 'Add at least one IP address or CIDR block';
+  } else if (
+    data.products.includes('trunk') &&
+    data.originating_ips.length > MAX_TRUNK_IPS
+  ) {
+    errs.originating_ips = `Maximum ${MAX_TRUNK_IPS} addresses when SIP Trunking is selected`;
+  }
+
   /* High-volume declaration */
   if (data.is_high_volume) {
     const use = intendedUseFromLabel(data.intended_use);
     if (!use) errs.intended_use = 'Please select an intended use';
     if (use === 'other' && !data.intended_use_description.trim()) {
       errs.intended_use_description = 'Required when intended use is Other';
-    }
-    if (data.originating_ips.length === 0) {
-      errs.originating_ips = 'Add at least one IP address or CIDR block';
     }
     if (data.expected_daily_calls.trim()) {
       const n = Number(data.expected_daily_calls);
@@ -454,7 +541,9 @@ const SERVER_LOC_TO_FIELD: Record<string, keyof IntakeForm> = {
   // the block level — that's its only cross-field rule.
   'products.rcf': 'current_carrier',
   'products.rcf.forwarding_setup': 'forwarding_setup',
-  'products.trunk.signaling_ips': 'trunk_signaling_ips',
+  // Unified IP field — BOTH backend locs (trunk signaling IPs and KYC
+  // high-volume originating IPs) map onto the single chip input.
+  'products.trunk.signaling_ips': 'originating_ips',
   'products.trunk.concurrent_call_paths': 'trunk_call_paths',
   'products.trunk.pbx_vendor': 'trunk_pbx_vendor',
   'products.trunk.dids_needed': 'trunk_dids_needed',
@@ -463,6 +552,12 @@ const SERVER_LOC_TO_FIELD: Record<string, keyof IntakeForm> = {
   'products.api.webhook_url': 'api_webhook_url',
   'products.voicemail.mailbox_count': 'vm_mailbox_count',
   'products.voicemail.attach_to': 'vm_attach_to',
+  // KycPayload model_validator errors (high-volume threshold, high_volume
+  // block presence) report at loc body->kyc — land them on the capacity row
+  // that drives the threshold, next to the locked toggle's cause.
+  kyc: 'declared_peak_cps',
+  'kyc.declared_peak_cps': 'declared_peak_cps',
+  'kyc.declared_max_concurrent_calls': 'declared_max_concurrent_calls',
   'kyc.standard.legal_business_name': 'legal_business_name',
   'kyc.standard.address_line1': 'address_line1',
   'kyc.standard.address_line2': 'address_line2',
@@ -481,12 +576,18 @@ const SERVER_LOC_TO_FIELD: Record<string, keyof IntakeForm> = {
 };
 
 const FUZZY_FIELD_PATTERNS: Array<[RegExp, keyof IntakeForm]> = [
+  // Threshold model_validator (is_high_volume required above 1 CPS / 1,000
+  // concurrent call paths) reports at body->kyc — land it on the capacity
+  // pair that drives the threshold.
+  [/is_high_volume|high-volume threshold/i, 'declared_peak_cps'],
+  [/declared_peak_cps/i, 'declared_peak_cps'],
+  [/declared_max_concurrent_calls/i, 'declared_max_concurrent_calls'],
   [/alternate_phone/i, 'alternate_phone'],
   [/state_of_registration/i, 'state_of_registration'],
   [/gov_id_number|EIN/i, 'gov_id_number'],
   [/intended_use_description/i, 'intended_use_description'],
-  [/signaling_ips/i, 'trunk_signaling_ips'],
-  [/originating_ips|CIDR|IP address/i, 'originating_ips'],
+  // Both IP locs fuzz to the one unified chip field.
+  [/signaling_ips|originating_ips|CIDR|IP address/i, 'originating_ips'],
   [/current_carrier/i, 'current_carrier'],
   [/webhook_url/i, 'api_webhook_url'],
   [/products\.\w+ (is required|must be null)|selected/i, 'products'],
@@ -525,7 +626,12 @@ function mapServerErrors(raw: unknown): { fields: FieldErrors; leftover: string[
   return { fields, leftover };
 }
 
-/* ─── Field wrapper ──────────────────────────────────────── */
+/* ─── Field wrapper ──────────────────────────────────────────
+   Two fixed slots — label, then a .landing-field-body holding the
+   control + error/hint. Inside .landing-intake-fields the field
+   subgrids these two slots onto shared parent rows, so paired
+   fields keep their controls on the same pixel even if one label
+   wraps (see "Pixel-perfect paired rows" in index.css). */
 
 function Field({
   id,
@@ -547,12 +653,14 @@ function Field({
       <label className="landing-label" id={`${id}-label`} htmlFor={id}>
         {label}
       </label>
-      {children}
-      {error ? (
-        <span className="landing-field-err">{error}</span>
-      ) : (
-        hint && <span className="landing-field-hint">{hint}</span>
-      )}
+      <div className="landing-field-body">
+        {children}
+        {error ? (
+          <span className="landing-field-err">{error}</span>
+        ) : (
+          hint && <span className="landing-field-hint">{hint}</span>
+        )}
+      </div>
     </div>
   );
 }
@@ -684,26 +792,58 @@ function IpChipInput({
 
 /* ─── Section ────────────────────────────────────────────── */
 
+/** What the success receipt shows — captured from the 200 response (id)
+    plus the submitted form (products, high-volume status). */
+interface SubmissionReceipt {
+  id: number;
+  products: ProductKey[];
+  highVolume: boolean;
+}
+
 export function RequestAccessSection() {
   // All hooks unconditionally at the top — React #310 prevention.
   const [form, setForm] = useState<IntakeForm>(EMPTY_FORM);
   const [errors, setErrors] = useState<FieldErrors>({});
   const [submitting, setSubmitting] = useState(false);
-  const [submitted, setSubmitted] = useState(false);
+  // Non-null once the POST succeeds — drives the composed success receipt.
+  const [receipt, setReceipt] = useState<SubmissionReceipt | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
-  // True once the user explicitly flips the high-volume switch; from then on
-  // the monthly-volume auto-suggestion never overrides their choice.
+  // True once the user explicitly flips the high-volume switch; below the
+  // threshold their choice is theirs — capacity changes never override it.
   const hvTouched = useRef(false);
+  // The user's own switch position from before the capacity lock (>1 CPS or
+  // >1,000 concurrent call paths) forced it on, restored when the declared
+  // capacity drops back to/below Granite's thresholds.
+  const hvBeforeLock = useRef(false);
 
   const handleChange = useCallback(
     <K extends keyof IntakeForm>(field: K, value: IntakeForm[K]) => {
       setForm((prev) => {
         const next = { ...prev, [field]: value };
-        // Auto-suggest the high-volume declaration from monthly volume —
-        // pre-checked, never locked; unchecking with 50,000+ stays allowed
-        // (the FCC has not fixed the threshold).
-        if (field === 'monthly_volume' && !hvTouched.current) {
-          next.is_high_volume = value === HIGH_VOLUME_TRIGGER;
+        // Granite's FCC-KYC thresholds (FCC 26-27 leaves the numbers to the
+        // provider): above 1 CPS or 1,000 concurrent call paths the
+        // declaration is required — force the switch on and lock it, live as
+        // the capacity numbers are typed. Dropping back to/below both
+        // thresholds restores the user's own choice (or off if they never
+        // touched the switch).
+        if (
+          field === 'declared_peak_cps' ||
+          field === 'declared_max_concurrent_calls'
+        ) {
+          const wasLocked = capacityOverThreshold(
+            prev.declared_peak_cps,
+            prev.declared_max_concurrent_calls,
+          );
+          const nowLocked = capacityOverThreshold(
+            next.declared_peak_cps,
+            next.declared_max_concurrent_calls,
+          );
+          if (nowLocked) {
+            if (!wasLocked) hvBeforeLock.current = prev.is_high_volume;
+            next.is_high_volume = true;
+          } else if (wasLocked) {
+            next.is_high_volume = hvTouched.current ? hvBeforeLock.current : false;
+          }
         }
         return next;
       });
@@ -773,6 +913,10 @@ export function RequestAccessSection() {
 
       const kyc: KycPayload = {
         is_high_volume: form.is_high_volume,
+        // Capacity declarations (v2) — validate() guarantees both parse as
+        // in-range integers before this runs.
+        declared_peak_cps: Number(form.declared_peak_cps),
+        declared_max_concurrent_calls: Number(form.declared_max_concurrent_calls),
         standard: {
           legal_business_name: form.legal_business_name.trim(),
           address_line1: form.address_line1.trim(),
@@ -821,7 +965,9 @@ export function RequestAccessSection() {
           : null,
         trunk: selectedProducts.includes('trunk')
           ? {
-              signaling_ips: form.trunk_signaling_ips,
+              // Unified IP field — the same entries also fill
+              // kyc.high_volume.originating_ips when high-volume is on.
+              signaling_ips: form.originating_ips,
               concurrent_call_paths: Number(form.trunk_call_paths),
               pbx_vendor: form.trunk_pbx_vendor.trim() || undefined,
               dids_needed: form.trunk_dids_needed.trim() || undefined,
@@ -846,7 +992,7 @@ export function RequestAccessSection() {
       };
 
       try {
-        await submitOnboardingRequest({
+        const created = await submitOnboardingRequest({
           // The FCC KYC legal business name IS the company name.
           company_name: form.legal_business_name.trim(),
           contact_name: form.contact_name,
@@ -866,7 +1012,11 @@ export function RequestAccessSection() {
           kyc,
           products,
         });
-        setSubmitted(true);
+        setReceipt({
+          id: created.id,
+          products: selectedProducts,
+          highVolume: form.is_high_volume,
+        });
       } catch (err) {
         // Map precise backend 422 field messages onto the form; anything
         // that can't be attributed to a field falls back to the banner.
@@ -899,9 +1049,10 @@ export function RequestAccessSection() {
   const handleReset = useCallback(() => {
     setForm(EMPTY_FORM);
     setErrors({});
-    setSubmitted(false);
+    setReceipt(null);
     setSubmitError(null);
     hvTouched.current = false;
+    hvBeforeLock.current = false;
   }, []);
 
   const showCarrier = portingRequiresCarrier(form.porting);
@@ -909,10 +1060,30 @@ export function RequestAccessSection() {
   const govIdHint = govType ? GOV_ID_HINTS[govType] : null;
   const intendedUse = intendedUseFromLabel(form.intended_use);
   const descriptionRequired = intendedUse === 'other';
-  const hvAutoSuggested =
-    form.is_high_volume &&
-    !hvTouched.current &&
-    form.monthly_volume === HIGH_VOLUME_TRIGGER;
+  // Above Granite's capacity thresholds (>1 CPS or >1,000 concurrent call
+  // paths) the declaration is mandatory — the switch is forced on and locked
+  // (handleChange keeps is_high_volume true).
+  const hvLocked = capacityOverThreshold(
+    form.declared_peak_cps,
+    form.declared_max_concurrent_calls,
+  );
+
+  /* Unified IP field — ONE IpChipInput serving two payload consumers.
+     Visible when either needs it; the tighter trunk cap (10) governs
+     whenever trunk is selected; label + helper adapt to who's asking. */
+  const trunkSelected = form.products.includes('trunk');
+  const ipFieldVisible = trunkSelected || form.is_high_volume;
+  const ipFieldMax = trunkSelected ? MAX_TRUNK_IPS : MAX_IPS;
+  const ipFieldLabel = trunkSelected
+    ? form.is_high_volume
+      ? 'Signaling & originating IP addresses'
+      : 'Signaling IP addresses'
+    : 'Originating IP addresses';
+  const ipFieldHint = trunkSelected
+    ? form.is_high_volume
+      ? 'Public signaling IPs of your PBX/SBC — used for IP authentication; the same addresses satisfy the FCC originating-IP requirement for high-volume callers. Enter or comma to add, up to 10.'
+      : 'Public signaling IPs of your PBX/SBC — used for IP authentication. Enter or comma to add, up to 10.'
+    : 'IPv4, IPv6, or CIDR blocks your calls originate from — the FCC originating-IP requirement for high-volume callers. Enter or comma to add, up to 20.';
 
   return (
     <section
@@ -958,16 +1129,43 @@ export function RequestAccessSection() {
 
         {/* ── The intake form — intake left, KYC right ── */}
         <div className="landing-intake-panel">
-          {submitted ? (
+          {receipt ? (
+            /* ── Composed receipt — reference #, what was requested,
+                high-volume status, TED next steps. ── */
             <div className="landing-intake-success" role="status">
               <span className="landing-intake-success-ring">
                 <CheckCircle size={26} strokeWidth={2} />
               </span>
+              <span className="landing-intake-success-ref">
+                Request #{receipt.id}
+              </span>
               <h3 className="landing-intake-success-title">TED has your request.</h3>
+              <div
+                className="landing-intake-success-chips"
+                aria-label="Requested products"
+              >
+                {receipt.products.map((key) => (
+                  <span key={key} className="landing-success-chip">
+                    {PRODUCT_CARDS[key].name}
+                  </span>
+                ))}
+                <span
+                  className={
+                    receipt.highVolume
+                      ? 'landing-success-chip landing-success-chip-hv'
+                      : 'landing-success-chip landing-success-chip-dim'
+                  }
+                >
+                  {receipt.highVolume
+                    ? 'High-volume declared'
+                    : 'Standard volume'}
+                </span>
+              </div>
               <p className="landing-intake-success-note">
                 Granite&rsquo;s Onboarding AI is processing your intake and will
                 work directly with Granite Telephony Engineering to activate
-                your service. Expect a follow-up within one business day.
+                your service. Expect a follow-up within one business day —
+                reference request #{receipt.id} in any correspondence.
               </p>
               <button
                 type="button"
@@ -980,7 +1178,7 @@ export function RequestAccessSection() {
           ) : (
             <form onSubmit={handleSubmit} noValidate>
               <div className="landing-intake-columns">
-                {/* ── Left track — regular intake ── */}
+                {/* ── Left track — who they are ── */}
                 <div className="landing-intake-fields landing-intake-col-a">
                   <span className="landing-intake-sub landing-field-full">
                     Contact
@@ -1032,334 +1230,6 @@ export function RequestAccessSection() {
                     />
                   </Field>
 
-                  <span className="landing-intake-sub landing-field-full">
-                    Products &amp; requirements
-                  </span>
-
-                  {/* ── Product picker — multi-select toggle cards ── */}
-                  <div className="landing-field landing-field-full">
-                    <span className="landing-label" id="ra-products-label">
-                      Which products are you interested in?
-                    </span>
-                    <div
-                      className={
-                        errors.products
-                          ? 'landing-product-grid landing-product-grid-invalid'
-                          : 'landing-product-grid'
-                      }
-                      role="group"
-                      aria-labelledby="ra-products-label"
-                    >
-                      {PRODUCT_ORDER.map((key) => (
-                        <button
-                          key={key}
-                          type="button"
-                          className="landing-product-card"
-                          aria-pressed={form.products.includes(key)}
-                          onClick={() => toggleProduct(key)}
-                          disabled={submitting}
-                        >
-                          <span className="landing-product-check" aria-hidden="true">
-                            <Check size={12} strokeWidth={3.5} />
-                          </span>
-                          <span className="landing-product-name">
-                            {PRODUCT_CARDS[key].name}
-                          </span>
-                          <span className="landing-product-desc">
-                            {PRODUCT_CARDS[key].desc}
-                          </span>
-                        </button>
-                      ))}
-                    </div>
-                    {errors.products && (
-                      <span className="landing-field-err">{errors.products}</span>
-                    )}
-                  </div>
-
-                  {/* ── RCF setup ── */}
-                  {form.products.includes('rcf') && (
-                    <div className="landing-field-full landing-product-block landing-hv-reveal">
-                      <span className="landing-product-block-title">
-                        RCF — Remote Call Forwarding
-                      </span>
-                      <div className="landing-intake-fields">
-                        <Field id="ra-didcount" label="How many phone numbers?" error={errors.did_count}>
-                          <LandingSelect
-                            id="ra-didcount"
-                            labelId="ra-didcount-label"
-                            value={form.did_count}
-                            options={DID_COUNT_OPTIONS}
-                            placeholder="Select a range…"
-                            onChange={(v) => handleChange('did_count', v)}
-                            disabled={submitting}
-                            invalid={!!errors.did_count}
-                          />
-                        </Field>
-
-                        <Field id="ra-porting" label="Porting existing numbers?" error={errors.porting}>
-                          <LandingSelect
-                            id="ra-porting"
-                            labelId="ra-porting-label"
-                            value={form.porting}
-                            options={PORTING_OPTIONS}
-                            placeholder="Select an option…"
-                            onChange={(v) => handleChange('porting', v)}
-                            disabled={submitting}
-                            invalid={!!errors.porting}
-                          />
-                        </Field>
-
-                        {/* Conditional: only when porting is Yes or Both */}
-                        {showCarrier && (
-                          <Field
-                            id="ra-carrier"
-                            label="Current carrier"
-                            error={errors.current_carrier}
-                            full
-                          >
-                            <input
-                              id="ra-carrier"
-                              className={inputClass(!!errors.current_carrier)}
-                              type="text"
-                              placeholder="e.g. AT&T, Lumen, Verizon"
-                              value={form.current_carrier}
-                              onChange={(e) => handleChange('current_carrier', e.target.value)}
-                              disabled={submitting}
-                            />
-                          </Field>
-                        )}
-
-                        <Field id="ra-forwarding" label="Forwarding setup" error={errors.forwarding_setup}>
-                          <LandingSelect
-                            id="ra-forwarding"
-                            labelId="ra-forwarding-label"
-                            value={form.forwarding_setup}
-                            options={FORWARDING_OPTIONS}
-                            placeholder="Select an option…"
-                            onChange={(v) => handleChange('forwarding_setup', v)}
-                            disabled={submitting}
-                            invalid={!!errors.forwarding_setup}
-                          />
-                        </Field>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* ── SIP Trunking setup ── */}
-                  {form.products.includes('trunk') && (
-                    <div className="landing-field-full landing-product-block landing-hv-reveal">
-                      <span className="landing-product-block-title">
-                        SIP Trunking
-                      </span>
-                      <div className="landing-intake-fields">
-                        <Field
-                          id="ra-trunkips"
-                          label="Signaling IP addresses"
-                          error={errors.trunk_signaling_ips}
-                          hint="Public IPs of your PBX/SBC — Granite trunks authenticate by IP, no registration"
-                          full
-                        >
-                          <IpChipInput
-                            id="ra-trunkips"
-                            ips={form.trunk_signaling_ips}
-                            maxIps={MAX_TRUNK_IPS}
-                            disabled={submitting}
-                            invalid={!!errors.trunk_signaling_ips}
-                            onChange={(ips) => handleChange('trunk_signaling_ips', ips)}
-                          />
-                        </Field>
-
-                        <Field id="ra-callpaths" label="Concurrent call paths" error={errors.trunk_call_paths}>
-                          <input
-                            id="ra-callpaths"
-                            className={inputClass(!!errors.trunk_call_paths)}
-                            type="number"
-                            min={1}
-                            max={1000}
-                            step={1}
-                            placeholder="20"
-                            value={form.trunk_call_paths}
-                            onChange={(e) => handleChange('trunk_call_paths', e.target.value)}
-                            disabled={submitting}
-                          />
-                        </Field>
-
-                        <Field id="ra-pbx" label="PBX vendor (optional)" error={errors.trunk_pbx_vendor}>
-                          <input
-                            id="ra-pbx"
-                            className={inputClass(!!errors.trunk_pbx_vendor)}
-                            type="text"
-                            maxLength={100}
-                            placeholder="e.g. Asterisk, 3CX, Avaya"
-                            value={form.trunk_pbx_vendor}
-                            onChange={(e) => handleChange('trunk_pbx_vendor', e.target.value)}
-                            disabled={submitting}
-                          />
-                        </Field>
-
-                        <Field
-                          id="ra-trunkdids"
-                          label="DIDs needed (optional)"
-                          error={errors.trunk_dids_needed}
-                          full
-                        >
-                          <input
-                            id="ra-trunkdids"
-                            className={inputClass(!!errors.trunk_dids_needed)}
-                            type="text"
-                            maxLength={200}
-                            placeholder="e.g. 25 new numbers, Boston metro"
-                            value={form.trunk_dids_needed}
-                            onChange={(e) => handleChange('trunk_dids_needed', e.target.value)}
-                            disabled={submitting}
-                          />
-                        </Field>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* ── API Calling setup ── */}
-                  {form.products.includes('api') && (
-                    <div className="landing-field-full landing-product-block landing-hv-reveal">
-                      <span className="landing-product-block-title">
-                        API Calling
-                      </span>
-                      <div className="landing-intake-fields">
-                        <Field id="ra-usecase" label="Use case" error={errors.api_use_case} full>
-                          <input
-                            id="ra-usecase"
-                            className={inputClass(!!errors.api_use_case)}
-                            type="text"
-                            maxLength={USE_CASE_MAX}
-                            placeholder="e.g. Outbound appointment reminders from our CRM"
-                            value={form.api_use_case}
-                            onChange={(e) => handleChange('api_use_case', e.target.value)}
-                            disabled={submitting}
-                          />
-                        </Field>
-
-                        <Field
-                          id="ra-cps"
-                          label="Expected calls / second (optional)"
-                          error={errors.api_expected_cps}
-                        >
-                          <input
-                            id="ra-cps"
-                            className={inputClass(!!errors.api_expected_cps)}
-                            type="number"
-                            min={1}
-                            max={1000}
-                            step={1}
-                            placeholder="10"
-                            value={form.api_expected_cps}
-                            onChange={(e) => handleChange('api_expected_cps', e.target.value)}
-                            disabled={submitting}
-                          />
-                        </Field>
-
-                        <Field id="ra-webhook" label="Webhook URL (optional)" error={errors.api_webhook_url}>
-                          <input
-                            id="ra-webhook"
-                            className={inputClass(!!errors.api_webhook_url)}
-                            type="url"
-                            maxLength={255}
-                            placeholder="https://api.acme.com/voice/events"
-                            value={form.api_webhook_url}
-                            onChange={(e) => handleChange('api_webhook_url', e.target.value)}
-                            disabled={submitting}
-                          />
-                        </Field>
-
-                        <div className="landing-field-full">
-                          <label className="landing-mini-toggle">
-                            <input
-                              type="checkbox"
-                              role="switch"
-                              aria-checked={form.api_needs_numbers}
-                              checked={form.api_needs_numbers}
-                              onChange={(e) => handleChange('api_needs_numbers', e.target.checked)}
-                              disabled={submitting}
-                            />
-                            <span className="landing-mini-toggle-q">
-                              Do you need us to provide numbers?
-                            </span>
-                            <span className="landing-mini-toggle-a" aria-hidden="true">
-                              {form.api_needs_numbers ? 'Yes' : 'No'}
-                            </span>
-                            <span className="landing-switch" aria-hidden="true" />
-                          </label>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* ── Visual Voicemail setup ── */}
-                  {form.products.includes('voicemail') && (
-                    <div className="landing-field-full landing-product-block landing-hv-reveal">
-                      <span className="landing-product-block-title">
-                        Visual Voicemail
-                      </span>
-                      <div className="landing-intake-fields">
-                        <Field id="ra-mailboxes" label="How many mailboxes?" error={errors.vm_mailbox_count}>
-                          <input
-                            id="ra-mailboxes"
-                            className={inputClass(!!errors.vm_mailbox_count)}
-                            type="number"
-                            min={1}
-                            max={10_000}
-                            step={1}
-                            placeholder="50"
-                            value={form.vm_mailbox_count}
-                            onChange={(e) => handleChange('vm_mailbox_count', e.target.value)}
-                            disabled={submitting}
-                          />
-                        </Field>
-
-                        <Field id="ra-attachto" label="Attach mailboxes to" error={errors.vm_attach_to}>
-                          <LandingSelect
-                            id="ra-attachto"
-                            labelId="ra-attachto-label"
-                            value={form.vm_attach_to}
-                            options={ATTACH_TO_OPTIONS}
-                            placeholder="Select an option…"
-                            onChange={(v) => handleChange('vm_attach_to', v)}
-                            disabled={submitting}
-                            invalid={!!errors.vm_attach_to}
-                          />
-                        </Field>
-                      </div>
-                    </div>
-                  )}
-
-                  <Field id="ra-volume" label="Expected monthly call volume" error={errors.monthly_volume}>
-                    <LandingSelect
-                      id="ra-volume"
-                      labelId="ra-volume-label"
-                      value={form.monthly_volume}
-                      options={VOLUME_OPTIONS}
-                      placeholder="Select a range…"
-                      onChange={(v) => handleChange('monthly_volume', v)}
-                      disabled={submitting}
-                      invalid={!!errors.monthly_volume}
-                    />
-                  </Field>
-
-                  <Field id="ra-timeline" label="When do you need this live?" error={errors.timeline}>
-                    <LandingSelect
-                      id="ra-timeline"
-                      labelId="ra-timeline-label"
-                      value={form.timeline}
-                      options={TIMELINE_OPTIONS}
-                      placeholder="Select a timeline…"
-                      onChange={(v) => handleChange('timeline', v)}
-                      disabled={submitting}
-                      invalid={!!errors.timeline}
-                    />
-                  </Field>
-                </div>
-
-                {/* ── Right track — FCC Know-Your-Customer ── */}
-                <div className="landing-intake-fields landing-intake-col-b">
                   <span className="landing-intake-sub landing-field-full">
                     Business verification
                   </span>
@@ -1562,31 +1432,427 @@ export function RequestAccessSection() {
                       disabled={submitting}
                     />
                   </Field>
+                </div>
+
+                {/* ── Right track — what they need ── */}
+                <div className="landing-intake-fields landing-intake-col-b">
+                  <span className="landing-intake-sub landing-field-full">
+                    Products &amp; requirements
+                  </span>
+
+                  {/* ── Product picker — multi-select toggle cards ── */}
+                  <div className="landing-field landing-field-full">
+                    <span className="landing-label" id="ra-products-label">
+                      Which products are you interested in?
+                    </span>
+                    <div className="landing-field-body">
+                      <div
+                        className={
+                          errors.products
+                            ? 'landing-product-grid landing-product-grid-invalid'
+                            : 'landing-product-grid'
+                        }
+                        role="group"
+                        aria-labelledby="ra-products-label"
+                      >
+                        {PRODUCT_ORDER.map((key) => (
+                          <button
+                            key={key}
+                            type="button"
+                            className="landing-product-card"
+                            aria-pressed={form.products.includes(key)}
+                            onClick={() => toggleProduct(key)}
+                            disabled={submitting}
+                          >
+                            <span className="landing-product-check" aria-hidden="true">
+                              <Check size={12} strokeWidth={3.5} />
+                            </span>
+                            <span className="landing-product-name">
+                              {PRODUCT_CARDS[key].name}
+                            </span>
+                            <span className="landing-product-desc">
+                              {PRODUCT_CARDS[key].desc}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                      {errors.products && (
+                        <span className="landing-field-err">{errors.products}</span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* ── RCF setup ── */}
+                  {form.products.includes('rcf') && (
+                    <div className="landing-field-full landing-product-block landing-hv-reveal">
+                      <span className="landing-product-block-title">
+                        RCF — Remote Call Forwarding
+                      </span>
+                      <div className="landing-intake-fields">
+                        <Field id="ra-didcount" label="How many phone numbers?" error={errors.did_count}>
+                          <LandingSelect
+                            id="ra-didcount"
+                            labelId="ra-didcount-label"
+                            value={form.did_count}
+                            options={DID_COUNT_OPTIONS}
+                            placeholder="Select a range…"
+                            onChange={(v) => handleChange('did_count', v)}
+                            disabled={submitting}
+                            invalid={!!errors.did_count}
+                          />
+                        </Field>
+
+                        <Field id="ra-porting" label="Porting existing numbers?" error={errors.porting}>
+                          <LandingSelect
+                            id="ra-porting"
+                            labelId="ra-porting-label"
+                            value={form.porting}
+                            options={PORTING_OPTIONS}
+                            placeholder="Select an option…"
+                            onChange={(v) => handleChange('porting', v)}
+                            disabled={submitting}
+                            invalid={!!errors.porting}
+                          />
+                        </Field>
+
+                        {/* Conditional: only when porting is Yes or Both */}
+                        {showCarrier && (
+                          <Field
+                            id="ra-carrier"
+                            label="Current carrier"
+                            error={errors.current_carrier}
+                            full
+                          >
+                            <input
+                              id="ra-carrier"
+                              className={inputClass(!!errors.current_carrier)}
+                              type="text"
+                              placeholder="e.g. AT&T, Lumen, Verizon"
+                              value={form.current_carrier}
+                              onChange={(e) => handleChange('current_carrier', e.target.value)}
+                              disabled={submitting}
+                            />
+                          </Field>
+                        )}
+
+                        <Field id="ra-forwarding" label="Forwarding setup" error={errors.forwarding_setup}>
+                          <LandingSelect
+                            id="ra-forwarding"
+                            labelId="ra-forwarding-label"
+                            value={form.forwarding_setup}
+                            options={FORWARDING_OPTIONS}
+                            placeholder="Select an option…"
+                            onChange={(v) => handleChange('forwarding_setup', v)}
+                            disabled={submitting}
+                            invalid={!!errors.forwarding_setup}
+                          />
+                        </Field>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* ── SIP Trunking setup ── */}
+                  {form.products.includes('trunk') && (
+                    <div className="landing-field-full landing-product-block landing-hv-reveal">
+                      <span className="landing-product-block-title">
+                        SIP Trunking
+                      </span>
+                      {/* Signaling IPs are captured once in the unified
+                          "IP addresses" block below — trunks authenticate
+                          by IP, no registration. */}
+                      <div className="landing-intake-fields">
+                        <Field id="ra-callpaths" label="Concurrent call paths" error={errors.trunk_call_paths}>
+                          <input
+                            id="ra-callpaths"
+                            className={inputClass(!!errors.trunk_call_paths)}
+                            type="number"
+                            min={1}
+                            max={1000}
+                            step={1}
+                            placeholder="20"
+                            value={form.trunk_call_paths}
+                            onChange={(e) => handleChange('trunk_call_paths', e.target.value)}
+                            disabled={submitting}
+                          />
+                        </Field>
+
+                        <Field id="ra-pbx" label="PBX vendor (optional)" error={errors.trunk_pbx_vendor}>
+                          <input
+                            id="ra-pbx"
+                            className={inputClass(!!errors.trunk_pbx_vendor)}
+                            type="text"
+                            maxLength={100}
+                            placeholder="e.g. Asterisk, 3CX, Avaya"
+                            value={form.trunk_pbx_vendor}
+                            onChange={(e) => handleChange('trunk_pbx_vendor', e.target.value)}
+                            disabled={submitting}
+                          />
+                        </Field>
+
+                        <Field
+                          id="ra-trunkdids"
+                          label="DIDs needed (optional)"
+                          error={errors.trunk_dids_needed}
+                          full
+                        >
+                          <input
+                            id="ra-trunkdids"
+                            className={inputClass(!!errors.trunk_dids_needed)}
+                            type="text"
+                            maxLength={200}
+                            placeholder="e.g. 25 new numbers, Boston metro"
+                            value={form.trunk_dids_needed}
+                            onChange={(e) => handleChange('trunk_dids_needed', e.target.value)}
+                            disabled={submitting}
+                          />
+                        </Field>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* ── API Calling setup ── */}
+                  {form.products.includes('api') && (
+                    <div className="landing-field-full landing-product-block landing-hv-reveal">
+                      <span className="landing-product-block-title">
+                        API Calling
+                      </span>
+                      <div className="landing-intake-fields">
+                        <Field id="ra-usecase" label="Use case" error={errors.api_use_case} full>
+                          <input
+                            id="ra-usecase"
+                            className={inputClass(!!errors.api_use_case)}
+                            type="text"
+                            maxLength={USE_CASE_MAX}
+                            placeholder="e.g. Outbound appointment reminders from our CRM"
+                            value={form.api_use_case}
+                            onChange={(e) => handleChange('api_use_case', e.target.value)}
+                            disabled={submitting}
+                          />
+                        </Field>
+
+                        <Field
+                          id="ra-cps"
+                          label="Expected calls / second (optional)"
+                          error={errors.api_expected_cps}
+                        >
+                          <input
+                            id="ra-cps"
+                            className={inputClass(!!errors.api_expected_cps)}
+                            type="number"
+                            min={1}
+                            max={1000}
+                            step={1}
+                            placeholder="10"
+                            value={form.api_expected_cps}
+                            onChange={(e) => handleChange('api_expected_cps', e.target.value)}
+                            disabled={submitting}
+                          />
+                        </Field>
+
+                        <Field id="ra-webhook" label="Webhook URL (optional)" error={errors.api_webhook_url}>
+                          <input
+                            id="ra-webhook"
+                            className={inputClass(!!errors.api_webhook_url)}
+                            type="url"
+                            maxLength={255}
+                            placeholder="https://api.acme.com/voice/events"
+                            value={form.api_webhook_url}
+                            onChange={(e) => handleChange('api_webhook_url', e.target.value)}
+                            disabled={submitting}
+                          />
+                        </Field>
+
+                        <div className="landing-field-full">
+                          <label className="landing-mini-toggle">
+                            <input
+                              type="checkbox"
+                              role="switch"
+                              aria-checked={form.api_needs_numbers}
+                              checked={form.api_needs_numbers}
+                              onChange={(e) => handleChange('api_needs_numbers', e.target.checked)}
+                              disabled={submitting}
+                            />
+                            <span className="landing-mini-toggle-q">
+                              Do you need us to provide numbers?
+                            </span>
+                            <span className="landing-mini-toggle-a" aria-hidden="true">
+                              {form.api_needs_numbers ? 'Yes' : 'No'}
+                            </span>
+                            <span className="landing-switch" aria-hidden="true" />
+                          </label>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* ── Visual Voicemail setup ── */}
+                  {form.products.includes('voicemail') && (
+                    <div className="landing-field-full landing-product-block landing-hv-reveal">
+                      <span className="landing-product-block-title">
+                        Visual Voicemail
+                      </span>
+                      <div className="landing-intake-fields">
+                        <Field id="ra-mailboxes" label="How many mailboxes?" error={errors.vm_mailbox_count}>
+                          <input
+                            id="ra-mailboxes"
+                            className={inputClass(!!errors.vm_mailbox_count)}
+                            type="number"
+                            min={1}
+                            max={10_000}
+                            step={1}
+                            placeholder="50"
+                            value={form.vm_mailbox_count}
+                            onChange={(e) => handleChange('vm_mailbox_count', e.target.value)}
+                            disabled={submitting}
+                          />
+                        </Field>
+
+                        <Field id="ra-attachto" label="Attach mailboxes to" error={errors.vm_attach_to}>
+                          <LandingSelect
+                            id="ra-attachto"
+                            labelId="ra-attachto-label"
+                            value={form.vm_attach_to}
+                            options={ATTACH_TO_OPTIONS}
+                            placeholder="Select an option…"
+                            onChange={(v) => handleChange('vm_attach_to', v)}
+                            disabled={submitting}
+                            invalid={!!errors.vm_attach_to}
+                          />
+                        </Field>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* ── Capacity & timeline — the technical declarations.
+                      The capacity pair (KYC v2, REQUIRED) drives Granite's
+                      high-volume threshold live: >1 CPS or >1,000 concurrent
+                      call paths locks the declaration toggle on (see the
+                      High-volume well below). ── */}
+                  <span className="landing-intake-sub landing-field-full">
+                    Capacity &amp; timeline
+                  </span>
+
+                  <Field
+                    id="ra-peakcps"
+                    label="Peak calls per second"
+                    error={errors.declared_peak_cps}
+                    hint="How many calls you'll start per second at peak"
+                  >
+                    <input
+                      id="ra-peakcps"
+                      className={inputClass(!!errors.declared_peak_cps)}
+                      type="number"
+                      min={1}
+                      max={1000}
+                      step={1}
+                      placeholder="1"
+                      value={form.declared_peak_cps}
+                      onChange={(e) => handleChange('declared_peak_cps', e.target.value)}
+                      disabled={submitting}
+                    />
+                  </Field>
+
+                  <Field
+                    id="ra-peakconcurrent"
+                    label="Peak concurrent calls"
+                    error={errors.declared_max_concurrent_calls}
+                    hint="Simultaneous active calls (call paths) at peak"
+                  >
+                    <input
+                      id="ra-peakconcurrent"
+                      className={inputClass(!!errors.declared_max_concurrent_calls)}
+                      type="number"
+                      min={1}
+                      max={100_000}
+                      step={1}
+                      placeholder="100"
+                      value={form.declared_max_concurrent_calls}
+                      onChange={(e) =>
+                        handleChange('declared_max_concurrent_calls', e.target.value)
+                      }
+                      disabled={submitting}
+                    />
+                  </Field>
+
+                  {/* One-line label — pairs with the timeline select.
+                      Informational only — no longer a high-volume trigger. */}
+                  <Field id="ra-volume" label="Expected monthly volume" error={errors.monthly_volume}>
+                    <LandingSelect
+                      id="ra-volume"
+                      labelId="ra-volume-label"
+                      value={form.monthly_volume}
+                      options={VOLUME_OPTIONS}
+                      placeholder="Select a range…"
+                      onChange={(v) => handleChange('monthly_volume', v)}
+                      disabled={submitting}
+                      invalid={!!errors.monthly_volume}
+                    />
+                  </Field>
+
+                  <Field id="ra-timeline" label="When do you need this live?" error={errors.timeline}>
+                    <LandingSelect
+                      id="ra-timeline"
+                      labelId="ra-timeline-label"
+                      value={form.timeline}
+                      options={TIMELINE_OPTIONS}
+                      placeholder="Select a timeline…"
+                      onChange={(v) => handleChange('timeline', v)}
+                      disabled={submitting}
+                      invalid={!!errors.timeline}
+                    />
+                  </Field>
 
                   {/* ── High-volume calling declaration ── */}
                   <span className="landing-intake-sub landing-field-full">
                     High-volume calling
                   </span>
 
+                  {/* Threshold statement — always visible. FCC 26-27 sets the
+                      enhanced-KYC requirement but leaves the numeric threshold
+                      to each provider; Granite defines two, and crossing
+                      EITHER makes the declaration mandatory. */}
+                  <p className="landing-intake-intro landing-field-full">
+                    Under the FCC&rsquo;s Know-Your-Customer rules (FCC 26-27),
+                    high-volume calling requires enhanced verification —
+                    intended use and originating IP addresses. The FCC leaves
+                    the threshold to each provider; Granite&rsquo;s thresholds
+                    are more than <strong>1 call per second</strong> or more
+                    than <strong>1,000 concurrent call paths</strong> —
+                    crossing either one requires the declaration.
+                  </p>
+
                   <div className="landing-field-full">
-                    <label className="landing-hv-toggle">
+                    <label
+                      className={
+                        hvLocked
+                          ? 'landing-hv-toggle landing-hv-toggle-locked'
+                          : 'landing-hv-toggle'
+                      }
+                    >
                       <input
                         type="checkbox"
                         role="switch"
                         aria-checked={form.is_high_volume}
                         checked={form.is_high_volume}
                         onChange={(e) => handleHighVolumeToggle(e.target.checked)}
-                        disabled={submitting}
+                        disabled={submitting || hvLocked}
                       />
                       <span className="landing-hv-toggle-text">
                         <span className="landing-hv-toggle-q">
                           Will you run high-volume outbound calling?
                         </span>
-                        <span className="landing-hv-toggle-sub">
-                          {hvAutoSuggested
-                            ? 'Suggested for 50,000+ monthly calls — switch off if this doesn’t apply.'
-                            : 'Automated campaigns, dialers, AI voice agents'}
-                        </span>
+                        {hvLocked ? (
+                          <span className="landing-hv-toggle-sub landing-hv-toggle-sub-lock">
+                            <Lock size={11} strokeWidth={2.5} aria-hidden="true" />
+                            Required above 1 call/sec or 1,000 concurrent call paths
+                          </span>
+                        ) : (
+                          <span className="landing-hv-toggle-sub">
+                            {form.is_high_volume
+                              ? 'Declared voluntarily — required only above 1 call/sec or 1,000 concurrent call paths'
+                              : 'Automated campaigns, dialers, AI voice agents — voluntary at or below 1 call/sec and 1,000 concurrent call paths'}
+                          </span>
+                        )}
                       </span>
                       <span className="landing-switch" aria-hidden="true" />
                     </label>
@@ -1665,21 +1931,37 @@ export function RequestAccessSection() {
                         </span>
                       </Field>
 
-                      <Field
-                        id="ra-ips"
-                        label="Originating IP addresses"
-                        error={errors.originating_ips}
-                        hint="IPv4, IPv6, or CIDR blocks your calls will originate from — Enter or comma to add"
-                        full
-                      >
-                        <IpChipInput
+                    </div>
+                  )}
+
+                  {/* ── Unified IP capture — ONE field, TWO payload slots.
+                      Appears when SIP Trunking is selected (IP-authenticated
+                      signaling) OR high-volume is on (FCC originating-IP
+                      requirement); label/helper adapt. On submit the same
+                      entries fill products.trunk.signaling_ips (cap 10) and
+                      kyc.high_volume.originating_ips. ── */}
+                  {ipFieldVisible && (
+                    <div className="landing-field-full landing-product-block landing-hv-reveal">
+                      {/* No block title — the adaptive field label leads the
+                          well (a second all-caps line read as a duplicate). */}
+                      <div className="landing-intake-fields">
+                        <Field
                           id="ra-ips"
-                          ips={form.originating_ips}
-                          disabled={submitting}
-                          invalid={!!errors.originating_ips}
-                          onChange={(ips) => handleChange('originating_ips', ips)}
-                        />
-                      </Field>
+                          label={ipFieldLabel}
+                          error={errors.originating_ips}
+                          hint={ipFieldHint}
+                          full
+                        >
+                          <IpChipInput
+                            id="ra-ips"
+                            ips={form.originating_ips}
+                            maxIps={ipFieldMax}
+                            disabled={submitting}
+                            invalid={!!errors.originating_ips}
+                            onChange={(ips) => handleChange('originating_ips', ips)}
+                          />
+                        </Field>
+                      </div>
                     </div>
                   )}
                 </div>

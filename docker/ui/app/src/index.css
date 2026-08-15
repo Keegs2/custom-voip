@@ -1715,7 +1715,8 @@ select.landing-input {
 .landing-intake-columns {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 36px;
+  gap: 23px; /* + the tracks' trailing 13px child margin = 36px stacked */
+  margin-bottom: -13px; /* cancel the last field row's phantom margin */
 }
 
 @media (min-width: 1000px) {
@@ -1738,18 +1739,53 @@ select.landing-input {
   display: grid;
   grid-template-columns: 1fr;
   align-content: start; /* columns must not rail-spread when the sibling track is taller */
-  gap: 20px;
+  gap: 7px; /* label→control gap — see "Pixel-perfect paired rows" below */
 }
 
 @media (min-width: 720px) {
   .landing-intake-fields {
     grid-template-columns: 1fr 1fr;
-    gap: 20px 22px;
+    gap: 7px 22px;
   }
 }
 
 .landing-field-full {
   grid-column: 1 / -1;
+}
+
+/* ── Pixel-perfect paired rows ─────────────────────────────────
+   Each field spans TWO parent rows (label / body) and subgrids onto
+   them, so a paired row shares ONE label track and ONE body track:
+   if either label ever wraps, both controls still start on the same
+   pixel — structural, survives future copy changes, no per-label
+   nowrap tuning. The parent's 7px row-gap is the label→control gap;
+   the 20px rhythm BETWEEN rows comes from a 13px bottom margin on
+   every direct child (13 + 7 = 20). Labels bottom-align so a
+   one-line label hugs its control when its pair-mate wraps.
+   (No-subgrid fallback: grid-template-rows is dropped and the field
+   lays out as its own 2-row grid — the old flex stack, minus the
+   cross-field track sharing.) */
+.landing-intake-fields > * {
+  margin-bottom: 13px;
+}
+
+.landing-intake-fields > .landing-field {
+  display: grid;
+  grid-row: span 2;
+  grid-template-rows: subgrid;
+  align-content: start;
+}
+
+.landing-intake-fields > .landing-field > .landing-label {
+  align-self: end;
+}
+
+/* Control + error/hint slot (Field body) — the old field stack */
+.landing-field-body {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-width: 0;
 }
 
 .landing-intake-sub {
@@ -1831,11 +1867,18 @@ select.landing-input {
 
 /* Calm intro microcopy directly under a group subhead */
 .landing-intake-intro {
-  margin: -8px 0 0;
+  /* Bottom 13px matches the paired-rows child margin (this shorthand
+     out-cascades the .landing-intake-fields > * rule above) */
+  margin: -8px 0 13px;
   font-size: 0.82rem;
   line-height: 1.6;
   color: var(--lg-mist);
   max-width: 64ch;
+}
+
+.landing-intake-intro strong {
+  color: #ffffff;
+  font-weight: 700;
 }
 
 /* Small helper text under an input (format hints, "must differ" notes) */
@@ -1977,6 +2020,33 @@ select.landing-input {
   color: var(--lg-mist);
 }
 
+/* Locked-on state — monthly volume is at Granite's 50,000+ threshold,
+   so the declaration is mandatory (FCC 26-27 KYC): switch stays on with
+   reduced interactivity, sub-line becomes a lock note. */
+.landing-hv-toggle-locked {
+  cursor: default;
+}
+
+.landing-hv-toggle-locked:hover {
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
+.landing-hv-toggle-locked .landing-switch {
+  opacity: 0.72;
+}
+
+.landing-hv-toggle-sub-lock {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  color: #cfe0ff;
+}
+
+.landing-hv-toggle-sub-lock svg {
+  flex-shrink: 0;
+}
+
 /* One-shot reveal of the high-volume fields (reduced-motion-safe) */
 @keyframes landing-hv-in {
   from {
@@ -2086,6 +2156,7 @@ select.landing-input {
 .landing-product-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
+  grid-auto-rows: 1fr; /* equal-height cards — both rows share the tallest */
   gap: 10px;
 }
 
@@ -2187,7 +2258,8 @@ select.landing-input {
   display: flex;
   flex-direction: column;
   gap: 14px;
-  padding: 14px 16px 16px;
+  /* 3px + the inner grid's trailing 13px row margin = 16px visual */
+  padding: 14px 16px 3px;
   background: rgba(3, 9, 26, 0.3);
   border: 1px solid rgba(255, 255, 255, 0.14);
   border-left: 3px solid var(--lg-azure-bright);
@@ -2291,6 +2363,17 @@ select.landing-input {
   color: #ffffff;
 }
 
+/* Reference kicker — the created row id, quotable in follow-ups */
+.landing-intake-success-ref {
+  font-family: "Archivo", "IBM Plex Sans", sans-serif;
+  font-weight: 700;
+  font-size: 0.74rem;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.72);
+  margin-top: 4px;
+}
+
 .landing-intake-success-title {
   font-family: "Archivo", "IBM Plex Sans", sans-serif;
   font-weight: 800;
@@ -2298,6 +2381,42 @@ select.landing-input {
   letter-spacing: -0.02em;
   color: #ffffff;
   margin: 6px 0 0;
+}
+
+/* Kicker sits tight over its title — collapse the flex gap + margin */
+.landing-intake-success-ref + .landing-intake-success-title {
+  margin-top: -10px;
+}
+
+/* Submitted-summary chips — products + high-volume status */
+.landing-intake-success-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.landing-success-chip {
+  padding: 5px 13px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: #ffffff;
+  white-space: nowrap;
+}
+
+.landing-success-chip-hv {
+  background: rgba(47, 125, 246, 0.32);
+  border-color: var(--lg-azure-bright);
+}
+
+.landing-success-chip-dim {
+  background: transparent;
+  border-color: rgba(255, 255, 255, 0.2);
+  color: rgba(255, 255, 255, 0.7);
 }
 
 .landing-intake-success-note {
@@ -2986,9 +3105,16 @@ select.dl-input {
 /* ─── Expandable number rows ─── */
 .rcf-nrow { cursor: pointer; }
 
+/* Mouse focus gets NO ring — the row is a giant click target, a perimeter
+   outline reads as an error state. Keyboard focus (:focus-visible) gets the
+   same quiet treatment as hover plus a faint inner keyline, so Tab users can
+   see where they are without the row shouting. */
+.rcf-nrow:focus { outline: none; }
+
 .rcf-nrow:focus-visible {
-  outline: 2px solid var(--rcf-azure);
-  outline-offset: -2px;
+  outline: none;
+  background: var(--rcf-tint-hover);
+  box-shadow: inset 2px 0 0 0 var(--rcf-azure), inset 0 0 0 1px rgba(47, 125, 246, 0.35);
 }
 
 .rcf-nrow-open {

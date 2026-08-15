@@ -161,9 +161,16 @@ export interface ProductsRecord extends ProductsPayload {
   form_version?: string;
 }
 
-/** The `kyc` object POSTed with a new onboarding submission. */
+/** The `kyc` object POSTed with a new onboarding submission (fcc-26-27-fnprm-v2). */
 export interface KycPayload {
   is_high_volume: boolean;
+  /** REQUIRED (v2) — expected peak calls per second, 1–1000. Together with
+      declared_max_concurrent_calls this drives Granite's provider-defined
+      high-volume threshold: >1 CPS OR >1,000 concurrent call paths forces
+      is_high_volume=true (backend 422s otherwise). */
+  declared_peak_cps: number;
+  /** REQUIRED (v2) — peak simultaneous calls (call paths), 1–100,000. */
+  declared_max_concurrent_calls: number;
   standard: KycStandard;
   /** Must be null when is_high_volume === false, present when true. */
   high_volume: KycHighVolume | null;
@@ -171,12 +178,16 @@ export interface KycPayload {
 
 /**
  * The stored KYC document as returned on admin reads
- * (onboarding_requests.kyc JSONB: {standard, high_volume, submitted_at,
- * form_version}). High-volume status is derived: high_volume !== null.
+ * (onboarding_requests.kyc JSONB: {standard, high_volume, declared_peak_cps,
+ * declared_max_concurrent_calls, submitted_at, form_version}). High-volume
+ * status is derived: high_volume !== null. Capacity declarations are absent
+ * on pre-v2 rows (form_version 'fcc-26-27-fnprm-v1').
  */
 export interface KycRecord {
   standard: KycStandard;
   high_volume: KycHighVolume | null;
+  declared_peak_cps?: number;
+  declared_max_concurrent_calls?: number;
   submitted_at?: string;
   form_version?: string;
 }
