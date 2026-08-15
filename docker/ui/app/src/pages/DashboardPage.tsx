@@ -419,7 +419,7 @@ export function DashboardPage() {
           <SectionHead
             kicker="The network"
             title="Three regions. Zero shared fate."
-            blurb="Each region runs a complete, independent voice stack — a redundant, highly available SBC layer, dedicated media, local data. Signaling and media never cross regional boundaries, so a regional event is a reroute, not an outage. The model below runs the actual failover scenarios continuously."
+            blurb="Each region runs a complete, independent voice stack — a redundant, highly available SBC layer, dedicated media, local data. Signaling and media never cross regional boundaries, so a regional event is a reroute, not an outage. The model below shows SIP Trunking inbound: every customer trunk targets one health-checked hostname, and DNS steers each call to a healthy region — running the failover scenarios continuously."
           />
           <HaArchitectureViz />
         </div>
