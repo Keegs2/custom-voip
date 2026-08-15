@@ -48,4 +48,26 @@ LBDN/pool LB method: **Topology**, with a ruleset evaluated in order (NIOS "firs
 
 We will: supply the initial customer subnet→pool list, verify steering from East/Central/West vantage points, verify the 503→pull behavior per zone (we can fail a zone's media core on demand in a maintenance window), then move customer onboarding to the hostname.
 
+---
+
+## PHASE 2 (build now, cut over later): second LBDN for carrier origination — `orig.granitevoip.com`
+
+Bandwidth's SIP-peer portal accepts DNS hosts in "Voice IP addresses / DNS hosts", so the SAME DTC infrastructure can eventually steer carrier-originated traffic (RCF and all inbound DIDs) — but with its own LBDN and ruleset, kept separate from the customer-trunk hostname for independent blast radius and per-audience rules.
+
+**Please build alongside Phase 1 (same pools, same monitors):**
+
+| Object | Value |
+|---|---|
+| LBDN 2 | `orig.granitevoip.com`, A record, TTL 30, LB method **Topology** |
+| Ruleset `orig-geo` | (1) **Subnet rules for Bandwidth's PoPs** — their edge resolvers are the query sources, and we know their ranges: Dallas `67.231.2.12`, Los Angeles `216.82.238.134`, plus the TC1 (NY/ATL) and TC2 (DAL/LA) PoP addresses we will supply as a prefix list. Map: LA/TC2-LA → `west-pool`; DAL/TC2-DAL → `central-pool`; NY/ATL → `east-pool`. (2) Geography rules as in Phase 1. (3) Global-availability fallback. |
+| Response size | If DTC supports returning MULTIPLE ordered A records for this LBDN, return the selected pool's VIP first with the other healthy VIPs after it (see migration note). Single-record is acceptable if not. |
+
+**Why separate from `crag.granitevoip.com`:** carrier ingress and customer ingress have different steering rules (known carrier PoPs vs per-customer prefixes), different change cadence, and we want per-audience monitoring and the ability to drain one audience without the other.
+
+**Cutover plan (ours, not yours — for context):** Phase 1 (customer trunks) proves DTC in production first. Then, in the Bandwidth portal, we set the origination host list to `orig.granitevoip.com` FIRST followed by the three static VIPs — Bandwidth walks the list with sequential failover, so DNS becomes the steered primary and the static IPs remain a safety net. No flag-day.
+
+**Open items we own before cutover (tracked, not blocking your build):**
+- Confirm with Bandwidth how their proxies resolve DNS hosts (per-call vs cached, TTL 30 honored, single vs multiple A records consumed, SRV support).
+- Supply you the authoritative Bandwidth PoP prefix list for the subnet rules.
+
 *Questions → Keegan (Telephony Engineering). The SBC-side 200/503 OPTIONS behavior is already live in all six SBCs (`FS_AWARE_OPTIONS`).*
