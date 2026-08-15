@@ -33,6 +33,17 @@ export function IC({ children }: { children: React.ReactNode }) {
   return <code className="dlx-ic">{children}</code>;
 }
 
+/** Bulleted usage list — azure dash markers (see .dlx8-ul). */
+export function UL({ items }: { items: React.ReactNode[] }) {
+  return (
+    <ul className="dlx8-ul">
+      {items.map((item, i) => (
+        <li key={i}>{item}</li>
+      ))}
+    </ul>
+  );
+}
+
 /* ─── Callout box ────────────────────────────────────────── */
 
 export function Callout({
@@ -209,15 +220,19 @@ export function Endpoint({
   method,
   path,
   description,
+  admin = false,
 }: {
   method: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
   path: string;
   description: string;
+  /** Marks an endpoint that requires the admin role (Granite-managed). */
+  admin?: boolean;
 }) {
   return (
     <div className="dlx-endpoint">
       <span className={`dlx-method dlx-method-${method.toLowerCase()}`}>{method}</span>
       <code className="dlx-endpoint-path">{path}</code>
+      {admin && <span className="dlx8-tag-admin">Admin</span>}
       <span className="dlx-endpoint-desc">{description}</span>
     </div>
   );

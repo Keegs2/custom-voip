@@ -32,8 +32,20 @@ const allProductNavItems: NavItemDef[] = [
 /* ─── Documentation nav items ─────────────────────────────── */
 
 const docNavItems: NavItemDef[] = [
-  { label: 'RCF Guide',     icon: <IconRCF size={18} />,  to: '/docs/rcf', color: '#3b82f6' },
-  { label: 'API Reference', icon: <IconDocs size={18} />, to: '/docs/api', color: '#3b82f6' },
+  {
+    label: 'Guides',
+    icon: <BookOpen size={18} />,
+    to: '/docs/guides',
+    color: '#3b82f6',
+    isActiveFn: (p) => p.startsWith('/docs/guides'),
+  },
+  {
+    label: 'API Reference',
+    icon: <IconDocs size={18} />,
+    to: '/docs/api',
+    color: '#3b82f6',
+    isActiveFn: (p) => p.startsWith('/docs/api'),
+  },
 ];
 
 /* ─── Coming Soon item definitions ───────────────────────── */
