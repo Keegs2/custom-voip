@@ -17,7 +17,7 @@ from routers import (
     auth, search, number_inventory,
     carriers, rates, tiers, sipp, sbc, homer,
     onboarding, freeswitch, carrier_status, live_trunk_stats,
-    stir,
+    stir, payments, billing,
 )
 from middleware.auth import JWTAuthMiddleware
 
@@ -129,6 +129,12 @@ app.include_router(stir.router, prefix="/v1/stir", tags=["STIR/SHAKEN"])
 app.include_router(stir.router, prefix="/stir", tags=["STIR/SHAKEN"])
 app.include_router(onboarding.router, prefix="/v1/onboarding", tags=["Onboarding"])
 app.include_router(onboarding.router, prefix="/onboarding", tags=["Onboarding"])
+# Payments demo (dormant unless PAYMENTS_DEMO_MODE=true — every endpoint 404s
+# otherwise) + read-only tenant-scoped billing views over the ledger.
+app.include_router(payments.router, prefix="/v1/payments", tags=["Payments"])
+app.include_router(payments.router, prefix="/payments", tags=["Payments"])
+app.include_router(billing.router, prefix="/v1/billing", tags=["Billing"])
+app.include_router(billing.router, prefix="/billing", tags=["Billing"])
 
 # FreeSWITCH mod_xml_curl gateway. Mounted at /freeswitch (auth-exempt in
 # middleware). Always returns HTTP 200 + the FreeSWITCH "not found" XML so
