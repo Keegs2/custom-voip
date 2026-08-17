@@ -7,6 +7,7 @@ from pydantic import BaseModel, field_validator
 
 from auth.dependencies import require_admin
 from db import database as db
+from services import call_pricing
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -72,15 +73,14 @@ def _rate_row(row) -> dict:
 
 
 async def _get_default_rate_table_id() -> int:
-    """Return the default rate table id, or the first one available."""
-    row = await db.fetch_one(
-        "SELECT id FROM rate_tables WHERE is_default = true LIMIT 1"
-    )
-    if row:
-        return row["id"]
-    row = await db.fetch_one("SELECT id FROM rate_tables ORDER BY id LIMIT 1")
-    if row:
-        return row["id"]
+    """Return the default rate table id, or the first one available.
+
+    Resolution shared with services.call_pricing (the x402 quote helper) so the
+    admin lookup and the pay-per-call quote always price off the same table.
+    """
+    table_id = await call_pricing.get_default_rate_table_id()
+    if table_id is not None:
+        return table_id
     raise HTTPException(
         status_code=400,
         detail="No rate tables exist. Create a rate table first.",
@@ -161,14 +161,9 @@ async def lookup_rate(
     if rate_table_id is None:
         rate_table_id = await _get_default_rate_table_id()
 
-    # Strip any non-digit characters except leading +
-    clean = destination.lstrip("+")
-
-    row = await db.fetch_one(
-        "SELECT * FROM get_rate($1, $2)",
-        rate_table_id,
-        clean,
-    )
+    # Longest-prefix match via the shared helper (same get_rate() SQL the
+    # rating engine and the x402 pay-per-call quote use).
+    row = await call_pricing.lookup_rate(destination, rate_table_id)
     if not row:
         return None
 
