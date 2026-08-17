@@ -26,6 +26,7 @@ import { TrunksAdminPage } from './pages/admin/TrunksAdminPage';
 import { DIDSearchPage } from './pages/admin/DIDSearchPage';
 import { UserDetailPage } from './pages/admin/UserDetailPage';
 import { OnboardingAdminPage } from './pages/admin/OnboardingAdminPage';
+import { PaymentsDemoControlPage } from './pages/admin/payments-demo/PaymentsDemoControlPage';
 import { OnboardingBriefPage } from './pages/admin/OnboardingBriefPage';
 import { CallQualityPage } from './pages/CallQualityPage';
 import { MyAccountPage } from './pages/MyAccountPage';
@@ -75,6 +76,16 @@ export function App() {
               <Route
                 path="admin/user/:userId"
                 element={<UserDetailRedirect />}
+              />
+
+              {/* Machine Payments Demo — standalone daylight page (no tab shell) */}
+              <Route
+                path="admin/payments-demo"
+                element={
+                  <RequireAdmin>
+                    <PaymentsDemoControlPage />
+                  </RequireAdmin>
+                }
               />
 
               {/* Customer Management — nested under AdminPage tab shell */}

@@ -7,7 +7,7 @@ import {
   IconRCF, IconTrunk, IconAPI, IconVoicemail, IconDocs,
   IconAdmin, IconSignal, IconTroubleshoot,
 } from '../icons/ProductIcons';
-import { Package, Shield, ChevronDown, Clock, Eye, EyeOff, Server, BookOpen } from 'lucide-react';
+import { Package, Shield, ChevronDown, Clock, Eye, EyeOff, Server, BookOpen, WalletMinimal } from 'lucide-react';
 
 /* ─── Types ───────────────────────────────────────────────── */
 
@@ -738,11 +738,15 @@ export function Sidebar({ collapsed = false }: SidebarProps) {
 
   const customersItem: NavItemDef   = {
     label: 'Customer Management', to: '/admin/customers', color: '#60a5fa', icon: <IconAdmin />,
-    isActiveFn: (p) => p.startsWith('/admin') && !p.startsWith('/admin/platform'),
+    isActiveFn: (p) => p.startsWith('/admin') && !p.startsWith('/admin/platform') && !p.startsWith('/admin/payments-demo'),
   };
   const platformItem: NavItemDef    = {
     label: 'Platform Management', to: '/admin/platform', color: '#60a5fa', icon: <Server size={15} strokeWidth={1.7} />,
     isActiveFn: (p) => p.startsWith('/admin/platform'),
+  };
+  const paymentsDemoItem: NavItemDef = {
+    label: 'Payments Demo', to: '/admin/payments-demo', color: '#60a5fa', icon: <WalletMinimal size={15} strokeWidth={1.7} />,
+    isActiveFn: (p) => p.startsWith('/admin/payments-demo'),
   };
   const callQualityItem: NavItemDef = { label: 'Call Quality',        to: '/call-quality',    color: '#22c55e', icon: <IconSignal size={17} /> };
   const troubleItem: NavItemDef     = { label: 'Troubleshooting',     to: '/troubleshooting', color: '#fbbf24', icon: <IconTroubleshoot size={17} /> };
@@ -1014,6 +1018,7 @@ export function Sidebar({ collapsed = false }: SidebarProps) {
                       <SubGroupLabel label="Customers" />
                       <SidebarNavItem item={customersItem} onNavigate={closeMobile} small />
                       <SidebarNavItem item={platformItem}  onNavigate={closeMobile} small />
+                      <SidebarNavItem item={paymentsDemoItem} onNavigate={closeMobile} small />
                     </>
                   )}
 

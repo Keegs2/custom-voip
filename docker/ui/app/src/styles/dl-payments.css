@@ -1,0 +1,552 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   dl-payments.css — page-scoped daylight styles for the Machine Payments
+   Demo control panel (/admin/payments-demo).
+
+   The `dlx9-` prefix marks these as page-scoped, NOT part of the shared
+   DAYLIGHT CONSOLE system in index.css. If another page reaches for one of
+   these, promote it into the shared `dl-*` block. Every value references the
+   shared `--rcf-*` custom properties declared on `.dl-scope` — no re-stated
+   magic numbers for color or rhythm. Hand-written @media only (never
+   Tailwind md:* — see the container-build gotcha in CLAUDE.md).
+
+   Rail palette (consistent semantic set, no purple/orange):
+     stripe_card   → azure   (card money)
+     stripe_crypto → teal    (stablecoin money)
+     x402          → green   (machine pay-per-request)
+     stripe_mpp    → cyan    (agent tab)
+     rating/admin  → slate   (platform-internal)
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ─── Cockpit: scenario triggers | live state pane ─── */
+.dlx9-cockpit {
+  display: grid;
+  grid-template-columns: minmax(0, 1.08fr) minmax(0, 0.92fr);
+  gap: var(--rcf-stack);
+  align-items: start;
+  margin-bottom: var(--rcf-stack);
+}
+
+@media (max-width: 1080px) {
+  .dlx9-cockpit { grid-template-columns: 1fr; }
+}
+
+.dlx9-scen-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+@media (max-width: 560px) {
+  .dlx9-scen-grid { grid-template-columns: 1fr; }
+}
+
+/* ─── Scenario card — a big legible trigger button ─── */
+.dlx9-scen {
+  appearance: none;
+  text-align: left;
+  font-family: inherit;
+  background: var(--rcf-card);
+  border: 1px solid var(--rcf-line);
+  border-radius: 12px;
+  padding: 16px 18px 14px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 128px;
+  box-shadow:
+    0 1px 2px rgba(14, 23, 38, 0.06),
+    0 12px 30px -18px rgba(14, 23, 38, 0.18);
+  transition: border-color var(--rcf-ease), box-shadow var(--rcf-ease), background var(--rcf-ease);
+}
+
+.dlx9-scen:hover:not(:disabled) {
+  border-color: rgba(47, 125, 246, 0.4);
+  background: var(--rcf-tint-hover);
+  box-shadow:
+    0 1px 2px rgba(14, 23, 38, 0.06),
+    0 16px 36px -18px rgba(14, 23, 38, 0.26);
+}
+
+.dlx9-scen:focus-visible {
+  outline: 2px solid var(--rcf-azure);
+  outline-offset: 1px;
+}
+
+.dlx9-scen:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+/* The running card stays fully opaque so the spinner reads clearly. */
+.dlx9-scen-running:disabled { opacity: 1; }
+
+.dlx9-scen-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.dlx9-scen-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  flex-shrink: 0;
+}
+
+.dlx9-scen-title {
+  font-family: "Archivo", "IBM Plex Sans", sans-serif;
+  font-weight: 700;
+  font-size: 0.88rem;
+  letter-spacing: -0.01em;
+  color: var(--rcf-ink);
+}
+
+.dlx9-scen-caption {
+  font-size: 0.72rem;
+  line-height: 1.45;
+  color: var(--rcf-ink-dim);
+  margin: 0;
+}
+
+/* Last-result summary line, pinned to the card bottom */
+.dlx9-scen-result {
+  margin-top: auto;
+  padding-top: 8px;
+  border-top: 1px dashed var(--rcf-line-soft);
+  font-size: 0.68rem;
+  line-height: 1.4;
+  color: var(--rcf-ink-soft);
+  font-variant-numeric: tabular-nums;
+}
+
+.dlx9-scen-result-err { color: var(--rcf-red); }
+
+/* Per-scenario icon tones (semantic, no purple/orange) */
+.dlx9-tone-azure { color: var(--rcf-azure-deep); background: rgba(47, 125, 246, 0.1);  border: 1px solid rgba(47, 125, 246, 0.24); }
+.dlx9-tone-green { color: var(--rcf-green);      background: rgba(22, 163, 74, 0.09);  border: 1px solid rgba(22, 163, 74, 0.24); }
+.dlx9-tone-teal  { color: #0f766e;               background: rgba(13, 148, 136, 0.09); border: 1px solid rgba(13, 148, 136, 0.26); }
+.dlx9-tone-cyan  { color: #0e7490;               background: rgba(8, 145, 178, 0.09);  border: 1px solid rgba(8, 145, 178, 0.26); }
+.dlx9-tone-amber { color: #92400e;               background: rgba(180, 83, 9, 0.08);   border: 1px solid rgba(180, 83, 9, 0.26); }
+.dlx9-tone-red   { color: var(--rcf-red);        background: rgba(220, 38, 38, 0.06);  border: 1px solid rgba(220, 38, 38, 0.24); }
+.dlx9-tone-slate { color: var(--rcf-ink-soft);   background: rgba(93, 111, 140, 0.09); border: 1px solid rgba(93, 111, 140, 0.26); }
+
+/* ─── Live state pane ─── */
+.dlx9-balance {
+  font-family: "Archivo", "IBM Plex Sans", sans-serif;
+  font-weight: 700;
+  font-size: clamp(1.9rem, 3vw, 2.4rem);
+  line-height: 1;
+  letter-spacing: -0.02em;
+  color: var(--rcf-ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.dlx9-balance-row {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.dlx9-statgrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
+@media (max-width: 420px) {
+  .dlx9-statgrid { grid-template-columns: 1fr; }
+}
+
+/* Mini activity log rows in the state pane */
+.dlx9-act {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--rcf-line-soft);
+  font-size: 0.72rem;
+}
+
+.dlx9-act:last-child { border-bottom: none; }
+
+.dlx9-act-name {
+  font-weight: 700;
+  color: var(--rcf-ink-soft);
+  text-transform: uppercase;
+  font-size: 0.62rem;
+  letter-spacing: 0.06em;
+}
+
+.dlx9-act-when {
+  color: var(--rcf-ink-dim);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* ─── Rail tags (ledger source / revenue rail) ─── */
+.dlx9-rail {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  border-radius: 5px;
+  padding: 2px 8px;
+  white-space: nowrap;
+}
+
+.dlx9-rail-card   { color: var(--rcf-azure-deep); background: rgba(47, 125, 246, 0.09);  border: 1px solid rgba(47, 125, 246, 0.24); }
+.dlx9-rail-crypto { color: #0f766e;               background: rgba(13, 148, 136, 0.09);  border: 1px solid rgba(13, 148, 136, 0.26); }
+.dlx9-rail-x402   { color: var(--rcf-green);      background: rgba(22, 163, 74, 0.1);    border: 1px solid rgba(22, 163, 74, 0.26); }
+.dlx9-rail-mpp    { color: #0e7490;               background: rgba(8, 145, 178, 0.09);   border: 1px solid rgba(8, 145, 178, 0.26); }
+.dlx9-rail-slate  { color: var(--rcf-ink-soft);   background: rgba(93, 111, 140, 0.09);  border: 1px solid rgba(93, 111, 140, 0.26); }
+
+/* Signed amounts in the ledger table */
+.dlx9-amt {
+  font-family: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.78rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.dlx9-amt-credit { color: var(--rcf-green); }
+.dlx9-amt-debit  { color: var(--rcf-ink); }
+
+.dlx9-ref {
+  display: block;
+  font-family: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.62rem;
+  color: var(--rcf-ink-dim);
+  margin-top: 2px;
+}
+
+/* ═══ x402 visualizer — framed dark technical inset (same family as the
+   SIP-ladder frame): solid dark ground, one crisp keyline, slim labeled
+   header strip with the azure tick. The handshake is a machine artifact;
+   it reads best on the dark console ground. ═══ */
+.dlx9-x4frame {
+  background: #0f1117;
+  border: 1px solid #cbd6e4;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow:
+    0 1px 2px rgba(14, 23, 38, 0.08),
+    0 18px 40px -20px rgba(14, 23, 38, 0.35);
+}
+
+.dlx9-x4head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 11px 18px;
+  background: #151823;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+}
+
+.dlx9-x4title {
+  font-family: "Archivo", "IBM Plex Sans", sans-serif;
+  font-weight: 700;
+  font-size: 0.78rem;
+  letter-spacing: 0.01em;
+  color: #e2e8f0;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  flex-shrink: 0;
+}
+
+/* The frame's single accent detail — the same azure tick the light
+   breadcrumb carries, so the dark inset reads as part of the family. */
+.dlx9-x4title::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  background: var(--rcf-azure);
+  border-radius: 1px;
+  flex-shrink: 0;
+}
+
+.dlx9-x4sub {
+  font-family: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.68rem;
+  color: #8b99b0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  flex: 1;
+}
+
+.dlx9-x4body {
+  padding: 18px 20px 20px;
+}
+
+/* Endpoint column labels above the timeline */
+.dlx9-x4rails {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.dlx9-x4rail-label {
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #64748b;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.dlx9-x4rail-label::after,
+.dlx9-x4rail-label::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.dlx9-x4rail-label:first-child::before { display: none; }
+.dlx9-x4rail-label:last-child::after { display: none; }
+
+/* One handshake step bubble */
+.dlx9-x4steps {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.dlx9-x4step {
+  display: flex;
+  animation: dlx9-rise 0.38s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.dlx9-x4step-agent    { justify-content: flex-start; }
+.dlx9-x4step-endpoint { justify-content: flex-end; }
+
+@keyframes dlx9-rise {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dlx9-x4step { animation: none; }
+}
+
+.dlx9-x4bubble {
+  max-width: 76%;
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid;
+}
+
+.dlx9-x4kind {
+  font-size: 0.58rem;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  margin-bottom: 3px;
+}
+
+.dlx9-x4label {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #e2e8f0;
+}
+
+.dlx9-x4detail {
+  font-family: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.66rem;
+  color: #8b99b0;
+  margin-top: 3px;
+  overflow-wrap: anywhere;
+}
+
+/* Step tones on the dark ground */
+.dlx9-x4-request  { color: #60a5fa; background: rgba(96, 165, 250, 0.08); border-color: rgba(96, 165, 250, 0.3); }
+.dlx9-x4-challenge{ color: #fbbf24; background: rgba(251, 191, 36, 0.07); border-color: rgba(251, 191, 36, 0.3); }
+.dlx9-x4-settle   { color: #4ade80; background: rgba(74, 222, 128, 0.07); border-color: rgba(74, 222, 128, 0.3); }
+
+/* Settlement strip at the frame bottom */
+.dlx9-x4settled {
+  margin-top: 14px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 11px 14px;
+  border-radius: 10px;
+  background: rgba(74, 222, 128, 0.07);
+  border: 1px solid rgba(74, 222, 128, 0.28);
+  font-family: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.72rem;
+  color: #e2e8f0;
+}
+
+.dlx9-x4settled-tag {
+  font-family: "Public Sans", "IBM Plex Sans", sans-serif;
+  font-size: 0.6rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #4ade80;
+  background: rgba(74, 222, 128, 0.12);
+  border: 1px solid rgba(74, 222, 128, 0.3);
+  border-radius: 999px;
+  padding: 3px 10px;
+}
+
+/* Empty prompt inside the dark frame */
+.dlx9-x4empty {
+  padding: 26px 20px;
+  text-align: center;
+  border: 1px dashed rgba(148, 163, 184, 0.25);
+  border-radius: 10px;
+  color: #8b99b0;
+  font-size: 0.8rem;
+}
+
+/* Run/reset buttons tuned for the dark strip */
+.dlx9-x4btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 14px;
+  border-radius: 7px;
+  border: 1px solid rgba(47, 125, 246, 0.55);
+  background: var(--rcf-azure);
+  color: #ffffff;
+  font-family: inherit;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background var(--rcf-ease), border-color var(--rcf-ease), opacity var(--rcf-ease);
+}
+
+.dlx9-x4btn:hover:not(:disabled) { background: var(--rcf-azure-deep); }
+.dlx9-x4btn:disabled { opacity: 0.55; cursor: not-allowed; }
+
+.dlx9-x4btn-ghost {
+  background: transparent;
+  border-color: rgba(148, 163, 184, 0.28);
+  color: #b7c3d6;
+}
+
+.dlx9-x4btn-ghost:hover:not(:disabled) {
+  background: rgba(148, 163, 184, 0.1);
+  border-color: rgba(148, 163, 184, 0.45);
+  color: #e2e8f0;
+}
+
+.dlx9-x4btn:focus-visible {
+  outline: 2px solid var(--rcf-azure);
+  outline-offset: 1px;
+}
+
+/* ─── MPP agent-tab rows ─── */
+.dlx9-tab-row {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.dlx9-tab-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.dlx9-tab-figures {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.dlx9-tab-total {
+  font-family: "Archivo", "IBM Plex Sans", sans-serif;
+  font-weight: 700;
+  font-size: 1.15rem;
+  letter-spacing: -0.01em;
+  color: var(--rcf-ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.dlx9-tab-limit {
+  font-size: 0.7rem;
+  color: var(--rcf-ink-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.dlx9-tick {
+  display: inline-flex;
+  align-items: center;
+  font-family: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.62rem;
+  font-weight: 600;
+  color: #0e7490;
+  background: rgba(8, 145, 178, 0.07);
+  border: 1px solid rgba(8, 145, 178, 0.22);
+  border-radius: 999px;
+  padding: 2px 9px;
+  white-space: nowrap;
+  animation: dlx9-rise 0.3s ease both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dlx9-tick { animation: none; }
+}
+
+/* ─── Compliance gate cards ─── */
+.dlx9-gates {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--rcf-stack);
+}
+
+@media (max-width: 980px) {
+  .dlx9-gates { grid-template-columns: 1fr; }
+}
+
+.dlx9-gate-evidence {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--rcf-line-soft);
+  font-family: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.64rem;
+  color: var(--rcf-ink-dim);
+  overflow-wrap: anywhere;
+}
+
+/* ─── Revenue tiles row ─── */
+.dlx9-rev-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 12px;
+}
+
+/* Footnote under the dashboard section */
+.dlx9-footnote {
+  font-size: 0.68rem;
+  line-height: 1.55;
+  color: var(--rcf-ink-dim);
+  max-width: 76ch;
+  margin: 14px 0 0;
+}
