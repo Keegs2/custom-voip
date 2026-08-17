@@ -179,6 +179,13 @@ services:
       - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:8080,http://localhost:8443}
       - SBC_PROXY_IP=${SBC_PROXY_IP:-127.0.0.1}
       - TEST_MODE=${TEST_MODE:-false}
+      # Payments demo gate — committed default OFF; set PAYMENTS_DEMO_MODE=true
+      # in the (gitignored) .env to activate the /v1/payments demo endpoints.
+      - PAYMENTS_DEMO_MODE=${PAYMENTS_DEMO_MODE:-false}
+      # Demo-only originate short-circuit for /v1/calls (Docker Desktop bridge
+      # API can't reach host-net FreeSWITCH via ESL). Only honored when
+      # PAYMENTS_DEMO_MODE=true; prod with real FS keeps this false.
+      - PAYMENTS_DEMO_FAKE_ORIGINATE=${PAYMENTS_DEMO_FAKE_ORIGINATE:-false}
       - BANDWIDTH_API_CLIENT_ID=${BANDWIDTH_API_CLIENT_ID:-}
       - BANDWIDTH_API_CLIENT_SECRET=${BANDWIDTH_API_CLIENT_SECRET:-}
       - BANDWIDTH_ACCOUNT_ID=${BANDWIDTH_ACCOUNT_ID:-9900717}

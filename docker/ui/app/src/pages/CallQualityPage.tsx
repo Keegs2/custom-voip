@@ -1,12 +1,16 @@
 /**
  * CallQualityPage — Platform-wide SIP call quality analysis tool.
  *
+ * Daylight console treatment (see the RCF CONSOLE / DAYLIGHT CONSOLE blocks in
+ * index.css and the page-scoped `dlx-*` primitives in styles/dl-call-quality.css).
+ *
  * Sections:
- *   1. Filter bar — customer, trunk, number search, direction, date range, product type
- *   2. Quality overview stat cards — Total Calls, ASR, MOS, Packet Loss, Jitter, R-Factor
- *   3. Quality trend charts — MOS, Packet Loss, Jitter over time
- *   4. Full CDR table — sortable, searchable, paginated with quality columns
- *   5. Call detail panel — slide-out drawer with full RTP/quality/billing data
+ *   1. Quiet header — breadcrumb, Archivo title, inline metrics off loaded data
+ *   2. Filter toolbar — customer, trunk, number search, direction, dates, product
+ *   3. Quality overview stat strip — Total Calls, ASR, MOS, Packet Loss, Jitter, R-Factor
+ *   4. Quality trend charts — MOS, Packet Loss, Jitter over time (light-recolored SVG)
+ *   5. Full CDR table — sortable, searchable, paginated with quality columns
+ *   6. Call detail sheet — white elevated slide-out with full RTP/quality/billing data
  */
 
 import { useState, useMemo, useId, useCallback, useEffect } from 'react';
@@ -15,49 +19,77 @@ import { searchCdrs, getCdr } from '../api/cdrs';
 import { listCustomers } from '../api/customers';
 import { listTrunks } from '../api/trunks';
 import { Spinner } from '../components/ui/Spinner';
-import { IconSignal } from '../components/icons/ProductIcons';
 import { AttestationChain } from '../components/stir/AttestationChain';
 import type { Cdr, CallDirection, ProductType } from '../types/cdr';
 import type { Customer } from '../types/customer';
 import type { Trunk } from '../types/trunk';
+import '../styles/dl-call-quality.css';
 
 // ---------------------------------------------------------------------------
-// Quality colour helpers
+// Daylight palette constants (mirror the .dl-scope CSS vars for inline SVG etc.)
+// ---------------------------------------------------------------------------
+
+const MONO = '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace';
+
+const INK_SOFT = '#46566f';
+const INK_DIM = '#5d6f8c';
+const INK_FAINT = '#8b99b0';
+const AZURE = '#2f7df6';
+const AZURE_DEEP = '#1d63dd';
+
+// Status colors — quality semantics only (never decoration). Ink-dark variants
+// tuned for legibility on the white paper canvas.
+const GOOD = '#15803d';
+const WARN = '#b45309';
+const BAD = '#b91c1c';
+
+// Chart series strokes (slightly brighter than the text-status greens)
+const CHART_GREEN = '#16a34a';
+
+// ---------------------------------------------------------------------------
+// Quality colour helpers — red/amber/green status semantics
 // ---------------------------------------------------------------------------
 
 function mosColor(mos: number | null | undefined): string {
-  if (mos == null) return '#4a5568';
-  if (mos >= 4.0) return '#22c55e';
-  if (mos >= 3.5) return '#f59e0b';
-  return '#ef4444';
+  if (mos == null) return INK_FAINT;
+  if (mos >= 4.0) return GOOD;
+  if (mos >= 3.5) return WARN;
+  return BAD;
 }
 
-function mosBg(mos: number | null | undefined): string {
-  if (mos == null) return 'rgba(74,85,104,0.15)';
-  if (mos >= 4.0) return 'rgba(34,197,94,0.12)';
-  if (mos >= 3.5) return 'rgba(245,158,11,0.12)';
-  return 'rgba(239,68,68,0.12)';
+interface QualityTone {
+  text: string;
+  bg: string;
+  border: string;
+}
+
+/** Translucent pill tone for a MOS value on the white canvas. */
+function mosTone(mos: number | null | undefined): QualityTone {
+  if (mos == null) return { text: INK_FAINT, bg: 'rgba(93,111,140,0.08)', border: 'rgba(93,111,140,0.2)' };
+  if (mos >= 4.0) return { text: GOOD, bg: 'rgba(22,163,74,0.1)', border: 'rgba(22,163,74,0.26)' };
+  if (mos >= 3.5) return { text: WARN, bg: 'rgba(180,83,9,0.09)', border: 'rgba(180,83,9,0.26)' };
+  return { text: BAD, bg: 'rgba(220,38,38,0.07)', border: 'rgba(220,38,38,0.26)' };
 }
 
 function rFactorColor(r: number | null | undefined): string {
-  if (r == null) return '#4a5568';
-  if (r >= 80) return '#22c55e';
-  if (r >= 60) return '#f59e0b';
-  return '#ef4444';
+  if (r == null) return INK_FAINT;
+  if (r >= 80) return GOOD;
+  if (r >= 60) return WARN;
+  return BAD;
 }
 
 function packetLossColor(pct: number | null | undefined): string {
-  if (pct == null) return '#4a5568';
-  if (pct <= 1) return '#22c55e';
-  if (pct <= 5) return '#f59e0b';
-  return '#ef4444';
+  if (pct == null) return INK_FAINT;
+  if (pct <= 1) return GOOD;
+  if (pct <= 5) return WARN;
+  return BAD;
 }
 
 function jitterColor(ms: number | null | undefined): string {
-  if (ms == null) return '#4a5568';
-  if (ms <= 20) return '#22c55e';
-  if (ms <= 50) return '#f59e0b';
-  return '#ef4444';
+  if (ms == null) return INK_FAINT;
+  if (ms <= 20) return GOOD;
+  if (ms <= 50) return WARN;
+  return BAD;
 }
 
 function fmtDuration(sec: number): string {
@@ -75,7 +107,9 @@ function fmtBytes(bytes: number | null | undefined): string {
 }
 
 // ---------------------------------------------------------------------------
-// Quality Trend Chart (SVG line/area)
+// Quality Trend Chart (SVG line/area) — recolored for the daylight canvas:
+// ink-scale axes/labels, white-filled dots with colored strokes, low-opacity
+// area gradients, hairline ink grid. No glow filters, no dark boxes.
 // ---------------------------------------------------------------------------
 
 interface TrendPoint {
@@ -169,75 +203,57 @@ function QualityTrendChart({ points, accent, label, formatY, yMin, yMax }: Quali
   const LABEL_EVERY = Math.ceil(points.length / 6);
 
   return (
-    <div style={{ width: '100%' }}>
-      <div
-        style={{
-          fontSize: '0.6rem',
-          fontWeight: 700,
-          color: '#4a5568',
-          textTransform: 'uppercase',
-          letterSpacing: '0.05em',
-          marginBottom: 8,
-        }}
-      >
+    <div className="dlx-chart-box">
+      <div className="dlx-chart-title">
+        <span className="dlx-chart-dot" style={{ background: accent }} aria-hidden="true" />
         {label}
       </div>
-      <div
-        style={{
-          background: 'rgba(10,12,18,0.6)',
-          border: '1px solid rgba(42,47,69,0.35)',
-          borderRadius: 10,
-          padding: '12px 12px 4px',
-          overflowX: 'auto',
-        }}
+      <svg
+        viewBox={`0 0 ${W} ${H}`}
+        style={{ width: '100%', height: 'auto', display: 'block', minHeight: 140 }}
+        aria-label={label}
       >
-        <svg
-          viewBox={`0 0 ${W} ${H}`}
-          style={{ width: '100%', height: 'auto', display: 'block', minHeight: 140 }}
-          aria-label={label}
-        >
-          <defs>
-            <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor={accent} stopOpacity={0.35} />
-              <stop offset="100%" stopColor={accent} stopOpacity={0.02} />
-            </linearGradient>
-          </defs>
+        <defs>
+          <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={accent} stopOpacity={0.14} />
+            <stop offset="100%" stopColor={accent} stopOpacity={0} />
+          </linearGradient>
+        </defs>
 
-          {gridLines.map(({ y, value }) => (
-            <g key={value}>
-              <line x1={PAD_L} y1={y} x2={W - PAD_R} y2={y} stroke="rgba(255,255,255,0.05)" strokeWidth={1} />
-              <text x={PAD_L - 6} y={y + 4} textAnchor="end" fontSize={9} fill="#4a5568" fontFamily="system-ui, -apple-system, sans-serif">
-                {formatY(value)}
-              </text>
+        {gridLines.map(({ y, value }) => (
+          <g key={value}>
+            <line x1={PAD_L} y1={y} x2={W - PAD_R} y2={y} stroke="rgba(14,23,38,0.05)" strokeWidth={1} />
+            <text x={PAD_L - 6} y={y + 4} textAnchor="end" fontSize={9} fill="#7c8ba3" fontFamily={MONO}>
+              {formatY(value)}
+            </text>
+          </g>
+        ))}
+
+        {areaPath && <path d={areaPath} fill={`url(#${gradId})`} />}
+
+        {pathSegments.map((d, i) => (
+          <path key={i} d={d} fill="none" stroke={accent} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+        ))}
+
+        {coords.map((c) => {
+          if (c.y == null) return null;
+          return (
+            <g key={c.point.date}>
+              <circle cx={c.x} cy={c.y} r={2.5} fill="#ffffff" stroke={accent} strokeWidth={1.5} />
+              <title>{c.point.label}: {c.point.value != null ? formatY(c.point.value) : '—'}</title>
             </g>
-          ))}
+          );
+        })}
 
-          {areaPath && <path d={areaPath} fill={`url(#${gradId})`} />}
-
-          {pathSegments.map((d, i) => (
-            <path key={i} d={d} fill="none" stroke={accent} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
-          ))}
-
-          {coords.map((c) => {
-            if (c.y == null) return null;
-            return (
-              <g key={c.point.date}>
-                <circle cx={c.x} cy={c.y} r={2.5} fill="#0f1117" stroke={accent} strokeWidth={1.5} />
-                <title>{c.point.label}: {c.point.value != null ? formatY(c.point.value) : '—'}</title>
-              </g>
-            );
-          })}
-
-          {coords.map((c, i) => {
-            if (i % LABEL_EVERY !== 0) return null;
-            return (
-              <text key={c.point.date} x={c.x} y={H - 6} textAnchor="middle" fontSize={9} fill="#4a5568" fontFamily="system-ui, -apple-system, sans-serif">
-                {c.point.label}
-              </text>
-            );
-          })}
-        </svg>
-      </div>
+        {coords.map((c, i) => {
+          if (i % LABEL_EVERY !== 0) return null;
+          return (
+            <text key={c.point.date} x={c.x} y={H - 6} textAnchor="middle" fontSize={9} fill="#8b99b0" fontFamily="system-ui, sans-serif">
+              {c.point.label}
+            </text>
+          );
+        })}
+      </svg>
     </div>
   );
 }
@@ -287,7 +303,7 @@ function buildDailyQuality(cdrs: Cdr[], startDate: Date, endDate: Date): DailyQu
 }
 
 // ---------------------------------------------------------------------------
-// Overview stat cards
+// Overview stats
 // ---------------------------------------------------------------------------
 
 interface OverviewStats {
@@ -326,58 +342,28 @@ function computeOverviewStats(cdrs: Cdr[]): OverviewStats {
   };
 }
 
-interface OverviewStatCardProps {
+interface StatFigureProps {
   label: string;
   value: React.ReactNode;
-  accent: string;
-  sub?: string;
+  /** Value + keyline color. Status colors read as status; anything else renders neutral. */
+  color?: string;
+  dim?: boolean;
 }
 
-function OverviewStatCard({ label, value, accent, sub }: OverviewStatCardProps) {
+/** One left-keyline figure in the quality stat strip. Status colors carry
+    onto the keyline; informational figures keep the default azure (or the
+    quiet neutral hairline when `dim`). */
+function StatFigure({ label, value, color, dim = false }: StatFigureProps) {
+  const isStatus = color === GOOD || color === WARN || color === BAD;
+  // No-data figures (faint em-dash) drop to the quiet neutral keyline too.
+  const isDim = dim || color === INK_FAINT;
   return (
     <div
-      className="glass-surface glass-hover"
-      style={{
-        padding: '16px 20px',
-        position: 'relative',
-        overflow: 'hidden',
-        flex: '1 1 140px',
-        minWidth: 0,
-      }}
+      className={isDim ? 'dlx-stat dlx-stat-dim' : 'dlx-stat'}
+      style={isStatus && !isDim ? { borderLeftColor: color } : undefined}
     >
-      <div
-        style={{
-          position: 'absolute',
-          top: 0, left: 0, right: 0, height: 2,
-          background: `linear-gradient(90deg, transparent, ${accent}99, transparent)`,
-        }}
-      />
-      <div
-        style={{
-          fontSize: '0.58rem',
-          fontWeight: 700,
-          color: '#4a5568',
-          textTransform: 'uppercase',
-          letterSpacing: '0.05em',
-          marginBottom: 8,
-        }}
-      >
-        {label}
-      </div>
-      <div
-        style={{
-          fontSize: '1.2rem',
-          fontWeight: 700,
-          color: accent,
-          fontVariantNumeric: 'tabular-nums',
-          lineHeight: 1.1,
-        }}
-      >
-        {value}
-      </div>
-      {sub && (
-        <div style={{ fontSize: '0.65rem', color: '#4a5568', marginTop: 3 }}>{sub}</div>
-      )}
+      <div className="dlx-stat-value" style={color ? { color } : undefined}>{value}</div>
+      <div className="dlx-stat-label">{label}</div>
     </div>
   );
 }
@@ -398,6 +384,12 @@ interface CdrTableProps {
   customers: Customer[];
   onSelect: (cdr: Cdr) => void;
   selectedUuid: string | null;
+}
+
+/** Sort direction glyph for a sortable column header. */
+function SortGlyph({ colKey, sort }: { colKey: SortKey; sort: SortState }) {
+  if (sort.key !== colKey) return <span style={{ color: '#b6c2d4', marginLeft: 3 }}>↕</span>;
+  return <span style={{ color: AZURE_DEEP, marginLeft: 3 }}>{sort.dir === 'asc' ? '↑' : '↓'}</span>;
 }
 
 function CdrTable({ cdrs, customers, onSelect, selectedUuid }: CdrTableProps) {
@@ -456,79 +448,69 @@ function CdrTable({ cdrs, customers, onSelect, selectedUuid }: CdrTableProps) {
     setPage(0);
   }
 
-  function SortIcon({ colKey }: { colKey: SortKey }) {
-    if (sort.key !== colKey) return <span style={{ color: '#2d3748', marginLeft: 3 }}>↕</span>;
-    return <span style={{ color: '#60a5fa', marginLeft: 3 }}>{sort.dir === 'asc' ? '↑' : '↓'}</span>;
-  }
-
-  const thStyle = (key?: SortKey): React.CSSProperties => ({
-    padding: '9px 10px',
-    textAlign: 'left',
-    fontSize: '0.58rem',
-    fontWeight: 700,
-    textTransform: 'uppercase',
-    letterSpacing: '0.05em',
-    color: '#4a5568',
-    background: 'rgba(59,130,246,0.035)',
-    boxShadow: 'inset 0 -1px 0 0 rgba(59,130,246,0.12)',
-    whiteSpace: 'nowrap',
-    cursor: key ? 'pointer' : 'default',
-    userSelect: 'none',
-  });
+  const thClass = (key?: SortKey): string => {
+    if (!key) return 'dl-th';
+    return sort.key === key ? 'dl-th dlx-th-sort dlx-th-active' : 'dl-th dlx-th-sort';
+  };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-      {/* Search + record count */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <div style={{ position: 'relative', flex: 1, maxWidth: 360 }}>
+    <>
+      {/* Search + record count toolbar */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 12,
+          padding: '12px 20px',
+          borderBottom: '1px solid var(--rcf-line)',
+          background: 'var(--rcf-tint)',
+        }}
+      >
+        <div style={{ position: 'relative', flex: 1, maxWidth: 380 }}>
           <SearchIcon />
           <input
             type="text"
             placeholder="Search by number, UUID, customer, codec, cause…"
             value={search}
             onChange={(e) => { setSearch(e.target.value); setPage(0); }}
-            className="form-control"
-            style={{ padding: '7px 12px 7px 32px', fontSize: '0.8rem' }}
+            className="dl-input"
+            style={{ width: '100%', padding: '7px 12px 7px 32px', fontSize: '0.8rem' }}
           />
         </div>
-        <span style={{ fontSize: '0.72rem', color: '#4a5568', whiteSpace: 'nowrap' }}>
+        <span style={{ fontSize: '0.72rem', color: INK_DIM, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
           {filtered.length.toLocaleString()} records
         </span>
       </div>
 
       {/* Table */}
-      <div
-        className="glass-surface"
-        style={{
-          overflowX: 'auto',
-          borderRadius: 12,
-        }}
-      >
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.74rem', color: '#cbd5e0' }}>
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.76rem', color: INK_SOFT }}>
           <thead>
             <tr>
-              <th style={thStyle('start_time')} onClick={() => toggleSort('start_time')}>Date / Time <SortIcon colKey="start_time" /></th>
-              <th style={thStyle()}>Customer</th>
-              <th style={thStyle()}>Dir</th>
-              <th style={thStyle()}>From</th>
-              <th style={thStyle()}>To</th>
-              <th style={thStyle('duration_seconds')} onClick={() => toggleSort('duration_seconds')}>Duration <SortIcon colKey="duration_seconds" /></th>
-              <th style={thStyle('mos')} onClick={() => toggleSort('mos')}>MOS <SortIcon colKey="mos" /></th>
-              <th style={thStyle('packet_loss_pct')} onClick={() => toggleSort('packet_loss_pct')}>Pkt Loss <SortIcon colKey="packet_loss_pct" /></th>
-              <th style={thStyle('jitter_avg_ms')} onClick={() => toggleSort('jitter_avg_ms')}>Jitter <SortIcon colKey="jitter_avg_ms" /></th>
-              <th style={thStyle('r_factor')} onClick={() => toggleSort('r_factor')}>R-Factor <SortIcon colKey="r_factor" /></th>
-              <th style={thStyle()}>Codec</th>
-              <th style={thStyle()}>Status</th>
-              <th style={thStyle()}>Hangup Cause</th>
+              <th className={thClass('start_time')} style={{ padding: '10px 12px' }} onClick={() => toggleSort('start_time')}>Date / Time <SortGlyph colKey="start_time" sort={sort} /></th>
+              <th className={thClass()} style={{ padding: '10px 12px' }}>Customer</th>
+              <th className={thClass()} style={{ padding: '10px 12px' }}>Dir</th>
+              <th className={thClass()} style={{ padding: '10px 12px' }}>From</th>
+              <th className={thClass()} style={{ padding: '10px 12px' }}>To</th>
+              <th className={thClass('duration_seconds')} style={{ padding: '10px 12px' }} onClick={() => toggleSort('duration_seconds')}>Duration <SortGlyph colKey="duration_seconds" sort={sort} /></th>
+              <th className={thClass('mos')} style={{ padding: '10px 12px' }} onClick={() => toggleSort('mos')}>MOS <SortGlyph colKey="mos" sort={sort} /></th>
+              <th className={thClass('packet_loss_pct')} style={{ padding: '10px 12px' }} onClick={() => toggleSort('packet_loss_pct')}>Pkt Loss <SortGlyph colKey="packet_loss_pct" sort={sort} /></th>
+              <th className={thClass('jitter_avg_ms')} style={{ padding: '10px 12px' }} onClick={() => toggleSort('jitter_avg_ms')}>Jitter <SortGlyph colKey="jitter_avg_ms" sort={sort} /></th>
+              <th className={thClass('r_factor')} style={{ padding: '10px 12px' }} onClick={() => toggleSort('r_factor')}>R-Factor <SortGlyph colKey="r_factor" sort={sort} /></th>
+              <th className={thClass()} style={{ padding: '10px 12px' }}>Codec</th>
+              <th className={thClass()} style={{ padding: '10px 12px' }}>Status</th>
+              <th className={thClass()} style={{ padding: '10px 12px' }}>Hangup Cause</th>
             </tr>
           </thead>
           <tbody>
             {pageItems.length === 0 && (
               <tr>
-                <td colSpan={13} style={{ padding: '32px 0', textAlign: 'center', color: '#4a5568', fontSize: '0.82rem' }}>
-                  {filtered.length === 0 && cdrs.length === 0
-                    ? 'No CDR records found. Adjust the filters and search.'
-                    : 'No records match your search.'}
+                <td colSpan={13} style={{ padding: '20px' }}>
+                  <div className="dl-empty">
+                    {filtered.length === 0 && cdrs.length === 0
+                      ? 'No CDR records found. Adjust the filters and search.'
+                      : 'No records match your search.'}
+                  </div>
                 </td>
               </tr>
             )}
@@ -537,130 +519,104 @@ function CdrTable({ cdrs, customers, onSelect, selectedUuid }: CdrTableProps) {
               const startDt = new Date(cdr.start_time);
               const isSelected = cdr.uuid === selectedUuid;
               const customerName = customerMap.get(cdr.customer_id) ?? `#${cdr.customer_id}`;
+              const tone = mosTone(cdr.mos);
 
               return (
                 <tr
                   key={cdr.uuid}
-                  className={isSelected ? undefined : 'glass-row-hover'}
+                  className={isSelected ? 'dl-row dlx-row-active' : 'dl-row'}
                   onClick={() => onSelect(cdr)}
-                  style={{
-                    background: isSelected ? 'rgba(59,130,246,0.1)' : undefined,
-                    cursor: 'pointer',
-                    transition: 'background 0.1s',
-                    boxShadow: isSelected ? 'inset 3px 0 0 0 rgba(59,130,246,0.6)' : undefined,
-                  }}
+                  style={{ cursor: 'pointer' }}
                 >
                   {/* Date/Time */}
-                  <td style={{ padding: '6px 10px', whiteSpace: 'nowrap' }}>
-                    <div style={{ color: '#a0aec0', fontVariantNumeric: 'tabular-nums', fontSize: '0.72rem' }}>
+                  <td style={{ padding: '8px 12px', whiteSpace: 'nowrap' }}>
+                    <div style={{ color: INK_SOFT, fontVariantNumeric: 'tabular-nums', fontSize: '0.74rem', fontWeight: 600 }}>
                       {startDt.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
                     </div>
-                    <div style={{ color: '#4a5568', fontSize: '0.68rem', fontVariantNumeric: 'tabular-nums' }}>
+                    <div style={{ color: INK_DIM, fontSize: '0.68rem', fontVariantNumeric: 'tabular-nums' }}>
                       {startDt.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}
                     </div>
                   </td>
 
                   {/* Customer */}
-                  <td style={{ padding: '6px 10px', color: '#94a3b8', fontSize: '0.72rem', whiteSpace: 'nowrap', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  <td style={{ padding: '8px 12px', color: INK_SOFT, fontSize: '0.74rem', whiteSpace: 'nowrap', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis' }}>
                     {customerName}
                   </td>
 
                   {/* Direction */}
-                  <td style={{ padding: '6px 10px' }}>
-                    <span
-                      style={{
-                        fontSize: '0.58rem',
-                        fontWeight: 700,
-                        textTransform: 'uppercase',
-                        letterSpacing: '0.06em',
-                        padding: '2px 6px',
-                        borderRadius: 4,
-                        background: cdr.direction === 'inbound' ? 'rgba(59,130,246,0.15)' : 'rgba(168,85,247,0.15)',
-                        color: cdr.direction === 'inbound' ? '#60a5fa' : '#c084fc',
-                        border: cdr.direction === 'inbound' ? '1px solid rgba(59,130,246,0.25)' : '1px solid rgba(168,85,247,0.25)',
-                      }}
-                    >
+                  <td style={{ padding: '8px 12px' }}>
+                    <span className={cdr.direction === 'inbound' ? 'dl-tag' : 'dl-tag dl-tag-slate'}>
                       {cdr.direction === 'inbound' ? 'In' : 'Out'}
                     </span>
                   </td>
 
                   {/* From */}
-                  <td style={{ padding: '6px 10px', fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', color: '#94a3b8', whiteSpace: 'nowrap', fontSize: '0.72rem' }}>
+                  <td style={{ padding: '8px 12px', fontFamily: MONO, color: INK_SOFT, whiteSpace: 'nowrap', fontSize: '0.74rem', fontWeight: 500 }}>
                     {cdr.caller_id || '—'}
                   </td>
 
                   {/* To */}
-                  <td style={{ padding: '6px 10px', fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', color: '#94a3b8', whiteSpace: 'nowrap', fontSize: '0.72rem' }}>
+                  <td style={{ padding: '8px 12px', fontFamily: MONO, color: AZURE_DEEP, whiteSpace: 'nowrap', fontSize: '0.74rem', fontWeight: 600 }}>
                     {cdr.destination}
                   </td>
 
                   {/* Duration */}
-                  <td style={{ padding: '6px 10px', fontVariantNumeric: 'tabular-nums', color: '#718096', whiteSpace: 'nowrap' }}>
+                  <td style={{ padding: '8px 12px', fontVariantNumeric: 'tabular-nums', color: INK_DIM, whiteSpace: 'nowrap' }}>
                     {fmtDuration(cdr.duration_seconds)}
                   </td>
 
                   {/* MOS */}
-                  <td style={{ padding: '6px 10px' }}>
+                  <td style={{ padding: '8px 12px' }}>
                     {cdr.mos != null ? (
                       <span
                         style={{
                           fontSize: '0.7rem',
                           fontWeight: 700,
-                          padding: '2px 7px',
-                          borderRadius: 5,
-                          background: mosBg(cdr.mos),
-                          color: mosColor(cdr.mos),
+                          padding: '2px 8px',
+                          borderRadius: 20,
+                          background: tone.bg,
+                          border: `1px solid ${tone.border}`,
+                          color: tone.text,
                           fontVariantNumeric: 'tabular-nums',
+                          whiteSpace: 'nowrap',
                         }}
                       >
                         {cdr.mos.toFixed(2)}
                       </span>
                     ) : (
-                      <span style={{ color: '#2d3748' }}>—</span>
+                      <span style={{ color: '#b6c2d4' }}>—</span>
                     )}
                   </td>
 
                   {/* Packet Loss */}
-                  <td style={{ padding: '6px 10px', fontVariantNumeric: 'tabular-nums', color: cdr.packet_loss_pct != null ? packetLossColor(cdr.packet_loss_pct) : '#2d3748' }}>
+                  <td style={{ padding: '8px 12px', fontVariantNumeric: 'tabular-nums', fontWeight: 600, color: cdr.packet_loss_pct != null ? packetLossColor(cdr.packet_loss_pct) : '#b6c2d4' }}>
                     {cdr.packet_loss_pct != null ? `${cdr.packet_loss_pct.toFixed(2)}%` : '—'}
                   </td>
 
                   {/* Jitter */}
-                  <td style={{ padding: '6px 10px', fontVariantNumeric: 'tabular-nums', color: cdr.jitter_avg_ms != null ? jitterColor(cdr.jitter_avg_ms) : '#2d3748' }}>
+                  <td style={{ padding: '8px 12px', fontVariantNumeric: 'tabular-nums', fontWeight: 600, color: cdr.jitter_avg_ms != null ? jitterColor(cdr.jitter_avg_ms) : '#b6c2d4' }}>
                     {cdr.jitter_avg_ms != null ? `${cdr.jitter_avg_ms.toFixed(1)}ms` : '—'}
                   </td>
 
                   {/* R-Factor */}
-                  <td style={{ padding: '6px 10px', fontVariantNumeric: 'tabular-nums', color: rFactorColor(cdr.r_factor) }}>
+                  <td style={{ padding: '8px 12px', fontVariantNumeric: 'tabular-nums', fontWeight: 600, color: cdr.r_factor != null ? rFactorColor(cdr.r_factor) : '#b6c2d4' }}>
                     {cdr.r_factor != null ? cdr.r_factor.toFixed(1) : '—'}
                   </td>
 
                   {/* Codec */}
-                  <td style={{ padding: '6px 10px', fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', color: '#4a5568', fontSize: '0.68rem', whiteSpace: 'nowrap' }}>
+                  <td style={{ padding: '8px 12px', fontFamily: MONO, color: INK_DIM, fontSize: '0.7rem', whiteSpace: 'nowrap' }}>
                     {cdr.read_codec ?? '—'}
                   </td>
 
                   {/* Status */}
-                  <td style={{ padding: '6px 10px' }}>
-                    <span
-                      style={{
-                        fontSize: '0.58rem',
-                        fontWeight: 700,
-                        textTransform: 'uppercase',
-                        letterSpacing: '0.06em',
-                        padding: '2px 6px',
-                        borderRadius: 4,
-                        background: answered ? 'rgba(34,197,94,0.12)' : 'rgba(239,68,68,0.12)',
-                        color: answered ? '#4ade80' : '#f87171',
-                        border: answered ? '1px solid rgba(34,197,94,0.2)' : '1px solid rgba(239,68,68,0.2)',
-                      }}
-                    >
+                  <td style={{ padding: '8px 12px' }}>
+                    <span className={answered ? 'dl-pill dl-pill-on' : 'dl-pill dl-pill-off'}>
                       {answered ? 'Ans' : 'N/A'}
                     </span>
                   </td>
 
                   {/* Hangup Cause */}
-                  <td style={{ padding: '6px 10px', color: '#4a5568', fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', fontSize: '0.68rem', whiteSpace: 'nowrap' }}>
+                  <td style={{ padding: '8px 12px', color: INK_DIM, fontFamily: MONO, fontSize: '0.7rem', whiteSpace: 'nowrap' }}>
                     {cdr.hangup_cause ?? '—'}
                   </td>
                 </tr>
@@ -672,44 +628,43 @@ function CdrTable({ cdrs, customers, onSelect, selectedUuid }: CdrTableProps) {
 
       {/* Pagination */}
       {pageCount > 1 && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'center' }}>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            justifyContent: 'center',
+            padding: '12px 20px',
+            borderTop: '1px solid var(--rcf-line)',
+          }}
+        >
           <button
+            type="button"
+            className="dlx-pgbtn"
             disabled={page === 0}
             onClick={() => setPage((p) => Math.max(0, p - 1))}
-            style={paginationBtnStyle(page === 0)}
           >
             ← Prev
           </button>
-          <span style={{ fontSize: '0.72rem', color: '#4a5568', fontVariantNumeric: 'tabular-nums' }}>
+          <span style={{ fontSize: '0.74rem', color: INK_DIM, fontVariantNumeric: 'tabular-nums' }}>
             {page + 1} / {pageCount}
           </span>
           <button
+            type="button"
+            className="dlx-pgbtn"
             disabled={page >= pageCount - 1}
             onClick={() => setPage((p) => Math.min(pageCount - 1, p + 1))}
-            style={paginationBtnStyle(page >= pageCount - 1)}
           >
             Next →
           </button>
         </div>
       )}
-    </div>
+    </>
   );
 }
 
-function paginationBtnStyle(disabled: boolean): React.CSSProperties {
-  return {
-    padding: '5px 14px',
-    fontSize: '0.72rem',
-    borderRadius: 6,
-    border: `1px solid ${disabled ? 'rgba(255,255,255,0.06)' : 'rgba(59,130,246,0.35)'}`,
-    background: disabled ? 'transparent' : 'rgba(59,130,246,0.1)',
-    color: disabled ? '#2d3748' : '#60a5fa',
-    cursor: disabled ? 'not-allowed' : 'pointer',
-  };
-}
-
 // ---------------------------------------------------------------------------
-// Call Detail Panel (slide-out drawer)
+// Call Detail Sheet (slide-out white panel)
 // ---------------------------------------------------------------------------
 
 interface CallDetailPanelProps {
@@ -724,36 +679,14 @@ function DetailRow({ label, value, mono = false, accent }: {
   accent?: string;
 }) {
   return (
-    <div
-      style={{
-        display: 'flex',
-        gap: 8,
-        padding: '5px 0',
-        borderBottom: '1px solid rgba(42,47,69,0.15)',
-        alignItems: 'flex-start',
-      }}
-    >
+    <div className="dlx-drow">
+      <span className="dlx-drow-label">{label}</span>
       <span
+        className="dlx-drow-value"
         style={{
-          fontSize: '0.6rem',
-          fontWeight: 700,
-          color: '#4a5568',
-          textTransform: 'uppercase',
-          letterSpacing: '0.05em',
-          whiteSpace: 'nowrap',
-          flexShrink: 0,
-          width: 128,
-          paddingTop: 2,
-        }}
-      >
-        {label}
-      </span>
-      <span
-        style={{
-          fontSize: '0.75rem',
-          color: accent ?? '#cbd5e0',
-          fontFamily: mono ? '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace' : 'inherit',
-          wordBreak: 'break-all',
+          color: accent,
+          fontFamily: mono ? MONO : undefined,
+          fontWeight: accent ? 700 : undefined,
         }}
       >
         {value ?? '—'}
@@ -764,21 +697,8 @@ function DetailRow({ label, value, mono = false, accent }: {
 
 function PanelSection({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div style={{ marginBottom: 20 }}>
-      <div
-        style={{
-          fontSize: '0.58rem',
-          fontWeight: 700,
-          color: '#3b82f6',
-          textTransform: 'uppercase',
-          letterSpacing: '0.05em',
-          marginBottom: 10,
-          paddingBottom: 6,
-          borderBottom: '1px solid rgba(59,130,246,0.2)',
-        }}
-      >
-        {title}
-      </div>
+    <div className="dlx-sheet-section">
+      <div className="dlx-sheet-section-title">{title}</div>
       {children}
     </div>
   );
@@ -786,19 +706,10 @@ function PanelSection({ title, children }: { title: string; children: React.Reac
 
 function BigMetric({ label, value, sub, color }: { label: string; value: string; sub?: string; color: string }) {
   return (
-    <div
-      style={{
-        background: `linear-gradient(135deg, ${color}12 0%, transparent 100%)`,
-        border: `1px solid ${color}25`,
-        borderRadius: 10,
-        padding: '12px 16px',
-        flex: '1 1 100px',
-        minWidth: 0,
-      }}
-    >
-      <div style={{ fontSize: '0.58rem', fontWeight: 700, color: '#4a5568', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>{label}</div>
-      <div style={{ fontSize: '1.6rem', fontWeight: 800, color, fontVariantNumeric: 'tabular-nums', lineHeight: 1 }}>{value}</div>
-      {sub && <div style={{ fontSize: '0.62rem', color: '#4a5568', marginTop: 3 }}>{sub}</div>}
+    <div className="dl-tile" style={{ flex: '1 1 100px', padding: '12px 14px' }}>
+      <div className="dl-tile-label">{label}</div>
+      <div className="dl-tile-value" style={{ color, fontSize: '1.5rem' }}>{value}</div>
+      {sub && <div className="dl-tile-hint">{sub}</div>}
     </div>
   );
 }
@@ -819,87 +730,35 @@ function CallDetailPanel({ cdr, onClose }: CallDetailPanelProps) {
   const rateFmt = d.rate_per_min != null ? `$${d.rate_per_min.toFixed(4)}/min` : '—';
 
   return (
-    <div
-      onClick={onClose}
-      style={{
-        position: 'fixed',
-        inset: 0,
-        background: 'rgba(0,0,0,0.55)',
-        zIndex: 1000,
-        display: 'flex',
-        justifyContent: 'flex-end',
-      }}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          width: 460,
-          maxWidth: '95vw',
-          height: '100%',
-          background: 'linear-gradient(180deg, rgba(22,25,36,0.99) 0%, rgba(13,15,21,1) 100%)',
-          backdropFilter: 'blur(18px) saturate(160%)',
-          WebkitBackdropFilter: 'blur(18px) saturate(160%)',
-          boxShadow: 'inset 1px 0 0 0 rgba(59,130,246,0.14), -16px 0 48px rgba(0,0,0,0.5)',
-          display: 'flex',
-          flexDirection: 'column',
-          overflowY: 'auto',
-        }}
-      >
+    <div className="dlx-sheet-backdrop" onClick={onClose}>
+      <div className="dlx-sheet" onClick={(e) => e.stopPropagation()}>
         {/* Header */}
-        <div
-          style={{
-            padding: '20px 24px 16px',
-            borderBottom: '1px solid rgba(59,130,246,0.12)',
-            display: 'flex',
-            alignItems: 'flex-start',
-            justifyContent: 'space-between',
-            gap: 12,
-            position: 'sticky',
-            top: 0,
-            background: 'rgba(22,25,36,0.98)',
-            backdropFilter: 'blur(8px)',
-            zIndex: 1,
-          }}
-        >
-          <div>
-            <div style={{ fontSize: '0.58rem', fontWeight: 700, color: '#3b82f6', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
-              Call Detail
-            </div>
-            <div style={{ fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', fontSize: '0.7rem', color: '#4a5568', wordBreak: 'break-all' }}>
+        <div className="dlx-sheet-head">
+          <div style={{ minWidth: 0 }}>
+            <div className="dlx-sheet-eyebrow">Call Detail</div>
+            <div style={{ fontFamily: MONO, fontSize: '0.7rem', color: INK_DIM, wordBreak: 'break-all', marginTop: 6 }}>
               {d.uuid}
             </div>
           </div>
-          <button
-            onClick={onClose}
-            aria-label="Close panel"
-            style={{
-              background: 'none',
-              border: '1px solid rgba(42,47,69,0.6)',
-              borderRadius: 8,
-              color: '#718096',
-              cursor: 'pointer',
-              padding: '4px 10px',
-              fontSize: '0.8rem',
-              flexShrink: 0,
-              marginTop: 2,
-            }}
-          >
-            ✕
+          <button type="button" className="dlx-sheet-close" onClick={onClose} aria-label="Close panel">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.8} style={{ width: 12, height: 12 }}>
+              <path d="M4 4l8 8M12 4l-8 8" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
           </button>
         </div>
 
         {/* Loading indicator */}
         {isLoading && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 24px', fontSize: '0.75rem', color: '#718096', borderBottom: '1px solid rgba(42,47,69,0.3)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 22px', fontSize: '0.75rem', color: INK_DIM, borderBottom: '1px solid var(--rcf-line-soft)' }}>
             <Spinner size="xs" /> Fetching full detail…
           </div>
         )}
 
         {/* Body */}
-        <div style={{ padding: '20px 24px', flex: 1 }}>
+        <div style={{ padding: '20px 22px', flex: 1 }}>
           {/* Big quality metrics */}
           {(d.mos != null || d.r_factor != null) && (
-            <div style={{ display: 'flex', gap: 10, marginBottom: 20, flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', gap: 10, marginBottom: 22, flexWrap: 'wrap' }}>
               {d.mos != null && (
                 <BigMetric
                   label="MOS Score"
@@ -920,7 +779,7 @@ function CallDetailPanel({ cdr, onClose }: CallDetailPanelProps) {
                 <BigMetric
                   label="Quality %"
                   value={`${d.quality_pct.toFixed(1)}%`}
-                  color={d.quality_pct >= 80 ? '#22c55e' : d.quality_pct >= 60 ? '#f59e0b' : '#ef4444'}
+                  color={d.quality_pct >= 80 ? GOOD : d.quality_pct >= 60 ? WARN : BAD}
                 />
               )}
             </div>
@@ -929,7 +788,7 @@ function CallDetailPanel({ cdr, onClose }: CallDetailPanelProps) {
           <PanelSection title="Call Info">
             <DetailRow label="UUID" value={d.uuid} mono />
             <DetailRow label="Direction" value={
-              <span style={{ padding: '1px 8px', borderRadius: 4, fontSize: '0.68rem', fontWeight: 700, background: d.direction === 'inbound' ? 'rgba(59,130,246,0.15)' : 'rgba(168,85,247,0.15)', color: d.direction === 'inbound' ? '#60a5fa' : '#c084fc' }}>
+              <span className={d.direction === 'inbound' ? 'dl-tag' : 'dl-tag dl-tag-slate'}>
                 {d.direction}
               </span>
             } />
@@ -969,8 +828,8 @@ function CallDetailPanel({ cdr, onClose }: CallDetailPanelProps) {
           {(d.rtp_audio_in_raw_bytes != null || d.rtp_audio_out_raw_bytes != null || d.jitter_avg_ms != null) && (
             <PanelSection title="RTP Statistics">
               {(d.rtp_audio_in_raw_bytes != null || d.rtp_audio_in_packet_count != null) && (
-                <div style={{ marginBottom: 10 }}>
-                  <div style={{ fontSize: '0.62rem', color: '#3b82f6', fontWeight: 700, marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Audio In (from carrier)</div>
+                <div style={{ marginBottom: 12 }}>
+                  <div className="dlx-sheet-subhead">Audio In (from carrier)</div>
                   {d.rtp_audio_in_raw_bytes != null && <DetailRow label="Raw Bytes" value={fmtBytes(d.rtp_audio_in_raw_bytes)} />}
                   {d.rtp_audio_in_media_bytes != null && <DetailRow label="Media Bytes" value={fmtBytes(d.rtp_audio_in_media_bytes)} />}
                   {d.rtp_audio_in_packet_count != null && <DetailRow label="Packets" value={d.rtp_audio_in_packet_count.toLocaleString()} />}
@@ -978,16 +837,16 @@ function CallDetailPanel({ cdr, onClose }: CallDetailPanelProps) {
                 </div>
               )}
               {(d.rtp_audio_out_raw_bytes != null || d.rtp_audio_out_packet_count != null) && (
-                <div style={{ marginBottom: 10 }}>
-                  <div style={{ fontSize: '0.62rem', color: '#a855f7', fontWeight: 700, marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Audio Out (to carrier)</div>
+                <div style={{ marginBottom: 12 }}>
+                  <div className="dlx-sheet-subhead">Audio Out (to carrier)</div>
                   {d.rtp_audio_out_raw_bytes != null && <DetailRow label="Raw Bytes" value={fmtBytes(d.rtp_audio_out_raw_bytes)} />}
                   {d.rtp_audio_out_media_bytes != null && <DetailRow label="Media Bytes" value={fmtBytes(d.rtp_audio_out_media_bytes)} />}
                   {d.rtp_audio_out_packet_count != null && <DetailRow label="Packets" value={d.rtp_audio_out_packet_count.toLocaleString()} />}
                 </div>
               )}
               {(d.jitter_min_ms != null || d.jitter_max_ms != null || d.jitter_avg_ms != null) && (
-                <div style={{ marginBottom: 10 }}>
-                  <div style={{ fontSize: '0.62rem', color: '#f59e0b', fontWeight: 700, marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Jitter</div>
+                <div style={{ marginBottom: 12 }}>
+                  <div className="dlx-sheet-subhead">Jitter</div>
                   {d.jitter_min_ms != null && <DetailRow label="Min" value={`${d.jitter_min_ms.toFixed(2)}ms`} />}
                   {d.jitter_max_ms != null && <DetailRow label="Max" value={`${d.jitter_max_ms.toFixed(2)}ms`} />}
                   {d.jitter_avg_ms != null && <DetailRow label="Avg (mean interval)" value={`${d.jitter_avg_ms.toFixed(2)}ms`} />}
@@ -998,7 +857,7 @@ function CallDetailPanel({ cdr, onClose }: CallDetailPanelProps) {
               )}
               {(d.read_codec != null || d.write_codec != null) && (
                 <div>
-                  <div style={{ fontSize: '0.62rem', color: '#3b82f6', fontWeight: 700, marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Codecs</div>
+                  <div className="dlx-sheet-subhead">Codecs</div>
                   {d.read_codec != null && <DetailRow label="Read Codec" value={d.read_codec} mono />}
                   {d.write_codec != null && <DetailRow label="Write Codec" value={d.write_codec} mono />}
                 </div>
@@ -1046,7 +905,7 @@ function getDefaultFilters(): FilterState {
 }
 
 // ---------------------------------------------------------------------------
-// Pill selector
+// Segmented pill selector
 // ---------------------------------------------------------------------------
 
 interface PillOption<T extends string> {
@@ -1058,12 +917,11 @@ interface PillSelectorProps<T extends string> {
   options: PillOption<T>[];
   value: T;
   onChange: (v: T) => void;
-  accent?: string;
 }
 
-function PillSelector<T extends string>({ options, value, onChange, accent = '#3b82f6' }: PillSelectorProps<T>) {
+function PillSelector<T extends string>({ options, value, onChange }: PillSelectorProps<T>) {
   return (
-    <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+    <div className="dlx-seg">
       {options.map((opt) => {
         const active = opt.value === value;
         return (
@@ -1071,17 +929,7 @@ function PillSelector<T extends string>({ options, value, onChange, accent = '#3
             key={opt.value}
             type="button"
             onClick={() => onChange(opt.value)}
-            style={{
-              padding: '4px 12px',
-              fontSize: '0.72rem',
-              fontWeight: active ? 700 : 500,
-              borderRadius: 20,
-              border: active ? `1px solid ${accent}50` : '1px solid rgba(42,47,69,0.6)',
-              background: active ? `${accent}18` : 'transparent',
-              color: active ? accent : '#4a5568',
-              cursor: 'pointer',
-              transition: 'all 0.15s',
-            }}
+            className={active ? 'dlx-seg-btn dlx-seg-btn-active' : 'dlx-seg-btn'}
           >
             {opt.label}
           </button>
@@ -1092,29 +940,46 @@ function PillSelector<T extends string>({ options, value, onChange, accent = '#3
 }
 
 // ---------------------------------------------------------------------------
-// Section card wrapper
+// Quiet page header — breadcrumb, Archivo title, inline metrics off data the
+// page already loads (no extra API calls). Metrics show em-dashes until the
+// CDR search resolves.
 // ---------------------------------------------------------------------------
 
-function SectionCard({ children, accent = '#3b82f6' }: { children: React.ReactNode; accent?: string }) {
+interface PageHeaderProps {
+  stats: OverviewStats;
+  loaded: boolean;
+}
+
+function CallQualityHeader({ stats, loaded }: PageHeaderProps) {
   return (
-    <div
-      className="glass-surface glass-hover"
-      style={{
-        padding: '24px 28px',
-        position: 'relative',
-        overflow: 'hidden',
-      }}
-    >
-      <div
-        style={{
-          position: 'absolute',
-          top: 0, left: 40, right: 40, height: 2,
-          background: `linear-gradient(90deg, transparent, ${accent}, transparent)`,
-          opacity: 0.55,
-        }}
-      />
-      {children}
-    </div>
+    <header className="dl-header fx-load">
+      <div className="dl-header-id">
+        <div className="dl-crumb">
+          <span>Call Quality</span>
+          <span className="dl-crumb-sep" aria-hidden="true">/</span>
+          <span>Granite CRAG</span>
+        </div>
+        <h1 className="dl-title">Call Quality</h1>
+        <p className="dl-sub">
+          Platform-wide SIP call analysis — MOS, packet loss, jitter, and RTP diagnostics for every call.
+        </p>
+      </div>
+
+      <div className="dl-metrics">
+        <div className="dl-metric">
+          <div className="dl-metric-value">{loaded ? stats.totalCalls.toLocaleString() : '—'}</div>
+          <div className="dl-metric-label">Calls</div>
+        </div>
+        <div className="dl-metric">
+          <div className="dl-metric-value">{loaded && stats.totalCalls > 0 ? `${stats.asr}%` : '—'}</div>
+          <div className="dl-metric-label">ASR</div>
+        </div>
+        <div className="dl-metric">
+          <div className="dl-metric-value">{loaded && stats.avgMos != null ? stats.avgMos.toFixed(2) : '—'}</div>
+          <div className="dl-metric-label">Avg MOS</div>
+        </div>
+      </div>
+    </header>
   );
 }
 
@@ -1123,6 +988,7 @@ function SectionCard({ children, accent = '#3b82f6' }: { children: React.ReactNo
 // ---------------------------------------------------------------------------
 
 export function CallQualityPage() {
+  // ALL hooks unconditionally at top — rules of hooks (#310 prevention)
   const [filters, setFilters] = useState<FilterState>(getDefaultFilters);
   const [appliedFilters, setAppliedFilters] = useState<FilterState>(getDefaultFilters);
   const [selectedCdr, setSelectedCdr] = useState<Cdr | null>(null);
@@ -1143,8 +1009,11 @@ export function CallQualityPage() {
   const customers: Customer[] = customersData?.items ?? [];
   const trunks: Trunk[] = trunksData?.items ?? [];
 
-  // When customer changes, reset trunk selection
+  // When customer changes, reset trunk selection. Pre-existing behavior kept
+  // verbatim through the daylight conversion (visual-only pass) — the lint
+  // finding predates it and refactoring the filter flow is out of scope here.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setFilters((prev) => ({ ...prev, trunkId: null }));
   }, [filters.customerId]);
 
@@ -1210,418 +1079,285 @@ export function CallQualityPage() {
     setAppliedFilters(defaults);
   }
 
-  const labelStyle: React.CSSProperties = {
-    fontSize: '0.6rem',
-    fontWeight: 700,
-    color: '#4a5568',
-    textTransform: 'uppercase',
-    letterSpacing: '0.05em',
-    marginBottom: 6,
-    display: 'block',
-  };
+  const sectionLoading = (message: string) => (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: INK_DIM, fontSize: '0.82rem', padding: '20px' }}>
+      <Spinner size="xs" /> {message}
+    </div>
+  );
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 24, paddingBottom: 40 }}>
+    <div className="dl-scope">
+      <div className="dl-shell">
+        {/* Quiet console header — breadcrumb, title, inline metrics, closing rule */}
+        <CallQualityHeader stats={overviewStats} loaded={!isLoading && !isError} />
 
-      {/* Page header */}
-      <div
-        style={{
-          paddingTop: 8,
-          paddingBottom: 28,
-          borderBottom: '1px solid rgba(59,130,246,0.12)',
-          textAlign: 'center',
-        }}
-      >
-        {/* Icon badge — centered */}
-        <div
-          style={{
-            width: 48,
-            height: 48,
-            borderRadius: 14,
-            background: 'linear-gradient(135deg, rgba(59,130,246,0.20) 0%, rgba(59,130,246,0.10) 100%)',
-            border: '1px solid rgba(59,130,246,0.30)',
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            color: '#3b82f6',
-            marginBottom: 14,
-            boxShadow: '0 0 24px rgba(59,130,246,0.18)',
-          }}
-          aria-hidden="true"
-        >
-          <IconSignal size={24} />
+        <div className="dl-stack" style={{ paddingBottom: 24 }}>
+
+          {/* ── Filter toolbar ─────────────────────────────────────── */}
+          <div className="dl-panel fx-load fx-load-d1">
+            <div className="dl-panel-head">
+              <span className="dl-panel-title">Filters</span>
+              {cdrData && (
+                <span className="dl-count" style={{ marginLeft: 'auto' }}>
+                  {allCdrs.length.toLocaleString()} of {cdrData.total.toLocaleString()} records
+                </span>
+              )}
+            </div>
+            <div className="dl-panel-body">
+              <div className="dlx-filter-grid" style={{ marginBottom: 16 }}>
+                {/* Customer */}
+                <div>
+                  <label className="dl-flabel" htmlFor="cq-customer">Customer</label>
+                  <select
+                    id="cq-customer"
+                    value={filters.customerId ?? ''}
+                    onChange={(e) => setFilters((p) => ({ ...p, customerId: e.target.value ? Number(e.target.value) : null }))}
+                    className="dl-input"
+                    style={{ width: '100%' }}
+                  >
+                    <option value="">All Customers</option>
+                    {customers.map((c) => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Trunk */}
+                <div>
+                  <label className="dl-flabel" htmlFor="cq-trunk">Trunk</label>
+                  <select
+                    id="cq-trunk"
+                    value={filters.trunkId ?? ''}
+                    onChange={(e) => setFilters((p) => ({ ...p, trunkId: e.target.value ? Number(e.target.value) : null }))}
+                    className="dl-input"
+                    style={{ width: '100%' }}
+                  >
+                    <option value="">All Trunks</option>
+                    {trunks.map((t) => (
+                      <option key={t.id} value={t.id}>{t.trunk_name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Number / DID search */}
+                <div>
+                  <label className="dl-flabel" htmlFor="cq-number">Number / DID</label>
+                  <input
+                    id="cq-number"
+                    type="text"
+                    placeholder="e.g. +14155551234"
+                    value={filters.numberSearch}
+                    onChange={(e) => setFilters((p) => ({ ...p, numberSearch: e.target.value }))}
+                    className="dl-input dl-input-mono"
+                    style={{ width: '100%' }}
+                  />
+                </div>
+
+                {/* Start Date */}
+                <div>
+                  <label className="dl-flabel" htmlFor="cq-start">Start Date</label>
+                  <input
+                    id="cq-start"
+                    type="date"
+                    value={filters.startDate}
+                    onChange={(e) => setFilters((p) => ({ ...p, startDate: e.target.value }))}
+                    className="dl-input"
+                    style={{ width: '100%', colorScheme: 'light' }}
+                  />
+                </div>
+
+                {/* End Date */}
+                <div>
+                  <label className="dl-flabel" htmlFor="cq-end">End Date</label>
+                  <input
+                    id="cq-end"
+                    type="date"
+                    value={filters.endDate}
+                    onChange={(e) => setFilters((p) => ({ ...p, endDate: e.target.value }))}
+                    className="dl-input"
+                    style={{ width: '100%', colorScheme: 'light' }}
+                  />
+                </div>
+              </div>
+
+              {/* Direction + Product type pills */}
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '16px 32px', marginBottom: 18, alignItems: 'flex-start' }}>
+                <div>
+                  <div className="dl-flabel">Direction</div>
+                  <PillSelector<CallDirection | 'all'>
+                    options={[
+                      { value: 'all', label: 'All' },
+                      { value: 'inbound', label: 'Inbound' },
+                      { value: 'outbound', label: 'Outbound' },
+                    ]}
+                    value={filters.direction}
+                    onChange={(v) => setFilters((p) => ({ ...p, direction: v }))}
+                  />
+                </div>
+                <div>
+                  <div className="dl-flabel">Product Type</div>
+                  <PillSelector<ProductType | 'all'>
+                    options={[
+                      { value: 'all', label: 'All' },
+                      { value: 'rcf', label: 'RCF' },
+                      { value: 'trunk', label: 'Trunk' },
+                      { value: 'api', label: 'API' },
+                    ]}
+                    value={filters.productType}
+                    onChange={(v) => setFilters((p) => ({ ...p, productType: v }))}
+                  />
+                </div>
+              </div>
+
+              {/* Action buttons */}
+              <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  className="dl-btn dl-btn-primary"
+                  onClick={handleSearch}
+                  disabled={isLoading}
+                >
+                  {isLoading ? <Spinner size="xs" /> : <SearchIconSmall />}
+                  {isLoading ? 'Loading…' : 'Search'}
+                </button>
+                <button
+                  type="button"
+                  className="dl-btn dl-btn-ghost"
+                  onClick={handleReset}
+                >
+                  Reset
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* ── Error state ────────────────────────────────────────── */}
+          {isError && (
+            <div className="dl-banner dl-banner-err" style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+              <span>Unable to load CDR data. The CDR service may be unavailable.</span>
+              <button
+                type="button"
+                className="dl-btn dl-btn-danger"
+                style={{ marginLeft: 'auto', padding: '5px 14px', fontSize: '0.76rem' }}
+                onClick={() => refetch()}
+              >
+                Retry
+              </button>
+            </div>
+          )}
+
+          {/* ── Quality overview stat strip ────────────────────────── */}
+          <div className="dl-panel fx-load fx-load-d2">
+            <div className="dl-panel-head">
+              <span className="dl-panel-title">Quality Overview</span>
+            </div>
+            {isLoading ? (
+              sectionLoading('Computing metrics…')
+            ) : (
+              <div className="dl-panel-body">
+                <div className="dlx-statline">
+                  <StatFigure
+                    label="Total calls"
+                    value={overviewStats.totalCalls.toLocaleString()}
+                    dim
+                  />
+                  <StatFigure
+                    label={`ASR · ${overviewStats.answeredCalls.toLocaleString()} answered`}
+                    value={overviewStats.totalCalls > 0 ? `${overviewStats.asr}%` : '—'}
+                    color={AZURE_DEEP}
+                  />
+                  <StatFigure
+                    label="MOS · voice quality"
+                    value={overviewStats.avgMos != null ? overviewStats.avgMos.toFixed(2) : '—'}
+                    color={mosColor(overviewStats.avgMos)}
+                  />
+                  <StatFigure
+                    label="Avg packet loss"
+                    value={overviewStats.avgPacketLossPct != null ? `${overviewStats.avgPacketLossPct.toFixed(2)}%` : '—'}
+                    color={packetLossColor(overviewStats.avgPacketLossPct)}
+                  />
+                  <StatFigure
+                    label="Avg jitter"
+                    value={overviewStats.avgJitterMs != null ? `${overviewStats.avgJitterMs.toFixed(1)}ms` : '—'}
+                    color={jitterColor(overviewStats.avgJitterMs)}
+                  />
+                  <StatFigure
+                    label="Avg R-Factor"
+                    value={overviewStats.avgRFactor != null ? overviewStats.avgRFactor.toFixed(1) : '—'}
+                    color={rFactorColor(overviewStats.avgRFactor)}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* ── Quality trends ─────────────────────────────────────── */}
+          <div className="dl-panel fx-load fx-load-d3">
+            <div className="dl-panel-head">
+              <span className="dl-panel-title">Quality Trends</span>
+              <span className="dl-panel-sub">Daily averages across the selected date range.</span>
+            </div>
+            {isLoading ? (
+              sectionLoading('Building charts…')
+            ) : allCdrs.length === 0 ? (
+              <div style={{ padding: 20 }}>
+                <div className="dl-empty">
+                  No CDR data for the selected filters. Adjust the criteria and search again.
+                </div>
+              </div>
+            ) : (
+              <div className="dl-panel-body">
+                <div className="dlx-chart-grid">
+                  <QualityTrendChart
+                    points={mosPts}
+                    accent={CHART_GREEN}
+                    label="MOS Score — Daily Avg"
+                    formatY={(v) => v.toFixed(2)}
+                    yMin={1}
+                    yMax={5}
+                  />
+                  <QualityTrendChart
+                    points={plPts}
+                    accent={AZURE}
+                    label="Packet Loss % — Daily Avg"
+                    formatY={(v) => `${v.toFixed(2)}%`}
+                    yMin={0}
+                  />
+                  <QualityTrendChart
+                    points={jPts}
+                    accent={AZURE_DEEP}
+                    label="Jitter (avg ms) — Daily"
+                    formatY={(v) => `${v.toFixed(1)}ms`}
+                    yMin={0}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* ── CDR Table ──────────────────────────────────────────── */}
+          <div className="dl-panel fx-load fx-load-d3">
+            <div className="dl-panel-head">
+              <span className="dl-panel-title">CDR Records</span>
+              {allCdrs.length > 0 && (
+                <span className="dl-count">{allCdrs.length.toLocaleString()} loaded</span>
+              )}
+            </div>
+            {isLoading ? (
+              sectionLoading('Loading records…')
+            ) : (
+              <CdrTable
+                cdrs={allCdrs}
+                customers={customers}
+                onSelect={handleSelect}
+                selectedUuid={selectedCdr?.uuid ?? null}
+              />
+            )}
+          </div>
         </div>
-
-        {/* Title */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 6 }}>
-          <h1
-            style={{
-              fontSize: '1.5rem',
-              fontWeight: 800,
-              color: '#e2e8f0',
-              letterSpacing: '-0.02em',
-              margin: 0,
-              lineHeight: 1.15,
-            }}
-          >
-            Call Quality
-          </h1>
-        </div>
-
-        {/* Subtitle */}
-        <p style={{ fontSize: '0.82rem', color: '#4a5568', margin: 0, marginLeft: 'auto', marginRight: 'auto', letterSpacing: '0.01em' }}>
-          SIP call analysis, quality metrics, and RTP diagnostics
-        </p>
       </div>
 
-      {/* Filter bar */}
-      <div
-        className="glass-surface glass-hover"
-        style={{
-          padding: '24px',
-          position: 'relative',
-          overflow: 'hidden',
-        }}
-      >
-        <div
-          style={{
-            position: 'absolute',
-            top: 0, left: 40, right: 40, height: 2,
-            background: 'linear-gradient(90deg, transparent, rgba(59,130,246,0.6), transparent)',
-          }}
-        />
-
-        <div
-          style={{
-            fontSize: '0.58rem',
-            fontWeight: 700,
-            color: '#3b82f6',
-            textTransform: 'uppercase',
-            letterSpacing: '0.05em',
-            marginBottom: 18,
-          }}
-        >
-          Filters
-        </div>
-
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 16, marginBottom: 16 }}>
-          {/* Customer */}
-          <div>
-            <label style={labelStyle}>Customer</label>
-            <select
-              value={filters.customerId ?? ''}
-              onChange={(e) => setFilters((p) => ({ ...p, customerId: e.target.value ? Number(e.target.value) : null }))}
-              className="form-control"
-              style={{ appearance: 'none' }}
-            >
-              <option value="">All Customers</option>
-              {customers.map((c) => (
-                <option key={c.id} value={c.id}>{c.name}</option>
-              ))}
-            </select>
-          </div>
-
-          {/* Trunk */}
-          <div>
-            <label style={labelStyle}>Trunk</label>
-            <select
-              value={filters.trunkId ?? ''}
-              onChange={(e) => setFilters((p) => ({ ...p, trunkId: e.target.value ? Number(e.target.value) : null }))}
-              className="form-control"
-              style={{ appearance: 'none' }}
-            >
-              <option value="">All Trunks</option>
-              {trunks.map((t) => (
-                <option key={t.id} value={t.id}>{t.trunk_name}</option>
-              ))}
-            </select>
-          </div>
-
-          {/* Number / DID search */}
-          <div>
-            <label style={labelStyle}>Number / DID</label>
-            <input
-              type="text"
-              placeholder="e.g. +14155551234"
-              value={filters.numberSearch}
-              onChange={(e) => setFilters((p) => ({ ...p, numberSearch: e.target.value }))}
-              className="form-control"
-            />
-          </div>
-
-          {/* Start Date */}
-          <div>
-            <label style={labelStyle}>Start Date</label>
-            <input
-              type="date"
-              value={filters.startDate}
-              onChange={(e) => setFilters((p) => ({ ...p, startDate: e.target.value }))}
-              className="form-control"
-              style={{ colorScheme: 'dark' }}
-            />
-          </div>
-
-          {/* End Date */}
-          <div>
-            <label style={labelStyle}>End Date</label>
-            <input
-              type="date"
-              value={filters.endDate}
-              onChange={(e) => setFilters((p) => ({ ...p, endDate: e.target.value }))}
-              className="form-control"
-              style={{ colorScheme: 'dark' }}
-            />
-          </div>
-        </div>
-
-        {/* Direction + Product type pills */}
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 20, marginBottom: 20, alignItems: 'flex-start' }}>
-          <div>
-            <div style={labelStyle}>Direction</div>
-            <PillSelector<CallDirection | 'all'>
-              options={[
-                { value: 'all', label: 'All' },
-                { value: 'inbound', label: 'Inbound' },
-                { value: 'outbound', label: 'Outbound' },
-              ]}
-              value={filters.direction}
-              onChange={(v) => setFilters((p) => ({ ...p, direction: v }))}
-            />
-          </div>
-          <div>
-            <div style={labelStyle}>Product Type</div>
-            <PillSelector<ProductType | 'all'>
-              options={[
-                { value: 'all', label: 'All' },
-                { value: 'rcf', label: 'RCF' },
-                { value: 'trunk', label: 'Trunk' },
-                { value: 'api', label: 'API' },
-              ]}
-              value={filters.productType}
-              onChange={(v) => setFilters((p) => ({ ...p, productType: v }))}
-            />
-          </div>
-        </div>
-
-        {/* Action buttons */}
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-          <button
-            type="button"
-            onClick={handleSearch}
-            disabled={isLoading}
-            style={{
-              padding: '8px 20px',
-              fontSize: '0.82rem',
-              fontWeight: 700,
-              borderRadius: 8,
-              border: '1px solid rgba(59,130,246,0.4)',
-              background: 'rgba(59,130,246,0.14)',
-              color: '#93c5fd',
-              cursor: isLoading ? 'not-allowed' : 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              opacity: isLoading ? 0.7 : 1,
-              transition: 'all 0.15s',
-            }}
-            onMouseEnter={(e) => { if (!isLoading) e.currentTarget.style.background = 'rgba(59,130,246,0.22)'; }}
-            onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(59,130,246,0.14)'; }}
-          >
-            {isLoading ? <Spinner size="xs" /> : <SearchIconSmall />}
-            {isLoading ? 'Loading…' : 'Search'}
-          </button>
-          <button
-            type="button"
-            onClick={handleReset}
-            style={{
-              padding: '8px 16px',
-              fontSize: '0.82rem',
-              fontWeight: 500,
-              borderRadius: 8,
-              border: '1px solid rgba(42,47,69,0.6)',
-              background: 'transparent',
-              color: '#718096',
-              cursor: 'pointer',
-              transition: 'all 0.15s',
-            }}
-            onMouseEnter={(e) => { e.currentTarget.style.color = '#e2e8f0'; e.currentTarget.style.borderColor = 'rgba(42,47,69,0.9)'; }}
-            onMouseLeave={(e) => { e.currentTarget.style.color = '#718096'; e.currentTarget.style.borderColor = 'rgba(42,47,69,0.6)'; }}
-          >
-            Reset
-          </button>
-          {cdrData && (
-            <span style={{ fontSize: '0.72rem', color: '#4a5568', marginLeft: 4 }}>
-              {allCdrs.length.toLocaleString()} of {cdrData.total.toLocaleString()} records
-            </span>
-          )}
-        </div>
-      </div>
-
-      {/* Error state */}
-      {isError && (
-        <div
-          style={{
-            padding: '14px 18px',
-            borderRadius: 10,
-            background: 'rgba(239,68,68,0.08)',
-            border: '1px solid rgba(239,68,68,0.18)',
-            color: '#f87171',
-            fontSize: '0.82rem',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 10,
-          }}
-        >
-          <span>Unable to load CDR data. The CDR service may be unavailable.</span>
-          <button
-            onClick={() => refetch()}
-            style={{ marginLeft: 'auto', padding: '4px 12px', fontSize: '0.76rem', borderRadius: 6, border: '1px solid rgba(239,68,68,0.3)', background: 'transparent', color: '#f87171', cursor: 'pointer' }}
-          >
-            Retry
-          </button>
-        </div>
-      )}
-
-      {/* Quality overview cards */}
-      <SectionCard accent="#3b82f6">
-        <div
-          style={{
-            fontSize: '0.6rem',
-            fontWeight: 700,
-            color: '#3b82f6',
-            textTransform: 'uppercase',
-            letterSpacing: '0.05em',
-            marginBottom: 16,
-          }}
-        >
-          Quality Overview
-        </div>
-        {isLoading ? (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: '#718096', fontSize: '0.82rem', padding: '16px 0' }}>
-            <Spinner size="xs" /> Computing metrics…
-          </div>
-        ) : (
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
-            <OverviewStatCard
-              label="Total Calls"
-              value={overviewStats.totalCalls.toLocaleString()}
-              accent="#60a5fa"
-            />
-            <OverviewStatCard
-              label="ASR"
-              value={`${overviewStats.asr}%`}
-              accent={overviewStats.asr >= 70 ? '#22c55e' : overviewStats.asr >= 50 ? '#f59e0b' : '#ef4444'}
-              sub={`${overviewStats.answeredCalls.toLocaleString()} answered`}
-            />
-            <OverviewStatCard
-              label="Avg MOS"
-              value={overviewStats.avgMos != null ? overviewStats.avgMos.toFixed(2) : '—'}
-              accent={mosColor(overviewStats.avgMos)}
-              sub={overviewStats.avgMos != null ? (overviewStats.avgMos >= 4.0 ? 'Excellent' : overviewStats.avgMos >= 3.5 ? 'Good' : 'Poor') : undefined}
-            />
-            <OverviewStatCard
-              label="Avg Pkt Loss"
-              value={overviewStats.avgPacketLossPct != null ? `${overviewStats.avgPacketLossPct.toFixed(2)}%` : '—'}
-              accent={packetLossColor(overviewStats.avgPacketLossPct)}
-            />
-            <OverviewStatCard
-              label="Avg Jitter"
-              value={overviewStats.avgJitterMs != null ? `${overviewStats.avgJitterMs.toFixed(1)}ms` : '—'}
-              accent={jitterColor(overviewStats.avgJitterMs)}
-            />
-            <OverviewStatCard
-              label="Avg R-Factor"
-              value={overviewStats.avgRFactor != null ? overviewStats.avgRFactor.toFixed(1) : '—'}
-              accent={rFactorColor(overviewStats.avgRFactor)}
-            />
-          </div>
-        )}
-      </SectionCard>
-
-      {/* Quality trends */}
-      <SectionCard accent="#3b82f6">
-        <div
-          style={{
-            fontSize: '0.6rem',
-            fontWeight: 700,
-            color: '#3b82f6',
-            textTransform: 'uppercase',
-            letterSpacing: '0.05em',
-            marginBottom: 16,
-          }}
-        >
-          Quality Trends
-        </div>
-        {isLoading ? (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: '#718096', fontSize: '0.82rem', padding: '16px 0' }}>
-            <Spinner size="xs" /> Building charts…
-          </div>
-        ) : allCdrs.length === 0 ? (
-          <div style={{ padding: '24px 0', textAlign: 'center', color: '#4a5568', fontSize: '0.82rem' }}>
-            No CDR data for the selected filters. Adjust the criteria and search again.
-          </div>
-        ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16 }}>
-            <QualityTrendChart
-              points={mosPts}
-              accent="#22c55e"
-              label="MOS Score — Daily Avg"
-              formatY={(v) => v.toFixed(2)}
-              yMin={1}
-              yMax={5}
-            />
-            <QualityTrendChart
-              points={plPts}
-              accent="#ef4444"
-              label="Packet Loss % — Daily Avg"
-              formatY={(v) => `${v.toFixed(2)}%`}
-              yMin={0}
-            />
-            <QualityTrendChart
-              points={jPts}
-              accent="#f59e0b"
-              label="Jitter (avg ms) — Daily"
-              formatY={(v) => `${v.toFixed(1)}ms`}
-              yMin={0}
-            />
-          </div>
-        )}
-      </SectionCard>
-
-      {/* CDR Table */}
-      <SectionCard accent="#3b82f6">
-        <div
-          style={{
-            fontSize: '0.6rem',
-            fontWeight: 700,
-            color: '#3b82f6',
-            textTransform: 'uppercase',
-            letterSpacing: '0.05em',
-            marginBottom: 16,
-          }}
-        >
-          CDR Records
-          {allCdrs.length > 0 && (
-            <span style={{ fontWeight: 400, color: '#4a5568', marginLeft: 8, textTransform: 'none', letterSpacing: 0 }}>
-              — {allCdrs.length.toLocaleString()} records loaded
-            </span>
-          )}
-        </div>
-        {isLoading ? (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: '#718096', fontSize: '0.82rem', padding: '16px 0' }}>
-            <Spinner size="xs" /> Loading records…
-          </div>
-        ) : (
-          <CdrTable
-            cdrs={allCdrs}
-            customers={customers}
-            onSelect={handleSelect}
-            selectedUuid={selectedCdr?.uuid ?? null}
-          />
-        )}
-      </SectionCard>
-
-      {/* Call Detail Panel */}
+      {/* Call Detail Sheet */}
       {selectedCdr && <CallDetailPanel cdr={selectedCdr} onClose={handleClose} />}
     </div>
   );
@@ -1631,13 +1367,12 @@ export function CallQualityPage() {
 // SVG Icons
 // ---------------------------------------------------------------------------
 
-
 function SearchIcon() {
   return (
     <svg
       viewBox="0 0 16 16"
       fill="none"
-      stroke="#4a5568"
+      stroke="#9aa9c0"
       strokeWidth={1.5}
       strokeLinecap="round"
       strokeLinejoin="round"

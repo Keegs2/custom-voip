@@ -1,0 +1,615 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   DL-DOCS — daylight-console documentation primitives (`dlx-` prefix)
+
+   Page styles for the Granite CRAG documentation pages (RcfDocsPage,
+   ApiDocsPage) built on the shared DAYLIGHT CONSOLE system in index.css.
+   Everything here references the shared `--rcf-*` custom properties declared
+   on `.dl-scope` — no re-stated scale values. Hand-written @media only
+   (never Tailwind md:* — see the container-build gotcha in CLAUDE.md).
+
+   FLAG FOR CONSOLIDATION: these `dlx-` primitives are candidates for
+   promotion into the shared `dl-*` block in index.css once a second page
+   needs them (docs prose, code blocks, method chips, reference tables).
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ─── Readable docs measure inside the 1200px shell ─── */
+.dlx-docs-col {
+  max-width: 848px;
+  margin: 0 auto;
+}
+
+/* ═══ Collapsible doc section — a dl-panel with a quiet toggle head ═══ */
+
+.dlx-section-toggle {
+  appearance: none;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 22px;
+  background: none;
+  border: none;
+  border-bottom: 1px solid transparent;
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+  transition: background var(--rcf-ease), border-color var(--rcf-ease);
+}
+
+.dlx-section-toggle:hover {
+  background: var(--rcf-tint-hover);
+}
+
+.dlx-section-toggle:focus-visible {
+  outline: 2px solid var(--rcf-azure);
+  outline-offset: -2px;
+}
+
+.dlx-section-toggle[aria-expanded='true'] {
+  background: var(--rcf-tint);
+  border-bottom-color: var(--rcf-line);
+}
+
+.dlx-section-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  background: rgba(47, 125, 246, 0.1);
+  border: 1px solid rgba(47, 125, 246, 0.22);
+  color: var(--rcf-azure-deep);
+}
+
+.dlx-section-id {
+  flex: 1;
+  min-width: 0;
+}
+
+.dlx-section-title {
+  display: block;
+  font-family: "Archivo", "IBM Plex Sans", sans-serif;
+  font-weight: 700;
+  font-size: 0.98rem;
+  letter-spacing: -0.012em;
+  line-height: 1.25;
+  color: var(--rcf-ink);
+  margin-bottom: 3px;
+}
+
+.dlx-section-sub {
+  display: block;
+  font-size: 0.76rem;
+  line-height: 1.45;
+  color: var(--rcf-ink-dim);
+}
+
+.dlx-section-chev {
+  flex-shrink: 0;
+  color: var(--rcf-ink-dim);
+  transform: rotate(-90deg);
+  transition: transform var(--rcf-ease), color var(--rcf-ease);
+}
+
+.dlx-section-toggle:hover .dlx-section-chev {
+  color: var(--rcf-azure-deep);
+}
+
+.dlx-section-chev-open {
+  transform: rotate(0deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dlx-section-chev { transition: none; }
+}
+
+.dlx-section-body {
+  padding: 24px 28px 28px;
+}
+
+@media (max-width: 620px) {
+  .dlx-section-body { padding: 18px 18px 22px; }
+  .dlx-section-toggle { padding: 14px 16px; }
+}
+
+/* ═══ Docs typography ═══ */
+
+.dlx-p {
+  margin: 0 0 14px;
+  font-size: 0.875rem;
+  color: var(--rcf-ink-soft);
+  line-height: 1.75;
+}
+
+/* Sentence-case Archivo subhead with the system's azure tick */
+.dlx-h3 {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 30px 0 12px;
+  font-family: "Archivo", "IBM Plex Sans", sans-serif;
+  font-weight: 700;
+  font-size: 0.95rem;
+  letter-spacing: -0.012em;
+  line-height: 1.3;
+  color: var(--rcf-ink);
+}
+
+.dlx-h3::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  background: var(--rcf-azure);
+  border-radius: 1px;
+  flex-shrink: 0;
+}
+
+.dlx-section-body > .dlx-h3:first-child {
+  margin-top: 2px;
+}
+
+/* Inline code — light code surface, azure-deep ink */
+.dlx-ic {
+  background: #eef2f8;
+  border: 1px solid #dbe3ee;
+  border-radius: 5px;
+  padding: 1px 6px;
+  font-family: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.78rem;
+  color: var(--rcf-azure-deep);
+}
+
+/* ═══ Callout — tinted note row (accent tint set inline by the component) ═══ */
+
+.dlx-callout {
+  display: flex;
+  gap: 11px;
+  padding: 13px 16px;
+  border-radius: 10px;
+  margin: 0 0 16px;
+  font-size: 0.82rem;
+  line-height: 1.65;
+  color: var(--rcf-ink-soft);
+}
+
+/* ═══ Code blocks — ink-on-dark navy surface, one consistent treatment ═══ */
+
+.dlx-code {
+  border-radius: 10px;
+  overflow: hidden;
+  margin: 0 0 16px;
+  background: #0f1a2e;
+  border: 1px solid #0b1424;
+  box-shadow: 0 1px 2px rgba(14, 23, 38, 0.1);
+}
+
+.dlx-code-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 14px;
+  background: #0b1322;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.dlx-code-label {
+  font-family: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.68rem;
+  color: #7d92b5;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dlx-code-copy {
+  appearance: none;
+  font-family: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.68rem;
+  color: #8fa3c4;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 5px;
+  padding: 2px 9px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: color var(--rcf-ease), background var(--rcf-ease), border-color var(--rcf-ease);
+}
+
+.dlx-code-copy:hover {
+  color: #e6edf8;
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
+.dlx-code-copy:focus-visible {
+  outline: 2px solid var(--rcf-azure);
+  outline-offset: 1px;
+}
+
+.dlx-code-copied {
+  color: #5fd39a;
+}
+
+.dlx-code-body {
+  padding: 14px 18px;
+  overflow-x: auto;
+  font-family: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.78rem;
+  line-height: 1.7;
+  /* Preserve code indentation; wrap long shell lines at spaces only */
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+
+/* ═══ HTTP endpoint row + solid method chips ═══ */
+
+.dlx-endpoint {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  padding: 11px 14px;
+  border-radius: 9px;
+  background: var(--rcf-tint);
+  border: 1px solid var(--rcf-line);
+  margin: 0 0 12px;
+}
+
+.dlx-method {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: center;
+  min-width: 52px;
+  padding: 3px 10px;
+  border-radius: 6px;
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  color: #ffffff;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+/* Method colors: GET azure, POST green, PUT/PATCH slate, DELETE red */
+.dlx-method-get    { background: var(--rcf-azure); }
+.dlx-method-post   { background: #16a34a; }
+.dlx-method-put    { background: #5d6f8c; }
+.dlx-method-patch  { background: #5d6f8c; }
+.dlx-method-delete { background: #dc2626; }
+
+.dlx-endpoint-path {
+  font-family: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--rcf-ink);
+  flex-shrink: 0;
+}
+
+.dlx-endpoint-desc {
+  flex: 1 1 220px;
+  min-width: 0;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: var(--rcf-ink-dim);
+}
+
+/* ═══ Reference tables (params, status codes, retry matrix) ═══ */
+
+.dlx-table-wrap {
+  border: 1px solid var(--rcf-line);
+  border-radius: 10px;
+  overflow-x: auto;
+  margin: 0 0 20px;
+  background: var(--rcf-card);
+}
+
+.dlx-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+}
+
+.dlx-table td {
+  padding: 10px 14px;
+  border-top: 1px solid var(--rcf-line-soft);
+  color: var(--rcf-ink-soft);
+  line-height: 1.55;
+  vertical-align: top;
+}
+
+.dlx-table tr:first-child td { border-top: none; }
+
+.dlx-td-code {
+  font-family: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--rcf-azure-deep);
+  white-space: nowrap;
+}
+
+.dlx-td-type {
+  font-family: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.75rem;
+  color: var(--rcf-ink-dim);
+  white-space: nowrap;
+}
+
+/* ═══ Side-by-side request / response ═══ */
+
+.dlx-reqres {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+  margin: 0 0 16px;
+}
+
+.dlx-reqres .dlx-code { margin-bottom: 0; }
+
+@media (min-width: 900px) {
+  .dlx-reqres { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+}
+
+/* ═══ Two-up note-card grid (behavior notes, webhook events) ═══ */
+
+.dlx-notegrid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+  margin: 0 0 16px;
+}
+
+@media (min-width: 720px) {
+  .dlx-notegrid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+}
+
+.dlx-notecard {
+  padding: 14px 16px;
+  border-radius: 10px;
+  background: var(--rcf-tint);
+  border: 1px solid var(--rcf-line-soft);
+}
+
+.dlx-notecard-title {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--rcf-azure-deep);
+  margin-bottom: 6px;
+}
+
+.dlx-notecard-body {
+  font-size: 0.8rem;
+  color: var(--rcf-ink-soft);
+  line-height: 1.6;
+}
+
+/* Warn-tinted variant (planned / coming-soon feature cards) */
+.dlx-notecard-warn {
+  background: rgba(180, 83, 9, 0.05);
+  border-color: rgba(180, 83, 9, 0.18);
+}
+
+.dlx-notecard-warn .dlx-notecard-title {
+  font-family: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.75rem;
+  color: #92400e;
+}
+
+/* ═══ Small pieces ═══ */
+
+/* Q&A / step list rows on a tinted surface */
+.dlx-item {
+  padding: 12px 16px;
+  border-radius: 9px;
+  background: var(--rcf-tint);
+  border: 1px solid var(--rcf-line-soft);
+}
+
+/* Numbered step circle for the quick-start walkthrough */
+.dlx-step-num {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: rgba(47, 125, 246, 0.1);
+  border: 1px solid rgba(47, 125, 246, 0.24);
+  color: var(--rcf-azure-deep);
+  font-family: "Archivo", "IBM Plex Sans", sans-serif;
+  font-size: 0.78rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   DLX8 — product selector + reference chrome for the two-page docs area
+   (Guides hub + per-product API Reference). Icon-led selector cards in the
+   daylight language; deep-linkable — the active card mirrors the URL param.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.dlx8-selector {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0 0 26px;
+}
+
+@media (max-width: 900px) {
+  .dlx8-selector { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 460px) {
+  .dlx8-selector { grid-template-columns: 1fr; }
+}
+
+.dlx8-pcard {
+  appearance: none;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 16px 16px 14px;
+  text-align: left;
+  font-family: inherit;
+  background: var(--rcf-card);
+  border: 1px solid var(--rcf-line);
+  border-radius: 12px;
+  cursor: pointer;
+  box-shadow: 0 1px 2px rgba(14, 23, 38, 0.04);
+  transition:
+    border-color var(--rcf-ease),
+    background var(--rcf-ease),
+    box-shadow var(--rcf-ease),
+    transform var(--rcf-ease);
+}
+
+.dlx8-pcard:hover {
+  border-color: rgba(47, 125, 246, 0.45);
+  transform: translateY(-1px);
+  box-shadow: 0 3px 10px rgba(14, 23, 38, 0.07);
+}
+
+.dlx8-pcard:focus-visible {
+  outline: 2px solid var(--rcf-azure);
+  outline-offset: 2px;
+}
+
+.dlx8-pcard-active,
+.dlx8-pcard-active:hover {
+  background: rgba(47, 125, 246, 0.05);
+  border-color: var(--rcf-azure);
+  box-shadow: inset 0 0 0 1px var(--rcf-azure), 0 2px 8px rgba(47, 125, 246, 0.12);
+  transform: none;
+}
+
+/* Icon tile — tinted at rest, solid azure when the card is selected */
+.dlx8-pcard-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: rgba(47, 125, 246, 0.1);
+  border: 1px solid rgba(47, 125, 246, 0.22);
+  color: var(--rcf-azure-deep);
+  transition: background var(--rcf-ease), color var(--rcf-ease), border-color var(--rcf-ease);
+}
+
+.dlx8-pcard-active .dlx8-pcard-icon {
+  background: var(--rcf-azure);
+  border-color: var(--rcf-azure);
+  color: #ffffff;
+}
+
+.dlx8-pcard-name-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  min-width: 0;
+}
+
+.dlx8-pcard-name {
+  font-family: "Archivo", "IBM Plex Sans", sans-serif;
+  font-weight: 700;
+  font-size: 0.88rem;
+  letter-spacing: -0.012em;
+  line-height: 1.25;
+  color: var(--rcf-ink);
+}
+
+.dlx8-pcard-desc {
+  font-size: 0.73rem;
+  line-height: 1.5;
+  color: var(--rcf-ink-dim);
+}
+
+/* Selected marker — quiet azure dot in the top-right corner */
+.dlx8-pcard-mark {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--rcf-azure);
+  opacity: 0;
+  transition: opacity var(--rcf-ease);
+}
+
+.dlx8-pcard-active .dlx8-pcard-mark { opacity: 1; }
+
+@media (prefers-reduced-motion: reduce) {
+  .dlx8-pcard { transition: none; }
+  .dlx8-pcard:hover { transform: none; }
+}
+
+/* Admin auth tag on endpoint rows — slate outline (deliberately amber-free) */
+.dlx8-tag-admin {
+  display: inline-flex;
+  align-items: center;
+  align-self: center;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #46566f;
+  background: transparent;
+  border: 1px solid #b9c4d6;
+  border-radius: 5px;
+  padding: 2px 8px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* Bulleted usage list — azure dash markers, docs prose rhythm */
+.dlx8-ul {
+  margin: 0 0 16px;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.dlx8-ul li {
+  position: relative;
+  padding-left: 20px;
+  font-size: 0.85rem;
+  line-height: 1.65;
+  color: var(--rcf-ink-soft);
+}
+
+.dlx8-ul li::before {
+  content: '';
+  position: absolute;
+  left: 2px;
+  top: 0.72em;
+  width: 9px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--rcf-azure);
+}
+
+/* Coming-soon tag — warn palette from the dl banner family */
+.dlx-tag-warn {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #92400e;
+  background: rgba(180, 83, 9, 0.08);
+  border: 1px solid rgba(180, 83, 9, 0.26);
+  border-radius: 5px;
+  padding: 2px 8px;
+  white-space: nowrap;
+}

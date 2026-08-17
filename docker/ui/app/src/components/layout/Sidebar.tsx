@@ -4,11 +4,10 @@ import { cn } from '../../utils/cn';
 import { useAuth } from '../../contexts/AuthContext';
 import { ApiError } from '../../api/client';
 import {
-  IconRCF, IconTrunk, IconAPI, IconIVR, IconDocs,
-  IconAdmin, IconSignal, IconTroubleshoot, IconMyAccount,
+  IconRCF, IconTrunk, IconAPI, IconVoicemail, IconDocs,
+  IconAdmin, IconSignal, IconTroubleshoot,
 } from '../icons/ProductIcons';
-import { Package, Shield, ChevronDown, Clock, Eye, EyeOff, Server, BookOpen } from 'lucide-react';
-import { AccessRequestForm } from './AccessRequestForm';
+import { Package, Shield, ChevronDown, Clock, Eye, EyeOff, Server, BookOpen, WalletMinimal } from 'lucide-react';
 
 /* ─── Types ───────────────────────────────────────────────── */
 
@@ -33,8 +32,20 @@ const allProductNavItems: NavItemDef[] = [
 /* ─── Documentation nav items ─────────────────────────────── */
 
 const docNavItems: NavItemDef[] = [
-  { label: 'RCF Guide',     icon: <IconRCF size={18} />,  to: '/docs/rcf', color: '#3b82f6' },
-  { label: 'API Reference', icon: <IconDocs size={18} />, to: '/docs/api', color: '#3b82f6' },
+  {
+    label: 'Guides',
+    icon: <BookOpen size={18} />,
+    to: '/docs/guides',
+    color: '#3b82f6',
+    isActiveFn: (p) => p.startsWith('/docs/guides'),
+  },
+  {
+    label: 'API Reference',
+    icon: <IconDocs size={18} />,
+    to: '/docs/api',
+    color: '#3b82f6',
+    isActiveFn: (p) => p.startsWith('/docs/api'),
+  },
 ];
 
 /* ─── Coming Soon item definitions ───────────────────────── */
@@ -42,14 +53,22 @@ const docNavItems: NavItemDef[] = [
 interface ComingSoonItemDef {
   label: string;
   icon: React.ReactNode;
+  /** When set, the item is a real link to a coming-soon preview page. */
+  to?: string;
+  /** Accent color for the hover tint / active treatment (link items only). */
+  color?: string;
 }
 
 // RCF and SIP Trunking are LIVE (gated by account_type in allProductNavItems).
-// API Calling and IVR Builder are pre-launch — shown here as disabled "Soon" items
-// until they graduate to live product portals.
+// API Calling and Visual Voicemail are pre-launch — shown as "Soon" items until
+// they graduate to live product portals, each linking to its coming-soon
+// showcase page. Like the group itself, these show for ALL authenticated
+// users regardless of account_type — same visibility the IVR item had.
+// (api/hybrid accounts can also reach /api-dids from their product pages; the
+// showcase renders identically for them.)
 const COMING_SOON_ITEMS: ComingSoonItemDef[] = [
-  { label: 'API Calling', icon: <IconAPI size={18} /> },
-  { label: 'IVR Builder', icon: <IconIVR size={18} /> },
+  { label: 'API Calling',      icon: <IconAPI size={18} />,       to: '/api-dids',  color: '#3b82f6' },
+  { label: 'Visual Voicemail', icon: <IconVoicemail size={18} />, to: '/voicemail', color: '#3b82f6' },
 ];
 
 /* ─── localStorage helpers ────────────────────────────────── */
@@ -259,7 +278,98 @@ function SidebarLoginForm() {
 
 /* ─── ComingSoonNavItem ───────────────────────────────────── */
 
-function ComingSoonNavItem({ item }: { item: ComingSoonItemDef }) {
+/** Shared "Soon" pill — identical treatment for linked and static items. */
+function SoonBadge() {
+  return (
+    <span
+      style={{
+        fontSize: '0.55rem',
+        fontWeight: 700,
+        letterSpacing: '0.06em',
+        textTransform: 'uppercase',
+        color: '#818cf8',
+        background: 'rgba(99,102,241,0.15)',
+        border: '1px solid rgba(99,102,241,0.25)',
+        borderRadius: 999,
+        padding: '2px 7px',
+        lineHeight: 1.6,
+        flexShrink: 0,
+      }}
+    >
+      Soon
+    </span>
+  );
+}
+
+function ComingSoonNavItem({ item, onNavigate }: { item: ComingSoonItemDef; onNavigate?: () => void }) {
+  // Linked variant — a real NavLink to the product's coming-soon page. Rides
+  // the shared .sb-nav-row / .sb-nav-icon hover language (index.css) so it
+  // behaves like every other nav row, keeping the "Soon" pill on the right.
+  if (item.to) {
+    const accent = item.color ?? '#3b82f6';
+    return (
+      <NavLink
+        to={item.to}
+        end
+        onClick={onNavigate}
+        title={`${item.label} — coming soon`}
+        className="block no-underline sb-nav-row"
+        style={({ isActive }) => ({
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          padding: '5px 10px 5px 14px',
+          borderRadius: 10,
+          overflow: 'hidden',
+          fontSize: '0.76rem',
+          fontWeight: isActive ? 600 : 500,
+          letterSpacing: '-0.01em',
+          cursor: 'pointer',
+          userSelect: 'none',
+          textDecoration: 'none',
+          ['--sb-accent-tint' as string]: `${accent}14`,
+          color: isActive ? '#f1f5f9' : undefined,
+          background: isActive
+            ? `linear-gradient(135deg, ${accent}22 0%, ${accent}10 100%)`
+            : undefined,
+          border: isActive ? `1px solid ${accent}40` : '1px solid transparent',
+          boxShadow: isActive ? `0 2px 12px -4px ${accent}40` : 'none',
+        })}
+      >
+        {({ isActive }) => (
+          <>
+            <span
+              className="sb-nav-icon"
+              style={{
+                width: 24,
+                height: 24,
+                borderRadius: 6,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0,
+                ...(isActive
+                  ? {
+                      background: `linear-gradient(135deg, ${accent}30 0%, ${accent}18 100%)`,
+                      border: `1px solid ${accent}40`,
+                      color: accent,
+                    }
+                  : null),
+              }}
+            >
+              {item.icon}
+            </span>
+            <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {item.label}
+            </span>
+            <SoonBadge />
+          </>
+        )}
+      </NavLink>
+    );
+  }
+
+  // Static variant — no page yet; muted, non-interactive.
   return (
     <div
       title="Coming Soon"
@@ -302,23 +412,7 @@ function ComingSoonNavItem({ item }: { item: ComingSoonItemDef }) {
       </span>
 
       {/* "Soon" badge */}
-      <span
-        style={{
-          fontSize: '0.55rem',
-          fontWeight: 700,
-          letterSpacing: '0.06em',
-          textTransform: 'uppercase',
-          color: '#818cf8',
-          background: 'rgba(99,102,241,0.15)',
-          border: '1px solid rgba(99,102,241,0.25)',
-          borderRadius: 999,
-          padding: '2px 7px',
-          lineHeight: 1.6,
-          flexShrink: 0,
-        }}
-      >
-        Soon
-      </span>
+      <SoonBadge />
     </div>
   );
 }
@@ -340,7 +434,7 @@ function SidebarNavItem({ item, onNavigate, small }: SidebarNavItemProps) {
       to={item.to}
       end={!item.isActiveFn}
       onClick={onNavigate}
-      className="block no-underline"
+      className="block no-underline sb-nav-row"
       style={({ isActive: routerActive }) => {
         const isActive = customActive ?? routerActive;
         return {
@@ -355,12 +449,17 @@ function SidebarNavItem({ item, onNavigate, small }: SidebarNavItemProps) {
           letterSpacing: '-0.01em',
           cursor: 'pointer',
           userSelect: 'none',
-          transition: 'background 0.15s, color 0.15s, border-color 0.15s, box-shadow 0.15s',
           textDecoration: 'none',
-          color: isActive ? '#f1f5f9' : '#64748b',
+          // Non-active resting/hover colors live in CSS (.sb-nav-row in
+          // index.css) so :hover / :focus-visible can restyle them — inline
+          // styles would win over the class. Active keeps its exact inline
+          // treatment (gradient + border + glow), which also beats the hover
+          // tint, so hovering an active item changes nothing.
+          ['--sb-accent-tint' as string]: `${item.color}14`,
+          color: isActive ? '#f1f5f9' : undefined,
           background: isActive
             ? `linear-gradient(135deg, ${item.color}22 0%, ${item.color}10 100%)`
-            : 'transparent',
+            : undefined,
           border: isActive
             ? `1px solid ${item.color}40`
             : '1px solid transparent',
@@ -375,6 +474,7 @@ function SidebarNavItem({ item, onNavigate, small }: SidebarNavItemProps) {
         return (
           <>
             <span
+              className="sb-nav-icon"
               style={{
                 width: small ? 24 : 28,
                 height: small ? 24 : 28,
@@ -383,14 +483,15 @@ function SidebarNavItem({ item, onNavigate, small }: SidebarNavItemProps) {
                 alignItems: 'center',
                 justifyContent: 'center',
                 flexShrink: 0,
-                background: isActive
-                  ? `linear-gradient(135deg, ${item.color}30 0%, ${item.color}18 100%)`
-                  : 'rgba(255,255,255,0.04)',
-                border: isActive
-                  ? `1px solid ${item.color}40`
-                  : '1px solid rgba(255,255,255,0.06)',
-                color: isActive ? item.color : '#475569',
-                transition: 'background 0.15s, border-color 0.15s, color 0.15s',
+                // Non-active swatch colors come from .sb-nav-icon (index.css)
+                // so the row's :hover can brighten them; active stays inline.
+                ...(isActive
+                  ? {
+                      background: `linear-gradient(135deg, ${item.color}30 0%, ${item.color}18 100%)`,
+                      border: `1px solid ${item.color}40`,
+                      color: item.color,
+                    }
+                  : null),
               }}
             >
               {item.icon}
@@ -452,6 +553,9 @@ function CollapsibleGroup({ id, label, icon, isOpen, onToggle, children, to }: C
         onClick={handleClick}
         aria-expanded={isOpen}
         title={to && isOpen ? `Go to ${label}` : undefined}
+        // Resting/hover colors live in CSS (.sb-group-head in index.css) so
+        // :hover / :focus-visible share one treatment across all nav rows.
+        className="sb-group-head"
         style={{
           display: 'flex',
           alignItems: 'center',
@@ -459,24 +563,13 @@ function CollapsibleGroup({ id, label, icon, isOpen, onToggle, children, to }: C
           width: '100%',
           padding: '5px 10px',
           borderRadius: 7,
-          background: 'transparent',
           border: 'none',
           cursor: 'pointer',
           userSelect: 'none',
-          color: '#475569',
           fontSize: '0.6rem',
           fontWeight: 600,
           letterSpacing: '0.05em',
           textTransform: 'uppercase',
-          transition: 'background 0.15s, color 0.15s',
-        }}
-        onMouseEnter={(e) => {
-          e.currentTarget.style.background = 'rgba(255,255,255,0.04)';
-          e.currentTarget.style.color = '#64748b';
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.background = 'transparent';
-          e.currentTarget.style.color = '#475569';
         }}
       >
         <span style={{ display: 'flex', alignItems: 'center', color: 'inherit' }}>{icon}</span>
@@ -553,7 +646,14 @@ function SubGroupLabel({ label }: { label: string }) {
 
 /* ─── Sidebar ─────────────────────────────────────────────── */
 
-export function Sidebar() {
+interface SidebarProps {
+  /** Desktop collapse (AppLayout owns the state + the toggle tab). Slides the
+      sidebar off-canvas at ≥768px only — the mobile drawer is unaffected.
+      Defaults to false for standalone users (TroubleshootingPage). */
+  collapsed?: boolean;
+}
+
+export function Sidebar({ collapsed = false }: SidebarProps) {
   // All hooks must be declared unconditionally at the top, before any
   // derived values, conditionals, or early returns — React tracks hooks by
   // call order and will throw error #310 if the count changes between renders.
@@ -594,18 +694,22 @@ export function Sidebar() {
     const productPaths = productNavItems.map((i) => i.to);
     const adminPaths   = ['/admin', '/call-quality', '/admin/platform', '/troubleshooting'];
     const docPaths     = docNavItems.map((i) => i.to);
+    const soonPaths    = COMING_SOON_ITEMS.flatMap((i) => (i.to ? [i.to] : []));
     const inProducts = productPaths.some((p) => path === p || path.startsWith(p + '/'));
     const inAdmin    = adminPaths.some((p) => path === p || path.startsWith(p + '/'));
     const inDocs     = docPaths.some((p) => path === p || path.startsWith(p + '/'));
+    const inSoon     = soonPaths.some((p) => path === p || path.startsWith(p + '/'));
 
     setGroupOpen((prev) => {
       const next = { ...prev };
       if (inProducts && !prev.products)       next.products       = true;
       if (inAdmin    && !prev.administration) next.administration = true;
       if (inDocs     && !prev.documentation)  next.documentation  = true;
+      if (inSoon     && !prev.comingSoon)     next.comingSoon     = true;
       if (next.products       === prev.products &&
           next.administration === prev.administration &&
-          next.documentation  === prev.documentation) {
+          next.documentation  === prev.documentation &&
+          next.comingSoon     === prev.comingSoon) {
         return prev;
       }
       return next;
@@ -634,13 +738,16 @@ export function Sidebar() {
 
   const customersItem: NavItemDef   = {
     label: 'Customer Management', to: '/admin/customers', color: '#60a5fa', icon: <IconAdmin />,
-    isActiveFn: (p) => p.startsWith('/admin') && !p.startsWith('/admin/platform'),
+    isActiveFn: (p) => p.startsWith('/admin') && !p.startsWith('/admin/platform') && !p.startsWith('/admin/payments-demo'),
   };
   const platformItem: NavItemDef    = {
     label: 'Platform Management', to: '/admin/platform', color: '#60a5fa', icon: <Server size={15} strokeWidth={1.7} />,
     isActiveFn: (p) => p.startsWith('/admin/platform'),
   };
-  const myAccountItem: NavItemDef   = { label: 'My Account',          to: '/my-account',      color: '#3b82f6', icon: <IconMyAccount size={17} /> };
+  const paymentsDemoItem: NavItemDef = {
+    label: 'Payments Demo', to: '/admin/payments-demo', color: '#60a5fa', icon: <WalletMinimal size={15} strokeWidth={1.7} />,
+    isActiveFn: (p) => p.startsWith('/admin/payments-demo'),
+  };
   const callQualityItem: NavItemDef = { label: 'Call Quality',        to: '/call-quality',    color: '#22c55e', icon: <IconSignal size={17} /> };
   const troubleItem: NavItemDef     = { label: 'Troubleshooting',     to: '/troubleshooting', color: '#fbbf24', icon: <IconTroubleshoot size={17} /> };
 
@@ -713,10 +820,14 @@ export function Sidebar() {
       {/* Sidebar panel */}
       <aside
         className={cn(
-          'fixed top-0 left-0 bottom-0 z-[100]',
+          'app-sidebar fixed top-0 left-0 bottom-0 z-[100]',
           'flex flex-col',
           'md:translate-x-0',
           mobileOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0',
+          // Desktop collapse — applied ≥768px only (see index.css). Uses
+          // `transform` so it composes with the Tailwind `translate` classes
+          // above instead of fighting them.
+          collapsed && 'app-sidebar--collapsed',
         )}
         style={{
           width: 240,
@@ -724,7 +835,9 @@ export function Sidebar() {
           borderRight: customerViewMode
             ? '1px solid rgba(245, 158, 11, 0.35)'
             : '1px solid rgba(42, 47, 69, 0.7)',
-          transition: 'transform 250ms ease-in-out, border-color 0.2s ease',
+          // `translate` covers the Tailwind mobile-drawer utilities (v4 uses
+          // the translate property); `transform` covers the desktop collapse.
+          transition: 'transform 200ms ease, translate 250ms ease-in-out, border-color 0.2s ease',
         }}
         aria-label="Main navigation"
       >
@@ -827,7 +940,6 @@ export function Sidebar() {
             }}
           >
             <SidebarLoginForm />
-            <AccessRequestForm />
           </div>
         )}
 
@@ -857,10 +969,6 @@ export function Sidebar() {
               ))}
             </CollapsibleGroup>
 
-            {/* ── Standalone: My Account (all customer users) ─ */}
-            <div style={{ height: 6 }} />
-            <SidebarNavItem item={myAccountItem} onNavigate={closeMobile} small />
-
             {/* ── GROUP 2: Coming Soon (hidden while empty) ─── */}
             {COMING_SOON_ITEMS.length > 0 && (
               <>
@@ -873,7 +981,7 @@ export function Sidebar() {
                   onToggle={toggleGroup}
                 >
                   {COMING_SOON_ITEMS.map((item) => (
-                    <ComingSoonNavItem key={item.label} item={item} />
+                    <ComingSoonNavItem key={item.label} item={item} onNavigate={closeMobile} />
                   ))}
                 </CollapsibleGroup>
               </>
@@ -910,6 +1018,7 @@ export function Sidebar() {
                       <SubGroupLabel label="Customers" />
                       <SidebarNavItem item={customersItem} onNavigate={closeMobile} small />
                       <SidebarNavItem item={platformItem}  onNavigate={closeMobile} small />
+                      <SidebarNavItem item={paymentsDemoItem} onNavigate={closeMobile} small />
                     </>
                   )}
 
@@ -943,6 +1052,9 @@ export function Sidebar() {
                   type="button"
                   onClick={toggleCustomerView}
                   title={customerViewMode ? 'Return to admin view' : 'Preview the app as a customer'}
+                  // Resting/hover colors live in CSS (.sb-viewas in index.css);
+                  // the amber customer-view treatment stays inline and wins.
+                  className="sb-viewas"
                   style={{
                     display: 'flex',
                     alignItems: 'center',
@@ -950,44 +1062,31 @@ export function Sidebar() {
                     width: '100%',
                     padding: '6px 10px',
                     borderRadius: 8,
-                    background: customerViewMode
-                      ? 'rgba(245, 158, 11, 0.10)'
-                      : 'transparent',
-                    border: customerViewMode
-                      ? '1px solid rgba(245, 158, 11, 0.30)'
-                      : '1px solid rgba(42, 47, 69, 0.4)',
                     cursor: 'pointer',
-                    transition: 'background 0.15s, border-color 0.15s',
-                  }}
-                  onMouseEnter={(e) => {
-                    if (!customerViewMode) {
-                      e.currentTarget.style.background = 'rgba(255,255,255,0.04)';
-                      e.currentTarget.style.borderColor = 'rgba(42,47,69,0.7)';
-                    }
-                  }}
-                  onMouseLeave={(e) => {
-                    if (!customerViewMode) {
-                      e.currentTarget.style.background = 'transparent';
-                      e.currentTarget.style.borderColor = 'rgba(42,47,69,0.4)';
-                    }
+                    ...(customerViewMode
+                      ? {
+                          background: 'rgba(245, 158, 11, 0.10)',
+                          border: '1px solid rgba(245, 158, 11, 0.30)',
+                        }
+                      : null),
                   }}
                 >
                   {/* Icon */}
                   {customerViewMode
                     ? <EyeOff size={13} style={{ color: '#f59e0b', flexShrink: 0 }} />
-                    : <Eye    size={13} style={{ color: '#475569', flexShrink: 0 }} />
+                    : <Eye    size={13} className="sb-viewas-glyph" style={{ flexShrink: 0 }} />
                   }
 
                   {/* Label */}
                   <span
+                    className="sb-viewas-label"
                     style={{
                       flex: 1,
                       textAlign: 'left',
                       fontSize: '0.75rem',
                       fontWeight: 500,
-                      color: customerViewMode ? '#f59e0b' : '#475569',
+                      ...(customerViewMode ? { color: '#f59e0b' } : null),
                       letterSpacing: '-0.01em',
-                      transition: 'color 0.15s',
                     }}
                   >
                     {customerViewMode ? 'Exit Customer View' : 'View as Customer'}
@@ -1031,11 +1130,15 @@ export function Sidebar() {
                   position: 'relative',
                 }}
               >
-                {/* Clickable area: avatar + name — navigates to /account */}
+                {/* Clickable area: avatar + name — THE entry to /my-account */}
                 <NavLink
-                  to="/account"
+                  to="/my-account"
                   onClick={closeMobile}
-                  title="Account settings"
+                  title="My account"
+                  aria-label="My account"
+                  // Resting/hover tint lives in CSS (.sb-account-link in
+                  // index.css); the active blue wash stays inline and wins.
+                  className="sb-account-link"
                   style={({ isActive }) => ({
                     display: 'flex',
                     alignItems: 'center',
@@ -1046,22 +1149,9 @@ export function Sidebar() {
                     borderRadius: 7,
                     padding: '2px 4px',
                     margin: '-2px -4px',
-                    background: isActive ? 'rgba(59,130,246,0.08)' : 'transparent',
-                    transition: 'background 0.15s',
+                    background: isActive ? 'rgba(59,130,246,0.08)' : undefined,
                     cursor: 'pointer',
                   })}
-                  onMouseEnter={(e) => {
-                    const el = e.currentTarget as HTMLAnchorElement;
-                    if (!el.classList.contains('active')) {
-                      el.style.background = 'rgba(255,255,255,0.05)';
-                    }
-                  }}
-                  onMouseLeave={(e) => {
-                    const el = e.currentTarget as HTMLAnchorElement;
-                    if (!el.classList.contains('active')) {
-                      el.style.background = 'transparent';
-                    }
-                  }}
                 >
                   {/* Avatar */}
                   <div style={{ position: 'relative', flexShrink: 0 }}>
@@ -1123,6 +1213,9 @@ export function Sidebar() {
                   onClick={logout}
                   title="Sign out"
                   aria-label="Sign out"
+                  // Resting + red hover colors live in CSS (.sb-signout in
+                  // index.css) so keyboard :focus-visible matches hover.
+                  className="sb-signout"
                   style={{
                     flexShrink: 0,
                     width: 26,
@@ -1131,22 +1224,8 @@ export function Sidebar() {
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    background: 'transparent',
-                    border: '1px solid rgba(42,47,69,0.5)',
-                    color: '#475569',
                     cursor: 'pointer',
-                    transition: 'color 0.15s, background 0.15s, border-color 0.15s',
                     padding: 0,
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.color = '#f87171';
-                    e.currentTarget.style.background = 'rgba(239,68,68,0.08)';
-                    e.currentTarget.style.borderColor = 'rgba(239,68,68,0.25)';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.color = '#475569';
-                    e.currentTarget.style.background = 'transparent';
-                    e.currentTarget.style.borderColor = 'rgba(42,47,69,0.5)';
                   }}
                 >
                   <IconSignOut />

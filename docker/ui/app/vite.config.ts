@@ -16,9 +16,17 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      '/api': {
-        target: 'http://localhost:8000',
+      // Trailing slash matters: a bare '/api' prefix would also capture the
+      // SPA route /api-dids. Production nginx proxies '/api/' the same way.
+      '/api/': {
+        // Direct uvicorn default; set VITE_API_PROXY_TARGET=http://localhost:8088
+        // to develop against the docker-compose API instead (strips /api like
+        // the production nginx does, since the API serves routes at root).
+        target: process.env.VITE_API_PROXY_TARGET || 'http://localhost:8000',
         changeOrigin: true,
+        ...(process.env.VITE_API_PROXY_TARGET
+          ? { rewrite: (path: string) => path.replace(/^\/api/, '') }
+          : {}),
       },
     },
   },

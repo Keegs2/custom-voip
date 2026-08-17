@@ -1,0 +1,38 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   dl-portal-pages.css — page-scoped daylight styles for the portal pages
+   converted in this pass (AccountPage, ApiDidsPage, IvrBuilderPage).
+
+   The `dlx-` prefix marks these as page-scoped, NOT part of the shared
+   DAYLIGHT CONSOLE system in index.css. If a third page reaches for one of
+   these, promote it into the shared `dl-*` block (flagged for
+   consolidation). Every value references the shared `--rcf-*` custom
+   properties declared on `.dl-scope` — no re-stated magic numbers.
+   Hand-written @media only (never Tailwind md:* — see CLAUDE.md).
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ─── Centered narrow column for single-purpose form pages (Account) ─── */
+.dlx-form-col {
+  max-width: 720px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--rcf-stack);
+}
+
+/* ─── Vertical label + control group ─── */
+.dlx-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* ─── Read-only identity facts — one column narrow, two columns wide ─── */
+.dlx-ro-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 14px 20px;
+}
+
+@media (min-width: 640px) {
+  .dlx-ro-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+}

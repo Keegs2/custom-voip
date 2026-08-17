@@ -1,10 +1,21 @@
+/**
+ * CdrsTab — full CDR search across all customers (/admin/platform/cdrs).
+ *
+ * Styling: the shared DAYLIGHT CONSOLE system (`dl-*` in index.css, plus the
+ * admin `dlx-*` layer in styles/dl-admin.css, the platform `dlx2-*` layer in
+ * styles/dl-platform.css, and the page-scoped `dlx4-*` layer in
+ * styles/dl-platform-b.css). Renders INSIDE the PlatformManagementPage shell,
+ * which owns the paper canvas (`dl-scope`) — this page contributes only the
+ * filter slab, the stat strip, the Records/Summary segmented control, and the
+ * results table. All search/accumulation/export logic is unchanged.
+ *
+ * React #310: every hook is called unconditionally at the top.
+ */
 import { useState, useCallback, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { searchCdrs } from '../../api/cdrs';
 import { listCustomers } from '../../api/customers';
 import { Spinner } from '../../components/ui/Spinner';
-import { Pagination } from '../../components/ui/Pagination';
-import { TabBar } from '../../components/ui/TabBar';
 import { exportCdrsCsv } from '../../utils/csv';
 import { useToast } from '../../components/ui/Toast';
 import { CdrFilterBar, defaultCdrFilters, filtersToParams } from './CdrFilterBar';
@@ -13,6 +24,9 @@ import { CdrTable } from './CdrTable';
 import { CdrSummaryView } from './CdrSummaryView';
 import type { CdrFilters } from './CdrFilterBar';
 import type { Cdr } from '../../types/cdr';
+import '../../styles/dl-admin.css';
+import '../../styles/dl-platform.css';
+import '../../styles/dl-platform-b.css';
 
 const PAGE_SIZE = 50;
 
@@ -97,9 +111,29 @@ export function CdrsTab() {
 
   const total = data?.total ?? 0;
   const shownCount = allCdrs.length;
+  const loadingMore = isFetching && offset > 0;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+    <div className="dl-stack">
+      {/* ── Section identity ── */}
+      <div style={{ marginBottom: 0 }}>
+        <h2
+          style={{
+            fontFamily: '"Archivo", "IBM Plex Sans", sans-serif',
+            fontSize: '0.95rem',
+            fontWeight: 700,
+            letterSpacing: '-0.01em',
+            color: 'var(--rcf-ink)',
+            margin: 0,
+          }}
+        >
+          Call Detail Records
+        </h2>
+        <p style={{ fontSize: '0.78rem', color: 'var(--rcf-ink-dim)', margin: '3px 0 0' }}>
+          Search, inspect, and export platform CDRs across all customers.
+        </p>
+      </div>
+
       <CdrFilterBar
         filters={draftFilters}
         onChange={setDraftFilters}
@@ -112,31 +146,41 @@ export function CdrsTab() {
         <CdrStatsBar cdrs={allCdrs} total={total} />
       )}
 
-      <TabBar
-        tabs={CDR_TABS}
-        activeTab={activeTab}
-        onTabChange={setActiveTab}
-      />
+      {/* Records / Summary segmented control */}
+      <div className="dlx-seg" role="tablist" aria-label="CDR views" style={{ alignSelf: 'flex-start' }}>
+        {CDR_TABS.map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            role="tab"
+            aria-selected={activeTab === tab.id}
+            className={activeTab === tab.id ? 'dlx-seg-btn dlx-seg-btn-active' : 'dlx-seg-btn'}
+            onClick={() => setActiveTab(tab.id)}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
 
       {activeTab === 'records' && (
         <>
           {isLoading && offset === 0 && (
-            <div className="flex items-center gap-2.5 text-[#718096] py-12">
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 10,
+                color: 'var(--rcf-ink-dim)',
+                fontSize: '0.85rem',
+                padding: '40px 0',
+              }}
+            >
               <Spinner /> Searching CDRs…
             </div>
           )}
 
           {isError && (
-            <div
-              style={{
-                padding: '16px 20px',
-                borderRadius: 12,
-                background: 'rgba(239,68,68,0.08)',
-                border: '1px solid rgba(239,68,68,0.2)',
-                color: '#f87171',
-                fontSize: '0.875rem',
-              }}
-            >
+            <div className="dl-banner dl-banner-err">
               Failed to load CDRs. Check your filters and try again.
             </div>
           )}
@@ -144,12 +188,39 @@ export function CdrsTab() {
           {!isLoading && !isError && data && (
             <>
               <CdrTable cdrs={allCdrs} customerNames={customerNames} />
-              <Pagination
-                shown={shownCount}
-                total={total}
-                onLoadMore={handleLoadMore}
-                loading={isFetching && offset > 0}
-              />
+
+              {/* Load-more pagination (daylight) */}
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: 12,
+                  fontSize: '0.78rem',
+                  color: 'var(--rcf-ink-dim)',
+                }}
+              >
+                <span>
+                  Showing{' '}
+                  <strong style={{ color: 'var(--rcf-ink)', fontVariantNumeric: 'tabular-nums' }}>
+                    {shownCount.toLocaleString()}
+                  </strong>{' '}
+                  of{' '}
+                  <strong style={{ color: 'var(--rcf-ink)', fontVariantNumeric: 'tabular-nums' }}>
+                    {total.toLocaleString()}
+                  </strong>
+                </span>
+                {shownCount < total && (
+                  <button
+                    type="button"
+                    className="dl-btn dl-btn-ghost"
+                    disabled={loadingMore}
+                    onClick={handleLoadMore}
+                  >
+                    {loadingMore ? 'Loading…' : 'Load More'}
+                  </button>
+                )}
+              </div>
             </>
           )}
         </>

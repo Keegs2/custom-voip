@@ -10,13 +10,22 @@
  *
  * Admin-only: rendered inside <RequireAdmin> via the route, and additionally
  * guarded here so a stray render never fires the admin query.
+ *
+ * Styling: the shared DAYLIGHT CONSOLE system (`dl-*` in index.css, plus the
+ * admin `dlx-*` layer in styles/dl-admin.css, the platform `dlx2-*` layer in
+ * styles/dl-platform.css, and the page-scoped `dlx4-*` layer in
+ * styles/dl-platform-b.css). Renders INSIDE the PlatformManagementPage shell
+ * (`dl-scope` canvas) — this page contributes only the intro, the filter
+ * slab, and the breakdown panels. Attestation colors keep their shared
+ * semantic mapping (A=green, B=amber, C=slate, div=azure; verstat pass=green
+ * / fail=red) in light-tuned tones.
  */
 
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { getAttestationSummary } from '../../api/stir';
 import { ApiError } from '../../api/client';
-import { AdminCustomerSelector } from '../../components/AdminCustomerSelector';
+import { listCustomers } from '../../api/customers';
 import { Spinner } from '../../components/ui/Spinner';
 import { useAuth } from '../../contexts/AuthContext';
 import type { AttestationBreakdownItem } from '../../types/stir';
@@ -28,8 +37,25 @@ import {
   verstatSourceColor,
   type ColorToken,
 } from '../../components/stir/attestationColors';
+import '../../styles/dl-admin.css';
+import '../../styles/dl-platform.css';
+import '../../styles/dl-platform-b.css';
 
-const ACCENT = '#3b82f6';
+// ── Light-tuned tones for the shared attestation palette ─────────────────────
+// The shared `attestationColors` tokens are tuned for the dark call-detail
+// surfaces; on paper we deepen each hue for contrast while keeping the exact
+// semantic mapping (green/amber/red/azure/slate).
+const LIGHT_TONE: Record<string, string> = {
+  '#22c55e': '#16a34a', // green  (A / verstat passed)
+  '#f59e0b': '#d97706', // amber  (B)
+  '#ef4444': '#dc2626', // red    (verstat failed)
+  '#3b82f6': '#2f7df6', // azure  (div / carrier source)
+  '#94a3b8': '#64748b', // slate  (C / none)
+};
+
+function lightTone(token: ColorToken): string {
+  return LIGHT_TONE[token.text] ?? token.text;
+}
 
 // ── Date helpers ──────────────────────────────────────────────────────────────
 
@@ -71,7 +97,7 @@ function subNote(dimension: Dimension, value: string | null): string | null {
   return null;
 }
 
-// ── One breakdown card (labelled bars) ────────────────────────────────────────
+// ── One breakdown panel (labelled bars) ───────────────────────────────────────
 
 interface BreakdownCardProps {
   title: string;
@@ -90,105 +116,64 @@ function BreakdownCard({ title, hint, dimension, items, total }: BreakdownCardPr
   const maxCount = sorted.reduce((m, it) => Math.max(m, it.count), 0);
 
   return (
-    <div
-      className="glass-surface glass-hover"
-      style={{ padding: '20px 22px', position: 'relative', overflow: 'hidden' }}
-    >
-      <div
-        style={{
-          position: 'absolute',
-          top: 0,
-          left: 24,
-          right: 24,
-          height: 2,
-          background: `linear-gradient(90deg, transparent, ${ACCENT}99, transparent)`,
-        }}
-      />
-      <div style={{ marginBottom: 4 }}>
-        <div
-          style={{
-            fontSize: '0.7rem',
-            fontWeight: 700,
-            color: '#e2e8f0',
-            letterSpacing: '0.02em',
-          }}
-        >
-          {title}
-        </div>
-        <div style={{ fontSize: '0.64rem', color: '#4a5568', marginTop: 2 }}>{hint}</div>
+    <section className="dl-panel">
+      <div className="dl-panel-head">
+        <h2 className="dl-panel-title">{title}</h2>
+        <p className="dl-panel-sub">{hint}</p>
       </div>
-
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 16 }}>
+      <div className="dl-panel-body" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
         {sorted.length === 0 && (
-          <div style={{ fontSize: '0.72rem', color: '#4a5568', padding: '6px 0' }}>
+          <div style={{ fontSize: '0.76rem', color: 'var(--rcf-ink-dim)', padding: '4px 0' }}>
             No data in this window.
           </div>
         )}
         {sorted.map((item) => {
-          const token = tokenFor(dimension, item.value);
+          const tone = lightTone(tokenFor(dimension, item.value));
           const pct = total > 0 ? (item.count / total) * 100 : 0;
           const barPct = maxCount > 0 ? (item.count / maxCount) * 100 : 0;
           const note = subNote(dimension, item.value);
           return (
-            <div key={String(item.value)} style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+            <div key={String(item.value)} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 10 }}>
                 <span
                   title={note ?? undefined}
                   style={{
                     display: 'inline-flex',
                     alignItems: 'center',
-                    gap: 6,
-                    fontSize: '0.72rem',
+                    gap: 7,
+                    fontSize: '0.78rem',
                     fontWeight: 700,
-                    color: token.text,
+                    color: 'var(--rcf-ink)',
                   }}
                 >
-                  <span
-                    aria-hidden="true"
-                    style={{
-                      width: 8,
-                      height: 8,
-                      borderRadius: 3,
-                      background: token.text,
-                      boxShadow: `0 0 6px ${token.text}66`,
-                      flexShrink: 0,
-                    }}
-                  />
+                  <span className="dlx4-dot" aria-hidden="true" style={{ background: tone }} />
                   {displayValue(dimension, item.value)}
                 </span>
                 <span style={{ display: 'flex', alignItems: 'baseline', gap: 8, whiteSpace: 'nowrap' }}>
                   <span
                     style={{
-                      fontSize: '0.82rem',
-                      fontWeight: 800,
-                      color: '#e2e8f0',
+                      fontFamily: '"Archivo", "IBM Plex Sans", sans-serif',
+                      fontSize: '0.86rem',
+                      fontWeight: 700,
+                      color: 'var(--rcf-ink)',
                       fontVariantNumeric: 'tabular-nums',
                     }}
                   >
                     {item.count.toLocaleString()}
                   </span>
-                  <span style={{ fontSize: '0.66rem', color: '#4a5568', fontVariantNumeric: 'tabular-nums' }}>
+                  <span style={{ fontSize: '0.68rem', color: 'var(--rcf-ink-dim)', fontVariantNumeric: 'tabular-nums' }}>
                     {pct.toFixed(1)}%
                   </span>
                 </span>
               </div>
               {/* Bar */}
-              <div
-                style={{
-                  height: 6,
-                  borderRadius: 4,
-                  background: 'rgba(42,47,69,0.5)',
-                  overflow: 'hidden',
-                }}
-              >
+              <div className="dl-meter">
                 <div
+                  className="dl-meter-fill"
                   style={{
-                    height: '100%',
                     width: `${barPct}%`,
                     minWidth: item.count > 0 ? 4 : 0,
-                    background: `linear-gradient(90deg, ${token.text}cc, ${token.text})`,
-                    borderRadius: 4,
-                    transition: 'width 0.4s ease',
+                    background: tone,
                   }}
                 />
               </div>
@@ -196,7 +181,7 @@ function BreakdownCard({ title, hint, dimension, items, total }: BreakdownCardPr
           );
         })}
       </div>
-    </div>
+    </section>
   );
 }
 
@@ -230,168 +215,142 @@ export function StirSummaryPage() {
     },
   });
 
+  // Customer scope — light select mirroring AdminCustomerSelector (same query
+  // key + account-type filter, daylight styling).
+  const { data: customersData } = useQuery({
+    queryKey: ['customers-dropdown'],
+    queryFn: () => listCustomers({ limit: 500 }),
+    enabled: isAdmin,
+    staleTime: 60_000,
+  });
+
+  const scopeCustomers = useMemo(() => {
+    const accountTypes = ['rcf', 'api', 'trunk', 'hybrid'];
+    return (customersData?.items ?? []).filter((c) => accountTypes.includes(c.account_type));
+  }, [customersData]);
+
   const total = data?.total ?? 0;
 
-  const dateInputStyle: React.CSSProperties = {
-    fontSize: '0.8rem',
-    padding: '7px 10px',
-    borderRadius: 8,
-    border: '1px solid rgba(59,130,246,0.18)',
-    background: 'rgba(15,17,23,0.6)',
-    color: '#e2e8f0',
-    outline: 'none',
-    colorScheme: 'dark',
-  };
-
-  const labelStyle: React.CSSProperties = {
-    fontSize: '0.6rem',
-    fontWeight: 700,
-    color: '#4a5568',
-    textTransform: 'uppercase',
-    letterSpacing: '0.05em',
-    marginBottom: 6,
-    display: 'block',
-  };
-
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 20, paddingBottom: 32 }}>
-
-      {/* Intro / description */}
-      <div
-        className="glass-surface"
-        style={{ padding: '18px 22px', position: 'relative', overflow: 'hidden' }}
-      >
-        <div
+    <div className="dl-stack">
+      {/* ── Section identity ── */}
+      <div>
+        <span className="dl-tag">STIR / SHAKEN</span>
+        <h2
           style={{
-            position: 'absolute',
-            top: 0,
-            left: 24,
-            right: 24,
-            height: 2,
-            background: `linear-gradient(90deg, transparent, ${ACCENT}, transparent)`,
-            opacity: 0.55,
-          }}
-        />
-        <div
-          style={{
-            fontSize: '0.58rem',
+            fontFamily: '"Archivo", "IBM Plex Sans", sans-serif',
+            fontSize: '1.02rem',
             fontWeight: 700,
-            color: ACCENT,
-            textTransform: 'uppercase',
-            letterSpacing: '0.05em',
-            marginBottom: 6,
+            letterSpacing: '-0.015em',
+            color: 'var(--rcf-ink)',
+            margin: '8px 0 4px',
           }}
         >
-          STIR / SHAKEN
-        </div>
-        <div style={{ fontSize: '0.82rem', color: '#94a3b8', lineHeight: 1.5, maxWidth: 640 }}>
+          Attestation Coverage
+        </h2>
+        <p style={{ fontSize: '0.8rem', color: 'var(--rcf-ink-dim)', lineHeight: 1.55, margin: 0, maxWidth: '72ch' }}>
           Attestation coverage across signed calls — what the platform signed outbound, what
           callers arrived with, and how inbound identity was verified.
-        </div>
+        </p>
       </div>
 
-      {/* Filter bar: customer + date range */}
-      <AdminCustomerSelector
-        selectedCustomerId={customerId}
-        onSelect={setCustomerId}
-        accountTypes={['rcf', 'api', 'trunk', 'hybrid']}
-      />
-
-      <div
-        className="glass-surface"
-        style={{
-          display: 'flex',
-          alignItems: 'flex-end',
-          gap: 16,
-          flexWrap: 'wrap',
-          padding: '16px 20px',
-          borderRadius: 12,
-        }}
-      >
-        <div>
-          <label style={labelStyle}>Start Date</label>
-          <input
-            type="date"
-            value={startDate}
-            max={endDate}
-            onChange={(e) => setStartDate(e.target.value)}
-            style={dateInputStyle}
-          />
-        </div>
-        <div>
-          <label style={labelStyle}>End Date</label>
-          <input
-            type="date"
-            value={endDate}
-            min={startDate}
-            onChange={(e) => setEndDate(e.target.value)}
-            style={dateInputStyle}
-          />
-        </div>
-        <button
-          type="button"
-          onClick={() => {
-            const d = defaultRange();
-            setStartDate(d.start);
-            setEndDate(d.end);
-          }}
-          style={{
-            fontSize: '0.72rem',
-            fontWeight: 600,
-            padding: '7px 14px',
-            borderRadius: 8,
-            border: '1px solid rgba(59,130,246,0.25)',
-            background: 'rgba(59,130,246,0.08)',
-            color: '#60a5fa',
-            cursor: 'pointer',
-          }}
+      {/* ── Filter slab: customer scope + date range + window total ── */}
+      <section className="dl-panel">
+        <div
+          className="dl-panel-body"
+          style={{ display: 'flex', alignItems: 'flex-end', gap: 16, flexWrap: 'wrap' }}
         >
-          Last 7 days
-        </button>
-
-        {/* Total + live refresh hint */}
-        <div style={{ marginLeft: 'auto', textAlign: 'right' }}>
-          <div
-            style={{
-              fontSize: '1.9rem',
-              fontWeight: 800,
-              color: '#e2e8f0',
-              fontVariantNumeric: 'tabular-nums',
-              lineHeight: 1,
+          <div style={{ display: 'flex', flexDirection: 'column', minWidth: 220 }}>
+            <label className="dl-flabel">Viewing</label>
+            <select
+              className="dl-input"
+              value={customerId ?? ''}
+              onChange={(e) => setCustomerId(e.target.value ? Number(e.target.value) : undefined)}
+            >
+              <option value="">All Customers</option>
+              {scopeCustomers.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name} ({c.account_type.toUpperCase()})
+                </option>
+              ))}
+            </select>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+            <label className="dl-flabel">Start Date</label>
+            <input
+              type="date"
+              className="dl-input"
+              value={startDate}
+              max={endDate}
+              onChange={(e) => setStartDate(e.target.value)}
+            />
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+            <label className="dl-flabel">End Date</label>
+            <input
+              type="date"
+              className="dl-input"
+              value={endDate}
+              min={startDate}
+              onChange={(e) => setEndDate(e.target.value)}
+            />
+          </div>
+          <button
+            type="button"
+            className="dl-btn dl-btn-ghost"
+            onClick={() => {
+              const d = defaultRange();
+              setStartDate(d.start);
+              setEndDate(d.end);
             }}
           >
-            {isLoading ? '—' : total.toLocaleString()}
-          </div>
-          <div style={{ fontSize: '0.62rem', color: '#4a5568', marginTop: 3 }}>
-            {isFetching && !isLoading ? 'refreshing…' : 'attested calls'}
+            Last 7 days
+          </button>
+
+          {/* Total + live refresh hint */}
+          <div style={{ marginLeft: 'auto', textAlign: 'right' }}>
+            <div
+              style={{
+                fontFamily: '"Archivo", "IBM Plex Sans", sans-serif',
+                fontSize: '1.7rem',
+                fontWeight: 700,
+                letterSpacing: '-0.01em',
+                color: 'var(--rcf-ink)',
+                fontVariantNumeric: 'tabular-nums',
+                lineHeight: 1,
+              }}
+            >
+              {isLoading ? '—' : total.toLocaleString()}
+            </div>
+            <div className="dlx4-stat-label" style={{ marginTop: 4 }}>
+              {isFetching && !isLoading ? 'refreshing…' : 'attested calls'}
+            </div>
           </div>
         </div>
-      </div>
+      </section>
 
       {/* Loading */}
       {isLoading && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#718096', padding: '32px 0' }}>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            color: 'var(--rcf-ink-dim)',
+            fontSize: '0.85rem',
+            padding: '32px 0',
+          }}
+        >
           <Spinner /> Loading attestation summary…
         </div>
       )}
 
       {/* Error / unavailable */}
       {isError && !isLoading && (
-        <div
-          style={{
-            padding: '16px 20px',
-            borderRadius: 12,
-            background: 'rgba(127,29,29,0.22)',
-            border: '1px solid rgba(239,68,68,0.28)',
-            color: '#fca5a5',
-            fontSize: '0.82rem',
-          }}
-        >
+        <div className="dl-banner dl-banner-err">
           <span style={{ fontWeight: 700 }}>Attestation summary unavailable</span>
-          {error instanceof Error && (
-            <span style={{ color: '#f87171', marginLeft: 8 }}>— {error.message}</span>
-          )}
-          <div style={{ color: '#94a3b8', marginTop: 4, fontSize: '0.74rem' }}>
+          {error instanceof Error && <span style={{ marginLeft: 8 }}>— {error.message}</span>}
+          <div style={{ color: 'var(--rcf-ink-dim)', marginTop: 4, fontSize: '0.74rem' }}>
             This becomes available once the STIR/SHAKEN endpoint is deployed.
           </div>
         </div>
@@ -399,14 +358,11 @@ export function StirSummaryPage() {
 
       {/* Empty (deployed, but zero rows in window) */}
       {data && !isLoading && total === 0 && (
-        <div
-          className="glass-surface"
-          style={{ textAlign: 'center', padding: '40px 24px', borderRadius: 16, color: '#718096' }}
-        >
-          <p style={{ fontWeight: 600, color: '#e2e8f0', marginBottom: 6 }}>
+        <div className="dl-empty">
+          <p style={{ fontWeight: 600, margin: 0, color: 'var(--rcf-ink)' }}>
             No attested calls in this window
           </p>
-          <p style={{ fontSize: '0.82rem' }}>
+          <p style={{ fontSize: '0.74rem', margin: '4px 0 0' }}>
             Widen the date range or clear the customer filter.
           </p>
         </div>
@@ -414,13 +370,7 @@ export function StirSummaryPage() {
 
       {/* Breakdown grid */}
       {data && !isLoading && total > 0 && (
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
-            gap: 18,
-          }}
-        >
+        <div className="dlx4-stir-grid">
           <BreakdownCard
             title="Signed Attestation"
             hint="What we signed the outbound leg with"

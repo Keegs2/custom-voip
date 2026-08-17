@@ -1,57 +1,35 @@
+/**
+ * CustomerRcfSection — RCF numbers panel on the admin Customer 360
+ * (rcf/hybrid accounts): entry list with inline label / forward-to /
+ * max-channels editors, enable-disable, delete, and the add-number form.
+ *
+ * Styling: the shared DAYLIGHT CONSOLE system (`dl-*` in index.css, plus the
+ * admin-area `dlx-*` primitives in dl-admin.css and the page-scoped `dlx3-*`
+ * primitives in dl-customer360.css). Renders its own dl-panel — the parent
+ * CustomerAccountPage contributes only page composition. Presentation only:
+ * every query, mutation payload, confirm() and toast is unchanged.
+ *
+ * React #310: every hook in every component below is called unconditionally
+ * at the top of its function, before any early return.
+ */
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
+import { PhoneForwarded } from 'lucide-react';
 import { listRcf, createRcfEntry, updateRcfEntry, deleteRcfEntry } from '../../api/rcf';
-import { Badge } from '../../components/ui/Badge';
-import { Button } from '../../components/ui/Button';
 import { Spinner } from '../../components/ui/Spinner';
 import { useToast } from '../../components/ui/ToastContext';
 import { fmt } from '../../utils/format';
 import { normalizeNumberInput } from '../../utils/phone';
 import type { RcfEntry } from '../../types/rcf';
+import '../../styles/dl-admin.css';
+import '../../styles/dl-customer360.css';
 
 interface CustomerRcfSectionProps {
   customerId: number;
 }
 
-const darkInput: React.CSSProperties = {
-  fontSize: '0.82rem',
-  padding: '5px 10px',
-  borderRadius: 8,
-  border: '1px solid rgba(59,130,246,0.15)',
-  background: 'rgba(13,15,21,0.55)',
-  color: '#e2e8f0',
-  outline: 'none',
-  fontFamily: 'inherit',
-  transition: 'border-color 150ms, box-shadow 150ms',
-};
-
-// Shared tiny button styles for inline Save/Cancel actions
-const inlineSaveBtn: React.CSSProperties = {
-  fontSize: '0.65rem',
-  fontWeight: 600,
-  padding: '4px 10px',
-  borderRadius: 4,
-  border: 'none',
-  background: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
-  color: '#fff',
-  cursor: 'pointer',
-  flexShrink: 0,
-  lineHeight: 1,
-};
-
-const inlineCancelBtn: React.CSSProperties = {
-  fontSize: '0.65rem',
-  fontWeight: 500,
-  padding: '4px 8px',
-  borderRadius: 4,
-  border: 'none',
-  background: 'transparent',
-  color: '#718096',
-  cursor: 'pointer',
-  flexShrink: 0,
-  lineHeight: 1,
-};
+const MONO = '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace';
 
 // Inline editable name/label field for a single RCF row
 function RcfNameInput({
@@ -98,11 +76,12 @@ function RcfNameInput({
   if (editing) {
     return (
       <div
-        style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap', marginBottom: 3 }}
+        style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginBottom: 4 }}
         onClick={(e) => e.stopPropagation()}
       >
         <input
           type="text"
+          className="dl-input"
           value={value}
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={(e) => {
@@ -116,33 +95,25 @@ function RcfNameInput({
           placeholder="Add label..."
           style={{
             flex: 1,
-            minWidth: 60,
-            fontSize: '0.85rem',
+            minWidth: 80,
             fontWeight: 600,
-            color: '#e2e8f0',
-            background: 'rgba(13,15,23,0.8)',
-            border: '1px solid rgba(59,130,246,0.55)',
-            borderRadius: 6,
-            outline: 'none',
-            padding: '2px 7px',
-            fontFamily: 'inherit',
+            fontSize: '0.82rem',
+            padding: '3px 8px',
             opacity: mutation.isPending ? 0.5 : 1,
-            boxShadow: '0 0 0 3px rgba(59,130,246,0.12)',
-            letterSpacing: '-0.01em',
           }}
         />
         <button
           type="button"
+          className="dl-btn dl-btn-primary dlx-btn-sm"
           onMouseDown={(e) => { e.preventDefault(); handleSave(); }}
           disabled={mutation.isPending}
-          style={{ ...inlineSaveBtn, opacity: mutation.isPending ? 0.6 : 1 }}
         >
           {mutation.isPending ? '…' : 'Save'}
         </button>
         <button
           type="button"
+          className="dl-btn dl-btn-ghost dlx-btn-sm"
           onMouseDown={(e) => { e.preventDefault(); handleCancel(); }}
-          style={inlineCancelBtn}
         >
           Cancel
         </button>
@@ -152,23 +123,14 @@ function RcfNameInput({
 
   // View mode — click to enter edit mode
   return (
-    <div
-      onClick={(e) => { e.stopPropagation(); setEditing(true); }}
-      title="Click to set a label"
-      style={{
-        fontSize: value.trim() ? '0.85rem' : '0.78rem',
-        fontWeight: value.trim() ? 600 : 400,
-        color: value.trim() ? '#e2e8f0' : '#4a5568',
-        fontStyle: value.trim() ? 'normal' : 'italic',
-        letterSpacing: value.trim() ? '-0.01em' : 'normal',
-        padding: '2px 0',
-        cursor: 'pointer',
-        marginBottom: 3,
-        borderBottom: '1px dashed rgba(59,130,246,0.2)',
-        width: '100%',
-      }}
-    >
-      {value.trim() || 'Add label...'}
+    <div style={{ marginBottom: 4 }}>
+      <span
+        onClick={(e) => { e.stopPropagation(); setEditing(true); }}
+        title="Click to set a label"
+        className={value.trim() ? 'dlx3-editlabel' : 'dlx3-editlabel dlx3-editlabel-empty'}
+      >
+        {value.trim() || 'Add label...'}
+      </span>
     </div>
   );
 }
@@ -225,11 +187,12 @@ function RcfForwardInput({
   if (editing) {
     return (
       <div
-        style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}
+        style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}
         onClick={(e) => e.stopPropagation()}
       >
         <input
           type="tel"
+          className="dl-input dl-input-mono"
           value={value}
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={(e) => {
@@ -241,26 +204,20 @@ function RcfForwardInput({
           disabled={mutation.isPending}
           autoFocus
           placeholder="+1XXXXXXXXXX"
-          style={{
-            ...darkInput,
-            width: 140,
-            borderColor: 'rgba(59,130,246,0.7)',
-            boxShadow: '0 0 0 3px rgba(59,130,246,0.15)',
-            opacity: mutation.isPending ? 0.5 : 1,
-          }}
+          style={{ width: 150, padding: '5px 10px', opacity: mutation.isPending ? 0.5 : 1 }}
         />
         <button
           type="button"
+          className="dl-btn dl-btn-primary dlx-btn-sm"
           onMouseDown={(e) => { e.preventDefault(); handleSave(); }}
           disabled={mutation.isPending}
-          style={{ ...inlineSaveBtn, opacity: mutation.isPending ? 0.6 : 1 }}
         >
           {mutation.isPending ? '…' : 'Save'}
         </button>
         <button
           type="button"
+          className="dl-btn dl-btn-ghost dlx-btn-sm"
           onMouseDown={(e) => { e.preventDefault(); handleCancel(); }}
-          style={inlineCancelBtn}
         >
           Cancel
         </button>
@@ -270,24 +227,13 @@ function RcfForwardInput({
 
   // View mode — click to enter edit mode
   return (
-    <div
+    <span
       onClick={(e) => { e.stopPropagation(); setEditing(true); }}
       title="Click to edit forward destination"
-      style={{
-        ...darkInput,
-        display: 'inline-flex',
-        alignItems: 'center',
-        width: 160,
-        color: saved ? '#60a5fa' : '#e2e8f0',
-        borderColor: saved ? 'rgba(59,130,246,0.55)' : 'rgba(59,130,246,0.15)',
-        boxShadow: saved ? '0 0 0 3px rgba(59,130,246,0.12)' : 'none',
-        cursor: 'pointer',
-        userSelect: 'none',
-        fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
-      }}
+      className={saved ? 'dlx3-editchip dlx3-editchip-saved' : 'dlx3-editchip'}
     >
       {fmt(entry.forward_to)}
-    </div>
+    </span>
   );
 }
 
@@ -343,13 +289,14 @@ function RcfMaxChannelsInput({
   if (editing) {
     return (
       <div
-        style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}
+        style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}
         onClick={(e) => e.stopPropagation()}
       >
         <input
           type="number"
           min={0}
           max={100}
+          className="dl-input"
           value={value}
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={(e) => {
@@ -360,27 +307,20 @@ function RcfMaxChannelsInput({
           onBlur={handleCancel}
           disabled={mutation.isPending}
           autoFocus
-          style={{
-            ...darkInput,
-            width: 64,
-            textAlign: 'center',
-            borderColor: 'rgba(59,130,246,0.7)',
-            boxShadow: '0 0 0 3px rgba(59,130,246,0.15)',
-            opacity: mutation.isPending ? 0.5 : 1,
-          }}
+          style={{ width: 70, textAlign: 'center', padding: '5px 8px', opacity: mutation.isPending ? 0.5 : 1 }}
         />
         <button
           type="button"
+          className="dl-btn dl-btn-primary dlx-btn-sm"
           onMouseDown={(e) => { e.preventDefault(); handleSave(); }}
           disabled={mutation.isPending}
-          style={{ ...inlineSaveBtn, opacity: mutation.isPending ? 0.6 : 1 }}
         >
           {mutation.isPending ? '…' : 'Save'}
         </button>
         <button
           type="button"
+          className="dl-btn dl-btn-ghost dlx-btn-sm"
           onMouseDown={(e) => { e.preventDefault(); handleCancel(); }}
-          style={inlineCancelBtn}
         >
           Cancel
         </button>
@@ -390,28 +330,19 @@ function RcfMaxChannelsInput({
 
   // View mode — click to enter edit mode
   return (
-    <div
+    <span
       onClick={(e) => { e.stopPropagation(); setEditing(true); }}
       title="Click to set concurrent call limit (0 = no limit)"
-      style={{
-        ...darkInput,
-        display: 'inline-flex',
-        alignItems: 'center',
-        width: 80,
-        cursor: 'pointer',
-        userSelect: 'none',
-        color: entry.max_channels > 0 ? '#60a5fa' : '#4a5568',
-        borderColor: entry.max_channels > 0 ? 'rgba(59,130,246,0.35)' : 'rgba(59,130,246,0.15)',
-        fontStyle: entry.max_channels === 0 ? 'italic' : 'normal',
-        fontSize: '0.78rem',
-      }}
+      className={
+        entry.max_channels === 0 ? 'dlx3-editchip dlx3-editchip-empty' : 'dlx3-editchip'
+      }
     >
       {entry.max_channels === 0 ? 'No Limit' : String(entry.max_channels)}
-    </div>
+    </span>
   );
 }
 
-// A single RCF entry rendered as a card row
+// A single RCF entry rendered as a tinted item row
 function RcfEntryRow({
   entry,
   customerId,
@@ -426,116 +357,56 @@ function RcfEntryRow({
   togglePending: boolean;
 }) {
   return (
-    <div
-      className="glass-surface glass-hover"
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 16,
-        padding: '14px 16px',
-        borderRadius: 10,
-        flexWrap: 'wrap',
-      }}
-    >
+    <div className="dl-item dlx3-prodrow">
       {/* Left: name label + DID number */}
-      <div style={{ minWidth: 130, flex: '0 0 auto' }}>
-        {/* Editable name above DID */}
+      <div style={{ minWidth: 150, flex: '0 0 auto' }}>
         <RcfNameInput entry={entry} customerId={customerId} />
         <div
           style={{
-            fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
+            fontFamily: MONO,
             fontSize: '0.92rem',
-            color: '#60a5fa',
-            fontWeight: 600,
-            letterSpacing: '0.3px',
+            color: 'var(--rcf-azure-deep)',
+            fontWeight: 700,
+            letterSpacing: '0.02em',
             whiteSpace: 'nowrap',
           }}
         >
           {entry.did}
         </div>
         {entry.ring_timeout != null && (
-          <div
-            style={{
-              fontSize: '0.6rem',
-              color: '#4a5568',
-              marginTop: 2,
-              letterSpacing: '0.3px',
-            }}
-          >
+          <div style={{ fontSize: '0.66rem', color: 'var(--rcf-ink-dim)', marginTop: 2 }}>
             {entry.ring_timeout}s timeout
           </div>
         )}
       </div>
 
       {/* Divider */}
-      <div
-        style={{
-          width: 1,
-          alignSelf: 'stretch',
-          background: 'rgba(59,130,246,0.15)',
-          flexShrink: 0,
-        }}
-      />
+      <div className="dlx3-vdiv" aria-hidden="true" />
 
       {/* Middle: Forward To */}
       <div style={{ flex: '1 1 auto', minWidth: 0 }}>
-        <div
-          style={{
-            fontSize: '0.6rem',
-            fontWeight: 700,
-            color: '#4a5568',
-            textTransform: 'uppercase',
-            letterSpacing: '0.7px',
-            marginBottom: 5,
-          }}
-        >
-          Forward To
-        </div>
+        <div className="dl-fact-label">Forward To</div>
         <RcfForwardInput entry={entry} customerId={customerId} />
       </div>
 
       {/* Max Channels */}
       <div style={{ flexShrink: 0 }}>
-        <div
-          style={{
-            fontSize: '0.6rem',
-            fontWeight: 700,
-            color: '#4a5568',
-            textTransform: 'uppercase',
-            letterSpacing: '0.7px',
-            marginBottom: 5,
-          }}
-        >
-          Max Calls
-        </div>
+        <div className="dl-fact-label">Max Calls</div>
         <RcfMaxChannelsInput entry={entry} customerId={customerId} />
       </div>
 
       {/* Right: Status + actions */}
       <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 10,
-          flexShrink: 0,
-        }}
+        style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0, marginLeft: 'auto' }}
         onClick={(e) => e.stopPropagation()}
       >
-        <Badge variant={entry.enabled ? 'active' : 'disabled'}>
+        <span className={entry.enabled ? 'dl-pill dl-pill-on' : 'dl-pill dl-pill-off'}>
           {entry.enabled ? 'Active' : 'Off'}
-        </Badge>
+        </span>
 
-        <div
-          style={{
-            width: 1,
-            height: 20,
-            background: 'rgba(59,130,246,0.15)',
-          }}
-        />
-
-        <Button
-          variant="ghost"
-          size="xs"
+        <button
+          type="button"
+          className="dl-btn dl-btn-ghost dlx-btn-sm"
           onClick={(e) => {
             e.stopPropagation();
             onToggle();
@@ -543,18 +414,18 @@ function RcfEntryRow({
           disabled={togglePending}
         >
           {entry.enabled ? 'Disable' : 'Enable'}
-        </Button>
+        </button>
 
-        <Button
-          variant="danger"
-          size="xs"
+        <button
+          type="button"
+          className="dl-btn dl-btn-danger dlx-btn-sm"
           onClick={(e) => {
             e.stopPropagation();
             onDelete();
           }}
         >
           Delete
-        </Button>
+        </button>
       </div>
     </div>
   );
@@ -568,9 +439,6 @@ export function CustomerRcfSection({ customerId }: CustomerRcfSectionProps) {
   const [newDid, setNewDid] = useState('');
   const [newFwd, setNewFwd] = useState('');
   const [passCid, setPassCid] = useState(true);
-
-  const [didFocused, setDidFocused] = useState(false);
-  const [fwdFocused, setFwdFocused] = useState(false);
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ['customerRcf', customerId],
@@ -633,284 +501,145 @@ export function CustomerRcfSection({ customerId }: CustomerRcfSectionProps) {
   const count = entries.length;
 
   return (
-    <div style={{ paddingTop: 16, borderTop: '1px solid rgba(59,130,246,0.12)' }}>
-
-      {/* Section header */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          marginBottom: 12,
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span
-            style={{
-              fontSize: '0.65rem',
-              fontWeight: 700,
-              color: '#4a5568',
-              textTransform: 'uppercase',
-              letterSpacing: '0.8px',
-            }}
-          >
-            RCF Numbers
-          </span>
-          {!isLoading && !isError && (
-            <span
-              style={{
-                fontSize: '0.62rem',
-                fontWeight: 700,
-                color: '#60a5fa',
-                background: 'rgba(59,130,246,0.12)',
-                border: '1px solid rgba(59,130,246,0.25)',
-                borderRadius: 20,
-                padding: '1px 7px',
-                letterSpacing: '0.3px',
-                lineHeight: 1.6,
-              }}
-            >
-              {count === 1 ? '1 number' : `${count} numbers`}
-            </span>
-          )}
-        </div>
-
+    <section className="dl-panel">
+      {/* ── Panel head — title + count + manage link ── */}
+      <div className="dl-panel-head" style={{ flexWrap: 'nowrap' }}>
+        <span aria-hidden="true" style={{ display: 'inline-flex', color: 'var(--rcf-azure-deep)', flexShrink: 0 }}>
+          <PhoneForwarded size={15} strokeWidth={2} />
+        </span>
+        <h3 className="dl-panel-title" style={{ margin: 0 }}>RCF Numbers</h3>
+        {!isLoading && !isError && (
+          <span className="dl-count">{count === 1 ? '1 number' : `${count} numbers`}</span>
+        )}
         <button
           type="button"
+          className="dlx-linkbtn"
+          style={{ marginLeft: 'auto', flexShrink: 0 }}
           onClick={(e) => { e.stopPropagation(); navigate('/rcf'); }}
-          style={{
-            fontSize: '0.72rem',
-            color: '#3b82f6',
-            background: 'none',
-            border: 'none',
-            cursor: 'pointer',
-            padding: 0,
-            textDecoration: 'none',
-          }}
-          onMouseEnter={(e) => (e.currentTarget.style.textDecoration = 'underline')}
-          onMouseLeave={(e) => (e.currentTarget.style.textDecoration = 'none')}
         >
-          Manage RCF Numbers
+          Manage RCF Numbers →
         </button>
       </div>
 
-      {/* Loading state */}
-      {isLoading && (
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            color: '#718096',
-            fontSize: '0.8rem',
-            padding: '8px 0',
-          }}
-        >
-          <Spinner size="xs" /> Loading…
-        </div>
-      )}
-
-      {/* Error state */}
-      {isError && (
-        <p style={{ color: '#f87171', fontSize: '0.8rem', margin: 0 }}>
-          Could not load RCF numbers.
-        </p>
-      )}
-
-      {/* Empty state */}
-      {!isLoading && !isError && entries.length === 0 && (
-        <p
-          style={{
-            color: '#4a5568',
-            fontSize: '0.8rem',
-            margin: '0 0 4px',
-            fontStyle: 'italic',
-          }}
-        >
-          No RCF numbers yet.
-        </p>
-      )}
-
-      {/* RCF entry cards */}
-      {!isLoading && entries.length > 0 && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>
-          {entries.map((entry) => (
-            <RcfEntryRow
-              key={entry.id}
-              entry={entry}
-              customerId={customerId}
-              onToggle={() => toggleMutation.mutate({ id: entry.id, enabled: !entry.enabled })}
-              onDelete={() => handleDelete(entry)}
-              togglePending={toggleMutation.isPending}
-            />
-          ))}
-        </div>
-      )}
-
-      {/* Add RCF Number form */}
-      <form
-        onSubmit={handleCreate}
-        onClick={(e) => e.stopPropagation()}
-        className="glass-surface"
-        style={{
-          marginTop: entries.length > 0 ? 4 : 8,
-          padding: '14px 16px',
-          borderRadius: 10,
-        }}
-      >
-        {/* Form header */}
-        <div
-          style={{
-            fontSize: '0.62rem',
-            fontWeight: 700,
-            color: '#60a5fa',
-            textTransform: 'uppercase',
-            letterSpacing: '0.8px',
-            marginBottom: 12,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-          }}
-        >
-          <span
+      <div className="dl-panel-body">
+        {/* Loading state */}
+        {isLoading && (
+          <div
             style={{
-              display: 'inline-block',
-              width: 14,
-              height: 14,
-              borderRadius: '50%',
-              background: 'rgba(59,130,246,0.15)',
-              border: '1px solid rgba(59,130,246,0.4)',
-              lineHeight: '13px',
-              textAlign: 'center',
-              fontSize: '0.7rem',
-              color: '#60a5fa',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              color: 'var(--rcf-ink-dim)',
+              fontSize: '0.8rem',
+              padding: '8px 0',
             }}
           >
-            +
-          </span>
-          Add RCF Number
-        </div>
-
-        {/* Form fields */}
-        <div
-          style={{
-            display: 'flex',
-            flexWrap: 'wrap',
-            gap: 12,
-            alignItems: 'flex-end',
-          }}
-        >
-          {/* DID field */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-            <label
-              style={{
-                fontSize: '0.6rem',
-                fontWeight: 700,
-                color: '#4a5568',
-                textTransform: 'uppercase',
-                letterSpacing: '0.7px',
-              }}
-            >
-              DID
-            </label>
-            <input
-              type="tel"
-              value={newDid}
-              onChange={(e) => setNewDid(e.target.value)}
-              onFocus={() => setDidFocused(true)}
-              onBlur={() => setDidFocused(false)}
-              onClick={(e) => e.stopPropagation()}
-              placeholder="+1XXXXXXXXXX"
-              style={{
-                ...darkInput,
-                width: 155,
-                borderColor: didFocused ? 'rgba(59,130,246,0.7)' : 'rgba(42,47,69,0.7)',
-                boxShadow: didFocused ? '0 0 0 3px rgba(59,130,246,0.15)' : 'none',
-                fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
-              }}
-            />
+            <Spinner size="xs" /> Loading…
           </div>
+        )}
 
-          {/* Forward To field */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-            <label
-              style={{
-                fontSize: '0.6rem',
-                fontWeight: 700,
-                color: '#4a5568',
-                textTransform: 'uppercase',
-                letterSpacing: '0.7px',
-              }}
-            >
-              Forward To
-            </label>
-            <input
-              type="tel"
-              value={newFwd}
-              onChange={(e) => setNewFwd(e.target.value)}
-              onFocus={() => setFwdFocused(true)}
-              onBlur={() => setFwdFocused(false)}
-              onClick={(e) => e.stopPropagation()}
-              placeholder="+1XXXXXXXXXX"
-              style={{
-                ...darkInput,
-                width: 155,
-                borderColor: fwdFocused ? 'rgba(59,130,246,0.7)' : 'rgba(42,47,69,0.7)',
-                boxShadow: fwdFocused ? '0 0 0 3px rgba(59,130,246,0.15)' : 'none',
-                fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
-              }}
-            />
+        {/* Error state */}
+        {isError && (
+          <div className="dl-banner dl-banner-err">Could not load RCF numbers.</div>
+        )}
+
+        {/* Empty state */}
+        {!isLoading && !isError && entries.length === 0 && (
+          <div className="dl-empty" style={{ marginBottom: 12 }}>
+            No RCF numbers yet.
           </div>
+        )}
 
-          {/* Pass CID */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-            <label
-              style={{
-                fontSize: '0.6rem',
-                fontWeight: 700,
-                color: '#4a5568',
-                textTransform: 'uppercase',
-                letterSpacing: '0.7px',
-              }}
-            >
-              Pass CID
-            </label>
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6,
-                padding: '5px 0',
-              }}
-            >
-              <input
-                type="checkbox"
-                checked={passCid}
-                onChange={(e) => setPassCid(e.target.checked)}
-                onClick={(e) => e.stopPropagation()}
-                style={{
-                  accentColor: '#3b82f6',
-                  width: 14,
-                  height: 14,
-                  cursor: 'pointer',
-                }}
+        {/* RCF entry rows */}
+        {!isLoading && entries.length > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
+            {entries.map((entry) => (
+              <RcfEntryRow
+                key={entry.id}
+                entry={entry}
+                customerId={customerId}
+                onToggle={() => toggleMutation.mutate({ id: entry.id, enabled: !entry.enabled })}
+                onDelete={() => handleDelete(entry)}
+                togglePending={toggleMutation.isPending}
               />
-              <span style={{ fontSize: '0.8rem', color: '#718096' }}>Yes</span>
-            </div>
+            ))}
           </div>
+        )}
 
-          {/* Submit */}
-          <Button
-            type="submit"
-            variant="primary"
-            size="sm"
-            loading={createMutation.isPending}
-            onClick={(e) => e.stopPropagation()}
-          >
-            Create
-          </Button>
-        </div>
-      </form>
-    </div>
+        {/* Add RCF Number form */}
+        <form
+          onSubmit={handleCreate}
+          onClick={(e) => e.stopPropagation()}
+          style={{ paddingTop: 16, borderTop: '1px solid var(--rcf-line)' }}
+        >
+          <h4 className="dl-section-title">Add RCF Number</h4>
+
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, alignItems: 'flex-end' }}>
+            {/* DID field */}
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              <span className="dl-flabel">DID</span>
+              <input
+                type="tel"
+                className="dl-input dl-input-mono"
+                value={newDid}
+                onChange={(e) => setNewDid(e.target.value)}
+                onClick={(e) => e.stopPropagation()}
+                placeholder="+1XXXXXXXXXX"
+                style={{ width: 160 }}
+              />
+            </div>
+
+            {/* Forward To field */}
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              <span className="dl-flabel">Forward To</span>
+              <input
+                type="tel"
+                className="dl-input dl-input-mono"
+                value={newFwd}
+                onChange={(e) => setNewFwd(e.target.value)}
+                onClick={(e) => e.stopPropagation()}
+                placeholder="+1XXXXXXXXXX"
+                style={{ width: 160 }}
+              />
+            </div>
+
+            {/* Pass CID */}
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              <span className="dl-flabel">Pass CID</span>
+              <label
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 7,
+                  padding: '8px 0',
+                  cursor: 'pointer',
+                  fontSize: '0.8rem',
+                  color: 'var(--rcf-ink-soft)',
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={passCid}
+                  onChange={(e) => setPassCid(e.target.checked)}
+                  onClick={(e) => e.stopPropagation()}
+                  style={{ accentColor: 'var(--rcf-azure)', width: 14, height: 14, cursor: 'pointer' }}
+                />
+                Yes
+              </label>
+            </div>
+
+            {/* Submit */}
+            <button
+              type="submit"
+              className="dl-btn dl-btn-primary"
+              disabled={createMutation.isPending}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {createMutation.isPending ? 'Creating…' : 'Create'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </section>
   );
 }

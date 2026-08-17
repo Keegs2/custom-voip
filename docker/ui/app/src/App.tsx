@@ -8,7 +8,8 @@ import { RcfPage } from './pages/RcfPage';
 import { ApiDidsPage } from './pages/ApiDidsPage';
 import { TrunksPage } from './pages/TrunksPage';
 import { IvrBuilderPage } from './pages/IvrBuilderPage';
-import { RcfDocsPage } from './pages/docs/RcfDocsPage';
+import { VisualVoicemailPage } from './pages/VisualVoicemailPage';
+import { GuidesPage } from './pages/docs/GuidesPage';
 import { ApiDocsPage } from './pages/docs/ApiDocsPage';
 import { TroubleshootingPage } from './pages/TroubleshootingPage';
 import { AdminPage } from './pages/admin/AdminPage';
@@ -25,8 +26,9 @@ import { TrunksAdminPage } from './pages/admin/TrunksAdminPage';
 import { DIDSearchPage } from './pages/admin/DIDSearchPage';
 import { UserDetailPage } from './pages/admin/UserDetailPage';
 import { OnboardingAdminPage } from './pages/admin/OnboardingAdminPage';
+import { PaymentsDemoControlPage } from './pages/admin/payments-demo/PaymentsDemoControlPage';
+import { OnboardingBriefPage } from './pages/admin/OnboardingBriefPage';
 import { CallQualityPage } from './pages/CallQualityPage';
-import { AccountPage } from './pages/AccountPage';
 import { MyAccountPage } from './pages/MyAccountPage';
 
 /** Redirects /admin/user/:userId → /admin/customers/users/:userId */
@@ -55,12 +57,17 @@ export function App() {
               <Route path="api-dids"   element={<ApiDidsPage />} />
               <Route path="trunks"     element={<TrunksPage />} />
               <Route path="ivr"        element={<IvrBuilderPage />} />
-              <Route path="documentation" element={<Navigate to="/docs/rcf" replace />} />
-              <Route path="docs/rcf"         element={<RcfDocsPage />} />
-              <Route path="docs/api"         element={<ApiDocsPage />} />
-              <Route path="docs/integration" element={<Navigate to="/docs/api" replace />} />
+              <Route path="voicemail"  element={<VisualVoicemailPage />} />
+              <Route path="documentation" element={<Navigate to="/docs/guides" replace />} />
+              {/* Old bookmark: the standalone RCF guide is now the Guides hub's RCF tab */}
+              <Route path="docs/rcf"                element={<Navigate to="/docs/guides/rcf" replace />} />
+              <Route path="docs/guides/:product?"   element={<GuidesPage />} />
+              <Route path="docs/api/:product?"      element={<ApiDocsPage />} />
+              <Route path="docs/integration"        element={<Navigate to="/docs/api" replace />} />
               <Route path="call-quality" element={<CallQualityPage />} />
-              <Route path="account"          element={<AccountPage />} />
+              {/* Old bookmarks: the standalone Account Settings page is retired —
+                  its content lives in MyAccountPage's "Your Account" tab. */}
+              <Route path="account"          element={<Navigate to="/my-account" replace />} />
               <Route path="my-account"       element={<MyAccountPage />} />
 
               {/* Redirects from old standalone paths to their new tab locations */}
@@ -69,6 +76,16 @@ export function App() {
               <Route
                 path="admin/user/:userId"
                 element={<UserDetailRedirect />}
+              />
+
+              {/* Machine Payments Demo — standalone daylight page (no tab shell) */}
+              <Route
+                path="admin/payments-demo"
+                element={
+                  <RequireAdmin>
+                    <PaymentsDemoControlPage />
+                  </RequireAdmin>
+                }
               />
 
               {/* Customer Management — nested under AdminPage tab shell */}
@@ -110,6 +127,16 @@ export function App() {
           </Route>
 
           {/* Full-screen pages — outside AppLayout (no max-width/padding) */}
+          <Route
+            path="admin/onboarding/print/:id"
+            element={
+              <RequireAuth>
+                <RequireAdmin>
+                  <OnboardingBriefPage />
+                </RequireAdmin>
+              </RequireAuth>
+            }
+          />
           <Route
             path="troubleshooting"
             element={

@@ -38,6 +38,11 @@ services:
       - BANDWIDTH_SIP_PEER_ID=${BANDWIDTH_SIP_PEER_ID:-1162116}
       - TEST_MODE=${TEST_MODE:-false}
       - ENABLE_DOCS=${ENABLE_DOCS:-true}
+      # Machine-payments demo (exec demo only — NEVER default-on). true enables
+      # /v1/payments + the x402 pay-per-call gate on /v1/calls; FAKE_ORIGINATE
+      # additionally skips real ESL originate (keep false where FS is reachable).
+      - PAYMENTS_DEMO_MODE=${PAYMENTS_DEMO_MODE:-false}
+      - PAYMENTS_DEMO_FAKE_ORIGINATE=${PAYMENTS_DEMO_FAKE_ORIGINATE:-false}
       # Shared bearer token the SBC carrier-monitor pollers present to
       # POST /v1/carrier-status/report. Must match CARRIER_STATUS_TOKEN in the
       # SBCs' .env. Unset => the endpoint fail-closes (rejects all reports).

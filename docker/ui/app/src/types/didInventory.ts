@@ -4,7 +4,8 @@ export type DidStatus =
   | 'reserved'
   | 'porting_in'
   | 'porting_out'
-  | 'suspended';
+  | 'suspended'
+  | 'release_requested';
 
 export interface DidInventoryItem {
   id: number;
@@ -27,6 +28,8 @@ export interface DidStats {
   assigned: number;
   available: number;
   reserved: number;
+  /** Raw per-status counts — includes lifecycle statuses like 'release_requested'. */
+  by_status?: Record<string, number>;
   by_product: Record<string, number>;
   by_state: Record<string, number>;
 }

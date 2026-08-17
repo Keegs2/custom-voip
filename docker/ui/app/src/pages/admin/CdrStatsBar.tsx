@@ -1,5 +1,20 @@
+/**
+ * CdrStatsBar — aggregate stats for the current CDR result set.
+ *
+ * Styling: the shared DAYLIGHT CONSOLE system — one white `dl-panel` slab
+ * carrying left-keyline figures in the statline language (`dlx4-statline`
+ * in styles/dl-platform-b.css). Status-measured figures (ASR, margin) keep
+ * their green/amber/red semantics in light-tuned tones; the stat math is
+ * unchanged.
+ */
 import { useMemo } from 'react';
 import type { Cdr } from '../../types/cdr';
+
+/** Light-tuned semantic tones (mirrors the Call Quality daylight palette). */
+const GOOD = 'var(--rcf-green)';
+const WARN = '#b45309';
+const BAD = 'var(--rcf-red)';
+const AZURE_DEEP = 'var(--rcf-azure-deep)';
 
 /** Formats total seconds as HH:MM:SS */
 function formatTotalDuration(totalSeconds: number): string {
@@ -14,49 +29,23 @@ function fmtMoney4(val: number): string {
   return `$${val.toFixed(4)}`;
 }
 
-interface StatPillProps {
+interface StatFigureProps {
   label: string;
   value: string;
+  /** Semantic accent — colors both the keyline and the numeral. */
   accent?: string;
 }
 
-function StatPill({ label, value, accent }: StatPillProps) {
+function StatFigure({ label, value, accent }: StatFigureProps) {
   return (
     <div
-      className="glass-surface glass-hover"
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        borderRadius: 12,
-        padding: '10px 16px',
-        minWidth: 90,
-      }}
+      className={accent ? 'dlx4-stat' : 'dlx4-stat dlx4-stat-dim'}
+      style={accent ? { borderLeftColor: accent } : undefined}
     >
-      <span
-        style={{
-          fontSize: '0.62rem',
-          fontWeight: 700,
-          textTransform: 'uppercase',
-          letterSpacing: '0.05em',
-          color: '#4a5568',
-          marginBottom: 6,
-          whiteSpace: 'nowrap',
-        }}
-      >
-        {label}
-      </span>
-      <span
-        style={{
-          fontSize: '1rem',
-          fontWeight: 700,
-          fontVariantNumeric: 'tabular-nums',
-          lineHeight: 1,
-          color: accent ?? '#e2e8f0',
-        }}
-      >
+      <div className="dlx4-stat-value" style={accent ? { color: accent } : undefined}>
         {value}
-      </span>
+      </div>
+      <div className="dlx4-stat-label">{label}</div>
     </div>
   );
 }
@@ -79,49 +68,37 @@ export function CdrStatsBar({ cdrs, total }: CdrStatsBarProps) {
     return { answered, asr, totalDurSec, totalBilled, totalCost, totalMargin, avgMarginPct };
   }, [cdrs, total]);
 
-  const asrAccent =
-    stats.asr > 50
-      ? '#4ade80'
-      : stats.asr >= 30
-        ? '#fbbf24'
-        : '#f87171';
+  const asrAccent = stats.asr > 50 ? GOOD : stats.asr >= 30 ? WARN : BAD;
 
-  const marginAccent = stats.totalMargin >= 0 ? '#4ade80' : '#f87171';
+  const marginAccent = stats.totalMargin >= 0 ? GOOD : BAD;
 
   const avgMpAccent =
     stats.avgMarginPct == null
       ? undefined
       : stats.avgMarginPct >= 30
-        ? '#4ade80'
+        ? GOOD
         : stats.avgMarginPct >= 15
-          ? '#fbbf24'
-          : '#f87171';
+          ? WARN
+          : BAD;
 
   return (
-    <div
-      style={{
-        display: 'flex',
-        flexWrap: 'wrap',
-        gap: 8,
-        marginBottom: 20,
-      }}
-    >
-      <StatPill label="Total Calls" value={total.toLocaleString()} />
-      <StatPill label="Answered" value={stats.answered.toLocaleString()} />
-      <StatPill label="ASR" value={`${stats.asr.toFixed(1)}%`} accent={asrAccent} />
-      <StatPill label="Duration" value={formatTotalDuration(stats.totalDurSec)} />
-      <StatPill
-        label="Total Billed"
-        value={fmtMoney4(stats.totalBilled)}
-        accent="#60a5fa"
-      />
-      <StatPill label="Total Cost" value={fmtMoney4(stats.totalCost)} accent="#f87171" />
-      <StatPill label="Total Margin" value={fmtMoney4(stats.totalMargin)} accent={marginAccent} />
-      <StatPill
-        label="Avg Margin %"
-        value={stats.avgMarginPct != null ? `${stats.avgMarginPct.toFixed(1)}%` : '--'}
-        accent={avgMpAccent}
-      />
-    </div>
+    <section className="dl-panel">
+      <div className="dl-panel-body" style={{ padding: '16px 20px' }}>
+        <div className="dlx4-statline">
+          <StatFigure label="Total Calls" value={total.toLocaleString()} />
+          <StatFigure label="Answered" value={stats.answered.toLocaleString()} />
+          <StatFigure label="ASR" value={`${stats.asr.toFixed(1)}%`} accent={asrAccent} />
+          <StatFigure label="Duration" value={formatTotalDuration(stats.totalDurSec)} />
+          <StatFigure label="Total Billed" value={fmtMoney4(stats.totalBilled)} accent={AZURE_DEEP} />
+          <StatFigure label="Total Cost" value={fmtMoney4(stats.totalCost)} accent={BAD} />
+          <StatFigure label="Total Margin" value={fmtMoney4(stats.totalMargin)} accent={marginAccent} />
+          <StatFigure
+            label="Avg Margin %"
+            value={stats.avgMarginPct != null ? `${stats.avgMarginPct.toFixed(1)}%` : '--'}
+            accent={avgMpAccent}
+          />
+        </div>
+      </div>
+    </section>
   );
 }

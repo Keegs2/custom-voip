@@ -1,72 +1,46 @@
 /**
  * Shared design tokens, helper components, and layout primitives used across
- * all three documentation pages (RCF Docs, API Reference, Integration Guide).
+ * the documentation pages (RCF Docs, API Reference).
  *
  * Keep this file free of page-specific content — it is pure shared infrastructure.
+ *
+ * Styling: the shared DAYLIGHT CONSOLE system (`dl-*` classes in index.css)
+ * plus the docs-only `dlx-*` primitives in src/styles/dl-docs.css — paper
+ * canvas, quiet breadcrumb header, white panels, ink text, azure accents,
+ * ink-on-dark code blocks.
+ *
+ * React #310: every hook in every component below is called unconditionally
+ * at the top of its function, before any early return.
  */
 
 import { useState } from 'react';
 import { ChevronDown, Info } from 'lucide-react';
 
-/* ─── Design tokens ──────────────────────────────────────── */
-
-export const C = {
-  bg: '#13151d',
-  surface: '#1a1d27',
-  surfaceAlt: '#1e2130',
-  border: 'rgba(42,47,69,0.6)',
-  borderSubtle: 'rgba(42,47,69,0.35)',
-  text: '#e2e8f0',
-  textMuted: '#94a3b8',
-  textFaint: '#4a5568',
-  accent: '#3b82f6',
-  amber: '#f59e0b',
-  red: '#ef4444',
-} as const;
+import '../../styles/dl-docs.css';
 
 /* ─── Typography helpers ─────────────────────────────────── */
 
 export function P({ children }: { children: React.ReactNode }) {
-  return (
-    <p style={{ margin: '0 0 14px', fontSize: '0.875rem', color: C.textMuted, lineHeight: 1.75 }}>
-      {children}
-    </p>
-  );
+  return <p className="dlx-p">{children}</p>;
 }
 
 export function H3({ children }: { children: React.ReactNode }) {
-  return (
-    <h3
-      style={{
-        margin: '28px 0 10px',
-        fontSize: '0.72rem',
-        fontWeight: 700,
-        letterSpacing: '0.05em',
-        textTransform: 'uppercase',
-        color: C.textFaint,
-      }}
-    >
-      {children}
-    </h3>
-  );
+  return <h3 className="dlx-h3">{children}</h3>;
 }
 
 /** Inline code span. */
 export function IC({ children }: { children: React.ReactNode }) {
+  return <code className="dlx-ic">{children}</code>;
+}
+
+/** Bulleted usage list — azure dash markers (see .dlx8-ul). */
+export function UL({ items }: { items: React.ReactNode[] }) {
   return (
-    <code
-      style={{
-        background: 'rgba(13,17,23,0.7)',
-        border: `1px solid ${C.borderSubtle}`,
-        borderRadius: 4,
-        padding: '1px 6px',
-        fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
-        fontSize: '0.78rem',
-        color: '#79c0ff',
-      }}
-    >
-      {children}
-    </code>
+    <ul className="dlx8-ul">
+      {items.map((item, i) => (
+        <li key={i}>{item}</li>
+      ))}
+    </ul>
   );
 }
 
@@ -81,20 +55,13 @@ export function Callout({
 }) {
   return (
     <div
+      className="dlx-callout"
       style={{
-        display: 'flex',
-        gap: 12,
-        padding: '14px 18px',
-        borderRadius: 8,
-        background: `${accent}0a`,
-        border: `1px solid ${accent}25`,
-        marginBottom: 16,
-        fontSize: '0.84rem',
-        color: C.textMuted,
-        lineHeight: 1.65,
+        background: `${accent}0d`,
+        border: `1px solid ${accent}30`,
       }}
     >
-      <div style={{ color: accent, flexShrink: 0, marginTop: 1 }}>
+      <div style={{ color: accent, flexShrink: 0, marginTop: 2 }}>
         <Info size={14} />
       </div>
       <div>{children}</div>
@@ -106,7 +73,6 @@ export function Callout({
 
 interface AccordionSectionProps {
   id: string;
-  accent: string;
   icon: React.ReactNode;
   title: React.ReactNode;
   subtitle: string;
@@ -115,7 +81,7 @@ interface AccordionSectionProps {
 }
 
 export function AccordionSection({
-  accent,
+  id,
   icon,
   title,
   subtitle,
@@ -125,108 +91,44 @@ export function AccordionSection({
   const [open, setOpen] = useState(defaultOpen);
 
   return (
-    <div
-      className="glass-surface"
-      style={{
-        borderRadius: 14,
-        overflow: 'hidden',
-        marginBottom: 20,
-        boxShadow: open
-          ? `inset 0 1px 0 0 rgba(255,255,255,0.06), 0 1px 2px rgba(0,0,0,0.35), 0 12px 34px -14px rgba(0,0,0,0.6), 0 0 0 1px ${accent}22, 0 8px 40px -10px ${accent}30`
-          : undefined,
-      }}
-    >
+    <section id={id} className="dl-panel">
       {/* Header bar */}
       <button
         type="button"
+        className="dlx-section-toggle"
+        aria-expanded={open}
         onClick={() => setOpen(o => !o)}
-        style={{
-          width: '100%',
-          display: 'flex',
-          alignItems: 'center',
-          gap: 16,
-          padding: '20px 28px',
-          background: open
-            ? `linear-gradient(90deg, ${accent}0d 0%, transparent 60%)`
-            : 'transparent',
-          border: 'none',
-          borderBottom: open ? `1px solid ${accent}25` : '1px solid transparent',
-          cursor: 'pointer',
-          textAlign: 'left',
-          transition: 'background 0.2s',
-        }}
       >
-        {/* Icon badge */}
-        <div
-          style={{
-            width: 40,
-            height: 40,
-            borderRadius: 10,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            background: `linear-gradient(135deg, ${accent}20 0%, ${accent}08 100%)`,
-            border: `1px solid ${accent}35`,
-            color: accent,
-            flexShrink: 0,
-          }}
-        >
-          {icon}
-        </div>
-
-        {/* Title + subtitle */}
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div
-            style={{
-              fontSize: '1.05rem',
-              fontWeight: 700,
-              color: C.text,
-              letterSpacing: '-0.01em',
-              marginBottom: 2,
-            }}
-          >
-            {title}
-          </div>
-          <div style={{ fontSize: '0.82rem', color: C.textMuted, lineHeight: 1.4 }}>
-            {subtitle}
-          </div>
-        </div>
-
-        {/* Chevron */}
-        <div
-          style={{
-            color: accent,
-            flexShrink: 0,
-            transform: open ? 'rotate(0deg)' : 'rotate(-90deg)',
-            transition: 'transform 0.2s',
-          }}
-        >
-          <ChevronDown size={20} />
-        </div>
+        <span className="dlx-section-icon" aria-hidden="true">{icon}</span>
+        <span className="dlx-section-id">
+          <span className="dlx-section-title">{title}</span>
+          <span className="dlx-section-sub">{subtitle}</span>
+        </span>
+        <ChevronDown
+          size={18}
+          className={open ? 'dlx-section-chev dlx-section-chev-open' : 'dlx-section-chev'}
+        />
       </button>
 
       {/* Collapsible body */}
-      {open && (
-        <div style={{ padding: '28px 32px' }}>
-          {children}
-        </div>
-      )}
-    </div>
+      {open && <div className="dlx-section-body">{children}</div>}
+    </section>
   );
 }
 
 /* ─── Code block ─────────────────────────────────────────── */
 
 /**
- * Renders a single code line with simple blue-palette token colouring.
- * Covers the patterns that appear in curl/JSON examples without a full parser.
+ * Renders a single code line with simple token colouring tuned for the
+ * ink-on-dark navy code surface. Covers the patterns that appear in
+ * curl/JSON examples without a full parser.
  */
 function CodeLine({ raw }: { raw: string }) {
   // Comment lines
   if (/^\s*#/.test(raw)) {
     return (
       <div>
-        <span style={{ color: '#334155' }}>{raw}</span>
+        <span style={{ color: '#5b6d8f' }}>{raw}</span>
       </div>
     );
   }
@@ -242,28 +144,28 @@ function CodeLine({ raw }: { raw: string }) {
   TOKEN_RE.lastIndex = 0;
   while ((match = TOKEN_RE.exec(remaining)) !== null) {
     if (match.index > lastIndex) {
-      tokens.push({ text: remaining.slice(lastIndex, match.index), color: '#94a3b8' });
+      tokens.push({ text: remaining.slice(lastIndex, match.index), color: '#c9d5ea' });
     }
 
     if (match[1]) {
-      tokens.push({ text: match[1], color: '#60a5fa' });
+      tokens.push({ text: match[1], color: '#6fb0ff' });
     } else if (match[2]) {
-      tokens.push({ text: match[2], color: '#93c5fd' });
+      tokens.push({ text: match[2], color: '#a3c9ff' });
     } else if (match[3]) {
-      tokens.push({ text: match[3], color: '#818cf8' });
+      tokens.push({ text: match[3], color: '#5fd39a' });
     } else if (match[4]) {
-      tokens.push({ text: match[4], color: '#38bdf8' });
+      tokens.push({ text: match[4], color: '#4cc9f0' });
     }
 
     lastIndex = match.index + match[0].length;
   }
 
   if (lastIndex < remaining.length) {
-    tokens.push({ text: remaining.slice(lastIndex), color: '#94a3b8' });
+    tokens.push({ text: remaining.slice(lastIndex), color: '#c9d5ea' });
   }
 
   if (tokens.length === 0) {
-    return <div><span style={{ color: '#94a3b8' }}>{raw || '\u00A0'}</span></div>;
+    return <div><span style={{ color: '#c9d5ea' }}>{raw || ' '}</span></div>;
   }
 
   return (
@@ -289,67 +191,21 @@ export function CodeBlock({ code, label }: { code: string; label?: string }) {
   const lines = code.split('\n');
 
   return (
-    <div
-      style={{
-        borderRadius: 10,
-        overflow: 'hidden',
-        border: `1px solid rgba(59,130,246,0.2)`,
-        marginBottom: 16,
-      }}
-    >
+    <div className="dlx-code">
       {/* Top bar */}
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          padding: '8px 16px',
-          background: 'rgba(59,130,246,0.06)',
-          borderBottom: '1px solid rgba(59,130,246,0.15)',
-        }}
-      >
-        <span
-          style={{
-            fontSize: '0.7rem',
-            fontWeight: 700,
-            letterSpacing: '0.05em',
-            textTransform: 'uppercase',
-            color: '#60a5fa',
-            fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
-          }}
-        >
-          {label ?? 'code'}
-        </span>
+      <div className="dlx-code-bar">
+        <span className="dlx-code-label">{label ?? 'code'}</span>
         <button
           type="button"
+          className={copied ? 'dlx-code-copy dlx-code-copied' : 'dlx-code-copy'}
           onClick={handleCopy}
-          style={{
-            background: 'none',
-            border: 'none',
-            cursor: 'pointer',
-            fontSize: '0.7rem',
-            color: copied ? '#4ade80' : '#475569',
-            fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
-            padding: '2px 6px',
-            borderRadius: 4,
-            transition: 'color 0.2s',
-          }}
         >
           {copied ? 'copied' : 'copy'}
         </button>
       </div>
 
       {/* Code body */}
-      <div
-        style={{
-          background: 'rgba(10,13,22,0.85)',
-          padding: '16px 20px',
-          overflowX: 'auto',
-          fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
-          fontSize: '0.78rem',
-          lineHeight: 1.75,
-        }}
-      >
+      <div className="dlx-code-body">
         {lines.map((raw, idx) => (
           <CodeLine key={idx} raw={raw} />
         ))}
@@ -364,62 +220,20 @@ export function Endpoint({
   method,
   path,
   description,
+  admin = false,
 }: {
   method: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
   path: string;
   description: string;
+  /** Marks an endpoint that requires the admin role (Granite-managed). */
+  admin?: boolean;
 }) {
-  const methodColors: Record<string, { bg: string; text: string }> = {
-    GET:    { bg: 'rgba(59,130,246,0.15)',  text: '#60a5fa' },
-    POST:   { bg: 'rgba(34,197,94,0.12)',   text: '#4ade80' },
-    PUT:    { bg: 'rgba(245,158,11,0.12)',   text: '#fbbf24' },
-    DELETE: { bg: 'rgba(239,68,68,0.12)',    text: '#f87171' },
-    PATCH:  { bg: 'rgba(168,85,247,0.12)',   text: '#c084fc' },
-  };
-  const mc = methodColors[method] ?? methodColors.GET;
-
   return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 12,
-        padding: '12px 16px',
-        borderRadius: 8,
-        background: 'rgba(10,13,22,0.55)',
-        border: `1px solid rgba(59,130,246,0.18)`,
-        marginBottom: 12,
-      }}
-    >
-      <span
-        style={{
-          display: 'inline-block',
-          padding: '3px 9px',
-          borderRadius: 5,
-          background: mc.bg,
-          color: mc.text,
-          fontSize: '0.68rem',
-          fontWeight: 800,
-          letterSpacing: '0.08em',
-          fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
-          flexShrink: 0,
-        }}
-      >
-        {method}
-      </span>
-      <code
-        style={{
-          color: '#93c5fd',
-          fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
-          fontSize: '0.82rem',
-          flexShrink: 0,
-        }}
-      >
-        {path}
-      </code>
-      <span style={{ color: C.textMuted, fontSize: '0.81rem', lineHeight: 1.4 }}>
-        {description}
-      </span>
+    <div className="dlx-endpoint">
+      <span className={`dlx-method dlx-method-${method.toLowerCase()}`}>{method}</span>
+      <code className="dlx-endpoint-path">{path}</code>
+      {admin && <span className="dlx8-tag-admin">Admin</span>}
+      <span className="dlx-endpoint-desc">{description}</span>
     </div>
   );
 }
@@ -435,68 +249,30 @@ export interface Param {
 
 export function ParamTable({ params }: { params: Param[] }) {
   return (
-    <div
-      style={{
-        borderRadius: 8,
-        overflow: 'hidden',
-        border: `1px solid rgba(59,130,246,0.18)`,
-        marginBottom: 20,
-      }}
-    >
-      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' }}>
+    <div className="dlx-table-wrap">
+      <table className="dlx-table">
         <thead>
-          <tr style={{ background: 'rgba(10,13,22,0.7)' }}>
+          <tr>
             {['Parameter', 'Type', 'Required', 'Description'].map(h => (
-              <th
-                key={h}
-                style={{
-                  padding: '9px 14px',
-                  textAlign: 'left',
-                  color: '#475569',
-                  fontWeight: 700,
-                  letterSpacing: '0.06em',
-                  fontSize: '0.67rem',
-                  textTransform: 'uppercase',
-                  borderBottom: '1px solid rgba(59,130,246,0.15)',
-                }}
-              >
-                {h}
-              </th>
+              <th key={h} className="dl-th">{h}</th>
             ))}
           </tr>
         </thead>
         <tbody>
-          {params.map((p, i) => (
-            <tr key={p.name} style={{ background: i % 2 === 0 ? 'transparent' : 'rgba(10,13,22,0.28)' }}>
-              <td style={{ padding: '9px 14px', borderBottom: '1px solid rgba(42,47,69,0.3)', whiteSpace: 'nowrap' }}>
-                <code style={{ color: '#60a5fa', fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', fontSize: '0.8rem', fontWeight: 700 }}>
-                  {p.name}
-                </code>
+          {params.map(p => (
+            <tr key={p.name}>
+              <td>
+                <code className="dlx-td-code">{p.name}</code>
               </td>
-              <td style={{ padding: '9px 14px', borderBottom: '1px solid rgba(42,47,69,0.3)', whiteSpace: 'nowrap' }}>
-                <code style={{ color: '#818cf8', fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace', fontSize: '0.78rem' }}>
-                  {p.type}
-                </code>
+              <td>
+                <code className="dlx-td-type">{p.type}</code>
               </td>
-              <td style={{ padding: '9px 14px', borderBottom: '1px solid rgba(42,47,69,0.3)', whiteSpace: 'nowrap' }}>
-                <span
-                  style={{
-                    display: 'inline-block',
-                    padding: '2px 7px',
-                    borderRadius: 4,
-                    fontSize: '0.67rem',
-                    fontWeight: 700,
-                    letterSpacing: '0.05em',
-                    background: p.required ? 'rgba(59,130,246,0.12)' : 'rgba(71,85,105,0.2)',
-                    color: p.required ? '#60a5fa' : '#475569',
-                  }}
-                >
+              <td>
+                <span className={p.required ? 'dl-tag' : 'dl-tag dl-tag-slate'}>
                   {p.required ? 'required' : 'optional'}
                 </span>
               </td>
-              <td style={{ padding: '9px 14px', borderBottom: '1px solid rgba(42,47,69,0.3)', color: C.textMuted, lineHeight: 1.55 }}>
-                {p.description}
-              </td>
+              <td>{p.description}</td>
             </tr>
           ))}
         </tbody>
@@ -509,14 +285,7 @@ export function ParamTable({ params }: { params: Param[] }) {
 
 export function ReqRes({ request, response }: { request: string; response: string }) {
   return (
-    <div
-      style={{
-        display: 'grid',
-        gridTemplateColumns: '1fr 1fr',
-        gap: 12,
-        marginBottom: 20,
-      }}
-    >
+    <div className="dlx-reqres">
       <CodeBlock code={request} label="request" />
       <CodeBlock code={response} label="response" />
     </div>
@@ -526,153 +295,43 @@ export function ReqRes({ request, response }: { request: string; response: strin
 /* ─── Behavior note card grid ────────────────────────────── */
 
 export function NoteCards({
-  accent,
   items,
 }: {
-  accent: string;
   items: { title: string; body: string }[];
 }) {
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 4 }}>
+    <div className="dlx-notegrid" style={{ marginBottom: 4 }}>
       {items.map(({ title, body }) => (
-        <div
-          key={title}
-          style={{
-            padding: '14px 16px',
-            borderRadius: 8,
-            background: `${accent}07`,
-            border: `1px solid ${accent}20`,
-          }}
-        >
-          <div style={{ fontSize: '0.78rem', fontWeight: 700, color: accent, marginBottom: 6 }}>
-            {title}
-          </div>
-          <div style={{ fontSize: '0.81rem', color: C.textMuted, lineHeight: 1.6 }}>
-            {body}
-          </div>
+        <div key={title} className="dlx-notecard">
+          <div className="dlx-notecard-title">{title}</div>
+          <div className="dlx-notecard-body">{body}</div>
         </div>
       ))}
     </div>
   );
 }
 
-/* ─── Page header glass card ─────────────────────────────── */
+/* ─── Quiet page header — breadcrumb, title, description ─── */
 
-interface PageHeaderCardProps {
-  /** Eyebrow text above the title */
-  eyebrow: string;
+interface DocsHeaderProps {
+  /** First breadcrumb segment, e.g. "RCF Guide" — rendered as "X / Granite CRAG". */
+  crumb: string;
   title: string;
   subtitle: string;
-  /** Accent colour drives the top rule, glow, and border */
-  accent: string;
 }
 
-export function PageHeaderCard({ eyebrow, title, subtitle, accent }: PageHeaderCardProps) {
+export function DocsHeader({ crumb, title, subtitle }: DocsHeaderProps) {
   return (
-    <div
-      className="animate-fade-in-up glass-header"
-      style={{
-        padding: '32px 36px 28px',
-        marginBottom: 28,
-      }}
-    >
-      {/* Top accent rule */}
-      <div
-        style={{
-          position: 'absolute',
-          top: 0,
-          left: 48,
-          right: 48,
-          height: 2,
-          background: `linear-gradient(90deg, transparent, ${accent}b0, transparent)`,
-          borderRadius: '0 0 2px 2px',
-          zIndex: 1,
-        }}
-      />
-
-      {/* Accent radial glow — layered over the surface's blue bleed */}
-      <div
-        style={{
-          position: 'absolute',
-          top: -60,
-          right: -60,
-          width: 280,
-          height: 280,
-          background: `radial-gradient(circle, ${accent}12 0%, transparent 70%)`,
-          pointerEvents: 'none',
-          zIndex: 0,
-        }}
-      />
-
-      <div style={{ position: 'relative', zIndex: 1, display: 'flex', alignItems: 'flex-start', gap: 24 }}>
-        {/* Logo badge */}
-        <div style={{ flexShrink: 0, position: 'relative' }}>
-          <div
-            style={{
-              width: 56,
-              height: 56,
-              borderRadius: 14,
-              background: `linear-gradient(135deg, ${accent}2e 0%, ${accent}0e 100%)`,
-              border: `1px solid ${accent}45`,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              boxShadow: `0 0 24px ${accent}33`,
-            }}
-          >
-            <img
-              src="/crag.png"
-              alt="CRAG"
-              style={{
-                width: 36,
-                height: 36,
-                objectFit: 'contain',
-                filter: `drop-shadow(0 0 8px ${accent}8c) brightness(1.1)`,
-              }}
-            />
-          </div>
+    <header className="dl-header fx-load">
+      <div className="dl-header-id">
+        <div className="dl-crumb">
+          <span>{crumb}</span>
+          <span className="dl-crumb-sep" aria-hidden="true">/</span>
+          <span>Granite CRAG</span>
         </div>
-
-        {/* Text block */}
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div
-            style={{
-              fontSize: '0.6rem',
-              fontWeight: 700,
-              letterSpacing: '0.06em',
-              textTransform: 'uppercase',
-              color: accent,
-              opacity: 0.85,
-              marginBottom: 6,
-            }}
-          >
-            {eyebrow}
-          </div>
-          <h1
-            style={{
-              fontSize: 'clamp(1.2rem, 2.5vw, 1.55rem)',
-              fontWeight: 800,
-              color: '#e2e8f0',
-              letterSpacing: '-0.025em',
-              lineHeight: 1.15,
-              margin: '0 0 8px',
-            }}
-          >
-            {title}
-          </h1>
-          <p
-            style={{
-              fontSize: '0.85rem',
-              color: '#718096',
-              lineHeight: 1.65,
-              margin: 0,
-              maxWidth: 520,
-            }}
-          >
-            {subtitle}
-          </p>
-        </div>
+        <h1 className="dl-title">{title}</h1>
+        <p className="dl-sub">{subtitle}</p>
       </div>
-    </div>
+    </header>
   );
 }

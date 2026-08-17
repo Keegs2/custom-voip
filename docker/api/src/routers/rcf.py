@@ -1,8 +1,22 @@
-"""RCF (Remote Call Forwarding) endpoints."""
+"""RCF (Remote Call Forwarding) endpoints.
+
+Multi-tenant contract (mirrors routers/trunks.py):
+  - Reads are tenant-scoped: non-admins (customer_filter not None) only ever see
+    their own customer's RCF entries; admins (customer_filter None) are
+    unrestricted. Cross-tenant / missing DIDs return 404 (never 403) so
+    existence is not leaked across tenants.
+  - Provisioning writes are admin-only (require_admin): create and delete go
+    through the admin/onboarding workflow (DID assignment lives in
+    number_inventory, itself admin-only). Customers never create or delete
+    RCF rows directly — number release goes through /numbers/{did}/unassign.
+  - Update (PUT/PATCH) is customer self-service, tenant-scoped, with
+    max_channels (a provisioning/capacity decision) admin-only.
+"""
 import logging
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, field_validator
 from typing import Optional
+from auth.dependencies import get_current_user, get_customer_filter, require_admin
 from db import database as db
 from db import redis_client as cache
 from utils import phone
@@ -121,8 +135,13 @@ class RCFResponse(BaseModel):
 
 
 @router.post("")
-async def create_rcf(rcf: RCFCreate):
-    """Create a new RCF number."""
+async def create_rcf(rcf: RCFCreate, admin: dict = Depends(require_admin)):
+    """Create a new RCF number. Admin-only: provisioning.
+
+    RCF entries are created by admins (customer 360 UI) or server-side
+    provisioning (number_inventory assign, itself admin-only) — a customer must
+    not be able to attach forwarding to an arbitrary DID the platform owns.
+    """
     # Verify customer exists and is active
     customer = await db.fetch_one(
         "SELECT id, status FROM customers WHERE id = $1",
@@ -151,25 +170,44 @@ async def create_rcf(rcf: RCFCreate):
 
 
 @router.get("/{did}")
-async def get_rcf(did: str):
-    """Get RCF config by DID."""
-    result = await db.fetch_one(
-        """
+async def get_rcf(did: str, customer_filter: int | None = Depends(get_customer_filter)):
+    """Get RCF config by DID (tenant-scoped).
+
+    Non-admin users may only read their own entries — another customer's DID
+    (or a DID we don't have) returns 404, never 403, so existence is not
+    leaked cross-tenant. Admins (customer_filter None) read any DID.
+    """
+    query = """
         SELECT r.*, c.name as customer_name, c.traffic_grade
         FROM rcf_numbers r
         JOIN customers c ON r.customer_id = c.id
         WHERE r.did = $1
-        """,
-        did
-    )
+    """
+    values = [did]
+    idx = 2
+
+    if customer_filter is not None:
+        query += f" AND r.customer_id = ${idx}"
+        values.append(customer_filter)
+        idx += 1
+
+    result = await db.fetch_one(query, *values)
     if not result:
         raise HTTPException(status_code=404, detail="RCF number not found")
     return dict(result)
 
 
 @router.put("/{identifier}")
-async def update_rcf(identifier: str, rcf: RCFUpdate) -> RCFResponse:
-    """Update RCF settings by ID (numeric) or DID (E.164 string)."""
+async def update_rcf(
+    identifier: str, rcf: RCFUpdate, user: dict = Depends(get_current_user)
+) -> RCFResponse:
+    """Update RCF settings by ID (numeric) or DID (E.164 string).
+
+    Non-admin users are tenant-scoped (their own entries only — anything else
+    404s without leaking existence) and may NOT change max_channels: the
+    concurrent-call cap is a provisioning decision, admin-only.
+    """
+    is_admin = user.get("role") == "admin"
     updates = []
     values = []
     idx = 1
@@ -178,6 +216,12 @@ async def update_rcf(identifier: str, rcf: RCFUpdate) -> RCFResponse:
 
     if not update_data:
         raise HTTPException(status_code=400, detail="No fields to update")
+
+    if "max_channels" in update_data and not is_admin:
+        raise HTTPException(
+            status_code=403,
+            detail="Admin access required to change max concurrent calls",
+        )
 
     for field, value in update_data.items():
         updates.append(f"{field} = ${idx}")
@@ -190,6 +234,11 @@ async def update_rcf(identifier: str, rcf: RCFUpdate) -> RCFResponse:
     else:
         values.append(identifier)
         where_clause = f"did = ${idx}"
+
+    if not is_admin:
+        idx += 1
+        values.append(user.get("customer_id"))
+        where_clause += f" AND customer_id = ${idx}"
 
     query = f"""
         UPDATE rcf_numbers SET {', '.join(updates)}
@@ -227,14 +276,19 @@ async def update_rcf(identifier: str, rcf: RCFUpdate) -> RCFResponse:
 
 
 @router.patch("/{identifier}")
-async def patch_rcf(identifier: str, rcf: RCFUpdate) -> RCFResponse:
+async def patch_rcf(
+    identifier: str, rcf: RCFUpdate, user: dict = Depends(get_current_user)
+) -> RCFResponse:
     """Partial update for RCF settings (alias for PUT)."""
-    return await update_rcf(identifier, rcf)
+    return await update_rcf(identifier, rcf, user)
 
 
 @router.delete("/{identifier}")
-async def delete_rcf(identifier: str):
-    """Delete an RCF number by ID (numeric) or DID (E.164 string)."""
+async def delete_rcf(identifier: str, admin: dict = Depends(require_admin)):
+    """Delete an RCF number by ID (numeric) or DID (E.164 string). Admin-only:
+    deprovisioning. Customer-initiated number release goes through
+    /numbers/{did}/unassign (number_inventory), not this endpoint.
+    """
     if identifier.isdigit():
         # Lookup DID first for cache invalidation, then delete by ID
         row = await db.fetch_one(
@@ -255,8 +309,17 @@ async def delete_rcf(identifier: str):
 
 
 @router.get("")
-async def list_rcf(customer_id: Optional[int] = None, enabled: Optional[bool] = None):
-    """List RCF numbers with optional filters."""
+async def list_rcf(
+    customer_id: Optional[int] = None,
+    enabled: Optional[bool] = None,
+    customer_filter: int | None = Depends(get_customer_filter),
+):
+    """List RCF numbers with optional filters.
+
+    Non-admins are scoped to their own customer (the caller's customer_id wins,
+    the `customer_id` query param is ignored for them — scoped, not 403'd);
+    admins may filter by any `customer_id` or see all.
+    """
     query = """
         SELECT r.id, r.did, r.name, r.forward_to, r.pass_caller_id, r.enabled,
                r.ring_timeout, r.failover_to, r.max_channels, r.customer_id,
@@ -268,7 +331,12 @@ async def list_rcf(customer_id: Optional[int] = None, enabled: Optional[bool] = 
     values = []
     idx = 1
 
-    if customer_id is not None:
+    # Enforce tenant scoping for non-admins; admins may optionally filter by customer_id.
+    if customer_filter is not None:
+        query += f" AND r.customer_id = ${idx}"
+        values.append(customer_filter)
+        idx += 1
+    elif customer_id is not None:
         query += f" AND r.customer_id = ${idx}"
         values.append(customer_id)
         idx += 1

@@ -1,714 +1,476 @@
-import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Shield, Zap, Globe, Activity, PhoneForwarded, Phone, Code, Voicemail, ArrowRight } from 'lucide-react';
+import { useCallback, useState } from 'react';
+import { Navigate, useLocation } from 'react-router-dom';
+import {
+  Activity,
+  ArrowRight,
+  ArrowUpRight,
+  BadgeCheck,
+  Bot,
+  Braces,
+  Gauge,
+  Layers,
+  Lock,
+  RefreshCw,
+  ShieldCheck,
+  Waypoints,
+  type LucideIcon,
+} from 'lucide-react';
 import { HaArchitectureViz } from '../components/layout/HaArchitectureViz';
 import { useAuth } from '../contexts/AuthContext';
+import { productHome } from '../utils/productHome';
+import { SignInModal } from './landing/SignInModal';
+import { RequestAccessSection } from './landing/RequestAccessSection';
 
-/* ─── Capability card data ───────────────────────────────── */
+/* ─────────────────────────────────────────────────────────────
+   Public landing page — Granite CRAG.
 
-interface CapabilityCard {
-  icon: React.ReactNode;
-  title: string;
-  description: string;
-  animDelay: string;
+   "Granite & Signal": industrial enterprise, color-blocked.
+   Full-bleed alternating granite-dark / cobalt / paper-light
+   bands (IBM/Cisco enterprise pattern). Display type: Archivo
+   800–900. Body: Public Sans. ALL load-bearing responsive
+   layout lives in index.css under "LANDING PAGE" as hand-written
+   @media rules (NOT Tailwind md:* — see the container-build
+   gotcha in CLAUDE.md).
+
+   Positioning: Granite IS the carrier. CRAG is Granite's
+   next-generation platform for advanced voice — AI agents,
+   API calling, webhooks, intelligent routing — built directly
+   on the carrier's own network. Never describe CRAG itself as
+   "our carrier-grade platform".
+
+   Narrative arc: what it is (hero) → proof (stats) → what you
+   can build (AI/API band) → products → the network under it →
+   platform capabilities → intake form (#request-access).
+   ───────────────────────────────────────────────────────────── */
+
+function scrollToRequestAccess(): void {
+  document
+    .getElementById('request-access')
+    ?.scrollIntoView({ behavior: 'smooth' });
 }
 
-const CAPABILITY_CARDS: CapabilityCard[] = [
+/* ─── Data ───────────────────────────────────────────────── */
+
+interface Stat {
+  value: string;
+  label: string;
+}
+
+const STATS: Stat[] = [
+  { value: '99.999%', label: 'Availability design target' },
+  { value: '3', label: 'Self-contained US regions' },
+  { value: '<1s', label: 'Failure detection & reroute' },
+  { value: '100%', label: 'Calls signed with STIR/SHAKEN' },
+];
+
+type ProductStatus = 'ga' | 'early' | 'roadmap';
+
+interface Product {
+  name: string;
+  desc: string;
+  status: ProductStatus;
+}
+
+const STATUS_LABEL: Record<ProductStatus, string> = {
+  ga: 'Generally available',
+  early: 'Early access',
+  roadmap: 'Roadmap',
+};
+
+const SIDE_PRODUCTS: Product[] = [
   {
-    icon: <Globe size={22} strokeWidth={1.75} />,
-    title: 'Multi-Zone Redundancy',
-    description:
-      'Three availability zones with active traffic distribution. Calls route to the nearest healthy zone. If a zone becomes unavailable, traffic fails over automatically — no manual intervention, no hardware swap.',
-    animDelay: '0.2s',
+    name: 'SIP Trunking',
+    desc: 'IP-authenticated enterprise trunks with multi-region inbound redundancy and automated DNS failover.',
+    status: 'early',
   },
   {
-    icon: <Zap size={22} strokeWidth={1.75} />,
-    title: 'Purpose-Built SIP Architecture',
-    description:
-      'Multi-layer SIP proxy design with sub-10ms latency to signaling endpoints. Intelligent session management handles timer negotiation automatically. SRTP-ready media paths and STIR/SHAKEN attestation on every call.',
-    animDelay: '0.4s',
+    name: 'API Calling',
+    desc: 'Programmable voice for platforms and AI agents — originate, control, and observe calls over REST and webhooks.',
+    status: 'early',
   },
   {
-    icon: <Shield size={22} strokeWidth={1.75} />,
-    title: '99.999% Uptime Target',
-    description:
-      'Dual SBC layer fronted by network load balancers with continuous health monitoring. Failed components are detected and bypassed in under 15 seconds. Self-healing by design.',
-    animDelay: '0.6s',
-  },
-  {
-    icon: <Activity size={22} strokeWidth={1.75} />,
-    title: 'Intelligent Call Routing',
-    description:
-      'Every call passes through a proprietary routing engine with real-time fraud detection, velocity limiting, and quality analysis. MOS scoring is captured per session for full visibility.',
-    animDelay: '0.8s',
+    name: 'Visual Voicemail',
+    desc: 'Platform-native mailboxes with transcription and API retrieval — designed in, not bolted on.',
+    status: 'roadmap',
   },
 ];
 
-/* ─── Product card data ──────────────────────────────────── */
-
-interface ProductCard {
-  icon: React.ReactNode;
+interface Capability {
+  icon: LucideIcon;
   title: string;
-  subtitle: string;
-  active: boolean;
-  route?: string;
-  animDelay: string;
+  desc: string;
 }
 
-const PRODUCT_CARDS: ProductCard[] = [
+const CAPABILITIES: Capability[] = [
   {
-    icon: <PhoneForwarded size={20} strokeWidth={1.75} />,
-    title: 'Remote Call Forwarding',
-    subtitle: 'Intelligent DID forwarding with multi-zone redundancy',
-    active: true,
-    route: '/rcf',
-    animDelay: '0.1s',
+    icon: ShieldCheck,
+    title: 'Identity on every call',
+    desc: 'STIR/SHAKEN signing at the switch, on self-hosted certificates. Verified attestation travels with the call from origination to termination.',
   },
   {
-    icon: <Phone size={20} strokeWidth={1.75} />,
-    title: 'SIP Trunking',
-    subtitle: 'Enterprise SIP connectivity',
-    active: false,
-    animDelay: '0.2s',
+    icon: Activity,
+    title: 'Packet-level observability',
+    desc: 'Full SIP capture in every region. Ladder diagrams, per-hop timing, and raw messages for any call — no ticket, no waiting.',
   },
   {
-    icon: <Code size={20} strokeWidth={1.75} />,
-    title: 'API Calling',
-    subtitle: 'Programmable voice via webhooks',
-    active: false,
-    animDelay: '0.3s',
+    icon: Gauge,
+    title: 'Quality, measured',
+    desc: 'MOS, jitter, and packet-loss scoring on every session, surfaced in dashboards and exportable call records.',
   },
   {
-    icon: <Voicemail size={20} strokeWidth={1.75} />,
-    title: 'Voicemail',
-    subtitle: 'Visual voicemail with transcription',
-    active: false,
-    animDelay: '0.4s',
+    icon: Waypoints,
+    title: 'Independent routes to termination',
+    desc: 'A redundant, highly available SBC layer and two carrier points of presence — Dallas and Los Angeles — give every call independent paths to termination.',
+  },
+  {
+    icon: Lock,
+    title: 'Session hardening',
+    desc: 'Topology hiding, rate limiting, and session-timer normalization handled in the network core, before traffic reaches your systems.',
+  },
+  {
+    icon: RefreshCw,
+    title: 'A network that reroutes itself',
+    desc: 'Sub-second failure detection with automatic reroute across border controllers and carriers — no manual intervention, no maintenance window.',
   },
 ];
 
-/* ─── CapabilityCardEl ───────────────────────────────────── */
+const BUILD_PILLARS: Capability[] = [
+  {
+    icon: Layers,
+    title: 'No middleman between you and the network',
+    desc: 'CRAG APIs terminate into Granite’s own switching core — no reseller layer, no CPaaS markup, no support-ticket relay. The team behind the API is the team that runs the network.',
+  },
+  {
+    icon: Bot,
+    title: 'Deterministic by design',
+    desc: 'Bounded post-dial delay, regional media anchoring, and a fixed failover order. Your AI agents get the same network behavior on every single call.',
+  },
+  {
+    icon: Braces,
+    title: 'Programmable control',
+    desc: 'REST provisioning, webhook call control, intelligent routing, and structured per-call records with quality metrics. Build voice products on primitives, not tickets.',
+  },
+  {
+    icon: BadgeCheck,
+    title: 'Carrier identity that gets answered',
+    desc: 'Calls carry Granite’s own signed attestation, so machine-originated traffic arrives verified at the far end — answered by people, not screened out as spam.',
+  },
+];
 
-function CapabilityCardEl({ card }: { card: CapabilityCard }) {
-  const [hovered, setHovered] = useState(false);
+/* ─── Building blocks ────────────────────────────────────── */
 
+function StatusChip({ status }: { status: ProductStatus }) {
   return (
-    <div
-      className="animate-fade-in-up"
-      style={{
-        animationDelay: card.animDelay,
-        position: 'relative',
-        background: 'rgba(19, 21, 29, 0.70)',
-        backdropFilter: 'blur(8px)',
-        WebkitBackdropFilter: 'blur(8px)',
-        border: `1px solid ${hovered ? 'rgba(59,130,246,0.30)' : 'rgba(59,130,246,0.12)'}`,
-        borderRadius: 20,
-        padding: '22px 22px 20px',
-        transition: 'border-color 0.25s ease, box-shadow 0.25s ease',
-        boxShadow: hovered
-          ? '0 0 0 1px rgba(59,130,246,0.18), 0 20px 50px -12px rgba(0,0,0,0.55)'
-          : '0 4px 20px -6px rgba(0,0,0,0.4)',
-        overflow: 'hidden',
-      }}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-    >
-      {/* Top accent line — visible on hover */}
-      <div
-        style={{
-          position: 'absolute',
-          top: 0,
-          left: 28,
-          right: 28,
-          height: 2,
-          background:
-            'linear-gradient(90deg, transparent, rgba(59,130,246,0.8), transparent)',
-          opacity: hovered ? 1 : 0,
-          transition: 'opacity 0.25s ease',
-          borderRadius: '0 0 2px 2px',
-        }}
-      />
-
-      {/* Icon container */}
-      <div
-        style={{
-          width: 44,
-          height: 44,
-          borderRadius: 12,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          marginBottom: 14,
-          color: hovered ? '#60a5fa' : '#3b82f6',
-          background: hovered
-            ? 'linear-gradient(135deg, rgba(59,130,246,0.22) 0%, rgba(59,130,246,0.10) 100%)'
-            : 'linear-gradient(135deg, rgba(59,130,246,0.14) 0%, rgba(59,130,246,0.06) 100%)',
-          border: `1px solid ${hovered ? 'rgba(59,130,246,0.35)' : 'rgba(59,130,246,0.20)'}`,
-          transition: 'background 0.25s ease, border-color 0.25s ease, color 0.25s ease',
-        }}
-      >
-        {card.icon}
-      </div>
-
-      <h3
-        style={{
-          fontSize: '1rem',
-          fontWeight: 700,
-          color: '#e2e8f0',
-          letterSpacing: '-0.01em',
-          marginBottom: 10,
-        }}
-      >
-        {card.title}
-      </h3>
-
-      <p
-        style={{
-          fontSize: '0.8rem',
-          color: '#718096',
-          lineHeight: 1.65,
-        }}
-      >
-        {card.description}
-      </p>
-    </div>
+    <span className={`landing-chip landing-chip-${status}`}>
+      {STATUS_LABEL[status]}
+    </span>
   );
 }
 
-/* ─── ProductCardEl ──────────────────────────────────────── */
-
-interface ProductCardElProps {
-  card: ProductCard;
-  /**
-   * When provided and the card is the RCF tile, clicking fires this callback
-   * instead of navigating. Used to open the Request Access form for unauthenticated
-   * visitors — avoids a silent redirect to /login.
-   */
-  onRequestAccess?: () => void;
-}
-
-function ProductCardEl({ card, onRequestAccess }: ProductCardElProps) {
-  const [hovered, setHovered] = useState(false);
-  const navigate = useNavigate();
-
-  function handleClick() {
-    if (!card.active) return;
-    if (onRequestAccess) {
-      onRequestAccess();
-      return;
-    }
-    if (card.route) {
-      navigate(card.route);
-    }
-  }
-
-  if (card.active) {
-    return (
-      <div
-        className="animate-fade-in-up"
-        style={{
-          animationDelay: card.animDelay,
-          flex: 1,
-          position: 'relative',
-          background: 'rgba(19, 21, 29, 0.70)',
-          backdropFilter: 'blur(8px)',
-          WebkitBackdropFilter: 'blur(8px)',
-          border: `1px solid ${hovered ? 'rgba(59,130,246,0.45)' : 'rgba(59,130,246,0.28)'}`,
-          borderRadius: 16,
-          padding: '20px',
-          cursor: 'pointer',
-          transition: 'border-color 0.22s ease, box-shadow 0.22s ease, transform 0.18s ease',
-          boxShadow: hovered
-            ? '0 0 0 1px rgba(59,130,246,0.22), 0 0 28px -6px rgba(59,130,246,0.25), 0 12px 32px -10px rgba(0,0,0,0.5)'
-            : '0 0 16px -6px rgba(59,130,246,0.12), 0 4px 16px -4px rgba(0,0,0,0.35)',
-          transform: hovered ? 'translateY(-2px)' : 'translateY(0)',
-          overflow: 'hidden',
-        }}
-        onMouseEnter={() => setHovered(true)}
-        onMouseLeave={() => setHovered(false)}
-        onClick={handleClick}
-        role="button"
-        tabIndex={0}
-        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') handleClick(); }}
-      >
-        {/* Top accent line */}
-        <div
-          style={{
-            position: 'absolute',
-            top: 0,
-            left: 16,
-            right: 16,
-            height: 2,
-            background: 'linear-gradient(90deg, transparent, rgba(59,130,246,0.9), transparent)',
-            opacity: hovered ? 1 : 0.4,
-            transition: 'opacity 0.22s ease',
-            borderRadius: '0 0 2px 2px',
-          }}
-        />
-
-        {/* Header row: icon + active badge */}
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 14 }}>
-          <div
-            style={{
-              width: 40,
-              height: 40,
-              borderRadius: 10,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: hovered ? '#93c5fd' : '#60a5fa',
-              background: hovered
-                ? 'linear-gradient(135deg, rgba(59,130,246,0.28) 0%, rgba(59,130,246,0.12) 100%)'
-                : 'linear-gradient(135deg, rgba(59,130,246,0.18) 0%, rgba(59,130,246,0.08) 100%)',
-              border: `1px solid ${hovered ? 'rgba(59,130,246,0.45)' : 'rgba(59,130,246,0.28)'}`,
-              transition: 'background 0.22s ease, border-color 0.22s ease, color 0.22s ease',
-              flexShrink: 0,
-            }}
-          >
-            {card.icon}
-          </div>
-
-          {/* Active badge */}
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 5,
-              background: 'rgba(59,130,246,0.12)',
-              border: '1px solid rgba(59,130,246,0.30)',
-              borderRadius: 20,
-              padding: '3px 8px',
-            }}
-          >
-            <div
-              style={{
-                width: 6,
-                height: 6,
-                borderRadius: '50%',
-                background: '#3b82f6',
-                boxShadow: '0 0 6px rgba(59,130,246,0.8)',
-              }}
-            />
-            <span
-              style={{
-                fontSize: '0.6rem',
-                fontWeight: 600,
-                color: '#60a5fa',
-                letterSpacing: '0.05em',
-                textTransform: 'uppercase',
-              }}
-            >
-              Active
-            </span>
-          </div>
-        </div>
-
-        <div
-          style={{
-            fontSize: '0.85rem',
-            fontWeight: 700,
-            color: '#e2e8f0',
-            letterSpacing: '-0.01em',
-            marginBottom: 5,
-          }}
-        >
-          {card.title}
-        </div>
-        <div
-          style={{
-            fontSize: '0.72rem',
-            color: '#64748b',
-            lineHeight: 1.5,
-          }}
-        >
-          {card.subtitle}
-        </div>
-      </div>
-    );
-  }
-
-  /* Coming soon card */
+function SectionHead({
+  kicker,
+  kickerInverse,
+  title,
+  blurb,
+}: {
+  kicker: string;
+  kickerInverse?: boolean;
+  title: React.ReactNode;
+  blurb: string;
+}) {
   return (
-    <div
-      className="animate-fade-in-up"
-      style={{
-        animationDelay: card.animDelay,
-        flex: 1,
-        position: 'relative',
-        background: 'rgba(19, 21, 29, 0.70)',
-        backdropFilter: 'blur(8px)',
-        WebkitBackdropFilter: 'blur(8px)',
-        border: '1px solid rgba(59,130,246,0.08)',
-        borderRadius: 16,
-        padding: '20px',
-        cursor: 'default',
-        opacity: 0.45,
-        overflow: 'hidden',
-      }}
-    >
-      {/* Header row: icon + soon badge */}
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 14 }}>
-        <div
-          style={{
-            width: 40,
-            height: 40,
-            borderRadius: 10,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            color: '#94a3b8',
-            background: 'rgba(148,163,184,0.08)',
-            border: '1px solid rgba(148,163,184,0.14)',
-            flexShrink: 0,
-          }}
-        >
-          {card.icon}
-        </div>
-
-        {/* Soon badge */}
-        <div
-          style={{
-            background: 'rgba(168,85,247,0.12)',
-            border: '1px solid rgba(168,85,247,0.22)',
-            borderRadius: 20,
-            padding: '3px 8px',
-          }}
-        >
-          <span
-            style={{
-              fontSize: '0.6rem',
-              fontWeight: 600,
-              color: '#c084fc',
-              letterSpacing: '0.05em',
-              textTransform: 'uppercase',
-            }}
-          >
-            Soon
-          </span>
-        </div>
-      </div>
-
-      <div
-        style={{
-          fontSize: '0.85rem',
-          fontWeight: 700,
-          color: '#e2e8f0',
-          letterSpacing: '-0.01em',
-          marginBottom: 5,
-        }}
+    <header className="landing-section-head">
+      <span
+        className={
+          kickerInverse
+            ? 'landing-kicker landing-kicker-inverse'
+            : 'landing-kicker'
+        }
       >
-        {card.title}
-      </div>
-      <div
-        style={{
-          fontSize: '0.72rem',
-          color: '#64748b',
-          lineHeight: 1.5,
-        }}
-      >
-        {card.subtitle}
-      </div>
-    </div>
-  );
-}
-
-/* ─── Section label ──────────────────────────────────────── */
-
-function SectionLabel({ children }: { children: React.ReactNode }) {
-  return (
-    <div
-      style={{
-        fontSize: '0.62rem',
-        fontWeight: 600,
-        letterSpacing: '0.06em',
-        textTransform: 'uppercase',
-        color: '#3b82f6',
-        marginBottom: 20,
-        opacity: 0.75,
-      }}
-    >
-      {children}
-    </div>
-  );
-}
-
-/* ─── Request Access CTA ─────────────────────────────────── */
-
-function RequestAccessCta() {
-  const [hovered, setHovered] = useState(false);
-
-  function handleClick() {
-    window.dispatchEvent(new Event('open-access-request'));
-  }
-
-  return (
-    <div
-      style={{
-        width: '100%',
-        maxWidth: 'none',
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        paddingTop: 40,
-        paddingBottom: 40,
-        marginBottom: 8,
-        borderTop: '1px solid rgba(59,130,246,0.08)',
-        borderBottom: '1px solid rgba(59,130,246,0.08)',
-      }}
-    >
-      <p
-        style={{
-          fontSize: '0.72rem',
-          color: '#475569',
-          marginBottom: 16,
-          fontWeight: 600,
-        }}
-      >
-        Carrier-grade call forwarding, ready to deploy
-      </p>
-
-      <button
-        type="button"
-        onClick={handleClick}
-        onMouseEnter={() => setHovered(true)}
-        onMouseLeave={() => setHovered(false)}
-        style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          gap: 8,
-          padding: '14px 36px',
-          borderRadius: 12,
-          border: 'none',
-          background: hovered
-            ? 'linear-gradient(135deg, #60a5fa 0%, #3b82f6 100%)'
-            : 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
-          color: '#fff',
-          fontSize: '0.9rem',
-          fontWeight: 700,
-          cursor: 'pointer',
-          letterSpacing: '-0.01em',
-          boxShadow: hovered
-            ? '0 0 28px -4px rgba(59,130,246,0.55), 0 8px 24px -8px rgba(0,0,0,0.4)'
-            : '0 4px 20px -6px rgba(59,130,246,0.35), 0 4px 16px -4px rgba(0,0,0,0.3)',
-          transform: hovered ? 'scale(1.02)' : 'scale(1)',
-          transition: 'all 0.2s ease',
-        }}
-      >
-        Request Access
-        <ArrowRight size={16} strokeWidth={2.5} />
-      </button>
-
-      <p
-        style={{
-          fontSize: '0.7rem',
-          color: '#334155',
-          marginTop: 14,
-          letterSpacing: '0.01em',
-        }}
-      >
-        A Granite solution engineer will respond within 1 business day.
-      </p>
-    </div>
+        {kicker}
+      </span>
+      <h2 className="landing-h2">{title}</h2>
+      <p className="landing-blurb">{blurb}</p>
+    </header>
   );
 }
 
 /* ─── Page ───────────────────────────────────────────────── */
 
 export function DashboardPage() {
-  const { isAuthenticated } = useAuth();
+  // All hooks unconditionally at the top — React #310 prevention.
+  const { isAuthenticated, isLoading, user, isAdmin } = useAuth();
+  const location = useLocation();
+  const [signInOpen, setSignInOpen] = useState(false);
 
-  function openRequestAccess() {
-    window.dispatchEvent(new Event('open-access-request'));
+  // Sign-in success only needs to close the modal: the auth state
+  // change re-renders this component, and the <Navigate> below takes
+  // over — a single, deterministic redirect source.
+  const handleSignInSuccess = useCallback(() => {
+    setSignInOpen(false);
+  }, []);
+
+  // RequireAuth preserves the intended destination when it bounces
+  // unauthenticated visitors here.
+  const fromState = location.state as
+    | { from?: { pathname?: string; search?: string } }
+    | null;
+  const redirectTo =
+    fromState?.from?.pathname && fromState.from.pathname !== '/'
+      ? `${fromState.from.pathname}${fromState.from.search ?? ''}`
+      : null;
+
+  // While the persisted token validates, hold on a blank granite
+  // screen so signed-in users never see the marketing page flash.
+  if (isLoading) {
+    return <div className="landing-splash" />;
+  }
+
+  // Authenticated users never see the landing page: go straight to
+  // where they were headed, or to the product page they purchased.
+  if (isAuthenticated) {
+    return <Navigate to={redirectTo ?? productHome(user, isAdmin)} replace />;
   }
 
   return (
-    <div style={{ minHeight: '100vh' }}>
-      {/* Page content — single column, centered */}
-      <div
-        style={{
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          width: '100%',
-          paddingLeft: 24,
-          paddingRight: 24,
-          paddingTop: 72,
-          paddingBottom: 80,
-          boxSizing: 'border-box',
-        }}
-      >
-        {/* ──────────────────────────────────────────────────── */}
-        {/* HERO SECTION                                         */}
-        {/* ──────────────────────────────────────────────────── */}
-        <div
-          className="animate-fade-in-up"
-          style={{
-            textAlign: 'center',
-            marginBottom: 56,
-            width: '100%',
-            maxWidth: 760,
-          }}
-        >
-          {/* CRAG branded image with scan-line overlay */}
-          {/*
-            Two-layer structure:
-            - .dash-crag-hero-wrap  → outer; handles hover scale via CSS transition
-            - img.dash-crag-hero    → inner; owns glow + float animation, never paused
-            Keeping them on separate elements prevents the animation transform and the
-            hover scale transform from fighting on the same CSS property.
-          */}
-          <div
-            className="dash-crag-hero-wrap"
-            style={{
-              position: 'relative',
-              marginBottom: 32,
-              overflow: 'hidden',
-              borderRadius: 16,
+    <div className="landing-root">
+      {/* ── HERO — granite band (top nav + hero grid) ────── */}
+      <section className="landing-band landing-band-granite landing-hero">
+        <div className="landing-wrap landing-topnav landing-up">
+          <a
+            className="landing-topnav-brand"
+            href="/"
+            onClick={(e) => {
+              e.preventDefault();
+              window.scrollTo({ top: 0, behavior: 'smooth' });
             }}
           >
             <img
               src="/crag.png"
-              alt="Granite CRAG — Call Routing Application Gateway"
-              className="dash-crag-hero"
-              style={{
-                width: 320,
-                height: 'auto',
-                display: 'block',
-              }}
+              alt=""
+              className="landing-topnav-mark"
+              width={32}
+              height={32}
             />
-            {/* Scan-line overlay */}
-            <div
-              className="dash-scan-line"
-              style={{
-                position: 'absolute',
-                inset: 0,
-                background:
-                  'linear-gradient(180deg, transparent 0%, rgba(96,165,250,0.06) 50%, transparent 100%)',
-                pointerEvents: 'none',
-              }}
-            />
-          </div>
-
-          {/* Tagline */}
-          <h1
-            className="animate-fade-in-up animation-delay-200"
-            style={{
-              fontSize: 'clamp(1.5rem, 3.5vw, 2.1rem)',
-              fontWeight: 800,
-              color: '#e2e8f0',
-              letterSpacing: '-0.03em',
-              lineHeight: 1.2,
-              marginBottom: 16,
-            }}
+            <span className="landing-topnav-word">GRANITE CRAG</span>
+          </a>
+          <button
+            type="button"
+            className="landing-btn landing-btn-ghost landing-topnav-btn"
+            onClick={() => setSignInOpen(true)}
           >
-            <span style={{ color: '#3b82f6' }}>Distributed</span>{' '}
-            Voice Infrastructure.{' '}
-            <br />
-            Built for the Enterprise.
-          </h1>
-
-          {/* Subtitle */}
-          <p
-            className="animate-fade-in-up animation-delay-400"
-            style={{
-              fontSize: '1rem',
-              color: '#718096',
-              lineHeight: 1.75,
-              maxWidth: 600,
-              margin: '0 auto',
-            }}
-          >
-            Port your numbers. Configure your rules. Route every call through
-            carrier-grade infrastructure with automatic failover across three
-            availability zones.
-          </p>
+            Sign in
+          </button>
         </div>
 
-        {/* ──────────────────────────────────────────────────── */}
-        {/* PRODUCTS — 4 horizontal cards                        */}
-        {/* ──────────────────────────────────────────────────── */}
-        <div
-          style={{
-            width: '100%',
-            maxWidth: 'none',
-            marginBottom: 48,
-          }}
-        >
-          <div className="animate-fade-in-up animation-delay-200">
-            <SectionLabel>Products</SectionLabel>
+        <div className="landing-wrap landing-hero-grid">
+          <div>
+            <p className="landing-tag landing-up">
+              Granite Telecommunications&ensp;·&ensp;Next-generation voice
+            </p>
+
+            <h1 className="landing-h1 landing-up landing-d1">
+              <span className="landing-acc">C</span>all{' '}
+              <span className="landing-acc">R</span>outing{' '}
+              <span className="landing-acc">A</span>pplication{' '}
+              <span className="landing-acc">G</span>ateway
+            </h1>
+
+            <p className="landing-lede landing-up landing-d2">
+              CRAG is Granite&rsquo;s next-generation voice platform — built by
+              the carrier for what comes next: AI voice agents, programmable
+              API calling, webhooks, and intelligent routing, running directly
+              on Granite&rsquo;s own nationwide network.
+            </p>
+
+            <div className="landing-cta-row landing-up landing-d3">
+              <button
+                type="button"
+                className="landing-btn landing-btn-primary"
+                onClick={scrollToRequestAccess}
+              >
+                Request access
+                <ArrowRight size={16} strokeWidth={2.5} />
+              </button>
+              <a
+                className="landing-btn landing-btn-ghost"
+                href="#landing-network"
+                onClick={(e) => {
+                  e.preventDefault();
+                  document
+                    .getElementById('landing-network')
+                    ?.scrollIntoView({ behavior: 'smooth' });
+                }}
+              >
+                See the network
+              </a>
+            </div>
+
+            <ul className="landing-hero-points landing-up landing-d4">
+              <li>STIR/SHAKEN on every call</li>
+              <li>Redundant, highly available SBC architecture</li>
+              <li>Packet-level SIP capture</li>
+            </ul>
           </div>
 
-          <div
-            style={{
-              display: 'flex',
-              gap: 16,
-            }}
-          >
-            {PRODUCT_CARDS.map((card) => (
-              <ProductCardEl
-                key={card.title}
-                card={card}
-                onRequestAccess={
-                  // Only the active RCF tile needs special behavior for unauthenticated visitors.
-                  // Authenticated users navigate normally — no callback provided.
-                  !isAuthenticated && card.active && card.route === '/rcf'
-                    ? openRequestAccess
-                    : undefined
-                }
-              />
+          <div className="landing-hero-mark landing-up landing-d2">
+            <img
+              src="/crag.png"
+              alt="CRAG — Call Routing Application Gateway"
+            />
+          </div>
+        </div>
+      </section>
+
+      {/* ── STAT BAND — cobalt ───────────────────────────── */}
+      <section className="landing-band landing-band-cobalt landing-stats">
+        <div className="landing-wrap landing-stats-grid">
+          {STATS.map((s) => (
+            <div key={s.label} className="landing-stat">
+              <div className="landing-stat-value">{s.value}</div>
+              <div className="landing-stat-label">{s.label}</div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* ── BUILD ON THE CARRIER — granite band ──────────── */}
+      <section className="landing-band landing-band-granite landing-ai">
+        <div className="landing-wrap">
+          <SectionHead
+            kicker="Build what's next"
+            title="A programmable surface on the carrier itself."
+            blurb="AI voice agents, API calling, webhooks, intelligent routing — CRAG puts modern voice primitives directly on Granite's nationwide network. When you build here, your software talks to the carrier — not to a reseller sitting on top of one."
+          />
+          <div className="landing-ai-grid">
+            {BUILD_PILLARS.map((p) => (
+              <div key={p.title} className="landing-ai-card">
+                <span className="landing-icon-tile landing-icon-tile-inverse">
+                  <p.icon size={19} strokeWidth={2.1} />
+                </span>
+                <h3 className="landing-card-title">{p.title}</h3>
+                <p className="landing-card-desc">{p.desc}</p>
+              </div>
             ))}
           </div>
         </div>
+      </section>
 
-        {/* ──────────────────────────────────────────────────── */}
-        {/* HA ARCHITECTURE VISUALIZATION                        */}
-        {/* ──────────────────────────────────────────────────── */}
-        <div
-          className="animate-fade-in-up animation-delay-600"
-          style={{ width: '100%', maxWidth: 'none' }}
-        >
+      {/* ── PRODUCTS — paper band ────────────────────────── */}
+      <section className="landing-band landing-band-paper">
+        <div className="landing-wrap">
+          <SectionHead
+            kicker="Products"
+            title="One network. Four ways to build on it."
+            blurb="Every product runs on the same signed, multi-region core — the same routing engine, the same failover discipline, the same telemetry. Pick the interface that fits your traffic."
+          />
+
+          <div className="landing-products">
+            <div
+              className="landing-card landing-card-featured"
+              role="button"
+              tabIndex={0}
+              onClick={scrollToRequestAccess}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') scrollToRequestAccess();
+              }}
+            >
+              <StatusChip status="ga" />
+              <h3 className="landing-card-title landing-card-title-lg">
+                Remote Call Forwarding
+              </h3>
+              <p className="landing-card-desc">
+                Nationwide number forwarding on redundant carrier routes —
+                provisioned in minutes and observable down to the packet.
+                Deployed today for utility-scale enterprise traffic.
+              </p>
+              <ul className="landing-spec-list">
+                <li>Forwarding changes take effect in seconds</li>
+                <li>Independent carrier routes for every call</li>
+                <li>Per-call quality scoring and SIP capture</li>
+              </ul>
+              <span className="landing-card-link">
+                Request access
+                <ArrowUpRight size={16} strokeWidth={2.5} />
+              </span>
+            </div>
+
+            <div className="landing-products-side">
+              {SIDE_PRODUCTS.map((p) => (
+                <div key={p.name} className="landing-card landing-card-side">
+                  <div className="landing-card-side-head">
+                    <h3 className="landing-card-title">{p.name}</h3>
+                    <StatusChip status={p.status} />
+                  </div>
+                  <p className="landing-card-desc">{p.desc}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ── NETWORK — granite band ───────────────────────── */}
+      <section
+        className="landing-band landing-band-granite landing-network"
+        id="landing-network"
+      >
+        <div className="landing-wrap">
+          <SectionHead
+            kicker="The network"
+            title="Three regions. Zero shared fate."
+            blurb="Each region runs a complete, independent voice stack — a redundant, highly available SBC layer, dedicated media, local data. Signaling and media never cross regional boundaries, so a regional event is a reroute, not an outage. The model below shows SIP Trunking inbound: every customer trunk targets one health-checked hostname, and DNS steers each call to a healthy region — running the failover scenarios continuously."
+          />
           <HaArchitectureViz />
         </div>
+      </section>
 
-        {/* ──────────────────────────────────────────────────── */}
-        {/* REQUEST ACCESS CTA — unauthenticated only            */}
-        {/* ──────────────────────────────────────────────────── */}
-        {!isAuthenticated && (
-          <div
-            className="animate-fade-in-up animation-delay-200"
-            style={{ width: '100%', maxWidth: 'none' }}
-          >
-            <RequestAccessCta />
-          </div>
-        )}
-
-        {/* ──────────────────────────────────────────────────── */}
-        {/* PLATFORM CAPABILITIES — 2×2 glass-morphism grid     */}
-        {/* ──────────────────────────────────────────────────── */}
-        <div
-          style={{
-            width: '100%',
-            maxWidth: 'none',
-            marginBottom: 72,
-          }}
-        >
-          <div className="animate-fade-in-up animation-delay-200">
-            <SectionLabel>Platform Capabilities</SectionLabel>
-          </div>
-
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(4, 1fr)',
-              gap: 20,
-            }}
-          >
-            {CAPABILITY_CARDS.map((card) => (
-              <CapabilityCardEl key={card.title} card={card} />
+      {/* ── CAPABILITIES — paper band ────────────────────── */}
+      <section className="landing-band landing-band-paper">
+        <div className="landing-wrap">
+          <SectionHead
+            kicker="Platform"
+            title="Carrier discipline. Modern tooling."
+            blurb="The practices Granite uses to keep utility-scale voice traffic flowing, paired with the observability and control surfaces engineering teams actually want to use."
+          />
+          <div className="landing-caps">
+            {CAPABILITIES.map((c) => (
+              <div key={c.title} className="landing-card landing-cap">
+                <span className="landing-icon-tile">
+                  <c.icon size={19} strokeWidth={2.1} />
+                </span>
+                <h3 className="landing-card-title">{c.title}</h3>
+                <p className="landing-card-desc">{c.desc}</p>
+              </div>
             ))}
           </div>
         </div>
-      </div>
+      </section>
+
+      {/* ── INTAKE — cobalt band (#request-access) ───────── */}
+      {/* Only unauthenticated visitors ever reach this render — the
+          intake band is always present. */}
+      <RequestAccessSection />
+
+      {/* ── FOOTER ───────────────────────────────────────── */}
+      <footer className="landing-band landing-foot">
+        <div className="landing-wrap landing-foot-inner">
+          <span className="landing-foot-brand">GRANITE · CRAG</span>
+          <span>
+            Next-generation voice — built and operated by Granite
+            Telecommunications
+          </span>
+        </div>
+      </footer>
+
+      {/* ── SIGN-IN MODAL — mounted only while open so each
+             open starts with fresh field/error state ───────── */}
+      {signInOpen && (
+        <SignInModal
+          onClose={() => setSignInOpen(false)}
+          onSuccess={handleSignInSuccess}
+        />
+      )}
     </div>
   );
 }

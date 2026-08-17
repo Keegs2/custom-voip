@@ -31,6 +31,16 @@
   --sidebar-w: 240px;
 }
 
+/* ─── Shared brand tokens ───────────────────────────────────
+   The landing stat-band cobalt, hoisted from .landing-root (its original
+   home — see the LANDING PAGE palette below) so the authenticated app
+   shell can use it too (sidebar collapse tab). .landing-root descendants
+   still resolve these via :root inheritance. */
+:root {
+  --lg-cobalt: #113398;
+  --lg-cobalt-deep: #0b246e;
+}
+
 *, *::before, *::after {
   box-sizing: border-box;
   margin: 0;
@@ -338,54 +348,2186 @@ input[type="time"] {
   color-scheme: dark;
 }
 
-/* ─── Dashboard scan-line ────────────────────────────────── */
-@keyframes scan-line {
-  0%   { transform: translateY(-100%); opacity: 0; }
-  10%  { opacity: 0.15; }
-  90%  { opacity: 0.15; }
-  100% { transform: translateY(100%); opacity: 0; }
+/* ══════════════════════════════════════════════════════════════════════════
+   APP SHELL — sidebar offset + desktop collapse (AppLayout / Sidebar)
+
+   The authenticated shell can hide the dark sidebar entirely so light
+   pages (RCF daylight console) stand full-width. State lives in AppLayout
+   (localStorage `sidebar_collapsed`); these classes do the layout work.
+   Responsive layout is hand-written @media (NOT Tailwind md:* — see the
+   container-build gotcha in CLAUDE.md). Breakpoint 768px matches the
+   sidebar's existing mobile-drawer breakpoint (Tailwind `md`).
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* Main content — margin animates in sync with the sidebar slide */
+.app-main {
+  transition: margin-left 200ms ease;
 }
 
-.dash-scan-line {
-  animation: scan-line 4s ease-in-out infinite;
+.app-main--sidebar {
+  margin-left: var(--sidebar-w);
 }
 
-/* ─── Dashboard CRAG hero animations ─────────────────── */
-@keyframes dashCragGlow3 {
-  0% {
-    filter:
-      drop-shadow(0 0 10px rgba(59, 130, 246, 0.35))
-      drop-shadow(0 0 28px rgba(59, 130, 246, 0.15))
-      drop-shadow(0 0 60px rgba(59, 130, 246, 0.06));
+/* Desktop collapse: slide the fixed sidebar off-canvas. Uses `transform`
+   (Tailwind v4's translate utilities use the separate `translate` property,
+   so the mobile-drawer classes and this compose without fighting). */
+@media (min-width: 768px) {
+  .app-sidebar--collapsed {
+    transform: translateX(-100%);
   }
-  100% {
-    filter:
-      drop-shadow(0 0 20px rgba(59, 130, 246, 0.65))
-      drop-shadow(0 0 48px rgba(59, 130, 246, 0.28))
-      drop-shadow(0 0 90px rgba(59, 130, 246, 0.12));
+}
+
+/* Collapse/expand tab — slim cobalt pill seated on the sidebar↔content
+   boundary. Gradient mirrors .landing-band-cobalt (150deg, --lg-cobalt →
+   --lg-cobalt-deep) so it reads as intentional on both the dark shell and
+   the RCF paper canvas. */
+.sidebar-collapse-tab {
+  position: fixed;
+  left: var(--sidebar-w);
+  top: 34%;
+  z-index: 120;               /* above the sidebar (z-100) */
+  width: 22px;
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid rgba(79, 146, 255, 0.4); /* azure keyline — lifts the tab off the dark shell */
+  border-left: none;
+  border-radius: 0 10px 10px 0;
+  background: linear-gradient(150deg, var(--lg-cobalt) 0%, var(--lg-cobalt-deep) 100%);
+  color: #fff;
+  cursor: pointer;
+  box-shadow:
+    2px 0 12px -2px rgba(11, 36, 110, 0.55),
+    0 0 16px -4px rgba(47, 125, 246, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.16);
+  transition: left 200ms ease, width 150ms ease, filter 150ms ease;
+}
+
+.sidebar-collapse-tab:hover {
+  filter: brightness(1.3);
+  width: 27px;
+}
+
+.sidebar-collapse-tab:focus-visible {
+  outline: 2px solid #4f92ff;
+  outline-offset: 2px;
+}
+
+/* When collapsed, the tab parks flush at the viewport's left edge */
+.sidebar-collapse-tab--collapsed {
+  left: 0;
+}
+
+/* Mobile (<768px): the sidebar is a drawer driven by the topbar hamburger —
+   the desktop collapse tab defers to that pattern entirely. The sidebar
+   offset also disappears (drawer overlays content). */
+@media (max-width: 767px) {
+  .app-main--sidebar { margin-left: 0; }
+  .sidebar-collapse-tab { display: none; }
+}
+
+/* Reduced motion: snap, don't slide. !important beats the sidebar's inline
+   transition. */
+@media (prefers-reduced-motion: reduce) {
+  .app-main,
+  .app-sidebar,
+  .sidebar-collapse-tab {
+    transition: none !important;
   }
 }
 
-@keyframes dashCragFloat2 {
-  0%, 100% { transform: translateY(0px); }
-  50%       { transform: translateY(-6px); }
+/* ─── Sidebar nav hover (Sidebar.tsx) ───────────────────────
+   One shared hover treatment for every clickable nav row on the dark shell:
+   subtle light tint + text/icon brightening, 150ms ease, mirrored on
+   :focus-visible for keyboard users. The Sidebar is inline-style based, so
+   only the RESTING (non-active) colors of each row live here — inline styles
+   win over classes for the same property, which is exactly how ACTIVE rows
+   keep their gradient + border + glow untouched: their inline background/
+   color simply beat these hover rules. Product rows pass their accent as
+   `--sb-accent-tint` (accent @ ~8%) so the tint leans toward the product
+   color instead of plain white. */
+
+.sb-nav-row {
+  color: #64748b;
+  background: transparent;
+  transition: background 150ms ease, color 150ms ease, border-color 150ms ease, box-shadow 150ms ease;
 }
 
-/* Inner image — owns the glow + float animation; never paused or overridden */
-.dash-crag-hero {
-  animation:
-    dashCragGlow3 3s ease-in-out infinite alternate,
-    dashCragFloat2 6s ease-in-out infinite;
+.sb-nav-row:hover,
+.sb-nav-row:focus-visible {
+  background: var(--sb-accent-tint, rgba(255, 255, 255, 0.06));
+  color: #94a3b8;
 }
 
-/* Outer wrapper — owns the hover 3D rotation; completely independent of the animation */
-.dash-crag-hero-wrap {
+/* Icon swatch inside a nav row — resting colors here so the row hover can
+   brighten them (active swatches stay inline and win). */
+.sb-nav-icon {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  color: #475569;
+  transition: background 150ms ease, border-color 150ms ease, color 150ms ease;
+}
+
+.sb-nav-row:hover .sb-nav-icon,
+.sb-nav-row:focus-visible .sb-nav-icon {
+  background: rgba(255, 255, 255, 0.07);
+  border-color: rgba(255, 255, 255, 0.12);
+  color: #94a3b8;
+}
+
+/* Collapsible group headers (Products / Documentation / Administration…) */
+.sb-group-head {
+  background: transparent;
+  color: #475569;
+  transition: background 150ms ease, color 150ms ease;
+}
+
+.sb-group-head:hover,
+.sb-group-head:focus-visible {
+  background: rgba(255, 255, 255, 0.06);
+  color: #94a3b8;
+}
+
+/* View-as-Customer control — resting slate; the amber "viewing" treatment
+   stays inline in Sidebar.tsx and wins over these rules. */
+.sb-viewas {
+  background: transparent;
+  border: 1px solid rgba(42, 47, 69, 0.4);
+  transition: background 150ms ease, border-color 150ms ease;
+}
+
+.sb-viewas:hover,
+.sb-viewas:focus-visible {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(42, 47, 69, 0.7);
+}
+
+.sb-viewas .sb-viewas-label,
+.sb-viewas .sb-viewas-glyph {
+  color: #475569;
+  transition: color 150ms ease;
+}
+
+.sb-viewas:hover .sb-viewas-label,
+.sb-viewas:hover .sb-viewas-glyph,
+.sb-viewas:focus-visible .sb-viewas-label,
+.sb-viewas:focus-visible .sb-viewas-glyph {
+  color: #94a3b8;
+}
+
+/* Account footer link (avatar + name → /account) — active blue wash is
+   inline and wins over the hover tint. */
+.sb-account-link {
+  background: transparent;
+  transition: background 150ms ease;
+}
+
+.sb-account-link:hover,
+.sb-account-link:focus-visible {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+/* Sign-out — keeps its established red hover, now shared with keyboard
+   focus and the 150ms family. */
+.sb-signout {
+  background: transparent;
+  border: 1px solid rgba(42, 47, 69, 0.5);
+  color: #475569;
+  transition: color 150ms ease, background 150ms ease, border-color 150ms ease;
+}
+
+.sb-signout:hover,
+.sb-signout:focus-visible {
+  color: #f87171;
+  background: rgba(239, 68, 68, 0.08);
+  border-color: rgba(239, 68, 68, 0.25);
+}
+
+/* Reduced motion: hover states snap instead of easing. */
+@media (prefers-reduced-motion: reduce) {
+  .sb-nav-row,
+  .sb-nav-icon,
+  .sb-group-head,
+  .sb-viewas,
+  .sb-viewas-label,
+  .sb-viewas-glyph,
+  .sb-account-link,
+  .sb-signout {
+    transition: none !important;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   LANDING PAGE (public homepage — DashboardPage)
+
+   "Granite & Signal" — industrial enterprise, color-blocked. Full-bleed
+   alternating bands: granite-dark → cobalt → paper-light (IBM/Cisco
+   enterprise pattern). Display: Archivo 800–900. Body: Public Sans —
+   both scoped to .landing-root only; the global body font is untouched.
+   Responsive layout is hand-written @media (NOT Tailwind md:* — see the
+   container-build gotcha in CLAUDE.md).
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.landing-root {
+  /* palette — dark bands sampled from the CRAG logo.
+     --lg-cobalt / --lg-cobalt-deep are hoisted to :root (top of this file)
+     so the app shell shares them; they still apply here via inheritance. */
+  --lg-granite: #070c16;
+  --lg-granite-hi: #0c1424;
+  --lg-azure: #2f7df6;
+  --lg-azure-deep: #1d63dd;
+  --lg-azure-bright: #4f92ff;
+  --lg-paper: #f3f5f9;
+  --lg-card: #ffffff;
+  --lg-ink: #0e1726;
+  --lg-ink-soft: #46566f;
+  --lg-cloud: #97a8c6;   /* muted text on granite */
+  --lg-mist: #c3d2f4;    /* muted text on cobalt */
+
+  /* cancel AppLayout wrapper padding → true full-bleed bands */
+  margin-top: -32px;
+  margin-bottom: -80px;
+  margin-left: calc(-1 * clamp(24px, 3vw, 48px));
+  margin-right: calc(-1 * clamp(24px, 3vw, 48px));
+
+  font-family: "Public Sans", "IBM Plex Sans", -apple-system, sans-serif;
+  color: var(--lg-ink);
+}
+
+/* ─── Band machinery ─── */
+.landing-band {
+  position: relative;
+  width: 100%;
+}
+
+.landing-wrap {
+  position: relative;
+  z-index: 1;
+  max-width: 1240px;
+  margin: 0 auto;
+  padding-left: clamp(28px, 4vw, 64px);
+  padding-right: clamp(28px, 4vw, 64px);
+}
+
+/* Dark granite band — layered stone gradient + faint grain, no flat black */
+.landing-band-granite {
+  color: #f2f6ff;
+  background:
+    radial-gradient(1100px 560px at 76% 12%, rgba(47, 125, 246, 0.11), transparent 62%),
+    linear-gradient(158deg, #0d1526 0%, var(--lg-granite) 52%, #050910 100%);
+}
+
+.landing-band-granite::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.05;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* Cobalt signal band — solid, confident */
+.landing-band-cobalt {
+  color: #ffffff;
+  background: linear-gradient(150deg, var(--lg-cobalt) 0%, var(--lg-cobalt-deep) 100%);
+}
+
+/* Paper band */
+.landing-band-paper {
+  background: var(--lg-paper);
+  color: var(--lg-ink);
+}
+
+.landing-band-paper .landing-wrap {
+  padding-top: 84px;
+  padding-bottom: 92px;
+}
+
+/* ─── Type ─── */
+.landing-h1 {
+  font-family: "Archivo", "IBM Plex Sans", sans-serif;
+  font-weight: 900;
+  font-size: clamp(2.5rem, 4.4vw, 4rem);
+  line-height: 1.02;
+  letter-spacing: -0.03em;
+  color: #ffffff;
+  margin: 26px 0 22px;
+  max-width: 14ch;
+}
+
+.landing-acc {
+  color: var(--lg-azure-bright);
+}
+
+.landing-h2 {
+  font-family: "Archivo", "IBM Plex Sans", sans-serif;
+  font-weight: 800;
+  font-size: clamp(1.75rem, 2.9vw, 2.5rem);
+  line-height: 1.08;
+  letter-spacing: -0.025em;
+  margin: 20px 0 14px;
+  max-width: 26ch;
+}
+
+.landing-lede {
+  font-size: 1.05rem;
+  line-height: 1.7;
+  font-weight: 400;
+  color: #b0c0dd;
+  max-width: 560px;
+}
+
+.landing-blurb {
+  font-size: 1rem;
+  line-height: 1.7;
+  color: var(--lg-ink-soft);
+  max-width: 700px;
+}
+
+.landing-band-granite .landing-blurb {
+  color: var(--lg-cloud);
+}
+
+.landing-band-cobalt .landing-blurb {
+  color: var(--lg-mist);
+}
+
+/* Hero brand tag — solid azure block + sans caps (no monospace) */
+.landing-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #8fb0e8;
+}
+
+.landing-tag::before {
+  content: '';
+  width: 26px;
+  height: 9px;
+  background: var(--lg-azure);
+  flex-shrink: 0;
+}
+
+/* Section kicker — solid chip, enterprise category-tag style */
+.landing-kicker {
   display: inline-block;
-  transition: transform 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  background: var(--lg-azure);
+  color: #ffffff;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 6px 12px;
+  border-radius: 3px;
 }
 
-.dash-crag-hero-wrap:hover {
-  transform: perspective(800px) rotateY(-8deg) rotateX(3deg) scale(1.01);
+.landing-kicker-inverse {
+  background: #ffffff;
+  color: var(--lg-cobalt);
+}
+
+.landing-section-head {
+  max-width: 780px;
+}
+
+/* ─── Top nav (inside the hero band) ─── */
+.landing-topnav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding-top: 44px;
+}
+
+/* Blank granite hold while the persisted auth token validates —
+   signed-in users never see the marketing page flash before the
+   product-page redirect. Same negative margins as .landing-root
+   so it covers the AppLayout padding edge-to-edge. */
+.landing-splash {
+  min-height: 100vh;
+  margin: -32px calc(-1 * clamp(24px, 3vw, 48px)) -80px;
+  background: linear-gradient(158deg, #0d1526 0%, #0a101d 52%, #050910 100%);
+}
+
+.landing-topnav-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  text-decoration: none;
+}
+
+/* Circular crop hides the PNG's square ground; ring seats it on granite */
+.landing-topnav-mark {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+  box-shadow: 0 0 0 1px rgba(143, 176, 232, 0.28);
+}
+
+.landing-topnav-word {
+  font-family: "Archivo", "IBM Plex Sans", sans-serif;
+  font-weight: 800;
+  font-size: 0.9rem;
+  letter-spacing: 0.16em;
+  color: #e8effc;
+  white-space: nowrap;
+}
+
+.landing-topnav-btn {
+  padding: 10px 20px;
+  font-size: 0.82rem;
+}
+
+/* ─── Hero ─── */
+.landing-hero .landing-hero-grid {
+  padding-top: 44px;
+  padding-bottom: 72px;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+  align-items: center;
+}
+
+@media (min-width: 1060px) {
+  .landing-hero .landing-hero-grid {
+    grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
+    gap: 48px;
+    padding-top: 36px;
+    padding-bottom: 64px;
+  }
+}
+
+/* Logo blend: band tone matches the PNG ground; a radial mask feathers the
+   square edge away and an azure glow seats the mark into the granite */
+.landing-hero-mark {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  order: -1; /* logo above copy when stacked */
+}
+
+@media (min-width: 1060px) {
+  .landing-hero-mark {
+    order: 0;
+  }
+}
+
+/* Dark pool matching the PNG's own ground (~#020a16) so the residual
+   square edge left by the mask is tonally invisible; a faint azure halo
+   rings the pool to seat the mark into the band */
+.landing-hero-mark::before {
+  content: '';
+  position: absolute;
+  width: 150%;
+  height: 150%;
+  left: -25%;
+  top: -25%;
+  background:
+    radial-gradient(circle at 50% 47%, rgba(47, 125, 246, 0.1) 30%, transparent 62%),
+    radial-gradient(circle at 50% 47%, rgba(2, 10, 22, 0.96) 0%, rgba(2, 10, 22, 0.9) 30%, rgba(2, 10, 22, 0) 60%);
+  pointer-events: none;
+}
+
+.landing-hero-mark img {
+  position: relative;
+  width: min(460px, 68vw);
+  max-width: 100%;
+  height: auto;
+  -webkit-mask-image: radial-gradient(circle at 50% 47%, #000 64%, transparent 92%);
+  mask-image: radial-gradient(circle at 50% 47%, #000 64%, transparent 92%);
+}
+
+.landing-hero-points {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 28px;
+  margin-top: 36px;
+  list-style: none;
+  padding: 0;
+}
+
+.landing-hero-points li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #9fb2d6;
+}
+
+.landing-hero-points li::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  background: var(--lg-azure);
+  border-radius: 1px;
+  flex-shrink: 0;
+}
+
+/* ─── Buttons — solid, squared-off, enterprise ─── */
+.landing-cta-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+  margin-top: 34px;
+}
+
+.landing-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-family: inherit;
+  font-size: 0.9rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  padding: 14px 28px;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  text-decoration: none;
+  transition: background 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
+}
+
+.landing-btn-primary {
+  background: var(--lg-azure);
+  color: #ffffff;
+  box-shadow: 0 12px 28px -12px rgba(47, 125, 246, 0.75);
+}
+
+.landing-btn-primary:hover {
+  background: var(--lg-azure-deep);
+  transform: translateY(-1px);
+  box-shadow: 0 16px 34px -12px rgba(47, 125, 246, 0.85);
+}
+
+.landing-btn-primary svg {
+  transition: transform 0.18s ease;
+}
+
+.landing-btn-primary:hover svg {
+  transform: translateX(3px);
+}
+
+.landing-btn-ghost {
+  background: #1c2a45;
+  color: #dce7fb;
+}
+
+.landing-btn-ghost:hover {
+  background: #25365a;
+  transform: translateY(-1px);
+}
+
+/* ─── Stat band ─── */
+.landing-stats .landing-wrap {
+  padding-top: 56px;
+  padding-bottom: 60px;
+}
+
+.landing-stats-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 32px;
+}
+
+@media (min-width: 620px) {
+  .landing-stats-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 40px 48px;
+  }
+}
+
+@media (min-width: 1020px) {
+  .landing-stats-grid {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+
+.landing-stat {
+  border-left: 5px solid rgba(255, 255, 255, 0.4);
+  padding-left: 20px;
+}
+
+.landing-stat-value {
+  font-family: "Archivo", "IBM Plex Sans", sans-serif;
+  font-weight: 900;
+  font-size: clamp(2.5rem, 3.8vw, 3.6rem);
+  line-height: 1;
+  letter-spacing: -0.03em;
+  color: #ffffff;
+  white-space: nowrap;
+}
+
+.landing-stat-label {
+  margin-top: 12px;
+  font-size: 0.86rem;
+  font-weight: 600;
+  line-height: 1.45;
+  color: var(--lg-mist);
+  max-width: 22ch;
+}
+
+/* ─── Cards (light sections) ─── */
+.landing-card {
+  background: var(--lg-card);
+  border-radius: 10px;
+  border-top: 4px solid var(--lg-azure);
+  padding: 28px 26px 30px;
+  box-shadow:
+    0 1px 2px rgba(14, 23, 38, 0.07),
+    0 14px 34px -16px rgba(14, 23, 38, 0.22);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.landing-card-title {
+  font-family: "Archivo", "IBM Plex Sans", sans-serif;
+  font-weight: 700;
+  font-size: 1.06rem;
+  letter-spacing: -0.015em;
+  color: inherit;
+  margin: 0 0 10px;
+}
+
+.landing-card-title-lg {
+  font-size: clamp(1.5rem, 2vw, 1.9rem);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  margin: 18px 0 12px;
+}
+
+.landing-card-desc {
+  font-size: 0.88rem;
+  line-height: 1.65;
+  color: var(--lg-ink-soft);
+  margin: 0;
+}
+
+/* ─── Products — asymmetric: featured RCF + stacked side rail ─── */
+.landing-products {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 22px;
+  margin-top: 44px;
+}
+
+@media (min-width: 1000px) {
+  .landing-products {
+    grid-template-columns: minmax(0, 5fr) minmax(0, 4fr);
+    align-items: stretch;
+  }
+}
+
+.landing-products-side {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 22px;
+}
+
+.landing-card-featured {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 40px 38px;
+  border-top-width: 6px;
+  cursor: pointer;
+}
+
+.landing-card-featured:hover {
+  transform: translateY(-3px);
+  box-shadow:
+    0 2px 4px rgba(14, 23, 38, 0.08),
+    0 24px 48px -18px rgba(14, 23, 38, 0.3);
+}
+
+.landing-card-featured .landing-card-desc {
+  font-size: 0.95rem;
+  max-width: 46ch;
+}
+
+.landing-spec-list {
+  list-style: none;
+  padding: 22px 0 0;
+  margin: 22px 0 0;
+  border-top: 1px solid #e6ebf3;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-self: stretch;
+}
+
+.landing-spec-list li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: #2b3a52;
+}
+
+.landing-spec-list li::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  background: var(--lg-azure);
+  border-radius: 1px;
+  flex-shrink: 0;
+}
+
+.landing-card-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 26px;
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--lg-azure-deep);
+}
+
+.landing-card-featured:hover .landing-card-link {
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+.landing-card-side {
+  border-top-color: #d7e0ef;
+  padding: 24px 26px 26px;
+}
+
+.landing-card-side:hover {
+  transform: translateY(-2px);
+  border-top-color: var(--lg-azure);
+}
+
+.landing-card-side-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.landing-card-side-head .landing-card-title {
+  margin: 0;
+}
+
+/* Status chips — solid blocks */
+.landing-chip {
+  display: inline-block;
+  font-size: 0.64rem;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  padding: 5px 10px;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+
+.landing-chip-ga {
+  background: #0d8a4f;
+  color: #ffffff;
+}
+
+.landing-chip-early {
+  background: #dfeaff;
+  color: #1a55c9;
+}
+
+.landing-chip-roadmap {
+  background: #e4e8f0;
+  color: #55637c;
+}
+
+/* ─── Network band ─── */
+.landing-network .landing-wrap {
+  padding-top: 84px;
+  padding-bottom: 92px;
+}
+
+.landing-network .landing-section-head {
+  margin-bottom: 44px;
+}
+
+/* ─── Capabilities grid ─── */
+.landing-caps {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 22px;
+  margin-top: 44px;
+}
+
+@media (min-width: 680px) {
+  .landing-caps {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (min-width: 1080px) {
+  .landing-caps {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+.landing-cap {
+  border-top-color: #d7e0ef;
+}
+
+.landing-cap:hover {
+  transform: translateY(-2px);
+  border-top-color: var(--lg-azure);
+  box-shadow:
+    0 2px 4px rgba(14, 23, 38, 0.08),
+    0 20px 40px -18px rgba(14, 23, 38, 0.28);
+}
+
+.landing-icon-tile {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  background: #e4eeff;
+  color: var(--lg-azure-deep);
+  margin-bottom: 18px;
+}
+
+.landing-icon-tile-inverse {
+  background: rgba(255, 255, 255, 0.14);
+  color: #ffffff;
+}
+
+/* ─── Build-on-the-carrier band (granite) — 4 pillars, 2×2 ─── */
+.landing-ai .landing-wrap {
+  padding-top: 84px;
+  padding-bottom: 92px;
+}
+
+.landing-ai-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 22px;
+  margin-top: 44px;
+}
+
+@media (min-width: 780px) {
+  .landing-ai-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.landing-ai-card {
+  background: rgba(19, 30, 54, 0.55);
+  border: 1px solid rgba(143, 176, 232, 0.12);
+  border-top: 4px solid var(--lg-azure);
+  border-radius: 10px;
+  padding: 28px 26px 30px;
+}
+
+.landing-ai-card .landing-card-title {
+  color: #ffffff;
+  font-size: 1.12rem;
+}
+
+.landing-ai-card .landing-card-desc {
+  color: var(--lg-cloud);
+}
+
+.landing-ai-card .landing-icon-tile-inverse {
+  background: rgba(47, 125, 246, 0.18);
+  color: var(--lg-azure-bright);
+}
+
+/* ─── Shared dark form fields (sign-in modal + intake band) ─── */
+.landing-field {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-width: 0;
+}
+
+.landing-label {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #a9bce4;
+  user-select: none;
+}
+
+.landing-input {
+  width: 100%;
+  box-sizing: border-box;
+  background: rgba(3, 8, 18, 0.5);
+  border: 1px solid rgba(151, 168, 198, 0.32);
+  border-radius: 6px;
+  padding: 12px 14px;
+  font-size: 0.92rem;
+  font-family: inherit;
+  color: #f2f6ff;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+  color-scheme: dark;
+}
+
+.landing-input::placeholder {
+  color: rgba(151, 168, 198, 0.55);
+}
+
+.landing-input:focus {
+  border-color: var(--lg-azure-bright);
+  box-shadow: 0 0 0 3px rgba(47, 125, 246, 0.28);
+  background: rgba(3, 8, 18, 0.65);
+}
+
+.landing-input:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+select.landing-input {
+  appearance: none;
+  cursor: pointer;
+  padding-right: 38px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8' fill='none'%3E%3Cpath d='M1 1.5 6 6.5 11 1.5' stroke='%23a9bce4' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+}
+
+.landing-input-invalid {
+  border-color: rgba(248, 113, 113, 0.7);
+}
+
+.landing-input-invalid:focus {
+  border-color: #f87171;
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.22);
+}
+
+.landing-field-err {
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: #fda4a4;
+}
+
+.landing-form-error {
+  background: rgba(239, 68, 68, 0.14);
+  border: 1px solid rgba(239, 68, 68, 0.42);
+  border-radius: 6px;
+  color: #fecaca;
+  font-size: 0.85rem;
+  font-weight: 500;
+  line-height: 1.5;
+  padding: 12px 14px;
+}
+
+/* ─── LandingSelect — custom listbox (native popups render light/OS-styled;
+       these open a solid granite-navy panel instead) ─── */
+.landing-select {
+  position: relative;
+}
+
+.landing-select-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.landing-select-btn:disabled {
+  cursor: not-allowed;
+}
+
+.landing-select-chevron {
+  flex-shrink: 0;
+  color: #a9bce4;
+  transition: transform 0.18s ease;
+}
+
+.landing-select-btn-open .landing-select-chevron {
+  transform: rotate(180deg);
+}
+
+.landing-select-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.landing-select-placeholder {
+  color: rgba(151, 168, 198, 0.55);
+}
+
+@keyframes landing-select-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: none; }
+}
+
+@keyframes landing-select-in-up {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: none; }
+}
+
+.landing-select-pop {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 40;
+  background: linear-gradient(172deg, #101b30 0%, #0b1322 100%);
+  border: 1px solid rgba(143, 176, 232, 0.24);
+  border-radius: 6px;
+  box-shadow:
+    0 2px 6px rgba(0, 0, 0, 0.35),
+    0 24px 48px -16px rgba(0, 0, 0, 0.75);
+  padding: 6px;
+  max-height: 264px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  animation: landing-select-in 0.16s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.landing-select-pop-up {
+  top: auto;
+  bottom: calc(100% + 6px);
+  animation-name: landing-select-in-up;
+}
+
+.landing-select-opt {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px 10px 14px;
+  border-radius: 4px;
+  font-size: 0.88rem;
+  font-weight: 500;
+  line-height: 1.35;
+  color: #c7d3ea;
+  cursor: pointer;
+  user-select: none;
+}
+
+.landing-select-opt + .landing-select-opt {
+  margin-top: 2px;
+}
+
+.landing-select-opt-hi {
+  background: rgba(47, 125, 246, 0.22);
+  color: #ffffff;
+}
+
+.landing-select-opt-selected {
+  color: #ffffff;
+  font-weight: 600;
+  box-shadow: inset 3px 0 0 0 var(--lg-azure-bright);
+}
+
+.landing-select-opt svg {
+  flex-shrink: 0;
+  color: var(--lg-azure-bright);
+}
+
+.landing-select-opt-hi svg {
+  color: #ffffff;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .landing-select-pop {
+    animation: none;
+  }
+  .landing-select-chevron {
+    transition: none;
+  }
+}
+
+/* ─── TED — Granite Onboarding AI identity card (intake left rail) ─── */
+.landing-ted {
+  display: flex;
+  align-items: flex-start;
+  gap: 15px;
+  margin-top: 28px;
+  padding: 18px 20px;
+  background: rgba(4, 10, 30, 0.42);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-left: 4px solid var(--lg-azure-bright);
+  border-radius: 10px;
+}
+
+/* Minimal geometric mark: signal bar over the TED letterform, Archivo-weight */
+.landing-ted-mark {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  width: 46px;
+  height: 46px;
+  flex-shrink: 0;
+  background: linear-gradient(150deg, var(--lg-azure) 0%, var(--lg-azure-deep) 100%);
+  border-radius: 9px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.24),
+    0 10px 22px -10px rgba(2, 8, 30, 0.7);
+  font-family: "Archivo", "IBM Plex Sans", sans-serif;
+  font-weight: 800;
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  color: #ffffff;
+  user-select: none;
+}
+
+.landing-ted-mark::before {
+  content: '';
+  width: 16px;
+  height: 3px;
+  background: #ffffff;
+  border-radius: 1px;
+  opacity: 0.92;
+}
+
+.landing-ted-name {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin: 2px 0 0;
+  font-family: "Archivo", "IBM Plex Sans", sans-serif;
+  font-weight: 800;
+  font-size: 0.92rem;
+  letter-spacing: -0.01em;
+  color: #ffffff;
+}
+
+.landing-ted-role {
+  font-family: "Public Sans", "IBM Plex Sans", sans-serif;
+  font-size: 0.64rem;
+  font-weight: 700;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: var(--lg-mist);
+}
+
+.landing-ted-line {
+  margin: 7px 0 0;
+  font-size: 0.83rem;
+  line-height: 1.6;
+  color: var(--lg-mist);
+}
+
+/* ─── Sign-in modal ─── */
+@keyframes landing-modal-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.landing-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(3, 7, 15, 0.74);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.landing-modal {
+  position: relative;
+  width: 100%;
+  max-width: 430px;
+  background:
+    radial-gradient(560px 300px at 82% -10%, rgba(47, 125, 246, 0.14), transparent 62%),
+    linear-gradient(160deg, #0e1729 0%, #0a1220 100%);
+  border: 1px solid rgba(143, 176, 232, 0.16);
+  border-top: 4px solid var(--lg-azure);
+  border-radius: 12px;
+  padding: 38px 36px 32px;
+  box-shadow: 0 40px 90px -30px rgba(0, 0, 0, 0.85);
+  animation: landing-modal-in 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.landing-modal-close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: #7e93b8;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.landing-modal-close:hover {
+  background: rgba(255, 255, 255, 0.07);
+  color: #e8effc;
+}
+
+.landing-modal-kicker {
+  display: inline-block;
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--lg-azure-bright);
+}
+
+.landing-modal-title {
+  font-family: "Archivo", "IBM Plex Sans", sans-serif;
+  font-weight: 800;
+  font-size: 1.65rem;
+  letter-spacing: -0.02em;
+  color: #ffffff;
+  margin: 10px 0 8px;
+}
+
+.landing-modal-sub {
+  font-size: 0.88rem;
+  line-height: 1.6;
+  color: var(--lg-cloud);
+  margin: 0 0 26px;
+}
+
+.landing-modal-form {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.landing-modal-submit {
+  width: 100%;
+  justify-content: center;
+  margin-top: 4px;
+}
+
+.landing-modal-submit:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.landing-modal-foot {
+  margin: 22px 0 0;
+  padding-top: 18px;
+  border-top: 1px solid rgba(143, 176, 232, 0.14);
+  font-size: 0.78rem;
+  line-height: 1.55;
+  color: #7e93b8;
+}
+
+/* ─── Intake band (#request-access) — cobalt ─── */
+.landing-intake .landing-wrap {
+  padding-top: 96px;
+  padding-bottom: 100px;
+}
+
+/* Header row above the panel — identity copy left, TED card right.
+   Compressing the old left rail into this row frees the full band
+   width for the two-column form below. */
+.landing-intake-head {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 28px;
+  align-items: end;
+  margin-bottom: 44px;
+}
+
+@media (min-width: 1060px) {
+  .landing-intake-head {
+    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+    gap: 72px;
+  }
+}
+
+.landing-intake-head .landing-h2 {
+  margin-top: 18px;
+}
+
+.landing-intake-head .landing-ted {
+  margin-top: 0;
+}
+
+/* Reassurance bullets — inline row so the header stays shallow */
+.landing-intake-points {
+  list-style: none;
+  padding: 20px 0 0;
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 28px;
+}
+
+.landing-intake-points li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: #ffffff;
+}
+
+.landing-intake-points li::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  background: #ffffff;
+  border-radius: 1px;
+  flex-shrink: 0;
+}
+
+.landing-intake-panel {
+  background: rgba(4, 10, 30, 0.42);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  padding: clamp(26px, 3vw, 42px);
+}
+
+/* Two parallel form tracks — regular intake left, KYC right — split by a
+   hairline rule. Stacks to one column (intake → KYC) below 1000px. The
+   tracks top-align; the KYC track may run taller (high-volume reveal). */
+.landing-intake-columns {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 23px; /* + the tracks' trailing 13px child margin = 36px stacked */
+  margin-bottom: -13px; /* cancel the last field row's phantom margin */
+}
+
+@media (min-width: 1000px) {
+  .landing-intake-columns {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    column-gap: 0;
+  }
+
+  .landing-intake-col-a {
+    padding-right: clamp(28px, 3vw, 44px);
+  }
+
+  .landing-intake-col-b {
+    padding-left: clamp(28px, 3vw, 44px);
+    border-left: 1px solid rgba(255, 255, 255, 0.14);
+  }
+}
+
+.landing-intake-fields {
+  display: grid;
+  grid-template-columns: 1fr;
+  align-content: start; /* columns must not rail-spread when the sibling track is taller */
+  gap: 7px; /* label→control gap — see "Pixel-perfect paired rows" below */
+}
+
+@media (min-width: 720px) {
+  .landing-intake-fields {
+    grid-template-columns: 1fr 1fr;
+    gap: 7px 22px;
+  }
+}
+
+.landing-field-full {
+  grid-column: 1 / -1;
+}
+
+/* ── Pixel-perfect paired rows ─────────────────────────────────
+   Each field spans TWO parent rows (label / body) and subgrids onto
+   them, so a paired row shares ONE label track and ONE body track:
+   if either label ever wraps, both controls still start on the same
+   pixel — structural, survives future copy changes, no per-label
+   nowrap tuning. The parent's 7px row-gap is the label→control gap;
+   the 20px rhythm BETWEEN rows comes from a 13px bottom margin on
+   every direct child (13 + 7 = 20). Labels bottom-align so a
+   one-line label hugs its control when its pair-mate wraps.
+   (No-subgrid fallback: grid-template-rows is dropped and the field
+   lays out as its own 2-row grid — the old flex stack, minus the
+   cross-field track sharing.) */
+.landing-intake-fields > * {
+  margin-bottom: 13px;
+}
+
+.landing-intake-fields > .landing-field {
+  display: grid;
+  grid-row: span 2;
+  grid-template-rows: subgrid;
+  align-content: start;
+}
+
+.landing-intake-fields > .landing-field > .landing-label {
+  align-self: end;
+}
+
+/* Control + error/hint slot (Field body) — the old field stack */
+.landing-field-body {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-width: 0;
+}
+
+.landing-intake-sub {
+  font-family: "Archivo", "IBM Plex Sans", sans-serif;
+  font-weight: 700;
+  font-size: 0.74rem;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.88);
+  padding-bottom: 2px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+.landing-intake-sub:not(:first-child) {
+  margin-top: 14px;
+}
+
+/* Inputs sit on the cobalt panel — slightly deeper wells */
+.landing-intake-panel .landing-input {
+  background: rgba(3, 9, 26, 0.55);
+  border-color: rgba(255, 255, 255, 0.22);
+}
+
+.landing-intake-panel .landing-input:focus {
+  border-color: #ffffff;
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.18);
+}
+
+.landing-intake-panel .landing-label {
+  color: var(--lg-mist);
+}
+
+.landing-intake-error {
+  margin-top: 22px;
+}
+
+.landing-intake-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px 22px;
+  margin-top: 30px;
+}
+
+/* White primary button — max contrast on cobalt */
+.landing-btn-onblue {
+  background: #ffffff;
+  color: var(--lg-cobalt-deep);
+  box-shadow: 0 12px 28px -12px rgba(2, 8, 30, 0.6);
+}
+
+.landing-btn-onblue:hover {
+  background: #e9effc;
+  transform: translateY(-1px);
+}
+
+.landing-btn-onblue:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.landing-btn-onblue svg {
+  transition: transform 0.18s ease;
+}
+
+.landing-btn-onblue:hover svg {
+  transform: translateX(3px);
+}
+
+.landing-intake-note {
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--lg-mist);
+  margin: 0;
+}
+
+/* ─── KYC — business verification (FCC Know-Your-Customer capture) ─── */
+
+/* Calm intro microcopy directly under a group subhead */
+.landing-intake-intro {
+  /* Bottom 13px matches the paired-rows child margin (this shorthand
+     out-cascades the .landing-intake-fields > * rule above) */
+  margin: -8px 0 13px;
+  font-size: 0.82rem;
+  line-height: 1.6;
+  color: var(--lg-mist);
+  max-width: 64ch;
+}
+
+.landing-intake-intro strong {
+  color: #ffffff;
+  font-weight: 700;
+}
+
+/* Small helper text under an input (format hints, "must differ" notes) */
+.landing-field-hint {
+  font-size: 0.72rem;
+  font-weight: 500;
+  line-height: 1.45;
+  color: rgba(195, 210, 244, 0.72);
+}
+
+/* Neutral disclosure checkbox (registered agent / virtual office) */
+.landing-check {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.landing-check input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+  pointer-events: none;
+}
+
+.landing-check-box {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+  flex-shrink: 0;
+  border: 1px solid rgba(255, 255, 255, 0.38);
+  border-radius: 4px;
+  background: rgba(3, 9, 26, 0.55);
+  color: transparent;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.landing-check input:checked + .landing-check-box {
+  background: #ffffff;
+  border-color: #ffffff;
+  color: var(--lg-cobalt-deep);
+}
+
+.landing-check input:focus-visible + .landing-check-box {
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.18);
+}
+
+.landing-check-text {
+  font-size: 0.86rem;
+  font-weight: 500;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.92);
+}
+
+/* High-volume declaration — bordered well with a switch */
+.landing-hv-toggle {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 16px 18px;
+  background: rgba(3, 9, 26, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 8px;
+  cursor: pointer;
+  user-select: none;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.landing-hv-toggle:hover {
+  border-color: rgba(255, 255, 255, 0.32);
+}
+
+.landing-hv-toggle input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+  pointer-events: none;
+}
+
+.landing-switch {
+  position: relative;
+  width: 44px;
+  height: 24px;
+  flex-shrink: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.22);
+  transition: background 0.18s ease;
+}
+
+.landing-switch::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #ffffff;
+  transition: transform 0.18s ease, background 0.18s ease;
+}
+
+.landing-hv-toggle input:checked ~ .landing-switch {
+  background: #ffffff;
+}
+
+.landing-hv-toggle input:checked ~ .landing-switch::after {
+  transform: translateX(20px);
+  background: var(--lg-cobalt-deep);
+}
+
+.landing-hv-toggle input:focus-visible ~ .landing-switch {
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.18);
+}
+
+.landing-hv-toggle-text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.landing-hv-toggle-q {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.landing-hv-toggle-sub {
+  font-size: 0.76rem;
+  font-weight: 500;
+  color: var(--lg-mist);
+}
+
+/* Locked-on state — monthly volume is at Granite's 50,000+ threshold,
+   so the declaration is mandatory (FCC 26-27 KYC): switch stays on with
+   reduced interactivity, sub-line becomes a lock note. */
+.landing-hv-toggle-locked {
+  cursor: default;
+}
+
+.landing-hv-toggle-locked:hover {
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
+.landing-hv-toggle-locked .landing-switch {
+  opacity: 0.72;
+}
+
+.landing-hv-toggle-sub-lock {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  color: #cfe0ff;
+}
+
+.landing-hv-toggle-sub-lock svg {
+  flex-shrink: 0;
+}
+
+/* One-shot reveal of the high-volume fields (reduced-motion-safe) */
+@keyframes landing-hv-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.landing-hv-reveal {
+  animation: landing-hv-in 0.45s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Originating-IP chip input — .landing-input surface that wraps chips */
+.landing-chipfield {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-height: 48px;
+  padding: 8px 10px;
+  box-sizing: border-box;
+  cursor: text;
+  background: rgba(3, 9, 26, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 6px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.landing-chipfield:focus-within {
+  border-color: #ffffff;
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.18);
+}
+
+.landing-chipfield-invalid {
+  border-color: rgba(248, 113, 113, 0.7);
+}
+
+.landing-chipfield input {
+  flex: 1;
+  min-width: 150px;
+  padding: 4px 4px;
+  background: transparent;
+  border: none;
+  outline: none;
+  font-family: inherit;
+  font-size: 0.92rem;
+  color: #f2f6ff;
+}
+
+.landing-chipfield input::placeholder {
+  color: rgba(151, 168, 198, 0.55);
+}
+
+.landing-chip-ip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px 4px 10px;
+  background: rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 4px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: #ffffff;
+  white-space: nowrap;
+}
+
+.landing-chip-ip button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.65);
+  cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.landing-chip-ip button:hover {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.16);
+}
+
+/* Intended-use description textarea + character counter */
+.landing-textarea {
+  resize: vertical;
+  min-height: 88px;
+  line-height: 1.55;
+}
+
+.landing-charcount {
+  align-self: flex-end;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: rgba(195, 210, 244, 0.6);
+}
+
+/* ─── Product picker (products-v1) — multi-select toggle cards ─── */
+
+.landing-product-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-auto-rows: 1fr; /* equal-height cards — both rows share the tallest */
+  gap: 10px;
+}
+
+@media (max-width: 519px) {
+  .landing-product-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.landing-product-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  padding: 12px 14px 12px 42px;
+  text-align: left;
+  font-family: inherit;
+  background: rgba(3, 9, 26, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.landing-product-card:hover {
+  border-color: rgba(255, 255, 255, 0.35);
+}
+
+.landing-product-card:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.18);
+}
+
+.landing-product-card:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Selected — unmistakable azure fill + keyline */
+.landing-product-card[aria-pressed='true'] {
+  background: linear-gradient(
+    135deg,
+    rgba(47, 125, 246, 0.38) 0%,
+    rgba(29, 99, 221, 0.24) 100%
+  );
+  border-color: var(--lg-azure-bright);
+  box-shadow: inset 0 0 0 1px var(--lg-azure-bright),
+    0 8px 20px -10px rgba(47, 125, 246, 0.6);
+}
+
+.landing-product-check {
+  position: absolute;
+  left: 13px;
+  top: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.38);
+  border-radius: 4px;
+  background: rgba(3, 9, 26, 0.55);
+  color: transparent;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.landing-product-card[aria-pressed='true'] .landing-product-check {
+  background: var(--lg-azure-bright);
+  border-color: #ffffff;
+  color: #ffffff;
+}
+
+.landing-product-name {
+  font-family: 'Archivo', 'IBM Plex Sans', sans-serif;
+  font-weight: 700;
+  font-size: 0.86rem;
+  letter-spacing: -0.01em;
+  color: #ffffff;
+  line-height: 1.3;
+}
+
+.landing-product-desc {
+  font-size: 0.72rem;
+  font-weight: 500;
+  line-height: 1.4;
+  color: var(--lg-mist);
+}
+
+/* None-selected inline error tints the whole grid */
+.landing-product-grid-invalid .landing-product-card {
+  border-color: rgba(248, 113, 113, 0.7);
+}
+
+/* Per-product setup sub-block — compact titled well, azure spine.
+   Reveal animation reuses .landing-hv-reveal (one-shot, motion-safe). */
+.landing-product-block {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  /* 3px + the inner grid's trailing 13px row margin = 16px visual */
+  padding: 14px 16px 3px;
+  background: rgba(3, 9, 26, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-left: 3px solid var(--lg-azure-bright);
+  border-radius: 8px;
+}
+
+.landing-product-block-title {
+  font-family: 'Archivo', 'IBM Plex Sans', sans-serif;
+  font-weight: 700;
+  font-size: 0.68rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+/* Compact yes/no switch row (API "provide numbers") */
+.landing-mini-toggle {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 11px 14px;
+  background: rgba(3, 9, 26, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 8px;
+  cursor: pointer;
+  user-select: none;
+  transition: border-color 0.15s ease;
+}
+
+.landing-mini-toggle:hover {
+  border-color: rgba(255, 255, 255, 0.32);
+}
+
+.landing-mini-toggle input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+  pointer-events: none;
+}
+
+.landing-mini-toggle-q {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.landing-mini-toggle-a {
+  font-size: 0.76rem;
+  font-weight: 700;
+  color: var(--lg-mist);
+}
+
+.landing-mini-toggle input:checked ~ .landing-switch {
+  background: #ffffff;
+}
+
+.landing-mini-toggle input:checked ~ .landing-switch::after {
+  transform: translateX(20px);
+  background: var(--lg-cobalt-deep);
+}
+
+.landing-mini-toggle input:focus-visible ~ .landing-switch {
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.18);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .landing-hv-reveal {
+    animation: none;
+  }
+  .landing-switch,
+  .landing-switch::after,
+  .landing-check-box,
+  .landing-product-card,
+  .landing-product-check {
+    transition: none;
+  }
+}
+
+/* Success state */
+.landing-intake-success {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 26px 6px;
+}
+
+.landing-intake-success-ring {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 54px;
+  height: 54px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.12);
+  border: 1.5px solid rgba(255, 255, 255, 0.4);
+  color: #ffffff;
+}
+
+/* Reference kicker — the created row id, quotable in follow-ups */
+.landing-intake-success-ref {
+  font-family: "Archivo", "IBM Plex Sans", sans-serif;
+  font-weight: 700;
+  font-size: 0.74rem;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.72);
+  margin-top: 4px;
+}
+
+.landing-intake-success-title {
+  font-family: "Archivo", "IBM Plex Sans", sans-serif;
+  font-weight: 800;
+  font-size: 1.5rem;
+  letter-spacing: -0.02em;
+  color: #ffffff;
+  margin: 6px 0 0;
+}
+
+/* Kicker sits tight over its title — collapse the flex gap + margin */
+.landing-intake-success-ref + .landing-intake-success-title {
+  margin-top: -10px;
+}
+
+/* Submitted-summary chips — products + high-volume status */
+.landing-intake-success-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.landing-success-chip {
+  padding: 5px 13px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: #ffffff;
+  white-space: nowrap;
+}
+
+.landing-success-chip-hv {
+  background: rgba(47, 125, 246, 0.32);
+  border-color: var(--lg-azure-bright);
+}
+
+.landing-success-chip-dim {
+  background: transparent;
+  border-color: rgba(255, 255, 255, 0.2);
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.landing-intake-success-note {
+  font-size: 0.95rem;
+  line-height: 1.6;
+  color: var(--lg-mist);
+  margin: 0;
+  max-width: 44ch;
+}
+
+.landing-intake-reset {
+  margin-top: 8px;
+  background: transparent;
+  border: none;
+  padding: 0;
+  color: rgba(255, 255, 255, 0.75);
+  font-size: 0.82rem;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+  text-decoration-color: rgba(255, 255, 255, 0.35);
+  transition: color 0.15s ease;
+}
+
+.landing-intake-reset:hover {
+  color: #ffffff;
+}
+
+/* ─── Footer strip ─── */
+.landing-foot {
+  background: #04070e;
+  color: #62748f;
+}
+
+.landing-foot-inner {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px 24px;
+  padding-top: 26px;
+  padding-bottom: 26px;
+  font-size: 0.74rem;
+  font-weight: 500;
+}
+
+.landing-foot-brand {
+  font-family: "Archivo", "IBM Plex Sans", sans-serif;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  color: #9fb2d0;
+}
+
+/* ─── Hero load orchestration (CSS-only, staggered) ─── */
+@keyframes landing-rise {
+  from {
+    opacity: 0;
+    transform: translateY(22px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes landing-seat {
+  from {
+    opacity: 0;
+    transform: scale(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.landing-up {
+  opacity: 0;
+  animation: landing-rise 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.05s forwards;
+}
+
+.landing-d1 { animation-delay: 0.16s; }
+.landing-d2 { animation-delay: 0.3s; }
+.landing-d3 { animation-delay: 0.46s; }
+.landing-d4 { animation-delay: 0.6s; }
+
+.landing-hero-mark.landing-up {
+  animation-name: landing-seat;
+  animation-duration: 1.1s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .landing-up {
+    animation: none;
+    opacity: 1;
+  }
+  .landing-modal {
+    animation: none;
+  }
+  .landing-btn,
+  .landing-card {
+    transition: none;
+  }
+  .landing-btn-primary:hover,
+  .landing-card-featured:hover,
+  .landing-card-side:hover,
+  .landing-cap:hover {
+    transform: none;
+  }
 }
 
 /* ─── Staggered fade-in-up delays (extending existing 100-500ms set) */
@@ -397,3 +2539,1143 @@ input[type="time"] {
 .animation-delay-1100 { animation-delay: 1.1s; }
 .animation-delay-1200 { animation-delay: 1.2s; }
 .animation-delay-1300 { animation-delay: 1.3s; }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   FX MOTION KIT — generic, reusable one-shot reveal primitives.
+
+   Consumed by src/components/fx/Reveal.tsx (IntersectionObserver flips
+   .fx-reveal → .fx-visible exactly once). Also provides a CSS-only
+   load-stagger (.fx-load + .fx-load-d*) for orchestrated page-entry
+   sequences, and named keyframes (fx-rise / fx-fade / fx-spin) for inline
+   micro-animations. All motion is opacity + small translate only (no layout
+   shift) and is disabled under prefers-reduced-motion.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.fx-reveal {
+  opacity: 0;
+  transform: translateY(14px);
+  transition:
+    opacity 0.6s cubic-bezier(0.16, 1, 0.3, 1) var(--fx-delay, 0ms),
+    transform 0.6s cubic-bezier(0.16, 1, 0.3, 1) var(--fx-delay, 0ms);
+  will-change: opacity, transform;
+}
+
+.fx-reveal.fx-visible {
+  opacity: 1;
+  transform: none;
+}
+
+@keyframes fx-rise {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: none; }
+}
+
+@keyframes fx-fade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes fx-spin {
+  to { transform: rotate(360deg); }
+}
+
+.fx-load {
+  opacity: 0;
+  animation: fx-rise 0.55s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.fx-load-d1 { animation-delay: 0.09s; }
+.fx-load-d2 { animation-delay: 0.18s; }
+.fx-load-d3 { animation-delay: 0.27s; }
+
+@media (prefers-reduced-motion: reduce) {
+  .fx-reveal { transition: none; opacity: 1; transform: none; }
+  .fx-load { animation: none; opacity: 1; }
+}
+/* ══════════════════════════════════════════════════════════════════════════
+   RCF CONSOLE — and the SOURCE of the shared daylight system
+
+   "Granite & Signal — daylight console." The RCF page paints its own light
+   canvas inside the dark app shell (dark sidebar / light content, the
+   VS Code-docs pattern): a full-bleed paper surface, a quiet typographic
+   page header set directly on the paper (no hero card), white slabs with
+   azure keylines, and ink-navy text. Display: Archivo. Body: Public Sans.
+   Load-bearing responsive layout is hand-written @media (never Tailwind
+   md:* — see the container-build gotcha in CLAUDE.md).
+
+   SHARED LAYER: this block is the single source of truth for the daylight
+   scale/colors. Primitives that other daylight pages (TrunksPage,
+   MyAccountPage, …) reuse carry a generic `.dl-*` ALIAS on the same rule
+   (comma-shared selectors — identical values by construction, never
+   copy-pasted). The `.rcf-*` names and values are shipped API: do not
+   rename or restructure them. Net-new shared primitives that RcfPage does
+   not use live in the DAYLIGHT CONSOLE (shared) block below.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.rcf-scope,
+.dl-scope {
+  /* palette — mirrors the landing page light sections */
+  --rcf-paper: #f4f6f9;
+  --rcf-card: #ffffff;
+  --rcf-ink: #0e1726;
+  --rcf-ink-soft: #46566f;
+  --rcf-ink-dim: #5d6f8c;
+  --rcf-azure: #2f7df6;
+  --rcf-azure-deep: #1d63dd;
+  --rcf-line: #e2e8f2;
+  --rcf-line-soft: #edf1f7;
+  --rcf-tint: #f7f9fc;
+  --rcf-tint-hover: #f2f7ff;
+  --rcf-green: #15803d;
+  --rcf-red: #b91c1c;
+
+  /* rhythm + motion tokens — one spacing scale (4/8/12/16/20/24/32), one
+     timing family. Zone gaps (header → scopebar → tabs → toolbar → panels)
+     are --rcf-zone; sibling cards stack at --rcf-stack. */
+  --rcf-zone: 24px;
+  --rcf-stack: 20px;
+  --rcf-ease: 0.15s ease;
+
+  /* Full-bleed paper canvas — cancels the AppLayout wrapper's HORIZONTAL
+     padding (set inline, so it survives the global reset). The wrapper's
+     vertical py-8/pb-20 utilities are dead on arrival: the unlayered
+     `*` reset above outranks Tailwind's layered utilities, so real vertical
+     padding is 0 and the vertical margins here must be 0 too — a negative
+     value hides paper above the viewport top. */
+  flex: 1;
+  margin-top: 0;
+  margin-bottom: 0;
+  margin-left: calc(-1 * clamp(24px, 3vw, 48px));
+  margin-right: calc(-1 * clamp(24px, 3vw, 48px));
+  background: var(--rcf-paper);
+  font-family: "Public Sans", "IBM Plex Sans", -apple-system, sans-serif;
+  color: var(--rcf-ink);
+}
+
+.rcf-shell,
+.dl-shell {
+  max-width: 1200px;
+  margin: 0 auto;
+  /* Breathing room above the header: ~44px of paper at desktop, easing down
+     on small screens. The paper itself stays full-bleed (see .rcf-scope). */
+  padding: clamp(28px, 3vw, 44px) clamp(24px, 3.4vw, 52px) 72px;
+}
+
+/* ─── Page header — quiet typographic opening, set directly on the paper ───
+   No hero card, no bands: breadcrumb line (the one azure detail), a calm
+   Archivo title, one-line description, and inline metrics divided by
+   hairline rules. A single 1px rule closes the zone. */
+.rcf-header,
+.dl-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px 48px;
+  padding-bottom: var(--rcf-zone);
+  border-bottom: 1px solid var(--rcf-line);
+  margin-bottom: var(--rcf-zone);
+}
+
+.rcf-header-id,
+.dl-header-id {
+  min-width: 0;
+  flex: 1 1 380px;
+}
+
+.rcf-crumb,
+.dl-crumb {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.64rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--rcf-ink-dim);
+  white-space: nowrap;
+}
+
+/* The page's single accent detail — a small azure tick. */
+.rcf-crumb::before,
+.dl-crumb::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  background: var(--rcf-azure);
+  border-radius: 1px;
+  flex-shrink: 0;
+}
+
+.rcf-crumb-sep,
+.dl-crumb-sep {
+  color: #b6c2d4;
+  font-weight: 400;
+}
+
+.rcf-title,
+.dl-title {
+  font-family: "Archivo", "IBM Plex Sans", sans-serif;
+  font-weight: 700;
+  font-size: clamp(1.28rem, 1.9vw, 1.55rem);
+  letter-spacing: -0.022em;
+  line-height: 1.15;
+  color: var(--rcf-ink);
+  margin: 10px 0 5px;
+}
+
+.rcf-sub,
+.dl-sub {
+  font-size: 0.82rem;
+  line-height: 1.5;
+  color: var(--rcf-ink-soft);
+  max-width: 62ch;
+  margin: 0;
+}
+
+/* Inline metrics — small numerals with labels, hairline-divided, unboxed.
+   Right-aligned so the last figure sits flush with the content column's
+   right edge (the table's right edge below). */
+.rcf-metrics,
+.dl-metrics {
+  display: flex;
+  align-items: stretch;
+  flex-shrink: 0;
+  padding-bottom: 2px;
+  text-align: right;
+}
+
+.rcf-metric,
+.dl-metric {
+  padding: 0 28px;
+}
+
+.rcf-metric:first-child,
+.dl-metric:first-child { padding-left: 0; }
+.rcf-metric:last-child,
+.dl-metric:last-child { padding-right: 0; }
+.rcf-metric + .rcf-metric,
+.dl-metric + .dl-metric { border-left: 1px solid var(--rcf-line); }
+
+.rcf-metric-value,
+.dl-metric-value {
+  font-family: "Archivo", "IBM Plex Sans", sans-serif;
+  font-weight: 700;
+  font-size: 1.3rem;
+  line-height: 1;
+  letter-spacing: -0.01em;
+  color: var(--rcf-ink);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.rcf-metric-label,
+.dl-metric-label {
+  margin-top: 6px;
+  font-size: 0.59rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--rcf-ink-dim);
+  white-space: nowrap;
+}
+
+@media (max-width: 560px) {
+  .rcf-metric,
+  .dl-metric { padding: 0 18px; }
+}
+
+/* ─── Admin scope bar ─── */
+.rcf-scopebar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-bottom: var(--rcf-zone);
+  flex-wrap: wrap;
+}
+
+.rcf-scopebar-label {
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--rcf-ink-dim);
+}
+
+/* ─── Tab rail — centered in the content column, evenly spaced, with a
+   soft azure tint + pre-highlight underline on hover and a crisp azure
+   underline when active. Hit areas are generous (padded buttons); the
+   hairline baseline runs the full column width beneath. ─── */
+.rcf-tabs,
+.dl-tabs {
+  display: flex;
+  justify-content: center;
+  gap: clamp(12px, 3vw, 36px);
+  border-bottom: 1px solid var(--rcf-line);
+  margin-bottom: var(--rcf-zone);
+}
+
+.rcf-tab,
+.dl-tab {
+  appearance: none;
+  background: none;
+  border: none;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: "Archivo", "IBM Plex Sans", sans-serif;
+  font-weight: 700;
+  font-size: 0.86rem;
+  letter-spacing: -0.01em;
+  color: var(--rcf-ink-dim);
+  padding: 10px 18px 13px;
+  border-bottom: 3px solid transparent;
+  border-radius: 9px 9px 0 0;
+  margin-bottom: -1px;
+  transition: color var(--rcf-ease), border-color var(--rcf-ease), background var(--rcf-ease);
+}
+
+.rcf-tab:hover,
+.dl-tab:hover {
+  color: var(--rcf-azure-deep);
+  background: linear-gradient(to top, rgba(47, 125, 246, 0.07), rgba(47, 125, 246, 0.015));
+  border-bottom-color: rgba(47, 125, 246, 0.35);
+}
+
+.rcf-tab:focus-visible,
+.dl-tab:focus-visible {
+  outline: 2px solid var(--rcf-azure);
+  outline-offset: -2px;
+}
+
+.rcf-tab-active,
+.rcf-tab-active:hover,
+.dl-tab-active,
+.dl-tab-active:hover {
+  color: var(--rcf-ink);
+  border-bottom-color: var(--rcf-azure);
+}
+
+@media (max-width: 560px) {
+  .rcf-tab,
+  .dl-tab { padding: 9px 10px 12px; gap: 6px; }
+}
+
+/* ─── Fields ─── */
+.rcf-input,
+.dl-input {
+  box-sizing: border-box;
+  background: #ffffff;
+  border: 1px solid #c9d5e6;
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 0.85rem;
+  font-family: inherit;
+  color: var(--rcf-ink);
+  outline: none;
+  transition: border-color var(--rcf-ease), box-shadow var(--rcf-ease);
+}
+
+.rcf-input::placeholder,
+.dl-input::placeholder { color: #9aa9c0; }
+
+/* Pre-focus hover — the border warms toward azure before the focus ring */
+.rcf-input:hover:not(:focus):not(:disabled),
+.dl-input:hover:not(:focus):not(:disabled) {
+  border-color: #a3b6d3;
+}
+
+.rcf-input:focus,
+.dl-input:focus {
+  border-color: var(--rcf-azure);
+  box-shadow: 0 0 0 3px rgba(47, 125, 246, 0.16);
+}
+
+.rcf-input:disabled,
+.dl-input:disabled {
+  background: #f1f4f9;
+  color: #8b99b0;
+  cursor: not-allowed;
+}
+
+select.rcf-input,
+select.dl-input {
+  appearance: none;
+  cursor: pointer;
+  padding-right: 32px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='11' height='7' viewBox='0 0 11 7' fill='none'%3E%3Cpath d='M1 1.25 5.5 5.75 10 1.25' stroke='%235d6f8c' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+}
+
+.rcf-input-mono,
+.dl-input-mono {
+  font-family: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  letter-spacing: 0.02em;
+}
+
+.rcf-flabel,
+.dl-flabel {
+  display: block;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--rcf-ink-dim);
+  margin-bottom: 6px;
+  user-select: none;
+}
+
+.rcf-help,
+.dl-help {
+  font-size: 0.68rem;
+  color: var(--rcf-ink-dim);
+  margin-top: 5px;
+  line-height: 1.45;
+}
+
+/* ─── Buttons ─── */
+.rcf-btn,
+.dl-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-family: inherit;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  padding: 9px 18px;
+  border: none;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: background var(--rcf-ease), border-color var(--rcf-ease), box-shadow var(--rcf-ease), color var(--rcf-ease);
+  white-space: nowrap;
+}
+
+.rcf-btn-primary,
+.dl-btn-primary {
+  background: var(--rcf-azure);
+  color: #ffffff;
+  box-shadow: 0 8px 20px -10px rgba(47, 125, 246, 0.7);
+}
+
+.rcf-btn-primary:hover:not(:disabled),
+.dl-btn-primary:hover:not(:disabled) {
+  background: var(--rcf-azure-deep);
+  box-shadow: 0 10px 24px -10px rgba(47, 125, 246, 0.85);
+}
+
+.rcf-btn-primary:disabled,
+.dl-btn-primary:disabled {
+  background: #b9cdf2;
+  box-shadow: none;
+  cursor: not-allowed;
+}
+
+.rcf-btn-ghost,
+.dl-btn-ghost {
+  background: transparent;
+  border: 1px solid #cdd8e8;
+  color: var(--rcf-ink-soft);
+}
+
+.rcf-btn-ghost:hover:not(:disabled),
+.dl-btn-ghost:hover:not(:disabled) { background: #f2f6fc; border-color: #b5c4da; }
+
+.rcf-btn-ghost:disabled,
+.dl-btn-ghost:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.rcf-btn-danger,
+.dl-btn-danger {
+  background: rgba(220, 38, 38, 0.06);
+  border: 1px solid rgba(220, 38, 38, 0.28);
+  color: var(--rcf-red);
+}
+
+.rcf-btn-danger:hover:not(:disabled),
+.dl-btn-danger:hover:not(:disabled) {
+  background: rgba(220, 38, 38, 0.12);
+  border-color: rgba(220, 38, 38, 0.45);
+}
+
+/* ─── Panels — white slabs on paper. Whole-card hover is a whisper of
+   extra lift so interactive surfaces feel alive without shouting. ─── */
+.rcf-panel,
+.dl-panel {
+  background: var(--rcf-card);
+  border: 1px solid var(--rcf-line);
+  border-radius: 12px;
+  box-shadow:
+    0 1px 2px rgba(14, 23, 38, 0.06),
+    0 12px 30px -18px rgba(14, 23, 38, 0.18);
+  overflow: hidden;
+  transition: border-color var(--rcf-ease), box-shadow var(--rcf-ease);
+}
+
+.rcf-panel:hover,
+.dl-panel:hover {
+  border-color: #d7e0ee;
+  box-shadow:
+    0 1px 2px rgba(14, 23, 38, 0.06),
+    0 16px 36px -18px rgba(14, 23, 38, 0.24);
+}
+
+.rcf-panel-head,
+.dl-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--rcf-line);
+}
+
+.rcf-panel-title,
+.dl-panel-title {
+  font-family: "Archivo", "IBM Plex Sans", sans-serif;
+  font-weight: 700;
+  font-size: 0.82rem;
+  letter-spacing: 0.01em;
+  color: var(--rcf-ink);
+  flex-shrink: 0;
+}
+
+.rcf-count,
+.dl-count {
+  font-size: 0.66rem;
+  font-weight: 700;
+  color: var(--rcf-azure-deep);
+  background: rgba(47, 125, 246, 0.09);
+  border: 1px solid rgba(47, 125, 246, 0.24);
+  border-radius: 4px;
+  padding: 2px 8px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
+/* ─── Tables ─── */
+.rcf-th,
+.dl-th {
+  padding: 11px 16px;
+  text-align: left;
+  white-space: nowrap;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--rcf-ink-dim);
+  background: var(--rcf-tint);
+  border-bottom: 1px solid #dfe6f0;
+  user-select: none;
+}
+
+.rcf-th-sort {
+  cursor: pointer;
+  transition: color var(--rcf-ease), background var(--rcf-ease);
+}
+
+.rcf-th-sort:hover {
+  color: var(--rcf-ink-soft);
+  background: #eef3fa;
+}
+
+.rcf-th-active { color: var(--rcf-azure-deep); }
+.rcf-th-active:hover { color: var(--rcf-azure-deep); }
+
+.rcf-row td,
+.dl-row td { border-top: 1px solid var(--rcf-line-soft); }
+.rcf-row:first-child td,
+.dl-row:first-child td { border-top: none; }
+
+.rcf-row,
+.dl-row {
+  transition: background var(--rcf-ease), box-shadow var(--rcf-ease);
+}
+
+.rcf-row:hover,
+.dl-row:hover {
+  background: var(--rcf-tint-hover);
+  box-shadow: inset 2px 0 0 0 var(--rcf-azure);
+}
+
+/* ─── Expandable number rows ─── */
+.rcf-nrow { cursor: pointer; }
+
+/* Mouse focus gets NO ring — the row is a giant click target, a perimeter
+   outline reads as an error state. Keyboard focus (:focus-visible) gets the
+   same quiet treatment as hover plus a faint inner keyline, so Tab users can
+   see where they are without the row shouting. */
+.rcf-nrow:focus { outline: none; }
+
+.rcf-nrow:focus-visible {
+  outline: none;
+  background: var(--rcf-tint-hover);
+  box-shadow: inset 2px 0 0 0 var(--rcf-azure), inset 0 0 0 1px rgba(47, 125, 246, 0.35);
+}
+
+.rcf-nrow-open {
+  background: #eef4fe;
+  box-shadow: inset 2px 0 0 0 var(--rcf-azure);
+}
+
+.rcf-nrow-open td { border-top-color: var(--rcf-line); }
+
+.rcf-chev {
+  transition: transform var(--rcf-ease), stroke var(--rcf-ease);
+  display: block;
+}
+
+.rcf-chev-open { transform: rotate(90deg); }
+
+/* Chevron affordance — on row hover the chevron picks up azure and nudges
+   toward the content it will reveal. CSS `stroke` outranks the SVG
+   presentation attribute set inline, so this wins on hover. */
+.rcf-nrow:hover .rcf-chev { stroke: var(--rcf-azure-deep); }
+.rcf-nrow:hover .rcf-chev:not(.rcf-chev-open) { transform: translateX(2px); }
+
+@media (prefers-reduced-motion: reduce) {
+  .rcf-chev { transition: none; }
+  .rcf-nrow:hover .rcf-chev:not(.rcf-chev-open) { transform: none; }
+}
+
+/* One-shot expand: grid-rows 0fr → 1fr + fade. Reduced-motion safe. */
+.rcf-xwrap {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  animation: rcf-x-open 0.34s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.rcf-xwrap > div {
+  overflow: hidden;
+  min-height: 0;
+}
+
+@keyframes rcf-x-open {
+  from { grid-template-rows: 0fr; opacity: 0; }
+  to   { grid-template-rows: 1fr; opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rcf-xwrap { animation: none; grid-template-rows: 1fr; opacity: 1; }
+}
+
+.rcf-xpanel {
+  background: #f7fafd;
+  border-top: 1px solid var(--rcf-line);
+  border-bottom: 1px solid var(--rcf-line);
+  padding: 22px 26px 18px;
+  box-shadow: inset 2px 0 0 0 var(--rcf-azure);
+}
+
+.rcf-xgrid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 22px 40px;
+}
+
+@media (min-width: 880px) {
+  .rcf-xgrid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+}
+
+.rcf-xsection-title,
+.dl-section-title {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 0.64rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--rcf-ink-soft);
+  margin-bottom: 14px;
+}
+
+.rcf-xsection-title::before,
+.dl-section-title::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  background: var(--rcf-azure);
+  border-radius: 1px;
+  flex-shrink: 0;
+}
+
+.rcf-xfields {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.rcf-xfacts {
+  border-top: 1px solid var(--rcf-line);
+  margin-top: 22px;
+  padding-top: 14px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 32px;
+  align-items: center;
+}
+
+.rcf-fact-label,
+.dl-fact-label {
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: #8b99b0;
+  margin-bottom: 3px;
+}
+
+.rcf-fact-value,
+.dl-fact-value {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--rcf-ink-soft);
+  font-variant-numeric: tabular-nums;
+}
+
+.rcf-xactions {
+  margin-left: auto;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+@media (max-width: 620px) {
+  .rcf-xactions { margin-left: 0; width: 100%; }
+  .rcf-xactions .rcf-btn { flex: 1; }
+}
+
+/* Read-only value rendering inside the expanded panel */
+.rcf-static,
+.dl-static {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--rcf-ink);
+  padding: 2px 0;
+}
+
+/* ─── Pagination controls — same hover family as the rest of the console ─── */
+.rcf-pgbtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  height: 32px;
+  padding: 0 8px;
+  border-radius: 7px;
+  font-size: 0.78rem;
+  font-weight: 500;
+  font-family: inherit;
+  border: 1px solid #d5deeb;
+  background: #ffffff;
+  color: var(--rcf-ink-dim);
+  cursor: pointer;
+  user-select: none;
+  transition: background var(--rcf-ease), color var(--rcf-ease), border-color var(--rcf-ease);
+}
+
+.rcf-pgbtn:hover:not(:disabled):not(.rcf-pgbtn-active) {
+  background: var(--rcf-tint-hover);
+  border-color: #b7c7dd;
+  color: var(--rcf-ink-soft);
+}
+
+.rcf-pgbtn:disabled {
+  color: #b6c2d4;
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.rcf-pgbtn-active {
+  border-color: rgba(47, 125, 246, 0.5);
+  background: rgba(47, 125, 246, 0.1);
+  color: var(--rcf-azure-deep);
+  font-weight: 700;
+}
+
+/* ─── Status pills ─── */
+.rcf-pill,
+.dl-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.64rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  border-radius: 999px;
+  padding: 3px 10px;
+  white-space: nowrap;
+}
+
+.rcf-pill::before,
+.dl-pill::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}
+
+.rcf-pill-on,
+.dl-pill-on {
+  color: var(--rcf-green);
+  background: rgba(22, 163, 74, 0.1);
+  border: 1px solid rgba(22, 163, 74, 0.26);
+}
+
+.rcf-pill-off,
+.dl-pill-off {
+  color: var(--rcf-red);
+  background: rgba(220, 38, 38, 0.07);
+  border: 1px solid rgba(220, 38, 38, 0.26);
+}
+
+/* ─── Switches ─── */
+.rcf-switch {
+  position: relative;
+  width: 38px;
+  height: 22px;
+  border-radius: 11px;
+  border: 1px solid #c3cfe2;
+  background: #dde5f0;
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease, opacity 0.2s ease;
+  padding: 0;
+  flex-shrink: 0;
+  outline: none;
+}
+
+.rcf-switch::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 1px 3px rgba(14, 23, 38, 0.35);
+  transition: left 0.2s ease;
+}
+
+.rcf-switch-on {
+  background: linear-gradient(135deg, var(--rcf-azure) 0%, var(--rcf-azure-deep) 100%);
+  border-color: var(--rcf-azure-deep);
+}
+
+.rcf-switch-on::after { left: 18px; }
+
+.rcf-switch:disabled { cursor: not-allowed; opacity: 0.55; }
+
+.rcf-switch:focus-visible {
+  outline: 2px solid var(--rcf-azure);
+  outline-offset: 2px;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   DAYLIGHT CONSOLE (shared) — generic `dl-*` primitives for daylight pages
+   (TrunksPage, MyAccountPage, and pages to come).
+
+   Mechanism: the daylight scale/colors have ONE source of truth — the RCF
+   CONSOLE block above. Every primitive that already exists there carries a
+   comma-shared `.dl-*` alias on the original `.rcf-*` rule (scope/shell,
+   quiet header, tabs, inputs, buttons, panels, table, pills, section
+   titles), so the values can never drift. This block only adds primitives
+   the RCF page does not use; each references the shared `--rcf-*` custom
+   properties declared on `.rcf-scope, .dl-scope` — no re-stated magic
+   numbers for color or rhythm. Hand-written @media only (never Tailwind
+   md:* — see the container-build gotcha in CLAUDE.md).
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ─── Layout: sibling-card stack + responsive two-column split ─── */
+.dl-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--rcf-stack);
+}
+
+.dl-grid2 {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--rcf-stack);
+}
+
+@media (min-width: 880px) {
+  .dl-grid2 { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+}
+
+/* ─── Panel body — standard interior padding on the spacing scale ─── */
+.dl-panel-body {
+  padding: 20px;
+}
+
+/* Dim one-line description inside a panel head, under the title */
+.dl-panel-sub {
+  flex-basis: 100%;
+  margin: -6px 0 0;
+  font-size: 0.72rem;
+  line-height: 1.45;
+  color: var(--rcf-ink-dim);
+}
+
+/* ─── Key → value definition row (hairline-divided) ─── */
+.dl-kv {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--rcf-line-soft);
+}
+
+.dl-kv:last-child { border-bottom: none; }
+
+.dl-kv-label {
+  font-size: 0.74rem;
+  color: var(--rcf-ink-dim);
+  flex-shrink: 0;
+}
+
+.dl-kv-value {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--rcf-ink);
+  text-align: right;
+  min-width: 0;
+}
+
+/* Tinted box that groups a set of kv rows */
+.dl-kvbox {
+  background: var(--rcf-tint);
+  border: 1px solid var(--rcf-line-soft);
+  border-radius: 10px;
+  padding: 2px 16px;
+}
+
+/* ─── Stat tile — label + Archivo numeral on a tinted card ─── */
+.dl-tile {
+  background: var(--rcf-tint);
+  border: 1px solid var(--rcf-line-soft);
+  border-radius: 10px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-width: 0;
+  transition: border-color var(--rcf-ease), background var(--rcf-ease);
+}
+
+.dl-tile:hover {
+  background: var(--rcf-tint-hover);
+  border-color: var(--rcf-line);
+}
+
+.dl-tile-label {
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--rcf-ink-dim);
+}
+
+.dl-tile-value {
+  font-family: "Archivo", "IBM Plex Sans", sans-serif;
+  font-weight: 700;
+  font-size: 1.35rem;
+  line-height: 1.05;
+  letter-spacing: -0.01em;
+  color: var(--rcf-ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.dl-tile-hint {
+  font-size: 0.68rem;
+  color: var(--rcf-ink-dim);
+  line-height: 1.35;
+}
+
+/* ─── Notes + status banners ─── */
+.dl-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 11px 14px;
+  border-radius: 9px;
+  background: rgba(47, 125, 246, 0.05);
+  border: 1px solid rgba(47, 125, 246, 0.16);
+  font-size: 0.75rem;
+  line-height: 1.55;
+  color: var(--rcf-ink-soft);
+}
+
+.dl-banner {
+  padding: 10px 14px;
+  border-radius: 9px;
+  font-size: 0.78rem;
+  font-weight: 500;
+  line-height: 1.5;
+}
+
+.dl-banner-ok {
+  background: rgba(22, 163, 74, 0.08);
+  border: 1px solid rgba(22, 163, 74, 0.26);
+  color: var(--rcf-green);
+}
+
+.dl-banner-err {
+  background: rgba(220, 38, 38, 0.06);
+  border: 1px solid rgba(220, 38, 38, 0.24);
+  color: var(--rcf-red);
+}
+
+.dl-banner-warn {
+  background: rgba(180, 83, 9, 0.07);
+  border: 1px solid rgba(180, 83, 9, 0.24);
+  color: #92400e;
+}
+
+/* ─── Neutral label tag (account types, roles, plan names) ─── */
+.dl-tag {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--rcf-azure-deep);
+  background: rgba(47, 125, 246, 0.09);
+  border: 1px solid rgba(47, 125, 246, 0.24);
+  border-radius: 5px;
+  padding: 2px 8px;
+  white-space: nowrap;
+}
+
+.dl-tag-slate {
+  color: var(--rcf-ink-soft);
+  background: rgba(93, 111, 140, 0.09);
+  border-color: rgba(93, 111, 140, 0.26);
+}
+
+/* ─── Mono value chip (phone numbers, IPs) ─── */
+.dl-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-family: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--rcf-ink);
+  background: var(--rcf-card);
+  border: 1px solid var(--rcf-line);
+  border-radius: 7px;
+  padding: 5px 11px;
+  white-space: nowrap;
+}
+
+/* ─── Tinted list row (product line items) ─── */
+.dl-item {
+  background: var(--rcf-tint);
+  border: 1px solid var(--rcf-line-soft);
+  border-radius: 10px;
+  padding: 13px 16px;
+  transition: background var(--rcf-ease), border-color var(--rcf-ease);
+}
+
+.dl-item:hover {
+  background: var(--rcf-tint-hover);
+  border-color: var(--rcf-line);
+}
+
+/* ─── Initial avatar — the one azure-tinted identity mark ─── */
+.dl-avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  border-radius: 11px;
+  font-family: "Archivo", "IBM Plex Sans", sans-serif;
+  font-size: 1.05rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--rcf-azure-deep);
+  background: rgba(47, 125, 246, 0.1);
+  border: 1px solid rgba(47, 125, 246, 0.22);
+}
+
+.dl-avatar-sm {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  font-size: 0.7rem;
+}
+
+/* ─── Utilization meter ─── */
+.dl-meter {
+  width: 100%;
+  height: 6px;
+  border-radius: 6px;
+  background: var(--rcf-line);
+  overflow: hidden;
+}
+
+.dl-meter-fill {
+  height: 100%;
+  border-radius: 6px;
+  transition: width 0.3s ease;
+}
+
+/* ─── Read-only field box (mirrors .dl-input's box, non-interactive) ─── */
+.dl-ro {
+  box-sizing: border-box;
+  background: #f1f4f9;
+  border: 1px solid var(--rcf-line);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 0.85rem;
+  color: var(--rcf-ink-soft);
+}
+
+/* ─── Centered page-state content (loading / error / empty / gate) ─── */
+.dl-center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 72px 24px;
+  text-align: center;
+}
+
+.dl-center-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 60px;
+  height: 60px;
+  border-radius: 14px;
+  margin-bottom: 4px;
+  background: #e4eeff;
+  color: var(--rcf-azure-deep);
+}
+
+/* ─── Inline empty state within a panel body ─── */
+.dl-empty {
+  padding: 26px 20px;
+  text-align: center;
+  border-radius: 10px;
+  border: 1px dashed var(--rcf-line);
+  background: var(--rcf-tint);
+  color: var(--rcf-ink-dim);
+  font-size: 0.8rem;
+  line-height: 1.5;
+}

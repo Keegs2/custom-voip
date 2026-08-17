@@ -1,7 +1,14 @@
+/**
+ * CdrTable — the CDR results table with expandable per-call detail.
+ *
+ * Styling: the shared DAYLIGHT CONSOLE system (`dl-*` in index.css, the admin
+ * `dlx-*` layer in dl-admin.css, and the page-scoped `dlx4-*` layer in
+ * styles/dl-platform-b.css). One white `dl-panel` slab; rows are `dl-row`
+ * and the open row carries the azure keyline. Direction/product/SBC render
+ * as daylight tags; the rated state keeps its green-ok / amber-warn
+ * semantics. Expansion + local rated tracking are unchanged.
+ */
 import { useState, useCallback } from 'react';
-import { Badge } from '../../components/ui/Badge';
-import { TableWrap, Table, Thead, Th, Td } from '../../components/ui/Table';
-import { cn } from '../../utils/cn';
 import { fmt } from '../../utils/format';
 import { CdrExpandedRow } from './CdrExpandedRow';
 import type { Cdr, ProductType, CallDirection } from '../../types/cdr';
@@ -29,21 +36,22 @@ function fmtDurationSec(sec: number): string {
   return s > 0 ? `${m}m ${s}s` : `${m}m`;
 }
 
-function directionBadge(dir: CallDirection) {
-  return <Badge variant={dir}>{dir}</Badge>;
+function DirectionTag({ dir }: { dir: CallDirection }) {
+  // Inbound reads azure (traffic toward us), outbound reads neutral slate.
+  return <span className={dir === 'inbound' ? 'dl-tag' : 'dl-tag dl-tag-slate'}>{dir}</span>;
 }
 
-function productBadge(pt: ProductType) {
-  return <Badge variant={pt}>{pt.toUpperCase()}</Badge>;
+function ProductTag({ pt }: { pt: ProductType }) {
+  return <span className="dl-tag">{pt.toUpperCase()}</span>;
 }
 
-function sbcBadge(sbcId: string | null | undefined) {
-  if (!sbcId) return <span className="text-[0.78rem] text-[#475569]">--</span>;
-  // Heuristic: anything ending in "-2" or containing "2" as the last digit gets cyan.
-  const variant = /2$/.test(sbcId) ? 'sbc2' : 'sbc1';
+function SbcTag({ sbcId }: { sbcId: string | null | undefined }) {
+  if (!sbcId) return <span style={{ fontSize: '0.78rem', color: 'var(--rcf-ink-dim)' }}>--</span>;
+  // Heuristic (unchanged): ids ending in "2" get the second-SBC tone.
+  const isSbc2 = /2$/.test(sbcId);
   // Shorten display: strip common "east-" prefix so it fits in the column.
   const label = sbcId.replace(/^east-/, '');
-  return <Badge variant={variant}>{label}</Badge>;
+  return <span className={isSbc2 ? 'dl-tag dlx4-tag-sky' : 'dl-tag'}>{label}</span>;
 }
 
 interface CdrTableProps {
@@ -67,152 +75,129 @@ export function CdrTable({ cdrs, customerNames }: CdrTableProps) {
 
   if (cdrs.length === 0) {
     return (
-      <div
-        className="glass-surface"
-        style={{
-          textAlign: 'center',
-          padding: '48px 24px',
-          borderRadius: 16,
-          color: '#718096',
-          fontSize: '0.875rem',
-        }}
-      >
-        <p style={{ fontWeight: 600, color: '#e2e8f0', marginBottom: 6 }}>No records found</p>
-        <p>Adjust your filters and search again.</p>
+      <div className="dl-empty">
+        <p style={{ fontWeight: 600, margin: 0, color: 'var(--rcf-ink)' }}>No records found</p>
+        <p style={{ fontSize: '0.74rem', margin: '4px 0 0' }}>Adjust your filters and search again.</p>
       </div>
     );
   }
 
   return (
-    <TableWrap>
-      <Table>
-        <Thead>
-          <tr>
-            <Th>Time</Th>
-            <Th>Dir</Th>
-            <Th>From</Th>
-            <Th>To</Th>
-            <Th>Customer</Th>
-            <Th>Product</Th>
-            <Th>Duration</Th>
-            <Th>Billed</Th>
-            <Th>Cost</Th>
-            <Th>Margin</Th>
-            <Th>Hangup</Th>
-            <Th>Carrier</Th>
-            <Th>SBC</Th>
-            <Th>Status</Th>
-          </tr>
-        </Thead>
-        <tbody>
-          {cdrs.map((cdr) => {
-            const isExpanded = expandedUuid === cdr.uuid;
-            const isRated = cdr.rated_at != null || localRated.has(cdr.uuid);
-            const margin = cdr.margin ?? 0;
-            const marginClass = margin >= 0 ? 'text-green-400' : 'text-red-400';
-            const hangupOk = cdr.hangup_cause === 'NORMAL_CLEARING';
+    <section className="dl-panel">
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 1080 }}>
+          <thead>
+            <tr>
+              <th className="dl-th">Time</th>
+              <th className="dl-th">Dir</th>
+              <th className="dl-th">From</th>
+              <th className="dl-th">To</th>
+              <th className="dl-th">Customer</th>
+              <th className="dl-th">Product</th>
+              <th className="dl-th">Duration</th>
+              <th className="dl-th">Billed</th>
+              <th className="dl-th">Cost</th>
+              <th className="dl-th">Margin</th>
+              <th className="dl-th">Hangup</th>
+              <th className="dl-th">Carrier</th>
+              <th className="dl-th">SBC</th>
+              <th className="dl-th">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {cdrs.map((cdr) => {
+              const isExpanded = expandedUuid === cdr.uuid;
+              const isRated = cdr.rated_at != null || localRated.has(cdr.uuid);
+              const margin = cdr.margin ?? 0;
+              const marginColor = margin >= 0 ? 'var(--rcf-green)' : 'var(--rcf-red)';
+              const hangupOk = cdr.hangup_cause === 'NORMAL_CLEARING';
 
-            return [
-              <tr
-                key={cdr.uuid}
-                onClick={() => toggleExpand(cdr.uuid)}
-                style={{
-                  cursor: 'pointer',
-                  transition: 'background 0.15s',
-                  background: isExpanded ? 'rgba(59,130,246,0.06)' : 'transparent',
-                }}
-                onMouseEnter={(e) => {
-                  if (!isExpanded) {
-                    (e.currentTarget as HTMLTableRowElement).style.background = 'rgba(255,255,255,0.018)';
-                  }
-                }}
-                onMouseLeave={(e) => {
-                  if (!isExpanded) {
-                    (e.currentTarget as HTMLTableRowElement).style.background = 'transparent';
-                  }
-                }}
-              >
-                <Td>
-                  <span className="font-mono text-[0.78rem] text-[#718096] whitespace-nowrap">
-                    {fmtTime(cdr.start_time)}
-                  </span>
-                </Td>
-                <Td>{directionBadge(cdr.direction)}</Td>
-                <Td>
-                  <span className="text-[0.82rem] text-[#e2e8f0] whitespace-nowrap">
-                    {fmt(cdr.caller_id) || cdr.caller_id || '--'}
-                  </span>
-                </Td>
-                <Td>
-                  <span className="text-[0.82rem] text-[#e2e8f0] whitespace-nowrap">
-                    {fmt(cdr.destination) || cdr.destination || '--'}
-                  </span>
-                </Td>
-                <Td>
-                  <span className="text-[0.82rem] text-[#718096]">
+              return [
+                <tr
+                  key={cdr.uuid}
+                  className={isExpanded ? 'dl-row dlx4-row-open' : 'dl-row'}
+                  style={{ cursor: 'pointer' }}
+                  onClick={() => toggleExpand(cdr.uuid)}
+                >
+                  <td className="dlx-td">
+                    <span className="dlx4-mono" style={{ color: 'var(--rcf-ink-dim)' }}>
+                      {fmtTime(cdr.start_time)}
+                    </span>
+                  </td>
+                  <td className="dlx-td"><DirectionTag dir={cdr.direction} /></td>
+                  <td className="dlx-td">
+                    <span style={{ color: 'var(--rcf-ink)' }}>
+                      {fmt(cdr.caller_id) || cdr.caller_id || '--'}
+                    </span>
+                  </td>
+                  <td className="dlx-td">
+                    <span style={{ color: 'var(--rcf-ink)' }}>
+                      {fmt(cdr.destination) || cdr.destination || '--'}
+                    </span>
+                  </td>
+                  <td className="dlx-td" style={{ color: 'var(--rcf-ink-dim)' }}>
                     {customerNames?.[cdr.customer_id] ?? `#${cdr.customer_id}`}
-                  </span>
-                </Td>
-                <Td>{productBadge(cdr.product_type)}</Td>
-                <Td>
-                  <span className="tabular-nums text-[0.82rem] text-[#e2e8f0] whitespace-nowrap">
-                    {fmtDurationSec(cdr.duration_seconds)}
-                  </span>
-                </Td>
-                <Td>
-                  <span className="tabular-nums text-[0.82rem] text-[#60a5fa]">
-                    {fmtMoney4(cdr.total_cost)}
-                  </span>
-                </Td>
-                <Td>
-                  <span className="tabular-nums text-[0.82rem] text-[#718096]">
-                    {cdr.carrier_cost != null && cdr.carrier_cost > 0
-                      ? fmtMoney4(cdr.carrier_cost)
-                      : '--'}
-                  </span>
-                </Td>
-                <Td>
-                  <span className={cn('tabular-nums text-[0.82rem]', marginClass)}>
-                    {cdr.margin != null ? fmtMoney4(cdr.margin) : '--'}
-                  </span>
-                </Td>
-                <Td>
-                  <span
-                    className={cn(
-                      'text-[0.78rem] whitespace-nowrap',
-                      hangupOk ? 'text-green-400' : 'text-red-400',
-                    )}
-                  >
-                    {cdr.hangup_cause || '--'}
-                  </span>
-                </Td>
-                <Td>
-                  <span className="text-[0.78rem] text-[#718096]">
+                  </td>
+                  <td className="dlx-td"><ProductTag pt={cdr.product_type} /></td>
+                  <td className="dlx-td">
+                    <span style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--rcf-ink)' }}>
+                      {fmtDurationSec(cdr.duration_seconds)}
+                    </span>
+                  </td>
+                  <td className="dlx-td">
+                    <span style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600, color: 'var(--rcf-azure-deep)' }}>
+                      {fmtMoney4(cdr.total_cost)}
+                    </span>
+                  </td>
+                  <td className="dlx-td">
+                    <span style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--rcf-ink-dim)' }}>
+                      {cdr.carrier_cost != null && cdr.carrier_cost > 0
+                        ? fmtMoney4(cdr.carrier_cost)
+                        : '--'}
+                    </span>
+                  </td>
+                  <td className="dlx-td">
+                    <span style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600, color: marginColor }}>
+                      {cdr.margin != null ? fmtMoney4(cdr.margin) : '--'}
+                    </span>
+                  </td>
+                  <td className="dlx-td">
+                    <span
+                      style={{
+                        fontSize: '0.72rem',
+                        fontWeight: 600,
+                        color: hangupOk ? 'var(--rcf-green)' : 'var(--rcf-red)',
+                      }}
+                    >
+                      {cdr.hangup_cause || '--'}
+                    </span>
+                  </td>
+                  <td className="dlx-td" style={{ fontSize: '0.76rem', color: 'var(--rcf-ink-dim)' }}>
                     {cdr.carrier_used || '--'}
-                  </span>
-                </Td>
-                <Td>{sbcBadge(cdr.sbc_id)}</Td>
-                <Td>
-                  {isRated ? (
-                    <Badge variant="pass">Rated</Badge>
-                  ) : (
-                    <Badge variant="warn">Unrated</Badge>
-                  )}
-                </Td>
-              </tr>,
+                  </td>
+                  <td className="dlx-td"><SbcTag sbcId={cdr.sbc_id} /></td>
+                  <td className="dlx-td">
+                    {isRated ? (
+                      <span className="dl-tag dlx4-tag-green">Rated</span>
+                    ) : (
+                      <span className="dl-tag dlx4-tag-amber">Unrated</span>
+                    )}
+                  </td>
+                </tr>,
 
-              isExpanded && (
-                <CdrExpandedRow
-                  key={`${cdr.uuid}-expand`}
-                  cdr={cdr}
-                  colSpan={COLUMN_COUNT}
-                  onRated={handleRated}
-                />
-              ),
-            ];
-          })}
-        </tbody>
-      </Table>
-    </TableWrap>
+                isExpanded && (
+                  <CdrExpandedRow
+                    key={`${cdr.uuid}-expand`}
+                    cdr={cdr}
+                    colSpan={COLUMN_COUNT}
+                    onRated={handleRated}
+                  />
+                ),
+              ];
+            })}
+          </tbody>
+        </table>
+      </div>
+    </section>
   );
 }

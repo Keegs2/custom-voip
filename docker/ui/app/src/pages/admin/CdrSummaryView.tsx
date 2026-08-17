@@ -1,10 +1,15 @@
+/**
+ * CdrSummaryView — grouped CDR summary (day / hour / destination).
+ *
+ * Styling: the shared DAYLIGHT CONSOLE system — `dlx-seg` group-by control
+ * (dl-admin.css) and a white `dl-panel` table. The summary query, grouping
+ * options, and ASR thresholds are unchanged (thresholds keep their
+ * green/amber/red semantics in light-tuned tones).
+ */
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { getCdrSummary } from '../../api/cdrs';
-import { Badge } from '../../components/ui/Badge';
 import { Spinner } from '../../components/ui/Spinner';
-import { TableWrap, Table, Thead, Th, Td } from '../../components/ui/Table';
-import type { ProductType, CallDirection } from '../../types/cdr';
 import type { CdrSummaryRow } from '../../types/rate';
 
 type GroupBy = 'day' | 'hour' | 'destination';
@@ -18,9 +23,9 @@ function formatTotalDuration(totalSeconds: number): string {
 }
 
 function asrColor(asr: number): string {
-  if (asr > 50) return 'text-green-400';
-  if (asr >= 30) return 'text-amber-400';
-  return 'text-red-400';
+  if (asr > 50) return 'var(--rcf-green)';
+  if (asr >= 30) return '#b45309';
+  return 'var(--rcf-red)';
 }
 
 function groupLabel(row: CdrSummaryRow, groupBy: GroupBy): string {
@@ -49,141 +54,144 @@ export function CdrSummaryView({ customerId }: CdrSummaryViewProps) {
     groupBy === 'hour' ? 'Hour' : groupBy === 'destination' ? 'Destination' : 'Date';
 
   return (
-    <div>
+    <div className="dl-stack">
       {/* Group by selector */}
-      <div className="flex items-center gap-3 mb-4">
-        <span className="text-[0.7rem] font-bold uppercase tracking-[0.04em] text-[#718096]">
-          Group by
-        </span>
-        {(['day', 'hour', 'destination'] as GroupBy[]).map((g) => (
-          <button
-            key={g}
-            type="button"
-            onClick={() => setGroupBy(g)}
-            style={{
-              padding: '4px 14px',
-              fontSize: '0.78rem',
-              fontWeight: 600,
-              borderRadius: 8,
-              border: `1px solid ${groupBy === g ? 'rgba(59,130,246,0.4)' : 'rgba(42,47,69,0.6)'}`,
-              background: groupBy === g ? 'rgba(59,130,246,0.12)' : 'transparent',
-              color: groupBy === g ? '#3b82f6' : '#718096',
-              cursor: 'pointer',
-              transition: 'all 0.15s',
-            }}
-            onMouseEnter={(e) => {
-              if (groupBy !== g) {
-                (e.currentTarget as HTMLButtonElement).style.color = '#e2e8f0';
-                (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(54,60,87,0.8)';
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (groupBy !== g) {
-                (e.currentTarget as HTMLButtonElement).style.color = '#718096';
-                (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(42,47,69,0.6)';
-              }
-            }}
-          >
-            {g.charAt(0).toUpperCase() + g.slice(1)}
-          </button>
-        ))}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <span className="dl-flabel" style={{ marginBottom: 0 }}>Group by</span>
+        <div className="dlx-seg" role="tablist" aria-label="Summary grouping">
+          {(['day', 'hour', 'destination'] as GroupBy[]).map((g) => (
+            <button
+              key={g}
+              type="button"
+              role="tab"
+              aria-selected={groupBy === g}
+              className={groupBy === g ? 'dlx-seg-btn dlx-seg-btn-active' : 'dlx-seg-btn'}
+              onClick={() => setGroupBy(g)}
+            >
+              {g.charAt(0).toUpperCase() + g.slice(1)}
+            </button>
+          ))}
+        </div>
       </div>
 
       {isLoading && (
-        <div className="flex items-center gap-2 text-[#718096] py-8">
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            color: 'var(--rcf-ink-dim)',
+            fontSize: '0.85rem',
+            padding: '24px 0',
+          }}
+        >
           <Spinner /> Loading summary…
         </div>
       )}
 
       {isError && (
-        <p className="text-red-400 text-sm py-4">Failed to load summary data.</p>
+        <div className="dl-banner dl-banner-err">Failed to load summary data.</div>
       )}
 
       {data && data.summary.length === 0 && (
-        <div className="text-center py-10 text-[#718096] text-sm">
-          <p className="font-semibold text-[#e2e8f0] mb-1">No summary data</p>
-          <p>Run a search first, then switch to this tab.</p>
+        <div className="dl-empty">
+          <p style={{ fontWeight: 600, margin: 0, color: 'var(--rcf-ink)' }}>No summary data</p>
+          <p style={{ fontSize: '0.74rem', margin: '4px 0 0' }}>
+            Run a search first, then switch to this tab.
+          </p>
         </div>
       )}
 
       {data && data.summary.length > 0 && (
-        <TableWrap>
-          <Table>
-            <Thead>
-              <tr>
-                <Th>{dateColLabel}</Th>
-                <Th>Product</Th>
-                <Th>Direction</Th>
-                <Th>Total Calls</Th>
-                <Th>Answered</Th>
-                <Th>ASR</Th>
-                <Th>Duration</Th>
-                <Th>Total Cost</Th>
-              </tr>
-            </Thead>
-            <tbody>
-              {data.summary.map((row, i) => {
-                const asr =
-                  row.total_calls > 0
-                    ? (row.answered_calls / row.total_calls) * 100
-                    : 0;
+        <section className="dl-panel">
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 720 }}>
+              <thead>
+                <tr>
+                  <th className="dl-th">{dateColLabel}</th>
+                  <th className="dl-th">Product</th>
+                  <th className="dl-th">Direction</th>
+                  <th className="dl-th">Total Calls</th>
+                  <th className="dl-th">Answered</th>
+                  <th className="dl-th">ASR</th>
+                  <th className="dl-th">Duration</th>
+                  <th className="dl-th">Total Cost</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.summary.map((row, i) => {
+                  const asr =
+                    row.total_calls > 0
+                      ? (row.answered_calls / row.total_calls) * 100
+                      : 0;
 
-                return (
-                  <tr key={i} className="hover:bg-white/[0.015] transition-colors">
-                    <Td>
-                      <span className="font-mono text-[0.82rem] text-[#e2e8f0] whitespace-nowrap">
-                        {groupLabel(row, groupBy)}
-                      </span>
-                    </Td>
-                    <Td>
-                      {row.product_type ? (
-                        <Badge variant={row.product_type as ProductType}>
-                          {row.product_type.toUpperCase()}
-                        </Badge>
-                      ) : (
-                        <span className="text-[#718096]">--</span>
-                      )}
-                    </Td>
-                    <Td>
-                      {row.direction ? (
-                        <Badge variant={row.direction as CallDirection}>
-                          {row.direction}
-                        </Badge>
-                      ) : (
-                        <span className="text-[#718096]">--</span>
-                      )}
-                    </Td>
-                    <Td>
-                      <span className="tabular-nums text-[#e2e8f0]">
-                        {row.total_calls.toLocaleString()}
-                      </span>
-                    </Td>
-                    <Td>
-                      <span className="tabular-nums text-[#e2e8f0]">
-                        {row.answered_calls.toLocaleString()}
-                      </span>
-                    </Td>
-                    <Td>
-                      <span className={`tabular-nums text-[0.82rem] ${asrColor(asr)}`}>
-                        {asr.toFixed(1)}%
-                      </span>
-                    </Td>
-                    <Td>
-                      <span className="tabular-nums text-[#e2e8f0]">
-                        {formatTotalDuration(row.total_duration_sec)}
-                      </span>
-                    </Td>
-                    <Td>
-                      <span className="tabular-nums text-[0.82rem] text-[#60a5fa]">
-                        ${row.total_cost.toFixed(4)}
-                      </span>
-                    </Td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </Table>
-        </TableWrap>
+                  return (
+                    <tr key={i} className="dl-row">
+                      <td className="dlx-td">
+                        <span className="dlx4-mono" style={{ color: 'var(--rcf-ink)' }}>
+                          {groupLabel(row, groupBy)}
+                        </span>
+                      </td>
+                      <td className="dlx-td">
+                        {row.product_type ? (
+                          <span className="dl-tag">{row.product_type.toUpperCase()}</span>
+                        ) : (
+                          <span style={{ color: 'var(--rcf-ink-dim)' }}>--</span>
+                        )}
+                      </td>
+                      <td className="dlx-td">
+                        {row.direction ? (
+                          <span className={row.direction === 'inbound' ? 'dl-tag' : 'dl-tag dl-tag-slate'}>
+                            {row.direction}
+                          </span>
+                        ) : (
+                          <span style={{ color: 'var(--rcf-ink-dim)' }}>--</span>
+                        )}
+                      </td>
+                      <td className="dlx-td">
+                        <span style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--rcf-ink)' }}>
+                          {row.total_calls.toLocaleString()}
+                        </span>
+                      </td>
+                      <td className="dlx-td">
+                        <span style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--rcf-ink)' }}>
+                          {row.answered_calls.toLocaleString()}
+                        </span>
+                      </td>
+                      <td className="dlx-td">
+                        <span
+                          style={{
+                            fontVariantNumeric: 'tabular-nums',
+                            fontWeight: 600,
+                            color: asrColor(asr),
+                          }}
+                        >
+                          {asr.toFixed(1)}%
+                        </span>
+                      </td>
+                      <td className="dlx-td">
+                        <span style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--rcf-ink)' }}>
+                          {formatTotalDuration(row.total_duration_sec)}
+                        </span>
+                      </td>
+                      <td className="dlx-td">
+                        <span
+                          style={{
+                            fontVariantNumeric: 'tabular-nums',
+                            fontWeight: 600,
+                            color: 'var(--rcf-azure-deep)',
+                          }}
+                        >
+                          ${row.total_cost.toFixed(4)}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </section>
       )}
     </div>
   );

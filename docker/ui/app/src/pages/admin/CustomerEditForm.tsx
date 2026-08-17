@@ -1,11 +1,21 @@
+/**
+ * CustomerEditForm — inline edit panel body for the admin Customer 360
+ * (rendered by CustomerAccountPage inside a dl-panel titled "Edit Customer").
+ *
+ * Styling: the shared DAYLIGHT CONSOLE system (`dl-*` in index.css, plus the
+ * admin-area `dlx-*` primitives in styles/dl-admin.css). Presentation only —
+ * the update payload, the optional tier-assignment follow-up (api/hybrid),
+ * validation, and every toast are byte-identical to the previous version.
+ *
+ * React #310: every hook is called unconditionally at the top.
+ */
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { updateCustomer } from '../../api/customers';
 import { listTiers, getCustomerTier, assignCustomerTier } from '../../api/tiers';
-import { Button } from '../../components/ui/Button';
-import { FormField } from '../../components/ui/FormField';
 import { useToast } from '../../components/ui/ToastContext';
 import type { Customer, CustomerStatus, TrafficGrade } from '../../types/customer';
+import '../../styles/dl-admin.css';
 
 interface CustomerEditFormProps {
   customer: Customer;
@@ -13,14 +23,15 @@ interface CustomerEditFormProps {
   onSaved: () => void;
 }
 
-const sectionLabelStyle: React.CSSProperties = {
-  fontSize: '0.62rem',
-  fontWeight: 700,
-  color: '#3b82f6',
-  textTransform: 'uppercase',
-  letterSpacing: '0.05em',
-  marginBottom: 16,
-};
+/** Vertical label + dl-input field group. */
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column' }}>
+      <span className="dl-flabel">{label}</span>
+      {children}
+    </div>
+  );
+}
 
 export function CustomerEditForm({ customer, onCancel, onSaved }: CustomerEditFormProps) {
   const qc = useQueryClient();
@@ -94,86 +105,83 @@ export function CustomerEditForm({ customer, onCancel, onSaved }: CustomerEditFo
   }
 
   return (
-    <form
-      onSubmit={handleSubmit}
-      onClick={(e) => e.stopPropagation()}
-      style={{ padding: '28px 28px 24px' }}
-    >
+    <form onSubmit={handleSubmit} onClick={(e) => e.stopPropagation()} className="dl-panel-body">
       {/* General section */}
-      <div style={sectionLabelStyle}>General</div>
-      <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
-        <FormField
-          label="Name"
-          value={name}
-          onChange={(e) => setName((e.target as HTMLInputElement).value)}
-          required
-        />
-        <FormField
-          label="Status"
-          as="select"
-          value={status}
-          onChange={(e) => setStatus((e.target as HTMLSelectElement).value as CustomerStatus)}
-        >
-          <option value="active">Active</option>
-          <option value="suspended">Suspended</option>
-          <option value="closed">Closed</option>
-        </FormField>
-        <FormField
-          label="Traffic Grade"
-          as="select"
-          value={grade}
-          onChange={(e) => setGrade((e.target as HTMLSelectElement).value as TrafficGrade)}
-        >
-          <option value="standard">Standard</option>
-          <option value="premium">Premium</option>
-          <option value="economy">Economy</option>
-        </FormField>
-        <FormField
-          label="Daily Limit ($)"
-          type="number"
-          min="0"
-          step="0.01"
-          value={dailyLimit}
-          onChange={(e) => setDailyLimit((e.target as HTMLInputElement).value)}
-        />
-        <FormField
-          label="CPM Limit"
-          type="number"
-          min="0"
-          value={cpmLimit}
-          onChange={(e) => setCpmLimit((e.target as HTMLInputElement).value)}
-        />
+      <h4 className="dl-section-title">General</h4>
+      <div className="dlx-form-grid">
+        <Field label="Name">
+          <input
+            className="dl-input"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            required
+          />
+        </Field>
+        <Field label="Status">
+          <select
+            className="dl-input"
+            value={status}
+            onChange={(e) => setStatus(e.target.value as CustomerStatus)}
+          >
+            <option value="active">Active</option>
+            <option value="suspended">Suspended</option>
+            <option value="closed">Closed</option>
+          </select>
+        </Field>
+        <Field label="Traffic Grade">
+          <select
+            className="dl-input"
+            value={grade}
+            onChange={(e) => setGrade(e.target.value as TrafficGrade)}
+          >
+            <option value="standard">Standard</option>
+            <option value="premium">Premium</option>
+            <option value="economy">Economy</option>
+          </select>
+        </Field>
+        <Field label="Daily Limit ($)">
+          <input
+            className="dl-input"
+            type="number"
+            min="0"
+            step="0.01"
+            value={dailyLimit}
+            onChange={(e) => setDailyLimit(e.target.value)}
+          />
+        </Field>
+        <Field label="CPM Limit">
+          <input
+            className="dl-input"
+            type="number"
+            min="0"
+            value={cpmLimit}
+            onChange={(e) => setCpmLimit(e.target.value)}
+          />
+        </Field>
       </div>
 
       {/* API Tier section */}
       {showApiTier && (
-        <div
-          style={{
-            marginTop: 24,
-            paddingTop: 24,
-            borderTop: '1px solid rgba(42,47,69,0.6)',
-          }}
-        >
-          <div style={sectionLabelStyle}>CPS Tier</div>
-          <div className="grid grid-cols-2 gap-4">
-            <FormField
-              label="API Tier"
-              as="select"
-              value={selectedTierId}
-              onChange={(e) =>
-                setSelectedTierId((e.target as HTMLSelectElement).value)
-              }
-            >
-              <option value="__unchanged__">
-                Keep current
-                {currentTierData?.tier ? ` (${currentTierData.tier.name})` : ''}
-              </option>
-              {apiTiers.map((t) => (
-                <option key={t.id} value={String(t.id)}>
-                  {t.name} — {t.cps_limit} CPS
+        <div style={{ marginTop: 24, paddingTop: 24, borderTop: '1px solid var(--rcf-line)' }}>
+          <h4 className="dl-section-title">CPS Tier</h4>
+          <div style={{ maxWidth: 380 }}>
+            <Field label="API Tier">
+              <select
+                className="dl-input"
+                value={selectedTierId}
+                onChange={(e) => setSelectedTierId(e.target.value)}
+              >
+                <option value="__unchanged__">
+                  Keep current
+                  {currentTierData?.tier ? ` (${currentTierData.tier.name})` : ''}
                 </option>
-              ))}
-            </FormField>
+                {apiTiers.map((t) => (
+                  <option key={t.id} value={String(t.id)}>
+                    {t.name} — {t.cps_limit} CPS
+                  </option>
+                ))}
+              </select>
+            </Field>
           </div>
         </div>
       )}
@@ -182,31 +190,25 @@ export function CustomerEditForm({ customer, onCancel, onSaved }: CustomerEditFo
         style={{
           display: 'flex',
           alignItems: 'center',
-          gap: 8,
+          gap: 10,
           marginTop: 24,
           paddingTop: 20,
-          borderTop: '1px solid rgba(42,47,69,0.6)',
+          borderTop: '1px solid var(--rcf-line)',
         }}
       >
-        <Button
-          type="submit"
-          variant="primary"
-          size="sm"
-          loading={updateMutation.isPending}
-        >
-          Save Changes
-        </Button>
-        <Button
+        <button type="submit" className="dl-btn dl-btn-primary" disabled={updateMutation.isPending}>
+          {updateMutation.isPending ? 'Saving…' : 'Save Changes'}
+        </button>
+        <button
           type="button"
-          variant="ghost"
-          size="sm"
+          className="dl-btn dl-btn-ghost"
           onClick={(e) => {
             e.stopPropagation();
             onCancel();
           }}
         >
           Cancel
-        </Button>
+        </button>
       </div>
     </form>
   );

@@ -1,12 +1,23 @@
+/**
+ * TiersTab — service-tier ladders for every product (/admin/platform/tiers).
+ *
+ * Styling: the shared DAYLIGHT CONSOLE system (`dl-*` in index.css, plus the
+ * admin `dlx-*` layer in styles/dl-admin.css and the platform-scoped `dlx2-*`
+ * layer in styles/dl-platform.css). Renders INSIDE the PlatformManagementPage
+ * shell, which owns the paper canvas (`dl-scope`) — this page contributes
+ * only the per-product tier panels.
+ *
+ * React #310: every hook is called unconditionally at the top.
+ */
 import { useQuery } from '@tanstack/react-query';
 import { listTrunkTiers, listApiTiers } from '../../api/tiers';
 import { listCallPaths } from '../../api/trunks';
 import type { Tier } from '../../types/tier';
 import { Spinner } from '../../components/ui/Spinner';
-import { Badge } from '../../components/ui/Badge';
-import { Table, Thead, Th, Td, Tr } from '../../components/ui/Table';
 import { IconTrunk, IconAPI, IconRCF } from '../../components/icons/ProductIcons';
 import { fmtMoney } from '../../utils/format';
+import '../../styles/dl-admin.css';
+import '../../styles/dl-platform.css';
 
 /**
  * Flat RCF price — mirrors the backend `RCF_LINE_MRC` constant. RCF has no tier
@@ -53,13 +64,25 @@ function perCallLabel(fee: unknown): string {
   return `$${n.toFixed(3)}/call`;
 }
 
+/* Shared cell styles — daylight numerics are right-aligned and tabular. */
+const numCell: React.CSSProperties = {
+  textAlign: 'right',
+  fontVariantNumeric: 'tabular-nums',
+  color: 'var(--rcf-ink)',
+};
+
+const numCellDim: React.CSSProperties = {
+  textAlign: 'right',
+  fontVariantNumeric: 'tabular-nums',
+  color: 'var(--rcf-ink-dim)',
+};
+
 // ---------------------------------------------------------------------------
 // Shared section shell
 // ---------------------------------------------------------------------------
 
 interface ProductSectionProps {
   icon: React.ReactNode;
-  accent: string;
   title: string;
   subtitle: string;
   badge?: React.ReactNode;
@@ -67,45 +90,47 @@ interface ProductSectionProps {
   children: React.ReactNode;
 }
 
-/** Glass panel wrapper for one product. Premium variant adds a soft blue glow. */
-function ProductSection({ icon, accent, title, subtitle, badge, premium, children }: ProductSectionProps) {
+/** Daylight panel wrapper for one product. Premium variant adds a faint azure ring. */
+function ProductSection({ icon, title, subtitle, badge, premium, children }: ProductSectionProps) {
   return (
     <section
-      className="glass-surface"
-      style={{
-        borderRadius: 16,
-        padding: 24,
-        boxShadow: premium ? '0 0 0 1px rgba(59,130,246,0.18), 0 0 28px rgba(59,130,246,0.08)' : undefined,
-      }}
+      className="dl-panel"
+      style={premium ? { boxShadow: '0 0 0 1px rgba(47, 125, 246, 0.2), 0 1px 2px rgba(14, 23, 38, 0.06), 0 12px 30px -18px rgba(14, 23, 38, 0.18)' } : undefined}
     >
       <div
-        className="flex items-start justify-between flex-wrap"
-        style={{ gap: 12, marginBottom: 20 }}
+        style={{
+          display: 'flex',
+          alignItems: 'flex-start',
+          justifyContent: 'space-between',
+          flexWrap: 'wrap',
+          gap: 12,
+          padding: '16px 20px',
+          borderBottom: '1px solid var(--rcf-line)',
+        }}
       >
-        <div className="flex items-center" style={{ gap: 12 }}>
-          <div
-            className="flex items-center justify-center flex-shrink-0"
-            style={{
-              width: 38,
-              height: 38,
-              borderRadius: 10,
-              background: `${accent}1a`,
-              border: `1px solid ${accent}40`,
-              color: accent,
-            }}
-          >
-            {icon}
-          </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div className="dlx2-prodicon">{icon}</div>
           <div>
-            <h2 style={{ fontSize: '1rem', fontWeight: 700, color: '#e2e8f0', margin: 0, letterSpacing: '-0.01em' }}>
+            <h2
+              style={{
+                fontFamily: '"Archivo", "IBM Plex Sans", sans-serif',
+                fontSize: '0.95rem',
+                fontWeight: 700,
+                letterSpacing: '-0.01em',
+                color: 'var(--rcf-ink)',
+                margin: 0,
+              }}
+            >
               {title}
             </h2>
-            <p style={{ fontSize: '0.8rem', color: '#718096', marginTop: 3, lineHeight: 1.5 }}>{subtitle}</p>
+            <p style={{ fontSize: '0.76rem', color: 'var(--rcf-ink-dim)', margin: '3px 0 0', lineHeight: 1.5 }}>
+              {subtitle}
+            </p>
           </div>
         </div>
-        {badge && <div className="flex-shrink-0">{badge}</div>}
+        {badge && <div style={{ flexShrink: 0 }}>{badge}</div>}
       </div>
-      {children}
+      <div className="dl-panel-body">{children}</div>
     </section>
   );
 }
@@ -128,13 +153,34 @@ function SectionState({
 }): React.ReactElement | null {
   if (isLoading) {
     return (
-      <div className="flex items-center gap-2.5 text-[#718096] py-5">
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          color: 'var(--rcf-ink-dim)',
+          fontSize: '0.82rem',
+          padding: '18px 0',
+        }}
+      >
         <Spinner /> {loadingLabel}
       </div>
     );
   }
-  if (isError) return <p className="text-red-400 text-sm py-4">{errorLabel}</p>;
-  if (isEmpty) return <p className="text-[#718096] text-sm py-4">{emptyLabel}</p>;
+  if (isError) {
+    return (
+      <p style={{ color: 'var(--rcf-red)', fontSize: '0.82rem', padding: '14px 0', margin: 0 }}>
+        {errorLabel}
+      </p>
+    );
+  }
+  if (isEmpty) {
+    return (
+      <p style={{ color: 'var(--rcf-ink-dim)', fontSize: '0.82rem', padding: '14px 0', margin: 0 }}>
+        {emptyLabel}
+      </p>
+    );
+  }
   return null;
 }
 
@@ -145,11 +191,11 @@ function SectionState({
 /**
  * "Contact sales" price treatment for the Custom tier. CPS above the self-serve
  * cap (10) is an exponentially-priced premium lever quoted per-account, so we
- * show a subtle blue badge instead of a number — mirroring how carriers gate
+ * show a subtle azure tag instead of a number — mirroring how carriers gate
  * high CPS to sales rather than publishing a rate.
  */
 function ContactSalesBadge() {
-  return <Badge variant="premium">Contact&nbsp;sales</Badge>;
+  return <span className="dl-tag">Contact&nbsp;sales</span>;
 }
 
 /**
@@ -160,51 +206,51 @@ function ContactSalesBadge() {
  */
 function CustomTierRow({ withPaths, label }: { withPaths: boolean; label: string }) {
   return (
-    // Reuses the shared `.glass-row-hover` class (identical hover language to
-    // every other row) and layers a soft, always-on blue tint + faint accent
-    // leading edge inline — so it reads as the premium cap of the ladder without
-    // adding any new CSS. The `Tr` wrapper takes only className, hence the raw
-    // <tr> here to carry the resting `style`.
-    <tr
-      className="glass-row-hover"
-      style={{
-        background: 'rgba(59,130,246,0.045)',
-        boxShadow: 'inset 3px 0 0 0 rgba(59,130,246,0.35)',
-      }}
-    >
-      <Td>
-        <div className="flex flex-col" style={{ gap: 2 }}>
-          <span className="font-semibold" style={{ color: '#93c5fd' }}>
-            Custom
+    // Reuses the shared `.dl-row` hover language and layers an always-on azure
+    // tint + accent leading edge (`.dlx2-caprow`), so it reads as the premium
+    // cap of the ladder without breaking the daylight table idiom.
+    <tr className="dl-row dlx2-caprow">
+      <td className="dlx-td">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+          <span style={{ fontWeight: 700, color: 'var(--rcf-azure-deep)' }}>Custom</span>
+          <span style={{ fontSize: '0.72rem', color: 'var(--rcf-ink-dim)', whiteSpace: 'normal' }}>
+            Enterprise — quoted per account
           </span>
-          <span className="text-[#718096] text-xs">Enterprise — quoted per account</span>
         </div>
-      </Td>
-      <Td className="text-right tabular-nums text-[#cbd5e1]">&gt;10</Td>
-      {withPaths && <Td className="text-right tabular-nums text-[#718096]">Custom</Td>}
-      <Td className="text-right">
-        <div className="flex justify-end">
+      </td>
+      <td className="dlx-td" style={numCell}>&gt;10</td>
+      {withPaths && <td className="dlx-td" style={numCellDim}>Custom</td>}
+      <td className="dlx-td" style={{ textAlign: 'right' }}>
+        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
           <ContactSalesBadge />
         </div>
-      </Td>
-      <Td className="text-right tabular-nums text-[#718096]">{label}</Td>
+      </td>
+      <td className="dlx-td" style={numCellDim}>{label}</td>
     </tr>
   );
 }
 
 /**
- * Muted, glass-consistent line placed under each tier ladder. Mirrors how
- * carriers quality-gate high CPS: capacity above the published tiers is granted
+ * Muted line placed under each tier ladder. Mirrors how carriers
+ * quality-gate high CPS: capacity above the published tiers is granted
  * subject to a traffic-quality review (ASR / ACD).
  */
 function CpsReviewNote() {
   return (
-    <p
-      className="text-[#718096]"
-      style={{ fontSize: '0.72rem', lineHeight: 1.5, marginTop: 10 }}
-    >
+    <p style={{ fontSize: '0.72rem', lineHeight: 1.5, color: 'var(--rcf-ink-dim)', margin: '10px 0 0' }}>
       Higher CPS is subject to traffic-quality review (ASR / ACD).
     </p>
+  );
+}
+
+/** Daylight table wrapper — panel-less, sits inside the product panel body. */
+function TierTable({ children, minWidth = 560 }: { children: React.ReactNode; minWidth?: number }) {
+  return (
+    <div style={{ overflowX: 'auto', border: '1px solid var(--rcf-line)', borderRadius: 10 }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', minWidth }}>
+        {children}
+      </table>
+    </div>
   );
 }
 
@@ -215,44 +261,52 @@ function CpsReviewNote() {
 function TrunkTierRows({ tiers }: { tiers: Tier[] }) {
   const sorted = [...tiers].sort((a, b) => a.cps_limit - b.cps_limit);
   return (
-    <Table>
-      <Thead>
+    <TierTable>
+      <thead>
         <tr>
-          <Th>Tier</Th>
-          <Th className="text-right">
+          <th className="dl-th">Tier</th>
+          <th className="dl-th" style={{ textAlign: 'right' }}>
             <span title="Calls per second — the primary capacity driver and the premium pricing lever">
               CPS
             </span>
-          </Th>
-          <Th className="text-right">Included Paths</Th>
-          <Th className="text-right">Monthly</Th>
-          <Th className="text-right">Per-Call</Th>
+          </th>
+          <th className="dl-th" style={{ textAlign: 'right' }}>Included Paths</th>
+          <th className="dl-th" style={{ textAlign: 'right' }}>Monthly</th>
+          <th className="dl-th" style={{ textAlign: 'right' }}>Per-Call</th>
         </tr>
-      </Thead>
+      </thead>
       <tbody>
         {sorted.map((t) => {
           const perCall = perCallLabel(t.per_call_fee);
           return (
-            <Tr key={t.id}>
-              <Td>
-                <div className="flex flex-col" style={{ gap: 2 }}>
-                  <span className="font-semibold text-[#e2e8f0]">{trunkDisplayName(t.name)}</span>
-                  {t.description && <span className="text-[#718096] text-xs">{t.description}</span>}
+            <tr key={t.id} className="dl-row">
+              <td className="dlx-td">
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                  <span style={{ fontWeight: 600, color: 'var(--rcf-ink)' }}>
+                    {trunkDisplayName(t.name)}
+                  </span>
+                  {t.description && (
+                    <span style={{ fontSize: '0.72rem', color: 'var(--rcf-ink-dim)', whiteSpace: 'normal' }}>
+                      {t.description}
+                    </span>
+                  )}
                 </div>
-              </Td>
-              <Td className="text-right tabular-nums text-[#cbd5e1]">{t.cps_limit}</Td>
-              <Td className="text-right tabular-nums text-[#cbd5e1]">
+              </td>
+              <td className="dlx-td" style={numCell}>{t.cps_limit}</td>
+              <td className="dlx-td" style={numCell}>
                 {t.call_paths != null ? t.call_paths : '--'}
-              </Td>
-              <Td className="text-right tabular-nums font-semibold text-[#e2e8f0]">{fmtMoney(num(t.monthly_fee))}/mo</Td>
-              <Td className="text-right tabular-nums text-[#718096]">{perCall || '--'}</Td>
-            </Tr>
+              </td>
+              <td className="dlx-td" style={{ ...numCell, fontWeight: 700 }}>
+                {fmtMoney(num(t.monthly_fee))}/mo
+              </td>
+              <td className="dlx-td" style={numCellDim}>{perCall || '--'}</td>
+            </tr>
           );
         })}
         {/* Enterprise cap: CPS above the self-serve limit (10) is quoted by sales. */}
         <CustomTierRow withPaths label="Custom" />
       </tbody>
-    </Table>
+    </TierTable>
   );
 }
 
@@ -267,31 +321,39 @@ interface CallPathAddOn {
 function AddOnsTable({ addOns }: { addOns: CallPathAddOn[] }) {
   const sorted = [...addOns].sort((a, b) => (a.paths ?? 0) - (b.paths ?? 0));
   return (
-    <Table>
-      <Thead>
+    <TierTable minWidth={440}>
+      <thead>
         <tr>
-          <Th>Add-On</Th>
-          <Th className="text-right">Additional Paths</Th>
-          <Th className="text-right">Monthly</Th>
+          <th className="dl-th">Add-On</th>
+          <th className="dl-th" style={{ textAlign: 'right' }}>Additional Paths</th>
+          <th className="dl-th" style={{ textAlign: 'right' }}>Monthly</th>
         </tr>
-      </Thead>
+      </thead>
       <tbody>
         {sorted.map((p) => (
-          <Tr key={p.id}>
-            <Td>
-              <div className="flex flex-col" style={{ gap: 2 }}>
-                <span className="font-semibold text-[#e2e8f0]">{p.name || `${p.paths ?? '--'} Paths`}</span>
-                {p.description && <span className="text-[#718096] text-xs">{p.description}</span>}
+          <tr key={p.id} className="dl-row">
+            <td className="dlx-td">
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                <span style={{ fontWeight: 600, color: 'var(--rcf-ink)' }}>
+                  {p.name || `${p.paths ?? '--'} Paths`}
+                </span>
+                {p.description && (
+                  <span style={{ fontSize: '0.72rem', color: 'var(--rcf-ink-dim)', whiteSpace: 'normal' }}>
+                    {p.description}
+                  </span>
+                )}
               </div>
-            </Td>
-            <Td className="text-right tabular-nums text-[#cbd5e1]">
+            </td>
+            <td className="dlx-td" style={numCell}>
               {p.paths != null ? `+${p.paths}` : '--'}
-            </Td>
-            <Td className="text-right tabular-nums font-semibold text-[#e2e8f0]">{fmtMoney(num(p.monthly_fee))}/mo</Td>
-          </Tr>
+            </td>
+            <td className="dlx-td" style={{ ...numCell, fontWeight: 700 }}>
+              {fmtMoney(num(p.monthly_fee))}/mo
+            </td>
+          </tr>
         ))}
       </tbody>
-    </Table>
+    </TierTable>
   );
 }
 
@@ -307,52 +369,54 @@ function ApiTierRows({ tiers }: { tiers: Tier[] }) {
     (a, b) => (API_ORDER[a.name] ?? a.cps_limit) - (API_ORDER[b.name] ?? b.cps_limit),
   );
   return (
-    <Table>
-      <Thead>
+    <TierTable>
+      <thead>
         <tr>
-          <Th>Plan</Th>
-          <Th className="text-right">
+          <th className="dl-th">Plan</th>
+          <th className="dl-th" style={{ textAlign: 'right' }}>
             <span title="Calls per second — the primary capacity driver and the premium pricing lever">
               CPS
             </span>
-          </Th>
-          <Th className="text-right">Monthly</Th>
-          <Th className="text-right">Per-Call</Th>
+          </th>
+          <th className="dl-th" style={{ textAlign: 'right' }}>Monthly</th>
+          <th className="dl-th" style={{ textAlign: 'right' }}>Per-Call</th>
         </tr>
-      </Thead>
+      </thead>
       <tbody>
         {sorted.map((t) => {
           const perCall = perCallLabel(t.per_call_fee);
           return (
-            <Tr key={t.id}>
-              <Td>
-                <div className="flex flex-col" style={{ gap: 2 }}>
-                  <span className="font-semibold" style={{ color: '#c4b5fd' }}>
+            <tr key={t.id} className="dl-row">
+              <td className="dlx-td">
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                  <span style={{ fontWeight: 600, color: 'var(--rcf-ink)' }}>
                     {apiDisplayName(t.name)}
                   </span>
-                  {t.description && <span className="text-[#718096] text-xs">{t.description}</span>}
+                  {t.description && (
+                    <span style={{ fontSize: '0.72rem', color: 'var(--rcf-ink-dim)', whiteSpace: 'normal' }}>
+                      {t.description}
+                    </span>
+                  )}
                 </div>
-              </Td>
-              <Td className="text-right tabular-nums text-[#cbd5e1]">{t.cps_limit}</Td>
-              <Td className="text-right tabular-nums font-semibold text-[#e2e8f0]">{fmtMoney(num(t.monthly_fee))}/mo</Td>
-              <Td className="text-right tabular-nums text-[#cbd5e1]">{perCall || '--'}</Td>
-            </Tr>
+              </td>
+              <td className="dlx-td" style={numCell}>{t.cps_limit}</td>
+              <td className="dlx-td" style={{ ...numCell, fontWeight: 700 }}>
+                {fmtMoney(num(t.monthly_fee))}/mo
+              </td>
+              <td className="dlx-td" style={numCell}>{perCall || '--'}</td>
+            </tr>
           );
         })}
         {/* Enterprise cap: CPS above the self-serve limit (10) is quoted by sales. */}
         <CustomTierRow withPaths={false} label="--" />
       </tbody>
-    </Table>
+    </TierTable>
   );
 }
 
 // ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
-
-const ACCENT_TRUNK = '#22c55e';
-const ACCENT_API = '#a855f7';
-const ACCENT_RCF = '#3b82f6';
 
 export function TiersTab() {
   const trunkQuery = useQuery({ queryKey: ['tiers', 'trunk'], queryFn: listTrunkTiers });
@@ -371,11 +435,10 @@ export function TiersTab() {
   }));
 
   return (
-    <div className="flex flex-col" style={{ gap: 20 }}>
+    <div className="dl-stack">
       {/* 1) SIP Trunking */}
       <ProductSection
         icon={<IconTrunk size={20} />}
-        accent={ACCENT_TRUNK}
         title="SIP Trunking"
         subtitle="Bundled CPS + included call paths with a flat MRC. Fully customizable and upsellable."
       >
@@ -390,10 +453,7 @@ export function TiersTab() {
         {!trunkQuery.isLoading && !trunkQuery.isError && trunkTiers.length > 0 && (
           <>
             <TrunkTierRows tiers={trunkTiers} />
-            <p
-              className="text-[#718096]"
-              style={{ fontSize: '0.75rem', lineHeight: 1.5, marginTop: 12 }}
-            >
+            <p style={{ fontSize: '0.74rem', lineHeight: 1.5, color: 'var(--rcf-ink-dim)', margin: '12px 0 0' }}>
               Tiers are a starting point — CPS and included paths are customizable, and every tier is
               upsellable with call-path add-ons below.
             </p>
@@ -403,16 +463,7 @@ export function TiersTab() {
 
         {/* Call-path add-ons (secondary) */}
         <div style={{ marginTop: 20 }}>
-          <div
-            className="uppercase"
-            style={{
-              fontSize: '0.68rem',
-              fontWeight: 600,
-              letterSpacing: '0.05em',
-              color: '#64748b',
-              marginBottom: 8,
-            }}
-          >
+          <div className="dl-section-title" style={{ marginBottom: 10 }}>
             Call-Path Add-Ons
           </div>
           <SectionState
@@ -432,11 +483,10 @@ export function TiersTab() {
       {/* 2) API Calling — premium */}
       <ProductSection
         icon={<IconAPI size={20} />}
-        accent={ACCENT_API}
         title="API Calling"
         subtitle="Programmable voice with the highest CPS. Metered per-call on top of the plan MRC."
         premium
-        badge={<Badge variant="premium">Premium</Badge>}
+        badge={<span className="dl-tag">Premium</span>}
       >
         <SectionState
           isLoading={apiQuery.isLoading}
@@ -457,16 +507,26 @@ export function TiersTab() {
       {/* 3) RCF — flat per-line MRC */}
       <ProductSection
         icon={<IconRCF size={20} />}
-        accent={ACCENT_RCF}
         title="Remote Call Forwarding"
         subtitle="Flat monthly recurring charge, billed per forwarding line. No tiers, no per-call fees."
-        badge={<Badge variant="rcf">Flat Rate</Badge>}
+        badge={<span className="dl-tag">Flat Rate</span>}
       >
-        <div className="flex items-baseline flex-wrap" style={{ gap: 8 }}>
-          <span style={{ fontSize: '1.9rem', fontWeight: 800, color: '#e2e8f0', lineHeight: 1 }} className="tabular-nums">
+        <div style={{ display: 'flex', alignItems: 'baseline', flexWrap: 'wrap', gap: 8 }}>
+          <span
+            style={{
+              fontFamily: '"Archivo", "IBM Plex Sans", sans-serif',
+              fontSize: '1.9rem',
+              fontWeight: 700,
+              color: 'var(--rcf-ink)',
+              lineHeight: 1,
+              fontVariantNumeric: 'tabular-nums',
+            }}
+          >
             {fmtMoney(RCF_LINE_MRC)}
           </span>
-          <span style={{ fontSize: '0.85rem', fontWeight: 600, color: '#94a3b8' }}>/ line / month</span>
+          <span style={{ fontSize: '0.84rem', fontWeight: 600, color: 'var(--rcf-ink-dim)' }}>
+            / line / month
+          </span>
         </div>
       </ProductSection>
     </div>

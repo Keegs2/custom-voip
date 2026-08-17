@@ -1,11 +1,27 @@
+/**
+ * CustomerUcaasSection — UCaaS extensions panel on the admin Customer 360
+ * (ucaas accounts, or api/trunk/hybrid with the UCaaS add-on enabled):
+ * extension table with presence, voicemail/DND flags, and auto-provision.
+ *
+ * Styling: the shared DAYLIGHT CONSOLE system (`dl-*` in index.css, plus the
+ * admin-area `dlx-*` primitives in dl-admin.css). Renders its own dl-panel.
+ * Presence/status colors keep semantics on the light canvas: green =
+ * available, red = busy/do-not-disturb (do-not-ring), amber = away (genuine
+ * "may not answer" state), slate = offline. Presentation only: the
+ * extensions query, the auto-provision mutation, and every toast are
+ * unchanged, as is the row-click navigation to the user 360.
+ *
+ * React #310: every hook in every component below is called unconditionally
+ * at the top of its function, before any early return.
+ */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
+import { Headphones, UserCheck, UserX } from 'lucide-react';
 import { apiRequest } from '../../api/client';
-import { Badge } from '../../components/ui/Badge';
-import { Button } from '../../components/ui/Button';
 import { Spinner } from '../../components/ui/Spinner';
 import { useToast } from '../../components/ui/ToastContext';
 import { fmt } from '../../utils/format';
+import '../../styles/dl-admin.css';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -34,15 +50,17 @@ interface AutoProvisionResponse {
 }
 
 // ---------------------------------------------------------------------------
-// Presence dot
+// Presence dot — daylight ink/status palette, semantics preserved
 // ---------------------------------------------------------------------------
 
+const MONO = '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace';
+
 const PRESENCE_COLORS: Record<Extension['presence_status'], string> = {
-  available: '#22c55e',
-  busy: '#ef4444',
-  away: '#f59e0b',
-  dnd: '#a855f7',
-  offline: '#475569',
+  available: '#15803d',
+  busy: '#b91c1c',
+  away: '#b45309',
+  dnd: '#b91c1c',
+  offline: '#5d6f8c',
 };
 
 function PresenceDot({ status }: { status: Extension['presence_status'] }) {
@@ -56,68 +74,9 @@ function PresenceDot({ status }: { status: Extension['presence_status'] }) {
         height: 8,
         borderRadius: '50%',
         background: color,
-        boxShadow: status !== 'offline' ? `0 0 5px ${color}99` : 'none',
         flexShrink: 0,
       }}
     />
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Inline icon components (avoid lucide-react bundle if not already present)
-// ---------------------------------------------------------------------------
-
-function HeadphonesIcon() {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.75}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      style={{ width: 16, height: 16, flexShrink: 0 }}
-    >
-      <path d="M3 18v-6a9 9 0 0 1 18 0v6" />
-      <path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z" />
-    </svg>
-  );
-}
-
-function UserCheckIcon() {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.75}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      style={{ width: 13, height: 13, flexShrink: 0 }}
-    >
-      <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-      <circle cx="8.5" cy="7" r="4" />
-      <polyline points="17 11 19 13 23 9" />
-    </svg>
-  );
-}
-
-function UserXIcon() {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.75}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      style={{ width: 13, height: 13, flexShrink: 0 }}
-    >
-      <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-      <circle cx="8.5" cy="7" r="4" />
-      <line x1="18" y1="8" x2="23" y2="13" />
-      <line x1="23" y1="8" x2="18" y2="13" />
-    </svg>
   );
 }
 
@@ -128,15 +87,25 @@ function UserXIcon() {
 const COLUMNS = ['Ext', 'User', 'DID', 'Voicemail', 'DND', 'Presence', 'Status'];
 
 // ---------------------------------------------------------------------------
+// On/off flag tag (voicemail, DND)
+// ---------------------------------------------------------------------------
+
+function FlagTag({ on, onIsNegative }: { on: boolean; onIsNegative?: boolean }) {
+  if (!on) return <span className="dl-tag dl-tag-slate">Off</span>;
+  return (
+    <span className={onIsNegative ? 'dl-pill dl-pill-off' : 'dl-pill dl-pill-on'}>On</span>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Extension row
 // ---------------------------------------------------------------------------
 
 interface ExtensionRowProps {
   ext: Extension;
-  index: number;
 }
 
-function ExtensionRow({ ext, index }: ExtensionRowProps) {
+function ExtensionRow({ ext }: ExtensionRowProps) {
   const navigate = useNavigate();
 
   const isAssigned = ext.user_id !== null;
@@ -150,32 +119,19 @@ function ExtensionRow({ ext, index }: ExtensionRowProps) {
 
   return (
     <tr
+      className="dl-row"
       onClick={isClickable ? handleClick : undefined}
-      style={{
-        borderBottom: '1px solid rgba(59,130,246,0.08)',
-        background: index % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.012)',
-        cursor: isClickable ? 'pointer' : 'default',
-        transition: 'background 0.1s',
-      }}
-      onMouseEnter={(e) => {
-        if (isClickable) {
-          e.currentTarget.style.background = 'rgba(14,165,233,0.06)';
-        }
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.background =
-          index % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.012)';
-      }}
+      style={{ cursor: isClickable ? 'pointer' : 'default' }}
     >
       {/* Extension number */}
-      <td style={{ padding: '8px 14px', whiteSpace: 'nowrap' }}>
+      <td className="dlx-td">
         <span
           style={{
-            fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
+            fontFamily: MONO,
             fontWeight: 700,
-            fontSize: '0.9rem',
-            color: '#0ea5e9',
-            letterSpacing: '0.5px',
+            fontSize: '0.88rem',
+            color: 'var(--rcf-azure-deep)',
+            letterSpacing: '0.02em',
           }}
         >
           {ext.extension}
@@ -183,18 +139,18 @@ function ExtensionRow({ ext, index }: ExtensionRowProps) {
       </td>
 
       {/* User */}
-      <td style={{ padding: '8px 14px', minWidth: 160 }}>
+      <td className="dlx-td" style={{ minWidth: 160, whiteSpace: 'normal' }}>
         {isAssigned ? (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span style={{ color: '#22c55e', flexShrink: 0 }}>
-              <UserCheckIcon />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+            <span style={{ color: 'var(--rcf-green)', flexShrink: 0, display: 'inline-flex' }}>
+              <UserCheck size={13} strokeWidth={2} aria-hidden="true" />
             </span>
             <div style={{ minWidth: 0 }}>
               <div
                 style={{
                   fontSize: '0.82rem',
-                  fontWeight: 600,
-                  color: '#e2e8f0',
+                  fontWeight: 700,
+                  color: 'var(--rcf-ink)',
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
                   whiteSpace: 'nowrap',
@@ -206,7 +162,7 @@ function ExtensionRow({ ext, index }: ExtensionRowProps) {
                 <div
                   style={{
                     fontSize: '0.7rem',
-                    color: '#4a5568',
+                    color: 'var(--rcf-ink-dim)',
                     overflow: 'hidden',
                     textOverflow: 'ellipsis',
                     whiteSpace: 'nowrap',
@@ -218,11 +174,11 @@ function ExtensionRow({ ext, index }: ExtensionRowProps) {
             </div>
           </div>
         ) : (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span style={{ color: '#4a5568', flexShrink: 0 }}>
-              <UserXIcon />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+            <span style={{ color: 'var(--rcf-ink-dim)', flexShrink: 0, display: 'inline-flex' }}>
+              <UserX size={13} strokeWidth={2} aria-hidden="true" />
             </span>
-            <span style={{ fontSize: '0.82rem', color: '#4a5568', fontStyle: 'italic' }}>
+            <span style={{ fontSize: '0.82rem', color: 'var(--rcf-ink-dim)', fontStyle: 'italic' }}>
               Unassigned
             </span>
           </div>
@@ -231,74 +187,35 @@ function ExtensionRow({ ext, index }: ExtensionRowProps) {
 
       {/* DID */}
       <td
+        className="dlx-td"
         style={{
-          padding: '8px 14px',
-          fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
+          fontFamily: MONO,
           fontSize: '0.78rem',
-          color: ext.assigned_did ? '#94a3b8' : '#2d3748',
-          whiteSpace: 'nowrap',
+          color: ext.assigned_did ? 'var(--rcf-ink-soft)' : 'var(--rcf-ink-dim)',
         }}
       >
         {ext.assigned_did ? fmt(ext.assigned_did) : '—'}
       </td>
 
       {/* Voicemail */}
-      <td style={{ padding: '8px 14px', textAlign: 'center' }}>
-        <span
-          style={{
-            display: 'inline-block',
-            fontSize: '0.6rem',
-            fontWeight: 700,
-            textTransform: 'uppercase',
-            letterSpacing: '0.05em',
-            padding: '2px 7px',
-            borderRadius: 4,
-            background: ext.voicemail_enabled
-              ? 'rgba(34,197,94,0.12)'
-              : 'rgba(71,85,105,0.15)',
-            color: ext.voicemail_enabled ? '#4ade80' : '#475569',
-            border: ext.voicemail_enabled
-              ? '1px solid rgba(34,197,94,0.2)'
-              : '1px solid rgba(71,85,105,0.2)',
-          }}
-        >
-          {ext.voicemail_enabled ? 'On' : 'Off'}
-        </span>
+      <td className="dlx-td" style={{ textAlign: 'center' }}>
+        <FlagTag on={ext.voicemail_enabled} />
       </td>
 
-      {/* DND */}
-      <td style={{ padding: '8px 14px', textAlign: 'center' }}>
-        <span
-          style={{
-            display: 'inline-block',
-            fontSize: '0.6rem',
-            fontWeight: 700,
-            textTransform: 'uppercase',
-            letterSpacing: '0.05em',
-            padding: '2px 7px',
-            borderRadius: 4,
-            background: ext.dnd
-              ? 'rgba(168,85,247,0.12)'
-              : 'rgba(71,85,105,0.12)',
-            color: ext.dnd ? '#c084fc' : '#475569',
-            border: ext.dnd
-              ? '1px solid rgba(168,85,247,0.22)'
-              : '1px solid rgba(71,85,105,0.18)',
-          }}
-        >
-          {ext.dnd ? 'On' : 'Off'}
-        </span>
+      {/* DND — "On" means do-not-ring, a genuinely blocking state → red */}
+      <td className="dlx-td" style={{ textAlign: 'center' }}>
+        <FlagTag on={ext.dnd} onIsNegative />
       </td>
 
       {/* Presence */}
-      <td style={{ padding: '8px 14px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+      <td className="dlx-td">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
           <PresenceDot status={ext.presence_status} />
           <span
             style={{
               fontSize: '0.78rem',
               color:
-                ext.presence_status === 'offline' ? '#4a5568' : '#94a3b8',
+                ext.presence_status === 'offline' ? 'var(--rcf-ink-dim)' : 'var(--rcf-ink-soft)',
               textTransform: 'capitalize',
             }}
           >
@@ -308,10 +225,10 @@ function ExtensionRow({ ext, index }: ExtensionRowProps) {
       </td>
 
       {/* Status */}
-      <td style={{ padding: '8px 14px' }}>
-        <Badge variant={ext.status === 'active' ? 'active' : 'disabled'}>
+      <td className="dlx-td">
+        <span className={ext.status === 'active' ? 'dl-pill dl-pill-on' : 'dl-pill dl-pill-off'}>
           {ext.status === 'active' ? 'Active' : 'Disabled'}
-        </Badge>
+        </span>
       </td>
     </tr>
   );
@@ -360,188 +277,114 @@ export function CustomerUcaasSection({ customerId }: CustomerUcaasSectionProps) 
   const hasUnassigned = extensions.some((e) => e.user_id === null);
 
   return (
-    <div style={{ paddingTop: 16, borderTop: '1px solid rgba(59,130,246,0.12)' }}>
-
-      {/* Section header */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          marginBottom: 14,
-          flexWrap: 'wrap',
-          gap: 10,
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ color: '#0ea5e9', display: 'flex', alignItems: 'center' }}>
-            <HeadphonesIcon />
+    <section className="dl-panel">
+      {/* ── Panel head ── */}
+      <div className="dl-panel-head">
+        <span aria-hidden="true" style={{ display: 'inline-flex', color: 'var(--rcf-azure-deep)', flexShrink: 0 }}>
+          <Headphones size={15} strokeWidth={2} />
+        </span>
+        <h3 className="dl-panel-title" style={{ margin: 0 }}>UCaaS Extensions</h3>
+        {!isLoading && !isError && (
+          <span className="dl-count">
+            {count === 1 ? '1 extension' : `${count} extensions`}
           </span>
-          <span
-            style={{
-              fontSize: '0.65rem',
-              fontWeight: 700,
-              color: '#0ea5e9',
-              textTransform: 'uppercase',
-              letterSpacing: '0.05em',
-            }}
-          >
-            UCaaS Extensions
-          </span>
-          {!isLoading && !isError && (
-            <span
-              style={{
-                fontSize: '0.62rem',
-                fontWeight: 700,
-                color: '#0ea5e9',
-                background: 'rgba(14,165,233,0.12)',
-                border: '1px solid rgba(14,165,233,0.25)',
-                borderRadius: 20,
-                padding: '1px 8px',
-                letterSpacing: '0.3px',
-                lineHeight: 1.6,
-              }}
-            >
-              {count === 1 ? '1 extension' : `${count} extensions`}
-            </span>
-          )}
-        </div>
+        )}
 
         {/* Auto-provision button — shown when there are users lacking extensions */}
         {!isLoading && !isError && hasUnassigned && (
-          <Button
-            variant="primary"
-            size="xs"
-            loading={autoProvisionMutation.isPending}
+          <button
+            type="button"
+            className="dl-btn dl-btn-primary dlx-btn-sm"
+            style={{ marginLeft: 'auto', flexShrink: 0 }}
+            disabled={autoProvisionMutation.isPending}
             onClick={() => autoProvisionMutation.mutate()}
           >
-            Auto-provision Extensions
-          </Button>
+            {autoProvisionMutation.isPending ? 'Provisioning…' : 'Auto-provision Extensions'}
+          </button>
         )}
       </div>
 
-      {/* Loading */}
-      {isLoading && (
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            color: '#718096',
-            fontSize: '0.8rem',
-            padding: '8px 0',
-          }}
-        >
-          <Spinner size="xs" /> Loading extensions…
-        </div>
-      )}
-
-      {/* Error */}
-      {isError && (
-        <p style={{ color: '#f87171', fontSize: '0.8rem', margin: 0 }}>
-          Could not load extensions.
-        </p>
-      )}
-
-      {/* Empty state */}
-      {!isLoading && !isError && extensions.length === 0 && (
-        <div
-          style={{
-            padding: '20px 18px',
-            borderRadius: 10,
-            background: 'rgba(14,165,233,0.04)',
-            border: '1px dashed rgba(14,165,233,0.2)',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 12,
-          }}
-        >
-          <p
+      <div className="dl-panel-body">
+        {/* Loading */}
+        {isLoading && (
+          <div
             style={{
-              color: '#4a5568',
-              fontSize: '0.82rem',
-              margin: 0,
-              fontStyle: 'italic',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              color: 'var(--rcf-ink-dim)',
+              fontSize: '0.8rem',
+              padding: '8px 0',
             }}
           >
-            No extensions provisioned. Use the auto-provision feature to assign extensions to all
-            users.
-          </p>
-          <div>
-            <Button
-              variant="primary"
-              size="sm"
-              loading={autoProvisionMutation.isPending}
+            <Spinner size="xs" /> Loading extensions…
+          </div>
+        )}
+
+        {/* Error */}
+        {isError && (
+          <div className="dl-banner dl-banner-err">Could not load extensions.</div>
+        )}
+
+        {/* Empty state */}
+        {!isLoading && !isError && extensions.length === 0 && (
+          <div className="dl-empty" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
+            <span>
+              No extensions provisioned. Use the auto-provision feature to assign extensions to all
+              users.
+            </span>
+            <button
+              type="button"
+              className="dl-btn dl-btn-primary"
+              disabled={autoProvisionMutation.isPending}
               onClick={() => autoProvisionMutation.mutate()}
             >
-              Auto-provision Extensions
-            </Button>
+              {autoProvisionMutation.isPending ? 'Provisioning…' : 'Auto-provision Extensions'}
+            </button>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Extensions table */}
-      {!isLoading && extensions.length > 0 && (
-        <div
-          className="glass-surface"
-          style={{
-            overflowX: 'auto',
-            borderRadius: 10,
-          }}
-        >
-          <table
-            style={{
-              width: '100%',
-              borderCollapse: 'collapse',
-              fontSize: '0.78rem',
-              color: '#cbd5e0',
-            }}
-          >
-            <thead>
-              <tr>
-                {COLUMNS.map((col) => (
-                  <th
-                    key={col}
-                    style={{
-                      padding: '9px 14px',
-                      textAlign: col === 'Voicemail' || col === 'DND' ? 'center' : 'left',
-                      fontSize: '0.6rem',
-                      fontWeight: 700,
-                      textTransform: 'uppercase',
-                      letterSpacing: '0.05em',
-                      color: '#4a5568',
-                      borderBottom: '1px solid rgba(59,130,246,0.12)',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    {col}
-                  </th>
+        {/* Extensions table */}
+        {!isLoading && extensions.length > 0 && (
+          <div style={{ overflowX: 'auto', border: '1px solid var(--rcf-line-soft)', borderRadius: 10 }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 720 }}>
+              <thead>
+                <tr>
+                  {COLUMNS.map((col) => (
+                    <th
+                      key={col}
+                      className="dl-th"
+                      style={
+                        col === 'Voicemail' || col === 'DND'
+                          ? { textAlign: 'center' }
+                          : undefined
+                      }
+                    >
+                      {col}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {extensions.map((ext) => (
+                  <ExtensionRow key={ext.id} ext={ext} />
                 ))}
-              </tr>
-            </thead>
-            <tbody>
-              {extensions.map((ext, i) => (
-                <ExtensionRow key={ext.id} ext={ext} index={i} />
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+              </tbody>
+            </table>
+          </div>
+        )}
 
-      {/* Auto-provision CTA when there are some unassigned rows (not empty overall) */}
-      {!isLoading && !isError && extensions.length > 0 && hasUnassigned && (
-        <p
-          style={{
-            fontSize: '0.72rem',
-            color: '#4a5568',
-            margin: '10px 0 0',
-            fontStyle: 'italic',
-          }}
-        >
-          Some extensions are unassigned. Click "Auto-provision Extensions" to assign numbers to
-          all remaining users.
-        </p>
-      )}
-    </div>
+        {/* Auto-provision CTA when there are some unassigned rows (not empty overall) */}
+        {!isLoading && !isError && extensions.length > 0 && hasUnassigned && (
+          <p
+            className="dl-help"
+            style={{ margin: '10px 0 0', fontStyle: 'italic' }}
+          >
+            Some extensions are unassigned. Click &quot;Auto-provision Extensions&quot; to assign
+            numbers to all remaining users.
+          </p>
+        )}
+      </div>
+    </section>
   );
 }
