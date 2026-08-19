@@ -40,7 +40,7 @@ import { getMyCustomer, getMyBilling, listMyTeam } from '../api/account';
 import { listRcf } from '../api/rcf';
 import { listTrunks } from '../api/trunks';
 import { listApiDids } from '../api/apiDids';
-import type { MyCustomer, BillingLineItem, TeamMember, TeamRole } from '../types/account';
+import type { MyCustomer, BillingLineItem, TeamMember } from '../types/account';
 import type { User } from '../types/auth';
 import type { AccountType } from '../types/customer';
 import { Spinner } from '../components/ui/Spinner';
@@ -93,10 +93,14 @@ function accountTypeLabel(t: AccountType): string {
   }
 }
 
-const ROLE_LABEL: Record<TeamRole, string> = {
+// Keyed by the full auth-role union: this map labels both team members
+// (TeamRole ⊂ User['role']) and the signed-in user's own role, which can be
+// 'support' (platform support staff — customer-less, but still has a profile).
+const ROLE_LABEL: Record<User['role'], string> = {
   admin: 'Administrator',
   user: 'User',
   readonly: 'Read-only',
+  support: 'Support',
 };
 
 /* ─── Daylight chips (replace the dark Badge component on this page) ─── */

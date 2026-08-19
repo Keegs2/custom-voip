@@ -237,7 +237,8 @@ function TrunkNameField({
 export function TrunkCard({ trunk }: TrunkCardProps) {
   const [expanded, setExpanded] = useState(false);
   const { user } = useAuth();
-  const canEdit = user?.role !== 'readonly';
+  // readonly (customer view-only) and support (platform read-only) never edit.
+  const canEdit = user?.role !== 'readonly' && user?.role !== 'support';
 
   const toggleExpanded = useCallback(() => {
     setExpanded((prev) => !prev);

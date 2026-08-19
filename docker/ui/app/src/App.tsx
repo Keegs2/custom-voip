@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate, useParams } from 'react-router-
 import { AuthProvider } from './contexts/AuthContext';
 import { RequireAuth } from './components/auth/RequireAuth';
 import { RequireAdmin } from './components/auth/RequireAdmin';
+import { RequireSupportOrAdmin } from './components/auth/RequireSupportOrAdmin';
 import { AppLayout } from './components/layout/AppLayout';
 import { DashboardPage } from './pages/DashboardPage';
 import { RcfPage } from './pages/RcfPage';
@@ -65,6 +66,18 @@ export function App() {
               <Route path="docs/api/:product?"      element={<ApiDocsPage />} />
               <Route path="docs/integration"        element={<Navigate to="/docs/api" replace />} />
               <Route path="call-quality" element={<CallQualityPage />} />
+              {/* Standalone CDR search — admin + support roles. The
+                  /admin/platform/cdrs tab mounts the same page (without the
+                  standalone shell) and stays untouched until the admin-tree
+                  cleanup PR. */}
+              <Route
+                path="cdrs"
+                element={
+                  <RequireSupportOrAdmin>
+                    <CdrsAdminPage standalone />
+                  </RequireSupportOrAdmin>
+                }
+              />
               {/* Old bookmarks: the standalone Account Settings page is retired —
                   its content lives in MyAccountPage's "Your Account" tab. */}
               <Route path="account"          element={<Navigate to="/my-account" replace />} />

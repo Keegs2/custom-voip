@@ -1,7 +1,7 @@
 export interface User {
   id: number;
   email: string;
-  role: 'admin' | 'user' | 'readonly';
+  role: 'admin' | 'user' | 'readonly' | 'support';
   customer_id: number | null;
   name: string;
   status: string;

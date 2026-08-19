@@ -7,7 +7,7 @@ import {
   IconRCF, IconTrunk, IconAPI, IconVoicemail, IconDocs,
   IconAdmin, IconSignal, IconTroubleshoot,
 } from '../icons/ProductIcons';
-import { Package, Shield, ChevronDown, Clock, Eye, EyeOff, Server, BookOpen, WalletMinimal } from 'lucide-react';
+import { Package, Shield, ChevronDown, Clock, Database, Eye, EyeOff, Server, BookOpen, WalletMinimal } from 'lucide-react';
 
 /* ─── Types ───────────────────────────────────────────────── */
 
@@ -673,13 +673,17 @@ export function Sidebar({ collapsed = false }: SidebarProps) {
 
   /* ── Access flags ──────────────────────────────────────── */
 
-  const isSupport = user?.role === 'readonly';
-  const showAdmin = isAdmin || isSupport;
+  const isSupport = user?.role === 'support';
+  const isReadonly = user?.role === 'readonly';
+  // The Administration group shows for admins (full tree), support (their
+  // whole nav — labeled "Support"), and readonly (Call Quality only: the one
+  // support tool their role can actually call).
+  const showAdmin = isAdmin || isSupport || isReadonly;
 
   /* ── Product items filtered by role/account_type ───────── */
 
   const productNavItems = allProductNavItems.filter((item) => {
-    if (isAdmin || isSupport) return true;
+    if (isAdmin) return true;
     if (item.adminOnly) return false;
     if (item.accountTypes && user?.account_type) {
       return item.accountTypes.includes(user.account_type);
@@ -692,7 +696,7 @@ export function Sidebar({ collapsed = false }: SidebarProps) {
     const path = location.pathname;
 
     const productPaths = productNavItems.map((i) => i.to);
-    const adminPaths   = ['/admin', '/call-quality', '/admin/platform', '/troubleshooting'];
+    const adminPaths   = ['/admin', '/call-quality', '/admin/platform', '/troubleshooting', '/cdrs'];
     const docPaths     = docNavItems.map((i) => i.to);
     const soonPaths    = COMING_SOON_ITEMS.flatMap((i) => (i.to ? [i.to] : []));
     const inProducts = productPaths.some((p) => path === p || path.startsWith(p + '/'));
@@ -750,6 +754,7 @@ export function Sidebar({ collapsed = false }: SidebarProps) {
   };
   const callQualityItem: NavItemDef = { label: 'Call Quality',        to: '/call-quality',    color: '#22c55e', icon: <IconSignal size={17} /> };
   const troubleItem: NavItemDef     = { label: 'Troubleshooting',     to: '/troubleshooting', color: '#fbbf24', icon: <IconTroubleshoot size={17} /> };
+  const cdrSearchItem: NavItemDef   = { label: 'CDR Search',          to: '/cdrs',            color: '#a78bfa', icon: <Database size={15} strokeWidth={1.7} /> };
 
   /* ─────────────────────────────────────────────────────── */
 
@@ -956,21 +961,23 @@ export function Sidebar({ collapsed = false }: SidebarProps) {
               scrollbarColor: 'rgba(42,47,69,0.6) transparent',
             }}
           >
-            {/* ── GROUP 1: Products ───────────────────────── */}
-            <CollapsibleGroup
-              id="products"
-              label="Products"
-              icon={<Package size={11} strokeWidth={2.5} />}
-              isOpen={groupOpen.products}
-              onToggle={toggleGroup}
-            >
-              {productNavItems.map((item) => (
-                <SidebarNavItem key={item.to} item={item} onNavigate={closeMobile} small />
-              ))}
-            </CollapsibleGroup>
+            {/* ── GROUP 1: Products (hidden for support staff) ─ */}
+            {!isSupport && (
+              <CollapsibleGroup
+                id="products"
+                label="Products"
+                icon={<Package size={11} strokeWidth={2.5} />}
+                isOpen={groupOpen.products}
+                onToggle={toggleGroup}
+              >
+                {productNavItems.map((item) => (
+                  <SidebarNavItem key={item.to} item={item} onNavigate={closeMobile} small />
+                ))}
+              </CollapsibleGroup>
+            )}
 
-            {/* ── GROUP 2: Coming Soon (hidden while empty) ─── */}
-            {COMING_SOON_ITEMS.length > 0 && (
+            {/* ── GROUP 2: Coming Soon (hidden while empty / for support) ─ */}
+            {!isSupport && COMING_SOON_ITEMS.length > 0 && (
               <>
                 <div style={{ height: 6 }} />
                 <CollapsibleGroup
@@ -987,27 +994,31 @@ export function Sidebar({ collapsed = false }: SidebarProps) {
               </>
             )}
 
-            {/* ── GROUP 3: Documentation ───────────────────── */}
-            <div style={{ height: 6 }} />
-            <CollapsibleGroup
-              id="documentation"
-              label="Documentation"
-              icon={<BookOpen size={11} strokeWidth={2.5} />}
-              isOpen={groupOpen.documentation}
-              onToggle={toggleGroup}
-            >
-              {docNavItems.map((item) => (
-                <SidebarNavItem key={item.to} item={item} onNavigate={closeMobile} small />
-              ))}
-            </CollapsibleGroup>
-
-            {/* ── GROUP 4: Administration (admin + support) ─ */}
-            {showAdmin && (
+            {/* ── GROUP 3: Documentation (hidden for support) ─ */}
+            {!isSupport && (
               <>
                 <div style={{ height: 6 }} />
                 <CollapsibleGroup
+                  id="documentation"
+                  label="Documentation"
+                  icon={<BookOpen size={11} strokeWidth={2.5} />}
+                  isOpen={groupOpen.documentation}
+                  onToggle={toggleGroup}
+                >
+                  {docNavItems.map((item) => (
+                    <SidebarNavItem key={item.to} item={item} onNavigate={closeMobile} small />
+                  ))}
+                </CollapsibleGroup>
+              </>
+            )}
+
+            {/* ── GROUP 4: Administration / Support tools ──── */}
+            {showAdmin && (
+              <>
+                {!isSupport && <div style={{ height: 6 }} />}
+                <CollapsibleGroup
                   id="administration"
-                  label="Administration"
+                  label={isSupport ? 'Support' : 'Administration'}
                   icon={<Shield size={11} strokeWidth={2.5} />}
                   isOpen={groupOpen.administration}
                   onToggle={toggleGroup}
@@ -1022,10 +1033,25 @@ export function Sidebar({ collapsed = false }: SidebarProps) {
                     </>
                   )}
 
-                  {/* ── Support sub-group (admin + readonly) */}
-                  <SubGroupLabel label="Support" />
-                  <SidebarNavItem item={callQualityItem} onNavigate={closeMobile} small />
-                  <SidebarNavItem item={troubleItem}     onNavigate={closeMobile} small />
+                  {isSupport ? (
+                    /* Support role — its entire nav: the three platform-read
+                       tools the API grants this role. */
+                    <>
+                      <SidebarNavItem item={troubleItem}     onNavigate={closeMobile} small />
+                      <SidebarNavItem item={callQualityItem} onNavigate={closeMobile} small />
+                      <SidebarNavItem item={cdrSearchItem}   onNavigate={closeMobile} small />
+                    </>
+                  ) : (
+                    /* ── Support sub-group (admin + readonly) ──
+                       Troubleshooting + CDR Search hit admin/support-gated
+                       APIs, so readonly gets Call Quality only. */
+                    <>
+                      <SubGroupLabel label="Support" />
+                      <SidebarNavItem item={callQualityItem} onNavigate={closeMobile} small />
+                      {isAdmin && <SidebarNavItem item={troubleItem}   onNavigate={closeMobile} small />}
+                      {isAdmin && <SidebarNavItem item={cdrSearchItem} onNavigate={closeMobile} small />}
+                    </>
+                  )}
                 </CollapsibleGroup>
               </>
             )}
