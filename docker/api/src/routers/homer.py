@@ -24,7 +24,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from auth.dependencies import require_admin
+from auth.dependencies import require_support_or_admin
 from db import database as db
 
 # Pure (stdlib-only) post-processing pipeline: dedup, SIP-causality ordering,
@@ -275,7 +275,7 @@ def _parse_loki_response(
 # ---------------------------------------------------------------------------
 
 @router.get("/aliases")
-async def list_aliases(admin: dict = Depends(require_admin)):
+async def list_aliases(user: dict = Depends(require_support_or_admin)):
     """Return the canonical IP-to-name alias mapping.
 
     In Homer 10, aliases are not synced to a backend — this static list
@@ -637,7 +637,7 @@ async def _attach_attestations(data: list[dict[str, Any]]) -> None:
 @router.post("/search")
 async def search_sip_traces(
     body: HomerSearchRequest,
-    admin: dict = Depends(require_admin),
+    user: dict = Depends(require_support_or_admin),
 ):
     """Search SIP traces with A/B leg correlation.
 

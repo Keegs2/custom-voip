@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Optional
 from db import database as db
-from auth.dependencies import get_current_user, require_admin
+from auth.dependencies import get_current_user, get_support_read_filter, require_admin
 
 router = APIRouter()
 
@@ -217,18 +217,37 @@ async def list_customers(
     status: Optional[str] = None,
     account_type: Optional[str] = None,
     limit: int = 100,
-    offset: int = 0
+    offset: int = 0,
+    customer_filter: int | None = Depends(get_support_read_filter),
+    user: dict = Depends(get_current_user),
 ):
-    """List all customers with optional filters."""
-    query = """
-        SELECT id, name, account_type, balance, credit_limit, status,
+    """List customers with optional filters.
+
+    Admins see every row with the full column set. Support sees every row but
+    SLIM (financial/ops columns — balance, credit_limit, fraud_score,
+    daily_limit, cpm_limit — are withheld). Tenant users see only their own
+    row, also slim. Same response shape otherwise (id + name for dropdowns).
+    """
+    if user.get("role") == "admin":
+        select_cols = """id, name, account_type, balance, credit_limit, status,
                traffic_grade, daily_limit, cpm_limit, fraud_score,
-               ucaas_enabled, created_at
+               ucaas_enabled, created_at"""
+    else:
+        select_cols = """id, name, account_type, status,
+               traffic_grade, ucaas_enabled, created_at"""
+
+    query = f"""
+        SELECT {select_cols}
         FROM customers
         WHERE 1=1
     """
     values = []
     idx = 1
+
+    if customer_filter is not None:
+        query += f" AND id = ${idx}"
+        values.append(customer_filter)
+        idx += 1
 
     if status is not None:
         query += f" AND status = ${idx}"
@@ -248,8 +267,8 @@ async def list_customers(
 
 
 @router.post("")
-async def create_customer(customer: CustomerCreate):
-    """Create a new customer."""
+async def create_customer(customer: CustomerCreate, admin: dict = Depends(require_admin)):
+    """Create a new customer. Admin-only: provisioning."""
     # UCaaS account type always has UCaaS enabled implicitly
     ucaas_flag = True if customer.account_type == "ucaas" else customer.ucaas_enabled
     result = await db.fetch_one(
@@ -345,8 +364,9 @@ async def get_my_billing(user: dict = Depends(get_current_user)):
 
 
 @router.get("/{customer_id}")
-async def get_customer(customer_id: int):
-    """Get customer by ID."""
+async def get_customer(customer_id: int, admin: dict = Depends(require_admin)):
+    """Get customer by ID (admin only — full row incl. financials; customers
+    read their own record via /me)."""
     result = await db.fetch_one(
         """
         SELECT id, name, account_type, balance, credit_limit, status,
@@ -374,8 +394,10 @@ async def get_customer_billing(customer_id: int, admin: dict = Depends(require_a
 
 
 @router.put("/{customer_id}")
-async def update_customer(customer_id: int, customer: CustomerUpdate):
-    """Update customer settings."""
+async def update_customer(
+    customer_id: int, customer: CustomerUpdate, admin: dict = Depends(require_admin)
+):
+    """Update customer settings. Admin-only: billing/limits-affecting."""
     updates = []
     values = []
     idx = 1
@@ -402,8 +424,8 @@ async def update_customer(customer_id: int, customer: CustomerUpdate):
 
 
 @router.delete("/{customer_id}")
-async def delete_customer(customer_id: int):
-    """Delete a customer and all associated records.
+async def delete_customer(customer_id: int, admin: dict = Depends(require_admin)):
+    """Delete a customer and all associated records. Admin-only: deprovisioning.
 
     All DELETEs are wrapped in a single transaction so that a failure
     midway does not leave orphaned records or a half-deleted customer.
@@ -433,8 +455,8 @@ async def delete_customer(customer_id: int):
 
 
 @router.get("/{customer_id}/balance")
-async def get_balance(customer_id: int):
-    """Get customer balance and credit info."""
+async def get_balance(customer_id: int, admin: dict = Depends(require_admin)):
+    """Get customer balance and credit info (admin only — financial data)."""
     result = await db.fetch_one(
         """
         SELECT id, balance, credit_limit, (balance + credit_limit) as available
@@ -448,8 +470,8 @@ async def get_balance(customer_id: int):
 
 
 @router.post("/{customer_id}/credit")
-async def add_credit(customer_id: int, amount: float):
-    """Add credit to customer balance."""
+async def add_credit(customer_id: int, amount: float, admin: dict = Depends(require_admin)):
+    """Add credit to customer balance. Admin-only: financial write."""
     result = await db.fetch_one(
         """
         UPDATE customers SET balance = balance + $1, updated_at = NOW()

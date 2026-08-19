@@ -3,7 +3,7 @@ from fastapi import APIRouter, HTTPException, Query, Request, Depends
 from typing import Optional
 from datetime import datetime, timedelta, timezone
 from db import database as db
-from auth.dependencies import get_customer_filter
+from auth.dependencies import get_support_read_filter, require_admin
 import logging
 import re
 
@@ -832,15 +832,15 @@ async def query_cdrs(
     rated_only: bool = False,
     limit: int = Query(default=100, le=1000),
     offset: int = 0,
-    customer_filter: int | None = Depends(get_customer_filter),
+    customer_filter: int | None = Depends(get_support_read_filter),
 ):
     """Query CDRs with filters.
 
-    Tenant-scoped: a non-admin caller (JWT or API key) only ever sees their own
+    Tenant-scoped: a tenant caller (JWT or API key) only ever sees their own
     customer's CDRs; the requested `customer_id` filter is ignored for them.
-    Admins (customer_filter is None) may filter by any `customer_id`.
+    Admins and support (customer_filter is None) may filter by any `customer_id`.
     """
-    # Non-admins are hard-scoped to their own customer (ignore any client value).
+    # Tenants are hard-scoped to their own customer (ignore any client value).
     if customer_filter is not None:
         customer_id = customer_filter
 
@@ -927,9 +927,17 @@ async def cdr_summary(
     customer_id: Optional[int] = None,
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
-    group_by: str = "day"  # day, hour, destination
+    group_by: str = "day",  # day, hour, destination
+    customer_filter: int | None = Depends(get_support_read_filter),
 ):
-    """Get CDR summary statistics."""
+    """Get CDR summary statistics.
+
+    Tenants are hard-scoped to their own customer (the `customer_id` query
+    param is overridden); admins and support may summarize any customer.
+    """
+    if customer_filter is not None:
+        customer_id = customer_filter
+
     if not start_date:
         start_date = datetime.now(timezone.utc) - timedelta(days=7)
     if not end_date:
@@ -992,10 +1000,17 @@ async def cdr_summary(
 
 
 @router.get("/{cdr_uuid}")
-async def get_cdr(cdr_uuid: str):
-    """Get a single CDR by UUID including all RTP quality metrics."""
-    result = await db.fetch_one(
-        """
+async def get_cdr(
+    cdr_uuid: str,
+    customer_filter: int | None = Depends(get_support_read_filter),
+):
+    """Get a single CDR by UUID including all RTP quality metrics.
+
+    Tenant-scoped and 404-no-leak: the customer predicate is folded into the
+    lookup itself, so a foreign-owned CDR is indistinguishable from a missing
+    one. Admins and support (customer_filter None) read any CDR.
+    """
+    query = """
         SELECT uuid, customer_id, product_type, trunk_id, direction,
                caller_id, destination, destination_prefix,
                start_time, answer_time, end_time,
@@ -1017,9 +1032,13 @@ async def get_cdr(cdr_uuid: str):
                sip_hangup_disposition, sip_user_agent,
                network_addr, bridge_uuid, sbc_id
         FROM cdrs WHERE uuid = $1
-        """,
-        cdr_uuid
-    )
+    """
+    values: list = [cdr_uuid]
+    if customer_filter is not None:
+        query += " AND customer_id = $2"
+        values.append(customer_filter)
+
+    result = await db.fetch_one(query, *values)
     if not result:
         raise HTTPException(status_code=404, detail="CDR not found")
 
@@ -1040,20 +1059,20 @@ async def get_cdr(cdr_uuid: str):
 @router.get("/{call_id}/attestation")
 async def get_cdr_attestation(
     call_id: str,
-    customer_filter: int | None = Depends(get_customer_filter),
+    customer_filter: int | None = Depends(get_support_read_filter),
 ):
     """Get the STIR/SHAKEN attestation for a single call.
 
     The per-call story: the caller's `inbound_attest` (verified via
     `inbound_verstat`/`verstat_source`) -> the `signed_attestation` WE emitted.
 
-    Tenant-scoped and 404-no-leak: a non-admin caller can only read
+    Tenant-scoped and 404-no-leak: a tenant caller can only read
     attestations for their own customer's calls. A call that exists but
     belongs to another customer returns the SAME 404 as a call that does not
-    exist, so ownership is never disclosed. Admins (customer_filter is None)
-    may read any call's attestation.
+    exist, so ownership is never disclosed. Admins and support
+    (customer_filter is None) may read any call's attestation.
     """
-    # Scope the lookup itself by customer for non-admins so a foreign-owned
+    # Scope the lookup itself by customer for tenants so a foreign-owned
     # row is indistinguishable from a missing one (no existence leak).
     if customer_filter is not None:
         row = await db.fetch_one(
@@ -1085,8 +1104,8 @@ async def get_cdr_attestation(
 
 
 @router.post("/{cdr_uuid}/rate")
-async def rate_cdr(cdr_uuid: str):
-    """Manually trigger rating for a CDR."""
+async def rate_cdr(cdr_uuid: str, admin: dict = Depends(require_admin)):
+    """Manually trigger rating for a CDR. Admin-only: billing-affecting write."""
     # Call the PostgreSQL rating function
     result = await db.fetch_one("SELECT rate_cdr($1) as cost", cdr_uuid)
 

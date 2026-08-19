@@ -20,7 +20,7 @@ from pydantic import BaseModel, field_validator
 from typing import Optional, List
 from db import database as db
 from db import redis_client as cache
-from auth.dependencies import get_customer_filter, require_admin
+from auth.dependencies import get_customer_filter, get_support_read_filter, require_admin
 from utils import phone
 
 logger = logging.getLogger(__name__)
@@ -105,13 +105,15 @@ async def list_trunks(
     enabled: Optional[bool] = None,
     limit: int = 100,
     offset: int = 0,
-    customer_filter: int | None = Depends(get_customer_filter),
+    customer_filter: int | None = Depends(get_support_read_filter),
 ):
     """List SIP trunks with optional filters.
 
-    Non-admins are scoped to their own customer (the caller's customer_id wins,
-    the `customer_id` query param is ignored for them); admins may filter by any
-    `customer_id` or see all.
+    Tenants are scoped to their own customer (the caller's customer_id wins,
+    the `customer_id` query param is ignored for them); admins and support may
+    filter by any `customer_id` or see all. This list carries no secrets (only
+    an ip COUNT, never the auth IPs themselves); by-id sub-resources stay
+    tenant-scoped via get_customer_filter.
     """
     query = """
         SELECT t.id, t.trunk_name, t.customer_id, t.max_channels, t.cps_limit,
