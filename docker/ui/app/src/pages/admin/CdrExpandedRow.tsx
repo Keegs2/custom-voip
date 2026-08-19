@@ -9,6 +9,7 @@
 import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { rateCdr } from '../../api/cdrs';
+import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../components/ui/Toast';
 import { AttestationChain } from '../../components/stir/AttestationChain';
 import type { Cdr } from '../../types/cdr';
@@ -56,6 +57,7 @@ interface CdrExpandedRowProps {
 }
 
 export function CdrExpandedRow({ cdr, colSpan, onRated }: CdrExpandedRowProps) {
+  const { isAdmin } = useAuth();
   const { toastOk, toastErr } = useToast();
   const queryClient = useQueryClient();
   const [isRating, setIsRating] = useState(false);
@@ -139,7 +141,9 @@ export function CdrExpandedRow({ cdr, colSpan, onRated }: CdrExpandedRowProps) {
                 <AttestationChain callId={cdr.uuid} />
               </div>
 
-              {!cdr.rated_at && (
+              {/* Rating is a write — admin only. Support (platform read) would
+                  get a 403 from the API, so the button is hidden entirely. */}
+              {isAdmin && !cdr.rated_at && (
                 <div className="dlx4-xsection">
                   <button
                     type="button"

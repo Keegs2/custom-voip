@@ -30,6 +30,12 @@ interface AuthContextValue {
    * itself), never for guarding admin-only content.
    */
   isActualAdmin: boolean;
+  /**
+   * True when role === 'support' — platform support staff with platform-wide
+   * READ access (CDRs, Homer, STIR, slim customer/trunk lists) and no writes.
+   * Not affected by customerViewMode (support users have no admin toggle).
+   */
+  isSupport: boolean;
   /** When true, an admin is previewing the app as a customer would see it. */
   customerViewMode: boolean;
   /** Toggles customerViewMode on/off. Navigates to / when turning ON. */
@@ -136,11 +142,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // that gates on isAdmin (sidebar groups, RequireAdmin, admin-only buttons)
   // automatically collapses to the customer view without any further changes.
   const isAdmin = isActualAdmin && !customerViewMode;
+  const isSupport = user?.role === 'support';
 
   return (
     <AuthContext.Provider value={{
       user, token, isAuthenticated,
-      isAdmin, isActualAdmin,
+      isAdmin, isActualAdmin, isSupport,
       customerViewMode, toggleCustomerView,
       isLoading, login, logout, refreshUser,
     }}>

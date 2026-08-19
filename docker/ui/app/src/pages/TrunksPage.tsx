@@ -961,8 +961,8 @@ export function TrunksPage() {
   const isTrunkAccount = accountType === 'trunk' || accountType === 'hybrid';
   const allowed = isTrunkAccount || isActualAdmin;
 
-  // Read-only users may view but not mutate.
-  const canManage = user?.role !== 'readonly';
+  // Read-only and support (platform read-only) users may view but not mutate.
+  const canManage = user?.role !== 'readonly' && user?.role !== 'support';
 
   // Owner-scoped: the backend filters listTrunks() to the caller's customer, so
   // no customer_id is sent. Admins see the full list (this page is primarily a

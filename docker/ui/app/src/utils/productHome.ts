@@ -13,6 +13,7 @@ import type { User } from '../types/auth';
 export function productHome(user: User | null, effectiveAdmin: boolean): string {
   if (!user) return '/rcf';
   if (effectiveAdmin) return '/admin';
+  if (user.role === 'support') return '/troubleshooting';
   if (user.role === 'readonly') return '/call-quality';
   switch (user.account_type) {
     case 'trunk':

@@ -3691,7 +3691,8 @@ export function RcfPage() {
   );
 
   const role = user?.role ?? 'user';
-  const canEdit = role !== 'readonly';
+  // readonly (customer view-only) and support (platform read-only) never edit.
+  const canEdit = role !== 'readonly' && role !== 'support';
   const totalPages = Math.max(1, Math.ceil(serverTotal / pageSize));
   const activeCount = useMemo(() => rawEntries.filter((e) => e.enabled).length, [rawEntries]);
   const disabledCount = useMemo(() => rawEntries.filter((e) => !e.enabled).length, [rawEntries]);
