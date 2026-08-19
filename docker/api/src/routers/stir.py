@@ -1,16 +1,16 @@
-"""STIR/SHAKEN attestation summary endpoints (admin only).
+"""STIR/SHAKEN attestation summary endpoints (support/admin).
 
 Aggregate visibility over the `call_attestations` companion table
 (see docker/postgres/init/32_call_attestations.sql). Per-call reads live on
 the CDRs router (GET /v1/cdrs/{call_id}/attestation, tenant-scoped); this
-router is the admin roll-up for the UI summary panel.
+router is the staff roll-up for the UI summary panel.
 """
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
 
-from auth.dependencies import require_admin
+from auth.dependencies import require_support_or_admin
 from db import database as db
 
 router = APIRouter()
@@ -21,9 +21,9 @@ async def attestation_summary(
     customer_id: Optional[int] = None,
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
-    admin: dict = Depends(require_admin),
+    user: dict = Depends(require_support_or_admin),
 ):
-    """STIR/SHAKEN attestation roll-up (admin only).
+    """STIR/SHAKEN attestation roll-up (support/admin, read-only).
 
     Returns GROUP BY counts over the `call_attestations` table for the given
     window (default: last 7 days), optionally scoped to one customer:

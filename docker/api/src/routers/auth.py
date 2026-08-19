@@ -242,8 +242,8 @@ async def register_user(body: RegisterRequest, admin: dict = Depends(require_adm
         raise HTTPException(status_code=409, detail="Email already registered")
 
     # Validate role
-    if body.role not in ("admin", "user", "readonly"):
-        raise HTTPException(status_code=400, detail="Invalid role. Must be admin, user, or readonly")
+    if body.role not in ("admin", "user", "readonly", "support"):
+        raise HTTPException(status_code=400, detail="Invalid role. Must be admin, user, readonly, or support")
 
     hashed = hash_password(body.password)
     row = await db.fetch_one(
@@ -328,7 +328,7 @@ async def update_user(user_id: int, body: UserUpdate, admin: dict = Depends(requ
             updates.append(f"password_hash = ${idx}")
             values.append(hash_password(value))
         else:
-            if field == "role" and value not in ("admin", "user", "readonly"):
+            if field == "role" and value not in ("admin", "user", "readonly", "support"):
                 raise HTTPException(status_code=400, detail="Invalid role")
             if field == "status" and value not in ("active", "disabled"):
                 raise HTTPException(status_code=400, detail="Invalid status")
