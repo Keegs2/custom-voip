@@ -27,11 +27,12 @@ if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
 from services.cdr_export.config import ExportConfig  # noqa: E402
-from services.cdr_export.formatter import EquinoxFormatter, FIELDS  # noqa: E402
+from services.cdr_export.formatter import EquinoxFormatter, FIELDS, _FIELD_DEFS  # noqa: E402
 from services.cdr_export import exporter as exp  # noqa: E402
 from services.cdr_export.ftp_client import FTPClient  # noqa: E402
 from datetime import datetime, timezone  # noqa: E402
 from decimal import Decimal  # noqa: E402
+import re  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -44,8 +45,13 @@ class FakeRow(dict):
 
 
 def make_row(**overrides):
-    """Build a CDR row with sensible defaults, overridable per test."""
+    """Build a CDR row with sensible defaults for EVERY exported column.
+
+    Mirrors exporter.SELECT_COLUMNS (the full cdrs data-column set minus the
+    exported_at watermark). Overridable per test.
+    """
     base = {
+        # base table (05_schema_cdr.sql)
         "id": 1001,
         "uuid": "abc-123-uuid",
         "customer_id": 42,
@@ -60,15 +66,55 @@ def make_row(**overrides):
         "end_time": datetime(2026, 7, 24, 15, 5, 5, tzinfo=timezone.utc),
         "duration_ms": 60000,
         "billable_ms": 57000,
+        "rate_per_min": Decimal("0.010000"),
+        "total_cost": Decimal("0.009500"),
+        "carrier_cost": Decimal("0.004000"),
+        "margin": Decimal("0.005500"),
+        "rated_at": datetime(2026, 7, 24, 15, 5, 10, tzinfo=timezone.utc),
         "hangup_cause": "NORMAL_CLEARING",
         "sip_code": 200,
         "carrier_used": "primary",
         "traffic_grade": "standard",
+        "fraud_score": 0,
+        "fraud_flags": None,
         "freeswitch_node": "fs-media-v2",
+        "mos": Decimal("4.20"),
+        "quality_pct": Decimal("98.50"),
+        "jitter_min_ms": Decimal("0.100"),
+        "jitter_max_ms": Decimal("3.250"),
+        "jitter_avg_ms": Decimal("1.125"),
+        "packet_loss_count": 0,
+        "packet_total_count": 3000,
+        "packet_loss_pct": Decimal("0.00"),
+        "flaw_total": 0,
+        "r_factor": Decimal("93.00"),
+        "rtp_audio_in_raw_bytes": 480000,
+        "rtp_audio_in_media_bytes": 476000,
+        "rtp_audio_out_raw_bytes": 480000,
+        "rtp_audio_out_media_bytes": 476000,
+        "rtp_audio_in_packet_count": 3000,
+        "rtp_audio_out_packet_count": 3000,
+        "rtp_audio_in_jitter_burst_rate": Decimal("0.0000"),
+        "rtp_audio_in_jitter_loss_rate": Decimal("0.0000"),
+        "rtp_audio_in_mean_interval": Decimal("20.000"),
+        "read_codec": "PCMU",
+        "write_codec": "PCMU",
+        "read_rate": 8000,
+        "write_rate": 8000,
+        "sip_from_user": "16175551234",
+        "sip_to_user": "17745559999",
+        "hangup_cause_q850": 16,
+        "sip_hangup_disposition": "recv_bye",
+        "sip_user_agent": "FreeSWITCH",
+        "network_addr": "67.231.2.12",
+        "bridge_uuid": "bridge-abc-999",
+        # 18_sbc_id_column.sql
         "sbc_id": "sbc-1",
-        "rate_per_min": Decimal("0.010000"),
-        "total_cost": Decimal("0.009500"),
-        "carrier_cost": Decimal("0.004000"),
+        # 23_onnet_cdr_columns.sql
+        "origin_customer_id": 42,
+        "terminating_customer_id": 42,
+        "on_net": False,
+        "on_net_hops": 0,
     }
     base.update(overrides)
     return FakeRow(base)
@@ -188,26 +234,72 @@ def test_formatter_key_field_rendering():
     parts = fmt.format_record(make_row()).split(",")
     field_index = {name: i for i, name in enumerate(FIELDS)}
 
-    # uuid / call_id verbatim
-    assert parts[field_index["call_id"]] == "abc-123-uuid"
+    # uuid verbatim (header is now the raw column name)
+    assert parts[field_index["uuid"]] == "abc-123-uuid"
+    # id verbatim
+    assert parts[field_index["id"]] == "1001"
     # timestamp -> deterministic UTC ISO-8601 with trailing Z, no microseconds
     assert parts[field_index["start_time"]] == "2026-07-24T15:04:05Z"
-    # duration_ms 60000 -> 60 seconds
-    assert parts[field_index["duration_sec"]] == "60"
-    # billable_ms 57000 -> 57 seconds
-    assert parts[field_index["billable_sec"]] == "57"
+    # durations are exported as raw milliseconds now (full-column dump)
+    assert parts[field_index["duration_ms"]] == "60000"
+    assert parts[field_index["billable_ms"]] == "57000"
     # money -> 6dp
     assert parts[field_index["total_cost"]] == "0.009500"
+    assert parts[field_index["margin"]] == "0.005500"
+
+
+def test_formatter_numeric_quality_renders_stored_value():
+    """NUMERIC quality metrics keep their stored precision via str(Decimal)."""
+    fmt = EquinoxFormatter()
+    parts = fmt.format_record(make_row()).split(",")
+    idx = {name: i for i, name in enumerate(FIELDS)}
+    # mos NUMERIC(3,2) 4.20 -> "4.20" (no float rounding, no 6dp money coercion)
+    assert parts[idx["mos"]] == "4.20"
+    assert parts[idx["jitter_avg_ms"]] == "1.125"
+    assert parts[idx["rtp_audio_in_mean_interval"]] == "20.000"
+
+
+def test_formatter_jsonb_fraud_flags_rendering():
+    """fraud_flags JSONB -> compact JSON; handles dict, str passthrough, and None."""
+    fmt = EquinoxFormatter()
+    idx = {name: i for i, name in enumerate(FIELDS)}
+
+    # dict (asyncpg-decoded) -> compact JSON, no whitespace. The comma inside
+    # the JSON forces csv to quote the cell, so re-parse to read it back.
+    import csv as _csv
+    line = fmt.format_record(make_row(fraud_flags={"velocity": True, "n": 3}))
+    cell = next(_csv.reader([line]))[idx["fraud_flags"]]
+    assert cell == '{"velocity":true,"n":3}'
+
+    # raw JSON string (asyncpg text codec) -> passed through unchanged. The
+    # embedded quotes make csv quote the cell, so re-parse to read the value.
+    line = fmt.format_record(make_row(fraud_flags='{"a":1}'))
+    assert next(_csv.reader([line]))[idx["fraud_flags"]] == '{"a":1}'
+
+    # None -> empty
+    parts = fmt.format_record(make_row(fraud_flags=None)).split(",")
+    assert parts[idx["fraud_flags"]] == ""
+
+
+def test_formatter_boolean_on_net_rendering():
+    """on_net BOOLEAN -> 'true'/'false', None -> ''."""
+    fmt = EquinoxFormatter()
+    idx = {name: i for i, name in enumerate(FIELDS)}
+    assert fmt.format_record(make_row(on_net=True)).split(",")[idx["on_net"]] == "true"
+    assert fmt.format_record(make_row(on_net=False)).split(",")[idx["on_net"]] == "false"
+    assert fmt.format_record(make_row(on_net=None)).split(",")[idx["on_net"]] == ""
 
 
 def test_formatter_none_becomes_empty_string():
     fmt = EquinoxFormatter()
     row = make_row(answer_time=None, trunk_id=None, rate_per_min=None,
-                   total_cost=None, carrier_cost=None, sbc_id=None)
+                   total_cost=None, carrier_cost=None, sbc_id=None,
+                   mos=None, on_net=None, fraud_flags=None, on_net_hops=None)
     parts = fmt.format_record(row).split(",")
     idx = {name: i for i, name in enumerate(FIELDS)}
     for key in ("answer_time", "trunk_id", "rate_per_min", "total_cost",
-                "carrier_cost", "sbc_id"):
+                "carrier_cost", "sbc_id", "mos", "on_net", "fraud_flags",
+                "on_net_hops"):
         assert parts[idx[key]] == "", f"{key} should render as empty string"
 
 
@@ -498,3 +590,137 @@ def test_ftp_password_never_logged_on_upload(monkeypatch, caplog):
     assert secret not in all_logs
     # Upload success should have been logged (filename + byte count), sans secret.
     assert any("uploaded CDR_test.csv" in r.getMessage() for r in caplog.records)
+
+
+# ---------------------------------------------------------------------------
+# Schema drift guard (DB-less): the export projection MUST stay == the full set
+# of cdrs data columns. A future ADD COLUMN that isn't wired into SELECT_COLUMNS
+# + the formatter fails HERE, honoring "export all the information we store".
+# Pure/regex-based — parses the init SQL files, no DB.
+# ---------------------------------------------------------------------------
+
+# tests/ -> repo root -> docker/postgres/init
+_INIT = pathlib.Path(__file__).resolve().parents[1] / "docker" / "postgres" / "init"
+
+# The watermark column is the selection cursor (NULL at export time); it is
+# deliberately NOT exported.
+_WATERMARK_EXCLUDED = {"exported_at"}
+
+# Non-column tokens that can start a line inside the CREATE TABLE body.
+_NOT_A_COLUMN = {"primary", "constraint", "unique", "check", "foreign", "like"}
+
+
+def _cdrs_base_columns() -> list[str]:
+    """Parse column names from the base `CREATE TABLE cdrs (...)` in 05_schema_cdr.sql.
+
+    Takes the body between `CREATE TABLE cdrs (` and its matching close paren,
+    then the first identifier of each definition line (skipping blanks, `--`
+    comments, and table-constraint lines like PRIMARY KEY).
+    """
+    sql = (_INIT / "05_schema_cdr.sql").read_text()
+    m = re.search(r"CREATE\s+TABLE\s+cdrs\s*\((.*?)\n\)\s*;", sql, re.IGNORECASE | re.DOTALL)
+    assert m, "could not locate CREATE TABLE cdrs (...) block in 05_schema_cdr.sql"
+    body = m.group(1)
+    cols: list[str] = []
+    for raw in body.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("--"):
+            continue
+        # strip trailing inline comment, then take the first token
+        line = line.split("--", 1)[0].strip().rstrip(",")
+        if not line:
+            continue
+        tok = line.split()[0]
+        if tok.lower() in _NOT_A_COLUMN:
+            continue
+        if re.fullmatch(r"[a-z_][a-z0-9_]*", tok):
+            cols.append(tok)
+    return cols
+
+
+def _cdrs_added_columns(filename: str) -> list[str]:
+    """Extract every `ADD COLUMN [IF NOT EXISTS] <name>` from a migration file.
+
+    The `(?!IF\\s+NOT\\s+EXISTS)` lookahead stops the optional IF-NOT-EXISTS
+    group from backtracking and capturing the keyword `IF` as the column name
+    (migration 23 uses the bare `ADD COLUMN IF NOT EXISTS <name>` form).
+    """
+    sql = (_INIT / filename).read_text()
+    return re.findall(
+        r"ADD\s+COLUMN\s+(?:IF\s+NOT\s+EXISTS\s+)?(?!IF\s+NOT\s+EXISTS)([a-z_][a-z0-9_]*)",
+        sql, re.IGNORECASE,
+    )
+
+
+def _all_cdrs_columns() -> list[str]:
+    """Full ordered cdrs data-column list from schema + migrations, minus watermark.
+
+    Base table order (05), then ADD COLUMNs in file-number order (16, 18, 23),
+    de-duplicated (16 re-declares columns already present in the base table via
+    IF NOT EXISTS — they keep their base-table position). exported_at (from 21)
+    is excluded: it is the export cursor, never emitted.
+    """
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for col in (
+        _cdrs_base_columns()
+        + _cdrs_added_columns("16_cdr_detail_columns.sql")
+        + _cdrs_added_columns("18_sbc_id_column.sql")
+        + _cdrs_added_columns("23_onnet_cdr_columns.sql")
+    ):
+        if col in _WATERMARK_EXCLUDED or col in seen:
+            continue
+        seen.add(col)
+        ordered.append(col)
+    return ordered
+
+
+def test_schema_parse_smoke():
+    """Sanity: the regex parser actually finds the columns we know exist."""
+    base = _cdrs_base_columns()
+    # a representative spread across the CREATE TABLE body
+    for col in ("id", "uuid", "start_time", "total_cost", "fraud_flags",
+                "mos", "bridge_uuid"):
+        assert col in base, f"parser missed base column {col!r}"
+    assert "exported_at" not in base            # 21 is a migration, not base
+    assert _cdrs_added_columns("18_sbc_id_column.sql") == ["sbc_id"]
+    assert set(_cdrs_added_columns("23_onnet_cdr_columns.sql")) == {
+        "origin_customer_id", "terminating_customer_id", "on_net", "on_net_hops",
+    }
+
+
+def test_select_columns_equal_full_cdrs_schema():
+    """exporter.SELECT_COLUMNS == every cdrs data column (excl. exported_at)."""
+    schema_cols = set(_all_cdrs_columns())
+    select_cols = set(exp.SELECT_COLUMNS)
+
+    missing = schema_cols - select_cols   # a new column not wired into export
+    extra = select_cols - schema_cols     # a projected column with no schema home
+    assert not missing, f"cdrs columns missing from SELECT_COLUMNS: {sorted(missing)}"
+    assert not extra, f"SELECT_COLUMNS has columns not in the cdrs schema: {sorted(extra)}"
+    assert "exported_at" not in select_cols
+
+    # No duplicate projections.
+    assert len(exp.SELECT_COLUMNS) == len(select_cols)
+
+
+def test_formatter_source_keys_match_select_columns():
+    """Every formatter source key is a SELECTed column, and all cols are formatted.
+
+    source keys ⊆ SELECT_COLUMNS (no phantom source), and (for a complete dump)
+    every SELECTed column has a formatter entry, so nothing we pull is dropped.
+    """
+    source_keys = [src for (_name, src, _fmt) in _FIELD_DEFS]
+    source_set = set(source_keys)
+    select_set = set(exp.SELECT_COLUMNS)
+
+    assert source_set <= select_set, (
+        f"formatter references non-selected columns: {sorted(source_set - select_set)}"
+    )
+    assert select_set <= source_set, (
+        f"selected columns with no formatter entry: {sorted(select_set - source_set)}"
+    )
+    # Header labels are the raw DB column names (self-describing file).
+    assert FIELDS == source_keys
+    # No duplicate field defs.
+    assert len(source_keys) == len(source_set)
