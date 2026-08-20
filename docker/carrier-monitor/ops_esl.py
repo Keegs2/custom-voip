@@ -1,43 +1,55 @@
 #!/usr/bin/env python3
 """
-ops_esl.py — minimal, READ-ONLY FreeSWITCH ESL client for the ops-agent.
+ops_esl.py — minimal FreeSWITCH ESL client for the ops-agent.
 
 The revup-ops-agent runs co-located with FreeSWITCH on the media VMs and needs to
-issue a HANDFUL of read-only `api <cmd>` commands (sofia status, show channels,
-uuid_dump, …) over the LOCAL Event Socket (127.0.0.1:8021). This is the same
-inband/blocking auth + `api <cmd>` handshake the API's async `esl_client.py` uses,
-re-implemented here **synchronously** (blocking sockets) because the ops-agent's
-command handlers run on plain threads — there is no asyncio event loop in this
-process, and pulling one in just for a few local socket reads would be gratuitous.
+issue a HANDFUL of `api <cmd>` commands (sofia status, show channels, uuid_dump,
+uuid_kill, reloadxml, …) over the LOCAL Event Socket (127.0.0.1:8021). This is the
+same inband/blocking auth + `api <cmd>` handshake the API's async `esl_client.py`
+uses, re-implemented here **synchronously** (blocking sockets) because the
+ops-agent's command handlers run on plain threads — there is no asyncio event loop
+in this process, and pulling one in just for a few local socket reads would be
+gratuitous.
 
 DESIGN / SAFETY
 ---------------
-- This client exposes EXACTLY ONE public entry point, `esl_api()`, which runs a
-  fixed, caller-supplied FreeSWITCH `api` verb string. The ops-agent NEVER builds
-  that string from request params by concatenation — the command catalog maps each
-  allow-listed command_id to a FIXED verb (optionally with ONE regex-validated
-  argument, e.g. a strict-UUID for `uuid_dump`). There is deliberately NO
-  free-form / passthrough command path.
-- ESL `api` is request/response and read-only for the verbs we use; we do NOT use
-  `bgapi`, do NOT subscribe to events, and do NOT send anything that mutates call
-  state. The catalog is the security boundary; this module is just transport.
+- This client exposes exactly TWO public entry points:
+    * `esl_api(verb)`   — runs a fixed, caller-supplied `api <verb>` and returns
+      the response body (used by every read verb AND by the reversible mutating
+      verbs uuid_kill / reloadxml / sofia rescan / fsctl loglevel).
+    * `esl_bgapi(verb)` — spawns a fixed `bgapi <verb>` (non-blocking) and returns
+      the Job-UUID. Used SOLELY by the canary originate, which then polls a
+      caller-supplied origination_uuid via `esl_api("uuid_exists …")` /
+      `esl_api("uuid_getvar …")`. There is NO event subscription: the canary owns
+      its own UUID so it observes progress with plain read verbs.
+  The ops-agent NEVER builds either verb string from request params by
+  concatenation — the command catalog maps each allow-listed command_id to a FIXED
+  verb (optionally with ONE regex/enum/int-range-validated argument, e.g. a strict
+  UUID for uuid_kill, or an enum profile for sofia rescan). There is deliberately
+  NO free-form / passthrough command path. The catalog is the security boundary;
+  this module is just transport.
+- `bgapi` is used ONLY for the single fixed canary originate verb (built from the
+  fixed test DID + validated proxy/carrier env, never from free request input).
+  Arbitrary bgapi is hard-excluded by the catalog build-time blocklist.
 - Every failure mode (connect refused, auth reject, timeout, socket error) returns
-  a structured (ok, output, error) tuple — it NEVER raises to the caller and never
-  blocks longer than the supplied timeout. Robustness parity with the poller.
+  a structured tuple — it NEVER raises to the caller and never blocks longer than
+  the supplied timeout. Robustness parity with the poller.
 
 The ESL text protocol used here:
     1. connect TCP to host:port
     2. server sends "Content-Type: auth/request"
     3. client sends "auth <password>\n\n"
     4. server replies "+OK accepted" (or "-ERR ...")
-    5. client sends "api <cmd>\n\n"
+    5. client sends "api <cmd>\n\n"  (or "bgapi <cmd>\n\n")
     6. server replies with a "Content-Type: api/response" event whose
        "Content-Length:" header gives the exact body length; we read that many
        bytes so the reply is captured in full (large `show channels as json`
-       payloads span many TCP segments).
+       payloads span many TCP segments). For bgapi the reply is a
+       "command/reply" with a "Reply-Text: +OK Job-UUID: <uuid>" header.
 """
 
 import os
+import re
 import socket
 
 
@@ -147,6 +159,78 @@ def esl_api(command: str, timeout: float = 10.0):
 
         text = body.decode("utf-8", "replace")
         return True, text, ""
+
+    except socket.timeout:
+        return False, "", f"ESL: timed out after {timeout:.0f}s"
+    except ConnectionRefusedError:
+        return False, "", f"ESL: connection refused to {ESL_HOST}:{ESL_PORT}"
+    except OSError as exc:
+        return False, "", f"ESL: socket error: {exc}"
+    finally:
+        if sock is not None:
+            try:
+                sock.close()
+            except OSError:
+                pass
+
+
+# Job-UUID appears in the bgapi command/reply as "+OK Job-UUID: <uuid>".
+_JOB_UUID_RE = re.compile(
+    rb"Job-UUID:\s*"
+    rb"([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+    rb"[0-9a-fA-F]{4}-[0-9a-fA-F]{12})"
+)
+
+
+def esl_bgapi(command: str, timeout: float = 10.0):
+    """
+    Spawn a single FreeSWITCH `bgapi <command>` over the local Event Socket and
+    return (ok: bool, job_uuid: str, error: str).
+
+    `bgapi` runs the command on a background thread in FreeSWITCH and returns
+    IMMEDIATELY with a "command/reply" carrying "+OK Job-UUID: <uuid>". We do NOT
+    wait for the job to finish here and we do NOT subscribe to the BACKGROUND_JOB
+    event — the single caller (the canary originate) supplies its own
+    `origination_uuid` and polls THAT channel with read-only `api uuid_exists` /
+    `api uuid_getvar` verbs. This keeps the transport a simple request/reply with
+    no event-loop / event-filter state to manage.
+
+    `command` is a FIXED verb string chosen by the command catalog (the canary
+    originate line, assembled from the fixed test DID + validated env), NEVER built
+    from free request input. `ok` is True only when the handshake succeeded and a
+    Job-UUID was parsed from the reply. Never raises.
+    """
+    if not command or not command.strip():
+        return False, "", "empty ESL command"
+
+    sock = None
+    try:
+        sock = socket.create_connection((ESL_HOST, ESL_PORT), timeout=timeout)
+        sock.settimeout(timeout)
+
+        # 1) auth prompt
+        prompt = _recv_until(sock, b"auth/request", timeout)
+        if b"auth/request" not in prompt:
+            return False, "", "ESL: no auth/request prompt"
+
+        # 2) authenticate
+        sock.sendall(b"auth " + ESL_PASSWORD.encode("utf-8", "replace") + b"\n\n")
+        auth_reply = _recv_until(sock, b"\n\n", timeout)
+        if b"+OK" not in auth_reply:
+            return False, "", "ESL: authentication rejected"
+
+        # 3) send the bgapi command
+        sock.sendall(b"bgapi " + command.encode("utf-8", "replace") + b"\n\n")
+
+        # 4) read the command/reply header block (ends in a blank line). The
+        #    Job-UUID is a header line; the body (if any) is empty for bgapi.
+        reply = _recv_until(sock, b"\n\n", timeout)
+        if b"+OK" not in reply:
+            return False, "", "ESL: bgapi rejected"
+        m = _JOB_UUID_RE.search(reply)
+        if not m:
+            return False, "", "ESL: bgapi reply missing Job-UUID"
+        return True, m.group(1).decode("ascii"), ""
 
     except socket.timeout:
         return False, "", f"ESL: timed out after {timeout:.0f}s"
