@@ -1,17 +1,22 @@
 # CDR Export Forwarder
 
 Standalone module/process that reads unexported CDRs from PostgreSQL and uploads
-them as **Equinox-format** files to a **FileMage** gateway over **plain FTP**
-(port 21, internal, behind firewall). Each shipped CDR is watermarked
-(`cdrs.exported_at`) so nothing is ever double-sent.
+them as **CSV** files to a **FileMage** gateway over **plain FTP** (port 21,
+internal, behind firewall). Each shipped CDR is watermarked (`cdrs.exported_at`)
+so nothing is ever double-sent.
+
+The export is a **complete dump of every `cdrs` data column** (all columns
+except the `exported_at` watermark). The header row is authoritative — each
+field label is the raw DB column name — so the file is self-describing and the
+downstream (Equinox) ingester consumes whichever columns it needs.
 
 It is **decoupled from the FastAPI app** — never wired into the app lifespan or
 routers, so it cannot destabilize the API or its `/health` contract. It runs as
 its own process and initializes its own asyncpg pool via the shared
 `db.database` module (`statement_cache_size=0`, explicit `::type` casts).
 
-> **Status: scaffold.** The exact ~49-field Equinox layout is not yet available.
-> The formatter ships a documented placeholder mapping — see **Format TODO**.
+> **Status:** flag-gated (`CDR_EXPORT_ENABLED`, default off). The output format
+> is the full `cdrs` column set (see **File format** below).
 
 ---
 
@@ -130,8 +135,7 @@ Do these **in order**. The first two are safe; only step 3 sends data.
 1. **`test-connection`** — confirms the FileMage host/port/creds and drop dir.
    Fix credentials/firewall before proceeding.
 2. **`dry-run`** — preview the exact file that would be sent (filename + first
-   lines). **Reconcile the format with the real Equinox template here** before
-   any real send (see Format TODO). Nothing is uploaded or marked.
+   lines, including the column header row). Nothing is uploaded or marked.
 3. **`run-once`** with `CDR_EXPORT_ENABLED=true` — ships exactly one batch.
    Verify the file landed on the FileMage side and that the rows are now
    watermarked:
@@ -188,29 +192,44 @@ retention policy** (`05_schema_cdr.sql`). Implications:
 
 ---
 
-## Format TODO
+## File format
 
-**The exact ~49-field Equinox specification is not yet available.** `formatter.py`
-ships a **reasonable placeholder** CSV mapping from the confirmed `cdrs` columns
-(call_id, timestamps, caller/destination, duration/billable seconds, hangup
-cause, sip code, carrier, sbc, product/customer, and money fields). It is marked:
+The file is a **complete CSV dump of every `cdrs` data column** — all columns
+except the `exported_at` watermark (which is the selection cursor, NULL at
+export time). The **header row is authoritative**: each field's label is the
+raw DB column name (snake_case), in `cdrs` declaration order followed by the
+ADD-COLUMN migrations (18 `sbc_id`, 23 on-net columns). Downstream (Equinox)
+consumes whichever columns it needs.
 
-```python
-# TODO: reconcile field order/format with the real ~49-field Equinox template
-#       before go-live.
-```
+Per-column value formatting (all in `formatter.py`):
 
-Before go-live, confirm with the operator and edit **only** `formatter.py`
-(field order/labels, header/trailer presence, timestamp format, duration units,
-money formatting) plus, if new source columns are needed, `SELECT_COLUMNS` in
-`exporter.py`. The formatter is intentionally the single swap point.
+| Column group | Rendering |
+|--------------|-----------|
+| Timestamps (`start_time`, `answer_time`, `end_time`, `rated_at`) | ISO-8601 UTC, e.g. `2026-07-24T15:04:05Z` (no microseconds) |
+| Money DECIMALs (`rate_per_min`, `total_cost`, `carrier_cost`, `margin`) | fixed 6 decimal places |
+| Quality NUMERICs (`mos`, `jitter_*`, `packet_loss_pct`, `r_factor`, `rtp_*` rates, `rtp_audio_in_mean_interval`) | stored precision, verbatim (`str(Decimal)`) |
+| Integers / bigints (durations in **ms**, counts, byte totals, codes, ids, hops) | plain integer string |
+| `fraud_flags` (JSONB) | compact JSON (`{"k":v}`, no spaces) |
+| `on_net` (BOOLEAN) | `true` / `false` |
+| Text columns | verbatim |
+| Any NULL | empty string |
+
+Durations (`duration_ms`, `billable_ms`) are exported as **raw milliseconds**
+(the stored unit), not seconds — this is a full-fidelity dump.
+
+**Adding a column when the `cdrs` schema grows:** add it to
+`exporter.SELECT_COLUMNS` **and** `formatter._FIELD_DEFS` (same name, both in
+the same position). The drift-guard test
+(`tests/test_cdr_export.py::test_select_columns_equal_full_cdrs_schema`) parses
+the schema SQL and **fails** until a new `cdrs` column is wired into both, so
+"export everything we store" holds over time. The formatter is the single
+layout swap point.
 
 ### What the operator still needs to provide
 - FileMage **FTP credentials** (`CDR_EXPORT_FTP_USER` / `CDR_EXPORT_FTP_PASSWORD`)
   and confirmation of the **host/port** (`10.142.0.71:21` assumed).
 - The **remote drop directory** (`CDR_EXPORT_FTP_DIR`).
-- The **real ~49-field Equinox field spec** (order, labels, formats) and the
-  **filename convention** Equinox expects (prefix/extension/timestamp/sequence).
-- Whether Equinox wants a **header row** and/or **trailer/checksum** record.
+- The **filename convention** the downstream expects
+  (prefix/extension/timestamp — `CDR_EXPORT_FILENAME_*`).
 - Whether the transport must be **FTPS** (`CDR_EXPORT_FTP_TLS=true`) rather than
   plain FTP.

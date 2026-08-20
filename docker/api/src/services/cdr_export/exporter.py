@@ -46,11 +46,19 @@ logger = logging.getLogger(__name__)
 # carrier/EDI-style ingesters (e.g. Equinox). Configurable later if needed.
 LINE_TERMINATOR = "\r\n"
 
-# Columns pulled for export. This list is the contract between the SELECT and
-# the formatter's source keys (formatter._FIELD_DEFS). If the formatter needs a
-# new source column, add it here too. `id` and `start_time` are always needed
-# for the watermark/meta even though start_time is also a formatted field.
+# Columns pulled for export — the COMPLETE set of data columns on the `cdrs`
+# table (every column EXCEPT the `exported_at` watermark, which is NULL at
+# export time and is the selection cursor). We export all information we store
+# per CDR; downstream consumes what it needs. This list is the contract between
+# the SELECT and the formatter's source keys (formatter._FIELD_DEFS) — the
+# drift-guard test (tests/test_cdr_export.py) fails loudly if a future
+# ADD COLUMN on cdrs isn't wired in here.
+#
+# Order = base-table declaration order (05_schema_cdr.sql) followed by the
+# ADD COLUMN migrations in file-number order: 18 (sbc_id), 23 (on-net columns).
+# `id` and `start_time` are also required by the watermark/meta (BatchMeta).
 SELECT_COLUMNS: tuple[str, ...] = (
+    # --- base table (05_schema_cdr.sql), in declaration order ---
     "id",
     "uuid",
     "customer_id",
@@ -65,15 +73,55 @@ SELECT_COLUMNS: tuple[str, ...] = (
     "end_time",
     "duration_ms",
     "billable_ms",
+    "rate_per_min",
+    "total_cost",
+    "carrier_cost",
+    "margin",
+    "rated_at",
     "hangup_cause",
     "sip_code",
     "carrier_used",
     "traffic_grade",
+    "fraud_score",
+    "fraud_flags",
     "freeswitch_node",
+    "mos",
+    "quality_pct",
+    "jitter_min_ms",
+    "jitter_max_ms",
+    "jitter_avg_ms",
+    "packet_loss_count",
+    "packet_total_count",
+    "packet_loss_pct",
+    "flaw_total",
+    "r_factor",
+    "rtp_audio_in_raw_bytes",
+    "rtp_audio_in_media_bytes",
+    "rtp_audio_out_raw_bytes",
+    "rtp_audio_out_media_bytes",
+    "rtp_audio_in_packet_count",
+    "rtp_audio_out_packet_count",
+    "rtp_audio_in_jitter_burst_rate",
+    "rtp_audio_in_jitter_loss_rate",
+    "rtp_audio_in_mean_interval",
+    "read_codec",
+    "write_codec",
+    "read_rate",
+    "write_rate",
+    "sip_from_user",
+    "sip_to_user",
+    "hangup_cause_q850",
+    "sip_hangup_disposition",
+    "sip_user_agent",
+    "network_addr",
+    "bridge_uuid",
+    # --- 18_sbc_id_column.sql ---
     "sbc_id",
-    "rate_per_min",
-    "total_cost",
-    "carrier_cost",
+    # --- 23_onnet_cdr_columns.sql ---
+    "origin_customer_id",
+    "terminating_customer_id",
+    "on_net",
+    "on_net_hops",
 )
 
 
