@@ -5,9 +5,9 @@ import { useAuth } from '../../contexts/AuthContext';
 import { ApiError } from '../../api/client';
 import {
   IconRCF, IconTrunk, IconAPI, IconVoicemail, IconDocs,
-  IconAdmin, IconSignal, IconTroubleshoot,
+  IconSignal, IconTroubleshoot,
 } from '../icons/ProductIcons';
-import { Package, Shield, ChevronDown, Clock, Database, Eye, EyeOff, Server, BookOpen, WalletMinimal } from 'lucide-react';
+import { Package, Shield, ChevronDown, Clock, Database, Eye, EyeOff, BookOpen, WalletMinimal } from 'lucide-react';
 
 /* ─── Types ───────────────────────────────────────────────── */
 
@@ -696,7 +696,7 @@ export function Sidebar({ collapsed = false }: SidebarProps) {
     const path = location.pathname;
 
     const productPaths = productNavItems.map((i) => i.to);
-    const adminPaths   = ['/admin', '/call-quality', '/admin/platform', '/troubleshooting', '/cdrs'];
+    const adminPaths   = ['/admin', '/call-quality', '/troubleshooting', '/cdrs'];
     const docPaths     = docNavItems.map((i) => i.to);
     const soonPaths    = COMING_SOON_ITEMS.flatMap((i) => (i.to ? [i.to] : []));
     const inProducts = productPaths.some((p) => path === p || path.startsWith(p + '/'));
@@ -740,14 +740,6 @@ export function Sidebar({ collapsed = false }: SidebarProps) {
 
   /* ── Admin items ───────────────────────────────────────── */
 
-  const customersItem: NavItemDef   = {
-    label: 'Customer Management', to: '/admin/customers', color: '#60a5fa', icon: <IconAdmin />,
-    isActiveFn: (p) => p.startsWith('/admin') && !p.startsWith('/admin/platform') && !p.startsWith('/admin/payments-demo'),
-  };
-  const platformItem: NavItemDef    = {
-    label: 'Platform Management', to: '/admin/platform', color: '#60a5fa', icon: <Server size={15} strokeWidth={1.7} />,
-    isActiveFn: (p) => p.startsWith('/admin/platform'),
-  };
   const paymentsDemoItem: NavItemDef = {
     label: 'Payments Demo', to: '/admin/payments-demo', color: '#60a5fa', icon: <WalletMinimal size={15} strokeWidth={1.7} />,
     isActiveFn: (p) => p.startsWith('/admin/payments-demo'),
@@ -1023,12 +1015,13 @@ export function Sidebar({ collapsed = false }: SidebarProps) {
                   isOpen={groupOpen.administration}
                   onToggle={toggleGroup}
                 >
-                  {/* ── Customers sub-group (admin only) ──── */}
+                  {/* ── Platform sub-group (admin only) ────
+                       Customer + platform administration moved to TED (the CRAG
+                       console); the Payments Demo is the only admin surface that
+                       still lives in revup. */}
                   {isAdmin && (
                     <>
-                      <SubGroupLabel label="Customers" />
-                      <SidebarNavItem item={customersItem} onNavigate={closeMobile} small />
-                      <SidebarNavItem item={platformItem}  onNavigate={closeMobile} small />
+                      <SubGroupLabel label="Platform" />
                       <SidebarNavItem item={paymentsDemoItem} onNavigate={closeMobile} small />
                     </>
                   )}

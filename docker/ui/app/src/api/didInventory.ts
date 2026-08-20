@@ -1,43 +1,8 @@
 import { apiRequest } from './client';
 import type {
   DidInventoryItem,
-  DidInventoryListParams,
-  DidInventoryListResponse,
-  DidStats,
-  DidAssignRequest,
   DidAvailableParams,
 } from '../types/didInventory';
-
-/**
- * GET /numbers/inventory
- * Admin endpoint — returns paginated full inventory with optional filters.
- */
-export async function listDidInventory(
-  params: DidInventoryListParams = {},
-): Promise<DidInventoryListResponse> {
-  const qs = new URLSearchParams();
-  if (params.status) qs.set('status', params.status);
-  if (params.state) qs.set('state', params.state);
-  if (params.search) qs.set('search', params.search);
-  if (params.limit !== undefined) qs.set('limit', String(params.limit));
-  if (params.offset !== undefined) qs.set('offset', String(params.offset));
-
-  const raw = await apiRequest<DidInventoryItem[] | DidInventoryListResponse>(
-    'GET',
-    `/numbers/inventory${qs.toString() ? `?${qs.toString()}` : ''}`,
-  );
-
-  if (Array.isArray(raw)) {
-    return { items: raw, total: raw.length };
-  }
-  return {
-    items: (raw as DidInventoryListResponse).items ?? [],
-    total:
-      (raw as DidInventoryListResponse).total ??
-      (raw as DidInventoryListResponse).items?.length ??
-      0,
-  };
-}
 
 /**
  * GET /numbers/available
@@ -61,14 +26,6 @@ export async function listAvailableDids(
 }
 
 /**
- * GET /numbers/stats
- * Admin endpoint — aggregate inventory stats (totals by status/product/state).
- */
-export async function getDidStats(): Promise<DidStats> {
-  return apiRequest<DidStats>('GET', '/numbers/stats');
-}
-
-/**
  * GET /numbers/my
  * Customer endpoint — returns DIDs assigned to the calling user's customer account.
  */
@@ -79,40 +36,6 @@ export async function listMyDids(): Promise<DidInventoryItem[]> {
   );
   if (Array.isArray(raw)) return raw;
   return (raw as { items: DidInventoryItem[] }).items ?? [];
-}
-
-/**
- * POST /numbers/sync
- * Admin endpoint — triggers a sync of the number inventory from Bandwidth.
- */
-export async function syncDidInventory(): Promise<{ synced: number; message: string }> {
-  return apiRequest<{ synced: number; message: string }>('POST', '/numbers/sync');
-}
-
-/**
- * POST /numbers/{did}/assign
- * Admin endpoint — assigns a DID to a customer with a product type.
- */
-export async function assignDid(
-  did: string,
-  data: DidAssignRequest,
-): Promise<DidInventoryItem> {
-  return apiRequest<DidInventoryItem>(
-    'POST',
-    `/numbers/${encodeURIComponent(did)}/assign`,
-    data,
-  );
-}
-
-/**
- * POST /numbers/{did}/unassign
- * Admin endpoint — removes a DID from its current customer assignment.
- */
-export async function unassignDid(did: string): Promise<DidInventoryItem> {
-  return apiRequest<DidInventoryItem>(
-    'POST',
-    `/numbers/${encodeURIComponent(did)}/unassign`,
-  );
 }
 
 /**

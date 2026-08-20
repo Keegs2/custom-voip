@@ -8,11 +8,15 @@ import type { User } from '../types/auth';
  * `effectiveAdmin` must be the customerViewMode-aware `isAdmin` from
  * AuthContext, NOT `user.role === 'admin'`: an admin previewing the
  * app in customer view must land on the customer product page, or the
- * `/` → `/admin` → RequireAdmin → `/` redirects loop forever.
+ * `/` → home → RequireAdmin → `/` redirects loop forever.
+ *
+ * Admins land on `/cdrs` (CDR Search) — platform + customer administration
+ * moved to TED (the CRAG console), so the revup `/admin` tree no longer
+ * exists; sending admins to `/admin` here would loop forever.
  */
 export function productHome(user: User | null, effectiveAdmin: boolean): string {
   if (!user) return '/rcf';
-  if (effectiveAdmin) return '/admin';
+  if (effectiveAdmin) return '/cdrs';
   if (user.role === 'support') return '/troubleshooting';
   if (user.role === 'readonly') return '/call-quality';
   switch (user.account_type) {

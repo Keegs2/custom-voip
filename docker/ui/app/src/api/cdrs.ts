@@ -1,6 +1,5 @@
 import { apiRequest } from './client';
-import type { Cdr, CdrSearchParams, CdrSearchResult } from '../types/cdr';
-import type { CdrSummaryResponse } from '../types/rate';
+import type { Cdr, CdrSearchParams, CdrSearchResult, CdrSummaryResponse } from '../types/cdr';
 
 /** Raw API shape — may use `cdrs`/`count` OR `items`/`total` depending on version. */
 interface CdrRawResult {

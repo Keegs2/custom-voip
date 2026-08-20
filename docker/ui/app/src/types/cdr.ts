@@ -92,3 +92,20 @@ export interface CdrSearchResult {
   limit: number;
   offset: number;
 }
+
+/** Grouped CDR summary row (day / hour / destination), returned by /cdrs/summary. */
+export interface CdrSummaryRow {
+  date?: string | null;
+  hour?: string | null;
+  destination?: string | null;
+  product_type?: string | null;
+  direction?: string | null;
+  total_calls: number;
+  answered_calls: number;
+  total_duration_sec: number;
+  total_cost: number;
+}
+
+export interface CdrSummaryResponse {
+  summary: CdrSummaryRow[];
+}
