@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate, useParams } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
 import { RequireAuth } from './components/auth/RequireAuth';
 import { RequireAdmin } from './components/auth/RequireAdmin';
@@ -13,30 +13,10 @@ import { VisualVoicemailPage } from './pages/VisualVoicemailPage';
 import { GuidesPage } from './pages/docs/GuidesPage';
 import { ApiDocsPage } from './pages/docs/ApiDocsPage';
 import { TroubleshootingPage } from './pages/TroubleshootingPage';
-import { AdminPage } from './pages/admin/AdminPage';
-import { PlatformManagementPage } from './pages/admin/PlatformManagementPage';
-import { CustomersAdminPage } from './pages/admin/CustomersAdminPage';
-import { CustomerAccountPage } from './pages/admin/CustomerAccountPage';
 import { CdrsAdminPage } from './pages/admin/CdrsAdminPage';
-import { RatesAdminPage } from './pages/admin/RatesAdminPage';
-import { TiersAdminPage } from './pages/admin/TiersAdminPage';
-import { CarriersAdminPage } from './pages/admin/CarriersAdminPage';
-import { StirSummaryPage } from './pages/admin/StirSummaryPage';
-// Homer moved to standalone Troubleshooting page
-import { TrunksAdminPage } from './pages/admin/TrunksAdminPage';
-import { DIDSearchPage } from './pages/admin/DIDSearchPage';
-import { UserDetailPage } from './pages/admin/UserDetailPage';
-import { OnboardingAdminPage } from './pages/admin/OnboardingAdminPage';
 import { PaymentsDemoControlPage } from './pages/admin/payments-demo/PaymentsDemoControlPage';
-import { OnboardingBriefPage } from './pages/admin/OnboardingBriefPage';
 import { CallQualityPage } from './pages/CallQualityPage';
 import { MyAccountPage } from './pages/MyAccountPage';
-
-/** Redirects /admin/user/:userId → /admin/customers/users/:userId */
-function UserDetailRedirect() {
-  const { userId } = useParams<{ userId: string }>();
-  return <Navigate to={`/admin/customers/users/${userId}`} replace />;
-}
 
 export function App() {
   return (
@@ -66,10 +46,10 @@ export function App() {
               <Route path="docs/api/:product?"      element={<ApiDocsPage />} />
               <Route path="docs/integration"        element={<Navigate to="/docs/api" replace />} />
               <Route path="call-quality" element={<CallQualityPage />} />
-              {/* Standalone CDR search — admin + support roles. The
-                  /admin/platform/cdrs tab mounts the same page (without the
-                  standalone shell) and stays untouched until the admin-tree
-                  cleanup PR. */}
+              {/* Standalone CDR search — admin + support roles. Platform +
+                  customer administration now lives in TED (the CRAG console);
+                  the revup /admin tree was removed, but CDR Search stays here
+                  as a support-facing tool. */}
               <Route
                 path="cdrs"
                 element={
@@ -83,15 +63,11 @@ export function App() {
               <Route path="account"          element={<Navigate to="/my-account" replace />} />
               <Route path="my-account"       element={<MyAccountPage />} />
 
-              {/* Redirects from old standalone paths to their new tab locations */}
-              <Route path="admin/did-search" element={<Navigate to="/admin/platform/dids" replace />} />
-              <Route path="admin/user" element={<Navigate to="/admin/customers/users" replace />} />
-              <Route
-                path="admin/user/:userId"
-                element={<UserDetailRedirect />}
-              />
+              {/* Old bookmark: the platform CDRs tab is now the standalone /cdrs page. */}
+              <Route path="admin/platform/cdrs" element={<Navigate to="/cdrs" replace />} />
 
-              {/* Machine Payments Demo — standalone daylight page (no tab shell) */}
+              {/* Machine Payments Demo — standalone daylight page (no tab shell).
+                  The only surviving /admin route; the rest moved to TED. */}
               <Route
                 path="admin/payments-demo"
                 element={
@@ -100,56 +76,10 @@ export function App() {
                   </RequireAdmin>
                 }
               />
-
-              {/* Customer Management — nested under AdminPage tab shell */}
-              <Route
-                path="admin"
-                element={
-                  <RequireAdmin>
-                    <AdminPage />
-                  </RequireAdmin>
-                }
-              >
-                <Route index                              element={<Navigate to="customers" replace />} />
-                <Route path="onboarding"                  element={<OnboardingAdminPage />} />
-                <Route path="customers"                   element={<CustomersAdminPage />} />
-                <Route path="customers/:customerId"       element={<CustomerAccountPage />} />
-                <Route path="trunks"                      element={<TrunksAdminPage />} />
-                <Route path="customers/users"             element={<UserDetailPage />} />
-                <Route path="customers/users/:userId"     element={<UserDetailPage />} />
-              </Route>
-
-              {/* Platform Management — nested under PlatformManagementPage tab shell */}
-              <Route
-                path="admin/platform"
-                element={
-                  <RequireAdmin>
-                    <PlatformManagementPage />
-                  </RequireAdmin>
-                }
-              >
-                <Route index           element={<Navigate to="carriers" replace />} />
-                <Route path="carriers" element={<CarriersAdminPage />} />
-                <Route path="cdrs"     element={<CdrsAdminPage />} />
-                <Route path="rates"    element={<RatesAdminPage />} />
-                <Route path="tiers"    element={<TiersAdminPage />} />
-                <Route path="stir"     element={<StirSummaryPage />} />
-                <Route path="dids"     element={<DIDSearchPage />} />
-              </Route>
             </Route>
           </Route>
 
           {/* Full-screen pages — outside AppLayout (no max-width/padding) */}
-          <Route
-            path="admin/onboarding/print/:id"
-            element={
-              <RequireAuth>
-                <RequireAdmin>
-                  <OnboardingBriefPage />
-                </RequireAdmin>
-              </RequireAuth>
-            }
-          />
           <Route
             path="troubleshooting"
             element={

@@ -10,7 +10,7 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { getCdrSummary } from '../../api/cdrs';
 import { Spinner } from '../../components/ui/Spinner';
-import type { CdrSummaryRow } from '../../types/rate';
+import type { CdrSummaryRow } from '../../types/cdr';
 
 type GroupBy = 'day' | 'hour' | 'destination';
 
