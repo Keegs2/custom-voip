@@ -159,31 +159,32 @@ Every SIP request enters here. Processing order:
 
 ### 4.2 route[WITHINDIALOG]
 
-Handles BYE, re-INVITE, ACK, UPDATE, etc. for established calls.
+Handles BYE, re-INVITE, ACK, UPDATE, etc. for established calls. (CANCEL never gets here — it is handled at the top of request_route via `t_check_trans()`.)
 
-**When `loose_route()` fails** (no Route headers):
+**FIRST — network-side dispatch, BEFORE `loose_route()`** (§8.10): if the source is external (`!IS_INTERNAL_SOURCE`, not SIPp) and the R-URI is one of OUR OWN addresses (`is_myself($rd)` — always true for carrier/PBX in-dialog requests because topology hiding rewrote FS's Contact to the VIP), the request is handed to `route[FROM_NET_INDIALOG]` → `route[TO_FS_INDIALOG]` and NEVER runs `loose_route()`. Re-INVITEs get `NAT_DETECT` + `record_route()` first (mirrors the legacy in-dialog INVITE handling). `TO_FS_INDIALOG` resolves the FS profile port statelessly — `;fs=` marker in Route/R-URI → `$dlg_var(fs_port)` (owner fallback for pre-marker dialogs) → guess 5090 + one-shot 481 retry — builds a clean `sip:<user>@FS_IP:port` R-URI (preserving `$rU` = FS's own Contact user echoed back), strips all Route headers, and relays. Works identically on both SBCs with zero dialog state.
+
+**When `loose_route()` fails** (no Route headers) — internal-plane and degenerate shapes only:
 
 - **ACK for 2xx** (normal case per RFC 3261 Section 17.1.1.3 - ACK for 2xx is a separate transaction):
+  - R-URI == self (mixed-state peer relay of a carrier ACK, see §8.10) -> `TO_FS_INDIALOG`.
   - From FS -> Topology-hide Contact, forward to carrier. R-URI already points to Bandwidth's Contact address.
-  - From Bandwidth -> Forward to FS using `$dlg_var(fs_port)` to select correct FS profile (5080 for inbound calls, 5090 for outbound calls). Rewrites R-URI to strip Record-Route params.
-- **BYE/CANCEL/UPDATE/etc without Route**:
-  - Same source-based logic as ACK. From FS -> carrier, from Bandwidth -> FS.
-  - Uses `$dlg_var(fs_port)` for correct FS profile targeting.
+  - From external (non-self R-URI) -> `TO_FS_INDIALOG`.
+- **BYE/UPDATE/etc without Route**:
+  - Same logic as ACK: R-URI==self -> FS; from FS -> carrier; from trusted external -> FS.
 
-**When `loose_route()` succeeds** (Route headers present):
+**When `loose_route()` succeeds** (Route headers present) — FS-originated, SIPp test path, and trunk-delivery legs only (network-side requests exited at the head arm):
 
-1. Re-INVITEs from external sources get NAT detection. Re-INVITEs from FS do NOT (would corrupt Contact).
-2. All in-dialog requests from FS get topology hiding: Contact replaced with Kamailio's address, SDP scrubbed.
-3. **Self-loop detection**: If R-URI points to Kamailio after loose_route(), redirect to the correct destination (FS or Bandwidth) based on source.
-4. Forward via route[RELAY].
+1. FS-originated requests: `after_loose()` pops the inner Route, sees `;r2=on` on it, consumes the VIP Route too and forces the VIP send socket → one traversal to the carrier.
+2. Re-INVITEs from external sources get NAT detection. Re-INVITEs from FS do NOT (would corrupt Contact).
+3. All in-dialog requests from FS get topology hiding: Contact replaced with Kamailio's address, SDP scrubbed.
+4. **Self-loop detection**: If R-URI points to Kamailio after loose_route(): from FS (media/docker/loopback subnets) -> carrier; from anything else (e.g. a mixed-state peer SBC relay) -> `TO_FS_INDIALOG`. Never key this on `IS_INTERNAL_SOURCE` alone — a peer SBC is "internal" too, and bouncing its relayed carrier BYE to Bandwidth was one of the §8.10 failure modes.
+5. Forward via route[RELAY].
 
-**Critical design: `$dlg_var(fs_port)`**
+**FS profile port resolution (in `TO_FS_INDIALOG`)**
 
-Dialog variable set during initial INVITE routing:
-- `5080` = FS internal profile (inbound calls from Bandwidth, trunk auth calls)
-- `5090` = FS external profile (outbound calls from FS to Bandwidth)
-
-This is read by WITHINDIALOG to route in-dialog requests to the correct FS SIP profile.
+- `5080` = FS internal profile (inbound calls from Bandwidth, trunk auth calls) — A-leg dialogs, `;fs=5080` marker.
+- `5090` = FS external profile (outbound calls from FS to Bandwidth) — B-leg dialogs, `;fs=5090` marker.
+- `$dlg_var(fs_port)` (set at INVITE time) remains as the owner-side fallback for dialogs established before the `;fs=` marker deploy; `dlg_match_mode=1` lets it resolve without `loose_route()` having processed a `;did=`.
 
 ### 4.3 route[TO_CARRIER] (Outbound: FS -> Bandwidth)
 
@@ -215,11 +216,12 @@ This is read by WITHINDIALOG to route in-dialog requests to the correct FS SIP p
 
 4. **`msg_apply_changes()` + DOUBLE `record_route_preset()`**: Rebuild message
    buffer, then add the two Record-Route headers via
-   `record_route_preset("ADVERTISE_IP:5060;lr", "SBC_INTERNAL_IP:5060;lr")` (outer
-   = NLB VIP, inner = this SBC's VPC IP). Order is critical -- record_route before
-   msg_apply_changes breaks header cleanup. The inner RR ensures Bandwidth's
-   in-dialog ACK/BYE comes back to THIS specific SBC (bypassing NLB load-balancing
-   to a stateless SBC). See section 8.7.
+   `record_route_preset("ADVERTISE_IP:5060;fs=5090;lr", "SBC_INTERNAL_IP:5060;r2=on;fs=5090;lr")`
+   (outer = NLB VIP, inner = this SBC's VPC IP). Order is critical -- record_route
+   before msg_apply_changes breaks header cleanup. `;r2=on` on the inner entry
+   makes FS-originated in-dialog requests consume both own Routes in one pass;
+   `;fs=5090` is the stateless dispatch marker that lets ANY SBC deliver a
+   carrier-originated in-dialog request to FS's external profile. See §8.7 + §8.10.
 
 5. **Via handling**: Intentionally NO Via manipulation. FS's Via is preserved. Removing it causes SIP corruption (orphaned `;received=`/`;rport=` params merge with next header). Two Vias is valid per RFC 3261.
 
@@ -519,24 +521,26 @@ Bandwidth sometimes sends `Session-Expires: 30` in 200 OK (below RFC minimum of 
 
 `enable_double_rr=1` is set and BOTH legs use `record_route_preset()` with two URIs:
 ```
-Record-Route: <sip:ADVERTISE_IP:5060;lr>          (outer = NLB VIP, what Bandwidth sees)
-Record-Route: <sip:SBC_INTERNAL_IP:5060;r2=on;lr> (inner = this SBC's VPC IP)
+Record-Route: <sip:ADVERTISE_IP:5060;fs=509x;lr>          (outer = NLB VIP, what Bandwidth sees)
+Record-Route: <sip:SBC_INTERNAL_IP:5060;r2=on;fs=509x;lr> (inner = this SBC's VPC IP)
 ```
-- **TO_CARRIER (B-leg, FS->carrier):** `record_route_preset("ADVERTISE_IP:5060;lr", "SBC_INTERNAL_IP:5060;r2=on;lr")` — outer first.
-- **A-leg (Bandwidth->FS, in request_route):** `record_route_preset("SBC_INTERNAL_IP:5060;r2=on;lr", "ADVERTISE_IP:5060;lr")` — REVERSED order, because Kamailio's RR insertion direction means the reversal yields the correct outer(VIP)/inner(SBC) roles for the inbound direction.
+- **TO_CARRIER (B-leg, FS->carrier):** `record_route_preset("ADVERTISE_IP:5060;fs=5090;lr", "SBC_INTERNAL_IP:5060;r2=on;fs=5090;lr")` — outer first.
+- **A-leg (Bandwidth->FS, in request_route):** `record_route_preset("SBC_INTERNAL_IP:5060;r2=on;fs=5080;lr", "ADVERTISE_IP:5060;fs=5080;lr")` — REVERSED order, because Kamailio's RR insertion direction means the reversal yields the correct outer(VIP)/inner(SBC) roles for the inbound direction.
 
-**The `;r2=on` marker (hairpin fix):** `r2=on` is the rr module's native double-RR pair marker (record.c `RR_R2`). With `enable_double_rr=1`, when `loose_route()` pops an own Route carrying `r2`, it ALSO consumes the next Route and forces the send socket to that URI's listen socket (loose.c `after_loose`/`is_2rr`). It goes on the **FS-facing (SBC_INTERNAL) entry ONLY**:
-- FS-side in-dialog ACK/BYE (Route: SBC_INTERNAL;r2, VIP) → both Routes consumed in ONE traversal, request relayed straight to the carrier from the VIP socket with ONE SBC Via. Without it, the leftover VIP Route made the SBC send the request TO ITSELF over loopback (the VIP is a local address), reprocess it, and stack a second own Via on the carrier-bound BYE.
-- The VIP (outer) entry must NOT carry `r2`: carrier-side in-dialog requests pop the VIP Route first.
-  > ⚠️ **KNOWN DEFECT — this arrangement does NOT actually survive an NLB-misdelivered carrier-side in-dialog request.** The original claim here ("the intact SBC_INTERNAL Route forwards an NLB-misdelivered request to the dialog-owning SBC") is **false** — proven by production packet capture (West, 2026-08-02) and verified against the Kamailio `rr` source. `r2` on the *inner* entry only helps the FS→carrier direction; in the carrier→FS direction the VIP is the FIRST route and `loose_route()` only ever inspects the first route for the `r2` flag, so a carrier BYE that the stateless NLB delivers to the **non-owner** SBC gets strict-promoted into the R-URI and loops → `481` → `408`. This mis-tears-down ~50% of carrier-originated hangups in **all three zones**. Full root cause + the applied fix + the test are in **§8.10**. Status: **FIXED in `kamailio.cfg`** (Option A, 2026-08-03) — `;r2=on` removed from both presets + a non-owner→owner relay added in `route[WITHINDIALOG]`; pending live test + per-zone rollout.
+**The `;r2=on` marker (FS-direction hairpin fix — carrier-side it is inert):** `r2=on` is the rr module's native double-RR pair marker (record.c `RR_R2`). With `enable_double_rr=1`, when `loose_route()` pops an own FIRST Route carrying `r2`, it ALSO consumes the next Route and forces the send socket to that URI's listen socket (5.8 loose.c `after_loose`/`is_2rr` — the check reads the FIRST Route's params only). It goes on the **FS-facing (SBC_INTERNAL) entry ONLY**, because that entry is the FIRST Route only in the FS→carrier direction:
+- FS-side in-dialog ACK/BYE (Route: SBC_INTERNAL;r2, VIP) → both Routes consumed in ONE traversal, request relayed straight to the carrier from the VIP socket with ONE SBC Via. Without it, the leftover VIP Route made the SBC send the request TO ITSELF over loopback (the VIP is a local address), reprocess it, and stack a second own Via on the carrier-bound BYE (this is exactly what production did during the r2-less window 2026-08-03..21).
+- In the carrier→FS direction the VIP is the first Route and never carries `r2`, so `r2` is **invisible there — it neither helps nor harms**. Carrier-side in-dialog requests are NOT routed by `loose_route()` at all; see §8.10.
 
-**Why the inner RR:** GCE's NLB is pass-through and stateless. Without the inner
-SBC_INTERNAL_IP record-route, Bandwidth's in-dialog ACK/BYE would hit the NLB VIP,
-get load-balanced to a RANDOM SBC with no dialog state -> dropped ACK / 404 on BYE.
-The inner RR routes in-dialog requests directly to the specific SBC that handled
-the INVITE. This requires `alias=SBC_INTERNAL_IP:5060` (so `loose_route()`
-recognizes the inner RR as local and strips it; without the alias, loose_route
-doesn't match it and an infinite ACK loop results).
+**The `;fs=` marker (stateless carrier-side dispatch):** `fs=5080` (A-leg preset) / `fs=5090` (B-leg preset) on BOTH entries. The peer echoes our Record-Route set verbatim in its Route headers (and some shapes echo an RR URI as the R-URI), so any SBC can read the target FS profile port from the request itself — no dialog state, no owner/non-owner logic. URI parameters on our own RR entries are inert to the rr module (`is_myself` matches host:port; `is_2rr`/`is_strict` key on `r2`/`lr` specifically) and MUST be echoed unmodified per RFC 3261 (Bandwidth demonstrably echoes `ftag`/`did` already).
+
+**Why the inner RR (FS direction):** GCE's NLB is pass-through and stateless. FS
+sends its in-dialog ACK/BYE to its first Route = the inner SBC_INTERNAL_IP —
+directly to the SBC that owns the dialog, bypassing the NLB. Without it, FS's ACK
+would hit the VIP and load-balance to a random SBC. This requires
+`alias=SBC_INTERNAL_IP:5060` (so `loose_route()` recognizes the inner RR as
+local/"myself"). In the carrier→FS direction the inner RR is informational only —
+any SBC can serve the request via the `;fs=` marker (§8.10), which is what makes
+the stateless NLB coin-flip harmless.
 
 **Contact vs SDP IP split:** Contact and From use ADVERTISE_IP (the VIP, for SIP
 routing); SDP `c=`/media uses FS_PUBLIC_IP (where RTP actually flows, bypassing
@@ -550,37 +554,143 @@ advertised address is delivered locally instead of dropped by GCE's fabric.
 
 The `topoh.so` module is explicitly disabled. It conflicts with the manual header cleanup in TO_CARRIER by adding TH= markers that must then be removed. All topology hiding is done via explicit `remove_hf()` + `append_hf()` + SDP `subst_body()`.
 
-### 8.9 Dialog Variable for FS Port Selection
+### 8.9 FS Profile Port Selection (fs= marker first, dialog variable as fallback)
 
-`$dlg_var(fs_port)` is set during initial INVITE routing and read during in-dialog routing. If this variable is missing (e.g., dialog not created), WITHINDIALOG defaults to port 5090 (external profile). Getting this wrong routes BYE to the wrong FS profile, causing the call to not hang up properly.
+The authoritative port source is the `;fs=` Record-Route marker (§8.7/§8.10) — stateless, works on any SBC. `$dlg_var(fs_port)` (set during initial INVITE routing: 5080 inbound/trunk, 5090 outbound) remains as the owner-side fallback for dialogs established before the marker existed; `dlg_match_mode=1` (SIP-element fallback matching) is REQUIRED for it to resolve in `TO_FS_INDIALOG`, which does not run `loose_route()` (so no `;did=` processing). If both are missing, `TO_FS_INDIALOG` guesses 5090 and serially retries the other profile on a 481 (`failure_route[FS_PORT_FAILOVER]`, non-ACK only). Routing an in-dialog request to the wrong FS profile yields a Sofia 481 — the profiles are independent SIP agents.
 
-### 8.10 Carrier-originated in-dialog BYE `481` on NLB misdelivery — FIXED (Option A applied 2026-08-03, pending live test)
+### 8.10 Carrier-side in-dialog routing (BYE/ACK/re-INVITE 481) — FINAL DESIGN: stateless dispatch, no loose_route() for network-side requests
 
-**Status:** Root-caused, and **Option A is now implemented in `kamailio.cfg`** (2026-08-03) — awaiting the live carrier-side-BYE test below + per-zone rollout. Was live in all 3 zones (config byte-identical; only env values differ). Discovered on West via HEP capture of a real call (A-leg dialog `did=b3f.824`/ftag `gK00149a7b` owned by west-sbc-2 `10.138.0.101`; B-leg `did=a96.58d2`/ftag `4ZK8K1DKNe1Ba` owned by west-sbc-1 `10.138.0.100`). **The fix is deployed by rebuilding/reloading Kamailio on all 6 SBCs (canary West first) — until then the defect is still live on any SBC running the old config.**
+**Status: FIXED (2026-08-21, branch `fix/sbc-indialog-bye-481`, single commit superseding three partial fixes). Pending the live test matrix below, then rollout to all 6 SBCs / 3 zones.**
 
-**Symptom:** Call sets up and runs fine (INVITE→200→ACK, media OK). At teardown, a burst of `481 Call/Transaction Does Not Exist` on the BYEs, BYE retransmissions, and a final `408 Request Timeout` ~30s later. User-visible as "signalling a little off": calls that ended but linger ~30s, stuck channels, CDR duration inflated. It's intermittent because it's a **coin-flip on which SBC the stateless NLB hands the carrier BYE to** — with 2 SBCs, ~50% of carrier-originated hangups.
+#### The disease (source-verified against Kamailio 5.8 `rr/loose.c`)
 
-**Root cause (source-verified against Kamailio 5.8 `rr` module):** The double-RR design puts `;r2=on` on the **inner** (SBC_INTERNAL) Record-Route so `loose_route()` will consume both routes in one pass and reach the dialog-owning SBC. But `after_loose()` decides the double-consume **solely from the TOPMOST (first) Route header** — `is_2rr(&puri.params)` (`parse_rr.h`) inspects only the first route's params, never the second.
-- **FS→carrier** (ACK/BYE we originate): route set is `[SBC_INTERNAL;r2, VIP]` — inner is FIRST, `r2` seen → both consumed in one pass → works. ✅
-- **carrier→FS** (Bandwidth originates the BYE): route set is REVERSED to `[VIP(no r2), SBC_INTERNAL;r2]` — the VIP is FIRST and carries NO `r2`, so `loose_route()` **never sees the flag**. If the NLB delivers that BYE to the **dialog-owner** SBC it still works by luck (the owner strips VIP=self, then the inner=self too, and the existing self-loop redirect sends it to FS). If the NLB delivers it to the **non-owner** SBC, after the VIP (own, on loopback) is stripped, the inner route is a *foreign* address; the module strict-promotes it into the Request-URI (packet showed `BYE sip:10.138.0.100:5060;r2=on;lr;... SIP/2.0` with the VIP Route still attached), re-emits toward `10.138.0.100` from the VIP socket, stacks another `Via: <VIP>`, re-enters an SBC, and loops until `481`/`408`. ❌
+Topology hiding rewrites FreeSWITCH's Contact to the NLB VIP (`ADVERTISE_IP`), so EVERY
+carrier/PBX in-dialog request arrives with **R-URI == one of our own addresses** — on
+BOTH SBCs (both listen on/advertise the VIP) — plus `Route: [VIP, SBC_INTERNAL_owner]`.
+`loose_route_mode()` dispatches on exactly that shape: *R-URI is myself + Route header
+present + to-tag* → **`after_strict()`** — the RFC 2543 strict-router recovery — fires
+**unconditionally** (r2 plays no role in the trigger). `after_strict()` then:
 
-The `;did=` and `;lr=on` params on the Record-Routes are cosmetic (`;lr=on` from `enable_full_lr=1`, `;ftag=` from `append_fromtag=1`, `;did=` is the dialog module's correlation cookie) — NOT the bug. There is exactly one `record_route_preset()` per leg; the dialog module is not double-record-routing.
+1. sets **`$du` = the FIRST Route** — our own VIP → a guaranteed loopback self-hairpin
+   (the VIP is a local address on every SBC), one stacked `Via:<VIP>` per pass;
+2. **promotes the LAST Route into the R-URI verbatim** (`rewrite_uri()` via
+   `find_rem_target()`) — the owner SBC's private `sip:10.138.0.x:5060;lr;ftag;did`
+   becomes the R-URI, params and all — and removes only that last Route.
 
-**The FIX (Option A — recommended, ~3 lines + one guard block):** `;r2=on` is the wrong tool for the reversed carrier→FS route set. Remove it from both presets and handle the non-owner handoff explicitly.
-1. `kamailio.cfg` A-leg preset (currently ~`:848`): `record_route_preset("SBC_INTERNAL_IP:5060;r2=on;lr", "ADVERTISE_IP:5060;lr")` → drop the `;r2=on`: `record_route_preset("SBC_INTERNAL_IP:5060;lr", "ADVERTISE_IP:5060;lr")`.
-2. `kamailio.cfg` B-leg preset in TO_CARRIER (currently ~`:1904`): `record_route_preset("ADVERTISE_IP:5060;lr", "SBC_INTERNAL_IP:5060;r2=on;lr")` → drop the `;r2=on`: `record_route_preset("ADVERTISE_IP:5060;lr", "SBC_INTERNAL_IP:5060;lr")`.
-3. In `route[WITHINDIALOG]` after `loose_route()` succeeds (~`:1468`, ahead of the self-loop redirect), add a non-owner relay: if the source is NOT internal (carrier-originated) and `loose_route()` set `$du` to a peer SBC's internal IP (i.e. `$dd` is in the GCE internal subnet and is NOT one of my own addresses — `!is_myself("$dd")`), then `route(RELAY); exit;` straight to the dialog-owner SBC WITHOUT topology-hiding or the self-loop redirect. The owner then runs the same block as the working owner case.
-   - Why safe: FS→carrier is unchanged (the self-loop redirect already forces `$du` to the carrier before RELAY, so dropping `r2` reintroduces no hairpin); carrier→FS-on-owner is unchanged; carrier→FS-on-non-owner is the only path that changes, and it goes from "strict-promote + loop" to "clean relay to the owner." `alias=SBC_INTERNAL_IP:5060` stays required (it's what makes the owner recognize its own inner route as self; peers don't alias each other's SBC_INTERNAL, which is exactly what `!is_myself($dd)` keys on).
-   - Option B (keep `r2`, string-match Route headers to pre-empt the non-owner case before `loose_route()`) was evaluated and **rejected** as fragile.
+The route set is destroyed and the packet's fate then depends on which SBC re-receives
+it, its dialog state, and which patch generation it runs — the captured result was a
+3×`Via:<VIP>` BYE egressing an SBC **public** interface to FS with an SBC R-URI, and
+Sofia answering **481** (wrong port or an R-URI Sofia can't associate → 481 every time;
+the two FS profiles :5080/:5090 are independent SIP agents). `after_strict()` is correct
+for a genuine upstream strict router; our R-URI==self comes from topology hiding, and
+rr has no way to know the difference. **Conclusion: carrier-side in-dialog requests must
+never be given to `loose_route()` at all.**
 
-**How to TEST (reproduce the specific failing pattern — a carrier BYE the NLB delivers to the NON-owner SBC):**
-1. Place a West call that egresses to a carrier (B-leg owned by one specific SBC — confirm via Homer `X-SBC-ID` / the `did=` owner). Answer it, hold >30s.
-2. Tear down from the **carrier/PSTN side** (terminating end hangs up, so **Bandwidth** originates the BYE). Repeat until the NLB lands a BYE on the **non-owner** SBC (Homer: the BYE's first `Via`/`X-SBC-ID` is the non-owner while the dialog `did` belongs to the other SBC).
-3. **PASS:** that BYE relays non-owner → owner → FS (`192.168.20.2:5080`) → `200 OK`, with NO `BYE sip:10.138.0.10x...` R-URI promotion, NO duplicate `Via: <VIP>` stacking, NO `481`/`408`. The FS-originated BYE (caller hangs up) must still reach the carrier in one hop with a single SBC `Via`.
-4. Run the SIPp banked harness on `west-loadtest` across the full carrier-BYE mix → zero 481-on-BYE.
-5. Deploy is per-SBC (all 6): `kamailio.cfg` is bind-mounted, but a config change needs a Kamailio reload/restart — `sudo docker compose -f docker-compose.sbc.yml up -d --build kamailio` (or `kamcmd` reload if config-file reload is wired). **Canary West first**, prove the pattern above, then apply the identical cfg to East + Central (same latent bug) and re-verify one carrier-side teardown per zone.
+#### The fix (design A — stateless deterministic dispatch)
 
-**HEP extraction used to diagnose (qryn/ClickHouse on the East `services` VM):**
+1. **`;fs=` dispatch marker in both Record-Route presets** (§8.7): A-leg preset carries
+   `;fs=5080`, TO_CARRIER preset `;fs=5090`, on BOTH entries. The peer echoes the RR set
+   verbatim in its Route headers on every in-dialog request (Bandwidth demonstrably echoes
+   `ftag`/`did` already), and RR-URI-as-R-URI shapes carry it in the R-URI. The target FS
+   profile port is therefore IN THE REQUEST — readable by ANY SBC with zero dialog state.
+2. **`route[WITHINDIALOG]` head arm, BEFORE `loose_route()`:**
+   `!IS_INTERNAL_SOURCE && $si != SIPP_TESTING_IP && is_myself($rd)` →
+   `route[FROM_NET_INDIALOG]` (re-INVITE: `NAT_DETECT` + `record_route()`, mirroring the
+   legacy in-dialog INVITE handling) → `route[TO_FS_INDIALOG]`.
+3. **`route[TO_FS_INDIALOG]`** (the ONE terminal FS delivery path, also used by the
+   no-Route safety nets and the self-loop redirect): resolve port `;fs=` in Route (either
+   header) → `;fs=` in R-URI → `$dlg_var(fs_port)` (owner-only fallback for pre-marker
+   dialogs; needs `dlg_match_mode=1`) → guess 5090 + one-shot 481 retry on 5080
+   (`failure_route[FS_PORT_FAILOVER]`, non-ACK). Build a clean `sip:<user>@FS_IP:port`
+   (preserve `$rU` — it IS FS's Contact user echoed back: the TN on the A-leg,
+   `mod_sofia` on the B-leg; fall back to `$tU`), `remove_hf("Route")` (we terminate the
+   route set — FS must never see Route headers), `$du = sip:FS_IP:port` → mhomed picks
+   the internal socket (192.168.x is only reachable via the VPC interface — same
+   mechanism as every DISPATCH INVITE, so the BYE reaches FS from an internal `10.x`
+   source, single SBC Via, never the public path).
+4. **`;r2=on` RESTORED on the inner (SBC_INTERNAL) preset entries** — FS-direction only
+   (§8.7). Carrier-side it was always invisible; FS-side it restores the April
+   single-traversal behavior (`after_loose()` double-pop + VIP send socket).
+5. **`dlg_match_mode=1`** so the `$dlg_var(fs_port)` fallback can resolve without
+   `loose_route()`/`;did=` processing (exact Call-ID+tags matching).
+
+Invariants preserved: topology hiding, `bw_dedup`, NAT_DETECT never on FS traffic
+(head arm is external-source-only, matching the old conditional exactly), TEST-PATH
+(SIPp is excluded from the head arm by BOTH clauses — internal SIPp via
+`IS_INTERNAL_SOURCE`, external SIPp via `$si != SIPP_TESTING_IP` — so test dialogs
+always reach their dedicated TEST-PATH machinery), STIR hooks, 422/5xx carrier
+failover, REPLY_HANDLER Contact rewriting, Contact-before-`msg_apply_changes`,
+`record_route`-after-`msg_apply_changes`, no topoh, `alias=SBC_INTERNAL_IP:5060`.
+
+#### Mixed-state / transition behavior (deploy-window safety)
+
+Each updated SBC is **self-sufficient**: a carrier request hitting it directly is
+handled correctly regardless of the peer's config generation. Shapes relayed BY a
+stale peer (its `after_strict()` output: no-Route + R-URI == our SBC_INTERNAL, from an
+internal source) land in the no-Route arms' `is_myself($rd)` safety net → same
+`TO_FS_INDIALOG` delivery. Dialogs **established before** the marker deploy have no
+`;fs=`: at the owner, `$dlg_var(fs_port)` resolves the port; at the non-owner, the
+5090-guess + 481-retry recovers BYE/UPDATE/INFO (one ~1ms internal round-trip); a
+pre-marker 2xx **ACK** on the non-owner cannot be retried (no transaction) and is
+best-effort — strictly better than the prior state, where it was 100% lost. These
+old dialogs age out within one session-timer cycle.
+
+#### Superseded iterations (kept for the record — do NOT resurrect)
+
+1. **April design ("r2=on required, inner Route reaches the owner")** — half right.
+   `r2` on the inner entry is correct and necessary **for the FS→carrier direction
+   only** (`is_2rr()` reads the FIRST Route; inner is first only in FS's route set).
+   The claim that the carrier direction "pops ONLY the VIP, leaving the inner Route
+   to reach the dialog-owning SBC" was **false**: with R-URI==self, `after_strict()`
+   fires before any popping logic and destroys the set. Carrier-side teardowns were
+   structurally broken from day one.
+2. **Option A, 34a7f70 (2026-08-03): drop r2 from both presets + `$dd`-keyed
+   non-owner relay** — attacked the wrong lever twice. Dropping `r2` changed nothing
+   carrier-side (it was never consulted there) and broke the FS-direction double-pop
+   (re-introducing the wire hairpin + duplicate Via it had fixed). The relay keyed on
+   `$dd ∈ GCE_INTERNAL_NETWORK`, but `after_strict()` sets `$du` to the **VIP** (first
+   Route) — never a peer-internal address — so the relay **could not fire** on the
+   real shape; the BYE self-hairpinned instead. Never live-verified.
+3. **2707a10 (owner no-Route `is_myself($rd)`→FS guard)** — right instinct (decide by
+   R-URI, not source), wrong location: the failing packet stays in the
+   loose_route()-SUCCESS branch (promotion returns RR_DRIVEN), so the no-Route guard
+   was unreachable for the primary shape. Also read `$dlg_var(fs_port)` in a context
+   where `dlg_match_mode=0` (did-only) could never match a no-Route request → always
+   defaulted to 5090, wrong for every A-leg (caller-side) BYE. The guard survives in
+   spirit as the mixed-state safety net (now delivering via `TO_FS_INDIALOG`).
+4. **b38f985 (loose_route-SUCCESS promoted-R-URI guard)** — correctly identified the
+   promotion but kept chasing its outputs: owner/non-owner branching on `$rd`, a
+   non-owner→owner relay (another traversal, another config-generation dependency),
+   `$dlg_var` reads with the same `dlg_match_mode=0` flaw, and its relay left the
+   leftover `Route:[VIP]` attached (per 5.8 `after_strict()` only the LAST Route is
+   removed), handing the owner a shape whose self-loop redirect (keyed on
+   `IS_INTERNAL_SOURCE`) would bounce it to Bandwidth. Never deployed.
+
+   The common failure mode of 2-4: **treating `after_strict()`'s output shapes as the
+   problem instead of the fact that `after_strict()` runs at all.** The final design
+   removes the generator; there are no shapes left to chase.
+
+#### Live test matrix (run per zone before calling it fixed; Homer signatures)
+
+For each cell: **PASS** = the BYE reaches FS as `BYE sip:<user>@<FS_IP>:<port>` (A-leg
+`:5080`, B-leg `:5090`) from an SBC **internal** `10.x` source, exactly ONE SBC
+`Via:<VIP>` on the FS leg, FS answers `200 OK`, and the phone drops immediately.
+**FAIL** signatures to grep: R-URI containing `:5060;lr` toward FS, 3× stacked
+`Via:<VIP>`, `received=<SBC public IP>` on the FS-received top Via, Sofia `481`.
+
+| Cell | Wire shape in | cfg branch | Expected |
+|---|---|---|---|
+| Callee hangup, NLB→either SBC, new dialog | R-URI `sip:mod_sofia@VIP`, Route `[VIP;fs=5090, inner;r2;fs=5090]` | head arm → TO_FS_INDIALOG (tier 1) | FS :5090, 200 OK, caller phone drops via FS A-leg BYE |
+| Caller hangup, NLB→either SBC, new dialog | R-URI `sip:<TN>@VIP`, Route `[VIP;fs=5080, inner;r2;fs=5080]` | head arm → TO_FS_INDIALOG (tier 1) | FS :5080, 200 OK, callee leg dropped by FS |
+| Either hangup, pre-marker dialog, NLB→owner | no `fs=` in Routes | head arm → tier 3 (`$dlg_var`) | correct port first try |
+| Either hangup, pre-marker dialog, NLB→non-owner | no `fs=`, no dialog state | head arm → tier 4 guess+retry | ≤1 internal 481 then 200 on the other port |
+| Carrier re-INVITE (session refresh) | INVITE, R-URI==VIP, Route pair | head arm → FROM_NET_INDIALOG (NAT_DETECT+record_route) → TO_FS_INDIALOG | FS answers 200 w/ SDP; refresh completes |
+| Carrier 2xx ACK | ACK, R-URI==VIP, Route pair | head arm → TO_FS_INDIALOG | ACK lands on correct profile; no 200-retransmit storm |
+| FS-originated BYE/ACK (both legs) | Route `[inner;r2, VIP]`, R-URI=carrier Contact | loose_route → after_loose double-pop | single traversal, ONE `Via:<VIP>`, egress from VIP socket to Bandwidth |
+| SIPp test in-dialog | single plain internal RR | TEST-PATH fast exit | unchanged |
+| Trunk PBX-side BYE (trunk-delivery leg) | R-URI = FS real Contact (not ours) | loose_route (head arm skipped: R-URI not myself) | unchanged |
+
+#### HEP extraction used to diagnose (qryn/ClickHouse on the East `services` VM)
 ```
 sudo docker exec voip-clickhouse clickhouse-client --query "SELECT timestamp_ns, string FROM qryn.samples_v3 WHERE string LIKE '%<callid-A>%' OR string LIKE '%<callid-B>%' ORDER BY timestamp_ns ASC FORMAT Vertical"
 ```

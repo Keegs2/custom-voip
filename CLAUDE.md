@@ -156,20 +156,20 @@ GCE Network Load Balancer is pass-through (not proxy). For intra-VPC traffic, th
 - **Fix:** FS uses direct SBC IPs for outbound bridging, not the NLB VIP. Env vars `SBC_PROXY_IP` (primary SBC) and `SBC_PROXY_IP_FAILOVER` (secondary SBC) point to the SBCs' VPC IPs.
 - **NLB is for inbound only:** Bandwidth → NLB VIP → SBC. All FS → SBC traffic uses direct IPs.
 
-### Double Record-Route Required for Multi-VM
+### Double Record-Route + Stateless In-Dialog Dispatch (Multi-VM)
 
-When Kamailio sends an outbound INVITE to Bandwidth (TO_CARRIER route), it must insert two Record-Route headers:
+Both legs insert two Record-Route headers via `record_route_preset()`, now carrying an `;fs=` dispatch marker:
 
 ```
-Record-Route: <sip:NLB_VIP:5060;lr>           ← outer: what Bandwidth sees, routes inbound
-Record-Route: <sip:SBC_INTERNAL_IP:5060;lr>    ← inner: what FS sees, routes to this specific SBC
+Record-Route: <sip:NLB_VIP:5060;fs=509x;lr>                 ← outer: what Bandwidth sees, routes inbound
+Record-Route: <sip:SBC_INTERNAL_IP:5060;r2=on;fs=509x;lr>   ← inner: what FS sees, routes to this specific SBC
 ```
 
-- **Why:** Without the inner RR, the B-leg ACK from Bandwidth arrives at the NLB VIP, gets load-balanced to a random SBC, and that SBC has no dialog state for this call → ACK dropped → call fails.
-- **Implementation:** `record_route_preset("ADVERTISE_IP:5060;lr", "SBC_INTERNAL_IP:5060;r2=on;lr")` in TO_CARRIER route (A-leg uses reversed argument order with the same `;r2=on` on the SBC_INTERNAL entry).
-- **`;r2=on` is REQUIRED on the SBC_INTERNAL entry (and ONLY there).** Kamailio's rr module consumes the second own-Route in one `loose_route()` pass only when the first consumed Route carries the `r2` param. Without it, FS-originated in-dialog requests (ACK/BYE) pop only the inner Route, then physically send to the VIP — the SBC's own loopback — causing a real wire hairpin, a second Kamailio traversal, and a duplicate Via. Never put `r2=on` on the VIP entry: Bandwidth's in-dialog requests must pop ONLY the VIP at whichever SBC the NLB picks, leaving the inner Route intact to reach the dialog-owning SBC.
+- **Implementation:** TO_CARRIER (B-leg): `record_route_preset("ADVERTISE_IP:5060;fs=5090;lr", "SBC_INTERNAL_IP:5060;r2=on;fs=5090;lr")`. A-leg (inbound, request_route): reversed argument order with `;fs=5080` on both entries and `;r2=on` on the SBC_INTERNAL entry.
+- **FS-originated direction (works via rr):** FS's in-dialog ACK/BYE carry `Route: [SBC_INTERNAL;r2, VIP]`. `;r2=on` on the SBC_INTERNAL entry makes `loose_route()` consume BOTH own Routes in one pass and force the VIP send socket (5.8 `loose.c after_loose()/is_2rr()` — the r2 check reads the FIRST Route only). Without r2, only the inner Route pops and the leftover VIP Route causes a real wire hairpin to the SBC's own loopback + a duplicate Via.
+- **Carrier-originated direction (NEVER runs loose_route()):** topology hiding rewrites FS's Contact to the VIP, so every carrier in-dialog request arrives with R-URI == the VIP (= "myself" on BOTH SBCs) + `Route: [VIP, SBC_INTERNAL_owner]`. Feeding that to `loose_route()` triggers rr's RFC 2543 strict-router recovery (`after_strict()` fires whenever R-URI==self + Route present, regardless of r2): it sets `$du` to the FIRST Route (the VIP → loopback self-hairpin) and promotes the LAST Route (the owner SBC's private IP) into the R-URI — destroying the route set and looping the BYE into 481/408. **Fix (2026-08, after three failed rr-based patches):** `route[WITHINDIALOG]` intercepts external-source in-dialog requests with R-URI==self BEFORE `loose_route()` and delivers them straight to FS. The FS profile port is read from the `;fs=` marker the peer echoes back in its Route set (`fs=5080` = A-leg/internal profile, `fs=5090` = B-leg/external profile), so ANY SBC routes ANY carrier in-dialog request with zero dialog state — the NLB coin-flip stops mattering. Pre-marker dialogs fall back to `$dlg_var(fs_port)` (owner only) then guess-5090 + one-shot 481 retry on 5080. See `docker/kamailio/CLAUDE.md` §8.10 for the full history (r2-on-inner was never visible carrier-side; dropping r2 fixed nothing and broke the FS direction; owner/non-owner relays chased promoted shapes).
 - **Requires:** `SBC_INTERNAL_IP` env var set per-SBC in `.env` + passed through `docker-compose.sbc.yml`.
-- **Requires:** `alias=SBC_INTERNAL_IP:5060` in Kamailio config so `loose_route()` recognizes the inner RR address as local. Without this, Kamailio doesn't match the inner RR and creates an infinite routing loop for ACKs.
+- **Requires:** `alias=SBC_INTERNAL_IP:5060` in Kamailio config so the inner RR address counts as "myself" (used by the FS-direction double-pop and the in-dialog dispatch guard).
 
 ### SBC Failover — TCP Pre-Check + 4-Attempt Loop
 
