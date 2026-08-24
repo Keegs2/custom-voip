@@ -1,9 +1,20 @@
 """DID inventory and lifecycle management endpoints.
 
 Provides a complete DID management system backed by the did_inventory table:
-  - Admin: full inventory, stats, Bandwidth sync, assign/unassign
+  - Admin: full inventory, stats, Bandwidth sync, manual intake (POST /add
+    with carrier-trunk attribution), assign/unassign
   - Customer: browse available numbers, view own numbers, request a number,
     request/cancel release of an assigned number
+
+Carrier attribution (migration 41): every inventory row carries
+source ('bandwidth_sync' | 'manual') and an optional carrier_trunk_id FK to
+carrier_trunks (migration 40). Manual intake is the first-class path for
+non-Bandwidth numbers (e.g. Sinch): admin POSTs a batch to /add attributed to
+a carrier trunk, the DIDs land status='available', and the EXISTING
+assign->customer->product flow takes over unchanged. source is the sync
+OWNERSHIP BOUNDARY — POST /sync only manages rows with source='bandwidth_sync'
+(manual rows never appear in its 'removed' report and never get their
+metadata overwritten).
 
 Release workflow (request-based): customer POST /{did}/request-release sets
 'assigned' -> 'release_requested'; admin approves via POST /{did}/unassign
@@ -17,8 +28,9 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional
 
+import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 from db import database as db
 from db import redis_client as cache
@@ -51,6 +63,22 @@ class AssignRequest(BaseModel):
 
 class UnassignRequest(BaseModel):
     notes: Optional[str] = None
+
+
+class AddDIDsRequest(BaseModel):
+    """Body for POST /add — manual DID intake with carrier-trunk attribution."""
+    dids: list[str] = Field(min_length=1, max_length=500)
+    carrier_trunk_id: int
+    notes: Optional[str] = None
+
+
+class CarrierTrunkAssociation(BaseModel):
+    """Body for PUT /{did}/carrier-trunk.
+
+    carrier_trunk_id is REQUIRED but nullable: an explicit null clears the
+    association (back to the implicit-Bandwidth attribution legacy rows carry).
+    """
+    carrier_trunk_id: Optional[int]
 
 
 class ReleaseRequest(BaseModel):
@@ -89,6 +117,50 @@ def _canonical_did(did: str) -> str:
         raise HTTPException(status_code=422, detail=str(exc))
 
 
+# The inventory-item shape shared by GET /inventory rows and the PUT
+# /{did}/carrier-trunk response. carrier/carrier_pop are attribution overlays:
+# COALESCE(ct.carrier,'bandwidth') renders legacy rows (carrier_trunk_id NULL)
+# as the implicit Bandwidth they came from; carrier_pop stays NULL for them.
+_ITEM_COLS = """d.*,
+               c.name AS customer_name,
+               u.name AS assigned_by_name,
+               COALESCE(ct.carrier, 'bandwidth') AS carrier,
+               ct.pop AS carrier_pop"""
+_ITEM_JOINS = """
+          FROM did_inventory d
+          LEFT JOIN customers c ON d.customer_id = c.id
+          LEFT JOIN users u ON d.assigned_by = u.id
+          LEFT JOIN carrier_trunks ct ON d.carrier_trunk_id = ct.id"""
+
+
+def _compute_sync_sets(
+    existing_rows: list, bw_dids: set[str]
+) -> tuple[set[str], set[str], set[str]]:
+    """Ownership-guarded set arithmetic for POST /sync (pure — unit-testable).
+
+    The sync only MANAGES rows it created (source='bandwidth_sync'); manually
+    intaken rows (source='manual', e.g. Sinch DIDs) are invisible to it:
+      * new_dids     — in Bandwidth, not in inventory AT ALL (any source), so a
+        Bandwidth TN that was manually added earlier is never re-inserted;
+      * update_dids  — sync-owned rows still in Bandwidth (metadata refresh).
+        A manual row whose DID appears in the Bandwidth feed is left ENTIRELY
+        alone — no metadata overwrite (its attribution says another carrier
+        hosts it; an admin resolves the conflict, not the sync);
+      * removed_dids — sync-owned rows no longer in Bandwidth. Manual rows can
+        NEVER appear here regardless of carrier_trunk_id.
+
+    Args:
+        existing_rows: mappings with 'did' and 'source' (the full inventory).
+        bw_dids: E.164 DIDs currently in the Bandwidth account.
+
+    Returns:
+        (new_dids, update_dids, removed_dids)
+    """
+    existing_dids = {r["did"] for r in existing_rows}
+    sync_owned = {r["did"] for r in existing_rows if r["source"] == "bandwidth_sync"}
+    return bw_dids - existing_dids, sync_owned & bw_dids, sync_owned - bw_dids
+
+
 async def _reconcile_product_tables() -> dict:
     """Reconcile did_inventory with actual product tables (rcf_numbers, api_dids, trunk_dids).
 
@@ -100,6 +172,13 @@ async def _reconcile_product_tables() -> dict:
       - DIDs that existed before did_inventory was created
       - Ported numbers not from Bandwidth
       - Any drift between product tables and did_inventory
+
+    Attribution safety: the ON CONFLICT upsert deliberately touches ONLY
+    customer/product/status/assigned_at — never source or carrier_trunk_id, so
+    a manually-intaken DID keeps its carrier attribution through reconcile.
+    (The INSERT arm creates missing rows with the column defaults:
+    source='bandwidth_sync', carrier_trunk_id NULL — implicit Bandwidth,
+    the pre-41 behavior for ported/unknown numbers.)
     """
     pool = await db.get_pool()
     reconciled = 0
@@ -207,18 +286,20 @@ async def get_inventory(
     product_type: Optional[str] = Query(None, description="Filter by product type"),
     search: Optional[str] = Query(None, description="DID substring search"),
     state: Optional[str] = Query(None, description="Filter by state"),
+    carrier: Optional[str] = Query(None, description="Filter by carrier (carrier=bandwidth includes legacy unattributed rows)"),
     limit: int = Query(100, ge=1, le=1000),
     offset: int = Query(0, ge=0),
 ):
-    """Return the full DID inventory with filters and pagination. Admin only."""
-    query = """
-        SELECT d.*,
-               c.name AS customer_name,
-               u.name AS assigned_by_name,
+    """Return the full DID inventory with filters and pagination. Admin only.
+
+    Items carry carrier attribution: carrier (COALESCEd — legacy rows without a
+    carrier_trunk_id render as 'bandwidth'), carrier_pop (NULL for implicit
+    Bandwidth), carrier_trunk_id, and source ('bandwidth_sync' | 'manual').
+    """
+    query = f"""
+        SELECT {_ITEM_COLS},
                COUNT(*) OVER() AS total_count
-          FROM did_inventory d
-          LEFT JOIN customers c ON d.customer_id = c.id
-          LEFT JOIN users u ON d.assigned_by = u.id
+        {_ITEM_JOINS}
          WHERE 1=1
     """
     values = []
@@ -247,6 +328,13 @@ async def get_inventory(
     if state is not None:
         query += f" AND d.state = ${idx}"
         values.append(state)
+        idx += 1
+
+    if carrier is not None:
+        # Match the COALESCEd value so carrier=bandwidth also finds legacy
+        # rows with no carrier_trunk_id (implicit Bandwidth).
+        query += f" AND COALESCE(ct.carrier, 'bandwidth') = ${idx}"
+        values.append(carrier.strip().lower())
         idx += 1
 
     query += f" ORDER BY d.did LIMIT ${idx} OFFSET ${idx + 1}"
@@ -288,6 +376,16 @@ async def get_stats(admin: dict = Depends(require_admin)):
     )
     by_state = {r["state"]: r["cnt"] for r in state_rows}
 
+    # Carrier breakdown — same COALESCE as GET /inventory: legacy rows with no
+    # carrier_trunk_id count under 'bandwidth' (implicit).
+    carrier_rows = await db.fetch_all(
+        "SELECT COALESCE(ct.carrier, 'bandwidth') AS carrier, COUNT(*) AS cnt "
+        "FROM did_inventory d "
+        "LEFT JOIN carrier_trunks ct ON d.carrier_trunk_id = ct.id "
+        "GROUP BY 1"
+    )
+    by_carrier = {r["carrier"]: r["cnt"] for r in carrier_rows}
+
     total = sum(by_status.values())
     available = by_status.get("available", 0)
     assigned = by_status.get("assigned", 0)
@@ -301,6 +399,7 @@ async def get_stats(admin: dict = Depends(require_admin)):
         "by_status": by_status,
         "by_product": by_product,
         "by_state": by_state,
+        "by_carrier": by_carrier,
     }
 
 
@@ -308,9 +407,17 @@ async def get_stats(admin: dict = Depends(require_admin)):
 async def sync_from_bandwidth(admin: dict = Depends(require_admin)):
     """Sync the Bandwidth TN inventory into did_inventory. Admin only.
 
-    - New TNs from Bandwidth are inserted with status='available'
-    - Existing TNs have their metadata (city/state/lata/rate_center) updated
-    - TNs in our DB but no longer in Bandwidth are flagged (returned as 'removed')
+    - New TNs from Bandwidth are inserted with status='available' (and the
+      column default source='bandwidth_sync')
+    - Existing sync-owned TNs have their metadata (city/state/lata/rate_center)
+      updated
+    - Sync-owned TNs no longer in Bandwidth are flagged (returned as 'removed'
+      — REPORT-ONLY: no status change, no delete; admin reviews)
+    - OWNERSHIP GUARD: only rows with source='bandwidth_sync' are managed.
+      Manually intaken rows (source='manual', e.g. Sinch DIDs) NEVER appear in
+      'removed' and are never metadata-overwritten — even when their DID shows
+      up in the Bandwidth feed (that conflict is left for an admin). See
+      _compute_sync_sets.
     - Idempotent: safe to run multiple times
     """
     if not _credentials_configured():
@@ -337,14 +444,11 @@ async def sync_from_bandwidth(admin: dict = Depends(require_admin)):
             bw_dids.add(e164)
             bw_map[e164] = tn
 
-    # Get all DIDs currently in our inventory
-    existing_rows = await db.fetch_all("SELECT did FROM did_inventory")
-    existing_dids = {r["did"] for r in existing_rows}
-
-    # New DIDs: in Bandwidth but not in our DB
-    new_dids = bw_dids - existing_dids
-    # Possibly removed: in our DB but not in Bandwidth
-    removed_dids = existing_dids - bw_dids
+    # Get all DIDs currently in our inventory (with intake source — the sync
+    # ownership boundary) and partition into new/update/removed. Manual rows
+    # are guarded out of update + removed by _compute_sync_sets.
+    existing_rows = await db.fetch_all("SELECT did, source FROM did_inventory")
+    new_dids, update_dids, removed_dids = _compute_sync_sets(existing_rows, bw_dids)
 
     pool = await db.get_pool()
     inserted = 0
@@ -374,8 +478,8 @@ async def sync_from_bandwidth(admin: dict = Depends(require_admin)):
                 )
                 inserted = len(new_dids)
 
-            # Update metadata for existing DIDs that are still in Bandwidth
-            update_dids = existing_dids & bw_dids
+            # Update metadata for sync-owned DIDs that are still in Bandwidth
+            # (manual rows excluded — the sync never writes rows it doesn't own)
             if update_dids:
                 update_args = []
                 for did in update_dids:
@@ -436,6 +540,141 @@ async def reconcile_product_tables(admin: dict = Depends(require_admin)):
         "reconciled": result["reconciled"],
         "by_product": result["by_product"],
     }
+
+
+@router.post("/add")
+async def add_dids(body: AddDIDsRequest, admin: dict = Depends(require_admin)):
+    """Manually intake a batch of DIDs with carrier-trunk attribution. Admin only.
+
+    The first-class intake path for non-Bandwidth numbers (e.g. Sinch DIDs):
+    every DID in the batch is attributed to the given carrier_trunks row and
+    lands status='available' / source='manual' in the pool — the existing
+    assign->customer->product flow takes over unchanged. Intake requires an
+    ENABLED trunk (404 otherwise): new numbers must map to a live carrier path.
+
+    Entries are normalized with the shared canonical E.164 helper (bare
+    10-digit NANP gets +1; '+CC' international preserved) and deduped within
+    the batch (first occurrence wins). Un-normalizable entries are reported
+    back verbatim in 'invalid'; DIDs already in inventory (any source) are
+    left untouched and reported in 'skipped_existing'.
+
+    Response envelope (TED UI contract — EXACT):
+        {"added": [e164...], "skipped_existing": [e164...],
+         "invalid": [raw_input...], "count": <len(added)>}
+    """
+    trunk = await db.fetch_one(
+        "SELECT id, carrier, pop, enabled FROM carrier_trunks WHERE id = $1::int",
+        body.carrier_trunk_id,
+    )
+    if not trunk:
+        raise HTTPException(status_code=404, detail="Carrier trunk not found")
+    if not trunk["enabled"]:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Carrier trunk {body.carrier_trunk_id} is disabled",
+        )
+
+    # Normalize with the SAME canonical helper every other DID write path uses;
+    # collect un-normalizable entries (verbatim) instead of failing the batch.
+    normalized: list[str] = []
+    invalid: list[str] = []
+    seen: set[str] = set()
+    for raw in body.dids:
+        try:
+            e164 = phone.normalize_e164(raw)
+        except ValueError:
+            invalid.append(raw)
+            continue
+        if e164 not in seen:
+            seen.add(e164)
+            normalized.append(e164)
+
+    added: list[str] = []
+    if normalized:
+        try:
+            rows = await db.fetch_all(
+                """
+                INSERT INTO did_inventory (did, status, source, carrier_trunk_id, notes)
+                SELECT d, 'available', 'manual', $2::int, $3::text
+                  FROM unnest($1::varchar[]) AS d
+                ON CONFLICT (did) DO NOTHING
+                RETURNING did
+                """,
+                normalized, body.carrier_trunk_id, body.notes,
+            )
+        except asyncpg.ForeignKeyViolationError:
+            # Trunk deleted between the check above and the insert.
+            raise HTTPException(status_code=404, detail="Carrier trunk not found")
+        added_set = {r["did"] for r in rows}
+        added = [d for d in normalized if d in added_set]
+
+    skipped_existing = [d for d in normalized if d not in set(added)]
+
+    logger.info(
+        "Manual DID intake: added=%d skipped=%d invalid=%d trunk=%s/%s (id=%d) by admin=%s",
+        len(added), len(skipped_existing), len(invalid),
+        trunk["carrier"], trunk["pop"], body.carrier_trunk_id, admin.get("email"),
+    )
+
+    return {
+        "added": added,
+        "skipped_existing": skipped_existing,
+        "invalid": invalid,
+        "count": len(added),
+    }
+
+
+@router.put("/{did}/carrier-trunk")
+async def set_did_carrier_trunk(
+    did: str,
+    body: CarrierTrunkAssociation,
+    admin: dict = Depends(require_admin),
+):
+    """Re-associate a DID with a carrier trunk (or clear it). Admin only.
+
+    carrier_trunk_id=null clears the association — the DID reverts to the
+    implicit-Bandwidth attribution legacy rows carry. Unlike /add (intake of
+    NEW numbers, which demands an enabled trunk), re-association accepts a
+    disabled trunk: attribution is metadata, and correcting it must not be
+    blocked by a trunk being administratively down.
+
+    Returns the updated inventory item (same shape as GET /inventory items).
+    """
+    e164 = _canonical_did(did)
+
+    if body.carrier_trunk_id is not None:
+        trunk = await db.fetch_one(
+            "SELECT id FROM carrier_trunks WHERE id = $1::int",
+            body.carrier_trunk_id,
+        )
+        if not trunk:
+            raise HTTPException(status_code=404, detail="Carrier trunk not found")
+
+    try:
+        result = await db.execute(
+            """
+            UPDATE did_inventory
+               SET carrier_trunk_id = $1::int,
+                   updated_at = NOW()
+             WHERE did = $2::varchar
+            """,
+            body.carrier_trunk_id, e164,
+        )
+    except asyncpg.ForeignKeyViolationError:
+        # Trunk deleted between the check above and the update.
+        raise HTTPException(status_code=404, detail="Carrier trunk not found")
+    if result == "UPDATE 0":
+        raise HTTPException(status_code=404, detail=f"DID {e164} not found in inventory")
+
+    logger.info(
+        "DID carrier-trunk set: did=%s trunk_id=%s by admin=%s",
+        e164, body.carrier_trunk_id, admin.get("email"),
+    )
+
+    row = await db.fetch_one(
+        f"SELECT {_ITEM_COLS} {_ITEM_JOINS} WHERE d.did = $1::varchar", e164
+    )
+    return dict(row)
 
 
 @router.post("/{did}/assign")
