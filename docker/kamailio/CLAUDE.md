@@ -560,7 +560,7 @@ The authoritative port source is the `;fs=` Record-Route marker (§8.7/§8.10) �
 
 ### 8.10 Carrier-side in-dialog routing (BYE/ACK/re-INVITE 481) — FINAL DESIGN: stateless dispatch, no loose_route() for network-side requests
 
-**Status: FIXED (2026-08-21, branch `fix/sbc-indialog-bye-481`, single commit superseding three partial fixes). Pending the live test matrix below, then rollout to all 6 SBCs / 3 zones.**
+**Status: VALIDATED IN PRODUCTION (2026-08-24). Deployed to all 6 SBCs / 3 zones (PR #65, merged); live test matrix below PASSED per zone — far-end AND caller-side hangups tear down immediately in West, East, and Central; no 481s, single VIP Via, BYEs reach FS on the correct profile port. The `kamailio -c` gate was run on the 5.8 image at each SBC before restart. Adversarially reviewed against fetched 5.8 `rr/loose.c` + rr/tm/dialog docs + RFC 3261 (zero call-path findings; one comment-level correction applied: `dlg_match_mode=1` does NOT affect `$dlg_var` reads — see the modparam comment). Ops corollary of the NLB consistent-hash pinning: whether pre-fix teardown "worked" depended on each Bandwidth PoP's 5-tuple pin coinciding with the B-leg bridge SBC — restarts re-roll the pin, which is why the defect appeared/disappeared across deployments. With this design the pin no longer matters.**
 
 #### The disease (source-verified against Kamailio 5.8 `rr/loose.c`)
 
