@@ -33,7 +33,7 @@ CREATE TABLE IF NOT EXISTS carrier_trunk_status (
     sbc_id      TEXT        NOT NULL,                 -- reporting SBC, e.g. east-sbc-1
     name        TEXT,                                 -- human label, e.g. Bandwidth Dallas
     ip          TEXT,                                 -- carrier signaling IP
-    setid       INT,                                  -- dispatcher group id (2..5)
+    setid       INT,                                  -- dispatcher group id (2..7)
     is_up       BOOLEAN     NOT NULL DEFAULT false,   -- reachable per this SBC's last probe
     flags       TEXT,                                 -- raw dispatcher flags, e.g. AP
     last_change TIMESTAMPTZ NOT NULL DEFAULT now(),   -- when is_up last FLIPPED for this pair
@@ -76,10 +76,13 @@ SELECT
         ELSE 'down'
     END AS status
 FROM carrier_trunk_status s
--- Only the live Bandwidth carriers: Dallas (setid 2) + LA (setid 3). The TC1/TC2
--- PoPs (setid 4/5) are unused, so they are excluded here structurally — even if a
--- lagging poller ever reports one, it can never surface in the health view/map.
-WHERE s.setid IN (2, 3)
+-- The live carriers: Bandwidth Dallas (setid 2) + LA (setid 3) and Sinch Denver
+-- (setid 6) + Chicago (setid 7) — Sinch added by 40_carrier_trunks.sql, which
+-- also carries this same view replace for the already-initialized prod primary.
+-- The Bandwidth TC1/TC2 PoPs (setid 4/5) are unused, so they are excluded here
+-- structurally — even if a lagging poller ever reports one, it can never
+-- surface in the health view/map.
+WHERE s.setid IN (2, 3, 6, 7)
 GROUP BY s.duid;
 
 -- ---------------------------------------------------------------------------

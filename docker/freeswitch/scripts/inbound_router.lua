@@ -245,6 +245,30 @@ freeswitch.consoleLog("INFO", string.format(
     uuid, original_caller_number, original_caller_name
 ))
 
+-- ================================================================
+-- Inbound carrier attribution (CDR): which carrier/PoP originated
+-- this call. Kamailio stamps X-Inbound-Carrier / X-Inbound-PoP on the
+-- carrier-ingress INVITE (spoof-proofed at the SBC: any wire-supplied
+-- copies are stripped before Kamailio appends its own verdict from the
+-- verified source IP — static match for Bandwidth/Sinch, carrier_trunks
+-- row for DB-admitted carriers). Set EARLY, before DID validation, so
+-- EVERY CDR — including UNALLOCATED_NUMBER rejects — carries the
+-- attribution. Plain channel variables are all that is needed for the
+-- CDR: mod_json_cdr serializes A-leg variables.* and the ingest reads
+-- them from there (same path as traffic_grade / product_type).
+-- Defaults when the headers are absent (pre-Sinch SBC image, or direct
+-- test traffic): carrier "bandwidth", pop "" — preserving the
+-- historical meaning of existing CDRs (everything was Bandwidth).
+local inbound_carrier = (get_var("sip_h_X-Inbound-Carrier", "bandwidth"):match("^%s*(.-)%s*$") or "")
+if inbound_carrier == "" then inbound_carrier = "bandwidth" end
+local inbound_carrier_pop = (get_var("sip_h_X-Inbound-PoP", ""):match("^%s*(.-)%s*$") or "")
+set_var("inbound_carrier", inbound_carrier)
+set_var("inbound_carrier_pop", inbound_carrier_pop)
+freeswitch.consoleLog("DEBUG", string.format(
+    "[%s] Inbound carrier attribution: carrier=%s pop=%s\n",
+    uuid, inbound_carrier, inbound_carrier_pop
+))
+
 -- Validate DID
 if did == "" then
     hangup("UNALLOCATED_NUMBER", "[" .. uuid .. "] Empty destination - rejecting")

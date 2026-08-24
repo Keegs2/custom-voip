@@ -115,6 +115,9 @@ def make_row(**overrides):
         "terminating_customer_id": 42,
         "on_net": False,
         "on_net_hops": 0,
+        # 40_carrier_trunks.sql
+        "inbound_carrier": "sinch",
+        "inbound_carrier_pop": "denver",
     }
     base.update(overrides)
     return FakeRow(base)
@@ -644,21 +647,26 @@ def _cdrs_added_columns(filename: str) -> list[str]:
     The `(?!IF\\s+NOT\\s+EXISTS)` lookahead stops the optional IF-NOT-EXISTS
     group from backtracking and capturing the keyword `IF` as the column name
     (migration 23 uses the bare `ADD COLUMN IF NOT EXISTS <name>` form).
+
+    `--` comments are stripped first (same as _cdrs_base_columns) so header
+    prose that MENTIONS "ADD COLUMN IF NOT EXISTS on ..." (e.g. the
+    hypertable-safety notes in 23/40) is never parsed as DDL.
     """
     sql = (_INIT / filename).read_text()
+    code = "\n".join(line.split("--", 1)[0] for line in sql.splitlines())
     return re.findall(
         r"ADD\s+COLUMN\s+(?:IF\s+NOT\s+EXISTS\s+)?(?!IF\s+NOT\s+EXISTS)([a-z_][a-z0-9_]*)",
-        sql, re.IGNORECASE,
+        code, re.IGNORECASE,
     )
 
 
 def _all_cdrs_columns() -> list[str]:
     """Full ordered cdrs data-column list from schema + migrations, minus watermark.
 
-    Base table order (05), then ADD COLUMNs in file-number order (16, 18, 23),
-    de-duplicated (16 re-declares columns already present in the base table via
-    IF NOT EXISTS — they keep their base-table position). exported_at (from 21)
-    is excluded: it is the export cursor, never emitted.
+    Base table order (05), then ADD COLUMNs in file-number order (16, 18, 23,
+    40), de-duplicated (16 re-declares columns already present in the base
+    table via IF NOT EXISTS — they keep their base-table position). exported_at
+    (from 21) is excluded: it is the export cursor, never emitted.
     """
     seen: set[str] = set()
     ordered: list[str] = []
@@ -667,6 +675,7 @@ def _all_cdrs_columns() -> list[str]:
         + _cdrs_added_columns("16_cdr_detail_columns.sql")
         + _cdrs_added_columns("18_sbc_id_column.sql")
         + _cdrs_added_columns("23_onnet_cdr_columns.sql")
+        + _cdrs_added_columns("40_carrier_trunks.sql")
     ):
         if col in _WATERMARK_EXCLUDED or col in seen:
             continue
@@ -687,6 +696,11 @@ def test_schema_parse_smoke():
     assert set(_cdrs_added_columns("23_onnet_cdr_columns.sql")) == {
         "origin_customer_id", "terminating_customer_id", "on_net", "on_net_hops",
     }
+    # 40 mixes CREATE TABLE carrier_trunks with the two cdrs ALTERs — the
+    # parser must pick up exactly the ADD COLUMNs.
+    assert _cdrs_added_columns("40_carrier_trunks.sql") == [
+        "inbound_carrier", "inbound_carrier_pop",
+    ]
 
 
 def test_select_columns_equal_full_cdrs_schema():

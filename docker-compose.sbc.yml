@@ -71,6 +71,12 @@ services:
       - BANDWIDTH_TC1_ATL=${BANDWIDTH_TC1_ATL:-67.231.13.185}
       - BANDWIDTH_TC2_DAL=${BANDWIDTH_TC2_DAL:-67.231.1.188}
       - BANDWIDTH_TC2_LA=${BANDWIDTH_TC2_LA:-67.231.4.138}
+      # Sinch ORIGINATION signaling IPs (fixed PoPs, all zones — inbound trust
+      # + dispatcher keepalive groups 6-7; termination stays Bandwidth).
+      # Defaults are the production values, so deploy = git pull + rebuild
+      # with NO .env edits. Denver=DNVTCOZIGR2_3278, Chicago=CHCGIL24GR4_7412.
+      - SINCH_DENVER_IP=${SINCH_DENVER_IP:-206.146.100.24}
+      - SINCH_CHICAGO_IP=${SINCH_CHICAGO_IP:-206.146.101.39}
     volumes:
       - ./docker/kamailio/kamailio.cfg:/etc/kamailio/kamailio.cfg.tmpl:ro
       - ./docker/kamailio/dispatcher.list:/etc/kamailio/dispatcher.list.tmpl:ro

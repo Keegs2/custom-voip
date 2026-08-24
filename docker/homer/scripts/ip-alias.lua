@@ -25,6 +25,10 @@ local aliases = {
     ["67.231.1.188"]   = "BW-TC2-DAL",
     ["67.231.4.138"]   = "BW-TC2-LA",
 
+    -- Sinch origination (inbound to us; origination-only — never termination)
+    ["206.146.100.24"] = "Sinch-Denver",
+    ["206.146.101.39"] = "Sinch-Chicago",
+
     -- =================== EAST ZONE (us-east1-b) ===================
     -- SBC layer (East). Both interfaces of each node collapse to one name
     -- so the node renders as a single ladder column.
