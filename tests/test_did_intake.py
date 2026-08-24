@@ -2,8 +2,10 @@
 POST /v1/numbers/add, PUT /v1/numbers/{did}/carrier-trunk) — full-stack tests.
 
 Proves, over the REAL router behind the REAL JWTAuthMiddleware on an ephemeral
-local PostgreSQL (real migrations 17 + 34 + 25 + 40 + 41, 41 applied twice —
-idempotency):
+local PostgreSQL (real migrations 17 + 31 + 34 + 25 + 40 + 41, 41 applied twice
+— idempotency; 31 supplies the rcf_forward_to_e164_chk CHECK the assign
+endpoint must satisfy — its absence is exactly how the prod-only
+forward_to='' 500 slipped past this suite):
 
   * POST /add happy path: mixed input formats normalize through the shared
     canonical E.164 helper, in-batch dupes collapse, and the response envelope
@@ -56,6 +58,7 @@ REPO = Path(__file__).resolve().parents[1]
 API_SRC = REPO / "docker" / "api" / "src"
 INIT = REPO / "docker" / "postgres" / "init"
 MIG_DID_INVENTORY = INIT / "17_did_inventory.sql"
+MIG_CANONICALIZE = INIT / "31_did_canonicalize.sql"
 MIG_TRUNK_STATUS = INIT / "25_carrier_trunk_status.sql"
 MIG_RELEASE_STATUS = INIT / "34_release_requested_status.sql"
 MIG_CARRIER_TRUNKS = INIT / "40_carrier_trunks.sql"
@@ -207,7 +210,7 @@ def _run(coro):
 
 @pytest.fixture(scope="module")
 def intake_db():
-    """Boot PG, apply base schema + REAL 17/34/25/40/41 (41 twice — idempotency)."""
+    """Boot PG, apply base schema + REAL 17/31/34/25/40/41 (41 twice — idempotency)."""
     if PG_BIN is None:
         pytest.skip("no local PostgreSQL binaries; set TEST_PG_BIN to run DID-intake tests")
     pg = _EphemeralPG(PG_BIN)
@@ -228,6 +231,10 @@ def intake_db():
         async with owner.acquire() as conn:
             await conn.execute(_BASE_SCHEMA)
             await conn.execute(MIG_DID_INVENTORY.read_text())   # 17: did_inventory
+            # 31: +E.164/extension CHECK constraints (needs base-schema
+            # rcf_numbers/api_dids/trunk_dids + 17's did_inventory — its only
+            # prerequisites). Gives the harness prod's rcf_forward_to_e164_chk.
+            await conn.execute(MIG_CANONICALIZE.read_text())
             await conn.execute(MIG_RELEASE_STATUS.read_text())  # 34: status CHECK
             await conn.execute(MIG_TRUNK_STATUS.read_text())    # 25: 40's view prereq
             await conn.execute(MIG_CARRIER_TRUNKS.read_text())  # 40: FK target + seeds
@@ -651,13 +658,23 @@ def test_sync_guard_end_to_end(client, tokens, sinch_ids, intake_db, monkeypatch
 # 10) Assign flow — the EXISTING path works unchanged on a manual Sinch DID.
 # ---------------------------------------------------------------------------
 def test_assign_flow_on_manual_did(client, tokens, sinch_ids, intake_db):
+    """Self-sufficient (runs in isolation, e.g. `-k assign`): adds its OWN DID
+    first instead of depending on test 1's batch having run."""
     db = intake_db["db"]
+    did = "+15305483000"
 
     async def go():
         hdrs = _auth(tokens, "admin")
 
-        r = await client.post("/v1/numbers/+15305480846/assign", headers=hdrs, json={
-            "customer_id": 42, "product_type": "rcf"})
+        # Intake the DID this test assigns (manual, Sinch Denver attribution).
+        r = await client.post("/v1/numbers/add", headers=hdrs, json={
+            "dids": [did], "carrier_trunk_id": sinch_ids["denver"]})
+        assert r.status_code == 200, r.text
+        assert r.json()["added"] == [did]
+
+        r = await client.post(f"/v1/numbers/{did}/assign", headers=hdrs, json={
+            "customer_id": 42, "product_type": "rcf",
+            "forward_to": "+17744045256"})
         assert r.status_code == 200, r.text
         body = r.json()
         assert body["status"] == "assigned"
@@ -667,25 +684,26 @@ def test_assign_flow_on_manual_did(client, tokens, sinch_ids, intake_db):
 
         # rcf_numbers record created (the RCF provisioning side-effect).
         rcf = await db.fetch_one(
-            "SELECT customer_id FROM rcf_numbers WHERE did = '+15305480846'")
+            "SELECT customer_id, forward_to FROM rcf_numbers WHERE did = $1", did)
         assert rcf is not None and rcf["customer_id"] == 42
+        assert rcf["forward_to"] == "+17744045256"
 
         # Attribution survived assignment.
-        item = await _get_item(client, tokens, "+15305480846")
+        item = await _get_item(client, tokens, did)
         assert item["status"] == "assigned"
         assert item["source"] == "manual"
         assert item["carrier"] == "sinch" and item["carrier_pop"] == "denver"
         assert item["customer_name"] == "Test RCF Co"
 
         # Unassign -> back to the pool, attribution intact.
-        r = await client.post("/v1/numbers/+15305480846/unassign", headers=hdrs, json={})
+        r = await client.post(f"/v1/numbers/{did}/unassign", headers=hdrs, json={})
         assert r.status_code == 200, r.text
-        item = await _get_item(client, tokens, "+15305480846")
+        item = await _get_item(client, tokens, did)
         assert item["status"] == "available"
         assert item["source"] == "manual"
         assert item["carrier_trunk_id"] == sinch_ids["denver"]
         rcf = await db.fetch_one(
-            "SELECT id FROM rcf_numbers WHERE did = '+15305480846'")
+            "SELECT id FROM rcf_numbers WHERE did = $1", did)
         assert rcf is None
 
     _run(go())
@@ -700,7 +718,7 @@ def test_reconcile_preserves_attribution(client, tokens, sinch_ids, intake_db):
     async def go():
         hdrs = _auth(tokens, "admin")
         r = await client.post("/v1/numbers/+16175550100/assign", headers=hdrs, json={
-            "customer_id": 42, "product_type": "rcf"})
+            "customer_id": 42, "product_type": "rcf", "forward_to": "+17744045256"})
         assert r.status_code == 200, r.text
 
         r = await client.post("/v1/numbers/reconcile", headers=hdrs)
@@ -715,5 +733,171 @@ def test_reconcile_preserves_attribution(client, tokens, sinch_ids, intake_db):
         assert row["customer_id"] == 42 and row["product_type"] == "rcf"
         assert row["source"] == "manual"
         assert row["carrier_trunk_id"] == sinch_ids["denver"]
+
+    _run(go())
+
+
+# ---------------------------------------------------------------------------
+# 12) RCF assign forward_to validation — the prod 500's regression guard.
+#     Migration 31's rcf_forward_to_e164_chk is now live in the harness, so a
+#     bad/absent forward_to must be a clean 422 (never the CheckViolationError
+#     that 500'd prod), and a valid extension must pass through verbatim.
+# ---------------------------------------------------------------------------
+def test_assign_rcf_forward_to_validation(client, tokens, sinch_ids, intake_db):
+    db = intake_db["db"]
+
+    async def go():
+        hdrs = _auth(tokens, "admin")
+
+        async def intake(did):
+            r = await client.post("/v1/numbers/add", headers=hdrs, json={
+                "dids": [did], "carrier_trunk_id": sinch_ids["denver"]})
+            assert r.status_code == 200, r.text
+            assert r.json()["added"] == [did]
+
+        # (a) A 3-6 digit local extension is a VALID forward_to — kept verbatim
+        # (rcf_forward_to_e164_chk allows ^\d{3,6}$).
+        ext_did = "+15305483100"
+        await intake(ext_did)
+        r = await client.post(f"/v1/numbers/{ext_did}/assign", headers=hdrs, json={
+            "customer_id": 42, "product_type": "rcf", "forward_to": "1001"})
+        assert r.status_code == 200, r.text
+        row = await db.fetch_one(
+            "SELECT forward_to FROM rcf_numbers WHERE did = $1", ext_did)
+        assert row["forward_to"] == "1001"          # extension stored as-is
+        di = await db.fetch_one(
+            "SELECT status FROM did_inventory WHERE did = $1", ext_did)
+        assert di["status"] == "assigned"
+
+        # (a2) A non-E.164 phone (bare 10-digit US) normalizes on the way in.
+        norm_did = "+15305483101"
+        await intake(norm_did)
+        r = await client.post(f"/v1/numbers/{norm_did}/assign", headers=hdrs, json={
+            "customer_id": 42, "product_type": "rcf", "forward_to": "774-404-5256"})
+        assert r.status_code == 200, r.text
+        row = await db.fetch_one(
+            "SELECT forward_to, enabled FROM rcf_numbers WHERE did = $1", norm_did)
+        assert row["forward_to"] == "+17744045256"  # canonicalized to +E.164
+        assert row["enabled"] is True
+
+        # (a3) Already-canonical E.164 passes through unchanged.
+        e164_did = "+15305483103"
+        await intake(e164_did)
+        r = await client.post(f"/v1/numbers/{e164_did}/assign", headers=hdrs, json={
+            "customer_id": 42, "product_type": "rcf", "forward_to": "+17744045256"})
+        assert r.status_code == 200, r.text
+        row = await db.fetch_one(
+            "SELECT forward_to, enabled FROM rcf_numbers WHERE did = $1", e164_did)
+        assert row["forward_to"] == "+17744045256"
+        assert row["enabled"] is True
+
+        # (b) MISSING forward_to on an RCF assign -> 422 (was the prod 500),
+        # with a message that says what is needed.
+        miss_did = "+15305483102"
+        await intake(miss_did)
+        r = await client.post(f"/v1/numbers/{miss_did}/assign", headers=hdrs, json={
+            "customer_id": 42, "product_type": "rcf"})
+        assert r.status_code == 422, r.text
+        assert "forward_to is required" in r.json()["detail"]
+        # No rcf_numbers row, and the DID is still assignable (txn never opened).
+        assert await db.fetch_one(
+            "SELECT id FROM rcf_numbers WHERE did = $1", miss_did) is None
+        di = await db.fetch_one(
+            "SELECT status, customer_id FROM did_inventory WHERE did = $1", miss_did)
+        assert di["status"] == "available" and di["customer_id"] is None
+
+        # (b2) Blank/whitespace forward_to is also missing -> 422.
+        r = await client.post(f"/v1/numbers/{miss_did}/assign", headers=hdrs, json={
+            "customer_id": 42, "product_type": "rcf", "forward_to": "   "})
+        assert r.status_code == 422, r.text
+        assert "forward_to is required" in r.json()["detail"]
+
+        # (c) Garbage forward_to -> 422 naming BOTH accepted forms (neither
+        # E.164-normalizable nor a 3-6 digit extension). "12" is too short;
+        # "abc" has no digits.
+        for junk in ("abc", "12"):
+            r = await client.post(f"/v1/numbers/{miss_did}/assign", headers=hdrs, json={
+                "customer_id": 42, "product_type": "rcf", "forward_to": junk})
+            assert r.status_code == 422, f"forward_to={junk!r}: {r.status_code} {r.text}"
+            detail = r.json()["detail"]
+            assert "E.164" in detail and "extension" in detail
+        # Still nothing inserted, still available.
+        assert await db.fetch_one(
+            "SELECT id FROM rcf_numbers WHERE did = $1", miss_did) is None
+        di = await db.fetch_one(
+            "SELECT status FROM did_inventory WHERE did = $1", miss_did)
+        assert di["status"] == "available"
+
+    _run(go())
+
+
+# ---------------------------------------------------------------------------
+# 13) Non-RCF assign ignores forward_to — trunk/api create no rcf_numbers row,
+#     so a supplied (or absent) forward_to is a no-op. Confirms the field is
+#     RCF-scoped and the other product branches are unaffected.
+# ---------------------------------------------------------------------------
+def test_assign_non_rcf_ignores_forward_to(client, tokens, sinch_ids, intake_db):
+    db = intake_db["db"]
+
+    async def go():
+        hdrs = _auth(tokens, "admin")
+        did = "+15305483200"
+        r = await client.post("/v1/numbers/add", headers=hdrs, json={
+            "dids": [did], "carrier_trunk_id": sinch_ids["denver"]})
+        assert r.status_code == 200, r.text
+
+        # product_type='api' with NO forward_to still succeeds (no rcf_numbers
+        # write path). The assign endpoint does not create an api_dids row —
+        # it only flips did_inventory (product_ref_id stays NULL for api/trunk).
+        r = await client.post(f"/v1/numbers/{did}/assign", headers=hdrs, json={
+            "customer_id": 42, "product_type": "api"})
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["status"] == "assigned" and body["product_type"] == "api"
+        assert body["product_ref_id"] is None
+
+        di = await db.fetch_one(
+            "SELECT status, product_type FROM did_inventory WHERE did = $1", did)
+        assert di["status"] == "assigned" and di["product_type"] == "api"
+        # No rcf_numbers row was created for a non-RCF assign.
+        assert await db.fetch_one(
+            "SELECT id FROM rcf_numbers WHERE did = $1", did) is None
+
+    _run(go())
+
+
+# ---------------------------------------------------------------------------
+# 14) Defense-in-depth: if a DB-invalid forward_to ever slips PAST app-level
+#     validation, the REAL rcf_forward_to_e164_chk (migration 31) fires and is
+#     mapped to a 422 naming the constraint — never the prod 500 — and the
+#     transaction rolls back cleanly.
+# ---------------------------------------------------------------------------
+def test_assign_rcf_check_violation_maps_to_422(client, tokens, sinch_ids,
+                                                intake_db, monkeypatch):
+    from utils import phone as phone_mod
+    db = intake_db["db"]
+    did = "+15305483300"
+
+    async def go():
+        hdrs = _auth(tokens, "admin")
+        r = await client.post("/v1/numbers/add", headers=hdrs, json={
+            "dids": [did], "carrier_trunk_id": sinch_ids["denver"]})
+        assert r.status_code == 200, r.text
+
+        # Simulate a validator bug: let the prod placeholder '' through.
+        monkeypatch.setattr(phone_mod, "normalize_forward_destination",
+                            lambda raw: "")
+        r = await client.post(f"/v1/numbers/{did}/assign", headers=hdrs, json={
+            "customer_id": 42, "product_type": "rcf",
+            "forward_to": "+17744045256"})
+        assert r.status_code == 422, r.text
+        assert "rcf_forward_to_e164_chk" in r.json()["detail"]
+
+        # Transaction rolled back: no rcf row, DID still available.
+        assert await db.fetch_one(
+            "SELECT id FROM rcf_numbers WHERE did = $1", did) is None
+        di = await db.fetch_one(
+            "SELECT status, customer_id FROM did_inventory WHERE did = $1", did)
+        assert di["status"] == "available" and di["customer_id"] is None
 
     _run(go())
