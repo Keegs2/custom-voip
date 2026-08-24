@@ -50,6 +50,10 @@ router = APIRouter()
 class AssignRequest(BaseModel):
     customer_id: int
     product_type: str
+    # Required when product_type='rcf' (the number the DID forwards to — E.164
+    # or a 3-6 digit local extension); ignored for every other product type.
+    # Enforced in assign_did, not here, because the requirement is conditional.
+    forward_to: Optional[str] = None
     notes: Optional[str] = None
 
     @field_validator("product_type")
@@ -685,11 +689,37 @@ async def assign_did(
 ):
     """Assign a DID to a customer for a specific product. Admin only.
 
-    For RCF: also creates the rcf_numbers record.
+    For RCF: also creates the rcf_numbers record, which REQUIRES a valid
+    forward_to (rcf_forward_to_e164_chk: +E.164 or a 3-6 digit local extension
+    — migration 31). Validated up front so a bad destination is a 422, never a
+    CheckViolationError 500. Ignored for non-rcf product types.
     Changes status from 'available' (or 'reserved') to 'assigned'.
     """
     e164 = _canonical_did(did)
     admin_user_id = int(admin["sub"])
+
+    # RCF destination — validate BEFORE any DB work (fail fast, client error).
+    rcf_forward_to: Optional[str] = None
+    if body.product_type == "rcf":
+        if body.forward_to is None or not body.forward_to.strip():
+            raise HTTPException(
+                status_code=422,
+                detail="forward_to is required when assigning as RCF — the number the DID forwards to",
+            )
+        try:
+            # Shared canonical helper (utils.phone): a bare 3-6 digit local
+            # extension is kept verbatim, anything else must normalize to
+            # +E.164 — exactly the two forms rcf_forward_to_e164_chk accepts.
+            rcf_forward_to = phone.normalize_forward_destination(body.forward_to)
+        except ValueError:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"invalid forward_to '{body.forward_to}': must be a phone number "
+                    "(E.164 like +17744045256, or a bare 10-digit US number) "
+                    "or a 3-6 digit local extension"
+                ),
+            )
 
     # Verify customer exists and is active
     customer = await db.fetch_one(
@@ -730,12 +760,23 @@ async def assign_did(
                     rcf_row = await conn.fetchrow(
                         """
                         INSERT INTO rcf_numbers (customer_id, did, name, forward_to, pass_caller_id, enabled, ring_timeout)
-                        VALUES ($1, $2, $3, '', true, true, 30)
+                        VALUES ($1, $2, $3, $4, true, true, 30)
                         RETURNING id
                         """,
-                        body.customer_id, e164, f"DID {e164}",
+                        body.customer_id, e164, f"DID {e164}", rcf_forward_to,
                     )
                     product_ref_id = rcf_row["id"]
+                except asyncpg.CheckViolationError as e:
+                    # Defense-in-depth: a value the app-level validation missed
+                    # (or a future constraint) is still a client error, not a 500.
+                    raise HTTPException(
+                        status_code=422,
+                        detail=(
+                            f"DID {e164} was rejected by rcf_numbers constraint "
+                            f"'{e.constraint_name}' — forward_to must be +E.164 "
+                            "or a 3-6 digit local extension"
+                        ),
+                    )
                 except Exception as e:
                     if "unique" in str(e).lower():
                         raise HTTPException(
