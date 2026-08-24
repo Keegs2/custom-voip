@@ -132,8 +132,9 @@ In `TEST_MODE=true`, originate uses `loopback/` instead of `sofia/external/`.
 ### CDR Ingest (`routers/cdrs.py`)
 FreeSWITCH `mod_json_cdr` POSTs CDRs to `/v1/cdrs/ingest` after each call. The endpoint:
 - Accepts `application/json`, `x-www-form-urlencoded` (mod_json_cdr encode-values mode), or raw body
-- Extracts ~53 fields from the FreeSWITCH JSON CDR structure including full RTP quality metrics (the INSERT binds 53 positional params, `$1`–`$53`)
+- Extracts ~55 fields from the FreeSWITCH JSON CDR structure including full RTP quality metrics (the INSERT binds 55 positional params, `$1`–`$55`)
 - **On-net routing (`$50`–`$53`):** `origin_customer_id`, `terminating_customer_id`, `on_net`, `on_net_hops` record BOTH parties of an internal call. `customer_id` stays the TERMINAL customer (so `rate_cdr()` is unchanged). Off-net calls: `origin_customer_id==customer_id`, `on_net=false`. See `docs/ONNET_ROUTING_DESIGN.md`.
+- **Inbound-carrier attribution (`$54`–`$55`, migration 40):** the FS channel vars `inbound_carrier` / `inbound_carrier_pop` (e.g. `sinch`/`denver`) are stored verbatim; absent or empty → NULL (legacy calls, customer-trunk sources)
 - Handles duplicate detection via `WHERE NOT EXISTS (SELECT 1 FROM cdrs WHERE uuid = $1)`
 - Always returns 200 to prevent FreeSWITCH retry storms
 - No auth required (called over internal Docker network)
@@ -266,6 +267,16 @@ Carrier gateway management — backed by `carrier_gateways` (Bandwidth Dallas/LA
 | `PATCH` | `/v1/carriers/{carrier_id}` | Update carrier |
 | `DELETE` | `/v1/carriers/{carrier_id}` | Delete carrier |
 | `POST` | `/v1/carriers/{carrier_id}/test` | Probe carrier reachability |
+
+### Carrier Trunks (Admin only)
+Multi-carrier trunk registry — backed by `carrier_trunks` (migration 40; Bandwidth Dallas/LA + Sinch Denver/Chicago). The Kamailio SBCs read this table directly via sqlops as the DB-backed trust fallback for unknown-source INVITEs — the column names `carrier`/`pop`/`trunk_group`/`source_ip`/`test_tn`/`direction`/`cps_limit`/`enabled` are a CONTRACT with that SBC SQL, never rename them. Operated by the TED admin tool through the revup-admin bridge (admin JWT).
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/v1/carrier-trunks` | List carrier trunks (filters: carrier, direction, enabled) |
+| `POST` | `/v1/carrier-trunks` | Create carrier trunk (409 on duplicate source_ip / carrier+pop) |
+| `GET` | `/v1/carrier-trunks/{trunk_id}` | Get carrier trunk detail |
+| `PUT` | `/v1/carrier-trunks/{trunk_id}` | Partial update (pop/trunk_group/source_ip/test_tn/direction/cps_limit/enabled/notes; carrier immutable) |
+| `DELETE` | `/v1/carrier-trunks/{trunk_id}` | Delete carrier trunk |
 
 ### Rates (Admin only)
 Rate table / rate entry management — backed by `rate_tables`, `rates`.

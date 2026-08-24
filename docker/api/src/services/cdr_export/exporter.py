@@ -55,7 +55,8 @@ LINE_TERMINATOR = "\r\n"
 # ADD COLUMN on cdrs isn't wired in here.
 #
 # Order = base-table declaration order (05_schema_cdr.sql) followed by the
-# ADD COLUMN migrations in file-number order: 18 (sbc_id), 23 (on-net columns).
+# ADD COLUMN migrations in file-number order: 18 (sbc_id), 23 (on-net columns),
+# 40 (inbound-carrier attribution).
 # `id` and `start_time` are also required by the watermark/meta (BatchMeta).
 SELECT_COLUMNS: tuple[str, ...] = (
     # --- base table (05_schema_cdr.sql), in declaration order ---
@@ -122,6 +123,9 @@ SELECT_COLUMNS: tuple[str, ...] = (
     "terminating_customer_id",
     "on_net",
     "on_net_hops",
+    # --- 40_carrier_trunks.sql (inbound-carrier attribution) ---
+    "inbound_carrier",
+    "inbound_carrier_pop",
 )
 
 

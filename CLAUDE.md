@@ -203,6 +203,16 @@ Bandwidth sometimes sends `Session-Expires: 30` in 200 OK (below RFC 4028 minimu
 - **422 handling:** If Bandwidth rejects with 422 (Session Interval Too Small), Kamailio retries with Session-Expires: 3600, Min-SE: 900.
 - **5xx failover:** On 500/503/408/480/404 from primary carrier IP, Kamailio fails over to alternate Bandwidth IP (flag 8 prevents infinite loop).
 
+### Sinch Carrier Behaviors
+
+- **ORIGINATION ONLY.** Sinch is the second origination carrier. All outbound/termination stays Bandwidth — Sinch is never a TO_CARRIER destination, is not part of X-Carrier outbound selection, and is not in the 5xx carrier failover chain.
+- **PoPs / trunk groups:** Denver 206.146.100.24 (Trunk Group `DNVTCOZIGR2_3278`, test TN 5305480845), Chicago 206.146.101.39 (Trunk Group `CHCGIL24GR4_7412`, test TN 5305480846). Env-overridable via `SINCH_DENVER_IP`/`SINCH_CHICAGO_IP` (defaults baked in — deploy is git pull + rebuild, no .env edits).
+- **Round-robin to all 3 zone NLB VIPs** (like Bandwidth). Each zone's SBCs trust both Sinch IPs statically (flag 5) and probe them via dispatcher groups 6 (Denver) / 7 (Chicago) for OPTIONS keepalive + carrier-monitor up/down reporting.
+- **Dedup + CPS are carrier-generic:** Sinch shares the same `bw_dedup` (From::To key — deliberately source-independent) and per-source-IP `bw_cps` backstop (BW_CPS_LIMIT) as Bandwidth. No Sinch-specific rate plumbing.
+- **CDR attribution:** Kamailio stamps spoof-proofed `X-Inbound-Carrier`/`X-Inbound-PoP` on carrier ingress (strips wire-supplied copies first); FS records them as `inbound_carrier`/`inbound_carrier_pop` channel vars (defaults `bandwidth`/`""` when absent) which flow into CDRs. TO_CARRIER strips both headers before any B-leg reaches Bandwidth.
+- **Egress of Sinch-originated calls:** X-Inbound-TC is set to `tc4` for Sinch sources — the forwarded leg terminates via Bandwidth's default trunk config (there is no Sinch outbound trunk).
+- **Runtime-added carriers (no redeploy):** carriers beyond the static list can be admitted via the `carrier_trunks` table (managed in TED; sibling migration 40). Kamailio's `route[CARRIER_TRUST]` authenticates unknown source IPs per-INVITE (after the same pike/scanner gates as customer trunk auth), applies the row's per-carrier/PoP CPS limit (`carrier_cps` htable), and stamps attribution from the row. Fail-closed: DB down = DB-only carriers rejected; static carriers (Bandwidth, Sinch) unaffected. See `docker/kamailio/CLAUDE.md`.
+
 ### FreeSWITCH Media Handling
 
 - **No proxy_media in RCF path.** Default media mode works correctly. proxy_media was removed after the Cloud NAT fix resolved the actual audio issue.
@@ -234,7 +244,7 @@ Each GCP zone is a complete, independent VoIP stack. Calls NEVER cross zones for
 ### GCE UDP Idle Timeout
 
 GCE has a 30-second UDP idle timeout on NAT pinholes. Without keepalive:
-- Kamailio: Dispatcher sends OPTIONS probes every 5s to Bandwidth IPs (groups 2+3 in dispatcher.list).
+- Kamailio: Dispatcher sends OPTIONS probes every 5s to carrier IPs (Bandwidth groups 2+3, Sinch groups 6+7 in dispatcher.list).
 - FreeSWITCH: `rtp-keepalive-sec=15` sends comfort packets to keep RTP pinholes open.
 
 ## Critical Gotchas
@@ -268,6 +278,8 @@ These env vars are set per-VM in `/opt/revup/.env`. Getting any of them wrong br
 | `BW_CPS_LIMIT` | `100` (default) | Optional — per-carrier-IP inbound CPS backstop (`bw_cps` htable, 503 + Retry-After when exceeded) |
 | `TESTING_IP` | (unset) | Optional — trusted SIPp test source IP. UNSET in production (defaults to 255.255.255.255 = disabled) |
 | `BANDWIDTH_TC1_NY` etc. | (defaults) | Optional — TC1/TC2 PoP IPs (`BANDWIDTH_TC1_NY/TC1_ATL/TC2_DAL/TC2_LA`), env-templated with East defaults |
+| `SINCH_DENVER_IP` | `206.146.100.24` (default) | Optional — Sinch Denver origination IP (trust + dispatcher group 6), env-templated with production default |
+| `SINCH_CHICAGO_IP` | `206.146.101.39` (default) | Optional — Sinch Chicago origination IP (trust + dispatcher group 7), env-templated with production default |
 
 ### Media VM (FreeSWITCH + Redis)
 | Variable | Example | Purpose |

@@ -111,6 +111,27 @@
 5 sip:__BANDWIDTH_TC2_LA__:5060 0 0 weight=100;duid=bw-tc2-la
 
 # ============================================================
+# Group 6: Sinch Origination - Denver (DNVTCOZIGR2_3278)
+# ============================================================
+# Sinch Denver signaling IP — ORIGINATION-ONLY second carrier (inbound
+# INVITEs round-robin to all 3 zone NLB VIPs; outbound/termination stays
+# Bandwidth). Same keepalive/health-monitoring purpose as Groups 2-3:
+# OPTIONS probes keep the GCE UDP NAT pinhole open and give the
+# carrier-monitor sidecar up/down visibility (CARRIER_SETIDS includes 6-7).
+# NEVER used for call routing — Sinch is not a TO_CARRIER destination.
+# IP templated by entrypoint.sh from SINCH_DENVER_IP (default 206.146.100.24
+# — test TN 5305480845).
+6 sip:__SINCH_DENVER_IP__:5060 0 0 weight=100;duid=sinch-denver
+
+# ============================================================
+# Group 7: Sinch Origination - Chicago (CHCGIL24GR4_7412)
+# ============================================================
+# Sinch Chicago signaling IP — same origination-only/keepalive notes as
+# Group 6. IP templated by entrypoint.sh from SINCH_CHICAGO_IP (default
+# 206.146.101.39 — test TN 5305480846).
+7 sip:__SINCH_CHICAGO_IP__:5060 0 0 weight=100;duid=sinch-chicago
+
+# ============================================================
 # Notes:
 # ============================================================
 # - Kamailio will probe each destination every ds_ping_interval seconds

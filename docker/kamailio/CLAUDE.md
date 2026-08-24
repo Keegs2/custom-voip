@@ -120,12 +120,16 @@ Every SIP request enters here. Processing order:
 
 1. **Logging + HEP trace**: Log method/from/to, set flag 22, call `sip_trace()`.
 2. **Max-Forwards check**: Reject with 483 if exceeded.
-3. **Trust classification (flag 5)**:
+3. **Trust classification (flag 5)** — the STATIC carrier trust list:
    - Bandwidth IPs (67.231.0.0/16, 216.82.224.0/19) -> trusted
+   - Sinch origination IPs (`SINCH_DENVER_IP` 206.146.100.24, `SINCH_CHICAGO_IP`
+     206.146.101.39 — env-templated defines, origination only) -> trusted
    - Internal networks: Docker `172.28.0.0/16`, loopback `127.0.0.0/8`,
      `GCE_INTERNAL_NETWORK` `10.142.0.0/20`, and `VOIP_SUBNET` `192.168.10.0/24`
      (the FS media subnet) -> trusted
-   - Everything else -> untrusted
+   - Everything else -> untrusted. (Runtime-added carriers are NOT here —
+     they are DB-authenticated per-INVITE later, in route[CARRIER_TRUST];
+     see 4.6.1 for the static-vs-DB trust model.)
    - **Per-zone (env-driven):** `GCE_INTERNAL_NETWORK` and `VOIP_SUBNET` are now
      templated from `INTERNAL_SUBNET` (default 10.142.0.0/20) and `MEDIA_SUBNET`
      (default 192.168.10.0/24). A new zone sets these in its `.env`
@@ -150,12 +154,18 @@ Every SIP request enters here. Processing order:
 12. **REGISTER**: Rejected with 403 (Bandwidth uses IP auth, no registration).
 13. **OPTIONS**: Responds 200 OK. Tracks floods from untrusted sources.
 14. **INVITE routing** (source-based decision tree):
-    - **From Bandwidth** -> Dedup check (htable `bw_dedup`, 3s TTL) -> NAT detect -> Dispatch to FreeSWITCH port 5080
+    - **From a static carrier (Bandwidth or Sinch)** -> shared carrier-ingress branch:
+      dedup check (htable `bw_dedup`, 3s TTL, source-independent From::To key) ->
+      per-source-IP CPS backstop (`bw_cps`, BW_CPS_LIMIT) -> STIR capture ->
+      X-Inbound-TC (Sinch gets tc4: egress stays Bandwidth) -> spoof-proofed
+      `X-Inbound-Carrier`/`X-Inbound-PoP` attribution (strip wire copies, then
+      stamp from the matched IP) -> NAT detect -> Dispatch to FreeSWITCH port 5080
     - **From FreeSWITCH** (UA matches "VoicePlatform" or "FreeSWITCH"):
       - If `X-PBX-Dest` header present -> **Trunk inbound delivery**: Route to customer PBX IP, fix headers/SDP, record_route, relay
       - Otherwise -> **Outbound call**: route[TO_CARRIER]
     - **From internal but not FS** (e.g., SIPp) -> Treat as test inbound, dispatch to FS
-    - **Unknown source** -> route[TRUNK_AUTH] for IP-based trunk authentication. If auth fails, 403.
+    - **Unknown source** -> route[TRUNK_AUTH] (customer trunk IP auth), then
+      route[CARRIER_TRUST] (DB-backed carrier trust, 4.6.1). If both fall through, 403.
 
 ### 4.2 route[WITHINDIALOG]
 
@@ -255,7 +265,38 @@ IP-based SIP trunk authentication for customer PBXs:
 3. Enforces per-trunk CPS rate limiting via `trunk_cps` htable.
 4. Appends `X-Trunk-ID`, `X-Customer-ID`, `X-Max-Channels` headers for FreeSWITCH.
 5. Dispatches to FreeSWITCH on port 5080 (same path as carrier inbound).
-6. If no trunk matches, returns (does not exit), and caller sends 403.
+6. If no trunk matches, returns (does not exit), and caller falls through to CARRIER_TRUST, then 403.
+
+### 4.6.1 route[CARRIER_TRUST] (DB-backed carrier trust)
+
+Runtime carrier admission: lets ops add a NEW origination carrier/PoP with a
+single `carrier_trunks` INSERT (managed via TED; table from migration 40 —
+columns `carrier, pop, trunk_group, source_ip inet, test_tn, direction,
+cps_limit, enabled`) — no config change, no redeploy, no restart.
+
+**Static vs DB trust model:**
+
+| | Static (Bandwidth, Sinch) | DB (`carrier_trunks`) |
+|---|---|---|
+| Trust point | Top of request_route (flag 5), compile-time defines | Per initial INVITE, SQL point lookup on the zone's local replica |
+| Protection cost | Skips pike/scanner (carrier-grade volume) | Runs AFTER the full untrusted gauntlet: blocked htable, sanity, pike (50 req/s/IP), SCANNER_DETECT (30 INVITE/min) — same profile as TRUNK_AUTH, so scanners cannot cheaply farm SQL |
+| CPS limit | `bw_cps` htable, global `BW_CPS_LIMIT` per source IP | `carrier_cps` htable (key `carrier::pop`, fixed 1s window, autoexpire=1 + updateexpire=0), limit = the row's `cps_limit` (NULL/0 = no per-row limit) |
+| OPTIONS / non-INVITE | Trusted (no flood tracking) | Untrusted handling — keep DB-carrier OPTIONS probes >= 5s apart (OPTIONS_FLOOD_THRESHOLD is 20/60s) |
+| Ceiling | None (static IPs bypass pike) | pike bounds EVERY request at 50/s/IP — promote a permanent/high-CPS carrier to a static define |
+| DB down | Unaffected (no DB on path) | **Fail-closed**: query error/no row -> return -> 403. A DB outage can never admit an unknown source |
+
+**On a hit** (enabled row, `direction IN ('inbound','both')`): `setflag(5)`,
+shared `bw_dedup` dedup (with the same 503-rollback semantics as the static
+branch), per-row `carrier_cps` admission (503 + Retry-After over limit),
+`dlg_manage()` + `$dlg_var(fs_port)=5080`, `X-SBC-ID`, spoof-proofed
+`X-Inbound-Carrier`/`X-Inbound-PoP` from the row, Identity capture
+(`X-In-Identity` for STIR div chaining), NAT_DETECT, DISPATCH, exit. The
+carrier double-RR was already applied in request_route (unknown sources take
+the non-FS `record_route_preset` branch), so in-dialog routing is identical to
+static carriers (WITHINDIALOG/FROM_NET_INDIALOG are carrier-agnostic).
+Deliberately NOT replicated: Bandwidth-PAI verstat/attest capture
+(Bandwidth-format observability) and the closed-enum Prometheus trunk
+metrics (a DB-sourced name is not a bounded label).
 
 ### 4.7 route[NAT_DETECT]
 
@@ -311,7 +352,7 @@ Tracks INVITE floods per source IP. >30 INVITEs/minute from untrusted source = b
 
 **File**: `dispatcher.list`
 
-Five dispatcher groups:
+Seven dispatcher groups:
 
 | Group | Destination(s) | Purpose |
 |---|---|---|
@@ -320,11 +361,15 @@ Five dispatcher groups:
 | 3 | sip:216.82.238.134:5060 | Bandwidth TC4 LA keepalive/health monitoring ONLY |
 | 4 | sip:67.231.9.142 + sip:67.231.13.185 | Bandwidth TC1 New York + Atlanta keepalive/health ONLY |
 | 5 | sip:67.231.1.188 + sip:67.231.4.138 | Bandwidth TC2 Dallas + LA keepalive/health ONLY |
+| 6 | sip:206.146.100.24:5060 (`__SINCH_DENVER_IP__`, duid=sinch-denver) | Sinch Denver (origination-only) keepalive/health ONLY |
+| 7 | sip:206.146.101.39:5060 (`__SINCH_CHICAGO_IP__`, duid=sinch-chicago) | Sinch Chicago (origination-only) keepalive/health ONLY |
 
-Groups 2-5 are NOT used for call routing (that's route[TO_CARRIER] via $rd/$du).
+Groups 2-7 are NOT used for call routing (that's route[TO_CARRIER] via $rd/$du —
+and Sinch is origination-only, never a TO_CARRIER destination anyway).
 They exist solely for:
 - **NAT keepalive**: OPTIONS every 5s keeps GCE's UDP NAT pinhole open.
-- **Health monitoring**: Detects carrier unreachability.
+- **Health monitoring**: Detects carrier unreachability. The carrier-monitor
+  sidecar reports groups 2, 3, 6, 7 (`CARRIER_SETIDS`) to the East API.
 
 Dispatcher parameters:
 - `ds_ping_interval=5`: Probe every 5 seconds (all groups).
@@ -370,6 +415,8 @@ Set in `.env` file on each SBC VM. Passed via `docker-compose.sbc.yml`.
 | `BANDWIDTH_TC1_ATL` | No (default 67.231.13.185) | — | TC1 Atlanta PoP (TC1 in-trunk failover target, dispatcher group 4 keepalive). |
 | `BANDWIDTH_TC2_DAL` | No (default 67.231.1.188) | — | TC2 Dallas PoP (`X-Carrier=tc2`, in-trunk failover, dispatcher group 5 keepalive). |
 | `BANDWIDTH_TC2_LA` | No (default 67.231.4.138) | — | TC2 Los Angeles PoP (TC2 in-trunk failover target, dispatcher group 5 keepalive). |
+| `SINCH_DENVER_IP` | No (default 206.146.100.24) | — | Sinch Denver origination PoP (Trunk Group DNVTCOZIGR2_3278, test TN 5305480845). Static inbound trust + attribution + dispatcher group 6 keepalive. Origination-only — never an egress target. |
+| `SINCH_CHICAGO_IP` | No (default 206.146.101.39) | — | Sinch Chicago origination PoP (Trunk Group CHCGIL24GR4_7412, test TN 5305480846). Static inbound trust + attribution + dispatcher group 7 keepalive. Origination-only — never an egress target. |
 
 ## 7. SIP Call Flows
 
@@ -700,27 +747,45 @@ sudo docker exec voip-clickhouse clickhouse-client --query "SELECT timestamp_ns,
 
 ### Adding a New Carrier IP / Trunk Config
 
-ALL Bandwidth carrier IPs are now env-driven: the TC4 primary/secondary PoPs via
-`BANDWIDTH_PRIMARY_IP`/`BANDWIDTH_SECONDARY_IP`, and the fixed-PoP TC1/TC2 IPs via
-`BANDWIDTH_TC1_NY`/`BANDWIDTH_TC1_ATL`/`BANDWIDTH_TC2_DAL`/`BANDWIDTH_TC2_LA`
+**Runtime path (ORIGINATION-only carriers, no redeploy):** INSERT a row into
+`carrier_trunks` (via TED) with the source IP, carrier/pop names, direction
+`inbound`/`both`, and a `cps_limit`. route[CARRIER_TRUST] (4.6.1) admits it on
+the next INVITE — no config change. Use this for trials and emergency adds;
+PROMOTE to a static define (below) once the carrier is permanent or needs
+carrier-grade CPS (the DB path sits behind pike at 50 req/s/IP).
+
+**Static path** — ALL carrier IPs are env-driven: the Bandwidth TC4
+primary/secondary PoPs via `BANDWIDTH_PRIMARY_IP`/`BANDWIDTH_SECONDARY_IP`, the
+fixed-PoP TC1/TC2 IPs via
+`BANDWIDTH_TC1_NY`/`BANDWIDTH_TC1_ATL`/`BANDWIDTH_TC2_DAL`/`BANDWIDTH_TC2_LA`,
+and the Sinch origination PoPs via `SINCH_DENVER_IP`/`SINCH_CHICAGO_IP`
 (entrypoint templates them into both kamailio.cfg AND dispatcher.list, defaults =
-current production IPs). To add a NEW carrier IP that is not one of these:
+current production IPs). To add a NEW static carrier IP:
 
 1. Add a `#!define` with a `__PLACEHOLDER__` in the Global Parameters section and
-   the matching default + sed line in entrypoint.sh (follow the `BANDWIDTH_TC*`
-   precedent):
+   the matching default + sed line in entrypoint.sh (follow the `BANDWIDTH_TC*` /
+   `SINCH_*` precedent):
    ```
    #!define BANDWIDTH_TCx_NEW "__BANDWIDTH_TCx_NEW__"
    ```
-2. Trust is already covered by the Bandwidth `#!define` nets (67.231.0.0/16,
-   216.82.224.0/19) in the flag-5 block; add a new net only if the IP is outside those.
-3. Add a dispatcher group in `dispatcher.list` for keepalive (next free group is 6):
+2. Trust: Bandwidth IPs inside 67.231.0.0/16 / 216.82.224.0/19 are already
+   covered by the flag-5 nets. IPs outside those (like Sinch's) need an explicit
+   `$si ==` arm in the flag-5 block AND in the carrier-ingress INVITE branch
+   condition (they are parallel — keep them in sync), plus an
+   `X-Inbound-Carrier`/`X-Inbound-PoP` attribution arm and (for a non-Bandwidth
+   carrier) an `X-Inbound-TC` arm.
+3. Add a dispatcher group in `dispatcher.list` for keepalive (groups 6-7 are
+   Sinch; next free group is 8):
    ```
-   6 sip:1.2.3.4:5060 0 0 weight=100;duid=bw-tcx-new
+   8 sip:1.2.3.4:5060 0 0 weight=100;duid=carrier-pop
    ```
-4. Add an `X-Carrier` routing case in TO_CARRIER's switch (e.g. `tcx`).
-5. Add the in-trunk failover case (and its return IP) in CARRIER_FAILURE.
-6. Run `kamcmd dispatcher.reload` after deploy.
+   Add the setid to `CARRIER_SETIDS` + a `DUID_NAMES` entry in
+   `docker/carrier-monitor/carrier_monitor.py` if it should be reported, and an
+   alias in `docker/homer/scripts/ip-alias.lua`.
+4. TERMINATION carriers only: add an `X-Carrier` routing case in TO_CARRIER's
+   switch and the in-trunk failover case (and its return IP) in CARRIER_FAILURE.
+   Origination-only carriers (Sinch) get NEITHER — egress stays Bandwidth.
+5. Run `kamcmd dispatcher.reload` after deploy.
 
 ### Adding a New Route
 

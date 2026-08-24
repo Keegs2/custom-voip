@@ -17,7 +17,7 @@ from routers import (
     auth, search, number_inventory,
     carriers, rates, tiers, sipp, sbc, homer,
     onboarding, freeswitch, carrier_status, live_trunk_stats,
-    stir, payments, billing,
+    stir, payments, billing, carrier_trunks,
 )
 from middleware.auth import JWTAuthMiddleware
 
@@ -121,6 +121,8 @@ app.include_router(sbc.router, prefix="/v1/sbc", tags=["SBC"])
 app.include_router(sbc.router, prefix="/sbc", tags=["SBC"])
 app.include_router(carrier_status.router, prefix="/v1/carrier-status", tags=["Carrier Status"])
 app.include_router(carrier_status.router, prefix="/carrier-status", tags=["Carrier Status"])
+app.include_router(carrier_trunks.router, prefix="/v1/carrier-trunks", tags=["Carrier Trunks"])
+app.include_router(carrier_trunks.router, prefix="/carrier-trunks", tags=["Carrier Trunks"])
 app.include_router(live_trunk_stats.router, prefix="/v1/live-trunk-stats", tags=["Live Trunk Stats"])
 app.include_router(live_trunk_stats.router, prefix="/live-trunk-stats", tags=["Live Trunk Stats"])
 app.include_router(homer.router, prefix="/v1/homer", tags=["Homer"])

@@ -32,6 +32,7 @@ src/
     search.py                # Admin DID search, user search
     number_inventory.py      # DID lifecycle management (inventory, assign, sync, reconcile)
     carriers.py              # Carrier gateway CRUD + reachability test (admin)
+    carrier_trunks.py        # Multi-carrier trunk registry CRUD (admin) — SBC sqlops trust-fallback contract
     rates.py                 # Rate table / rate entry CRUD, margins, lookup (admin)
     tiers.py                 # CPS tier CRUD (admin)
     sipp.py                  # SIPp load-test presets + run (admin; runner not yet deployed)
@@ -122,8 +123,8 @@ CDR ingestion and querying. The largest router file.
   - Resolves fields from multiple locations: `variables` dict, `callflow[0].caller_profile`, top-level `core-uuid`
   - Cleans caller_id_number (handles SIP `"Display" <+1234>` format)
   - Computes R-factor from MOS using piecewise linear approximation
-  - Extracts ~53 columns including full RTP quality metrics (jitter, packet loss, MOS, codec info) and the on-net set `origin_customer_id`/`terminating_customer_id`/`on_net`/`on_net_hops` (records both parties of an internal call; `customer_id` stays the terminal so `rate_cdr()` is unchanged; off-net → `origin==customer`, `on_net=false`)
-  - Explicit `::type` casts on all INSERT parameters for asyncpg/PgBouncer compatibility (the INSERT binds 53 positional params, `$1`–`$53`; on-net columns are `$50::int`/`$51::int`/`$52::bool`/`$53::smallint`)
+  - Extracts ~55 columns including full RTP quality metrics (jitter, packet loss, MOS, codec info), the on-net set `origin_customer_id`/`terminating_customer_id`/`on_net`/`on_net_hops` (records both parties of an internal call; `customer_id` stays the terminal so `rate_cdr()` is unchanged; off-net → `origin==customer`, `on_net=false`), and the inbound-carrier attribution pair `inbound_carrier`/`inbound_carrier_pop` (FS channel vars, migration 40; absent/empty → NULL)
+  - Explicit `::type` casts on all INSERT parameters for asyncpg/PgBouncer compatibility (the INSERT binds 55 positional params, `$1`–`$55`; on-net columns are `$50::int`/`$51::int`/`$52::bool`/`$53::smallint`, inbound-carrier columns `$54::varchar`/`$55::varchar`)
   - Duplicate detection via `WHERE NOT EXISTS` (the cdrs table uses a composite PK for TimescaleDB)
   - Always returns 200 to prevent FreeSWITCH retry storms
 - **Query**: `GET /v1/cdrs` with filters (customer, trunk, product_type, direction, destination, date range, rated_only). Defaults to last 24 hours.
@@ -150,6 +151,9 @@ Complete DID lifecycle management backed by the `did_inventory` table.
 
 ### carriers.py
 Admin-only CRUD for `carrier_gateways` (Bandwidth Dallas/LA). `POST /{carrier_id}/test` probes carrier reachability.
+
+### carrier_trunks.py
+Admin-only CRUD for `carrier_trunks` (migration 40) at `/v1/carrier-trunks` — the multi-carrier trunk registry (Bandwidth + Sinch, one row per carrier signaling IP). The Kamailio SBCs read it via sqlops (`freeswitch` DB role) as the DB-backed trust fallback for unknown-source INVITEs: `SELECT carrier, pop, cps_limit FROM carrier_trunks WHERE source_ip = '$si'::inet AND direction IN ('inbound','both') AND enabled = true` — those column names are a CONTRACT, never rename. Validates `source_ip` with `ipaddress` (bare IP, no CIDR), direction as a `Literal` enum, `cps_limit > 0`; maps the two named UNIQUE constraints (source_ip, carrier+pop) to distinct 409s; PUT is a partial update via `exclude_unset` (nullable fields clearable); `carrier` is immutable (delete + recreate to re-home an IP). Returns `host(source_ip)` as text.
 
 ### rates.py
 Admin-only management of `rate_tables` / `rates`. Plus `GET /margins` (rate vs cost analysis) and `GET /lookup` (longest-prefix rate match for a destination).

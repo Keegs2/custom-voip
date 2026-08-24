@@ -10,8 +10,10 @@ Run:
 
 Focus: the four additive on-net columns (origin_customer_id,
 terminating_customer_id, on_net, on_net_hops) are extracted from FreeSWITCH
-`variables`, bound as $50-$53, and that the always-return-200 ingest contract
-and off-net backward-compatibility (on_net=false) are intact.
+`variables`, bound as $50-$53, the two inbound-carrier attribution columns
+(inbound_carrier, inbound_carrier_pop — migration 40) as $54-$55, and that the
+always-return-200 ingest contract and off-net backward-compatibility
+(on_net=false) are intact.
 """
 import sys
 import pathlib
@@ -69,12 +71,17 @@ def _base_variables(**overrides):
     return v
 
 
-# Column order in the INSERT (must match cdrs.py). The four on-net columns are
-# the last four -> params index -4..-1 (0-based) i.e. $50..$53.
-IDX_ORIGIN = -4
-IDX_TERMINATING = -3
-IDX_ON_NET = -2
-IDX_ON_NET_HOPS = -1
+# Column order in the INSERT (must match cdrs.py). The tail is: the four
+# on-net columns ($50..$53) then the two inbound-carrier columns ($54..$55),
+# so negative indices from the end are -6..-1.
+IDX_ORIGIN = -6
+IDX_TERMINATING = -5
+IDX_ON_NET = -4
+IDX_ON_NET_HOPS = -3
+IDX_INBOUND_CARRIER = -2
+IDX_INBOUND_CARRIER_POP = -1
+
+PARAM_COUNT = 55
 
 
 def _run(body):
@@ -94,7 +101,7 @@ def test_onnet_fields_extracted(cap):
     assert result["status"] == "ok"
     p = cap.params
     assert p is not None, "INSERT was not executed"
-    assert len(p) == 53, f"expected 53 bind params, got {len(p)}"
+    assert len(p) == PARAM_COUNT, f"expected {PARAM_COUNT} bind params, got {len(p)}"
     # customer_id is the terminal customer (param $2, index 1)
     assert p[1] == 20
     assert p[IDX_ORIGIN] == 10
@@ -156,8 +163,8 @@ def test_insert_param_count_matches_placeholders(cap):
     )}
     _run(body)
     placeholders = set(re.findall(r"\$(\d+)", cap.sql))
-    # highest placeholder index must equal the param count (53)
-    assert max(int(x) for x in placeholders) == len(cap.params) == 53
+    # highest placeholder index must equal the param count (55)
+    assert max(int(x) for x in placeholders) == len(cap.params) == PARAM_COUNT
 
 
 def test_ingest_always_returns_ok_dict_on_bad_body(cap):
@@ -165,3 +172,53 @@ def test_ingest_always_returns_ok_dict_on_bad_body(cap):
     dict (the HTTP layer still returns 200)."""
     result = _run({"variables": {}})  # missing everything
     assert result["status"] == "error"
+
+
+# ---------------------------------------------------------------------------
+# Inbound-carrier attribution ($54/$55 — migration 40).
+# ---------------------------------------------------------------------------
+
+def test_inbound_carrier_fields_extracted(cap):
+    """FS channel vars inbound_carrier / inbound_carrier_pop bind as $54/$55."""
+    body = {"variables": _base_variables(
+        inbound_carrier="sinch",
+        inbound_carrier_pop="denver",
+    )}
+    result = _run(body)
+    assert result["status"] == "ok"
+    p = cap.params
+    assert len(p) == PARAM_COUNT
+    assert p[IDX_INBOUND_CARRIER] == "sinch"
+    assert p[IDX_INBOUND_CARRIER_POP] == "denver"
+
+
+def test_missing_inbound_carrier_fields_are_none(cap):
+    """Absent inbound-carrier vars (legacy calls / customer-trunk sources)
+    bind NULL for both columns and still ingest ok."""
+    body = {"variables": _base_variables()}  # no inbound-carrier vars
+    result = _run(body)
+    assert result["status"] == "ok"
+    assert cap.params[IDX_INBOUND_CARRIER] is None
+    assert cap.params[IDX_INBOUND_CARRIER_POP] is None
+
+
+def test_empty_inbound_carrier_vars_are_none(cap):
+    """FS emits unset channel vars as "" in some paths — store NULL, not ''."""
+    body = {"variables": _base_variables(
+        inbound_carrier="", inbound_carrier_pop="",
+    )}
+    result = _run(body)
+    assert result["status"] == "ok"
+    assert cap.params[IDX_INBOUND_CARRIER] is None
+    assert cap.params[IDX_INBOUND_CARRIER_POP] is None
+
+
+def test_inbound_carrier_truncated_to_column_width(cap):
+    """Values longer than the column widths (20/50) are truncated, not erred."""
+    body = {"variables": _base_variables(
+        inbound_carrier="x" * 40, inbound_carrier_pop="y" * 80,
+    )}
+    result = _run(body)
+    assert result["status"] == "ok"
+    assert cap.params[IDX_INBOUND_CARRIER] == "x" * 20
+    assert cap.params[IDX_INBOUND_CARRIER_POP] == "y" * 50

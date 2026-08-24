@@ -201,6 +201,9 @@ _FIELD_DEFS: list[tuple[str, str, Callable[[Any], str]]] = [
     ("terminating_customer_id",        "terminating_customer_id",        _fmt_plain),
     ("on_net",                         "on_net",                         _fmt_bool),
     ("on_net_hops",                    "on_net_hops",                    _fmt_plain),
+    # --- 40_carrier_trunks.sql (inbound-carrier attribution) ---
+    ("inbound_carrier",                "inbound_carrier",                _fmt_plain),
+    ("inbound_carrier_pop",            "inbound_carrier_pop",            _fmt_plain),
 ]
 
 # Module-level documentation of column order (output labels). Public API.

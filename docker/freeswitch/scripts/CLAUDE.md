@@ -48,6 +48,11 @@ Dialplan public context matches destination_number pattern
 inbound_router.lua executes:
   1. Extract call details (DID, caller ID, source IP)
   2. Preserve original caller ID from sip_from_user (before FS modifies it)
+  2b. Inbound carrier attribution (EARLY, before DID validation, so even
+      rejected calls carry it in the CDR): read the SBC's spoof-proofed
+      sip_h_X-Inbound-Carrier / sip_h_X-Inbound-PoP headers into the
+      `inbound_carrier` / `inbound_carrier_pop` channel variables
+      (defaults "bandwidth" / "" when the headers are absent)
   3. Normalize DID to E.164 (+1XXXXXXXXXX)
   4. DID lookup cascade (PostgreSQL only — the Redis route cache, fraud
      prefix check, and velocity limiting were REMOVED in RCF-V1; old code
@@ -205,7 +210,7 @@ body is stripped is obsolete.
 - `number_routing` view -- on-net oracle for `forward_to` (resolve_destination)
 
 **Channel variables set for CDR:**
-`customer_id` (=terminal customer), `product_type`, `traffic_grade`, `trunk_id`, `carrier_used`, `forward_to`, `direction`, `call_start_time`, `hangup_cause`, `blocked_reason`, `fraud_score`, `lua_routed`, and the on-net set `origin_customer_id`, `terminating_customer_id`, `on_net`, `on_net_hops`.
+`customer_id` (=terminal customer), `product_type`, `traffic_grade`, `trunk_id`, `carrier_used`, `forward_to`, `direction`, `call_start_time`, `hangup_cause`, `blocked_reason`, `fraud_score`, `lua_routed`, the inbound-carrier attribution `inbound_carrier` / `inbound_carrier_pop` (from Kamailio's X-Inbound-Carrier/X-Inbound-PoP; "bandwidth"/"" when absent), and the on-net set `origin_customer_id`, `terminating_customer_id`, `on_net`, `on_net_hops`.
 
 ### trunk_outbound.lua
 

@@ -34,6 +34,7 @@ Scripts in `init/` run alphabetically on first database creation:
 | `21_cdr_export.sql` | Idempotent: `cdrs.exported_at` watermark + partial index; `cdr_export_log` / `cdr_export_lock` tables (backs the Equinox→FileMage CDR forwarder). Apply manually on prod primary. |
 | `22_number_routing.sql` | **On-net routing oracle:** `CREATE OR REPLACE VIEW number_routing` — `UNION ALL` over rcf_numbers/api_dids/trunk_dids JOIN customers, canonical columns, `GRANT SELECT TO freeswitch, api`. **Unfiltered on enabled/active** (resolver tells "not ours" from "ours but disabled"). Point lookup by `did` hits each arm's hash index. Apply manually on prod primary → replicates to all zones (view must exist before any replica is re-cloned). |
 | `23_onnet_cdr_columns.sql` | Idempotent ALTER adding `cdrs.origin_customer_id INT`, `terminating_customer_id INT`, `on_net BOOLEAN DEFAULT false`, `on_net_hops SMALLINT` + partial index on `origin_customer_id`. Records both parties of an on-net call; `customer_id` stays the terminal so `rate_cdr()` is unchanged. Apply manually on prod primary. |
+| `40_carrier_trunks.sql` | **Multi-carrier trunk registry:** `carrier_trunks` table (one row per carrier signaling IP; UNIQUE source_ip + UNIQUE (carrier,pop)) seeded with Bandwidth Dallas/LA + Sinch Denver/Chicago; **columns carrier/pop/trunk_group/source_ip/test_tn/direction/cps_limit/enabled are the Kamailio sqlops CONTRACT** (SELECT-granted to `freeswitch`, ALL to `api`). Also: idempotent ALTER adding `cdrs.inbound_carrier VARCHAR(20)` + `inbound_carrier_pop VARCHAR(50)` (per-carrier CDR attribution), and the `carrier_trunk_health` view replace widening setid (2,3) → (2,3,6,7) for the Sinch dispatcher groups (25 is amended in place for fresh installs; prod applies this file). Apply manually on prod primary. |
 
 ## Hot-Path Tables (Call Setup)
 
@@ -43,6 +44,7 @@ These are queried on EVERY inbound call — must be fast:
 - **`number_routing`** (view) — on-net oracle. `resolve_destination(forward_to)` does one `WHERE did=$1` point lookup that pushes into each product arm's DID hash index (`idx_{rcf,api,trunk}_did_lookup`) → 3 point lookups + small joins, sub-ms, 0/1 row. Runs on EVERY RCF forward. Defined on the primary, inherited by every replica.
 - **`customers`** — Status/limits check. Joined with rcf_numbers (and every `number_routing` arm). Index on `(id, status)`.
 - **`trunk_auth_ips`** — IP-based SIP trunk auth. Hash index on `ip_address`. Queried by Kamailio sqlops.
+- **`carrier_trunks`** — carrier-IP trust fallback for unknown-source INVITEs (Bandwidth + Sinch). UNIQUE index on `source_ip` (point lookup). Queried by Kamailio sqlops; admin CRUD via `/v1/carrier-trunks`.
 - **`high_risk_prefixes`** — IRSF fraud check. text_pattern_ops index for prefix matching.
 
 ## Database Users

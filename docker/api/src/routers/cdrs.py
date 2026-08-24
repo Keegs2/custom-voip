@@ -500,6 +500,19 @@ async def _process_cdr_body(body: dict) -> dict:
             on_net = str(on_net_raw).strip().lower() in ("true", "1", "t", "yes")
         on_net_hops = _safe_int(variables.get("on_net_hops"))
 
+        # ---- Inbound carrier attribution (multi-carrier, migration 40) ----
+        # FreeSWITCH sets the channel vars `inbound_carrier` /
+        # `inbound_carrier_pop` (EXACTLY those names) on calls admitted via a
+        # carrier trunk (e.g. 'sinch'/'denver'). Absent (legacy calls,
+        # customer-trunk sources) or empty -> NULL. Truncated to the column
+        # widths (VARCHAR(20)/VARCHAR(50)).
+        inbound_carrier = variables.get("inbound_carrier")
+        if inbound_carrier is not None:
+            inbound_carrier = str(inbound_carrier).strip()[:20] or None
+        inbound_carrier_pop = variables.get("inbound_carrier_pop")
+        if inbound_carrier_pop is not None:
+            inbound_carrier_pop = str(inbound_carrier_pop).strip()[:50] or None
+
         # ---- Logging: summarize what we extracted -------------------------
         extracted = []
         dropped = []
@@ -530,6 +543,8 @@ async def _process_cdr_body(body: dict) -> dict:
             "origin_customer_id": origin_customer_id,
             "terminating_customer_id": terminating_customer_id,
             "on_net": on_net, "on_net_hops": on_net_hops,
+            "inbound_carrier": inbound_carrier,
+            "inbound_carrier_pop": inbound_carrier_pop,
         }
         for fname, fval in field_checks.items():
             if fval is not None:
@@ -576,7 +591,8 @@ async def _process_cdr_body(body: dict) -> dict:
                 hangup_cause_q850, sip_hangup_disposition,
                 sip_user_agent, network_addr, bridge_uuid,
                 sbc_id,
-                origin_customer_id, terminating_customer_id, on_net, on_net_hops
+                origin_customer_id, terminating_customer_id, on_net, on_net_hops,
+                inbound_carrier, inbound_carrier_pop
             )
             SELECT
                 $1::varchar,  $2::int,       $3::varchar,  $4::int,       $5::varchar,
@@ -599,7 +615,8 @@ async def _process_cdr_body(body: dict) -> dict:
                 $44::smallint, $45::varchar,
                 $46::varchar, $47::varchar, $48::varchar,
                 $49::varchar,
-                $50::int,     $51::int,      $52::bool,     $53::smallint
+                $50::int,     $51::int,      $52::bool,     $53::smallint,
+                $54::varchar, $55::varchar
             WHERE NOT EXISTS (
                 SELECT 1 FROM cdrs WHERE uuid = $1::varchar
             )
@@ -657,6 +674,8 @@ async def _process_cdr_body(body: dict) -> dict:
             terminating_customer_id,  # $51 terminating_customer_id (int | None)
             on_net,                 # $52 on_net (bool | None)
             on_net_hops,            # $53 on_net_hops (int | None)
+            inbound_carrier,        # $54 inbound_carrier (str | None)
+            inbound_carrier_pop,    # $55 inbound_carrier_pop (str | None)
         )
 
         # ---- STIR/SHAKEN attestation (companion table, failure-isolated) --
