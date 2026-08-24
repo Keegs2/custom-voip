@@ -6,15 +6,18 @@ Provides a complete DID management system backed by the did_inventory table:
   - Customer: browse available numbers, view own numbers, request a number,
     request/cancel release of an assigned number
 
-Carrier attribution (migration 41): every inventory row carries
-source ('bandwidth_sync' | 'manual') and an optional carrier_trunk_id FK to
-carrier_trunks (migration 40). Manual intake is the first-class path for
-non-Bandwidth numbers (e.g. Sinch): admin POSTs a batch to /add attributed to
-a carrier trunk, the DIDs land status='available', and the EXISTING
-assign->customer->product flow takes over unchanged. source is the sync
-OWNERSHIP BOUNDARY — POST /sync only manages rows with source='bandwidth_sync'
-(manual rows never appear in its 'removed' report and never get their
-metadata overwritten).
+Carrier attribution (migrations 41 + 42): every inventory row carries
+source ('bandwidth_sync' | 'manual'), an optional carrier_trunk_id FK to
+carrier_trunks (migration 40), and a first-class carrier column (migration
+42; NULL = legacy implicit Bandwidth — readers COALESCE(d.carrier,
+ct.carrier, 'bandwidth')). Manual intake is the first-class path for
+non-Bandwidth numbers (e.g. Sinch): admin POSTs a batch to /add naming the
+OWNING CARRIER (required; must have at least one enabled carrier_trunks row)
+plus optionally a specific trunk of that carrier, the DIDs land
+status='available', and the EXISTING assign->customer->product flow takes
+over unchanged. source is the sync OWNERSHIP BOUNDARY — POST /sync only
+manages rows with source='bandwidth_sync' (manual rows never appear in its
+'removed' report and never get their metadata overwritten).
 
 Release workflow (request-based): customer POST /{did}/request-release sets
 'assigned' -> 'release_requested'; admin approves via POST /{did}/unassign
@@ -70,17 +73,34 @@ class UnassignRequest(BaseModel):
 
 
 class AddDIDsRequest(BaseModel):
-    """Body for POST /add — manual DID intake with carrier-trunk attribution."""
+    """Body for POST /add — manual DID intake with carrier attribution.
+
+    carrier is REQUIRED (the owning carrier — must have at least one ENABLED
+    carrier_trunks row, else 404 'unknown carrier'); carrier_trunk_id is an
+    OPTIONAL narrowing to a specific trunk, which must belong to that carrier
+    and be enabled (else 422).
+    """
     dids: list[str] = Field(min_length=1, max_length=500)
-    carrier_trunk_id: int
+    carrier: str
+    carrier_trunk_id: Optional[int] = None
     notes: Optional[str] = None
+
+    @field_validator("carrier")
+    @classmethod
+    def validate_carrier(cls, v: str) -> str:
+        v = v.strip().lower()
+        if not v or len(v) > 50:
+            raise ValueError("carrier must be 1-50 characters")
+        return v
 
 
 class CarrierTrunkAssociation(BaseModel):
     """Body for PUT /{did}/carrier-trunk.
 
     carrier_trunk_id is REQUIRED but nullable: an explicit null clears the
-    association (back to the implicit-Bandwidth attribution legacy rows carry).
+    trunk association. Setting a trunk also syncs the DID's first-class
+    `carrier` to that trunk's carrier; clearing leaves `carrier` as-is (the
+    DID still belongs to its carrier — it just loses the specific trunk).
     """
     carrier_trunk_id: Optional[int]
 
@@ -122,19 +142,36 @@ def _canonical_did(did: str) -> str:
 
 
 # The inventory-item shape shared by GET /inventory rows and the PUT
-# /{did}/carrier-trunk response. carrier/carrier_pop are attribution overlays:
-# COALESCE(ct.carrier,'bandwidth') renders legacy rows (carrier_trunk_id NULL)
-# as the implicit Bandwidth they came from; carrier_pop stays NULL for them.
+# /{did}/carrier-trunk response. The item's `carrier` is
+# COALESCE(d.carrier, ct.carrier, 'bandwidth') — first-class column (42),
+# else the trunk's carrier (41-era rows), else implicit Bandwidth (legacy) —
+# computed in _shape_item, NOT aliased in SQL: d.* already emits a `carrier`
+# column, and dict(asyncpg.Record) resolves duplicate names to the FIRST
+# occurrence, which would silently return the raw (possibly NULL) column.
+# carrier_pop comes from the associated trunk and stays NULL without one.
 _ITEM_COLS = """d.*,
                c.name AS customer_name,
                u.name AS assigned_by_name,
-               COALESCE(ct.carrier, 'bandwidth') AS carrier,
+               ct.carrier AS _trunk_carrier,
                ct.pop AS carrier_pop"""
 _ITEM_JOINS = """
           FROM did_inventory d
           LEFT JOIN customers c ON d.customer_id = c.id
           LEFT JOIN users u ON d.assigned_by = u.id
           LEFT JOIN carrier_trunks ct ON d.carrier_trunk_id = ct.id"""
+
+# The carrier value a row RENDERS as, SQL-side — used by the /inventory
+# carrier= filter and /stats by_carrier so filtering/grouping match the item
+# shape exactly.
+_CARRIER_COALESCE = "COALESCE(d.carrier, ct.carrier, 'bandwidth')"
+
+
+def _shape_item(row) -> dict:
+    """Record -> inventory-item dict: fold the trunk carrier into `carrier`."""
+    item = dict(row)
+    trunk_carrier = item.pop("_trunk_carrier", None)
+    item["carrier"] = item.get("carrier") or trunk_carrier or "bandwidth"
+    return item
 
 
 def _compute_sync_sets(
@@ -296,9 +333,10 @@ async def get_inventory(
 ):
     """Return the full DID inventory with filters and pagination. Admin only.
 
-    Items carry carrier attribution: carrier (COALESCEd — legacy rows without a
-    carrier_trunk_id render as 'bandwidth'), carrier_pop (NULL for implicit
-    Bandwidth), carrier_trunk_id, and source ('bandwidth_sync' | 'manual').
+    Items carry carrier attribution: carrier (COALESCE(d.carrier, ct.carrier,
+    'bandwidth') — first-class column, else the trunk's carrier, else implicit
+    Bandwidth for legacy rows), carrier_pop (NULL without a trunk),
+    carrier_trunk_id, and source ('bandwidth_sync' | 'manual').
     """
     query = f"""
         SELECT {_ITEM_COLS},
@@ -335,9 +373,9 @@ async def get_inventory(
         idx += 1
 
     if carrier is not None:
-        # Match the COALESCEd value so carrier=bandwidth also finds legacy
-        # rows with no carrier_trunk_id (implicit Bandwidth).
-        query += f" AND COALESCE(ct.carrier, 'bandwidth') = ${idx}"
+        # Match the rendered carrier value so carrier=bandwidth also finds
+        # legacy rows with neither d.carrier nor a trunk (implicit Bandwidth).
+        query += f" AND {_CARRIER_COALESCE} = ${idx}"
         values.append(carrier.strip().lower())
         idx += 1
 
@@ -349,7 +387,7 @@ async def get_inventory(
 
     items = []
     for r in rows:
-        item = dict(r)
+        item = _shape_item(r)
         item.pop("total_count", None)
         items.append(item)
 
@@ -380,10 +418,10 @@ async def get_stats(admin: dict = Depends(require_admin)):
     )
     by_state = {r["state"]: r["cnt"] for r in state_rows}
 
-    # Carrier breakdown — same COALESCE as GET /inventory: legacy rows with no
-    # carrier_trunk_id count under 'bandwidth' (implicit).
+    # Carrier breakdown — same COALESCE as GET /inventory: first-class
+    # d.carrier, else the trunk's carrier, else implicit 'bandwidth' (legacy).
     carrier_rows = await db.fetch_all(
-        "SELECT COALESCE(ct.carrier, 'bandwidth') AS carrier, COUNT(*) AS cnt "
+        f"SELECT {_CARRIER_COALESCE} AS carrier, COUNT(*) AS cnt "
         "FROM did_inventory d "
         "LEFT JOIN carrier_trunks ct ON d.carrier_trunk_id = ct.id "
         "GROUP BY 1"
@@ -548,13 +586,16 @@ async def reconcile_product_tables(admin: dict = Depends(require_admin)):
 
 @router.post("/add")
 async def add_dids(body: AddDIDsRequest, admin: dict = Depends(require_admin)):
-    """Manually intake a batch of DIDs with carrier-trunk attribution. Admin only.
+    """Manually intake a batch of DIDs with carrier attribution. Admin only.
 
     The first-class intake path for non-Bandwidth numbers (e.g. Sinch DIDs):
-    every DID in the batch is attributed to the given carrier_trunks row and
-    lands status='available' / source='manual' in the pool — the existing
-    assign->customer->product flow takes over unchanged. Intake requires an
-    ENABLED trunk (404 otherwise): new numbers must map to a live carrier path.
+    every DID in the batch is owned by the given carrier (REQUIRED — must have
+    at least one ENABLED carrier_trunks row, else 404 'unknown carrier': new
+    numbers must map to a live carrier path) and lands status='available' /
+    source='manual' in the pool — the existing assign->customer->product flow
+    takes over unchanged. carrier_trunk_id optionally narrows attribution to a
+    specific trunk; when given it must belong to that carrier and be enabled
+    (422 otherwise).
 
     Entries are normalized with the shared canonical E.164 helper (bare
     10-digit NANP gets +1; '+CC' international preserved) and deduped within
@@ -566,17 +607,48 @@ async def add_dids(body: AddDIDsRequest, admin: dict = Depends(require_admin)):
         {"added": [e164...], "skipped_existing": [e164...],
          "invalid": [raw_input...], "count": <len(added)>}
     """
-    trunk = await db.fetch_one(
-        "SELECT id, carrier, pop, enabled FROM carrier_trunks WHERE id = $1::int",
-        body.carrier_trunk_id,
+    # The carrier must exist as a live termination/attribution target: at
+    # least one ENABLED trunk row. A carrier whose rows are all disabled is
+    # indistinguishable from an unknown one here — both are "not a carrier
+    # you can intake numbers for right now".
+    live = await db.fetch_one(
+        "SELECT 1 AS ok FROM carrier_trunks "
+        "WHERE carrier = $1::varchar AND enabled = true LIMIT 1",
+        body.carrier,
     )
-    if not trunk:
-        raise HTTPException(status_code=404, detail="Carrier trunk not found")
-    if not trunk["enabled"]:
+    if not live:
         raise HTTPException(
             status_code=404,
-            detail=f"Carrier trunk {body.carrier_trunk_id} is disabled",
+            detail=f"unknown carrier '{body.carrier}' — no enabled carrier_trunks row",
         )
+
+    trunk = None
+    if body.carrier_trunk_id is not None:
+        trunk = await db.fetch_one(
+            "SELECT id, carrier, pop, enabled FROM carrier_trunks WHERE id = $1::int",
+            body.carrier_trunk_id,
+        )
+        # The optional trunk is a NARROWING of the required carrier — a trunk
+        # that doesn't exist, belongs to another carrier, or is disabled is a
+        # body-consistency error (422), unlike the carrier itself (404 above).
+        if not trunk:
+            raise HTTPException(
+                status_code=422,
+                detail=f"carrier_trunk_id {body.carrier_trunk_id} not found",
+            )
+        if trunk["carrier"] != body.carrier:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"carrier_trunk_id {body.carrier_trunk_id} belongs to "
+                    f"carrier '{trunk['carrier']}', not '{body.carrier}'"
+                ),
+            )
+        if not trunk["enabled"]:
+            raise HTTPException(
+                status_code=422,
+                detail=f"carrier_trunk_id {body.carrier_trunk_id} is disabled",
+            )
 
     # Normalize with the SAME canonical helper every other DID write path uses;
     # collect un-normalizable entries (verbatim) instead of failing the batch.
@@ -598,26 +670,31 @@ async def add_dids(body: AddDIDsRequest, admin: dict = Depends(require_admin)):
         try:
             rows = await db.fetch_all(
                 """
-                INSERT INTO did_inventory (did, status, source, carrier_trunk_id, notes)
-                SELECT d, 'available', 'manual', $2::int, $3::text
+                INSERT INTO did_inventory (did, status, source, carrier, carrier_trunk_id, notes)
+                SELECT d, 'available', 'manual', $2::varchar, $3::int, $4::text
                   FROM unnest($1::varchar[]) AS d
                 ON CONFLICT (did) DO NOTHING
                 RETURNING did
                 """,
-                normalized, body.carrier_trunk_id, body.notes,
+                normalized, body.carrier, body.carrier_trunk_id, body.notes,
             )
         except asyncpg.ForeignKeyViolationError:
-            # Trunk deleted between the check above and the insert.
-            raise HTTPException(status_code=404, detail="Carrier trunk not found")
+            # Trunk deleted between the check above and the insert — same
+            # body-consistency 422 as a trunk that never existed.
+            raise HTTPException(
+                status_code=422,
+                detail=f"carrier_trunk_id {body.carrier_trunk_id} not found",
+            )
         added_set = {r["did"] for r in rows}
         added = [d for d in normalized if d in added_set]
 
     skipped_existing = [d for d in normalized if d not in set(added)]
 
     logger.info(
-        "Manual DID intake: added=%d skipped=%d invalid=%d trunk=%s/%s (id=%d) by admin=%s",
-        len(added), len(skipped_existing), len(invalid),
-        trunk["carrier"], trunk["pop"], body.carrier_trunk_id, admin.get("email"),
+        "Manual DID intake: added=%d skipped=%d invalid=%d carrier=%s trunk=%s by admin=%s",
+        len(added), len(skipped_existing), len(invalid), body.carrier,
+        f"{trunk['pop']} (id={trunk['id']})" if trunk else "none",
+        admin.get("email"),
     )
 
     return {
@@ -636,34 +713,46 @@ async def set_did_carrier_trunk(
 ):
     """Re-associate a DID with a carrier trunk (or clear it). Admin only.
 
-    carrier_trunk_id=null clears the association — the DID reverts to the
-    implicit-Bandwidth attribution legacy rows carry. Unlike /add (intake of
-    NEW numbers, which demands an enabled trunk), re-association accepts a
-    disabled trunk: attribution is metadata, and correcting it must not be
-    blocked by a trunk being administratively down.
+    Setting a trunk also syncs the DID's first-class `carrier` (migration 42)
+    to that trunk's carrier — the trunk association IS the carrier statement.
+    carrier_trunk_id=null clears only the trunk; `carrier` is left as-is (the
+    DID still belongs to its carrier without naming a specific trunk). Unlike
+    /add (intake of NEW numbers, which demands an enabled trunk),
+    re-association accepts a disabled trunk: attribution is metadata, and
+    correcting it must not be blocked by a trunk being administratively down.
 
     Returns the updated inventory item (same shape as GET /inventory items).
     """
     e164 = _canonical_did(did)
 
-    if body.carrier_trunk_id is not None:
-        trunk = await db.fetch_one(
-            "SELECT id FROM carrier_trunks WHERE id = $1::int",
-            body.carrier_trunk_id,
-        )
-        if not trunk:
-            raise HTTPException(status_code=404, detail="Carrier trunk not found")
-
     try:
-        result = await db.execute(
-            """
-            UPDATE did_inventory
-               SET carrier_trunk_id = $1::int,
-                   updated_at = NOW()
-             WHERE did = $2::varchar
-            """,
-            body.carrier_trunk_id, e164,
-        )
+        if body.carrier_trunk_id is not None:
+            trunk = await db.fetch_one(
+                "SELECT id, carrier FROM carrier_trunks WHERE id = $1::int",
+                body.carrier_trunk_id,
+            )
+            if not trunk:
+                raise HTTPException(status_code=404, detail="Carrier trunk not found")
+            result = await db.execute(
+                """
+                UPDATE did_inventory
+                   SET carrier_trunk_id = $1::int,
+                       carrier = $2::varchar,
+                       updated_at = NOW()
+                 WHERE did = $3::varchar
+                """,
+                body.carrier_trunk_id, trunk["carrier"], e164,
+            )
+        else:
+            result = await db.execute(
+                """
+                UPDATE did_inventory
+                   SET carrier_trunk_id = NULL,
+                       updated_at = NOW()
+                 WHERE did = $1::varchar
+                """,
+                e164,
+            )
     except asyncpg.ForeignKeyViolationError:
         # Trunk deleted between the check above and the update.
         raise HTTPException(status_code=404, detail="Carrier trunk not found")
@@ -678,7 +767,7 @@ async def set_did_carrier_trunk(
     row = await db.fetch_one(
         f"SELECT {_ITEM_COLS} {_ITEM_JOINS} WHERE d.did = $1::varchar", e164
     )
-    return dict(row)
+    return _shape_item(row)
 
 
 @router.post("/{did}/assign")

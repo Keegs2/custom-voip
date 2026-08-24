@@ -209,6 +209,174 @@ local function is_sbc_reachable(ip, port)
     return probe
 end
 
+-- ================================================================
+-- Table-driven termination trunks (carrier_trunks) with caching
+-- ================================================================
+-- RCF PSTN termination attempts are built from the operator-managed
+-- carrier_trunks table (TED tool) instead of the hardcoded
+-- {SBC-1,SBC-2} x {primary,secondary} matrix, so enabling/disabling/
+-- reprioritizing a trunk changes live routing within ~a minute — no
+-- redeploy. Selection SQL (db_client.get_termination_trunks):
+--
+--   SELECT carrier, pop, host(source_ip) AS term_ip,
+--          COALESCE(priority_<zone>, priority) AS eff_priority
+--   FROM carrier_trunks
+--   WHERE direction IN ('outbound','both') AND enabled = true
+--   ORDER BY eff_priority, id
+--
+-- Results are cached PROCESS-WIDE in a FreeSWITCH global variable
+-- (freeswitch.get/setGlobalVariable — the exact SBC-health-cache
+-- pattern above) for TERM_TRUNKS_TTL seconds: within the TTL no call
+-- touches the DB; steady state is ~1 query/minute per FS.
+-- Cache entry: "term_trunks_<zone>" = "<epoch>|carrier,pop,ip;..."
+-- ("<epoch>|FALLBACK" is the negative-cache sentinel: DB error or
+-- zero rows, re-checked after the same TTL).
+--
+-- FAIL-OPEN (non-negotiable): DB error, zero usable rows, or an
+-- unparsable cache entry all return nil, and the caller runs the
+-- EXACT legacy hardcoded attempt loop (env primary/secondary SBC IPs
+-- + X-Carrier enum header) — table-driven routing can never break
+-- termination on a DB blip. The caller records the decision in the
+-- term_trunks_source channel variable (db|fallback) which lands in
+-- the CDR variables (same plain-channel-var path as inbound_carrier).
+local TERM_TRUNKS_TTL = 60
+-- Cap at 4 trunks (x 2 SBCs = 8 bridge attempts) to bound worst-case
+-- PDD across a fully-failing attempt sweep.
+local TERM_TRUNKS_MAX = 4
+
+-- Deployment zone selects the per-zone priority override column
+-- (priority_east/west/central). Validated against the closed set;
+-- anything else WARNs and falls back to east. Operator step: West and
+-- Central .env must set FS_ZONE=west / FS_ZONE=central.
+local fs_zone = os.getenv("FS_ZONE") or "east"
+if fs_zone ~= "east" and fs_zone ~= "west" and fs_zone ~= "central" then
+    freeswitch.consoleLog("WARNING", string.format(
+        "[inbound_router] FS_ZONE '%s' is not east/west/central — using east\n",
+        tostring(fs_zone)))
+    fs_zone = "east"
+end
+
+-- Sanitize a carrier/pop token for cache/dial-string/header safety:
+-- keep [A-Za-z0-9_.-] only. Row values are admin-provisioned closed
+-- vocabulary (TED), so this is belt-and-suspenders, not lossy.
+local function term_token(s)
+    return tostring(s or ""):gsub("[^%w%._%-]", "")
+end
+
+-- Parse the serialized cache payload back into the trunk list.
+-- Any malformed segment invalidates the WHOLE payload (nil) — never
+-- bridge from a half-parsed trunk list.
+local function parse_term_trunks(payload)
+    local trunks = {}
+    for seg in payload:gmatch("[^;]+") do
+        local carrier, pop, ip = seg:match("^([%w%._%-]+),([%w%._%-]*),(%d+%.%d+%.%d+%.%d+)$")
+        if not carrier then
+            return nil
+        end
+        trunks[#trunks + 1] = { carrier = carrier, pop = pop, term_ip = ip }
+    end
+    if #trunks == 0 then
+        return nil
+    end
+    return trunks
+end
+
+-- get_termination_trunks(zone): ordered trunk list from carrier_trunks,
+-- or nil => the caller MUST use the legacy hardcoded fallback attempts.
+local function get_termination_trunks(zone)
+    local cache_key = "term_trunks_" .. zone
+    local now = os.time()
+
+    -- Cache check — fresh entries (TTL 60s) never touch the DB.
+    local cached = freeswitch.getGlobalVariable(cache_key)
+    if cached and cached ~= "" then
+        local ts, payload = cached:match("^(%d+)|(.+)$")
+        ts = tonumber(ts)
+        if ts and payload then
+            local age = now - ts
+            if age >= 0 and age < TERM_TRUNKS_TTL then
+                if payload == "FALLBACK" then
+                    return nil  -- negative-cached miss; re-fetch after TTL
+                end
+                local trunks = parse_term_trunks(payload)
+                if trunks then
+                    return trunks
+                end
+                -- Unparsable cache: fail open NOW; negative-cache so the
+                -- next post-TTL fetch rebuilds it cleanly.
+                freeswitch.consoleLog("WARNING", string.format(
+                    "[inbound_router] term_trunks cache unparsable for zone %s — using legacy fallback attempts\n",
+                    zone))
+                freeswitch.setGlobalVariable(cache_key, string.format("%d|FALLBACK", now))
+                return nil
+            end
+        end
+    end
+
+    -- Cache miss/expired: one DB fetch via db_client (same connection and
+    -- error style as the DID lookups).
+    local rows = nil
+    if db and db.get_termination_trunks then
+        local ok, res = pcall(function() return db.get_termination_trunks(zone) end)
+        if ok then
+            rows = res
+        else
+            freeswitch.consoleLog("ERR", string.format(
+                "[inbound_router] get_termination_trunks(%s) raised: %s\n",
+                zone, tostring(res)))
+        end
+    end
+
+    if type(rows) ~= "table" then
+        -- DB error (or db_client unavailable): FAIL OPEN. Negative-cache so
+        -- a sustained outage costs ~1 failed query/minute, not one per call.
+        freeswitch.consoleLog("WARNING", string.format(
+            "[inbound_router] carrier_trunks lookup failed for zone %s — using legacy fallback attempts\n",
+            zone))
+        freeswitch.setGlobalVariable(cache_key, string.format("%d|FALLBACK", now))
+        return nil
+    end
+
+    -- Validate + serialize. Rows with an empty carrier or non-IPv4 term_ip
+    -- are dropped (WARN); rows beyond TERM_TRUNKS_MAX are ignored (WARN).
+    local parts = {}
+    local capped = false
+    for _, row in ipairs(rows) do
+        local carrier = term_token(row.carrier)
+        local pop = term_token(row.pop)
+        local ip = tostring(row.term_ip or "")
+        if carrier == "" or not ip:match("^%d+%.%d+%.%d+%.%d+$") then
+            freeswitch.consoleLog("WARNING", string.format(
+                "[inbound_router] carrier_trunks row carrier=%s pop=%s term_ip=%s is unusable — skipped\n",
+                tostring(row.carrier), tostring(row.pop), ip))
+        elseif #parts >= TERM_TRUNKS_MAX then
+            if not capped then
+                freeswitch.consoleLog("WARNING", string.format(
+                    "[inbound_router] carrier_trunks returned more than %d outbound rows for zone %s — extra rows ignored (8-attempt cap)\n",
+                    TERM_TRUNKS_MAX, zone))
+                capped = true
+            end
+        else
+            parts[#parts + 1] = carrier .. "," .. pop .. "," .. ip
+        end
+    end
+
+    if #parts == 0 then
+        -- Zero usable rows: FAIL OPEN to the legacy attempts.
+        freeswitch.consoleLog("WARNING", string.format(
+            "[inbound_router] no enabled outbound carrier_trunks rows for zone %s — using legacy fallback attempts\n",
+            zone))
+        freeswitch.setGlobalVariable(cache_key, string.format("%d|FALLBACK", now))
+        return nil
+    end
+
+    local payload = table.concat(parts, ";")
+    freeswitch.setGlobalVariable(cache_key, string.format("%d|%s", now, payload))
+    -- Return by re-parsing what was serialized, so cached and fresh calls
+    -- yield the identical validated shape.
+    return parse_term_trunks(payload)
+end
+
 -- Get call details
 local uuid = get_var("uuid", "unknown")
 local did = get_var("destination_number", "")
@@ -784,8 +952,10 @@ local function terminate_rcf(dest, ctx)
         --
         -- These are session variables (like sip_h_Diversion / sip_h_X-Original-CID
         -- above), so mod_sofia emits them on the outbound INVITE and they PERSIST
-        -- across every iteration of the 4-attempt SBC×carrier failover loop below
-        -- (that loop only overrides X-Carrier / X-CID / the SBC IP per attempt).
+        -- across every iteration of the SBC×carrier failover loop below — table-
+        -- driven or legacy (either loop only overrides the carrier selector
+        -- headers (X-Carrier-IP/X-Carrier-Label or legacy X-Carrier) / X-CID /
+        -- the SBC IP per attempt).
         -- They are set ONLY in this PSTN/carrier `else` branch — the local-
         -- extension branch (user/<ext>) never reaches the carrier, so it must not
         -- carry them.
@@ -891,20 +1061,36 @@ local function terminate_rcf(dest, ctx)
     end
 
     -- ================================================================
-    -- SBC + Carrier failover: 4 bridge attempts for PSTN routing
+    -- SBC + Carrier failover: table-driven attempts (carrier_trunks)
+    -- with legacy hardcoded fallback
     -- ================================================================
     -- For local extensions, there is only the single dial_string built above.
-    -- For PSTN, we try all combinations of SBC (SBC-1/SBC-2) and
-    -- carrier (primary/secondary) before giving up:
-    --   1. SBC-1 + primary carrier   (Dallas)
-    --   2. SBC-2 + primary carrier   (Dallas)
-    --   3. SBC-1 + secondary carrier (LA)
-    --   4. SBC-2 + secondary carrier (LA)
+    -- For PSTN, attempts come from get_termination_trunks(fs_zone) — the
+    -- TED-managed carrier_trunks table (60s process-wide cache) — built
+    -- TRUNK-MAJOR: both SBCs are tried on trunk 1 before moving to trunk 2,
+    -- preserving today's shape. With the 2-row Bandwidth seeds this is
+    -- exactly the historical order (east/central shown; west swaps the PoPs):
+    --   1. SBC-1 + bandwidth-dallas
+    --   2. SBC-2 + bandwidth-dallas
+    --   3. SBC-1 + bandwidth-la
+    --   4. SBC-2 + bandwidth-la
+    -- Per attempt the dial string carries sip_h_X-Carrier-IP=<term_ip> (+
+    -- sip_h_X-Carrier-Label=<carrier>-<pop>) instead of the legacy X-Carrier
+    -- enum. Kamailio validates the IP (env Bandwidth IPs or a carrier_trunks
+    -- point lookup), sets $du to it, and DISABLES its own alternate-IP
+    -- carrier flip for these calls — this loop owns ALL carrier failover
+    -- (two failover owners would double-dial the PSTN).
+    --
+    -- FAIL-OPEN: if the table cannot be resolved (DB blip / zero rows /
+    -- bad cache), the legacy 4-attempt loop below runs byte-identically to
+    -- the pre-table behavior (X-Carrier enum -> Kamailio env mapping).
+    -- term_trunks_source=db|fallback records which path ran (CDR breadcrumb).
     --
     -- Channel variables (outbound_caller_id_*, effective_caller_id_*,
     -- sip_h_Diversion, sip_h_X-Original-CID, sip_h_Remote-Party-ID)
     -- and exported origination_caller_id_* persist on the session across
-    -- all bridge attempts. Only X-Carrier and the SBC IP change per attempt.
+    -- all bridge attempts. Only the carrier selector headers and the SBC IP
+    -- change per attempt.
     -- ================================================================
 
     if is_local_forward then
@@ -913,6 +1099,109 @@ local function terminate_rcf(dest, ctx)
             session:execute("bridge", dial_string)
         end)
     else
+        local term_trunks = get_termination_trunks(fs_zone)
+
+        if term_trunks then
+        -- PSTN: table-driven SBC + carrier failover loop (carrier_trunks)
+        set_var("term_trunks_source", "db")
+
+        -- Trunk-major attempt table: for each trunk (already in
+        -- eff_priority order) try the primary SBC, then the failover SBC.
+        local bridge_attempts = {}
+        for _, trunk in ipairs(term_trunks) do
+            local carrier_label = trunk.carrier
+            if trunk.pop and trunk.pop ~= "" then
+                carrier_label = trunk.carrier .. "-" .. trunk.pop
+            end
+            bridge_attempts[#bridge_attempts + 1] = {
+                sbc = sbc_proxy_ip, ip = trunk.term_ip, carrier_label = carrier_label,
+                label = "SBC-1 + " .. carrier_label .. " (" .. trunk.term_ip .. ")",
+            }
+            bridge_attempts[#bridge_attempts + 1] = {
+                sbc = sbc_proxy_ip_failover, ip = trunk.term_ip, carrier_label = carrier_label,
+                label = "SBC-2 + " .. carrier_label .. " (" .. trunk.term_ip .. ")",
+            }
+        end
+        local total_attempts = #bridge_attempts
+
+        for i, attempt in ipairs(bridge_attempts) do
+            local attempted = false
+
+            -- Same cached TCP pre-check as the legacy loop: skip a dead
+            -- SBC in <1 second instead of eating the SIP timeout.
+            if not is_sbc_reachable(attempt.sbc, 5060) then
+                freeswitch.consoleLog("WARNING", string.format(
+                    "[%s] RCF bridge attempt %d/%d SKIPPED — SBC %s unreachable (%s)\n",
+                    uuid, i, total_attempts, attempt.sbc, attempt.label
+                ))
+            else
+                attempted = true
+                -- Same dial string as the legacy loop except the carrier
+                -- selector: X-Carrier-IP/X-Carrier-Label replace the
+                -- X-Carrier enum. progress_timeout still bounds carrier PDD
+                -- per attempt; call_timeout / session-timer trio / X-CID
+                -- are unchanged.
+                local attempt_dial = string.format(
+                    "{ignore_early_media=false,progress_timeout=%d,call_timeout=%d,sip_h_X-Carrier-IP=%s,sip_h_X-Carrier-Label=%s" ..
+                    ",sip_h_X-CID=%s" ..
+                    ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true" ..
+                    "}sofia/external/%s@%s:5060",
+                    bridge_progress_timeout,
+                    ring_timeout,
+                    attempt.ip,
+                    attempt.carrier_label,
+                    sip_call_id,
+                    forward_to,
+                    attempt.sbc
+                )
+
+                -- carrier_used reflects the WINNING attempt (same semantics
+                -- as the legacy loop, new value shape "<carrier>-<pop>").
+                set_var("carrier_used", attempt.carrier_label)
+
+                freeswitch.consoleLog("INFO", string.format(
+                    "[%s] RCF bridge attempt %d/%d (%s): %s -> %s@%s carrier_ip=%s\n",
+                    uuid, i, total_attempts, attempt.label, normalized_did, forward_to, attempt.sbc, attempt.ip
+                ))
+
+                pcall(function()
+                    session:execute("bridge", attempt_dial)
+                end)
+            end
+
+            -- Same disposition contract as the legacy loop (see its comments):
+            -- originate_disposition is the authoritative bridge result and is
+            -- only inspected for attempts that actually ran a bridge.
+            if attempted then
+                local disposition = get_var("originate_disposition", "")
+                if disposition == "SUCCESS" then
+                    freeswitch.consoleLog("INFO", string.format(
+                        "[%s] RCF bridge attempt %d/%d succeeded (%s)\n",
+                        uuid, i, total_attempts, attempt.label
+                    ))
+                    break
+                end
+
+                freeswitch.consoleLog("INFO", string.format(
+                    "[%s] RCF bridge attempt %d/%d failed (%s): cause=%s\n",
+                    uuid, i, total_attempts, attempt.label,
+                    get_var("last_bridge_hangup_cause", disposition)
+                ))
+            end
+
+            -- If continue_on_fail tore the A-leg down (e.g. caller hung up
+            -- mid-failover), stop trying — the session is gone.
+            if not session:ready() then
+                break
+            end
+        end
+
+        else
+        -- LEGACY FALLBACK — byte-identical to the pre-table loop below this
+        -- comment (indentation preserved on purpose). Do NOT restructure:
+        -- the fail-open contract is that a DB blip reproduces today's exact
+        -- attempts (env primary/secondary + X-Carrier enum).
+        set_var("term_trunks_source", "fallback")
         -- PSTN: 4-attempt SBC + carrier failover loop
         local bridge_attempts = {
             { sbc = sbc_proxy_ip,          carrier = "primary",   label = "SBC-1 + primary carrier (Dallas)" },
@@ -998,6 +1287,7 @@ local function terminate_rcf(dest, ctx)
                 break
             end
         end
+        end -- term_trunks (table-driven) vs legacy fallback
     end
 
     -- Final result check (covers both local and PSTN paths).

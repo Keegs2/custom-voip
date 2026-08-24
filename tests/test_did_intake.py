@@ -1,26 +1,35 @@
-"""Manual DID intake with carrier-trunk attribution (migration 41 +
+"""Manual DID intake with carrier attribution (migrations 41 + 42 +
 POST /v1/numbers/add, PUT /v1/numbers/{did}/carrier-trunk) — full-stack tests.
 
 Proves, over the REAL router behind the REAL JWTAuthMiddleware on an ephemeral
-local PostgreSQL (real migrations 17 + 31 + 34 + 25 + 40 + 41, 41 applied twice
-— idempotency; 31 supplies the rcf_forward_to_e164_chk CHECK the assign
-endpoint must satisfy — its absence is exactly how the prod-only
-forward_to='' 500 slipped past this suite):
+local PostgreSQL (real migrations 17 + 31 + 34 + 25 + 40 + 41 + 42, 41 and 42
+each applied twice — idempotency; 31 supplies the rcf_forward_to_e164_chk
+CHECK the assign endpoint must satisfy — its absence is exactly how the
+prod-only forward_to='' 500 slipped past this suite):
 
   * POST /add happy path: mixed input formats normalize through the shared
     canonical E.164 helper, in-batch dupes collapse, and the response envelope
     is EXACTLY {"added", "skipped_existing", "invalid", "count"} (the TED UI
     codes against it); rows land status='available' / source='manual' with the
-    carrier_trunk_id attribution;
-  * dup-skip on re-add, invalid entries reported verbatim, unknown/disabled
-    trunk -> 404, batch >500 (and empty) -> 422;
+    first-class carrier (migration 42) + carrier_trunk_id attribution;
+  * carrier is REQUIRED (422 absent; 404 'unknown carrier' when no enabled
+    trunk row exists for it); carrier_trunk_id is OPTIONAL — when given it
+    must belong to that carrier and be enabled (422 otherwise); a
+    bandwidth add with NO trunk works (carrier set, trunk NULL);
+  * dup-skip on re-add, invalid entries reported verbatim, batch >500 (and
+    empty) -> 422;
   * support + tenant users get 403 on /add and the carrier-trunk PUT;
   * GET /inventory items carry carrier / carrier_pop / carrier_trunk_id /
-    source; the carrier filter matches the COALESCEd value (carrier=bandwidth
-    also finds legacy rows with NULL carrier_trunk_id); envelope unchanged;
+    source; item carrier is COALESCE(d.carrier, ct.carrier, 'bandwidth') —
+    correct across all three row generations (legacy NULL/NULL, 41-era
+    trunk-only, 42-era carrier-first) — and the carrier= filter matches that
+    same COALESCE; envelope unchanged;
   * GET /stats gains by_carrier (same COALESCE);
-  * PUT /{did}/carrier-trunk re-associates and clears (null), returning the
-    updated inventory item;
+  * PUT /{did}/carrier-trunk re-associates (syncing d.carrier to the trunk's
+    carrier) and clears (null — d.carrier left as-is), returning the updated
+    inventory item;
+  * migration 42's did_inventory.carrier backfill: NULL-carrier rows derive
+    from their trunk's carrier, else 'bandwidth' (proven via a re-run);
   * THE SYNC GUARD: POST /sync (Bandwidth client monkeypatched) never reports
     a manual row in 'removed' — even one whose trunk association was cleared —
     while a sync-owned row missing from Bandwidth still is (report-only: no
@@ -63,6 +72,7 @@ MIG_TRUNK_STATUS = INIT / "25_carrier_trunk_status.sql"
 MIG_RELEASE_STATUS = INIT / "34_release_requested_status.sql"
 MIG_CARRIER_TRUNKS = INIT / "40_carrier_trunks.sql"
 MIG_DID_CARRIER = INIT / "41_did_carrier_source.sql"
+MIG_CARRIER_PRIORITIES = INIT / "42_carrier_priorities.sql"
 
 sys.path.insert(0, str(API_SRC))
 
@@ -210,7 +220,8 @@ def _run(coro):
 
 @pytest.fixture(scope="module")
 def intake_db():
-    """Boot PG, apply base schema + REAL 17/31/34/25/40/41 (41 twice — idempotency)."""
+    """Boot PG, apply base schema + REAL 17/31/34/25/40/41/42 (41 and 42 each
+    twice — idempotency)."""
     if PG_BIN is None:
         pytest.skip("no local PostgreSQL binaries; set TEST_PG_BIN to run DID-intake tests")
     pg = _EphemeralPG(PG_BIN)
@@ -238,10 +249,13 @@ def intake_db():
             await conn.execute(MIG_RELEASE_STATUS.read_text())  # 34: status CHECK
             await conn.execute(MIG_TRUNK_STATUS.read_text())    # 25: 40's view prereq
             await conn.execute(MIG_CARRIER_TRUNKS.read_text())  # 40: FK target + seeds
-            # The migration under test — applied twice (idempotent: guarded
-            # ADD COLUMNs, name-agnostic CHECK drop/recreate, IF NOT EXISTS index).
+            # The migrations under test — each applied twice (idempotent:
+            # guarded ADD COLUMNs, name-agnostic CHECK drop/recreate,
+            # IF NOT EXISTS index, default-guarded priority seeds).
             await conn.execute(MIG_DID_CARRIER.read_text())
             await conn.execute(MIG_DID_CARRIER.read_text())
+            await conn.execute(MIG_CARRIER_PRIORITIES.read_text())  # 42: priorities + d.carrier
+            await conn.execute(MIG_CARRIER_PRIORITIES.read_text())
         await owner.close()
         db.pool = await asyncpg.create_pool(
             host=pg.sock, port=pg.port, user="api", password="api_secret",
@@ -343,6 +357,7 @@ def test_add_happy_path_mixed_formats_exact_envelope(client, tokens, sinch_ids, 
                 "notanumber",          # invalid: no digits
                 "12345",               # invalid: too short / ambiguous
             ],
+            "carrier": "sinch",
             "carrier_trunk_id": sinch_ids["denver"],
             "notes": "Sinch Denver turn-up batch",
         })
@@ -356,13 +371,16 @@ def test_add_happy_path_mixed_formats_exact_envelope(client, tokens, sinch_ids, 
         assert body["invalid"] == ["notanumber", "12345"]  # verbatim raw inputs
         assert body["count"] == 3
 
-        # Rows landed available/manual with the trunk attribution + notes.
+        # Rows landed available/manual with the first-class carrier (42) +
+        # trunk attribution + notes.
         rows = await db.fetch_all(
-            "SELECT did, status, source, carrier_trunk_id, notes FROM did_inventory ORDER BY did")
+            "SELECT did, status, source, carrier, carrier_trunk_id, notes "
+            "FROM did_inventory ORDER BY did")
         by_did = {r2["did"]: dict(r2) for r2 in rows}
         for did in ("+15305480845", "+15305480846", "+16175550100"):
             assert by_did[did]["status"] == "available"
             assert by_did[did]["source"] == "manual"
+            assert by_did[did]["carrier"] == "sinch"
             assert by_did[did]["carrier_trunk_id"] == sinch_ids["denver"]
             assert by_did[did]["notes"] == "Sinch Denver turn-up batch"
 
@@ -376,6 +394,7 @@ def test_add_dup_skip(client, tokens, sinch_ids):
     async def go():
         r = await client.post("/v1/numbers/add", headers=_auth(tokens, "admin"), json={
             "dids": ["+15305480845", "5305480999"],
+            "carrier": "sinch",
             "carrier_trunk_id": sinch_ids["chicago"],
         })
         assert r.status_code == 200, r.text
@@ -393,33 +412,71 @@ def test_add_dup_skip(client, tokens, sinch_ids):
 
 
 # ---------------------------------------------------------------------------
-# 3) Unknown / disabled trunk -> 404.
+# 3) Carrier + trunk validation: carrier REQUIRED (422 absent, 404 unknown /
+#    no-enabled-trunk); the optional trunk must belong to the carrier and be
+#    enabled (422 otherwise). Nothing invalid ever inserts.
 # ---------------------------------------------------------------------------
-def test_add_unknown_and_disabled_trunk_404(client, tokens):
+def test_add_carrier_and_trunk_validation(client, tokens, sinch_ids):
     async def go():
         hdrs = _auth(tokens, "admin")
-        r = await client.post("/v1/numbers/add", headers=hdrs, json={
-            "dids": ["+15305481000"], "carrier_trunk_id": 99999})
-        assert r.status_code == 404, r.text
 
-        # Disabled trunk (created through the real carrier-trunks API).
+        # carrier absent -> 422 (required field).
+        r = await client.post("/v1/numbers/add", headers=hdrs, json={
+            "dids": ["+15305481000"]})
+        assert r.status_code == 422, r.text
+
+        # Unknown carrier -> 404 'unknown carrier'.
+        r = await client.post("/v1/numbers/add", headers=hdrs, json={
+            "dids": ["+15305481000"], "carrier": "telnyx"})
+        assert r.status_code == 404, r.text
+        assert "unknown carrier" in r.json()["detail"]
+
+        # A carrier whose trunks are ALL disabled is equally unknown (no live
+        # path to intake numbers onto).
+        r = await client.post("/v1/carrier-trunks", headers=hdrs, json={
+            "carrier": "ghostco", "pop": "nowhere",
+            "source_ip": "206.146.104.9", "enabled": False})
+        assert r.status_code == 200, r.text
+        ghost_id = r.json()["id"]
+        r = await client.post("/v1/numbers/add", headers=hdrs, json={
+            "dids": ["+15305481000"], "carrier": "ghostco"})
+        assert r.status_code == 404, r.text
+        assert "unknown carrier" in r.json()["detail"]
+
+        # Unknown trunk id -> 422 (body-consistency, not a 404: the CARRIER
+        # is valid, the narrowing trunk is not).
+        r = await client.post("/v1/numbers/add", headers=hdrs, json={
+            "dids": ["+15305481000"], "carrier": "sinch",
+            "carrier_trunk_id": 99999})
+        assert r.status_code == 422, r.text
+
+        # Trunk of ANOTHER carrier -> 422.
+        r = await client.post("/v1/numbers/add", headers=hdrs, json={
+            "dids": ["+15305481000"], "carrier": "bandwidth",
+            "carrier_trunk_id": sinch_ids["denver"]})
+        assert r.status_code == 422, r.text
+        assert "belongs to" in r.json()["detail"]
+
+        # Disabled trunk of the right carrier -> 422 (created through the real
+        # carrier-trunks API).
         r = await client.post("/v1/carrier-trunks", headers=hdrs, json={
             "carrier": "sinch", "pop": "disabledpop",
             "source_ip": "206.146.104.10", "enabled": False})
         assert r.status_code == 200, r.text
         disabled_id = r.json()["id"]
-
         r = await client.post("/v1/numbers/add", headers=hdrs, json={
-            "dids": ["+15305481000"], "carrier_trunk_id": disabled_id})
-        assert r.status_code == 404, r.text
+            "dids": ["+15305481000"], "carrier": "sinch",
+            "carrier_trunk_id": disabled_id})
+        assert r.status_code == 422, r.text
         assert "disabled" in r.json()["detail"]
 
-        # Nothing was inserted by either attempt.
+        # Nothing was inserted by any attempt.
         r = await client.get("/v1/numbers/inventory?search=5305481000", headers=hdrs)
         assert r.json()["total"] == 0
 
-        r = await client.delete(f"/v1/carrier-trunks/{disabled_id}", headers=hdrs)
-        assert r.status_code == 200
+        for tid in (ghost_id, disabled_id):
+            r = await client.delete(f"/v1/carrier-trunks/{tid}", headers=hdrs)
+            assert r.status_code == 200
 
     _run(go())
 
@@ -432,11 +489,11 @@ def test_add_batch_size_limits_422(client, tokens, sinch_ids):
         hdrs = _auth(tokens, "admin")
         r = await client.post("/v1/numbers/add", headers=hdrs, json={
             "dids": [f"+1530600{i:04d}" for i in range(501)],
-            "carrier_trunk_id": sinch_ids["denver"]})
+            "carrier": "sinch", "carrier_trunk_id": sinch_ids["denver"]})
         assert r.status_code == 422, r.text
 
         r = await client.post("/v1/numbers/add", headers=hdrs, json={
-            "dids": [], "carrier_trunk_id": sinch_ids["denver"]})
+            "dids": [], "carrier": "sinch", "carrier_trunk_id": sinch_ids["denver"]})
         assert r.status_code == 422, r.text
 
     _run(go())
@@ -450,7 +507,8 @@ def test_non_admin_403_on_add_and_carrier_trunk_put(client, tokens, sinch_ids, r
     async def go():
         hdrs = _auth(tokens, role)
         r = await client.post("/v1/numbers/add", headers=hdrs, json={
-            "dids": ["+15305482000"], "carrier_trunk_id": sinch_ids["denver"]})
+            "dids": ["+15305482000"], "carrier": "sinch",
+            "carrier_trunk_id": sinch_ids["denver"]})
         assert r.status_code == 403, f"POST /add: {r.status_code} {r.text}"
         r = await client.put("/v1/numbers/+15305480845/carrier-trunk", headers=hdrs,
                              json={"carrier_trunk_id": sinch_ids["chicago"]})
@@ -523,7 +581,8 @@ def test_stats_by_carrier(client, tokens):
 
 
 # ---------------------------------------------------------------------------
-# 8) PUT /{did}/carrier-trunk — re-associate + clear; returns the item shape.
+# 8) PUT /{did}/carrier-trunk — re-associate (syncs d.carrier) + clear (leaves
+#    d.carrier as-is); returns the item shape.
 # ---------------------------------------------------------------------------
 def test_put_carrier_trunk_reassociate_and_clear(client, tokens, sinch_ids):
     async def go():
@@ -541,13 +600,15 @@ def test_put_carrier_trunk_reassociate_and_clear(client, tokens, sinch_ids):
         assert item["source"] == "manual"
         assert "customer_name" in item and "status" in item  # full item shape
 
-        # Clear (null) -> implicit Bandwidth; source stays 'manual'.
+        # Clear (null) -> only the TRUNK association drops; the first-class
+        # carrier (migration 42) stays as-is — the DID still belongs to Sinch,
+        # it just no longer names a specific trunk. source stays 'manual'.
         r = await client.put("/v1/numbers/+15305480999/carrier-trunk", headers=hdrs,
                              json={"carrier_trunk_id": None})
         assert r.status_code == 200, r.text
         item = r.json()
         assert item["carrier_trunk_id"] is None
-        assert item["carrier"] == "bandwidth"
+        assert item["carrier"] == "sinch"
         assert item["carrier_pop"] is None
         assert item["source"] == "manual"
 
@@ -643,12 +704,15 @@ def test_sync_guard_end_to_end(client, tokens, sinch_ids, intake_db, monkeypatch
             "SELECT city FROM did_inventory WHERE did = '+16175559999'")
         assert row["city"] == "Cambridge"
 
-        # New TN inserted as sync-owned.
+        # New TN inserted as sync-owned. The sync does not write the
+        # first-class carrier (stays NULL) — it RENDERS as 'bandwidth' via
+        # the reader COALESCE, same as every legacy row.
         row = await db.fetch_one(
-            "SELECT status, source, carrier_trunk_id FROM did_inventory "
+            "SELECT status, source, carrier, carrier_trunk_id FROM did_inventory "
             "WHERE did = '+16170001111'")
         assert row["status"] == "available"
         assert row["source"] == "bandwidth_sync"
+        assert row["carrier"] is None
         assert row["carrier_trunk_id"] is None
 
     _run(go())
@@ -668,7 +732,8 @@ def test_assign_flow_on_manual_did(client, tokens, sinch_ids, intake_db):
 
         # Intake the DID this test assigns (manual, Sinch Denver attribution).
         r = await client.post("/v1/numbers/add", headers=hdrs, json={
-            "dids": [did], "carrier_trunk_id": sinch_ids["denver"]})
+            "dids": [did], "carrier": "sinch",
+            "carrier_trunk_id": sinch_ids["denver"]})
         assert r.status_code == 200, r.text
         assert r.json()["added"] == [did]
 
@@ -751,7 +816,8 @@ def test_assign_rcf_forward_to_validation(client, tokens, sinch_ids, intake_db):
 
         async def intake(did):
             r = await client.post("/v1/numbers/add", headers=hdrs, json={
-                "dids": [did], "carrier_trunk_id": sinch_ids["denver"]})
+                "dids": [did], "carrier": "sinch",
+                "carrier_trunk_id": sinch_ids["denver"]})
             assert r.status_code == 200, r.text
             assert r.json()["added"] == [did]
 
@@ -843,7 +909,8 @@ def test_assign_non_rcf_ignores_forward_to(client, tokens, sinch_ids, intake_db)
         hdrs = _auth(tokens, "admin")
         did = "+15305483200"
         r = await client.post("/v1/numbers/add", headers=hdrs, json={
-            "dids": [did], "carrier_trunk_id": sinch_ids["denver"]})
+            "dids": [did], "carrier": "sinch",
+            "carrier_trunk_id": sinch_ids["denver"]})
         assert r.status_code == 200, r.text
 
         # product_type='api' with NO forward_to still succeeds (no rcf_numbers
@@ -881,7 +948,8 @@ def test_assign_rcf_check_violation_maps_to_422(client, tokens, sinch_ids,
     async def go():
         hdrs = _auth(tokens, "admin")
         r = await client.post("/v1/numbers/add", headers=hdrs, json={
-            "dids": [did], "carrier_trunk_id": sinch_ids["denver"]})
+            "dids": [did], "carrier": "sinch",
+            "carrier_trunk_id": sinch_ids["denver"]})
         assert r.status_code == 200, r.text
 
         # Simulate a validator bug: let the prod placeholder '' through.
@@ -899,5 +967,114 @@ def test_assign_rcf_check_violation_maps_to_422(client, tokens, sinch_ids,
         di = await db.fetch_one(
             "SELECT status, customer_id FROM did_inventory WHERE did = $1", did)
         assert di["status"] == "available" and di["customer_id"] is None
+
+    _run(go())
+
+
+# ---------------------------------------------------------------------------
+# 15) The three row generations render the same carrier truth (migration 42):
+#     legacy NULL/NULL -> 'bandwidth', 41-era trunk-only -> the trunk's
+#     carrier, 42-era carrier-first -> d.carrier — and the carrier= filter
+#     matches the identical COALESCE. Also: a bandwidth add with NO trunk
+#     (the carrier-required / trunk-optional contract) and input lowercasing.
+# ---------------------------------------------------------------------------
+def test_add_carrier_generations_and_coalesce(client, tokens, sinch_ids, intake_db):
+    db = intake_db["db"]
+
+    async def go():
+        hdrs = _auth(tokens, "admin")
+
+        # (a) 42-era, carrier-first, NO trunk: bandwidth owns its seeds'
+        # enabled rows, so intake works without naming one. Mixed-case
+        # carrier input is lowercased on the way in.
+        r = await client.post("/v1/numbers/add", headers=hdrs, json={
+            "dids": ["+16175030001"], "carrier": " Bandwidth "})
+        assert r.status_code == 200, r.text
+        assert r.json()["added"] == ["+16175030001"]
+        row = await db.fetch_one(
+            "SELECT status, source, carrier, carrier_trunk_id FROM did_inventory "
+            "WHERE did = '+16175030001'")
+        assert row["status"] == "available" and row["source"] == "manual"
+        assert row["carrier"] == "bandwidth"
+        assert row["carrier_trunk_id"] is None
+
+        # (b) 42-era, carrier-first WITH a trunk of that carrier.
+        r = await client.post("/v1/numbers/add", headers=hdrs, json={
+            "dids": ["+15305484001"], "carrier": "sinch",
+            "carrier_trunk_id": sinch_ids["denver"]})
+        assert r.status_code == 200, r.text
+        assert r.json()["added"] == ["+15305484001"]
+
+        # (c) 41-era generation: trunk attributed, d.carrier NULL (inserted
+        # directly — post-backfill rows the way pre-42 code wrote them).
+        await db.execute(
+            "INSERT INTO did_inventory (did, status, source, carrier_trunk_id) "
+            "VALUES ('+15305484002', 'available', 'manual', $1)",
+            sinch_ids["chicago"])
+        # (d) legacy generation: neither carrier nor trunk.
+        await db.execute(
+            "INSERT INTO did_inventory (did, status) VALUES ('+16175030002', 'available')")
+
+        # Item COALESCE per generation.
+        item = await _get_item(client, tokens, "+16175030001")
+        assert item["carrier"] == "bandwidth" and item["carrier_pop"] is None
+        item = await _get_item(client, tokens, "+15305484001")
+        assert item["carrier"] == "sinch" and item["carrier_pop"] == "denver"
+        item = await _get_item(client, tokens, "+15305484002")   # ct.carrier arm
+        assert item["carrier"] == "sinch" and item["carrier_pop"] == "chicago"
+        item = await _get_item(client, tokens, "+16175030002")   # implicit arm
+        assert item["carrier"] == "bandwidth" and item["carrier_pop"] is None
+
+        # carrier= filter matches the same COALESCE across generations.
+        r = await client.get("/v1/numbers/inventory?carrier=sinch&search=53054840",
+                             headers=hdrs)
+        assert {i["did"] for i in r.json()["items"]} == {"+15305484001",
+                                                         "+15305484002"}
+        r = await client.get("/v1/numbers/inventory?carrier=bandwidth&search=1617503",
+                             headers=hdrs)
+        assert {i["did"] for i in r.json()["items"]} == {"+16175030001",
+                                                         "+16175030002"}
+
+    _run(go())
+
+
+# ---------------------------------------------------------------------------
+# 16) Migration 42's did_inventory.carrier backfill — proven via re-run: a
+#     NULL-carrier row derives from its trunk's carrier, else 'bandwidth',
+#     and rows that already HAVE a carrier are never touched.
+# ---------------------------------------------------------------------------
+def test_migration42_carrier_backfill_on_rerun(intake_db):
+    pg = intake_db["pg"]
+    db = intake_db["db"]
+
+    async def go():
+        # Two pre-42-style rows (carrier NULL): one trunk-attributed, one bare.
+        await db.execute(
+            "INSERT INTO did_inventory (did, status, source, carrier_trunk_id) "
+            "SELECT '+15305485001', 'available', 'manual', id FROM carrier_trunks "
+            "WHERE carrier = 'sinch' AND pop = 'denver'")
+        await db.execute(
+            "INSERT INTO did_inventory (did, status) VALUES ('+16175040001', 'available')")
+
+        conn = await asyncpg.connect(
+            host=pg.sock, port=pg.port, user="postgres", database="postgres",
+            statement_cache_size=0)
+        try:
+            await conn.execute(MIG_CARRIER_PRIORITIES.read_text())
+        finally:
+            await conn.close()
+
+        row = await db.fetch_one(
+            "SELECT carrier FROM did_inventory WHERE did = '+15305485001'")
+        assert row["carrier"] == "sinch"          # derived from its trunk
+        row = await db.fetch_one(
+            "SELECT carrier FROM did_inventory WHERE did = '+16175040001'")
+        assert row["carrier"] == "bandwidth"      # implicit legacy backfill
+
+        # A row that already had a carrier was NOT touched (test 15's (a)).
+        row = await db.fetch_one(
+            "SELECT carrier, carrier_trunk_id FROM did_inventory "
+            "WHERE did = '+16175030001'")
+        assert row["carrier"] == "bandwidth" and row["carrier_trunk_id"] is None
 
     _run(go())

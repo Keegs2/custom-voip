@@ -12,6 +12,23 @@ fallback for unknown-source INVITEs:
 direction, cps_limit, enabled are load-bearing for that SBC SQL — never rename
 them here or in the migration. **
 
+Migration 42 adds termination priorities: `priority` (INT NOT NULL DEFAULT 100,
+lower = tried first) + per-zone overrides `priority_east` / `priority_west` /
+`priority_central` (NULL = use `priority`). FreeSWITCH builds its outbound
+carrier-failover attempt list per zone <z> by running EXACTLY:
+
+    SELECT carrier, pop, host(source_ip) AS term_ip,
+           COALESCE(priority_<z>, priority) AS eff_priority
+    FROM carrier_trunks
+    WHERE direction IN ('outbound','both') AND enabled = true
+    ORDER BY eff_priority, id
+
+** so those four priority column names are load-bearing too. ** Disabling a
+trunk here removes it from every zone's termination list on the next call —
+carrier redundancy is operated from this CRUD, no config push. (source_ip
+doubles as the termination signaling target; a future term_ip column is the
+documented escape hatch for asymmetric carriers — not built.)
+
 All endpoints are ADMIN-ONLY (require_admin): this is carrier infrastructure
 config, operated through the TED admin tool over the revup-admin bridge
 (admin JWT). Writes land on the East primary and replicate to the zone
@@ -48,7 +65,9 @@ router = APIRouter()
 # text ('206.146.100.24') for clean JSON in any response class.
 _RETURN_COLS = (
     "id, carrier, pop, trunk_group, host(source_ip) AS source_ip, test_tn, "
-    "direction, cps_limit, enabled, notes, created_at, updated_at"
+    "direction, cps_limit, enabled, "
+    "priority, priority_east, priority_west, priority_central, "
+    "notes, created_at, updated_at"
 )
 
 _DIRECTIONS = ("inbound", "outbound", "both")
@@ -74,6 +93,13 @@ def _validate_name(v: str, field: str, max_len: int) -> str:
     return v
 
 
+def _validate_priority(v: Optional[int], field: str) -> Optional[int]:
+    """Priorities are positive ints (lower = tried first); None = unset/inherit."""
+    if v is not None and v < 1:
+        raise ValueError(f"{field} must be >= 1")
+    return v
+
+
 # ---------------------------------------------------------------------------
 # Pydantic models
 # ---------------------------------------------------------------------------
@@ -87,6 +113,12 @@ class CarrierTrunkCreate(BaseModel):
     direction: Literal["inbound", "outbound", "both"] = "inbound"
     cps_limit: int = 100
     enabled: bool = True
+    # Termination ordering (migration 42): lower = tried first; the zone
+    # overrides are nullable (NULL = inherit `priority`).
+    priority: int = 100
+    priority_east: Optional[int] = None
+    priority_west: Optional[int] = None
+    priority_central: Optional[int] = None
     notes: Optional[str] = None
 
     @field_validator("carrier")
@@ -131,6 +163,12 @@ class CarrierTrunkCreate(BaseModel):
             raise ValueError("cps_limit must be > 0")
         return v
 
+    @field_validator("priority", "priority_east", "priority_west",
+                     "priority_central")
+    @classmethod
+    def validate_priorities(cls, v: Optional[int], info) -> Optional[int]:
+        return _validate_priority(v, info.field_name)
+
 
 class CarrierTrunkUpdate(BaseModel):
     """Partial update. `carrier` is intentionally NOT updatable — a trunk row's
@@ -143,6 +181,13 @@ class CarrierTrunkUpdate(BaseModel):
     direction: Optional[Literal["inbound", "outbound", "both"]] = None
     cps_limit: Optional[int] = None
     enabled: Optional[bool] = None
+    # priority is NOT NULL in the schema — an explicit null is rejected in the
+    # endpoint (can't be told from "absent" here). Zone overrides ARE nullable:
+    # explicit null clears the override back to inheriting `priority`.
+    priority: Optional[int] = None
+    priority_east: Optional[int] = None
+    priority_west: Optional[int] = None
+    priority_central: Optional[int] = None
     notes: Optional[str] = None
 
     @field_validator("pop")
@@ -179,6 +224,12 @@ class CarrierTrunkUpdate(BaseModel):
         if v is not None and v <= 0:
             raise ValueError("cps_limit must be > 0")
         return v
+
+    @field_validator("priority", "priority_east", "priority_west",
+                     "priority_central")
+    @classmethod
+    def validate_priorities(cls, v: Optional[int], info) -> Optional[int]:
+        return _validate_priority(v, info.field_name)
 
 
 # ---------------------------------------------------------------------------
@@ -243,14 +294,18 @@ async def create_carrier_trunk(
             f"""
             INSERT INTO carrier_trunks
                 (carrier, pop, trunk_group, source_ip, test_tn,
-                 direction, cps_limit, enabled, notes)
+                 direction, cps_limit, enabled,
+                 priority, priority_east, priority_west, priority_central,
+                 notes)
             VALUES ($1::varchar, $2::varchar, $3::varchar, $4::inet, $5::varchar,
-                    $6::varchar, $7::int, $8::bool, $9::text)
+                    $6::varchar, $7::int, $8::bool,
+                    $9::int, $10::int, $11::int, $12::int, $13::text)
             RETURNING {_RETURN_COLS}
             """,
             body.carrier, body.pop, body.trunk_group, body.source_ip,
             body.test_tn, body.direction, body.cps_limit, body.enabled,
-            body.notes,
+            body.priority, body.priority_east, body.priority_west,
+            body.priority_central, body.notes,
         )
     except asyncpg.UniqueViolationError as e:
         raise _conflict_409(e)
@@ -282,18 +337,26 @@ async def update_carrier_trunk(
     """Partially update a carrier trunk (only the fields present in the body).
 
     exclude_unset (not exclude_none) so the nullable fields (trunk_group,
-    test_tn, notes) can be explicitly cleared with null. 409 when the new
-    source_ip or (carrier, pop) collides with another row.
+    test_tn, notes, priority_east/west/central) can be explicitly cleared with
+    null — clearing a zone override reverts that zone to the global priority.
+    409 when the new source_ip or (carrier, pop) collides with another row.
     """
     update_data = body.model_dump(exclude_unset=True)
     if not update_data:
         raise HTTPException(status_code=400, detail="No fields to update")
+    # priority is NOT NULL — an explicit null would be a DB error; the zone
+    # overrides accept null (clears the override back to inheriting priority).
+    if "priority" in update_data and update_data["priority"] is None:
+        raise HTTPException(
+            status_code=422,
+            detail="priority cannot be null (zone overrides can)")
 
     # Explicit per-column casts (asyncpg + PgBouncer: no type inference).
     casts = {
         "pop": "varchar", "trunk_group": "varchar", "source_ip": "inet",
         "test_tn": "varchar", "direction": "varchar", "cps_limit": "int",
-        "enabled": "bool", "notes": "text",
+        "enabled": "bool", "priority": "int", "priority_east": "int",
+        "priority_west": "int", "priority_central": "int", "notes": "text",
     }
     updates = []
     values: list = []

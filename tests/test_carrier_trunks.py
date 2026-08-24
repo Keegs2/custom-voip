@@ -6,6 +6,21 @@ local PostgreSQL:
   * migration 40_carrier_trunks.sql applies idempotently (twice) on top of the
     real 25_carrier_trunk_status.sql, seeds the 4 production rows exactly once,
     and widens the carrier_trunk_health setid filter to (2,3,6,7);
+  * migration 42_carrier_priorities.sql applies idempotently (twice), lands
+    the guarded seed priorities (East/Central prefer Dallas, West prefers LA),
+    and NEVER clobbers operator-edited priorities on re-run;
+  * priority CRUD: create defaults (100 / NULL overrides), full round-trip,
+    partial update incl. clearing a zone override with explicit null, >=1
+    validation, and priority itself is not nullable;
+  * THE FS TERMINATION CONTRACT: the literal per-zone SQL the FreeSWITCH
+    outbound carrier-failover Lua runs (SELECT carrier, pop, host(source_ip)
+    AS term_ip, COALESCE(priority_<z>, priority) AS eff_priority FROM
+    carrier_trunks WHERE direction IN ('outbound','both') AND enabled = true
+    ORDER BY eff_priority, id) — executed AS THE `freeswitch` DB ROLE for
+    east/west/central: Bandwidth-only in today's per-zone order, Sinch
+    (direction='inbound') structurally absent, disabling Dallas from the
+    admin tool collapses every zone to LA (redundancy-from-the-table), and
+    flipping Sinch Denver to direction='both' opts it in by priority;
   * admin CRUD happy path (create / list+filters / get / partial update /
     delete), 409 on duplicate source_ip and duplicate (carrier, pop),
     422/400 on bad IP / bad direction / bad cps_limit;
@@ -48,6 +63,7 @@ REPO = Path(__file__).resolve().parents[1]
 API_SRC = REPO / "docker" / "api" / "src"
 MIG_TRUNK_STATUS = REPO / "docker" / "postgres" / "init" / "25_carrier_trunk_status.sql"
 MIG_CARRIER_TRUNKS = REPO / "docker" / "postgres" / "init" / "40_carrier_trunks.sql"
+MIG_CARRIER_PRIORITIES = REPO / "docker" / "postgres" / "init" / "42_carrier_priorities.sql"
 
 sys.path.insert(0, str(API_SRC))
 
@@ -59,6 +75,19 @@ SBC_CONTRACT_SQL = (
     "WHERE source_ip = '{si}'::inet "
     "AND direction IN ('inbound','both') AND enabled = true"
 )
+
+# The EXACT per-zone termination-selection SQL the FreeSWITCH outbound
+# carrier-failover Lua runs ({zone} in east/west/central — migration 42
+# contract). If the table or column names drift, THIS test must fail.
+TERM_CONTRACT_SQL = (
+    "SELECT carrier, pop, host(source_ip) AS term_ip, "
+    "COALESCE(priority_{zone}, priority) AS eff_priority "
+    "FROM carrier_trunks "
+    "WHERE direction IN ('outbound','both') AND enabled = true "
+    "ORDER BY eff_priority, id"
+)
+
+ZONES = ("east", "west", "central")
 
 
 def _find_pg_bin():
@@ -169,7 +198,18 @@ CREATE TABLE call_attestations (
   sip_call_id        TEXT,
   created_at         TIMESTAMPTZ NOT NULL DEFAULT now());
 
-GRANT ALL ON cdrs, call_attestations TO api;
+-- Stub for migration 42's did_inventory ALTER + carrier backfill (same
+-- pattern as test_did_intake.py's cdrs stub for 40): only the columns 42
+-- touches. carrier_trunk_id mirrors 41's column (plain INT — carrier_trunks
+-- doesn't exist yet at base-schema time; the FK is 41's concern, proven in
+-- test_did_intake.py along with the real inventory behavior).
+CREATE TABLE did_inventory (
+  id SERIAL PRIMARY KEY,
+  did VARCHAR(20) NOT NULL UNIQUE,
+  status VARCHAR(20) NOT NULL DEFAULT 'available',
+  carrier_trunk_id INT);
+
+GRANT ALL ON cdrs, call_attestations, did_inventory TO api;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO api;
 """
 
@@ -221,7 +261,8 @@ SEEDS = {
 
 @pytest.fixture(scope="module")
 def trunks_db():
-    """Boot PG, apply base schema + REAL 25 + REAL 40 (twice — idempotency)."""
+    """Boot PG, apply base schema + REAL 25 + REAL 40 + REAL 42 (each of the
+    latter twice — idempotency)."""
     if PG_BIN is None:
         pytest.skip("no local PostgreSQL binaries; set TEST_PG_BIN to run carrier-trunk tests")
     pg = _EphemeralPG(PG_BIN)
@@ -244,10 +285,13 @@ def trunks_db():
             # Prerequisite the view replace amends: the REAL 25 (fresh-install
             # path — already carries the (2,3,6,7) filter after the amend).
             await conn.execute(MIG_TRUNK_STATUS.read_text())
-            # The REAL migration under test — applied twice (idempotent; the
-            # seed block must not duplicate rows on the second pass).
+            # The REAL migrations under test — each applied twice (idempotent;
+            # 40's seed block must not duplicate rows, 42's guarded priority
+            # seeds must not re-fire on the second pass).
             await conn.execute(MIG_CARRIER_TRUNKS.read_text())
             await conn.execute(MIG_CARRIER_TRUNKS.read_text())
+            await conn.execute(MIG_CARRIER_PRIORITIES.read_text())
+            await conn.execute(MIG_CARRIER_PRIORITIES.read_text())
         await owner.close()
         db.pool = await asyncpg.create_pool(
             host=pg.sock, port=pg.port, user="api", password="api_secret",
@@ -603,6 +647,265 @@ def test_sbc_contract_excludes_disabled_and_outbound(trunks_db, client, tokens):
         # Clean up the extra rows (keep later tests over the 4 seeds).
         for tid in (disabled_id, outbound_id):
             r = await client.delete(f"/v1/carrier-trunks/{tid}", headers=hdrs)
+            assert r.status_code == 200
+
+    _run(go())
+
+
+# ---------------------------------------------------------------------------
+# 5b) Migration 42 — termination priorities: guarded seeds, operator-edit
+#     survival, priority CRUD, and THE FS TERMINATION CONTRACT per zone.
+# ---------------------------------------------------------------------------
+
+# Seeded priorities (must match migration 42's guarded UPDATEs). They encode
+# TODAY'S per-zone behavior: East/Central prefer Dallas, West prefers LA;
+# Sinch has a global order (denver 10, chicago 20) and no zone overrides.
+PRIORITY_SEEDS = {
+    ("bandwidth", "dallas"):  {"priority": 10, "priority_east": None,
+                               "priority_west": 20,   "priority_central": None},
+    ("bandwidth", "la"):      {"priority": 20, "priority_east": None,
+                               "priority_west": 10,   "priority_central": None},
+    ("sinch",     "denver"):  {"priority": 10, "priority_east": None,
+                               "priority_west": None, "priority_central": None},
+    ("sinch",     "chicago"): {"priority": 20, "priority_east": None,
+                               "priority_west": None, "priority_central": None},
+}
+
+
+async def _fetch_term(pg, zone):
+    """Run the EXACT FS termination-selection SQL as the `freeswitch` DB role
+    (proves the priority-column names + the SELECT grant together)."""
+    conn = await asyncpg.connect(
+        host=pg.sock, port=pg.port, user="freeswitch", database="postgres",
+        statement_cache_size=0)
+    try:
+        return await conn.fetch(TERM_CONTRACT_SQL.format(zone=zone))
+    finally:
+        await conn.close()
+
+
+def test_migration42_seed_priorities(client, tokens):
+    """Applied twice (fixture), the guarded seed UPDATEs landed exactly the
+    contract priorities on the four production rows — once."""
+    async def go():
+        r = await client.get("/v1/carrier-trunks", headers=_auth(tokens, "admin"))
+        assert r.status_code == 200, r.text
+        by_key = {(t["carrier"], t["pop"]): t for t in r.json()["trunks"]}
+        assert set(by_key) == set(PRIORITY_SEEDS)
+        for key, expect in PRIORITY_SEEDS.items():
+            row = by_key[key]
+            for field, val in expect.items():
+                assert row[field] == val, f"{key} {field}: {row[field]!r} != {val!r}"
+
+    _run(go())
+
+
+def test_migration42_operator_edit_survives_rerun(trunks_db, client, tokens):
+    """An operator-tuned priority is NEVER clobbered by re-running 42: the
+    seed UPDATEs are guarded on the column defaults (priority = 100 / touched
+    override IS NULL), which no seeded-then-edited row still matches."""
+    pg = trunks_db["pg"]
+
+    async def go():
+        hdrs = _auth(tokens, "admin")
+        r = await client.get("/v1/carrier-trunks", headers=hdrs)
+        ids = {(t["carrier"], t["pop"]): t["id"] for t in r.json()["trunks"]}
+
+        # Operator edits through the real API: the global priority on Dallas,
+        # and a zone override on Denver (previously NULL).
+        r = await client.put(f"/v1/carrier-trunks/{ids[('bandwidth', 'dallas')]}",
+                             headers=hdrs, json={"priority": 55})
+        assert r.status_code == 200, r.text
+        r = await client.put(f"/v1/carrier-trunks/{ids[('sinch', 'denver')]}",
+                             headers=hdrs, json={"priority_east": 7})
+        assert r.status_code == 200, r.text
+
+        # Re-run the REAL migration as superuser (exactly how prod re-applies).
+        conn = await asyncpg.connect(
+            host=pg.sock, port=pg.port, user="postgres", database="postgres",
+            statement_cache_size=0)
+        try:
+            await conn.execute(MIG_CARRIER_PRIORITIES.read_text())
+        finally:
+            await conn.close()
+
+        r = await client.get("/v1/carrier-trunks", headers=hdrs)
+        by_key = {(t["carrier"], t["pop"]): t for t in r.json()["trunks"]}
+        assert by_key[("bandwidth", "dallas")]["priority"] == 55        # survived
+        assert by_key[("bandwidth", "dallas")]["priority_west"] == 20   # untouched
+        assert by_key[("sinch", "denver")]["priority_east"] == 7        # survived
+        assert by_key[("sinch", "denver")]["priority"] == 10            # untouched
+        assert by_key[("bandwidth", "la")]["priority"] == 20            # seed intact
+        assert by_key[("bandwidth", "la")]["priority_west"] == 10
+
+        # Restore the seed state for the termination-contract tests below.
+        r = await client.put(f"/v1/carrier-trunks/{ids[('bandwidth', 'dallas')]}",
+                             headers=hdrs, json={"priority": 10})
+        assert r.status_code == 200
+        r = await client.put(f"/v1/carrier-trunks/{ids[('sinch', 'denver')]}",
+                             headers=hdrs, json={"priority_east": None})
+        assert r.status_code == 200 and r.json()["priority_east"] is None
+
+    _run(go())
+
+
+def test_crud_priority_and_zone_overrides(client, tokens):
+    """Create defaults (100/NULLs), full round-trip, partial update incl.
+    clearing one zone override with explicit null, >=1 validation, and
+    priority itself is not nullable."""
+    async def go():
+        hdrs = _auth(tokens, "admin")
+
+        # Create with defaults.
+        r = await client.post("/v1/carrier-trunks", headers=hdrs, json={
+            "carrier": "sinch", "pop": "defaults", "source_ip": "206.146.105.1"})
+        assert r.status_code == 200, r.text
+        d = r.json()
+        assert d["priority"] == 100
+        assert d["priority_east"] is None and d["priority_west"] is None \
+            and d["priority_central"] is None
+
+        # Full round-trip.
+        r = await client.post("/v1/carrier-trunks", headers=hdrs, json={
+            "carrier": "sinch", "pop": "tuned", "source_ip": "206.146.105.2",
+            "priority": 5, "priority_east": 1, "priority_west": 2,
+            "priority_central": 3})
+        assert r.status_code == 200, r.text
+        t = r.json()
+        tid = t["id"]
+        assert (t["priority"], t["priority_east"], t["priority_west"],
+                t["priority_central"]) == (5, 1, 2, 3)
+        r = await client.get(f"/v1/carrier-trunks/{tid}", headers=hdrs)
+        t = r.json()
+        assert (t["priority"], t["priority_east"], t["priority_west"],
+                t["priority_central"]) == (5, 1, 2, 3)
+
+        # Partial update: bump priority, clear ONE override with explicit null.
+        r = await client.put(f"/v1/carrier-trunks/{tid}", headers=hdrs,
+                             json={"priority": 7, "priority_east": None})
+        assert r.status_code == 200, r.text
+        t = r.json()
+        assert t["priority"] == 7
+        assert t["priority_east"] is None
+        assert t["priority_west"] == 2 and t["priority_central"] == 3  # untouched
+
+        # Validation: every priority must be >= 1; priority is not nullable.
+        for bad in ({"priority": 0}, {"priority": -3}, {"priority_west": 0},
+                    {"priority_central": -1}, {"priority": None}):
+            r = await client.put(f"/v1/carrier-trunks/{tid}", headers=hdrs,
+                                 json=bad)
+            assert r.status_code == 422, f"{bad}: {r.status_code} {r.text}"
+        r = await client.post("/v1/carrier-trunks", headers=hdrs, json={
+            "carrier": "sinch", "pop": "badprio", "source_ip": "206.146.105.3",
+            "priority": 0})
+        assert r.status_code == 422, r.text
+
+        # Clean up (keep the termination tests over the 4 seeds only).
+        for cleanup_id in (d["id"], tid):
+            r = await client.delete(f"/v1/carrier-trunks/{cleanup_id}",
+                                    headers=hdrs)
+            assert r.status_code == 200
+
+    _run(go())
+
+
+def test_termination_contract_per_zone(trunks_db):
+    """THE FS TERMINATION CONTRACT: the literal per-zone Lua SQL, run as the
+    `freeswitch` DB role, returns the Bandwidth PoPs in TODAY'S order
+    (East/Central Dallas-first, West LA-first) with source_ip doubling as
+    term_ip — and the Sinch rows (direction='inbound') structurally ABSENT."""
+    pg = trunks_db["pg"]
+
+    async def go():
+        for zone in ("east", "central"):
+            rows = await _fetch_term(pg, zone)
+            # dict-equality also pins the CONTRACT column names.
+            assert [dict(r) for r in rows] == [
+                {"carrier": "bandwidth", "pop": "dallas",
+                 "term_ip": "67.231.2.12", "eff_priority": 10},
+                {"carrier": "bandwidth", "pop": "la",
+                 "term_ip": "216.82.238.134", "eff_priority": 20},
+            ], f"zone {zone}"
+
+        rows = await _fetch_term(pg, "west")
+        assert [dict(r) for r in rows] == [
+            {"carrier": "bandwidth", "pop": "la",
+             "term_ip": "216.82.238.134", "eff_priority": 10},
+            {"carrier": "bandwidth", "pop": "dallas",
+             "term_ip": "67.231.2.12", "eff_priority": 20},
+        ]
+
+        # Sinch never terminates while direction='inbound' — in any zone.
+        for zone in ZONES:
+            rows = await _fetch_term(pg, zone)
+            assert all(r["carrier"] != "sinch" for r in rows), zone
+
+    _run(go())
+
+
+def test_termination_contract_disable_is_failover(trunks_db, client, tokens):
+    """Disable Dallas from the admin tool -> every zone's termination list
+    collapses to the single LA row on the next query (carrier redundancy is
+    operated from the table — no config push). Re-enabling restores today's
+    per-zone order."""
+    pg = trunks_db["pg"]
+
+    async def go():
+        hdrs = _auth(tokens, "admin")
+        r = await client.get("/v1/carrier-trunks?carrier=bandwidth", headers=hdrs)
+        ids = {t["pop"]: t["id"] for t in r.json()["trunks"]}
+
+        r = await client.put(f"/v1/carrier-trunks/{ids['dallas']}", headers=hdrs,
+                             json={"enabled": False})
+        assert r.status_code == 200, r.text
+        try:
+            for zone in ZONES:
+                rows = await _fetch_term(pg, zone)
+                assert [r2["pop"] for r2 in rows] == ["la"], zone
+        finally:
+            r = await client.put(f"/v1/carrier-trunks/{ids['dallas']}",
+                                 headers=hdrs, json={"enabled": True})
+            assert r.status_code == 200
+
+        rows = await _fetch_term(pg, "east")
+        assert [r2["pop"] for r2 in rows] == ["dallas", "la"]
+
+    _run(go())
+
+
+def test_termination_contract_sinch_optin_by_direction(trunks_db, client, tokens):
+    """Flip Sinch Denver to direction='both' -> it joins every zone's
+    termination list ordered by priority (eff 10; `id` breaks the tie with
+    the same-priority Bandwidth row). Turning a carrier's termination on is a
+    table edit, not a code change. Restored to 'inbound' after."""
+    pg = trunks_db["pg"]
+
+    async def go():
+        hdrs = _auth(tokens, "admin")
+        r = await client.get("/v1/carrier-trunks", headers=hdrs)
+        ids = {(t["carrier"], t["pop"]): t["id"] for t in r.json()["trunks"]}
+        # 40 seeds with a single INSERT, so ids follow its VALUES order:
+        # dallas < la < denver — the ORDER BY eff_priority, id tiebreak below
+        # depends on that.
+        assert ids[("bandwidth", "dallas")] < ids[("bandwidth", "la")] \
+            < ids[("sinch", "denver")]
+
+        r = await client.put(f"/v1/carrier-trunks/{ids[('sinch', 'denver')]}",
+                             headers=hdrs, json={"direction": "both"})
+        assert r.status_code == 200, r.text
+        try:
+            # East/Central: dallas(10) then denver(10, higher id) then la(20).
+            for zone in ("east", "central"):
+                rows = await _fetch_term(pg, zone)
+                assert [(r2["pop"], r2["eff_priority"]) for r2 in rows] == [
+                    ("dallas", 10), ("denver", 10), ("la", 20)], zone
+            # West: la(10, override) then denver(10, higher id) then dallas(20).
+            rows = await _fetch_term(pg, "west")
+            assert [(r2["pop"], r2["eff_priority"]) for r2 in rows] == [
+                ("la", 10), ("denver", 10), ("dallas", 20)]
+        finally:
+            r = await client.put(f"/v1/carrier-trunks/{ids[('sinch', 'denver')]}",
+                                 headers=hdrs, json={"direction": "inbound"})
             assert r.status_code == 200
 
     _run(go())

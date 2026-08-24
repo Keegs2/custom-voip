@@ -243,12 +243,12 @@ All endpoints are mounted at both `/v1/<path>` and `/<path>` (backward compatibi
 ### Number Inventory (DID Lifecycle Management)
 | Method | Path | Auth | Description |
 |---|---|---|---|
-| `GET` | `/v1/numbers/inventory` | Admin | Full DID inventory with filters and pagination; items carry carrier attribution (`carrier` COALESCEd to `bandwidth` for legacy rows, `carrier_pop`, `carrier_trunk_id`, `source`); optional `carrier=` filter matches the COALESCEd value |
+| `GET` | `/v1/numbers/inventory` | Admin | Full DID inventory with filters and pagination; items carry carrier attribution (`carrier` = COALESCE(d.carrier, ct.carrier, 'bandwidth') — first-class column since migration 42, trunk's carrier for 41-era rows, implicit Bandwidth for legacy —, `carrier_pop`, `carrier_trunk_id`, `source`); optional `carrier=` filter matches the same COALESCE |
 | `GET` | `/v1/numbers/stats` | Admin | Inventory summary stats (by status/product/state/carrier) |
 | `POST` | `/v1/numbers/sync` | Admin | Sync Bandwidth TN inventory into did_inventory table (also reconciles product tables). Only manages rows with `source='bandwidth_sync'` — manually intaken rows never appear in `removed` and are never metadata-overwritten |
 | `POST` | `/v1/numbers/reconcile` | Admin | Reconcile did_inventory against product tables (rcf/api/trunk) without hitting Bandwidth (never clobbers `source`/`carrier_trunk_id`) |
-| `POST` | `/v1/numbers/add` | Admin | Manual DID intake: batch of 1-500 DIDs attributed to an enabled carrier_trunks row → status `available`, `source='manual'`. Envelope: `{added, skipped_existing, invalid, count}` (TED UI contract) |
-| `PUT` | `/v1/numbers/{did}/carrier-trunk` | Admin | Re-associate a DID with a carrier trunk (`carrier_trunk_id: int\|null`; null clears to implicit Bandwidth); returns the updated inventory item |
+| `POST` | `/v1/numbers/add` | Admin | Manual DID intake: batch of 1-500 DIDs owned by `carrier` (REQUIRED, lowercased — must have ≥1 ENABLED carrier_trunks row, else 404 "unknown carrier"); `carrier_trunk_id` OPTIONAL (must belong to that carrier + be enabled, else 422) → status `available`, `source='manual'`, `carrier` set, trunk nullable. Envelope: `{added, skipped_existing, invalid, count}` (TED UI contract) |
+| `PUT` | `/v1/numbers/{did}/carrier-trunk` | Admin | Re-associate a DID with a carrier trunk (`carrier_trunk_id: int\|null`). Setting a trunk also syncs `d.carrier` to that trunk's carrier; null clears only the trunk (`d.carrier` left as-is); returns the updated inventory item |
 | `POST` | `/v1/numbers/{did}/assign` | Admin | Assign DID to customer (creates product record) |
 | `POST` | `/v1/numbers/{did}/unassign` | Admin | Unassign DID (removes product record) |
 | `GET` | `/v1/numbers/available` | User | Browse available DIDs with filters |
@@ -271,13 +271,13 @@ Carrier gateway management — backed by `carrier_gateways` (Bandwidth Dallas/LA
 | `POST` | `/v1/carriers/{carrier_id}/test` | Probe carrier reachability |
 
 ### Carrier Trunks (Admin only)
-Multi-carrier trunk registry — backed by `carrier_trunks` (migration 40; Bandwidth Dallas/LA + Sinch Denver/Chicago). The Kamailio SBCs read this table directly via sqlops as the DB-backed trust fallback for unknown-source INVITEs — the column names `carrier`/`pop`/`trunk_group`/`source_ip`/`test_tn`/`direction`/`cps_limit`/`enabled` are a CONTRACT with that SBC SQL, never rename them. Operated by the TED admin tool through the revup-admin bridge (admin JWT).
+Multi-carrier trunk registry — backed by `carrier_trunks` (migrations 40 + 42; Bandwidth Dallas/LA + Sinch Denver/Chicago). The Kamailio SBCs read this table directly via sqlops as the DB-backed trust fallback for unknown-source INVITEs, and FreeSWITCH reads it per zone as the outbound TERMINATION-ORDER oracle (`COALESCE(priority_<z>, priority)`, direction IN ('outbound','both'), enabled) — the column names `carrier`/`pop`/`trunk_group`/`source_ip`/`test_tn`/`direction`/`cps_limit`/`enabled`/`priority`/`priority_east`/`priority_west`/`priority_central` are a CONTRACT with those SQLs, never rename them. Disabling a trunk here removes it from every zone's termination list on the next call (redundancy operated from the tool). Operated by the TED admin tool through the revup-admin bridge (admin JWT).
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/v1/carrier-trunks` | List carrier trunks (filters: carrier, direction, enabled) |
-| `POST` | `/v1/carrier-trunks` | Create carrier trunk (409 on duplicate source_ip / carrier+pop) |
+| `GET` | `/v1/carrier-trunks` | List carrier trunks (filters: carrier, direction, enabled; rows carry priority + per-zone overrides) |
+| `POST` | `/v1/carrier-trunks` | Create carrier trunk (409 on duplicate source_ip / carrier+pop; `priority` defaults 100, zone overrides default NULL = inherit) |
 | `GET` | `/v1/carrier-trunks/{trunk_id}` | Get carrier trunk detail |
-| `PUT` | `/v1/carrier-trunks/{trunk_id}` | Partial update (pop/trunk_group/source_ip/test_tn/direction/cps_limit/enabled/notes; carrier immutable) |
+| `PUT` | `/v1/carrier-trunks/{trunk_id}` | Partial update (pop/trunk_group/source_ip/test_tn/direction/cps_limit/enabled/priority/priority_east/west/central/notes; carrier immutable; priorities ≥1, zone overrides nullable — explicit null clears back to inheriting `priority`, `priority` itself not nullable) |
 | `DELETE` | `/v1/carrier-trunks/{trunk_id}` | Delete carrier trunk |
 
 ### Rates (Admin only)
