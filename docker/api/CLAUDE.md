@@ -243,10 +243,12 @@ All endpoints are mounted at both `/v1/<path>` and `/<path>` (backward compatibi
 ### Number Inventory (DID Lifecycle Management)
 | Method | Path | Auth | Description |
 |---|---|---|---|
-| `GET` | `/v1/numbers/inventory` | Admin | Full DID inventory with filters and pagination |
-| `GET` | `/v1/numbers/stats` | Admin | Inventory summary stats (by status/product/state) |
-| `POST` | `/v1/numbers/sync` | Admin | Sync Bandwidth TN inventory into did_inventory table (also reconciles product tables) |
-| `POST` | `/v1/numbers/reconcile` | Admin | Reconcile did_inventory against product tables (rcf/api/trunk) without hitting Bandwidth |
+| `GET` | `/v1/numbers/inventory` | Admin | Full DID inventory with filters and pagination; items carry carrier attribution (`carrier` COALESCEd to `bandwidth` for legacy rows, `carrier_pop`, `carrier_trunk_id`, `source`); optional `carrier=` filter matches the COALESCEd value |
+| `GET` | `/v1/numbers/stats` | Admin | Inventory summary stats (by status/product/state/carrier) |
+| `POST` | `/v1/numbers/sync` | Admin | Sync Bandwidth TN inventory into did_inventory table (also reconciles product tables). Only manages rows with `source='bandwidth_sync'` — manually intaken rows never appear in `removed` and are never metadata-overwritten |
+| `POST` | `/v1/numbers/reconcile` | Admin | Reconcile did_inventory against product tables (rcf/api/trunk) without hitting Bandwidth (never clobbers `source`/`carrier_trunk_id`) |
+| `POST` | `/v1/numbers/add` | Admin | Manual DID intake: batch of 1-500 DIDs attributed to an enabled carrier_trunks row → status `available`, `source='manual'`. Envelope: `{added, skipped_existing, invalid, count}` (TED UI contract) |
+| `PUT` | `/v1/numbers/{did}/carrier-trunk` | Admin | Re-associate a DID with a carrier trunk (`carrier_trunk_id: int\|null`; null clears to implicit Bandwidth); returns the updated inventory item |
 | `POST` | `/v1/numbers/{did}/assign` | Admin | Assign DID to customer (creates product record) |
 | `POST` | `/v1/numbers/{did}/unassign` | Admin | Unassign DID (removes product record) |
 | `GET` | `/v1/numbers/available` | User | Browse available DIDs with filters |
