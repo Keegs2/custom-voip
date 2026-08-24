@@ -475,6 +475,57 @@ function M.get_trunk_endpoint_ips(trunk_id)
     return #ips > 0 and ips or nil
 end
 
+-- Ordered outbound termination trunk list for table-driven RCF carrier
+-- attempts (inbound_router.lua get_termination_trunks cache wrapper).
+-- Reads the TED-managed carrier_trunks table (the freeswitch DB role has
+-- SELECT; per-zone reads hit the local replica through PgBouncer, same
+-- connection as every DID lookup above).
+--
+-- zone selects the per-zone priority override column
+-- (priority_east / priority_west / priority_central, migration 42);
+-- COALESCE falls back to the global priority. zone is HARD-VALIDATED
+-- against the closed 3-value set BEFORE interpolation (SQL-injection
+-- guard, same posture as validate_did) — anything else queries as east.
+--
+-- Returns an array of { carrier, pop, term_ip } in eff_priority order
+-- ({} when there are no enabled outbound rows), or nil on any DB error.
+-- The caller treats {} and nil alike as "use the legacy fallback
+-- attempts" (fail-open) but logs them differently.
+function M.get_termination_trunks(zone)
+    if zone ~= "east" and zone ~= "west" and zone ~= "central" then
+        freeswitch.consoleLog("WARN", "Invalid zone for termination trunk lookup: " .. tostring(zone) .. " — using east\n")
+        zone = "east"
+    end
+
+    local sql = string.format([[
+        SELECT carrier, pop, host(source_ip) AS term_ip,
+               COALESCE(priority_%s, priority) AS eff_priority
+        FROM carrier_trunks
+        WHERE direction IN ('outbound','both') AND enabled = true
+        ORDER BY eff_priority, id
+    ]], zone)
+
+    local cursor, err = execute_query(sql)
+    if not cursor then
+        freeswitch.consoleLog("ERR", "Termination trunk lookup failed: " .. tostring(err) .. "\n")
+        return nil
+    end
+
+    local trunks = {}
+    local row = cursor:fetch({}, "a")
+    while row do
+        table.insert(trunks, {
+            carrier = row.carrier,
+            pop = row.pop,
+            term_ip = row.term_ip,
+        })
+        row = cursor:fetch({}, "a")
+    end
+    cursor:close()
+
+    return trunks
+end
+
 -- Insert CDR (async via background job in production)
 function M.insert_cdr(cdr)
     -- Validate required fields

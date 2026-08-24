@@ -33,6 +33,12 @@ services:
       - HEP_CAPTURE_ID=${HEP_CAPTURE_ID:-200}
       - SBC_PROXY_IP=${SBC_PROXY_IP}
       - SBC_PROXY_IP_FAILOVER=${SBC_PROXY_IP_FAILOVER:-${SBC_PROXY_IP}}
+      # Deployment zone for table-driven RCF termination (carrier_trunks):
+      # selects the per-zone priority override column (priority_<zone>).
+      # One of east|west|central — inbound_router.lua validates and falls
+      # back to east with a WARN. OPERATOR: West/Central VMs MUST set
+      # FS_ZONE=west / FS_ZONE=central in /opt/revup/.env (East may omit).
+      - FS_ZONE=${FS_ZONE:-east}
       - ESL_PASSWORD=${ESL_PASSWORD}
       - TEST_MODE=${TEST_MODE:-false}
       # Per-attempt progress timeout (seconds) for SBC/carrier failover loops:
