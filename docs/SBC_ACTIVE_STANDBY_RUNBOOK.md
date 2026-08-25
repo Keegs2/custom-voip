@@ -91,7 +91,7 @@ Use when active/standby itself is causing harm. Order matters: **a VM may not si
 1. 🟠 Detach the standby group from the external backend service: `gcloud compute backend-services remove-backend sbc-backend --region=us-east1 --instance-group=sbc-standby-group --instance-group-zone=us-east1-b --project=rugged-night-193017`
 2. 🟠 Detach it from the signaling backend service too: `gcloud compute backend-services remove-backend sbc-signaling-backend --region=us-east1 --instance-group=sbc-standby-group --instance-group-zone=us-east1-b --project=rugged-night-193017`
 3. 🟠 Put SBC-2 back in the primary group (restores 2-way CLIENT_IP distribution immediately): `gcloud compute instance-groups unmanaged add-instances sbc-group --zone=us-east1-b --instances=kam-g2 --project=rugged-night-193017`
-4. 🟢 Clear the (now-inert) failover policy so config matches behavior: `gcloud compute backend-services update sbc-backend --region=us-east1 --no-drop-traffic-if-unhealthy --connection-drain-on-failover --project=rugged-night-193017` (same for `sbc-signaling-backend`).
+4. 🟢 Clear the (now-inert) failover policy so config matches behavior: `gcloud compute backend-services update sbc-backend --region=us-east1 --no-drop-traffic-if-unhealthy --project=rugged-night-193017` (same for `sbc-signaling-backend`; do NOT pass `--connection-drain-on-failover` — draining-on-failover is unsupported on non-TCP backend services and the flag can error).
 5. 🟠 Repoint FreeSWITCH at the direct SBC IPs: on the media VM edit `/opt/revup/.env` → `SBC_PROXY_IP=10.142.0.100` and `SBC_PROXY_IP_FAILOVER=10.142.0.101`, then recreate FS. **This restart DROPS the zone's active calls** — maintenance window. Orphan gotcha first, then up: `hostname | grep -q '^fs-media-v2$' && sudo killall -9 freeswitch; hostname | grep -q '^fs-media-v2$' && cd /opt/revup && sudo docker compose -f docker-compose.media.yml up -d`
 6. 🟢 Optional: retune the health check back to the pre-4b cadence (faster detection is also fine active/active — keeping 3s/2s/2/2 is safe): `gcloud compute health-checks update tcp sbc-health-check --region=us-east1 --check-interval=5s --timeout=5s --unhealthy-threshold=3 --healthy-threshold=2 --project=rugged-night-193017`
 7. 🟢 Leave in place, harmless: the signaling ILB (unused once FS points at direct IPs — do NOT delete the reserved VIP; it is baked into blueprints/envs) and Kamailio's `SBC_SIGNALING_VIP` listen/alias (telephony owner removes it on their own schedule).
@@ -126,3 +126,32 @@ Use when active/standby itself is causing harm. Order matters: **a VM may not si
 | Date | Zone | Type (planned §2 / kill §3 / real) | Flip time observed | Established call survived | Setups lost noted | Failback clean | Notes |
 |---|---|---|---|---|---|---|---|
 | | | | | | | | |
+
+## 9. One-time migration (active/active → active/standby) — historical record
+
+Executed per zone, West → Central → East, off-peak. Prerequisites: the `feat/sbc-active-standby` PR merged; SBC images rebuilt on the new code (a no-op until `SBC_SIGNALING_VIP` is set).
+
+**Phase A — discovery 🟢 (once, before anything):** confirm live resource names/shapes; the §0 table is authoritative only after this check.
+1. `gcloud compute forwarding-rules list --project=rugged-night-193017 --format='table(name,region,IPAddress,IPProtocol,portRange,backendService)'`
+2. `gcloud compute backend-services list --project=rugged-night-193017 --format='table(name,region,protocol,healthChecks,sessionAffinity)'` — if a zone has SEPARATE UDP and TCP backend services, Phase C steps 4–5 must be applied to EACH.
+3. `gcloud compute health-checks list --project=rugged-night-193017 --format='table(name,region,type,tcpHealthCheck.port,checkIntervalSec,unhealthyThreshold)'` — note global vs regional (regional needs `--region` on update).
+4. `gcloud compute instance-groups list --project=rugged-night-193017`
+
+**Phase B — SBC code deploy 🟢 (all 6 SBCs, one at a time, no env change yet):** standard pull + build + `kamailio -c` gate + recreate. Behavior is byte-identical with the env unset (proven in the PR).
+
+**Phase C — per-zone GCP (West shown; substitute the §0 table for other zones):**
+1. 🟢 Reserve the signaling VIP: `gcloud compute addresses create west-sbc-signaling-vip --region=us-west1 --subnet=default --addresses=10.138.0.250 --project=rugged-night-193017` (if taken, omit `--addresses` and read back the assignment; update `.env`s, `ip-alias.lua`, and the §0 table accordingly)
+2. 🟢 Create the standby group: `gcloud compute instance-groups unmanaged create west-sbc-standby-group --zone=us-west1-b --project=rugged-night-193017`
+3. 🟠 Move SBC-2 out of the serving group (flows pinned to it rehash to SBC-1; established calls survive via stateless in-dialog, setups in flight on SBC-2 may drop): `gcloud compute instance-groups unmanaged remove-instances west-sbc-group --zone=us-west1-b --instances=west-sbc-2 --project=rugged-night-193017` then `gcloud compute instance-groups unmanaged add-instances west-sbc-standby-group --zone=us-west1-b --instances=west-sbc-2 --project=rugged-night-193017`
+4. 🟢 Fast-failover health check: `gcloud compute health-checks update tcp west-sbc-health-check --check-interval=3s --timeout=2s --unhealthy-threshold=2 --healthy-threshold=2 --project=rugged-night-193017` (add `--region=us-west1` if Phase A showed regional)
+5. 🟠 External plane failover: `gcloud compute backend-services add-backend west-sbc-backend --region=us-west1 --instance-group=west-sbc-standby-group --instance-group-zone=us-west1-b --failover --project=rugged-night-193017` then `gcloud compute backend-services update west-sbc-backend --region=us-west1 --failover-ratio=0 --drop-traffic-if-unhealthy --no-connection-drain-on-failover --project=rugged-night-193017` (repeat both for a second external backend service if Phase A showed one)
+6. 🟢 Signaling ILB: `gcloud compute backend-services create west-sbc-signaling-backend --region=us-west1 --load-balancing-scheme=INTERNAL --protocol=UNSPECIFIED --health-checks=west-sbc-health-check --project=rugged-night-193017` · add primary `gcloud compute backend-services add-backend west-sbc-signaling-backend --region=us-west1 --instance-group=west-sbc-group --instance-group-zone=us-west1-b --project=rugged-night-193017` · add standby `gcloud compute backend-services add-backend west-sbc-signaling-backend --region=us-west1 --instance-group=west-sbc-standby-group --instance-group-zone=us-west1-b --failover --project=rugged-night-193017` · policy `gcloud compute backend-services update west-sbc-signaling-backend --region=us-west1 --failover-ratio=0 --drop-traffic-if-unhealthy --no-connection-drain-on-failover --project=rugged-night-193017` · rule `gcloud compute forwarding-rules create west-sbc-signaling-fwd --region=us-west1 --load-balancing-scheme=INTERNAL --network=default --subnet=default --address=west-sbc-signaling-vip --ip-protocol=L3_DEFAULT --ports=ALL --backend-service=west-sbc-signaling-backend --project=rugged-night-193017`
+7. 🟢 Verify both planes elect SBC-1: §1 steps 1–2.
+
+**Phase D — per-zone env cutover:**
+1. 🟢 STANDBY SBC first: add `SBC_SIGNALING_VIP=10.138.0.250` to `/opt/revup/.env`, recreate kamailio (config gate), confirm startup log shows `SIGNALING_VIP=… (dedicated)` and `ip addr show dev lo` has the VIP.
+2. 🟠 PRIMARY SBC same change — its restart causes one real ~6 s flip to the standby and automatic failback (an unplanned mini-drill; watch §1 step 1 recover).
+3. 🟠 Media VM: `/opt/revup/.env` → `SBC_PROXY_IP=10.138.0.250` and `SBC_PROXY_IP_FAILOVER=10.138.0.100`, then recreate FS (DROPS the zone's active calls — maintenance window): `hostname | grep -q '^west-fs$' && sudo killall -9 freeswitch; hostname | grep -q '^west-fs$' && cd /opt/revup && sudo docker compose -f docker-compose.media.yml up -d --force-recreate`
+4. 🟢 Acceptance: test call completes; Homer shows the B-leg INVITE arriving at the signaling VIP and the 200 OK toward FS carrying `Record-Route: <sip:10.138.0.250:5060;r2=on;fs=5090;lr>`; far-end hangup draws a single BYE 200 OK (no retransmit storm); `kamcmd dlg.stats_active` returns to 0.
+
+**Phase E — drills:** §2 planned failover, then §3 variant A, in the migrated zone before starting the next zone. Log in §8.

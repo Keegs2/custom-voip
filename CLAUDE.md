@@ -153,8 +153,8 @@ GCP Cloud NAT on the `default` subnet overrides VM 1:1 external IPs with a NAT p
 GCE Network Load Balancer is pass-through (not proxy). For intra-VPC traffic, the NLB VIP cannot be used for outbound B-leg SIP from FreeSWITCH to Kamailio.
 
 - **Problem:** FS sends outbound INVITE to NLB VIP → NLB routes to a random SBC → SBC processes call → B-leg reply comes back → but the reply's source IP is the SBC's own IP, not the VIP → FS rejects it.
-- **Fix:** FS uses direct SBC IPs for outbound bridging, not the NLB VIP. Env vars `SBC_PROXY_IP` (primary SBC) and `SBC_PROXY_IP_FAILOVER` (secondary SBC) point to the SBCs' VPC IPs.
-- **NLB is for inbound only:** Bandwidth → NLB VIP → SBC. All FS → SBC traffic uses direct IPs.
+- **Fix:** FS never targets the EXTERNAL NLB VIP for outbound bridging. Since the active/standby cutover, `SBC_PROXY_IP` is the zone's INTERNAL signaling ILB VIP (an internal passthrough NLB with failover backends — symmetric by design, safe for FS) and `SBC_PROXY_IP_FAILOVER` is SBC-1's direct VPC IP (ILB-bypass fallback). Pre-cutover these were the two SBCs' direct VPC IPs.
+- **External NLB is for inbound only:** Bandwidth → NLB VIP → active SBC. FS → SBC traffic uses the internal signaling VIP (or direct IPs as fallback).
 
 ### Double Record-Route + Stateless In-Dialog Dispatch (Multi-VM)
 
@@ -232,6 +232,16 @@ ip addr add "${PUBLIC_IP}/32" dev lo
 
 This allows FS to reach Kamailio's Record-Route address when Kamailio is on the same VM (dev) or when FS needs to send to its own advertised address. Requires `NET_ADMIN` Docker capability.
 
+### Active/Standby SBC Pair (2026-08-25)
+
+Each zone's 2 SBCs run as a TRUE active/standby HA pair — NOT active/active. Enforced entirely by GCP NLB failover backends (no VRRP/keepalived; identical config on both SBCs; "active" is decided only by health checks):
+
+- **Both traffic planes fail over together:** the external carrier VIP AND a per-zone internal "signaling VIP" (internal passthrough NLB, `SBC_SIGNALING_VIP`) share the same primary group (SBC-1), standby group (SBC-2), TCP:5060 health check (3s/2s/2/2 ≈ 6s detection), and policy (`failover-ratio=0`, `drop-traffic-if-unhealthy`, `no-connection-drain-on-failover`). Failback is automatic.
+- **FS targets the signaling VIP** (`SBC_PROXY_IP`), and the inner Record-Route entry renders the signaling VIP — so FS-side in-dialog requests always reach the ACTIVE SBC, and a mid-call SBC death no longer strands the FS→carrier direction. The `;fs=` stateless dispatch (§8.10) + stateless FS→carrier BYE forward are what make established calls survive a flip; setups in flight during the ~6s flip are lost (industry-standard HA semantic).
+- **`SBC_SIGNALING_VIP` unset ⇒ byte-identical legacy behavior** (renders as SBC_INTERNAL_IP, no extra listen/alias) — rolling-safe. Never set it before the zone's ILB exists; set it on BOTH SBCs before repointing FS.
+- **Single active SBC side-effects:** bw_dedup now catches cross-edge duplicate INVITEs deterministically; bw_cps/pike counters see full zone load (limits env-tunable); dialog gauges are accurate on the active SBC.
+- **Ops:** `docs/SBC_ACTIVE_STANDBY_RUNBOOK.md` (drills, failure modes, rollback, migration record). IaC blueprint: `infra/OPENTOFU_PLAN.md` §18. Alerting: `infra/monitoring/sbc_failover.tf`.
+
 ### Per-Zone Self-Containment
 
 Each GCP zone is a complete, independent VoIP stack. Calls NEVER cross zones for SIP/RTP.
@@ -270,7 +280,8 @@ These env vars are set per-VM in `/opt/revup/.env`. Getting any of them wrong br
 | Variable | Example | Purpose |
 |----------|---------|---------|
 | `EXTERNAL_SIP_IP` | `34.24.133.82` | NLB VIP — what Bandwidth sees in SIP headers |
-| `SBC_INTERNAL_IP` | `10.142.0.100` | This SBC's VPC IP — used in inner Record-Route |
+| `SBC_INTERNAL_IP` | `10.142.0.100` | This SBC's VPC IP — legacy inner Record-Route, direct-IP fallback |
+| `SBC_SIGNALING_VIP` | `10.142.0.250` | Zone's internal signaling ILB VIP — inner Record-Route + extra listen. Optional; unset = legacy per-SBC behavior |
 | `FREESWITCH_IP` | `192.168.10.2` | FS media VM VPC IP — dispatcher target |
 | `HOMER_IP` | `10.142.0.103` | Services VM IP — HEP capture destination |
 | `DB_HOST` | `10.142.0.103` | Services VM IP — trunk auth SQL |
@@ -286,8 +297,8 @@ These env vars are set per-VM in `/opt/revup/.env`. Getting any of them wrong br
 |----------|---------|---------|
 | `EXTERNAL_SIP_IP` | `34.139.119.135` | This VM's public IP — SDP c= line, Via, Contact |
 | `EXTERNAL_RTP_IP` | `34.139.119.135` | Same as above — RTP source IP |
-| `SBC_PROXY_IP` | `10.142.0.100` | Primary SBC VPC IP — outbound bridge target |
-| `SBC_PROXY_IP_FAILOVER` | `10.142.0.101` | Secondary SBC VPC IP — failover bridge target |
+| `SBC_PROXY_IP` | `10.142.0.250` | Zone signaling ILB VIP — outbound bridge target (always the ACTIVE SBC) |
+| `SBC_PROXY_IP_FAILOVER` | `10.142.0.100` | SBC-1 direct VPC IP — ILB-bypass fallback bridge target |
 | `DB_HOST` | `10.142.0.103` | Services VM IP — DID lookups |
 | `DB_PORT` | `6432` | PgBouncer port |
 | `ESL_PASSWORD` | (secret) | Event Socket password — must match API config |
