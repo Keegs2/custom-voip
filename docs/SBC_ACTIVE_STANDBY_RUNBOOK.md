@@ -26,14 +26,16 @@ Each zone's two Kamailio SBCs are a TRUE ACTIVE/STANDBY pair enforced by GCP pas
 | PRIMARY SBC (VM) | `poc-custom-voip` (10.142.0.100) | `west-sbc-1` (10.138.0.100) | `central-sbc-1` (10.128.0.100) |
 | STANDBY SBC (VM) | `kam-g2` (10.142.0.101) | `west-sbc-2` (10.138.0.101) | `central-sbc-2` (10.128.0.101) |
 | External VIP | 34.24.133.82 | 35.252.214.40 | 35.253.133.230 |
-| Signaling VIP (ILB) | 10.142.0.250 † | 10.138.0.250 † | 10.128.0.250 † |
+| Signaling VIP (ILB) | 10.142.0.250 | 10.138.0.250 | 10.128.0.250 |
 | Backend service (ext) | `sbc-backend` | `west-sbc-backend` | `central-sbc-backend` |
 | Backend service (ILB) | `sbc-signaling-backend` | `west-sbc-signaling-backend` | `central-sbc-signaling-backend` |
 | Primary / standby group | `sbc-group` / `sbc-standby-group` | `west-sbc-group` / `west-sbc-standby-group` | `central-sbc-group` / `central-sbc-standby-group` |
-| Health check (attached, HTTP fs-aware) | `east-sbc-fs-aware-hc` | `west-sbc-fs-aware-hc` | `central-sbc-fs-aware-hc` |
+| Health check (attached, HTTP :8080 /healthz) | `east-sbc-fs-aware-hc` | `west-sbc-healthz-hc` ‡ | `central-sbc-fs-aware-hc` |
 | FreeSWITCH VM | `fs-media-v2` | `west-fs` | `central-fs` |
 
-† Confirm the reserved signaling VIPs (authoritative over this table): `gcloud compute addresses list --project=rugged-night-193017 --filter='name~signaling' --format='table(name,region,address)'`
+‡ West's HC has a different name: during the 2026-08-26 migration the original `west-sbc-fs-aware-hc` was replaced with an identically-configured fresh resource to force prober reprogramming, and the original (plus the three unattached legacy TCP `*-sbc-health-check`s) was deleted. Same semantics as the other zones.
+
+**PROBE ADDRESSING (hard-won, do not forget):** GCP passthrough-LB health probes — external NLB AND internal ILB — arrive addressed to the **forwarding-rule IP** (`VIP:8080`), not the VM's own IP, from `209.85.152.0/22` + `209.85.204.0/22` + `35.191.0.0/16`. Kamailio therefore binds :8080 on the external VIP (always) and the signaling VIP (dedicated mode) — see the listen block in `kamailio.cfg`. Before those binds existed (pre-2026-08-26) the checks NEVER passed and every zone silently rode NLB all-unhealthy fail-open. When debugging probes with tcpdump, filter on ALL of the ranges above.
 
 All commands below are written for **East**; substitute the row above for West/Central (names, region, zone, hostnames).
 
@@ -45,7 +47,7 @@ All commands below are written for **East**; substitute the row above for West/C
 2. **Signaling plane agrees:** `gcloud compute backend-services get-health sbc-signaling-backend --region=us-east1 --project=rugged-night-193017` — must show the same picture as step 1 (same health check; a disagreement means an LB-plane problem, not an SBC problem).
 3. **Grafana:** Traffic Status → "Active SBC per zone" — exactly one green card per zone (the primary), idle standby neutral at 0. Green on the standby card = you are failed over right now.
 4. **On an SBC** 🟢: `sudo docker ps --filter name=voip-kamailio` and `curl -s 127.0.0.1:8080/metrics | grep -m3 kamailio_dialog_active_dialogs`
-5. **From the FS VM (signaling-VIP dataplane + pre-check path)** 🟢: `nc -vz -w1 10.142.0.250 5060` → expect `succeeded` (this is exactly the TCP pre-check FS runs before bridging).
+5. **From the FS VM (signaling-VIP dataplane)** 🟢: `curl -s -m2 http://10.142.0.250:8080/healthz` → expect `OK fs_up=1` (traverses the ILB to the ACTIVE SBC and returns its FS-aware health; `nc` is not installed on the FS VMs).
 6. **End-to-end** 🟢: call the live test DID `+16174544217` → it must forward to `+17744045256`.
 
 ## 2. Planned failover drill 🟠 (quiet hours; loses setups in flight during the two ~10-12 s flips)
@@ -129,7 +131,9 @@ Use when active/standby itself is causing harm. Order matters: **a VM may not si
 
 ## 9. One-time migration (active/active → active/standby) — historical record
 
-Executed per zone, West → Central → East, off-peak. Prerequisites: the `feat/sbc-active-standby` PR merged; SBC images rebuilt on the new code (a no-op until `SBC_SIGNALING_VIP` is set).
+**EXECUTED 2026-08-26/27, all three zones (West → Central → East), acceptance + §2/§3A drills passed per zone.** As-built deviations from the plan below: (1) the fs-aware HCs were discovered probing port 80 and — after fixing port/path — discovered to have NEVER passed because passthrough-LB probes are VIP-addressed (see ‡/PROBE ADDRESSING above); fixed by the VIP:8080 listens (PR #74) and, for West, a fresh HC (`west-sbc-healthz-hc`) to force prober reprogramming. (2) The drop-traffic-if-unhealthy flag is armed only AFTER a green health gate (West briefly darkened its VIP when the flag was armed against the never-passing HC — reverted within minutes; Bandwidth's multi-VIP retry shielded customers). (3) The FS-VM dataplane gate uses curl (no nc on media VMs). (4) Legacy TCP `*-sbc-health-check`s and the orphaned `west-sbc-fs-aware-hc` were deleted post-migration.
+
+Original plan, per zone, off-peak. Prerequisites: the `feat/sbc-active-standby` PR merged; SBC images rebuilt on the new code (a no-op until `SBC_SIGNALING_VIP` is set).
 
 **Phase A — discovery 🟢 (once, before anything):** confirm live resource names/shapes; the §0 table is authoritative only after this check.
 1. `gcloud compute forwarding-rules list --project=rugged-night-193017 --format='table(name,region,IPAddress,IPProtocol,portRange,backendService)'`
