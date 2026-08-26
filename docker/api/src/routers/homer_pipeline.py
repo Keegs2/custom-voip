@@ -1,11 +1,12 @@
 """Pure SIP-trace post-processing pipeline for the Homer router.
 
 This module is STDLIB-ONLY by design: it imports nothing outside the Python
-standard library so the unit tests (tests/test_homer_pipeline.py) can load and
-exercise the dedup / causality-ordering / hairpin-marking logic without
-fastapi, httpx or the auth package being installed.  routers/homer.py
-re-imports every helper defined here, so the router's public surface is
-unchanged.
+standard library so the unit tests (tests/test_homer_pipeline.py and
+tests/test_homer_number_search.py) can load and exercise the dedup /
+causality-ordering / hairpin-marking logic — and the search-needle
+normalizer — without fastapi, httpx or the auth package being installed.
+routers/homer.py re-imports every helper defined here, so the router's
+public surface is unchanged.
 
 Ground truth for the behaviors implemented here is a real production call
 whose SIP ladder rendered broken:
@@ -67,6 +68,49 @@ def _is_hep_stamped(ts_ns: int) -> bool:
     ...707725964951 while its true wire time is <= ...707709698000).
     """
     return ts_ns > 0 and ts_ns % 1_000 == 0
+
+
+# ---------------------------------------------------------------------------
+# Search-needle normalization (the /v1/homer/search input contract)
+# ---------------------------------------------------------------------------
+
+# ASCII-strict on purpose: SIP payloads carry phone numbers as ASCII digits
+# only, so Unicode digits (e.g. Arabic-Indic "٦١٧") are stripped as formatting
+# rather than translated — they can never match a payload anyway.
+_NON_ASCII_DIGIT_RE = re.compile(r"[^0-9]+")
+
+
+def normalize_number_needle(raw: Optional[str]) -> str:
+    """Normalize a free-form phone-number search input to a digits-only needle.
+
+    Support types a number in ANY form — ``+1 (617) 454-4217``,
+    ``617.454.4217``, ``16174544217``, ``6174544217``, or any >=3-digit
+    partial — and normalization is OUR job, server-side.  Rules (the pinned
+    POST /v1/homer/search contract):
+
+      1. Strip every non-digit (ASCII 0-9 only survive).
+      2. Exactly 11 digits with a leading ``1`` -> drop the ``1`` (NANP
+         national core).  SUBSTRING PROPERTY: because the needle is used as an
+         UNANCHORED containment match against the raw SIP payload,
+         ``6174544217`` then matches ``+16174544217``, ``16174544217`` AND the
+         bare ``6174544217`` form — dropping the country code strictly widens
+         the match to every representation of the same NANP number.  Longer
+         (12+ digit) or non-leading-1 international strings pass through
+         unchanged.
+      3. Fewer than 3 digits remaining -> ``ValueError`` ("need at least 3
+         digits"); the router maps this to HTTP 422.
+
+    The return value is digits-only by construction, which makes it
+    regex-metacharacter-free and safe to interpolate into a LogQL line filter
+    (``|~ "<needle>"``) — no anchoring is added anywhere: containment
+    semantics are intentional so partials match everything containing them.
+    """
+    digits = _NON_ASCII_DIGIT_RE.sub("", raw or "")
+    if len(digits) == 11 and digits.startswith("1"):
+        digits = digits[1:]
+    if len(digits) < 3:
+        raise ValueError("need at least 3 digits")
+    return digits
 
 
 # ---------------------------------------------------------------------------
