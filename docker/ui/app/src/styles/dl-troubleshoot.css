@@ -34,6 +34,14 @@
   }
 }
 
+/* Mobile (<768px): the sidebar is an overlay drawer, so the offset disappears
+   — same contract as `.app-main--sidebar` in index.css. */
+@media (max-width: 767px) {
+  .dl-scope.dlx5-canvas {
+    margin-left: 0;
+  }
+}
+
 /* Reduced motion: snap, don't slide (same contract as the APP SHELL block). */
 @media (prefers-reduced-motion: reduce) {
   .dl-scope.dlx5-canvas {
@@ -41,32 +49,215 @@
   }
 }
 
-/* ─── Search form grid — From / To / Call-ID over the date range ─── */
+/* ─── Omnibox — the primary search control ───
+   One oversized mono field with an inset glyph; Search/Clear sit inline so
+   the eye's loop is type → confirm hint → Enter. */
+.dlx5-omnirow {
+  display: flex;
+  gap: 10px;
+  align-items: stretch;
+}
+
+.dlx5-omniwrap {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.dlx5-omni-icon {
+  position: absolute;
+  left: 13px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  color: #8b99b0;
+  pointer-events: none;
+}
+
+.dl-input.dlx5-omni {
+  width: 100%;
+  height: 100%;
+  padding: 11px 14px 11px 38px;
+  font-size: 0.95rem;
+}
+
+.dlx5-omnirow .dl-btn {
+  flex-shrink: 0;
+}
+
+/* Narrow: the buttons wrap under the full-width box */
+@media (max-width: 620px) {
+  .dlx5-omnirow { flex-wrap: wrap; }
+  .dlx5-omniwrap { flex-basis: 100%; }
+}
+
+/* ─── Live truth hint under the omnibox ───
+   Always states exactly what Search will send; reserves one line of height
+   so appearing/disappearing text doesn't bounce the rows below. */
+.dlx5-hintstrip {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 8px 2px 0;
+  min-height: 18px;
+}
+
+.dlx5-hint {
+  margin: 0;
+  font-size: 0.74rem;
+  line-height: 1.5;
+  color: var(--rcf-ink-dim);
+}
+
+.dlx5-hint-needle {
+  font-family: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.73rem;
+  font-weight: 600;
+  color: var(--rcf-azure-deep);
+  overflow-wrap: anywhere; /* long Call-IDs wrap instead of overflowing */
+}
+
+.dlx5-hint-sep {
+  color: #b6c2d4;
+}
+
+.dlx5-hint-warn {
+  color: #b45309;
+  font-weight: 600;
+}
+
+/* ─── Time range row — preset pills + (custom-only) datetime pickers ─── */
+.dlx5-timerow {
+  display: flex;
+  align-items: flex-end;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-top: 16px;
+}
+
+.dlx5-timefield {
+  flex: 0 1 200px;
+  min-width: 170px;
+}
+
+@media (max-width: 820px) {
+  .dlx5-timefield { flex-basis: 100%; }
+}
+
+/* Segmented preset pills — page-scoped copy of the established `dlx-seg`
+   idiom (dl-call-quality.css / dl-admin.css). Third page to need it: promote
+   to a shared `.dl-seg` in index.css on the next design-system pass. */
+.dlx5-seg {
+  display: inline-flex;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+
+.dlx5-seg-btn {
+  appearance: none;
+  font-family: inherit;
+  font-size: 0.74rem;
+  font-weight: 600;
+  padding: 5px 14px;
+  border-radius: 20px;
+  border: 1px solid #cdd8e8;
+  background: #ffffff;
+  color: var(--rcf-ink-dim);
+  cursor: pointer;
+  transition: background var(--rcf-ease), color var(--rcf-ease), border-color var(--rcf-ease);
+}
+
+.dlx5-seg-btn:hover:not(.dlx5-seg-btn-active) {
+  background: #f2f6fc;
+  border-color: #a3b6d3;
+  color: var(--rcf-ink-soft);
+}
+
+.dlx5-seg-btn:focus-visible {
+  outline: 2px solid var(--rcf-azure);
+  outline-offset: 1px;
+}
+
+.dlx5-seg-btn-active {
+  border-color: rgba(47, 125, 246, 0.5);
+  background: rgba(47, 125, 246, 0.1);
+  color: var(--rcf-azure-deep);
+  font-weight: 700;
+}
+
+/* ─── Advanced disclosure — quiet uppercase toggle + rotating caret ─── */
+.dlx5-adv-toggle {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 16px;
+  padding: 4px 2px;
+  border: none;
+  background: none;
+  font-family: inherit;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--rcf-ink-dim);
+  cursor: pointer;
+  transition: color var(--rcf-ease);
+}
+
+.dlx5-adv-toggle:hover {
+  color: var(--rcf-azure-deep);
+}
+
+.dlx5-adv-toggle:focus-visible {
+  outline: 2px solid var(--rcf-azure);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.dlx5-adv-caret {
+  display: inline-flex;
+  transition: transform var(--rcf-ease);
+}
+
+.dlx5-adv-toggle[aria-expanded="true"] .dlx5-adv-caret {
+  transform: rotate(90deg);
+}
+
+/* Collapsed-with-active-criteria badge — advanced filters still apply while
+   hidden, and the toggle says so. */
+.dlx5-adv-count {
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 1px 8px;
+  border-radius: 20px;
+  color: var(--rcf-azure-deep);
+  background: rgba(47, 125, 246, 0.1);
+  border: 1px solid rgba(47, 125, 246, 0.3);
+}
+
+/* ─── Advanced fields grid — From / To / Call-ID ─── */
 .dlx5-form-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 16px;
-  margin-bottom: 16px;
 }
 
-.dlx5-form-grid2 {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
-  margin-bottom: 18px;
+.dlx5-adv {
+  margin-top: 12px;
 }
 
 @media (max-width: 820px) {
   .dlx5-form-grid { grid-template-columns: minmax(0, 1fr); }
-  .dlx5-form-grid2 { grid-template-columns: minmax(0, 1fr); }
 }
 
-/* ─── Inline validation note under the form fields ─── */
+/* ─── Inline validation note (custom-range errors) ─── */
 .dlx5-invalid {
   display: flex;
   align-items: center;
   gap: 7px;
-  margin: 0 0 14px;
+  margin: 10px 0 0;
   font-size: 0.78rem;
   font-weight: 600;
   color: var(--rcf-red);
@@ -131,16 +322,37 @@
   border: 1px solid transparent;
 }
 
-/* ─── Expand chevron on each call row ─── */
+/* ─── Open-ladder affordance on each call row (label + chevron) ─── */
+.dlx5-openhint {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: #9aa9c0;
+  transition: color var(--rcf-ease);
+}
+
+.dl-row:hover .dlx5-openhint {
+  color: var(--rcf-azure-deep);
+}
+
 .dlx5-chevron {
   display: inline-flex;
-  color: #9aa9c0;
+  color: inherit;
   transition: transform var(--rcf-ease), color var(--rcf-ease);
+}
+
+.dlx5-row-open .dlx5-openhint,
+.dlx5-row-open .dlx5-chevron {
+  color: var(--rcf-azure-deep);
 }
 
 .dlx5-row-open .dlx5-chevron {
   transform: rotate(90deg);
-  color: var(--rcf-azure-deep);
 }
 
 /* Expanded call row — held open with a soft azure wash (mirrors the

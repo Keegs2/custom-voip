@@ -40,6 +40,7 @@ from .homer_pipeline import (
     _is_directional,
     _message_identity,
     _ns_to_iso,
+    normalize_number_needle,
 )
 
 logger = logging.getLogger(__name__)
@@ -110,6 +111,13 @@ CANONICAL_ALIASES: list[dict[str, Any]] = [
 # ---------------------------------------------------------------------------
 
 class HomerSearchRequest(BaseModel):
+    # PRIMARY free-form number search: any format the user types —
+    # "+1 (617) 454-4217", "617.454.4217", "16174544217", "6174544217", or a
+    # >=3-digit partial. Normalized server-side (normalize_number_needle) to a
+    # digits-only payload-substring needle; 422 if <3 digits survive.
+    number: Optional[str] = None
+    # Back-compat "advanced" fields — now pass through the SAME normalization
+    # as `number` (422 on <3 digits). All number fields AND together.
     from_user: Optional[str] = None
     to_user: Optional[str] = None
     call_id: Optional[str] = None
@@ -134,6 +142,7 @@ def _build_logql_query(
     from_user: Optional[str],
     to_user: Optional[str],
     call_id: Optional[str],
+    number: Optional[str] = None,
 ) -> str:
     """Build a LogQL query for SIP trace search.
 
@@ -141,34 +150,67 @@ def _build_logql_query(
       type, method, response, call_id, from, to, src_ip, dst_ip, node, etc.
     The log line is the raw SIP message text (NOT JSON).
 
-    We use label selectors for call_id and regex on the raw SIP payload
-    for phone number matching (since the 'from'/'to' labels contain the
-    full SIP header value, not just the user part).
+    We use a label selector for call_id (EXACT match) and regex on the raw
+    SIP payload for phone number matching (since the 'from'/'to' labels
+    contain the full SIP header value, not just the user part).
+
+    ``from_user`` / ``to_user`` / ``number`` MUST arrive already normalized
+    (normalize_number_needle): digits-only needles. That is ENFORCED here
+    before interpolation as defense-in-depth — a digit string is
+    regex-metacharacter-free by construction, so it can neither alter the RE2
+    pattern nor break out of the quoted LogQL string. Each needle becomes an
+    UNANCHORED containment filter (``|~ "digits"``) matching the number
+    anywhere in the message (From, To, RURI, PAI, Diversion, ...); multiple
+    filters AND together.
     """
     # Start with label selectors
     label_parts = ['type="sip"']
 
     if call_id:
-        label_parts.append(f'call_id="{call_id}"')
+        # Loki label-matcher values are Go-style quoted strings: escape the
+        # two structural characters so a hostile Call-ID can never terminate
+        # the string and inject extra matchers. Real SIP Call-IDs on this
+        # platform are plain word@host tokens — escaping is a no-op for them,
+        # and the match stays EXACT (not substring/regex).
+        escaped_cid = call_id.replace("\\", "\\\\").replace('"', '\\"')
+        label_parts.append(f'call_id="{escaped_cid}"')
 
     query = "{" + ", ".join(label_parts) + "}"
 
-    # Phone number search uses regex on the raw SIP payload
-    # This matches the number anywhere in the message (From, To, RURI, PAI, etc.)
+    # Phone number search uses regex on the raw SIP payload — one containment
+    # line filter per needle, ANDed by LogQL. Order is stable: from, to, number.
     line_filters: list[str] = []
-
-    if from_user:
-        val = from_user.lstrip("+")
-        line_filters.append(f'|~ "{val}"')
-
-    if to_user:
-        val = to_user.lstrip("+")
-        line_filters.append(f'|~ "{val}"')
+    for needle in (from_user, to_user, number):
+        if not needle:
+            continue
+        if not needle.isascii() or not needle.isdigit():
+            # Upstream normalization guarantees digits-only; refuse to build
+            # a query if anything else ever reaches the interpolation point.
+            raise ValueError(
+                "search needle must be digits-only after normalization"
+            )
+        line_filters.append(f'|~ "{needle}"')
 
     if line_filters:
         query += " " + " ".join(line_filters)
 
     return query
+
+
+def _needle_or_422(field: str, raw: Optional[str]) -> Optional[str]:
+    """Normalize one user-typed number field to a digits-only needle, or 422.
+
+    Absent/empty fields pass through as None (not part of the search).
+    Anything the user actually typed must yield >= 3 digits — the 422 detail
+    names the offending field so the UI can attach the error to the right
+    input (e.g. "number: need at least 3 digits").
+    """
+    if not raw:
+        return None
+    try:
+        return normalize_number_needle(raw)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"{field}: {exc}")
 
 
 def _parse_loki_response(
@@ -641,6 +683,25 @@ async def search_sip_traces(
 ):
     """Search SIP traces with A/B leg correlation.
 
+    SEARCH INPUTS (all optional, at least one required -> 400 otherwise):
+      number       free-form phone number in ANY format — "+1 (617) 454-4217",
+                   "617.454.4217", "16174544217", "6174544217", or any
+                   >=3-digit partial. Normalized server-side
+                   (normalize_number_needle: strip non-digits; 11-digit
+                   leading-1 NANP -> drop the 1) into a digits-only needle used
+                   as an UNANCHORED substring regex over the raw SIP payload.
+                   422 when fewer than 3 digits survive normalization.
+      from_user /
+      to_user      back-compat "advanced" fields; SAME normalization and 422
+                   rule as `number`. Every number field contributes its own
+                   LogQL line filter — AND semantics when combined.
+      call_id      EXACT Loki label match (call_id="<value>"), NOT a
+                   substring — the UI should send the complete SIP Call-ID
+                   (== the heplify call_id label; FORCEALEGID=false, so it is
+                   the real Call-ID for both legs). Combines (AND) with the
+                   number filters; correlation then expands to sibling legs
+                   via X-CID.
+
     Builds a LogQL query from the search parameters and queries qryn.
     When correlation is enabled, performs A/B leg correlation in 3 steps:
 
@@ -702,17 +763,33 @@ async def search_sip_traces(
     15-20 ms late, so timestamp order alone is NOT trustworthy (see
     tests/fixtures/homer_ground_truth_20260610.md).
     """
-    if not body.from_user and not body.to_user and not body.call_id:
+    if (
+        not body.number
+        and not body.from_user
+        and not body.to_user
+        and not body.call_id
+    ):
         raise HTTPException(
             status_code=400,
-            detail="At least one of from_user, to_user, or call_id is required",
+            detail="At least one of number, from_user, to_user, or call_id is required",
         )
+
+    # Free-form number normalization is OUR job, server-side (the pinned
+    # contract — see normalize_number_needle). from_user/to_user get the SAME
+    # treatment: the legacy path interpolated raw user input into the LogQL
+    # regex, so "(617) 454-4217" (literal parens/spaces; dots matching any
+    # char) matched nothing, and "+1"/11-digit forms missed bare 10-digit
+    # payload occurrences. Raises 422 (naming the field) on <3 digits.
+    number_needle = _needle_or_422("number", body.number)
+    from_needle = _needle_or_422("from_user", body.from_user)
+    to_needle = _needle_or_422("to_user", body.to_user)
 
     # Build LogQL query
     logql = _build_logql_query(
-        from_user=body.from_user,
-        to_user=body.to_user,
+        from_user=from_needle,
+        to_user=to_needle,
         call_id=body.call_id,
+        number=number_needle,
     )
 
     # Convert timestamps to Unix nanoseconds
@@ -730,6 +807,13 @@ async def search_sip_traces(
     # message in the window and filters in Python, so the default limit of 200
     # was easily truncated on busy windows -- consistent with FINAL_LIMIT),
     # 1000 for the final call_id query which fetches both legs of all calls.
+    #
+    # These limits are ALSO the guardrail for broad partial needles: a
+    # 3-digit needle like "617" can match thousands of messages in a busy
+    # window, but Step 1 simply truncates at INITIAL_LIMIT, correlation is
+    # skipped entirely above 50 distinct Call-IDs (below), and every upstream
+    # query carries the 15s httpx timeout. The time WINDOW span itself is
+    # client-chosen and not capped server-side.
     INITIAL_LIMIT = 500
     CORRELATION_LIMIT = 1000
     FINAL_LIMIT = 1000
