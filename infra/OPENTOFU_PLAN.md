@@ -1747,6 +1747,8 @@ This separation is intentional. OpenTofu handles the "what metal exists" questio
 
 ## 18. Active/Standby HA (Phase 4b) — SBC Failover Backends + Per-Zone Signaling ILB
 
+> **DISCOVERY CORRECTIONS (2026-08-26, live gcloud):** the SBC backend services are protocol `UNSPECIFIED` (one per zone, serving both the UDP and TCP 5060 forwarding rules — a single failover policy per zone per plane covers everything), and the ATTACHED health checks are the regional **HTTP `{east|west|central}-sbc-fs-aware-hc`** checks (5s/unhealthy-2), NOT the TCP `*-sbc-health-check` resources (those exist, unattached). The signaling ILB backend services below must reference the fs-aware HC (`health_checks = [google_compute_health_check.<zone>_fs_aware.id]`-style, imported) so both planes share one election. HC blocks below that model `tcp_health_check { port = 5060 }` are superseded by imports of the fs-aware checks; do not create or retune HCs in Phase 4b. Session affinity discovered as CLIENT_IP (East/West) / NONE (Central) — irrelevant under failover with a single-VM primary group; leave as-is on import.
+
 Each zone's 2-SBC Kamailio pair converts from active/active behind the external
 passthrough NLB to a TRUE ACTIVE/STANDBY pair using GCP NLB **failover backends**,
 plus a NEW per-zone **internal passthrough NLB** ("signaling VIP") that FreeSWITCH
