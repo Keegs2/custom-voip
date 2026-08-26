@@ -1,6 +1,6 @@
 """CDR (Call Detail Record) query and ingestion endpoints."""
 from fastapi import APIRouter, HTTPException, Query, Request, Depends
-from typing import Optional
+from typing import Literal, Optional
 from datetime import datetime, timedelta, timezone
 from db import database as db
 from auth.dependencies import get_support_read_filter, require_admin
@@ -838,6 +838,128 @@ async def ingest_cdr_bulk(request: Request):
     return results
 
 
+# ---------------------------------------------------------------------------
+# CDR search (records + summary) — shared filter machinery
+#
+# GET /v1/cdrs and GET /v1/cdrs/summary are driven as a PAIR by the support
+# CDR Search UI with identical query params, so both endpoints build their
+# WHERE clause through the single builder below — they cannot drift apart.
+# ---------------------------------------------------------------------------
+
+# `zone` filter values. Zone is DERIVED from the sbc_id column prefix: every
+# SBC stamps X-SBC-ID as "{zone}-sbc-{n}" (east-sbc-1, west-sbc-2, ...; see
+# SBC_ID in docker-compose.sbc.yml / GCP_DEPLOYMENT_PLAN.md), so
+# `sbc_id LIKE '{zone}-%'` selects that zone's calls. Rows with NULL sbc_id
+# (pre-migration-18 rows and edge ingest paths that never carried the header)
+# can never match a zone filter and are EXCLUDED by it — accepted behavior
+# per the CDR Search contract. Literal -> FastAPI rejects any other value
+# with a 422 and documents the enum in OpenAPI.
+Zone = Literal["east", "west", "central"]
+
+
+def _as_utc(dt: Optional[datetime]) -> Optional[datetime]:
+    """Normalize a query-param datetime to timezone-AWARE UTC.
+
+    FastAPI parses ISO8601 query strings into datetimes: values with an
+    explicit offset (the UI always sends UTC with a 'Z' suffix) arrive aware,
+    but a bare value like '2026-08-26T12:00:00' arrives NAIVE. The cdrs
+    start_time column is timestamptz, so a naive bind's meaning would depend
+    on driver/session defaults. Pin the semantics instead: a naive datetime
+    is treated as UTC.
+    """
+    if dt is None:
+        return None
+    return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt
+
+
+def _escape_like(value: str) -> str:
+    """Escape LIKE metacharacters so user input matches LITERALLY.
+
+    The destination filter is a literal prefix match; without this, '%' / '_'
+    in the input act as SQL wildcards (destination='%' matched every row).
+    Backslash is PostgreSQL's default LIKE escape character.
+    """
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def _build_cdr_filters(
+    *,
+    start_date: datetime,
+    end_date: datetime,
+    customer_id: Optional[int],
+    trunk_id: Optional[int],
+    product_type: Optional[str],
+    direction: Optional[str],
+    destination: Optional[str],
+    sbc_id: Optional[str],
+    zone: Optional[str],
+    rated_only: bool,
+) -> tuple[str, list]:
+    """Build the WHERE clause + bind values shared by /v1/cdrs and /summary.
+
+    Returns (where_sql, values). Only FIXED SQL fragments are concatenated —
+    every user-supplied value is bound through a ${n} placeholder (asyncpg
+    parameterization), never interpolated into the SQL string.
+
+    Both time bounds are INCLUSIVE on both endpoints:
+    `start_time >= start_date AND start_time <= end_date`.
+    """
+    sql = "WHERE start_time >= $1 AND start_time <= $2"
+    values: list = [start_date, end_date]
+    idx = 3
+
+    # `is not None`, NOT truthiness: customer_id=0 is the ingest default for
+    # unmatched calls. The old `if customer_id:` silently DROPPED the filter
+    # for an explicit customer_id=0 query and returned unscoped results.
+    if customer_id is not None:
+        sql += f" AND customer_id = ${idx}"
+        values.append(customer_id)
+        idx += 1
+
+    if trunk_id is not None:
+        sql += f" AND trunk_id = ${idx}"
+        values.append(trunk_id)
+        idx += 1
+
+    # String filters keep truthiness on purpose: an empty '?direction=' means
+    # "no filter", matching historical behavior.
+    if product_type:
+        sql += f" AND product_type = ${idx}"
+        values.append(product_type)
+        idx += 1
+
+    if direction:
+        sql += f" AND direction = ${idx}"
+        values.append(direction)
+        idx += 1
+
+    if destination:
+        # Literal prefix match — LIKE metachars in the input are escaped.
+        sql += f" AND destination LIKE ${idx}"
+        values.append(f"{_escape_like(destination)}%")
+        idx += 1
+
+    if sbc_id:
+        # Exact match; retained for back-compat (the UI now sends `zone`).
+        sql += f" AND sbc_id = ${idx}"
+        values.append(sbc_id)
+        idx += 1
+
+    if zone:
+        # Zone derives from the sbc_id prefix ("{zone}-sbc-{n}" — see the
+        # module comment on `Zone`). NULL-sbc_id rows (pre-migration-18) are
+        # excluded by any zone filter by design. `zone` is Literal-validated
+        # upstream AND parameterized here.
+        sql += f" AND sbc_id LIKE ${idx}"
+        values.append(f"{zone}-%")
+        idx += 1
+
+    if rated_only:
+        sql += " AND rated_at IS NOT NULL"
+
+    return sql, values
+
+
 @router.get("")
 async def query_cdrs(
     customer_id: Optional[int] = None,
@@ -846,11 +968,12 @@ async def query_cdrs(
     direction: Optional[str] = None,
     destination: Optional[str] = None,
     sbc_id: Optional[str] = None,
+    zone: Optional[Zone] = None,
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
     rated_only: bool = False,
-    limit: int = Query(default=100, le=1000),
-    offset: int = 0,
+    limit: int = Query(default=100, ge=0, le=1000),
+    offset: int = Query(default=0, ge=0),
     customer_filter: int | None = Depends(get_support_read_filter),
 ):
     """Query CDRs with filters.
@@ -858,18 +981,43 @@ async def query_cdrs(
     Tenant-scoped: a tenant caller (JWT or API key) only ever sees their own
     customer's CDRs; the requested `customer_id` filter is ignored for them.
     Admins and support (customer_filter is None) may filter by any `customer_id`.
+
+    Filter contract (shared 1:1 with GET /v1/cdrs/summary):
+      * start_date / end_date — ISO8601, INCLUSIVE bounds on start_time;
+        naive values are treated as UTC. Default window: last 24 hours.
+      * zone — east | west | central (anything else is a 422). Matches the
+        sbc_id prefix ("{zone}-sbc-{n}"); NULL-sbc_id rows never match.
+      * sbc_id — exact match, retained for back-compat.
+      * destination — literal prefix match.
     """
     # Tenants are hard-scoped to their own customer (ignore any client value).
     if customer_filter is not None:
         customer_id = customer_filter
 
-    # Default to last 24 hours if no date range
+    # Pin naive datetimes to UTC, then default to the last 24 hours when no
+    # explicit range is given (the UI always sends one; this is a safety net).
+    start_date = _as_utc(start_date)
+    end_date = _as_utc(end_date)
     if not start_date:
         start_date = datetime.now(timezone.utc) - timedelta(hours=24)
     if not end_date:
         end_date = datetime.now(timezone.utc)
 
-    query = """
+    where_sql, values = _build_cdr_filters(
+        start_date=start_date,
+        end_date=end_date,
+        customer_id=customer_id,
+        trunk_id=trunk_id,
+        product_type=product_type,
+        direction=direction,
+        destination=destination,
+        sbc_id=sbc_id,
+        zone=zone,
+        rated_only=rated_only,
+    )
+
+    idx = len(values) + 1
+    query = f"""
         SELECT uuid, customer_id, product_type, trunk_id, direction,
                caller_id, destination, start_time, answer_time, end_time,
                duration_ms, billable_ms, rate_per_min, total_cost,
@@ -887,45 +1035,9 @@ async def query_cdrs(
                sip_hangup_disposition, sip_user_agent,
                network_addr, bridge_uuid, sbc_id
         FROM cdrs
-        WHERE start_time >= $1 AND start_time <= $2
+        {where_sql}
+        ORDER BY start_time DESC LIMIT ${idx} OFFSET ${idx + 1}
     """
-    values = [start_date, end_date]
-    idx = 3
-
-    if customer_id:
-        query += f" AND customer_id = ${idx}"
-        values.append(customer_id)
-        idx += 1
-
-    if trunk_id:
-        query += f" AND trunk_id = ${idx}"
-        values.append(trunk_id)
-        idx += 1
-
-    if product_type:
-        query += f" AND product_type = ${idx}"
-        values.append(product_type)
-        idx += 1
-
-    if direction:
-        query += f" AND direction = ${idx}"
-        values.append(direction)
-        idx += 1
-
-    if destination:
-        query += f" AND destination LIKE ${idx}"
-        values.append(f"{destination}%")
-        idx += 1
-
-    if sbc_id:
-        query += f" AND sbc_id = ${idx}"
-        values.append(sbc_id)
-        idx += 1
-
-    if rated_only:
-        query += " AND rated_at IS NOT NULL"
-
-    query += f" ORDER BY start_time DESC LIMIT ${idx} OFFSET ${idx + 1}"
     values.extend([limit, offset])
 
     results = await db.fetch_all(query, *values)
@@ -944,28 +1056,59 @@ async def query_cdrs(
 @router.get("/summary")
 async def cdr_summary(
     customer_id: Optional[int] = None,
+    trunk_id: Optional[int] = None,
+    product_type: Optional[str] = None,
+    direction: Optional[str] = None,
+    destination: Optional[str] = None,
+    sbc_id: Optional[str] = None,
+    zone: Optional[Zone] = None,
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
-    group_by: str = "day",  # day, hour, destination
+    rated_only: bool = False,
+    group_by: Literal["day", "hour", "destination"] = "day",
     customer_filter: int | None = Depends(get_support_read_filter),
 ):
     """Get CDR summary statistics.
 
     Tenants are hard-scoped to their own customer (the `customer_id` query
     param is overridden); admins and support may summarize any customer.
+
+    Accepts the SAME filter set as GET /v1/cdrs — both endpoints run the
+    shared `_build_cdr_filters` builder, so the CDR Search UI can drive the
+    records list and this roll-up with identical query params (zone,
+    direction, product_type, destination prefix, trunk_id, sbc_id,
+    rated_only, inclusive start_date/end_date; naive datetimes pinned UTC).
+
+    CHANGED (CDR Search rebuild): the default window is now the last 24
+    HOURS — it was 7 days, silently inconsistent with GET /v1/cdrs. The UI
+    always sends an explicit range, so the default is only a safety net.
+    Also, an unknown `group_by` is now a 422 (it previously fell through to
+    the hourly roll-up without any indication).
     """
     if customer_filter is not None:
         customer_id = customer_filter
 
+    # Pin naive datetimes to UTC, then apply the SAME 24h default window as
+    # GET /v1/cdrs (see CHANGED note in the docstring).
+    start_date = _as_utc(start_date)
+    end_date = _as_utc(end_date)
     if not start_date:
-        start_date = datetime.now(timezone.utc) - timedelta(days=7)
+        start_date = datetime.now(timezone.utc) - timedelta(hours=24)
     if not end_date:
         end_date = datetime.now(timezone.utc)
 
-    # Build dynamic WHERE clause — start_date=$1, end_date=$2, customer_id=$3 (if present)
-    cust_filter = ""
-    if customer_id is not None:
-        cust_filter = "AND customer_id = $3"
+    where_sql, values = _build_cdr_filters(
+        start_date=start_date,
+        end_date=end_date,
+        customer_id=customer_id,
+        trunk_id=trunk_id,
+        product_type=product_type,
+        direction=direction,
+        destination=destination,
+        sbc_id=sbc_id,
+        zone=zone,
+        rated_only=rated_only,
+    )
 
     if group_by == "day":
         query = f"""
@@ -978,7 +1121,7 @@ async def cdr_summary(
                 SUM(duration_ms) / 1000 as total_duration_sec,
                 SUM(total_cost) as total_cost
             FROM cdrs
-            WHERE start_time >= $1 AND start_time <= $2 {cust_filter}
+            {where_sql}
             GROUP BY DATE(start_time), product_type, direction
             ORDER BY date DESC
         """
@@ -992,7 +1135,7 @@ async def cdr_summary(
                 SUM(total_cost) as total_cost,
                 AVG(duration_ms) FILTER (WHERE answer_time IS NOT NULL) / 1000 as avg_duration_sec
             FROM cdrs
-            WHERE start_time >= $1 AND start_time <= $2 {cust_filter}
+            {where_sql}
             GROUP BY prefix
             ORDER BY total_calls DESC
             LIMIT 50
@@ -1005,15 +1148,12 @@ async def cdr_summary(
                 COUNT(*) FILTER (WHERE answer_time IS NOT NULL) as answered_calls,
                 SUM(total_cost) as total_cost
             FROM cdrs
-            WHERE start_time >= $1 AND start_time <= $2 {cust_filter}
+            {where_sql}
             GROUP BY hour
             ORDER BY hour DESC
             LIMIT 168
         """
 
-    values = [start_date, end_date]
-    if customer_id is not None:
-        values.append(customer_id)
     results = await db.fetch_all(query, *values)
     return {"summary": [dict(r) for r in results], "group_by": group_by}
 
