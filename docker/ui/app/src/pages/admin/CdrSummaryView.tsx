@@ -1,16 +1,21 @@
 /**
  * CdrSummaryView — grouped CDR summary (day / hour / destination).
  *
+ * Queries /cdrs/summary with the SAME committed filter set as the Records
+ * tab (the API accepts the identical param set on both endpoints) plus the
+ * grouping dimension — so switching tabs never changes what "the current
+ * search" means.
+ *
  * Styling: the shared DAYLIGHT CONSOLE system — `dlx-seg` group-by control
- * (dl-admin.css) and a white `dl-panel` table. The summary query, grouping
- * options, and ASR thresholds are unchanged (thresholds keep their
- * green/amber/red semantics in light-tuned tones).
+ * (dl-admin.css) and a white `dl-panel` table. ASR thresholds keep their
+ * green/amber/red semantics in light-tuned tones.
  */
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { getCdrSummary } from '../../api/cdrs';
 import { Spinner } from '../../components/ui/Spinner';
-import type { CdrSummaryRow } from '../../types/cdr';
+import { fmtMoneySmart } from '../../utils/format';
+import type { CdrSearchParams, CdrSummaryRow } from '../../types/cdr';
 
 type GroupBy = 'day' | 'hour' | 'destination';
 
@@ -35,19 +40,18 @@ function groupLabel(row: CdrSummaryRow, groupBy: GroupBy): string {
 }
 
 interface CdrSummaryViewProps {
-  customerId?: string;
+  /** The committed search params — identical object the Records query uses. */
+  params: CdrSearchParams;
+  /** Search nonce — bumps per Search click so identical params still re-fetch. */
+  nonce: number;
 }
 
-export function CdrSummaryView({ customerId }: CdrSummaryViewProps) {
+export function CdrSummaryView({ params, nonce }: CdrSummaryViewProps) {
   const [groupBy, setGroupBy] = useState<GroupBy>('day');
 
   const { data, isLoading, isError } = useQuery({
-    queryKey: ['cdr-summary', { customerId, groupBy }],
-    queryFn: () =>
-      getCdrSummary({
-        customer_id: customerId ? Number(customerId) : undefined,
-        group_by: groupBy,
-      }),
+    queryKey: ['cdr-summary', params, groupBy, nonce],
+    queryFn: () => getCdrSummary({ ...params, group_by: groupBy }),
   });
 
   const dateColLabel =
@@ -97,7 +101,7 @@ export function CdrSummaryView({ customerId }: CdrSummaryViewProps) {
         <div className="dl-empty">
           <p style={{ fontWeight: 600, margin: 0, color: 'var(--rcf-ink)' }}>No summary data</p>
           <p style={{ fontSize: '0.74rem', margin: '4px 0 0' }}>
-            Run a search first, then switch to this tab.
+            No CDRs match the current filters — adjust them and search again.
           </p>
         </div>
       )}
@@ -179,10 +183,11 @@ export function CdrSummaryView({ customerId }: CdrSummaryViewProps) {
                           style={{
                             fontVariantNumeric: 'tabular-nums',
                             fontWeight: 600,
-                            color: 'var(--rcf-azure-deep)',
+                            // Color only meaningful nonzero money; zero reads neutral.
+                            color: row.total_cost > 0 ? 'var(--rcf-azure-deep)' : 'var(--rcf-ink-dim)',
                           }}
                         >
-                          ${row.total_cost.toFixed(4)}
+                          {fmtMoneySmart(row.total_cost)}
                         </span>
                       </td>
                     </tr>

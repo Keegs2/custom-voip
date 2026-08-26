@@ -1017,12 +1017,15 @@ export function CallQualityPage() {
     setFilters((prev) => ({ ...prev, trunkId: null }));
   }, [filters.customerId]);
 
-  // Build search params from applied filters
+  // Build search params from applied filters. The API's declared params are
+  // `start_date`/`end_date` (the old `start_from`/`start_to` names were
+  // silently dropped by FastAPI → permanent last-24h default). Local
+  // wall-clock day bounds are normalized to ISO UTC inside searchCdrs.
   const searchParams = useMemo(() => ({
     customer_id: appliedFilters.customerId ?? undefined,
     direction: appliedFilters.direction !== 'all' ? appliedFilters.direction : undefined,
-    start_from: `${appliedFilters.startDate}T00:00:00`,
-    start_to: `${appliedFilters.endDate}T23:59:59`,
+    start_date: `${appliedFilters.startDate}T00:00:00`,
+    end_date: `${appliedFilters.endDate}T23:59:59`,
     product_type: appliedFilters.productType !== 'all' ? appliedFilters.productType : undefined,
     limit: 1000,
   }), [appliedFilters]);

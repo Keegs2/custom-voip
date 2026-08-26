@@ -1,79 +1,110 @@
 /**
- * CdrsTab — full CDR search across all customers (/admin/platform/cdrs).
+ * CdrsTab — platform CDR search (standalone /cdrs, admin + support).
  *
  * Styling: the shared DAYLIGHT CONSOLE system (`dl-*` in index.css, plus the
- * admin `dlx-*` layer in styles/dl-admin.css, the platform `dlx2-*` layer in
- * styles/dl-platform.css, and the page-scoped `dlx4-*` layer in
- * styles/dl-platform-b.css). Renders INSIDE the PlatformManagementPage shell,
- * which owns the paper canvas (`dl-scope`) — this page contributes only the
- * filter slab, the stat strip, the Records/Summary segmented control, and the
- * results table. All search/accumulation/export logic is unchanged.
+ * admin `dlx-*` layer in styles/dl-admin.css and the page-scoped `dlx4-*`
+ * layer in styles/dl-platform-b.css). The page shell (CdrsAdminPage) owns the
+ * canvas and the single quiet header — this component contributes the filter
+ * slab, the stat strip, the Records/Summary segmented control, and results.
+ *
+ * Search model (the part that was broken):
+ * - Filters are edited as DRAFT state. Clicking Search serializes them ONCE
+ *   via filtersToParams() — relative presets resolve to concrete UTC instants
+ *   at that moment — and commits `{ params, nonce }`.
+ * - The committed params + nonce form the react-query key, so every Search
+ *   click provably re-runs the request (nonce bumps even when the params are
+ *   value-identical), and Load More pages reuse the exact frozen window.
+ * - Records (useInfiniteQuery), Summary, and CSV export ALL consume the same
+ *   committed params object → identical filter set on the wire for all three.
  *
  * React #310: every hook is called unconditionally at the top.
  */
 import { useState, useCallback, useMemo } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useInfiniteQuery } from '@tanstack/react-query';
 import { searchCdrs } from '../../api/cdrs';
 import { listCustomers } from '../../api/customers';
 import { Spinner } from '../../components/ui/Spinner';
 import { exportCdrsCsv } from '../../utils/csv';
 import { useToast } from '../../components/ui/Toast';
-import { CdrFilterBar, defaultCdrFilters, filtersToParams } from './CdrFilterBar';
+import { CdrFilterBar } from './CdrFilterBar';
+import { defaultCdrFilters, filtersToParams, validateCdrFilters } from './cdrFilters';
 import { CdrStatsBar } from './CdrStatsBar';
 import { CdrTable } from './CdrTable';
 import { CdrSummaryView } from './CdrSummaryView';
-import type { CdrFilters } from './CdrFilterBar';
-import type { Cdr } from '../../types/cdr';
+import type { CdrFilters } from './cdrFilters';
+import type { Cdr, CdrSearchParams } from '../../types/cdr';
 import '../../styles/dl-admin.css';
 import '../../styles/dl-platform.css';
 import '../../styles/dl-platform-b.css';
 
 const PAGE_SIZE = 50;
 
+/** The API caps `limit` at 1000 (Query(le=1000)) — one export request max. */
+const EXPORT_LIMIT = 1000;
+
 const CDR_TABS = [
   { id: 'records', label: 'Records' },
   { id: 'summary', label: 'Summary' },
 ];
 
+interface CommittedSearch {
+  /** Concrete query params, frozen at Search time (no limit/offset). */
+  params: CdrSearchParams;
+  /** Bumps on every Search click so identical params still re-fetch. */
+  nonce: number;
+}
+
 export function CdrsTab() {
   const { toastOk, toastErr } = useToast();
 
   const [draftFilters, setDraftFilters] = useState<CdrFilters>(defaultCdrFilters);
-  const [committedFilters, setCommittedFilters] = useState<CdrFilters>(defaultCdrFilters);
-  const [offset, setOffset] = useState(0);
-  const [accumulatedCdrs, setAccumulatedCdrs] = useState<Cdr[]>([]);
+  const [committed, setCommitted] = useState<CommittedSearch>(() => ({
+    params: filtersToParams(defaultCdrFilters()),
+    nonce: 0,
+  }));
   const [activeTab, setActiveTab] = useState('records');
+  const [exporting, setExporting] = useState(false);
 
-  const searchParams = useMemo(
-    () => filtersToParams(committedFilters, PAGE_SIZE, offset),
-    [committedFilters, offset],
-  );
-
-  const { data, isLoading, isFetching, isError } = useQuery({
-    queryKey: ['cdrs', searchParams],
-    queryFn: async () => {
-      const result = await searchCdrs(searchParams);
-      return result;
+  const {
+    data,
+    isLoading,
+    isError,
+    hasNextPage,
+    isFetchingNextPage,
+    fetchNextPage,
+  } = useInfiniteQuery({
+    queryKey: ['cdrs', committed.params, committed.nonce],
+    queryFn: ({ pageParam }) =>
+      searchCdrs({ ...committed.params, limit: PAGE_SIZE, offset: pageParam }),
+    initialPageParam: 0,
+    getNextPageParam: (lastPage, allPages) => {
+      const loaded = allPages.reduce((n, p) => n + p.items.length, 0);
+      if (lastPage.items.length === 0 || loaded >= lastPage.total) return undefined;
+      return loaded;
     },
-    placeholderData: (prev) => prev,
   });
 
-  const allCdrs = useMemo(() => {
-    if (!data) return accumulatedCdrs;
-    const pageItems = data.items ?? [];
-    if (offset === 0) return pageItems;
-    const uuids = new Set(accumulatedCdrs.map((c) => c.uuid));
-    const newItems = pageItems.filter((c) => !uuids.has(c.uuid));
-    return [...accumulatedCdrs, ...newItems];
-  }, [data, offset, accumulatedCdrs]);
+  // Flatten pages, de-duplicating by uuid (fresh CDRs arriving between page
+  // fetches shift OFFSET-based pages, so boundaries can overlap).
+  const allCdrs = useMemo<Cdr[]>(() => {
+    const pages = data?.pages ?? [];
+    const seen = new Set<string>();
+    const merged: Cdr[] = [];
+    for (const page of pages) {
+      for (const cdr of page.items) {
+        if (!seen.has(cdr.uuid)) {
+          seen.add(cdr.uuid);
+          merged.push(cdr);
+        }
+      }
+    }
+    return merged;
+  }, [data]);
 
-  const [prevOffset, setPrevOffset] = useState(0);
-  if (data && offset !== prevOffset) {
-    setPrevOffset(offset);
-    setAccumulatedCdrs(allCdrs);
-  } else if (data && offset === 0 && accumulatedCdrs !== (data.items ?? [])) {
-    setAccumulatedCdrs(data.items ?? []);
-  }
+  const total = useMemo(() => {
+    const pages = data?.pages ?? [];
+    return pages.length > 0 ? pages[pages.length - 1].total : 0;
+  }, [data]);
 
   const { data: customersData } = useQuery({
     queryKey: ['customers-all'],
@@ -90,59 +121,61 @@ export function CdrsTab() {
   }, [customersData]);
 
   const handleSearch = useCallback(() => {
-    setCommittedFilters(draftFilters);
-    setOffset(0);
-    setAccumulatedCdrs([]);
-    setActiveTab('records');
+    // The filter bar disables Search on invalid input; guard anyway.
+    if (validateCdrFilters(draftFilters) !== null) return;
+    setCommitted((prev) => ({
+      params: filtersToParams(draftFilters),
+      nonce: prev.nonce + 1,
+    }));
   }, [draftFilters]);
 
   const handleLoadMore = useCallback(() => {
-    setOffset((prev) => prev + PAGE_SIZE);
-  }, []);
+    void fetchNextPage();
+  }, [fetchNextPage]);
 
-  const handleExport = useCallback(() => {
-    if (allCdrs.length === 0) {
-      toastErr('No CDRs to export — run a search first.');
-      return;
+  /**
+   * CSV export — fetches from the API with the EXACT committed filter set
+   * (same serializer, same params object as the Records/Summary queries),
+   * not just the client-side loaded pages.
+   */
+  const handleExport = useCallback(async () => {
+    setExporting(true);
+    try {
+      const result = await searchCdrs({ ...committed.params, limit: EXPORT_LIMIT, offset: 0 });
+      if (result.items.length === 0) {
+        toastErr('No CDRs match the current filters — nothing to export.');
+        return;
+      }
+      exportCdrsCsv(result.items);
+      if (result.total > result.items.length) {
+        toastOk(
+          `Exported first ${result.items.length.toLocaleString()} of ` +
+          `${result.total.toLocaleString()} matching CDRs — narrow the date range for a full export.`,
+        );
+      } else {
+        toastOk(`Exported ${result.items.length.toLocaleString()} CDRs`);
+      }
+    } catch {
+      toastErr('Export failed — try again.');
+    } finally {
+      setExporting(false);
     }
-    exportCdrsCsv(allCdrs);
-    toastOk('CDR export downloaded');
-  }, [allCdrs, toastOk, toastErr]);
+  }, [committed.params, toastOk, toastErr]);
 
-  const total = data?.total ?? 0;
   const shownCount = allCdrs.length;
-  const loadingMore = isFetching && offset > 0;
 
   return (
     <div className="dl-stack">
-      {/* ── Section identity ── */}
-      <div style={{ marginBottom: 0 }}>
-        <h2
-          style={{
-            fontFamily: '"Archivo", "IBM Plex Sans", sans-serif',
-            fontSize: '0.95rem',
-            fontWeight: 700,
-            letterSpacing: '-0.01em',
-            color: 'var(--rcf-ink)',
-            margin: 0,
-          }}
-        >
-          Call Detail Records
-        </h2>
-        <p style={{ fontSize: '0.78rem', color: 'var(--rcf-ink-dim)', margin: '3px 0 0' }}>
-          Search, inspect, and export platform CDRs across all customers.
-        </p>
-      </div>
-
       <CdrFilterBar
         filters={draftFilters}
         onChange={setDraftFilters}
         onSearch={handleSearch}
         onExport={handleExport}
         searching={isLoading}
+        exporting={exporting}
       />
 
-      {allCdrs.length > 0 && (
+      {activeTab === 'records' && allCdrs.length > 0 && (
         <CdrStatsBar cdrs={allCdrs} total={total} />
       )}
 
@@ -164,7 +197,7 @@ export function CdrsTab() {
 
       {activeTab === 'records' && (
         <>
-          {isLoading && offset === 0 && (
+          {isLoading && (
             <div
               style={{
                 display: 'flex',
@@ -210,14 +243,14 @@ export function CdrsTab() {
                     {total.toLocaleString()}
                   </strong>
                 </span>
-                {shownCount < total && (
+                {hasNextPage && (
                   <button
                     type="button"
                     className="dl-btn dl-btn-ghost"
-                    disabled={loadingMore}
+                    disabled={isFetchingNextPage}
                     onClick={handleLoadMore}
                   >
-                    {loadingMore ? 'Loading…' : 'Load More'}
+                    {isFetchingNextPage ? 'Loading…' : 'Load More'}
                   </button>
                 )}
               </div>
@@ -227,7 +260,7 @@ export function CdrsTab() {
       )}
 
       {activeTab === 'summary' && (
-        <CdrSummaryView customerId={committedFilters.customer_id} />
+        <CdrSummaryView params={committed.params} nonce={committed.nonce} />
       )}
     </div>
   );
