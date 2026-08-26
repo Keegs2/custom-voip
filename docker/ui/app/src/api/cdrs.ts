@@ -11,23 +11,46 @@ interface CdrRawResult {
   offset?: number;
 }
 
-export async function searchCdrs(params: CdrSearchParams = {}): Promise<CdrSearchResult> {
+/**
+ * Normalise any parseable datetime string to an ISO 8601 UTC instant
+ * ("...Z"). The API's `start_date`/`end_date` are timezone-aware datetimes;
+ * sending a naive local wall-clock string would be misread as UTC and shift
+ * the window by the caller's UTC offset.
+ */
+function toIsoUtc(value: string): string {
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? value : d.toISOString();
+}
+
+/**
+ * THE single serializer for CDR query params — used by BOTH `/cdrs` and
+ * `/cdrs/summary` (the API accepts the identical filter set on both), and by
+ * the CSV export path. Param names here are the API's declared names —
+ * FastAPI silently ignores anything else (`start_from`/`start_to` was the bug
+ * that made the search page permanently show the last-24h default).
+ */
+export function cdrSearchQuery(params: CdrSearchParams): URLSearchParams {
   const query = new URLSearchParams();
   if (params.customer_id !== undefined) query.set('customer_id', String(params.customer_id));
   if (params.product_type) query.set('product_type', params.product_type);
   if (params.direction) query.set('direction', params.direction);
   if (params.caller_id) query.set('caller_id', params.caller_id);
   if (params.destination) query.set('destination', params.destination);
-  if (params.start_from) query.set('start_from', params.start_from);
-  if (params.start_to) query.set('start_to', params.start_to);
+  if (params.start_date) query.set('start_date', toIsoUtc(params.start_date));
+  if (params.end_date) query.set('end_date', toIsoUtc(params.end_date));
   if (params.hangup_cause) query.set('hangup_cause', params.hangup_cause);
+  if (params.zone) query.set('zone', params.zone);
   if (params.sbc_id) query.set('sbc_id', params.sbc_id);
+  if (params.rated_only) query.set('rated_only', 'true');
   if (params.limit !== undefined) query.set('limit', String(params.limit));
   if (params.offset !== undefined) query.set('offset', String(params.offset));
   if (params.sort_by) query.set('sort_by', params.sort_by);
   if (params.sort_dir) query.set('sort_dir', params.sort_dir);
+  return query;
+}
 
-  const qs = query.toString();
+export async function searchCdrs(params: CdrSearchParams = {}): Promise<CdrSearchResult> {
+  const qs = cdrSearchQuery(params).toString();
   const raw = await apiRequest<CdrRawResult>('GET', `/cdrs${qs ? `?${qs}` : ''}`);
 
   // Normalise field names: API returns either `cdrs`/`count` or `items`/`total`
@@ -50,15 +73,20 @@ export async function rateCdr(uuid: string): Promise<Cdr> {
   return apiRequest('POST', `/cdrs/${encodeURIComponent(uuid)}/rate`);
 }
 
-export interface CdrSummaryParams {
-  customer_id?: number;
+/**
+ * `/cdrs/summary` accepts the SAME filter set as `/cdrs` (minus pagination),
+ * plus the grouping dimension.
+ */
+export type CdrSummaryParams = Omit<CdrSearchParams, 'limit' | 'offset' | 'sort_by' | 'sort_dir'> & {
   group_by?: 'day' | 'hour' | 'destination';
-}
+};
 
 export async function getCdrSummary(params: CdrSummaryParams = {}): Promise<CdrSummaryResponse> {
-  const query = new URLSearchParams();
-  if (params.customer_id !== undefined) query.set('customer_id', String(params.customer_id));
-  if (params.group_by) query.set('group_by', params.group_by);
+  const { group_by, ...filters } = params;
+  // Reuse the exact same serializer as searchCdrs so Records, Summary, and
+  // CSV export provably send the identical filter set.
+  const query = cdrSearchQuery(filters);
+  if (group_by) query.set('group_by', group_by);
 
   const qs = query.toString();
   return apiRequest('GET', `/cdrs/summary${qs ? `?${qs}` : ''}`);

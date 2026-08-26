@@ -39,6 +39,31 @@ export function fmtMoney(amount: number, decimals = 2): string {
 }
 
 /**
+ * Money formatter for CDR cost/margin figures, where per-call amounts are
+ * routinely fractions of a cent.
+ *
+ * Rules:
+ * - null/undefined (unrated / absent)  → em dash "—" — never "$0.0000"
+ * - exactly zero                       → "$0.00"
+ * - default                            → 2 decimals ("$1.23")
+ * - 4 decimals ONLY when sub-cent precision matters: rounding to whole
+ *   cents would lose more than 10% of the value (e.g. $0.0087 → "$0.0087",
+ *   but $1.2345 → "$1.23").
+ */
+export function fmtMoneySmart(value: number | null | undefined): string {
+  if (value == null || Number.isNaN(value)) return '—';
+  if (value === 0) return '$0.00';
+
+  const abs = Math.abs(value);
+  const roundedToCents = Math.round(abs * 100) / 100;
+  const subCentMatters = abs < 0.01 || Math.abs(abs - roundedToCents) / abs > 0.1;
+  const decimals = subCentMatters ? 4 : 2;
+
+  const sign = value < 0 ? '-' : '';
+  return `${sign}$${abs.toFixed(decimals)}`;
+}
+
+/**
  * Formats a per-minute rate with up to 6 decimal places.
  * Trims trailing zeros while keeping at least 4 significant decimal digits.
  * Example: 0.012400 → "$0.0124/min"
