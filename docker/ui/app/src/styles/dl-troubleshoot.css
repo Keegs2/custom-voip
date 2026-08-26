@@ -362,38 +362,96 @@
   background: rgba(47, 125, 246, 0.06);
 }
 
-/* Expansion zone under the open row — recessed tint so the dark ladder
-   frame reads as deliberately seated, not floating. */
+/* ─── Results-table containment — the scroll container ───
+   Page-scoped copy of the CDR page's `.dlx4-tablewrap` idiom
+   (dl-platform-b.css): the results table pans HORIZONTALLY inside the
+   panel — never past the card edge — behind a scrollbar that stays
+   VISIBLE on the paper canvas, so a clipped last column reads as
+   "scroll", not "broken".
+
+   `container-type: inline-size` additionally makes this scrollport a size
+   container: the expanded-row ladder slab pins itself to the VISIBLE card
+   width with `width: 100cqw` + `position: sticky` (see .dlx5-expand-inner),
+   so nothing inside an expanded call can ever be pushed past the fold. */
+.dlx5-tablewrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  container-type: inline-size;
+  scrollbar-width: thin;                        /* Firefox */
+  scrollbar-color: #b7c7dd var(--rcf-tint);     /* Firefox: thumb / track */
+}
+
+.dlx5-tablewrap::-webkit-scrollbar {
+  height: 8px;
+}
+
+.dlx5-tablewrap::-webkit-scrollbar-track {
+  background: var(--rcf-tint);
+}
+
+.dlx5-tablewrap::-webkit-scrollbar-thumb {
+  background: #b7c7dd;
+  border-radius: 999px;
+}
+
+.dlx5-tablewrap::-webkit-scrollbar-thumb:hover {
+  background: #94a9c9;
+}
+
+/* Expansion zone under the open row — recessed tint so the ladder panel
+   reads as deliberately seated, not floating. Zero padding: the tint and
+   keyline span the FULL table width (however wide the scroll plane is);
+   the padded inner carries the actual content. */
 .dlx5-expand-cell {
-  padding: 14px 16px 22px;
+  padding: 0;
   background: var(--rcf-tint);
   border-top: 1px solid var(--rcf-line-soft);
 }
 
-/* ─── The dark technical frame hosting the SIP ladder ───
-   The ladder internals (components/sip-ladder/*) are a dark-designed
-   visualization and are NOT converted. This frame seats them on the light
-   page like a code block in light docs: solid dark ground matching the
-   ladder's own palette, one crisp keyline, a slim labeled header strip. */
+/* The expanded-call content plane. Baseline: fill the row (full scroll-plane
+   width). In container-query-capable browsers (all our targets) it instead
+   PINS to the visible scrollport: sticky at the left fold, exactly one card
+   wide (100cqw) — so the ladder frame and its "Open in Grafana" control stay
+   fully on screen no matter how wide the results table is or how far it is
+   panned. Sticky's own containment caps the offset at (table width − 100cqw),
+   which is precisely the scrollport's max scroll — the pin never detaches. */
+.dlx5-expand-inner {
+  box-sizing: border-box;
+  padding: 14px 16px 22px;
+}
+
+@supports (container-type: inline-size) {
+  .dlx5-expand-inner {
+    position: sticky;
+    left: 0;
+    width: 100cqw;
+  }
+}
+
+/* ─── The ladder frame — a daylight inset panel ───
+   The ladder internals (components/sip-ladder/*) are daylight-themed off
+   their own LADDER_COLORS theme object (white canvas, ink text, hairline
+   grid). This frame seats them as a quiet inset: tinted header strip
+   labeling the call, one hairline keyline, white ground below. */
 .dlx5-ladderframe {
-  background: #0f1117;
+  background: var(--rcf-card);
   border: 1px solid #cbd6e4;
   border-radius: 12px;
   overflow: hidden;
   box-shadow:
-    0 1px 2px rgba(14, 23, 38, 0.08),
-    0 18px 40px -20px rgba(14, 23, 38, 0.35);
+    0 1px 2px rgba(14, 23, 38, 0.06),
+    0 14px 32px -22px rgba(14, 23, 38, 0.28);
 }
 
-/* Slim dark header strip labeling the call inside the frame */
+/* Slim header strip labeling the call inside the frame */
 .dlx5-ladderframe-head {
   display: flex;
   align-items: center;
   gap: 12px;
   flex-wrap: wrap;
   padding: 11px 18px;
-  background: #151823;
-  border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+  background: var(--rcf-tint);
+  border-bottom: 1px solid var(--rcf-line);
 }
 
 .dlx5-ladderframe-title {
@@ -401,15 +459,15 @@
   font-weight: 700;
   font-size: 0.78rem;
   letter-spacing: 0.01em;
-  color: #e2e8f0;
+  color: var(--rcf-ink);
   display: inline-flex;
   align-items: center;
   gap: 9px;
   flex-shrink: 0;
 }
 
-/* The frame's single accent detail — the same azure tick the light
-   breadcrumb carries, so the dark inset reads as part of the family. */
+/* The frame's single accent detail — the same azure tick the page
+   breadcrumb carries, so the inset reads as part of the family. */
 .dlx5-ladderframe-title::before {
   content: '';
   width: 6px;
@@ -422,7 +480,7 @@
 .dlx5-ladderframe-route {
   font-family: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
   font-size: 0.72rem;
-  color: #8b99b0;
+  color: var(--rcf-ink-dim);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -431,20 +489,23 @@
 
 .dlx5-ladderframe-body {
   padding: 16px 18px 18px;
+  /* Paper ground so the ladder's white cards (summary / filters / diagram)
+     read as cards — same canvas-vs-card contrast as the page itself. */
+  background: var(--rcf-tint);
 }
 
-/* Ghost link tuned for the dark strip (the light .dl-btn-ghost tones
-   vanish on #151823). Same 150ms hover family. */
-.dlx5-ghost-dark {
+/* Compact ghost link in the frame's header strip (Grafana deep link).
+   Light-ghost chrome matching .dl-btn-ghost, sized for the slim strip. */
+.dlx5-frame-link {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   margin-left: auto;
   padding: 5px 12px;
   border-radius: 7px;
-  border: 1px solid rgba(148, 163, 184, 0.28);
-  background: transparent;
-  color: #b7c3d6;
+  border: 1px solid #cdd8e8;
+  background: var(--rcf-card);
+  color: var(--rcf-ink-soft);
   font-size: 0.72rem;
   font-weight: 700;
   letter-spacing: -0.01em;
@@ -453,22 +514,23 @@
   transition: background var(--rcf-ease), border-color var(--rcf-ease), color var(--rcf-ease);
 }
 
-.dlx5-ghost-dark:hover {
-  background: rgba(148, 163, 184, 0.1);
-  border-color: rgba(148, 163, 184, 0.45);
-  color: #e2e8f0;
+.dlx5-frame-link:hover {
+  background: #f2f6fc;
+  border-color: #b5c4da;
+  color: var(--rcf-azure-deep);
 }
 
-.dlx5-ghost-dark:focus-visible {
+.dlx5-frame-link:focus-visible {
   outline: 2px solid var(--rcf-azure);
   outline-offset: 1px;
 }
 
 /* ─── Narrow-viewport column fold ───
    Below 1400px the content column (240px sidebar + shell) can't seat every
-   column without horizontal scroll — which would also clip the expanded
-   ladder frame. The Network Path column folds away first: it duplicates
-   what the ladder's own node columns show far better. */
+   column without panning. The `.dlx5-tablewrap` scrollport handles that
+   gracefully now, but the Network Path column still folds away first — it
+   duplicates what the ladder's own node columns show far better, and
+   dropping it usually keeps the table fully seated with no pan at all. */
 @media (max-width: 1400px) {
   .dlx5-col-path { display: none; }
 }

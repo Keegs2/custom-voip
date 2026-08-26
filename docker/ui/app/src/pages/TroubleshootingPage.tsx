@@ -21,11 +21,17 @@
  * SidebarCollapse.tsx — the `.dlx5-canvas--collapsed` modifier drops the
  * offset to 0 when the sidebar slides off.
  *
- * One deliberate exception to daylight: the <SipLadder> visualization
- * (components/sip-ladder/*) is a dark-designed technical diagram and is NOT
- * converted. Expanded rows seat it inside a composed dark frame
- * (`.dlx5-ladderframe`) — a code-block-in-light-docs contrast, with a slim
- * header strip labeling the call and the per-call Grafana deep link.
+ * The <SipLadder> visualization (components/sip-ladder/*) is daylight-themed
+ * end-to-end off its own LADDER_COLORS theme object — expanded rows seat it
+ * inside a light inset frame (`.dlx5-ladderframe`) with a slim header strip
+ * labeling the call and the per-call Grafana deep link.
+ *
+ * Containment: results render inside `.dlx5-tablewrap` (the CDR page's
+ * visible-scrollbar pan idiom, plus `container-type: inline-size`), and the
+ * expanded-row content sits in `.dlx5-expand-inner` — sticky at the left
+ * fold, exactly `100cqw` (one visible card) wide — so the ladder frame and
+ * its "Open in Grafana" control can never be pushed past the card edge, no
+ * matter how wide the results table is or how far it is panned.
  */
 import React, { useState, useCallback, useMemo, type KeyboardEvent } from 'react';
 import { useMutation } from '@tanstack/react-query';
@@ -684,8 +690,10 @@ function ResultsTable({ callGroups, correlations, pipelineWarnings, windowStartI
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
 
   return (
-    <div style={{ overflowX: 'auto' }}>
-      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.78rem', color: INK_SOFT }}>
+    <div className="dlx5-tablewrap">
+      {/* min-width keeps the nowrap columns readable; narrower panels PAN
+          inside the wrap (visible scrollbar) instead of crushing/overflowing. */}
+      <table style={{ width: '100%', minWidth: 940, borderCollapse: 'collapse', fontSize: '0.78rem', color: INK_SOFT }}>
         <thead>
           <tr>
             <th className="dl-th" style={{ padding: '10px 10px 10px 20px' }}>Time</th>
@@ -832,32 +840,37 @@ function ResultsTable({ callGroups, correlations, pipelineWarnings, windowStartI
                 {isExpanded && (
                   <tr>
                     <td colSpan={10} className="dlx5-expand-cell">
-                      {/* Composed dark technical frame — the ladder keeps its
-                          dark design; everything around it is daylight. */}
-                      <div className="dlx5-ladderframe">
-                        <div className="dlx5-ladderframe-head">
-                          <span className="dlx5-ladderframe-title">Signaling Ladder</span>
-                          <span className="dlx5-ladderframe-route">
-                            {displayUser(row.from_user)} → {displayUser(row.to_user)} · {group.callIds.length}{' '}
-                            {group.callIds.length === 1 ? 'leg' : 'legs'}
-                          </span>
-                          <a
-                            className="dlx5-ghost-dark"
-                            href={grafanaLink}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            <ExternalIcon size={11} />
-                            Open in Grafana
-                          </a>
-                        </div>
-                        <div className="dlx5-ladderframe-body">
-                          <SipLadder
-                            messages={group.messages}
-                            correlations={correlations}
-                            pipelineWarnings={pipelineWarnings}
-                          />
+                      {/* Sticky containment plane: exactly one visible card
+                          wide (100cqw), pinned at the left fold — the ladder
+                          frame and the Grafana control never leave the screen
+                          however wide the results table pans. */}
+                      <div className="dlx5-expand-inner">
+                        {/* Daylight inset frame hosting the ladder */}
+                        <div className="dlx5-ladderframe">
+                          <div className="dlx5-ladderframe-head">
+                            <span className="dlx5-ladderframe-title">Signaling Ladder</span>
+                            <span className="dlx5-ladderframe-route">
+                              {displayUser(row.from_user)} → {displayUser(row.to_user)} · {group.callIds.length}{' '}
+                              {group.callIds.length === 1 ? 'leg' : 'legs'}
+                            </span>
+                            <a
+                              className="dlx5-frame-link"
+                              href={grafanaLink}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <ExternalIcon size={11} />
+                              Open in Grafana
+                            </a>
+                          </div>
+                          <div className="dlx5-ladderframe-body">
+                            <SipLadder
+                              messages={group.messages}
+                              correlations={correlations}
+                              pipelineWarnings={pipelineWarnings}
+                            />
+                          </div>
                         </div>
                       </div>
                     </td>

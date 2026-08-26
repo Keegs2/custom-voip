@@ -159,12 +159,19 @@ function extractSdpInfo(sdpBody: string): SdpInfo {
   };
 }
 
-// ─── Styles ─────────────────────────────────────────────────────────────────
+// ─── Styles — every color comes from the LADDER_COLORS theme object ─────────
 
+const MONO_STACK = '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace';
+
+/** Daylight inspector slab — white card on the ladder's white canvas, held by
+ *  a hairline border + soft shadow (replaces the dark `glass-surface`). */
 const panelStyle: React.CSSProperties = {
   margin: '4px 0 8px',
   overflow: 'hidden',
-  borderRadius: 14,
+  borderRadius: 12,
+  background: LADDER_COLORS.bg,
+  border: `1px solid ${LADDER_COLORS.controlBorder}`,
+  boxShadow: '0 1px 2px rgba(14,23,38,0.06), 0 10px 24px -16px rgba(14,23,38,0.2)',
 };
 
 const sectionHeaderStyle: React.CSSProperties = {
@@ -186,7 +193,7 @@ const sectionTitleStyle: React.CSSProperties = {
 };
 
 const headerNameStyle: React.CSSProperties = {
-  fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
+  fontFamily: MONO_STACK,
   fontSize: '0.78rem',
   fontWeight: 600,
   color: LADDER_COLORS.textMuted,
@@ -197,7 +204,7 @@ const headerNameStyle: React.CSSProperties = {
 };
 
 const headerValueStyle: React.CSSProperties = {
-  fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
+  fontFamily: MONO_STACK,
   fontSize: '0.78rem',
   color: LADDER_COLORS.text,
   wordBreak: 'break-all',
@@ -206,15 +213,15 @@ const headerValueStyle: React.CSSProperties = {
 
 const importantHeaderNameStyle: React.CSSProperties = {
   ...headerNameStyle,
-  color: '#60a5fa',
+  color: LADDER_COLORS.accent,
 };
 
 const rawBlockStyle: React.CSSProperties = {
-  fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
+  fontFamily: MONO_STACK,
   fontSize: '0.72rem',
   lineHeight: 1.6,
   color: LADDER_COLORS.textMuted,
-  background: 'rgba(0,0,0,0.3)',
+  background: LADDER_COLORS.surface,
   borderRadius: 8,
   padding: '12px 16px',
   margin: '0 16px 16px',
@@ -222,8 +229,89 @@ const rawBlockStyle: React.CSSProperties = {
   wordBreak: 'break-all',
   maxHeight: 400,
   overflowY: 'auto',
-  border: `1px solid ${LADDER_COLORS.borderLight}`,
+  border: `1px solid ${LADDER_COLORS.border}`,
 };
+
+// ─── Cheap SIP syntax emphasis (raw payload stays monospace) ────────────────
+
+/**
+ * Renders a SIP start line with subtle token emphasis:
+ *   - Status line  ("SIP/2.0 200 OK")      → faint version, strong code+reason
+ *   - Request line ("INVITE sip:… SIP/2.0") → strong azure method, ink URI,
+ *                                             faint trailing version
+ * Pure string splitting — no regex backtracking, safe on malformed lines.
+ */
+function StartLineTokens({ line, strong }: { line: string; strong?: boolean }) {
+  const firstSpace = line.indexOf(' ');
+  if (firstSpace <= 0) {
+    return <>{line}</>;
+  }
+  const head = line.slice(0, firstSpace);
+  const rest = line.slice(firstSpace + 1);
+
+  if (head.toUpperCase().startsWith('SIP/')) {
+    // Status line: SIP/2.0 <code> <reason>
+    return (
+      <>
+        <span style={{ color: LADDER_COLORS.textFaint }}>{head}</span>{' '}
+        <span style={{ color: LADDER_COLORS.text, fontWeight: 700 }}>{rest}</span>
+      </>
+    );
+  }
+
+  // Request line: METHOD <uri> [SIP/2.0]
+  const lastSpace = rest.lastIndexOf(' ');
+  const hasVersion = lastSpace > 0 && rest.slice(lastSpace + 1).toUpperCase().startsWith('SIP/');
+  const uri = hasVersion ? rest.slice(0, lastSpace) : rest;
+  const version = hasVersion ? rest.slice(lastSpace + 1) : null;
+  return (
+    <>
+      <span style={{ color: LADDER_COLORS.accent, fontWeight: 700 }}>{head}</span>{' '}
+      <span style={{ color: strong ? LADDER_COLORS.text : LADDER_COLORS.textMuted }}>{uri}</span>
+      {version !== null && (
+        <>
+          {' '}
+          <span style={{ color: LADDER_COLORS.textFaint }}>{version}</span>
+        </>
+      )}
+    </>
+  );
+}
+
+/**
+ * Raw-message emphasis: first line gets the start-line token treatment; every
+ * header line gets a semibold ink name before the colon. Lines without a colon
+ * (SDP `v=0`, blank separators) render untouched. Cheap per-line splits only.
+ */
+function renderRawSip(raw: string): React.ReactNode[] {
+  const lines = raw.replace(/\r\n/g, '\n').split('\n');
+  return lines.map((line, idx) => {
+    if (idx === 0) {
+      return (
+        <span key={idx}>
+          <StartLineTokens line={line} strong />
+          {'\n'}
+        </span>
+      );
+    }
+    const colonIdx = line.indexOf(':');
+    // Header-shaped lines only: "Name: value" with a plausible token name.
+    // SDP lines ("c=IN IP4 …") and continuations fall through unstyled.
+    if (colonIdx > 0 && /^[A-Za-z][A-Za-z0-9-]*$/.test(line.slice(0, colonIdx))) {
+      return (
+        <span key={idx}>
+          <span style={{ color: LADDER_COLORS.textMuted, fontWeight: 600 }}>
+            {line.slice(0, colonIdx)}
+          </span>
+          <span style={{ color: LADDER_COLORS.textFaint }}>:</span>
+          {line.slice(colonIdx + 1)}
+          {'\n'}
+        </span>
+      );
+    }
+    return <span key={idx}>{line}{'\n'}</span>;
+  });
+}
 
 // ─── Chevron icon ───────────────────────────────────────────────────────────
 
@@ -284,8 +372,8 @@ function SdpInfoCard({ sdpInfo }: { sdpInfo: SdpInfo }) {
         <div
           key={item.label}
           style={{
-            background: item.highlight ? 'rgba(59,130,246,0.06)' : 'rgba(255,255,255,0.02)',
-            border: `1px solid ${item.highlight ? 'rgba(59,130,246,0.2)' : LADDER_COLORS.borderLight}`,
+            background: item.highlight ? LADDER_COLORS.accentWashSoft : LADDER_COLORS.surface,
+            border: `1px solid ${item.highlight ? LADDER_COLORS.accentBorder : LADDER_COLORS.border}`,
             borderRadius: 8,
             padding: '8px 12px',
           }}
@@ -304,10 +392,10 @@ function SdpInfoCard({ sdpInfo }: { sdpInfo: SdpInfo }) {
           </div>
           <div
             style={{
-              fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
+              fontFamily: MONO_STACK,
               fontSize: '0.8rem',
               fontWeight: 600,
-              color: item.highlight ? '#60a5fa' : LADDER_COLORS.text,
+              color: item.highlight ? LADDER_COLORS.accent : LADDER_COLORS.text,
             }}
           >
             {item.value}
@@ -346,20 +434,24 @@ export function PacketDetailPanel({ rawMsg, accentColor, onClose }: PacketDetail
   const handleSdpToggle = useCallback(() => setSdpExpanded((p) => !p), []);
   const handleRawToggle = useCallback(() => setRawExpanded((p) => !p), []);
 
+  // Pre-rendered raw payload with cheap syntax emphasis (memoised — the
+  // string splitting only re-runs when the packet changes, not per toggle).
+  const rawNodes = useMemo(() => renderRawSip(parsed.rawText), [parsed.rawText]);
+
   return (
-    <div className="glass-surface" style={panelStyle}>
-      {/* Top accent bar + close button */}
+    <div style={panelStyle}>
+      {/* Top strip: message accent tick, emphasised start line, close button */}
       <div
         style={{
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
           padding: '8px 16px',
-          borderBottom: `1px solid ${LADDER_COLORS.borderLight}`,
-          background: 'rgba(0,0,0,0.15)',
+          borderBottom: `1px solid ${LADDER_COLORS.border}`,
+          background: LADDER_COLORS.surface,
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
           <div
             style={{
               width: 3,
@@ -371,13 +463,17 @@ export function PacketDetailPanel({ rawMsg, accentColor, onClose }: PacketDetail
           />
           <span
             style={{
-              fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
+              fontFamily: MONO_STACK,
               fontSize: '0.78rem',
               fontWeight: 600,
               color: LADDER_COLORS.text,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
             }}
+            title={parsed.startLine}
           >
-            {parsed.startLine}
+            <StartLineTokens line={parsed.startLine} />
           </span>
         </div>
 
@@ -391,7 +487,7 @@ export function PacketDetailPanel({ rawMsg, accentColor, onClose }: PacketDetail
             width: 24,
             height: 24,
             borderRadius: 6,
-            border: `1px solid ${LADDER_COLORS.borderLight}`,
+            border: `1px solid ${LADDER_COLORS.controlBorder}`,
             background: 'transparent',
             cursor: 'pointer',
             color: LADDER_COLORS.textFaint,
@@ -401,7 +497,7 @@ export function PacketDetailPanel({ rawMsg, accentColor, onClose }: PacketDetail
           }}
           onMouseEnter={(e) => {
             e.currentTarget.style.color = LADDER_COLORS.text;
-            e.currentTarget.style.background = 'rgba(255,255,255,0.05)';
+            e.currentTarget.style.background = LADDER_COLORS.inkChip;
           }}
           onMouseLeave={(e) => {
             e.currentTarget.style.color = LADDER_COLORS.textFaint;
@@ -431,7 +527,7 @@ export function PacketDetailPanel({ rawMsg, accentColor, onClose }: PacketDetail
           style={sectionHeaderStyle}
           onClick={handleHeadersToggle}
           onMouseEnter={(e) => {
-            e.currentTarget.style.background = 'rgba(255,255,255,0.02)';
+            e.currentTarget.style.background = LADDER_COLORS.surface;
           }}
           onMouseLeave={(e) => {
             e.currentTarget.style.background = 'transparent';
@@ -456,7 +552,7 @@ export function PacketDetailPanel({ rawMsg, accentColor, onClose }: PacketDetail
                     padding: '3px 0',
                     borderBottom:
                       idx < parsed.headers.length - 1
-                        ? `1px solid rgba(42,47,69,0.15)`
+                        ? `1px solid rgba(14,23,38,0.06)`
                         : 'none',
                   }}
                 >
@@ -473,12 +569,12 @@ export function PacketDetailPanel({ rawMsg, accentColor, onClose }: PacketDetail
 
       {/* SDP section (only if body contains SDP) */}
       {parsed.sdpBody && (
-        <div style={{ borderTop: `1px solid ${LADDER_COLORS.borderLight}` }}>
+        <div style={{ borderTop: `1px solid ${LADDER_COLORS.border}` }}>
           <div
             style={sectionHeaderStyle}
             onClick={handleSdpToggle}
             onMouseEnter={(e) => {
-              e.currentTarget.style.background = 'rgba(255,255,255,0.02)';
+              e.currentTarget.style.background = LADDER_COLORS.surface;
             }}
             onMouseLeave={(e) => {
               e.currentTarget.style.background = 'transparent';
@@ -500,12 +596,12 @@ export function PacketDetailPanel({ rawMsg, accentColor, onClose }: PacketDetail
       )}
 
       {/* Raw message section */}
-      <div style={{ borderTop: `1px solid ${LADDER_COLORS.borderLight}` }}>
+      <div style={{ borderTop: `1px solid ${LADDER_COLORS.border}` }}>
         <div
           style={sectionHeaderStyle}
           onClick={handleRawToggle}
           onMouseEnter={(e) => {
-            e.currentTarget.style.background = 'rgba(255,255,255,0.02)';
+            e.currentTarget.style.background = LADDER_COLORS.surface;
           }}
           onMouseLeave={(e) => {
             e.currentTarget.style.background = 'transparent';
@@ -516,7 +612,7 @@ export function PacketDetailPanel({ rawMsg, accentColor, onClose }: PacketDetail
         </div>
 
         {rawExpanded && (
-          <pre style={rawBlockStyle}>{parsed.rawText}</pre>
+          <pre style={rawBlockStyle}>{rawNodes}</pre>
         )}
       </div>
     </div>
