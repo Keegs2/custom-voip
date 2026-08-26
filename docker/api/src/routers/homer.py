@@ -76,6 +76,11 @@ CANONICAL_ALIASES: list[dict[str, Any]] = [
     {"alias": "Bandwidth TC2 (LA)", "ip": "67.231.4.138", "port": 5060},
     # ── EAST ZONE (us-east1-b) ──
     {"alias": "NLB VIP (East)", "ip": "34.24.133.82", "port": 5060},
+    # Signaling ILB VIPs (active/standby, 2026-08): FS targets these for B-legs;
+    # keep in sync with docker/homer/scripts/ip-alias.lua (Grafana flow panel).
+    {"alias": "Signaling VIP (East)", "ip": "10.142.0.250", "port": 5060},
+    {"alias": "Signaling VIP (West)", "ip": "10.138.0.250", "port": 5060},
+    {"alias": "Signaling VIP (Central)", "ip": "10.128.0.250", "port": 5060},
     {"alias": "SBC-1 East", "ip": "34.74.71.32", "port": 5060},
     {"alias": "SBC-1 East (Int)", "ip": "10.142.0.100", "port": 5060},
     {"alias": "SBC-2 East", "ip": "35.243.136.35", "port": 5060},
