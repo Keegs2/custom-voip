@@ -8,7 +8,8 @@ Turns "customers are the monitoring" into GCP-native alerting. Creates:
 | Uptime check: **API /health** (`:8088`) | Provisioning/portal API down |
 | Uptime check: **UI https** (`:8443`, self-signed tolerated) | Customer portal down |
 | **VM down** (hypervisor metric absent 5 min) — all 4 VMs | Instance stopped/crashed |
-| **SBC failover state** (per zone; primary SBC's hypervisor metric absent 2 min) | Zone flipped to its standby SBC (Phase 4b active/standby) — calls continue, redundancy gone. Runbook: `docs/SBC_ACTIVE_STANDBY_RUNBOOK.md` |
+| **SBC primary UNHEALTHY** (per zone, CRITICAL; NLB health-check transition log) | Zone flipped to its standby SBC (Phase 4b active/standby) — calls continue on the standby, redundancy gone. Health-check truth: catches a dead/hung kamailio container as well as VM death, in ~10-12 s + ≤1 min log→alert. Runbook: `docs/SBC_ACTIVE_STANDBY_RUNBOOK.md` §4 |
+| **SBC standby UNHEALTHY** (per zone, WARNING; same log family) | No traffic impact — but the zone is one failure from a zone outage. Restore promptly (runbook §6) |
 | **Disk > 85%** (per filesystem; needs Ops Agent) | Slot-WAL / ClickHouse / PG disk-fill before it kills PG |
 | **Memory > 90%** (needs Ops Agent), **CPU > 90% 15m** | Saturation |
 | **`revup-alert` log match** | Any on-VM watchdog: backup failures, replication-slot WAL, future scripts |
@@ -44,6 +45,13 @@ and syslog shipping (which carries the `revup-alert` lines). On the
 
 ## Notes / limitations (honest)
 
+- **SBC failover pages need health-check logging enabled** (one-time, operator
+  gcloud from a workstation): the three single-line
+  `gcloud compute health-checks update http <hc> --region=<region> --enable-logging`
+  commands are in the `sbc_failover.tf` header and runbook §7. GCP health-check
+  logging records per-endpoint health-state TRANSITIONS only — no steady-state
+  log volume. Until enabled, those two policy families never see an entry
+  (vm_down still backstops VM death).
 - **Uptime probers vs firewall:** GCP probes come from Google's published
   public ranges, not the health-check CIDRs. This module opens exactly the
   probed ports to exactly those IPv4s (fetched live via

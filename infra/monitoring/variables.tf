@@ -67,17 +67,48 @@ variable "instances" {
 }
 
 variable "sbc_failover_pairs" {
-  description = "Per-zone SBC active/standby pairs (Phase 4b HA). primary = the VM whose death means the zone is running on its standby; backend/region feed the incident's get-health command. Drives the per-zone 'SBC failover state' policies (sbc_failover.tf)."
+  description = "Per-zone SBC active/standby pairs (Phase 4b HA). Drives the per-zone log-based 'SBC failover state' policies (sbc_failover.tf). primary/standby = VM names (incident text only); primary_group/standby_group = the 1-VM unmanaged instance groups whose health-check transition logs identify each SBC (resource.labels.instance_group_name — HC log entries carry no instance name); backend/ilb_backend/region feed the incident's get-health ground-truth commands; health_check = the attached HC that needs logging enabled once (commands in the sbc_failover.tf header + runbook §7)."
   type = map(object({
-    primary = string
-    standby = string
-    backend = string
-    region  = string
+    primary       = string
+    standby       = string
+    primary_group = string
+    standby_group = string
+    backend       = string
+    ilb_backend   = string
+    health_check  = string
+    region        = string
   }))
   default = {
-    east    = { primary = "poc-custom-voip", standby = "kam-g2", backend = "sbc-backend", region = "us-east1" }
-    west    = { primary = "west-sbc-1", standby = "west-sbc-2", backend = "west-sbc-backend", region = "us-west1" }
-    central = { primary = "central-sbc-1", standby = "central-sbc-2", backend = "central-sbc-backend", region = "us-central1" }
+    east = {
+      primary       = "poc-custom-voip"
+      standby       = "kam-g2"
+      primary_group = "sbc-group"
+      standby_group = "sbc-standby-group"
+      backend       = "sbc-backend"
+      ilb_backend   = "sbc-signaling-backend"
+      health_check  = "east-sbc-fs-aware-hc"
+      region        = "us-east1"
+    }
+    west = {
+      primary       = "west-sbc-1"
+      standby       = "west-sbc-2"
+      primary_group = "west-sbc-group"
+      standby_group = "west-sbc-standby-group"
+      backend       = "west-sbc-backend"
+      ilb_backend   = "west-sbc-signaling-backend"
+      health_check  = "west-sbc-healthz-hc"
+      region        = "us-west1"
+    }
+    central = {
+      primary       = "central-sbc-1"
+      standby       = "central-sbc-2"
+      primary_group = "central-sbc-group"
+      standby_group = "central-sbc-standby-group"
+      backend       = "central-sbc-backend"
+      ilb_backend   = "central-sbc-signaling-backend"
+      health_check  = "central-sbc-fs-aware-hc"
+      region        = "us-central1"
+    }
   }
 }
 

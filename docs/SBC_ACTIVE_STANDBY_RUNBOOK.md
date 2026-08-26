@@ -64,7 +64,7 @@ Do this per zone after any Kamailio/LB change, and on a monthly cadence. East sh
 8. 🟢 Watch automatic failback (~10-12 s after Kamailio answers its fs-aware /healthz; NO manual step — `failover-ratio=0` + no drain reverts traffic the moment the primary is healthy): re-run the step-4 command until primary is HEALTHY again, then place one more test call and confirm the Grafana primary card re-greens within ~10 min (the panel window).
 9. 🟢 Log it in §8.
 
-**Expected alert behavior during this drill:** NO GCM page — the primary VM stays up (hypervisor metrics flow), and the zone VIP stays reachable (that is the point). The flip is visible only in get-health + the Grafana row. If the SIP VIP uptime page DOES fire during a drill, the standby did not take over — stop and investigate.
+**Expected alert behavior during this drill:** the **"[CRITICAL] {zone} primary SBC UNHEALTHY"** health-check-log page fires within ~1 minute of step 3 — that is the alerting working, not a problem; acknowledge it. The SIP VIP uptime page must NOT fire (the standby is serving). If the VIP page fires, the standby did not take over — stop and investigate. The incident auto-closes on rate-limit/auto-close, not on recovery — get-health and the Grafana row are recovery truth.
 
 ## 3. Mid-call kill drill 🔴 (full-fidelity: VM death while calls are up)
 
@@ -73,7 +73,7 @@ Variant A (container SIGKILL — no VM-death page, faster to run): as §2 but st
 Variant B (VM stop — exercises the page + hypervisor path; workstation, triple-check name+zone before Enter):
 1. 🟢 §2 steps 1–2 (pre-state + establish the call).
 2. 🔴 `gcloud compute instances stop poc-custom-voip --zone=us-east1-b --project=rugged-night-193017`
-3. 🟢 Same verifications as §2 steps 4–6. ADDITIONALLY expect the GCM page **"[CRITICAL] East primary SBC DOWN — zone failed over to standby kam-g2"** within ~2–3 min (and the generic "VM down" at ~5 min).
+3. 🟢 Same verifications as §2 steps 4–6. ADDITIONALLY expect the **"[CRITICAL] East primary SBC UNHEALTHY"** health-check-log page within ~1 min, and the generic "VM down" page at ~5 min (VM-death drills fire both).
 4. 🟠 `gcloud compute instances start poc-custom-voip --zone=us-east1-b --project=rugged-night-193017`
 5. 🟢 After boot, on the primary: `sudo docker ps --filter name=voip-kamailio` (compose restart policy should bring Kamailio up; if not: `cd /opt/revup && sudo docker compose -f docker-compose.sbc.yml up -d`). Then confirm failback per §2 step 8 and that the incidents auto-resolve.
 
@@ -81,7 +81,7 @@ Variant B (VM stop — exercises the page + hypervisor path; workstation, triple
 
 1. 🟢 Confirm what the LB thinks (§1 steps 1–2). If the standby is serving: calls are flowing — you have time. Breathe.
 2. 🟢 Place a new test call through the zone (`+16174544217`).
-3. 🟢 Read the page: VM-death page fired → GCP console for the instance (crashed/stopped/host event). No page but Grafana shows the standby green → Kamailio died or hung with the VM up: on the primary, `sudo docker ps -a --filter name=voip-kamailio` + `sudo docker logs --tail 100 voip-kamailio`.
+3. 🟢 Read the pages: the CRITICAL primary-UNHEALTHY page fires for ANY cause the health check sees (VM death, container death, Kamailio hung/failing /healthz). If "VM down" ALSO fired (~5 min) → GCP console for the instance (crashed/stopped/host event). Primary-UNHEALTHY alone → Kamailio-level: on the primary, `sudo docker ps -a --filter name=voip-kamailio` + `sudo docker logs --tail 100 voip-kamailio`.
 4. 🟠 Recover the primary (VM start, or `hostname | grep -q '^poc-custom-voip$' && cd /opt/revup && sudo docker compose -f docker-compose.sbc.yml up -d`). Failback is automatic.
 5. 🟢 Confirm failback (§2 step 8) and spot-check teardown quality in Homer (no 481/408 bursts).
 6. If the STANDBY is also unhealthy → the zone front door is dark: the "SIP VIP unreachable" page fires; Bandwidth's retry against the other zones' VIPs limits blast radius. Zone recovery is now the incident — both SBCs, then §6's "both SBCs dead" row.
@@ -104,8 +104,8 @@ Use when active/standby itself is causing harm. Order matters: **a VM may not si
 
 | Failure | How you find out | LB behavior | Call impact | Your move |
 |---|---|---|---|---|
-| **Primary VM dead** (crash/stop/host event) | GCM "[CRITICAL] {zone} primary SBC DOWN" ~2–3 min; get-health UNHEALTHY; Grafana standby card green | Both planes flip to standby in ~6 s | Established calls SURVIVE; setups in flight during the flip lost (UDP retransmits recover some); new calls via standby | Recover the VM (§4); failback automatic |
-| **Kamailio dead/hung, VM up** (container OOM/crash, wedged process not accepting TCP) | NO VM page (hypervisor metrics still flow). Grafana row + get-health show it; VIP uptime stays green | Same ~10-12 s flip (fs-aware /healthz refused/timed out) | Same as above | Restart the container (hostname-guarded, §4 step 4) |
+| **Primary VM dead** (crash/stop/host event) | GCM "[CRITICAL] {zone} primary SBC UNHEALTHY" (health-check log, ~1 min) + "VM down" ~5 min; get-health; Grafana standby card | Both planes flip to standby in ~6 s | Established calls SURVIVE; setups in flight during the flip lost (UDP retransmits recover some); new calls via standby | Recover the VM (§4); failback automatic |
+| **Kamailio dead/hung, VM up** (container OOM/crash, wedged process not accepting TCP) | GCM "[CRITICAL] {zone} primary SBC UNHEALTHY" ~1 min (no VM-down page — that's the tell it's container-level); Grafana row + get-health | Same ~10-12 s flip (fs-aware /healthz refused/timed out) | Same as above | Restart the container (hostname-guarded, §4 step 4) |
 | **Kamailio wedged but still ACCEPTING TCP** (worst case: healthy-looking zombie) | Live ASR collapse on Traffic Status; ASR watchdog `revup-alert` page; customer reports | NO flip — health check passes | New calls failing on the primary | FORCE the flip: stop Kamailio on the primary (§2 step 3), fix, then restore |
 | **FreeSWITCH dead (zone-wide)** | vm_down page (~5 min) / FS-aware OPTIONS-503 toward carrier probes / zone ASR to zero | BOTH SBCs fail the fs-aware HC → `drop-traffic-if-unhealthy` darkens the zone VIP (no spraying a dead-media zone); Bandwidth retries its other VIPs | ALL in-zone calls fail; established media dead | Zone-level failover only: Bandwidth retries its other VIPs on failure. Recover FS (`sudo killall -9 freeswitch` orphan gotcha, then compose up) |
 | **Signaling ILB dark, SBCs fine** (forwarding-rule/backend misconfig, rare LB dataplane issue) | Outbound forwards briefly slow then continue; FS logs show pre-check failing on `SBC_PROXY_IP` | External plane unaffected (inbound fine) | FS TCP pre-check marks the VIP dead in <1 s (cached 10 s) → falls back to `SBC_PROXY_IP_FAILOVER` (SBC-1 DIRECT IP) → outbound B-legs continue | Verify the ILB trio exists (`gcloud compute forwarding-rules describe sbc-signaling-fwd --region=us-east1 --project=rugged-night-193017`); restore it; no FS restart needed for the fallback itself |
@@ -116,12 +116,19 @@ Use when active/standby itself is causing harm. Order matters: **a VM may not si
 
 | Surface | Signal | Latency | Covers |
 |---|---|---|---|
-| GCM "SBC failover state — {zone} primary down" (`infra/monitoring/sbc_failover.tf`) | Primary SBC VM stopped reporting hypervisor metrics | ~2–3 min | VM death only (by design — same metric family as vm_down) |
+| GCM "[CRITICAL] SBC failover state — {zone} primary UNHEALTHY (zone on standby)" (`infra/monitoring/sbc_failover.tf`, log-based) | The attached HC logs a health-state transition to UNHEALTHY for the zone's 1-VM primary group — the exact signal the NLB flips on | ~10–12 s HC detection + seconds–1 min log→alert pipeline | Kamailio container dead/hung-visible-to-HC, VM death, FS death (fs-aware /healthz) — every real flip AND every §2/§3 drill (a planned drill now fires this page; expect + acknowledge it) |
+| GCM "[WARNING] SBC failover state — {zone} standby UNHEALTHY (redundancy degraded)" (same file) | Same transition log for the zone's standby group | same | Standby loss while the primary serves — no traffic impact, one failure from zone outage (§6 row) |
 | GCM "VM down (metrics absent)" | Any production VM dark 5 min | ~5–6 min | Primary AND standby AND everything else |
 | GCM "SIP VIP {zone} unreachable" | Whole front door dark (both SBCs) | ~1–2 min | Total zone signaling failure |
 | Grafana Traffic Status "Active SBC per zone" | Which SBC owns live dialogs (10 m window) | ~15 s scrape | Every flip, including container-level and drills |
 | `gcloud compute backend-services get-health ...` | Authoritative LB election | on demand | Ground truth for both planes |
 | `revup-alert` ASR watchdog | Calls failing while everything looks "healthy" | minutes | The healthy-zombie case |
+
+**One-time setup for the two log-based rows (operator, workstation gcloud):** the SBC failover pages read GCP health-check logs, which are OFF by default. Enable logging once on each zone's attached HC — it records per-endpoint health-state TRANSITIONS only (no steady-state log volume, negligible cost):
+
+1. 🟢 `gcloud compute health-checks update http east-sbc-fs-aware-hc --region=us-east1 --enable-logging --project=rugged-night-193017`
+2. 🟢 `gcloud compute health-checks update http west-sbc-healthz-hc --region=us-west1 --enable-logging --project=rugged-night-193017`
+3. 🟢 `gcloud compute health-checks update http central-sbc-fs-aware-hc --region=us-central1 --enable-logging --project=rugged-night-193017`
 
 ## 8. Drill log (append a row per drill/incident — same discipline as the DB runbook)
 
