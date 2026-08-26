@@ -232,11 +232,12 @@ ip addr add "${PUBLIC_IP}/32" dev lo
 
 This allows FS to reach Kamailio's Record-Route address when Kamailio is on the same VM (dev) or when FS needs to send to its own advertised address. Requires `NET_ADMIN` Docker capability.
 
-### Active/Standby SBC Pair (2026-08-25)
+### Active/Standby SBC Pair (LIVE all 3 zones, 2026-08-27)
 
-Each zone's 2 SBCs run as a TRUE active/standby HA pair — NOT active/active. Enforced entirely by GCP NLB failover backends (no VRRP/keepalived; identical config on both SBCs; "active" is decided only by health checks):
+Each zone's 2 SBCs run as a TRUE active/standby HA pair — NOT active/active. Deployed + drill-verified (planned failover & kill drills) in West, Central, East. Enforced entirely by GCP NLB failover backends (no VRRP/keepalived; identical config on both SBCs; "active" is decided only by health checks):
 
-- **Both traffic planes fail over together:** the external carrier VIP AND a per-zone internal "signaling VIP" (internal passthrough NLB, `SBC_SIGNALING_VIP`) share the same primary group (SBC-1), standby group (SBC-2), TCP:5060 health check (3s/2s/2/2 ≈ 6s detection), and policy (`failover-ratio=0`, `drop-traffic-if-unhealthy`, `no-connection-drain-on-failover`). Failback is automatic.
+- **Both traffic planes fail over together:** the external carrier VIP AND a per-zone internal "signaling VIP" (internal passthrough NLB, `SBC_SIGNALING_VIP`: East 10.142.0.250 / West 10.138.0.250 / Central 10.128.0.250) share the same primary group (SBC-1), standby group (SBC-2 in `*sbc-standby-group`), HTTP :8080 `/healthz` fs-aware health check (5s/2 ≈ 10-12s detection; East/Central `*-sbc-fs-aware-hc`, West `west-sbc-healthz-hc`), and policy (`failover-ratio=0`, `drop-traffic-if-unhealthy`, `no-connection-drain-on-failover`). Failback is automatic.
+- **Passthrough-LB health probes are VIP-addressed** (dst = forwarding-rule IP, from 209.85.152.0/22 + 209.85.204.0/22 + 35.191.0.0/16) — Kamailio binds :8080 on the external VIP and (dedicated mode) the signaling VIP for exactly this. Before those binds (pre-2026-08-26) the health checks NEVER passed and zones rode NLB fail-open invisibly.
 - **FS targets the signaling VIP** (`SBC_PROXY_IP`), and the inner Record-Route entry renders the signaling VIP — so FS-side in-dialog requests always reach the ACTIVE SBC, and a mid-call SBC death no longer strands the FS→carrier direction. The `;fs=` stateless dispatch (§8.10) + stateless FS→carrier BYE forward are what make established calls survive a flip; setups in flight during the ~6s flip are lost (industry-standard HA semantic).
 - **`SBC_SIGNALING_VIP` unset ⇒ byte-identical legacy behavior** (renders as SBC_INTERNAL_IP, no extra listen/alias) — rolling-safe. Never set it before the zone's ILB exists; set it on BOTH SBCs before repointing FS.
 - **Single active SBC side-effects:** bw_dedup now catches cross-edge duplicate INVITEs deterministically; bw_cps/pike counters see full zone load (limits env-tunable); dialog gauges are accurate on the active SBC.
