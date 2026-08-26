@@ -16,8 +16,11 @@ import { formatTimeDelta, LADDER_COLORS } from './sipLadderUtils';
 // The label text is positioned on the arrow line using absolute positioning.
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Width of the timestamp column */
-const TIMESTAMP_COL_WIDTH = 90;
+/** Width of the timestamp column. Sized for the WIDEST stamp the gutter can
+ *  render — a causality-corrected absolute time like `~14:23:45.123` (13 mono
+ *  chars at 0.7rem ≈ 88px) plus cell padding — so the nowrap stamp never
+ *  overflows into the first node column at laptop widths. */
+const TIMESTAMP_COL_WIDTH = 112;
 
 // ─── Arrowhead SVG component ────────────────────────────────────────────────
 
@@ -153,13 +156,16 @@ export function SipMessageRow({
     timestampDisplay = `~${timestampDisplay}`;
   }
 
-  // Row opacity. Retransmissions dim to 0.4. The synthetic loopback connector is a
-  // deliberate "show-off" affordance, so it stays clearly legible (0.9) — a touch
-  // below a real captured hop, but never a barely-there hairline.
-  const rowOpacity = isRetrans ? 0.4 : internalHandoff ? 0.9 : 1;
+  // Row opacity. Retransmissions dim to 0.55 — a deliberate sub-AA ghost
+  // treatment for duplicate wire noise (the full-contrast original renders
+  // adjacent, and the filter can hide retransmissions outright). The synthetic
+  // loopback connector is a deliberate "show-off" affordance, so it stays
+  // clearly legible (0.9) — a touch below a real captured hop, but never a
+  // barely-there hairline.
+  const rowOpacity = isRetrans ? 0.55 : internalHandoff ? 0.9 : 1;
 
   // Row hover background
-  const rowBg = isExpanded ? 'rgba(59,130,246,0.06)' : 'transparent';
+  const rowBg = isExpanded ? 'rgba(47,125,246,0.07)' : 'transparent';
 
   // The connector is not a captured packet — no packet panel to open. Explain it
   // on hover rather than inviting a click.
@@ -184,7 +190,7 @@ export function SipMessageRow({
         }
       }}
       onMouseLeave={(e) => {
-        e.currentTarget.style.background = isExpanded ? 'rgba(59,130,246,0.06)' : 'transparent';
+        e.currentTarget.style.background = isExpanded ? 'rgba(47,125,246,0.07)' : 'transparent';
       }}
       title={rowTitle}
     >
@@ -417,7 +423,7 @@ export function SipMessageRow({
                         fontWeight: 600,
                         color: LADDER_COLORS.textFaint,
                         fontStyle: 'italic',
-                        border: `1px solid ${LADDER_COLORS.borderLight}`,
+                        border: `1px solid ${LADDER_COLORS.controlBorder}`,
                         borderRadius: 3,
                         padding: '0 3px',
                         letterSpacing: '0.02em',
@@ -459,7 +465,7 @@ export function SipMessageRow({
                       fontWeight: 600,
                       color: LADDER_COLORS.textFaint,
                       fontStyle: 'italic',
-                      border: `1px solid ${LADDER_COLORS.borderLight}`,
+                      border: `1px solid ${LADDER_COLORS.controlBorder}`,
                       borderRadius: 3,
                       padding: '0 3px',
                       letterSpacing: '0.02em',

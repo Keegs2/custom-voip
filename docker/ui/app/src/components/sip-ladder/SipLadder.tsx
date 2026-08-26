@@ -5,20 +5,31 @@ import { computeLayout } from './sipLadderLayout';
 import { LADDER_COLORS, formatTimeDelta } from './sipLadderUtils';
 import { SipMessageRow, TIMESTAMP_COL_WIDTH } from './SipMessageRow';
 import { PacketDetailPanel } from './PacketDetailPanel';
+import './sipLadder.css';
 
 // ─── Design tokens ──────────────────────────────────────────────────────────
+// ALL colors come from the LADDER_COLORS theme object (sipLadderUtils.ts) —
+// never hard-code a hue here. These two constants are structural only.
 
-const GLASS_CARD: React.CSSProperties = {
-  background: 'linear-gradient(135deg, rgba(26,29,39,0.95) 0%, rgba(19,21,29,0.9) 100%)',
+/** Daylight card — white slab with a hairline border, mirroring `.dl-panel`. */
+const CARD: React.CSSProperties = {
+  background: LADDER_COLORS.bg,
   border: `1px solid ${LADDER_COLORS.border}`,
-  borderRadius: 16,
-  backdropFilter: 'blur(12px)',
-  boxShadow: '0 4px 24px rgba(0,0,0,0.3)',
+  borderRadius: 12,
+  boxShadow: '0 1px 2px rgba(14,23,38,0.05)',
 };
 
 const MONO: React.CSSProperties = {
   fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
 };
+
+/**
+ * Minimum width per node column. Combined with the fixed timestamp gutter this
+ * sets the ladder table's min-width, so when the frame is narrower than the
+ * diagram needs, the ladder PANS inside its own scroll region
+ * (.sipladder-scroll) instead of crushing columns into unreadable slivers.
+ */
+const NODE_COL_MIN_WIDTH = 128;
 
 // ─── Role display helpers ───────────────────────────────────────────────────
 
@@ -35,11 +46,11 @@ function getRoleLabel(role: string): string {
 
 function getRoleColor(role: string): string {
   switch (role) {
-    case 'carrier-ingress': return '#f59e0b';
-    case 'carrier-egress': return '#f59e0b';
-    case 'sbc-vip': return '#8b5cf6';
-    case 'sbc': return '#3b82f6';
-    case 'media-server': return '#22c55e';
+    case 'carrier-ingress': return LADDER_COLORS.roleCarrier;
+    case 'carrier-egress': return LADDER_COLORS.roleCarrier;
+    case 'sbc-vip': return LADDER_COLORS.roleVip;
+    case 'sbc': return LADDER_COLORS.roleSbc;
+    case 'media-server': return LADDER_COLORS.roleMedia;
     default: return LADDER_COLORS.textFaint;
   }
 }
@@ -102,24 +113,26 @@ function FilterBtn({ active, label, count, onClick }: FilterBtnProps) {
         gap: 5,
         padding: '5px 12px',
         borderRadius: 6,
-        border: `1px solid ${active ? 'rgba(59,130,246,0.4)' : LADDER_COLORS.borderLight}`,
-        background: active ? 'rgba(59,130,246,0.1)' : 'transparent',
-        color: active ? '#60a5fa' : LADDER_COLORS.textMuted,
+        border: `1px solid ${active ? LADDER_COLORS.accentBorderStrong : LADDER_COLORS.controlBorder}`,
+        background: active ? LADDER_COLORS.accentWash : LADDER_COLORS.bg,
+        color: active ? LADDER_COLORS.accent : LADDER_COLORS.textMuted,
         fontSize: '0.72rem',
-        fontWeight: 500,
+        fontWeight: active ? 600 : 500,
         cursor: 'pointer',
         transition: 'all 0.15s',
         whiteSpace: 'nowrap',
       }}
       onMouseEnter={(e) => {
         if (!active) {
-          e.currentTarget.style.borderColor = 'rgba(59,130,246,0.3)';
+          e.currentTarget.style.borderColor = LADDER_COLORS.controlBorderHover;
+          e.currentTarget.style.background = LADDER_COLORS.surface;
           e.currentTarget.style.color = LADDER_COLORS.text;
         }
       }}
       onMouseLeave={(e) => {
         if (!active) {
-          e.currentTarget.style.borderColor = LADDER_COLORS.borderLight;
+          e.currentTarget.style.borderColor = LADDER_COLORS.controlBorder;
+          e.currentTarget.style.background = LADDER_COLORS.bg;
           e.currentTarget.style.color = LADDER_COLORS.textMuted;
         }
       }}
@@ -133,8 +146,8 @@ function FilterBtn({ active, label, count, onClick }: FilterBtnProps) {
             fontWeight: 600,
             padding: '1px 5px',
             borderRadius: 4,
-            background: active ? 'rgba(59,130,246,0.15)' : 'rgba(255,255,255,0.04)',
-            color: active ? '#60a5fa' : LADDER_COLORS.textFaint,
+            background: active ? LADDER_COLORS.accentChip : LADDER_COLORS.inkChip,
+            color: active ? LADDER_COLORS.accent : LADDER_COLORS.textFaint,
           }}
         >
           {count}
@@ -148,14 +161,19 @@ function FilterBtn({ active, label, count, onClick }: FilterBtnProps) {
 
 function ColumnHeader({ node }: { node: LadderNode }) {
   const roleColor = getRoleColor(node.role);
+  const isUnrecognized = node.role === 'unknown';
 
   // Split SBC columns get distinct A-leg / B-leg sublabels so the two "SBC-1"
   // headers are never ambiguous. All other roles keep their standard sublabel
   // (CARRIER (IN) / CARRIER (OUT) / LOAD BALANCER / MEDIA SERVER / SBC).
+  // Un-aliased nodes (role 'unknown' — the id is the bare IP) get a quiet
+  // lowercase "unrecognized" note instead of a shouting uppercase UNKNOWN.
   const roleLabel =
     node.role === 'sbc' && node.legTag
       ? `SBC · ${node.legTag === 'a' ? 'A' : 'B'}-LEG`
-      : getRoleLabel(node.role);
+      : isUnrecognized
+        ? 'unrecognized'
+        : getRoleLabel(node.role);
 
   return (
     <th
@@ -165,7 +183,7 @@ function ColumnHeader({ node }: { node: LadderNode }) {
         verticalAlign: 'top',
         position: 'sticky',
         top: 0,
-        background: 'rgba(15,17,23,0.97)',
+        background: 'rgba(255,255,255,0.97)',
         zIndex: 10,
         borderBottom: `1px solid ${LADDER_COLORS.border}`,
         boxSizing: 'border-box',
@@ -174,8 +192,8 @@ function ColumnHeader({ node }: { node: LadderNode }) {
       <div
         style={{
           fontSize: '0.8rem',
-          fontWeight: 700,
-          color: LADDER_COLORS.text,
+          fontWeight: isUnrecognized ? 500 : 700,
+          color: isUnrecognized ? LADDER_COLORS.textMuted : LADDER_COLORS.text,
           ...MONO,
           marginBottom: 2,
         }}
@@ -187,9 +205,10 @@ function ColumnHeader({ node }: { node: LadderNode }) {
           fontSize: '0.62rem',
           fontWeight: 500,
           color: roleColor,
-          letterSpacing: '0.04em',
-          textTransform: 'uppercase',
-          opacity: 0.8,
+          letterSpacing: isUnrecognized ? '0.02em' : '0.04em',
+          textTransform: isUnrecognized ? 'none' : 'uppercase',
+          fontStyle: isUnrecognized ? 'italic' : 'normal',
+          opacity: isUnrecognized ? 1 : 0.9,
         }}
       >
         {roleLabel}
@@ -243,30 +262,31 @@ function CallSummary({ layout }: CallSummaryProps) {
     durationDisplay = formatTimeDelta(layout.callDurationMs);
   }
 
-  // Status badge color
-  let statusBg = 'rgba(71,85,105,0.3)';
+  // Status badge tones — light-canvas washes of the semantic arrow hues
+  // (mirrors the page's dlx5-status pills so both status reads match).
+  let statusBg = 'rgba(93,111,140,0.08)';
   let statusColor: string = LADDER_COLORS.textMuted;
-  let statusBorder = 'rgba(71,85,105,0.4)';
+  let statusBorder = 'rgba(93,111,140,0.2)';
   if (finalStatus !== null) {
     if (finalStatus >= 200 && finalStatus < 300) {
-      statusBg = 'rgba(34,197,94,0.12)';
-      statusColor = '#4ade80';
-      statusBorder = 'rgba(34,197,94,0.3)';
+      statusBg = 'rgba(22,163,74,0.1)';
+      statusColor = LADDER_COLORS.success;
+      statusBorder = 'rgba(22,163,74,0.26)';
     } else if (finalStatus >= 400 && finalStatus < 500) {
-      statusBg = 'rgba(245,158,11,0.12)';
-      statusColor = '#fbbf24';
-      statusBorder = 'rgba(245,158,11,0.3)';
+      statusBg = 'rgba(180,83,9,0.09)';
+      statusColor = LADDER_COLORS.clientError;
+      statusBorder = 'rgba(180,83,9,0.26)';
     } else if (finalStatus >= 500) {
-      statusBg = 'rgba(239,68,68,0.12)';
-      statusColor = '#f87171';
-      statusBorder = 'rgba(239,68,68,0.3)';
+      statusBg = 'rgba(220,38,38,0.07)';
+      statusColor = LADDER_COLORS.serverError;
+      statusBorder = 'rgba(220,38,38,0.26)';
     }
   }
 
   return (
     <div
       style={{
-        ...GLASS_CARD,
+        ...CARD,
         padding: '16px 20px',
         marginBottom: 12,
       }}
@@ -301,7 +321,7 @@ function CallSummary({ layout }: CallSummaryProps) {
           <span style={{ fontSize: '0.7rem', fontWeight: 600, color: LADDER_COLORS.textFaint, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
             Duration
           </span>
-          <span style={{ ...MONO, fontSize: '0.82rem', fontWeight: 600, color: '#c084fc' }}>
+          <span style={{ ...MONO, fontSize: '0.82rem', fontWeight: 600, color: LADDER_COLORS.provisional }}>
             {durationDisplay}
           </span>
         </div>
@@ -336,7 +356,7 @@ function CallSummary({ layout }: CallSummaryProps) {
           <span style={{ fontSize: '0.7rem', fontWeight: 600, color: LADDER_COLORS.textFaint, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
             Messages
           </span>
-          <span style={{ ...MONO, fontSize: '0.82rem', fontWeight: 600, color: '#60a5fa' }}>
+          <span style={{ ...MONO, fontSize: '0.82rem', fontWeight: 600, color: LADDER_COLORS.accent }}>
             {layout.messages.filter((m) => !m.internalHandoff).length}
           </span>
         </div>
@@ -355,8 +375,8 @@ function CallSummary({ layout }: CallSummaryProps) {
                 color: LADDER_COLORS.aLeg,
                 padding: '1px 5px',
                 borderRadius: 3,
-                background: 'rgba(59,130,246,0.1)',
-                border: '1px solid rgba(59,130,246,0.2)',
+                background: 'rgba(29,99,221,0.08)',
+                border: '1px solid rgba(29,99,221,0.22)',
               }}
             >
               A-leg
@@ -389,8 +409,8 @@ function CallSummary({ layout }: CallSummaryProps) {
                 color: LADDER_COLORS.bLeg,
                 padding: '1px 5px',
                 borderRadius: 3,
-                background: 'rgba(245,158,11,0.1)',
-                border: '1px solid rgba(245,158,11,0.2)',
+                background: 'rgba(180,83,9,0.08)',
+                border: '1px solid rgba(180,83,9,0.24)',
               }}
             >
               B-leg
@@ -435,7 +455,7 @@ function EmptyLadder() {
   return (
     <div
       style={{
-        ...GLASS_CARD,
+        ...CARD,
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
@@ -544,29 +564,32 @@ export function SipLadder({ messages, correlations, pipelineWarnings }: SipLadde
 
   return (
     <div>
-      {/* Pipeline warnings (unobtrusive, only when the API reports them) */}
+      {/* Pipeline notes — quiet ⓘ info chips, NOT warnings. What the API
+          reports here (e.g. "N messages reordered for SIP causality") is the
+          pipeline doing its job correctly; an amber alarm banner overstated it.
+          One muted line per note, wrapping inline. */}
       {pipelineWarnings && pipelineWarnings.length > 0 && (
         <div
           style={{
             display: 'flex',
-            flexDirection: 'column',
-            gap: 4,
-            padding: '8px 14px',
-            marginBottom: 12,
-            borderRadius: 8,
-            border: '1px solid rgba(245,158,11,0.2)',
-            background: 'rgba(245,158,11,0.05)',
+            flexWrap: 'wrap',
+            gap: 6,
+            marginBottom: 10,
           }}
         >
           {pipelineWarnings.map((warning, idx) => (
-            <div
+            <span
               key={idx}
               style={{
-                display: 'flex',
+                display: 'inline-flex',
                 alignItems: 'center',
                 gap: 6,
-                fontSize: '0.72rem',
-                color: '#d6a354',
+                padding: '3px 10px',
+                borderRadius: 20,
+                border: `1px solid ${LADDER_COLORS.border}`,
+                background: LADDER_COLORS.surface,
+                fontSize: '0.7rem',
+                color: LADDER_COLORS.textFaint,
               }}
             >
               <svg
@@ -579,13 +602,14 @@ export function SipLadder({ messages, correlations, pipelineWarnings }: SipLadde
                 strokeLinecap="round"
                 strokeLinejoin="round"
                 style={{ flexShrink: 0 }}
+                aria-hidden="true"
               >
-                <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
-                <line x1={12} y1={9} x2={12} y2={13} />
-                <line x1={12} y1={17} x2={12.01} y2={17} />
+                <circle cx={12} cy={12} r={10} />
+                <line x1={12} y1={16} x2={12} y2={12} />
+                <line x1={12} y1={8} x2={12.01} y2={8} />
               </svg>
               {warning}
-            </div>
+            </span>
           ))}
         </div>
       )}
@@ -596,7 +620,7 @@ export function SipLadder({ messages, correlations, pipelineWarnings }: SipLadde
       {/* Filter bar + Legend */}
       <div
         style={{
-          ...GLASS_CARD,
+          ...CARD,
           padding: '10px 16px',
           marginBottom: 12,
           display: 'flex',
@@ -606,8 +630,9 @@ export function SipLadder({ messages, correlations, pipelineWarnings }: SipLadde
           gap: 10,
         }}
       >
-        {/* Filters */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        {/* Filters — flexWrap so this row can NEVER dictate a minimum width
+            wider than the card (it used to inflate the outer results table). */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', rowGap: 6 }}>
           <span
             style={{
               fontSize: '0.68rem',
@@ -662,18 +687,23 @@ export function SipLadder({ messages, correlations, pipelineWarnings }: SipLadde
           <LegendItem color={LADDER_COLORS.serverError} label="4xx/5xx" />
           <LegendItem color={LADDER_COLORS.ack} label="ACK" />
           <LegendItem color={LADDER_COLORS.bye} label="BYE" />
-          <LegendItem color={LADDER_COLORS.textFaint} label="⟳ internal loopback" dashed />
+          <LegendItem color={LADDER_COLORS.internalHandoff} label="⟳ internal loopback" dashed />
         </div>
       </div>
 
       {/* Ladder diagram */}
       <div
         style={{
-          ...GLASS_CARD,
+          ...CARD,
           overflow: 'hidden',
         }}
       >
+        {/* The ONE horizontal scroll region for the ladder columns. The table
+            carries a real min-width (timestamp gutter + a readable minimum per
+            node column), so a narrow frame pans here — with a visible styled
+            scrollbar (.sipladder-scroll) — instead of crushing the columns. */}
         <div
+          className="sipladder-scroll"
           style={{
             overflowX: 'auto',
             overflowY: 'auto',
@@ -684,6 +714,7 @@ export function SipLadder({ messages, correlations, pipelineWarnings }: SipLadde
             style={{
               borderCollapse: 'collapse',
               width: '100%',
+              minWidth: TIMESTAMP_COL_WIDTH + layout.nodes.length * NODE_COL_MIN_WIDTH,
               tableLayout: 'fixed',
             }}
           >
@@ -706,7 +737,7 @@ export function SipLadder({ messages, correlations, pipelineWarnings }: SipLadde
                     textAlign: 'right',
                     position: 'sticky',
                     top: 0,
-                    background: 'rgba(15,17,23,0.97)',
+                    background: 'rgba(255,255,255,0.97)',
                     zIndex: 10,
                     borderBottom: `1px solid ${LADDER_COLORS.border}`,
                     boxSizing: 'border-box',
@@ -809,7 +840,7 @@ function MessageRowWithDetail({
         <tr>
           <td
             colSpan={numCols + 1}
-            style={{ padding: '0 12px 8px', background: 'rgba(59,130,246,0.03)' }}
+            style={{ padding: '0 12px 8px', background: LADDER_COLORS.accentWashSoft }}
           >
             <PacketDetailPanel
               rawMsg={message.original.raw_msg}
@@ -825,7 +856,7 @@ function MessageRowWithDetail({
             colSpan={numCols + 1}
             style={{
               padding: '14px 20px',
-              background: 'rgba(59,130,246,0.03)',
+              background: LADDER_COLORS.accentWashSoft,
               textAlign: 'center',
             }}
           >

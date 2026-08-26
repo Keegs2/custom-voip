@@ -1,0 +1,37 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   sipLadder.css — the SIP ladder's ONE component stylesheet.
+
+   Everything else in the ladder stack styles inline off the LADDER_COLORS
+   theme object (sipLadderUtils.ts). This file exists only for what inline
+   styles cannot express: scrollbar pseudo-elements. Values mirror the
+   daylight scrollbar treatment of the CDR page's `.dlx4-tablewrap`
+   (styles/dl-platform-b.css) so every horizontally-panning surface on the
+   troubleshooting/CDR pages reads identically.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* The ladder's internal horizontal pan region. The scrollbar stays VISIBLE
+   on the white canvas — an explicit affordance, so a clipped last column
+   reads as "scroll", not "broken". */
+.sipladder-scroll {
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;             /* Firefox */
+  scrollbar-color: #b7c7dd #f7f9fc;  /* Firefox: thumb / track */
+}
+
+.sipladder-scroll::-webkit-scrollbar {
+  height: 8px;
+  width: 8px;
+}
+
+.sipladder-scroll::-webkit-scrollbar-track {
+  background: #f7f9fc;
+}
+
+.sipladder-scroll::-webkit-scrollbar-thumb {
+  background: #b7c7dd;
+  border-radius: 999px;
+}
+
+.sipladder-scroll::-webkit-scrollbar-thumb:hover {
+  background: #94a9c9;
+}

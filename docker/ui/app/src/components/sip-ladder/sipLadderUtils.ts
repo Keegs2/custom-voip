@@ -1,53 +1,87 @@
 import type { HomerSearchResult } from '../../api/homer';
 import type { NodeRole } from './sipLadderTypes';
 
-// ─── Color constants ────────────────────────────────────────────────────────
+// ─── Color constants — THE ladder theme object ──────────────────────────────
 
 /**
- * Complete color palette for the SIP ladder diagram.
- * Dark theme aligned with the platform design system (#0f1117 background).
+ * Complete color palette for the SIP ladder diagram — the SINGLE source of
+ * truth for every color in the ladder stack (SipLadder / SipMessageRow /
+ * PacketDetailPanel / the layout engine's synthetic connectors). Re-theming
+ * the ladder means editing THIS object only; components must never hard-code
+ * a color literal of their own.
+ *
+ * DAYLIGHT theme: white canvas, hairline grid, ink text — aligned with the
+ * app-wide daylight console (`--rcf-*` tokens on `.dl-scope` in index.css;
+ * values mirrored here because this file styles inline, outside CSS var
+ * scope guarantees).
+ *
+ * Semantic arrow hues keep the SAME mapping the dark ladder had (INVITE
+ * A-leg blue / B-leg orange / 1xx purple / 2xx green / 4xx-5xx red / ACK
+ * cyan-teal / BYE gray / retransmissions dimmed / internal loopback dashed
+ * slate) but are re-derived one shade darker-saturated so every label and
+ * arrow holds ≥ 4.5:1 (WCAG AA, small text) against the white canvas.
  */
 export const LADDER_COLORS = {
-  // Surface
-  bg: '#0f1117',
-  surface: '#13151d',
-  surfaceHover: '#1a1d27',
-  border: 'rgba(42,47,69,0.6)',
-  borderLight: 'rgba(42,47,69,0.3)',
+  // Surface (mirrors --rcf-card / --rcf-tint / --rcf-tint-hover / --rcf-line)
+  bg: '#ffffff',
+  surface: '#f7f9fc',
+  surfaceHover: '#f2f7ff',
+  border: '#e2e8f2',
+  borderLight: '#edf1f7',
 
-  // Text
-  text: '#e2e8f0',
-  textMuted: '#94a3b8',
-  textFaint: '#475569',
+  // Text — the ink ramp (mirrors --rcf-ink / -soft / -dim)
+  text: '#0e1726',
+  textMuted: '#46566f',
+  textFaint: '#5d6f8c',
 
   // SIP methods (requests)
-  invite: '#3b82f6',
-  bye: '#94a3b8',
-  ack: '#22d3ee',
+  invite: '#1d63dd',   // was #3b82f6 — azure-deep, 5.4:1 on white
+  bye: '#64748b',      // was #94a3b8 — slate-500, 4.8:1
+  ack: '#0e7490',      // was #22d3ee — cyan-700 keeps the teal read, 5.4:1
 
   // SIP responses
-  provisional: '#8b5cf6',
-  success: '#22c55e',
-  redirect: '#f59e0b',
-  clientError: '#f59e0b',
-  serverError: '#ef4444',
+  provisional: '#7c3aed', // was #8b5cf6 — violet-600, 5.7:1
+  success: '#15803d',     // was #22c55e — green-700 (--rcf-green), 5.0:1
+  redirect: '#b45309',    // was #f59e0b — amber-700, 5.0:1
+  clientError: '#b45309', // was #f59e0b — same amber family as before
+  serverError: '#b91c1c', // was #ef4444 — red-700 (--rcf-red), 6.5:1
 
   // Call legs
-  aLeg: '#3b82f6',
-  bLeg: '#f59e0b',
+  aLeg: '#1d63dd', // was #3b82f6
+  bLeg: '#b45309', // was #f59e0b
 
-  // Retransmission
-  retransmission: 'rgba(148,163,184,0.3)',
+  // Retransmission arrows — deliberately dimmed (duplicate wire noise; the
+  // full-contrast original renders adjacent, and the filter can hide these).
+  retransmission: 'rgba(70,86,111,0.75)',
 
   // Internal loopback connector (synthetic VIP ↔ sibling-SBC same-box handoff).
-  // A muted slate-cyan that is clearly readable against the dark ladder yet still
-  // reads as "inferred/internal" — distinct from every real SIP method/status hue,
-  // so the connector never masquerades as a captured packet.
-  internalHandoff: '#64748b',
+  // A muted dark slate that is clearly readable on the white ladder yet still
+  // reads as "inferred/internal" — distinct from every real SIP method/status
+  // hue, so the connector never masquerades as a captured packet.
+  internalHandoff: '#475569',
+
+  // Node roles (column-header sublabels) — same hue families as the arrows.
+  roleCarrier: '#b45309',
+  roleVip: '#7c3aed',
+  roleSbc: '#1d63dd',
+  roleMedia: '#15803d',
+
+  // Interactive accent (azure family — mirrors --rcf-azure / --rcf-azure-deep)
+  accent: '#1d63dd',
+  accentWash: 'rgba(47,125,246,0.08)',
+  accentWashSoft: 'rgba(47,125,246,0.04)',
+  accentChip: 'rgba(47,125,246,0.12)',
+  accentBorder: 'rgba(47,125,246,0.3)',
+  accentBorderStrong: 'rgba(47,125,246,0.5)',
+
+  // Control chrome (buttons/pills — mirrors the dlx5-seg-btn family)
+  controlBorder: '#cdd8e8',
+  controlBorderHover: '#a3b6d3',
+  inkChip: 'rgba(14,23,38,0.05)',
 
   // Diagram elements
-  columnLine: 'rgba(42,47,69,0.3)',
-  arrowHead: '#e2e8f0',
+  columnLine: 'rgba(14,23,38,0.1)',
+  arrowHead: '#0e1726',
 } as const;
 
 // ─── SIP response descriptions ─────────────────────────────────────────────
