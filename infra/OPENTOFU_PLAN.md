@@ -1742,3 +1742,501 @@ infra/*.tfplan
 | Application code deploys | Ansible + git |
 
 This separation is intentional. OpenTofu handles the "what metal exists" question. Ansible handles the "what runs on the metal" question. They meet at the VM: Tofu creates it, Ansible configures it.
+
+---
+
+## 18. Active/Standby HA (Phase 4b) — SBC Failover Backends + Per-Zone Signaling ILB
+
+Each zone's 2-SBC Kamailio pair converts from active/active behind the external
+passthrough NLB to a TRUE ACTIVE/STANDBY pair using GCP NLB **failover backends**,
+plus a NEW per-zone **internal passthrough NLB** ("signaling VIP") that FreeSWITCH
+targets for outbound B-legs instead of a direct SBC IP. The operator creates the
+resources via `gcloud` (the migration command sequence lives with the main
+session, NOT in this doc); this section is the blueprint + import IDs so the
+result lands in state on the Phase 5 import pass. Steady-state operations:
+`docs/SBC_ACTIVE_STANDBY_RUNBOOK.md`.
+
+**What changes per zone:**
+
+1. SBC-2 leaves the existing primary instance group into a NEW single-VM standby
+   group, attached to the backend service with `--failover`.
+2. The existing external backend service gains a failover policy:
+   `failover-ratio=0`, `drop-traffic-if-unhealthy`,
+   `no-connection-drain-on-failover`. Traffic flows ONLY to the primary group
+   while it has a healthy instance; the standby gets traffic only when the
+   primary is unhealthy; failback is automatic and immediate (no drain).
+3. A NEW internal passthrough NLB fronts the SAME two instance groups with the
+   SAME health check and the SAME failover policy: reserved static internal IP
+   in the `default` subnet, regional backend service
+   `INTERNAL`/`UNSPECIFIED`, one `L3_DEFAULT` / all-ports forwarding rule.
+   FreeSWITCH sets `SBC_PROXY_IP=<signaling VIP>` (UDP 5060 SIP + TCP 5060
+   pre-check); `SBC_PROXY_IP_FAILOVER` stays a DIRECT SBC IP as the ILB-bypass
+   fallback. Kamailio gains `SBC_SIGNALING_VIP` (listen bind + inner
+   Record-Route — owned by the telephony config, referenced here only).
+4. The shared per-zone health check is tuned for fast failover:
+   `check-interval=3s`, `timeout=2s`, `unhealthy-threshold=2`,
+   `healthy-threshold=2` → ~6 s detection.
+
+**Supersedes §7.1/§13 "Import or skip" for the regional NLB.** The regional
+NLBs are permanent (GCP has no global passthrough NLB for UDP — the Phase 2
+`global-lb` module does NOT replace them), and Phase 4b modifies their backend
+services, so the whole regional LB set (health check, groups, backend service,
+VIP address, forwarding rules) is now **Import**.
+
+### 18.1 Real resource names (ground truth for import)
+
+East predates the naming convention; West/Central follow `{zone}-` prefixes
+(this also corrects §5's `sbc-group-${region_name}` guess — reality is
+`${region_name}-sbc-group`, per `scripts/create-west-nlb.sh`). Resources marked
+NEW are created by the operator during the Phase 4b migration and then imported.
+
+| Resource | East (us-east1 / us-east1-b) | West (us-west1 / us-west1-b) | Central (us-central1 / us-central1-b) |
+|---|---|---|---|
+| Primary SBC VM | `poc-custom-voip` (10.142.0.100) | `west-sbc-1` (10.138.0.100) | `central-sbc-1` (10.128.0.100) |
+| Standby SBC VM | `kam-g2` (10.142.0.101) | `west-sbc-2` (10.138.0.101) | `central-sbc-2` (10.128.0.101) |
+| Health check (regional TCP:5060) | `sbc-health-check` | `west-sbc-health-check` | `central-sbc-health-check` † |
+| Primary instance group (existing, shrinks to 1 VM) | `sbc-group` | `west-sbc-group` | `central-sbc-group` |
+| Standby instance group (NEW, 1 VM) | `sbc-standby-group` | `west-sbc-standby-group` | `central-sbc-standby-group` |
+| External backend service (existing, gains failover) | `sbc-backend` | `west-sbc-backend` | `central-sbc-backend` |
+| External VIP address | `sbc-vip` = 34.24.133.82 | `west-sbc-vip` = 35.252.214.40 | `central-sbc-vip` = 35.253.133.230 |
+| External forwarding rules | `sbc-vip-udp` / `sbc-vip-tcp` | `west-sbc-vip-udp` / `west-sbc-vip-tcp` | `central-sbc-vip-udp` / `central-sbc-vip-tcp` |
+| Signaling VIP address (NEW, INTERNAL, `default` subnet) | `sbc-signaling-vip` ≈ 10.142.0.250 ‡ | `west-sbc-signaling-vip` ≈ 10.138.0.250 ‡ | `central-sbc-signaling-vip` ≈ 10.128.0.250 ‡ |
+| Signaling backend service (NEW, INTERNAL/UNSPECIFIED) | `sbc-signaling-backend` | `west-sbc-signaling-backend` | `central-sbc-signaling-backend` |
+| Signaling forwarding rule (NEW, L3_DEFAULT, all ports) | `sbc-signaling-fwd` | `west-sbc-signaling-fwd` | `central-sbc-signaling-fwd` |
+
+† Central's health-check name is presumed to mirror West's convention — confirm
+before writing import blocks: `gcloud compute health-checks list --project=rugged-night-193017 --format='table(name,region,type)'`
+
+‡ Suggested `.250` convention (clear of .100/.101/.103 and DHCP range). The
+tfvars value MUST equal whatever the operator actually reserved — confirm with:
+`gcloud compute addresses list --project=rugged-night-193017 --filter='name~signaling' --format='table(name,region,address,status)'`
+
+### 18.2 Variable additions
+
+`modules/voip-region/variables.tf` — extend the `config` object and add LB name
+overrides (same Option-A pattern as §7.5's `vm_name_overrides`):
+
+```hcl
+# Added fields on the config object (root regions map — §3):
+#   signaling_vip_ip = string   # reserved internal IP for the zone's signaling ILB
+
+variable "lb_name_overrides" {
+  description = "Override LB resource names for imported legacy-named resources. Defaults follow the {region_name}- prefix convention (West/Central); East overrides to its unprefixed legacy names."
+  type = object({
+    health_check        = optional(string)
+    primary_group       = optional(string)
+    standby_group       = optional(string)
+    backend_service     = optional(string)
+    vip_address         = optional(string)
+    vip_fwd_prefix      = optional(string)
+    signaling_address   = optional(string)
+    signaling_backend   = optional(string)
+    signaling_fwd       = optional(string)
+  })
+  default = {}
+}
+
+locals {
+  hc_name             = coalesce(var.lb_name_overrides.health_check,      "${var.region_name}-sbc-health-check")
+  primary_group_name  = coalesce(var.lb_name_overrides.primary_group,     "${var.region_name}-sbc-group")
+  standby_group_name  = coalesce(var.lb_name_overrides.standby_group,     "${var.region_name}-sbc-standby-group")
+  backend_name        = coalesce(var.lb_name_overrides.backend_service,   "${var.region_name}-sbc-backend")
+  vip_address_name    = coalesce(var.lb_name_overrides.vip_address,       "${var.region_name}-sbc-vip")
+  vip_fwd_prefix      = coalesce(var.lb_name_overrides.vip_fwd_prefix,    "${var.region_name}-sbc-vip")
+  signaling_addr_name = coalesce(var.lb_name_overrides.signaling_address, "${var.region_name}-sbc-signaling-vip")
+  signaling_bs_name   = coalesce(var.lb_name_overrides.signaling_backend, "${var.region_name}-sbc-signaling-backend")
+  signaling_fwd_name  = coalesce(var.lb_name_overrides.signaling_fwd,     "${var.region_name}-sbc-signaling-fwd")
+}
+```
+
+`production.tfvars` — East's overrides (West/Central need none):
+
+```hcl
+  east = {
+    # ... existing fields ...
+    signaling_vip_ip = "10.142.0.250"   # confirm against the reserved address (§18.1 ‡)
+    lb_name_overrides = {
+      health_check      = "sbc-health-check"
+      primary_group     = "sbc-group"
+      standby_group     = "sbc-standby-group"
+      backend_service   = "sbc-backend"
+      vip_address       = "sbc-vip"
+      vip_fwd_prefix    = "sbc-vip"
+      signaling_address = "sbc-signaling-vip"
+      signaling_backend = "sbc-signaling-backend"
+      signaling_fwd     = "sbc-signaling-fwd"
+    }
+  }
+  # west:    signaling_vip_ip = "10.138.0.250"
+  # central: signaling_vip_ip = "10.128.0.250"
+```
+
+### 18.3 `modules/voip-region/instance-group.tf` (REVISED — replaces §5's version)
+
+The single 2-VM `sbc_group` splits into primary (SBC-1 only) + standby (SBC-2
+only). The resource address `google_compute_instance_group.sbc_group` is KEPT
+for the existing group (it just loses a member) so import continuity holds.
+
+```hcl
+# Primary instance group — SBC-1 ONLY (Phase 4b active/standby).
+# This is the pre-existing group ("sbc-group"/"west-sbc-group"/...): the
+# operator removed SBC-2 from it during the Phase 4b migration.
+resource "google_compute_instance_group" "sbc_group" {
+  name    = local.primary_group_name
+  project = var.project_id
+  zone    = var.config.gcp_zone
+
+  instances = [google_compute_instance.sbc[0].self_link]
+
+  named_port {
+    name = "sip-udp"
+    port = 5060
+  }
+
+  named_port {
+    name = "sip-tcp"
+    port = 5060
+  }
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+# Standby instance group — SBC-2 ONLY. Attached to both backend services with
+# failover = true. NOTE: a VM may not appear in two instance groups that back
+# the same backend service — membership must stay disjoint from sbc_group.
+resource "google_compute_instance_group" "sbc_group_standby" {
+  name    = local.standby_group_name
+  project = var.project_id
+  zone    = var.config.gcp_zone
+
+  instances = [google_compute_instance.sbc[1].self_link]
+
+  named_port {
+    name = "sip-udp"
+    port = 5060
+  }
+
+  named_port {
+    name = "sip-tcp"
+    port = 5060
+  }
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+```
+
+### 18.4 `modules/voip-region/lb.tf` (NEW) — external NLB failover + signaling ILB
+
+```hcl
+# ---------------------------------------------------------------------------
+# Shared regional health check — TCP:5060 against Kamailio, used by BOTH the
+# external (carrier) and internal (signaling) backend services.
+# Phase 4b tuning: 3s/2s/2/2 => ~6s failover detection (2 failed checks x 3s).
+# Import note: the pre-Phase-4b values were 5s/5s/2/3 (create-west-nlb.sh);
+# the operator retunes via gcloud during migration, so plan should show 0 diff.
+# ---------------------------------------------------------------------------
+resource "google_compute_region_health_check" "sbc" {
+  name    = local.hc_name
+  project = var.project_id
+  region  = var.config.gcp_region
+
+  tcp_health_check {
+    port = 5060
+  }
+
+  check_interval_sec  = 3
+  timeout_sec         = 2
+  healthy_threshold   = 2
+  unhealthy_threshold = 2
+}
+
+# ---------------------------------------------------------------------------
+# External VIP (pre-existing reserved address — Bandwidth targets this).
+# ---------------------------------------------------------------------------
+resource "google_compute_address" "sbc_vip" {
+  name         = local.vip_address_name
+  project      = var.project_id
+  region       = var.config.gcp_region
+  address_type = "EXTERNAL"
+
+  lifecycle {
+    prevent_destroy = true # Bandwidth has this IP whitelisted — never release
+  }
+}
+
+# ---------------------------------------------------------------------------
+# External backend service (pre-existing) — Phase 4b adds the failover backend
+# + failover policy. failover_ratio = 0 with drop_traffic_if_unhealthy means:
+# ALL traffic to the primary group while it has >=1 healthy instance; standby
+# serves ONLY while the primary is unhealthy; drop (don't spray both) if all
+# backends are unhealthy; failback is immediate (connection drain disabled —
+# SIP/UDP has no connections worth draining, and established calls survive the
+# flip via stateless in-dialog routing, docker/kamailio/CLAUDE.md §8.10).
+# ---------------------------------------------------------------------------
+resource "google_compute_region_backend_service" "sbc_external" {
+  name                  = local.backend_name
+  project               = var.project_id
+  region                = var.config.gcp_region
+  load_balancing_scheme = "EXTERNAL"
+  protocol              = "UNSPECIFIED"
+  session_affinity      = "CLIENT_IP"
+  health_checks         = [google_compute_region_health_check.sbc.id]
+
+  backend {
+    group = google_compute_instance_group.sbc_group.self_link
+  }
+
+  backend {
+    group    = google_compute_instance_group.sbc_group_standby.self_link
+    failover = true
+  }
+
+  failover_policy {
+    disable_connection_drain_on_failover = true
+    drop_traffic_if_unhealthy            = true
+    failover_ratio                       = 0
+  }
+
+  lifecycle {
+    prevent_destroy = true # the carrier front door — destroying it is a zone outage
+  }
+}
+
+# External forwarding rules (pre-existing): UDP + TCP 5060 on the VIP.
+resource "google_compute_forwarding_rule" "sbc_vip" {
+  for_each = { udp = "UDP", tcp = "TCP" }
+
+  name                  = "${local.vip_fwd_prefix}-${each.key}"
+  project               = var.project_id
+  region                = var.config.gcp_region
+  load_balancing_scheme = "EXTERNAL"
+  ip_protocol           = each.value
+  ports                 = ["5060"]
+  ip_address            = google_compute_address.sbc_vip.address
+  backend_service       = google_compute_region_backend_service.sbc_external.id
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+# ---------------------------------------------------------------------------
+# Signaling ILB (NEW) — internal passthrough NLB for FS -> SBC B-leg traffic.
+# FreeSWITCH targets this VIP (SBC_PROXY_IP): UDP 5060 SIP + TCP 5060
+# pre-check. Same groups, same health check, same failover semantics as the
+# external side, so both planes elect the SAME active SBC. L3_DEFAULT +
+# all_ports carries UDP and TCP through one rule.
+# NOTE (asymmetric-routing lesson, CLAUDE.md): the EXTERNAL VIP still cannot
+# be used for FS->SBC. This ILB is the supported intra-VPC equivalent —
+# internal passthrough NLBs deliver to the backend with the client source
+# preserved, and the backend replies from the VIP (Kamailio binds it via
+# SBC_SIGNALING_VIP + the entrypoint's `ip addr add ... dev lo`).
+# ---------------------------------------------------------------------------
+resource "google_compute_address" "sbc_signaling_vip" {
+  name         = local.signaling_addr_name
+  project      = var.project_id
+  region       = var.config.gcp_region
+  address_type = "INTERNAL"
+  subnetwork   = "projects/${var.project_id}/regions/${var.config.gcp_region}/subnetworks/default"
+  address      = var.config.signaling_vip_ip
+
+  lifecycle {
+    prevent_destroy = true # baked into every zone .env (SBC_PROXY_IP) + kamailio Record-Route
+  }
+}
+
+resource "google_compute_region_backend_service" "sbc_signaling" {
+  name                  = local.signaling_bs_name
+  project               = var.project_id
+  region                = var.config.gcp_region
+  load_balancing_scheme = "INTERNAL"
+  protocol              = "UNSPECIFIED"
+  session_affinity      = "CLIENT_IP"
+  network               = "projects/${var.project_id}/global/networks/default"
+  health_checks         = [google_compute_region_health_check.sbc.id]
+
+  backend {
+    group = google_compute_instance_group.sbc_group.self_link
+  }
+
+  backend {
+    group    = google_compute_instance_group.sbc_group_standby.self_link
+    failover = true
+  }
+
+  failover_policy {
+    disable_connection_drain_on_failover = true
+    drop_traffic_if_unhealthy            = true
+    failover_ratio                       = 0
+  }
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+resource "google_compute_forwarding_rule" "sbc_signaling" {
+  name                  = local.signaling_fwd_name
+  project               = var.project_id
+  region                = var.config.gcp_region
+  load_balancing_scheme = "INTERNAL"
+  ip_protocol           = "L3_DEFAULT"
+  all_ports             = true
+  network               = "projects/${var.project_id}/global/networks/default"
+  subnetwork            = "projects/${var.project_id}/regions/${var.config.gcp_region}/subnetworks/default"
+  ip_address            = google_compute_address.sbc_signaling_vip.address
+  backend_service       = google_compute_region_backend_service.sbc_signaling.id
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+```
+
+`modules/voip-region/outputs.tf` additions:
+
+```hcl
+output "sbc_signaling_vip" {
+  description = "The zone's internal signaling ILB VIP — FS SBC_PROXY_IP target"
+  value       = google_compute_address.sbc_signaling_vip.address
+}
+
+output "sbc_standby_instance_group" {
+  value = google_compute_instance_group.sbc_group_standby.self_link
+}
+```
+
+### 18.5 Firewall — verified, NO new rule needed (but the §6 blueprint has a bug)
+
+Two questions the ILB raises, both resolved by EXISTING rules:
+
+1. **ILB health-check probes.** Internal passthrough NLB health checks originate
+   from the SAME Google ranges as the external NLB's (`35.191.0.0/16`,
+   `130.211.0.0/22`), and Phase 4b reuses the SAME TCP:5060 check against the
+   SAME `voip-sbc`-tagged VMs. The existing `voip-health-check` rule (§6:
+   tcp:5060 from `var.gcp_health_check_cidrs` to `target_tags=["voip-sbc"]`)
+   already admits them. **No new rule.**
+
+2. **FS → signaling-VIP:5060 dataplane** (UDP SIP + TCP pre-check from
+   192.168.x.2). Passthrough ILBs deliver packets to the backend VM with the
+   ORIGINAL client source; ingress firewall is evaluated at the backend
+   (target tag `voip-sbc`) and GCP ingress rules are destination-IP-agnostic —
+   so whatever admits FS→SBC-direct-IP:5060 today admits FS→VIP:5060
+   identically. In production that is `voip-internal`, which is
+   **source-TAG based** (source tags `voip-sbc`/`voip-media`/`voip-services` →
+   the voip target tags — verified in `infra/WEST_ZONE_BUILDOUT.md` pre-flight:
+   "`sourceTags`-based ... tag-driven, no edits"), and FS carries `voip-media`.
+   Proven daily by the existing FS→SBC direct :5060 B-leg path. **No new rule.**
+
+**Blueprint bug found (fix before the import pass):** §6's HCL models
+`voip_internal` with `source_ranges = var.zone_subnet_cidrs`, and §4 computes
+those ONLY from `internal_ip_base` (10.142/10.138/10.128 /20s) — the
+`voip-media` subnets (192.168.10/20/30.0/24) are missing, and the rule's real
+form is source-TAGS, not ranges. Applied as-written it would cut FreeSWITCH off
+from the SBCs (and from this ILB). Model reality instead:
+
+```hcl
+# CORRECTED voip_internal — matches the deployed source-TAG rule
+resource "google_compute_firewall" "voip_internal" {
+  name    = "voip-internal"
+  project = var.project_id
+  network = var.network
+
+  allow { protocol = "tcp" }
+  allow { protocol = "udp" }
+  allow { protocol = "icmp" }
+
+  source_tags = ["voip-sbc", "voip-media", "voip-services", "voip-db"]
+  target_tags = ["voip-sbc", "voip-media", "voip-services", "voip-db"]
+}
+```
+
+(If `gcloud compute firewall-rules describe voip-internal` shows the deployed
+rule's source-tag list omits `voip-db` or differs, match reality — §7.4 rules.)
+
+### 18.6 Import blocks — `infra/import-ha.tf` (temporary, delete after import)
+
+Same one-time-use pattern as §7.3. East shown in full; West/Central repeat with
+the §18.1 names. ALL of these exist in GCP by the time the import runs (the
+pre-existing NLB pieces + the operator's Phase 4b migration output).
+
+```hcl
+# --- East: pre-existing regional NLB (now permanent — §18 supersedes §7.1) ---
+import {
+  to = module.region["east"].google_compute_region_health_check.sbc
+  id = "projects/rugged-night-193017/regions/us-east1/healthChecks/sbc-health-check"
+}
+
+import {
+  to = module.region["east"].google_compute_address.sbc_vip
+  id = "projects/rugged-night-193017/regions/us-east1/addresses/sbc-vip"
+}
+
+import {
+  to = module.region["east"].google_compute_region_backend_service.sbc_external
+  id = "projects/rugged-night-193017/regions/us-east1/backendServices/sbc-backend"
+}
+
+import {
+  to = module.region["east"].google_compute_forwarding_rule.sbc_vip["udp"]
+  id = "projects/rugged-night-193017/regions/us-east1/forwardingRules/sbc-vip-udp"
+}
+
+import {
+  to = module.region["east"].google_compute_forwarding_rule.sbc_vip["tcp"]
+  id = "projects/rugged-night-193017/regions/us-east1/forwardingRules/sbc-vip-tcp"
+}
+
+# (sbc-group import already exists in §7.3 — keep it; membership is now SBC-1 only)
+
+# --- East: Phase 4b resources created by the operator via gcloud ---
+import {
+  to = module.region["east"].google_compute_instance_group.sbc_group_standby
+  id = "projects/rugged-night-193017/zones/us-east1-b/instanceGroups/sbc-standby-group"
+}
+
+import {
+  to = module.region["east"].google_compute_address.sbc_signaling_vip
+  id = "projects/rugged-night-193017/regions/us-east1/addresses/sbc-signaling-vip"
+}
+
+import {
+  to = module.region["east"].google_compute_region_backend_service.sbc_signaling
+  id = "projects/rugged-night-193017/regions/us-east1/backendServices/sbc-signaling-backend"
+}
+
+import {
+  to = module.region["east"].google_compute_forwarding_rule.sbc_signaling
+  id = "projects/rugged-night-193017/regions/us-east1/forwardingRules/sbc-signaling-fwd"
+}
+
+# --- West: same 9 blocks with regions/us-west1 + zones/us-west1-b and names
+#     west-sbc-health-check / west-sbc-vip / west-sbc-backend /
+#     west-sbc-vip-{udp,tcp} / west-sbc-group (§7.3 pattern) /
+#     west-sbc-standby-group / west-sbc-signaling-vip /
+#     west-sbc-signaling-backend / west-sbc-signaling-fwd
+# --- Central: same with regions/us-central1 + zones/us-central1-b and the
+#     central-* names (health-check name: confirm per §18.1 †)
+```
+
+**Import-cycle expectations (§7.4 applies):** after the operator's migration,
+the plan against this config should show **0 diffs** on the LB set. Any diff on
+`failover_policy`, health-check timings, or group membership means config and
+reality disagree — reconcile before apply, never "fix" by letting tofu modify
+the live LB during traffic hours.
+
+### 18.7 What Phase 4b does NOT change
+
+- **FS-dead-in-zone is NOT covered.** Both SBCs stay TCP:5060-healthy with
+  FreeSWITCH down, so neither NLB fails over — zone-level failover is
+  carrier/DNS-level (Bandwidth retries the other zones' VIPs; FS-aware
+  OPTIONS-503 signals sick-zone where enabled). See the runbook's failure-mode
+  table.
+- **No Cloud NAT / subnet changes.** The ILB VIP lives in `default`; the media
+  subnets and `bypass-vpn` tagging rules from the Cloud NAT lesson are untouched.
+- **Secrets/env.** `SBC_PROXY_IP`, `SBC_SIGNALING_VIP` land in per-VM `.env`
+  via the deploy workflow (Ansible/manual), not OpenTofu.

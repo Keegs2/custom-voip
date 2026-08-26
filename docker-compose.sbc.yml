@@ -30,6 +30,17 @@ services:
       - HEP_CAPTURE_ID=${HEP_CAPTURE_ID:-100}
       - SBC_ID=${SBC_ID:-east-sbc-1}
       - SBC_INTERNAL_IP=${SBC_INTERNAL_IP}
+      # Active/standby HA signaling VIP (per-zone INTERNAL passthrough NLB).
+      # OPTIONAL — leave unset until the operator has created the zone's ILB
+      # with the primary/standby SBC backends. Unset/empty = the templated
+      # config renders byte-identical to the pre-HA deploy (SIGNALING_VIP
+      # falls back to SBC_INTERNAL_IP, no extra listeners). When set, the
+      # entrypoint binds it on loopback and Kamailio listens on it; the
+      # FS-facing inner Record-Route in both presets becomes this VIP.
+      # Set it on BOTH SBCs of the zone (identical config — "active" is
+      # decided only by GCP health checks) BEFORE pointing the media VM's
+      # SBC_PROXY_IP at the ILB.
+      - SBC_SIGNALING_VIP=${SBC_SIGNALING_VIP:-}
       # Per-zone Bandwidth egress PoPs (East defaults; West swaps primary<->secondary)
       - BANDWIDTH_PRIMARY_IP=${BANDWIDTH_PRIMARY_IP:-67.231.2.12}
       - BANDWIDTH_SECONDARY_IP=${BANDWIDTH_SECONDARY_IP:-216.82.238.134}

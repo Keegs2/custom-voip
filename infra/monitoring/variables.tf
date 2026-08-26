@@ -66,6 +66,21 @@ variable "instances" {
   ]
 }
 
+variable "sbc_failover_pairs" {
+  description = "Per-zone SBC active/standby pairs (Phase 4b HA). primary = the VM whose death means the zone is running on its standby; backend/region feed the incident's get-health command. Drives the per-zone 'SBC failover state' policies (sbc_failover.tf)."
+  type = map(object({
+    primary = string
+    standby = string
+    backend = string
+    region  = string
+  }))
+  default = {
+    east    = { primary = "poc-custom-voip", standby = "kam-g2", backend = "sbc-backend", region = "us-east1" }
+    west    = { primary = "west-sbc-1", standby = "west-sbc-2", backend = "west-sbc-backend", region = "us-west1" }
+    central = { primary = "central-sbc-1", standby = "central-sbc-2", backend = "central-sbc-backend", region = "us-central1" }
+  }
+}
+
 # --- Who gets paged -----------------------------------------------------------
 variable "notification_email" {
   description = "REQUIRED — ops email address that receives all alerts"

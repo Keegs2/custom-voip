@@ -8,6 +8,7 @@ Turns "customers are the monitoring" into GCP-native alerting. Creates:
 | Uptime check: **API /health** (`:8088`) | Provisioning/portal API down |
 | Uptime check: **UI https** (`:8443`, self-signed tolerated) | Customer portal down |
 | **VM down** (hypervisor metric absent 5 min) — all 4 VMs | Instance stopped/crashed |
+| **SBC failover state** (per zone; primary SBC's hypervisor metric absent 2 min) | Zone flipped to its standby SBC (Phase 4b active/standby) — calls continue, redundancy gone. Runbook: `docs/SBC_ACTIVE_STANDBY_RUNBOOK.md` |
 | **Disk > 85%** (per filesystem; needs Ops Agent) | Slot-WAL / ClickHouse / PG disk-fill before it kills PG |
 | **Memory > 90%** (needs Ops Agent), **CPU > 90% 15m** | Saturation |
 | **`revup-alert` log match** | Any on-VM watchdog: backup failures, replication-slot WAL, future scripts |

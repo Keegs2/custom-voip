@@ -332,6 +332,7 @@ MEDIA_SUBNET=<zone_media_subnet>        # This zone's FS media subnet (East 192.
 SBC_ID=<region>-sbc-<n>                 # e.g. east-sbc-1, west-sbc-2
 HEP_CAPTURE_ID=<see table below>        # Unique per-SBC Homer capture ID
 # Optional (defaults preserve current behavior — usually leave unset):
+# SBC_SIGNALING_VIP=<zone_ilb_vip>      # Active/standby HA: per-zone INTERNAL passthrough-NLB VIP (see below)
 # BW_CPS_LIMIT=100                      # Inbound CPS flood backstop per Bandwidth IP (503 above this)
 # TESTING_IP=                           # Trusted SIPp test source. UNSET in prod (disabled by default)
 # BANDWIDTH_TC1_NY / TC1_ATL / TC2_DAL / TC2_LA  # Fixed TC1/TC2 PoPs (defaults = production IPs)
@@ -355,6 +356,40 @@ next SBC/carrier; ringing then continues to call_timeout).
 > Validated with `kamailio -c` on both East (byte-identical to pre-change) and West templated configs.
 > **Set `MEDIA_SUBNET` to the real per-region media subnet you provision for West** — pick a
 > Cloud-NAT-excluded CIDR (it must not overlap East's `192.168.10.0/24`).
+
+#### Active/standby SBC pair — `SBC_SIGNALING_VIP` (optional, per zone)
+
+Converts the zone's 2-SBC pair from active/active to a TRUE active/standby HA pair.
+Both SBCs keep IDENTICAL config; "active" is decided ONLY by GCP health checks (no
+VRRP/keepalived). Two GCP pieces (operator-provisioned) + one env var:
+
+1. **External NLB failover policy** — sbc-1 = primary backend, sbc-2 = failover
+   backend. ALL carrier traffic to the external VIP lands on the ONE active SBC
+   (automatic failback when the primary recovers).
+2. **NEW per-zone INTERNAL passthrough NLB ("signaling VIP")** with the SAME
+   primary/failover backends, forwarding UDP:5060 **and** TCP:5060 (two forwarding
+   rules on one reserved internal IP, or one `L3_DEFAULT` rule — TCP is required by
+   FreeSWITCH's `inbound_router.lua` TCP health pre-check).
+3. `SBC_SIGNALING_VIP=<that ILB VIP>` in each SBC's `.env`.
+
+Effect on the templated config (`__SIGNALING_VIP__` / `SBC_SIGVIP_DEDICATED`):
+Kamailio binds the ILB VIP on loopback + listens on it (advertising the EXTERNAL
+VIP — deliberate, see the listen-block comment in `kamailio.cfg`), adds `alias=`,
+and the FS-facing inner Record-Route in BOTH presets becomes the signaling VIP
+instead of `SBC_INTERNAL_IP`. FS's in-dialog requests (ACK/BYE/re-INVITE) then
+always reach the ACTIVE SBC — a mid-call SBC death no longer strands FS's BYE on
+a dead pinned SBC IP. **Unset = byte-identical rendered config to the pre-HA
+deploy** (token falls back to `SBC_INTERNAL_IP`, no extra listeners), so the code
+can be deployed fleet-wide before any ILB exists.
+
+**Cutover order (per zone, strictly):** (1) deploy code everywhere with the var
+unset — no-op; (2) operator creates the ILB (UDP+TCP, failover policy) and the
+external NLB failover policy; (3) set `SBC_SIGNALING_VIP` on BOTH SBCs and
+restart them one at a time (in-flight dialogs carry the old `SBC_INTERNAL_IP`
+inner Route — the kept listen/alias keeps terminating them); (4) flip the media
+VM's `SBC_PROXY_IP` to the ILB VIP and `SBC_PROXY_IP_FAILOVER` to sbc-1's direct
+VPC IP. Never set the var before the ILB answers on the VIP: new dialogs would
+carry an inner Route that nothing serves.
 
 #### SBC Identity & Homer Capture ID Mapping
 
@@ -386,16 +421,24 @@ REDIS_PORT=6379
 API_HOST=10.142.0.103                   # Centralized API in East
 API_PORT=8088
 HOMER_IP=10.142.0.103                   # Centralized Homer in East
-SBC_PROXY_IP=<zone_sbc1_internal_ip>          # Zone's primary SBC (outbound bridge target)
-SBC_PROXY_IP_FAILOVER=<zone_sbc2_internal_ip>  # Zone's secondary SBC (4-attempt failover)
+SBC_PROXY_IP=<zone_signaling_vip>             # Zone's SBC signaling target. Active/standby HA: the zone's
+                                              #   INTERNAL NLB VIP (always reaches the active SBC).
+                                              #   Pre-HA (no ILB yet): sbc-1's direct VPC IP, as before.
+SBC_PROXY_IP_FAILOVER=<zone_sbc1_internal_ip> # Belt-and-braces if the ILB itself fails: sbc-1's DIRECT
+                                              #   VPC IP. Pre-HA: sbc-2's direct VPC IP (legacy meaning).
 ESL_PASSWORD=<STRONG_ESL_PASSWORD>
 TEST_MODE=false
 ```
 
 > `SBC_PROXY_IP_FAILOVER` is templated in `docker-compose.media.yml` (defaults to
 > `SBC_PROXY_IP` if unset) and drives the 4-attempt SBC×carrier failover loop in
-> `inbound_router.lua`. Set it to the zone's second SBC so a dead primary SBC fails
-> over within the same zone.
+> `inbound_router.lua`. **Active/standby HA meaning:** `SBC_PROXY_IP` = the zone's
+> signaling VIP (internal NLB — UDP bridging and the TCP :5060 pre-check both land
+> on the active SBC), `SBC_PROXY_IP_FAILOVER` = the primary SBC's direct VPC IP as
+> a fallback for ILB failure. No Lua/FS config change is needed — both values are
+> consumed verbatim as `<dest>@<ip>:5060` bridge targets and per-IP probe-cache
+> keys. Legacy (pre-ILB) meaning — sbc-1 / sbc-2 direct IPs — still works and is
+> what an unmigrated zone keeps running.
 
 ---
 

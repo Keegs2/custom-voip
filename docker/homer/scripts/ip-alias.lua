@@ -33,6 +33,7 @@ local aliases = {
     -- SBC layer (East). Both interfaces of each node collapse to one name
     -- so the node renders as a single ladder column.
     ["34.24.133.82"]   = "SBC-VIP",      -- East NLB VIP
+    ["10.142.0.250"]   = "SBC-SigVIP",   -- East signaling ILB VIP (active/standby; update if reservation differs)
     ["10.142.0.100"]   = "SBC-1",        -- East SBC-1 internal (VPC)
     ["34.74.71.32"]    = "SBC-1",        -- East SBC-1 public
     ["10.142.0.101"]   = "SBC-2",        -- East SBC-2 internal (VPC)
@@ -50,6 +51,7 @@ local aliases = {
     -- node map to one "West-*" name so each node is a single column and
     -- never renders as a raw "UNKNOWN" IP in the ladder.
     ["35.252.214.40"]  = "West-SBC-VIP", -- West NLB VIP
+    ["10.138.0.250"]   = "West-SBC-SigVIP", -- West signaling ILB VIP (active/standby; update if reservation differs)
     ["10.138.0.100"]   = "West-SBC-1",   -- West SBC-1 internal (VPC)
     ["8.229.41.59"]    = "West-SBC-1",   -- West SBC-1 public
     ["10.138.0.101"]   = "West-SBC-2",   -- West SBC-2 internal (VPC)
@@ -67,6 +69,7 @@ local aliases = {
     -- Same collapse pattern: both interfaces of each node map to one
     -- "Central-*" name so each node is a single ladder column.
     ["35.253.133.230"] = "Central-SBC-VIP", -- Central NLB VIP
+    ["10.128.0.250"]   = "Central-SBC-SigVIP", -- Central signaling ILB VIP (active/standby; update if reservation differs)
     ["10.128.0.100"]   = "Central-SBC-1",   -- Central SBC-1 internal (VPC)
     ["34.41.188.100"]  = "Central-SBC-1",   -- Central SBC-1 public
     ["10.128.0.101"]   = "Central-SBC-2",   -- Central SBC-2 internal (VPC)

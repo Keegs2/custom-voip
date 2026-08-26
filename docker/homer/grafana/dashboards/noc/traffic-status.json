@@ -38,16 +38,61 @@
       "transparent": true,
       "options": {
         "mode": "markdown",
-        "content": "## Traffic Status — live ops wall\n**Every panel is real-time** (VictoriaMetrics `voip-metrics-vm` — Kamailio + FreeSWITCH `mod_prometheus`, scraped ~15s), so this reflects the fleet as it is **right now**, not the retrospective CDR view (all CDR-delayed volume/ASR/carrier-split/hangup analytics moved to **Call Quality**). **CPS** = live seizures/sec; **connected calls** = FreeSWITCH `calls_active`; **dialogs** = Kamailio signaling concurrency; **Live ASR / failure %** = Kamailio INVITE reply-class rates over 5m. Carrier UP/DOWN is the only non-VM source — the SBCs' Kamailio-dispatcher OPTIONS probes via `carrier_trunk_health` (`voip-cdr-pg`), poller-fresh (~3–15s), not call-derived. `zone` label comes from `external_labels`; the **Zone** picker (`$zonere`) filters the SBC/dialog/ASR selectors. **Carriers:** Bandwidth Dallas (primary) · Bandwidth LA (secondary) · `local` = on-net."
+        "content": "## Traffic Status — live ops wall\n**Every panel is real-time** (VictoriaMetrics `voip-metrics-vm` — Kamailio + FreeSWITCH `mod_prometheus`, scraped ~15s), so this reflects the fleet as it is **right now**, not the retrospective CDR view (all CDR-delayed volume/ASR/carrier-split/hangup analytics moved to **Call Quality**). **CPS** = live seizures/sec; **connected calls** = FreeSWITCH `calls_active`; **dialogs** = Kamailio signaling concurrency; **Live ASR / failure %** = Kamailio INVITE reply-class rates over 5m. Carrier UP/DOWN is the only non-VM source — the SBCs' Kamailio-dispatcher OPTIONS probes via `carrier_trunk_health` (`voip-cdr-pg`), poller-fresh (~3–15s), not call-derived. `zone` label comes from `external_labels`; the **Zone** picker (`$zonere`) filters the SBC/dialog/ASR selectors. **Carriers:** Bandwidth Dallas (primary) · Bandwidth LA (secondary) · `local` = on-net. **Active SBC per zone** (top row) = which SBC each zone's active/standby failover pair is serving from — green card = owned live dialogs in the last 10m, neutral 0 = idle standby."
       },
       "fieldConfig": { "defaults": {}, "overrides": [] }
+    },
+    {
+      "id": 54,
+      "type": "stat",
+      "title": "Active SBC per zone — HA failover state",
+      "description": "Which SBC is actually serving each zone (Phase 4b active/standby NLB failover pair). One card per SBC: sum by (zone, reporting_instance)(max_over_time(kamailio_dialog_active_dialogs[10m])) — the recent-peak live dialogs each SBC owns. GREEN = owned dialogs in the last 10m (the serving SBC; steady state = the zone's sbc-1). Neutral 0 = idle standby (normal) or a genuinely quiet zone. After a failover the standby goes green with the first new call; the dead SBC's card freezes, then VANISHES when its exporter goes stale (~5m) — a missing card is itself a signal (that SBC's metrics are dark: check the GCM 'SBC failover state' alert + gcloud backend-services get-health). Two green cards in one zone = both owned dialogs within the window (legacy active/active, failback overlap, or a flapping pair). Shows every zone regardless of the Zone filter. Runbook: docs/SBC_ACTIVE_STANDBY_RUNBOOK.md",
+      "gridPos": { "h": 4, "w": 24, "x": 0, "y": 2 },
+      "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
+          "expr": "sum by (zone, reporting_instance) (max_over_time(kamailio_dialog_active_dialogs[10m]))",
+          "instant": true,
+          "range": false,
+          "format": "time_series",
+          "legendFormat": "{{zone}} · {{reporting_instance}}"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "orientation": "auto",
+        "textMode": "value_and_name",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "wideLayout": true
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "noValue": "no SBC reporting",
+          "mappings": [],
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "text", "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      }
     },
     {
       "id": 1,
       "type": "stat",
       "title": "Total CPS — now (1m)",
       "description": "Fleet-wide calls per second right now: sum(rate(kamailio_trunk_cps[1m])) across all SBCs/zones. Rated capacity is ~500 CPS/zone; amber at 350, red at 500 on the all-zones view. Live from VictoriaMetrics (Kamailio mod_prometheus).",
-      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 2 },
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 6 },
       "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
       "targets": [
         {
@@ -90,7 +135,7 @@
       "type": "stat",
       "title": "Total connected calls — now",
       "description": "Concurrent/active calls across the fleet at this instant — TRUE LIVE GAUGE from FreeSWITCH mod_prometheus (sum of freeswitch_calls_active over all media nodes), scraped every ~15s. Reflects calls actually up on the switches right now.",
-      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 2 },
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 6 },
       "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
       "targets": [
         {
@@ -126,7 +171,7 @@
       "type": "stat",
       "title": "Live ASR (5m)",
       "description": "Live answer-seizure ratio from Kamailio INVITE reply classes over the last 5 minutes: 2xx / (2xx + 4xx + 5xx + 6xx). Honours the Zone filter. Green >= 50%, amber < 50%, red < 30%. This is the live signaling ASR, independent of CDR write lag.",
-      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 2 },
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 6 },
       "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
       "targets": [
         {
@@ -171,7 +216,7 @@
       "type": "stat",
       "title": "Live failure % (5m)",
       "description": "Live INVITE failure fraction from Kamailio reply classes over 5m: (4xx + 5xx + 6xx) / (2xx + 4xx + 5xx + 6xx). Honours the Zone filter. Green < 10%, amber >= 10%, red >= 25%. Same denominator as Live ASR; the earliest live sign of a carrier/routing fault.",
-      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 2 },
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 6 },
       "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
       "targets": [
         {
@@ -216,7 +261,7 @@
       "type": "stat",
       "title": "On-net % — now",
       "description": "Live share of active FreeSWITCH channels that are on-net (short-circuited internally, no carrier egress): sum(freeswitch_channels_active{on_net=\"true\"}) / sum(freeswitch_channels_active{on_net=~\"true|false\"}). Higher = more carrier hairpin avoided (cost + quality win). Live gauge, all zones.",
-      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 2 },
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 6 },
       "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
       "targets": [
         {
@@ -254,7 +299,7 @@
       "type": "stat",
       "title": "Active dialogs — now",
       "description": "Live signaling concurrency: sum(kamailio_dialog_active_dialogs) across the SBCs, honouring the Zone filter. This is SIP dialog state (what Kamailio is tracking) as opposed to media legs (freeswitch_calls_active) — the two should track closely; a divergence points at leaked dialogs or media/signaling mismatch.",
-      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 2 },
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 6 },
       "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
       "targets": [
         {
@@ -290,7 +335,7 @@
       "type": "timeseries",
       "title": "CPS over time — by zone (1m rate)",
       "description": "Live calls-per-second per zone: sum by (zone)(rate(kamailio_trunk_cps[1m])), one line per zone. Watch load balance across East / West / Central. All zones shown regardless of the Zone filter.",
-      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 6 },
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 10 },
       "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
       "targets": [
         {
@@ -329,7 +374,7 @@
       "type": "timeseries",
       "title": "Concurrency over time — media vs signaling",
       "description": "Live concurrency: media (FreeSWITCH calls_active) vs signaling (SBC dialog_active_dialogs), both fleet-wide. They should track closely; a persistent gap points at leaked dialogs or a media/signaling mismatch. All zones.",
-      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 6 },
+      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 10 },
       "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
       "targets": [
         {
@@ -378,7 +423,7 @@
       "type": "timeseries",
       "title": "CPS per FreeSWITCH (1m rate)",
       "description": "Calls per second per media node = seizures per 1-minute bucket / 60, one series per freeswitch_node. Shows how call-start load is distributed across the FreeSWITCH fleet. Honours the Zone filter. Live from VictoriaMetrics.",
-      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 6 },
+      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 10 },
       "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
       "targets": [
         {
@@ -417,7 +462,7 @@
       "type": "barchart",
       "title": "Calls per carrier trunk — inbound (live)",
       "description": "Live inbound active calls per CARRIER trunk (Bandwidth PoP) from Kamailio's dialog profile: kamailio_trunk_active_calls{direction=\"inbound\"}, summed by the bounded carrier `trunk` label, instant snapshot. Honours the Zone filter.",
-      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 12 },
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 16 },
       "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
       "targets": [
         {
@@ -460,7 +505,7 @@
       "type": "barchart",
       "title": "Calls per carrier trunk — outbound (live)",
       "description": "Live outbound active calls per CARRIER trunk (Bandwidth PoP) from Kamailio's dialog profile: kamailio_trunk_active_calls{direction=\"outbound\"}, summed by the bounded carrier `trunk` label, instant snapshot. Honours the Zone filter.",
-      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 12 },
+      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 16 },
       "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
       "targets": [
         {
@@ -503,7 +548,7 @@
       "type": "timeseries",
       "title": "SIP INVITE reply-class rate (5m)",
       "description": "Live Kamailio INVITE reply rate by response class over 5m: 2xx / 3xx / 4xx / 5xx / 6xx, sum(rate(kamailio_core_rcv_replies_Nxx_invite[5m])). Honours the Zone filter. A growing 4xx/5xx/6xx band is the earliest LIVE sign of a carrier/routing fault — this is the live replacement for the old CDR SIP-class panel.",
-      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 12 },
+      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 16 },
       "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
       "targets": [
         {
@@ -576,7 +621,7 @@
       "type": "timeseries",
       "title": "Live ASR trend (5m)",
       "description": "The Live ASR stat as a trend line: 2xx / (2xx + 4xx + 5xx + 6xx) from Kamailio INVITE reply classes over 5m, honouring the Zone filter. Watch for a sustained dip below 50% (amber) / 30% (red).",
-      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 19 },
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 23 },
       "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
       "targets": [
         {
@@ -624,7 +669,7 @@
       "type": "stat",
       "title": "Carrier reachability — UP / DOWN",
       "description": "Live Bandwidth carrier trunk reachability from the SBCs' Kamailio-dispatcher OPTIONS probes (carrier_trunk_health, keyed by duid). The ONLY panel on this wall not sourced from VictoriaMetrics — it reads voip-cdr-pg, but the health view is poller-fresh (~3-15s), NOT call-derived. 🟢 UP (reachable from >=1 SBC) · 🔴 DOWN (dead on every SBC) · 🟠 STALE (no fresh probe in 90s). Proactive — a dead carrier shows even at zero call volume.",
-      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 19 },
+      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 23 },
       "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
       "targets": [
         {
@@ -689,7 +734,7 @@
       "type": "piechart",
       "title": "On-net vs off-net (live)",
       "description": "Live split of active FreeSWITCH channels by on_net label: sum by (on_net)(freeswitch_channels_active). on-net = short-circuited internally (no carrier egress), off-net = hairpinned to a carrier. All zones.",
-      "gridPos": { "h": 6, "w": 4, "x": 16, "y": 19 },
+      "gridPos": { "h": 6, "w": 4, "x": 16, "y": 23 },
       "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
       "targets": [
         {
@@ -727,7 +772,7 @@
       "type": "piechart",
       "title": "Inbound vs outbound (live)",
       "description": "Live split of active FreeSWITCH channels by direction: sum by (direction)(freeswitch_channels_active{direction=~\"inbound|outbound\"}). All zones.",
-      "gridPos": { "h": 6, "w": 4, "x": 20, "y": 19 },
+      "gridPos": { "h": 6, "w": 4, "x": 20, "y": 23 },
       "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
       "targets": [
         {
@@ -765,7 +810,7 @@
       "type": "timeseries",
       "title": "SBC memory headroom (shmem used %)",
       "description": "Live Kamailio shared-memory utilisation per SBC: kamailio_shmem_used_size / kamailio_shmem_total_size, one line per reporting_instance. Green < 70%, amber >= 70%, red >= 85%. Rising shmem is an early warning of a dialog/tm leak or an under-provisioned SBC before it starts dropping calls.",
-      "gridPos": { "h": 5, "w": 12, "x": 0, "y": 25 },
+      "gridPos": { "h": 5, "w": 12, "x": 0, "y": 29 },
       "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
       "targets": [
         {
@@ -813,7 +858,7 @@
       "type": "stat",
       "title": "Blocked IPs — now",
       "description": "Live count of source IPs currently blocked by Kamailio's pike (flood-detection) module: sum(kamailio_pike_blocked_ips). Green at 0; any non-zero is an active flood/attack indicator worth eyeballing. Fleet-wide.",
-      "gridPos": { "h": 5, "w": 6, "x": 12, "y": 25 },
+      "gridPos": { "h": 5, "w": 6, "x": 12, "y": 29 },
       "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
       "targets": [
         {
@@ -855,7 +900,7 @@
       "type": "stat",
       "title": "Dialogs per SBC — now",
       "description": "Live signaling concurrency broken out per SBC: sum by (reporting_instance)(kamailio_dialog_active_dialogs), honouring the Zone filter. Shows how dialog load is distributed across the SBC fleet — a lopsided SBC points at an NLB imbalance or a stuck peer.",
-      "gridPos": { "h": 5, "w": 6, "x": 18, "y": 25 },
+      "gridPos": { "h": 5, "w": 6, "x": 18, "y": 29 },
       "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
       "targets": [
         {

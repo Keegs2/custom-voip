@@ -24,6 +24,34 @@ HEP_CAPTURE_ID="${HEP_CAPTURE_ID:-100}"
 SBC_ID="${SBC_ID:-east-sbc-1}"
 SBC_INTERNAL_IP="${SBC_INTERNAL_IP:-127.0.0.1}"
 
+# SBC_SIGNALING_VIP: per-zone INTERNAL passthrough-NLB VIP ("signaling VIP")
+# for the TRUE active/standby SBC pair. FreeSWITCH targets this VIP
+# (SBC_PROXY_IP in the media VM .env) for B-leg bridging AND for in-dialog
+# requests (it is the FS-facing inner Record-Route entry in both presets), so
+# FS->SBC traffic always reaches the ONE active SBC and a mid-call SBC death
+# no longer strands in-dialog requests on a dead pinned SBC_INTERNAL_IP.
+#
+# DEFAULT (unset/empty): SBC_INTERNAL_IP. The SIGNALING_VIP token in
+# kamailio.cfg then renders to the exact same IP string as today's inner
+# Record-Route, and the dedicated listen/alias lines are compiled OUT (the
+# mode define below becomes a comment) — the rendered config is byte-identical
+# to a pre-HA deploy. Rolling-safe: deploy this code everywhere first (no-op),
+# have the operator create the internal NLB, THEN set the var per-SBC.
+#
+# Set-but-equal (SBC_SIGNALING_VIP == SBC_INTERNAL_IP) is treated as unset so
+# a duplicate listen directive is never emitted (Kamailio 5.8 silently merges
+# exact-duplicate listens keeping the FIRST one's advertise —
+# core/socket_info.c fix_socket_list "removing duplicate addresses" — but we
+# refuse to rely on silent-merge semantics on a live platform).
+if [ -n "${SBC_SIGNALING_VIP:-}" ] && [ "${SBC_SIGNALING_VIP}" != "${SBC_INTERNAL_IP}" ]; then
+  SBC_SIGVIP_MODE_DEFINE="#!define SBC_SIGVIP_DEDICATED"
+  SBC_SIGVIP_MODE=dedicated
+else
+  SBC_SIGNALING_VIP="${SBC_INTERNAL_IP}"
+  SBC_SIGVIP_MODE_DEFINE="# SBC_SIGNALING_VIP not set — SIGNALING_VIP renders as SBC_INTERNAL_IP, no dedicated listen/alias emitted"
+  SBC_SIGVIP_MODE=fallback
+fi
+
 # Per-zone Bandwidth egress PoPs. Defaults are the East values, so an East
 # redeploy WITHOUT these vars set is byte-identical to the pre-templating config.
 #   East:  PRIMARY=67.231.2.12 (Dallas), SECONDARY=216.82.238.134 (LA)
@@ -162,6 +190,14 @@ sed -i "s|__HOMER_IP__|${HOMER_IP}|g" "$CONFIG"
 sed -i "s|__HEP_CAPTURE_ID__|${HEP_CAPTURE_ID}|g" "$CONFIG"
 sed -i "s|__SBC_ID__|${SBC_ID}|g" "$CONFIG"
 sed -i "s|__SBC_INTERNAL_IP__|${SBC_INTERNAL_IP}|g" "$CONFIG"
+# Signaling VIP (active/standby HA). Value is SBC_SIGNALING_VIP when set to a
+# dedicated ILB VIP, else SBC_INTERNAL_IP (fallback — renders byte-identical
+# to the pre-HA config). The mode define compiles the dedicated listen/alias
+# lines in (dedicated) or out (fallback) — same line-replacement pattern as
+# FS_AWARE_OPTIONS; both replacement strings are fixed literals with no
+# '|', '&' or '\'.
+sed -i "s|__SIGNALING_VIP__|${SBC_SIGNALING_VIP}|g" "$CONFIG"
+sed -i "s|__SBC_SIGVIP_MODE_DEFINE__|${SBC_SIGVIP_MODE_DEFINE}|" "$CONFIG"
 sed -i "s|__BANDWIDTH_PRIMARY_IP__|${BANDWIDTH_PRIMARY_IP}|g" "$CONFIG"
 sed -i "s|__BANDWIDTH_SECONDARY_IP__|${BANDWIDTH_SECONDARY_IP}|g" "$CONFIG"
 sed -i "s|__INTERNAL_SUBNET__|${INTERNAL_SUBNET}|g" "$CONFIG"
@@ -207,7 +243,7 @@ sed -i "s|__BANDWIDTH_TC2_LA__|${BANDWIDTH_TC2_LA}|g" "$CONFIG" "$DISPATCH"
 sed -i "s|__SINCH_DENVER_IP__|${SINCH_DENVER_IP}|g" "$CONFIG" "$DISPATCH"
 sed -i "s|__SINCH_CHICAGO_IP__|${SINCH_CHICAGO_IP}|g" "$CONFIG" "$DISPATCH"
 
-echo "Kamailio config templated: ADVERTISE_IP=${EXTERNAL_SIP_IP}, FS=${FREESWITCH_IP}, FS_PUBLIC_IP=${FS_PUBLIC_IP}, DB=${DB_HOST}:${DB_PORT}, Homer=${HOMER_IP}, HEP_ID=${HEP_CAPTURE_ID}, SBC_ID=${SBC_ID}, SBC_INTERNAL_IP=${SBC_INTERNAL_IP}, BW_PRIMARY=${BANDWIDTH_PRIMARY_IP}, BW_SECONDARY=${BANDWIDTH_SECONDARY_IP}, SINCH_DENVER=${SINCH_DENVER_IP}, SINCH_CHICAGO=${SINCH_CHICAGO_IP}, INTERNAL_SUBNET=${INTERNAL_SUBNET}, MEDIA_SUBNET=${MEDIA_SUBNET}, FS_AWARE_OPTIONS=${FS_AWARE_OPTIONS}, STIR_SHAKEN_SIGN=${STIR_SHAKEN_SIGN}, STIR_SHAKEN_VERIFY=${STIR_SHAKEN_VERIFY}, STIR_CERT_URL=${STIR_CERT_URL}, STIR_VERIFY_CERT_MODE=${STIR_VERIFY_CERT_MODE}, STIR_VERIFY_CA_FILE=${STIR_VERIFY_CA_FILE:-<unset>}"
+echo "Kamailio config templated: ADVERTISE_IP=${EXTERNAL_SIP_IP}, FS=${FREESWITCH_IP}, FS_PUBLIC_IP=${FS_PUBLIC_IP}, DB=${DB_HOST}:${DB_PORT}, Homer=${HOMER_IP}, HEP_ID=${HEP_CAPTURE_ID}, SBC_ID=${SBC_ID}, SBC_INTERNAL_IP=${SBC_INTERNAL_IP}, SIGNALING_VIP=${SBC_SIGNALING_VIP} (${SBC_SIGVIP_MODE}), BW_PRIMARY=${BANDWIDTH_PRIMARY_IP}, BW_SECONDARY=${BANDWIDTH_SECONDARY_IP}, SINCH_DENVER=${SINCH_DENVER_IP}, SINCH_CHICAGO=${SINCH_CHICAGO_IP}, INTERNAL_SUBNET=${INTERNAL_SUBNET}, MEDIA_SUBNET=${MEDIA_SUBNET}, FS_AWARE_OPTIONS=${FS_AWARE_OPTIONS}, STIR_SHAKEN_SIGN=${STIR_SHAKEN_SIGN}, STIR_SHAKEN_VERIFY=${STIR_SHAKEN_VERIFY}, STIR_CERT_URL=${STIR_CERT_URL}, STIR_VERIFY_CERT_MODE=${STIR_VERIFY_CERT_MODE}, STIR_VERIFY_CA_FILE=${STIR_VERIFY_CA_FILE:-<unset>}"
 
 # Add the NLB VIP (EXTERNAL_SIP_IP / ADVERTISE_IP) to the loopback interface.
 #
@@ -232,6 +268,30 @@ if ip addr show | grep -q "${VIP}"; then
 else
   echo "Adding ${VIP}/32 to loopback"
   ip addr add "${VIP}/32" dev lo 2>/dev/null || true
+fi
+
+# Add the signaling VIP (internal passthrough NLB) to loopback — dedicated
+# mode only. Same rationale/mechanism as the external VIP above: the internal
+# NLB delivers packets with dst still set to the ILB VIP, and Kamailio's
+# `listen=udp:SIGNALING_VIP:5060` must be able to BIND it at startup (a
+# listen on a non-local address is a fatal startup error). GCP's guest agent
+# does program a local route for ILB backends, but we must not depend on
+# guest-agent timing/ordering relative to container start.
+#
+# NOTE the guard grep matches " ${IP}/" (with CIDR slash), NOT the bare IP:
+# the signaling VIP lives in the SAME subnet as the VM NIC IP (e.g. ILB VIP
+# 10.138.0.10 is a bare-substring PREFIX of NIC 10.138.0.100), so a bare
+# grep could false-match the longer address, skip the add, and crash-loop
+# Kamailio on the listen bind. In fallback mode
+# SBC_SIGNALING_VIP == SBC_INTERNAL_IP (the NIC address, already present) —
+# nothing to add.
+if [ "${SBC_SIGVIP_MODE}" = "dedicated" ]; then
+  if ip addr show | grep -q " ${SBC_SIGNALING_VIP}/"; then
+    echo "Signaling VIP ${SBC_SIGNALING_VIP} already on interface"
+  else
+    echo "Adding signaling VIP ${SBC_SIGNALING_VIP}/32 to loopback"
+    ip addr add "${SBC_SIGNALING_VIP}/32" dev lo 2>/dev/null || true
+  fi
 fi
 
 # Start Kamailio with all original arguments
