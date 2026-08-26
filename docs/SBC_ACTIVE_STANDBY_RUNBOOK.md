@@ -114,12 +114,19 @@ Use when active/standby itself is causing harm. Order matters: **a VM may not si
 
 | Surface | Signal | Latency | Covers |
 |---|---|---|---|
-| GCM "SBC failover state — {zone} primary down" (`infra/monitoring/sbc_failover.tf`) | Primary SBC VM stopped reporting hypervisor metrics | ~2–3 min | VM death only (by design — same metric family as vm_down) |
+| GCM "[CRITICAL] SBC failover state — {zone} primary UNHEALTHY (zone on standby)" (`infra/monitoring/sbc_failover.tf`, log-based) | The attached HC logs a health-state transition to UNHEALTHY for the zone's 1-VM primary group — the exact signal the NLB flips on | ~10–12 s HC detection + seconds–1 min log→alert pipeline | Kamailio container dead/hung-visible-to-HC, VM death, FS death (fs-aware /healthz) — every real flip AND every §2/§3 drill (a planned drill now fires this page; expect + acknowledge it) |
+| GCM "[WARNING] SBC failover state — {zone} standby UNHEALTHY (redundancy degraded)" (same file) | Same transition log for the zone's standby group | same | Standby loss while the primary serves — no traffic impact, one failure from zone outage (§6 row) |
 | GCM "VM down (metrics absent)" | Any production VM dark 5 min | ~5–6 min | Primary AND standby AND everything else |
 | GCM "SIP VIP {zone} unreachable" | Whole front door dark (both SBCs) | ~1–2 min | Total zone signaling failure |
 | Grafana Traffic Status "Active SBC per zone" | Which SBC owns live dialogs (10 m window) | ~15 s scrape | Every flip, including container-level and drills |
 | `gcloud compute backend-services get-health ...` | Authoritative LB election | on demand | Ground truth for both planes |
 | `revup-alert` ASR watchdog | Calls failing while everything looks "healthy" | minutes | The healthy-zombie case |
+
+**One-time setup for the two log-based rows (operator, workstation gcloud):** the SBC failover pages read GCP health-check logs, which are OFF by default. Enable logging once on each zone's attached HC — it records per-endpoint health-state TRANSITIONS only (no steady-state log volume, negligible cost):
+
+1. 🟢 `gcloud compute health-checks update http east-sbc-fs-aware-hc --region=us-east1 --enable-logging --project=rugged-night-193017`
+2. 🟢 `gcloud compute health-checks update http west-sbc-healthz-hc --region=us-west1 --enable-logging --project=rugged-night-193017`
+3. 🟢 `gcloud compute health-checks update http central-sbc-fs-aware-hc --region=us-central1 --enable-logging --project=rugged-night-193017`
 
 ## 8. Drill log (append a row per drill/incident — same discipline as the DB runbook)
 
