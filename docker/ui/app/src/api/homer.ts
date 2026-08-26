@@ -2,7 +2,16 @@ import { apiRequest } from './client';
 import type { MessageAttestation } from '../types/stir';
 
 export interface HomerSearchParams {
+  /**
+   * Free-form number needle — send the user's input VERBATIM. The server owns
+   * normalization: it strips to digits, drops the leading 1 from an 11-digit
+   * NANP number, and 422s if fewer than 3 digits remain. Matches caller OR
+   * callee OR anywhere in the SIP message (payload-wide containment).
+   */
+  number?: string;
+  /** Caller needle — advanced use. Same free-form server-side normalization. */
   from_user?: string;
+  /** Callee needle — advanced use. Same free-form server-side normalization. */
   to_user?: string;
   call_id?: string;
   start_time: string; // ISO 8601

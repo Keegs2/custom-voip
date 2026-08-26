@@ -1,6 +1,16 @@
 /**
  * TroubleshootingPage — platform SIP trace search backed by POST /homer/search.
  *
+ * The primary control is a smart omnibox: support pastes a phone number in ANY
+ * form (`+1 (617) 454-4217`, `617.454.4217`, `16174544217`, a ≥3-digit
+ * partial…) or a SIP Call-ID, and the client only DETECTS which one it is —
+ * number-looking input is sent VERBATIM as `number` (the server owns all
+ * normalization and matches caller/callee/payload-wide), Call-ID-looking input
+ * goes out as `call_id`. A live hint under the box always states exactly what
+ * will be searched. Advanced From/To/Call-ID fields live in a collapsible row;
+ * the time range uses relative presets that resolve to concrete instants at
+ * Search time (same idiom as the CDR page's filter bar).
+ *
  * Daylight console treatment (see the DAYLIGHT CONSOLE block in index.css and
  * the page-scoped `dlx5-*` primitives in styles/dl-troubleshoot.css).
  *
@@ -26,6 +36,7 @@ import { Spinner } from '../components/ui/Spinner';
 import { searchSipTraces } from '../api/homer';
 import type { HomerSearchParams, HomerSearchResult } from '../api/homer';
 import { fmt } from '../utils/format';
+import { toDatetimeLocal } from './admin/cdrFilters';
 import { SipLadder } from '../components/sip-ladder';
 import type { MessageAttestation } from '../types/stir';
 import {
@@ -44,19 +55,219 @@ const INK_DIM = '#5d6f8c';
 const INK_FAINT = '#8b99b0';
 const AZURE_DEEP = '#1d63dd';
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+// ─── Time-range presets ──────────────────────────────────────────────────────
+// Same idiom as the CDR page's filter bar (pages/admin/cdrFilters.ts): presets
+// are RELATIVE and resolve to concrete instants when Search is clicked, so
+// "Last 24h" always means 24h before the search, not before page load. While a
+// preset is active the datetime pickers show a live preview and are disabled.
 
-/** Returns ISO 8601 string for a date offset by `offsetHours` from now. */
-function isoOffset(offsetHours: number): string {
-  const d = new Date(Date.now() + offsetHours * 60 * 60 * 1000);
-  // datetime-local inputs need "YYYY-MM-DDTHH:MM" — drop seconds/tz
-  return d.toISOString().slice(0, 16);
+const MINUTE_MS = 60 * 1000;
+const HOUR_MS = 60 * MINUTE_MS;
+const DAY_MS = 24 * HOUR_MS;
+
+const TRACE_PRESETS = [
+  { id: '15m', label: 'Last 15m', ms: 15 * MINUTE_MS },
+  { id: '1h', label: 'Last hour', ms: HOUR_MS },
+  { id: '24h', label: 'Last 24h', ms: DAY_MS },
+  { id: '7d', label: 'Last 7d', ms: 7 * DAY_MS },
+] as const;
+
+type TracePresetId = (typeof TRACE_PRESETS)[number]['id'] | 'custom';
+
+/** Concrete window for a relative preset, anchored at `now`. */
+function presetWindow(preset: Exclude<TracePresetId, 'custom'>, now: Date): { start: Date; end: Date } {
+  const ms = TRACE_PRESETS.find((p) => p.id === preset)?.ms ?? DAY_MS;
+  return { start: new Date(now.getTime() - ms), end: now };
 }
 
-/** Strip leading + so Homer storage format matches. */
-function stripPlus(value: string): string {
-  return value.trim().replace(/^\+/, '');
+// ─── Omnibox input classification ────────────────────────────────────────────
+
+/** What a free-form search input will be sent as. */
+type NeedleKind =
+  | 'empty'      // nothing typed
+  | 'number'     // digit needle with ≥3 digits → `number` param, sent VERBATIM
+  | 'callid'     // Call-ID-looking (or non-numeric text) → sent verbatim
+  | 'too-short'; // number-looking but <3 digits → Search disabled, no request
+
+interface NeedleClassification {
+  kind: NeedleKind;
+  /** For number/too-short kinds: the digits the SERVER will match (display mirror). */
+  digits: string;
 }
+
+/**
+ * DISPLAY-ONLY mirror of the server's number normalization: strip to digits,
+ * then drop the leading 1 from an 11-digit NANP number.
+ *
+ * THE SERVER OWNS THE TRUTH — requests always carry the user's input VERBATIM
+ * (`number: "<raw>"`). This mirror exists solely so the live hint can show
+ * what the server will actually search for.
+ */
+function mirrorServerNumberNormalization(raw: string): string {
+  const digits = raw.replace(/\D/g, '');
+  return digits.length === 11 && digits.startsWith('1') ? digits.slice(1) : digits;
+}
+
+/**
+ * Classify a free-form search input as a number needle or a Call-ID.
+ *
+ * Heuristic (pinned to the /homer/search contract):
+ * - contains `@` → Call-ID (numbers never carry @; most Call-IDs do)
+ * - after removing ONE leading `+` and common number punctuation
+ *   (spaces, parens, dots, dashes), any non-digit remains (letters, symbols)
+ *   → Call-ID
+ * - otherwise it's a number needle; <3 digits is "too short" (the server
+ *   would 422 — we disable Search with an inline hint instead of sending).
+ */
+function classifyNeedle(raw: string): NeedleClassification {
+  const value = raw.trim();
+  if (!value) return { kind: 'empty', digits: '' };
+  if (value.includes('@')) return { kind: 'callid', digits: '' };
+  const unformatted = value.replace(/^\+/, '').replace(/[\s().-]/g, '');
+  if (/\D/.test(unformatted)) return { kind: 'callid', digits: '' };
+  const digits = mirrorServerNumberNormalization(value);
+  if (digits.length < 3) return { kind: 'too-short', digits };
+  return { kind: 'number', digits };
+}
+
+/** Readable digit grouping for hint display — the SAME digits the server will
+ *  match, just punctuated: 10 → (617) 454-4217 · 7 → 454-4217 · else as-is. */
+function groupDigits(digits: string): string {
+  if (digits.length === 10) return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
+  if (digits.length === 7) return `${digits.slice(0, 3)}-${digits.slice(3)}`;
+  return digits;
+}
+
+// ─── Derived search state (pure — one place turns form state into truth) ─────
+
+/** One criterion of the pending search, phrased for the live hint /
+ *  results-header summary. `label` + `needle` render as
+ *  "…{label} {needle}…", e.g. "for numbers containing" + "(617) 454-4217". */
+interface CriterionSegment {
+  label: string;
+  needle: string;
+}
+
+interface SearchFormState {
+  omni: string;
+  fromUser: string;
+  toUser: string;
+  advCallId: string;
+  rangePreset: TracePresetId;
+  startLocal: string;
+  endLocal: string;
+}
+
+interface DerivedSearch {
+  omniKind: NeedleKind;
+  /** Advanced Call-ID actually in effect ('' while the omnibox IS the Call-ID). */
+  effectiveAdvCallId: string;
+  /** Everything the search will match, in hint order. Empty = nothing to search. */
+  segments: CriterionSegment[];
+  /** Number-needle problem blocking the search (too-short input), or null. */
+  needleError: string | null;
+  /** Custom-range problem blocking the search, or null. */
+  rangeError: string | null;
+  /** True when a 3-5 digit needle meets a >24h window — worth a slowness hint. */
+  broadSearch: boolean;
+}
+
+function deriveSearch(form: SearchFormState): DerivedSearch {
+  const omniC = classifyNeedle(form.omni);
+  const fromC = classifyNeedle(form.fromUser);
+  const toC = classifyNeedle(form.toUser);
+
+  // While the omnibox holds a Call-ID the advanced Call-ID field mirrors it
+  // (disabled in the UI), so it contributes nothing of its own.
+  const effectiveAdvCallId = omniC.kind === 'callid' ? '' : form.advCallId.trim();
+
+  const segments: CriterionSegment[] = [];
+  if (omniC.kind === 'number') {
+    segments.push({ label: 'for numbers containing', needle: groupDigits(omniC.digits) });
+  } else if (omniC.kind === 'callid') {
+    segments.push({ label: 'Call-ID containing', needle: `“${form.omni.trim()}”` });
+  }
+  if (fromC.kind === 'number') {
+    segments.push({ label: 'From containing', needle: groupDigits(fromC.digits) });
+  } else if (fromC.kind === 'callid') {
+    segments.push({ label: 'From containing', needle: `“${form.fromUser.trim()}”` });
+  }
+  if (toC.kind === 'number') {
+    segments.push({ label: 'To containing', needle: groupDigits(toC.digits) });
+  } else if (toC.kind === 'callid') {
+    segments.push({ label: 'To containing', needle: `“${form.toUser.trim()}”` });
+  }
+  if (effectiveAdvCallId) {
+    segments.push({ label: 'Call-ID containing', needle: `“${effectiveAdvCallId}”` });
+  }
+
+  // Too-short number needles block the search (the server would 422) — say so
+  // inline instead of ever sending a doomed request.
+  let needleError: string | null = null;
+  if (omniC.kind === 'too-short') {
+    needleError = 'Keep typing — a number search needs at least 3 digits.';
+  } else if (fromC.kind === 'too-short') {
+    needleError = 'From needs at least 3 digits to search as a number.';
+  } else if (toC.kind === 'too-short') {
+    needleError = 'To needs at least 3 digits to search as a number.';
+  }
+
+  // Custom-range validation (presets can't be invalid).
+  let rangeError: string | null = null;
+  let windowMs: number | null = null;
+  if (form.rangePreset === 'custom') {
+    if (!form.startLocal || !form.endLocal) {
+      rangeError = 'Custom range requires both a start and an end date/time.';
+    } else {
+      const start = new Date(form.startLocal);
+      const end = new Date(form.endLocal);
+      if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+        rangeError = 'Enter a valid start and end date/time.';
+      } else if (start.getTime() >= end.getTime()) {
+        rangeError = 'Start must be before end.';
+      } else {
+        windowMs = end.getTime() - start.getTime();
+      }
+    }
+  } else {
+    windowMs = TRACE_PRESETS.find((p) => p.id === form.rangePreset)?.ms ?? null;
+  }
+
+  // Broad-search guidance: a short (3-5 digit) needle over a large (>24h)
+  // window scans a lot of traffic. Non-blocking — a Call-ID criterion narrows
+  // the search enough to skip the warning.
+  const hasCallId = omniC.kind === 'callid' || effectiveAdvCallId !== '';
+  const hasShortNumberNeedle = [omniC, fromC, toC].some(
+    (c) => c.kind === 'number' && c.digits.length <= 5,
+  );
+  const broadSearch =
+    !hasCallId && hasShortNumberNeedle && windowMs !== null && windowMs > DAY_MS;
+
+  return {
+    omniKind: omniC.kind,
+    effectiveAdvCallId,
+    segments,
+    needleError,
+    rangeError,
+    broadSearch,
+  };
+}
+
+/** Compact local-time stamp for the committed-search summary line. */
+function fmtWindowStamp(iso: string): string {
+  try {
+    return new Intl.DateTimeFormat('en-US', {
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    }).format(new Date(iso));
+  } catch {
+    return iso;
+  }
+}
+
+// ─── Display helpers ─────────────────────────────────────────────────────────
 
 /** Returns true when a string looks like a phone number (mostly digits). */
 function looksLikePhone(value: string): boolean {
@@ -446,8 +657,12 @@ function EmptyState() {
           <circle cx={12} cy={20} r={1} fill="currentColor" stroke="none" />
         </svg>
       </div>
-      <p style={{ margin: 0, color: INK_DIM, fontSize: '0.85rem', maxWidth: 340 }}>
-        Search for SIP traces by phone number, Call-ID, or date range
+      <p style={{ margin: 0, color: INK_DIM, fontSize: '0.85rem', maxWidth: 380 }}>
+        Search by phone number — any format, full or a 3+ digit partial — or by
+        SIP Call-ID, then expand a call to read its signaling ladder.
+      </p>
+      <p style={{ margin: 0, color: INK_FAINT, fontFamily: MONO, fontSize: '0.7rem' }}>
+        +1 (617) 454-4217 · 617.454.4217 · 4544217 · a84b4c76@sbc-1
       </p>
     </div>
   );
@@ -460,11 +675,12 @@ interface ResultsTableProps {
   correlations: Record<string, string[]>;
   /** Pipeline diagnostics from the API — surfaced above each expanded ladder */
   pipelineWarnings: string[];
-  startTime: string;
-  endTime: string;
+  /** The COMMITTED search window (frozen at Search time) — Grafana-link fallback. */
+  windowStartIso: string;
+  windowEndIso: string;
 }
 
-function ResultsTable({ callGroups, correlations, pipelineWarnings, startTime, endTime }: ResultsTableProps) {
+function ResultsTable({ callGroups, correlations, pipelineWarnings, windowStartIso, windowEndIso }: ResultsTableProps) {
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
 
   return (
@@ -481,7 +697,7 @@ function ResultsTable({ callGroups, correlations, pipelineWarnings, startTime, e
             <th className="dl-th" style={{ padding: '10px 10px' }}>Duration</th>
             <th className="dl-th" style={{ padding: '10px 10px' }}>Msgs</th>
             <th className="dl-th" style={{ padding: '10px 10px' }}>Node</th>
-            <th className="dl-th" style={{ padding: '10px 16px 10px 8px', width: 30 }} aria-label="Expand" />
+            <th className="dl-th" style={{ padding: '10px 16px 10px 8px', width: 72 }} aria-label="Expand" />
           </tr>
         </thead>
         <tbody>
@@ -506,9 +722,9 @@ function ResultsTable({ callGroups, correlations, pipelineWarnings, startTime, e
               fromMs = Math.floor(Math.min(...callTimestamps) / 1_000_000) - 5_000;
               toMs = Math.floor(Math.max(...callTimestamps) / 1_000_000) + 60_000;
             } else {
-              // Fallback: use the search form's time range
-              fromMs = Math.floor(new Date(startTime).getTime());
-              toMs = Math.floor(new Date(endTime).getTime());
+              // Fallback: use the committed search window
+              fromMs = Math.floor(new Date(windowStartIso).getTime());
+              toMs = Math.floor(new Date(windowEndIso).getTime());
             }
 
             const params = new URLSearchParams({
@@ -600,12 +816,15 @@ function ResultsTable({ callGroups, correlations, pipelineWarnings, startTime, e
                     {row.node ?? '—'}
                   </td>
 
-                  {/* Expand chevron */}
+                  {/* Explicit open-ladder affordance (label + rotating chevron) */}
                   <td style={{ padding: '9px 16px 9px 8px', textAlign: 'right' }}>
-                    <span className="dlx5-chevron" aria-hidden="true">
-                      <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
-                        <polyline points="9 18 15 12 9 6" />
-                      </svg>
+                    <span className="dlx5-openhint" aria-hidden="true">
+                      {isExpanded ? 'Close' : 'Ladder'}
+                      <span className="dlx5-chevron">
+                        <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
+                          <polyline points="9 18 15 12 9 6" />
+                        </svg>
+                      </span>
                     </span>
                   </td>
                 </tr>
@@ -655,15 +874,29 @@ function ResultsTable({ callGroups, correlations, pipelineWarnings, startTime, e
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 
+/** The search committed by the last Search click — powers the results-header
+ *  summary and the Grafana fallback window (frozen at commit time). */
+interface CommittedSearch {
+  /** e.g. `for numbers containing (617) 454-4217 · Call-ID containing “x@y”` */
+  summary: string;
+  startIso: string;
+  endIso: string;
+}
+
 export function TroubleshootingPage() {
   // ── All hooks unconditionally at the top (React rules of hooks) ──
+  const [omni, setOmni] = useState('');
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [fromUser, setFromUser] = useState('');
   const [toUser, setToUser] = useState('');
-  const [callId, setCallId] = useState('');
-  const [startTime, setStartTime] = useState(() => isoOffset(-24));
-  const [endTime, setEndTime] = useState(() => isoOffset(0));
-  const [validationError, setValidationError] = useState<string | null>(null);
+  const [advCallId, setAdvCallId] = useState('');
+  const [rangePreset, setRangePreset] = useState<TracePresetId>('24h');
+  // Custom-range pickers (local wall-clock) — authoritative only when
+  // rangePreset === 'custom'; seeded from the default preset's window.
+  const [startLocal, setStartLocal] = useState(() => toDatetimeLocal(new Date(Date.now() - DAY_MS)));
+  const [endLocal, setEndLocal] = useState(() => toDatetimeLocal(new Date()));
   const [hasSearched, setHasSearched] = useState(false);
+  const [lastSearch, setLastSearch] = useState<CommittedSearch | null>(null);
   // Shared desktop sidebar collapse — same localStorage key as AppLayout, so
   // the state carries across navigation between shells.
   const { collapsed, toggleCollapsed } = useSidebarCollapse();
@@ -671,38 +904,70 @@ export function TroubleshootingPage() {
   const searchMutation = useMutation({
     mutationFn: (params: HomerSearchParams) => searchSipTraces(params),
   });
+  const { mutate: runSearch, reset: resetSearch } = searchMutation;
+
+  // One pure derivation turns form state into the truth shown in the hint:
+  // input classification, criteria segments, blocking errors, broad-search.
+  const derived = useMemo(
+    () => deriveSearch({ omni, fromUser, toUser, advCallId, rangePreset, startLocal, endLocal }),
+    [omni, fromUser, toUser, advCallId, rangePreset, startLocal, endLocal],
+  );
+
+  const canSearch =
+    derived.segments.length > 0 && derived.needleError === null && derived.rangeError === null;
 
   const handleSearch = useCallback(() => {
-    // Validation: at least one of From, To, or Call-ID must be filled
-    if (!fromUser.trim() && !toUser.trim() && !callId.trim()) {
-      setValidationError('Enter at least one of From, To, or Call-ID to search.');
-      return;
+    // Mirrors the disabled state — Enter can arrive while invalid.
+    if (!canSearch) return;
+
+    // Resolve the RELATIVE preset to concrete instants NOW (commit time).
+    let start: Date;
+    let end: Date;
+    if (rangePreset === 'custom') {
+      start = new Date(startLocal); // local wall-clock → instant
+      end = new Date(endLocal);
+    } else {
+      ({ start, end } = presetWindow(rangePreset, new Date()));
     }
-    setValidationError(null);
-    setHasSearched(true);
 
     const params: HomerSearchParams = {
-      start_time: new Date(startTime).toISOString(),
-      end_time: new Date(endTime).toISOString(),
+      start_time: start.toISOString(),
+      end_time: end.toISOString(),
     };
 
-    if (fromUser.trim()) params.from_user = stripPlus(fromUser);
-    if (toUser.trim()) params.to_user = stripPlus(toUser);
-    if (callId.trim()) params.call_id = callId.trim();
+    // Omnibox: the input goes out VERBATIM — the server owns normalization.
+    const omniValue = omni.trim();
+    if (derived.omniKind === 'number') params.number = omniValue;
+    else if (derived.omniKind === 'callid') params.call_id = omniValue;
 
-    searchMutation.mutate(params);
-  }, [fromUser, toUser, callId, startTime, endTime, searchMutation]);
+    // Advanced criteria are additive (AND-combined server-side). The advanced
+    // Call-ID is '' while the omnibox IS the Call-ID (the field mirrors it).
+    if (fromUser.trim()) params.from_user = fromUser.trim();
+    if (toUser.trim()) params.to_user = toUser.trim();
+    if (derived.effectiveAdvCallId) params.call_id = derived.effectiveAdvCallId;
+
+    setLastSearch({
+      summary: derived.segments.map((s) => `${s.label} ${s.needle}`).join(' · '),
+      startIso: params.start_time,
+      endIso: params.end_time,
+    });
+    setHasSearched(true);
+    runSearch(params);
+  }, [canSearch, derived, omni, fromUser, toUser, rangePreset, startLocal, endLocal, runSearch]);
 
   const handleClear = useCallback(() => {
+    setOmni('');
     setFromUser('');
     setToUser('');
-    setCallId('');
-    setStartTime(isoOffset(-24));
-    setEndTime(isoOffset(0));
-    setValidationError(null);
+    setAdvCallId('');
+    setAdvancedOpen(false);
+    setRangePreset('24h');
+    setStartLocal(toDatetimeLocal(new Date(Date.now() - DAY_MS)));
+    setEndLocal(toDatetimeLocal(new Date()));
     setHasSearched(false);
-    searchMutation.reset();
-  }, [searchMutation]);
+    setLastSearch(null);
+    resetSearch();
+  }, [resetSearch]);
 
   // Submit on Enter from any input field
   const handleKeyDown = useCallback(
@@ -712,10 +977,14 @@ export function TroubleshootingPage() {
     [handleSearch],
   );
 
-  // ── Memoised call grouping (hook — must stay above early returns) ──
-  const results = searchMutation.data?.data ?? [];
-  const correlations = searchMutation.data?.correlations ?? {};
-  const pipelineWarnings = searchMutation.data?.pipeline_warnings ?? [];
+  // ── Memoised call grouping (hooks — must stay above early returns) ──
+  // The fallbacks are memoised on the response object so their identity is
+  // stable across renders — otherwise `?? []` / `?? {}` would re-run the
+  // union-find grouping on every keystroke.
+  const searchData = searchMutation.data;
+  const results = useMemo(() => searchData?.data ?? [], [searchData]);
+  const correlations = useMemo(() => searchData?.correlations ?? {}, [searchData]);
+  const pipelineWarnings = searchData?.pipeline_warnings ?? [];
 
   const callGroups = useMemo(
     () => groupMessagesByCall(results, correlations),
@@ -732,6 +1001,21 @@ export function TroubleshootingPage() {
         ? searchMutation.error.message
         : 'Search failed')
     : null;
+
+  const isCustomRange = rangePreset === 'custom';
+  // While a preset is active the pickers show its live preview (recomputed
+  // each render — close enough to "now"; the authoritative resolution happens
+  // at Search time). Same idiom as the CDR filter bar.
+  const rangePreview = isCustomRange ? null : presetWindow(rangePreset, new Date());
+  const startPickerValue = rangePreview ? toDatetimeLocal(rangePreview.start) : startLocal;
+  const endPickerValue = rangePreview ? toDatetimeLocal(rangePreview.end) : endLocal;
+
+  // Advanced Call-ID mirrors the omnibox while the omnibox IS a Call-ID.
+  const omniIsCallId = derived.omniKind === 'callid';
+  const advCallIdValue = omniIsCallId ? omni.trim() : advCallId;
+  // Criteria active in the advanced row (badge on the collapsed toggle).
+  const advActiveCount =
+    (fromUser.trim() ? 1 : 0) + (toUser.trim() ? 1 : 0) + (derived.effectiveAdvCallId ? 1 : 0);
 
   // ── Render ──
   return (
@@ -758,7 +1042,7 @@ export function TroubleshootingPage() {
               </div>
               <h1 className="dl-title">SIP Trace Search</h1>
               <p className="dl-sub">
-                Search SIP traces by phone number, Call-ID, or date range — expand a call to read its full signaling ladder.
+                Find any call by phone number — any format, full or partial — or by Call-ID, then expand it to read the full signaling ladder.
               </p>
             </div>
 
@@ -779,99 +1063,35 @@ export function TroubleshootingPage() {
             {/* ── Search form ──────────────────────────────────────────── */}
             <div className="dl-panel fx-load fx-load-d1">
               <div className="dl-panel-head">
-                <span className="dl-panel-title">Search Criteria</span>
+                <span className="dl-panel-title">Search</span>
                 <span className="dl-panel-sub">
-                  At least one of From, To, or Call-ID is required.
+                  Numbers match the caller, the callee, or anywhere in the SIP message — paste them in any format.
                 </span>
               </div>
               <div className="dl-panel-body">
-                <div className="dlx5-form-grid">
-                  <div>
-                    <label className="dl-flabel" htmlFor="sip-from">From</label>
+                {/* Omnibox — the one control most searches need */}
+                <div className="dlx5-omnirow">
+                  <div className="dlx5-omniwrap">
+                    <span className="dlx5-omni-icon" aria-hidden="true">
+                      <SearchIcon />
+                    </span>
                     <input
-                      id="sip-from"
+                      id="sip-omni"
                       type="text"
-                      value={fromUser}
-                      onChange={(e) => setFromUser(e.target.value)}
+                      className="dl-input dl-input-mono dlx5-omni"
+                      placeholder="Number or Call-ID — any format"
+                      aria-label="Search by number or Call-ID, any format"
+                      value={omni}
+                      onChange={(e) => setOmni(e.target.value)}
                       onKeyDown={handleKeyDown}
-                      placeholder="Caller number or SIP user"
-                      className="dl-input"
-                      style={{ width: '100%' }}
+                      autoFocus
                     />
                   </div>
-
-                  <div>
-                    <label className="dl-flabel" htmlFor="sip-to">To</label>
-                    <input
-                      id="sip-to"
-                      type="text"
-                      value={toUser}
-                      onChange={(e) => setToUser(e.target.value)}
-                      onKeyDown={handleKeyDown}
-                      placeholder="Destination number"
-                      className="dl-input"
-                      style={{ width: '100%' }}
-                    />
-                  </div>
-
-                  <div>
-                    <label className="dl-flabel" htmlFor="sip-callid">Call-ID</label>
-                    <input
-                      id="sip-callid"
-                      type="text"
-                      value={callId}
-                      onChange={(e) => setCallId(e.target.value)}
-                      onKeyDown={handleKeyDown}
-                      placeholder="SIP Call-ID"
-                      className="dl-input dl-input-mono"
-                      style={{ width: '100%', fontSize: '0.8rem' }}
-                    />
-                  </div>
-                </div>
-
-                <div className="dlx5-form-grid2">
-                  <div>
-                    <label className="dl-flabel" htmlFor="sip-start">Date Range — From</label>
-                    <input
-                      id="sip-start"
-                      type="datetime-local"
-                      value={startTime}
-                      onChange={(e) => setStartTime(e.target.value)}
-                      className="dl-input"
-                      style={{ width: '100%', colorScheme: 'light' }}
-                    />
-                  </div>
-
-                  <div>
-                    <label className="dl-flabel" htmlFor="sip-end">Date Range — To</label>
-                    <input
-                      id="sip-end"
-                      type="datetime-local"
-                      value={endTime}
-                      onChange={(e) => setEndTime(e.target.value)}
-                      className="dl-input"
-                      style={{ width: '100%', colorScheme: 'light' }}
-                    />
-                  </div>
-                </div>
-
-                {validationError && (
-                  <p className="dlx5-invalid" role="alert">
-                    <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-                      <circle cx={12} cy={12} r={10} />
-                      <line x1={12} y1={8} x2={12} y2={12} />
-                      <line x1={12} y1={16} x2="12.01" y2={16} />
-                    </svg>
-                    {validationError}
-                  </p>
-                )}
-
-                <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
                   <button
                     type="button"
                     className="dl-btn dl-btn-primary"
                     onClick={handleSearch}
-                    disabled={isLoading}
+                    disabled={isLoading || !canSearch}
                   >
                     {isLoading ? <Spinner size="xs" /> : <SearchIcon />}
                     {isLoading ? 'Searching…' : 'Search'}
@@ -885,6 +1105,183 @@ export function TroubleshootingPage() {
                     Clear
                   </button>
                 </div>
+
+                {/* Live, always-truthful hint — states exactly what Search will send */}
+                <div className="dlx5-hintstrip" aria-live="polite">
+                  {derived.needleError !== null ? (
+                    <p className="dlx5-hint dlx5-hint-warn">{derived.needleError}</p>
+                  ) : derived.segments.length > 0 ? (
+                    <p className="dlx5-hint">
+                      Searching{' '}
+                      {derived.segments.map((s, i) => (
+                        <React.Fragment key={`${s.label}-${i}`}>
+                          {i > 0 && <span className="dlx5-hint-sep"> · </span>}
+                          {s.label}{' '}
+                          <span className="dlx5-hint-needle">{s.needle}</span>
+                        </React.Fragment>
+                      ))}
+                    </p>
+                  ) : (
+                    <p className="dlx5-hint">
+                      Type a number in any format — full or a 3+ digit partial — or paste a SIP Call-ID.
+                    </p>
+                  )}
+                  {derived.broadSearch && (
+                    <p className="dlx5-hint dlx5-hint-warn">
+                      Broad search — a short needle over a window this large may be slow. Narrow the time range if it drags.
+                    </p>
+                  )}
+                </div>
+
+                {/* Time range — relative presets, resolved at Search time */}
+                <div className="dlx5-timerow">
+                  <div>
+                    <span className="dl-flabel">Time Range</span>
+                    <div className="dlx5-seg" role="group" aria-label="Time range presets">
+                      {TRACE_PRESETS.map((p) => (
+                        <button
+                          key={p.id}
+                          type="button"
+                          aria-pressed={rangePreset === p.id}
+                          className={rangePreset === p.id ? 'dlx5-seg-btn dlx5-seg-btn-active' : 'dlx5-seg-btn'}
+                          onClick={() => setRangePreset(p.id)}
+                        >
+                          {p.label}
+                        </button>
+                      ))}
+                      <button
+                        type="button"
+                        aria-pressed={isCustomRange}
+                        className={isCustomRange ? 'dlx5-seg-btn dlx5-seg-btn-active' : 'dlx5-seg-btn'}
+                        onClick={() => {
+                          // Seed the editable pickers from the window currently shown.
+                          setStartLocal(startPickerValue);
+                          setEndLocal(endPickerValue);
+                          setRangePreset('custom');
+                        }}
+                      >
+                        Custom
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="dlx5-timefield">
+                    <label className="dl-flabel" htmlFor="sip-start">
+                      Start{isCustomRange ? ' (local)' : ''}
+                    </label>
+                    <input
+                      id="sip-start"
+                      type="datetime-local"
+                      value={startPickerValue}
+                      disabled={!isCustomRange}
+                      aria-invalid={derived.rangeError !== null}
+                      onChange={(e) => setStartLocal(e.target.value)}
+                      onKeyDown={handleKeyDown}
+                      className="dl-input"
+                      style={{ width: '100%', colorScheme: 'light' }}
+                    />
+                  </div>
+
+                  <div className="dlx5-timefield">
+                    <label className="dl-flabel" htmlFor="sip-end">
+                      End{isCustomRange ? ' (local)' : ''}
+                    </label>
+                    <input
+                      id="sip-end"
+                      type="datetime-local"
+                      value={endPickerValue}
+                      disabled={!isCustomRange}
+                      aria-invalid={derived.rangeError !== null}
+                      onChange={(e) => setEndLocal(e.target.value)}
+                      onKeyDown={handleKeyDown}
+                      className="dl-input"
+                      style={{ width: '100%', colorScheme: 'light' }}
+                    />
+                  </div>
+                </div>
+
+                {derived.rangeError !== null && (
+                  <p className="dlx5-invalid" role="alert">
+                    <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx={12} cy={12} r={10} />
+                      <line x1={12} y1={8} x2={12} y2={12} />
+                      <line x1={12} y1={16} x2="12.01" y2={16} />
+                    </svg>
+                    {derived.rangeError}
+                  </p>
+                )}
+
+                {/* Advanced — From / To / Call-ID, collapsed by default */}
+                <button
+                  type="button"
+                  className="dlx5-adv-toggle"
+                  aria-expanded={advancedOpen}
+                  onClick={() => setAdvancedOpen((open) => !open)}
+                >
+                  <span className="dlx5-adv-caret" aria-hidden="true">
+                    <svg width={11} height={11} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="9 18 15 12 9 6" />
+                    </svg>
+                  </span>
+                  Advanced
+                  {!advancedOpen && advActiveCount > 0 && (
+                    <span className="dlx5-adv-count">{advActiveCount} active</span>
+                  )}
+                </button>
+
+                {advancedOpen && (
+                  <div className="dlx5-form-grid dlx5-adv">
+                    <div>
+                      <label className="dl-flabel" htmlFor="sip-from">From</label>
+                      <input
+                        id="sip-from"
+                        type="text"
+                        value={fromUser}
+                        onChange={(e) => setFromUser(e.target.value)}
+                        onKeyDown={handleKeyDown}
+                        placeholder="Caller — number (any format) or SIP user"
+                        className="dl-input"
+                        style={{ width: '100%' }}
+                      />
+                      <p className="dl-help">Only calls FROM this number/user.</p>
+                    </div>
+
+                    <div>
+                      <label className="dl-flabel" htmlFor="sip-to">To</label>
+                      <input
+                        id="sip-to"
+                        type="text"
+                        value={toUser}
+                        onChange={(e) => setToUser(e.target.value)}
+                        onKeyDown={handleKeyDown}
+                        placeholder="Callee — number (any format) or SIP user"
+                        className="dl-input"
+                        style={{ width: '100%' }}
+                      />
+                      <p className="dl-help">Only calls TO this number/user.</p>
+                    </div>
+
+                    <div>
+                      <label className="dl-flabel" htmlFor="sip-callid">Call-ID</label>
+                      <input
+                        id="sip-callid"
+                        type="text"
+                        value={advCallIdValue}
+                        disabled={omniIsCallId}
+                        onChange={(e) => setAdvCallId(e.target.value)}
+                        onKeyDown={handleKeyDown}
+                        placeholder="SIP Call-ID"
+                        className="dl-input dl-input-mono"
+                        style={{ width: '100%', fontSize: '0.8rem' }}
+                      />
+                      <p className="dl-help">
+                        {omniIsCallId
+                          ? 'Synced from the search box — clear it to type a Call-ID here.'
+                          : 'Exact-field Call-ID match.'}
+                      </p>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -895,6 +1292,12 @@ export function TroubleshootingPage() {
                 {hasSearched && !isLoading && !isError && (
                   <span className="dl-count" style={{ marginLeft: 'auto' }}>
                     {totalCalls} {totalCalls === 1 ? 'call' : 'calls'} · {totalMessages} messages
+                  </span>
+                )}
+                {hasSearched && lastSearch && (
+                  <span className="dl-panel-sub">
+                    Searched {lastSearch.summary} · {fmtWindowStamp(lastSearch.startIso)} →{' '}
+                    {fmtWindowStamp(lastSearch.endIso)} (local)
                   </span>
                 )}
               </div>
@@ -919,18 +1322,19 @@ export function TroubleshootingPage() {
               {!isLoading && !isError && hasSearched && results.length === 0 && (
                 <div style={{ padding: 20 }}>
                   <div className="dl-empty">
-                    No SIP traces found for your search criteria. Widen the date range or loosen the number match.
+                    No SIP traces matched. Try a wider time range, fewer digits
+                    (any 3+ digit partial matches), or drop an Advanced filter.
                   </div>
                 </div>
               )}
 
-              {!isLoading && !isError && callGroups.length > 0 && (
+              {!isLoading && !isError && callGroups.length > 0 && lastSearch && (
                 <ResultsTable
                   callGroups={callGroups}
                   correlations={correlations}
                   pipelineWarnings={pipelineWarnings}
-                  startTime={startTime}
-                  endTime={endTime}
+                  windowStartIso={lastSearch.startIso}
+                  windowEndIso={lastSearch.endIso}
                 />
               )}
             </div>
