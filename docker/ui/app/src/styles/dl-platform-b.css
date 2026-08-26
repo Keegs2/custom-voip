@@ -14,29 +14,31 @@
    Hand-written @media only (never Tailwind md:* — see CLAUDE.md).
    ═══════════════════════════════════════════════════════════════════════════ */
 
-/* ─── Stat strip — left-keyline figures on one white slab (the statline
-   language from the Call Quality console). Keyline is azure by default;
-   status-measured figures override it inline (green/amber/red). ─── */
-.dlx4-statline {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 14px 36px;
+/* ─── CDR stat strip — one bordered slab divided into equal-height cells by
+   hairline seams. auto-fit/minmax reflows the cells into balanced rows at
+   laptop widths (no orphan wrap, cells stretch to fill); the 1px grid gap
+   over the seam color draws the dividers. Numerals stay neutral ink unless
+   a semantic tone is set inline (green/amber/red/azure). ─── */
+.dlx4-statgrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(148px, 1fr));
+  gap: 1px;
+  background: var(--rcf-line-soft);
+  border: 1px solid var(--rcf-line);
+  border-radius: 12px;
+  overflow: hidden;
 }
 
-.dlx4-stat {
-  min-width: 104px;
-  padding-left: 14px;
-  border-left: 3px solid var(--rcf-azure);
+.dlx4-statcell {
+  background: var(--rcf-card);
+  padding: 14px 16px 12px;
+  min-width: 0;
 }
 
-.dlx4-stat-dim {
-  border-left-color: #c6d2e4;
-}
-
-.dlx4-stat-value {
+.dlx4-statcell-value {
   font-family: "Archivo", "IBM Plex Sans", sans-serif;
   font-weight: 700;
-  font-size: 1.25rem;
+  font-size: 1.22rem;
   line-height: 1.05;
   letter-spacing: -0.01em;
   color: var(--rcf-ink);
@@ -44,7 +46,7 @@
   white-space: nowrap;
 }
 
-.dlx4-stat-label {
+.dlx4-statcell-label {
   margin-top: 5px;
   font-size: 0.6rem;
   font-weight: 700;
@@ -52,14 +54,91 @@
   text-transform: uppercase;
   color: var(--rcf-ink-dim);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-/* ─── CDR filter field row — labelled fields that wrap on one slab ─── */
-.dlx4-filterbar {
+.dlx4-statcell-hint {
+  margin-top: 2px;
+  font-size: 0.66rem;
+  color: var(--rcf-ink-dim);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Hand-written @media (never Tailwind md:*): tighten the cells on small
+   laptops/tablets so seven stats keep two clean rows instead of cramping. */
+@media (max-width: 900px) {
+  .dlx4-statgrid { grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); }
+  .dlx4-statcell { padding: 12px 14px 10px; }
+  .dlx4-statcell-value { font-size: 1.08rem; }
+}
+
+/* ─── CDR filter slab — two wrapping field rows + an action footer ─── */
+.dlx4-filterrow {
   display: flex;
   flex-wrap: wrap;
   gap: 14px 16px;
   align-items: flex-end;
+}
+
+.dlx4-filterrow-time {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--rcf-line-soft);
+}
+
+/* A labelled field — label above control, never squeezed below usability */
+.dlx4-field {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* Footer: inline validation left, Search / Export right */
+.dlx4-filterfoot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--rcf-line-soft);
+}
+
+.dlx4-ferr {
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: var(--rcf-red);
+}
+
+/* ─── CDR results table — horizontal scroll INSIDE the card. All columns
+   are kept; at laptop widths the table pans within the panel instead of
+   running past the viewport edge (min-width lives on the table itself).
+   The scrollbar is styled to stay VISIBLE on the paper canvas — an explicit
+   affordance, so a clipped last column reads as "scroll", not "broken". ─── */
+.dlx4-tablewrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;                        /* Firefox */
+  scrollbar-color: #b7c7dd var(--rcf-tint);     /* Firefox: thumb / track */
+}
+
+.dlx4-tablewrap::-webkit-scrollbar {
+  height: 8px;
+}
+
+.dlx4-tablewrap::-webkit-scrollbar-track {
+  background: var(--rcf-tint);
+}
+
+.dlx4-tablewrap::-webkit-scrollbar-thumb {
+  background: #b7c7dd;
+  border-radius: 999px;
+}
+
+.dlx4-tablewrap::-webkit-scrollbar-thumb:hover {
+  background: #94a9c9;
 }
 
 /* ─── Mono numeric value (DIDs, timestamps, UUIDs) ─── */

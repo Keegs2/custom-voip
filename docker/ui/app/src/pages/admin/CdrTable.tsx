@@ -7,14 +7,22 @@
  * and the open row carries the azure keyline. Direction/product/SBC render
  * as daylight tags; the rated state keeps its green-ok / amber-warn
  * semantics. Expansion + local rated tracking are unchanged.
+ *
+ * Laptop widths: all 14 columns are kept — the table scrolls HORIZONTALLY
+ * inside the card (`dlx4-tablewrap`), never past the panel edge.
+ *
+ * Money: em dash for unrated/absent cost/margin (fmtMoneySmart), color only
+ * on meaningful nonzero values.
  */
 import { useState, useCallback } from 'react';
-import { fmt } from '../../utils/format';
+import { fmt, fmtMoneySmart } from '../../utils/format';
 import { CdrExpandedRow } from './CdrExpandedRow';
 import type { Cdr, ProductType, CallDirection } from '../../types/cdr';
 
 const COLUMN_COUNT = 14;
 
+/** Table timestamps render in the operator's LOCAL timezone (matches the
+    local-time filter pickers, so what you search is what you read). */
 function fmtTime(iso: string): string {
   const d = new Date(iso);
   const pad = (n: number) => String(n).padStart(2, '0');
@@ -22,11 +30,6 @@ function fmtTime(iso: string): string {
     `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ` +
     `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
   );
-}
-
-function fmtMoney4(val: number | null | undefined): string {
-  if (val == null) return '--';
-  return `$${val.toFixed(4)}`;
 }
 
 function fmtDurationSec(sec: number): string {
@@ -49,8 +52,9 @@ function SbcTag({ sbcId }: { sbcId: string | null | undefined }) {
   if (!sbcId) return <span style={{ fontSize: '0.78rem', color: 'var(--rcf-ink-dim)' }}>--</span>;
   // Heuristic (unchanged): ids ending in "2" get the second-SBC tone.
   const isSbc2 = /2$/.test(sbcId);
-  // Shorten display: strip common "east-" prefix so it fits in the column.
-  const label = sbcId.replace(/^east-/, '');
+  // Shorten display: strip the zone prefix so it fits in the column (the
+  // full id stays visible in the expanded-row SIP detail).
+  const label = sbcId.replace(/^(east|west|central)-/, '');
   return <span className={isSbc2 ? 'dl-tag dlx4-tag-sky' : 'dl-tag'}>{label}</span>;
 }
 
@@ -84,7 +88,7 @@ export function CdrTable({ cdrs, customerNames }: CdrTableProps) {
 
   return (
     <section className="dl-panel">
-      <div style={{ overflowX: 'auto' }}>
+      <div className="dlx4-tablewrap">
         <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 1080 }}>
           <thead>
             <tr>
@@ -108,8 +112,16 @@ export function CdrTable({ cdrs, customerNames }: CdrTableProps) {
             {cdrs.map((cdr) => {
               const isExpanded = expandedUuid === cdr.uuid;
               const isRated = cdr.rated_at != null || localRated.has(cdr.uuid);
-              const margin = cdr.margin ?? 0;
-              const marginColor = margin >= 0 ? 'var(--rcf-green)' : 'var(--rcf-red)';
+              // Color only meaningful nonzero money — null (unrated) and $0
+              // both read neutral, not red/green.
+              const marginColor =
+                cdr.margin == null || cdr.margin === 0
+                  ? 'var(--rcf-ink-dim)'
+                  : cdr.margin > 0 ? 'var(--rcf-green)' : 'var(--rcf-red)';
+              const billedColor =
+                cdr.total_cost != null && cdr.total_cost > 0
+                  ? 'var(--rcf-azure-deep)'
+                  : 'var(--rcf-ink-dim)';
               const hangupOk = cdr.hangup_cause === 'NORMAL_CLEARING';
 
               return [
@@ -145,20 +157,18 @@ export function CdrTable({ cdrs, customerNames }: CdrTableProps) {
                     </span>
                   </td>
                   <td className="dlx-td">
-                    <span style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600, color: 'var(--rcf-azure-deep)' }}>
-                      {fmtMoney4(cdr.total_cost)}
+                    <span style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600, color: billedColor }}>
+                      {fmtMoneySmart(cdr.total_cost)}
                     </span>
                   </td>
                   <td className="dlx-td">
                     <span style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--rcf-ink-dim)' }}>
-                      {cdr.carrier_cost != null && cdr.carrier_cost > 0
-                        ? fmtMoney4(cdr.carrier_cost)
-                        : '--'}
+                      {fmtMoneySmart(cdr.carrier_cost)}
                     </span>
                   </td>
                   <td className="dlx-td">
                     <span style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600, color: marginColor }}>
-                      {cdr.margin != null ? fmtMoney4(cdr.margin) : '--'}
+                      {fmtMoneySmart(cdr.margin)}
                     </span>
                   </td>
                   <td className="dlx-td">

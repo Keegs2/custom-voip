@@ -2,6 +2,8 @@ import type { TrafficGrade } from './customer';
 
 export type ProductType = 'rcf' | 'api' | 'trunk';
 export type CallDirection = 'inbound' | 'outbound';
+/** Deployment zone — one self-contained SIP stack per GCP region. */
+export type CdrZone = 'east' | 'west' | 'central';
 
 export interface Cdr {
   uuid: string;
@@ -68,16 +70,31 @@ export interface Cdr {
   network_addr?: string | null;
 }
 
+/**
+ * Query params for GET /cdrs (and, minus pagination, GET /cdrs/summary —
+ * the API accepts the identical filter set on both).
+ *
+ * IMPORTANT — wire names: the API declares `start_date` / `end_date`
+ * (ISO 8601 UTC). FastAPI silently drops undeclared query params, so any
+ * other name (the old `start_from`/`start_to`) never reaches the endpoint
+ * and the API falls back to its last-24-hours default.
+ */
 export interface CdrSearchParams {
   customer_id?: number;
   product_type?: ProductType;
   direction?: CallDirection;
   caller_id?: string;
   destination?: string;
-  start_from?: string;
-  start_to?: string;
+  /** Range start — ISO 8601 UTC instant (e.g. 2026-08-04T13:30:00.000Z). */
+  start_date?: string;
+  /** Range end — ISO 8601 UTC instant. */
+  end_date?: string;
   hangup_cause?: string;
+  /** Zone filter — east | west | central (omit for all zones). */
+  zone?: CdrZone;
   sbc_id?: string;
+  /** Only CDRs that have been rated (rated_at IS NOT NULL). */
+  rated_only?: boolean;
   limit?: number;
   offset?: number;
   sort_by?: string;
