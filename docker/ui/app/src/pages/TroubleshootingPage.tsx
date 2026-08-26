@@ -185,7 +185,7 @@ function deriveSearch(form: SearchFormState): DerivedSearch {
   if (omniC.kind === 'number') {
     segments.push({ label: 'for numbers containing', needle: groupDigits(omniC.digits) });
   } else if (omniC.kind === 'callid') {
-    segments.push({ label: 'Call-ID containing', needle: `“${form.omni.trim()}”` });
+    segments.push({ label: 'Call-ID (exact match)', needle: `“${form.omni.trim()}”` });
   }
   if (fromC.kind === 'number') {
     segments.push({ label: 'From containing', needle: groupDigits(fromC.digits) });
@@ -1239,7 +1239,7 @@ export function TroubleshootingPage() {
                         value={fromUser}
                         onChange={(e) => setFromUser(e.target.value)}
                         onKeyDown={handleKeyDown}
-                        placeholder="Caller — number (any format) or SIP user"
+                        placeholder="Caller — number, any format (3+ digits)"
                         className="dl-input"
                         style={{ width: '100%' }}
                       />
@@ -1254,7 +1254,7 @@ export function TroubleshootingPage() {
                         value={toUser}
                         onChange={(e) => setToUser(e.target.value)}
                         onKeyDown={handleKeyDown}
-                        placeholder="Callee — number (any format) or SIP user"
+                        placeholder="Callee — number, any format (3+ digits)"
                         className="dl-input"
                         style={{ width: '100%' }}
                       />
