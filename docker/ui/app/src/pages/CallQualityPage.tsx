@@ -8,18 +8,22 @@
  *   1. Quiet header — breadcrumb, Archivo title, inline metrics off loaded data
  *   2. Filter toolbar — customer, trunk, number search, direction, dates, product
  *   3. Quality overview stat strip — Total Calls, ASR, MOS, Packet Loss, Jitter, R-Factor
- *   4. Quality trend charts — MOS, Packet Loss, Jitter over time (light-recolored SVG)
+ *   4. Quality trend charts — MOS, Packet Loss, Jitter daily averages via the
+ *      shared <QualityTrendChart> (true-pixel SVG, honest gap rendering,
+ *      good/fair/poor reference bands — see components/charts/)
  *   5. Full CDR table — sortable, searchable, paginated with quality columns
  *   6. Call detail sheet — white elevated slide-out with full RTP/quality/billing data
  */
 
-import { useState, useMemo, useId, useCallback, useEffect } from 'react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { searchCdrs, getCdr } from '../api/cdrs';
 import { listCustomers } from '../api/customers';
 import { listTrunks } from '../api/trunks';
 import { Spinner } from '../components/ui/Spinner';
 import { AttestationChain } from '../components/stir/AttestationChain';
+import { QualityTrendChart } from '../components/charts/QualityTrendChart';
+import type { TrendBand, TrendDomain, TrendPoint } from '../components/charts/QualityTrendChart';
 import type { Cdr, CallDirection, ProductType } from '../types/cdr';
 import type { Customer } from '../types/customer';
 import type { Trunk } from '../types/trunk';
@@ -34,7 +38,6 @@ const MONO = '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace';
 const INK_SOFT = '#46566f';
 const INK_DIM = '#5d6f8c';
 const INK_FAINT = '#8b99b0';
-const AZURE = '#2f7df6';
 const AZURE_DEEP = '#1d63dd';
 
 // Status colors — quality semantics only (never decoration). Ink-dark variants
@@ -43,8 +46,12 @@ const GOOD = '#15803d';
 const WARN = '#b45309';
 const BAD = '#b91c1c';
 
-// Chart series strokes (slightly brighter than the text-status greens)
+// Trend-chart series strokes — semantic families (MOS green, packet loss
+// rose, jitter azure) kept distinct from the good/fair/poor band tones the
+// charts overlay.
 const CHART_GREEN = '#16a34a';
+const CHART_ROSE = '#be123c';
+const CHART_AZURE = AZURE_DEEP;
 
 // ---------------------------------------------------------------------------
 // Quality colour helpers — red/amber/green status semantics
@@ -107,175 +114,74 @@ function fmtBytes(bytes: number | null | undefined): string {
 }
 
 // ---------------------------------------------------------------------------
-// Quality Trend Chart (SVG line/area) — recolored for the daylight canvas:
-// ink-scale axes/labels, white-filled dots with colored strokes, low-opacity
-// area gradients, hairline ink grid. No glow filters, no dark boxes.
+// Quality trend chart configuration — reference bands, y-domains, formatters.
+//
+// Thresholds are the industry framing for voice-quality telemetry:
+//   MOS          ≥ 4.0 good · 3.6–4.0 fair · < 3.6 poor   (fixed 1–5 axis)
+//   Packet loss  ≤ 1% good · 1–2.5% fair · > 2.5% poor
+//   Jitter       ≤ 30ms good · 30–50ms fair · > 50ms poor
+// (The CDR-table cell colors above use their own long-standing cutoffs; these
+// band values are the chart annotation standard, deliberately explicit here.)
+//
+// Module-scope constants so the chart's geometry memo keeps stable inputs.
 // ---------------------------------------------------------------------------
 
-interface TrendPoint {
-  date: string;
-  label: string;
-  value: number | null;
-}
+const MOS_BANDS: TrendBand[] = [
+  { from: 4.0, to: Infinity, tone: 'good', label: 'good ≥ 4.0' },
+  { from: 3.6, to: 4.0, tone: 'fair', label: 'fair 3.6–4.0', edge: 4.0 },
+  { from: -Infinity, to: 3.6, tone: 'poor', label: 'poor < 3.6', edge: 3.6 },
+];
+const MOS_DOMAIN: TrendDomain = { min: 1, max: 5 };
 
-interface QualityTrendChartProps {
-  points: TrendPoint[];
-  accent: string;
-  label: string;
-  formatY: (v: number) => string;
-  yMin?: number;
-  yMax?: number;
-}
+const LOSS_BANDS: TrendBand[] = [
+  { from: 0, to: 1, tone: 'good', label: 'good ≤ 1%' },
+  { from: 1, to: 2.5, tone: 'fair', label: 'fair 1–2.5%', edge: 1 },
+  { from: 2.5, to: Infinity, tone: 'poor', label: 'poor > 2.5%', edge: 2.5 },
+];
+// Auto-scale from data, but always show at least 0–3.5% so both thresholds
+// stay on the chart when loss is (as it should be) near zero.
+const LOSS_DOMAIN: TrendDomain = { min: 0, max: 'auto', autoFloor: 3.5 };
 
-function QualityTrendChart({ points, accent, label, formatY, yMin, yMax }: QualityTrendChartProps) {
-  const gradId = useId();
+const JITTER_BANDS: TrendBand[] = [
+  { from: 0, to: 30, tone: 'good', label: 'good ≤ 30ms' },
+  { from: 30, to: 50, tone: 'fair', label: 'fair 30–50ms', edge: 30 },
+  { from: 50, to: Infinity, tone: 'poor', label: 'poor > 50ms', edge: 50 },
+];
+const JITTER_DOMAIN: TrendDomain = { min: 0, max: 'auto', autoFloor: 60 };
 
-  const validValues = points.map((p) => p.value).filter((v): v is number => v != null);
-  const dataMin = validValues.length > 0 ? Math.min(...validValues) : 0;
-  const dataMax = validValues.length > 0 ? Math.max(...validValues) : 1;
-
-  const visMin = yMin ?? Math.max(0, dataMin - (dataMax - dataMin) * 0.15);
-  const visMax = yMax ?? (dataMax + (dataMax - dataMin) * 0.15 || 1);
-  const range = visMax - visMin || 1;
-
-  const W = 500;
-  const H = 160;
-  const PAD_L = 44;
-  const PAD_R = 12;
-  const PAD_T = 14;
-  const PAD_B = 28;
-  const chartW = W - PAD_L - PAD_R;
-  const chartH = H - PAD_T - PAD_B;
-
-  const coords = points.map((p, i) => ({
-    x: PAD_L + (i / Math.max(points.length - 1, 1)) * chartW,
-    y: p.value != null
-      ? PAD_T + chartH - ((p.value - visMin) / range) * chartH
-      : null,
-    point: p,
-  }));
-
-  function buildPathSegments(): string[] {
-    const segments: string[] = [];
-    let current: string | null = null;
-
-    for (let i = 0; i < coords.length; i++) {
-      const c = coords[i];
-      if (c.y == null) {
-        if (current) { segments.push(current); current = null; }
-        continue;
-      }
-      if (current == null) {
-        current = `M ${c.x.toFixed(2)} ${c.y.toFixed(2)}`;
-      } else {
-        const prev2 = coords[Math.max(i - 2, 0)];
-        const prev1 = coords[i - 1];
-        const next1 = coords[Math.min(i + 1, coords.length - 1)];
-        const p0 = { x: prev2.x, y: prev2.y ?? c.y };
-        const p1 = { x: prev1.x, y: prev1.y ?? c.y };
-        const p2 = { x: c.x, y: c.y };
-        const p3 = { x: next1.x, y: next1.y ?? c.y };
-        const t = 0.3;
-        const cp1x = p1.x + (p2.x - p0.x) * t;
-        const cp1y = p1.y + (p2.y - p0.y) * t;
-        const cp2x = p2.x - (p3.x - p1.x) * t;
-        const cp2y = p2.y - (p3.y - p1.y) * t;
-        current += ` C ${cp1x.toFixed(2)} ${cp1y.toFixed(2)}, ${cp2x.toFixed(2)} ${cp2y.toFixed(2)}, ${p2.x.toFixed(2)} ${p2.y.toFixed(2)}`;
-      }
-    }
-    if (current) segments.push(current);
-    return segments;
-  }
-
-  const pathSegments = buildPathSegments();
-  const firstSegment = pathSegments[0] ?? '';
-  const firstStart = coords.find((c) => c.y != null);
-  const firstEnd = [...coords].reverse().find((c) => c.y != null);
-  const areaPath = firstSegment && firstStart && firstEnd
-    ? `${firstSegment} L ${firstEnd.x.toFixed(2)} ${(PAD_T + chartH).toFixed(2)} L ${firstStart.x.toFixed(2)} ${(PAD_T + chartH).toFixed(2)} Z`
-    : '';
-
-  const gridLines = [0, 0.25, 0.5, 0.75, 1].map((frac) => ({
-    y: PAD_T + chartH - frac * chartH,
-    value: visMin + frac * range,
-  }));
-
-  const LABEL_EVERY = Math.ceil(points.length / 6);
-
-  return (
-    <div className="dlx-chart-box">
-      <div className="dlx-chart-title">
-        <span className="dlx-chart-dot" style={{ background: accent }} aria-hidden="true" />
-        {label}
-      </div>
-      <svg
-        viewBox={`0 0 ${W} ${H}`}
-        style={{ width: '100%', height: 'auto', display: 'block', minHeight: 140 }}
-        aria-label={label}
-      >
-        <defs>
-          <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor={accent} stopOpacity={0.14} />
-            <stop offset="100%" stopColor={accent} stopOpacity={0} />
-          </linearGradient>
-        </defs>
-
-        {gridLines.map(({ y, value }) => (
-          <g key={value}>
-            <line x1={PAD_L} y1={y} x2={W - PAD_R} y2={y} stroke="rgba(14,23,38,0.05)" strokeWidth={1} />
-            <text x={PAD_L - 6} y={y + 4} textAnchor="end" fontSize={9} fill="#7c8ba3" fontFamily={MONO}>
-              {formatY(value)}
-            </text>
-          </g>
-        ))}
-
-        {areaPath && <path d={areaPath} fill={`url(#${gradId})`} />}
-
-        {pathSegments.map((d, i) => (
-          <path key={i} d={d} fill="none" stroke={accent} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
-        ))}
-
-        {coords.map((c) => {
-          if (c.y == null) return null;
-          return (
-            <g key={c.point.date}>
-              <circle cx={c.x} cy={c.y} r={2.5} fill="#ffffff" stroke={accent} strokeWidth={1.5} />
-              <title>{c.point.label}: {c.point.value != null ? formatY(c.point.value) : '—'}</title>
-            </g>
-          );
-        })}
-
-        {coords.map((c, i) => {
-          if (i % LABEL_EVERY !== 0) return null;
-          return (
-            <text key={c.point.date} x={c.x} y={H - 6} textAnchor="middle" fontSize={9} fill="#8b99b0" fontFamily="system-ui, sans-serif">
-              {c.point.label}
-            </text>
-          );
-        })}
-      </svg>
-    </div>
-  );
-}
+const fmtMosValue = (v: number): string => v.toFixed(2);
+const fmtMosTick = (v: number): string => String(Math.round(v));
+const fmtLossValue = (v: number): string => `${v.toFixed(2)}%`;
+const fmtLossTick = (v: number): string => `${parseFloat(v.toFixed(2))}%`;
+const fmtJitterValue = (v: number): string => `${v.toFixed(1)} ms`;
+const fmtJitterTick = (v: number): string => `${parseFloat(v.toFixed(1))}`;
 
 // ---------------------------------------------------------------------------
-// Build daily quality buckets from CDR array
+// Build daily quality buckets from CDR array — one slot for EVERY day of the
+// selected range (continuous axis; days without data stay null and render as
+// honest gaps), plus per-day sample counts so the chart tooltips can show
+// how many calls each average summarizes.
 // ---------------------------------------------------------------------------
 
 interface DailyQuality {
   date: string;
-  label: string;
+  /** All CDRs bucketed to this day (answered or not). */
+  totalCalls: number;
   avgMos: number | null;
+  mosCount: number;
   avgPacketLossPct: number | null;
+  plCount: number;
   avgJitterMs: number | null;
+  jCount: number;
 }
 
 function buildDailyQuality(cdrs: Cdr[], startDate: Date, endDate: Date): DailyQuality[] {
-  const byDate = new Map<string, { mosSum: number; mosCount: number; plSum: number; plCount: number; jSum: number; jCount: number }>();
+  const byDate = new Map<string, { calls: number; mosSum: number; mosCount: number; plSum: number; plCount: number; jSum: number; jCount: number }>();
 
   for (const cdr of cdrs) {
     const key = cdr.start_time.slice(0, 10);
-    const bucket = byDate.get(key) ?? { mosSum: 0, mosCount: 0, plSum: 0, plCount: 0, jSum: 0, jCount: 0 };
+    const bucket = byDate.get(key) ?? { calls: 0, mosSum: 0, mosCount: 0, plSum: 0, plCount: 0, jSum: 0, jCount: 0 };
+    bucket.calls++;
     if (cdr.mos != null) { bucket.mosSum += cdr.mos; bucket.mosCount++; }
     if (cdr.packet_loss_pct != null) { bucket.plSum += cdr.packet_loss_pct; bucket.plCount++; }
     if (cdr.jitter_avg_ms != null) { bucket.jSum += cdr.jitter_avg_ms; bucket.jCount++; }
@@ -286,17 +192,20 @@ function buildDailyQuality(cdrs: Cdr[], startDate: Date, endDate: Date): DailyQu
   const msPerDay = 86400000;
   const dayCount = Math.round((endDate.getTime() - startDate.getTime()) / msPerDay);
 
-  for (let i = 0; i <= Math.min(dayCount, 60); i++) {
-    const d = new Date(startDate.getTime() + i * msPerDay);
-    const key = d.toISOString().slice(0, 10);
-    const label = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  // Cover the FULL selected range (the old 60-day cap silently truncated the
+  // axis); 365 is a defensive ceiling against absurd ranges.
+  for (let i = 0; i <= Math.min(dayCount, 365); i++) {
+    const key = new Date(startDate.getTime() + i * msPerDay).toISOString().slice(0, 10);
     const b = byDate.get(key);
     slots.push({
       date: key,
-      label,
+      totalCalls: b?.calls ?? 0,
       avgMos: b && b.mosCount > 0 ? b.mosSum / b.mosCount : null,
+      mosCount: b?.mosCount ?? 0,
       avgPacketLossPct: b && b.plCount > 0 ? b.plSum / b.plCount : null,
+      plCount: b?.plCount ?? 0,
       avgJitterMs: b && b.jCount > 0 ? b.jSum / b.jCount : null,
+      jCount: b?.jCount ?? 0,
     });
   }
   return slots;
@@ -1062,9 +971,13 @@ export function CallQualityPage() {
 
   const dailyQuality = useMemo(() => buildDailyQuality(allCdrs, startDateObj, endDateObj), [allCdrs, startDateObj, endDateObj]);
 
-  const mosPts = dailyQuality.map((d) => ({ date: d.date, label: d.label, value: d.avgMos }));
-  const plPts = dailyQuality.map((d) => ({ date: d.date, label: d.label, value: d.avgPacketLossPct }));
-  const jPts = dailyQuality.map((d) => ({ date: d.date, label: d.label, value: d.avgJitterMs }));
+  // One TrendPoint series per metric — value + per-day sample size for the
+  // chart tooltips ("N of M calls scored").
+  const trendPoints = useMemo(() => ({
+    mos: dailyQuality.map((d): TrendPoint => ({ date: d.date, value: d.avgMos, sampleCount: d.mosCount, totalCalls: d.totalCalls })),
+    loss: dailyQuality.map((d): TrendPoint => ({ date: d.date, value: d.avgPacketLossPct, sampleCount: d.plCount, totalCalls: d.totalCalls })),
+    jitter: dailyQuality.map((d): TrendPoint => ({ date: d.date, value: d.avgJitterMs, sampleCount: d.jCount, totalCalls: d.totalCalls })),
+  }), [dailyQuality]);
 
   const handleSelect = useCallback((cdr: Cdr) => {
     setSelectedCdr((prev) => (prev?.uuid === cdr.uuid ? null : cdr));
@@ -1298,7 +1211,9 @@ export function CallQualityPage() {
           <div className="dl-panel fx-load fx-load-d3">
             <div className="dl-panel-head">
               <span className="dl-panel-title">Quality Trends</span>
-              <span className="dl-panel-sub">Daily averages across the selected date range.</span>
+              <span className="dl-panel-sub">
+                Daily averages across the selected date range — gaps in a line are days with no measured calls.
+              </span>
             </div>
             {isLoading ? (
               sectionLoading('Building charts…')
@@ -1312,26 +1227,43 @@ export function CallQualityPage() {
               <div className="dl-panel-body">
                 <div className="dlx-chart-grid">
                   <QualityTrendChart
-                    points={mosPts}
+                    points={trendPoints.mos}
                     accent={CHART_GREEN}
-                    label="MOS Score — Daily Avg"
-                    formatY={(v) => v.toFixed(2)}
-                    yMin={1}
-                    yMax={5}
+                    title="MOS — perceived voice quality"
+                    subtitle="1 (bad) to 5 (excellent) · daily average of scored calls."
+                    axisTitle="MOS (1–5)"
+                    bands={MOS_BANDS}
+                    domain={MOS_DOMAIN}
+                    formatValue={fmtMosValue}
+                    formatTick={fmtMosTick}
+                    sampleNoun="scored"
+                    emptyMessage="No MOS scores in this range — MOS is recorded for answered calls with RTP statistics."
                   />
                   <QualityTrendChart
-                    points={plPts}
-                    accent={AZURE}
-                    label="Packet Loss % — Daily Avg"
-                    formatY={(v) => `${v.toFixed(2)}%`}
-                    yMin={0}
+                    points={trendPoints.loss}
+                    accent={CHART_ROSE}
+                    title="Packet loss — media integrity"
+                    subtitle="% of RTP audio packets lost in transit · daily average per call, lower is better."
+                    axisTitle="Packet loss (%)"
+                    bands={LOSS_BANDS}
+                    domain={LOSS_DOMAIN}
+                    formatValue={fmtLossValue}
+                    formatTick={fmtLossTick}
+                    sampleNoun="measured"
+                    emptyMessage="No packet-loss measurements in this range — recorded for calls with RTP statistics."
                   />
                   <QualityTrendChart
-                    points={jPts}
-                    accent={AZURE_DEEP}
-                    label="Jitter (avg ms) — Daily"
-                    formatY={(v) => `${v.toFixed(1)}ms`}
-                    yMin={0}
+                    points={trendPoints.jitter}
+                    accent={CHART_AZURE}
+                    title="Jitter — arrival-timing variation"
+                    subtitle="Variation in RTP packet arrival, in ms · daily average per call, lower is steadier audio."
+                    axisTitle="Jitter (ms)"
+                    bands={JITTER_BANDS}
+                    domain={JITTER_DOMAIN}
+                    formatValue={fmtJitterValue}
+                    formatTick={fmtJitterTick}
+                    sampleNoun="measured"
+                    emptyMessage="No jitter measurements in this range — recorded for calls with RTP statistics."
                   />
                 </div>
               </div>

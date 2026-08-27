@@ -95,44 +95,20 @@
   font-weight: 700;
 }
 
-/* ─── Trend chart cards — tinted boxes inside the white Quality Trends
-   panel (dl-tile family: tint fill, soft hairline, 10px radius). ─── */
+/* ─── Quality Trends chart grid — hosts the shared <QualityTrendChart>
+   cards (dl-qtc-*, see dl-trend-chart.css). Charts stack full-width by
+   default so each one gets a wide, readable plot; the 3-across row returns
+   only when the shell is at full width (~340px per chart at the 1200px
+   shell cap). minmax(0, 1fr) keeps the ResizeObserver-measured SVGs from
+   ever overflowing the panel. ─── */
 .dlx-chart-grid {
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: minmax(0, 1fr);
   gap: 16px;
 }
 
-@media (min-width: 920px) {
+@media (min-width: 1240px) {
   .dlx-chart-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-}
-
-.dlx-chart-box {
-  background: var(--rcf-tint);
-  border: 1px solid var(--rcf-line-soft);
-  border-radius: 10px;
-  padding: 12px 12px 4px;
-  min-width: 0;
-}
-
-.dlx-chart-title {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 0.6rem;
-  font-weight: 700;
-  letter-spacing: 0.09em;
-  text-transform: uppercase;
-  color: var(--rcf-ink-soft);
-  margin-bottom: 8px;
-}
-
-/* Series swatch dot in the chart title */
-.dlx-chart-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  flex-shrink: 0;
 }
 
 /* ─── Sortable table headers — used together with the shared .dl-th ─── */
