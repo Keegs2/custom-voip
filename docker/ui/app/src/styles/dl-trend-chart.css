@@ -1,0 +1,162 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   dl-trend-chart.css — shared daylight styles for <QualityTrendChart>
+   (src/components/charts/QualityTrendChart.tsx).
+
+   The `dl-qtc-` prefix marks these as shared chart-component scope — used by
+   CallQualityPage's Quality Trends row today, safe for any daylight page.
+   Every color references the shared `--rcf-*` custom properties declared on
+   `.dl-scope`. Responsive layout is hand-written @media only (never Tailwind
+   md:* — see CLAUDE.md); the chart measures its container via ResizeObserver
+   and renders the SVG at true pixel scale, so text sizes here and in the SVG
+   are real pixels — nothing is viewBox-shrunk.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Card — tint fill + soft hairline (dl-tile family) */
+.dl-qtc {
+  min-width: 0;
+  background: var(--rcf-tint);
+  border: 1px solid var(--rcf-line-soft);
+  border-radius: 10px;
+  padding: 14px 14px 10px;
+}
+
+.dl-qtc-head {
+  margin-bottom: 6px;
+}
+
+.dl-qtc-titlerow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Series color swatch beside the title */
+.dl-qtc-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.dl-qtc-title {
+  font-family: "Archivo", "IBM Plex Sans", sans-serif;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--rcf-ink);
+}
+
+/* Plain-language explainer under the title */
+.dl-qtc-sub {
+  margin-top: 3px;
+  font-size: 0.72rem;
+  line-height: 1.45;
+  color: var(--rcf-ink-dim);
+}
+
+/* Threshold legend — one chip per reference band, exact ranges in text.
+   Chip text color is set inline to the band's ink-dark status color. */
+.dl-qtc-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 14px;
+  margin: 8px 0 6px;
+}
+
+.dl-qtc-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.dl-qtc-legend-swatch {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+/* Plot frame — position context for the tooltip; fixed height so the grid
+   keeps its rhythm before the ResizeObserver delivers a width. */
+.dl-qtc-frame {
+  position: relative;
+  min-width: 0;
+}
+
+.dl-qtc-svg {
+  display: block;
+  width: 100%;
+}
+
+/* Hover tooltip — white elevated card, clamped inside the frame by the
+   component so it can never escape the panel. */
+.dl-qtc-tip {
+  position: absolute;
+  z-index: 5;
+  pointer-events: none;
+  min-width: 132px;
+  max-width: 216px;
+  padding: 8px 11px;
+  background: var(--rcf-card);
+  border: 1px solid var(--rcf-line);
+  border-radius: 8px;
+  box-shadow:
+    0 2px 6px rgba(14, 23, 38, 0.08),
+    0 12px 28px -12px rgba(14, 23, 38, 0.28);
+}
+
+.dl-qtc-tip-date {
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--rcf-ink-dim);
+  white-space: nowrap;
+}
+
+.dl-qtc-tip-value {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  margin-top: 3px;
+  font-family: "Archivo", "IBM Plex Sans", sans-serif;
+  font-size: 1.02rem;
+  font-weight: 700;
+  color: var(--rcf-ink);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Band tone word beside the value ("good" / "fair" / "poor") */
+.dl-qtc-tip-tone {
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.dl-qtc-tip-sub {
+  margin-top: 3px;
+  font-size: 0.7rem;
+  color: var(--rcf-ink-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Metric-has-no-data state — same footprint as the SVG (height set inline
+   from the component's layout constant) so the three cards stay aligned. */
+.dl-qtc-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 0 22px;
+  border: 1px dashed var(--rcf-line);
+  border-radius: 8px;
+  background: var(--rcf-card);
+  color: var(--rcf-ink-dim);
+  font-size: 0.76rem;
+  line-height: 1.55;
+}
