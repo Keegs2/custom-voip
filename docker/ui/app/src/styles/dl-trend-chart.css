@@ -4,7 +4,7 @@
 
    The `dl-qtc-` prefix marks these as shared chart-component scope — used by
    CallQualityPage's Quality Trends row today, safe for any daylight page.
-   Every color references the shared `--rcf-*` custom properties declared on
+   Colors reference the shared `--rcf-*` custom properties declared on
    `.dl-scope`. Responsive layout is hand-written @media only (never Tailwind
    md:* — see CLAUDE.md); the chart measures its container via ResizeObserver
    and renders the SVG at true pixel scale, so text sizes here and in the SVG
@@ -20,17 +20,14 @@
   padding: 14px 14px 10px;
 }
 
-.dl-qtc-head {
-  margin-bottom: 6px;
-}
-
+/* Header — series color dot + short metric label, nothing else */
 .dl-qtc-titlerow {
   display: flex;
   align-items: center;
   gap: 8px;
+  margin-bottom: 6px;
 }
 
-/* Series color swatch beside the title */
 .dl-qtc-swatch {
   width: 10px;
   height: 10px;
@@ -44,40 +41,6 @@
   font-weight: 700;
   letter-spacing: 0.01em;
   color: var(--rcf-ink);
-}
-
-/* Plain-language explainer under the title */
-.dl-qtc-sub {
-  margin-top: 3px;
-  font-size: 0.72rem;
-  line-height: 1.45;
-  color: var(--rcf-ink-dim);
-}
-
-/* Threshold legend — one chip per reference band, exact ranges in text.
-   Chip text color is set inline to the band's ink-dark status color. */
-.dl-qtc-legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px 14px;
-  margin: 8px 0 6px;
-}
-
-.dl-qtc-legend-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 0.68rem;
-  font-weight: 600;
-  white-space: nowrap;
-  font-variant-numeric: tabular-nums;
-}
-
-.dl-qtc-legend-swatch {
-  width: 9px;
-  height: 9px;
-  border-radius: 2px;
-  flex-shrink: 0;
 }
 
 /* Plot frame — position context for the tooltip; fixed height so the grid
@@ -119,23 +82,12 @@
 }
 
 .dl-qtc-tip-value {
-  display: flex;
-  align-items: baseline;
-  gap: 7px;
   margin-top: 3px;
   font-family: "Archivo", "IBM Plex Sans", sans-serif;
   font-size: 1.02rem;
   font-weight: 700;
   color: var(--rcf-ink);
   font-variant-numeric: tabular-nums;
-}
-
-/* Band tone word beside the value ("good" / "fair" / "poor") */
-.dl-qtc-tip-tone {
-  font-size: 0.62rem;
-  font-weight: 700;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
 }
 
 .dl-qtc-tip-sub {
