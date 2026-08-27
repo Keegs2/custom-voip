@@ -1,5 +1,5 @@
 /**
- * CdrStatsBar — aggregate stats for the current CDR result set.
+ * CdrStatsBar — aggregate stats for the CURRENT PAGE of CDR results.
  *
  * Styling: the shared DAYLIGHT CONSOLE system — one bordered slab divided
  * into equal-height cells by hairline seams (`dlx4-statgrid` in
@@ -10,9 +10,13 @@
  * Money semantics: em dash when nothing in the set is rated (no fake
  * "$0.0000"), and color only on meaningful nonzero values.
  *
- * Except for Total Calls (server-side total), aggregates are computed
- * client-side over the LOADED rows — the "N loaded" hint says so when the
- * set is partial.
+ * SCOPE HONESTY: with real pagination, `cdrs` is exactly one page — so
+ * every aggregate here is deliberately PAGE-SCOPED and the strip says so
+ * (lead cell "This Page", with the full match count as its hint when the
+ * API reports one; the pagination bar carries "Showing X–Y of Z"). Do NOT
+ * try to fake platform-wide stats client-side from one page of rows —
+ * whole-result-set aggregation is the Summary tab's job (/cdrs/summary
+ * aggregates server-side over the same committed filter set).
  */
 import { useMemo } from 'react';
 import { fmtMoneySmart } from '../../utils/format';
@@ -55,8 +59,10 @@ function StatCell({ label, value, tone, hint }: StatCellProps) {
 }
 
 interface CdrStatsBarProps {
+  /** The rows on the CURRENT page — every aggregate below is page-scoped. */
   cdrs: Cdr[];
-  total: number;
+  /** Full match count across all pages — absent until the API ships `total`. */
+  total?: number;
 }
 
 export function CdrStatsBar({ cdrs, total }: CdrStatsBarProps) {
@@ -83,14 +89,15 @@ export function CdrStatsBar({ cdrs, total }: CdrStatsBarProps) {
     ? undefined
     : stats.totalMargin > 0 ? GOOD : BAD;
 
-  const partial = stats.loaded < total;
-
   return (
-    <section className="dlx4-statgrid" aria-label="CDR result aggregates">
+    <section className="dlx4-statgrid" aria-label="CDR aggregates for the current page">
+      {/* Lead cell anchors the strip's scope: everything here summarizes
+          THIS page. The full match count rides along as the hint (the
+          pagination bar owns "Showing X–Y of Z" as the primary readout). */}
       <StatCell
-        label="Total Calls"
-        value={total.toLocaleString()}
-        hint={partial ? `${stats.loaded.toLocaleString()} loaded` : undefined}
+        label="This Page"
+        value={stats.loaded.toLocaleString()}
+        hint={total != null ? `of ${total.toLocaleString()} matching` : undefined}
       />
       <StatCell label="Answered" value={stats.answered.toLocaleString()} />
       <StatCell label="ASR" value={`${stats.asr.toFixed(1)}%`} tone={asrTone} />

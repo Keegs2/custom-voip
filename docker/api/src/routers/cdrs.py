@@ -989,6 +989,10 @@ async def query_cdrs(
         sbc_id prefix ("{zone}-sbc-{n}"); NULL-sbc_id rows never match.
       * sbc_id — exact match, retained for back-compat.
       * destination — literal prefix match.
+
+    Response: {cdrs, count, total, offset, limit}. `count` is the RETURNED
+    page's row count (back-compat); `total` is COUNT(*) over the same filters
+    WITHOUT limit/offset — the real-pagination denominator.
     """
     # Tenants are hard-scoped to their own customer (ignore any client value).
     if customer_filter is not None:
@@ -1015,6 +1019,14 @@ async def query_cdrs(
         zone=zone,
         rated_only=rated_only,
     )
+
+    # Real-pagination total: COUNT(*) over the EXACT same where clause and
+    # bind values (tenant/support scoping included — the builder ran AFTER the
+    # customer_filter override above), WITHOUT limit/offset. Must run before
+    # `values` is extended with the pagination binds below. Always one row.
+    count_row = await db.fetch_one(
+        f"SELECT COUNT(*) AS total FROM cdrs {where_sql}", *values)
+    total = count_row["total"]
 
     idx = len(values) + 1
     query = f"""
@@ -1050,7 +1062,8 @@ async def query_cdrs(
         cdr["billable_seconds"] = (cdr.pop("billable_ms") or 0) / 1000
         cdrs.append(cdr)
 
-    return {"cdrs": cdrs, "count": len(cdrs), "offset": offset, "limit": limit}
+    return {"cdrs": cdrs, "count": len(cdrs), "total": total,
+            "offset": offset, "limit": limit}
 
 
 @router.get("/summary")

@@ -266,6 +266,151 @@ tr.dl-row.dlx4-row-open:hover {
   cursor: not-allowed;
 }
 
+.dlx4-pgbtn:focus-visible {
+  outline: 2px solid var(--rcf-azure);
+  outline-offset: 1px;
+}
+
+/* ─── CDR pagination bar — range readout / page nav / size select.
+   Rendered above AND below the results table (same component) so controls
+   are reachable at either end of a page that can run 500 rows tall. ─── */
+.dlx4-pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px 18px;
+}
+
+.dlx4-pager-range {
+  font-size: 0.78rem;
+  color: var(--rcf-ink-dim);
+  white-space: nowrap;
+}
+
+.dlx4-pager-range strong {
+  font-weight: 600;
+  color: var(--rcf-ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.dlx4-pager-nav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.dlx4-pg-nums {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Page-number buttons sit tighter than the First/Prev/Next/Last words */
+.dlx4-pgbtn.dlx4-pgnum {
+  min-width: 30px;
+  padding: 0 8px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Current page — active azure treatment (mirrors .dlx-seg-btn-active). The
+   compound + :disabled selector keeps full contrast even though the button
+   is disabled: it is the one control that is CORRECTLY inert. */
+.dlx4-pgbtn.dlx4-pgbtn-active,
+.dlx4-pgbtn.dlx4-pgbtn-active:disabled {
+  color: var(--rcf-azure-deep);
+  background: var(--rcf-tint-hover);
+  border-color: rgba(47, 125, 246, 0.45);
+  font-weight: 700;
+  opacity: 1;
+  cursor: default;
+}
+
+/* Ellipsis between page-number groups */
+.dlx4-pg-gap {
+  min-width: 18px;
+  text-align: center;
+  font-size: 0.74rem;
+  color: var(--rcf-ink-dim);
+  user-select: none;
+}
+
+/* Legacy-API mode (match total not shipped yet): plain page indicator */
+.dlx4-pg-cur {
+  padding: 0 8px;
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: var(--rcf-ink-soft);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Compact "6 / 85" stand-in for the number strip — narrow widths only */
+.dlx4-pg-compact {
+  display: none;
+  padding: 0 6px;
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: var(--rcf-ink-soft);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.dlx4-pgsize-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 0.74rem;
+  color: var(--rcf-ink-dim);
+  white-space: nowrap;
+  user-select: none;
+}
+
+.dlx4-pgsize {
+  height: 30px;
+  padding: 0 8px;
+  border-radius: 7px;
+  border: 1px solid #d5deeb;
+  background: #ffffff;
+  font-size: 0.74rem;
+  font-weight: 600;
+  font-family: inherit;
+  color: var(--rcf-ink-soft);
+  cursor: pointer;
+  transition: background var(--rcf-ease), border-color var(--rcf-ease);
+}
+
+.dlx4-pgsize:hover:not(:disabled) {
+  background: var(--rcf-tint-hover);
+  border-color: #b7c7dd;
+}
+
+.dlx4-pgsize:focus-visible {
+  outline: 2px solid var(--rcf-azure);
+  outline-offset: 1px;
+}
+
+.dlx4-pgsize:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* Page-transition dim — the previous page's rows stay mounted (stable table
+   height, no jump) while the next page fetches; dim + inert signals the swap. */
+.dlx4-fetchdim {
+  opacity: 0.55;
+  pointer-events: none;
+  transition: opacity var(--rcf-ease);
+}
+
+/* Hand-written @media (never Tailwind md:*): drop the page-number strip on
+   narrow screens — First/Prev/Next/Last + the compact "page / count" stay. */
+@media (max-width: 760px) {
+  .dlx4-pg-nums { display: none; }
+  .dlx4-pg-compact { display: inline-block; }
+}
+
 /* ─── Daylight modal — white elevated dialog on a dimmed paper scrim ─── */
 .dlx4-modal-backdrop {
   position: fixed;
