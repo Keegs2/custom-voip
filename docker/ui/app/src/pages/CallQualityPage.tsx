@@ -989,7 +989,11 @@ export function CallQualityPage() {
               <span className="dl-panel-title">Filters</span>
               {cdrData && (
                 <span className="dl-count" style={{ marginLeft: 'auto' }}>
-                  {allCdrs.length.toLocaleString()} of {cdrData.total.toLocaleString()} records
+                  {/* `total` is the real match count on newer APIs; until it
+                      ships, fall back to the fetched row count (the legacy
+                      behavior — `count` used to alias exactly this). */}
+                  {allCdrs.length.toLocaleString()} of{' '}
+                  {(cdrData.total ?? cdrData.items.length).toLocaleString()} records
                 </span>
               )}
             </div>

@@ -104,8 +104,15 @@ export interface CdrSearchParams {
 export interface CdrSearchResult {
   /** Normalised list of CDR records (from either `items` or `cdrs` field). */
   items: Cdr[];
-  /** Total matching records (from either `total` or `count` field). */
-  total: number;
+  /**
+   * Full match count for the current filters, independent of limit/offset —
+   * the API's `total` field. Absent until the API version that emits it is
+   * deployed. The legacy `count` field is the number of rows in THIS
+   * response (== items.length), NOT a match total, so it must never be
+   * surfaced as one — treating it as the total is exactly what made the CDR
+   * page look like it "maxes out" at one page.
+   */
+  total?: number;
   limit: number;
   offset: number;
 }

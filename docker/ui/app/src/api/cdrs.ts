@@ -1,7 +1,13 @@
 import { apiRequest } from './client';
 import type { Cdr, CdrSearchParams, CdrSearchResult, CdrSummaryResponse } from '../types/cdr';
 
-/** Raw API shape — may use `cdrs`/`count` OR `items`/`total` depending on version. */
+/**
+ * Raw API shape — may use `cdrs` or `items` for the row list depending on
+ * version. `count` is the number of rows in THIS response (== len(cdrs));
+ * `total` is the full match count for the filters, independent of
+ * limit/offset, and only exists on newer API builds. They are NOT
+ * interchangeable — see the normalisation note in searchCdrs().
+ */
 interface CdrRawResult {
   cdrs?: Cdr[];
   items?: Cdr[];
@@ -53,13 +59,15 @@ export async function searchCdrs(params: CdrSearchParams = {}): Promise<CdrSearc
   const qs = cdrSearchQuery(params).toString();
   const raw = await apiRequest<CdrRawResult>('GET', `/cdrs${qs ? `?${qs}` : ''}`);
 
-  // Normalise field names: API returns either `cdrs`/`count` or `items`/`total`
   const items = raw.items ?? raw.cdrs ?? [];
-  const total = raw.total ?? raw.count ?? items.length;
 
   return {
     items,
-    total,
+    // ONLY the API's `total` is a real match count. The legacy `count` field
+    // is the row count of THIS response, so falling back to it would report
+    // a full page as the entire result set — the old "maxes out at 50" bug.
+    // Absent (undefined) until the API that emits `total` is deployed.
+    total: raw.total,
     limit: raw.limit ?? params.limit ?? 50,
     offset: raw.offset ?? params.offset ?? 0,
   };
@@ -109,22 +117,12 @@ export async function getCustomerRecentCdrs(
     query.set('end_date', new Date().toISOString());
   }
 
-  interface RawResult {
-    cdrs?: Cdr[];
-    items?: Cdr[];
-    count?: number;
-    total?: number;
-    limit?: number;
-    offset?: number;
-  }
-
-  const raw = await apiRequest<RawResult>('GET', `/cdrs?${query.toString()}`);
+  const raw = await apiRequest<CdrRawResult>('GET', `/cdrs?${query.toString()}`);
   const items = raw.items ?? raw.cdrs ?? [];
-  const total = raw.total ?? raw.count ?? items.length;
 
   return {
     items,
-    total,
+    total: raw.total, // real match count only — never the legacy `count`
     limit: raw.limit ?? limit,
     offset: raw.offset ?? 0,
   };
@@ -169,22 +167,12 @@ export async function getCustomerStatsCdrs(
   query.set('start_date', start.toISOString());
   query.set('end_date', end.toISOString());
 
-  interface RawResult {
-    cdrs?: Cdr[];
-    items?: Cdr[];
-    count?: number;
-    total?: number;
-    limit?: number;
-    offset?: number;
-  }
-
-  const raw = await apiRequest<RawResult>('GET', `/cdrs?${query.toString()}`);
+  const raw = await apiRequest<CdrRawResult>('GET', `/cdrs?${query.toString()}`);
   const items = raw.items ?? raw.cdrs ?? [];
-  const total = raw.total ?? raw.count ?? items.length;
 
   return {
     items,
-    total,
+    total: raw.total, // real match count only — never the legacy `count`
     limit: raw.limit ?? limit,
     offset: raw.offset ?? 0,
   };
