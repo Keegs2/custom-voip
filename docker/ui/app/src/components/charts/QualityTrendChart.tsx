@@ -10,12 +10,15 @@
  *      (ResizeObserver) — never scaled through a fixed viewBox, so the 11px
  *      tick labels really are 11px.
  *
- *   2. HONEST GAPS. The x-axis is the FULL selected date range, one slot per
- *      day. Days with no measured calls break the line — no interpolation,
- *      and the under-shade is built PER contiguous segment so it never
- *      bridges a gap. Isolated single-day segments render as a marker only.
+ *   2. CONTINUOUS TREND, HONEST MARKERS. The x-axis is the FULL selected date
+ *      range, one slot per day, but the line is ONE continuous path through
+ *      every real data point — consecutive points connect directly across
+ *      no-data days (no synthetic/interpolated points), and a single
+ *      under-shade spans first → last data day. Markers and hover targets
+ *      exist ONLY on real data days, so which dates actually measured calls
+ *      stays legible. A lone data point renders as a marker only.
  *
- *   3. NON-OVERSHOOTING SMOOTHING. Segments are curved with a monotone cubic
+ *   3. NON-OVERSHOOTING SMOOTHING. The series is curved with a monotone cubic
  *      (Fritsch–Carlson tangents — the d3 curveMonotoneX rule): tangents are
  *      slope-limited and flattened at local extrema, so the curve never
  *      overshoots a data point or invents peaks between sparse points.
@@ -116,21 +119,21 @@ function plural(n: number): string {
 // Geometry — everything derived from points + measured width
 // ---------------------------------------------------------------------------
 
-interface SegmentPoint {
+interface PlottedPoint {
   x: number;
   y: number;
+  /** Index of this point's day slot in the full `points` array. */
   index: number;
 }
 
 interface Geometry {
   width: number;
-  plotW: number;
   /** 3–4 light horizontal gridline values. */
   yTicks: number[];
   /** 4–5 labeled day indices. */
   xLabelIdx: number[];
-  /** Contiguous non-null runs; length-1 runs are marker-only. */
-  segments: SegmentPoint[][];
+  /** Every real data day as a plotted point — one continuous series. */
+  linePts: PlottedPoint[];
   xFor: (i: number) => number;
   yFor: (v: number) => number;
 }
@@ -179,20 +182,15 @@ function computeGeometry(points: TrendPoint[], width: number, domain: TrendDomai
     xLabelIdx.push(n - 1);
   }
 
-  // --- Line segments: contiguous non-null runs only (gaps stay gaps)
-  const segments: SegmentPoint[][] = [];
-  let run: SegmentPoint[] = [];
+  // --- Plotted points: every real data day, in order. Consecutive points
+  // connect directly, so the line and shade bridge no-data days by
+  // construction — no null-breaking, no synthetic points.
+  const linePts: PlottedPoint[] = [];
   points.forEach((p, i) => {
-    if (p.value == null) {
-      if (run.length > 0) segments.push(run);
-      run = [];
-      return;
-    }
-    run.push({ x: xFor(i), y: yFor(p.value), index: i });
+    if (p.value != null) linePts.push({ x: xFor(i), y: yFor(p.value), index: i });
   });
-  if (run.length > 0) segments.push(run);
 
-  return { width, plotW, yTicks, xLabelIdx, segments, xFor, yFor };
+  return { width, yTicks, xLabelIdx, linePts, xFor, yFor };
 }
 
 // ---------------------------------------------------------------------------
@@ -200,24 +198,26 @@ function computeGeometry(points: TrendPoint[], width: number, domain: TrendDomai
 // ---------------------------------------------------------------------------
 
 /**
- * Monotone cubic path through a segment (Fritsch–Carlson tangents — the rule
- * behind d3's curveMonotoneX). Interior tangents are slope-limited to
- * min(|s₋|, |s₊|, ½|weighted mean|) and forced to 0 at local extrema, which
- * guarantees the curve stays inside the data's vertical envelope — smooth,
- * but it can never overshoot a point or invent a peak between points.
+ * Monotone cubic path through the whole series (Fritsch–Carlson tangents —
+ * the rule behind d3's curveMonotoneX). Interior tangents are slope-limited
+ * to min(|s₋|, |s₊|, ½|weighted mean|) and forced to 0 at local extrema,
+ * which guarantees the curve stays inside the data's vertical envelope —
+ * smooth, but it can never overshoot a point or invent a peak between
+ * points. The dx-weighted tangents already handle the uneven x spacing that
+ * bridged no-data gaps produce.
  */
-function monotonePath(seg: SegmentPoint[]): string {
-  const n = seg.length;
-  const start = `M ${seg[0].x.toFixed(2)} ${seg[0].y.toFixed(2)}`;
+function monotonePath(pts: PlottedPoint[]): string {
+  const n = pts.length;
+  const start = `M ${pts[0].x.toFixed(2)} ${pts[0].y.toFixed(2)}`;
   if (n < 2) return start;
 
   // Secant slopes between consecutive points.
   const dx: number[] = [];
   const slope: number[] = [];
   for (let i = 0; i < n - 1; i++) {
-    const h = seg[i + 1].x - seg[i].x;
+    const h = pts[i + 1].x - pts[i].x;
     dx.push(h);
-    slope.push((seg[i + 1].y - seg[i].y) / h);
+    slope.push((pts[i + 1].y - pts[i].y) / h);
   }
 
   // Tangents: one-sided at the ends, Fritsch–Carlson-limited in the interior.
@@ -239,21 +239,21 @@ function monotonePath(seg: SegmentPoint[]): string {
   let d = start;
   for (let i = 0; i < n - 1; i++) {
     const h = dx[i] / 3;
-    const c1x = seg[i].x + h;
-    const c1y = seg[i].y + tangent[i] * h;
-    const c2x = seg[i + 1].x - h;
-    const c2y = seg[i + 1].y - tangent[i + 1] * h;
-    d += ` C ${c1x.toFixed(2)} ${c1y.toFixed(2)}, ${c2x.toFixed(2)} ${c2y.toFixed(2)}, ${seg[i + 1].x.toFixed(2)} ${seg[i + 1].y.toFixed(2)}`;
+    const c1x = pts[i].x + h;
+    const c1y = pts[i].y + tangent[i] * h;
+    const c2x = pts[i + 1].x - h;
+    const c2y = pts[i + 1].y - tangent[i + 1] * h;
+    d += ` C ${c1x.toFixed(2)} ${c1y.toFixed(2)}, ${c2x.toFixed(2)} ${c2y.toFixed(2)}, ${pts[i + 1].x.toFixed(2)} ${pts[i + 1].y.toFixed(2)}`;
   }
   return d;
 }
 
-/** Under-shade: the same curve closed straight down to the baseline. */
-function areaPath(seg: SegmentPoint[]): string {
+/** Under-shade: the line path closed straight down to the baseline. */
+function areaPath(linePath: string, pts: PlottedPoint[]): string {
   const baseline = (PAD_T + PLOT_H).toFixed(2);
-  const first = seg[0];
-  const last = seg[seg.length - 1];
-  return `${monotonePath(seg)} L ${last.x.toFixed(2)} ${baseline} L ${first.x.toFixed(2)} ${baseline} Z`;
+  const first = pts[0];
+  const last = pts[pts.length - 1];
+  return `${linePath} L ${last.x.toFixed(2)} ${baseline} L ${first.x.toFixed(2)} ${baseline} Z`;
 }
 
 // ---------------------------------------------------------------------------
@@ -297,6 +297,14 @@ export function QualityTrendChart({
     [points, width, domain],
   );
 
+  // One continuous line + under-shade through every real data point. A lone
+  // point has no path — it renders as a marker only.
+  const paths = useMemo(() => {
+    if (geom.linePts.length < 2) return null;
+    const line = monotonePath(geom.linePts);
+    return { line, area: areaPath(line, geom.linePts) };
+  }, [geom]);
+
   const n = points.length;
   const hasData = useMemo(() => points.some((p) => p.value != null), [points]);
   const multiYear = n > 1 && points[0].date.slice(0, 4) !== points[n - 1].date.slice(0, 4);
@@ -312,17 +320,22 @@ export function QualityTrendChart({
       ...(multiYear ? { year: 'numeric' as const } : {}),
     });
 
+  // Hover snaps to the nearest REAL data point — bridged days have no
+  // tooltip targets of their own.
   function handleMouseMove(e: React.MouseEvent<SVGSVGElement>): void {
-    if (n === 0) return;
+    const pts = geom.linePts;
+    if (pts.length === 0) return;
     const rect = e.currentTarget.getBoundingClientRect();
     const mx = e.clientX - rect.left;
     if (mx < PAD_L - 10 || mx > geom.width - PAD_R + 10) {
       setHoverIdx(null);
       return;
     }
-    const idx =
-      n <= 1 ? 0 : clamp(Math.round(((mx - PAD_L) / geom.plotW) * (n - 1)), 0, n - 1);
-    setHoverIdx((prev) => (prev === idx ? prev : idx));
+    let nearest = pts[0];
+    for (const p of pts) {
+      if (Math.abs(p.x - mx) < Math.abs(nearest.x - mx)) nearest = p;
+    }
+    setHoverIdx((prev) => (prev === nearest.index ? prev : nearest.index));
   }
 
   function handleMouseLeave(): void {
@@ -350,20 +363,22 @@ export function QualityTrendChart({
   }
 
   const measured = width >= MIN_RENDER_WIDTH;
-  const hovered = hoverIdx != null && hoverIdx < n ? points[hoverIdx] : null;
-  const hoveredX = hoverIdx != null && hoverIdx < n ? geom.xFor(hoverIdx) : 0;
+  // Hover only ever lands on a real data day; resolve it back to its plotted
+  // point (x/y precomputed) — a stale index simply fails the lookup.
+  const hoveredPt =
+    hoverIdx != null ? (geom.linePts.find((p) => p.index === hoverIdx) ?? null) : null;
+  const hovered = hoveredPt ? points[hoveredPt.index] : null;
 
-  // Tooltip anchor: above the data point (or mid-plot for empty days), flipped
-  // below when too close to the top; center clamped inside the frame.
-  const anchorY = hovered?.value != null ? geom.yFor(hovered.value) : PAD_T + PLOT_H * 0.4;
+  // Tooltip anchor: above the data point, flipped below when too close to the
+  // top; center clamped inside the frame.
+  const anchorY = hoveredPt?.y ?? 0;
   const tipBelow = anchorY < PAD_T + 100;
-  const tipLeft = measured ? clamp(hoveredX, 108, Math.max(geom.width - 108, 108)) : 0;
+  const tipLeft = measured ? clamp(hoveredPt?.x ?? 0, 108, Math.max(geom.width - 108, 108)) : 0;
 
-  const sampleLine = (p: TrendPoint): string => {
-    if (p.totalCalls === 0) return 'No calls this day';
-    if (p.sampleCount === p.totalCalls) return `${p.totalCalls} ${plural(p.totalCalls)}`;
-    return `${p.sampleCount} of ${p.totalCalls} ${plural(p.totalCalls)}`;
-  };
+  const sampleLine = (p: TrendPoint): string =>
+    p.sampleCount === p.totalCalls
+      ? `${p.totalCalls} ${plural(p.totalCalls)}`
+      : `${p.sampleCount} of ${p.totalCalls} ${plural(p.totalCalls)}`;
 
   return (
     <div ref={boxRef} className="dl-qtc">
@@ -380,11 +395,11 @@ export function QualityTrendChart({
             onMouseLeave={handleMouseLeave}
           >
             <defs>
-              {/* Under-shade: accent at 12% alpha at the line → 0 at the
+              {/* Under-shade: accent at 25% alpha at the line → 0 at the
                   baseline. Default objectBoundingBox units scale the ramp to
-                  each area path's own bbox, so every segment fades fully. */}
+                  the area path's bbox, so the fade fully spans peak → base. */}
               <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor={accent} stopOpacity={0.12} />
+                <stop offset="0%" stopColor={accent} stopOpacity={0.25} />
                 <stop offset="100%" stopColor={accent} stopOpacity={0} />
               </linearGradient>
             </defs>
@@ -427,53 +442,45 @@ export function QualityTrendChart({
               );
             })}
 
-            {/* Under-shade per contiguous segment (never bridges a gap) */}
-            {geom.segments.map(
-              (seg) => seg.length >= 2 && <path key={`a-${seg[0].index}`} d={areaPath(seg)} fill={`url(#${gradId})`} />,
-            )}
+            {/* Under-shade — one continuous fill, first → last data day */}
+            {paths && <path d={paths.area} fill={`url(#${gradId})`} />}
 
-            {/* Line per contiguous segment — monotone cubic */}
-            {geom.segments.map(
-              (seg) =>
-                seg.length >= 2 && (
-                  <path
-                    key={`l-${seg[0].index}`}
-                    d={monotonePath(seg)}
-                    fill="none"
-                    stroke={accent}
-                    strokeWidth={2}
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                ),
+            {/* Line — one continuous monotone cubic through every data day */}
+            {paths && (
+              <path
+                d={paths.line}
+                fill="none"
+                stroke={accent}
+                strokeWidth={2}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
             )}
 
             {/* Hover guide */}
-            {hovered && (
+            {hoveredPt && (
               <line
-                x1={crisp(hoveredX)}
+                x1={crisp(hoveredPt.x)}
                 y1={PAD_T}
-                x2={crisp(hoveredX)}
+                x2={crisp(hoveredPt.x)}
                 y2={PAD_T + PLOT_H}
                 stroke={GUIDE_LINE}
                 strokeWidth={1}
               />
             )}
 
-            {/* Markers on every real data day (isolated days stay visible) */}
-            {geom.segments.map((seg) =>
-              seg.map((p) => (
-                <circle
-                  key={`m-${p.index}`}
-                  cx={p.x}
-                  cy={p.y}
-                  r={hoverIdx === p.index ? 4.5 : 3}
-                  fill={accent}
-                  stroke="#ffffff"
-                  strokeWidth={1.5}
-                />
-              )),
-            )}
+            {/* Markers on real data days ONLY — they show which dates have data */}
+            {geom.linePts.map((p) => (
+              <circle
+                key={p.index}
+                cx={p.x}
+                cy={p.y}
+                r={hoverIdx === p.index ? 4.5 : 3}
+                fill={accent}
+                stroke="#ffffff"
+                strokeWidth={1.5}
+              />
+            ))}
           </svg>
         )}
 
