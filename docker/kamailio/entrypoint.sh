@@ -52,6 +52,41 @@ else
   SBC_SIGVIP_MODE=fallback
 fi
 
+# FREESWITCH_IP_2: OPTIONAL second FreeSWITCH media node (VPC/media-subnet IP,
+# same address family as FREESWITCH_IP) for the STRICT ACTIVE/STANDBY media
+# pair — the FS mirror of the SBC pair model. When set (and different from
+# FREESWITCH_IP):
+#   - dispatcher.list group 1 gains a SECOND destination (duid=fs-standby,
+#     priority 5) and the FS-1 line's priority becomes 10. Kamailio 5.8 orders
+#     dlist[] by DESCENDING priority number (add_dest2list ascending insert +
+#     reindex_dests backwards copy — dispatch.c:589-604/803-816), so alg 8
+#     ("serial", hash=0 — dispatch.c:2466) always tries FS-1 first and only
+#     skips to FS-2 while FS-1 is marked INACTIVE/DISABLED (ds_skip_dst,
+#     dispatch.h:51). Strict first-active-by-priority — NOT round-robin.
+#   - kamailio.cfg compiles the FS_HA_PAIR blocks in: alg 8 in
+#     route[DISPATCH], per-node fsn=1/fsn=2 Record-Route markers, per-node
+#     fshealth flags (fs1_up/fs2_up), and fsn-aware in-dialog host resolution.
+#
+# DEFAULT (unset/empty): FREESWITCH_IP_2 substitutes as FREESWITCH_IP (so the
+# __FS_IP_2__ token inside compiled-out #!ifdef blocks still renders to a
+# valid address), the FS-2 dispatcher line renders as a comment, the FS-1
+# priority renders back to 0, and the mode define renders as a comment —
+# single-FS behavior, rolling-safe. Set-but-equal is treated as unset (same
+# guard as SBC_SIGNALING_VIP): a duplicate group-1 destination would make the
+# "standby" a second route to the SAME box and break per-node health truth.
+if [ -n "${FREESWITCH_IP_2:-}" ] && [ "${FREESWITCH_IP_2}" != "${FREESWITCH_IP}" ]; then
+  FS_HA_MODE_DEFINE="#!define FS_HA_PAIR"
+  FS_HA_MODE=pair
+  FS1_PRIORITY=10
+  FS2_DISPATCHER_LINE="1 sip:${FREESWITCH_IP_2}:5080 0 5 weight=100;maxload=2000;duid=fs-standby"
+else
+  FREESWITCH_IP_2="${FREESWITCH_IP}"
+  FS_HA_MODE_DEFINE="# FREESWITCH_IP_2 not set — single-FS zone, FS_HA_PAIR blocks compiled out"
+  FS_HA_MODE=single
+  FS1_PRIORITY=0
+  FS2_DISPATCHER_LINE="# FREESWITCH_IP_2 not set — no standby media destination (strict-pair mode off)"
+fi
+
 # Per-zone Bandwidth egress PoPs. Defaults are the East values, so an East
 # redeploy WITHOUT these vars set is byte-identical to the pre-templating config.
 #   East:  PRIMARY=67.231.2.12 (Dallas), SECONDARY=216.82.238.134 (LA)
@@ -180,7 +215,17 @@ cp /etc/kamailio/kamailio.cfg.tmpl "$CONFIG"
 cp /etc/kamailio/dispatcher.list.tmpl "$DISPATCH"
 
 sed -i "s|__ADVERTISE_IP__|${EXTERNAL_SIP_IP}|g" "$CONFIG"
+# ORDER MATTERS: __FS_IP_2__ MUST be substituted BEFORE __FS_IP__ — the
+# __FS_IP__ pattern is a substring of __FS_IP_2__, so the reverse order would
+# corrupt the FS-2 token into "<fs1-ip>_2__".
+sed -i "s|__FS_IP_2__|${FREESWITCH_IP_2}|g" "$CONFIG"
 sed -i "s|__FS_IP__|${FREESWITCH_IP}|g" "$CONFIG" "$DISPATCH"
+# Strict active/standby FS pair rendering (see the FREESWITCH_IP_2 block
+# above). All replacement strings are fixed shell-built literals containing
+# no '|', '&' or '\' — safe for the s|..|..| delimiter.
+sed -i "s|__FS1_PRIORITY__|${FS1_PRIORITY}|g" "$DISPATCH"
+sed -i "s|__FS2_DISPATCHER_LINE__|${FS2_DISPATCHER_LINE}|" "$DISPATCH"
+sed -i "s|__FS_HA_MODE_DEFINE__|${FS_HA_MODE_DEFINE}|" "$CONFIG"
 sed -i "s|__FS_PUBLIC_IP__|${FS_PUBLIC_IP}|g" "$CONFIG"
 sed -i "s|__DB_HOST__|${DB_HOST}|g" "$CONFIG"
 sed -i "s|__DB_PORT__|${DB_PORT}|g" "$CONFIG"
@@ -243,7 +288,7 @@ sed -i "s|__BANDWIDTH_TC2_LA__|${BANDWIDTH_TC2_LA}|g" "$CONFIG" "$DISPATCH"
 sed -i "s|__SINCH_DENVER_IP__|${SINCH_DENVER_IP}|g" "$CONFIG" "$DISPATCH"
 sed -i "s|__SINCH_CHICAGO_IP__|${SINCH_CHICAGO_IP}|g" "$CONFIG" "$DISPATCH"
 
-echo "Kamailio config templated: ADVERTISE_IP=${EXTERNAL_SIP_IP}, FS=${FREESWITCH_IP}, FS_PUBLIC_IP=${FS_PUBLIC_IP}, DB=${DB_HOST}:${DB_PORT}, Homer=${HOMER_IP}, HEP_ID=${HEP_CAPTURE_ID}, SBC_ID=${SBC_ID}, SBC_INTERNAL_IP=${SBC_INTERNAL_IP}, SIGNALING_VIP=${SBC_SIGNALING_VIP} (${SBC_SIGVIP_MODE}), BW_PRIMARY=${BANDWIDTH_PRIMARY_IP}, BW_SECONDARY=${BANDWIDTH_SECONDARY_IP}, SINCH_DENVER=${SINCH_DENVER_IP}, SINCH_CHICAGO=${SINCH_CHICAGO_IP}, INTERNAL_SUBNET=${INTERNAL_SUBNET}, MEDIA_SUBNET=${MEDIA_SUBNET}, FS_AWARE_OPTIONS=${FS_AWARE_OPTIONS}, STIR_SHAKEN_SIGN=${STIR_SHAKEN_SIGN}, STIR_SHAKEN_VERIFY=${STIR_SHAKEN_VERIFY}, STIR_CERT_URL=${STIR_CERT_URL}, STIR_VERIFY_CERT_MODE=${STIR_VERIFY_CERT_MODE}, STIR_VERIFY_CA_FILE=${STIR_VERIFY_CA_FILE:-<unset>}"
+echo "Kamailio config templated: ADVERTISE_IP=${EXTERNAL_SIP_IP}, FS=${FREESWITCH_IP}, FS2=${FREESWITCH_IP_2} (${FS_HA_MODE}), FS_PUBLIC_IP=${FS_PUBLIC_IP}, DB=${DB_HOST}:${DB_PORT}, Homer=${HOMER_IP}, HEP_ID=${HEP_CAPTURE_ID}, SBC_ID=${SBC_ID}, SBC_INTERNAL_IP=${SBC_INTERNAL_IP}, SIGNALING_VIP=${SBC_SIGNALING_VIP} (${SBC_SIGVIP_MODE}), BW_PRIMARY=${BANDWIDTH_PRIMARY_IP}, BW_SECONDARY=${BANDWIDTH_SECONDARY_IP}, SINCH_DENVER=${SINCH_DENVER_IP}, SINCH_CHICAGO=${SINCH_CHICAGO_IP}, INTERNAL_SUBNET=${INTERNAL_SUBNET}, MEDIA_SUBNET=${MEDIA_SUBNET}, FS_AWARE_OPTIONS=${FS_AWARE_OPTIONS}, STIR_SHAKEN_SIGN=${STIR_SHAKEN_SIGN}, STIR_SHAKEN_VERIFY=${STIR_SHAKEN_VERIFY}, STIR_CERT_URL=${STIR_CERT_URL}, STIR_VERIFY_CERT_MODE=${STIR_VERIFY_CERT_MODE}, STIR_VERIFY_CA_FILE=${STIR_VERIFY_CA_FILE:-<unset>}"
 
 # Add the NLB VIP (EXTERNAL_SIP_IP / ADVERTISE_IP) to the loopback interface.
 #
