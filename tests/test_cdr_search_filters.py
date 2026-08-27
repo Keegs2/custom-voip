@@ -19,6 +19,9 @@ endpoints accept the SAME filter set):
     wildcards (destination='%' used to match every row).
   * Tenant/support/admin scoping preserved exactly (get_support_read_filter:
     admin+support platform-wide, tenants hard-scoped, param override ignored).
+  * NEW `total` on GET /v1/cdrs — COUNT(*) over the SAME filters (shared
+    builder, scoping included), independent of limit/offset; `count` stays
+    the returned page's row count (back-compat).
 
 Harness mirrors tests/test_support_role_authz.py (ephemeral local PG, module
 event loop, db.pool wired as the runtime `api` role, REAL JWTAuthMiddleware
@@ -635,5 +638,123 @@ def test_support_platform_wide_with_zone(client, tokens):
         r = await client.get("/v1/cdrs/summary", params={"zone": "east"}, headers=hdrs)
         assert r.status_code == 200, r.text
         assert _total(r) == 3
+
+    _run(go())
+
+
+# ---------------------------------------------------------------------------
+# 6) `total` — real pagination: COUNT(*) over the SAME filters, scope included.
+# ---------------------------------------------------------------------------
+def test_total_present_and_correct_with_filters(search_db, client, tokens):
+    """`total` rides the shared filter builder — zone / customer / explicit
+    date ranges shape it exactly like the rows they return. Response keys are
+    the pinned contract: count/offset/limit unchanged, total added."""
+    async def go():
+        hdrs = _auth(tokens, "admin")
+        now = search_db["now"]
+
+        # Default 24h window: page holds everything, so count == total here.
+        r = await client.get("/v1/cdrs", headers=hdrs)
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert set(body.keys()) == {"cdrs", "count", "total", "offset", "limit"}
+        assert body["total"] == len(IN_WINDOW)
+        assert body["count"] == len(IN_WINDOW)
+
+        cases = [
+            ({"zone": "east"}, 3),
+            ({"zone": "west"}, 1),
+            ({"zone": "central"}, 1),
+            ({"customer_id": CID_B}, 1),
+            ({"customer_id": 0}, 1),  # ingest-default filter counts too
+            ({"start_date": _z(now - timedelta(hours=3, minutes=30)),
+              "end_date": _z(now - timedelta(hours=2, minutes=30))}, 1),
+            ({"start_date": _z(now - timedelta(days=8)),
+              "end_date": _z(now)}, 7),  # widened range pulls in the -3d row
+        ]
+        for params, expected in cases:
+            r = await client.get("/v1/cdrs", params=params, headers=hdrs)
+            assert r.status_code == 200, f"{params}: {r.text}"
+            body = r.json()
+            assert body["total"] == expected, f"{params}: got {body['total']}"
+            assert body["count"] == len(body["cdrs"])  # back-compat semantic
+
+    _run(go())
+
+
+def test_total_unaffected_by_limit_offset(client, tokens):
+    """total is the filtered COUNT(*) — identical on EVERY page (including an
+    empty page past the end and limit=0); count remains the page size."""
+    async def go():
+        hdrs = _auth(tokens, "admin")
+        expected_total = len(IN_WINDOW)  # 6
+
+        for offset in (0, 2, 4):
+            r = await client.get("/v1/cdrs", params={"limit": 2, "offset": offset},
+                                 headers=hdrs)
+            assert r.status_code == 200, r.text
+            assert r.json()["total"] == expected_total, f"offset={offset}"
+            assert r.json()["count"] == 2, f"offset={offset}"
+
+        # Past the end: empty page, total unchanged.
+        r = await client.get("/v1/cdrs", params={"limit": 2, "offset": 100}, headers=hdrs)
+        assert r.json()["cdrs"] == [] and r.json()["count"] == 0
+        assert r.json()["total"] == expected_total
+
+        # limit=0 proves total comes from COUNT(*), never from the page.
+        r = await client.get("/v1/cdrs", params={"limit": 0}, headers=hdrs)
+        assert r.json()["count"] == 0 and r.json()["total"] == expected_total
+
+        # Filter + pagination compose: zone=east has 3 rows, page 2 of size 1.
+        r = await client.get("/v1/cdrs", params={"zone": "east", "limit": 1, "offset": 1},
+                             headers=hdrs)
+        assert r.json()["count"] == 1 and r.json()["total"] == 3
+
+    _run(go())
+
+
+def test_total_respects_tenant_scoping(client, tokens):
+    """Tenant A's total NEVER counts B's (or customer-0's) rows — the COUNT
+    reuses the where clause built AFTER the customer_filter override, so the
+    requested customer_id param cannot widen it either."""
+    async def go():
+        hdrs = _auth(tokens, "user_a")
+
+        r = await client.get("/v1/cdrs", headers=hdrs)
+        assert r.status_code == 200, r.text
+        assert r.json()["total"] == 4  # A's in-window rows only (of 6 platform-wide)
+
+        # Requested customer_id=B is IGNORED for tenants — in total too.
+        r = await client.get("/v1/cdrs", params={"customer_id": CID_B}, headers=hdrs)
+        assert r.json()["total"] == 4
+
+        # Scope composes with filters: east has 3 rows platform-wide, A owns 1.
+        r = await client.get("/v1/cdrs", params={"zone": "east"}, headers=hdrs)
+        assert r.json()["total"] == 1
+
+        # Scoped total is page-independent as well.
+        r = await client.get("/v1/cdrs", params={"limit": 1, "offset": 1}, headers=hdrs)
+        assert r.json()["count"] == 1 and r.json()["total"] == 4
+
+        # support stays platform-wide (read-only troubleshooting scope).
+        r = await client.get("/v1/cdrs", params={"zone": "east"},
+                             headers=_auth(tokens, "support"))
+        assert r.json()["total"] == 3
+
+    _run(go())
+
+
+def test_total_respects_rated_only(client, tokens):
+    async def go():
+        hdrs = _auth(tokens, "admin")
+        r = await client.get("/v1/cdrs", params={"rated_only": "true"}, headers=hdrs)
+        assert r.status_code == 200, r.text
+        assert r.json()["total"] == 1  # only the rated east row is in-window
+        assert _uuids(r) == {CDR_EAST2}
+
+        # rated_only + limit=0: empty page, total still counts the rated row.
+        r = await client.get("/v1/cdrs", params={"rated_only": "true", "limit": 0},
+                             headers=hdrs)
+        assert r.json()["count"] == 0 and r.json()["total"] == 1
 
     _run(go())
