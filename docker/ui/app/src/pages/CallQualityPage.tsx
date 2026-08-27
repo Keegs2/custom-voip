@@ -9,8 +9,8 @@
  *   2. Filter toolbar — customer, trunk, number search, direction, dates, product
  *   3. Quality overview stat strip — Total Calls, ASR, MOS, Packet Loss, Jitter, R-Factor
  *   4. Quality trend charts — MOS, Packet Loss, Jitter daily averages via the
- *      shared <QualityTrendChart> (true-pixel SVG, honest gap rendering,
- *      good/fair/poor reference bands — see components/charts/)
+ *      shared <QualityTrendChart> (true-pixel SVG, honest gap rendering —
+ *      see components/charts/)
  *   5. Full CDR table — sortable, searchable, paginated with quality columns
  *   6. Call detail sheet — white elevated slide-out with full RTP/quality/billing data
  */
@@ -23,7 +23,7 @@ import { listTrunks } from '../api/trunks';
 import { Spinner } from '../components/ui/Spinner';
 import { AttestationChain } from '../components/stir/AttestationChain';
 import { QualityTrendChart } from '../components/charts/QualityTrendChart';
-import type { TrendBand, TrendDomain, TrendPoint } from '../components/charts/QualityTrendChart';
+import type { TrendDomain, TrendPoint } from '../components/charts/QualityTrendChart';
 import type { Cdr, CallDirection, ProductType } from '../types/cdr';
 import type { Customer } from '../types/customer';
 import type { Trunk } from '../types/trunk';
@@ -47,8 +47,7 @@ const WARN = '#b45309';
 const BAD = '#b91c1c';
 
 // Trend-chart series strokes — semantic families (MOS green, packet loss
-// rose, jitter azure) kept distinct from the good/fair/poor band tones the
-// charts overlay.
+// rose, jitter azure).
 const CHART_GREEN = '#16a34a';
 const CHART_ROSE = '#be123c';
 const CHART_AZURE = AZURE_DEEP;
@@ -114,45 +113,20 @@ function fmtBytes(bytes: number | null | undefined): string {
 }
 
 // ---------------------------------------------------------------------------
-// Quality trend chart configuration — reference bands, y-domains, formatters.
-//
-// Thresholds are the industry framing for voice-quality telemetry:
-//   MOS          ≥ 4.0 good · 3.6–4.0 fair · < 3.6 poor   (fixed 1–5 axis)
-//   Packet loss  ≤ 1% good · 1–2.5% fair · > 2.5% poor
-//   Jitter       ≤ 30ms good · 30–50ms fair · > 50ms poor
-// (The CDR-table cell colors above use their own long-standing cutoffs; these
-// band values are the chart annotation standard, deliberately explicit here.)
-//
-// Module-scope constants so the chart's geometry memo keeps stable inputs.
+// Quality trend chart configuration — y-domains + formatters.
+// MOS renders on its fixed 1–5 scale; packet loss and jitter auto-scale
+// (padded to the data). Module-scope constants so the chart's geometry memo
+// keeps stable inputs.
 // ---------------------------------------------------------------------------
 
-const MOS_BANDS: TrendBand[] = [
-  { from: 4.0, to: Infinity, tone: 'good', label: 'good ≥ 4.0' },
-  { from: 3.6, to: 4.0, tone: 'fair', label: 'fair 3.6–4.0', edge: 4.0 },
-  { from: -Infinity, to: 3.6, tone: 'poor', label: 'poor < 3.6', edge: 3.6 },
-];
 const MOS_DOMAIN: TrendDomain = { min: 1, max: 5 };
-
-const LOSS_BANDS: TrendBand[] = [
-  { from: 0, to: 1, tone: 'good', label: 'good ≤ 1%' },
-  { from: 1, to: 2.5, tone: 'fair', label: 'fair 1–2.5%', edge: 1 },
-  { from: 2.5, to: Infinity, tone: 'poor', label: 'poor > 2.5%', edge: 2.5 },
-];
-// Auto-scale from data, but always show at least 0–3.5% so both thresholds
-// stay on the chart when loss is (as it should be) near zero.
-const LOSS_DOMAIN: TrendDomain = { min: 0, max: 'auto', autoFloor: 3.5 };
-
-const JITTER_BANDS: TrendBand[] = [
-  { from: 0, to: 30, tone: 'good', label: 'good ≤ 30ms' },
-  { from: 30, to: 50, tone: 'fair', label: 'fair 30–50ms', edge: 30 },
-  { from: 50, to: Infinity, tone: 'poor', label: 'poor > 50ms', edge: 50 },
-];
-const JITTER_DOMAIN: TrendDomain = { min: 0, max: 'auto', autoFloor: 60 };
+const LOSS_DOMAIN: TrendDomain = { min: 0, max: 'auto' };
+const JITTER_DOMAIN: TrendDomain = { min: 0, max: 'auto' };
 
 const fmtMosValue = (v: number): string => v.toFixed(2);
 const fmtMosTick = (v: number): string => String(Math.round(v));
 const fmtLossValue = (v: number): string => `${v.toFixed(2)}%`;
-const fmtLossTick = (v: number): string => `${parseFloat(v.toFixed(2))}%`;
+const fmtLossTick = (v: number): string => `${parseFloat(v.toFixed(3))}%`;
 const fmtJitterValue = (v: number): string => `${v.toFixed(1)} ms`;
 const fmtJitterTick = (v: number): string => `${parseFloat(v.toFixed(1))}`;
 
@@ -1211,9 +1185,6 @@ export function CallQualityPage() {
           <div className="dl-panel fx-load fx-load-d3">
             <div className="dl-panel-head">
               <span className="dl-panel-title">Quality Trends</span>
-              <span className="dl-panel-sub">
-                Daily averages across the selected date range — gaps in a line are days with no measured calls.
-              </span>
             </div>
             {isLoading ? (
               sectionLoading('Building charts…')
@@ -1229,41 +1200,26 @@ export function CallQualityPage() {
                   <QualityTrendChart
                     points={trendPoints.mos}
                     accent={CHART_GREEN}
-                    title="MOS — perceived voice quality"
-                    subtitle="1 (bad) to 5 (excellent) · daily average of scored calls."
-                    axisTitle="MOS (1–5)"
-                    bands={MOS_BANDS}
+                    title="MOS"
                     domain={MOS_DOMAIN}
                     formatValue={fmtMosValue}
                     formatTick={fmtMosTick}
-                    sampleNoun="scored"
-                    emptyMessage="No MOS scores in this range — MOS is recorded for answered calls with RTP statistics."
                   />
                   <QualityTrendChart
                     points={trendPoints.loss}
                     accent={CHART_ROSE}
-                    title="Packet loss — media integrity"
-                    subtitle="% of RTP audio packets lost in transit · daily average per call, lower is better."
-                    axisTitle="Packet loss (%)"
-                    bands={LOSS_BANDS}
+                    title="Packet Loss %"
                     domain={LOSS_DOMAIN}
                     formatValue={fmtLossValue}
                     formatTick={fmtLossTick}
-                    sampleNoun="measured"
-                    emptyMessage="No packet-loss measurements in this range — recorded for calls with RTP statistics."
                   />
                   <QualityTrendChart
                     points={trendPoints.jitter}
                     accent={CHART_AZURE}
-                    title="Jitter — arrival-timing variation"
-                    subtitle="Variation in RTP packet arrival, in ms · daily average per call, lower is steadier audio."
-                    axisTitle="Jitter (ms)"
-                    bands={JITTER_BANDS}
+                    title="Jitter (ms)"
                     domain={JITTER_DOMAIN}
                     formatValue={fmtJitterValue}
                     formatTick={fmtJitterTick}
-                    sampleNoun="measured"
-                    emptyMessage="No jitter measurements in this range — recorded for calls with RTP statistics."
                   />
                 </div>
               </div>
