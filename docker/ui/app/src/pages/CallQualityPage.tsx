@@ -91,6 +91,9 @@ function packetLossColor(pct: number | null | undefined): string {
   return BAD;
 }
 
+// Thresholds are for jitter_avg_ms — the RMS mid-band jitter estimate in
+// real ms (ITU-ish guidance: <20ms comfortable, 20-50ms noticeable, >50ms
+// audible degradation).
 function jitterColor(ms: number | null | undefined): string {
   if (ms == null) return INK_FAINT;
   if (ms <= 20) return GOOD;
@@ -378,7 +381,7 @@ function CdrTable({ cdrs, customers, onSelect, selectedUuid }: CdrTableProps) {
               <th className={thClass('duration_seconds')} style={{ padding: '10px 12px' }} onClick={() => toggleSort('duration_seconds')}>Duration <SortGlyph colKey="duration_seconds" sort={sort} /></th>
               <th className={thClass('mos')} style={{ padding: '10px 12px' }} onClick={() => toggleSort('mos')}>MOS <SortGlyph colKey="mos" sort={sort} /></th>
               <th className={thClass('packet_loss_pct')} style={{ padding: '10px 12px' }} onClick={() => toggleSort('packet_loss_pct')}>Pkt Loss <SortGlyph colKey="packet_loss_pct" sort={sort} /></th>
-              <th className={thClass('jitter_avg_ms')} style={{ padding: '10px 12px' }} onClick={() => toggleSort('jitter_avg_ms')}>Jitter <SortGlyph colKey="jitter_avg_ms" sort={sort} /></th>
+              <th className={thClass('jitter_avg_ms')} style={{ padding: '10px 12px' }} onClick={() => toggleSort('jitter_avg_ms')}>Jitter (est) <SortGlyph colKey="jitter_avg_ms" sort={sort} /></th>
               <th className={thClass('r_factor')} style={{ padding: '10px 12px' }} onClick={() => toggleSort('r_factor')}>R-Factor <SortGlyph colKey="r_factor" sort={sort} /></th>
               <th className={thClass()} style={{ padding: '10px 12px' }}>Codec</th>
               <th className={thClass()} style={{ padding: '10px 12px' }}>Status</th>
@@ -700,7 +703,7 @@ function CallDetailPanel({ cdr, onClose }: CallDetailPanelProps) {
               {d.r_factor != null && <DetailRow label="R-Factor" value={d.r_factor.toFixed(2)} accent={rFactorColor(d.r_factor)} />}
               {d.quality_pct != null && <DetailRow label="Quality %" value={`${d.quality_pct.toFixed(2)}%`} />}
               {d.flaw_total != null && <DetailRow label="Flaw Total" value={d.flaw_total.toLocaleString()} />}
-              {d.packet_loss_count != null && <DetailRow label="Packets Lost" value={d.packet_loss_count.toLocaleString()} />}
+              {d.packet_loss_count != null && <DetailRow label="Pkts Skipped (autoflush)" value={d.packet_loss_count.toLocaleString()} />}
               {d.packet_total_count != null && <DetailRow label="Packets Total" value={d.packet_total_count.toLocaleString()} />}
               {d.packet_loss_pct != null && (
                 <DetailRow label="Packet Loss %" value={`${d.packet_loss_pct.toFixed(3)}%`} accent={packetLossColor(d.packet_loss_pct)} />
@@ -716,7 +719,7 @@ function CallDetailPanel({ cdr, onClose }: CallDetailPanelProps) {
                   {d.rtp_audio_in_raw_bytes != null && <DetailRow label="Raw Bytes" value={fmtBytes(d.rtp_audio_in_raw_bytes)} />}
                   {d.rtp_audio_in_media_bytes != null && <DetailRow label="Media Bytes" value={fmtBytes(d.rtp_audio_in_media_bytes)} />}
                   {d.rtp_audio_in_packet_count != null && <DetailRow label="Packets" value={d.rtp_audio_in_packet_count.toLocaleString()} />}
-                  {d.packet_loss_count != null && <DetailRow label="Skipped (lost)" value={d.packet_loss_count.toLocaleString()} />}
+                  {d.packet_loss_count != null && <DetailRow label="Skipped (autoflush)" value={d.packet_loss_count.toLocaleString()} />}
                 </div>
               )}
               {(d.rtp_audio_out_raw_bytes != null || d.rtp_audio_out_packet_count != null) && (
@@ -730,10 +733,10 @@ function CallDetailPanel({ cdr, onClose }: CallDetailPanelProps) {
               {(d.jitter_min_ms != null || d.jitter_max_ms != null || d.jitter_avg_ms != null) && (
                 <div style={{ marginBottom: 12 }}>
                   <div className="dlx-sheet-subhead">Jitter</div>
-                  {d.jitter_min_ms != null && <DetailRow label="Min" value={`${d.jitter_min_ms.toFixed(2)}ms`} />}
-                  {d.jitter_max_ms != null && <DetailRow label="Max" value={`${d.jitter_max_ms.toFixed(2)}ms`} />}
-                  {d.jitter_avg_ms != null && <DetailRow label="Avg (mean interval)" value={`${d.jitter_avg_ms.toFixed(2)}ms`} />}
-                  {d.rtp_audio_in_mean_interval != null && <DetailRow label="Mean Interval" value={`${d.rtp_audio_in_mean_interval.toFixed(2)}ms`} />}
+                  {d.jitter_min_ms != null && <DetailRow label="Floor (min)" value={`${d.jitter_min_ms.toFixed(2)}ms`} />}
+                  {d.jitter_max_ms != null && <DetailRow label="Peak (max)" value={`${d.jitter_max_ms.toFixed(2)}ms`} />}
+                  {d.jitter_avg_ms != null && <DetailRow label="Estimated Avg" value={`${d.jitter_avg_ms.toFixed(2)}ms`} />}
+                  {d.rtp_audio_in_mean_interval != null && <DetailRow label="Mean Packet Interval" value={`${d.rtp_audio_in_mean_interval.toFixed(2)}ms`} />}
                   {d.rtp_audio_in_jitter_burst_rate != null && <DetailRow label="Jitter Burst Rate" value={d.rtp_audio_in_jitter_burst_rate.toFixed(4)} />}
                   {d.rtp_audio_in_jitter_loss_rate != null && <DetailRow label="Jitter Loss Rate" value={d.rtp_audio_in_jitter_loss_rate.toFixed(4)} />}
                 </div>
@@ -1171,7 +1174,7 @@ export function CallQualityPage() {
                     color={packetLossColor(overviewStats.avgPacketLossPct)}
                   />
                   <StatFigure
-                    label="Avg jitter"
+                    label="Avg jitter (est)"
                     value={overviewStats.avgJitterMs != null ? `${overviewStats.avgJitterMs.toFixed(1)}ms` : '—'}
                     color={jitterColor(overviewStats.avgJitterMs)}
                   />
@@ -1220,7 +1223,7 @@ export function CallQualityPage() {
                   <QualityTrendChart
                     points={trendPoints.jitter}
                     accent={CHART_AZURE}
-                    title="Jitter (ms)"
+                    title="Jitter — est (ms)"
                     domain={JITTER_DOMAIN}
                     formatValue={fmtJitterValue}
                     formatTick={fmtJitterTick}

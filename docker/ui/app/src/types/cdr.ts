@@ -35,12 +35,16 @@ export interface Cdr {
   r_factor?: number | null;
   flaw_total?: number | null;
 
-  // Packet loss
+  // Packet loss. packet_loss_count is FS's autoflush skip counter (discards,
+  // NOT network loss); packet_loss_pct is the real network-loss indicator,
+  // computed from flaw_total / inbound packets.
   packet_loss_count?: number | null;
   packet_total_count?: number | null;
   packet_loss_pct?: number | null;
 
-  // Jitter (milliseconds)
+  // Jitter — running jitter std-dev in real ms (sqrt of FS's inter-arrival
+  // variance): min = calmest ("floor"), max = worst ("peak"),
+  // avg = sqrt((min_var+max_var)/2) — RMS mid-band ESTIMATE, not a true mean.
   jitter_min_ms?: number | null;
   jitter_max_ms?: number | null;
   jitter_avg_ms?: number | null;
