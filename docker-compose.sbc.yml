@@ -57,6 +57,13 @@ services:
       # a dead-FS zone drains via carrier/DNS failover (the fail-open NLB can't).
       # Default 1 (ON). Set to 0 to force legacy always-200 with no code change.
       - FS_AWARE_OPTIONS=${FS_AWARE_OPTIONS:-1}
+      # UDP MTU / oversized-INVITE UDP->TCP fallback (core udp_mtu +
+      # udp_mtu_try_proto=TCP). DEFAULT 0 = OFF (dark). The param is GLOBAL
+      # (also affects FS- and PBX-bound UDP sends) and Bandwidth TCP support is
+      # UNVERIFIED — set a value (e.g. 1300) ONLY after the Bandwidth TCP
+      # canary passes; full activation criteria in kamailio.cfg. entrypoint.sh
+      # sanitizes non-numeric/<=0 to OFF.
+      - UDP_MTU=${UDP_MTU:-0}
       # STIR/SHAKEN outbound signing (secsipid). DARK BY DEFAULT (off). When
       # STIR_SHAKEN_SIGN=on, Kamailio signs the outbound Identity/PASSporT in
       # route[TO_CARRIER] using the cert at STIR_CERT_URL (x5u) + the private key
