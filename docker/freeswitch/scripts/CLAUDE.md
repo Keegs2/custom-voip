@@ -240,9 +240,43 @@ Call flow:
 4. [If Redis] CPS check with API tier limits (25/50/100+ CPS via redis_cps)
 5. Get per-call fee from tier (starter=$0.01, professional=$0.008, enterprise=$0.005)
 6. [If Redis] Velocity check with higher API limits (300 CPM, 5000 daily)
-7. If webhook_url set: hand off to voice_webhook.lua (TwiML engine)
-8. If no webhook: bridge via `sofia/external/dest@sbc_proxy_ip:5060` with X-Carrier=primary
-9. Failover with X-Carrier=secondary
+7. **STIR/SHAKEN attestation (STEP 7.5, Task 2.2)** — see the contract below
+8. If webhook_url set: hand off to voice_webhook.lua (TwiML engine)
+9. If no webhook: bridge via `sofia/external/dest@sbc_proxy_ip:5060` with X-Carrier=primary
+10. Failover with X-Carrier=secondary
+
+**STIR/SHAKEN attestation contract (API product = A, Phase 2 Task 2.2).**
+Kamailio `route[TO_CARRIER]` Step 8.5 reads `X-Attestation` ∈ {A,B,div} as the
+SHAKEN signing level and ALWAYS strips it before the carrier (the strip is
+unconditional, outside the `STIR_SHAKEN_SIGN` ifdef — dark-safe). Defense in
+depth, three layers:
+
+1. **API edge (`calls.py`)**: `POST /v1/calls` only originates when `from_did`
+   is an ENABLED `api_dids` row owned by the JWT-authenticated tenant
+   (tenant-scoped lookup, cross-tenant → 404 no-leak). It passes
+   `stir_attest=A` through `esl_client.originate_call`. **Path nuance:** the
+   production ESL originate is `sofia/external/{to}@SBC` built straight from
+   the originate `{vars}` — NO dialplan/Lua runs before that INVITE — so
+   esl_client also puts `sip_h_X-Attestation=A` (+ the CDR facts
+   `stir_attest_intent=A`, `stir_inbound_signed=0`) directly in the originate
+   vars. Webhook `<Dial>`/`outbound_api.lua` B-legs inherit the `sip_h_` var.
+2. **api_outbound.lua STEP 7.5** (every dialplan-routed API path):
+   `stir_attest=A` is honored ONLY after re-verifying in PostgreSQL that the
+   presented caller ID (`caller_id_number`) is an `api_dids` row belonging to
+   THIS call's `customer_id` (`db.lookup_api_did` — canonicalizes to +E.164,
+   enabled+active rows only). Not owned / db unavailable / unknown requested
+   level → **B, never A**, with a loud ERR/WARNING log; the call is NOT
+   rejected here (the API already gated; B is the safe floor — same policy as
+   trunk_outbound.lua's `caller_did_owned`). `stir_attest` absent → legacy
+   behavior (no header set; Kamailio defaults the level to B) — EXCEPT if the
+   channel already carries an unsolicited `sip_h_X-Attestation` (inherited
+   from an inbound leg's header), which is overwritten with B (anti-spoof).
+   When a level is set, the same raw CDR facts as trunk are recorded
+   (`stir_attest_intent`, `stir_inbound_signed="0"`, `stir_verstat`,
+   `stir_verstat_source`, `stir_inbound_attest`) so API calls appear in
+   `call_attestations` / the attestation UI + Grafana like trunk/RCF calls.
+3. **Kamailio whitelist**: any value not exactly A/B/C is coerced to B;
+   absent header → B.
 
 ### outbound_api.lua
 

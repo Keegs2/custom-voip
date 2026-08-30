@@ -540,3 +540,62 @@ def test_flag_off_legacy_behavior(x402_db, client, monkeypatch):
         assert await _balance(db, cid) == bal0 - Decimal("0.0200")
 
     _run(go())
+
+
+# ---------------------------------------------------------------------------
+# 8) STIR/SHAKEN Task 2.2 — from_did ownership gate (attestation-A layer 1).
+# ---------------------------------------------------------------------------
+def test_from_did_ownership_gate_and_stir_attest(x402_db, client, monkeypatch):
+    """The tenant may only originate from an OWNED api_did (404-no-leak), and a
+    successful originate carries stir_attest="A" into the ESL layer.
+
+    This is the API-edge half of the STIR/SHAKEN attestation-A contract: the
+    ownership gate here is what earns attestation A; api_outbound.lua re-checks
+    on the FS side and Kamailio floors anything else to B.
+    """
+    db, cid = x402_db["db"], x402_db["customer_id"]
+    from routers import calls as calls_mod
+
+    attested = []
+
+    async def _fake_esl_originate(**kwargs):
+        attested.append(kwargs.get("stir_attest"))
+        return True
+
+    # Force the REAL originate path (not the demo mint) so the stir_attest
+    # kwarg is observable at the ESL boundary.
+    monkeypatch.setenv("PAYMENTS_DEMO_FAKE_ORIGINATE", "false")
+    monkeypatch.setattr(calls_mod, "originate_call", _fake_esl_originate)
+
+    async def go():
+        # Seed a SECOND customer with its own api_did.
+        other = await db.fetch_one(
+            "INSERT INTO customers (name, account_type, balance, status) "
+            "VALUES ('Other Co', 'api', 10, 'active') RETURNING id")
+        other_did = "+16175550999"
+        await db.execute(
+            "INSERT INTO api_dids (customer_id, did, voice_url) VALUES ($1, $2, $3)",
+            other["id"], other_did, "https://other.test/voice")
+
+        # (a) Cross-tenant from_did → 404 (no existence leak, no originate).
+        r = await client.post("/v1/calls",
+                              json={"from_did": other_did, "to": TO_RATED})
+        assert r.status_code == 404, r.text
+        assert attested == []
+
+        # (b) from_did that exists nowhere → 404, no originate.
+        r2 = await client.post("/v1/calls",
+                               json={"from_did": "+19995550000", "to": TO_RATED})
+        assert r2.status_code == 404
+        assert attested == []
+
+        # (c) Owned from_did → originates WITH stir_attest="A".
+        r3 = await client.post("/v1/calls", json=_body())
+        assert r3.status_code == 200, r3.text
+        assert attested == ["A"]
+
+        # Cleanup the extra tenant (keep module fixtures undisturbed).
+        await db.execute("DELETE FROM api_dids WHERE did = $1", other_did)
+        await db.execute("DELETE FROM customers WHERE id = $1", other["id"])
+
+    _run(go())

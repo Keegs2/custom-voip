@@ -538,7 +538,7 @@ render_and_check(){
     -e FREESWITCH_IP=192.168.10.2 \
     -e STIR_SHAKEN_VERIFY="$verify" \
     -e STIR_VERIFY_CERT_MODE=5 \
-    -e STIR_VERIFY_CA_FILE=/etc/kamailio/stir/sti-pa-roots.pem \
+    -e STIR_VERIFY_CA_FILE=/etc/kamailio/stir/ca/sti-pa-trust-bundle.pem \
     "$BASE_IMAGE" -c -f /etc/kamailio/kamailio.cfg \
     >"$REND/$label.kamctl.log" 2>&1
   RC=$?
@@ -564,7 +564,7 @@ if [ -s "$CFG_ON" ]; then
     else record FAIL "cfg(on): $2" "missing: $1"; fi
   }
   check_libopt 'modparam("secsipid", "libopt", "CertVerify=5")'                                   "libopt CertVerify=5"
-  check_libopt 'modparam("secsipid", "libopt", "CertCAFile=/etc/kamailio/stir/sti-pa-roots.pem")' "libopt CertCAFile=<bundle>"
+  check_libopt 'modparam("secsipid", "libopt", "CertCAFile=/etc/kamailio/stir/ca/sti-pa-trust-bundle.pem")' "libopt CertCAFile=<bundle>"
   check_libopt 'modparam("secsipid", "libopt", "CertCAInter=")'                                   "libopt CertCAInter=<empty>"
 else
   record FAIL "cfg(on): render" "rendered cfg missing/empty (see $REND/on.kamctl.log)"

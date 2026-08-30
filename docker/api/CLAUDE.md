@@ -121,7 +121,7 @@ Docker healthcheck: `curl -sf http://127.0.0.1:8000/health` every 15s.
 
 ### ESL Client (`services/esl_client.py`)
 Raw TCP socket connection to FreeSWITCH Event Socket (port 8021). Opens a new connection per command (no persistent connection). Supports:
-- `originate_call()` -- builds a `sofia/external/dest@proxy` originate command with channel variables for customer_id, product_type, traffic_grade. The `X-Carrier` SIP header is hardcoded to `primary` (Dallas); `traffic_grade` is only passed as a channel var, it does NOT select the carrier.
+- `originate_call()` -- builds a `sofia/external/dest@proxy` originate command with channel variables for customer_id, product_type, traffic_grade. The `X-Carrier` SIP header is hardcoded to `primary` (Dallas); `traffic_grade` is only passed as a channel var, it does NOT select the carrier. STIR/SHAKEN (Task 2.2): accepts `stir_attest="A"` (calls.py passes it only after the from_did ownership gate) and adds `stir_attest`/`sip_h_X-Attestation`/`stir_attest_intent`/`stir_inbound_signed` to the originate vars — the direct originate leg IS the carrier-bound INVITE, and Kamailio consumes + strips X-Attestation unconditionally.
 - `get_call_status()` -- `uuid_dump` to get live call state
 - `hangup_call()` -- `uuid_kill` with hangup cause
 - `transfer_call()` -- `uuid_transfer`
