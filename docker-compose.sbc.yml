@@ -79,13 +79,16 @@ services:
       # STIR/SHAKEN inbound VERIFY trust anchors (Phase 2B). Govern whether a
       # fetched x5u cert is chained to a trusted STI-CA root. DEFAULT MODE 0 =
       # structural + JWT-signature only (no chain), byte-identical to no-libopt.
-      # For true STI-PA trust set MODE=7 and point CA_FILE at the STI-PA root
-      # bundle (delivered per-SBC like the key; mount it read-only). Inert unless
-      # STIR_SHAKEN_VERIFY=on. STIR_VERIFY_CA_FILE/_INTER are only opened when the
-      # matching CertVerify bit is set, so an empty default never blocks a call.
+      # For true STI-PA trust set MODE=5 and point CA_FILE at the STI-PA root
+      # bundle (delivered per-SBC by refresh-sbc-trust-bundle.sh; dir-mounted
+      # read-only via docker-compose.stir-cafile.yml). Inert unless
+      # STIR_SHAKEN_VERIFY=on. STIR_VERIFY_CA_FILE/_INTER/_CRL_FILE are only
+      # opened when the matching CertVerify bit (4/8/16) is set, so an empty
+      # default never blocks a call.
       - STIR_VERIFY_CERT_MODE=${STIR_VERIFY_CERT_MODE:-0}
       - STIR_VERIFY_CA_FILE=${STIR_VERIFY_CA_FILE:-}
       - STIR_VERIFY_CA_INTER=${STIR_VERIFY_CA_INTER:-}
+      - STIR_VERIFY_CRL_FILE=${STIR_VERIFY_CRL_FILE:-}
       # Bandwidth TC1/TC2 trunk-config signaling IPs (fixed PoPs, all zones)
       - BANDWIDTH_TC1_NY=${BANDWIDTH_TC1_NY:-67.231.9.142}
       - BANDWIDTH_TC1_ATL=${BANDWIDTH_TC1_ATL:-67.231.13.185}
