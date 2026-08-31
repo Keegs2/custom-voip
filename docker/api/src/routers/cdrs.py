@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from db import database as db
 from auth.dependencies import get_support_read_filter, require_admin
 import logging
+import math
 import re
 
 logger = logging.getLogger(__name__)
@@ -36,14 +37,124 @@ def _safe_float(value, default=None):
         return default
 
 
-def _safe_bigint(value, default=None):
-    """Convert a string value to a big int, returning default on failure."""
-    if value is None:
-        return default
-    try:
-        return int(value)
-    except (ValueError, TypeError):
-        return default
+# Bounds for the cdrs quality/RTP columns (05_schema_cdr.sql).  Every metric
+# is clamped BEFORE the INSERT: asyncpg raises on NUMERIC overflow, and any
+# exception in _process_cdr_body drops the whole row -- a bad quality number
+# must never cost a billing CDR.
+_INT32_MAX = 2**31 - 1
+_INT64_MAX = 2**63 - 1
+_NUMERIC_8_3_MAX = 99999.999
+_NUMERIC_8_4_MAX = 9999.9999
+
+
+def _clamped_float(value, lo, hi, ndigits=3):
+    """Parse a float and clamp it into [lo, hi]; None/NaN -> None."""
+    v = _safe_float(value)
+    if v is None or v != v:
+        return None
+    return round(min(max(v, lo), hi), ndigits)
+
+
+def _clamped_int(value, lo=0, hi=_INT32_MAX):
+    """Parse an int and clamp it into [lo, hi]; None -> None."""
+    v = _safe_int(value)
+    if v is None:
+        return None
+    return min(max(v, lo), hi)
+
+
+def _variance_to_jitter_ms(variance: float | None) -> float | None:
+    """Convert a running inter-arrival variance (ms^2) to jitter std-dev in ms.
+
+    FreeSWITCH's rtp_audio_in_jitter_min_variance / _max_variance are the
+    population VARIANCE of packet inter-arrival diffs in ms^2 (switch_rtp.c
+    check_jitter()), NOT milliseconds.  sqrt() yields the honest running
+    jitter in real ms.  None / NaN / negative -> None.
+    """
+    if variance is None or variance != variance or variance < 0:
+        return None
+    return round(min(math.sqrt(variance), _NUMERIC_8_3_MAX), 3)
+
+
+def _extract_quality_metrics(variables: dict) -> dict:
+    """Extract + sanitize the RTP quality/byte-counter metrics for a CDR.
+
+    Pure function of the FreeSWITCH variables dict.  Every value is parsed
+    defensively and clamped to its column bounds, so the resulting dict can
+    always be bound to the cdrs INSERT without overflow.
+
+    Jitter: jitter_min_ms / jitter_max_ms = sqrt of FS's running min/max
+    inter-arrival variance -- the calmest ("floor") and worst ("peak")
+    running jitter in real ms.  FS never exports a mean-based per-call
+    jitter, so jitter_avg_ms = sqrt((min_var + max_var) / 2), the RMS
+    mid-band of the two extremes -- an honest single-number ESTIMATE, not a
+    true mean.
+    """
+    mos = _clamped_float(variables.get("rtp_audio_in_mos"), 0.0, 9.99, 2)
+    quality_pct = _clamped_float(
+        variables.get("rtp_audio_in_quality_percentage"), 0.0, 100.0, 2)
+
+    jitter_min_var = _safe_float(variables.get("rtp_audio_in_jitter_min_variance"))
+    jitter_max_var = _safe_float(variables.get("rtp_audio_in_jitter_max_variance"))
+    jitter_min_ms = _variance_to_jitter_ms(jitter_min_var)
+    jitter_max_ms = _variance_to_jitter_ms(jitter_max_var)
+    if jitter_min_var is not None and jitter_max_var is not None:
+        jitter_avg_ms = _variance_to_jitter_ms((jitter_min_var + jitter_max_var) / 2)
+    elif jitter_max_ms is not None:
+        jitter_avg_ms = jitter_max_ms
+    else:
+        jitter_avg_ms = jitter_min_ms  # None if both are None
+
+    # rtp_audio_in_mean_interval is the mean packet interval (always ~ptime,
+    # e.g. 20ms) -- kept as its own column, it is NOT jitter.
+    rtp_mean_interval = _clamped_float(
+        variables.get("rtp_audio_in_mean_interval"), 0.0, _NUMERIC_8_3_MAX)
+
+    # packet_loss_count keeps FS's skip_packet_count: autoflush DISCARDS
+    # (rtp-autoflush-during-bridge), not network loss.
+    packet_loss_count = _clamped_int(variables.get("rtp_audio_in_skip_packet_count"))
+    packet_total_count = _clamped_int(variables.get("rtp_audio_in_media_packet_count"))
+    rtp_audio_in_packet_count = _clamped_int(variables.get("rtp_audio_in_packet_count"))
+    rtp_audio_out_packet_count = _clamped_int(variables.get("rtp_audio_out_packet_count"))
+    flaw_total = _clamped_int(variables.get("rtp_audio_in_flaw_total"))
+
+    # packet_loss_pct: the real NETWORK loss indicator is flaw_total
+    # (sequence-gap based), not the autoflush skip count that used to be
+    # (mis)used here.
+    packet_loss_pct = None
+    total_in = rtp_audio_in_packet_count or packet_total_count
+    if flaw_total is not None and total_in:
+        packet_loss_pct = _clamped_float(flaw_total / total_in * 100.0, 0.0, 100.0, 2)
+
+    r_factor = _clamped_float(_compute_r_factor(mos), 0.0, 999.99, 2)
+
+    return {
+        "mos": mos,
+        "quality_pct": quality_pct,
+        "jitter_min_ms": jitter_min_ms,
+        "jitter_max_ms": jitter_max_ms,
+        "jitter_avg_ms": jitter_avg_ms,
+        "rtp_mean_interval": rtp_mean_interval,
+        "packet_loss_count": packet_loss_count,
+        "packet_total_count": packet_total_count,
+        "packet_loss_pct": packet_loss_pct,
+        "flaw_total": flaw_total,
+        "r_factor": r_factor,
+        "rtp_audio_in_raw_bytes": _clamped_int(
+            variables.get("rtp_audio_in_raw_bytes"), 0, _INT64_MAX),
+        "rtp_audio_in_media_bytes": _clamped_int(
+            variables.get("rtp_audio_in_media_bytes"), 0, _INT64_MAX),
+        "rtp_audio_out_raw_bytes": _clamped_int(
+            variables.get("rtp_audio_out_raw_bytes"), 0, _INT64_MAX),
+        "rtp_audio_out_media_bytes": _clamped_int(
+            variables.get("rtp_audio_out_media_bytes"), 0, _INT64_MAX),
+        "rtp_audio_in_packet_count": rtp_audio_in_packet_count,
+        "rtp_audio_out_packet_count": rtp_audio_out_packet_count,
+        "rtp_jitter_burst_rate": _clamped_float(
+            variables.get("rtp_audio_in_jitter_burst_rate"), 0.0, _NUMERIC_8_4_MAX, 4),
+        "rtp_jitter_loss_rate": _clamped_float(
+            variables.get("rtp_audio_in_jitter_loss_rate"), 0.0, _NUMERIC_8_4_MAX, 4),
+    }
 
 
 def _compute_r_factor(mos: float | None) -> float | None:
@@ -411,39 +522,36 @@ async def _process_cdr_body(body: dict) -> dict:
         destination_prefix = str(destination[:6]) if destination else None
 
         # ---- RTP quality metrics ------------------------------------------
-        mos = _safe_float(variables.get("rtp_audio_in_mos"))
-        quality_pct = _safe_float(variables.get("rtp_audio_in_quality_percentage"))
-        jitter_min_ms = _safe_float(variables.get("rtp_audio_in_jitter_min_variance"))
-        jitter_max_ms = _safe_float(variables.get("rtp_audio_in_jitter_max_variance"))
-        rtp_mean_interval = _safe_float(variables.get("rtp_audio_in_mean_interval"))
-        # Compute average jitter from min/max variance (actual network jitter).
-        # rtp_audio_in_mean_interval is the packet interval (always ~ptime),
-        # NOT jitter — it was incorrectly used as jitter proxy before.
-        if jitter_min_ms is not None and jitter_max_ms is not None:
-            jitter_avg_ms = round((jitter_min_ms + jitter_max_ms) / 2, 3)
-        elif jitter_max_ms is not None:
-            jitter_avg_ms = jitter_max_ms
-        else:
-            jitter_avg_ms = jitter_min_ms  # None if both are None
-        packet_loss_count = _safe_int(variables.get("rtp_audio_in_skip_packet_count"))
-        packet_total_count = _safe_int(variables.get("rtp_audio_in_media_packet_count"))
-
-        # Compute packet loss percentage
-        packet_loss_pct = None
-        if packet_loss_count is not None and packet_total_count and packet_total_count > 0:
-            packet_loss_pct = round((packet_loss_count / packet_total_count) * 100, 2)
-
-        flaw_total = _safe_int(variables.get("rtp_audio_in_flaw_total"))
-        r_factor = _compute_r_factor(mos)
-
-        rtp_audio_in_raw_bytes = _safe_bigint(variables.get("rtp_audio_in_raw_bytes"))
-        rtp_audio_in_media_bytes = _safe_bigint(variables.get("rtp_audio_in_media_bytes"))
-        rtp_audio_out_raw_bytes = _safe_bigint(variables.get("rtp_audio_out_raw_bytes"))
-        rtp_audio_out_media_bytes = _safe_bigint(variables.get("rtp_audio_out_media_bytes"))
-        rtp_audio_in_packet_count = _safe_int(variables.get("rtp_audio_in_packet_count"))
-        rtp_audio_out_packet_count = _safe_int(variables.get("rtp_audio_out_packet_count"))
-        rtp_jitter_burst_rate = _safe_float(variables.get("rtp_audio_in_jitter_burst_rate"))
-        rtp_jitter_loss_rate = _safe_float(variables.get("rtp_audio_in_jitter_loss_rate"))
+        # Parsed + clamped in _extract_quality_metrics (jitter variance ms^2
+        # -> std-dev ms, flaw-based loss %, column-bound clamps).  A failure
+        # here must NEVER abort the INSERT -- the billing row outranks the
+        # quality metrics -- so any unexpected error NULLs the whole set.
+        try:
+            qm = _extract_quality_metrics(variables)
+        except Exception:
+            logger.exception(
+                "CDR ingest: quality metric extraction failed for uuid=%s; "
+                "inserting CDR without quality metrics", call_uuid)
+            qm = {}
+        mos = qm.get("mos")
+        quality_pct = qm.get("quality_pct")
+        jitter_min_ms = qm.get("jitter_min_ms")
+        jitter_max_ms = qm.get("jitter_max_ms")
+        jitter_avg_ms = qm.get("jitter_avg_ms")
+        rtp_mean_interval = qm.get("rtp_mean_interval")
+        packet_loss_count = qm.get("packet_loss_count")
+        packet_total_count = qm.get("packet_total_count")
+        packet_loss_pct = qm.get("packet_loss_pct")
+        flaw_total = qm.get("flaw_total")
+        r_factor = qm.get("r_factor")
+        rtp_audio_in_raw_bytes = qm.get("rtp_audio_in_raw_bytes")
+        rtp_audio_in_media_bytes = qm.get("rtp_audio_in_media_bytes")
+        rtp_audio_out_raw_bytes = qm.get("rtp_audio_out_raw_bytes")
+        rtp_audio_out_media_bytes = qm.get("rtp_audio_out_media_bytes")
+        rtp_audio_in_packet_count = qm.get("rtp_audio_in_packet_count")
+        rtp_audio_out_packet_count = qm.get("rtp_audio_out_packet_count")
+        rtp_jitter_burst_rate = qm.get("rtp_jitter_burst_rate")
+        rtp_jitter_loss_rate = qm.get("rtp_jitter_loss_rate")
         read_codec = variables.get("read_codec")
         if read_codec is not None:
             read_codec = str(read_codec)

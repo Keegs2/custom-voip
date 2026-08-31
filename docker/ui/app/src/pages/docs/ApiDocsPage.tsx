@@ -785,8 +785,9 @@ function TelemetryReference() {
       <Callout accent={BLUE}>
         <strong style={{ color: C.text }}>Quality fields:</strong> each record
         carries <IC>mos</IC> (1–5 voice-quality score; 4.0+ is excellent), <IC>r_factor</IC>{' '}
-        (0–93 transmission rating), jitter (<IC>jitter_min_ms</IC>/<IC>avg</IC>/<IC>max</IC>),
-        and packet loss (<IC>packet_loss_count</IC>, <IC>packet_loss_pct</IC>), plus codec and
+        (0–93 transmission rating), running jitter in ms (<IC>jitter_min_ms</IC> floor /{' '}
+        <IC>jitter_max_ms</IC> peak / <IC>jitter_avg_ms</IC> mid-band estimate),
+        and network packet loss (<IC>packet_loss_pct</IC>, sequence-gap based), plus codec and
         RTP byte/packet counters — the response above is trimmed for brevity.
       </Callout>
 

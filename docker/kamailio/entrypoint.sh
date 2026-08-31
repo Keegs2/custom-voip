@@ -158,6 +158,27 @@ else
   STIR_SHAKEN_VERIFY=off
 fi
 
+# UDP_MTU: oversized-request UDP->TCP fallback (core udp_mtu +
+# udp_mtu_try_proto=TCP — see the activation criteria comment in kamailio.cfg).
+# DEFAULT OFF (0): ship-dark safety valve for STIR-signed INVITEs that exceed
+# the wire MTU and currently IP-fragment. The param is GLOBAL (also governs
+# FS-bound and PBX-bound UDP sends) and Bandwidth's TCP support is unverified
+# from our side, so it MUST stay off until the operator completes the Bandwidth
+# TCP canary. Sanitize hard: anything non-numeric or <=0 renders the toggle
+# OFF (fail-safe — a typo can never flip transport behavior on the live
+# carrier path). Same compile-time line-replacement mechanism as
+# FS_AWARE_OPTIONS/STIR_SHAKEN_SIGN.
+UDP_MTU="${UDP_MTU:-0}"
+case "${UDP_MTU}" in
+  ''|*[!0-9]*) UDP_MTU=0 ;;
+esac
+if [ "${UDP_MTU}" -gt 0 ]; then
+  UDP_MTU_DEFINE="#!define UDP_MTU_FALLBACK"
+else
+  UDP_MTU=0
+  UDP_MTU_DEFINE="# UDP_MTU disabled via env (default 0) — no udp_mtu/TCP fallback; oversized UDP fragments as before"
+fi
+
 # STIR/SHAKEN cert repo URL (x5u) + private-key path. Safe placeholder defaults
 # so the #!define always resolves even when signing is OFF (the tokens are only
 # referenced inside the STIR_SHAKEN_SIGN ifdef). STIR_KEY_PATH points at the
@@ -258,6 +279,12 @@ sed -i "s|__FS_AWARE_OPTIONS_DEFINE__|${FS_AWARE_OPTIONS_DEFINE}|" "$CONFIG"
 # '&' or '\', so the s|..|..| delimiter is safe.
 sed -i "s|__STIR_SHAKEN_SIGN_DEFINE__|${STIR_SHAKEN_SIGN_DEFINE}|" "$CONFIG"
 sed -i "s|__STIR_SHAKEN_VERIFY_DEFINE__|${STIR_SHAKEN_VERIFY_DEFINE}|" "$CONFIG"
+# UDP MTU fallback toggle + value. Both replacement strings are fixed literals
+# (the define/comment line and a sanitized integer) with no '|', '&' or '\'.
+# The value is substituted even when the toggle is OFF (renders 0 inside the
+# compiled-out #!ifdef block) so no placeholder ever survives templating.
+sed -i "s|__UDP_MTU_DEFINE__|${UDP_MTU_DEFINE}|" "$CONFIG"
+sed -i "s|__UDP_MTU_VALUE__|${UDP_MTU}|g" "$CONFIG"
 # STIR x5u URL + key path. x5u is an ATIS-1000074 §5.3.1 URL (https, no query
 # string / fragment / userinfo), so it contains no '|', '&', or '\' — safe for
 # the s|..|..| delimiter and literal in the replacement. Escape defensively
