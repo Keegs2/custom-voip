@@ -68,7 +68,7 @@ local aliases = {
 
     -- Media HA hot standby (West FS-2 `west-fs-2`, Phase 4c)
     ["192.168.20.3"]   = "West-FreeSWITCH-2", -- West FS-2 internal (voip-media-west; update if reservation differs)
-    -- ["<west-fs-2-ip>"] = "West-FreeSWITCH-2", -- West FS-2 public — OPERATOR: uncomment + fill with the reserved west-fs-2-ip address, then restart heplify-server
+    ["35.197.95.171"]  = "West-FreeSWITCH-2", -- West FS-2 public (west-fs-2-ip)
 
     -- Services (West) — replica DB / HEP relay
     ["10.138.0.2"]     = "West-Services",   -- West services VM (DB replica)
