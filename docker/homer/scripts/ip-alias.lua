@@ -46,7 +46,7 @@ local aliases = {
     -- Media HA hot standby (East FS-2 `east-fs-2`, Phase 4c — receives calls
     -- only while FS-1 is dead). Same collapse pattern: both interfaces -> one name.
     ["192.168.10.3"]   = "FreeSWITCH-2", -- East FS-2 internal (voip-media; update if reservation differs)
-    -- ["<east-fs-2-ip>"] = "FreeSWITCH-2", -- East FS-2 public — OPERATOR: uncomment + fill with the reserved east-fs-2-ip address, then restart heplify-server
+    ["35.196.226.123"] = "FreeSWITCH-2", -- East FS-2 public (east-fs-2-ip)
 
     -- Services (East)
     ["10.142.0.103"]   = "Services",     -- East services VM (DB/Homer)
@@ -68,7 +68,7 @@ local aliases = {
 
     -- Media HA hot standby (West FS-2 `west-fs-2`, Phase 4c)
     ["192.168.20.3"]   = "West-FreeSWITCH-2", -- West FS-2 internal (voip-media-west; update if reservation differs)
-    -- ["<west-fs-2-ip>"] = "West-FreeSWITCH-2", -- West FS-2 public — OPERATOR: uncomment + fill with the reserved west-fs-2-ip address, then restart heplify-server
+    ["35.197.95.171"]  = "West-FreeSWITCH-2", -- West FS-2 public (west-fs-2-ip)
 
     -- Services (West) — replica DB / HEP relay
     ["10.138.0.2"]     = "West-Services",   -- West services VM (DB replica)
@@ -90,7 +90,7 @@ local aliases = {
 
     -- Media HA hot standby (Central FS-2 `central-fs-2`, Phase 4c)
     ["192.168.30.3"]   = "Central-FreeSWITCH-2", -- Central FS-2 internal (voip-media-central; update if reservation differs)
-    -- ["<central-fs-2-ip>"] = "Central-FreeSWITCH-2", -- Central FS-2 public — OPERATOR: uncomment + fill with the reserved central-fs-2-ip address, then restart heplify-server
+    ["34.63.100.161"]  = "Central-FreeSWITCH-2", -- Central FS-2 public (central-fs-2-ip)
 
     -- Services (Central) — replica DB / HEP relay
     ["10.128.0.2"]     = "Central-Services",   -- Central services VM (DB replica)
