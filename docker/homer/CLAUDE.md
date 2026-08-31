@@ -65,7 +65,7 @@ Per-profile capture-server params are silently ignored by FreeSWITCH (the config
 does not recognize `capture-server` in profile `<settings>`, only in `<global_settings>`).
 Both internal and external profiles share capture_id=200.
 
-**Multi-zone capture IDs:** East=100/200, West=110/210, Central=120/220.
+**Multi-zone capture IDs:** East=100/200, West=110/210, Central=120/220. Media-HA FS-2 nodes (Phase 4c hot standbys `east-fs-2`/`west-fs-2`/`central-fs-2`): **201/211/221** — set via `HEP_CAPTURE_ID` in each FS-2 `.env` so ladders distinguish which FS handled a call (confirm against the FS-2 `.env` matrix at deploy).
 
 HEP sources (Kamailio and FreeSWITCH) are unchanged from Homer 7 -- they still
 send HEP to port 9060 on the services VM. Only the backend storage and UI changed.

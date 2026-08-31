@@ -333,6 +333,7 @@ SBC_ID=<region>-sbc-<n>                 # e.g. east-sbc-1, west-sbc-2
 HEP_CAPTURE_ID=<see table below>        # Unique per-SBC Homer capture ID
 # Optional (defaults preserve current behavior — usually leave unset):
 # SBC_SIGNALING_VIP=<zone_ilb_vip>      # Active/standby HA: per-zone INTERNAL passthrough-NLB VIP (see below)
+# FREESWITCH_IP_2=<zone_fs2_internal_ip> # Strict active/standby FS pair: zone's SECOND media node (see below)
 # BW_CPS_LIMIT=100                      # Inbound CPS flood backstop per Bandwidth IP (503 above this)
 # TESTING_IP=                           # Trusted SIPp test source. UNSET in prod (disabled by default)
 # BANDWIDTH_TC1_NY / TC1_ATL / TC2_DAL / TC2_LA  # Fixed TC1/TC2 PoPs (defaults = production IPs)
@@ -390,6 +391,83 @@ inner Route — the kept listen/alias keeps terminating them); (4) flip the medi
 VM's `SBC_PROXY_IP` to the ILB VIP and `SBC_PROXY_IP_FAILOVER` to sbc-1's direct
 VPC IP. Never set the var before the ILB answers on the VIP: new dialogs would
 carry an inner Route that nothing serves.
+
+#### Strict active/standby FreeSWITCH pair — `FREESWITCH_IP_2` (optional, per zone)
+
+Gives each zone a SECOND media node in the SAME model as the SBC pair: FS-1
+serves ALL new calls; FS-2 runs fully hot (sofia up, DB connected, answering the
+same dispatcher OPTIONS probes) but receives ZERO new calls while FS-1 is
+healthy. Probing-declared death flips new-call selection to FS-2; recovery
+automatically fails back. NOT load-sharing, NOT round-robin.
+
+Mechanism (all env-gated by `FREESWITCH_IP_2`; unset = single-FS config,
+verified effective-config-identical + `kamailio -c` clean):
+- `dispatcher.list` group 1 gains `sip:<FS2>:5080` (duid `fs-standby`,
+  priority 5) and FS-1's line renders priority 10. Kamailio 5.8 orders the
+  runtime `dlist[]` by DESCENDING priority number and `ds_select_dst("1","8")`
+  (serial) always takes the first non-INACTIVE entry — verified against 5.8
+  `dispatch.c` (alg-8 hash=0 :2466, skip-walk :2536, ascending insert :589 +
+  backwards reindex :803) and live (`kamcmd dispatcher.list` order + INVITE
+  delivery tests).
+- Per-call node identity for in-dialog routing: the Record-Route presets add
+  `;fsn=1`/`;fsn=2` next to `;fs=5080/5090`, and `$dlg_var(fs_node)` records
+  the REAL selection on the dialog-owning SBC (it outranks the marker there).
+  Legacy dialogs (no `fsn`) resolve to FS-1 with a one-shot 481 other-host
+  retry. §8.10 port tiers are untouched.
+- `fshealth` gains per-node `fs1_up`/`fs2_up`; `fs_up` becomes the ANY-node
+  aggregate. `/healthz` 503 + OPTIONS-503 drain fire ONLY when BOTH nodes are
+  down (single-node death must NOT drain the zone). Detection windows with
+  current settings (`ds_ping_interval=5`, thresholds 3, tm `fr_timer=30s`):
+  ~40-45s for a silently dead node (probe replies time out at fr_timer),
+  ~10-15s for a node answering probes with a non-accepted code; failback
+  ~10-15s after the node answers again. In-window call setups get one
+  in-transaction rescue onto the standby via `DISPATCH_FAILURE`/`ds_next_dst`
+  (attempted at ~30s — the carrier will often have CANCELled by then).
+
+**FS-2 VM build:** clone of the media VM — `docker-compose.media.yml` is reused
+AS-IS, `inbound_router.lua`/sofia/conf need ZERO changes (all identity is env).
+FS-2 `.env` = FS-1's `.env` with exactly these differences:
+`EXTERNAL_SIP_IP`/`EXTERNAL_RTP_IP` = FS-2's OWN public IP (entrypoint adds it
+to loopback per-VM — no shared VIP anywhere in the media plane),
+`FS_NODE_ID`/`HEP_CAPTURE_ID` = distinct per node (Homer: East FS-2 = 201,
+West = 211, Central = 221). Identical: `SBC_PROXY_IP` (zone signaling ILB VIP),
+`SBC_PROXY_IP_FAILOVER`, `FS_ZONE`, `DB_HOST`/`DB_PORT` (zone replica),
+`API_HOST`, `HOMER_IP`, `ESL_PASSWORD`, `METRICS_ZONE`. The FS-2 VM must be on
+the zone's Cloud-NAT-excluded media subnet with the same firewall tags as FS-1
+(`bypass-vpn`, `voip-media`).
+
+**Cutover order (per zone, strictly):** (1) deploy this code everywhere with
+the var unset — no-op; (2) operator builds the FS-2 VM (media subnet, tags,
+`.env` as above), verifies it standalone (sofia up on :5080/:5090, DB reachable,
+answers OPTIONS from an SBC source); (3) set `FREESWITCH_IP_2=<FS-2 VPC IP>` on
+BOTH SBCs of the zone and restart them one at a time; (4) watch
+`kamcmd dispatcher.list` (FS-1 prio 10 first + FS-2 prio 5, both `AX`) and
+`kamcmd htable.get fshealth fs1_up` / `fs2_up` = 1. In-flight dialogs carry no
+`fsn` marker and keep resolving to FS-1 — unchanged.
+
+**Operational caveats:**
+- Calls established on a dying FS are LOST (media + B2BUA state are anchored
+  on the node — industry standard for media-server death). Failover covers NEW
+  calls only; setups inside the detection window may fail.
+- ESL/API originate (`POST /v1/calls`) stays pinned to FS-1
+  (`FREESWITCH_ESL_HOST` on the Services VM — deliberately NOT changed here).
+  A future `FREESWITCH_ESL_HOST_2` failover in the API is the follow-up.
+- `kamcmd dispatcher.set_state` does NOT fire the dispatcher dst-up/dst-down
+  events in 5.8 (`ds_reinit_state` sets flags directly), so an RPC-forced
+  state change leaves `fs1_up`/`fs2_up` stale until the next probe-driven
+  transition. Also, with `ds_probing_mode=1`, `set_state ip` on an ALIVE node
+  self-heals back to active in ~15s (successful probes reactivate it) — for a
+  real admin drain of a media node use `set_state dp` (DISABLED sticks), and
+  expect the health mirror/markers to lag as above. Selection itself is always
+  correct (dispatcher flags are authoritative).
+- Each SBC probes and mirrors independently; their views can diverge by one
+  probe cycle (±5-15s). Harmless: only the ACTIVE SBC receives carrier traffic
+  (NLB failover policy), and the aggregate consumers converge within a cycle.
+- The SDP private-IP scrub targets (`FS_PUBLIC_IP`) remain FS-1's public IP.
+  They are defense-in-depth no-ops for a correctly configured FS (SDP already
+  carries the node's own public IP via `ext-rtp-ip`); a private-IP leak from
+  FS-2 would be "repaired" to FS-1's address — the call's audio was already
+  broken in that misconfiguration; fix the FS-2 env, don't widen the scrub.
 
 #### SBC Identity & Homer Capture ID Mapping
 

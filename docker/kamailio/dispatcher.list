@@ -9,7 +9,18 @@
 #   8 - Disable DNS A lookups
 #   16 - Delete entry on expire
 #
-# Priority: Lower = higher priority (0-255)
+# Priority: HIGHER number = tried FIRST by alg 8 (serial/first-active).
+#   VERIFIED against Kamailio 5.8 source — do NOT trust the old "lower =
+#   higher priority" note that used to live here, it was wrong:
+#   add_dest2list() keeps the set's linked list in ASCENDING priority order
+#   (dispatch.c:589-604, "highest priority last -> reindex will copy
+#   backwards") and reindex_dests() then copies that list BACKWARDS into the
+#   dlist[] array (dispatch.c:803-816, j = nr-1 down to 0 walking from the
+#   list head), so dlist[0] — the entry alg 8 selects first (hash=0,
+#   dispatch.c:2466-2468) — is the destination with the HIGHEST numeric
+#   priority. Corollary for EQUAL priorities: FILE ORDER IS REVERSED in
+#   dlist[] (the last-listed line lands at dlist[0]) — never rely on file
+#   order for precedence; always encode precedence in the priority number.
 #
 # Attrs: Key-value pairs for custom routing
 #   weight=N - Relative weight for weighted distribution
@@ -53,11 +64,31 @@
 # SIP-honest OPTIONS handler. The flags field stays 0: with ds_probing_mode=1
 # no explicit "probing" (2) flag is needed, and leaving it 0 keeps the long-
 # standing behavior byte-identical. Do NOT set flag 1 (inactive) here.
-1 sip:__FS_IP__:5080 0 0 weight=100;maxload=2000;duid=fs-primary
+#
+# STRICT ACTIVE/STANDBY FS PAIR (optional, env-gated — mirrors the SBC pair
+# model): when FREESWITCH_IP_2 is set in the SBC .env, entrypoint.sh renders
+#   - the FS-1 line's templated priority field as 10  (ACTIVE:  dlist[0])
+#   - the FS-2 placeholder below as a real line, priority 5 (STANDBY: dlist[1])
+# and kamailio.cfg's route[DISPATCH] switches ds_select_dst group 1 from
+# alg 4 to alg 8 (serial / "use always first entry", dispatch.c:2466). Alg 8
+# always starts at dlist[0] and only walks past a destination whose state is
+# INACTIVE or DISABLED (ds_skip_dst, dispatch.h:51 — note TRYING is NOT
+# skipped, so probe failures below ds_probing_threshold do NOT move traffic).
+# Net effect: FS-1 serves ALL new calls while healthy; FS-2 runs fully hot
+# (probed by the same OPTIONS ping, DB-connected, sofia up) but receives ZERO
+# new calls; when FS-1 is marked INACTIVE, every new call goes to FS-2; when
+# FS-1 recovers (ds_inactive_threshold successful probes) new calls
+# automatically fail back to FS-1. NOT round-robin, NOT load-sharing.
+# When FREESWITCH_IP_2 is unset, the FS-1 priority field renders back to 0
+# and the placeholder renders as a comment — byte-identical single-FS
+# behavior.
+1 sip:__FS_IP__:5080 0 __FS1_PRIORITY__ weight=100;maxload=2000;duid=fs-primary
+__FS2_DISPATCHER_LINE__
 
-# Add additional FreeSWITCH instances here for horizontal scaling:
-# 1 sip:freeswitch-2:5080 0 0 weight=100;maxload=2000;duid=fs-secondary
-# 1 sip:freeswitch-3:5080 0 0 weight=100;maxload=2000;duid=fs-tertiary
+# For horizontal scaling beyond the active/standby pair, add further lines
+# with DESCENDING priority numbers (each lower number = later in the alg-8
+# serial order — see the priority note at the top of this file):
+# 1 sip:freeswitch-3:5080 0 3 weight=100;maxload=2000;duid=fs-tertiary
 
 # ============================================================
 # Group 2: Bandwidth Primary (Dallas)

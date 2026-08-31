@@ -2244,3 +2244,154 @@ the live LB during traffic hours.
   subnets and `bypass-vpn` tagging rules from the Cloud NAT lesson are untouched.
 - **Secrets/env.** `SBC_PROXY_IP`, `SBC_SIGNALING_VIP` land in per-VM `.env`
   via the deploy workflow (Ansible/manual), not OpenTofu.
+
+## 19. Media HA (Phase 4c) — Second FreeSWITCH per zone (hot standby)
+
+> **Blueprint (maintenance 2026-08):** Phase 4c adds ONE hot-standby FreeSWITCH VM per
+> zone (`east-fs-2` / `west-fs-2` / `central-fs-2`), created by the operator via gcloud
+> during the Phase 4c maintenance (runbook: `docs/FS_MEDIA_HA_RUNBOOK.md`) and imported
+> later like everything else. **Unlike Phase 4b there are NO new LB resources**: media
+> failover is SIP-level — Kamailio dispatcher priority selection (`FREESWITCH_IP_2`,
+> telephony-owned) flips NEW calls to FS-2 only while FS-1 fails OPTIONS probing, with
+> automatic failback; in-dialog requests follow per-call `fsn` markers. The GCP footprint
+> per zone is exactly: 1 VM + 1 reserved external static IP + 1 reserved internal static
+> IP (plus a transient machine image used at create time — not imported, delete or keep
+> as a warm template at will).
+
+**What changes per zone:** nothing in the LB set, subnets, firewall (tag-driven —
+`voip-media` + `bypass-vpn` on the new VM inherits every rule, per the §18.5/West-buildout
+verification), or Cloud NAT posture (the VM lands on the zone's existing Cloud-NAT-excluded
+`voip-media*` subnet). East's FS-1 keeps its legacy name (`fs-media-v2`); the new VMs
+finally follow the `{zone}-fs-2` convention.
+
+### 19.1 Real resource names (ground truth for import)
+
+| Resource | East (us-east1 / us-east1-b) | West (us-west1 / us-west1-b) | Central (us-central1 / us-central1-b) |
+|---|---|---|---|
+| FS-1 VM (existing) | `fs-media-v2` (192.168.10.2) | `west-fs` (192.168.20.2) | `central-fs` (192.168.30.2) |
+| FS-2 VM (NEW, e2-standard-8) | `east-fs-2` (192.168.10.3) | `west-fs-2` (192.168.20.3) | `central-fs-2` (192.168.30.3) |
+| Media subnet (existing, Cloud-NAT-excluded) | `voip-media` (192.168.10.0/24) | `voip-media-west` (192.168.20.0/24) | `voip-media-central` (192.168.30.0/24) |
+| FS-2 external IP (NEW, reserved) | `east-fs-2-ip` ‡ | `west-fs-2-ip` ‡ | `central-fs-2-ip` ‡ |
+| FS-2 internal IP (NEW, reserved on the media subnet) | `east-fs-2-internal` = 192.168.10.3 | `west-fs-2-internal` = 192.168.20.3 | `central-fs-2-internal` = 192.168.30.3 |
+| Tags | voip-media, bypass-vpn | voip-media, bypass-vpn | voip-media, bypass-vpn |
+| Machine image (transient, create-time only) | `east-fs-2-image` (from `fs-media-v2`) | `west-fs-2-image` (from `west-fs`) | `central-fs-2-image` (from `central-fs`) |
+
+‡ External addresses are GCP-assigned at reservation — record the actual IPs in the
+runbook zone table, `docker/homer/scripts/ip-alias.lua` (two commented placeholder
+lines per zone), and the tfvars before the import pass:
+`gcloud compute addresses list --project=rugged-night-193017 --filter='name~fs-2' --format='table(name,region,address,status)'`
+
+### 19.2 Module changes — `modules/voip-region/freeswitch.tf`
+
+**Fixes a §5 blueprint-vs-reality bug while we are here:** §5 models the FS on the
+`default` subnet at `internal_ip_base.102` — reality (and the Cloud NAT lesson) is the
+dedicated `voip-media*` subnet at `192.168.x.2`, tags `["voip-media", "bypass-vpn"]`.
+Model BOTH FS VMs against reality. Config-object additions (root `regions` map):
+
+```hcl
+#   media_subnet_name = string   # "voip-media" / "voip-media-west" / "voip-media-central"
+#   fs_internal_ip    = string   # FS-1: 192.168.{10,20,30}.2
+#   fs2_internal_ip   = string   # FS-2: 192.168.{10,20,30}.3
+#   fs2_name          = optional(string)  # default "${region_name}-fs-2"; East needs no override (east-fs-2)
+```
+
+```hcl
+# FS-2 — media-HA hot standby (Phase 4c). Same shape as FS-1 in every way that
+# matters: e2-standard-8, media subnet (Cloud-NAT-excluded), voip-media+bypass-vpn.
+# NOTE the fs_name_override pattern only applies to FS-1 (East legacy fs-media-v2);
+# FS-2 names follow the convention in all three zones.
+resource "google_compute_address" "fs2_external" {
+  name         = "${coalesce(var.config.fs2_name, "${var.region_name}-fs-2")}-ip"
+  project      = var.project_id
+  region       = var.config.gcp_region
+  address_type = "EXTERNAL"
+  lifecycle { prevent_destroy = true } # Bandwidth termination whitelist candidate — never release
+}
+
+resource "google_compute_address" "fs2_internal" {
+  name         = "${coalesce(var.config.fs2_name, "${var.region_name}-fs-2")}-internal"
+  project      = var.project_id
+  region       = var.config.gcp_region
+  address_type = "INTERNAL"
+  subnetwork   = "projects/${var.project_id}/regions/${var.config.gcp_region}/subnetworks/${var.config.media_subnet_name}"
+  address      = var.config.fs2_internal_ip
+  lifecycle { prevent_destroy = true } # baked into SBC .envs as FREESWITCH_IP_2 + dispatcher
+}
+
+resource "google_compute_instance" "freeswitch_standby" {
+  name         = coalesce(var.config.fs2_name, "${var.region_name}-fs-2")
+  project      = var.project_id
+  zone         = var.config.gcp_zone
+  machine_type = var.config.fs_machine_type          # e2-standard-8, same as FS-1
+
+  tags = ["voip-media", "bypass-vpn"]
+
+  labels = merge(var.labels, { role = "freeswitch-standby", region = var.region_name })
+
+  boot_disk {
+    initialize_params {
+      # Created from the zone's {zone}-fs-2-image machine image (operator, gcloud);
+      # on import, match the discovered source image/size/type — do not force replace.
+      size = var.config.fs_disk_size_gb
+      type = "pd-ssd"
+    }
+  }
+
+  network_interface {
+    subnetwork = "projects/${var.project_id}/regions/${var.config.gcp_region}/subnetworks/${var.config.media_subnet_name}"
+    network_ip = google_compute_address.fs2_internal.address
+    access_config { nat_ip = google_compute_address.fs2_external.address }
+  }
+
+  service_account { scopes = ["cloud-platform"] }
+  scheduling {
+    automatic_restart   = true
+    on_host_maintenance = "MIGRATE"
+  }
+  lifecycle { prevent_destroy = true }
+}
+```
+
+`outputs.tf` additions: `fs2_internal_ip` (the SBC `.env` `FREESWITCH_IP_2` value) and
+`fs2_external_ip` (ip-alias + any future Bandwidth termination whitelist ask).
+
+`production.tfvars` per zone: `media_subnet_name` + `fs_internal_ip` (reality fix) +
+`fs2_internal_ip` = `192.168.10.3` / `192.168.20.3` / `192.168.30.3`.
+
+### 19.3 Import blocks — append to `infra/import-ha.tf` (temporary)
+
+East shown; West/Central substitute regions/zones and the `west-`/`central-` names.
+
+```hcl
+import {
+  to = module.region["east"].google_compute_instance.freeswitch_standby
+  id = "projects/rugged-night-193017/zones/us-east1-b/instances/east-fs-2"
+}
+
+import {
+  to = module.region["east"].google_compute_address.fs2_external
+  id = "projects/rugged-night-193017/regions/us-east1/addresses/east-fs-2-ip"
+}
+
+import {
+  to = module.region["east"].google_compute_address.fs2_internal
+  id = "projects/rugged-night-193017/regions/us-east1/addresses/east-fs-2-internal"
+}
+```
+
+### 19.4 What Phase 4c does NOT change
+
+- **No LB / health-check / instance-group resources.** FS-2 is invisible to both NLB
+  planes; only Kamailio's dispatcher (SIP OPTIONS probing, priority selection) and the
+  any-FS `/healthz` semantics (telephony-owned) know it exists. Both-FS-dead still
+  darkens the zone VIP exactly as §18.7 describes.
+- **No firewall edits.** All VoIP rules are tag-driven (§18.5); the `voip-media` +
+  `bypass-vpn` tags inherit everything, including HEP egress to Homer and vmagent
+  remote-write to East.
+- **Secrets/env.** The FS-2 `.env` (identity fields: EXTERNAL_SIP_IP/EXTERNAL_RTP_IP,
+  FS_NODE_ID, HEP_CAPTURE_ID) and the SBC `.env` `FREESWITCH_IP_2` land via the deploy
+  workflow, not OpenTofu.
+- **Monitoring enrollment** rides `infra/monitoring/variables.tf` (`var.instances` now
+  lists the three FS-2 VMs) + the NOC dashboard instance lists — apply AFTER the VMs
+  exist. Grafana FS panels that aggregate by `freeswitch_node`/`reporting_instance`
+  labels pick the new nodes up automatically.
