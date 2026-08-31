@@ -90,7 +90,7 @@ local aliases = {
 
     -- Media HA hot standby (Central FS-2 `central-fs-2`, Phase 4c)
     ["192.168.30.3"]   = "Central-FreeSWITCH-2", -- Central FS-2 internal (voip-media-central; update if reservation differs)
-    -- ["<central-fs-2-ip>"] = "Central-FreeSWITCH-2", -- Central FS-2 public — OPERATOR: uncomment + fill with the reserved central-fs-2-ip address, then restart heplify-server
+    ["34.63.100.161"]  = "Central-FreeSWITCH-2", -- Central FS-2 public (central-fs-2-ip)
 
     -- Services (Central) — replica DB / HEP relay
     ["10.128.0.2"]     = "Central-Services",   -- Central services VM (DB replica)

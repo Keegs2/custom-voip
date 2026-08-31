@@ -24,7 +24,7 @@ Each zone gains a SECOND FreeSWITCH (`{zone}-fs-2`) that runs **fully hot** — 
 |---|---|---|---|
 | Region / zone | us-east1 / us-east1-b | us-west1 / us-west1-b | us-central1 / us-central1-b |
 | FS-1 (ACTIVE) | `fs-media-v2` (192.168.10.2 · ext 34.139.119.135) | `west-fs` (192.168.20.2 · ext 8.229.177.165) | `central-fs` (192.168.30.2 · ext 35.253.103.114) |
-| **FS-2 (HOT STANDBY, NEW)** | `east-fs-2` (192.168.10.3 · ext = `east-fs-2-ip`, fill ‡) | `west-fs-2` (192.168.20.3 · ext **35.197.95.171**) | `central-fs-2` (192.168.30.3 · ext = `central-fs-2-ip`, fill ‡) |
+| **FS-2 (HOT STANDBY, NEW)** | `east-fs-2` (192.168.10.3 · ext = `east-fs-2-ip`, fill ‡) | `west-fs-2` (192.168.20.3 · ext **35.197.95.171**) | `central-fs-2` (192.168.30.3 · ext **34.63.100.161**) |
 | Machine type / subnet / tags (both FS) | e2-standard-8 / `voip-media` / voip-media, bypass-vpn | e2-standard-8 / `voip-media-west` / voip-media, bypass-vpn | e2-standard-8 / `voip-media-central` / voip-media, bypass-vpn |
 | NEW reserved IPs | `east-fs-2-ip` (ext) + `east-fs-2-internal` (192.168.10.3) | `west-fs-2-ip` + `west-fs-2-internal` (192.168.20.3) | `central-fs-2-ip` + `central-fs-2-internal` (192.168.30.3) |
 | SBC pair (gets `FREESWITCH_IP_2`) | `poc-custom-voip` (primary) / `kam-g2` (standby) | `west-sbc-1` / `west-sbc-2` | `central-sbc-1` / `central-sbc-2` |
