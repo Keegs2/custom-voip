@@ -218,19 +218,26 @@ end
 -- reprioritizing a trunk changes live routing within ~a minute — no
 -- redeploy. Selection SQL (db_client.get_termination_trunks):
 --
---   SELECT carrier, pop, host(source_ip) AS term_ip,
+--   SELECT carrier, pop, host(source_ip) AS term_ip, traffic_class,
 --          COALESCE(priority_<zone>, priority) AS eff_priority
 --   FROM carrier_trunks
 --   WHERE direction IN ('outbound','both') AND enabled = true
 --   ORDER BY eff_priority, id
 --
+-- traffic_class (migration 44: any|ld|tollfree) restricts which
+-- destination classes a trunk may carry; the ONE cached list is
+-- filtered PER CALL against classify_destination(forward_to) at
+-- attempt-build time (never split into per-class caches).
+--
 -- Results are cached PROCESS-WIDE in a FreeSWITCH global variable
 -- (freeswitch.get/setGlobalVariable — the exact SBC-health-cache
 -- pattern above) for TERM_TRUNKS_TTL seconds: within the TTL no call
 -- touches the DB; steady state is ~1 query/minute per FS.
--- Cache entry: "term_trunks_<zone>" = "<epoch>|carrier,pop,ip;..."
+-- Cache entry: "term_trunks_<zone>" = "<epoch>|carrier,pop,ip,class;..."
 -- ("<epoch>|FALLBACK" is the negative-cache sentinel: DB error or
--- zero rows, re-checked after the same TTL).
+-- zero rows, re-checked after the same TTL). A 3-field pre-44 entry
+-- (no class) still parses, as class 'any' — covers the one stale
+-- cache generation across a rolling Lua deploy.
 --
 -- FAIL-OPEN (non-negotiable): DB error, zero usable rows, or an
 -- unparsable cache entry all return nil, and the caller runs the
@@ -263,17 +270,61 @@ local function term_token(s)
     return tostring(s or ""):gsub("[^%w%._%-]", "")
 end
 
+-- Coerce a trunk traffic_class to the closed {any, ld, tollfree} set.
+-- Anything else (NULL from a pre-44 replica, an unexpected future value)
+-- becomes 'any' — the unrestricted class — so a schema/value surprise can
+-- only ever WIDEN a trunk's eligibility back to pre-44 behavior, never
+-- strand a call.
+local function term_class(s)
+    if s == "ld" or s == "tollfree" then
+        return s
+    end
+    return "any"
+end
+
+-- classify_destination(number) -> 'tollfree' | 'ld' for the trunk class
+-- filter. Delegates to the shared pure impl (number_utils — unit-tested);
+-- the inline fallback is the identical algorithm (same pattern as
+-- normalize_did/to_10digit above: number_utils failing to load must not
+-- change routing behavior).
+local TOLLFREE_NPAS_FALLBACK = {
+    ["800"] = true, ["833"] = true, ["844"] = true, ["855"] = true,
+    ["866"] = true, ["877"] = true, ["888"] = true,
+}
+local function classify_destination(number)
+    if number_utils and number_utils.classify_destination then
+        return number_utils.classify_destination(number)
+    end
+    local d = tostring(number or ""):gsub("%D", "")
+    if #d == 11 and d:sub(1, 1) == "1" then
+        d = d:sub(2)
+    end
+    if #d == 10 and TOLLFREE_NPAS_FALLBACK[d:sub(1, 3)] then
+        return "tollfree"
+    end
+    return "ld"
+end
+
 -- Parse the serialized cache payload back into the trunk list.
 -- Any malformed segment invalidates the WHOLE payload (nil) — never
 -- bridge from a half-parsed trunk list.
 local function parse_term_trunks(payload)
     local trunks = {}
     for seg in payload:gmatch("[^;]+") do
-        local carrier, pop, ip = seg:match("^([%w%._%-]+),([%w%._%-]*),(%d+%.%d+%.%d+%.%d+)$")
+        local carrier, pop, ip, class = seg:match("^([%w%._%-]+),([%w%._%-]*),(%d+%.%d+%.%d+%.%d+),(%a+)$")
+        if not carrier then
+            -- 3-field pre-44 cache entry (one stale generation across a
+            -- rolling Lua deploy): parses as class 'any'.
+            carrier, pop, ip = seg:match("^([%w%._%-]+),([%w%._%-]*),(%d+%.%d+%.%d+%.%d+)$")
+            class = "any"
+        end
         if not carrier then
             return nil
         end
-        trunks[#trunks + 1] = { carrier = carrier, pop = pop, term_ip = ip }
+        trunks[#trunks + 1] = {
+            carrier = carrier, pop = pop, term_ip = ip,
+            traffic_class = term_class(class),
+        }
     end
     if #trunks == 0 then
         return nil
@@ -357,7 +408,8 @@ local function get_termination_trunks(zone)
                 capped = true
             end
         else
-            parts[#parts + 1] = carrier .. "," .. pop .. "," .. ip
+            parts[#parts + 1] = carrier .. "," .. pop .. "," .. ip .. ","
+                .. term_class(row.traffic_class)
         end
     end
 
@@ -1066,9 +1118,11 @@ local function terminate_rcf(dest, ctx)
     -- ================================================================
     -- For local extensions, there is only the single dial_string built above.
     -- For PSTN, attempts come from get_termination_trunks(fs_zone) — the
-    -- TED-managed carrier_trunks table (60s process-wide cache) — built
-    -- TRUNK-MAJOR: both SBCs are tried on trunk 1 before moving to trunk 2,
-    -- preserving today's shape. With the 2-row Bandwidth seeds this is
+    -- TED-managed carrier_trunks table (60s process-wide cache) — filtered
+    -- per call by traffic_class (any/ld/tollfree vs classify_destination,
+    -- see the filter below) and built TRUNK-MAJOR: both SBCs are tried on
+    -- trunk 1 before moving to trunk 2, preserving today's shape. With the
+    -- 2-row Bandwidth seeds ('any' class — never filtered out) this is
     -- exactly the historical order (east/central shown; west swaps the PoPs):
     --   1. SBC-1 + bandwidth-dallas
     --   2. SBC-2 + bandwidth-dallas
@@ -1105,10 +1159,35 @@ local function terminate_rcf(dest, ctx)
         -- PSTN: table-driven SBC + carrier failover loop (carrier_trunks)
         set_var("term_trunks_source", "db")
 
+        -- Traffic-class filter (migration 44): keep trunks whose
+        -- traffic_class is 'any' or matches this destination's class
+        -- ('tollfree' = NANP 8YY, else 'ld'). Filtered PER CALL on the one
+        -- cached list; ordering is untouched. CONTRACT: a class-restricted
+        -- trunk (Sinch OSAO tollfree-only / INT ld-only) must never receive
+        -- a call outside its class. If the filter would empty the list
+        -- entirely (operator misconfig: no 'any' trunk and no class match),
+        -- fall back to the FULL list — never strand a call.
+        local dest_class = classify_destination(forward_to)
+        freeswitch.consoleLog("DEBUG", string.format(
+            "[%s] Destination %s classified as %s for trunk selection\n",
+            uuid, forward_to, dest_class))
+        local eligible_trunks = {}
+        for _, trunk in ipairs(term_trunks) do
+            if trunk.traffic_class == "any" or trunk.traffic_class == dest_class then
+                eligible_trunks[#eligible_trunks + 1] = trunk
+            end
+        end
+        if #eligible_trunks == 0 then
+            freeswitch.consoleLog("WARNING", string.format(
+                "[%s] No termination trunk carries class %s (no 'any' rows either) — using the full trunk list\n",
+                uuid, dest_class))
+            eligible_trunks = term_trunks
+        end
+
         -- Trunk-major attempt table: for each trunk (already in
         -- eff_priority order) try the primary SBC, then the failover SBC.
         local bridge_attempts = {}
-        for _, trunk in ipairs(term_trunks) do
+        for _, trunk in ipairs(eligible_trunks) do
             local carrier_label = trunk.carrier
             if trunk.pop and trunk.pop ~= "" then
                 carrier_label = trunk.carrier .. "-" .. trunk.pop

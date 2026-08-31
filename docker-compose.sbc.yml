@@ -107,6 +107,13 @@ services:
       # with NO .env edits. Denver=DNVTCOZIGR2_3278, Chicago=CHCGIL24GR4_7412.
       - SINCH_DENVER_IP=${SINCH_DENVER_IP:-206.146.100.24}
       - SINCH_CHICAGO_IP=${SINCH_CHICAGO_IP:-206.146.101.39}
+      # Sinch TERMINATION signaling IPs (all zones — dispatcher keepalive
+      # groups 8-9 ONLY; egress selection is table-driven via carrier_trunks
+      # + X-Carrier-IP, no kamailio.cfg define). Defaults are the production
+      # values, so deploy = git pull + rebuild with NO .env edits.
+      # Atlanta LD=ATLNGAQSGR2_7214 (INT), Denver TF=DNVTCOZIGR2_3282 (OSAO 8YY).
+      - SINCH_LD_IP=${SINCH_LD_IP:-206.146.98.26}
+      - SINCH_TF_IP=${SINCH_TF_IP:-206.146.100.26}
     volumes:
       - ./docker/kamailio/kamailio.cfg:/etc/kamailio/kamailio.cfg.tmpl:ro
       - ./docker/kamailio/dispatcher.list:/etc/kamailio/dispatcher.list.tmpl:ro

@@ -73,6 +73,7 @@ MIG_RELEASE_STATUS = INIT / "34_release_requested_status.sql"
 MIG_CARRIER_TRUNKS = INIT / "40_carrier_trunks.sql"
 MIG_DID_CARRIER = INIT / "41_did_carrier_source.sql"
 MIG_CARRIER_PRIORITIES = INIT / "42_carrier_priorities.sql"
+MIG_SINCH_TERMINATION = INIT / "44_sinch_termination.sql"
 
 sys.path.insert(0, str(API_SRC))
 
@@ -256,6 +257,10 @@ def intake_db():
             await conn.execute(MIG_DID_CARRIER.read_text())
             await conn.execute(MIG_CARRIER_PRIORITIES.read_text())  # 42: priorities + d.carrier
             await conn.execute(MIG_CARRIER_PRIORITIES.read_text())
+            # 44: traffic_class column (the carrier-trunks router SELECTs it)
+            # + the two Sinch termination seed rows.
+            await conn.execute(MIG_SINCH_TERMINATION.read_text())
+            await conn.execute(MIG_SINCH_TERMINATION.read_text())
         await owner.close()
         db.pool = await asyncpg.create_pool(
             host=pg.sock, port=pg.port, user="api", password="api_secret",
@@ -314,7 +319,7 @@ def tokens(intake_db):
 
 @pytest.fixture(scope="module")
 def sinch_ids(intake_db):
-    """ids of the migration-40 seeded Sinch trunks (never hardcoded)."""
+    """ids of the migration-40/44 seeded Sinch trunks (never hardcoded)."""
     db = intake_db["db"]
 
     async def go():
@@ -323,7 +328,8 @@ def sinch_ids(intake_db):
         return {r["pop"]: r["id"] for r in rows}
 
     ids = _run(go())
-    assert set(ids) == {"denver", "chicago"}
+    # 40 seeds the origination PoPs; 44 adds the termination trunk groups.
+    assert set(ids) == {"denver", "chicago", "atlanta-ld", "denver-tf"}
     return ids
 
 

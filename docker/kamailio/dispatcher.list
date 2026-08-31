@@ -163,6 +163,30 @@ __FS2_DISPATCHER_LINE__
 7 sip:__SINCH_CHICAGO_IP__:5060 0 0 weight=100;duid=sinch-chicago
 
 # ============================================================
+# Group 8: Sinch Termination - Atlanta LD (ATLNGAQSGR2_7214)
+# ============================================================
+# Sinch Atlanta signaling IP — TERMINATION-ONLY trunk group ("INT" Long
+# Distance, Sinch order 225468139; registered to all 6 SBC public IPs on the
+# Sinch side). NOTE: a DIFFERENT IP from the group-6/7 origination PoPs.
+# Same keepalive/health-monitoring purpose as Groups 2-3: OPTIONS probes
+# keep the GCE UDP NAT pinhole open and give the carrier-monitor sidecar
+# up/down visibility (CARRIER_SETIDS includes 8-9).
+# NEVER used for call routing here — egress selection is table-driven
+# (carrier_trunks -> FS X-Carrier-IP -> route[TO_CARRIER] Step 1a).
+# IP templated by entrypoint.sh from SINCH_LD_IP (default 206.146.98.26
+# — LD test TN 2139924610).
+8 sip:__SINCH_LD_IP__:5060 0 0 weight=100;duid=sinch-atlanta-ld
+
+# ============================================================
+# Group 9: Sinch Termination - Denver TF (DNVTCOZIGR2_3282)
+# ============================================================
+# Sinch Denver signaling IP — TERMINATION-ONLY trunk group ("OSAO"
+# Toll-Free, 8YY destinations ONLY per contract, Sinch order 225468672).
+# Same termination-only/keepalive notes as Group 8. IP templated by
+# entrypoint.sh from SINCH_TF_IP (default 206.146.100.26).
+9 sip:__SINCH_TF_IP__:5060 0 0 weight=100;duid=sinch-denver-tf
+
+# ============================================================
 # Notes:
 # ============================================================
 # - Kamailio will probe each destination every ds_ping_interval seconds

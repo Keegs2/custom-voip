@@ -487,8 +487,10 @@ end
 -- against the closed 3-value set BEFORE interpolation (SQL-injection
 -- guard, same posture as validate_did) — anything else queries as east.
 --
--- Returns an array of { carrier, pop, term_ip } in eff_priority order
--- ({} when there are no enabled outbound rows), or nil on any DB error.
+-- Returns an array of { carrier, pop, term_ip, traffic_class } in
+-- eff_priority order ({} when there are no enabled outbound rows), or nil
+-- on any DB error. traffic_class (migration 44: any|ld|tollfree) is the
+-- destination-class restriction the caller filters on per call.
 -- The caller treats {} and nil alike as "use the legacy fallback
 -- attempts" (fail-open) but logs them differently.
 function M.get_termination_trunks(zone)
@@ -498,7 +500,7 @@ function M.get_termination_trunks(zone)
     end
 
     local sql = string.format([[
-        SELECT carrier, pop, host(source_ip) AS term_ip,
+        SELECT carrier, pop, host(source_ip) AS term_ip, traffic_class,
                COALESCE(priority_%s, priority) AS eff_priority
         FROM carrier_trunks
         WHERE direction IN ('outbound','both') AND enabled = true
@@ -518,6 +520,7 @@ function M.get_termination_trunks(zone)
             carrier = row.carrier,
             pop = row.pop,
             term_ip = row.term_ip,
+            traffic_class = row.traffic_class,
         })
         row = cursor:fetch({}, "a")
     end
