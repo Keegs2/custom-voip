@@ -102,6 +102,7 @@ RCF (Remote Call Forwarding) number provisioning. The core RCF product.
 
 ### calls.py
 API call origination with tiered CPS enforcement.
+- **STIR/SHAKEN attestation-A gate (Task 2.2, layer 1):** the from_did lookup in `create_call` (enabled `api_dids` row + tenant-scope check, cross-tenant → 404 no-leak) is the ownership verification that justifies attestation A. Both originate sites (prepaid + x402) pass `stir_attest="A"` to `originate_call`; `api_outbound.lua` re-verifies on dialplan paths and Kamailio coerces anything else to B. The demo fake-originate path skips ESL entirely — no SIP leg, no attestation. Do NOT weaken the from_did lookup without revisiting the STIR policy.
 - Tiers: `api_basic` (5 CPS, $0.01/call), `api_standard` (8 CPS, $0.008/call), `api_premium` (15 CPS, $0.005/call)
 - CPS check uses Redis sliding window (`check_cps_limit` in redis_client)
 - Velocity check (calls per minute) as a secondary guard
@@ -254,7 +255,7 @@ Implements a raw TCP ESL client (no third-party ESL library). Each command opens
 All operations have 5-10 second timeouts. Returns None on any error.
 
 **Public functions**:
-- `originate_call(uuid, from_did, to, customer_id, traffic_grade, webhook_url, timeout)` -- builds an originate command with channel variables. Routes through `sofia/external/{to}@{sbc_proxy}:5060` so Kamailio applies `ext-sip-ip`. The `sip_h_X-Carrier` header is hardcoded to `primary` (Dallas) — all products use the same 2-carrier model and `traffic_grade` is only passed as a channel var, it does NOT select the carrier. In TEST_MODE, uses `loopback/`.
+- `originate_call(uuid, from_did, to, customer_id, traffic_grade, webhook_url, timeout, stir_attest)` -- builds an originate command with channel variables. Routes through `sofia/external/{to}@{sbc_proxy}:5060` so Kamailio applies `ext-sip-ip`. The `sip_h_X-Carrier` header is hardcoded to `primary` (Dallas) — all products use the same 2-carrier model and `traffic_grade` is only passed as a channel var, it does NOT select the carrier. In TEST_MODE, uses `loopback/`. **STIR/SHAKEN (Task 2.2):** `stir_attest="A"` (passed by calls.py ONLY after the from_did ownership gate) adds `stir_attest=A`, `sip_h_X-Attestation=A`, `stir_attest_intent=A`, `stir_inbound_signed=0` to the originate vars — the header must ride the vars because the direct originate leg IS the carrier-bound INVITE (no dialplan/Lua runs pre-INVITE). Kamailio Step 8.5 consumes X-Attestation as the SHAKEN signing level and strips it unconditionally (dark-safe). Only "A"/"B" are honored; other values are logged + ignored.
 - `get_call_status(call_id)` -- `uuid_dump`, parses key:value pairs
 - `hangup_call(call_id, cause)` -- `uuid_kill`
 - `transfer_call(call_id, destination)` -- `uuid_transfer`

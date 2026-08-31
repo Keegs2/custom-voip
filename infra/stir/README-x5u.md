@@ -8,6 +8,13 @@ the `x5u` embedded in every signed PASSporT.
 **On-disk source:** `infra/stir/granite-shaken-8052-x5u.pem` (leaf `CN=SHAKEN 8052`
 + Neustar SHAKEN CA-2 intermediate; **public, no private key** — served verbatim).
 
+**Second served path:** `https://fs-cert.granitevoip.com/stir/sti-pa-trust-bundle.pem`
+— the STI-PA trusted-CA list our own SBCs cron-pull for inbound verify
+(`refresh-sbc-trust-bundle.sh`). On-disk source `/var/lib/stir/` (ro dir mount
+`/srv/stir-trust`), installed/refreshed by `refresh-stir-trust-bundle.sh`; 404s
+until first install. Lifecycle: `docs/STIR_TRUST_BUNDLE_RUNBOOK.md`. Everything
+else still 404s.
+
 We self-host because org policy (Domain Restricted Sharing) blocks public GCS.
 Public reachability here is a **firewall/network** concern, not IAM.
 

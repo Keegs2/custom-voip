@@ -1,13 +1,18 @@
 # ============================================================================
 # STIR/SHAKEN x5u — public HTTPS static endpoint (Caddy)
 # ============================================================================
-# Serves ONLY our public STI certificate chain (leaf CN=SHAKEN 8052 +
-# Neustar SHAKEN CA-2 intermediate) at exactly:
+# Serves ONLY public STIR/SHAKEN certificate material, at exactly three paths:
 #
-#     https://{$X5U_DOMAIN}/stir/8052-2026.pem
+#     https://{$X5U_DOMAIN}/stir/8052-2026.pem            (our x5u chain)
+#     https://{$X5U_DOMAIN}/stir/sti-pa-trust-bundle.pem  (STI-PA trusted-CA list)
+#     https://{$X5U_DOMAIN}/stir/sti-pa-crl.pem           (STI-PA CRL, daily)
 #
-# This is the `x5u` value embedded in every signed PASSporT. Other carriers'
-# STIR/SHAKEN verifiers fetch it over HTTPS to validate our Identity header.
+# The first is the `x5u` value embedded in every signed PASSporT — other
+# carriers' STIR/SHAKEN verifiers fetch it over HTTPS to validate our Identity
+# header. The second and third are the STI-PA trust list + revocation list OUR
+# OWN SBCs cron-pull to chain/screen inbound callers' certs
+# (refresh-sbc-trust-bundle.sh); each 404s until refresh-stir-trust-bundle.sh
+# installs it on this VM.
 #
 # The on-disk source is infra/stir/granite-shaken-8052-x5u.pem (PUBLIC, no
 # private key), bind-mounted READ-ONLY at /srv/stir inside the container. We
@@ -58,6 +63,41 @@
 		header Content-Type "application/pem-certificate-chain"
 		header Cache-Control "public, max-age=86400"
 		rewrite * /granite-shaken-8052-x5u.pem
+		file_server
+	}
+
+	# ---- STI-PA trusted-CA bundle, served at EXACTLY /stir/sti-pa-trust-bundle.pem ----
+	# The multi-CA trust list our SBCs chain INBOUND callers' x5u certs to
+	# (CertCAFile). PUBLIC CA material — safe to serve. Installed/refreshed on
+	# this VM by infra/stir/refresh-stir-trust-bundle.sh into /var/lib/stir,
+	# which is a SEPARATE read-only DIRECTORY mount (/srv/stir-trust) so the
+	# script's atomic rename is visible here with no restart. 404s until the
+	# first install. Shorter cache (1h) than the x5u cert so STI-PA list
+	# changes propagate to the SBC cron pulls within the hour.
+	@trust path /stir/sti-pa-trust-bundle.pem
+	handle @trust {
+		root * /srv/stir-trust
+		header Content-Type "application/pem-certificate-chain"
+		header Cache-Control "public, max-age=3600"
+		rewrite * /sti-pa-trust-bundle.pem
+		file_server
+	}
+
+	# ---- STI-PA CRL, served at EXACTLY /stir/sti-pa-crl.pem ----
+	# The STI-PA revocation list (PEM CRL, reissued DAILY with a 24h
+	# nextUpdate). Installed/refreshed on this VM by refresh-stir-trust-
+	# bundle.sh (pinned-signature + strict freshness gates) into the same
+	# /var/lib/stir dir; SBCs pull it in the same daily cron as the trust
+	# bundle for libsecsipid CertCRLFile (CertVerify bit 16). 404s until the
+	# CRL lifecycle is activated — harmless: the SBC pull treats that as "not
+	# published". Short cache (15 min): the content turns over daily and
+	# staleness here is meaningful (revocation data).
+	@crl path /stir/sti-pa-crl.pem
+	handle @crl {
+		root * /srv/stir-trust
+		header Content-Type "application/pkix-crl"
+		header Cache-Control "public, max-age=900"
+		rewrite * /sti-pa-crl.pem
 		file_server
 	}
 

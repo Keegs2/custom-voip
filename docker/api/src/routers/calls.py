@@ -143,7 +143,19 @@ async def create_call(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=f"Invalid destination 'to': {exc}")
 
-    # Verify the from DID belongs to an API customer and get tier info
+    # Verify the from DID belongs to an API customer and get tier info.
+    #
+    # STIR/SHAKEN Task 2.2 — attestation-A gate, layer 1 (API edge). This
+    # lookup + the tenant-scope check below ARE the ownership verification that
+    # justifies attestation A on API-originated calls: the caller is
+    # JWT/API-key authenticated, the from_did must be an ENABLED api_dids row,
+    # and a non-admin may only present a DID owned by their own customer
+    # (cross-tenant probing returns 404, no existence leak). Only after this
+    # gate does originate_call() carry stir_attest="A" / sip_h_X-Attestation=A
+    # to FreeSWITCH; api_outbound.lua re-verifies the same fact in the DB on
+    # dialplan-routed paths (layer 2) and Kamailio coerces anything else to B
+    # (layer 3). Do NOT weaken this lookup without revisiting the attestation
+    # policy in docs/STIR_SHAKEN_IMPLEMENTATION_PLAN.md.
     did_info = await db.fetch_one(
         """
         SELECT
@@ -254,7 +266,10 @@ async def create_call(
                 customer_id=customer_id,
                 traffic_grade=did_info["traffic_grade"],
                 webhook_url=call.webhook_url or did_info["voice_url"],
-                timeout=call.timeout
+                timeout=call.timeout,
+                # STIR/SHAKEN Task 2.2: attestation A is earned — the from_did
+                # ownership gate above passed (authed tenant + owned api_did).
+                stir_attest="A"
             )
 
             if not success:
@@ -299,6 +314,9 @@ async def _mint_demo_originate(
     Only reachable when ``_fake_originate_enabled()`` (demo mode + explicit
     PAYMENTS_DEMO_FAKE_ORIGINATE flag). Logs + records a demo_scenarios audit row
     so the demo trail shows the call was minted, not carried.
+
+    STIR/SHAKEN note: no attestation applies here — the ESL originate is
+    skipped entirely, so no SIP leg exists to attest (nothing reaches Kamailio).
     """
     await db.execute(
         "UPDATE active_calls SET state = 'demo_originated' WHERE uuid = $1", call_uuid)
@@ -468,6 +486,9 @@ async def _x402_pay_per_call(
                 customer_id=customer_id, traffic_grade=did_info["traffic_grade"],
                 webhook_url=call.webhook_url or did_info["voice_url"],
                 timeout=call.timeout,
+                # STIR/SHAKEN Task 2.2: same ownership gate ran in create_call
+                # before this x402 path was entered -> attestation A.
+                stir_attest="A",
             )
             if not success:
                 raise HTTPException(status_code=500, detail="Failed to originate call")
