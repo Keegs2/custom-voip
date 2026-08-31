@@ -46,7 +46,7 @@ local aliases = {
     -- Media HA hot standby (East FS-2 `east-fs-2`, Phase 4c — receives calls
     -- only while FS-1 is dead). Same collapse pattern: both interfaces -> one name.
     ["192.168.10.3"]   = "FreeSWITCH-2", -- East FS-2 internal (voip-media; update if reservation differs)
-    -- ["<east-fs-2-ip>"] = "FreeSWITCH-2", -- East FS-2 public — OPERATOR: uncomment + fill with the reserved east-fs-2-ip address, then restart heplify-server
+    ["35.196.226.123"] = "FreeSWITCH-2", -- East FS-2 public (east-fs-2-ip)
 
     -- Services (East)
     ["10.142.0.103"]   = "Services",     -- East services VM (DB/Homer)
