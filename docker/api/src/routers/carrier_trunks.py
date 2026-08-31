@@ -14,16 +14,21 @@ them here or in the migration. **
 
 Migration 42 adds termination priorities: `priority` (INT NOT NULL DEFAULT 100,
 lower = tried first) + per-zone overrides `priority_east` / `priority_west` /
-`priority_central` (NULL = use `priority`). FreeSWITCH builds its outbound
-carrier-failover attempt list per zone <z> by running EXACTLY:
+`priority_central` (NULL = use `priority`). Migration 44 adds `traffic_class`
+(any|ld|tollfree — which destination classes the trunk may carry; FreeSWITCH
+filters its cached trunk list per call against the destination's class, e.g.
+the Sinch OSAO trunk is 'tollfree' so it never sees an LD call). FreeSWITCH
+builds its outbound carrier-failover attempt list per zone <z> by running
+EXACTLY:
 
-    SELECT carrier, pop, host(source_ip) AS term_ip,
+    SELECT carrier, pop, host(source_ip) AS term_ip, traffic_class,
            COALESCE(priority_<z>, priority) AS eff_priority
     FROM carrier_trunks
     WHERE direction IN ('outbound','both') AND enabled = true
     ORDER BY eff_priority, id
 
-** so those four priority column names are load-bearing too. ** Disabling a
+** so those four priority column names and traffic_class are load-bearing
+too. ** Disabling a
 trunk here removes it from every zone's termination list on the next call —
 carrier redundancy is operated from this CRUD, no config push. (source_ip
 doubles as the termination signaling target; a future term_ip column is the
@@ -65,12 +70,13 @@ router = APIRouter()
 # text ('206.146.100.24') for clean JSON in any response class.
 _RETURN_COLS = (
     "id, carrier, pop, trunk_group, host(source_ip) AS source_ip, test_tn, "
-    "direction, cps_limit, enabled, "
+    "direction, traffic_class, cps_limit, enabled, "
     "priority, priority_east, priority_west, priority_central, "
     "notes, created_at, updated_at"
 )
 
 _DIRECTIONS = ("inbound", "outbound", "both")
+_TRAFFIC_CLASSES = ("any", "ld", "tollfree")
 
 
 # ---------------------------------------------------------------------------
@@ -111,6 +117,9 @@ class CarrierTrunkCreate(BaseModel):
     source_ip: str
     test_tn: Optional[str] = None
     direction: Literal["inbound", "outbound", "both"] = "inbound"
+    # Destination-class restriction (migration 44): 'any' = unrestricted,
+    # 'ld' / 'tollfree' = FS only offers this trunk to matching destinations.
+    traffic_class: Literal["any", "ld", "tollfree"] = "any"
     cps_limit: int = 100
     enabled: bool = True
     # Termination ordering (migration 42): lower = tried first; the zone
@@ -179,6 +188,9 @@ class CarrierTrunkUpdate(BaseModel):
     source_ip: Optional[str] = None
     test_tn: Optional[str] = None
     direction: Optional[Literal["inbound", "outbound", "both"]] = None
+    # traffic_class is NOT NULL in the schema — an explicit null is rejected
+    # in the endpoint (same treatment as priority).
+    traffic_class: Optional[Literal["any", "ld", "tollfree"]] = None
     cps_limit: Optional[int] = None
     enabled: Optional[bool] = None
     # priority is NOT NULL in the schema — an explicit null is rejected in the
@@ -254,10 +266,12 @@ def _conflict_409(exc: asyncpg.UniqueViolationError) -> HTTPException:
 async def list_carrier_trunks(
     carrier: Optional[str] = None,
     direction: Optional[str] = None,
+    traffic_class: Optional[str] = None,
     enabled: Optional[bool] = None,
     admin: dict = Depends(require_admin),
 ):
-    """List carrier trunks with optional filters (carrier / direction / enabled)."""
+    """List carrier trunks with optional filters (carrier / direction /
+    traffic_class / enabled)."""
     query = f"SELECT {_RETURN_COLS} FROM carrier_trunks WHERE 1=1"
     values: list = []
     idx = 1
@@ -273,6 +287,14 @@ async def list_carrier_trunks(
                 detail=f"direction must be one of {', '.join(_DIRECTIONS)}")
         query += f" AND direction = ${idx}::varchar"
         values.append(direction)
+        idx += 1
+    if traffic_class is not None:
+        if traffic_class not in _TRAFFIC_CLASSES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"traffic_class must be one of {', '.join(_TRAFFIC_CLASSES)}")
+        query += f" AND traffic_class = ${idx}::text"
+        values.append(traffic_class)
         idx += 1
     if enabled is not None:
         query += f" AND enabled = ${idx}::bool"
@@ -294,18 +316,18 @@ async def create_carrier_trunk(
             f"""
             INSERT INTO carrier_trunks
                 (carrier, pop, trunk_group, source_ip, test_tn,
-                 direction, cps_limit, enabled,
+                 direction, traffic_class, cps_limit, enabled,
                  priority, priority_east, priority_west, priority_central,
                  notes)
             VALUES ($1::varchar, $2::varchar, $3::varchar, $4::inet, $5::varchar,
-                    $6::varchar, $7::int, $8::bool,
-                    $9::int, $10::int, $11::int, $12::int, $13::text)
+                    $6::varchar, $7::text, $8::int, $9::bool,
+                    $10::int, $11::int, $12::int, $13::int, $14::text)
             RETURNING {_RETURN_COLS}
             """,
             body.carrier, body.pop, body.trunk_group, body.source_ip,
-            body.test_tn, body.direction, body.cps_limit, body.enabled,
-            body.priority, body.priority_east, body.priority_west,
-            body.priority_central, body.notes,
+            body.test_tn, body.direction, body.traffic_class, body.cps_limit,
+            body.enabled, body.priority, body.priority_east,
+            body.priority_west, body.priority_central, body.notes,
         )
     except asyncpg.UniqueViolationError as e:
         raise _conflict_409(e)
@@ -344,17 +366,23 @@ async def update_carrier_trunk(
     update_data = body.model_dump(exclude_unset=True)
     if not update_data:
         raise HTTPException(status_code=400, detail="No fields to update")
-    # priority is NOT NULL — an explicit null would be a DB error; the zone
-    # overrides accept null (clears the override back to inheriting priority).
+    # priority / traffic_class are NOT NULL — an explicit null would be a DB
+    # error; the zone overrides accept null (clears the override back to
+    # inheriting priority).
     if "priority" in update_data and update_data["priority"] is None:
         raise HTTPException(
             status_code=422,
             detail="priority cannot be null (zone overrides can)")
+    if "traffic_class" in update_data and update_data["traffic_class"] is None:
+        raise HTTPException(
+            status_code=422,
+            detail="traffic_class cannot be null (use 'any' to unrestrict)")
 
     # Explicit per-column casts (asyncpg + PgBouncer: no type inference).
     casts = {
         "pop": "varchar", "trunk_group": "varchar", "source_ip": "inet",
-        "test_tn": "varchar", "direction": "varchar", "cps_limit": "int",
+        "test_tn": "varchar", "direction": "varchar",
+        "traffic_class": "text", "cps_limit": "int",
         "enabled": "bool", "priority": "int", "priority_east": "int",
         "priority_west": "int", "priority_central": "int", "notes": "text",
     }

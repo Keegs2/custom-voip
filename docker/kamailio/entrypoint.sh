@@ -229,6 +229,18 @@ BANDWIDTH_TC2_LA="${BANDWIDTH_TC2_LA:-67.231.4.138}"
 SINCH_DENVER_IP="${SINCH_DENVER_IP:-206.146.100.24}"
 SINCH_CHICAGO_IP="${SINCH_CHICAGO_IP:-206.146.101.39}"
 
+# Sinch TERMINATION signaling IPs (trunk groups registered to all 6 SBC
+# public IPs on the Sinch side — DIFFERENT IPs from the origination PoPs
+# above). Same env-driven/default posture as SINCH_DENVER_IP. These appear
+# ONLY in dispatcher.list (keepalive groups 8-9) — egress selection is
+# table-driven (carrier_trunks -> FS X-Carrier-IP), so kamailio.cfg carries
+# no define for them and the sed below deliberately targets the dispatcher
+# file only.
+#   Atlanta LD ("INT"):      TG ATLNGAQSGR2_7214, order 225468139, test TN 2139924610
+#   Denver TF ("OSAO" 8YY):  TG DNVTCOZIGR2_3282, order 225468672
+SINCH_LD_IP="${SINCH_LD_IP:-206.146.98.26}"
+SINCH_TF_IP="${SINCH_TF_IP:-206.146.100.26}"
+
 # FS_PUBLIC_IP: FreeSWITCH VM's own public IP for RTP media.
 # Used in SDP body rewrites. Different from EXTERNAL_SIP_IP (NLB VIP) because
 # RTP goes directly to/from FS, not through the NLB.
@@ -320,8 +332,13 @@ sed -i "s|__BANDWIDTH_TC2_LA__|${BANDWIDTH_TC2_LA}|g" "$CONFIG" "$DISPATCH"
 # so trust and keepalive targets stay in lockstep.
 sed -i "s|__SINCH_DENVER_IP__|${SINCH_DENVER_IP}|g" "$CONFIG" "$DISPATCH"
 sed -i "s|__SINCH_CHICAGO_IP__|${SINCH_CHICAGO_IP}|g" "$CONFIG" "$DISPATCH"
+# Sinch TERMINATION IPs appear ONLY in dispatcher.list (keepalive groups
+# 8-9) — kamailio.cfg has no define for them (egress is table-driven via
+# X-Carrier-IP), so DELIBERATELY only the dispatcher file is templated.
+sed -i "s|__SINCH_LD_IP__|${SINCH_LD_IP}|g" "$DISPATCH"
+sed -i "s|__SINCH_TF_IP__|${SINCH_TF_IP}|g" "$DISPATCH"
 
-echo "Kamailio config templated: ADVERTISE_IP=${EXTERNAL_SIP_IP}, FS=${FREESWITCH_IP}, FS2=${FREESWITCH_IP_2} (${FS_HA_MODE}), FS_PUBLIC_IP=${FS_PUBLIC_IP}, DB=${DB_HOST}:${DB_PORT}, Homer=${HOMER_IP}, HEP_ID=${HEP_CAPTURE_ID}, SBC_ID=${SBC_ID}, SBC_INTERNAL_IP=${SBC_INTERNAL_IP}, SIGNALING_VIP=${SBC_SIGNALING_VIP} (${SBC_SIGVIP_MODE}), BW_PRIMARY=${BANDWIDTH_PRIMARY_IP}, BW_SECONDARY=${BANDWIDTH_SECONDARY_IP}, SINCH_DENVER=${SINCH_DENVER_IP}, SINCH_CHICAGO=${SINCH_CHICAGO_IP}, INTERNAL_SUBNET=${INTERNAL_SUBNET}, MEDIA_SUBNET=${MEDIA_SUBNET}, FS_AWARE_OPTIONS=${FS_AWARE_OPTIONS}, STIR_SHAKEN_SIGN=${STIR_SHAKEN_SIGN}, STIR_SHAKEN_VERIFY=${STIR_SHAKEN_VERIFY}, STIR_CERT_URL=${STIR_CERT_URL}, STIR_VERIFY_CERT_MODE=${STIR_VERIFY_CERT_MODE}, STIR_VERIFY_CA_FILE=${STIR_VERIFY_CA_FILE:-<unset>}"
+echo "Kamailio config templated: ADVERTISE_IP=${EXTERNAL_SIP_IP}, FS=${FREESWITCH_IP}, FS2=${FREESWITCH_IP_2} (${FS_HA_MODE}), FS_PUBLIC_IP=${FS_PUBLIC_IP}, DB=${DB_HOST}:${DB_PORT}, Homer=${HOMER_IP}, HEP_ID=${HEP_CAPTURE_ID}, SBC_ID=${SBC_ID}, SBC_INTERNAL_IP=${SBC_INTERNAL_IP}, SIGNALING_VIP=${SBC_SIGNALING_VIP} (${SBC_SIGVIP_MODE}), BW_PRIMARY=${BANDWIDTH_PRIMARY_IP}, BW_SECONDARY=${BANDWIDTH_SECONDARY_IP}, SINCH_DENVER=${SINCH_DENVER_IP}, SINCH_CHICAGO=${SINCH_CHICAGO_IP}, SINCH_LD=${SINCH_LD_IP}, SINCH_TF=${SINCH_TF_IP}, INTERNAL_SUBNET=${INTERNAL_SUBNET}, MEDIA_SUBNET=${MEDIA_SUBNET}, FS_AWARE_OPTIONS=${FS_AWARE_OPTIONS}, STIR_SHAKEN_SIGN=${STIR_SHAKEN_SIGN}, STIR_SHAKEN_VERIFY=${STIR_SHAKEN_VERIFY}, STIR_CERT_URL=${STIR_CERT_URL}, STIR_VERIFY_CERT_MODE=${STIR_VERIFY_CERT_MODE}, STIR_VERIFY_CA_FILE=${STIR_VERIFY_CA_FILE:-<unset>}"
 
 # Add the NLB VIP (EXTERNAL_SIP_IP / ADVERTISE_IP) to the loopback interface.
 #

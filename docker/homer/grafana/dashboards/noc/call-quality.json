@@ -303,8 +303,8 @@
     {
       "id": 2,
       "type": "timeseries",
-      "title": "ASR trend per carrier — hourly (Dallas / LA)",
-      "description": "ASR per carrier_used per hour on the selected zone. carrier_primary = Dallas (67.231.2.12), carrier_secondary = LA (216.82.238.134). 'local'/'default' excluded. Divergence between the two lines pinpoints a PoP-side answer problem.",
+      "title": "ASR trend per carrier — hourly",
+      "description": "ASR per carrier_used per hour on the selected zone — one series per carrier value, so table-driven trunks (bandwidth-dallas, bandwidth-la, sinch-atlanta-ld, sinch-denver-tf, future carriers) appear automatically. Legacy enum rows are folded to readable labels: carrier_primary -> bandwidth-dallas, carrier_secondary -> bandwidth-la (the East/Central mapping; pre-fold West rows labeled these enums the same way even though West's primary PoP was LA). 'local'/'default'/NULL excluded. Divergence between lines pinpoints a carrier/PoP-side answer problem.",
       "gridPos": { "h": 9, "w": 12, "x": 12, "y": 8 },
       "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
       "targets": [
@@ -314,7 +314,7 @@
           "format": "time_series",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT $__timeGroup(start_time, '1h') AS time, CASE carrier_used WHEN 'carrier_primary' THEN 'Dallas (primary)' WHEN 'carrier_secondary' THEN 'LA (secondary)' ELSE carrier_used END AS carrier, (count(*) FILTER (WHERE answer_time IS NOT NULL))::float / NULLIF(count(*), 0) AS asr FROM cdrs WHERE $__timeFilter(start_time) AND carrier_used IN ('carrier_primary','carrier_secondary') AND CASE WHEN freeswitch_node LIKE 'west%' THEN 'west' WHEN freeswitch_node LIKE 'central%' THEN 'central' WHEN COALESCE(freeswitch_node,'') = '' THEN 'unknown' ELSE 'east' END LIKE '$zone' GROUP BY 1, 2 ORDER BY 1;"
+          "rawSql": "SELECT $__timeGroup(start_time, '1h') AS time, CASE carrier_used WHEN 'carrier_primary' THEN 'bandwidth-dallas' WHEN 'carrier_secondary' THEN 'bandwidth-la' ELSE carrier_used END AS carrier, (count(*) FILTER (WHERE answer_time IS NOT NULL))::float / NULLIF(count(*), 0) AS asr FROM cdrs WHERE $__timeFilter(start_time) AND carrier_used IS NOT NULL AND carrier_used NOT IN ('local','default','') AND CASE WHEN freeswitch_node LIKE 'west%' THEN 'west' WHEN freeswitch_node LIKE 'central%' THEN 'central' WHEN COALESCE(freeswitch_node,'') = '' THEN 'unknown' ELSE 'east' END LIKE '$zone' GROUP BY 1, 2 ORDER BY 1;"
         }
       ],
       "fieldConfig": {

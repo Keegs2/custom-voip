@@ -25,9 +25,13 @@ local aliases = {
     ["67.231.1.188"]   = "BW-TC2-DAL",
     ["67.231.4.138"]   = "BW-TC2-LA",
 
-    -- Sinch origination (inbound to us; origination-only — never termination)
+    -- Sinch origination (inbound to us)
     ["206.146.100.24"] = "Sinch-Denver",
     ["206.146.101.39"] = "Sinch-Chicago",
+
+    -- Sinch termination (outbound from us; DIFFERENT IPs from origination)
+    ["206.146.98.26"]  = "Sinch-Atlanta-LD",  -- TG ATLNGAQSGR2_7214 (INT LD)
+    ["206.146.100.26"] = "Sinch-Denver-TF",   -- TG DNVTCOZIGR2_3282 (OSAO 8YY)
 
     -- =================== EAST ZONE (us-east1-b) ===================
     -- SBC layer (East). Both interfaces of each node collapse to one name

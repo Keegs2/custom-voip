@@ -114,6 +114,45 @@ function M.to_e164(raw)
     return nil, "unnormalizable number: " .. s
 end
 
+-- classify_destination(raw) -> 'tollfree' | 'ld' — termination traffic class.
+-- LUA-ONLY helper (NOT part of the three-language to_e164/to_10digit vector
+-- contract above — no Python/TS twin exists or is needed). Pure + dep-free so
+-- it is unit-testable standalone (tests/test_classify_destination.py).
+--
+-- 'tollfree' = NANP 8YY toll-free destination in any accepted input form:
+-- bare 10-digit, 11-digit with leading 1, +1 E.164; formatting characters
+-- are ignored (same digit-collapse as to_e164). EVERYTHING else — non-8YY
+-- NANP, international, unparseable/empty — is 'ld'. The consumer
+-- (inbound_router.lua trunk filter) treats 'ld' as the unrestricted default
+-- class, so misparse can never route an LD call onto a tollfree-only trunk.
+--
+-- Assigned toll-free NPAs (SMS/800 registry): 800, 833, 844, 855, 866, 877,
+-- 888. 822 / 880-887 / 889 are reserved-but-unassigned and classify 'ld'
+-- until the registry activates them (add here when that happens). Lua
+-- patterns have no alternation/{n} quantifiers, so the NPA rides a closed
+-- set lookup instead of a regex.
+local TOLLFREE_NPAS = {
+    ["800"] = true, ["833"] = true, ["844"] = true, ["855"] = true,
+    ["866"] = true, ["877"] = true, ["888"] = true,
+}
+
+function M.classify_destination(raw)
+    if raw == nil or raw == "" then
+        return "ld"
+    end
+    if type(raw) ~= "string" then
+        raw = tostring(raw)
+    end
+    local d = digits_only(raw)
+    if #d == 11 and d:sub(1, 1) == "1" then
+        d = d:sub(2)  -- '1' + NANP (covers +1 E.164 too) -> bare 10-digit
+    end
+    if #d == 10 and TOLLFREE_NPAS[d:sub(1, 3)] then
+        return "tollfree"
+    end
+    return "ld"
+end
+
 -- to_10digit(raw) -> the LAST 10 digits of the number (or nil for empty input).
 -- Used ONLY for the outbound From / caller-ID that Bandwidth authenticates
 -- against (the platform-owned DID). This intentionally strips any country code
