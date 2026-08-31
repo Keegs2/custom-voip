@@ -198,10 +198,14 @@ STIR_KEY_PATH="${STIR_KEY_PATH:-/etc/kamailio/stir/stir-key-not-configured.pem}"
 #     (the operator delivers this per-SBC like the key; NOT in git). Empty by
 #     default; only opened when CertVerify has the custom-CA bit (4) set.
 #   STIR_VERIFY_CA_INTER — optional intermediates PEM (bit 8). Empty by default.
+#   STIR_VERIFY_CRL_FILE — optional STI-PA CRL PEM (bit 16, CertCRLFile;
+#     refreshed daily by refresh-sbc-trust-bundle.sh). Empty by default; only
+#     opened when CertVerify has the CRL bit (16) set.
 # With STIR_SHAKEN_VERIFY off, no verify runs at all, so these are inert.
 STIR_VERIFY_CERT_MODE="${STIR_VERIFY_CERT_MODE:-0}"
 STIR_VERIFY_CA_FILE="${STIR_VERIFY_CA_FILE:-}"
 STIR_VERIFY_CA_INTER="${STIR_VERIFY_CA_INTER:-}"
+STIR_VERIFY_CRL_FILE="${STIR_VERIFY_CRL_FILE:-}"
 
 # Bandwidth TC1/TC2 trunk-config signaling IPs (fixed PoPs, same for every
 # zone today — NOT swapped per zone like PRIMARY/SECONDARY). Env-driven for
@@ -300,9 +304,11 @@ sed -i "s|__STIR_KEY_PATH__|${STIR_KEY_PATH_ESC}|g" "$CONFIG"
 # lacks the corresponding CA bit (default mode 0 = no CA files opened at all).
 STIR_VERIFY_CA_FILE_ESC=$(printf '%s' "${STIR_VERIFY_CA_FILE}" | sed -e 's/[\\&|]/\\&/g')
 STIR_VERIFY_CA_INTER_ESC=$(printf '%s' "${STIR_VERIFY_CA_INTER}" | sed -e 's/[\\&|]/\\&/g')
+STIR_VERIFY_CRL_FILE_ESC=$(printf '%s' "${STIR_VERIFY_CRL_FILE}" | sed -e 's/[\\&|]/\\&/g')
 sed -i "s|__STIR_VERIFY_CERT_MODE__|${STIR_VERIFY_CERT_MODE}|g" "$CONFIG"
 sed -i "s|__STIR_VERIFY_CA_FILE__|${STIR_VERIFY_CA_FILE_ESC}|g" "$CONFIG"
 sed -i "s|__STIR_VERIFY_CA_INTER__|${STIR_VERIFY_CA_INTER_ESC}|g" "$CONFIG"
+sed -i "s|__STIR_VERIFY_CRL_FILE__|${STIR_VERIFY_CRL_FILE_ESC}|g" "$CONFIG"
 # TC1/TC2 IPs appear in BOTH kamailio.cfg (#!define + routing/failover) and
 # dispatcher.list (keepalive groups 4-5) — template both from the same vars.
 sed -i "s|__BANDWIDTH_TC1_NY__|${BANDWIDTH_TC1_NY}|g" "$CONFIG" "$DISPATCH"

@@ -339,6 +339,106 @@ freeswitch.consoleLog("INFO", string.format(
     gateway, traffic_grade
 ))
 
+-- ============================================
+-- STEP 7.5: STIR/SHAKEN attestation — Phase 2 Task 2.2
+-- ============================================
+-- Kamailio route[TO_CARRIER] "Step 8.5" reads X-Attestation ∈ {A,B,div} as the
+-- SHAKEN signing level, then ALWAYS strips the header before the carrier sees
+-- it (the strip is unconditional, outside the STIR_SHAKEN_SIGN ifdef — so this
+-- is dark-safe: with signing off the header is consumed and discarded).
+--
+-- API contract (defense in depth, three layers):
+--   1. API edge (calls.py): POST /v1/calls only originates when the from_did
+--      is an ENABLED api_dids row owned by the JWT-authenticated tenant.
+--      It then passes stir_attest=A through the ESL originate vars. On the
+--      DIRECT originate path (sofia/external/{to}@SBC built straight from the
+--      originate {vars}) the header itself also rides the originate vars,
+--      because no dialplan/Lua runs before that INVITE is emitted.
+--   2. THIS block (every dialplan-routed path into api_outbound.lua):
+--      stir_attest=A is honored ONLY after RE-verifying in PostgreSQL that the
+--      presented caller ID is an api_dids row of THIS call's customer_id — so
+--      a non-API ESL/dialplan path that merely sets stir_attest=A cannot mint
+--      an A it doesn't deserve. Not owned / unverifiable -> B and a loud log.
+--      We do NOT reject here (the API already gated; B is the safe floor —
+--      same policy as trunk_outbound.lua's caller_did_owned check).
+--   3. Kamailio whitelist: anything not exactly A/B/C is coerced to B; absent
+--      header defaults to B.
+-- Set BEFORE the test-mode/webhook/bridge branches so the header session var
+-- applies to the webhook engine's <Dial> B-legs and both carrier bridge
+-- attempts (sip_h_* vars on this channel are emitted on B-leg INVITEs), and so
+-- TEST_MODE harness runs still exercise this block.
+local stir_attest_req = get_var("stir_attest", "")
+local stir_attest = nil  -- nil = legacy: no request, no header touched
+
+if stir_attest_req ~= "" then
+    stir_attest = "B"  -- safe floor; upgraded to A only on verified ownership
+    if stir_attest_req == "A" then
+        local presented_cid = caller_id or ""
+        local owned = false
+        if db and presented_cid ~= "" then
+            -- lookup_api_did canonicalizes to +E.164 and only returns
+            -- enabled=true rows of active customers (0 or 1 row).
+            local did_row = db.lookup_api_did(presented_cid)
+            if did_row and tonumber(did_row.customer_id) == customer_id then
+                owned = true
+            end
+        end
+        if owned then
+            stir_attest = "A"
+            freeswitch.consoleLog("INFO", string.format(
+                "[%s] STIR: attest A confirmed — caller ID %s is an owned api_did of customer %d\n",
+                uuid, presented_cid, customer_id
+            ))
+        elseif not db then
+            freeswitch.consoleLog("ERR", string.format(
+                "[%s] STIR: attest A requested but db_client unavailable — cannot verify ownership of %s, downgrading to B\n",
+                uuid, presented_cid
+            ))
+        else
+            freeswitch.consoleLog("ERR", string.format(
+                "[%s] STIR: attest A requested but caller ID '%s' is NOT an enabled api_did of customer %d — downgrading to B (possible spoof or stale provisioning)\n",
+                uuid, presented_cid, customer_id
+            ))
+        end
+    else
+        freeswitch.consoleLog("WARNING", string.format(
+            "[%s] STIR: unknown requested attestation '%s' — using B\n",
+            uuid, stir_attest_req
+        ))
+    end
+elseif get_var("sip_h_X-Attestation", "") ~= "" then
+    -- No stir_attest request, but the channel already carries an
+    -- X-Attestation header var (e.g. inherited from an inbound leg's header).
+    -- NEVER trust an inherited level — floor it to B so it cannot ride
+    -- through to Kamailio as a spoofed A.
+    stir_attest = "B"
+    freeswitch.consoleLog("WARNING", string.format(
+        "[%s] STIR: unsolicited X-Attestation '%s' on channel with no stir_attest var — overwriting with B\n",
+        uuid, get_var("sip_h_X-Attestation", "")
+    ))
+end
+
+if stir_attest then
+    session:setVariable("sip_h_X-Attestation", stir_attest)
+
+    -- STIR/SHAKEN CDR facts (T3) — record RAW facts only, never derive.
+    -- Same contract as trunk_outbound.lua / inbound_router.lua: these A-leg
+    -- channel vars serialize into the mod_json_cdr POST and feed
+    -- call_attestations via /v1/cdrs/ingest. An API-originated call has no
+    -- inbound carrier leg, so inbound_signed is "0" and the verstat/inbound
+    -- attest reads are defensive-empty (uniform CDR shape).
+    set_var("stir_attest_intent", stir_attest)
+    set_var("stir_inbound_signed", "0")
+    set_var("stir_verstat", get_var("sip_h_X-Verstat", ""))
+    set_var("stir_verstat_source", get_var("sip_h_X-Verstat-Source", ""))
+    set_var("stir_inbound_attest", get_var("sip_h_X-Inbound-Attest", ""))
+
+    freeswitch.consoleLog("INFO", string.format(
+        "[%s] STIR: X-Attestation=%s set for API outbound (requested=%s)\n",
+        uuid, stir_attest, stir_attest_req ~= "" and stir_attest_req or "(none)"
+    ))
+end
+
 -- Test mode check
 local test_mode = os.getenv("TEST_MODE")
 if test_mode == "true" then

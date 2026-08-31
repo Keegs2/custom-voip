@@ -69,6 +69,15 @@ services:
       # The cert directory (READ-ONLY). Contains ONLY the public PEM chain —
       # NO private key. Mounted at the Caddyfile's `root` (/srv/stir).
       - ./infra/stir:/srv/stir:ro
+      # STI-PA trusted-CA bundle publish dir (READ-ONLY). PUBLIC CA material,
+      # installed/refreshed by infra/stir/refresh-stir-trust-bundle.sh; the
+      # Caddyfile serves EXACTLY /stir/sti-pa-trust-bundle.pem from it (root
+      # override /srv/stir-trust). A DIRECTORY mount on purpose: the refresh
+      # script installs by atomic rename, and a single-FILE bind mount would
+      # pin the old inode — the dir mount makes every swap visible instantly
+      # with no container restart. Auto-created (root-owned) if absent; the
+      # path 404s until the first install.
+      - ${STIR_TRUST_DIR:-/var/lib/stir}:/srv/stir-trust:ro
       # Persist the issued LE cert + ACME account across restarts (rate limits).
       - x5u_caddy_data:/data
       # Persist Caddy's autosave config across restarts.
