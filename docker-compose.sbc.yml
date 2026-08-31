@@ -21,6 +21,15 @@ services:
     environment:
       - EXTERNAL_SIP_IP=${EXTERNAL_SIP_IP}
       - FREESWITCH_IP=${FREESWITCH_IP}
+      # Strict active/standby FreeSWITCH pair (FS media HA) — the SECOND media
+      # node's VPC/media-subnet IP. OPTIONAL — leave unset until the zone's
+      # FS-2 VM exists and is fully hot (sofia up, DB connected). Unset/empty
+      # = the templated config + dispatcher.list render byte-identical to the
+      # single-FS deploy (same rolling-safety contract as SBC_SIGNALING_VIP).
+      # When set: FS-1 keeps ALL new calls (dispatcher alg 8, priority-first);
+      # FS-2 is a probed hot standby that takes new calls ONLY while FS-1 is
+      # marked down, with automatic failback. Set it on BOTH SBCs of the zone.
+      - FREESWITCH_IP_2=${FREESWITCH_IP_2:-}
       - FS_PUBLIC_IP=${FS_PUBLIC_IP}
       - DB_HOST=${DB_HOST}
       - DB_PORT=${DB_PORT:-6432}

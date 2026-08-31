@@ -54,15 +54,15 @@ variable "ui_https_port" {
 }
 
 variable "instances" {
-  description = "GCE instance names to cover with VM-down / disk / memory / CPU alerts (13 always-on production VMs across the 3 zones; the idle west-loadtest test box is excluded so it never false-pages when stopped)"
+  description = "GCE instance names to cover with VM-down / disk / memory / CPU alerts (16 always-on production VMs across the 3 zones incl. the Phase 4c *-fs-2 media-HA hot standbys — apply only AFTER those VMs exist; the idle west-loadtest test box is excluded so it never false-pages when stopped)"
   type        = list(string)
   default = [
-    # East (us-east1)
-    "poc-custom-voip", "kam-g2", "fs-media-v2", "services", "east-db-standby",
+    # East (us-east1) — east-fs-2 = media-HA hot standby (Phase 4c)
+    "poc-custom-voip", "kam-g2", "fs-media-v2", "east-fs-2", "services", "east-db-standby",
     # West (us-west1) — west-loadtest excluded: idle/banked test box, would false-page when stopped
-    "west-sbc-1", "west-sbc-2", "west-fs", "west-db",
+    "west-sbc-1", "west-sbc-2", "west-fs", "west-fs-2", "west-db",
     # Central (us-central1)
-    "central-sbc-1", "central-sbc-2", "central-fs", "central-db",
+    "central-sbc-1", "central-sbc-2", "central-fs", "central-fs-2", "central-db",
   ]
 }
 
