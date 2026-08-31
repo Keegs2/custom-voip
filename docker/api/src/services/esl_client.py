@@ -78,9 +78,17 @@ async def originate_call(
     customer_id: int,
     traffic_grade: str = "standard",
     webhook_url: str = "",
-    timeout: int = 60
+    timeout: int = 60,
+    stir_attest: str = ""
 ) -> bool:
-    """Originate an outbound call."""
+    """Originate an outbound call.
+
+    stir_attest (STIR/SHAKEN Task 2.2): the attestation level this call has
+    EARNED at the API edge — calls.py passes "A" only after verifying the
+    from_did is an api_dids row owned by the JWT-authenticated customer
+    (tenant-scoped, 404-no-leak). Only "A"/"B" are honored; anything else is
+    ignored (Kamailio's signing whitelist coerces unknown/absent to B anyway).
+    """
     # Build originate command
     # Format: originate {vars}sofia/external/destination@proxy &lua(script.lua)
     # Uses external profile through Kamailio proxy to ensure ext-sip-ip (public IP)
@@ -90,7 +98,7 @@ async def originate_call(
     # All products now use the same 2-carrier model: primary (Dallas) / secondary (LA)
     carrier = "primary"
 
-    vars_str = ",".join([
+    originate_vars = [
         f"origination_uuid={uuid}",
         f"origination_caller_id_number={from_did}",
         f"customer_id={customer_id}",
@@ -102,7 +110,42 @@ async def originate_call(
         f"ignore_early_media=true",
         f"originate_timeout={timeout}",
         f"sip_h_X-Carrier={carrier}"
-    ])
+    ]
+
+    # STIR/SHAKEN attestation (Task 2.2). On this DIRECT originate path the
+    # first leg IS the carrier-bound INVITE (sofia/external/{to}@SBC) — no
+    # dialplan or Lua runs before the INVITE is emitted, so the X-Attestation
+    # header must ride the originate vars. Kamailio route[TO_CARRIER] Step 8.5
+    # reads X-Attestation as the SHAKEN signing level and ALWAYS strips it
+    # before the carrier sees it (strip is unconditional, outside the
+    # STIR_SHAKEN_SIGN ifdef — dark-safe when signing is off).
+    #   stir_attest          -- channel var consumed by api_outbound.lua on any
+    #                           dialplan-routed API path, where ownership is
+    #                           RE-verified against api_dids before honoring A
+    #                           (defense in depth; see api_outbound.lua).
+    #   sip_h_X-Attestation  -- the header itself. sip_h_* vars on the
+    #                           originating channel are also emitted on any
+    #                           B-leg INVITE it later bridges (voice_webhook
+    #                           <Dial>, outbound_api.lua bridge), so webhook
+    #                           legs inherit the level too.
+    #   stir_attest_intent / stir_inbound_signed -- raw CDR facts for
+    #                           call_attestations (same contract as
+    #                           trunk_outbound.lua; an API-originated call has
+    #                           no inbound carrier leg to chain -> signed "0").
+    if stir_attest in ("A", "B"):
+        originate_vars += [
+            f"stir_attest={stir_attest}",
+            f"sip_h_X-Attestation={stir_attest}",
+            f"stir_attest_intent={stir_attest}",
+            "stir_inbound_signed=0",
+        ]
+    elif stir_attest:
+        logger.warning(
+            f"Ignoring invalid stir_attest={stir_attest!r} for call {uuid} "
+            "(only A/B are valid for API origination)"
+        )
+
+    vars_str = ",".join(originate_vars)
 
     # For testing without carrier, use loopback
     if os.getenv("TEST_MODE") == "true":

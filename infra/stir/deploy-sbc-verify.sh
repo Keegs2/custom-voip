@@ -15,15 +15,23 @@
 #   sudo /opt/revup/infra/stir/deploy-sbc-verify.sh --disable  # roll verify back OFF (fast revert)
 #   sudo /opt/revup/infra/stir/deploy-sbc-verify.sh --status   # show STIR_VERIFY_* env + recent verify logs
 #
-# PREREQUISITE — deliver the STI-PA trusted-root CA bundle first. Unlike the
-# signing key it is NOT a secret (it's the public STI-PA trust list), but it IS a
-# config artifact: never in git, delivered out-of-band per-SBC:
-#   sudo mkdir -p /opt/revup/secrets && sudo tee /opt/revup/secrets/sti-pa-roots.pem   # paste, then Ctrl-D
-#   (default path below; override with CA_SRC=/path). The script REFUSES to enable
-#   (when CERT_MODE>0) unless the bundle exists, is non-empty, and parses as one or
-#   more PEM CERTIFICATEs — an empty/garbage bundle fails EVERY inbound chain-trust,
-#   flooding TN-Validation-Failed (fail-open, so calls still complete — but the
-#   metric would be wrong).
+# PREREQUISITE — deliver the STI-PA trusted-CA bundle first. Unlike the signing
+# key it is NOT a secret (it's the public STI-PA trust list), but it IS a config
+# artifact: never in git, delivered out-of-band per-SBC. The lifecycle tooling
+# does it for you (see docs/STIR_TRUST_BUNDLE_RUNBOOK.md):
+#   sudo /opt/revup/infra/stir/refresh-sbc-trust-bundle.sh --install
+# pulls the published bundle from https://fs-cert.granitevoip.com/stir/
+# sti-pa-trust-bundle.pem, runs the validation gates, and installs it at the
+# default CA_SRC below (override with CA_SRC=/path). This script REFUSES to
+# enable (when CERT_MODE>0) unless the bundle exists, is non-empty, and parses
+# as one or more PEM CERTIFICATEs — an empty/garbage bundle fails EVERY inbound
+# chain-trust, flooding TN-Validation-Failed (fail-open, so calls still complete
+# — but the metric would be wrong).
+#
+# BUNDLE REFRESH NEEDS NO RE-RUN OF THIS SCRIPT: the overlay mounts the CA
+# DIRECTORY (CA_DIR) — not the file — so the refresh script's atomic rename is
+# visible in-container instantly, and libsecsipid re-reads CertCAFile on every
+# verification. Re-run this script only to change the MODE/toggle wiring.
 #
 # INDEPENDENT OF SIGNING. This script touches ONLY STIR_SHAKEN_VERIFY + the three
 # STIR_VERIFY_* keys and the CA-file overlay. It NEVER reads or writes
@@ -39,17 +47,42 @@ set -euo pipefail
 
 # ---------------- config (override via environment) ----------------
 REPO_DIR="${REPO_DIR:-/opt/revup}"
-# STI-PA trusted-root bundle on the SBC (PUBLIC trust list; out-of-band, not git).
-CA_SRC="${CA_SRC:-$REPO_DIR/secrets/sti-pa-roots.pem}"
-# Fixed in-container path — MUST equal the mount target in docker-compose.stir-cafile.yml.
-CA_CONTAINER_PATH="${CA_CONTAINER_PATH:-/etc/kamailio/stir/sti-pa-roots.pem}"
-# CertVerify bitmask (libsecsipid). Default 5 = time|custCA — the STIR-correct
-# minimum: verify PASSporT iat freshness AND chain the fetched x5u leaf to the
-# STI-PA custom roots in CertCAFile. 7 (time|sysCA|custCA) additionally allows the
-# OS/web trust store; harmless for STIR because STI certs chain to the STI-PA
-# custom roots (NOT web CAs), so sysCA is simply never the anchor that matters.
+# STI-PA trusted-CA bundle on the SBC (PUBLIC trust list; out-of-band, not git;
+# installed + refreshed by refresh-sbc-trust-bundle.sh). CA_DIR is the bind
+# SOURCE of the overlay's DIRECTORY mount; CA_SRC is the bundle file inside it.
+CA_SRC="${CA_SRC:-$REPO_DIR/secrets/stir-ca/sti-pa-trust-bundle.pem}"
+CA_DIR="${CA_DIR:-$(dirname "$CA_SRC")}"
+# Fixed in-container path — MUST equal the overlay's dir mount target
+# (/etc/kamailio/stir/ca) + the bundle filename.
+CA_CONTAINER_PATH="${CA_CONTAINER_PATH:-/etc/kamailio/stir/ca/$(basename "$CA_SRC")}"
+# CertVerify bitmask (libsecsipid). Bit meanings verified against the secsipidx
+# source (secsipid/secsipid.go, consts at lines ~143-148 + pubKeyVerify):
+#   1  (1<<0) CertVerifyOptTime    — x5u CERTIFICATE validity window
+#             (NotBefore/NotAfter of the fetched leaf; pubKeyVerify time block).
+#             NOTE: NOT the PASSporT iat — iat freshness is checked separately
+#             and UNCONDITIONALLY in SJWTGetValidPayload ("payload.IAT == 0 ||
+#             now > IAT+expire" -> expired token), independent of CertVerify.
+#   2  (1<<1) CertVerifyOptSysCA   — OS trust store as chain roots
+#   4  (1<<2) CertVerifyOptCustCA  — CertCAFile contents as chain roots
+#   8  (1<<3) CertVerifyOptInterCA — CertCAInter file into the intermediates pool
+#   16 (1<<4) CertVerifyOptCRL     — leaf serial screened against CertCRLFile
+#   32 (1<<5) CertVerifyOptTimeOnly— time check then STOP (no chain) — never use
+# Default 5 = time|custCA — the STIR-correct chain mode: leaf validity window +
+# chain the fetched x5u to the STI-PA roots in CertCAFile. 7 adds sysCA;
+# harmless but pointless (STI certs chain to STI-PA roots, not web CAs).
+# 21 = 5|16 adds CRL screening — ONLY set once the CRL lifecycle is live on this
+# SBC (refresh scripts publish/pull sti-pa-crl.pem): with bit 16 set, a missing
+# CertCRLFile fails every chain-verify, and secsipidx's CRL branch ignores the
+# x509.ParseCRL error before dereferencing — a corrupt CRL file would nil-panic
+# the Go runtime inside Kamailio. The refresh gates + atomic rename guarantee
+# only a validated CRL ever lands on disk; the guard below refuses bit 16
+# without a parseable CRL.
 # 0 = structural + JWT-signature only (NO chain) — the dark default; set >0 here.
 CERT_MODE="${CERT_MODE:-5}"
+# STI-PA CRL on the SBC (only consumed with bit 16). Lives in the SAME CA_DIR
+# directory mount, so no extra overlay is needed.
+CRL_SRC="${CRL_SRC:-$CA_DIR/sti-pa-crl.pem}"
+CRL_CONTAINER_PATH="${CRL_CONTAINER_PATH:-/etc/kamailio/stir/ca/$(basename "$CRL_SRC")}"
 # Overlays. The CA-file overlay is this feature's; the key overlay belongs to
 # signing and is applied ONLY IF it already exists (so verify never drops it).
 CAFILE_OVERRIDE="${CAFILE_OVERRIDE:-$REPO_DIR/docker-compose.stir-cafile.yml}"
@@ -82,8 +115,10 @@ deploy-sbc-verify.sh — STIR/SHAKEN INBOUND verify on one Kamailio SBC (run as 
   sudo deploy-sbc-verify.sh --enable   turn inbound verify ON (recreates kamailio)
   sudo deploy-sbc-verify.sh --disable  roll inbound verify back OFF (fast revert)
   sudo deploy-sbc-verify.sh --status   show STIR_VERIFY_* env + recent verify logs
-Prerequisite: place the STI-PA trusted-root bundle at /opt/revup/secrets/sti-pa-roots.pem
-first (PUBLIC trust list; out-of-band, never git). Fail-open: verify never drops calls.
+Prerequisite: install the STI-PA trusted-CA bundle first (PUBLIC list, never git):
+  sudo /opt/revup/infra/stir/refresh-sbc-trust-bundle.sh --install
+(lands it at /opt/revup/secrets/stir-ca/sti-pa-trust-bundle.pem; the cron keeps it
+fresh with no restarts). Fail-open: verify never drops calls.
 Independent of signing — does not touch STIR_SHAKEN_SIGN / the signing key.
 USAGE
     exit 0 ;;
@@ -115,13 +150,13 @@ build_compose_args(){
 # Recreate kamailio with ALL overlays and hard-verify config + health. Shared by
 # setup/enable/disable so every path recreates with the identical overlay set and
 # never uses --remove-orphans (would delete the base-only sidecars). $1 = a label
-# for the log line (e.g. "verify=on"). Uses CA_SRC from the environment so the
-# CA-file overlay resolves its bind source.
+# for the log line (e.g. "verify=on"). Uses CA_DIR from the environment so the
+# CA-dir overlay resolves its bind source.
 recreate_and_check(){
   local label="$1"
   build_compose_args
   info "recreating kamailio ($label) with overlays: ${CF[*]} — brief restart; the NLB covers it ..."
-  CA_SRC="$CA_SRC" docker compose "${CF[@]}" up -d --build kamailio
+  CA_DIR="$CA_DIR" docker compose "${CF[@]}" up -d --build kamailio
   sleep 5
   if ! docker exec "$KAM" kamailio -c -f /etc/kamailio/kamailio.cfg >/tmp/_kamcheck.$$ 2>&1; then
     echo "  ---- kamailio -c output ----"; tail -20 /tmp/_kamcheck.$$ | sed 's/^/  /'; rm -f /tmp/_kamcheck.$$
@@ -173,7 +208,7 @@ echo "== STIR/SHAKEN inbound verify $ACTION on $(hostname) =="
 #    a flood of TN-Validation-Failed. Fail-open keeps calls up, but the metric
 #    lies. With CERT_MODE=0 (no chain) the bundle is never opened, so skip.
 if [ "$CERT_MODE" -gt 0 ] 2>/dev/null; then
-  [ -f "$CA_SRC" ] || die "CA bundle not found at $CA_SRC — deliver the STI-PA trusted-root list there first (PUBLIC, out-of-band, never git). See:  $0 --help"
+  [ -f "$CA_SRC" ] || die "CA bundle not found at $CA_SRC — install it first:  sudo $REPO_DIR/infra/stir/refresh-sbc-trust-bundle.sh --install   (pulls the published STI-PA list + runs the validation gates). See:  $0 --help"
   [ -s "$CA_SRC" ] || die "CA bundle $CA_SRC is EMPTY — an empty bundle fails every inbound chain-trust. Deliver the real STI-PA root list."
   # Prefer crl2pkcs7 (accepts a multi-cert bundle in one shot); fall back to a
   # per-block x509 parse. Either proves >=1 real PEM CERTIFICATE, not garbage.
@@ -188,6 +223,21 @@ if [ "$CERT_MODE" -gt 0 ] 2>/dev/null; then
   ok "CA bundle valid: $NCERTS PEM CERTIFICATE block(s) in $CA_SRC (CERT_MODE=$CERT_MODE)"
 else
   info "CERT_MODE=0 (structural + JWT-signature only, no chain) — CA bundle not required; verify will not open it"
+fi
+
+# 1b) HARD GUARD for CRL mode (bit 16): the CRL must exist and PARSE. This is
+#     stricter than hygiene — secsipidx's pubKeyVerify CRL branch ignores the
+#     x509.ParseCRL error and dereferences the result, so a corrupt CertCRLFile
+#     nil-panics the Go runtime inside Kamailio (cgo panic = process abort),
+#     and a MISSING file fails every chain-verify (SJWTRetErrCertNoCRLFile).
+if [ $(( CERT_MODE & 16 )) -ne 0 ] 2>/dev/null; then
+  [ -s "$CRL_SRC" ] || die "CERT_MODE=$CERT_MODE has the CRL bit (16) but $CRL_SRC is missing/empty — pull it first:  sudo $REPO_DIR/infra/stir/refresh-sbc-trust-bundle.sh --install   (requires the publisher to be serving /stir/sti-pa-crl.pem), or drop to CERT_MODE=5"
+  openssl crl -in "$CRL_SRC" -noout >/dev/null 2>&1 \
+    || die "$CRL_SRC does not parse as a PEM CRL — refusing bit 16 (a corrupt CertCRLFile would PANIC libsecsipid inside Kamailio; secsipidx pubKeyVerify ignores the ParseCRL error). Re-pull with refresh-sbc-trust-bundle.sh --install"
+  if ! openssl crl -in "$CRL_SRC" -noout -nextupdate 2>/dev/null | grep -q '=' ; then
+    warn "could not read CRL nextUpdate — check the file"
+  fi
+  ok "CRL valid for bit 16: $CRL_SRC (nextUpdate $(openssl crl -in "$CRL_SRC" -noout -nextupdate 2>/dev/null | cut -d= -f2))"
 fi
 
 # 2) EGRESS pre-check: secsipid must fetch each caller's x5u over :443. Confirm
@@ -212,16 +262,18 @@ done
 #    keys idempotently. STIR_VERIFY_CA_INTER stays empty: STI x5u endpoints serve
 #    their OWN intermediate in the fetched chain (x5u = leaf+intermediate), so the
 #    intermediate arrives with the caller's cert — CertCAFile carries the ROOTS only.
-sed -i '/^STIR_VERIFY_CERT_MODE=/d;/^STIR_VERIFY_CA_FILE=/d;/^STIR_VERIFY_CA_INTER=/d' .env
-{ echo "STIR_VERIFY_CERT_MODE=$CERT_MODE"; echo "STIR_VERIFY_CA_FILE=$CA_CONTAINER_PATH"; echo "STIR_VERIFY_CA_INTER="; } >> .env
-ok ".env -> CERT_MODE=$CERT_MODE, CA_FILE=$CA_CONTAINER_PATH, CA_INTER=<empty>"
+sed -i '/^STIR_VERIFY_CERT_MODE=/d;/^STIR_VERIFY_CA_FILE=/d;/^STIR_VERIFY_CA_INTER=/d;/^STIR_VERIFY_CRL_FILE=/d' .env
+{ echo "STIR_VERIFY_CERT_MODE=$CERT_MODE"; echo "STIR_VERIFY_CA_FILE=$CA_CONTAINER_PATH"; echo "STIR_VERIFY_CA_INTER="; echo "STIR_VERIFY_CRL_FILE=$CRL_CONTAINER_PATH"; } >> .env
+ok ".env -> CERT_MODE=$CERT_MODE, CA_FILE=$CA_CONTAINER_PATH, CA_INTER=<empty>, CRL_FILE=$CRL_CONTAINER_PATH (read only when CERT_MODE has bit 16)"
 
-# 4) CA_SRC must reach docker compose so the CA-file overlay resolves its bind
+# 4) CA_DIR must reach docker compose so the CA-dir overlay resolves its bind
 #    source. Persist it in .env (idempotent) as well as exporting it for the
-#    recreate below — a bind mount with a missing SOURCE makes Compose refuse to
-#    start, and we already validated the file exists in step 1 (when CERT_MODE>0).
-sed -i '/^CA_SRC=/d' .env; echo "CA_SRC=$CA_SRC" >> .env
-ok ".env -> CA_SRC=$CA_SRC (CA-file overlay bind source)"
+#    recreate below. Directory mount (NOT the file): the refresh cron swaps the
+#    bundle by atomic rename inside CA_DIR, and a single-file bind mount would
+#    pin the old inode. Drop any legacy CA_SRC line from the pre-dir-mount era.
+mkdir -p "$CA_DIR"
+sed -i '/^CA_DIR=/d;/^CA_SRC=/d' .env; echo "CA_DIR=$CA_DIR" >> .env
+ok ".env -> CA_DIR=$CA_DIR (CA-dir overlay bind source; bundle file: $CA_SRC)"
 
 # 5) verify toggle for this action (default off on setup; on for --enable). This
 #    is the ONLY key that flips call behavior; STIR_SHAKEN_SIGN is never touched.

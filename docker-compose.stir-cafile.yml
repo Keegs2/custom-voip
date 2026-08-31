@@ -1,12 +1,29 @@
 # ============================================================================
-# docker-compose.stir-cafile.yml — STIR/SHAKEN inbound VERIFY trust anchor mount
+# docker-compose.stir-cafile.yml — STIR/SHAKEN inbound VERIFY trust-anchor mount
 # ============================================================================
-# Mounts the STI-PA trusted-ROOT CA bundle (a PUBLIC trust list — NOT a secret
-# like the signing key, but still a config artifact delivered out-of-band, never
-# in git) READ-ONLY into the Kamailio container at a FIXED path. secsipid's
-# `libopt CertCAFile=<that path>` then chains each fetched x5u leaf to a trusted
-# STI-CA root when STIR_VERIFY_CERT_MODE has the custom-CA bit (4) set (e.g. 5 or
-# 7). Applied by infra/stir/deploy-sbc-verify.sh.
+# Mounts the STI-PA trusted-CA bundle DIRECTORY (PUBLIC trust list — NOT a
+# secret like the signing key, but still a config artifact delivered out-of-band
+# by refresh-sbc-trust-bundle.sh, never in git) READ-ONLY into the Kamailio
+# container. secsipid's `libopt CertCAFile=<container path>` then chains each
+# fetched x5u leaf to a trusted STI-CA when STIR_VERIFY_CERT_MODE has the
+# custom-CA bit (4) set (e.g. 5 or 7). Applied by infra/stir/deploy-sbc-verify.sh.
+#
+# WHY A DIRECTORY MOUNT (load-bearing — do not "simplify" to a file mount):
+# the bundle is REFRESHED IN PLACE by refresh-sbc-trust-bundle.sh via atomic
+# rename (temp -> mv within CA_DIR). Docker single-FILE bind mounts pin the
+# inode at container start, so a host-side `mv` would leave the container
+# reading the OLD bundle forever (until a recreate). Mounting the PARENT
+# DIRECTORY means the rename lands in-container instantly — and libsecsipid
+# re-reads CertCAFile on every verification (secsipidx pubKeyVerify does
+# os.ReadFile per call), so a bundle refresh needs NO Kamailio reload/restart.
+#
+# CONTAINER PATH of the bundle is fixed at
+#     /etc/kamailio/stir/ca/sti-pa-trust-bundle.pem
+# and MUST equal STIR_VERIFY_CA_FILE in the SBC .env (deploy-sbc-verify.sh
+# keeps them in lockstep). The host dir is env-driven (CA_DIR, persisted in
+# .env by the deploy script); Compose auto-creates a missing source dir, and
+# the deploy script HARD-VALIDATES the bundle file exists + parses before it
+# ever enables a chain-validating mode.
 #
 # COEXISTS with docker-compose.stir-key.yml (the outbound-signing private-key
 # mount). Compose DEEP-MERGES service keys across `-f` overlays, so the two
@@ -25,18 +42,11 @@
 # docker-compose.sbc.yml, so an `up --remove-orphans` scoped to the base+overlays
 # would treat them as orphans and REMOVE the running sidecars. Recreate ONLY the
 # `kamailio` service (append the service name to `up -d`).
-#
-# CONTAINER PATH is fixed at /etc/kamailio/stir/sti-pa-roots.pem and MUST equal
-# STIR_VERIFY_CA_FILE in the SBC .env (the script keeps them in lockstep). The
-# host source path is env-driven (CA_SRC), defaulting to the operator-delivered
-# location; a bind mount whose SOURCE is missing makes Compose refuse to start
-# the container, so the script HARD-VALIDATES the bundle exists + parses as PEM
-# certificate(s) before it ever enables verify.
 # ----------------------------------------------------------------------------
 services:
   kamailio:
     volumes:
-      # STI-PA trusted-root CA bundle (PUBLIC trust list) — READ-ONLY. Container
-      # path MUST match STIR_VERIFY_CA_FILE in .env. CA_SRC defaults to the
-      # out-of-band delivery location on the SBC (never committed to git).
-      - ${CA_SRC:-/opt/revup/secrets/sti-pa-roots.pem}:/etc/kamailio/stir/sti-pa-roots.pem:ro
+      # STI-PA trusted-CA bundle dir (PUBLIC trust list) — READ-ONLY DIRECTORY
+      # mount (atomic-refresh + inode rationale above). The bundle file inside
+      # is CA_DIR/sti-pa-trust-bundle.pem -> the STIR_VERIFY_CA_FILE path.
+      - ${CA_DIR:-/opt/revup/secrets/stir-ca}:/etc/kamailio/stir/ca:ro

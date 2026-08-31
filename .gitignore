@@ -9,6 +9,13 @@
 # deploys via `git pull`. Verified key-free. The STI private key is never committed.
 !infra/stir/granite-shaken-8052-x5u.pem
 
+# Exception: the repo-PINNED PUBLIC STI-PA signer certs (CA-list JWT signer +
+# CRL signer, both issued by "STI-PA Root Certificate 2"). Public material by
+# definition — the J1/C2 trust-bundle gates verify the daily STI-PA downloads
+# against these pins (docs/STIR_TRUST_BUNDLE_RUNBOOK.md §5b for rotation).
+!infra/stir/sti-pa-calist-signer.crt
+!infra/stir/sti-pa-crl-signer.crt
+
 # OS files
 .DS_Store
 Thumbs.db
