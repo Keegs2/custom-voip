@@ -244,19 +244,7 @@ Keeps hundreds→thousands of customer trunks **out** of Prometheus while still 
 - **`docker/postgres/init/26_live_trunk_stats.sql`** (new) — mirrors `25_carrier_trunk_status.sql`: table `live_trunk_stats(customer_id,trunk_id,sbc_id,trunk_name,active_channels,cps_1m,asr_5m,registered,updated_at)` PK `(customer_id,trunk_id,sbc_id)`, a `live_trunk_health` view aggregating across SBCs with a `stale` flag, grants to `api` (write) + `grafana_ro` (read). Idempotent; apply on primary, replicates.
 - **`docker/api/src/routers/live_trunk_stats.py`** (new) — byte-for-byte the `carrier_status.py` shape: shared-bearer (**distinct** `LIVE_TRUNK_STATS_TOKEN`, fail-closed), resilient **always-200**, per-row UPSERT with explicit `::type` casts, `MAX_TRUNKS` guard. `GET ""` (`require_admin`) reads `live_trunk_health` for CRAG. Dual-mount `/v1/live-trunk-stats` + `/live-trunk-stats` in `main.py`; one exemption line in `middleware/auth.py` (`path.endswith("/live-trunk-stats/report") and method=="POST"`).
 - **Feeder** — extend the SBC `carrier-monitor` (already POSTs to the East API): a second poll derives per-customer-trunk `active_channels`/`cps`/registration from `kamcmd` and POSTs to `/v1/live-trunk-stats/report`. No new container. (CDR-derived `asr_5m` can be filled by a periodic East-API query.)
-- **`docker/vmalert/rules/trunk_rollup.yml`** (new) — bounded roll-ups so the wall stays fixed-size (reconciled to real metric names):
-```yaml
-groups:
-  - name: trunk_rollups
-    interval: 30s
-    rules:
-      - record: voip:cps:by_direction:rate1m
-        expr: sum by (direction, zone) (rate(kamailio_trunk_cps[1m]))
-      - record: voip:calls_active:by_node
-        expr: sum by (freeswitch_node, zone) (freeswitch_calls_active)
-      - record: voip:calls_active:top10_carrier
-        expr: topk(10, sum by (trunk, direction) (kamailio_trunk_active_calls))
-```
+- ~~**`docker/vmalert/rules/trunk_rollup.yml`**~~ — **SUPERSEDED 2026-09-01** by the full recording-rule set in `docker/vmalert/rules/{traffic,sip_health,stir}.yml` (see "Recording rules" section at the bottom). The three original `voip:*` series had no dashboard/alert consumers; their equivalents now carry standard `level:metric:operations` names (`zone:kamailio_trunk_cps:rate1m`, `node:freeswitch_calls_active:sum`; the unused `topk(10)` rule was dropped — topk in a recording rule churns labelsets).
 
 ---
 
@@ -314,7 +302,7 @@ Never names/rebuilds `freeswitch`/`kamailio` except the deliberate windowed FS/S
 
 ## File inventory
 
-**New:** `docker/vmagent/{scrape-sbc,scrape-media,scrape-services,scrape-db}.yml` · `docker/vmalert/rules/trunk_rollup.yml` · `docker/homer/grafana/provisioning/datasources/victoriametrics.yml` · `docker/postgres/init/26_live_trunk_stats.sql` · `docker/api/src/routers/live_trunk_stats.py` · `docker/carrier-monitor/ops_metrics.py` · `docker/freeswitch/conf/autoload_configs/prometheus.conf.xml` · `docker-compose.db.yml`
+**New:** `docker/vmagent/{scrape-sbc,scrape-media,scrape-services,scrape-db}.yml` · `docker/vmalert/rules/{traffic,sip_health,stir}.yml` *(originally `trunk_rollup.yml`, superseded 2026-09-01)* · `docker/homer/grafana/provisioning/datasources/victoriametrics.yml` · `docker/postgres/init/26_live_trunk_stats.sql` · `docker/api/src/routers/live_trunk_stats.py` · `docker/carrier-monitor/ops_metrics.py` · `docker/freeswitch/conf/autoload_configs/prometheus.conf.xml` · `docker-compose.db.yml`
 
 **Changed:** `docker-compose.{services,media,sbc}.yml` · `docker/freeswitch/Dockerfile` · `docker/freeswitch/conf/autoload_configs/modules.conf.xml` · `docker/kamailio/Dockerfile` · `docker/kamailio/kamailio.cfg` · `docker/carrier-monitor/ops_agent.py` · `docker/api/src/main.py` · `docker/api/src/middleware/auth.py` · `docker/homer/grafana/dashboards/noc/traffic-status.json` · `.env.{sbc,media,services}.example`
 
@@ -363,3 +351,51 @@ Each zone runs a **host‑net vmagent** that scrapes only its local exporters (`
 ## Deferred (not blocking)
 
 - **DB‑replica HOST metrics** (CPU/disk of `west-db`/`central-db`): the replicas have no Docker/repo, so a bare `node_exporter` binary + a scraper would be needed. **Low priority** — replication lag is already covered centrally from the primary's `postgres_exporter`.
+
+---
+
+# Recording rules — vmalert roll-ups + NOC panel adoption (2026-09-01)
+
+vmalert (`voip-vmalert`, East services VM) evaluates `docker/vmalert/rules/*.yml` against VictoriaMetrics and writes the results back via `-remoteWrite.url=http://victoriametrics:8428`, so recorded series land in the same store the `voip-metrics-vm` Grafana datasource reads. Compose now also pins `-evaluationInterval=30s` (the default for any group that omits `interval`).
+
+**Interval: 30s** (not the 15s scrape). Rationale: matches the 30s wall auto-refresh, halves remote-write volume, and every rule window is ≥ 1m so a 30s step loses no resolution; worst-case added staleness vs a raw query is one eval (30s) — invisible on a 30s wall.
+
+**Naming:** Prometheus `level:metric:operations` convention. Source names are the reconciled platform names — `kamailio_*` counters have **NO `_total` suffix** (hard-won gotcha); `freeswitch_sessions_total` does.
+
+**Cardinality contract:** recorded labels are only `zone`, `direction`, `trunk` (carrier), `reporting_instance` (SBC), `freeswitch_node`, `attestation`, `verstat`, `source`, `class`. Never customer identifiers.
+
+## Rule inventory
+
+| File / group | Rule | Expr (summary) | Consumers |
+|---|---|---|---|
+| `traffic.yml` / `noc_traffic` | `zone:kamailio_trunk_cps:rate1m` | `sum by (zone,direction)(rate(kamailio_trunk_cps[1m]))` | traffic-status id 1 (`sum()`), id 44 (`sum by (zone)`) |
+| | `sbc:kamailio_trunk_cps:rate1m` | `sum by (reporting_instance,zone)(rate(kamailio_trunk_cps[1m]))` | traffic-status id 58 |
+| | `trunk:kamailio_trunk_cps:increase5m` | `sum by (trunk,direction,zone)(increase(kamailio_trunk_cps[5m]))` | call-quality id 74 (inbound) |
+| | `node:freeswitch_sessions:rate1m` | `sum by (freeswitch_node,zone)(rate(freeswitch_sessions_total[1m]))` | traffic-status id 2 |
+| | `node:freeswitch_calls_active:sum` | `sum by (freeswitch_node,zone)(freeswitch_calls_active)` | none (legacy `voip:calls_active:by_node` continuity + future alerting) |
+| `sip_health.yml` / `noc_sip_health` | `zone:kamailio_invite_replies:rate5m` ×5 (static label `class`=2xx/3xx/4xx/5xx/6xx) | `sum by (zone)(rate(kamailio_core_rcv_replies_Nxx_invite[5m]))` | traffic-status ids 40, 41, 46 (A–E), 47 |
+| `stir.yml` / `noc_stir` | `zone:kamailio_stir_attest_signed:increase5m` | `sum by (zone,attestation)(increase(...[5m]))` | none yet (alerting / future fixed-window panels) |
+| | `zone:kamailio_stir_inbound_verstat:increase5m` | `sum by (zone,verstat,source)(increase(...[5m]))` | none yet (same) |
+
+Ratios (ASR / failure %) are deliberately NOT recorded: panels filter `zone=~"$zonere"` then take ratio-of-sums — a pre-recorded per-zone ratio cannot be re-aggregated across zones without weighting. Panels compose the ratio from the recorded class rates (semantically identical to raw).
+
+## Panels swapped vs deliberately left raw
+
+**Swapped** (recorded series is semantically equivalent; each panel description names the rule + raw fallback query): traffic-status 1, 2, 40, 41, 44, 46, 47, 58 · call-quality 74. Recorded series only exist from deploy time — on the now-6h default walls any pre-deploy gap ages out within 6h.
+
+**Left raw — with reasons:**
+- **Election rows (traffic-status 55/56/57 Active SBC, 59/60/61 Active FS):** their `present_over_time`/`last_over_time` + `or vector(0)` queries are value-aware freshness probes — a recorded series keeps existing after the source goes stale and would DESTROY the staleness signal that rolls the election. Never route these through recording rules.
+- **Instant gauge sums** (traffic-status 3, 4, 5, 42, 43, 45, 49, 50, 51, 52, 53 · noc-home 2 `probe_success`): point lookups over a handful of bounded series — already cheap, recording adds lag for zero win.
+- **stir-shaken voip-metrics-vm panels (1–13):** all are INSTANT `increase(...[$__range])` — the operator's range pick (1h/24h/7d) drives the count. A fixed-window recorded series cannot serve an arbitrary `$__range` without changing semantics (`sum_over_time` over a 30s-recorded `increase5m` multi-counts events + inherits edge effects). Stays raw; the `stir.yml` 5m roll-ups exist for alerting and any future fixed-window panel.
+- **stir-shaken trust-bundle stats (201–208):** instant single-gauge arithmetic (`time() - ts`) — cheap by construction.
+- **db-replication / infra-overview:** no `voip-metrics-vm` queries (Postgres/other datasources).
+
+## Deploy (services VM only — East)
+
+```
+cd /opt/revup && sudo git pull
+[ "$(hostname)" = "services" ] && sudo docker compose -f /opt/revup/docker-compose.services.yml up -d --force-recreate --no-deps vmalert
+[ "$(hostname)" = "services" ] && sudo docker compose -f /opt/revup/docker-compose.services.yml up -d --force-recreate --no-deps grafana
+```
+
+Verify: `curl -s http://127.0.0.1:8880/api/v1/rules | grep -c record` (expect 12 rules across 3 groups) and, after ~1 min, `curl -s 'http://127.0.0.1:8428/api/v1/query?query=zone:kamailio_trunk_cps:rate1m'` returns series. The legacy `voip:*` series simply stop updating (12-month retention keeps their history queryable).

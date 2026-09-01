@@ -1,0 +1,46 @@
+# vmalert recording rules — SIP INVITE reply-class rates (NOC wall ASR/failure).
+# ---------------------------------------------------------------------------
+# See traffic.yml header for the load path, naming convention, and the 30s
+# interval rationale.
+#
+# The traffic-status wall computes Live ASR (id=40), Live failure % (id=41),
+# the 5-series reply-class timeseries (id=46 refs A-E) and the ASR trend
+# (id=47) from the five per-class Kamailio counters
+# kamailio_core_rcv_replies_{2xx,3xx,4xx,5xx,6xx}_invite (no _total suffix) —
+# 9 range-vector rate() aggregations re-evaluated every 30s refresh. This
+# group collapses them into ONE recorded metric with a static `class` label
+# (5 rules → one labelset each; zones x 5 classes ≈ 15 series).
+#
+# Deliberately NOT recorded: the ASR / failure RATIOS. Panels filter
+# zone=~"$zonere" then take ratio-of-sums; a pre-recorded per-zone ratio
+# cannot be re-aggregated across zones without weighting (avg of ratios !=
+# ratio of sums). Panels compose the ratio from these class rates instead —
+# semantically identical to the raw queries.
+groups:
+  - name: noc_sip_health
+    interval: 30s
+    rules:
+      - record: zone:kamailio_invite_replies:rate5m
+        labels:
+          class: 2xx
+        expr: sum by (zone) (rate(kamailio_core_rcv_replies_2xx_invite[5m]))
+
+      - record: zone:kamailio_invite_replies:rate5m
+        labels:
+          class: 3xx
+        expr: sum by (zone) (rate(kamailio_core_rcv_replies_3xx_invite[5m]))
+
+      - record: zone:kamailio_invite_replies:rate5m
+        labels:
+          class: 4xx
+        expr: sum by (zone) (rate(kamailio_core_rcv_replies_4xx_invite[5m]))
+
+      - record: zone:kamailio_invite_replies:rate5m
+        labels:
+          class: 5xx
+        expr: sum by (zone) (rate(kamailio_core_rcv_replies_5xx_invite[5m]))
+
+      - record: zone:kamailio_invite_replies:rate5m
+        labels:
+          class: 6xx
+        expr: sum by (zone) (rate(kamailio_core_rcv_replies_6xx_invite[5m]))

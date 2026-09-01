@@ -373,6 +373,7 @@ services:
       - "-remoteWrite.url=http://victoriametrics:8428"
       - "-remoteRead.url=http://victoriametrics:8428"
       - "-rule=/etc/vmalert/rules/*.yml"
+      - "-evaluationInterval=30s"
       - "-httpListenAddr=:8880"
     ports:
       - "8880:8880"
@@ -396,16 +397,28 @@ services:
   # host-net + pid:host + read-only rootfs bind so it sees real host metrics.
   # Binds :9100 on the VM interface; the services vmagent scrapes it via
   # host.docker.internal (it is on the bridge network).
+  #
+  # Textfile collector: /var/lib/stir/metrics holds .prom files written
+  # atomically by the STIR trust-bundle machinery (stir-trust-lib.sh
+  # tb_emit_metrics — bundle age / sticaList exp / CRL nextUpdate / leaf-cert
+  # expiry / refresh status; see docs/STIR_TRUST_BUNDLE_RUNBOOK.md
+  # "Observability"). The dedicated ro bind mount (rather than reading through
+  # /host) makes docker auto-create the host dir on `up`, so the collector
+  # never errors on a missing directory — host config encoded in the repo, no
+  # manual VM command. The dir 404s from the x5u Caddy (exact-path serving) and
+  # contains no secrets (timestamps/counters only).
   node-exporter:
     image: prom/node-exporter:v1.8.2
     container_name: voip-node-exporter
     command:
       - "--path.rootfs=/host"
       - "--web.listen-address=:9100"
+      - "--collector.textfile.directory=/var/lib/stir/metrics"
     network_mode: host
     pid: host
     volumes:
       - "/:/host:ro,rslave"
+      - "/var/lib/stir/metrics:/var/lib/stir/metrics:ro"
     deploy:
       resources:
         limits:

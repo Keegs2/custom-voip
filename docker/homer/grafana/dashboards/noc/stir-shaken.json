@@ -38,7 +38,7 @@
       "transparent": true,
       "options": {
         "mode": "markdown",
-        "content": "## STIR/SHAKEN — attestation & inbound verification\nLive from VictoriaMetrics (`voip-metrics-vm`) — the Kamailio SBCs' `xhttp_prom` counters, scraped per-zone by vmagent. Two families:\n- **Signed attestation** (`kamailio_stir_attest_signed{attestation, zone}`) — what WE signed on each **outbound carrier leg**. `A` full (authenticated origin, e.g. trunk/API) · `B` partial (SHAKEN default) · `C` gateway (RCF forward of an unsigned inbound) · **`div`** = chained onto a preserved inbound Identity (best outcome — we relayed the upstream attestation) · `unsigned` = nothing signed (fail-open / signing off).\n- **Inbound verstat** (`kamailio_stir_inbound_verstat{verstat, source, zone}`) — the inbound caller-verification result. `source=self` = our own `secsipid_check_identity`; `source=carrier` = Bandwidth's `verstat=` lifted off the P-Asserted-Identity.\n\n`zone` = **SBC_ID** (e.g. `east-sbc-1`); the **Zone** picker maps to a `zone=~\"$zone\"` regex (`east-.*` / `west-.*` / `central-.*`, or `.*` = all). All ratios/mixes are over the dashboard time range (`$__range`)."
+        "content": "## STIR/SHAKEN — attestation & inbound verification\nLive from VictoriaMetrics (`voip-metrics-vm`) — the Kamailio SBCs' `xhttp_prom` counters, scraped per-zone by vmagent. Two families:\n- **Signed attestation** (`kamailio_stir_attest_signed{attestation, zone}`) — what WE signed on each **outbound carrier leg**. `A` full (authenticated origin, e.g. trunk/API) · `B` partial (SHAKEN default) · `C` gateway (RCF forward of an unsigned inbound) · **`div`** = chained onto a preserved inbound Identity (best outcome — we relayed the upstream attestation) · `unsigned` = nothing signed (fail-open / signing off).\n- **Inbound verstat** (`kamailio_stir_inbound_verstat{verstat, source, zone}`) — the inbound caller-verification result. `source=self` = our own `secsipid_check_identity`; `source=carrier` = Bandwidth's `verstat=` lifted off the P-Asserted-Identity.\n\n`zone` = **SBC_ID** (e.g. `east-sbc-1`); the **Zone** picker maps to a `zone=~\"$zone\"` regex (`east-.*` / `west-.*` / `central-.*`, or `.*` = all). All ratios/mixes are over the dashboard time range (`$__range`).\n\nThe **Trust & Certificates** row at the bottom watches the STI-PA trust-chain plumbing on the **services VM** (bundle age vs the 40d watchdog · sticaList exp · CA count · CRL · our SHAKEN-8052 leaf · x5u publish) — the §6 pre-canary checklist for turning own-crypto inbound verify ON (`docs/STIR_TRUST_BUNDLE_RUNBOOK.md`, \"Observability\"). The Zone picker does not apply to that row."
       },
       "fieldConfig": { "defaults": {}, "overrides": [] }
     },
@@ -601,6 +601,386 @@
           }
         ]
       }
+    },
+    {
+      "id": 200,
+      "type": "row",
+      "title": "Trust & Certificates — STI-PA bundle / CRL / our leaf / x5u publish (services VM; §6 pre-canary checklist)",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 27 },
+      "panels": []
+    },
+    {
+      "id": 201,
+      "type": "stat",
+      "title": "Trust bundle age (40d watchdog)",
+      "description": "Age of the last VERIFIED STI-PA trust-bundle install on the services VM (the authoritative publisher): time() - stir_trust_bundle_installed_timestamp_seconds. Emitted by the trust-refresh machinery (stir-trust-lib.sh tb_emit_metrics) via the node_exporter textfile collector; the daily --check cron re-stamps it, and because it's a timestamp a frozen/broken emitter AGES into red instead of reading healthy. Green < 30d, yellow 30-40d, red > 40d = the TB_MAX_BUNDLE_AGE_DAYS watchdog has lapsed (re-ingest a fresh sticaList.jwt — runbook step 2). Services-VM metric: the Zone picker does not apply. 'No data' = metrics never emitted (run any refresh action) or node_exporter textfile not wired.",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 28 },
+      "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
+          "expr": "time() - stir_trust_bundle_installed_timestamp_seconds",
+          "instant": true,
+          "range": false,
+          "legendFormat": "bundle age"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "decimals": 1,
+          "noValue": "no data",
+          "mappings": [],
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 2592000 },
+              { "color": "red", "value": 3456000 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 202,
+      "type": "stat",
+      "title": "sticaList exp — time remaining",
+      "description": "Countdown to the exp claim of the last ingested sticaList.jwt: stir_sticalist_expiry_timestamp_seconds - time(). The STI-PA reissues the list DAILY with a ~24h exp, so on the manual-download flow this goes negative within a day of ingest — that only means the mirror is behind the daily reissue (the installed PEM roots stay valid; the 40d age watchdog is the hard SLA). Green > 6h left, yellow < 6h (TB_JWT_EXP_WARN_SECS), red = expired (negative). Persistent deep-red weeks-old values together with a yellow bundle-age tile = the refresh flow is lapsing. Services-VM metric; Zone picker does not apply.",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 28 },
+      "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
+          "expr": "stir_sticalist_expiry_timestamp_seconds - time()",
+          "instant": true,
+          "range": false,
+          "legendFormat": "sticaList exp"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "decimals": 1,
+          "noValue": "no data",
+          "mappings": [],
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "orange", "value": 0 },
+              { "color": "green", "value": 21600 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 203,
+      "type": "stat",
+      "title": "Trusted CAs in bundle",
+      "description": "Certificate count of the installed STI-PA trust bundle (stir_trust_bundle_ca_count). The official trustList carries 19 CAs today. Green >= 19 (the list may legitimately grow), yellow 5-18 = above the G3 floor (MIN_CA_CERTS=5) but smaller than the known-good list — investigate (partial list, or the STI-PA delisted CAs; check G5 didn't lose OUR Neustar root), red < 5 / no data = no valid bundle installed. Services-VM metric; Zone picker does not apply.",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 28 },
+      "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
+          "expr": "stir_trust_bundle_ca_count",
+          "instant": true,
+          "range": false,
+          "legendFormat": "CAs"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "noValue": "no data",
+          "mappings": [],
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "orange", "value": 5 },
+              { "color": "green", "value": 19 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 204,
+      "type": "stat",
+      "title": "Last trust-refresh run",
+      "description": "Result of the most recent trust-refresh script action on the services VM (stir_trust_refresh_last_run_status: 1=OK, 0=FAIL — any of --install/--fetch/--check, so the daily 04:47 --check cron keeps this current). On FAIL the previously installed bundle is KEPT and keeps serving (fail-safe), so this is an operator signal, not a call-affecting event: read DETAIL in /var/lib/stir/trust-bundle.status and /var/log/stir-trust-refresh.log. Companion metric stir_trust_refresh_last_success_timestamp_seconds carries the last-good time across failures. Services-VM metric; Zone picker does not apply.",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 28 },
+      "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
+          "expr": "stir_trust_refresh_last_run_status",
+          "instant": true,
+          "range": false,
+          "legendFormat": "last run"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "noValue": "no data",
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": { "text": "FAIL", "color": "red", "index": 1 },
+                "1": { "text": "OK", "color": "green", "index": 0 }
+              }
+            }
+          ],
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 205,
+      "type": "stat",
+      "title": "CRL freshness (nextUpdate)",
+      "description": "Countdown to the installed STI-PA CRL's nextUpdate: stir_crl_next_update_timestamp_seconds - time(). The CRL reissues DAILY (nextUpdate = +24h). 'not installed' (gray) is EXPECTED until the CRL lifecycle is activated — the CRL is only consumed at CertVerify bit 16 (mode 21), and the runbook says don't wire it on the manual flow. Once automated: green = inside its 24h window, red = stale (negative; the publisher cron is missing its daily fetch — at bit 16 this matters, fix the publisher). Services-VM metric; Zone picker does not apply.",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 32 },
+      "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
+          "expr": "stir_crl_next_update_timestamp_seconds - time()",
+          "instant": true,
+          "range": false,
+          "legendFormat": "CRL nextUpdate"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "decimals": 1,
+          "noValue": "not installed",
+          "mappings": [],
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 0 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 206,
+      "type": "stat",
+      "title": "Our leaf cert (SHAKEN 8052) — time to expiry",
+      "description": "Countdown to the notAfter of OUR OWN signing leaf CN=SHAKEN 8052 (stir_leaf_cert_expiry_timestamp_seconds - time(), parsed from infra/stir/granite-shaken-8052-x5u.pem — expires 2027-05-08, Neustar/TruContact renewal due ~2027-04-01). Green > 60d, yellow < 60d = start the renewal (docs/STIR_SHAKEN_IMPLEMENTATION_PLAN.md 'Cert renewal'), red < 30d = outbound signing is at risk when it lapses. After renewing onto a different STI-CA, confirm the new issuer's root is in the trust bundle (G5) before the old cert expires. Services-VM metric; Zone picker does not apply.",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 32 },
+      "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
+          "expr": "stir_leaf_cert_expiry_timestamp_seconds - time()",
+          "instant": true,
+          "range": false,
+          "legendFormat": "leaf expiry"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "decimals": 1,
+          "noValue": "no data",
+          "mappings": [],
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "orange", "value": 2592000 },
+              { "color": "green", "value": 5184000 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 207,
+      "type": "stat",
+      "title": "x5u endpoint (fs-cert.granitevoip.com)",
+      "description": "Blackbox HTTPS probe of the PUBLIC x5u Caddy /healthz (probe_success{service=\"x5u (fs-cert)\"}) — the endpoint other carriers' STIR verifiers fetch our cert chain from, and the SBC crons pull the trust bundle from. Probed via the public URL so DNS, the Let's Encrypt cert, and the firewall path are all in the check. DOWN = our outbound PASSporTs stop verifying at other carriers within their x5u cache TTL AND SBC bundle pulls start failing — check the x5u-caddy container (docker compose -f docker-compose.x5u.yml up -d; NEVER --remove-orphans) and :80/:443 firewall. Zone picker does not apply.",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 32 },
+      "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
+          "expr": "probe_success{service=\"x5u (fs-cert)\"}",
+          "instant": true,
+          "range": false,
+          "legendFormat": "x5u healthz"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "noValue": "no probe",
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": { "text": "DOWN", "color": "red", "index": 1 },
+                "1": { "text": "UP", "color": "green", "index": 0 }
+              }
+            }
+          ],
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 208,
+      "type": "stat",
+      "title": "Trust bundle published (public URL)",
+      "description": "Blackbox HTTPS probe of the EXACT URL the 6 SBC crons pull: https://fs-cert.granitevoip.com/stir/sti-pa-trust-bundle.pem (probe_success{service=\"x5u trust bundle\"}). NOT PUBLISHED (red) while the x5u endpoint tile is UP = the bundle was never installed on this VM (the path 404s until the first refresh-stir-trust-bundle.sh --install — runbook step 2) or the Caddy trust-dir mount is missing. This tile green + bundle age green + CA count 19 = the SBC fleet has a fresh trust store to pull — the §6 pre-canary state. Zone picker does not apply.",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 32 },
+      "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
+          "expr": "probe_success{service=\"x5u trust bundle\"}",
+          "instant": true,
+          "range": false,
+          "legendFormat": "bundle published"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "noValue": "no probe",
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": { "text": "NOT PUBLISHED", "color": "red", "index": 1 },
+                "1": { "text": "PUBLISHED", "color": "green", "index": 0 }
+              }
+            }
+          ],
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      }
     }
   ],
   "refresh": "30s",
@@ -634,5 +1014,5 @@
   "uid": "noc-stir-shaken",
   "version": 1,
   "weekStart": "",
-  "description": "STIR/SHAKEN NOC board: outbound signed-attestation mix (A/B/C/div/unsigned) + signing rate, %div/%C/%unsigned compliance stats, inbound verstat mix (Passed/Failed/No-TN) and its self-vs-carrier source, plus a per-zone (SBC) attestation table. Live from VictoriaMetrics (voip-metrics-vm) Kamailio xhttp_prom counters. Zone dropdown focuses East / West / Central or All."
+  "description": "STIR/SHAKEN NOC board: outbound signed-attestation mix (A/B/C/div/unsigned) + signing rate, %div/%C/%unsigned compliance stats, inbound verstat mix (Passed/Failed/No-TN) and its self-vs-carrier source, plus a per-zone (SBC) attestation table. Live from VictoriaMetrics (voip-metrics-vm) Kamailio xhttp_prom counters. Zone dropdown focuses East / West / Central or All. Bottom row: Trust & Certificates — STI-PA trust-bundle health (age/CA count/sticaList exp/CRL), our SHAKEN-8052 leaf expiry, and x5u publish reachability from the services-VM textfile metrics + blackbox probes (the pre-canary checklist for enabling own-crypto inbound verify)."
 }

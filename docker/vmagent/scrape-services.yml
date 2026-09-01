@@ -67,6 +67,22 @@ scrape_configs:
       - targets: ["http://heplify-server:9096/metrics"]
         labels:
           service: "Homer (HEP)"
+      # STIR/SHAKEN x5u publish surface (isolated Caddy, docker-compose.x5u.yml)
+      # probed via the PUBLIC URL — the exact path other carriers' verifiers and
+      # our SBC crons use, so DNS + LE cert + firewall are all in the probe.
+      # Two signals: /healthz = the endpoint/container is up at all;
+      # /stir/sti-pa-trust-bundle.pem = the STI-PA trust bundle is actually
+      # PUBLISHED (404s until the first refresh-stir-trust-bundle.sh --install).
+      # NOTE: this egresses via the VM's own external IP (34.26.57.37) back to
+      # itself — proven to work on this VM (the refresh script's publish
+      # self-probe and the runbook's verification curls do the same). If GCE
+      # hairpin ever breaks it, fall back to http://host.docker.internal:80/healthz.
+      - targets: ["https://fs-cert.granitevoip.com/healthz"]
+        labels:
+          service: "x5u (fs-cert)"
+      - targets: ["https://fs-cert.granitevoip.com/stir/sti-pa-trust-bundle.pem"]
+        labels:
+          service: "x5u trust bundle"
     relabel_configs:
       # Move the probe URL into the module's ?target= param.
       - source_labels: [__address__]

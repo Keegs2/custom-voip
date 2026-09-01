@@ -486,6 +486,94 @@ tb_check_freshness(){
   return 0
 }
 
+# ============================================================================
+# Prometheus metrics emission — node_exporter textfile collector (STRICTLY
+# fail-safe / additive)
+# ============================================================================
+# tb_emit_metrics <OK|FAIL> [bundle_file]
+# Writes a .prom textfile (atomic: temp + mv, world-readable) for the
+# node_exporter --collector.textfile.directory. Called from tb_write_status —
+# i.e. on EVERY script action (install/fetch/check, success AND failure), so
+# the daily --check cron doubles as the periodic re-emit. Every metric that can
+# go stale is an epoch TIMESTAMP, not a boolean: if this file ever freezes
+# (refresh broken, emission broken), the dashboard ages into yellow/red instead
+# of showing forever-healthy — that failure mode is designed out.
+#
+# FAIL-SAFE CONTRACT: this function returns 0 on every path and swallows every
+# error. A metrics problem must NEVER fail (or even warn) a trust refresh.
+#
+# TB_METRICS_DIR: override the output dir; empty (default) derives
+# <dir of STATUS_FILE>/metrics — /var/lib/stir/metrics on the VMs (the exact
+# host path docker-compose.services.yml bind-mounts into node_exporter), and
+# the selftest's temp dir when STATUS_FILE is overridden. Set to "none" to
+# disable emission entirely.
+: "${TB_METRICS_DIR:=}"
+TB_METRICS_FILE_NAME="stir_trust_bundle.prom"
+
+tb_prom_line(){ # <name> <value> <help> — emits nothing unless value is numeric
+  case "${2:-}" in ''|*[!0-9]*) return 0 ;; esac
+  printf '# HELP %s %s\n# TYPE %s gauge\n%s %s\n' "$1" "$3" "$1" "$1" "$2"
+}
+
+tb_emit_metrics(){
+  local st="${1:-FAIL}" bundle="${2:-}"
+  local mdir out tmp now inst_at cnt lexp nexp_ep crl_file crl_ep leaf_ep last_ok run_ok
+  mdir="${TB_METRICS_DIR:-$(dirname "$STATUS_FILE")/metrics}"
+  [ "$mdir" != none ] || return 0
+  out="$mdir/$TB_METRICS_FILE_NAME"
+  now=$(date -u +%s)
+  mkdir -p "$mdir" 2>/dev/null || return 0
+  tmp=$(mktemp "$mdir/.prom.XXXXXX" 2>/dev/null) || return 0
+  # status-file provenance (tb_write_status has just rewritten it)
+  inst_at=$(tb_status_get INSTALLED_AT)
+  cnt=$(tb_status_get CERT_COUNT)
+  lexp=$(tb_status_get LIST_EXP)
+  nexp_ep=$(tb_date_epoch "$(tb_status_get NEXT_EXPIRY)")
+  if [ "$st" = OK ]; then
+    run_ok=1; last_ok=$now
+  else
+    # carry the previous success timestamp forward across failures
+    run_ok=0
+    last_ok=$(awk '$1=="stir_trust_refresh_last_success_timestamp_seconds"{print $2}' "$out" 2>/dev/null | head -1)
+  fi
+  # the CRL is installed as a sibling of the bundle (publisher AND SBC layouts)
+  crl_ep=""
+  if [ -n "$bundle" ]; then
+    crl_file="$(dirname "$bundle")/sti-pa-crl.pem"
+    if [ -s "$crl_file" ]; then
+      crl_ep=$(tb_date_epoch "$(openssl crl -in "$crl_file" -noout -nextupdate 2>/dev/null | cut -d= -f2)")
+    fi
+  fi
+  # our own signing leaf (first cert of OUR_CHAIN = CN=SHAKEN 8052) notAfter
+  leaf_ep=""
+  if [ -n "${OUR_CHAIN:-}" ] && [ -s "${OUR_CHAIN:-}" ]; then
+    leaf_ep=$(tb_date_epoch "$(openssl x509 -in "$OUR_CHAIN" -noout -enddate 2>/dev/null | cut -d= -f2)")
+  fi
+  {
+    tb_prom_line stir_trust_bundle_installed_timestamp_seconds "$inst_at" \
+      "Epoch of the last VERIFIED trust-bundle install (status INSTALLED_AT; watchdog SLA TB_MAX_BUNDLE_AGE_DAYS=40d)."
+    tb_prom_line stir_trust_bundle_ca_count "$cnt" \
+      "Certificates in the installed STI-PA trust bundle (official list carries 19 today; G3 floor MIN_CA_CERTS)."
+    tb_prom_line stir_trust_bundle_next_ca_expiry_timestamp_seconds "$nexp_ep" \
+      "Soonest notAfter across the installed bundle's CA certs."
+    tb_prom_line stir_sticalist_expiry_timestamp_seconds "$lexp" \
+      "exp claim of the last ingested sticaList.jwt (STI-PA reissues DAILY, ~24h lifetime; past exp = mirror behind the daily reissue)."
+    tb_prom_line stir_crl_next_update_timestamp_seconds "$crl_ep" \
+      "nextUpdate of the installed STI-PA CRL (absent = CRL not installed; only consumed at CertVerify bit 16)."
+    tb_prom_line stir_leaf_cert_expiry_timestamp_seconds "$leaf_ep" \
+      "notAfter of our own SHAKEN leaf (granite-shaken-8052; renewal due ~2027-04-01, expires 2027-05-08)."
+    tb_prom_line stir_trust_refresh_last_run_timestamp_seconds "$now" \
+      "Epoch of the last refresh-script run that wrote status (any action, OK or FAIL)."
+    tb_prom_line stir_trust_refresh_last_run_status "$run_ok" \
+      "1 = the last refresh-script run wrote STATUS=OK, 0 = FAIL."
+    tb_prom_line stir_trust_refresh_last_success_timestamp_seconds "$last_ok" \
+      "Epoch of the last STATUS=OK run (carried forward across failed runs)."
+  } > "$tmp" 2>/dev/null || { rm -f "$tmp" 2>/dev/null; return 0; }
+  chmod 0644 "$tmp" 2>/dev/null || true
+  mv -f "$tmp" "$out" 2>/dev/null || rm -f "$tmp" 2>/dev/null
+  return 0
+}
+
 # tb_write_status <OK|FAIL> <action> <detail> [bundle_file]
 # Atomic key=value status file + syslog line. NEVER fails the caller.
 tb_write_status(){
@@ -530,6 +618,8 @@ tb_write_status(){
   else
     logger -t "$SYSLOG_TAG" -p daemon.err "$action FAIL: $detail" 2>/dev/null || true
   fi
+  # Prometheus textfile emission — strictly additive; can never fail the caller.
+  tb_emit_metrics "$st" "$bundle" || true
 }
 
 tb_show_status(){ # pretty-print the status file + a live summary of <installed bundle>
