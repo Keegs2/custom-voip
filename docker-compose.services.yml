@@ -59,7 +59,9 @@ services:
       resources:
         limits:
           cpus: '2'
-          memory: 1G
+          # 32GB-VM budget (docs/SERVICES_VM_32GB_TUNING.md): 1G was tight for
+          # busy CDR ingest + Bandwidth sync + Homer search fan-out; 2G headroom.
+          memory: 2G
         reservations:
           cpus: '0.5'
           memory: 256M
@@ -200,6 +202,20 @@ services:
       - ./docker/homer/clickhouse-users.xml:/etc/clickhouse-server/users.d/custom-users.xml
     networks:
       - services-network
+    deploy:
+      resources:
+        limits:
+          # 32GB-VM budget (docs/SERVICES_VM_32GB_TUNING.md): previously
+          # UNLIMITED — a runaway Homer scan could eat the whole box and evict
+          # the host Postgres primary's page cache. 6G = one 4G per-query cap
+          # (clickhouse-users.xml max_memory_usage) + ~2G server overhead
+          # (mark cache, background merges, HEP insert buffers). cpus 3 leaves
+          # a core for api/PG during heavy SIP-search scans (CH parallelizes
+          # a single query across all cores by default).
+          cpus: '3'
+          memory: 6G
+        reservations:
+          memory: 512M
     healthcheck:
       test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:8123/ping || exit 1"]
       interval: 5s
@@ -208,6 +224,12 @@ services:
     restart: unless-stopped
 
   # qryn — Loki-compatible API backed by ClickHouse (replaces homer-app backend)
+  # 32GB-VM budget note (docs/SERVICES_VM_32GB_TUNING.md): DELIBERATELY no
+  # compose memory limit. The V8 heap is already bounded in-process at 4G by
+  # NODE_OPTIONS below (degrades via GC pressure, not OOM-kill); a cgroup cap
+  # tight enough to matter (<~5G incl. native/new-space overhead) would turn
+  # heap peaks into SIGKILLs that drop in-flight HEP writes. Budgeted at an
+  # effective ~4.5G worst case / ~1-2G typical in the budget table.
   qryn:
     image: qxip/qryn:latest
     container_name: voip-qryn
@@ -320,6 +342,17 @@ services:
       - qryn
     networks:
       - services-network
+    deploy:
+      resources:
+        limits:
+          # 32GB-VM budget (docs/SERVICES_VM_32GB_TUNING.md): previously
+          # UNLIMITED. Grafana 10 OSS with our dashboard count sits in the
+          # 200-400M range; 1G is generous headroom while capping the blast
+          # radius of a plugin/datasource leak away from the host PG primary.
+          cpus: '1'
+          memory: 1G
+        reservations:
+          memory: 128M
     restart: unless-stopped
 
   # ===========================================================================
@@ -348,7 +381,12 @@ services:
       resources:
         limits:
           cpus: '2'
-          memory: 4G
+          # 32GB-VM budget (docs/SERVICES_VM_32GB_TUNING.md): fleet-wide TSDB —
+          # every zone's vmagent remote-writes here, 12-month retention, and
+          # vmsingle RSS grows with active series + long-range Grafana reads.
+          # 4G was sized for the 16GB box; 6G absorbs scrape-load growth
+          # without letting the TSDB squeeze the host PG page cache.
+          memory: 6G
         reservations:
           cpus: '0.5'
           memory: 512M

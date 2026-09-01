@@ -1,7 +1,12 @@
 <clickhouse>
     <profiles>
         <default>
-            <max_memory_usage>2000000000</max_memory_usage>
+            <!-- Per-QUERY cap. 4GB (was 2GB) for the 32GB services VM — Homer
+                 SIP-search over big time ranges is the consumer that hit the
+                 2GB ceiling. Must stay below the container's 6G compose limit
+                 (docker-compose.services.yml) with room for server overhead;
+                 see docs/SERVICES_VM_32GB_TUNING.md. -->
+            <max_memory_usage>4000000000</max_memory_usage>
             <load_balancing>random</load_balancing>
         </default>
     </profiles>
