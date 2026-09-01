@@ -1615,12 +1615,13 @@ function CallActivityTab({ customerId }: CallActivityTabProps) {
   const { data, isLoading, isError } = useQuery({
     queryKey: ['rcf-activity', customerId],
     queryFn: () =>
+      // No sort params — GET /cdrs doesn't declare any; it always returns
+      // ORDER BY start_time DESC (the old sort_by/sort_dir were silently
+      // dropped by FastAPI).
       searchCdrs({
         customer_id: customerId,
         product_type: 'rcf',
         limit: 200,
-        sort_by: 'start_time',
-        sort_dir: 'desc',
       }),
     enabled: true,
     staleTime: 60_000,

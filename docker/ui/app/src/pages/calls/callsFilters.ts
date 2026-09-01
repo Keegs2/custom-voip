@@ -1,12 +1,18 @@
 /**
- * cdrFilters — filter state, validation, and the filters→query-params
- * serialization for the CDR Search page (/cdrs).
+ * callsFilters — filter state, validation, and the filters→query-params
+ * serialization for the merged Calls & Quality page (/cdrs + /call-quality).
  *
- * Kept separate from CdrFilterBar.tsx so the component file only exports a
- * component (react-refresh) and so CdrsTab can serialize/commit without
- * touching presentation code. filtersToParams() is the ONE place the picker
- * state becomes wire params — Records, Summary, and CSV export all consume
- * its output.
+ * Evolved from pages/admin/cdrFilters.ts (the CDR Search filter module) with
+ * one addition: `trunk_id` — a server-declared param on GET /cdrs that the
+ * old page never exposed. filtersToParams() remains the ONE place the picker
+ * state becomes wire params — Records, Summary, CSV export, and the quality
+ * trend charts all consume its output.
+ *
+ * PINNED API CONTRACT (GET /v1/cdrs — routers/cdrs.py query_cdrs): the
+ * endpoint declares ONLY customer_id, trunk_id, product_type, direction,
+ * destination (prefix), sbc_id, zone, start_date, end_date, rated_only,
+ * limit, offset. FastAPI silently drops anything else — do not add params
+ * here without adding them to the router first.
  */
 import type { CdrSearchParams, ProductType, CallDirection, CdrZone } from '../../types/cdr';
 
@@ -47,8 +53,10 @@ export function toDatetimeLocal(d: Date): string {
 
 /* ── Filter state ────────────────────────────────────────────────────── */
 
-export interface CdrFilters {
+export interface CallsFilters {
   customer_id: string;
+  /** '' = all trunks, else a trunk id (sent as the server's `trunk_id`). */
+  trunk_id: string;
   product_type: string;
   direction: string;
   /** '' = all zones, else east | west | central. */
@@ -61,12 +69,13 @@ export interface CdrFilters {
   rated_only: boolean;
 }
 
-export function defaultCdrFilters(): CdrFilters {
+export function defaultCallsFilters(): CallsFilters {
   // Seed the custom pickers with the default preset's window so switching to
   // Custom always starts from something sensible.
   const { start, end } = presetRange('24h', new Date());
   return {
     customer_id: '',
+    trunk_id: '',
     product_type: '',
     direction: '',
     zone: '',
@@ -82,7 +91,7 @@ export function defaultCdrFilters(): CdrFilters {
  * Validate the filter set. Returns a user-facing error string, or null when
  * the filters are searchable. Only the custom range can be invalid.
  */
-export function validateCdrFilters(filters: CdrFilters): string | null {
+export function validateCallsFilters(filters: CallsFilters): string | null {
   if (filters.range_preset !== 'custom') return null;
   if (!filters.start_local || !filters.end_local) {
     return 'Custom range requires both a start and an end date/time.';
@@ -102,7 +111,7 @@ export function validateCdrFilters(filters: CdrFilters): string | null {
  * Serialize the filter UI state to the API's query params. Called ONCE per
  * Search click (commit time) so:
  * - relative presets resolve to concrete instants at that moment, and
- * - Load More pages reuse the exact same frozen window (consistent offsets).
+ * - page navigation reuses the exact same frozen window (consistent offsets).
  *
  * TIMEZONE HANDLING: `<input type="datetime-local">` yields a wall-clock
  * string with no timezone (e.g. "2026-08-04T09:30"). Per ECMA-262,
@@ -112,13 +121,13 @@ export function validateCdrFilters(filters: CdrFilters): string | null {
  * `end_date` params expect. So the operator thinks in local time and the
  * wire always carries unambiguous UTC.
  *
- * Callers must validateCdrFilters() first — an invalid custom range here
+ * Callers must validateCallsFilters() first — an invalid custom range here
  * falls back to the last-24h window rather than sending garbage.
  */
-export function filtersToParams(filters: CdrFilters): CdrSearchParams {
+export function filtersToParams(filters: CallsFilters): CdrSearchParams {
   let start: Date;
   let end: Date;
-  if (filters.range_preset === 'custom' && validateCdrFilters(filters) === null) {
+  if (filters.range_preset === 'custom' && validateCallsFilters(filters) === null) {
     start = new Date(filters.start_local); // local wall-clock → Date instant
     end = new Date(filters.end_local);
   } else {
@@ -131,6 +140,7 @@ export function filtersToParams(filters: CdrFilters): CdrSearchParams {
     end_date: end.toISOString(),
   };
   if (filters.customer_id) params.customer_id = Number(filters.customer_id);
+  if (filters.trunk_id) params.trunk_id = Number(filters.trunk_id);
   if (filters.product_type) params.product_type = filters.product_type as ProductType;
   if (filters.direction) params.direction = filters.direction as CallDirection;
   if (filters.zone) params.zone = filters.zone as CdrZone;

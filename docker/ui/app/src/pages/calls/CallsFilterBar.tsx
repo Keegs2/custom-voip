@@ -1,13 +1,19 @@
 /**
- * CdrFilterBar — the CDR search filter slab (/cdrs).
+ * CallsFilterBar — the merged Calls & Quality filter slab.
  *
- * Styling: the shared DAYLIGHT CONSOLE system (`dl-*` in index.css plus the
- * page-scoped `dlx4-*` layer in styles/dl-platform-b.css). One white
- * `dl-panel`: a scope row (customer / product / direction / zone /
- * destination), a time row (range presets + datetime pickers + rated-only),
- * and a footer with inline validation + the Search / Export actions.
+ * Evolved from the CDR Search filter bar (the more dynamic of the two pages'
+ * search boxes) with the Call Quality page's trunk selector folded in and
+ * role gating added. One white `dl-panel`: a scope row (customer / trunk /
+ * product / direction / zone / destination prefix), a time row (range
+ * presets + datetime pickers + rated-only), and a footer with inline
+ * validation + the Search / Export actions.
  *
- * Time-range semantics (state + serialization live in ./cdrFilters):
+ * Role gating (presentation only — the API tenant-scopes server-side):
+ * - Staff (admin + support) see the Customer and Zone filters and Export CSV.
+ * - Tenants get neither; the Trunk selector stays (listTrunks is
+ *   tenant-scoped, so tenants only ever see their own trunks).
+ *
+ * Time-range semantics (state + serialization live in ./callsFilters):
  * - Presets (Last hour / 24h / 7d / 30d) are RELATIVE — they resolve to
  *   concrete instants when Search is clicked, so "Last 24h" always means 24h
  *   before the search, not before page load. While a preset is active the
@@ -18,38 +24,56 @@
  */
 import { useQuery } from '@tanstack/react-query';
 import { listCustomers } from '../../api/customers';
+import { listTrunks } from '../../api/trunks';
 import {
   PRESET_LABELS,
   presetRange,
   toDatetimeLocal,
-  validateCdrFilters,
-} from './cdrFilters';
-import type { CdrFilters, CdrRangePreset } from './cdrFilters';
+  validateCallsFilters,
+} from './callsFilters';
+import type { CallsFilters, CdrRangePreset } from './callsFilters';
 
-interface CdrFilterBarProps {
-  filters: CdrFilters;
-  onChange: (filters: CdrFilters) => void;
+interface CallsFilterBarProps {
+  filters: CallsFilters;
+  onChange: (filters: CallsFilters) => void;
   onSearch: () => void;
   onExport: () => void;
   searching: boolean;
   exporting: boolean;
+  /** Admin or support — shows Customer + Zone filters and Export CSV. */
+  isStaff: boolean;
 }
 
-export function CdrFilterBar({
+export function CallsFilterBar({
   filters,
   onChange,
   onSearch,
   onExport,
   searching,
   exporting,
-}: CdrFilterBarProps) {
+  isStaff,
+}: CallsFilterBarProps) {
+  // ALL hooks unconditionally at the top — React #310 prevention.
   const { data: customersData } = useQuery({
     queryKey: ['customers-all'],
     queryFn: () => listCustomers({ limit: 500 }),
     staleTime: 5 * 60 * 1000,
+    enabled: isStaff, // tenants have no customer filter (and no /customers read)
   });
 
-  const rangeError = validateCdrFilters(filters);
+  // Trunk options follow the selected customer for staff; tenants always get
+  // their own trunks (listTrunks is tenant-scoped server-side).
+  const { data: trunksData } = useQuery({
+    queryKey: ['trunks-for-cdr-filter', filters.customer_id],
+    queryFn: () =>
+      listTrunks({
+        customer_id: filters.customer_id ? Number(filters.customer_id) : undefined,
+        limit: 500,
+      }),
+    staleTime: 2 * 60 * 1000,
+  });
+
+  const rangeError = validateCallsFilters(filters);
 
   // While a preset is active the pickers show its live preview (recomputed
   // each render — close enough to "now" for a preview; the authoritative
@@ -60,8 +84,13 @@ export function CdrFilterBar({
   const startValue = preview ? toDatetimeLocal(preview.start) : filters.start_local;
   const endValue = preview ? toDatetimeLocal(preview.end) : filters.end_local;
 
-  function set<K extends keyof CdrFilters>(key: K, value: CdrFilters[K]) {
+  function set<K extends keyof CallsFilters>(key: K, value: CallsFilters[K]) {
     onChange({ ...filters, [key]: value });
+  }
+
+  /** Changing customer invalidates the trunk choice (trunks are per-customer). */
+  function setCustomer(value: string) {
+    onChange({ ...filters, customer_id: value, trunk_id: '' });
   }
 
   function selectPreset(preset: CdrRangePreset) {
@@ -89,17 +118,34 @@ export function CdrFilterBar({
       <form onSubmit={handleSubmit} className="dl-panel-body">
         {/* Row 1 — scope filters */}
         <div className="dlx4-filterrow">
-          <div className="dlx4-field" style={{ minWidth: 180 }}>
-            <label className="dl-flabel" htmlFor="cdr-f-customer">Customer</label>
+          {isStaff && (
+            <div className="dlx4-field" style={{ minWidth: 180 }}>
+              <label className="dl-flabel" htmlFor="cdr-f-customer">Customer</label>
+              <select
+                id="cdr-f-customer"
+                className="dl-input"
+                value={filters.customer_id}
+                onChange={(e) => setCustomer(e.target.value)}
+              >
+                <option value="">All Customers</option>
+                {(customersData?.items ?? []).map((c) => (
+                  <option key={c.id} value={String(c.id)}>{c.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          <div className="dlx4-field" style={{ minWidth: 150 }}>
+            <label className="dl-flabel" htmlFor="cdr-f-trunk">Trunk</label>
             <select
-              id="cdr-f-customer"
+              id="cdr-f-trunk"
               className="dl-input"
-              value={filters.customer_id}
-              onChange={(e) => set('customer_id', e.target.value)}
+              value={filters.trunk_id}
+              onChange={(e) => set('trunk_id', e.target.value)}
             >
-              <option value="">All Customers</option>
-              {(customersData?.items ?? []).map((c) => (
-                <option key={c.id} value={String(c.id)}>{c.name}</option>
+              <option value="">All Trunks</option>
+              {(trunksData?.items ?? []).map((t) => (
+                <option key={t.id} value={String(t.id)}>{t.trunk_name}</option>
               ))}
             </select>
           </div>
@@ -134,21 +180,23 @@ export function CdrFilterBar({
           </div>
 
           {/* Zone — static options; each zone is a self-contained SIP stack.
-              Per-SBC granularity stays visible in the expanded row detail. */}
-          <div className="dlx4-field" style={{ minWidth: 120 }}>
-            <label className="dl-flabel" htmlFor="cdr-f-zone">Zone</label>
-            <select
-              id="cdr-f-zone"
-              className="dl-input"
-              value={filters.zone}
-              onChange={(e) => set('zone', e.target.value)}
-            >
-              <option value="">All zones</option>
-              <option value="east">East</option>
-              <option value="west">West</option>
-              <option value="central">Central</option>
-            </select>
-          </div>
+              Per-SBC granularity stays visible in the call-detail modal. */}
+          {isStaff && (
+            <div className="dlx4-field" style={{ minWidth: 120 }}>
+              <label className="dl-flabel" htmlFor="cdr-f-zone">Zone</label>
+              <select
+                id="cdr-f-zone"
+                className="dl-input"
+                value={filters.zone}
+                onChange={(e) => set('zone', e.target.value)}
+              >
+                <option value="">All zones</option>
+                <option value="east">East</option>
+                <option value="west">West</option>
+                <option value="central">Central</option>
+              </select>
+            </div>
+          )}
 
           <div className="dlx4-field" style={{ minWidth: 150 }}>
             <label className="dl-flabel" htmlFor="cdr-f-dest">Destination Prefix</label>
@@ -258,14 +306,16 @@ export function CdrFilterBar({
             >
               {searching ? 'Searching…' : 'Search'}
             </button>
-            <button
-              type="button"
-              className="dl-btn dl-btn-ghost"
-              disabled={exporting || rangeError != null}
-              onClick={onExport}
-            >
-              {exporting ? 'Exporting…' : 'Export CSV'}
-            </button>
+            {isStaff && (
+              <button
+                type="button"
+                className="dl-btn dl-btn-ghost"
+                disabled={exporting || rangeError != null}
+                onClick={onExport}
+              >
+                {exporting ? 'Exporting…' : 'Export CSV'}
+              </button>
+            )}
           </div>
         </div>
       </form>

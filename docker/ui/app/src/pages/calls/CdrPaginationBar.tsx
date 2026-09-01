@@ -1,9 +1,9 @@
 /**
- * CdrPaginationBar — real page navigation for the CDR Search results.
+ * CdrPaginationBar — real page navigation for the Calls & Quality results.
  *
  * Styling: the shared DAYLIGHT CONSOLE system — reuses the compact
  * `dlx4-pgbtn` button vocabulary and adds the `dlx4-pager-*` layout classes
- * (styles/dl-platform-b.css). Rendered twice by CdrsTab — the same slim bar
+ * (styles/dl-platform-b.css). Rendered twice by CallsPage — the same slim bar
  * above and below the table — so the controls are reachable both before and
  * after scanning a page (pages can be up to 500 rows tall).
  *

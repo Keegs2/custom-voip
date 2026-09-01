@@ -42,7 +42,7 @@ import { Spinner } from '../components/ui/Spinner';
 import { searchSipTraces } from '../api/homer';
 import type { HomerSearchParams, HomerSearchResult } from '../api/homer';
 import { fmt } from '../utils/format';
-import { toDatetimeLocal } from './admin/cdrFilters';
+import { toDatetimeLocal } from './calls/callsFilters';
 import { SipLadder } from '../components/sip-ladder';
 import type { MessageAttestation } from '../types/stir';
 import {
@@ -62,7 +62,7 @@ const INK_FAINT = '#8b99b0';
 const AZURE_DEEP = '#1d63dd';
 
 // ─── Time-range presets ──────────────────────────────────────────────────────
-// Same idiom as the CDR page's filter bar (pages/admin/cdrFilters.ts): presets
+// Same idiom as the Calls & Quality filter bar (pages/calls/callsFilters.ts): presets
 // are RELATIVE and resolve to concrete instants when Search is clicked, so
 // "Last 24h" always means 24h before the search, not before page load. While a
 // preset is active the datetime pickers show a live preview and are disabled.
