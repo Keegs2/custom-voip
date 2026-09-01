@@ -1153,7 +1153,8 @@ async def query_cdrs(
                rtp_audio_in_mean_interval,
                sip_from_user, sip_to_user, hangup_cause_q850,
                sip_hangup_disposition, sip_user_agent,
-               network_addr, bridge_uuid, sbc_id
+               network_addr, bridge_uuid, sbc_id,
+               inbound_carrier, inbound_carrier_pop, on_net
         FROM cdrs
         {where_sql}
         ORDER BY start_time DESC LIMIT ${idx} OFFSET ${idx + 1}
@@ -1310,7 +1311,8 @@ async def get_cdr(
                read_rate, write_rate,
                sip_from_user, sip_to_user, hangup_cause_q850,
                sip_hangup_disposition, sip_user_agent,
-               network_addr, bridge_uuid, sbc_id
+               network_addr, bridge_uuid, sbc_id,
+               inbound_carrier, inbound_carrier_pop, on_net
         FROM cdrs WHERE uuid = $1
     """
     values: list = [cdr_uuid]
