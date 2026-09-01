@@ -1105,9 +1105,9 @@
     },
     {
       "id": 11,
-      "type": "histogram",
+      "type": "barchart",
       "title": "MOS distribution",
-      "description": "Distribution of per-call MOS over the dashboard time range, selected zone, mos IS NOT NULL (unrated/unanswered excluded). A healthy carrier is bunched at 4.0-4.5. A left tail toward 3.x is audio degradation.",
+      "description": "Per-call MOS bucketed into fixed quality bands (SQL CASE): Poor <3.6 (red), Fair 3.6–4.0 (orange), Good 4.0–4.3 (yellow), Excellent ≥4.3 (green). All four bands always render — empty bands show as zero-height slots, so the axis never collapses. Fixed bands because the FreeSWITCH MOS estimator pins healthy G.711 calls at ~4.5: an auto-bucketed histogram degenerates to a single full-width bar. Healthy = everything stacked in Excellent; any movement into lower bands = audio degradation. Dashboard time range, selected zone, mos IS NOT NULL (unrated/unanswered excluded).",
       "gridPos": {
         "h": 8,
         "w": 6,
@@ -1128,29 +1128,47 @@
           "format": "table",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT mos FROM cdrs WHERE $__timeFilter(start_time) AND mos IS NOT NULL AND CASE WHEN freeswitch_node LIKE 'west%' THEN 'west' WHEN freeswitch_node LIKE 'central%' THEN 'central' WHEN COALESCE(freeswitch_node,'') = '' THEN 'unknown' ELSE 'east' END LIKE '$zone';"
+          "rawSql": "SELECT b.band AS band, COALESCE(a.calls, 0) AS calls FROM (VALUES (1, 'Poor'), (2, 'Fair'), (3, 'Good'), (4, 'Excellent')) AS b(ord, band) LEFT JOIN (SELECT CASE WHEN mos < 3.6 THEN 'Poor' WHEN mos < 4.0 THEN 'Fair' WHEN mos < 4.3 THEN 'Good' ELSE 'Excellent' END AS band, COUNT(*) AS calls FROM cdrs WHERE $__timeFilter(start_time) AND mos IS NOT NULL AND CASE WHEN freeswitch_node LIKE 'west%' THEN 'west' WHEN freeswitch_node LIKE 'central%' THEN 'central' WHEN COALESCE(freeswitch_node,'') = '' THEN 'unknown' ELSE 'east' END LIKE '$zone' GROUP BY 1) a ON a.band = b.band ORDER BY b.ord;"
         }
       ],
       "options": {
-        "bucketSize": 0.1,
+        "xField": "band",
+        "colorByField": "band",
+        "orientation": "vertical",
+        "xTickLabelRotation": 0,
+        "xTickLabelSpacing": 0,
+        "showValue": "auto",
+        "stacking": "none",
+        "groupWidth": 0.7,
+        "barWidth": 0.9,
+        "barRadius": 0,
+        "fullHighlight": false,
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        },
         "legend": {
-          "calcs": [],
+          "showLegend": false,
           "displayMode": "list",
           "placement": "bottom",
-          "showLegend": false
+          "calcs": []
         }
       },
       "fieldConfig": {
         "defaults": {
           "unit": "short",
+          "min": 0,
+          "decimals": 0,
           "color": {
             "mode": "fixed",
             "fixedColor": "green"
           },
           "custom": {
             "fillOpacity": 80,
-            "gradientMode": "none"
+            "gradientMode": "none",
+            "lineWidth": 1
           },
+          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -1161,7 +1179,42 @@
             ]
           }
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "band"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "Poor": {
+                        "color": "red",
+                        "index": 0
+                      },
+                      "Fair": {
+                        "color": "orange",
+                        "index": 1
+                      },
+                      "Good": {
+                        "color": "yellow",
+                        "index": 2
+                      },
+                      "Excellent": {
+                        "color": "green",
+                        "index": 3
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
       }
     },
     {
