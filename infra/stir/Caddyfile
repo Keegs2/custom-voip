@@ -38,6 +38,28 @@
 }
 
 # ----------------------------------------------------------------------------
+# Container healthcheck site — plain HTTP, LOOPBACK HOSTS ONLY.
+# The compose healthcheck wgets http://127.0.0.1/healthz. Without this block,
+# Caddy's auto-HTTPS redirected that to https://127.0.0.1, where the TLS
+# handshake can only fail (SNI mismatch — the cert is for the public domain
+# only), so the container sat "unhealthy" while serving the public site fine.
+# Host-scoped to loopback, so the public domain's ACME HTTP-01 challenges
+# (Caddy injects challenge handlers ahead of site routes on :80) and its
+# :80 -> :443 redirect are unaffected. Deep health of the PUBLIC endpoint is
+# monitored separately by the blackbox probes on the STIR/SHAKEN board.
+# ----------------------------------------------------------------------------
+http://127.0.0.1, http://localhost {
+	@healthz path /healthz
+	handle @healthz {
+		header Content-Type "text/plain; charset=utf-8"
+		respond "ok" 200
+	}
+	handle {
+		respond "Not Found" 404
+	}
+}
+
+# ----------------------------------------------------------------------------
 # The public x5u site. Caddy auto-provisions a Let's Encrypt cert for this
 # hostname (HTTP-01 on :80) and serves it on :443.
 # ----------------------------------------------------------------------------
