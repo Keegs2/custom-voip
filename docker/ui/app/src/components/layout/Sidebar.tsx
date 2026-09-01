@@ -7,7 +7,7 @@ import {
   IconRCF, IconTrunk, IconAPI, IconVoicemail, IconDocs,
   IconSignal, IconTroubleshoot,
 } from '../icons/ProductIcons';
-import { Package, Shield, ChevronDown, Clock, Database, Eye, EyeOff, BookOpen, WalletMinimal } from 'lucide-react';
+import { Package, Shield, ChevronDown, Clock, Eye, EyeOff, BookOpen, WalletMinimal } from 'lucide-react';
 
 /* ─── Types ───────────────────────────────────────────────── */
 
@@ -744,9 +744,16 @@ export function Sidebar({ collapsed = false }: SidebarProps) {
     label: 'Payments Demo', to: '/admin/payments-demo', color: '#60a5fa', icon: <WalletMinimal size={15} strokeWidth={1.7} />,
     isActiveFn: (p) => p.startsWith('/admin/payments-demo'),
   };
+  // The merged Calls & Quality page (CDR search + voice-quality analysis in
+  // one). Staff enter via /cdrs; the tenant-facing entry keeps the familiar
+  // "Call Quality" label via /call-quality — both routes render the same page.
+  const callsQualityItem: NavItemDef = {
+    label: 'Calls & Quality', to: '/cdrs', color: '#22c55e', icon: <IconSignal size={17} />,
+    // Light up on either alias of the merged page.
+    isActiveFn: (p) => p.startsWith('/cdrs') || p.startsWith('/call-quality'),
+  };
   const callQualityItem: NavItemDef = { label: 'Call Quality',        to: '/call-quality',    color: '#22c55e', icon: <IconSignal size={17} /> };
   const troubleItem: NavItemDef     = { label: 'Troubleshooting',     to: '/troubleshooting', color: '#fbbf24', icon: <IconTroubleshoot size={17} /> };
-  const cdrSearchItem: NavItemDef   = { label: 'CDR Search',          to: '/cdrs',            color: '#a78bfa', icon: <Database size={15} strokeWidth={1.7} /> };
 
   /* ─────────────────────────────────────────────────────── */
 
@@ -1027,22 +1034,26 @@ export function Sidebar({ collapsed = false }: SidebarProps) {
                   )}
 
                   {isSupport ? (
-                    /* Support role — its entire nav: the three platform-read
-                       tools the API grants this role. */
+                    /* Support role — its entire nav: the platform-read tools
+                       the API grants this role. Calls & Quality is the merged
+                       CDR Search + Call Quality page. */
                     <>
-                      <SidebarNavItem item={troubleItem}     onNavigate={closeMobile} small />
-                      <SidebarNavItem item={callQualityItem} onNavigate={closeMobile} small />
-                      <SidebarNavItem item={cdrSearchItem}   onNavigate={closeMobile} small />
+                      <SidebarNavItem item={troubleItem}      onNavigate={closeMobile} small />
+                      <SidebarNavItem item={callsQualityItem} onNavigate={closeMobile} small />
                     </>
                   ) : (
                     /* ── Support sub-group (admin + readonly) ──
-                       Troubleshooting + CDR Search hit admin/support-gated
-                       APIs, so readonly gets Call Quality only. */
+                       Staff get the ONE merged Calls & Quality entry (it
+                       replaced the separate CDR Search + Call Quality items);
+                       readonly keeps the tenant-facing Call Quality label
+                       pointing at the same merged page. Troubleshooting hits
+                       admin-gated APIs, so it stays admin-only. */
                     <>
                       <SubGroupLabel label="Support" />
-                      <SidebarNavItem item={callQualityItem} onNavigate={closeMobile} small />
-                      {isAdmin && <SidebarNavItem item={troubleItem}   onNavigate={closeMobile} small />}
-                      {isAdmin && <SidebarNavItem item={cdrSearchItem} onNavigate={closeMobile} small />}
+                      {isAdmin
+                        ? <SidebarNavItem item={callsQualityItem} onNavigate={closeMobile} small />
+                        : <SidebarNavItem item={callQualityItem}  onNavigate={closeMobile} small />}
+                      {isAdmin && <SidebarNavItem item={troubleItem} onNavigate={closeMobile} small />}
                     </>
                   )}
                 </CollapsibleGroup>

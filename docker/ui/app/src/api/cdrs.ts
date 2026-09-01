@@ -31,27 +31,26 @@ function toIsoUtc(value: string): string {
 /**
  * THE single serializer for CDR query params — used by BOTH `/cdrs` and
  * `/cdrs/summary` (the API accepts the identical filter set on both), and by
- * the CSV export path. Param names here are the API's declared names —
- * FastAPI silently ignores anything else (`start_from`/`start_to` was the bug
- * that made the search page permanently show the last-24h default).
+ * the CSV export path. Param names here are PINNED 1:1 to the router's
+ * declared params (routers/cdrs.py query_cdrs) — FastAPI silently ignores
+ * anything else (`start_from`/`start_to` was the bug that made the search
+ * page permanently show the last-24h default; `caller_id`/`sort_*` were the
+ * same class of dead filter and have been removed).
  */
 export function cdrSearchQuery(params: CdrSearchParams): URLSearchParams {
   const query = new URLSearchParams();
   if (params.customer_id !== undefined) query.set('customer_id', String(params.customer_id));
+  if (params.trunk_id !== undefined) query.set('trunk_id', String(params.trunk_id));
   if (params.product_type) query.set('product_type', params.product_type);
   if (params.direction) query.set('direction', params.direction);
-  if (params.caller_id) query.set('caller_id', params.caller_id);
   if (params.destination) query.set('destination', params.destination);
   if (params.start_date) query.set('start_date', toIsoUtc(params.start_date));
   if (params.end_date) query.set('end_date', toIsoUtc(params.end_date));
-  if (params.hangup_cause) query.set('hangup_cause', params.hangup_cause);
   if (params.zone) query.set('zone', params.zone);
   if (params.sbc_id) query.set('sbc_id', params.sbc_id);
   if (params.rated_only) query.set('rated_only', 'true');
   if (params.limit !== undefined) query.set('limit', String(params.limit));
   if (params.offset !== undefined) query.set('offset', String(params.offset));
-  if (params.sort_by) query.set('sort_by', params.sort_by);
-  if (params.sort_dir) query.set('sort_dir', params.sort_dir);
   return query;
 }
 
@@ -85,7 +84,7 @@ export async function rateCdr(uuid: string): Promise<Cdr> {
  * `/cdrs/summary` accepts the SAME filter set as `/cdrs` (minus pagination),
  * plus the grouping dimension.
  */
-export type CdrSummaryParams = Omit<CdrSearchParams, 'limit' | 'offset' | 'sort_by' | 'sort_dir'> & {
+export type CdrSummaryParams = Omit<CdrSearchParams, 'limit' | 'offset'> & {
   group_by?: 'day' | 'hour' | 'destination';
 };
 

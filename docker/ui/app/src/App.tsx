@@ -13,9 +13,8 @@ import { VisualVoicemailPage } from './pages/VisualVoicemailPage';
 import { GuidesPage } from './pages/docs/GuidesPage';
 import { ApiDocsPage } from './pages/docs/ApiDocsPage';
 import { TroubleshootingPage } from './pages/TroubleshootingPage';
-import { CdrsAdminPage } from './pages/admin/CdrsAdminPage';
+import { CallsPage } from './pages/calls/CallsPage';
 import { PaymentsDemoControlPage } from './pages/admin/payments-demo/PaymentsDemoControlPage';
-import { CallQualityPage } from './pages/CallQualityPage';
 import { MyAccountPage } from './pages/MyAccountPage';
 
 export function App() {
@@ -45,16 +44,17 @@ export function App() {
               <Route path="docs/guides/:product?"   element={<GuidesPage />} />
               <Route path="docs/api/:product?"      element={<ApiDocsPage />} />
               <Route path="docs/integration"        element={<Navigate to="/docs/api" replace />} />
-              <Route path="call-quality" element={<CallQualityPage />} />
-              {/* Standalone CDR search — admin + support roles. Platform +
-                  customer administration now lives in TED (the CRAG console);
-                  the revup /admin tree was removed, but CDR Search stays here
-                  as a support-facing tool. */}
+              {/* Calls & Quality — the merged CDR Search + Call Quality page.
+                  BOTH legacy routes render it so bookmarks keep working:
+                  /call-quality stays tenant-reachable (the page hides all
+                  cost/fleet UI for non-staff; the API tenant-scopes data),
+                  while /cdrs keeps its staff-only guard. */}
+              <Route path="call-quality" element={<CallsPage />} />
               <Route
                 path="cdrs"
                 element={
                   <RequireSupportOrAdmin>
-                    <CdrsAdminPage standalone />
+                    <CallsPage />
                   </RequireSupportOrAdmin>
                 }
               />

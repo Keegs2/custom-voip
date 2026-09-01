@@ -78,22 +78,25 @@ export interface Cdr {
  * Query params for GET /cdrs (and, minus pagination, GET /cdrs/summary —
  * the API accepts the identical filter set on both).
  *
- * IMPORTANT — wire names: the API declares `start_date` / `end_date`
- * (ISO 8601 UTC). FastAPI silently drops undeclared query params, so any
- * other name (the old `start_from`/`start_to`) never reaches the endpoint
- * and the API falls back to its last-24-hours default.
+ * PINNED 1:1 to the router's declared params (routers/cdrs.py query_cdrs):
+ * customer_id, trunk_id, product_type, direction, destination (prefix),
+ * sbc_id, zone, start_date, end_date, rated_only, limit, offset — and
+ * NOTHING else. FastAPI silently drops undeclared query params (the old
+ * `start_from`/`start_to` and `caller_id`/`sort_by`/`sort_dir` were exactly
+ * such dead filters), so any param added here MUST exist on the router.
  */
 export interface CdrSearchParams {
   customer_id?: number;
+  /** Server-side trunk filter (cdrs.trunk_id is stored as text of this id). */
+  trunk_id?: number;
   product_type?: ProductType;
   direction?: CallDirection;
-  caller_id?: string;
+  /** Literal destination PREFIX match (LIKE 'value%'). */
   destination?: string;
   /** Range start — ISO 8601 UTC instant (e.g. 2026-08-04T13:30:00.000Z). */
   start_date?: string;
   /** Range end — ISO 8601 UTC instant. */
   end_date?: string;
-  hangup_cause?: string;
   /** Zone filter — east | west | central (omit for all zones). */
   zone?: CdrZone;
   sbc_id?: string;
@@ -101,8 +104,6 @@ export interface CdrSearchParams {
   rated_only?: boolean;
   limit?: number;
   offset?: number;
-  sort_by?: string;
-  sort_dir?: 'asc' | 'desc';
 }
 
 export interface CdrSearchResult {
