@@ -1339,7 +1339,7 @@
       "id": 17,
       "type": "stat",
       "title": "Sinch DEN",
-      "description": "Sinch Denver ORIGINATION trunk (206.146.100.24, TG DNVTCOZIGR2_3278). Top: live reachability from the SBCs' Kamailio-dispatcher OPTIONS probes (carrier_trunk_health, duid sinch-denver) — 🟢 UP (reachable from ≥1 SBC) · 🔴 DOWN (dead on every SBC) · 🟠 STALE (no fresh probe in 90s). Bottom: inbound calls landed via this PoP in the last hour (cdrs, inbound_carrier='sinch', pop='denver') — the Sinch orig test TN 5305480845 lands here, so a test call shows as a count here within its own hour.",
+      "description": "Sinch Denver ORIGINATION trunk (206.146.100.24, TG DNVTCOZIGR2_3278). Top: passive-OR-probe health (carrier_trunk_health, duid sinch-denver) — 🟢 UP (OPTIONS probe answered from ≥ 1 SBC, OR inbound calls landed via this PoP in the last 60 min — passive evidence) · 🟡 PASSIVE (no probe answer AND no recent traffic — this orig-only TG was provisioned Sinch→us and does not answer OPTIONS from unregistered IPs, so 'down' is unknowable from our side; NOT an outage signal) · 🟠 STALE (no fresh probe report in 90s — monitoring pipeline dark) · 🔴 DOWN is unreachable for this trunk unless Sinch enables OPTIONS response toward our SBC IPs (then strict probe truth returns). Bottom: inbound calls landed via this PoP in the last hour (cdrs, inbound_carrier='sinch', pop='denver') — the Sinch orig test TN 5305480845 lands here.",
       "datasource": {
         "type": "postgres",
         "uid": "voip-cdr-pg"
@@ -1360,7 +1360,7 @@
           "format": "table",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT CASE WHEN status IS NULL THEN 2 WHEN last_updated IS NULL OR last_updated < now() - interval '90 seconds' THEN 2 WHEN status = 'up' THEN 1 ELSE 0 END AS carrier_up FROM carrier_trunk_health WHERE duid = 'sinch-denver';"
+          "rawSql": "SELECT CASE WHEN status IS NULL THEN 2 WHEN last_updated IS NULL OR last_updated < now() - interval '90 seconds' THEN 2 WHEN status = 'up' THEN 1 WHEN status = 'passive' THEN 3 ELSE 0 END AS carrier_up FROM carrier_trunk_health WHERE duid = 'sinch-denver';"
         },
         {
           "refId": "B",
@@ -1448,6 +1448,11 @@
                         "text": "STALE",
                         "color": "orange",
                         "index": 2
+                      },
+                      "3": {
+                        "text": "PASSIVE",
+                        "color": "yellow",
+                        "index": 4
                       }
                     }
                   },
@@ -1480,6 +1485,10 @@
                     {
                       "color": "orange",
                       "value": 2
+                    },
+                    {
+                      "color": "yellow",
+                      "value": 3
                     }
                   ]
                 }
@@ -1525,7 +1534,7 @@
       "id": 18,
       "type": "stat",
       "title": "Sinch CHI",
-      "description": "Sinch Chicago ORIGINATION trunk (206.146.101.39, TG CHCGIL24GR4_7412). Top: live reachability from the SBCs' Kamailio-dispatcher OPTIONS probes (carrier_trunk_health, duid sinch-chicago) — 🟢 UP (reachable from ≥1 SBC) · 🔴 DOWN (dead on every SBC) · 🟠 STALE (no fresh probe in 90s). Bottom: inbound calls landed via this PoP in the last hour (cdrs, inbound_carrier='sinch', pop='chicago') — the Sinch orig test TN 5305480846 lands here.",
+      "description": "Sinch Chicago ORIGINATION trunk (206.146.101.39, TG CHCGIL24GR4_7412). Top: passive-OR-probe health (carrier_trunk_health, duid sinch-chicago) — 🟢 UP (OPTIONS probe answered from ≥ 1 SBC, OR inbound calls landed via this PoP in the last 60 min — passive evidence) · 🟡 PASSIVE (no probe answer AND no recent traffic — this orig-only TG was provisioned Sinch→us and does not answer OPTIONS from unregistered IPs, so 'down' is unknowable from our side; NOT an outage signal) · 🟠 STALE (no fresh probe report in 90s — monitoring pipeline dark) · 🔴 DOWN is unreachable for this trunk unless Sinch enables OPTIONS response toward our SBC IPs (then strict probe truth returns). Bottom: inbound calls landed via this PoP in the last hour (cdrs, inbound_carrier='sinch', pop='chicago') — the Sinch orig test TN 5305480846 lands here.",
       "datasource": {
         "type": "postgres",
         "uid": "voip-cdr-pg"
@@ -1546,7 +1555,7 @@
           "format": "table",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT CASE WHEN status IS NULL THEN 2 WHEN last_updated IS NULL OR last_updated < now() - interval '90 seconds' THEN 2 WHEN status = 'up' THEN 1 ELSE 0 END AS carrier_up FROM carrier_trunk_health WHERE duid = 'sinch-chicago';"
+          "rawSql": "SELECT CASE WHEN status IS NULL THEN 2 WHEN last_updated IS NULL OR last_updated < now() - interval '90 seconds' THEN 2 WHEN status = 'up' THEN 1 WHEN status = 'passive' THEN 3 ELSE 0 END AS carrier_up FROM carrier_trunk_health WHERE duid = 'sinch-chicago';"
         },
         {
           "refId": "B",
@@ -1634,6 +1643,11 @@
                         "text": "STALE",
                         "color": "orange",
                         "index": 2
+                      },
+                      "3": {
+                        "text": "PASSIVE",
+                        "color": "yellow",
+                        "index": 4
                       }
                     }
                   },
@@ -1666,6 +1680,10 @@
                     {
                       "color": "orange",
                       "value": 2
+                    },
+                    {
+                      "color": "yellow",
+                      "value": 3
                     }
                   ]
                 }
@@ -1711,7 +1729,7 @@
       "id": 11,
       "type": "geomap",
       "title": "US datacenters · live regions, carriers & traffic",
-      "description": "Geographic view of the 3 GCP datacenters (green, sized by calls in the last hour) and every carrier trunk — Bandwidth (Dallas primary, LA secondary) plus all 4 Sinch PoPs: origination Denver (TG DNVTCOZIGR2_3278) and Chicago (CHCGIL24GR4_7412), termination Atlanta LD (ATLNGAQSGR2_7214) and Denver TF (DNVTCOZIGR2_3282, toll-free 8YY only, priority below Bandwidth). Carrier triangles are colored by the SBCs' live Kamailio-dispatcher OPTIONS probes (carrier_trunk_health): Bandwidth GREEN when up, Sinch BLUE when up; RED when the trunk is down on every SBC or its status is stale (no fresh probe in 90s) / not yet reported. Denver hosts BOTH a Sinch origination PoP and the TF termination trunk — the two triangles are offset slightly (orig west / label above, TF east / label below) so both stay legible at TV distance. This is a proactive probe, independent of call traffic, so a dead carrier shows even at zero volume. Hover a triangle for status, SBCs up / reporting, and seconds since last probe. Datacenter up/down, VIP reachability and servers up/down are the zone tiles in the band below the map; Bandwidth + Sinch origination health/volume are the carrier tiles in that band.",
+      "description": "Geographic view of the 3 GCP datacenters (green, sized by calls in the last hour) and every carrier trunk — Bandwidth (Dallas primary, LA secondary) plus all 4 Sinch PoPs: origination Denver (TG DNVTCOZIGR2_3278) and Chicago (CHCGIL24GR4_7412), termination Atlanta LD (ATLNGAQSGR2_7214) and Denver TF (DNVTCOZIGR2_3282, toll-free 8YY only, priority below Bandwidth). Bandwidth + Sinch TERMINATION triangles are colored by the SBCs' live Kamailio-dispatcher OPTIONS probes (carrier_trunk_health): Bandwidth GREEN when up, Sinch termination BLUE when up; RED when the trunk is down on every SBC or its status is stale (no fresh probe in 90s) / not yet reported. Sinch ORIGINATION triangles (Denver orig + Chicago) use passive-OR-probe health instead (migration 45): BLUE when the probe is answered OR inbound calls landed via that PoP in the last 60 min, YELLOW 'PASSIVE' when neither — these orig-only TGs were provisioned Sinch→us and do not answer OPTIONS from unregistered IPs, so 'down' is unknowable and never rendered red; RED on an orig triangle only means stale/unreported monitoring. Denver hosts BOTH a Sinch origination PoP and the TF termination trunk — the two triangles are offset slightly (orig west / label above, TF east / label below) so both stay legible at TV distance. Probe coloring is proactive and independent of call traffic, so a dead probed carrier shows even at zero volume. Hover a triangle for status, SBCs up / reporting, seconds since last probe, and (origination) inbound calls in the last hour. Datacenter up/down, VIP reachability and servers up/down are the zone tiles in the band below the map; Bandwidth + Sinch origination health/volume are the carrier tiles in that band.",
       "datasource": {
         "type": "postgres",
         "uid": "voip-cdr-pg"
@@ -1754,7 +1772,7 @@
           "format": "table",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT COALESCE(h.name, z.name) AS name, z.lat, z.lon, CASE WHEN h.status = 'up' THEN 1 ELSE 0 END AS sinch_up, COALESCE(h.status,'unknown') AS status, COALESCE(h.up_sbcs,0) AS up_sbcs, COALESCE(h.total_sbcs,0) AS total_sbcs, CASE WHEN h.last_updated IS NULL THEN NULL ELSE round(EXTRACT(EPOCH FROM (now() - h.last_updated)))::int END AS probe_age_s FROM (VALUES ('sinch-denver','Sinch Denver',39.74::float8,-105.70::float8),('sinch-chicago','Sinch Chicago',41.88::float8,-87.63::float8)) AS z(duid,name,lat,lon) LEFT JOIN carrier_trunk_health h ON h.duid = z.duid ORDER BY z.duid;"
+          "rawSql": "SELECT COALESCE(h.name, z.name) AS name, z.lat, z.lon, CASE WHEN h.status = 'up' THEN 1 WHEN h.status = 'passive' THEN 2 ELSE 0 END AS sinch_up, COALESCE(h.status,'unknown') AS status, COALESCE(h.up_sbcs,0) AS up_sbcs, COALESCE(h.total_sbcs,0) AS total_sbcs, CASE WHEN h.last_updated IS NULL THEN NULL ELSE round(EXTRACT(EPOCH FROM (now() - h.last_updated)))::int END AS probe_age_s, COALESCE(h.recent_inbound_calls,0) AS inbound_1h FROM (VALUES ('sinch-denver','Sinch Denver',39.74::float8,-105.70::float8),('sinch-chicago','Sinch Chicago',41.88::float8,-87.63::float8)) AS z(duid,name,lat,lon) LEFT JOIN carrier_trunk_health h ON h.duid = z.duid ORDER BY z.duid;"
         },
         {
           "refId": "D",
@@ -1881,7 +1899,7 @@
           },
           {
             "type": "markers",
-            "name": "Sinch origination (up=blue)",
+            "name": "Sinch origination (up=blue, passive=yellow)",
             "tooltip": true,
             "location": {
               "mode": "coords",
@@ -2178,6 +2196,10 @@
                     {
                       "color": "blue",
                       "value": 1
+                    },
+                    {
+                      "color": "yellow",
+                      "value": 2
                     }
                   ]
                 }
@@ -2195,10 +2217,34 @@
                       "1": {
                         "text": "UP",
                         "index": 1
+                      },
+                      "2": {
+                        "text": "PASSIVE",
+                        "index": 2
                       }
                     }
                   }
                 ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "inbound_1h"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Inbound calls (1h)"
+              },
+              {
+                "id": "unit",
+                "value": "short"
+              },
+              {
+                "id": "decimals",
+                "value": 0
               }
             ]
           }

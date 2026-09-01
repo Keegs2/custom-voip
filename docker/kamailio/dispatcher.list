@@ -25,7 +25,13 @@
 # Attrs: Key-value pairs for custom routing
 #   weight=N - Relative weight for weighted distribution
 #   maxload=N - Max concurrent calls (for call-load algorithm)
-#   socket=udp:IP:PORT - Force specific local socket
+#   socket=udp:IP:PORT - Force specific local send socket (probes AND relays).
+#     MUST exactly match a real listen= bind (5.8 add_dest2list ->
+#     grep_sock_info, dispatch.c:472-490) — a non-local socket REJECTS the
+#     destination and the whole list load fails => kamailio does not start.
+#   ping_from=sip:user@host - Per-destination From URI for the OPTIONS
+#     keepalive, overriding the global ds_ping_from modparam
+#     (5.8 dispatch.c:374 attr parse, ds_ping_set:3960-3967 override).
 #   duid=STRING - Unique destination ID
 #
 # Load balancing algorithms (used in ds_select_dst):
@@ -152,15 +158,42 @@ __FS2_DISPATCHER_LINE__
 # NEVER used for call routing — Sinch is not a TO_CARRIER destination.
 # IP templated by entrypoint.sh from SINCH_DENVER_IP (default 206.146.100.24
 # — test TN 5305480845).
-6 sip:__SINCH_DENVER_IP__:5060 0 0 weight=100;duid=sinch-denver
+#
+# VIP-SOURCED PROBES — groups 6/7 ONLY (captured evidence, 2026-09-01): the
+# Sinch orig TGs answer our SBC-public-IP-sourced OPTIONS with 500 Server
+# Internal Error + Contact <sip:ANONYMOUS@...> (Ribbon/Sonus "source IP is
+# not a configured trunk" signature) — the orig TGs are registered with our
+# NLB VIPs (the addresses Sinch SENDS calls to), not the SBC public IPs
+# (those are only on the TERM TGs, groups 8/9). Hence two per-destination
+# attrs here, covering both filtering layers:
+#   socket=udp:__ADVERTISE_IP__:5060 — L3: probe egresses from the external
+#     VIP socket (a REAL bind — entrypoint.sh puts the VIP on lo; GCE
+#     passthrough-NLB backends may legally egress with the forwarding-rule
+#     IP as source, DSR semantics), so the wire source = the zone VIP.
+#   ping_from=sip:ping@__ADVERTISE_IP__ — L7: From host becomes the VIP
+#     instead of the global ds_ping_from (sip:ping@voiceplatform.local).
+# KNOWN CONSEQUENCE (by design — do NOT "fix"): replies addressed to the VIP
+# return through the external NLB to the ACTIVE SBC only. Active SBC: reply
+# matches its transaction -> groups 6/7 go UP. STANDBY SBC: its replies land
+# on the active (no transaction there, dropped) -> the standby marks 6/7
+# Inactive PERMANENTLY. That is fine: carrier_trunk_health is up-on->=1-SBC
+# (bool_or across SBCs), and migration 45's passive/traffic state stays the
+# safety net. Side effect: one dispatcher:dst-down event per standby boot
+# for each of these two duids (a single dsmon gen bump + one carrier-monitor
+# snapshot — harmless, no flapping; the monitor reports plain snapshots).
+# Do NOT copy these attrs to groups 2/3/8/9 — Bandwidth + Sinch TERM answer
+# 200 on the SBC-public-IP path today; leave the proven path alone.
+6 sip:__SINCH_DENVER_IP__:5060 0 0 weight=100;duid=sinch-denver;socket=udp:__ADVERTISE_IP__:5060;ping_from=sip:ping@__ADVERTISE_IP__
 
 # ============================================================
 # Group 7: Sinch Origination - Chicago (CHCGIL24GR4_7412)
 # ============================================================
 # Sinch Chicago signaling IP — same origination-only/keepalive notes as
-# Group 6. IP templated by entrypoint.sh from SINCH_CHICAGO_IP (default
+# Group 6, INCLUDING the VIP-sourced probe attrs (socket= / ping_from=) and
+# the standby-reads-Inactive-forever consequence documented there.
+# IP templated by entrypoint.sh from SINCH_CHICAGO_IP (default
 # 206.146.101.39 — test TN 5305480846).
-7 sip:__SINCH_CHICAGO_IP__:5060 0 0 weight=100;duid=sinch-chicago
+7 sip:__SINCH_CHICAGO_IP__:5060 0 0 weight=100;duid=sinch-chicago;socket=udp:__ADVERTISE_IP__:5060;ping_from=sip:ping@__ADVERTISE_IP__
 
 # ============================================================
 # Group 8: Sinch Termination - Atlanta LD (ATLNGAQSGR2_7214)

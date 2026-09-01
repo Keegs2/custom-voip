@@ -369,7 +369,47 @@ and Sinch is origination-only, never a TO_CARRIER destination anyway).
 They exist solely for:
 - **NAT keepalive**: OPTIONS every 5s keeps GCE's UDP NAT pinhole open.
 - **Health monitoring**: Detects carrier unreachability. The carrier-monitor
-  sidecar reports groups 2, 3, 6, 7 (`CARRIER_SETIDS`) to the East API.
+  sidecar reports groups 2, 3, 6-9 (`CARRIER_SETIDS`) to the East API.
+
+**Probe egress / on-the-wire source IP (verified against config + 5.8 socket
+selection):** for every group EXCEPT 6/7 no destination carries a `socket=`
+attr and there is no `ds_default_socket`, so with `mhomed=1` the OPTIONS
+probes to the public carrier IPs egress from the `udp:SBC_INTERNAL_IP:5060`
+socket (kernel route lookup picks the NIC address — the external VIP and
+signaling VIP live on loopback and are never selected for an external
+destination) and GCE 1:1 NAT puts **each SBC's OWN public IP** on the wire.
+The Via shows ADVERTISE_IP (that socket advertises the VIP), but compliant
+peers reply to the packet source per RFC 3261 §18.2.2 (`received`), i.e.
+straight back to the SBC — this is the exact path on which Bandwidth (groups
+2-5) and the Sinch TERM TGs (groups 8-9) answer. **Groups 6/7 are the
+exception**: they carry `socket=udp:ADVERTISE_IP:5060` +
+`ping_from=sip:ping@ADVERTISE_IP` (rendered from `__ADVERTISE_IP__`), so
+those two probes egress FROM the external VIP bind on lo (GCE
+passthrough-NLB backends may egress with the forwarding-rule IP as source —
+DSR semantics, same mechanism as the proven /healthz VIP-sourced RST) with a
+VIP From URI. `socket=` must match a real `listen=` bind exactly or
+dispatcher REJECTS the list at load and kamailio won't start
+(dispatch.c:472-490 `grep_sock_info`); the VIP bind exists unconditionally.
+
+**Sinch ORIGINATION groups 6-7 — VIP-sourced probes + standby reads Inactive
+by design:** the orig TGs (DNVTCOZIGR2_3278 / CHCGIL24GR4_7412) are
+registered with our NLB VIPs (the addresses Sinch sends calls to), not the
+SBC public IPs — captured 2026-09-01: SBC-public-sourced OPTIONS get 500 +
+Contact `<sip:ANONYMOUS@...>` (Ribbon/Sonus unknown-trunk signature; 500 is
+counted as probe-failure and deliberately NOT added to ds_ping_reply_codes —
+see that modparam's comment). The `socket=`/`ping_from=` attrs make the 6/7
+probes VIP-sourced at L3 and L7. Consequence of the passthrough NLB: replies
+to the VIP reach the ACTIVE SBC only — the active SBC's 6/7 go probe-up
+green; the STANDBY's 6/7 stay Inactive PERMANENTLY (its replies land on the
+active, no transaction, dropped) and fire one `dispatcher:dst-down` per
+standby boot per duid (single dsmon gen bump + one carrier-monitor snapshot
+— harmless, no flapping). Correct overall signal because
+carrier_trunk_health is up-on-≥1-SBC (bool_or), and migration 45's
+passive/traffic state remains the safety net ('up' on probe-answer OR
+inbound CDRs within 60 min, else amber 'passive' — never red). If Sinch's
+filter still 500s VIP-sourced OPTIONS, the passive display stands and the
+Sinch support ask (enable OPTIONS on the orig TGs) is the only path to
+probe-green.
 
 Dispatcher parameters:
 - `ds_ping_interval=5`: Probe every 5 seconds (all groups).
