@@ -251,7 +251,12 @@ FS_PUBLIC_IP="${FS_PUBLIC_IP:-${EXTERNAL_SIP_IP}}"
 cp /etc/kamailio/kamailio.cfg.tmpl "$CONFIG"
 cp /etc/kamailio/dispatcher.list.tmpl "$DISPATCH"
 
-sed -i "s|__ADVERTISE_IP__|${EXTERNAL_SIP_IP}|g" "$CONFIG"
+# __ADVERTISE_IP__ appears in BOTH kamailio.cfg (listens/RR/etc.) and
+# dispatcher.list (groups 6/7 Sinch orig: per-destination socket=/ping_from —
+# VIP-sourced probes; the socket= value must render to the exact same address
+# as the `listen=udp:ADVERTISE_IP:5060` bind or dispatcher rejects the list
+# at load and kamailio does not start).
+sed -i "s|__ADVERTISE_IP__|${EXTERNAL_SIP_IP}|g" "$CONFIG" "$DISPATCH"
 # ORDER MATTERS: __FS_IP_2__ MUST be substituted BEFORE __FS_IP__ — the
 # __FS_IP__ pattern is a substring of __FS_IP_2__, so the reverse order would
 # corrupt the FS-2 token into "<fs1-ip>_2__".

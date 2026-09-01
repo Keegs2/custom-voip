@@ -22,6 +22,17 @@
 -- the orig TGs toward our 6 SBC IPs, which makes probe-up green again with
 -- zero further change here.
 --
+-- UPDATE (same PR, after a coworker captured the exchange): the orig TGs are
+-- NOT silent — they answer 500 + Contact <sip:ANONYMOUS@...> (Ribbon/Sonus
+-- unknown-trunk signature), because they are registered with our NLB VIPs,
+-- not the SBC public IPs. dispatcher.list groups 6/7 now carry per-dest
+-- socket=/ping_from attrs sourcing those probes FROM the zone VIP. Even if
+-- that turns the ACTIVE SBC's probes green, this view stays load-bearing:
+-- VIP-addressed replies return through the NLB to the active SBC only, so
+-- the STANDBY SBC's 6/7 probes can never be answered and read Inactive
+-- forever (bool_or below absorbs that), and 'passive' remains the honest
+-- state if Sinch's filter also rejects VIP-sourced OPTIONS.
+--
 -- ** WHAT ** — CREATE OR REPLACE of carrier_trunk_health (full copy of 44's
 -- definition, same first-10 column names/types/order — PG requires it):
 --   * status gains a fourth value 'passive' ("up"|"down"|"stale"|"passive"),
