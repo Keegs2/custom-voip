@@ -52,6 +52,8 @@ import { useState, useCallback, useMemo, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { searchCdrs } from '../../api/cdrs';
 import { listCustomers } from '../../api/customers';
+import { listTrunks } from '../../api/trunks';
+import { carrierLabel } from './callsFormat';
 import { useAuth } from '../../contexts/AuthContext';
 import { Spinner } from '../../components/ui/Spinner';
 import { exportCdrsCsv } from '../../utils/csv';
@@ -148,6 +150,25 @@ export function CallsPage() {
     return map;
   }, [customersData]);
 
+  // Trunk names for the Trunk column + CSV. Same query key + fn as the
+  // filter bar's UNSCOPED trunks fetch (['trunks-for-cdr-filter', '']), so
+  // React Query dedupes them into one request in the default "All Customers"
+  // state — NO per-row fetches. Tenants only ever get their own trunks
+  // (listTrunks is tenant-scoped server-side).
+  const { data: trunksData } = useQuery({
+    queryKey: ['trunks-for-cdr-filter', ''],
+    queryFn: () => listTrunks({ limit: 500 }),
+    staleTime: 2 * 60 * 1000,
+  });
+
+  const trunkNames = useMemo<Record<string, string>>(() => {
+    const map: Record<string, string> = {};
+    for (const t of (trunksData?.items ?? [])) {
+      map[String(t.id)] = t.trunk_name;
+    }
+    return map;
+  }, [trunksData]);
+
   /**
    * Deliberate, single scroll behavior for ALL pagination interactions:
    * instantly align the results block to the viewport top. Instant (not
@@ -204,7 +225,7 @@ export function CallsPage() {
         toastErr('No CDRs match the current filters — nothing to export.');
         return;
       }
-      exportCdrsCsv(result.items);
+      exportCdrsCsv(result.items, trunkNames);
       const exported = result.items.length.toLocaleString();
       if (result.total != null && result.total > result.items.length) {
         toastOk(
@@ -222,7 +243,7 @@ export function CallsPage() {
     } finally {
       setExporting(false);
     }
-  }, [committed.params, toastOk, toastErr]);
+  }, [committed.params, trunkNames, toastOk, toastErr]);
 
   const handleSelect = useCallback((cdr: Cdr) => {
     setSelectedCdr(cdr);
@@ -247,9 +268,18 @@ export function CallsPage() {
       c.uuid.toLowerCase().includes(q) ||
       c.direction.includes(q) ||
       (c.read_codec ?? '').toLowerCase().includes(q) ||
-      (customerNames[c.customer_id] ?? '').toLowerCase().includes(q),
+      (customerNames[c.customer_id] ?? '').toLowerCase().includes(q) ||
+      // Carrier: both the rendered label ("bw·dallas", "on-net") and the raw
+      // stored values, so either vocabulary matches.
+      carrierLabel(c).toLowerCase().includes(q) ||
+      (c.carrier_used ?? '').toLowerCase().includes(q) ||
+      (c.inbound_carrier ?? '').toLowerCase().includes(q) ||
+      // Trunk: resolved name (or the raw id for unresolved trunks).
+      (c.trunk_id != null
+        ? (trunkNames[String(c.trunk_id)] ?? String(c.trunk_id)).toLowerCase().includes(q)
+        : false),
     );
-  }, [cdrs, quickFilter, customerNames]);
+  }, [cdrs, quickFilter, customerNames, trunkNames]);
 
   /** Full match count — undefined until the API ships `total`. */
   const total = data?.total;
@@ -286,7 +316,9 @@ export function CallsPage() {
 
   return (
     <div className="dl-scope">
-      <div className="dl-shell">
+      {/* dlx4-shell-wide: page-scoped 1800px cap (vs the shared 1200px
+          .dl-shell) so the CDR table gets real width — see dl-platform-b.css */}
+      <div className="dl-shell dlx4-shell-wide">
         {/* ── Quiet page header ─────────────────────────────────────── */}
         <header className="dl-header fx-load">
           <div className="dl-header-id">
@@ -389,6 +421,7 @@ export function CallsPage() {
                         cdrs={visibleCdrs}
                         pageRowCount={cdrs.length}
                         customerNames={isStaff ? customerNames : undefined}
+                        trunkNames={trunkNames}
                         quickFilter={quickFilter}
                         onQuickFilterChange={setQuickFilter}
                         onSelect={handleSelect}

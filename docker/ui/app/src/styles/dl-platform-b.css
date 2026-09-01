@@ -14,6 +14,18 @@
    Hand-written @media only (never Tailwind md:* — see CLAUDE.md).
    ═══════════════════════════════════════════════════════════════════════════ */
 
+/* ─── Wide content shell — Calls & Quality page ONLY. The shared `.dl-shell`
+   caps content at 1200px (index.css DAYLIGHT block), which starves the wide
+   CDR table; this page-scoped modifier lets the page use most of the
+   viewport while keeping the shell's own clamp() gutters and centering.
+   Applied as `dl-shell dlx4-shell-wide` in CallsPage.tsx — NEVER widen
+   `.dl-shell` itself (TrunksPage, MyAccountPage, docs, … all share it).
+   Hand-written CSS by design, not a Tailwind md:* utility (load-bearing
+   layout — see the container-build gotcha in CLAUDE.md). ─── */
+.dl-shell.dlx4-shell-wide {
+  max-width: 1800px;
+}
+
 /* ─── CDR stat strip — one bordered slab divided into equal-height cells by
    hairline seams. auto-fit/minmax reflows the cells into balanced rows at
    laptop widths (no orphan wrap, cells stretch to fill); the 1px grid gap

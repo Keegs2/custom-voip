@@ -30,6 +30,7 @@ import { Spinner } from '../../components/ui/Spinner';
 import { useToast } from '../../components/ui/Toast';
 import { AttestationChain } from '../../components/stir/AttestationChain';
 import { fmt } from '../../utils/format';
+import { carrierLabel, EMPTY } from './callsFormat';
 import {
   MONO, INK_FAINT,
   mosColor, rFactorColor, packetLossColor, jitterColor, qualityPctColor,
@@ -161,6 +162,9 @@ export function CdrDetailModal({ cdr, onClose, isStaff, isAdmin }: CdrDetailModa
   const d = detail ?? cdr;
   const answered = d.answer_time != null;
   const zone = zoneOf(d.sbc_id);
+  // Shared callsFormat mapping — same label as the table's Carrier column,
+  // so the two can never drift. EMPTY folds to InfoItem's own em dash.
+  const carrier = carrierLabel(d);
 
   const hasQuality =
     d.mos != null || d.r_factor != null || d.quality_pct != null ||
@@ -290,7 +294,7 @@ export function CdrDetailModal({ cdr, onClose, isStaff, isAdmin }: CdrDetailModa
               value={`${fmtDurationShort(d.duration_seconds)}${d.billable_seconds > 0 ? ` · billable ${fmtDurationShort(d.billable_seconds)}` : ''}`}
             />
             <InfoItem label="Zone / SBC" value={d.sbc_id ? `${zone ?? '—'} · ${d.sbc_id}` : null} mono />
-            <InfoItem label="Carrier" value={d.carrier_used} />
+            <InfoItem label="Carrier" value={carrier === EMPTY ? null : carrier} />
             <InfoItem
               label="Codec"
               value={

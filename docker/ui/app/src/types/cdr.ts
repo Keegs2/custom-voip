@@ -29,6 +29,15 @@ export interface Cdr {
   rated_at?: string | null;
   trunk_id?: string | null;
 
+  // Carrier attribution (migration 40 + on-net migration 23).
+  /** Origination carrier for inbound calls ('bandwidth' | 'sinch'; NULL on
+      pre-attribution rows = implicit Bandwidth — the platform default). */
+  inbound_carrier?: string | null;
+  /** Origination PoP (e.g. 'denver', 'chicago'); NULL when unknown. */
+  inbound_carrier_pop?: string | null;
+  /** True when the call was delivered on-net (no carrier hairpin). */
+  on_net?: boolean | null;
+
   // Quality / RTP metrics
   mos?: number | null;
   quality_pct?: number | null;

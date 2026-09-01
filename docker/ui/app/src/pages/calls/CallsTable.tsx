@@ -3,9 +3,19 @@
  *
  * Column union of the CDR Search table and the Call Quality table: Time,
  * Customer (staff), Product, Dir, From, To, Duration, MOS pill, Loss %,
- * Status, Hangup, Cost (staff). Row click opens the call-detail modal
- * (the old inline expanded-row idiom is gone — the modal carries all of it
- * and more).
+ * Status, Carrier, Trunk, Cost Est. (staff). Row click opens the call-detail
+ * modal (the old inline expanded-row idiom is gone — the modal carries all
+ * of it and more, including the hangup cause, which no longer gets a column
+ * but stays in the modal's Call Info and the CSV export).
+ *
+ * Carrier/Trunk cells render via the shared callsFormat.ts mapping (also
+ * used by the modal + CSV): inbound rows show the origination carrier+PoP,
+ * outbound rows the terminating carrier_used fold, on-net rows an "On-net"
+ * pill. Trunk resolves id → name from the page's already-fetched
+ * /v1/trunks list (no per-row fetches); em dash for RCF calls.
+ *
+ * Cost is labeled "Cost Est." — RCF-V1 billing is estimates-only by design;
+ * the billing of record is Equinox (title attr says so).
  *
  * The toolbar carries the Call Quality page's free-text quick filter. It is
  * deliberately CLIENT-SIDE over the CURRENT PAGE's rows (matching number /
@@ -19,6 +29,7 @@
  */
 import { fmt, fmtMoneySmart } from '../../utils/format';
 import { mosTone, packetLossColor, INK_FAINT } from './quality';
+import { carrierLabel, isOnNetCall, trunkLabel, EMPTY } from './callsFormat';
 import type { Cdr, ProductType, CallDirection } from '../../types/cdr';
 
 /** Table timestamps render in the operator's LOCAL timezone (matches the
@@ -102,6 +113,9 @@ interface CallsTableProps {
   pageRowCount: number;
   /** Map from customer_id to customer name for display (staff only). */
   customerNames?: Record<number, string>;
+  /** Map from trunk id (stringified) to trunk name for the Trunk column —
+      the page's already-fetched /v1/trunks list; NO per-row fetches. */
+  trunkNames?: Record<string, string>;
   /** Quick-filter text (client-side, this page only). */
   quickFilter: string;
   onQuickFilterChange: (value: string) => void;
@@ -115,6 +129,7 @@ export function CallsTable({
   cdrs,
   pageRowCount,
   customerNames,
+  trunkNames,
   quickFilter,
   onQuickFilterChange,
   onSelect,
@@ -154,7 +169,7 @@ export function CallsTable({
       </div>
 
       <div className="dlx4-tablewrap">
-        <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: isStaff ? 1080 : 900 }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: isStaff ? 1240 : 1040 }}>
           <thead>
             <tr>
               <th className="dl-th">Time</th>
@@ -167,14 +182,19 @@ export function CallsTable({
               <th className="dl-th">MOS</th>
               <th className="dl-th">Loss %</th>
               <th className="dl-th">Status</th>
-              <th className="dl-th">Hangup</th>
-              {isStaff && <th className="dl-th">Cost</th>}
+              <th className="dl-th">Carrier</th>
+              <th className="dl-th">Trunk</th>
+              {isStaff && (
+                <th className="dl-th" title="Estimated cost — billing of record is Equinox">
+                  Cost Est.
+                </th>
+              )}
             </tr>
           </thead>
           <tbody>
             {cdrs.length === 0 && (
               <tr>
-                <td colSpan={isStaff ? 12 : 10} style={{ padding: 20 }}>
+                <td colSpan={isStaff ? 13 : 11} style={{ padding: 20 }}>
                   <div className="dl-empty">
                     {pageRowCount === 0 ? (
                       <>
@@ -196,7 +216,8 @@ export function CallsTable({
             {cdrs.map((cdr) => {
               const answered = cdr.answer_time != null;
               const isSelected = cdr.uuid === selectedUuid;
-              const hangupOk = cdr.hangup_cause === 'NORMAL_CLEARING';
+              const carrier = carrierLabel(cdr);
+              const trunk = trunkLabel(cdr.trunk_id, trunkNames);
               const billedColor =
                 cdr.total_cost != null && cdr.total_cost > 0
                   ? 'var(--rcf-azure-deep)'
@@ -254,15 +275,25 @@ export function CallsTable({
                     </span>
                   </td>
                   <td className="dlx-td">
-                    <span
-                      style={{
-                        fontSize: '0.72rem',
-                        fontWeight: 600,
-                        color: hangupOk ? 'var(--rcf-green)' : 'var(--rcf-red)',
-                        whiteSpace: 'nowrap',
-                      }}
-                    >
-                      {cdr.hangup_cause || '--'}
+                    {isOnNetCall(cdr) ? (
+                      <span className="dl-tag">On-net</span>
+                    ) : (
+                      <span
+                        style={{
+                          whiteSpace: 'nowrap',
+                          color: carrier === EMPTY ? INK_FAINT : 'var(--rcf-ink)',
+                        }}
+                      >
+                        {carrier}
+                      </span>
+                    )}
+                  </td>
+                  <td
+                    className="dlx-td"
+                    style={{ maxWidth: 130, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                  >
+                    <span style={{ color: trunk === EMPTY ? INK_FAINT : 'var(--rcf-ink)' }}>
+                      {trunk}
                     </span>
                   </td>
                   {isStaff && (
