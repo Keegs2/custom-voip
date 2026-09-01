@@ -52,23 +52,8 @@
       "type": "dashboards"
     }
   ],
-  "description": "NOC home / wall-TV command board: a big US datacenter map framed by a left KPI rail — platform-services status, per-zone SIP VIP reachability + servers up/down, and live carrier trunk up/down. Landing page for the Production NOC.",
+  "description": "NOC home / wall-TV command board — Live System Status. Top row: the US datacenter map, full width. Bottom band (left→right): per-zone SIP VIP reachability + servers up/down (East · West · Central), carrier trunks (Bandwidth Dallas / LA, Sinch Denver / Chicago origination), platform services. 🟢 green = healthy · 🔴 red = attention · 🟠 orange = stale probe. Zone tiles: VIP reachable (uptime pass-fraction ≥ 99.9%) + VMs reporting CPU. Carrier tiles: UP / DOWN from live Kamailio-dispatcher OPTIONS probes + inbound calls landed in the last hour. Platform services: UP / DOWN from live blackbox probes. Map: 🟢 datacenter (dot size = calls / hour) · 🔺 carrier trunk (Bandwidth 🟢 up · Sinch 🔵 up · 🔴 down) — includes the two Sinch termination trunks (Atlanta LD, Denver TF; the two Denver triangles are offset — orig west / label above, TF east / label below). Hover any tile or map marker for detail. Landing page for the Production NOC.",
   "panels": [
-    {
-      "id": 1,
-      "type": "text",
-      "transparent": true,
-      "gridPos": {
-        "x": 0,
-        "y": 0,
-        "w": 24,
-        "h": 2
-      },
-      "options": {
-        "mode": "markdown",
-        "content": "**Live System Status** — 🟢 green = healthy · 🔴 red = attention.  **Left rail:** Platform services (UP / DOWN from live blackbox probes) · each datacenter's SIP VIP (reachable / unreachable) + servers up/down · carrier trunks — Bandwidth (Dallas / LA) and Sinch origination (Denver / Chicago): UP / DOWN from live OPTIONS probes + inbound calls landed in the last hour.  **Map:** 🟢 datacenter (dot size = calls / hour) · 🔺 carrier trunk (Bandwidth 🟢 up · Sinch 🔵 up · 🔴 down) — includes the two Sinch termination trunks (Atlanta LD, Denver TF).  Hover any tile or map marker for detail."
-      }
-    },
     {
       "id": 2,
       "type": "stat",
@@ -79,10 +64,10 @@
         "uid": "voip-metrics-vm"
       },
       "gridPos": {
-        "x": 0,
-        "y": 2,
-        "w": 6,
-        "h": 9
+        "x": 20,
+        "y": 14,
+        "w": 4,
+        "h": 6
       },
       "targets": [
         {
@@ -172,7 +157,7 @@
     {
       "id": 8,
       "type": "stat",
-      "title": "East · us-east1 — VIP 34.24.133.82",
+      "title": "East · us-east1",
       "description": "East datacenter status. Top: SIP VIP 34.24.133.82:5060 carrier reachability (uptime pass-fraction; Reachable ≥ 99.9%). Bottom: VMs reporting CPU (expect 6, incl. east-fs-2 media-HA hot standby). 🟢 VIP reachable AND 6/6 up · 🔴 VIP unreachable OR any VM down. East holds the DB primary + API + UI.",
       "datasource": {
         "type": "stackdriver",
@@ -180,9 +165,9 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 11,
-        "w": 6,
-        "h": 5
+        "y": 14,
+        "w": 4,
+        "h": 6
       },
       "targets": [
         {
@@ -445,17 +430,17 @@
     {
       "id": 9,
       "type": "stat",
-      "title": "West · us-west1 — VIP 35.252.214.40",
+      "title": "West · us-west1",
       "description": "West datacenter status. Top: SIP VIP 35.252.214.40:5060 carrier reachability (uptime pass-fraction; Reachable ≥ 99.9%). Bottom: VMs reporting CPU (expect 5, incl. west-fs-2 media-HA hot standby). 🟢 VIP reachable AND 5/5 up · 🔴 VIP unreachable OR any VM down.",
       "datasource": {
         "type": "stackdriver",
         "uid": "gcp-monitoring"
       },
       "gridPos": {
-        "x": 0,
-        "y": 16,
-        "w": 6,
-        "h": 5
+        "x": 4,
+        "y": 14,
+        "w": 4,
+        "h": 6
       },
       "targets": [
         {
@@ -713,17 +698,17 @@
     {
       "id": 10,
       "type": "stat",
-      "title": "Central · us-central1 — VIP 35.253.133.230",
+      "title": "Central · us-central1",
       "description": "Central datacenter status. Top: SIP VIP 35.253.133.230:5060 carrier reachability (uptime pass-fraction; Reachable ≥ 99.9%). Bottom: VMs reporting CPU (expect 5, incl. central-fs-2 media-HA hot standby). 🟢 VIP reachable AND 5/5 up · 🔴 VIP unreachable OR any VM down.",
       "datasource": {
         "type": "stackdriver",
         "uid": "gcp-monitoring"
       },
       "gridPos": {
-        "x": 0,
-        "y": 21,
-        "w": 6,
-        "h": 5
+        "x": 8,
+        "y": 14,
+        "w": 4,
+        "h": 6
       },
       "targets": [
         {
@@ -981,17 +966,17 @@
     {
       "id": 15,
       "type": "stat",
-      "title": "Bandwidth Dallas",
+      "title": "BW Dallas",
       "description": "Bandwidth Dallas trunk (67.231.2.12, primary). Top: live reachability from the SBCs' Kamailio-dispatcher OPTIONS probes (carrier_trunk_health, duid bw-dallas-primary) — 🟢 UP (reachable from ≥1 SBC) · 🔴 DOWN (dead on every SBC) · 🟠 STALE (no fresh probe in 90s). Proactive, independent of call traffic. Bottom: inbound calls landed via this PoP in the last hour (cdrs, inbound_carrier='bandwidth', pop='dallas').",
       "datasource": {
         "type": "postgres",
         "uid": "voip-cdr-pg"
       },
       "gridPos": {
-        "x": 0,
-        "y": 26,
-        "w": 3,
-        "h": 4
+        "x": 12,
+        "y": 14,
+        "w": 2,
+        "h": 6
       },
       "targets": [
         {
@@ -1137,7 +1122,7 @@
             "properties": [
               {
                 "id": "displayName",
-                "value": "Calls · 1h"
+                "value": "1h calls"
               },
               {
                 "id": "unit",
@@ -1167,17 +1152,17 @@
     {
       "id": 16,
       "type": "stat",
-      "title": "Bandwidth LA",
+      "title": "BW LA",
       "description": "Bandwidth LA trunk (216.82.238.134, secondary). Top: live reachability from the SBCs' Kamailio-dispatcher OPTIONS probes (carrier_trunk_health, duid bw-la-secondary) — 🟢 UP (reachable from ≥1 SBC) · 🔴 DOWN (dead on every SBC) · 🟠 STALE (no fresh probe in 90s). Proactive, independent of call traffic. Bottom: inbound calls landed via this PoP in the last hour (cdrs, inbound_carrier='bandwidth', pop='la').",
       "datasource": {
         "type": "postgres",
         "uid": "voip-cdr-pg"
       },
       "gridPos": {
-        "x": 3,
-        "y": 26,
-        "w": 3,
-        "h": 4
+        "x": 14,
+        "y": 14,
+        "w": 2,
+        "h": 6
       },
       "targets": [
         {
@@ -1323,7 +1308,7 @@
             "properties": [
               {
                 "id": "displayName",
-                "value": "Calls · 1h"
+                "value": "1h calls"
               },
               {
                 "id": "unit",
@@ -1353,17 +1338,17 @@
     {
       "id": 17,
       "type": "stat",
-      "title": "Sinch Denver",
+      "title": "Sinch DEN",
       "description": "Sinch Denver ORIGINATION trunk (206.146.100.24, TG DNVTCOZIGR2_3278). Top: live reachability from the SBCs' Kamailio-dispatcher OPTIONS probes (carrier_trunk_health, duid sinch-denver) — 🟢 UP (reachable from ≥1 SBC) · 🔴 DOWN (dead on every SBC) · 🟠 STALE (no fresh probe in 90s). Bottom: inbound calls landed via this PoP in the last hour (cdrs, inbound_carrier='sinch', pop='denver') — the Sinch orig test TN 5305480845 lands here, so a test call shows as a count here within its own hour.",
       "datasource": {
         "type": "postgres",
         "uid": "voip-cdr-pg"
       },
       "gridPos": {
-        "x": 0,
-        "y": 30,
-        "w": 3,
-        "h": 4
+        "x": 16,
+        "y": 14,
+        "w": 2,
+        "h": 6
       },
       "targets": [
         {
@@ -1509,7 +1494,7 @@
             "properties": [
               {
                 "id": "displayName",
-                "value": "Calls · 1h"
+                "value": "1h calls"
               },
               {
                 "id": "unit",
@@ -1539,17 +1524,17 @@
     {
       "id": 18,
       "type": "stat",
-      "title": "Sinch Chicago",
+      "title": "Sinch CHI",
       "description": "Sinch Chicago ORIGINATION trunk (206.146.101.39, TG CHCGIL24GR4_7412). Top: live reachability from the SBCs' Kamailio-dispatcher OPTIONS probes (carrier_trunk_health, duid sinch-chicago) — 🟢 UP (reachable from ≥1 SBC) · 🔴 DOWN (dead on every SBC) · 🟠 STALE (no fresh probe in 90s). Bottom: inbound calls landed via this PoP in the last hour (cdrs, inbound_carrier='sinch', pop='chicago') — the Sinch orig test TN 5305480846 lands here.",
       "datasource": {
         "type": "postgres",
         "uid": "voip-cdr-pg"
       },
       "gridPos": {
-        "x": 3,
-        "y": 30,
-        "w": 3,
-        "h": 4
+        "x": 18,
+        "y": 14,
+        "w": 2,
+        "h": 6
       },
       "targets": [
         {
@@ -1695,7 +1680,7 @@
             "properties": [
               {
                 "id": "displayName",
-                "value": "Calls · 1h"
+                "value": "1h calls"
               },
               {
                 "id": "unit",
@@ -1726,16 +1711,16 @@
       "id": 11,
       "type": "geomap",
       "title": "US datacenters · live regions, carriers & traffic",
-      "description": "Geographic view of the 3 GCP datacenters (green, sized by calls in the last hour) and every carrier trunk — Bandwidth (Dallas primary, LA secondary) plus all 4 Sinch PoPs: origination Denver (TG DNVTCOZIGR2_3278) and Chicago (CHCGIL24GR4_7412), termination Atlanta LD (ATLNGAQSGR2_7214) and Denver TF (DNVTCOZIGR2_3282, toll-free 8YY only, priority below Bandwidth). Carrier triangles are colored by the SBCs' live Kamailio-dispatcher OPTIONS probes (carrier_trunk_health): Bandwidth GREEN when up, Sinch BLUE when up; RED when the trunk is down on every SBC or its status is stale (no fresh probe in 90s) / not yet reported. Denver hosts BOTH a Sinch origination PoP and the TF termination trunk — the two triangles are offset slightly (orig west / label above, TF east / label below) so both stay legible at TV distance. This is a proactive probe, independent of call traffic, so a dead carrier shows even at zero volume. Hover a triangle for status, SBCs up / reporting, and seconds since last probe. Datacenter up/down, VIP reachability and servers up/down are the zone tiles in the left rail; Bandwidth + Sinch origination health/volume are the carrier tiles in the left rail.",
+      "description": "Geographic view of the 3 GCP datacenters (green, sized by calls in the last hour) and every carrier trunk — Bandwidth (Dallas primary, LA secondary) plus all 4 Sinch PoPs: origination Denver (TG DNVTCOZIGR2_3278) and Chicago (CHCGIL24GR4_7412), termination Atlanta LD (ATLNGAQSGR2_7214) and Denver TF (DNVTCOZIGR2_3282, toll-free 8YY only, priority below Bandwidth). Carrier triangles are colored by the SBCs' live Kamailio-dispatcher OPTIONS probes (carrier_trunk_health): Bandwidth GREEN when up, Sinch BLUE when up; RED when the trunk is down on every SBC or its status is stale (no fresh probe in 90s) / not yet reported. Denver hosts BOTH a Sinch origination PoP and the TF termination trunk — the two triangles are offset slightly (orig west / label above, TF east / label below) so both stay legible at TV distance. This is a proactive probe, independent of call traffic, so a dead carrier shows even at zero volume. Hover a triangle for status, SBCs up / reporting, and seconds since last probe. Datacenter up/down, VIP reachability and servers up/down are the zone tiles in the band below the map; Bandwidth + Sinch origination health/volume are the carrier tiles in that band.",
       "datasource": {
         "type": "postgres",
         "uid": "voip-cdr-pg"
       },
       "gridPos": {
-        "x": 6,
-        "y": 2,
-        "w": 18,
-        "h": 32
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 14
       },
       "targets": [
         {
@@ -1786,9 +1771,9 @@
       "options": {
         "view": {
           "id": "coords",
-          "lat": 39.5,
+          "lat": 38.5,
           "lon": -96.0,
-          "zoom": 4
+          "zoom": 4.2
         },
         "controls": {
           "showZoom": true,
