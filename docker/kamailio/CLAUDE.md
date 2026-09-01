@@ -369,7 +369,31 @@ and Sinch is origination-only, never a TO_CARRIER destination anyway).
 They exist solely for:
 - **NAT keepalive**: OPTIONS every 5s keeps GCE's UDP NAT pinhole open.
 - **Health monitoring**: Detects carrier unreachability. The carrier-monitor
-  sidecar reports groups 2, 3, 6, 7 (`CARRIER_SETIDS`) to the East API.
+  sidecar reports groups 2, 3, 6-9 (`CARRIER_SETIDS`) to the East API.
+
+**Probe egress / on-the-wire source IP (verified against config + 5.8 socket
+selection):** no dispatcher destination carries a `socket=` attr and there is
+no `ds_default_socket`, so with `mhomed=1` the OPTIONS probes to the public
+carrier IPs egress from the `udp:SBC_INTERNAL_IP:5060` socket (kernel route
+lookup picks the NIC address — the external VIP and signaling VIP live on
+loopback and are never selected for an external destination) and GCE 1:1 NAT
+puts **each SBC's OWN public IP** on the wire. The Via shows ADVERTISE_IP
+(that socket advertises the VIP), but compliant peers reply to the packet
+source per RFC 3261 §18.2.2 (`received`), i.e. straight back to the SBC —
+this is the exact path on which Bandwidth (groups 2-5) and the Sinch TERM
+TGs (groups 8-9) answer.
+
+**Sinch ORIGINATION groups 6-7 read Inactive by design (carrier-side):** the
+orig TGs (DNVTCOZIGR2_3278 / CHCGIL24GR4_7412) were provisioned Sinch→us only
+and do not answer OPTIONS from IPs not registered on the TG — unlike the TERM
+TGs, whose registered IP lists include all 6 SBC public IPs. Probes keep
+being sent (`ds_probing_mode=1`, keepalive intact) and inbound calls work
+regardless. The NOC therefore renders duids `sinch-denver`/`sinch-chicago`
+with passive-OR-probe health (migration 45: 'up' on probe-answer OR inbound
+CDRs within 60 min, else amber 'passive' — never red, since "down" is
+unknowable for a probe-deaf orig-only trunk). Real fix = Sinch enabling
+OPTIONS response on the orig TGs toward the 6 SBC public IPs; probe-up then
+takes over automatically.
 
 Dispatcher parameters:
 - `ds_ping_interval=5`: Probe every 5 seconds (all groups).
