@@ -430,6 +430,54 @@ else record FAIL "TC7 corrupt CRL FATAL under bit 16" "see log"; show_tail; fi
 kill "$HTTP_PID" 2>/dev/null; wait "$HTTP_PID" 2>/dev/null; HTTP_PID=""
 
 # --------------------------------------------------------------------------
+# 4b. Prometheus metrics emission (node_exporter textfile collector)
+# --------------------------------------------------------------------------
+# tb_emit_metrics is hooked into tb_write_status, so every publisher/SBC run
+# above has already been emitting into <status-dir>/metrics/stir_trust_bundle.prom
+# (the derived default; /var/lib/stir/metrics on the VMs). Prove: OK runs emit
+# sane values, FAIL runs flip last_run_status to 0 but PRESERVE the last
+# success timestamp, an unwritable metrics dir can never fail the refresh, and
+# the SBC script emits too.
+echo; echo "${c_b}== 4b. metrics emission (textfile collector) ==${c_z}"
+PROM="$SVC_DIR/metrics/stir_trust_bundle.prom"
+pget(){ awk -v m="$2" '$1==m{print $2}' "$1" 2>/dev/null | head -1; }
+
+# TM1: --check (OK) emits the full metric set atomically, world-readable
+PROM_PERM=""
+if run_svcc --check && [ -s "$PROM" ]; then
+  PROM_PERM=$(stat -f%Lp "$PROM" 2>/dev/null || stat -c%a "$PROM" 2>/dev/null)
+fi
+if [ "$(pget "$PROM" stir_trust_bundle_ca_count)" = 5 ] \
+   && [ "$(pget "$PROM" stir_trust_refresh_last_run_status)" = 1 ] \
+   && [ -n "$(pget "$PROM" stir_trust_bundle_installed_timestamp_seconds)" ] \
+   && [ -n "$(pget "$PROM" stir_sticalist_expiry_timestamp_seconds)" ] \
+   && [ -n "$(pget "$PROM" stir_crl_next_update_timestamp_seconds)" ] \
+   && [ -n "$(pget "$PROM" stir_leaf_cert_expiry_timestamp_seconds)" ] \
+   && [ "$PROM_PERM" = 644 ]; then
+  record PASS "TM1 metrics on OK run" "ca_count/installed/list-exp/CRL/leaf all emitted, status 1, mode 644"
+else record FAIL "TM1 metrics on OK run" "prom file missing/incomplete ($PROM, perm ${PROM_PERM:-n/a})"; show_tail; fi
+LS1=$(pget "$PROM" stir_trust_refresh_last_success_timestamp_seconds)
+
+# TM2: FAIL run flips last_run_status to 0 but carries last_success forward
+if ! run_svcc --install --from-file "$B/corrupt.pem" \
+   && [ "$(pget "$PROM" stir_trust_refresh_last_run_status)" = 0 ] \
+   && [ "$(pget "$PROM" stir_trust_refresh_last_success_timestamp_seconds)" = "$LS1" ] \
+   && [ -n "$(pget "$PROM" stir_trust_refresh_last_run_timestamp_seconds)" ]; then
+  record PASS "TM2 metrics on FAIL run" "last_run_status=0, last_success preserved ($LS1)"
+else record FAIL "TM2 metrics on FAIL run" "see log"; show_tail; fi
+
+# TM3: metrics emission is strictly fail-safe — unwritable dir, refresh still OK
+if "${SVC_ENV_C[@]}" TB_METRICS_DIR=/dev/null/nope "$SVC" --check >"$WORK/last.log" 2>&1; then
+  record PASS "TM3 unwritable metrics dir harmless" "--check still exits 0 (emission swallowed)"
+else record FAIL "TM3 unwritable metrics dir harmless" "metrics failure leaked into the refresh"; show_tail; fi
+
+# TM4: the SBC script emits too (its last run above was the TC7 FAIL)
+SBC_PROM="$WORK/sbc-var/metrics/stir_trust_bundle.prom"
+if [ -s "$SBC_PROM" ] && [ "$(pget "$SBC_PROM" stir_trust_refresh_last_run_status)" = 0 ]; then
+  record PASS "TM4 SBC-side emission" "SBC .prom present, TC7 failure reflected (status 0)"
+else record FAIL "TM4 SBC-side emission" "missing/incomplete $SBC_PROM"; fi
+
+# --------------------------------------------------------------------------
 # 5. REAL STI-PA artifacts (auto-skips when absent/expired — never in git)
 # --------------------------------------------------------------------------
 echo; echo "${c_b}== 5. real STI-PA artifacts (optional) ==${c_z}"

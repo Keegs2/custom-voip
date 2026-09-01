@@ -1,0 +1,30 @@
+# vmalert recording rules — STIR/SHAKEN attestation + verstat 5m counts.
+# ---------------------------------------------------------------------------
+# See traffic.yml header for the load path, naming convention, and the 30s
+# interval rationale. Source counters carry the kamailio_ prefix and NO
+# _total suffix (platform gotcha).
+#
+# NO current panel consumer — and that is deliberate: every voip-metrics-vm
+# panel on stir-shaken.json is an INSTANT increase(...[$__range]) query (the
+# operator picks 1h/24h/7d and the count follows). A fixed-window recorded
+# series cannot serve an arbitrary $__range without changing semantics
+# (sum_over_time over an increase5m recorded at 30s multi-counts every event
+# and inherits window edge effects), so those panels STAY RAW per the
+# swap-only-if-equivalent rule.
+#
+# These bounded roll-ups (zones x 4 attestations ≈ 12 series; zones x 3
+# verstats x 2 sources ≈ 18 series) exist as the ready-made aggregate for
+# alerting (e.g. unsigned-spike, verstat-failure-spike) and any future
+# fixed-window wall panel, without re-deriving label sets from raw.
+groups:
+  - name: noc_stir
+    interval: 30s
+    rules:
+      # Signed-attestation volume per 5m (attestation: A / div / C / unsigned).
+      - record: zone:kamailio_stir_attest_signed:increase5m
+        expr: sum by (zone, attestation) (increase(kamailio_stir_attest_signed[5m]))
+
+      # Inbound verstat volume per 5m (verstat: TN-Validation-Passed / -Failed /
+      # No-TN-Validation; source: self vs carrier).
+      - record: zone:kamailio_stir_inbound_verstat:increase5m
+        expr: sum by (zone, verstat, source) (increase(kamailio_stir_inbound_verstat[5m]))

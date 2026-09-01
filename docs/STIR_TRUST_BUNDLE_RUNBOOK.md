@@ -35,7 +35,7 @@ synthetic-test path); either way the SBCs only ever consume plain PEM.
 | `refresh-sbc-trust-bundle.sh` | every **SBC** | pull the published bundle (+CRL) over HTTPS → SAME gates → atomic swap into `/opt/revup/secrets/stir-ca/` |
 | `stir-trust-lib.sh` | sourced by both | the shared gates — J1-J3 (JWT), G1-G5 (PEM), C1-C3 (CRL), freshness watchdog |
 | `deploy-sbc-verify.sh` | SBC (operator) | one-time wiring of the CA **dir** mount + `CertVerify` mode + verify toggle |
-| `trust_bundle_selftest.sh` | anywhere, local | proof of every gate — 31 synthetic checks + 3 real-artifact checks (auto-skip when `~/Downloads/sticaList.jwt` is absent/expired); run after changing any of the above |
+| `trust_bundle_selftest.sh` | anywhere, local | proof of every gate — 35 synthetic checks (incl. metrics emission) + 3 real-artifact checks (auto-skip when `~/Downloads/sticaList.jwt` is absent/expired); run after changing any of the above |
 | `sti-pa-calist-signer.crt` / `sti-pa-crl-signer.crt` | in git | the repo-pinned STI-PA signer certs (public material) |
 
 **Flow:**
@@ -277,8 +277,9 @@ printf 'PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\n%s 5 
 - **Syslog:** tag `stir-trust-bundle` (`daemon.err` on failure):
   `grep stir-trust-bundle /var/log/syslog | tail`.
 - **Log file:** `tail -50 /var/log/stir-trust-refresh.log`.
-- (Grafana/Cloud-Monitoring alerting on the status file is deliberately OUT of
-  scope here — status file + logs only for now.)
+- **Grafana:** the *Trust & Certificates* row on the STIR/SHAKEN NOC board
+  (`noc-stir-shaken`) — Prometheus metrics + blackbox probes, see §5c
+  *Observability* below.
 
 **On FAIL:** the previous bundle is still installed and serving — inbound verify
 keeps working on yesterday's trust; nothing is call-affecting (verify is
@@ -333,6 +334,86 @@ STI-PA rotates a signer (J1/C2 starts failing on a KNOWN-fresh download, or
 
 Both pins expire 2028 — expect a planned rotation then; the J1 gate will start
 failing with "pinned STI-PA signer cert has EXPIRED", which is this procedure.
+
+## 5c. Observability — Prometheus metrics + the NOC "Trust & Certificates" row
+
+**What exists:** every `refresh-*-trust-bundle.sh` run (any action, OK **and**
+FAIL — so the daily `--check` cron doubles as the periodic re-emit) writes a
+Prometheus textfile via `tb_emit_metrics` in `stir-trust-lib.sh`:
+
+- **Path (services VM):** `/var/lib/stir/metrics/stir_trust_bundle.prom` —
+  derived as `<status-file dir>/metrics`; override with `TB_METRICS_DIR`
+  (`TB_METRICS_DIR=none` disables). Written atomically (temp + `mv`), mode
+  0644.
+- **Strictly fail-safe:** emission swallows every error and can NEVER fail (or
+  even warn) a trust refresh — proven by selftest TM3. The SBC script emits the
+  same file on SBCs (`/var/lib/stir/metrics/`); nothing scrapes it there today —
+  harmless, and a ready-made hook if SBC node_exporters ever grow a textfile
+  collector.
+- **Pickup:** `docker-compose.services.yml` runs node_exporter with
+  `--collector.textfile.directory=/var/lib/stir/metrics` (dedicated ro bind
+  mount — docker auto-creates the host dir, no manual VM command), and the
+  services vmagent's existing `node` job scrapes :9100 into VictoriaMetrics.
+- **Design note:** everything that can go stale is an epoch **timestamp**, not
+  a boolean — if the refresh (or the emission itself) silently freezes, the
+  tiles AGE into yellow/red instead of reading forever-healthy.
+  (`node_textfile_mtime_seconds{file="stir_trust_bundle.prom"}` is the
+  emission's own freshness signal if you ever need it.)
+
+| Metric (all gauges) | Meaning |
+|---|---|
+| `stir_trust_bundle_installed_timestamp_seconds` | epoch of the last VERIFIED install (`INSTALLED_AT`; the 40d watchdog's clock) |
+| `stir_trust_bundle_ca_count` | certs in the installed bundle (19 today) |
+| `stir_trust_bundle_next_ca_expiry_timestamp_seconds` | soonest notAfter across the bundle's CAs |
+| `stir_sticalist_expiry_timestamp_seconds` | `exp` of the last ingested `sticaList.jwt` (daily, ~24h) |
+| `stir_crl_next_update_timestamp_seconds` | installed CRL's nextUpdate (absent = CRL not installed) |
+| `stir_leaf_cert_expiry_timestamp_seconds` | OUR leaf `CN=SHAKEN 8052` notAfter (2027-05-08; renew ~2027-04-01) |
+| `stir_trust_refresh_last_run_timestamp_seconds` | epoch of the last script run that wrote status |
+| `stir_trust_refresh_last_run_status` | 1 = last run STATUS=OK, 0 = FAIL |
+| `stir_trust_refresh_last_success_timestamp_seconds` | epoch of the last OK run (carried across failures) |
+
+Additionally the services blackbox-exporter probes the **public** x5u URLs
+(`docker/vmagent/scrape-services.yml`): `probe_success{service="x5u (fs-cert)"}`
+(= `/healthz`, endpoint up) and `probe_success{service="x5u trust bundle"}`
+(= the exact bundle URL the SBC crons pull; 404 until the first install).
+
+**The tiles** (bottom row of Grafana board `noc-stir-shaken`, datasource
+VictoriaMetrics) and how they map to the **§6 pre-canary checklist**:
+
+| Tile | Green means | §6 prereq it proves |
+|---|---|---|
+| Trust bundle age (40d watchdog) | verified install < 30d old (yellow 30–40d, red = watchdog LAPSED) | prereq 1/2 — publisher ingest is current |
+| sticaList exp | list `exp` still ahead (red = mirror behind the daily reissue — fine within the 40d SLA, but re-ingest same-day before flipping verify ON) | prereq 1 — ingest freshness |
+| Trusted CAs in bundle | ≥ 19 (yellow 5–18 = smaller than the known list — investigate before canary) | prereq 1 — `CERT_COUNT=19` |
+| Last trust-refresh run | last publisher action wrote STATUS=OK | prereq 1 — gates passing |
+| CRL freshness | inside its 24h window; **gray "not installed" is the EXPECTED state until mode 21** | mode-21 precondition only |
+| Our leaf cert (SHAKEN 8052) | > 60d to notAfter (yellow < 60d = start renewal, §7) | outbound signing stays valid through the canary |
+| x5u endpoint | public Caddy answering over HTTPS | carriers can fetch our chain; SBCs can pull |
+| Trust bundle published | the SBC-pull URL serves the bundle (red + endpoint UP = never installed / trust mount missing) | prereq 2 — published for the SBC crons |
+
+**Pre-canary read:** bundle age green · CA count 19 · last run OK · both x5u
+tiles green ⇒ the trust side of §6 is satisfied (CRL may stay "not installed"
+for mode 5). Any red tile: resolve via §5's failure table first.
+
+**Deploy (services VM, one-time — all single-line):**
+
+```
+cd /opt/revup && sudo git pull
+sudo docker compose -f docker-compose.services.yml up -d node-exporter
+sudo docker compose -f docker-compose.services.yml restart vmagent
+sudo /opt/revup/infra/stir/refresh-stir-trust-bundle.sh --check
+curl -s http://localhost:9100/metrics | grep ^stir_
+sudo docker compose -f docker-compose.services.yml restart grafana
+```
+
+- `up -d node-exporter` recreates it with the textfile flag + mount (creates
+  `/var/lib/stir/metrics` if absent); `restart vmagent` reloads the scrape file
+  (adds the two x5u blackbox targets); the `--check` writes the first `.prom`
+  (and is harmless — same command as the daily cron); the `curl` must print the
+  `stir_*` series; the grafana restart re-provisions the updated dashboard
+  (skip it if the provider's auto-reload has already picked it up).
+- Nothing here touches call flow: node_exporter/vmagent/grafana are
+  monitoring-plane only, and the x5u Caddy is not restarted.
 
 ## 6. ACTIVATION — turning own-crypto inbound verify ON (chain mode)
 

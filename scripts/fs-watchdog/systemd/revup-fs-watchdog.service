@@ -1,0 +1,14 @@
+# FreeSWITCH container/ESL watchdog (see fs_watchdog.sh header). Emits its own
+# specific revup-alert page line when FreeSWITCH dies on this media VM (closes
+# the FS_MEDIA_HA_RUNBOOK §8 container-death paging gap); OnFailure adds the
+# generic page if the watchdog itself errors.
+# Placement: /etc/systemd/system/ (installed by install_fs_watchdog.sh)
+[Unit]
+Description=revup FreeSWITCH media watchdog
+After=docker.service
+OnFailure=revup-alert@%p.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/revup/fs-watchdog.env
+ExecStart=/opt/revup/scripts/fs-watchdog/fs_watchdog.sh

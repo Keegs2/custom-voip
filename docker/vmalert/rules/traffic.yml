@@ -1,0 +1,62 @@
+# vmalert recording rules — NOC wall traffic roll-ups (CPS / ingress / concurrency).
+# ---------------------------------------------------------------------------
+# Loaded by the vmalert service (docker-compose.services.yml) via
+#   -rule=/etc/vmalert/rules/*.yml
+# evaluated against VictoriaMetrics and written back via -remoteWrite.url so the
+# recorded series persist in the same store the Grafana `voip-metrics-vm`
+# datasource reads.
+#
+# Purpose: pre-compute the range-vector rate()/increase() aggregations that the
+# continuously-refreshing NOC wall (traffic-status 30s, call-quality 1m)
+# recomputes on every refresh, into fixed-cardinality series. Bounded labels
+# ONLY: zone, direction, trunk (carrier), reporting_instance (SBC),
+# freeswitch_node. NEVER customer identifiers (the cardinality contract).
+#
+# Naming: Prometheus convention level:metric:operations. Source metric names
+# are the RECONCILED platform names (kamailio_ prefix, counters WITHOUT a
+# _total suffix — hard-won gotcha; freeswitch_sessions_total DOES carry it).
+#
+# Interval 30s (not the 15s scrape): matches the 30s wall auto-refresh, halves
+# remote-write volume, and every window here is >= 1m so a 30s step loses no
+# resolution. Worst-case added staleness vs raw = one eval (30s) — invisible on
+# a 30s wall.
+#
+# This file supersedes trunk_rollup.yml (2026-07-29 design). The legacy series
+# voip:cps:by_direction:rate1m / voip:calls_active:by_node had no dashboard or
+# alert consumers; their equivalents below carry the standard naming. The old
+# topk(10) rule was dropped — topk in a recording rule churns labelsets
+# (gappy series) and nothing consumed it.
+groups:
+  - name: noc_traffic
+    interval: 30s
+    rules:
+      # Per-zone carrier CPS, in/out split preserved (kamailio_trunk_cps is a
+      # counter of INVITE admits per carrier trunk).
+      # Consumers: traffic-status id=1 (sum()), id=44 (sum by (zone)).
+      # Replaces legacy voip:cps:by_direction:rate1m (identical expr).
+      - record: zone:kamailio_trunk_cps:rate1m
+        expr: sum by (zone, direction) (rate(kamailio_trunk_cps[1m]))
+
+      # Per-SBC CPS (reporting_instance = SBC hostname, 6 total fleet-wide).
+      # Consumer: traffic-status id=58.
+      - record: sbc:kamailio_trunk_cps:rate1m
+        expr: sum by (reporting_instance, zone) (rate(kamailio_trunk_cps[1m]))
+
+      # Carrier ingress/egress volume per trunk per 5m (bandwidth_dallas,
+      # bandwidth_la, sinch_denver, sinch_chicago, ...).
+      # Consumer: call-quality id=74 (inbound, sum by (trunk)).
+      - record: trunk:kamailio_trunk_cps:increase5m
+        expr: sum by (trunk, direction, zone) (increase(kamailio_trunk_cps[5m]))
+
+      # Per-FS-node session setup rate (freeswitch_sessions_total is a true
+      # Prometheus counter — this one DOES have the _total suffix).
+      # Consumer: traffic-status id=2.
+      - record: node:freeswitch_sessions:rate1m
+        expr: sum by (freeswitch_node, zone) (rate(freeswitch_sessions_total[1m]))
+
+      # Live connected calls per FS node. No panel consumer (the wall's
+      # concurrency panels sum ~6 raw gauge series directly — cheap); kept for
+      # continuity with legacy voip:calls_active:by_node (identical expr) and
+      # as the bounded aggregate for future alerting.
+      - record: node:freeswitch_calls_active:sum
+        expr: sum by (freeswitch_node, zone) (freeswitch_calls_active)
