@@ -394,29 +394,30 @@ dispatcher REJECTS the list at load and kamailio won't start
 **Sinch ORIGINATION groups 6-7 — VIP-sourced probes + standby reads Inactive
 by design:** the orig TGs (DNVTCOZIGR2_3278 / CHCGIL24GR4_7412) are
 registered with our NLB VIPs (the addresses Sinch sends calls to), not the
-SBC public IPs — captured 2026-09-01: SBC-public-sourced OPTIONS get 500 +
-Contact `<sip:ANONYMOUS@...>` (Ribbon/Sonus unknown-trunk signature; 500 is
-counted as probe-failure and deliberately NOT added to ds_ping_reply_codes —
-see that modparam's comment). The `socket=`/`ping_from=` attrs make the 6/7
-probes VIP-sourced at L3 and L7. Consequence of the passthrough NLB: replies
-to the VIP reach the ACTIVE SBC only — the active SBC's 6/7 go probe-up
-green; the STANDBY's 6/7 stay Inactive PERMANENTLY (its replies land on the
-active, no transaction, dropped) and fire one `dispatcher:dst-down` per
-standby boot per duid (single dsmon gen bump + one carrier-monitor snapshot
-— harmless, no flapping). Correct overall signal because
-carrier_trunk_health is up-on-≥1-SBC (bool_or), and migration 45's
-passive/traffic state remains the safety net ('up' on probe-answer OR
-inbound CDRs within 60 min, else amber 'passive' — never red). If Sinch's
-filter still 500s VIP-sourced OPTIONS, the passive display stands and the
-Sinch support ask (enable OPTIONS on the orig TGs) is the only path to
-probe-green.
+SBC public IPs — captured 2026-09-01: OPTIONS get 500 + Contact
+`<sip:ANONYMOUS@...>` from BOTH the SBC public IPs and (after the
+socket=/ping_from VIP-sourcing) the VIP itself; Granite's other telephony
+platform gets the same 500 — it is Sinch's STANDARD OPTIONS response on
+these TGs. Resolution (2026-09-02): **500 was added to
+ds_ping_reply_codes** (see that modparam's comment for the trade-off), so
+the 500 now counts as probe-alive. The `socket=`/`ping_from=` attrs stay
+(correct source addressing either way). Consequence of the passthrough NLB:
+replies to the VIP reach the ACTIVE SBC only — the active SBC's 6/7 go
+probe-up green; the STANDBY's 6/7 stay Inactive PERMANENTLY (its replies
+land on the active, no transaction, dropped) and fire one
+`dispatcher:dst-down` per standby boot per duid (single dsmon gen bump + one
+carrier-monitor snapshot — harmless, no flapping). Correct overall signal
+because carrier_trunk_health is up-on-≥1-SBC (bool_or), and migration 45's
+passive/traffic state remains as a safety net behind the probe.
 
 Dispatcher parameters:
 - `ds_ping_interval=5`: Probe every 5 seconds (all groups).
 - `ds_probing_mode=1`: Probe all destinations continuously, not just inactive.
 - `ds_probing_threshold=3`: 3 failures = mark inactive.
 - `ds_inactive_threshold=3`: 3 successes = mark active.
-- `ds_ping_reply_codes`: Accepts 2xx, 404, 405, 480 as alive.
+- `ds_ping_reply_codes`: Accepts 2xx, 404, 405, 480, **500** as alive (500 added
+  2026-09-02: Sinch orig TGs answer 500 to all OPTIONS as their standard
+  response — see the modparam comment for the full trade-off).
 - Algorithm: Round-robin (4) for FS group. Weight (100) and maxload (2000) attrs configured but not currently used (would need algorithm 9 or 10).
 
 To add a FreeSWITCH instance for horizontal scaling:
