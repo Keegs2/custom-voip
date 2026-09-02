@@ -52,7 +52,7 @@
       "type": "dashboards"
     }
   ],
-  "description": "NOC home / wall-TV command board — Live System Status. Top row: the US datacenter map, full width. Bottom band (left→right): per-zone SIP VIP reachability + servers up/down (East · West · Central), carrier trunks (Bandwidth Dallas / LA, Sinch Denver / Chicago origination), platform services. 🟢 green = healthy · 🔴 red = attention · 🟠 orange = stale probe. Zone tiles: VIP reachable (uptime pass-fraction ≥ 99.9%) + VMs reporting CPU. Carrier tiles: UP / DOWN from live Kamailio-dispatcher OPTIONS probes + inbound calls landed in the last hour. Platform services: UP / DOWN from live blackbox probes. Map: 🟢 datacenter (dot size = calls / hour) · 🔺 carrier trunk (Bandwidth 🟢 up · Sinch 🔵 up · 🔴 down) — includes the two Sinch termination trunks (Atlanta LD, Denver TF; the two Denver triangles are offset — orig west / label above, TF east / label below). Hover any tile or map marker for detail. Landing page for the Production NOC.",
+  "description": "NOC home / wall-TV command board — Live System Status. Top row: the US datacenter map, full width. Bottom band (left→right): per-zone SIP VIP reachability + servers up/down (East · West · Central), carrier trunks (Bandwidth Dallas / LA, Sinch Denver / Chicago origination), platform services. 🟢 green = healthy · 🔴 red = attention · 🟠 orange = stale probe. Zone tiles: VIP reachable (uptime pass-fraction ≥ 99.9%) + one UP/DOWN box per server (SBC-1 · SBC-2 · FS-1 · FS-2 · SVCS/DB) pinned to the expected fleet — a server that stops reporting goes RED, it never vanishes. Carrier tiles: UP / DOWN from live Kamailio-dispatcher OPTIONS probes + inbound calls landed in the last hour. Platform services: UP / DOWN from live blackbox probes. Map: 🟢 datacenter (dot size = calls / hour) · 🔺 carrier trunk (Bandwidth 🟢 up · Sinch 🔵 up · 🔴 down) — includes the two Sinch termination trunks (Atlanta LD, Denver TF; the two Denver triangles are offset — orig west / label above, TF east / label below). Below the band, three full-width KPI rows: Traffic (active calls · CPS · calls 1h/today · ASR · on-net %), Voice (MOS · loss · peak jitter · R-factor · ACD · PDD-proxy p95), and STIR/SHAKEN (signed % · A share · div chains · inbound verified % · trust-bundle age · leaf-cert time left). Hover any tile or map marker for detail. Landing page for the Production NOC.",
   "panels": [
     {
       "id": 2,
@@ -158,10 +158,10 @@
       "id": 8,
       "type": "stat",
       "title": "East · us-east1",
-      "description": "East datacenter status. Top: SIP VIP 34.24.133.82:5060 carrier reachability (uptime pass-fraction; Reachable ≥ 99.9%). Bottom: VMs reporting CPU (expect 6, incl. east-fs-2 media-HA hot standby). 🟢 VIP reachable AND 6/6 up · 🔴 VIP unreachable OR any VM down. East holds the DB primary + API + UI.",
+      "description": "East datacenter status. Headline: SIP VIP 34.24.133.82:5060 carrier reachability (GCM uptime check pass-fraction; Reachable >= 99.9%). Below: one box per server — SBC-1/SBC-2 (Kamailio, east-sbc-1/east-sbc-2), FS-1 (fs-media-v2) / FS-2 (east-fs-2 media-HA hot standby), SVCS (services VM: PG primary + API + UI + Homer, reporting_instance east-services), DB (east-db-standby). Per-server source: VictoriaMetrics up{job=\"node\"} per reporting_instance, freshness-clamped with last_over_time(...[2m]) and pinned to the expected fleet via `or vector(0)` per server — a VM whose metrics go silent (VM dead, node_exporter dead, or vmagent dark/wedged-buffering > 2m) renders a RED DOWN box, it never vanishes. (Plain `up` would return a stale value for VictoriaMetrics' 5m lookback and then disappear entirely; the [2m] clamp turns 'silent 2m' into absent and the synthetic vector(0) arm turns absent into 0=DOWN — the two compose rather than fight.) Canonical job is node_exporter (present on every VM) so each server yields exactly one box; max() guards against dupes. Boxes are VM/metrics-plane liveness, NOT SIP election — the active/standby SBC + FS election rows live on Traffic & Status. EXCEPTION — the DB box: east-db-standby runs NO metrics plane (docker-compose.db.yml covers west-db/central-db only; no vmagent/node_exporter there), so instead of faking an `up` series its box is driven live from the East PRIMARY via voip-cdr-pg: slot east_standby active AND streaming in pg_stat_replication — an honest, arguably stronger signal (catches Postgres down even while the VM is up, and detection is instant, no staleness window). If the primary itself is unreachable the whole query errors loudly rather than showing a stale green. East holds the DB primary + API + UI.",
       "datasource": {
-        "type": "stackdriver",
-        "uid": "gcp-monitoring"
+        "type": "datasource",
+        "uid": "-- Mixed --"
       },
       "gridPos": {
         "x": 0,
@@ -200,30 +200,74 @@
         },
         {
           "refId": "B",
-          "queryType": "timeSeriesList",
           "datasource": {
-            "type": "stackdriver",
-            "uid": "gcp-monitoring"
+            "type": "prometheus",
+            "uid": "voip-metrics-vm"
           },
-          "timeSeriesList": {
-            "projectName": "rugged-night-193017",
-            "filters": [
-              "metric.type",
-              "=",
-              "compute.googleapis.com/instance/cpu/utilization",
-              "AND",
-              "metadata.system_labels.name",
-              "=~",
-              "poc-custom-voip|kam-g2|fs-media-v2|east-fs-2|services|east-db-standby"
-            ],
-            "crossSeriesReducer": "REDUCE_COUNT",
-            "perSeriesAligner": "ALIGN_MEAN",
-            "alignmentPeriod": "+300s",
-            "groupBys": [],
-            "view": "FULL",
-            "aliasBy": "Servers"
+          "expr": "max(last_over_time(up{zone=\"east\", job=\"node\", reporting_instance=\"east-sbc-1\"}[2m])) or vector(0)",
+          "instant": true,
+          "range": false,
+          "format": "time_series",
+          "legendFormat": "SBC-1"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "voip-metrics-vm"
           },
-          "aliasBy": "Servers"
+          "expr": "max(last_over_time(up{zone=\"east\", job=\"node\", reporting_instance=\"east-sbc-2\"}[2m])) or vector(0)",
+          "instant": true,
+          "range": false,
+          "format": "time_series",
+          "legendFormat": "SBC-2"
+        },
+        {
+          "refId": "D",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "voip-metrics-vm"
+          },
+          "expr": "max(last_over_time(up{zone=\"east\", job=\"node\", reporting_instance=\"fs-media-v2\"}[2m])) or vector(0)",
+          "instant": true,
+          "range": false,
+          "format": "time_series",
+          "legendFormat": "FS-1"
+        },
+        {
+          "refId": "E",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "voip-metrics-vm"
+          },
+          "expr": "max(last_over_time(up{zone=\"east\", job=\"node\", reporting_instance=\"east-fs-2\"}[2m])) or vector(0)",
+          "instant": true,
+          "range": false,
+          "format": "time_series",
+          "legendFormat": "FS-2"
+        },
+        {
+          "refId": "F",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "voip-metrics-vm"
+          },
+          "expr": "max(last_over_time(up{zone=\"east\", job=\"node\", reporting_instance=\"east-services\"}[2m])) or vector(0)",
+          "instant": true,
+          "range": false,
+          "format": "time_series",
+          "legendFormat": "SVCS"
+        },
+        {
+          "refId": "G",
+          "datasource": {
+            "type": "postgres",
+            "uid": "voip-cdr-pg"
+          },
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT count(*) FILTER (WHERE s.active AND r.state = 'streaming') AS standby_up FROM pg_replication_slots s LEFT JOIN pg_stat_replication r ON r.pid = s.active_pid WHERE s.slot_name = 'east_standby';"
         }
       ],
       "options": {
@@ -234,7 +278,7 @@
           "fields": "",
           "values": false
         },
-        "orientation": "horizontal",
+        "orientation": "auto",
         "textMode": "value_and_name",
         "colorMode": "background",
         "graphMode": "none",
@@ -248,6 +292,34 @@
           "unit": "none",
           "decimals": 0,
           "noValue": "DOWN",
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "DOWN",
+                  "color": "red",
+                  "index": 0
+                },
+                "1": {
+                  "text": "UP",
+                  "color": "green",
+                  "index": 1
+                }
+              }
+            },
+            {
+              "type": "special",
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "DOWN",
+                  "color": "red",
+                  "index": 2
+                }
+              }
+            }
+          ],
           "color": {
             "mode": "thresholds"
           },
@@ -260,7 +332,7 @@
               },
               {
                 "color": "green",
-                "value": 6
+                "value": 1
               }
             ]
           }
@@ -342,85 +414,12 @@
           {
             "matcher": {
               "id": "byFrameRefID",
-              "options": "B"
+              "options": "G"
             },
             "properties": [
               {
                 "id": "displayName",
-                "value": "Servers"
-              },
-              {
-                "id": "unit",
-                "value": "none"
-              },
-              {
-                "id": "noValue",
-                "value": "DOWN"
-              },
-              {
-                "id": "mappings",
-                "value": [
-                  {
-                    "type": "value",
-                    "options": {
-                      "0": {
-                        "text": "0 / 6",
-                        "index": 0
-                      },
-                      "1": {
-                        "text": "1 / 6",
-                        "index": 1
-                      },
-                      "2": {
-                        "text": "2 / 6",
-                        "index": 2
-                      },
-                      "3": {
-                        "text": "3 / 6",
-                        "index": 3
-                      },
-                      "4": {
-                        "text": "4 / 6",
-                        "index": 4
-                      },
-                      "5": {
-                        "text": "5 / 6",
-                        "index": 5
-                      },
-                      "6": {
-                        "text": "6 / 6",
-                        "index": 6
-                      }
-                    }
-                  },
-                  {
-                    "type": "special",
-                    "options": {
-                      "match": "null",
-                      "result": {
-                        "text": "DOWN",
-                        "color": "red",
-                        "index": 10
-                      }
-                    }
-                  }
-                ]
-              },
-              {
-                "id": "thresholds",
-                "value": {
-                  "mode": "absolute",
-                  "steps": [
-                    {
-                      "color": "red",
-                      "value": null
-                    },
-                    {
-                      "color": "green",
-                      "value": 6
-                    }
-                  ]
-                }
+                "value": "DB"
               }
             ]
           }
@@ -431,10 +430,10 @@
       "id": 9,
       "type": "stat",
       "title": "West · us-west1",
-      "description": "West datacenter status. Top: SIP VIP 35.252.214.40:5060 carrier reachability (uptime pass-fraction; Reachable ≥ 99.9%). Bottom: VMs reporting CPU (expect 5, incl. west-fs-2 media-HA hot standby). 🟢 VIP reachable AND 5/5 up · 🔴 VIP unreachable OR any VM down.",
+      "description": "West datacenter status. Headline: SIP VIP 35.252.214.40:5060 carrier reachability (GCM uptime check pass-fraction; Reachable >= 99.9%). Below: one box per server — SBC-1/SBC-2 (Kamailio, west-sbc-1/west-sbc-2), FS-1 (west-fs) / FS-2 (west-fs-2 media-HA hot standby), DB (west-db PG replica + PgBouncer, metrics plane per docker-compose.db.yml). Per-server source: VictoriaMetrics up{job=\"node\"} per reporting_instance, freshness-clamped with last_over_time(...[2m]) and pinned to the expected fleet via `or vector(0)` per server — a VM whose metrics go silent (VM dead, node_exporter dead, or vmagent dark/wedged-buffering > 2m) renders a RED DOWN box, it never vanishes. (Plain `up` would return a stale value for VictoriaMetrics' 5m lookback and then disappear entirely; the [2m] clamp turns 'silent 2m' into absent and the synthetic vector(0) arm turns absent into 0=DOWN — the two compose rather than fight.) Canonical job is node_exporter (present on every VM) so each server yields exactly one box; max() guards against dupes. Boxes are VM/metrics-plane liveness, NOT SIP election — the active/standby SBC + FS election rows live on Traffic & Status.",
       "datasource": {
-        "type": "stackdriver",
-        "uid": "gcp-monitoring"
+        "type": "datasource",
+        "uid": "-- Mixed --"
       },
       "gridPos": {
         "x": 4,
@@ -473,29 +472,63 @@
         },
         {
           "refId": "B",
-          "queryType": "timeSeriesList",
           "datasource": {
-            "type": "stackdriver",
-            "uid": "gcp-monitoring"
+            "type": "prometheus",
+            "uid": "voip-metrics-vm"
           },
-          "timeSeriesList": {
-            "projectName": "rugged-night-193017",
-            "filters": [
-              "metric.type",
-              "=",
-              "compute.googleapis.com/instance/cpu/utilization",
-              "AND",
-              "metadata.system_labels.name",
-              "=~",
-              "west-sbc-1|west-sbc-2|west-fs|west-fs-2|west-db"
-            ],
-            "crossSeriesReducer": "REDUCE_COUNT",
-            "perSeriesAligner": "ALIGN_MEAN",
-            "alignmentPeriod": "+300s",
-            "groupBys": [],
-            "view": "FULL"
+          "expr": "max(last_over_time(up{zone=\"west\", job=\"node\", reporting_instance=\"west-sbc-1\"}[2m])) or vector(0)",
+          "instant": true,
+          "range": false,
+          "format": "time_series",
+          "legendFormat": "SBC-1"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "voip-metrics-vm"
           },
-          "aliasBy": "Servers"
+          "expr": "max(last_over_time(up{zone=\"west\", job=\"node\", reporting_instance=\"west-sbc-2\"}[2m])) or vector(0)",
+          "instant": true,
+          "range": false,
+          "format": "time_series",
+          "legendFormat": "SBC-2"
+        },
+        {
+          "refId": "D",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "voip-metrics-vm"
+          },
+          "expr": "max(last_over_time(up{zone=\"west\", job=\"node\", reporting_instance=\"west-fs\"}[2m])) or vector(0)",
+          "instant": true,
+          "range": false,
+          "format": "time_series",
+          "legendFormat": "FS-1"
+        },
+        {
+          "refId": "E",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "voip-metrics-vm"
+          },
+          "expr": "max(last_over_time(up{zone=\"west\", job=\"node\", reporting_instance=\"west-fs-2\"}[2m])) or vector(0)",
+          "instant": true,
+          "range": false,
+          "format": "time_series",
+          "legendFormat": "FS-2"
+        },
+        {
+          "refId": "F",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "voip-metrics-vm"
+          },
+          "expr": "max(last_over_time(up{zone=\"west\", job=\"node\", reporting_instance=\"west-db\"}[2m])) or vector(0)",
+          "instant": true,
+          "range": false,
+          "format": "time_series",
+          "legendFormat": "DB"
         }
       ],
       "options": {
@@ -506,7 +539,7 @@
           "fields": "",
           "values": false
         },
-        "orientation": "horizontal",
+        "orientation": "auto",
         "textMode": "value_and_name",
         "colorMode": "background",
         "graphMode": "none",
@@ -520,6 +553,34 @@
           "unit": "none",
           "decimals": 0,
           "noValue": "DOWN",
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "DOWN",
+                  "color": "red",
+                  "index": 0
+                },
+                "1": {
+                  "text": "UP",
+                  "color": "green",
+                  "index": 1
+                }
+              }
+            },
+            {
+              "type": "special",
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "DOWN",
+                  "color": "red",
+                  "index": 2
+                }
+              }
+            }
+          ],
           "color": {
             "mode": "thresholds"
           },
@@ -532,7 +593,7 @@
               },
               {
                 "color": "green",
-                "value": 5
+                "value": 1
               }
             ]
           }
@@ -610,87 +671,6 @@
                 }
               }
             ]
-          },
-          {
-            "matcher": {
-              "id": "byFrameRefID",
-              "options": "B"
-            },
-            "properties": [
-              {
-                "id": "displayName",
-                "value": "Servers"
-              },
-              {
-                "id": "unit",
-                "value": "none"
-              },
-              {
-                "id": "noValue",
-                "value": "DOWN"
-              },
-              {
-                "id": "mappings",
-                "value": [
-                  {
-                    "type": "value",
-                    "options": {
-                      "0": {
-                        "text": "0 / 5",
-                        "index": 0
-                      },
-                      "1": {
-                        "text": "1 / 5",
-                        "index": 1
-                      },
-                      "2": {
-                        "text": "2 / 5",
-                        "index": 2
-                      },
-                      "3": {
-                        "text": "3 / 5",
-                        "index": 3
-                      },
-                      "4": {
-                        "text": "4 / 5",
-                        "index": 4
-                      },
-                      "5": {
-                        "text": "5 / 5",
-                        "index": 5
-                      }
-                    }
-                  },
-                  {
-                    "type": "special",
-                    "options": {
-                      "match": "null",
-                      "result": {
-                        "text": "DOWN",
-                        "color": "red",
-                        "index": 10
-                      }
-                    }
-                  }
-                ]
-              },
-              {
-                "id": "thresholds",
-                "value": {
-                  "mode": "absolute",
-                  "steps": [
-                    {
-                      "color": "red",
-                      "value": null
-                    },
-                    {
-                      "color": "green",
-                      "value": 5
-                    }
-                  ]
-                }
-              }
-            ]
           }
         ]
       }
@@ -699,10 +679,10 @@
       "id": 10,
       "type": "stat",
       "title": "Central · us-central1",
-      "description": "Central datacenter status. Top: SIP VIP 35.253.133.230:5060 carrier reachability (uptime pass-fraction; Reachable ≥ 99.9%). Bottom: VMs reporting CPU (expect 5, incl. central-fs-2 media-HA hot standby). 🟢 VIP reachable AND 5/5 up · 🔴 VIP unreachable OR any VM down.",
+      "description": "Central datacenter status. Headline: SIP VIP 35.253.133.230:5060 carrier reachability (GCM uptime check pass-fraction; Reachable >= 99.9%). Below: one box per server — SBC-1/SBC-2 (Kamailio, central-sbc-1/central-sbc-2), FS-1 (central-fs) / FS-2 (central-fs-2 media-HA hot standby), DB (central-db PG replica + PgBouncer, metrics plane per docker-compose.db.yml). Per-server source: VictoriaMetrics up{job=\"node\"} per reporting_instance, freshness-clamped with last_over_time(...[2m]) and pinned to the expected fleet via `or vector(0)` per server — a VM whose metrics go silent (VM dead, node_exporter dead, or vmagent dark/wedged-buffering > 2m) renders a RED DOWN box, it never vanishes. (Plain `up` would return a stale value for VictoriaMetrics' 5m lookback and then disappear entirely; the [2m] clamp turns 'silent 2m' into absent and the synthetic vector(0) arm turns absent into 0=DOWN — the two compose rather than fight.) Canonical job is node_exporter (present on every VM) so each server yields exactly one box; max() guards against dupes. Boxes are VM/metrics-plane liveness, NOT SIP election — the active/standby SBC + FS election rows live on Traffic & Status.",
       "datasource": {
-        "type": "stackdriver",
-        "uid": "gcp-monitoring"
+        "type": "datasource",
+        "uid": "-- Mixed --"
       },
       "gridPos": {
         "x": 8,
@@ -741,29 +721,63 @@
         },
         {
           "refId": "B",
-          "queryType": "timeSeriesList",
           "datasource": {
-            "type": "stackdriver",
-            "uid": "gcp-monitoring"
+            "type": "prometheus",
+            "uid": "voip-metrics-vm"
           },
-          "timeSeriesList": {
-            "projectName": "rugged-night-193017",
-            "filters": [
-              "metric.type",
-              "=",
-              "compute.googleapis.com/instance/cpu/utilization",
-              "AND",
-              "metadata.system_labels.name",
-              "=~",
-              "central-sbc-1|central-sbc-2|central-fs|central-fs-2|central-db"
-            ],
-            "crossSeriesReducer": "REDUCE_COUNT",
-            "perSeriesAligner": "ALIGN_MEAN",
-            "alignmentPeriod": "+300s",
-            "groupBys": [],
-            "view": "FULL"
+          "expr": "max(last_over_time(up{zone=\"central\", job=\"node\", reporting_instance=\"central-sbc-1\"}[2m])) or vector(0)",
+          "instant": true,
+          "range": false,
+          "format": "time_series",
+          "legendFormat": "SBC-1"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "voip-metrics-vm"
           },
-          "aliasBy": "Servers"
+          "expr": "max(last_over_time(up{zone=\"central\", job=\"node\", reporting_instance=\"central-sbc-2\"}[2m])) or vector(0)",
+          "instant": true,
+          "range": false,
+          "format": "time_series",
+          "legendFormat": "SBC-2"
+        },
+        {
+          "refId": "D",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "voip-metrics-vm"
+          },
+          "expr": "max(last_over_time(up{zone=\"central\", job=\"node\", reporting_instance=\"central-fs\"}[2m])) or vector(0)",
+          "instant": true,
+          "range": false,
+          "format": "time_series",
+          "legendFormat": "FS-1"
+        },
+        {
+          "refId": "E",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "voip-metrics-vm"
+          },
+          "expr": "max(last_over_time(up{zone=\"central\", job=\"node\", reporting_instance=\"central-fs-2\"}[2m])) or vector(0)",
+          "instant": true,
+          "range": false,
+          "format": "time_series",
+          "legendFormat": "FS-2"
+        },
+        {
+          "refId": "F",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "voip-metrics-vm"
+          },
+          "expr": "max(last_over_time(up{zone=\"central\", job=\"node\", reporting_instance=\"central-db\"}[2m])) or vector(0)",
+          "instant": true,
+          "range": false,
+          "format": "time_series",
+          "legendFormat": "DB"
         }
       ],
       "options": {
@@ -774,7 +788,7 @@
           "fields": "",
           "values": false
         },
-        "orientation": "horizontal",
+        "orientation": "auto",
         "textMode": "value_and_name",
         "colorMode": "background",
         "graphMode": "none",
@@ -788,6 +802,34 @@
           "unit": "none",
           "decimals": 0,
           "noValue": "DOWN",
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "DOWN",
+                  "color": "red",
+                  "index": 0
+                },
+                "1": {
+                  "text": "UP",
+                  "color": "green",
+                  "index": 1
+                }
+              }
+            },
+            {
+              "type": "special",
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "DOWN",
+                  "color": "red",
+                  "index": 2
+                }
+              }
+            }
+          ],
           "color": {
             "mode": "thresholds"
           },
@@ -800,7 +842,7 @@
               },
               {
                 "color": "green",
-                "value": 5
+                "value": 1
               }
             ]
           }
@@ -873,87 +915,6 @@
                     {
                       "color": "green",
                       "value": 0.999
-                    }
-                  ]
-                }
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byFrameRefID",
-              "options": "B"
-            },
-            "properties": [
-              {
-                "id": "displayName",
-                "value": "Servers"
-              },
-              {
-                "id": "unit",
-                "value": "none"
-              },
-              {
-                "id": "noValue",
-                "value": "DOWN"
-              },
-              {
-                "id": "mappings",
-                "value": [
-                  {
-                    "type": "value",
-                    "options": {
-                      "0": {
-                        "text": "0 / 5",
-                        "index": 0
-                      },
-                      "1": {
-                        "text": "1 / 5",
-                        "index": 1
-                      },
-                      "2": {
-                        "text": "2 / 5",
-                        "index": 2
-                      },
-                      "3": {
-                        "text": "3 / 5",
-                        "index": 3
-                      },
-                      "4": {
-                        "text": "4 / 5",
-                        "index": 4
-                      },
-                      "5": {
-                        "text": "5 / 5",
-                        "index": 5
-                      }
-                    }
-                  },
-                  {
-                    "type": "special",
-                    "options": {
-                      "match": "null",
-                      "result": {
-                        "text": "DOWN",
-                        "color": "red",
-                        "index": 10
-                      }
-                    }
-                  }
-                ]
-              },
-              {
-                "id": "thresholds",
-                "value": {
-                  "mode": "absolute",
-                  "steps": [
-                    {
-                      "color": "red",
-                      "value": null
-                    },
-                    {
-                      "color": "green",
-                      "value": 5
                     }
                   ]
                 }
@@ -2249,6 +2210,1258 @@
             ]
           }
         ]
+      }
+    },
+    {
+      "id": 20,
+      "type": "stat",
+      "title": "Traffic · Active calls — now",
+      "description": "Live connected calls platform-wide: sum(freeswitch_calls_active) across every FS node, all zones — the same live gauge as Traffic & Status id 3 (ESL exporter :9103). Volume metric, informational blue. Sparkline shows the dashboard range.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "voip-metrics-vm"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 20,
+        "w": 4,
+        "h": 6
+      },
+      "targets": [
+        {
+          "expr": "sum(freeswitch_calls_active)",
+          "range": true,
+          "legendFormat": "connected",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "voip-metrics-vm"
+          }
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "center"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "noValue": "0",
+          "mappings": [],
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 21,
+      "type": "stat",
+      "title": "Traffic · CPS — now (1m)",
+      "description": "Live calls-per-second, all zones: sum(zone:kamailio_trunk_cps:rate1m) — the vmalert recording rule over kamailio_trunk_cps (INVITE admits per carrier trunk), same query as Traffic & Status id 1. Green normal · orange >= 350 · red >= 500 (platform capacity guardrails).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "voip-metrics-vm"
+      },
+      "gridPos": {
+        "x": 4,
+        "y": 20,
+        "w": 4,
+        "h": 6
+      },
+      "targets": [
+        {
+          "expr": "sum(zone:kamailio_trunk_cps:rate1m)",
+          "range": true,
+          "legendFormat": "CPS",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "voip-metrics-vm"
+          }
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "center"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "cps",
+          "decimals": 1,
+          "noValue": "0",
+          "mappings": [],
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 350
+              },
+              {
+                "color": "red",
+                "value": 500
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 22,
+      "type": "stat",
+      "title": "Traffic · Calls — last hour",
+      "description": "CDR count, trailing 60 min, all zones (cdrs.start_time > now()-1h on the East primary — every zone's FS posts CDRs there). Same source as the geomap dot sizing. Informational blue.",
+      "datasource": {
+        "type": "postgres",
+        "uid": "voip-cdr-pg"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 20,
+        "w": 4,
+        "h": 6
+      },
+      "targets": [
+        {
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT count(*) AS calls_1h FROM cdrs WHERE start_time > now() - interval '1 hour';",
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "voip-cdr-pg"
+          }
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "noValue": "0",
+          "mappings": [],
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 23,
+      "type": "stat",
+      "title": "Traffic · Calls — today",
+      "description": "CDR count since midnight (date_trunc('day', now()) — DB server timezone, not browser). All zones, all directions. Informational blue.",
+      "datasource": {
+        "type": "postgres",
+        "uid": "voip-cdr-pg"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 20,
+        "w": 4,
+        "h": 6
+      },
+      "targets": [
+        {
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT count(*) AS calls_today FROM cdrs WHERE start_time >= date_trunc('day', now());",
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "voip-cdr-pg"
+          }
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "noValue": "0",
+          "mappings": [],
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 24,
+      "type": "stat",
+      "title": "Traffic · ASR — 15m",
+      "description": "Answer-Seizure Ratio, trailing 15 min, all zones: answered (answer_time set) / all attempts, from CDRs (Call Quality id 40's query with the zone filter dropped — noc-home has no zone variable). CDR-based, so it lags live SIP by CDR ingest; the live SIP-reply ASR is on Traffic & Status. Red < 40% · orange < 55% · green >= 55% (forwarded-call traffic mix runs lower than raw PSTN ASR).",
+      "datasource": {
+        "type": "postgres",
+        "uid": "voip-cdr-pg"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 20,
+        "w": 4,
+        "h": 6
+      },
+      "targets": [
+        {
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT (count(*) FILTER (WHERE answer_time IS NOT NULL))::float / NULLIF(count(*), 0) AS asr FROM cdrs WHERE start_time > now() - interval '15 minutes';",
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "voip-cdr-pg"
+          }
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 1,
+          "min": 0,
+          "max": 1,
+          "noValue": "—",
+          "mappings": [],
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.4
+              },
+              {
+                "color": "green",
+                "value": 0.55
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 25,
+      "type": "stat",
+      "title": "Traffic · On-net % — 15m",
+      "description": "Share of calls delivered on-net (internal short-circuit, no carrier hairpin) in the trailing 15 min, from CDRs.on_net (Call Quality id 44's query, zone filter dropped). Higher = more carrier minutes saved. Informational blue.",
+      "datasource": {
+        "type": "postgres",
+        "uid": "voip-cdr-pg"
+      },
+      "gridPos": {
+        "x": 20,
+        "y": 20,
+        "w": 4,
+        "h": 6
+      },
+      "targets": [
+        {
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT (count(*) FILTER (WHERE on_net))::float / NULLIF(count(*), 0) AS on_net_pct FROM cdrs WHERE start_time > now() - interval '15 minutes';",
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "voip-cdr-pg"
+          }
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 1,
+          "min": 0,
+          "max": 1,
+          "noValue": "—",
+          "mappings": [],
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 30,
+      "type": "stat",
+      "title": "Voice · Avg MOS — 15m",
+      "description": "Mean Opinion Score, trailing 15 min, rated calls only (mos IS NOT NULL), all zones — Call Quality id 43's query with the zone filter dropped. Red < 3.5 · orange < 4.0 · green >= 4.0.",
+      "datasource": {
+        "type": "postgres",
+        "uid": "voip-cdr-pg"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 26,
+        "w": 4,
+        "h": 6
+      },
+      "targets": [
+        {
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT avg(mos) AS avg_mos FROM cdrs WHERE start_time > now() - interval '15 minutes' AND mos IS NOT NULL;",
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "voip-cdr-pg"
+          }
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 2,
+          "min": 1,
+          "max": 5,
+          "noValue": "—",
+          "mappings": [],
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 3.5
+              },
+              {
+                "color": "green",
+                "value": 4.0
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 31,
+      "type": "stat",
+      "title": "Voice · Packet loss — 15m",
+      "description": "Average RTP packet loss %, trailing 15 min, rated-calls-only semantics per Call Quality conventions (billable_ms >= 10000 AND rtp_audio_in_packet_count >= 500 — short/silent calls produce junk loss numbers). Green < 1% · orange >= 1% · red >= 3%.",
+      "datasource": {
+        "type": "postgres",
+        "uid": "voip-cdr-pg"
+      },
+      "gridPos": {
+        "x": 4,
+        "y": 26,
+        "w": 4,
+        "h": 6
+      },
+      "targets": [
+        {
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT avg(packet_loss_pct) AS avg_loss_pct FROM cdrs WHERE start_time > now() - interval '15 minutes' AND packet_loss_pct IS NOT NULL AND billable_ms >= 10000 AND rtp_audio_in_packet_count >= 500;",
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "voip-cdr-pg"
+          }
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "decimals": 2,
+          "noValue": "—",
+          "mappings": [],
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 3
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 32,
+      "type": "stat",
+      "title": "Voice · Peak jitter — 15m",
+      "description": "Average of per-call PEAK jitter (cdrs.jitter_max_ms — real milliseconds since migration 43's variance->ms fix), trailing 15 min, rated calls only (billable_ms >= 10000, rtp_audio_in_packet_count >= 500), matching Call Quality id 20. Peak latches the worst burst of each call, so this reads pessimistic vs mean jitter. Green < 40 ms · orange >= 40 · red >= 80.",
+      "datasource": {
+        "type": "postgres",
+        "uid": "voip-cdr-pg"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 26,
+        "w": 4,
+        "h": 6
+      },
+      "targets": [
+        {
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT avg(jitter_max_ms) AS avg_peak_jitter_ms FROM cdrs WHERE start_time > now() - interval '15 minutes' AND jitter_max_ms IS NOT NULL AND billable_ms >= 10000 AND rtp_audio_in_packet_count >= 500;",
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "voip-cdr-pg"
+          }
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "decimals": 1,
+          "noValue": "—",
+          "mappings": [],
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 40
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 33,
+      "type": "stat",
+      "title": "Voice · R-factor — 15m",
+      "description": "Average R-factor (ITU-T G.107 E-model, 0-100), trailing 15 min, rated calls only (r_factor IS NOT NULL) — Call Quality id 13's metric as a stat. Red < 70 (users complain) · orange < 80 · green >= 80 (toll quality).",
+      "datasource": {
+        "type": "postgres",
+        "uid": "voip-cdr-pg"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 26,
+        "w": 4,
+        "h": 6
+      },
+      "targets": [
+        {
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT avg(r_factor) AS avg_r_factor FROM cdrs WHERE start_time > now() - interval '15 minutes' AND r_factor IS NOT NULL;",
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "voip-cdr-pg"
+          }
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 1,
+          "min": 0,
+          "max": 100,
+          "noValue": "—",
+          "mappings": [],
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 70
+              },
+              {
+                "color": "green",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 34,
+      "type": "stat",
+      "title": "Voice · ACD — 1h",
+      "description": "Average Call Duration of ANSWERED calls in the trailing hour: avg(end_time - answer_time) from CDRs (true talk time, not billable_ms which carries minimum/increment rounding). ACD shifts are a traffic-mix / fraud signal, not a health threshold — informational blue.",
+      "datasource": {
+        "type": "postgres",
+        "uid": "voip-cdr-pg"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 26,
+        "w": 4,
+        "h": 6
+      },
+      "targets": [
+        {
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT avg(EXTRACT(EPOCH FROM (end_time - answer_time))) AS acd_sec FROM cdrs WHERE start_time > now() - interval '1 hour' AND answer_time IS NOT NULL AND end_time IS NOT NULL;",
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "voip-cdr-pg"
+          }
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "decimals": 1,
+          "noValue": "—",
+          "mappings": [],
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 35,
+      "type": "stat",
+      "title": "Voice · PDD p95 (proxy) — 1h",
+      "description": "CAVEAT — this is time-to-ANSWER (answer_time - start_time, p95 over the trailing hour, Call Quality id 4's proxy), NOT true Post-Dial Delay: it includes human ring time on the forwarded leg, so it reads as an UPPER BOUND on PDD and normally sits in the tens of seconds. True PDD (INVITE->18x) needs SIP-timestamp instrumentation we don't record in CDRs. Watch the TREND: a sudden jump with flat ASR usually means slow carrier PDD (progress_timeout pressure), not slower humans. Informational blue — no red/green judgment on a proxy.",
+      "datasource": {
+        "type": "postgres",
+        "uid": "voip-cdr-pg"
+      },
+      "gridPos": {
+        "x": 20,
+        "y": 26,
+        "w": 4,
+        "h": 6
+      },
+      "targets": [
+        {
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT percentile_cont(0.95) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (answer_time - start_time))) AS p95_answer_s FROM cdrs WHERE start_time > now() - interval '1 hour' AND answer_time IS NOT NULL;",
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "voip-cdr-pg"
+          }
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "decimals": 1,
+          "noValue": "—",
+          "mappings": [],
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 40,
+      "type": "stat",
+      "title": "STIR · Signed % — 1h",
+      "description": "Share of outbound carrier B-legs that left with a SHAKEN Identity header (attestation != unsigned) in the trailing hour: kamailio_stir_attest_signed (counter, NO _total suffix — counts legs actually emitted on the wire; the unsigned bucket is the fail-open path). Red < 80% · orange < 95% · green >= 95% (mirrors the stir-shaken board's 5%/20% unsigned alarm bands, inverted).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "voip-metrics-vm"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 32,
+        "w": 4,
+        "h": 6
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(kamailio_stir_attest_signed{attestation!=\"unsigned\"}[1h])) / clamp_min(sum(increase(kamailio_stir_attest_signed[1h])), 1)",
+          "instant": true,
+          "range": false,
+          "legendFormat": "signed",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "voip-metrics-vm"
+          }
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 1,
+          "min": 0,
+          "max": 1,
+          "noValue": "—",
+          "mappings": [],
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.8
+              },
+              {
+                "color": "green",
+                "value": 0.95
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 41,
+      "type": "stat",
+      "title": "STIR · Attestation A share — 1h",
+      "description": "Share of signed+unsigned outbound legs carrying full attestation A (Trunk/API-originated, we know the customer AND the number) in the trailing hour, from kamailio_stir_attest_signed{attestation=\"A\"}. RCF forwards sign as div-chained instead, so A share tracks the Trunk/API traffic mix — informational blue, not a health threshold.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "voip-metrics-vm"
+      },
+      "gridPos": {
+        "x": 4,
+        "y": 32,
+        "w": 4,
+        "h": 6
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(kamailio_stir_attest_signed{attestation=\"A\"}[1h])) / clamp_min(sum(increase(kamailio_stir_attest_signed[1h])), 1)",
+          "instant": true,
+          "range": false,
+          "legendFormat": "A share",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "voip-metrics-vm"
+          }
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 1,
+          "min": 0,
+          "max": 1,
+          "noValue": "—",
+          "mappings": [],
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 42,
+      "type": "stat",
+      "title": "STIR · div chains — 1h",
+      "description": "Count of RCF forwarded legs signed with a div (diversion) PASSporT chained onto the inbound Identity in the trailing hour — the best possible outcome for a forwarded call (preserves the originator's attestation; confirmed end-to-end vs T-Mobile A->div). kamailio_stir_attest_signed{attestation=\"div\"}. Volume tracks RCF forward traffic of signed inbound — informational blue.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "voip-metrics-vm"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 32,
+        "w": 4,
+        "h": 6
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(kamailio_stir_attest_signed{attestation=\"div\"}[1h]))",
+          "instant": true,
+          "range": false,
+          "legendFormat": "div",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "voip-metrics-vm"
+          }
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "noValue": "0",
+          "mappings": [],
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 43,
+      "type": "stat",
+      "title": "STIR · Inbound verified % — 1h",
+      "description": "Share of inbound calls arriving with verstat TN-Validation-Passed in the trailing hour: kamailio_stir_inbound_verstat (counter, NO _total suffix; verstat currently sourced from Bandwidth's P-Attestation-Indicator / PAI verstat until own-crypto trust-bundle verify ships — the stir-shaken board splits self vs carrier). Thresholds copied from stir-shaken id 6: red < 20% · orange < 50% · green >= 50%.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "voip-metrics-vm"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 32,
+        "w": 4,
+        "h": 6
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(kamailio_stir_inbound_verstat{verstat=\"TN-Validation-Passed\"}[1h])) / clamp_min(sum(increase(kamailio_stir_inbound_verstat[1h])), 1)",
+          "instant": true,
+          "range": false,
+          "legendFormat": "passed",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "voip-metrics-vm"
+          }
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 1,
+          "min": 0,
+          "max": 1,
+          "noValue": "—",
+          "mappings": [],
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.2
+              },
+              {
+                "color": "green",
+                "value": 0.5
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 44,
+      "type": "stat",
+      "title": "STIR · Trust bundle age",
+      "description": "Age of the last VERIFIED STI-PA trust-bundle install: time() - stir_trust_bundle_installed_timestamp_seconds (textfile metric from refresh-stir-trust-bundle / stir-trust-lib.sh, exported by the services-VM node_exporter --collector.textfile.directory=/var/lib/stir/metrics — the only textfile emitter today; max() keeps this a single box if another exporter ever appears). Same 40d-watchdog bands as stir-shaken id 201: green < 30d · orange >= 30d · red >= 40d (bundle refresh pipeline stuck).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "voip-metrics-vm"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 32,
+        "w": 4,
+        "h": 6
+      },
+      "targets": [
+        {
+          "expr": "time() - max(stir_trust_bundle_installed_timestamp_seconds)",
+          "instant": true,
+          "range": false,
+          "legendFormat": "bundle age",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "voip-metrics-vm"
+          }
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "decimals": 1,
+          "noValue": "no data",
+          "mappings": [],
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 2592000
+              },
+              {
+                "color": "red",
+                "value": 3456000
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 45,
+      "type": "stat",
+      "title": "STIR · Leaf cert — time left",
+      "description": "Time until our SHAKEN signing leaf (CN=SHAKEN 8052, Neustar/TruContact-issued) expires: min(stir_leaf_cert_expiry_timestamp_seconds) - time() (same textfile source as the bundle-age tile; min() = worst reporter). Expires 2027-05-08, renewal due ~2027-04-01. Thresholds per stir-shaken id 206: red expired/none · orange < 30d · green >= 60d. If this goes orange, start the Neustar renewal NOW — an expired leaf means every outbound call goes out unsigned.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "voip-metrics-vm"
+      },
+      "gridPos": {
+        "x": 20,
+        "y": 32,
+        "w": 4,
+        "h": 6
+      },
+      "targets": [
+        {
+          "expr": "min(stir_leaf_cert_expiry_timestamp_seconds) - time()",
+          "instant": true,
+          "range": false,
+          "legendFormat": "leaf expiry",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "voip-metrics-vm"
+          }
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "decimals": 1,
+          "noValue": "no data",
+          "mappings": [],
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 2592000
+              },
+              {
+                "color": "green",
+                "value": 5184000
+              }
+            ]
+          }
+        },
+        "overrides": []
       }
     }
   ]
