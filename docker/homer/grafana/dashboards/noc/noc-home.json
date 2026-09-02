@@ -52,7 +52,7 @@
       "type": "dashboards"
     }
   ],
-  "description": "NOC home / wall-TV command board — Live System Status. Top row: the US datacenter map, full width. Bottom band (left→right): per-zone SIP VIP reachability + servers up/down (East · West · Central), carrier trunks (Bandwidth Dallas / LA, Sinch Denver / Chicago origination), platform services. 🟢 green = healthy · 🔴 red = attention · 🟠 orange = stale probe. Zone tiles: VIP reachable (uptime pass-fraction ≥ 99.9%) + one UP/DOWN box per server (SBC-1 · SBC-2 · FS-1 · FS-2 · SVCS/DB) pinned to the expected fleet — a server that stops reporting goes RED, it never vanishes. Carrier tiles: UP / DOWN from live Kamailio-dispatcher OPTIONS probes + inbound calls landed in the last hour. Platform services: UP / DOWN from live blackbox probes. Map: 🟢 datacenter (dot size = calls / hour) · 🔺 carrier trunk (Bandwidth 🟢 up · Sinch 🔵 up · 🔴 down) — includes the two Sinch termination trunks (Atlanta LD, Denver TF; the two Denver triangles are offset — orig west / label above, TF east / label below). Below the band, three full-width KPI rows: Traffic (active calls · CPS · calls 1h/today · ASR · on-net %), Voice (MOS · loss · peak jitter · R-factor · ACD · PDD-proxy p95), and STIR/SHAKEN (signed % · A share · div chains · inbound verified % · trust-bundle age · leaf-cert time left). Hover any tile or map marker for detail. Landing page for the Production NOC.",
+  "description": "NOC home / wall-TV command board — Live System Status. Top row: the US datacenter map, full width. Bottom band (left→right): per-zone SIP VIP reachability + servers up/down (East · West · Central), carrier trunks (Bandwidth Dallas / LA, Sinch Denver / Chicago origination), platform services. 🟢 green = healthy · 🔴 red = attention · 🟠 orange = stale probe. Zone tiles: VIP reachable (uptime pass-fraction ≥ 99.9%) + one UP/DOWN box per server (SBC-1 · SBC-2 · FS-1 · FS-2 · SVCS/DB) pinned to the expected fleet — a server that stops reporting goes RED, it never vanishes. Carrier tiles: UP / DOWN from live Kamailio-dispatcher OPTIONS probes + inbound calls landed in the last hour. Platform services: UP / DOWN from live blackbox probes. Map: 🟢 datacenter (server-rack icon, size = calls / hour) · 📡 carrier trunk (signal-tower icon — Bandwidth 🟢 up · Sinch 🔵 up · 🔴 down) — includes the two Sinch termination trunks (Atlanta LD, Denver TF; the two Denver tower markers are offset — orig west / label above, TF east / label below). Below the band, three full-width KPI rows: Traffic (active calls · CPS · calls 1h/today · ASR · on-net %), Voice (MOS · loss · peak jitter · R-factor · ACD · PDD-proxy p95), and STIR/SHAKEN (signed % · A share · div chains · inbound verified % · trust-bundle age · leaf-cert time left). Hover any tile or map marker for detail. Landing page for the Production NOC.",
   "panels": [
     {
       "id": 2,
@@ -1712,7 +1712,7 @@
       "id": 11,
       "type": "geomap",
       "title": "US datacenters · live regions, carriers & traffic",
-      "description": "Geographic view of the 3 GCP datacenters (green, sized by calls in the last hour) and every carrier trunk — Bandwidth (Dallas primary, LA secondary) plus all 4 Sinch PoPs: origination Denver (TG DNVTCOZIGR2_3278) and Chicago (CHCGIL24GR4_7412), termination Atlanta LD (ATLNGAQSGR2_7214) and Denver TF (DNVTCOZIGR2_3282, toll-free 8YY only, priority below Bandwidth). Bandwidth + Sinch TERMINATION triangles are colored by the SBCs' live Kamailio-dispatcher OPTIONS probes (carrier_trunk_health): Bandwidth GREEN when up, Sinch termination BLUE when up; RED when the trunk is down on every SBC or its status is stale (no fresh probe in 90s) / not yet reported. Sinch ORIGINATION triangles (Denver orig + Chicago) use passive-OR-probe health instead (migration 45): BLUE when the probe is answered OR inbound calls landed via that PoP in the last 60 min, YELLOW 'PASSIVE' when neither — these orig-only TGs were provisioned Sinch→us and do not answer OPTIONS from unregistered IPs, so 'down' is unknowable and never rendered red; RED on an orig triangle only means stale/unreported monitoring. Denver hosts BOTH a Sinch origination PoP and the TF termination trunk — the two triangles are offset slightly (orig west / label above, TF east / label below) so both stay legible at TV distance. Probe coloring is proactive and independent of call traffic, so a dead probed carrier shows even at zero volume. Hover a triangle for status, SBCs up / reporting, seconds since last probe, and (origination) inbound calls in the last hour. Datacenter up/down, VIP reachability and servers up/down are the zone tiles in the band below the map; Bandwidth + Sinch origination health/volume are the carrier tiles in that band.",
+      "description": "Geographic view of the 3 GCP datacenters (green server-rack icons, sized by calls in the last hour) and every carrier trunk (signal-tower icons) — Bandwidth (Dallas primary, LA secondary) plus all 4 Sinch PoPs: origination Denver (TG DNVTCOZIGR2_3278) and Chicago (CHCGIL24GR4_7412), termination Atlanta LD (ATLNGAQSGR2_7214) and Denver TF (DNVTCOZIGR2_3282, toll-free 8YY only, priority below Bandwidth). Bandwidth + Sinch TERMINATION tower markers are colored by the SBCs' live Kamailio-dispatcher OPTIONS probes (carrier_trunk_health): Bandwidth GREEN when up, Sinch termination BLUE when up; RED when the trunk is down on every SBC or its status is stale (no fresh probe in 90s) / not yet reported. Sinch ORIGINATION tower markers (Denver orig + Chicago) use passive-OR-probe health instead (migration 45): BLUE when the probe is answered OR inbound calls landed via that PoP in the last 60 min, YELLOW 'PASSIVE' when neither — these orig-only TGs were provisioned Sinch→us and do not answer OPTIONS from unregistered IPs, so 'down' is unknowable and never rendered red; RED on an orig tower marker only means stale/unreported monitoring. Denver hosts BOTH a Sinch origination PoP and the TF termination trunk — the two tower markers are offset slightly (orig west / label above, TF east / label below) so both stay legible at TV distance. Probe coloring is proactive and independent of call traffic, so a dead probed carrier shows even at zero volume. Hover a tower marker for status, SBCs up / reporting, seconds since last probe, and (origination) inbound calls in the last hour. Datacenter up/down, VIP reachability and servers up/down are the zone tiles in the band below the map; Bandwidth + Sinch origination health/volume are the carrier tiles in that band.",
       "datasource": {
         "type": "postgres",
         "uid": "voip-cdr-pg"
@@ -1814,7 +1814,7 @@
               "style": {
                 "size": {
                   "field": "calls_1h",
-                  "min": 9,
+                  "min": 14,
                   "max": 26
                 },
                 "color": {
@@ -1823,7 +1823,7 @@
                 "opacity": 0.85,
                 "symbol": {
                   "mode": "fixed",
-                  "fixed": "img/icons/marker/circle.svg"
+                  "fixed": "img/icons/custom/datacenter.svg"
                 },
                 "text": {
                   "mode": "field",
@@ -1855,7 +1855,7 @@
               "showLegend": false,
               "style": {
                 "size": {
-                  "fixed": 9,
+                  "fixed": 12,
                   "min": 2,
                   "max": 15
                 },
@@ -1865,7 +1865,7 @@
                 "opacity": 0.9,
                 "symbol": {
                   "mode": "fixed",
-                  "fixed": "img/icons/marker/triangle.svg"
+                  "fixed": "img/icons/custom/signal-tower.svg"
                 },
                 "text": {
                   "mode": "field",
@@ -1897,7 +1897,7 @@
               "showLegend": false,
               "style": {
                 "size": {
-                  "fixed": 9,
+                  "fixed": 12,
                   "min": 2,
                   "max": 15
                 },
@@ -1907,7 +1907,7 @@
                 "opacity": 0.9,
                 "symbol": {
                   "mode": "fixed",
-                  "fixed": "img/icons/marker/triangle.svg"
+                  "fixed": "img/icons/custom/signal-tower.svg"
                 },
                 "text": {
                   "mode": "field",
@@ -1939,7 +1939,7 @@
               "showLegend": false,
               "style": {
                 "size": {
-                  "fixed": 9,
+                  "fixed": 12,
                   "min": 2,
                   "max": 15
                 },
@@ -1949,7 +1949,7 @@
                 "opacity": 0.9,
                 "symbol": {
                   "mode": "fixed",
-                  "fixed": "img/icons/marker/triangle.svg"
+                  "fixed": "img/icons/custom/signal-tower.svg"
                 },
                 "text": {
                   "mode": "field",

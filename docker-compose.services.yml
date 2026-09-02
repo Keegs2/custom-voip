@@ -336,6 +336,9 @@ services:
       - grafana_data:/var/lib/grafana
       - ./docker/homer/grafana/provisioning:/etc/grafana/provisioning
       - ./docker/homer/grafana/dashboards:/var/lib/grafana/dashboards
+      # Custom NOC geomap marker glyphs (datacenter rack / signal tower) —
+      # health-tinted by Grafana, referenced as img/icons/custom/<name>.svg.
+      - ./docker/homer/grafana/icons:/usr/share/grafana/public/img/icons/custom:ro
       # (No SA-key mount — GCP Monitoring uses keyless GCE metadata auth via the
       # services VM's attached service account. See gcp-monitoring.yml.)
     depends_on:
