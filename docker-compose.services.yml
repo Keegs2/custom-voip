@@ -569,7 +569,7 @@ services:
       - "-envflag.enable=true"
     environment:
       - ZONE=${METRICS_ZONE}
-      - INSTANCE_ID=${SERVICES_NODE_ID}
+      - INSTANCE_ID=${SERVICES_NODE_ID:-east-services}
     volumes:
       - ./docker/vmagent/scrape-services.yml:/etc/vmagent/scrape-services.yml:ro
       - vmagent_data:/vmagent-data
