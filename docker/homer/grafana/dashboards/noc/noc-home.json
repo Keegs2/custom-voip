@@ -158,7 +158,7 @@
       "id": 8,
       "type": "stat",
       "title": "East · us-east1",
-      "description": "East datacenter status. Headline: SIP VIP 34.24.133.82:5060 carrier reachability (GCM uptime check pass-fraction; Reachable >= 99.9%). Below: one box per server — SBC-1/SBC-2 (Kamailio, east-sbc-1/east-sbc-2), FS-1 (fs-media-v2) / FS-2 (east-fs-2 media-HA hot standby), SVCS (services VM: PG primary + API + UI + Homer, reporting_instance services (the value prod .env actually sets; east-services and empty-label accepted for tolerance)), DB (east-db-standby). Per-server source: VictoriaMetrics up{job=\"node\"} per reporting_instance, freshness-clamped with last_over_time(...[2m]) and pinned to the expected fleet via `or vector(0)` per server — a VM whose metrics go silent (VM dead, node_exporter dead, or vmagent dark/wedged-buffering > 2m) renders a RED DOWN box, it never vanishes. (Plain `up` would return a stale value for VictoriaMetrics' 5m lookback and then disappear entirely; the [2m] clamp turns 'silent 2m' into absent and the synthetic vector(0) arm turns absent into 0=DOWN — the two compose rather than fight.) Canonical job is node_exporter (present on every VM) so each server yields exactly one box; max() guards against dupes. Boxes are VM/metrics-plane liveness, NOT SIP election — the active/standby SBC + FS election rows live on Traffic & Status. EXCEPTION — the DB box: east-db-standby runs NO metrics plane (docker-compose.db.yml covers west-db/central-db only; no vmagent/node_exporter there), so instead of faking an `up` series its box is driven live from the East PRIMARY via voip-cdr-pg: slot east_standby active AND streaming in pg_stat_replication — an honest, arguably stronger signal (catches Postgres down even while the VM is up, and detection is instant, no staleness window). If the primary itself is unreachable the whole query errors loudly rather than showing a stale green. East holds the DB primary + API + UI. SVCS-box label tolerance: the services vmagent stamps zone/reporting_instance from METRICS_ZONE/SERVICES_NODE_ID env; a prod .env that predates the compose default (INSTANCE_ID=${SERVICES_NODE_ID:-services (the value prod .env actually sets; east-services and empty-label accepted for tolerance)}) stamps EMPTY labels, so the SVCS target uses empty-tolerant anchored regexes — reporting_instance=~\"services (the value prod .env actually sets; east-services and empty-label accepted for tolerance)|\" and zone=~\"east|\" each match the proper value OR the empty/absent label — green both before and after the vmagent recreate picks up the default. Safe because nothing else can match: every other job=\"node\" series in east carries a proven-live non-empty reporting_instance (the SBC/FS values are exercised daily by the election rows on Traffic & Status), west/central series carry zone=\"west\"/\"central\", and east-db-standby publishes no node series at all. Same [2m] freshness clamp + `or vector(0)` DOWN-pinning as the sibling boxes.",
+      "description": "East datacenter status. Headline: SIP VIP 34.24.133.82:5060 carrier reachability (GCM uptime check pass-fraction; Reachable >= 99.9%). Below: one box per server — SBC-1/SBC-2 (Kamailio, east-sbc-1/east-sbc-2), FS-1 (fs-media-v2) / FS-2 (east-fs-2 media-HA hot standby), SVCS (services VM: PG primary + API + UI + Homer, reporting_instance east-services), DB (east-db-standby). Per-server source: VictoriaMetrics up{job=\"node\"} per reporting_instance, freshness-clamped with last_over_time(...[2m]) and pinned to the expected fleet via `or vector(0)` per server — a VM whose metrics go silent (VM dead, node_exporter dead, or vmagent dark/wedged-buffering > 2m) renders a RED DOWN box, it never vanishes. (Plain `up` would return a stale value for VictoriaMetrics' 5m lookback and then disappear entirely; the [2m] clamp turns 'silent 2m' into absent and the synthetic vector(0) arm turns absent into 0=DOWN — the two compose rather than fight.) Canonical job is node_exporter (present on every VM) so each server yields exactly one box; max() guards against dupes. Boxes are VM/metrics-plane liveness, NOT SIP election — the active/standby SBC + FS election rows live on Traffic & Status. EXCEPTION — the DB box: east-db-standby runs NO metrics plane (docker-compose.db.yml covers west-db/central-db only; no vmagent/node_exporter there), so instead of faking an `up` series its box is driven live from the East PRIMARY via voip-cdr-pg: slot east_standby active AND streaming in pg_stat_replication — an honest, arguably stronger signal (catches Postgres down even while the VM is up, and detection is instant, no staleness window). If the primary itself is unreachable the whole query errors loudly rather than showing a stale green. East holds the DB primary + API + UI. SVCS-box label tolerance: the services vmagent stamps zone/reporting_instance from METRICS_ZONE/SERVICES_NODE_ID env; a prod .env that predates the compose default (INSTANCE_ID=${SERVICES_NODE_ID:-east-services}) stamps EMPTY labels, so the SVCS target uses empty-tolerant anchored regexes — reporting_instance=~\"east-services|\" and zone=~\"east|\" each match the proper value OR the empty/absent label — green both before and after the vmagent recreate picks up the default. Safe because nothing else can match: every other job=\"node\" series in east carries a proven-live non-empty reporting_instance (the SBC/FS values are exercised daily by the election rows on Traffic & Status), west/central series carry zone=\"west\"/\"central\", and east-db-standby publishes no node series at all. Same [2m] freshness clamp + `or vector(0)` DOWN-pinning as the sibling boxes. MAINT (YELLOW, value 2) = intentional maintenance drain, NOT a fault. SBC boxes fold in kamailio_maint_drain{reporting_instance=...} (gauge refreshed every few seconds by the drain plane's /healthz handler, [2m]-freshness-clamped and `or vector(0)`-pinned like the up terms); FS boxes fold in fs_dispatcher_disabled{fs_ip=...} (1 iff the group-1 dispatcher destination is admin-Disabled — max() spans both of this zone's SBCs, so either SBC showing Disabled = maintenance; Active/Inactive/Trying all read 0). Per-box encoding: value = 2*maint + (1-maint)*up -> 0=DOWN red / 1=UP green / 2=MAINT yellow. Staleness ordering is deliberate: a fully dead VM goes stale on BOTH series, so the maint term collapses to 0 via the or-vector arm and the box still reads DOWN — a dead node can never fake MAINT; conversely a drained node whose kamailio (SBC) or dispatcher exporters (FS) later go dark degrades from MAINT back to the plain UP/DOWN reading within 2m. A zone taken intentionally dark shows BOTH SBC boxes MAINT yellow (and the FS boxes too if the media plane is drained) — yellow != broken. VIP sub-stat and DB box are unchanged by the maint fold.",
       "datasource": {
         "type": "datasource",
         "uid": "-- Mixed --"
@@ -204,7 +204,7 @@
             "type": "prometheus",
             "uid": "voip-metrics-vm"
           },
-          "expr": "max(last_over_time(up{zone=\"east\", job=\"node\", reporting_instance=\"east-sbc-1\"}[2m])) or vector(0)",
+          "expr": "2 * (clamp_max(max(last_over_time(kamailio_maint_drain{reporting_instance=\"east-sbc-1\"}[2m])) or vector(0), 1)) + (1 - (clamp_max(max(last_over_time(kamailio_maint_drain{reporting_instance=\"east-sbc-1\"}[2m])) or vector(0), 1))) * (max(last_over_time(up{zone=\"east\", job=\"node\", reporting_instance=\"east-sbc-1\"}[2m])) or vector(0))",
           "instant": true,
           "range": false,
           "format": "time_series",
@@ -216,7 +216,7 @@
             "type": "prometheus",
             "uid": "voip-metrics-vm"
           },
-          "expr": "max(last_over_time(up{zone=\"east\", job=\"node\", reporting_instance=\"east-sbc-2\"}[2m])) or vector(0)",
+          "expr": "2 * (clamp_max(max(last_over_time(kamailio_maint_drain{reporting_instance=\"east-sbc-2\"}[2m])) or vector(0), 1)) + (1 - (clamp_max(max(last_over_time(kamailio_maint_drain{reporting_instance=\"east-sbc-2\"}[2m])) or vector(0), 1))) * (max(last_over_time(up{zone=\"east\", job=\"node\", reporting_instance=\"east-sbc-2\"}[2m])) or vector(0))",
           "instant": true,
           "range": false,
           "format": "time_series",
@@ -228,7 +228,7 @@
             "type": "prometheus",
             "uid": "voip-metrics-vm"
           },
-          "expr": "max(last_over_time(up{zone=\"east\", job=\"node\", reporting_instance=\"fs-media-v2\"}[2m])) or vector(0)",
+          "expr": "2 * (clamp_max(max(last_over_time(fs_dispatcher_disabled{fs_ip=\"192.168.10.2\"}[2m])) or vector(0), 1)) + (1 - (clamp_max(max(last_over_time(fs_dispatcher_disabled{fs_ip=\"192.168.10.2\"}[2m])) or vector(0), 1))) * (max(last_over_time(up{zone=\"east\", job=\"node\", reporting_instance=\"fs-media-v2\"}[2m])) or vector(0))",
           "instant": true,
           "range": false,
           "format": "time_series",
@@ -240,7 +240,7 @@
             "type": "prometheus",
             "uid": "voip-metrics-vm"
           },
-          "expr": "max(last_over_time(up{zone=\"east\", job=\"node\", reporting_instance=\"east-fs-2\"}[2m])) or vector(0)",
+          "expr": "2 * (clamp_max(max(last_over_time(fs_dispatcher_disabled{fs_ip=\"192.168.10.3\"}[2m])) or vector(0), 1)) + (1 - (clamp_max(max(last_over_time(fs_dispatcher_disabled{fs_ip=\"192.168.10.3\"}[2m])) or vector(0), 1))) * (max(last_over_time(up{zone=\"east\", job=\"node\", reporting_instance=\"east-fs-2\"}[2m])) or vector(0))",
           "instant": true,
           "range": false,
           "format": "time_series",
@@ -305,6 +305,11 @@
                   "text": "UP",
                   "color": "green",
                   "index": 1
+                },
+                "2": {
+                  "text": "MAINT",
+                  "color": "yellow",
+                  "index": 3
                 }
               }
             },
@@ -333,6 +338,10 @@
               {
                 "color": "green",
                 "value": 1
+              },
+              {
+                "color": "yellow",
+                "value": 2
               }
             ]
           }
@@ -430,7 +439,7 @@
       "id": 9,
       "type": "stat",
       "title": "West · us-west1",
-      "description": "West datacenter status. Headline: SIP VIP 35.252.214.40:5060 carrier reachability (GCM uptime check pass-fraction; Reachable >= 99.9%). Below: one box per server — SBC-1/SBC-2 (Kamailio, west-sbc-1/west-sbc-2), FS-1 (west-fs) / FS-2 (west-fs-2 media-HA hot standby), DB (west-db PG replica + PgBouncer). Per-server source: VictoriaMetrics up{job=\"node\"} per reporting_instance, freshness-clamped with last_over_time(...[2m]) and pinned to the expected fleet via `or vector(0)` per server — a VM whose metrics go silent (VM dead, node_exporter dead, or vmagent dark/wedged-buffering > 2m) renders a RED DOWN box, it never vanishes. (Plain `up` would return a stale value for VictoriaMetrics' 5m lookback and then disappear entirely; the [2m] clamp turns 'silent 2m' into absent and the synthetic vector(0) arm turns absent into 0=DOWN — the two compose rather than fight.) Canonical job is node_exporter (present on every VM) so each server yields exactly one box; max() guards against dupes. Boxes are VM/metrics-plane liveness, NOT SIP election — the active/standby SBC + FS election rows live on Traffic & Status. EXCEPTION — the DB box: west-db runs NO metrics plane today (docker-compose.db.yml was never deployed there), so up{job=\"node\", reporting_instance=\"west-db\"} does not exist and would render a permanent false DOWN. Instead the box is driven live from the East PRIMARY via voip-cdr-pg: slot west_standby active AND streaming in pg_stat_replication — the exact same source of truth as the DB & Replication board (and the East DB box), so this box always agrees with it. It is an honest, arguably stronger signal (catches Postgres down even while the VM is up; detection is instant, no staleness window). If the primary itself is unreachable the query errors loudly rather than showing a stale green. Host-level metrics for west-db become available if/when docker-compose.db.yml is deployed there; until then replica-streaming-per-the-primary IS the West DB truth.",
+      "description": "West datacenter status. Headline: SIP VIP 35.252.214.40:5060 carrier reachability (GCM uptime check pass-fraction; Reachable >= 99.9%). Below: one box per server — SBC-1/SBC-2 (Kamailio, west-sbc-1/west-sbc-2), FS-1 (west-fs) / FS-2 (west-fs-2 media-HA hot standby), DB (west-db PG replica + PgBouncer). Per-server source: VictoriaMetrics up{job=\"node\"} per reporting_instance, freshness-clamped with last_over_time(...[2m]) and pinned to the expected fleet via `or vector(0)` per server — a VM whose metrics go silent (VM dead, node_exporter dead, or vmagent dark/wedged-buffering > 2m) renders a RED DOWN box, it never vanishes. (Plain `up` would return a stale value for VictoriaMetrics' 5m lookback and then disappear entirely; the [2m] clamp turns 'silent 2m' into absent and the synthetic vector(0) arm turns absent into 0=DOWN — the two compose rather than fight.) Canonical job is node_exporter (present on every VM) so each server yields exactly one box; max() guards against dupes. Boxes are VM/metrics-plane liveness, NOT SIP election — the active/standby SBC + FS election rows live on Traffic & Status. EXCEPTION — the DB box: west-db runs NO metrics plane today (docker-compose.db.yml was never deployed there), so up{job=\"node\", reporting_instance=\"west-db\"} does not exist and would render a permanent false DOWN. Instead the box is driven live from the East PRIMARY via voip-cdr-pg: slot west_standby active AND streaming in pg_stat_replication — the exact same source of truth as the DB & Replication board (and the East DB box), so this box always agrees with it. It is an honest, arguably stronger signal (catches Postgres down even while the VM is up; detection is instant, no staleness window). If the primary itself is unreachable the query errors loudly rather than showing a stale green. Host-level metrics for west-db become available if/when docker-compose.db.yml is deployed there; until then replica-streaming-per-the-primary IS the West DB truth. MAINT (YELLOW, value 2) = intentional maintenance drain, NOT a fault. SBC boxes fold in kamailio_maint_drain{reporting_instance=...} (gauge refreshed every few seconds by the drain plane's /healthz handler, [2m]-freshness-clamped and `or vector(0)`-pinned like the up terms); FS boxes fold in fs_dispatcher_disabled{fs_ip=...} (1 iff the group-1 dispatcher destination is admin-Disabled — max() spans both of this zone's SBCs, so either SBC showing Disabled = maintenance; Active/Inactive/Trying all read 0). Per-box encoding: value = 2*maint + (1-maint)*up -> 0=DOWN red / 1=UP green / 2=MAINT yellow. Staleness ordering is deliberate: a fully dead VM goes stale on BOTH series, so the maint term collapses to 0 via the or-vector arm and the box still reads DOWN — a dead node can never fake MAINT; conversely a drained node whose kamailio (SBC) or dispatcher exporters (FS) later go dark degrades from MAINT back to the plain UP/DOWN reading within 2m. A zone taken intentionally dark shows BOTH SBC boxes MAINT yellow (and the FS boxes too if the media plane is drained) — yellow != broken. VIP sub-stat and DB box are unchanged by the maint fold.",
       "datasource": {
         "type": "datasource",
         "uid": "-- Mixed --"
@@ -476,7 +485,7 @@
             "type": "prometheus",
             "uid": "voip-metrics-vm"
           },
-          "expr": "max(last_over_time(up{zone=\"west\", job=\"node\", reporting_instance=\"west-sbc-1\"}[2m])) or vector(0)",
+          "expr": "2 * (clamp_max(max(last_over_time(kamailio_maint_drain{reporting_instance=\"west-sbc-1\"}[2m])) or vector(0), 1)) + (1 - (clamp_max(max(last_over_time(kamailio_maint_drain{reporting_instance=\"west-sbc-1\"}[2m])) or vector(0), 1))) * (max(last_over_time(up{zone=\"west\", job=\"node\", reporting_instance=\"west-sbc-1\"}[2m])) or vector(0))",
           "instant": true,
           "range": false,
           "format": "time_series",
@@ -488,7 +497,7 @@
             "type": "prometheus",
             "uid": "voip-metrics-vm"
           },
-          "expr": "max(last_over_time(up{zone=\"west\", job=\"node\", reporting_instance=\"west-sbc-2\"}[2m])) or vector(0)",
+          "expr": "2 * (clamp_max(max(last_over_time(kamailio_maint_drain{reporting_instance=\"west-sbc-2\"}[2m])) or vector(0), 1)) + (1 - (clamp_max(max(last_over_time(kamailio_maint_drain{reporting_instance=\"west-sbc-2\"}[2m])) or vector(0), 1))) * (max(last_over_time(up{zone=\"west\", job=\"node\", reporting_instance=\"west-sbc-2\"}[2m])) or vector(0))",
           "instant": true,
           "range": false,
           "format": "time_series",
@@ -500,7 +509,7 @@
             "type": "prometheus",
             "uid": "voip-metrics-vm"
           },
-          "expr": "max(last_over_time(up{zone=\"west\", job=\"node\", reporting_instance=\"west-fs\"}[2m])) or vector(0)",
+          "expr": "2 * (clamp_max(max(last_over_time(fs_dispatcher_disabled{fs_ip=\"192.168.20.2\"}[2m])) or vector(0), 1)) + (1 - (clamp_max(max(last_over_time(fs_dispatcher_disabled{fs_ip=\"192.168.20.2\"}[2m])) or vector(0), 1))) * (max(last_over_time(up{zone=\"west\", job=\"node\", reporting_instance=\"west-fs\"}[2m])) or vector(0))",
           "instant": true,
           "range": false,
           "format": "time_series",
@@ -512,7 +521,7 @@
             "type": "prometheus",
             "uid": "voip-metrics-vm"
           },
-          "expr": "max(last_over_time(up{zone=\"west\", job=\"node\", reporting_instance=\"west-fs-2\"}[2m])) or vector(0)",
+          "expr": "2 * (clamp_max(max(last_over_time(fs_dispatcher_disabled{fs_ip=\"192.168.20.3\"}[2m])) or vector(0), 1)) + (1 - (clamp_max(max(last_over_time(fs_dispatcher_disabled{fs_ip=\"192.168.20.3\"}[2m])) or vector(0), 1))) * (max(last_over_time(up{zone=\"west\", job=\"node\", reporting_instance=\"west-fs-2\"}[2m])) or vector(0))",
           "instant": true,
           "range": false,
           "format": "time_series",
@@ -565,6 +574,11 @@
                   "text": "UP",
                   "color": "green",
                   "index": 1
+                },
+                "2": {
+                  "text": "MAINT",
+                  "color": "yellow",
+                  "index": 3
                 }
               }
             },
@@ -593,6 +607,10 @@
               {
                 "color": "green",
                 "value": 1
+              },
+              {
+                "color": "yellow",
+                "value": 2
               }
             ]
           }
@@ -690,7 +708,7 @@
       "id": 10,
       "type": "stat",
       "title": "Central · us-central1",
-      "description": "Central datacenter status. Headline: SIP VIP 35.253.133.230:5060 carrier reachability (GCM uptime check pass-fraction; Reachable >= 99.9%). Below: one box per server — SBC-1/SBC-2 (Kamailio, central-sbc-1/central-sbc-2), FS-1 (central-fs) / FS-2 (central-fs-2 media-HA hot standby), DB (central-db PG replica + PgBouncer). Per-server source: VictoriaMetrics up{job=\"node\"} per reporting_instance, freshness-clamped with last_over_time(...[2m]) and pinned to the expected fleet via `or vector(0)` per server — a VM whose metrics go silent (VM dead, node_exporter dead, or vmagent dark/wedged-buffering > 2m) renders a RED DOWN box, it never vanishes. (Plain `up` would return a stale value for VictoriaMetrics' 5m lookback and then disappear entirely; the [2m] clamp turns 'silent 2m' into absent and the synthetic vector(0) arm turns absent into 0=DOWN — the two compose rather than fight.) Canonical job is node_exporter (present on every VM) so each server yields exactly one box; max() guards against dupes. Boxes are VM/metrics-plane liveness, NOT SIP election — the active/standby SBC + FS election rows live on Traffic & Status. EXCEPTION — the DB box: central-db runs NO metrics plane today (docker-compose.db.yml was never deployed there), so up{job=\"node\", reporting_instance=\"central-db\"} does not exist and would render a permanent false DOWN. Instead the box is driven live from the East PRIMARY via voip-cdr-pg: slot central_standby active AND streaming in pg_stat_replication — the exact same source of truth as the DB & Replication board (and the East DB box), so this box always agrees with it. It is an honest, arguably stronger signal (catches Postgres down even while the VM is up; detection is instant, no staleness window). If the primary itself is unreachable the query errors loudly rather than showing a stale green. Host-level metrics for central-db become available if/when docker-compose.db.yml is deployed there; until then replica-streaming-per-the-primary IS the Central DB truth.",
+      "description": "Central datacenter status. Headline: SIP VIP 35.253.133.230:5060 carrier reachability (GCM uptime check pass-fraction; Reachable >= 99.9%). Below: one box per server — SBC-1/SBC-2 (Kamailio, central-sbc-1/central-sbc-2), FS-1 (central-fs) / FS-2 (central-fs-2 media-HA hot standby), DB (central-db PG replica + PgBouncer). Per-server source: VictoriaMetrics up{job=\"node\"} per reporting_instance, freshness-clamped with last_over_time(...[2m]) and pinned to the expected fleet via `or vector(0)` per server — a VM whose metrics go silent (VM dead, node_exporter dead, or vmagent dark/wedged-buffering > 2m) renders a RED DOWN box, it never vanishes. (Plain `up` would return a stale value for VictoriaMetrics' 5m lookback and then disappear entirely; the [2m] clamp turns 'silent 2m' into absent and the synthetic vector(0) arm turns absent into 0=DOWN — the two compose rather than fight.) Canonical job is node_exporter (present on every VM) so each server yields exactly one box; max() guards against dupes. Boxes are VM/metrics-plane liveness, NOT SIP election — the active/standby SBC + FS election rows live on Traffic & Status. EXCEPTION — the DB box: central-db runs NO metrics plane today (docker-compose.db.yml was never deployed there), so up{job=\"node\", reporting_instance=\"central-db\"} does not exist and would render a permanent false DOWN. Instead the box is driven live from the East PRIMARY via voip-cdr-pg: slot central_standby active AND streaming in pg_stat_replication — the exact same source of truth as the DB & Replication board (and the East DB box), so this box always agrees with it. It is an honest, arguably stronger signal (catches Postgres down even while the VM is up; detection is instant, no staleness window). If the primary itself is unreachable the query errors loudly rather than showing a stale green. Host-level metrics for central-db become available if/when docker-compose.db.yml is deployed there; until then replica-streaming-per-the-primary IS the Central DB truth. MAINT (YELLOW, value 2) = intentional maintenance drain, NOT a fault. SBC boxes fold in kamailio_maint_drain{reporting_instance=...} (gauge refreshed every few seconds by the drain plane's /healthz handler, [2m]-freshness-clamped and `or vector(0)`-pinned like the up terms); FS boxes fold in fs_dispatcher_disabled{fs_ip=...} (1 iff the group-1 dispatcher destination is admin-Disabled — max() spans both of this zone's SBCs, so either SBC showing Disabled = maintenance; Active/Inactive/Trying all read 0). Per-box encoding: value = 2*maint + (1-maint)*up -> 0=DOWN red / 1=UP green / 2=MAINT yellow. Staleness ordering is deliberate: a fully dead VM goes stale on BOTH series, so the maint term collapses to 0 via the or-vector arm and the box still reads DOWN — a dead node can never fake MAINT; conversely a drained node whose kamailio (SBC) or dispatcher exporters (FS) later go dark degrades from MAINT back to the plain UP/DOWN reading within 2m. A zone taken intentionally dark shows BOTH SBC boxes MAINT yellow (and the FS boxes too if the media plane is drained) — yellow != broken. VIP sub-stat and DB box are unchanged by the maint fold.",
       "datasource": {
         "type": "datasource",
         "uid": "-- Mixed --"
@@ -736,7 +754,7 @@
             "type": "prometheus",
             "uid": "voip-metrics-vm"
           },
-          "expr": "max(last_over_time(up{zone=\"central\", job=\"node\", reporting_instance=\"central-sbc-1\"}[2m])) or vector(0)",
+          "expr": "2 * (clamp_max(max(last_over_time(kamailio_maint_drain{reporting_instance=\"central-sbc-1\"}[2m])) or vector(0), 1)) + (1 - (clamp_max(max(last_over_time(kamailio_maint_drain{reporting_instance=\"central-sbc-1\"}[2m])) or vector(0), 1))) * (max(last_over_time(up{zone=\"central\", job=\"node\", reporting_instance=\"central-sbc-1\"}[2m])) or vector(0))",
           "instant": true,
           "range": false,
           "format": "time_series",
@@ -748,7 +766,7 @@
             "type": "prometheus",
             "uid": "voip-metrics-vm"
           },
-          "expr": "max(last_over_time(up{zone=\"central\", job=\"node\", reporting_instance=\"central-sbc-2\"}[2m])) or vector(0)",
+          "expr": "2 * (clamp_max(max(last_over_time(kamailio_maint_drain{reporting_instance=\"central-sbc-2\"}[2m])) or vector(0), 1)) + (1 - (clamp_max(max(last_over_time(kamailio_maint_drain{reporting_instance=\"central-sbc-2\"}[2m])) or vector(0), 1))) * (max(last_over_time(up{zone=\"central\", job=\"node\", reporting_instance=\"central-sbc-2\"}[2m])) or vector(0))",
           "instant": true,
           "range": false,
           "format": "time_series",
@@ -760,7 +778,7 @@
             "type": "prometheus",
             "uid": "voip-metrics-vm"
           },
-          "expr": "max(last_over_time(up{zone=\"central\", job=\"node\", reporting_instance=\"central-fs\"}[2m])) or vector(0)",
+          "expr": "2 * (clamp_max(max(last_over_time(fs_dispatcher_disabled{fs_ip=\"192.168.30.2\"}[2m])) or vector(0), 1)) + (1 - (clamp_max(max(last_over_time(fs_dispatcher_disabled{fs_ip=\"192.168.30.2\"}[2m])) or vector(0), 1))) * (max(last_over_time(up{zone=\"central\", job=\"node\", reporting_instance=\"central-fs\"}[2m])) or vector(0))",
           "instant": true,
           "range": false,
           "format": "time_series",
@@ -772,7 +790,7 @@
             "type": "prometheus",
             "uid": "voip-metrics-vm"
           },
-          "expr": "max(last_over_time(up{zone=\"central\", job=\"node\", reporting_instance=\"central-fs-2\"}[2m])) or vector(0)",
+          "expr": "2 * (clamp_max(max(last_over_time(fs_dispatcher_disabled{fs_ip=\"192.168.30.3\"}[2m])) or vector(0), 1)) + (1 - (clamp_max(max(last_over_time(fs_dispatcher_disabled{fs_ip=\"192.168.30.3\"}[2m])) or vector(0), 1))) * (max(last_over_time(up{zone=\"central\", job=\"node\", reporting_instance=\"central-fs-2\"}[2m])) or vector(0))",
           "instant": true,
           "range": false,
           "format": "time_series",
@@ -825,6 +843,11 @@
                   "text": "UP",
                   "color": "green",
                   "index": 1
+                },
+                "2": {
+                  "text": "MAINT",
+                  "color": "yellow",
+                  "index": 3
                 }
               }
             },
@@ -853,6 +876,10 @@
               {
                 "color": "green",
                 "value": 1
+              },
+              {
+                "color": "yellow",
+                "value": 2
               }
             ]
           }

@@ -65,6 +65,16 @@ try:
 except ImportError:  # pragma: no cover - requests is installed in the image
     requests = None
 
+# FS-dispatcher maintenance-state exporter (:9104) — a sibling module fed from
+# THIS poller's dispatcher.list parse (push model, zero extra kamcmd calls).
+# Guarded import so the documented standalone deployment of carrier_monitor.py
+# (file copied alone, no siblings) keeps working: absent module -> the publish
+# helpers below no-op and the poller is byte-for-byte the old behavior.
+try:
+    import fsdisp_metrics
+except ImportError:  # pragma: no cover - present in the image (Dockerfile COPY)
+    fsdisp_metrics = None
+
 
 # --------------------------------------------------------------------------- #
 # Configuration (all via env; sane defaults so a missing var never crashes)
@@ -282,15 +292,17 @@ def _host_from_uri(uri: str) -> str:
     return host
 
 
-def parse_dispatcher_list(text: str):
+def parse_dispatcher_records(text: str):
     """
-    Parse `kamcmd dispatcher.list` text into a list of carrier trunk dicts
-    matching the payload contract. Returns only setid 2,3 gateways.
+    Parse `kamcmd dispatcher.list` text into RAW destination records across
+    ALL setids (the single shared parse pass — carrier reporting AND the
+    fsdisp exporter both consume its output, so ONE kamcmd invocation and ONE
+    parse serve both).
 
-    Each dict: {duid, name, ip, setid, is_up, flags}.
+    Each record: {setid, uri, flags, duid, body} (fields absent if unseen).
     Never raises — on any structural surprise it returns whatever it parsed.
     """
-    trunks = []
+    records = []
     current_setid = None
     dest = None  # accumulator for the DEST block currently being read
 
@@ -298,19 +310,7 @@ def parse_dispatcher_list(text: str):
         nonlocal dest
         if not dest:
             return
-        setid = dest.get("setid")
-        # Only carrier sets (2-5); skip FreeSWITCH (setid 1) and anything else.
-        if setid in CARRIER_SETIDS:
-            duid = dest.get("duid") or _duid_from_body(dest.get("body", ""))
-            flags = dest.get("flags", "")
-            trunks.append({
-                "duid": duid,
-                "name": friendly_name(duid) if duid else "Bandwidth (unknown)",
-                "ip": _host_from_uri(dest.get("uri", "")),
-                "setid": setid,
-                "is_up": flags_to_is_up(flags),
-                "flags": flags,
-            })
+        records.append(dest)
         dest = None
 
     # Walk every token in document order and reconstruct records by association.
@@ -339,7 +339,89 @@ def parse_dispatcher_list(text: str):
             dest.setdefault("body", m.group("body").strip())
 
     flush()  # flush the final DEST at EOF
+    return records
+
+
+def carrier_trunks_from_records(records):
+    """
+    Shape raw dispatcher records into the carrier-trunk payload-contract dicts.
+    Returns only CARRIER_SETIDS gateways (skips FreeSWITCH setid 1 and unknowns).
+
+    Each dict: {duid, name, ip, setid, is_up, flags}. Never raises.
+    """
+    trunks = []
+    for dest in records:
+        setid = dest.get("setid")
+        if setid not in CARRIER_SETIDS:
+            continue
+        duid = dest.get("duid") or _duid_from_body(dest.get("body", ""))
+        flags = dest.get("flags", "")
+        trunks.append({
+            "duid": duid,
+            "name": friendly_name(duid) if duid else "Bandwidth (unknown)",
+            "ip": _host_from_uri(dest.get("uri", "")),
+            "setid": setid,
+            "is_up": flags_to_is_up(flags),
+            "flags": flags,
+        })
     return trunks
+
+
+def parse_dispatcher_list(text: str):
+    """
+    Parse `kamcmd dispatcher.list` text into a list of carrier trunk dicts
+    matching the payload contract. Returns only carrier-setid gateways.
+
+    Each dict: {duid, name, ip, setid, is_up, flags}.
+    Never raises — on any structural surprise it returns whatever it parsed.
+    (Kept as the stable public entry point; now a thin composition of
+    parse_dispatcher_records + carrier_trunks_from_records.)
+    """
+    return carrier_trunks_from_records(parse_dispatcher_records(text))
+
+
+def fs_destinations(records):
+    """
+    Extract the dispatcher GROUP 1 (FreeSWITCH) destinations from raw records
+    for the fsdisp exporter: [{"fs_ip": <bare host from sip:IP:5080>, "flags":
+    <FLAGS>}]. Records whose URI has no parseable host are skipped (an empty
+    fs_ip label would be useless and un-alertable). Never raises.
+    """
+    out = []
+    for dest in records:
+        if dest.get("setid") != FS_SETID:
+            continue
+        fs_ip = _host_from_uri(dest.get("uri", ""))
+        if not fs_ip:
+            continue
+        out.append({"fs_ip": fs_ip, "flags": dest.get("flags", "")})
+    return out
+
+
+# --------------------------------------------------------------------------- #
+# fsdisp exporter publish hooks — fail-open bridges into fsdisp_metrics. Both
+# are no-ops when the sibling module is absent (standalone deployment) and can
+# never raise into the poll loop.
+# --------------------------------------------------------------------------- #
+
+def _fsdisp_publish(records) -> None:
+    """Push this tick's group-1 destinations to the fsdisp exporter cache."""
+    if fsdisp_metrics is None:
+        return
+    try:
+        fsdisp_metrics.update_from_destinations(fs_destinations(records))
+    except Exception as exc:  # noqa: BLE001 - metrics must never break polling
+        logging.debug("fsdisp publish failed (ignored): %s", exc)
+
+
+def _fsdisp_mark_failed() -> None:
+    """Tell the fsdisp exporter this cycle's dispatcher read/parse failed."""
+    if fsdisp_metrics is None:
+        return
+    try:
+        fsdisp_metrics.mark_scrape_failed()
+    except Exception as exc:  # noqa: BLE001 - metrics must never break polling
+        logging.debug("fsdisp mark-failed failed (ignored): %s", exc)
 
 
 # --------------------------------------------------------------------------- #
@@ -502,13 +584,22 @@ def poll_once() -> bool:
         raw = run_kamcmd_dispatcher_list()
     except Exception as exc:  # noqa: BLE001 - must never propagate
         logging.warning("dispatcher read skipped: %s", exc)
+        _fsdisp_mark_failed()
         return False
 
     try:
-        trunks = parse_dispatcher_list(raw)
+        records = parse_dispatcher_records(raw)
+        trunks = carrier_trunks_from_records(records)
     except Exception as exc:  # noqa: BLE001 - parser is defensive, belt-and-suspenders
         logging.error("failed to parse dispatcher.list: %s", exc)
+        _fsdisp_mark_failed()
         return False
+
+    # Publish the FS group-1 state to the fsdisp exporter NOW — from the SAME
+    # parsed reply, BEFORE the carrier-report gates below. The exporter's truth
+    # (fs_dispatcher_disabled / fsdisp_scrape_ok) tracks the dispatcher parse
+    # only; an empty carrier set or a failed API POST must not stale it.
+    _fsdisp_publish(records)
 
     if not trunks:
         # No carrier gateways parsed. Could be a transient startup race or a
