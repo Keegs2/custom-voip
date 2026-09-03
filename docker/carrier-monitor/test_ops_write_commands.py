@@ -103,6 +103,8 @@ _EXPECTED_WRITE_IDS = {
     "kamcmd.dispatcher.set_state",
     "kamcmd.htable.block",
     "kamcmd.htable.unblock",
+    "sbc.drain",
+    "sbc.restore",
 }
 
 
@@ -113,8 +115,9 @@ def test_write_ids_in_catalog_and_flagged():
         assert oc.is_mutating(cid), f"is_mutating({cid}) false"
     # The frozenset and the per-spec flag agree exactly.
     assert set(oc.WRITE_COMMAND_IDS) == _EXPECTED_WRITE_IDS
-    # Reads stay non-mutating.
-    for cid in ("kamcmd.dispatcher_list", "fs.status", "host.docker_ps"):
+    # Reads stay non-mutating (sbc.drain_status is the maint READ verb).
+    for cid in ("kamcmd.dispatcher_list", "fs.status", "host.docker_ps",
+                "sbc.drain_status"):
         assert oc.CATALOG[cid]["mutating"] is False
         assert not oc.is_mutating(cid)
 
@@ -131,6 +134,11 @@ def test_role_gating():
     assert not oc.is_valid_for_role("kamcmd.htable.block", oc.ROLE_FS)
     assert oc.is_valid_for_role("call.canary", oc.ROLE_FS)
     assert not oc.is_valid_for_role("call.canary", oc.ROLE_SBC)
+    # Maintenance-drain verbs are SBC-only (all three, including the read).
+    for cid in ("sbc.drain", "sbc.restore", "sbc.drain_status"):
+        assert oc.is_valid_for_role(cid, oc.ROLE_SBC)
+        assert not oc.is_valid_for_role(cid, oc.ROLE_FS)
+        assert not oc.is_valid_for_role(cid, oc.ROLE_SERVICES)
 
 
 # --------------------------------------------------------------------------- #
@@ -200,16 +208,38 @@ def test_dispatcher_set_state_rejects_bad():
 
 
 def test_htable_block_unblock_argv():
+    # FIXED 2026-09-03: htable.seti/htable.delete — sht_set/sht_rm are NOT
+    # exported RPCs in Kamailio 5.8 (live-verified 500-with-exit-0 fault).
     assert _argv_for(oc._kam_htable_block, {"key": "203.0.113.7"}) == \
-        _KAM_PREFIX + ["htable.sht_set", "blocked", "203.0.113.7", "1"]
+        _KAM_PREFIX + ["htable.seti", "blocked", "203.0.113.7", "1"]
     assert _argv_for(oc._kam_htable_unblock, {"key": "203.0.113.7"}) == \
-        _KAM_PREFIX + ["htable.sht_rm", "blocked", "203.0.113.7"]
+        _KAM_PREFIX + ["htable.delete", "blocked", "203.0.113.7"]
     # CIDR accepted + canonicalized (203.0.113.9/24 -> network 203.0.113.0/24).
     assert _argv_for(oc._kam_htable_block, {"key": "203.0.113.9/24"}) == \
-        _KAM_PREFIX + ["htable.sht_set", "blocked", "203.0.113.0/24", "1"]
+        _KAM_PREFIX + ["htable.seti", "blocked", "203.0.113.0/24", "1"]
     # IPv6 host.
     assert _argv_for(oc._kam_htable_block, {"key": "2001:db8::5"}) == \
-        _KAM_PREFIX + ["htable.sht_set", "blocked", "2001:db8::5", "1"]
+        _KAM_PREFIX + ["htable.seti", "blocked", "2001:db8::5", "1"]
+
+
+def test_htable_block_fault_scanning():
+    """Block/unblock must scan stdout for kamcmd RPC faults (exit-0 gotcha):
+    a faulted block is FAILURE; unblock's 404 not-found is idempotent OK."""
+    orig = oc._run_argv
+    try:
+        oc._run_argv = lambda argv, t: (True, 0, "error: 500 - command x not found\n", "")
+        ok, _, _, err = oc._kam_htable_block({"key": "203.0.113.7"}, 5)
+        assert ok is False and "faulted" in err
+        ok, _, _, err = oc._kam_htable_unblock({"key": "203.0.113.7"}, 5)
+        assert ok is False and "faulted" in err
+        oc._run_argv = lambda argv, t: (True, 0, "error: 404 - Key not found in htable.\n", "")
+        ok, _, out, _ = oc._kam_htable_unblock({"key": "203.0.113.7"}, 5)
+        assert ok is True and "was not blocked" in out
+        oc._run_argv = lambda argv, t: (True, 0, "", "")
+        ok, _, out, _ = oc._kam_htable_block({"key": "203.0.113.7"}, 5)
+        assert ok is True and "BLOCKED" in out
+    finally:
+        oc._run_argv = orig
 
 
 def test_htable_rejects_bad_key():
@@ -217,6 +247,157 @@ def test_htable_rejects_bad_key():
                 "; rm -rf /", "1.2.3.4; DROP"):
         _expect_valueerror(oc._kam_htable_block, {"key": bad}, f"bad key {bad!r}")
         _expect_valueerror(oc._kam_htable_unblock, {"key": bad}, f"bad key {bad!r}")
+
+
+# --------------------------------------------------------------------------- #
+# 3b) Maintenance-drain verbs (sbc.drain / sbc.restore / sbc.drain_status).
+#     PINNED CONTRACT with the ted backend:
+#       - sbc.drain success stdout contains the literal token "DRAINED"
+#       - sbc.restore success stdout contains "RESTORED"
+#       - sbc.drain_status stdout is EXACTLY "drain=<0|1> healthz=<status>"
+# --------------------------------------------------------------------------- #
+
+class _SeqArgv:
+    """Patch oc._run_argv with a SEQUENCE of canned results, recording argvs."""
+
+    def __init__(self, results):
+        self.results = list(results)
+        self.argvs = []
+
+    def __enter__(self):
+        self._orig = oc._run_argv
+
+        def seq(argv, timeout):
+            self.argvs.append([str(a) for a in argv])
+            if self.results:
+                return self.results.pop(0)
+            return True, 0, "", ""
+
+        oc._run_argv = seq
+        return self
+
+    def __exit__(self, *exc):
+        oc._run_argv = self._orig
+        return False
+
+
+# kamcmd result shapes, LIVE-VERIFIED against the 5.8 image (harness run
+# 2026-09-03): an RPC FAULT exits 0 with "error: <code> - <msg>" on STDOUT;
+# only transport failures (socket missing / Kamailio down) exit nonzero (255,
+# stderr). The verbs must therefore scan stdout for faults, not trust exit 0.
+_ABSENT_GET = (True, 0, "error: 500 - Key name doesn't exist in htable.", "")
+_ABSENT_DEL = (True, 0, "error: 404 - Key not found in htable.", "")
+_NO_TABLE = (True, 0, "error: 500 - No such htable", "")
+_CONN_DOWN = (False, 255, "",
+              "ERROR: connect_unix_sock: connect(/var/run/kamailio/kamailio_ctl): "
+              "No such file or directory [2]")
+_GET_HIT = (True, 0,
+            "{\n\titem: {\n\t\tname: drain\n\t\tvalue: 1\n\t\tflags: 0\n"
+            "\t\texpire: 2026-09-03 13:17:16\n\t}\n}", "")
+
+
+def test_maint_drain_argv_and_contract_token():
+    with _SeqArgv([(True, 0, "Ok. Key set to new value.", "")]) as cap:
+        ok, code, out, err = oc._kam_maint_drain({}, 10.0)
+    assert cap.argvs == [_KAM_PREFIX + ["htable.seti", "maint", "drain", "1"]]
+    assert ok is True and code == 0
+    assert "DRAINED" in out                      # pinned backend assertion token
+    assert "3600" in out                         # dead-man TTL surfaced
+    # kamcmd transport failure (Kamailio down) -> fail closed, NO false DRAINED.
+    with _SeqArgv([_CONN_DOWN]):
+        ok2, _c2, out2, err2 = oc._kam_maint_drain({}, 10.0)
+    assert ok2 is False and "DRAINED" not in out2
+    assert err2
+    # RPC fault with exit 0 (e.g. pre-maint cfg: "No such htable") -> NO false
+    # DRAINED either (the kamcmd exit-code gotcha).
+    with _SeqArgv([_NO_TABLE]):
+        ok3, _c3, out3, err3 = oc._kam_maint_drain({}, 10.0)
+    assert ok3 is False and "DRAINED" not in out3
+    assert "No such htable" in err3
+
+
+def test_maint_restore_argv_and_contract_token():
+    # Flag was set -> delete succeeds -> RESTORED.
+    with _SeqArgv([(True, 0, "Ok. Key deleted.", "")]) as cap:
+        ok, code, out, _err = oc._kam_maint_restore({}, 10.0)
+    assert cap.argvs == [_KAM_PREFIX + ["htable.delete", "maint", "drain"]]
+    assert ok is True and code == 0 and "RESTORED" in out
+    # Idempotent: flag absent (never set / dead-man expired) is still RESTORED
+    # (definite 404 fault, exit 0 — real shape).
+    with _SeqArgv([_ABSENT_DEL]):
+        ok2, _c2, out2, _e2 = oc._kam_maint_restore({}, 10.0)
+    assert ok2 is True and "RESTORED" in out2
+    # Kamailio unreachable -> fail CLOSED (no false RESTORED).
+    with _SeqArgv([_CONN_DOWN]):
+        ok3, _c3, out3, err3 = oc._kam_maint_restore({}, 10.0)
+    assert ok3 is False and "RESTORED" not in out3
+    assert err3
+    # Unknown fault (exit 0) -> fail closed too.
+    with _SeqArgv([_NO_TABLE]):
+        ok4, _c4, out4, _e4 = oc._kam_maint_restore({}, 10.0)
+    assert ok4 is False and "RESTORED" not in out4
+
+
+def test_maint_status_line_shape():
+    orig_probe = oc._healthz_probe
+    try:
+        # Drained SBC: flag present (real htable.get cell dump) + healthz
+        # really answering 503 DRAINING.
+        oc._healthz_probe = lambda: ("503", "DRAINING maint=1")
+        with _SeqArgv([_GET_HIT]) as cap:
+            ok, code, out, err = oc._kam_maint_status({}, 10.0)
+        assert cap.argvs == [_KAM_PREFIX + ["htable.get", "maint", "drain"]]
+        assert ok is True and code == 0
+        assert out == "drain=1 healthz=503"      # pinned single-line shape
+        assert "DRAINING" in err                 # body detail rides on stderr
+
+        # Healthy SBC: flag absent (definite 500 fault, exit 0) + healthz 200.
+        oc._healthz_probe = lambda: ("200", "OK fs_up=1")
+        with _SeqArgv([_ABSENT_GET]):
+            _ok, _c, out2, _e = oc._kam_maint_status({}, 10.0)
+        assert out2 == "drain=0 healthz=200"
+
+        # Kamailio unreachable: NEVER a false drain=0 — and healthz degrades
+        # to err rather than raising.
+        oc._healthz_probe = lambda: ("err", "healthz GET failed: refused")
+        with _SeqArgv([_CONN_DOWN]):
+            _ok, _c, out3, _e = oc._kam_maint_status({}, 10.0)
+        assert out3 == "drain=err healthz=err"
+
+        # Pre-maint config ("No such htable" fault, exit 0): err, not 0.
+        oc._healthz_probe = lambda: ("200", "OK fs_up=1")
+        with _SeqArgv([_NO_TABLE]):
+            _ok, _c, out4, _e = oc._kam_maint_status({}, 10.0)
+        assert out4 == "drain=err healthz=200"
+    finally:
+        oc._healthz_probe = orig_probe
+
+
+def test_maint_status_probe_url_resolution(tmp_path=None):
+    # Default resolution on this test box (no OPS_HEALTHZ_URL/SBC_INTERNAL_IP
+    # env, no /opt/revup/.env) must fall back to loopback.
+    assert oc.SBC_HEALTHZ_URL.endswith(":8080/healthz")
+    # Env-file parser: last assignment wins, quotes stripped, errors -> "".
+    import tempfile
+    with tempfile.NamedTemporaryFile("w", suffix=".env", delete=False) as fh:
+        fh.write("FOO=bar\nSBC_INTERNAL_IP=10.9.9.9\nSBC_INTERNAL_IP=\"10.142.0.100\"\n")
+        path = fh.name
+    try:
+        assert oc._read_env_file_var(path, "SBC_INTERNAL_IP") == "10.142.0.100"
+        assert oc._read_env_file_var(path, "NOPE") == ""
+        assert oc._read_env_file_var("/nonexistent/.env", "SBC_INTERNAL_IP") == ""
+    finally:
+        os.unlink(path)
+
+
+def test_maint_render_is_scanned_and_clean():
+    # The audit render covers all three verbs without live side effects; the
+    # drain_status render is the documented fixed string (no live HTTP at
+    # import — mirrors the call.canary precedent).
+    render = oc._render_argv_text("sbc.drain_status")
+    assert "htable.get maint drain" in render and "GET " in render
+    assert oc._render_argv_text("sbc.drain")  # builder renders under capture
+    assert oc._render_argv_text("sbc.restore")
 
 
 # --------------------------------------------------------------------------- #
@@ -351,7 +532,7 @@ def test_run_command_dispatch_write_kamcmd():
         )
     assert res["ok"] is True
     assert cap.argv == _KAM_PREFIX + [
-        "htable.sht_set", "blocked", "198.51.100.4", "1"
+        "htable.seti", "blocked", "198.51.100.4", "1"
     ]
 
 
