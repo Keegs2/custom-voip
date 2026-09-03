@@ -13,10 +13,13 @@ The catalog holds two tiers:
   * WRITE commands (mutating=True)  — a SMALL, curated set of REVERSIBLE operator
     actions: FS `uuid_kill`/`reloadxml`/`sofia … rescan`/`fsctl loglevel`, a
     synthetic `call.canary` test call, and Kamailio `dispatcher.reload`/
-    `dispatcher.set_state`/`htable.sht_set|sht_rm blocked`. Each is chosen because
-    an operator can undo it by calling another catalog verb (set the loglevel back,
-    reload dispatcher, unblock the IP, re-rescan the profile). See WRITE_COMMAND_IDS
-    and the per-command notes.
+    `dispatcher.set_state`/`htable.seti|delete blocked`, plus the CRAG
+    maintenance-drain pair `sbc.drain`/`sbc.restore` (Kamailio `maint` htable —
+    exact inverses, with a 1h autoexpire dead-man IN KAMAILIO; ground truth via
+    the READ verb `sbc.drain_status`). Each is chosen because an operator can
+    undo it by calling another catalog verb (set the loglevel back, reload
+    dispatcher, unblock the IP, re-rescan the profile, restore the drain). See
+    WRITE_COMMAND_IDS and the per-command notes.
 
 HARD RULES (enforced structurally, not by convention)
 -----------------------------------------------------
@@ -52,6 +55,8 @@ import re
 import shutil
 import subprocess
 import time
+import urllib.error
+import urllib.request
 import uuid as uuid_mod
 
 from ops_esl import esl_api, esl_bgapi
@@ -556,7 +561,7 @@ def _kam_htable_dump(p, t):
 #   dispatcher.reload    — re-reads dispatcher.list from disk; undo = edit + reload.
 #   dispatcher.set_state — flips one destination's admin state; undo = set_state
 #                          back (typically "ap"=active+probing) or dispatcher.reload.
-#   htable.sht_set blocked <ip> 1 / htable.sht_rm blocked <ip> — block/unblock a
+#   htable.seti blocked <ip> 1 / htable.delete blocked <ip> — block/unblock a
 #                          source IP in the SAME `blocked` htable kamailio.cfg uses
 #                          (`$sht(blocked=>$si)=1`, autoexpire=300s). Exact inverses.
 #
@@ -602,18 +607,247 @@ def _kam_dispatcher_set_state(p, t):
 
 def _kam_htable_block(p, t):
     key = _ip_or_cidr("key", p.get("key"))
-    # htable.sht_set <table> <key> <value> — write 1 into the `blocked` htable, the
-    # exact table+value kamailio.cfg tests. Fixed table + fixed value; key validated.
-    return _run_argv(
-        _kamcmd_argv("htable.sht_set", _BLOCK_HTABLE, key, _BLOCK_VALUE), t
+    # FIXED 2026-09-03: was `htable.sht_set`, which is NOT an exported RPC in
+    # Kamailio 5.8 — the module exports htable.seti/sets/delete (htable.c).
+    # Live-verified: sht_set returned "error: 500 - command htable.sht_set not
+    # found" WITH EXIT CODE 0 (the kamcmd gotcha above), so the console
+    # reported successful blocks that never happened. Correct RPC + fault scan:
+    ok, code, out, err = _run_argv(
+        _kamcmd_argv("htable.seti", _BLOCK_HTABLE, key, _BLOCK_VALUE), t
     )
+    if not ok:
+        return False, code, out, err or "htable.seti blocked failed"
+    fault = _kamcmd_fault(out)
+    if fault:
+        return False, 1, "", f"htable.seti blocked {key} faulted: {fault}"
+    return True, 0, f"BLOCKED {key} in htable `{_BLOCK_HTABLE}`", ""
 
 
 def _kam_htable_unblock(p, t):
     key = _ip_or_cidr("key", p.get("key"))
-    # htable.sht_rm <table> <key> — delete the key from `blocked`. Exact inverse of
-    # block.
-    return _run_argv(_kamcmd_argv("htable.sht_rm", _BLOCK_HTABLE, key), t)
+    # FIXED 2026-09-03: was `htable.sht_rm` (not an RPC in 5.8) — see block
+    # above. htable.delete is the exact inverse; a 404 "Key not found" fault is
+    # the DEFINITE already-unblocked answer (idempotent success, mirroring
+    # sbc.restore); any other fault fails closed.
+    ok, code, out, err = _run_argv(
+        _kamcmd_argv("htable.delete", _BLOCK_HTABLE, key), t
+    )
+    if not ok:
+        return False, code, out, err or "htable.delete blocked failed"
+    fault = _kamcmd_fault(out)
+    if fault is None:
+        return True, 0, f"UNBLOCKED {key} from htable `{_BLOCK_HTABLE}`", ""
+    if _maint_key_absent(fault):
+        return True, 0, f"UNBLOCKED {key} (was not blocked)", ""
+    return False, 1, "", f"htable.delete blocked {key} faulted: {fault}"
+
+
+# ---- SBC maintenance drain (CRAG Maintenance tool, layer 1b) -------------- #
+#
+# Three verbs against the Kamailio `maint` htable (kamailio.cfg:
+# `maint=>size=2;autoexpire=3600`). The SBC's GET /healthz handler answers 503
+# "DRAINING maint=1" while the `drain` key exists, which fails the GCP NLB
+# health checks and flips BOTH traffic planes (external carrier VIP + internal
+# signaling ILB) to the standby SBC in ~10-12s. Reversible by design:
+#   sbc.drain   — htable.seti maint drain 1   (undo = sbc.restore)
+#   sbc.restore — htable.delete maint drain   (undo = sbc.drain)
+# DEAD-MAN: the htable's autoexpire=3600 lives IN KAMAILIO — kamcmd-inserted
+# entries get the table TTL (5.8 ht_api.c: htable.seti -> ht_set_cell ->
+# ht_set_cell_ex(exv=0) -> expire = now + htexpire), so a forgotten drain
+# self-clears at the SBC after 1h even if this agent dies; a Kamailio restart
+# (shm table) also clears it.
+#
+# RPC names verified against the 5.8 htable module's rpc export table
+# (htable.c): htable.seti / htable.delete / htable.get. On a missing key,
+# htable.get faults 500 "Key name doesn't exist in htable." and htable.delete
+# faults 404 "Key not found in htable." — those exact strings are how the
+# verbs below distinguish "flag absent" (a definite answer) from "Kamailio
+# unreachable" (fail closed, never a false DRAINED/RESTORED/0).
+#
+# ⚠ kamcmd EXIT-CODE GOTCHA (live-verified on the 5.8 image): kamcmd exits 0
+# even when the RPC FAULTS — the fault is printed to STDOUT as
+# "error: <code> - <message>". Only TRANSPORT failures (ctl socket missing,
+# Kamailio down) exit nonzero (255, stderr). So `ok` from _run_argv means
+# "kamcmd delivered the RPC", NOT "the RPC succeeded" — every verb below MUST
+# also scan stdout for a fault line before claiming success.
+
+_MAINT_HTABLE = "maint"
+_MAINT_KEY = "drain"
+_MAINT_VALUE = "1"
+_MAINT_TTL_S = 3600
+
+# kamcmd RPC-fault line, e.g. "error: 500 - Key name doesn't exist in htable."
+_KAMCMD_FAULT_RE = re.compile(r"^\s*error:\s*\d+\s*-", re.IGNORECASE | re.MULTILINE)
+
+# Substrings (lowercased) that mark an htable fault as the DEFINITE "key
+# absent" answer (get: "Key name doesn't exist in htable."; delete: "Key not
+# found in htable."). Anything else is treated as an error, fail-closed.
+# Tightened 2026-09-03: key-specific phrases only. A generic "not found"
+# also matches "command htable.delete not found" (RPC missing on an old
+# build), which MUST fail closed, not read as key-absent success.
+_MAINT_ABSENT_MARKERS = ("key name doesn't exist", "key not found")
+
+
+def _kamcmd_fault(out: str):
+    """Return the RPC fault text if kamcmd's stdout carries a fault line
+    ("error: <code> - <msg>"), else None. See the exit-code gotcha above."""
+    if out and _KAMCMD_FAULT_RE.search(out):
+        return out.strip()
+    return None
+
+
+def _maint_key_absent(fault: str) -> bool:
+    low = (fault or "").lower()
+    return any(m in low for m in _MAINT_ABSENT_MARKERS)
+
+
+def _kam_maint_drain(_p, t):
+    # htable.seti <table> <key> <value> — fixed table/key/value, no params.
+    # The insert inherits the table's autoexpire=3600 (dead-man, see above).
+    ok, code, out, err = _run_argv(
+        _kamcmd_argv("htable.seti", _MAINT_HTABLE, _MAINT_KEY, _MAINT_VALUE), t
+    )
+    if not ok:
+        return False, code, out, err or "htable.seti maint drain failed"
+    fault = _kamcmd_fault(out)
+    if fault:
+        # e.g. "error: 500 - No such htable" (pre-maint kamailio.cfg still
+        # deployed on this SBC). NEVER a false DRAINED.
+        return False, 1, "", f"htable.seti maint drain faulted: {fault}"
+    # Contract: success stdout must contain the literal token DRAINED.
+    return (
+        True,
+        0,
+        f"DRAINED maint=>drain=1 ttl={_MAINT_TTL_S}s "
+        "(dead-man: self-clears at the SBC; healthz now 503 DRAINING)",
+        "",
+    )
+
+
+def _kam_maint_restore(_p, t):
+    # htable.delete <table> <key> — exact inverse of sbc.drain. Idempotent from
+    # the operator's point of view: "restore" on an already-clean SBC (flag
+    # never set, or already dead-man-expired) is SUCCESS, distinguished from a
+    # real failure via the module's definite 404 "Key not found in htable."
+    # fault. Any OTHER failure (unknown fault / Kamailio down / ctl socket
+    # missing) fails CLOSED — we never report RESTORED without a definite
+    # answer.
+    ok, code, out, err = _run_argv(
+        _kamcmd_argv("htable.delete", _MAINT_HTABLE, _MAINT_KEY), t
+    )
+    if not ok:
+        return False, code, out, err or "htable.delete maint drain failed"
+    fault = _kamcmd_fault(out)
+    if fault is None:
+        return True, 0, "RESTORED maint=>drain cleared (healthz back to FS-health truth)", ""
+    if _maint_key_absent(fault):
+        return True, 0, "RESTORED maint=>drain was not set (already clear)", ""
+    return False, 1, "", f"htable.delete maint drain faulted: {fault}"
+
+
+# ---- sbc.drain_status: ground truth = flag state + a REAL local healthz GET #
+#
+# The healthz number must be what the NLB probes actually see, so it comes from
+# an actual HTTP GET of this SBC's own /healthz — NOT inferred from the flag.
+# Network reality (docker-compose.sbc.yml): this agent runs on the BRIDGE
+# network, so 127.0.0.1:8080 would be the agent container itself, not
+# Kamailio. Kamailio's :8080 listens are on SBC_INTERNAL_IP / the VIPs (all
+# host addresses, reachable from a bridge container via normal routing).
+# Resolution order for the probe target:
+#   1. OPS_HEALTHZ_URL            — explicit full-URL override.
+#   2. SBC_INTERNAL_IP env        — if the operator exports it to the agent.
+#   3. SBC_INTERNAL_IP parsed from {REPO_PATH}/.env — the VM .env is already
+#      bind-mounted read-only at /opt/revup and sets this var on every SBC
+#      (the inner Record-Route depends on it), and the agent runs as root, so
+#      this works with ZERO compose/.env changes.
+#   4. 127.0.0.1 fallback         — correct only if the agent is host-net
+#      (dev); degrades to healthz=err otherwise, never raises.
+
+SBC_HEALTHZ_TIMEOUT = 3.0
+
+
+def _read_env_file_var(path: str, name: str) -> str:
+    """Best-effort read of NAME=value from a dotenv-style file (last one wins,
+    quotes stripped). Returns "" on any error — never raises."""
+    val = ""
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                line = line.strip()
+                if line.startswith(name + "="):
+                    val = line.split("=", 1)[1].strip().strip('"').strip("'")
+    except OSError:
+        return ""
+    return val
+
+
+def _resolve_sbc_healthz_url() -> str:
+    url = os.environ.get("OPS_HEALTHZ_URL", "").strip()
+    if url:
+        return url
+    host = os.environ.get("SBC_INTERNAL_IP", "").strip()
+    if not host:
+        host = _read_env_file_var(os.path.join(REPO_PATH, ".env"), "SBC_INTERNAL_IP")
+    if not host:
+        host = "127.0.0.1"
+    return f"http://{host}:8080/healthz"
+
+
+SBC_HEALTHZ_URL = _resolve_sbc_healthz_url()
+
+
+def _healthz_probe():
+    """
+    Local HTTP GET of this SBC's own /healthz. Returns (status, body) where
+    status is the numeric HTTP status as a string ("200"/"503"/...) or "err".
+    Non-2xx is a REAL answer (503 = drained or fs-down), not an error. Never
+    raises; every failure degrades to ("err", diagnostic).
+    """
+    req = urllib.request.Request(SBC_HEALTHZ_URL, method="GET")
+    try:
+        with urllib.request.urlopen(req, timeout=SBC_HEALTHZ_TIMEOUT) as resp:
+            body = (resp.read(256) or b"").decode("utf-8", "replace").strip()
+            return str(resp.status), body
+    except urllib.error.HTTPError as exc:
+        # urllib raises on non-2xx — that IS the healthz answer (e.g. 503).
+        try:
+            body = (exc.read(256) or b"").decode("utf-8", "replace").strip()
+        except Exception:
+            body = ""
+        return str(exc.code), body
+    except Exception as exc:  # URLError, socket.timeout, anything transport
+        return "err", f"healthz GET {SBC_HEALTHZ_URL} failed: {exc}"
+
+
+def _kam_maint_status(_p, t):
+    """
+    READ verb. stdout is EXACTLY one parseable line per the pinned contract:
+        drain=<0|1> healthz=<http_status>     e.g. "drain=1 healthz=503"
+    drain comes from `kamcmd htable.get maint drain`: a returned cell = 1; the
+    definite "doesn't exist" fault = 0; anything else (transport failure /
+    unknown fault, incl. "No such htable" on a pre-maint config) = "err" —
+    never a false 0/1 (see the kamcmd exit-code gotcha above: faults exit 0,
+    so stdout is scanned). healthz comes from the REAL local GET
+    (_healthz_probe); "err" on transport failure. Extra detail (healthz body /
+    diagnostics) goes to stderr so the stdout line stays clean.
+    """
+    ok_get, _code, out, _err = _run_argv(
+        _kamcmd_argv("htable.get", _MAINT_HTABLE, _MAINT_KEY), t
+    )
+    if not ok_get:
+        drain = "err"                      # transport failure (Kamailio down)
+    else:
+        fault = _kamcmd_fault(out)
+        if fault is None:
+            drain = "1"                    # cell returned -> flag set
+        elif _maint_key_absent(fault):
+            drain = "0"                    # definite "doesn't exist"
+        else:
+            drain = "err"                  # e.g. "No such htable" (old cfg)
+
+    status, body = _healthz_probe()
+    detail = f"url={SBC_HEALTHZ_URL}" + (f" body={body}" if body else "")
+    return True, 0, f"drain={drain} healthz={status}", detail
 
 
 # ---- FS (local ESL, read-only api verbs) ---------------------------------- #
@@ -912,6 +1146,14 @@ CATALOG = {
     "kamcmd.dispatcher.set_state": _sbc(_kam_dispatcher_set_state, mutating=True),
     "kamcmd.htable.block": _sbc(_kam_htable_block, mutating=True),
     "kamcmd.htable.unblock": _sbc(_kam_htable_unblock, mutating=True),
+    # SBC — maintenance drain (CRAG Maintenance tool; ids are a PINNED contract
+    # with the ted backend — do not rename). drain/restore are exact inverses;
+    # the Kamailio maint htable's autoexpire=3600 is the dead-man switch.
+    "sbc.drain": _sbc(_kam_maint_drain, mutating=True),
+    "sbc.restore": _sbc(_kam_maint_restore, mutating=True),
+    # READ: ground truth (flag + real local healthz GET). The probe budget is
+    # SBC_HEALTHZ_TIMEOUT (3s) on top of the kamcmd flag read.
+    "sbc.drain_status": _sbc(_kam_maint_status, timeout=DEFAULT_TIMEOUT + SBC_HEALTHZ_TIMEOUT),
     # FS — READ
     "fs.sofia_status": _fsr(_fs_sofia_status),
     "fs.sofia_status_profile": _fsr(_fs_sofia_status_profile),
@@ -1053,6 +1295,14 @@ def _render_argv_text(command_id: str) -> str:
         # request input is involved; this is the verb the canary can ever emit.
         dest = f"sofia/external/{CANARY_DEST}@{CANARY_SBC_PROXY}:5060"
         return f"bgapi originate {{...}}{dest} &park ; uuid_exists ; uuid_kill"
+
+    if command_id == "sbc.drain_status":
+        # Do NOT invoke the builder: it performs a REAL local HTTP GET of
+        # /healthz (that live probe is the verb's whole point). Render its two
+        # fixed operations directly — the kamcmd flag read + the healthz GET.
+        return (
+            f"htable.get {_MAINT_HTABLE} {_MAINT_KEY} ; GET {SBC_HEALTHZ_URL}"
+        )
 
     captured = {"text": ""}
 
