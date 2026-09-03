@@ -69,14 +69,17 @@ COPY ops_esl.py /usr/local/bin/ops_esl.py
 # Metrics-plane feeders (role-gated, started by ops_agent.py — see that file):
 #   ops_metrics.py       : FS ESL Prometheus exporter (:9103), FS role.
 #   live_trunk_feeder.py : per-customer-trunk stats → East API, SBC role.
+#   fsdisp_metrics.py    : FS-dispatcher maintenance-state exporter (:9104),
+#                          SBC role — fed by carrier_monitor's own parse.
 COPY ops_metrics.py /usr/local/bin/ops_metrics.py
 COPY live_trunk_feeder.py /usr/local/bin/live_trunk_feeder.py
+COPY fsdisp_metrics.py /usr/local/bin/fsdisp_metrics.py
 RUN chmod +x /usr/local/bin/carrier_monitor.py /usr/local/bin/ops_agent.py
 
 # Byte-compile at build time — surfaces any syntax error in the image build, and
 # warms .pyc so first request is fast. (WORKDIR so bare `import ops_api` resolves.)
 WORKDIR /usr/local/bin
-RUN python3 -m py_compile carrier_monitor.py ops_agent.py ops_api.py ops_commands.py ops_esl.py ops_metrics.py live_trunk_feeder.py
+RUN python3 -m py_compile carrier_monitor.py ops_agent.py ops_api.py ops_commands.py ops_esl.py ops_metrics.py live_trunk_feeder.py fsdisp_metrics.py
 
 # Runs as root — deliberately. Two reasons, both necessary and low-risk here:
 #   1. The Kamailio `ctl` binrpc socket is mode 0600 owned by the `kamailio` user
@@ -92,6 +95,8 @@ RUN python3 -m py_compile carrier_monitor.py ops_agent.py ops_api.py ops_command
 # The read-only command API listens on OPS_AGENT_PORT (default 8710). EXPOSE is
 # documentation only; on the SBC/services VMs the container publishes the port,
 # and on the FS VM it uses host networking (see the three compose files).
-EXPOSE 8710
+# 9104 = fsdisp Prometheus exporter (SBC role; published loopback-only in
+# docker-compose.sbc.yml for the co-located host-net vmagent).
+EXPOSE 8710 9104
 
 ENTRYPOINT ["python3", "/usr/local/bin/ops_agent.py"]

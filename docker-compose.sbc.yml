@@ -253,6 +253,15 @@ services:
     ports:
       # Read-only NOC command API. VPC-internal; gate with a firewall rule.
       - "${OPS_AGENT_PORT:-8710}:${OPS_AGENT_PORT:-8710}"
+      # fsdisp Prometheus exporter (:9104) — FS dispatcher group-1 maintenance
+      # state (fs_dispatcher_disabled{fs_ip} / fsdisp_scrape_ok), rendered from
+      # the SAME `kamcmd dispatcher.list` reply the carrier poller already
+      # reads. Published LOOPBACK-ONLY: the scraper is the co-located host-net
+      # vmagent (scrape-sbc.yml job `fsdisp`, target 127.0.0.1:9104) — nothing
+      # off-VM ever needs this port, so it is never bound on a VM interface.
+      # (Host :9104 is free on the SBCs — 5060 SIP, 8080 xhttp, 8429 vmagent,
+      # 8710 ops-agent, 9100 node_exporter are the existing listeners.)
+      - "127.0.0.1:9104:9104"
     environment:
       # Per-SBC identity (goes into the payload's sbc_id). MUST be unique per SBC.
       - SBC_ID=${SBC_ID:-east-sbc-1}

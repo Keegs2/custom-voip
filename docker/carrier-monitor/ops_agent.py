@@ -41,8 +41,13 @@ import ops_commands
 # Role-specific metrics-plane feeders (each a daemon thread, fail-open):
 #   - ops_metrics       : FS ESL Prometheus exporter (:9103), FS role only.
 #   - live_trunk_feeder : per-customer-trunk stats → East API, SBC role only.
+#   - fsdisp_metrics    : FS-dispatcher maintenance-state exporter (:9104),
+#                         SBC role only. HTTP server only — it is FED by the
+#                         carrier poller's own dispatcher.list parse (push
+#                         model, zero extra kamcmd invocations).
 import ops_metrics
 import live_trunk_feeder
+import fsdisp_metrics
 
 
 def main() -> int:
@@ -90,6 +95,12 @@ def main() -> int:
             live_trunk_feeder.start_in_background()
         except Exception as exc:  # noqa: BLE001 - feeder must never block the poller
             log.error("failed to start live-trunk feeder thread: %s", exc)
+        # fsdisp exporter (:9104): HTTP thread only. The carrier poller (main
+        # thread, below) pushes samples into it from its dispatcher.list parse.
+        try:
+            fsdisp_metrics.start_in_background()
+        except Exception as exc:  # noqa: BLE001 - metrics must never block the poller
+            log.error("failed to start fsdisp-metrics exporter thread: %s", exc)
 
     # 2) Hand the MAIN thread to the UNCHANGED carrier poller. It installs its own
     #    signal handlers and blocks until SIGTERM/SIGINT, then returns 0. Its
