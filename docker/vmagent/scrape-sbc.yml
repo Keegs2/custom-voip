@@ -27,3 +27,16 @@ scrape_configs:
   - job_name: node
     static_configs:
       - targets: ["127.0.0.1:9100"]
+
+  # fsdisp — FS dispatcher group-1 maintenance state, exported by the
+  # carrier-monitor sidecar (bridge-net, published loopback-only as
+  # 127.0.0.1:9104 in docker-compose.sbc.yml). Series:
+  #   fs_dispatcher_disabled{fs_ip} — 1 iff the destination is admin-Disabled
+  #     (FLAGS 'D' = maintenance; Inactive/Trying/Active render 0)
+  #   fsdisp_scrape_ok — 1 when the dispatcher.list parse succeeded this cycle
+  # zone/reporting_instance come from the external_labels above — the exporter
+  # deliberately adds no zone labels of its own.
+  - job_name: fsdisp
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["127.0.0.1:9104"]
