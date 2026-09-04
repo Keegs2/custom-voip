@@ -3,11 +3,27 @@
 
    Everything else in the ladder stack styles inline off the LADDER_COLORS
    theme object (sipLadderUtils.ts). This file exists only for what inline
-   styles cannot express: scrollbar pseudo-elements. Values mirror the
-   daylight scrollbar treatment of the CDR page's `.dlx4-tablewrap`
-   (styles/dl-platform-b.css) so every horizontally-panning surface on the
-   troubleshooting/CDR pages reads identically.
+   styles cannot express: scrollbar pseudo-elements and the sticky-header
+   paint rules. Scrollbar values mirror the daylight scrollbar treatment of
+   the CDR page's `.dlx4-tablewrap` (styles/dl-platform-b.css) so every
+   horizontally-panning surface on the troubleshooting/CDR pages reads
+   identically.
    ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Sticky participant header (both the Time gutter and every node column).
+   The background MUST be fully opaque — the previous rgba(255,255,255,0.97)
+   let scrolled message rows ("100 Trying", retrans labels) ghost through
+   behind the header text. z-index 10 clears every row layer (arrow lines
+   z-1, dots/heads z-2, labels z-3). The bottom hairline is an inset shadow,
+   NOT a border: with `border-collapse: collapse`, borders on sticky cells
+   stay behind at the table's original y-position and scroll away. */
+.sipladder-header-cell {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: #ffffff; /* LADDER_COLORS.bg — opaque, never see-through */
+  box-shadow: inset 0 -1px 0 #e2e8f2; /* LADDER_COLORS.border hairline */
+}
 
 /* The ladder's internal horizontal pan region. The scrollbar stays VISIBLE
    on the white canvas — an explicit affordance, so a clipped last column

@@ -8,6 +8,8 @@ import {
   LADDER_COLORS,
 } from './sipLadderUtils';
 import { extractSIPInfo } from './sipUtils';
+import { orderLadderColumns } from './ladderOrder';
+import type { OrderParticipant, OrderWireMessage } from './ladderOrder';
 
 // ─── Main entry point ───────────────────────────────────────────────────────
 
@@ -20,9 +22,9 @@ import { extractSIPInfo } from './sipUtils';
  *    their request)
  * 2. Discovers unique nodes from src_ip/dst_ip values
  * 3. Classifies each node's architectural role
- * 4. Orders nodes left-to-right by FIXED platform topology rank
- *    (carrier-in → VIP → SBC → FS → SBC(B) → carrier-out); chronology only
- *    breaks ties
+ * 4. Orders nodes left-to-right by the CANONICAL platform topology
+ *    (ladderOrder.ts): orig-external → NLB VIP → SBC(A) → FS → signaling VIP
+ *    → SBC(B) → term-external; chronology only breaks ties within a rank
  * 5. Classifies messages by call leg (A vs B)
  * 6. Detects retransmissions and hairpin (SBC self-hop) rows
  * 7. Computes inter-message time deltas
@@ -57,18 +59,30 @@ export function computeLayout(
   // Step 5 (early): Classify call legs (needed for carrier in/out detection)
   const { aLegCallIds, bLegCallIds } = classifyCallLegs(sorted, correlations);
 
-  // Steps 3+4: Order nodes left-to-right by topology rank. Carrier roles
-  // (ingress vs egress) are resolved from call-flow direction BEFORE ranking
-  // so timestamp corruption can never push carrier-in right of the media server.
-  const orderedNodes = orderNodes(sorted, nodeNames, aLegCallIds, bLegCallIds);
+  // Steps 3+4: Order nodes left-to-right by the CANONICAL platform topology
+  // (ladderOrder.ts): orig external → NLB VIP → A-leg SBC → FS → signaling VIP
+  // → (B-leg SBC splice point) → term external, with the term endpoint pinned
+  // rightmost via the failover-aware last-external-INVITE rule. Carrier roles
+  // (ingress vs egress) are still refined from call-flow direction so header
+  // sublabels and the handoff injector see the right roles.
+  const { orderedNodes, bLegInsertIndex } = orderNodes(
+    sorted,
+    nodeNames,
+    aLegCallIds,
+    bLegCallIds,
+  );
 
-  // Step 4.5: Split nodes that appear in both call legs into virtual A/B-leg columns.
-  // This creates a symmetric ladder: BW-ATL | SBC-VIP | SBC-1 (IN) | FS | SBC-1 (OUT) | BW-DAL
+  // Step 4.5: Split nodes that appear in both call legs into virtual A/B-leg
+  // columns, splicing the B-leg clones at the canonical rank-6 position (after
+  // the signaling VIP, before the egress externals). This creates the pinned
+  // symmetric ladder, e.g.:
+  //   Sinch-Denver | SBC-VIP | SBC-1 (A) | FS | SBC-SigVIP | SBC-1 (B) | Sinch-Atlanta-LD
   const { finalNodes, bLegColumnIndex } = splitDualLegNodes(
     orderedNodes,
     sorted,
     aLegCallIds,
     bLegCallIds,
+    bLegInsertIndex,
   );
 
   // Build column index lookup (uses the final node list after splitting)
@@ -592,9 +606,11 @@ const BLEG_SUFFIX = '__bleg';
  * already separate (BW-ATL vs BW-DAL) and FreeSWITCH is the B2BUA bridge that
  * naturally sits in the center.
  *
- * The B-leg virtual node is inserted immediately after FreeSWITCH in the column
- * order, producing the desired symmetric layout:
- *   BW-ATL | SBC-VIP | SBC-1 | FreeSWITCH | SBC-1 | BW-DAL
+ * The B-leg virtual nodes are spliced at `bLegInsertIndex` — the canonical
+ * rank-6 position computed by ladderOrder.ts (after FreeSWITCH AND the
+ * signaling VIP, before any egress externals) — producing the pinned
+ * symmetric layout with the term carrier always rightmost:
+ *   BW-ATL | SBC-VIP | SBC-1 (A) | FreeSWITCH | SBC-SigVIP | SBC-1 (B) | BW-DAL
  *
  * Returns the modified node list and a map from physical node ID to the B-leg
  * virtual column index (used by resolveColumn to route B-leg messages).
@@ -604,6 +620,7 @@ function splitDualLegNodes(
   sorted: ReadonlyArray<HomerSearchResult>,
   aLegCallIds: Set<string>,
   bLegCallIds: Set<string>,
+  bLegInsertIndex: number,
 ): { finalNodes: LadderNode[]; bLegColumnIndex: Map<string, number> } {
   // Collect which physical node IDs appear in each leg
   const aLegNodeIds = new Set<string>();
@@ -664,57 +681,29 @@ function splitDualLegNodes(
     }
   }
 
-  // Index of the FreeSWITCH / media-server node (the B2BUA center point).
-  // B-leg virtual nodes go after this node. Reuses the pivot found above.
-  const mediaIdx = mediaPivotIdx;
-
-  // Build the new node list: A-leg nodes stay in their original positions (left of
-  // or at FreeSWITCH), B-leg virtual clones are inserted to the right of FreeSWITCH.
-  const finalNodes: LadderNode[] = [];
+  // Build the B-leg virtual clones, preserving A-leg chain order, and splice
+  // them at the canonical rank-6 position. Using the ordering module's splice
+  // index (instead of "immediately after media-server") keeps the B-leg SBC to
+  // the RIGHT of the signaling VIP — wire truth is FS → SigVIP → SBC — and
+  // always to the LEFT of the egress externals, term endpoint included. When
+  // no egress external exists the index equals the list length (append), which
+  // also covers the no-media-server degenerate case.
   const bLegVirtualNodes: LadderNode[] = [];
-
-  for (const node of orderedNodes) {
-    finalNodes.push(node);
-
-    // After the media-server node, insert all B-leg virtual nodes.
-    // We collect them first from the nodes-to-split set, preserving their original
-    // order (which is the order they appear in the A-leg chain).
-    if (node.role === 'media-server') {
-      // Create B-leg virtual clones for each split node
-      for (const origNode of orderedNodes) {
-        if (nodesToSplit.has(origNode.id)) {
-          bLegVirtualNodes.push({
-            id: origNode.id + BLEG_SUFFIX,
-            displayLabel: origNode.id,
-            role: origNode.role,
-            columnIndex: -1, // will be reassigned below
-            legTag: 'b',
-          });
-        }
-      }
-      // Insert in reverse order of the A-leg chain so they mirror correctly.
-      // In the A-leg chain: ... SBC-VIP | SBC-1 | FS
-      // In the B-leg chain: FS | SBC-1 | ... (mirrors right)
-      for (const vNode of bLegVirtualNodes) {
-        finalNodes.push(vNode);
-      }
+  for (const origNode of orderedNodes) {
+    if (nodesToSplit.has(origNode.id)) {
+      bLegVirtualNodes.push({
+        id: origNode.id + BLEG_SUFFIX,
+        displayLabel: origNode.id,
+        role: origNode.role,
+        columnIndex: -1, // will be reassigned below
+        legTag: 'b',
+      });
     }
   }
 
-  // If there was no media-server node (unusual), append virtual nodes at the end
-  if (mediaIdx === -1) {
-    for (const origNode of orderedNodes) {
-      if (nodesToSplit.has(origNode.id)) {
-        finalNodes.push({
-          id: origNode.id + BLEG_SUFFIX,
-          displayLabel: origNode.id,
-          role: origNode.role,
-          columnIndex: -1,
-          legTag: 'b',
-        });
-      }
-    }
-  }
+  const finalNodes: LadderNode[] = [...orderedNodes];
+  const spliceAt = Math.min(Math.max(bLegInsertIndex, 0), finalNodes.length);
+  finalNodes.splice(spliceAt, 0, ...bLegVirtualNodes);
 
   // Reassign column indices
   const bLegColumnIdx = new Map<string, number>();
@@ -1088,48 +1077,34 @@ function discoverNodes(sorted: ReadonlyArray<HomerSearchResult>): string[] {
 }
 
 /**
- * Fixed topology rank for each architectural role. The platform topology is
- * KNOWN and constant: carrier-in → SBC-VIP (NLB) → SBC (A-leg) → FreeSWITCH →
- * SBC (B-leg, inserted by the dual-leg split) → carrier-out. Columns are
- * ordered by this rank FIRST; chronology (first appearance) only breaks ties
- * between nodes of the same rank (e.g. two carrier-in edge proxies).
- *
- * This makes column order immune to capture-timestamp corruption: a late
- * stored timestamp on the carrier INVITE can no longer push the carrier-in
- * or VIP columns right of the media server.
- */
-const TOPOLOGY_RANK: Record<NodeRole, number> = {
-  'carrier-ingress': 0,
-  'sbc-vip': 1,
-  sbc: 2,
-  'media-server': 3,
-  // B-leg SBC virtual columns are inserted between media-server and
-  // carrier-egress by splitDualLegNodes (rank-driven placement).
-  'carrier-egress': 4,
-  unknown: 99, // adjacency-placed, never rank-sorted
-};
-
-/**
- * Orders nodes left-to-right — topology-first.
+ * Orders nodes left-to-right — canonical platform topology.
  *
  * Algorithm:
  * 1. Classify every node's role from its heplify alias (zone-aware substring
  *    matching handles West/Central prefixes).
  * 2. Resolve carrier in/out from CALL FLOW, not timestamps: a carrier that
  *    sources an A-leg INVITE is ingress; one that receives a B-leg INVITE
- *    (or appears only in B-leg traffic) is egress.
- * 3. Sort known-role nodes by TOPOLOGY_RANK; chronological first appearance
- *    breaks ties within a rank.
- * 4. Insert unknown/un-aliased nodes (raw IPs) by first-appearance adjacency:
- *    next to the peer of their first directional message — before the peer
- *    when the unknown node was the sender (upstream), after it otherwise.
+ *    (or appears only in B-leg traffic) is egress. (Header sublabels and the
+ *    loopback-handoff injector consume these roles — unchanged behavior.)
+ * 3. Delegate the actual ORDER to the pure ordering module (ladderOrder.ts):
+ *    orig external (leftmost, always) → NLB VIP → A-leg SBC → FreeSWITCH →
+ *    signaling VIP → [B-leg splice point] → failed term attempts → term
+ *    external (rightmost, always). The orig/term endpoints come from the
+ *    failover-aware earliest/last external INVITE rule (same rule as the
+ *    results table); external-vs-signaling VIPs are told apart by SigVIP
+ *    alias vocabulary with a traffic-shape fallback; unclassifiable nodes
+ *    place between ranks by first activity, never outside the endpoints.
+ *
+ * This makes column order immune to BOTH capture-timestamp corruption and
+ * first-appearance scrambling (the defect where the term carrier rendered
+ * mid-ladder and the SigVIP rendered left of FreeSWITCH).
  */
 function orderNodes(
   sorted: ReadonlyArray<HomerSearchResult>,
   allNodeNames: ReadonlyArray<string>,
   aLegCallIds: Set<string>,
   bLegCallIds: Set<string>,
-): LadderNode[] {
+): { orderedNodes: LadderNode[]; bLegInsertIndex: number } {
   // Step 1: base role classification
   const roleById = new Map<string, NodeRole>();
   for (const name of allNodeNames) {
@@ -1167,53 +1142,33 @@ function orderNodes(
     // Neither leg (unclassified traffic only): keep the default ingress.
   }
 
-  // Step 3: rank-sort known-role nodes; first appearance breaks ties
-  const firstAppearance = new Map<string, number>();
-  allNodeNames.forEach((name, idx) => firstAppearance.set(name, idx));
+  // Step 3: canonical ordering via the pure module. Participants carry the
+  // refined roles; wire rows carry src/dst + INVITE-request flags in display
+  // order (array position doubles as the first-activity clock).
+  const participants: OrderParticipant[] = allNodeNames.map((id) => ({
+    id,
+    role: roleById.get(id)!,
+  }));
+  const wire: OrderWireMessage[] = sorted.map((m) => ({
+    src: m.src_ip,
+    dst: m.dst_ip,
+    isInviteRequest: m.method === 'INVITE' && m.status === null,
+  }));
 
-  const ordered: string[] = allNodeNames
-    .filter((name) => roleById.get(name) !== 'unknown')
-    .sort((a, b) => {
-      const rankDiff = TOPOLOGY_RANK[roleById.get(a)!] - TOPOLOGY_RANK[roleById.get(b)!];
-      if (rankDiff !== 0) return rankDiff;
-      return firstAppearance.get(a)! - firstAppearance.get(b)!;
-    });
+  const { orderedIds, bLegInsertIndex, endpointTags } = orderLadderColumns(
+    participants,
+    wire,
+  );
 
-  // Step 4: adjacency-place unknown nodes (raw IPs heplify hasn't aliased)
-  const pending = allNodeNames.filter((name) => roleById.get(name) === 'unknown');
-  let progress = true;
-  while (progress && pending.length > 0) {
-    progress = false;
-    for (let i = 0; i < pending.length; i++) {
-      const id = pending[i]!;
-      // First directional message involving this node tells us its neighbour.
-      const firstMsg =
-        sorted.find(
-          (m) => (m.src_ip === id || m.dst_ip === id) && m.src_ip !== m.dst_ip,
-        ) ?? sorted.find((m) => m.src_ip === id || m.dst_ip === id);
-      if (!firstMsg) continue;
-
-      const peer = firstMsg.src_ip === id ? firstMsg.dst_ip : firstMsg.src_ip;
-      const peerIdx = ordered.indexOf(peer);
-      if (peerIdx === -1) continue; // peer not placed yet — retry next round
-
-      // Sender sits upstream (left) of its receiver.
-      const insertAt = firstMsg.src_ip === id ? peerIdx : peerIdx + 1;
-      ordered.splice(insertAt, 0, id);
-      pending.splice(i, 1);
-      progress = true;
-      break;
-    }
-  }
-  // Anything still unplaced (isolated self-traffic, peerless) goes at the end.
-  for (const id of pending) ordered.push(id);
-
-  // Build LadderNode objects with column indices
-  return ordered.map((id, columnIndex) => ({
+  // Build LadderNode objects with column indices + endpoint bookend tags.
+  const orderedNodes = orderedIds.map((id, columnIndex) => ({
     id,
     role: roleById.get(id)!,
     columnIndex,
+    endpointTag: endpointTags.get(id),
   }));
+
+  return { orderedNodes, bLegInsertIndex };
 }
 
 /**

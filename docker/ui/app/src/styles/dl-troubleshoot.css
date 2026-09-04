@@ -49,6 +49,16 @@
   }
 }
 
+/* ─── Page-scoped WIDE shell — matches the Calls & Quality page ───
+   Same pattern as `dlx4-shell-wide` (dl-platform-b.css): 1800px cap applied
+   as `dl-shell dlx5-shell-wide` in TroubleshootingPage.tsx. NEVER widen
+   `.dl-shell` itself (all other pages share the 1200px shell). Hand-written
+   CSS by design, not a Tailwind md:* utility (load-bearing layout — see the
+   container-build gotcha in CLAUDE.md). */
+.dl-shell.dlx5-shell-wide {
+  max-width: 1800px;
+}
+
 /* ─── Omnibox — the primary search control ───
    One oversized mono field with an inset glyph; Search/Clear sit inline so
    the eye's loop is type → confirm hint → Enter. */
@@ -322,6 +332,126 @@
   border: 1px solid transparent;
 }
 
+/* ─── Zone pill — HEP capture node id folded to its zone (East/West/Central).
+   Quiet slate chrome (same family as .dlx5-status-none); the -raw modifier
+   marks an UNRECOGNIZED capture id shown verbatim (mono, fainter). ─── */
+.dlx5-zone {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 9px;
+  border-radius: 20px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  color: var(--rcf-ink-dim);
+  background: rgba(93, 111, 140, 0.08);
+  border: 1px solid rgba(93, 111, 140, 0.2);
+}
+
+.dlx5-zone-raw {
+  font-family: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.64rem;
+  font-weight: 600;
+  color: var(--rcf-ink-faint, #8b99b0);
+}
+
+/* ─── Network Path line — one clean mono line above the expanded ladder
+   (moved out of the results table; replaces the old summary strip spot). ─── */
+.dlx5-pathline {
+  display: flex;
+  align-items: center;
+  margin-bottom: 12px;
+  font-family: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.74rem;
+  color: var(--rcf-ink-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dlx5-pathline-label {
+  font-family: "IBM Plex Sans", sans-serif;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--rcf-ink-faint, #8b99b0);
+  margin-right: 10px;
+  flex-shrink: 0;
+}
+
+.dlx5-pathline-arrow {
+  color: #b6c2d4;
+  margin: 0 8px;
+}
+
+/* ─── Cursor pager — Prev / "Page N" / Next under the results table.
+   Page-scoped copy of the CDR pager vocabulary (dlx4-pgbtn / dlx4-pg-cur in
+   dl-platform-b.css), simplified: no totals exist for trace search, so no
+   number strip and no page-size select. Third page to need the button
+   chrome: promote to a shared `.dl-pgbtn` on the next design-system pass. */
+.dlx5-pager {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 20px 16px;
+  border-top: 1px solid var(--rcf-line-soft);
+}
+
+.dlx5-pgbtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  height: 30px;
+  padding: 0 14px;
+  border-radius: 7px;
+  font-size: 0.74rem;
+  font-weight: 600;
+  font-family: inherit;
+  border: 1px solid #d5deeb;
+  background: #ffffff;
+  color: var(--rcf-ink-dim);
+  cursor: pointer;
+  user-select: none;
+  transition: background var(--rcf-ease), color var(--rcf-ease), border-color var(--rcf-ease);
+}
+
+.dlx5-pgbtn:hover:not(:disabled) {
+  background: var(--rcf-tint-hover);
+  border-color: #b7c7dd;
+  color: var(--rcf-ink-soft);
+}
+
+.dlx5-pgbtn:disabled {
+  color: #b6c2d4;
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.dlx5-pgbtn:focus-visible {
+  outline: 2px solid var(--rcf-azure);
+  outline-offset: 1px;
+}
+
+.dlx5-pg-cur {
+  padding: 0 8px;
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: var(--rcf-ink-soft);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Quiet "there's more" annotation next to an enabled Next */
+.dlx5-pager-note {
+  margin-left: 8px;
+  font-size: 0.72rem;
+  color: var(--rcf-ink-faint, #8b99b0);
+  white-space: nowrap;
+}
+
 /* ─── Open-ladder affordance on each call row (label + chevron) ─── */
 .dlx5-openhint {
   display: inline-flex;
@@ -525,12 +655,7 @@
   outline-offset: 1px;
 }
 
-/* ─── Narrow-viewport column fold ───
-   Below 1400px the content column (240px sidebar + shell) can't seat every
-   column without panning. The `.dlx5-tablewrap` scrollport handles that
-   gracefully now, but the Network Path column still folds away first — it
-   duplicates what the ladder's own node columns show far better, and
-   dropping it usually keeps the table fully seated with no pan at all. */
-@media (max-width: 1400px) {
-  .dlx5-col-path { display: none; }
-}
+/* (The old .dlx5-col-path narrow-viewport fold is gone with the Network Path
+   column itself — the path now lives as .dlx5-pathline in the expanded
+   ladder frame, and the slimmer column set seats without panning far
+   earlier than 1400px.) */

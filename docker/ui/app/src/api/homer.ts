@@ -16,6 +16,16 @@ export interface HomerSearchParams {
   call_id?: string;
   start_time: string; // ISO 8601
   end_time: string;   // ISO 8601
+  /**
+   * PINNED CURSOR-PAGING CONTRACT — strict upper bound: the server returns
+   * only messages with `timestamp_ns < before_ns`. Page N+1 re-issues the
+   * SAME committed search with `before_ns = oldest_ts_ns` of page N.
+   * Preferred over shrinking `end_time` (which parses at microsecond
+   * precision server-side while timestamps are nanosecond — before_ns is
+   * exact, so adjacent pages share zero rows by construction). Omit on the
+   * first page.
+   */
+  before_ns?: number;
 }
 
 export interface HomerSearchResult {
@@ -71,6 +81,19 @@ export interface HomerSearchResponse {
   correlation_truncated?: boolean;
   /** Pipeline diagnostics (e.g. timestamp-corruption notices) — show unobtrusively */
   pipeline_warnings?: string[];
+  /**
+   * `timestamp_ns` of the OLDEST message actually returned in `data` — the
+   * cursor for the next (older) page: re-issue the same search with
+   * `before_ns: oldest_ts_ns`. `null` when `data` is empty. Absent on
+   * old/cached responses (treat as no cursor → paging unavailable).
+   */
+  oldest_ts_ns?: number | null;
+  /**
+   * True when the base fetch was truncated by the server's internal cap —
+   * older messages exist in the window beyond what was returned (the store
+   * returns newest-first). Absent on old/cached responses (treat as false).
+   */
+  has_more?: boolean;
 }
 
 export async function searchSipTraces(
