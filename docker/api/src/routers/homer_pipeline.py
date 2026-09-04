@@ -284,6 +284,17 @@ def _message_identity(record: dict[str, Any]) -> tuple[Any, ...]:
     FALLBACK: if no topmost Via branch can be parsed (rare for valid SIP), we
     refuse to merge by including (src_ip, dst_ip, timestamp_ns) in the identity
     — a possibly-duplicate row is acceptable, a silently-dropped hop is not.
+
+    NOTE: this key is deliberately NOT the whole story.  The wire src/dst
+    endpoints are part of a message's identity too — two rows with the same
+    branch key but DIFFERENT directional (src, dst) pairs are two DISTINCT
+    wire messages on two different hops and must never merge (observed in
+    production 2026-09: same-branch teardown rows on different hops collapsed,
+    silently dropping the carrier-side hop from the ladder).  That split is
+    enforced by ``_split_cluster_by_hop`` inside ``_deduplicate_results``
+    rather than here, because a naive (src, dst) key would ALSO split the
+    alias-collapsed ``src == dst`` self-capture away from its directional twin
+    and resurrect the orphan-dot bug this identity was designed to fix.
     """
     via_branch = record.get("via_branch", "") or _extract_via_branch(
         record.get("raw_msg")
@@ -322,6 +333,67 @@ def _message_identity(record: dict[str, Any]) -> tuple[Any, ...]:
 DEDUP_WINDOW_NS = 50_000_000  # 50 ms
 
 
+def _split_cluster_by_hop(
+    cluster: list[dict[str, Any]],
+) -> list[list[dict[str, Any]]]:
+    """Split one time-cluster of same-identity rows by directional hop.
+
+    A cluster groups rows sharing (callid, method, status, topmost Via branch)
+    within DEDUP_WINDOW_NS.  Normally every row in it is a capture of ONE wire
+    message, but two DISTINCT wire messages on two DIFFERENT hops can land in
+    the same cluster when the forwarding element's stored copy carries the
+    same topmost Via branch (e.g. a trace buffer serialized before the new Via
+    was prepended, or an element that forwards without re-branching).  Merging
+    those drops a real hop from the ladder — the exact production defect where
+    the SBC→carrier teardown leg vanished because its only capture merged into
+    the FS→SBC cluster.
+
+    Rules (mirrors the _message_identity contract):
+      * rows with a DIRECTIONAL (src, dst) pair are grouped by that exact
+        ordered pair — different pairs = different wire messages, never merged;
+      * NON-directional rows (src == dst alias collapse, or missing endpoint)
+        are per-capture copies that cannot name their hop — each one joins the
+        temporally-nearest directional subcluster (preserving the East-fixture
+        behavior where a collapsed self-capture merges with its directional
+        twin instead of surviving as an orphan dot);
+      * a cluster with zero or one distinct directional pair is returned
+        unchanged (the overwhelmingly common case — zero-cost).
+
+    Returned subclusters are internally timestamp-sorted and ordered by their
+    first timestamp, so downstream survivor election is order-stable.
+    """
+    by_pair: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    nondirectional: list[dict[str, Any]] = []
+    for entry in cluster:
+        if _is_directional(entry):
+            pair = (
+                (entry.get("src_ip") or "").strip(),
+                (entry.get("dst_ip") or "").strip(),
+            )
+            by_pair.setdefault(pair, []).append(entry)
+        else:
+            nondirectional.append(entry)
+
+    if len(by_pair) <= 1:
+        return [cluster]
+
+    subclusters = list(by_pair.values())
+    for entry in nondirectional:
+        ts = entry.get("timestamp_ns", 0)
+        nearest = min(
+            subclusters,
+            key=lambda rows: min(
+                abs(ts - r.get("timestamp_ns", 0)) for r in rows
+            ),
+        )
+        nearest.append(entry)
+
+    for rows in subclusters:
+        rows.sort(key=lambda r: r.get("timestamp_ns", 0))
+    subclusters.sort(key=lambda rows: rows[0].get("timestamp_ns", 0))
+    return subclusters
+
+
 def _deduplicate_results(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Deduplicate SIP messages captured by multiple HEP nodes.
 
@@ -351,6 +423,11 @@ def _deduplicate_results(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
          other (same physical message seen by sender and receiver within a few
          ms; a re-INVITE or retransmit with the same identity far apart in time
          stays a separate cluster).
+      3b. Split each time-cluster by directional hop (_split_cluster_by_hop):
+         rows with DIFFERENT directional (src, dst) pairs are DISTINCT wire
+         messages even under an identical branch identity and each keep their
+         own survivor; non-directional (src==dst / endpoint-less) copies still
+         merge with their temporally-nearest directional twin.
       4. For each cluster, elect the survivor by PREFERRING a directional
          capture (src != dst); only if NO directional capture exists do we keep
          a src==dst row (so a message is never lost entirely, but a drawable
@@ -411,8 +488,15 @@ def _deduplicate_results(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
             else:
                 clusters.append([entry])
 
-        # For each cluster, elect a survivor and merge node IDs.
+        # For each cluster, split by directional hop FIRST (two distinct wire
+        # messages sharing the branch identity must both survive — see
+        # _split_cluster_by_hop), then elect a survivor per hop-subcluster
+        # and merge node IDs.
+        hop_clusters: list[list[dict[str, Any]]] = []
         for cluster in clusters:
+            hop_clusters.extend(_split_cluster_by_hop(cluster))
+
+        for cluster in hop_clusters:
             directional = [e for e in cluster if _is_directional(e)]
             # Prefer a directional capture; fall back to non-directional only
             # if none is directional.  Within the pool, prefer HEP-stamped
@@ -573,6 +657,13 @@ def _order_by_causality(
         (req_by_txn if m["is_request"] else resp_by_txn).setdefault(key, []).append(m)
 
     # R1 — response after its request at the same hop.
+    #
+    # RETRANSMISSION-AWARE: only the EARLIEST matching request copy constrains
+    # the response.  A retransmitted request shares the branch identity of the
+    # original, and on the wire the response legitimately crosses/precedes the
+    # later retransmissions (that crossing is exactly WHY they retransmit).
+    # Edging from EVERY copy forced the first 200 to display after the LAST
+    # retransmitted BYE, interleaving teardown rounds out of wire order.
     for key, resps in resp_by_txn.items():
         reqs = req_by_txn.get(key, [])
         if not reqs:
@@ -580,10 +671,14 @@ def _order_by_causality(
         for resp in resps:
             matched = False
             if resp["top"]:
-                for req in reqs:
-                    if req["top"] and req["top"] == resp["top"]:
-                        add_edge(req["idx"], resp["idx"])
-                        matched = True
+                cands = [
+                    req for req in reqs
+                    if req["top"] and req["top"] == resp["top"]
+                ]
+                if cands:
+                    first = min(cands, key=lambda r: (r["ts"], r["idx"]))
+                    add_edge(first["idx"], resp["idx"])
+                    matched = True
             if not matched and resp["src"] and resp["dst"]:
                 # Conservative fallback: swapped endpoints, unique candidate.
                 cands = [
@@ -595,13 +690,23 @@ def _order_by_causality(
 
     # R2 — forwarded request copies ordered by Via depth (hop adjacency),
     # chained only with the suffix proof.
+    #
+    # RETRANSMISSION-AWARE: chain the EARLIEST copy per depth only.  The hard
+    # rule is "the first forwarded copy follows the first arrival"; a later
+    # retransmission at depth N carries no constraint against the original at
+    # depth N+1 (zip-chaining copies pushed the original forwarded BYE at
+    # +1 ms after the +500 ms retransmitted first-hop copy).
     for reqs in req_by_txn.values():
         if len(reqs) < 2:
             continue
-        known = sorted(
-            (m for m in reqs if m["depth"]),
-            key=lambda m: (m["depth"], m["ts"]),
-        )
+        earliest_by_depth: dict[int, dict[str, Any]] = {}
+        for m in reqs:
+            if not m["depth"]:
+                continue
+            cur = earliest_by_depth.get(m["depth"])
+            if cur is None or (m["ts"], m["idx"]) < (cur["ts"], cur["idx"]):
+                earliest_by_depth[m["depth"]] = m
+        known = sorted(earliest_by_depth.values(), key=lambda m: m["depth"])
         for a, b in zip(known, known[1:]):
             if a["depth"] < b["depth"] and is_proper_suffix(a["branches"], b["branches"]):
                 add_edge(a["idx"], b["idx"])
@@ -616,10 +721,16 @@ def _order_by_causality(
         for group in by_status.values():
             if len(group) < 2:
                 continue
-            known = sorted(
-                (m for m in group if m["depth"]),
-                key=lambda m: (-m["depth"], m["ts"]),
-            )
+            # Earliest copy per depth (retransmitted response copies carry no
+            # constraint against the original at the next hop — see R2).
+            earliest_resp: dict[int, dict[str, Any]] = {}
+            for m in group:
+                if not m["depth"]:
+                    continue
+                cur = earliest_resp.get(m["depth"])
+                if cur is None or (m["ts"], m["idx"]) < (cur["ts"], cur["idx"]):
+                    earliest_resp[m["depth"]] = m
+            known = sorted(earliest_resp.values(), key=lambda m: -m["depth"])
             for a, b in zip(known, known[1:]):
                 if a["depth"] > b["depth"] and is_proper_suffix(b["branches"], a["branches"]):
                     add_edge(a["idx"], b["idx"])

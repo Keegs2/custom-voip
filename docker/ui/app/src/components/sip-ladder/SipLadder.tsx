@@ -8,11 +8,14 @@ import { SipMessageRow, TIMESTAMP_COL_WIDTH } from './SipMessageRow';
 import { PacketDetailPanel } from './PacketDetailPanel';
 import './sipLadder.css';
 
-// Dev-only self-test for the canonical column ordering (ladderOrder.ts).
-// `import.meta.env.DEV` is statically `false` in production builds, so the
-// assertion module is dead-code-eliminated and never ships.
+// Dev-only self-tests: canonical column ordering (ladderOrder.assert) and
+// end-to-end data fidelity through the REAL grouping + layout engine
+// (sipLadderFidelity.assert — the West Sinch→Sinch teardown replay).
+// `import.meta.env.DEV` is statically `false` in production builds, so both
+// assertion modules are dead-code-eliminated and never ship.
 if (import.meta.env.DEV) {
   void import('./ladderOrder.assert');
+  void import('./sipLadderFidelity.assert');
 }
 
 // ─── Design tokens ──────────────────────────────────────────────────────────
