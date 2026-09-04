@@ -1,4 +1,4 @@
-import { apiRequest } from './client';
+import { apiRequest, apiRequestBlob } from './client';
 import type { MessageAttestation } from '../types/stir';
 
 export interface HomerSearchParams {
@@ -77,4 +77,43 @@ export async function searchSipTraces(
   params: HomerSearchParams,
 ): Promise<HomerSearchResponse> {
   return apiRequest('POST', '/homer/search', params);
+}
+
+/** A ready-to-save PCAP export: the bytes plus the filename to save them as. */
+export interface PcapDownload {
+  blob: Blob;
+  filename: string;
+}
+
+/**
+ * Downloads the captured SIP signaling for a call as a PCAP file.
+ *
+ * PINNED CONTRACT — `GET /v1/homer/pcap?call_id=<sip call-id>&internal=<bool>&correlated=true`:
+ * these three params and NOTHING else (FastAPI silently drops undeclared
+ * params, so any extra would be dead weight; any missing one changes meaning).
+ *
+ * - `internal=false` (default UX): edge-only capture (SBC ↔ carrier/customer)
+ *   — internal topology absent, safe to hand outside Granite.
+ * - `internal=true`: full path through our network, engineers only.
+ * - `correlated=true`: the server folds in all correlated legs (A + B).
+ *
+ * The response filename is server-owned via Content-Disposition
+ * (`sip_<callid>[_internal].pcap`); we fall back to mirroring that scheme
+ * only if the header is missing.
+ *
+ * Error details are human-readable and surfaced verbatim by callers —
+ * notably the 404 "no edge packets — may be on-net; retry with internal=true".
+ */
+export async function downloadPcap(
+  callId: string,
+  internal: boolean,
+): Promise<PcapDownload> {
+  const params = new URLSearchParams({
+    call_id: callId,
+    internal: internal ? 'true' : 'false',
+    correlated: 'true',
+  });
+  const { blob, filename } = await apiRequestBlob(`/homer/pcap?${params.toString()}`);
+  const fallback = `sip_${callId.replace(/[^A-Za-z0-9._@-]/g, '_')}${internal ? '_internal' : ''}.pcap`;
+  return { blob, filename: filename ?? fallback };
 }

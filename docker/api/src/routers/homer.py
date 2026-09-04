@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel
 
 from auth.dependencies import require_support_or_admin
@@ -31,6 +31,11 @@ from db import database as db
 # hairpin marking, seq assignment.  Lives in a separate module so unit tests
 # can exercise it without fastapi/httpx/auth installed.  Re-imported here so
 # this router's public surface is unchanged.
+# Edge/internal packet classification + libpcap synthesis for GET /pcap.
+# Pure stdlib module (same pattern as homer_pipeline) so the classification
+# truth table and pcap byte format are unit-testable without fastapi.
+from .homer_pcap import build_pcap, is_edge_packet
+
 from .homer_pipeline import (
     _deduplicate_results,
     _extract_cseq,
@@ -296,6 +301,8 @@ def _parse_loki_response(
                 "via_branch": _extract_via_branch(log_line),
                 "src_ip": labels.get("src_ip", ""),
                 "dst_ip": labels.get("dst_ip", ""),
+                "src_port": labels.get("src_port", ""),
+                "dst_port": labels.get("dst_port", ""),
                 "status": status,
                 "node": labels.get("node", ""),
                 "raw_msg": log_line if log_line else None,
@@ -545,6 +552,8 @@ async def _query_clickhouse_by_callids(
             "via_branch": _extract_via_branch(log_line),
             "src_ip": labels.get("src_ip", ""),
             "dst_ip": labels.get("dst_ip", ""),
+            "src_port": labels.get("src_port", ""),
+            "dst_port": labels.get("dst_port", ""),
             "status": status,
             "node": labels.get("node", ""),
             "raw_msg": log_line if log_line else None,
@@ -959,3 +968,238 @@ async def search_sip_traces(
         # query itself hit its limit.
         all_results = initial_results + corr_results + final_results
         return await _respond(all_results, correlations, truncated=correlation_truncated)
+
+
+# ---------------------------------------------------------------------------
+# PCAP export — GET /pcap
+# ---------------------------------------------------------------------------
+
+# How far back the export looks for a Call-ID.  The contract takes no time
+# window (one click from a trace row), so we scan a generous slice of the
+# capture retention; the ClickHouse gin lookup is indexed by call_id, so the
+# wide window costs only extra partition pruning, not a scan.
+PCAP_LOOKBACK_DAYS = 30
+# Row cap per the pinned contract (~2000 packets -> 413 when exceeded).
+PCAP_MAX_PACKETS = 2000
+# Margin around the primary leg's observed packet span used both for the
+# qryn X-CID correlation scan and the final multi-leg refetch.  B-legs are
+# created strictly within the A-leg's lifetime; 5 minutes is ample slack.
+PCAP_CORRELATION_MARGIN_NS = 300 * 1_000_000_000
+
+# Same X-CID pattern the search correlation uses (_parse_loki_response).
+_PCAP_XCID_RE = re.compile(r"X-CID:\s*(.+)", re.IGNORECASE)
+
+# Content-Disposition filename characters we keep from the raw Call-ID.
+_PCAP_FILENAME_SAFE_RE = re.compile(r"[^A-Za-z0-9._@-]")
+
+
+async def _pcap_correlated_callids(
+    client: httpx.AsyncClient,
+    call_id: str,
+    rows: list[dict[str, Any]],
+) -> set[str]:
+    """Discover the full correlation group for one Call-ID (REUSES the
+    search pipeline's X-CID machinery, scoped to the call's own time span).
+
+    Two directions:
+      * given a B-leg: its OWN packets carry ``X-CID: <a-leg>`` — extracted
+        here directly from the fetched raw bodies;
+      * given an A-leg: sibling B-legs referencing it are found exactly like
+        /search Step 2 (qryn ``|~ "X-CID:"`` scan + Python filter +
+        _build_correlations), but over the call's span instead of a
+        user-chosen window, which keeps the scan cheap and complete.
+
+    FAIL-SOFT: a qryn error degrades to the already-fetched leg(s) rather
+    than failing the whole export (mirrors /search behavior).
+    """
+    known: set[str] = {call_id}
+    for r in rows:
+        m = _PCAP_XCID_RE.search(r.get("raw_msg") or "")
+        if m:
+            known.add(m.group(1).strip())
+
+    ts_values = [r["timestamp_ns"] for r in rows if r.get("timestamp_ns")]
+    if not ts_values:
+        return known
+    win_start = min(ts_values) - PCAP_CORRELATION_MARGIN_NS
+    win_end = max(ts_values) + PCAP_CORRELATION_MARGIN_NS
+
+    try:
+        corr_results = await _query_qryn(
+            client, '{type="sip"} |~ "X-CID:"', win_start, win_end,
+            limit=1000, extract_xcid=True,
+        )
+    except HTTPException:
+        logger.warning(
+            "pcap export: X-CID correlation query failed for %s — "
+            "exporting the requested leg(s) only", call_id,
+        )
+        return known
+
+    corr_results = [r for r in corr_results if r.get("x_cid", "") in known]
+    correlations = _build_correlations(known, corr_results)
+    group: set[str] = set(known)
+    for cids in correlations.values():
+        group.update(cids)
+    return group
+
+
+@router.get("/pcap")
+async def export_pcap(
+    call_id: str = "",
+    internal: bool = False,
+    correlated: bool = True,
+    user: dict = Depends(require_support_or_admin),
+):
+    """Export the captured SIP signaling for one call as a Wireshark pcap.
+
+    PINNED CONTRACT (the UI is built against this verbatim):
+      GET /v1/homer/pcap?call_id=<sip call-id>&internal=<bool, default
+      false>&correlated=<bool, default true>
+      * Auth: same gate as POST /search (support/admin).
+      * 200: binary body, Content-Type application/vnd.tcpdump.pcap,
+        Content-Disposition attachment;
+        filename="sip_<sanitized-callid>[_internal].pcap" — the "_internal"
+        suffix ONLY when internal=true, so the filename itself says which
+        flavor a human is holding.
+      * internal=false (THE DEFAULT — enforced here at the API, not just in
+        the UI): EDGE packets only — signaling between our SBCs and the
+        outside world (carrier PoPs, customer PBXes).  Safe to hand to
+        carriers/customers: internal topology (SBC<->FS hops, private IPs,
+        FS nodes) is entirely absent.  internal=true: the full capture
+        through the whole network.
+      * 404 with detail when the Call-ID has no stored packets at all, AND
+        when edge filtering leaves zero packets (an empty-but-valid pcap is
+        never returned).
+      * 400 on malformed/empty call_id; 413 with detail above the
+        ~2000-packet cap.
+      * correlated=true also pulls the correlated legs (the A<->B X-CID
+        correlation the search pipeline computes).
+      * X-Pcap-Skipped header: count of stored rows that could not be
+        represented as IPv4/UDP packets (rare; e.g. IPv6 endpoints).
+
+    Edge/internal classification and pcap synthesis live in homer_pcap.py
+    (pure stdlib, truth table + byte format pinned by unit tests there).
+    """
+    cid = call_id.strip()
+    if not cid:
+        raise HTTPException(
+            status_code=400,
+            detail="call_id is required and must be a non-empty SIP Call-ID",
+        )
+    if len(cid) > 512 or any(c in cid for c in "\r\n\x00"):
+        raise HTTPException(
+            status_code=400,
+            detail="call_id is malformed (control characters or >512 chars)",
+        )
+
+    now_ns = int(datetime.now(timezone.utc).timestamp() * 1_000_000_000)
+    start_ns = now_ns - PCAP_LOOKBACK_DAYS * 86400 * 1_000_000_000
+    end_ns = now_ns + 60 * 1_000_000_000  # small allowance for clock skew
+
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        # Primary fetch: every stored packet for THIS Call-ID (indexed gin
+        # lookup — same access pattern as /search Step 3).  limit=cap+1 so
+        # cap overflow is detectable without unbounded transfer.
+        rows = await _query_clickhouse_by_callids(
+            client, [cid], start_ns, end_ns, limit=PCAP_MAX_PACKETS + 1,
+        )
+        if not rows:
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    f"no captured SIP packets found for Call-ID '{cid}' "
+                    f"within the last {PCAP_LOOKBACK_DAYS} days"
+                ),
+            )
+        if len(rows) > PCAP_MAX_PACKETS:
+            raise HTTPException(
+                status_code=413,
+                detail=(
+                    f"capture for Call-ID '{cid}' exceeds the "
+                    f"{PCAP_MAX_PACKETS}-packet export cap"
+                ),
+            )
+
+        if correlated:
+            group = await _pcap_correlated_callids(client, cid, rows)
+            if group != {cid}:
+                ts_values = [
+                    r["timestamp_ns"] for r in rows if r.get("timestamp_ns")
+                ]
+                win_start = (
+                    min(ts_values) - PCAP_CORRELATION_MARGIN_NS
+                    if ts_values else start_ns
+                )
+                win_end = (
+                    max(ts_values) + PCAP_CORRELATION_MARGIN_NS
+                    if ts_values else end_ns
+                )
+                try:
+                    all_rows = await _query_clickhouse_by_callids(
+                        client, sorted(group), win_start, win_end,
+                        limit=PCAP_MAX_PACKETS + 1,
+                    )
+                except HTTPException:
+                    # Fail-soft (mirrors /search): keep the primary leg.
+                    logger.warning(
+                        "pcap export: correlated-leg fetch failed for %s — "
+                        "exporting the requested leg only", cid,
+                    )
+                    all_rows = []
+                if all_rows:
+                    rows = all_rows
+                if len(rows) > PCAP_MAX_PACKETS:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=(
+                            f"capture for Call-ID '{cid}' plus correlated "
+                            f"legs exceeds the {PCAP_MAX_PACKETS}-packet "
+                            "export cap — retry with correlated=false to "
+                            "export only this leg"
+                        ),
+                    )
+
+    total_stored = len(rows)
+    if not internal:
+        rows = [
+            r for r in rows
+            if is_edge_packet(r.get("src_ip") or "", r.get("dst_ip") or "")
+        ]
+        if not rows:
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    f"no edge packets for this call ({total_stored} internal "
+                    "packets stored) — it may be on-net; retry with "
+                    "internal=true"
+                ),
+            )
+
+    # No dedup by design: a carrier<->SBC packet is captured only at the SBC
+    # (node 100-series) so multi-node duplication is minimal, and for the
+    # internal flavor the per-capture-point copies are the point.  Stored
+    # timestamp order is the export order.
+    rows.sort(key=lambda r: r.get("timestamp_ns") or 0)
+    pcap_bytes, packet_count, skipped = build_pcap(rows)
+    if packet_count == 0:
+        # Contract: never return an empty-but-valid pcap.
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"all {len(rows)} stored packets for this call were "
+                "unrepresentable as IPv4/UDP (skipped) — nothing to export"
+            ),
+        )
+
+    safe_cid = _PCAP_FILENAME_SAFE_RE.sub("_", cid)[:120] or "call"
+    filename = f"sip_{safe_cid}{'_internal' if internal else ''}.pcap"
+    return Response(
+        content=pcap_bytes,
+        media_type="application/vnd.tcpdump.pcap",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "X-Pcap-Skipped": str(skipped),
+            "X-Pcap-Packets": str(packet_count),
+        },
+    )

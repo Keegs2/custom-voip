@@ -119,3 +119,63 @@ export async function apiRequest<T>(
 
   return response.json() as Promise<T>;
 }
+
+/** A binary download fetched through the authenticated API client. */
+export interface ApiBinaryResult {
+  blob: Blob;
+  /** Filename parsed from Content-Disposition, or null when absent/unparseable. */
+  filename: string | null;
+}
+
+/**
+ * Pulls the filename out of a Content-Disposition header. Handles both the
+ * quoted (`filename="sip_x.pcap"`) and bare (`filename=sip_x.pcap`) forms.
+ */
+function parseContentDispositionFilename(header: string | null): string | null {
+  if (!header) return null;
+  const match = /filename\s*=\s*(?:"([^"]+)"|([^;]+))/i.exec(header);
+  const value = (match?.[1] ?? match?.[2])?.trim();
+  return value ? value : null;
+}
+
+/**
+ * Binary sibling of apiRequest for endpoints that return a file (e.g. PCAP
+ * export). Identical auth / 401-redirect / ApiError semantics — error bodies
+ * are still JSON `{ detail }` shapes even on binary endpoints — but a 2xx
+ * response is returned as a Blob plus the server-declared filename.
+ */
+export async function apiRequestBlob(path: string): Promise<ApiBinaryResult> {
+  const url = `${API_BASE}${path}`;
+
+  const headers: Record<string, string> = {};
+  const token = localStorage.getItem(AUTH_TOKEN_KEY);
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  const response = await fetch(url, { method: 'GET', headers });
+
+  if (response.status === 401) {
+    localStorage.removeItem(AUTH_TOKEN_KEY);
+    window.location.replace('/');
+    throw new ApiError(401, 'Session expired. Please sign in again.');
+  }
+
+  if (!response.ok) {
+    let errorBody: unknown;
+    try {
+      errorBody = await response.json();
+    } catch {
+      errorBody = await response.text().catch(() => 'Unknown error');
+    }
+    const message = extractErrorMessage(errorBody);
+    throw new ApiError(response.status, message, errorBody);
+  }
+
+  return {
+    blob: await response.blob(),
+    filename: parseContentDispositionFilename(
+      response.headers.get('Content-Disposition'),
+    ),
+  };
+}
