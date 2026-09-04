@@ -221,13 +221,34 @@ export function formatMessageLabel(msg: HomerSearchResult): string {
 }
 
 /**
- * Detects RFC 3261 retransmissions by checking whether an identical message
- * (same Call-ID, method, status, source, destination) was seen within the
- * given time window.
+ * RFC 3261 retransmission window when the TRANSACTION key (CSeq + topmost Via
+ * branch) is available: 64*T1 = 32 s — the maximum lifetime of a SIP
+ * transaction (Timer F / Timer H), which bounds how late a retransmitted copy
+ * of the same message can legally appear on the wire.
+ */
+export const RETRANSMISSION_TXN_WINDOW_MS = 32_000;
+
+/**
+ * Detects RFC 3261 retransmissions.
  *
- * @param msg        The message to check
+ * PRIMARY (transaction-keyed) detection: when both rows carry the API's
+ * `via_branch` + `cseq` fields, a retransmission is an EXACT repeat of the
+ * same transaction on the same hop — same Call-ID, CSeq, topmost Via branch,
+ * method, status, src and dst — within the RFC transaction lifetime (32 s).
+ * The topmost Via branch is unique per transaction per hop, so this key can
+ * never confuse a re-INVITE / new transaction with a retransmission, and it
+ * catches the FULL RFC 3261 retransmit schedule (T1 doubling: 500 ms, 1 s,
+ * 2 s, 4 s…) — the old fixed 500 ms window silently missed every copy after
+ * the first, so later BYE/200 retransmissions rendered as full-color primary
+ * rows that the "Hide Retransmissions" toggle could not govern.
+ *
+ * FALLBACK (legacy) detection: for old/cached rows without `via_branch`/
+ * `cseq`, the original conservative key (Call-ID, method, status, src, dst)
+ * within `windowMs` (default 500 ms) still applies.
+ *
+ * @param msg           The message to check
  * @param prevMessages  All chronologically earlier messages to compare against
- * @param windowMs   Retransmission detection window (default 500ms per RFC 3261 T1*64)
+ * @param windowMs      LEGACY-fallback window (default 500ms, RFC 3261 T1)
  */
 export function isRetransmission(
   msg: HomerSearchResult,
@@ -235,25 +256,45 @@ export function isRetransmission(
   windowMs: number = 500,
 ): boolean {
   const msgTimeMs = msg.timestamp_ns / 1_000_000;
-  const windowStart = msgTimeMs - windowMs;
+  const legacyStart = msgTimeMs - windowMs;
+  const txnStart = msgTimeMs - RETRANSMISSION_TXN_WINDOW_MS;
+  const msgHasTxnKey = !!msg.via_branch && !!msg.cseq;
 
   // Walk backwards through previous messages (most recent first is most likely to match)
   for (let i = prevMessages.length - 1; i >= 0; i--) {
     const prev = prevMessages[i]!;
     const prevTimeMs = prev.timestamp_ns / 1_000_000;
 
-    // If we've gone past the detection window, no point checking further
-    if (prevTimeMs < windowStart) {
+    // Past BOTH detection windows — nothing older can match.
+    if (prevTimeMs < txnStart && prevTimeMs < legacyStart) {
       break;
     }
 
-    if (
+    const sameHopSameShape =
       prev.callid === msg.callid &&
       prev.method === msg.method &&
       prev.status === msg.status &&
       prev.src_ip === msg.src_ip &&
-      prev.dst_ip === msg.dst_ip
-    ) {
+      prev.dst_ip === msg.dst_ip;
+    if (!sameHopSameShape) continue;
+
+    if (msgHasTxnKey && prev.via_branch && prev.cseq) {
+      // Transaction-keyed: exact same transaction repeated on the same hop.
+      if (
+        prev.via_branch === msg.via_branch &&
+        prev.cseq === msg.cseq &&
+        prevTimeMs >= txnStart
+      ) {
+        return true;
+      }
+      // Both rows are keyed but the transactions differ (e.g. a re-INVITE or
+      // a new BYE) — a DISTINCT message, never a retransmission, even inside
+      // the legacy window.
+      continue;
+    }
+
+    // Legacy fallback for old/cached rows without transaction fields.
+    if (prevTimeMs >= legacyStart) {
       return true;
     }
   }
