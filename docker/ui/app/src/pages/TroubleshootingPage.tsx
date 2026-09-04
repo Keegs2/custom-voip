@@ -44,6 +44,7 @@ import type { HomerSearchParams, HomerSearchResult } from '../api/homer';
 import { fmt } from '../utils/format';
 import { toDatetimeLocal } from './calls/callsFilters';
 import { SipLadder } from '../components/sip-ladder';
+import { PcapExportControl } from '../components/pcap/PcapExportControl';
 import type { MessageAttestation } from '../types/stir';
 import {
   attestLabel,
@@ -864,6 +865,11 @@ function ResultsTable({ callGroups, correlations, pipelineWarnings, windowStartI
                               Open in Grafana
                             </a>
                           </div>
+                          {/* PCAP export strip — keyed by the representative
+                              Call-ID so a different call's row NEVER inherits
+                              this row's toggle state; unmounting on collapse
+                              already resets it (default = edge-only, safe). */}
+                          <PcapExportControl key={row.callid} callId={row.callid} />
                           <div className="dlx5-ladderframe-body">
                             <SipLadder
                               messages={group.messages}
