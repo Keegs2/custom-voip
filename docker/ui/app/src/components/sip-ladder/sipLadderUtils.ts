@@ -66,6 +66,12 @@ export const LADDER_COLORS = {
   roleSbc: '#1d63dd',
   roleMedia: '#15803d',
 
+  // Endpoint bookend chips (the "CARRIER · ORIG" / "CARRIER · TERM" header
+  // sublabels on the two external endpoint columns) — amber family, mirroring
+  // roleCarrier at wash strength so the bookends read as a matched pair.
+  endpointChipEdge: 'rgba(180,83,9,0.3)',
+  endpointChipWash: 'rgba(180,83,9,0.07)',
+
   // Interactive accent (azure family — mirrors --rcf-azure / --rcf-azure-deep)
   accent: '#1d63dd',
   accentWash: 'rgba(47,125,246,0.08)',

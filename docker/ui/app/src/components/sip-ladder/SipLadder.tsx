@@ -2,10 +2,18 @@ import { useState, useMemo, useCallback } from 'react';
 import type { HomerSearchResult } from '../../api/homer';
 import type { LadderLayout, LadderNode } from './sipLadderTypes';
 import { computeLayout } from './sipLadderLayout';
+import { matchesCarrierVocab } from './ladderOrder';
 import { LADDER_COLORS } from './sipLadderUtils';
 import { SipMessageRow, TIMESTAMP_COL_WIDTH } from './SipMessageRow';
 import { PacketDetailPanel } from './PacketDetailPanel';
 import './sipLadder.css';
+
+// Dev-only self-test for the canonical column ordering (ladderOrder.ts).
+// `import.meta.env.DEV` is statically `false` in production builds, so the
+// assertion module is dead-code-eliminated and never ships.
+if (import.meta.env.DEV) {
+  void import('./ladderOrder.assert');
+}
 
 // ─── Design tokens ──────────────────────────────────────────────────────────
 // ALL colors come from the LADDER_COLORS theme object (sipLadderUtils.ts) —
@@ -147,32 +155,50 @@ function FilterBtn({ active, label, count, onClick }: FilterBtnProps) {
 // ─── Column header ──────────────────────────────────────────────────────────
 
 function ColumnHeader({ node }: { node: LadderNode }) {
-  const roleColor = getRoleColor(node.role);
-  const isUnrecognized = node.role === 'unknown';
+  const name = node.displayLabel ?? node.id;
+  // Sinch/BW PoPs classify role-'unknown' (the role vocabulary is BW-only) but
+  // ARE first-class carriers — the ordering module's vocabulary recognizes
+  // them, so their headers must never read "unrecognized".
+  const isCarrier = matchesCarrierVocab(name);
+  const isUnrecognized = node.role === 'unknown' && !isCarrier;
 
-  // Split SBC columns get distinct A-leg / B-leg sublabels so the two "SBC-1"
-  // headers are never ambiguous. All other roles keep their standard sublabel
-  // (CARRIER (IN) / CARRIER (OUT) / LOAD BALANCER / MEDIA SERVER / SBC).
-  // Un-aliased nodes (role 'unknown' — the id is the bare IP) get a quiet
-  // lowercase "unrecognized" note instead of a shouting uppercase UNKNOWN.
-  const roleLabel =
-    node.role === 'sbc' && node.legTag
-      ? `SBC · ${node.legTag === 'a' ? 'A' : 'B'}-LEG`
-      : isUnrecognized
-        ? 'unrecognized'
-        : getRoleLabel(node.role);
+  // Sublabel precedence:
+  //  1. Endpoint bookends — the orig/term external columns (from the canonical
+  //     ordering) read "CARRIER · ORIG" / "CARRIER · TERM" for the known
+  //     carrier vocabulary (BW-*/Sinch-*), or a quiet "endpoint · orig/term"
+  //     for customer PBX / unknown public addresses.
+  //  2. Split SBC columns get distinct A-leg / B-leg sublabels so the two
+  //     "SBC-1" headers are never ambiguous.
+  //  3. Known roles keep their standard sublabel (CARRIER (IN) / CARRIER (OUT)
+  //     / LOAD BALANCER / MEDIA SERVER / SBC); a carrier-vocab column that is
+  //     neither orig nor final term (a failed failover attempt) reads plain
+  //     "CARRIER" rather than a second, misleading TERM.
+  //  4. Un-aliased nodes (bare IPs) get a quiet lowercase "unrecognized" note
+  //     instead of a shouting uppercase UNKNOWN.
+  let roleLabel: string;
+  if (node.endpointTag && isCarrier) {
+    roleLabel = `carrier · ${node.endpointTag}`;
+  } else if (node.endpointTag && isUnrecognized) {
+    roleLabel = `endpoint · ${node.endpointTag}`;
+  } else if (node.role === 'sbc' && node.legTag) {
+    roleLabel = `SBC · ${node.legTag === 'a' ? 'A' : 'B'}-LEG`;
+  } else if (isCarrier && node.role === 'unknown') {
+    roleLabel = 'carrier';
+  } else if (isUnrecognized) {
+    roleLabel = 'unrecognized';
+  } else {
+    roleLabel = getRoleLabel(node.role);
+  }
+
+  const roleColor = isCarrier ? LADDER_COLORS.roleCarrier : getRoleColor(node.role);
 
   return (
     <th
+      className="sipladder-header-cell"
       style={{
         padding: '12px 8px 10px',
         textAlign: 'center',
         verticalAlign: 'top',
-        position: 'sticky',
-        top: 0,
-        background: 'rgba(255,255,255,0.97)',
-        zIndex: 10,
-        borderBottom: `1px solid ${LADDER_COLORS.border}`,
         boxSizing: 'border-box',
       }}
     >
@@ -185,7 +211,7 @@ function ColumnHeader({ node }: { node: LadderNode }) {
           marginBottom: 2,
         }}
       >
-        {node.displayLabel ?? node.id}
+        {name}
       </div>
       <div
         style={{
@@ -198,7 +224,25 @@ function ColumnHeader({ node }: { node: LadderNode }) {
           opacity: isUnrecognized ? 1 : 0.9,
         }}
       >
-        {roleLabel}
+        {node.endpointTag ? (
+          // Bookend chip — the orig/term endpoint columns frame the ladder as
+          // a matched visual pair (amber wash for carriers, neutral otherwise).
+          <span
+            style={{
+              display: 'inline-block',
+              padding: '1px 7px',
+              borderRadius: 999,
+              border: `1px solid ${
+                isCarrier ? LADDER_COLORS.endpointChipEdge : LADDER_COLORS.controlBorder
+              }`,
+              background: isCarrier ? LADDER_COLORS.endpointChipWash : LADDER_COLORS.inkChip,
+            }}
+          >
+            {roleLabel}
+          </span>
+        ) : (
+          roleLabel
+        )}
       </div>
       {/* Column guide line */}
       <div
@@ -588,16 +632,12 @@ export function SipLadder({ messages, correlations, pipelineWarnings }: SipLadde
             <thead>
               <tr>
                 <th
+                  className="sipladder-header-cell"
                   style={{
                     width: TIMESTAMP_COL_WIDTH,
                     minWidth: TIMESTAMP_COL_WIDTH,
                     padding: '12px 8px 10px',
                     textAlign: 'right',
-                    position: 'sticky',
-                    top: 0,
-                    background: 'rgba(255,255,255,0.97)',
-                    zIndex: 10,
-                    borderBottom: `1px solid ${LADDER_COLORS.border}`,
                     boxSizing: 'border-box',
                   }}
                 >

@@ -36,6 +36,15 @@ export interface LadderNode {
    * two SBC columns are never visually ambiguous. Unset for unsplit nodes.
    */
   legTag?: 'a' | 'b';
+  /**
+   * Bookend designation from the canonical column ordering (ladderOrder.ts):
+   * 'orig' = the external endpoint sourcing the earliest inbound INVITE
+   * (always the leftmost column); 'term' = the external endpoint receiving the
+   * LAST externally-destined INVITE (always the rightmost column — failover-
+   * aware, same rule as the results table). Drives the "CARRIER · ORIG" /
+   * "CARRIER · TERM" header sublabels. Unset for platform nodes.
+   */
+  endpointTag?: 'orig' | 'term';
 }
 
 // ─── Processed message ──────────────────────────────────────────────────────
