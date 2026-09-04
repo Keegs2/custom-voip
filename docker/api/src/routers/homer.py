@@ -22,7 +22,7 @@ from typing import Any, Optional
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from auth.dependencies import require_support_or_admin
 from db import database as db
@@ -134,6 +134,15 @@ class HomerSearchRequest(BaseModel):
     start_time: str   # ISO 8601 datetime
     end_time: str      # ISO 8601 datetime
     correlate: bool = True  # Enable A/B leg correlation
+    # Cursor paging (PREFERRED by the frontend over shrinking end_time):
+    # strict upper bound — only messages with timestamp_ns < before_ns are
+    # fetched/returned. Page N+1 sends before_ns = page N's oldest_ts_ns.
+    # Needed because end_time goes through datetime.fromisoformat, which holds
+    # at most MICROSECOND precision, while stored timestamps are NANOSECOND —
+    # an end_time cursor could duplicate or skip messages inside the same
+    # microsecond. before_ns is exact. When absent, behavior (including
+    # end_time semantics) is byte-identical to before this field existed.
+    before_ns: Optional[int] = Field(default=None, gt=0)
 
 
 # ---------------------------------------------------------------------------
@@ -745,6 +754,30 @@ async def search_sip_traces(
                             causality", "13 ingest-stamped rows detected";
                             empty list when the pipeline saw nothing unusual
       correlation_truncated true       — only present when Step 2 truncated
+      oldest_ts_ns          int|null   — timestamp_ns of the OLDEST message
+                            actually RETURNED in data (the true min over the
+                            post-dedup result set); null when data is empty.
+                            This is the paging cursor.
+      has_more              bool       — true when the Step-1 base fetch came
+                            back at exactly INITIAL_LIMIT, i.e. the window was
+                            truncated by the internal cap and older data (qryn
+                            returns the NEWEST entries first) exists beyond
+                            what was returned. Under-limit -> false. Distinct
+                            from correlation_truncated (Step-2 X-CID scan),
+                            which is unchanged.
+
+    CURSOR PAGING: when has_more is true, the frontend re-issues the SAME
+    search with ``before_ns = oldest_ts_ns`` (strict ``timestamp_ns <
+    before_ns`` bound applied to every fetch step AND to the returned set) to
+    get the next-older page. before_ns is preferred over shrinking end_time
+    because end_time parses through datetime.fromisoformat (microsecond
+    precision at best) while timestamps are nanosecond — adjacent pages via
+    before_ns share ZERO message rows by construction. NOTE the boundary is
+    message-level, not call-level: a call whose messages straddle the cursor
+    is split across pages (its older messages appear on the next page). That
+    is intentional — the server does not re-expand calls across the boundary;
+    oldest_ts_ns is always the exact min of what THIS response returned so
+    the next window starts exactly there.
 
     Per message (in addition to the existing fields timestamp, timestamp_ns,
     from_user, to_user, callid, method, cseq, via_branch, src_ip, dst_ip,
@@ -816,6 +849,24 @@ async def search_sip_traces(
             detail=f"Invalid timestamp format: {exc}",
         )
 
+    # Cursor paging: before_ns is a STRICT upper bound (timestamp_ns <
+    # before_ns). Clamping end_ns propagates the bound to every fetch step
+    # (qryn Steps 1/2 and the ClickHouse Step 3, whose range predicate is
+    # already exclusive: ``timestamp_ns < end_ns``); a Python-side strict
+    # filter in _respond() guarantees it regardless of qryn's end-boundary
+    # semantics. end_time behavior is untouched when before_ns is absent.
+    if body.before_ns is not None:
+        end_ns = min(end_ns, body.before_ns)
+        if end_ns <= start_ns:
+            # Cursor paged past the window start — nothing older can exist.
+            return {
+                "data": [],
+                "correlations": {},
+                "pipeline_warnings": [],
+                "oldest_ts_ns": None,
+                "has_more": False,
+            }
+
     # Limits: 500 for initial phone-number search (8 calls x ~30 msgs = 240+),
     # 1000 for the X-CID correlation query in Step 2 (it fetches EVERY X-CID
     # message in the window and filters in Python, so the default limit of 200
@@ -838,20 +889,47 @@ async def search_sip_traces(
             client, logql, start_ns, end_ns, limit=INITIAL_LIMIT,
         )
 
+        # Paging truth: qryn (Loki-compatible) defaults to direction=backward,
+        # returning the NEWEST entries when the limit truncates — so a
+        # full-limit Step-1 response means older data exists in the window
+        # beyond what was returned, and the next page is reached by bounding
+        # below this page's oldest timestamp (before_ns). Under-limit means
+        # the base fetch saw the whole window. Measured PRE-dedup/PRE-filter:
+        # it reflects what the store actually handed back.
+        base_truncated = len(initial_results) >= INITIAL_LIMIT
+
         # Every return path runs the full post-processing pipeline (dedup,
         # SIP-causality ordering, hairpin marking, seq assignment) so the UI
         # receives the same per-message contract regardless of which path
         # produced the data.
         async def _respond(results: list, correlations: dict, truncated: bool = False) -> dict:
+            if body.before_ns is not None:
+                # Belt-and-braces strict cursor bound: end_ns clamping already
+                # scoped every upstream fetch, but correlation refetches merge
+                # rows from multiple queries — enforce the page boundary on
+                # the final set so adjacent pages can never share a row.
+                results = [
+                    r for r in results
+                    if r.get("timestamp_ns", 0) < body.before_ns
+                ]
             data, pipeline_warnings = _finalize_pipeline(results)
             # Additive: stamp each message with its call's STIR/SHAKEN
             # attestation (or null). One batched, failure-isolated lookup — it
             # never raises and never blocks the search on a DB hiccup.
             await _attach_attestations(data)
+            # True min over what was RETURNED (0 = unparseable-timestamp
+            # sentinel, excluded — it is not a usable cursor position).
+            oldest_ts_ns = min(
+                (m["timestamp_ns"] for m in data if m.get("timestamp_ns")),
+                default=None,
+            )
             return {
                 "data": data,
                 "correlations": correlations,
                 "pipeline_warnings": pipeline_warnings,
+                # Additive cursor-paging fields (always present).
+                "oldest_ts_ns": oldest_ts_ns,
+                "has_more": base_truncated,
                 # Additive, backward-compatible: only present when True.
                 **({"correlation_truncated": True} if truncated else {}),
             }

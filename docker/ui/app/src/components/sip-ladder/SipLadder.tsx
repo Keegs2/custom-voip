@@ -2,7 +2,7 @@ import { useState, useMemo, useCallback } from 'react';
 import type { HomerSearchResult } from '../../api/homer';
 import type { LadderLayout, LadderNode } from './sipLadderTypes';
 import { computeLayout } from './sipLadderLayout';
-import { LADDER_COLORS, formatTimeDelta } from './sipLadderUtils';
+import { LADDER_COLORS } from './sipLadderUtils';
 import { SipMessageRow, TIMESTAMP_COL_WIDTH } from './SipMessageRow';
 import { PacketDetailPanel } from './PacketDetailPanel';
 import './sipLadder.css';
@@ -53,19 +53,6 @@ function getRoleColor(role: string): string {
     case 'media-server': return LADDER_COLORS.roleMedia;
     default: return LADDER_COLORS.textFaint;
   }
-}
-
-// ─── Format phone numbers for display ───────────────────────────────────────
-
-function formatPhone(raw: string): string {
-  const digits = raw.replace(/\D/g, '');
-  if (digits.length === 11 && digits[0] === '1') {
-    return `+1 (${digits.slice(1, 4)}) ${digits.slice(4, 7)}-${digits.slice(7)}`;
-  }
-  if (digits.length === 10) {
-    return `+1 (${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
-  }
-  return raw;
 }
 
 // ─── Legend item ─────────────────────────────────────────────────────────────
@@ -228,224 +215,88 @@ function ColumnHeader({ node }: { node: LadderNode }) {
   );
 }
 
-// ─── Call summary header ────────────────────────────────────────────────────
+// ─── A-leg / B-leg Call-ID chips (filter-bar residents) ─────────────────────
+//
+// The old CallSummary strip is gone (2026-09 declutter: it repeated the
+// results row verbatim). The one thing it carried that lives nowhere else —
+// the per-leg Call-IDs — now sits in the filter bar as compact mono chips.
+// Click copies the leg's Call-ID(s); the title tooltip always shows them in
+// full for environments where the clipboard API is unavailable.
 
-interface CallSummaryProps {
-  layout: LadderLayout;
+interface LegChipProps {
+  leg: 'a' | 'b';
+  callIds: ReadonlyArray<string>;
 }
 
-function CallSummary({ layout }: CallSummaryProps) {
-  const firstMsg = layout.messages[0]?.original;
-  const lastMsg = layout.messages[layout.messages.length - 1]?.original;
+function LegChip({ leg, callIds }: LegChipProps) {
+  // ALL hooks at the top (rules of hooks — see CLAUDE.md §13)
+  const [copied, setCopied] = useState(false);
 
-  if (!firstMsg) return null;
+  const handleCopy = useCallback(() => {
+    const text = callIds.join(', ');
+    // Clipboard API is available on our HTTPS/localhost targets; if not,
+    // the title tooltip still exposes the full ids — fail silently.
+    navigator.clipboard
+      ?.writeText(text)
+      .then(() => {
+        setCopied(true);
+        window.setTimeout(() => setCopied(false), 1400);
+      })
+      .catch(() => {});
+  }, [callIds]);
 
-  // Find the final response status (highest 2xx or highest final response)
-  let finalStatus: number | null = null;
-  for (const msg of layout.messages) {
-    const s = msg.original.status;
-    if (s !== null && s >= 200) {
-      if (finalStatus === null || (s >= 200 && s < 300 && (finalStatus < 200 || finalStatus >= 300))) {
-        finalStatus = s;
-      } else if (finalStatus !== null && !(finalStatus >= 200 && finalStatus < 300) && s > finalStatus) {
-        finalStatus = s;
-      }
-    }
-  }
+  if (callIds.length === 0) return null;
 
-  const fromDisplay = formatPhone(firstMsg.from_user);
-  const toDisplay = formatPhone(firstMsg.to_user);
-
-  // Duration
-  let durationDisplay = '--';
-  if (layout.callDurationMs !== null) {
-    durationDisplay = formatTimeDelta(layout.callDurationMs);
-  }
-
-  // Status badge tones — light-canvas washes of the semantic arrow hues
-  // (mirrors the page's dlx5-status pills so both status reads match).
-  let statusBg = 'rgba(93,111,140,0.08)';
-  let statusColor: string = LADDER_COLORS.textMuted;
-  let statusBorder = 'rgba(93,111,140,0.2)';
-  if (finalStatus !== null) {
-    if (finalStatus >= 200 && finalStatus < 300) {
-      statusBg = 'rgba(22,163,74,0.1)';
-      statusColor = LADDER_COLORS.success;
-      statusBorder = 'rgba(22,163,74,0.26)';
-    } else if (finalStatus >= 400 && finalStatus < 500) {
-      statusBg = 'rgba(180,83,9,0.09)';
-      statusColor = LADDER_COLORS.clientError;
-      statusBorder = 'rgba(180,83,9,0.26)';
-    } else if (finalStatus >= 500) {
-      statusBg = 'rgba(220,38,38,0.07)';
-      statusColor = LADDER_COLORS.serverError;
-      statusBorder = 'rgba(220,38,38,0.26)';
-    }
-  }
+  const accent = leg === 'a' ? LADDER_COLORS.aLeg : LADDER_COLORS.bLeg;
+  const wash = leg === 'a' ? 'rgba(29,99,221,0.08)' : 'rgba(180,83,9,0.08)';
+  const edge = leg === 'a' ? 'rgba(29,99,221,0.22)' : 'rgba(180,83,9,0.24)';
+  const idsText = callIds.join(', ');
 
   return (
-    <div
+    <button
+      type="button"
+      onClick={handleCopy}
+      title={`Click to copy\n${callIds.join('\n')}`}
       style={{
-        ...CARD,
-        padding: '16px 20px',
-        marginBottom: 12,
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 6,
+        maxWidth: 220,
+        padding: '3px 9px',
+        borderRadius: 6,
+        border: `1px solid ${edge}`,
+        background: wash,
+        cursor: 'copy',
+        overflow: 'hidden',
       }}
     >
-      {/* Top row: from/to, duration, status */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 20, flexWrap: 'wrap' }}>
-        {/* From → To */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontSize: '0.7rem', fontWeight: 600, color: LADDER_COLORS.textFaint, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-            From
-          </span>
-          <span style={{ ...MONO, fontSize: '0.82rem', fontWeight: 600, color: LADDER_COLORS.text }}>
-            {fromDisplay}
-          </span>
-          <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke={LADDER_COLORS.textFaint} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-            <line x1={5} y1={12} x2={19} y2={12} />
-            <polyline points="12 5 19 12 12 19" />
-          </svg>
-          <span style={{ fontSize: '0.7rem', fontWeight: 600, color: LADDER_COLORS.textFaint, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-            To
-          </span>
-          <span style={{ ...MONO, fontSize: '0.82rem', fontWeight: 600, color: LADDER_COLORS.text }}>
-            {toDisplay}
-          </span>
-        </div>
-
-        {/* Divider */}
-        <div style={{ width: 1, height: 20, background: LADDER_COLORS.borderLight }} />
-
-        {/* Duration */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span style={{ fontSize: '0.7rem', fontWeight: 600, color: LADDER_COLORS.textFaint, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-            Duration
-          </span>
-          <span style={{ ...MONO, fontSize: '0.82rem', fontWeight: 600, color: LADDER_COLORS.provisional }}>
-            {durationDisplay}
-          </span>
-        </div>
-
-        {/* Status badge */}
-        {finalStatus !== null && (
-          <>
-            <div style={{ width: 1, height: 20, background: LADDER_COLORS.borderLight }} />
-            <span
-              style={{
-                ...MONO,
-                display: 'inline-block',
-                padding: '3px 10px',
-                borderRadius: 5,
-                fontSize: '0.72rem',
-                fontWeight: 700,
-                background: statusBg,
-                color: statusColor,
-                border: `1px solid ${statusBorder}`,
-              }}
-            >
-              {finalStatus}
-            </span>
-          </>
-        )}
-
-        {/* Divider */}
-        <div style={{ width: 1, height: 20, background: LADDER_COLORS.borderLight }} />
-
-        {/* Message count */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span style={{ fontSize: '0.7rem', fontWeight: 600, color: LADDER_COLORS.textFaint, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-            Messages
-          </span>
-          <span style={{ ...MONO, fontSize: '0.82rem', fontWeight: 600, color: LADDER_COLORS.accent }}>
-            {layout.messages.filter((m) => !m.internalHandoff).length}
-          </span>
-        </div>
-      </div>
-
-      {/* Bottom row: Call-IDs */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 10, flexWrap: 'wrap' }}>
-        {layout.aLegCallIds.size > 0 && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-            <span
-              style={{
-                fontSize: '0.6rem',
-                fontWeight: 700,
-                letterSpacing: '0.06em',
-                textTransform: 'uppercase',
-                color: LADDER_COLORS.aLeg,
-                padding: '1px 5px',
-                borderRadius: 3,
-                background: 'rgba(29,99,221,0.08)',
-                border: '1px solid rgba(29,99,221,0.22)',
-              }}
-            >
-              A-leg
-            </span>
-            <span
-              style={{
-                ...MONO,
-                fontSize: '0.68rem',
-                color: LADDER_COLORS.textMuted,
-                maxWidth: 280,
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-              }}
-              title={Array.from(layout.aLegCallIds).join(', ')}
-            >
-              {Array.from(layout.aLegCallIds).join(', ')}
-            </span>
-          </div>
-        )}
-
-        {layout.bLegCallIds.size > 0 && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-            <span
-              style={{
-                fontSize: '0.6rem',
-                fontWeight: 700,
-                letterSpacing: '0.06em',
-                textTransform: 'uppercase',
-                color: LADDER_COLORS.bLeg,
-                padding: '1px 5px',
-                borderRadius: 3,
-                background: 'rgba(180,83,9,0.08)',
-                border: '1px solid rgba(180,83,9,0.24)',
-              }}
-            >
-              B-leg
-            </span>
-            <span
-              style={{
-                ...MONO,
-                fontSize: '0.68rem',
-                color: LADDER_COLORS.textMuted,
-                maxWidth: 280,
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-              }}
-              title={Array.from(layout.bLegCallIds).join(', ')}
-            >
-              {Array.from(layout.bLegCallIds).join(', ')}
-            </span>
-          </div>
-        )}
-
-        {/* Timestamps if we have them */}
-        {firstMsg && lastMsg && firstMsg !== lastMsg && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginLeft: 'auto' }}>
-            <span style={{ ...MONO, fontSize: '0.68rem', color: LADDER_COLORS.textFaint }}>
-              {new Date(firstMsg.timestamp).toLocaleTimeString()}
-            </span>
-            <span style={{ fontSize: '0.68rem', color: LADDER_COLORS.textFaint }}>-</span>
-            <span style={{ ...MONO, fontSize: '0.68rem', color: LADDER_COLORS.textFaint }}>
-              {new Date(lastMsg.timestamp).toLocaleTimeString()}
-            </span>
-          </div>
-        )}
-      </div>
-    </div>
+      <span
+        style={{
+          fontSize: '0.6rem',
+          fontWeight: 700,
+          letterSpacing: '0.06em',
+          textTransform: 'uppercase',
+          color: accent,
+          flexShrink: 0,
+        }}
+      >
+        {leg === 'a' ? 'A-leg' : 'B-leg'}
+      </span>
+      <span
+        style={{
+          ...MONO,
+          fontSize: '0.66rem',
+          color: copied ? accent : LADDER_COLORS.textMuted,
+          fontWeight: copied ? 700 : 400,
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+          minWidth: 0,
+        }}
+      >
+        {copied ? 'copied ✓' : idsText}
+      </span>
+    </button>
   );
 }
 
@@ -562,13 +413,17 @@ export function SipLadder({ messages, correlations, pipelineWarnings }: SipLadde
     return <EmptyLadder />;
   }
 
+  // Pipeline notes — the "N messages reordered for SIP causality" note is the
+  // pipeline doing its job correctly and reads as clutter above every ladder
+  // (2026-09 declutter) — dropped entirely. Any OTHER diagnostic (e.g.
+  // ingest-stamp corruption notices) still renders as a quiet ⓘ chip.
+  const visibleWarnings = (pipelineWarnings ?? []).filter(
+    (w) => !/reordered for SIP causality/i.test(w),
+  );
+
   return (
     <div>
-      {/* Pipeline notes — quiet ⓘ info chips, NOT warnings. What the API
-          reports here (e.g. "N messages reordered for SIP causality") is the
-          pipeline doing its job correctly; an amber alarm banner overstated it.
-          One muted line per note, wrapping inline. */}
-      {pipelineWarnings && pipelineWarnings.length > 0 && (
+      {visibleWarnings.length > 0 && (
         <div
           style={{
             display: 'flex',
@@ -577,7 +432,7 @@ export function SipLadder({ messages, correlations, pipelineWarnings }: SipLadde
             marginBottom: 10,
           }}
         >
-          {pipelineWarnings.map((warning, idx) => (
+          {visibleWarnings.map((warning, idx) => (
             <span
               key={idx}
               style={{
@@ -614,10 +469,9 @@ export function SipLadder({ messages, correlations, pipelineWarnings }: SipLadde
         </div>
       )}
 
-      {/* Call summary header */}
-      <CallSummary layout={layout} />
-
-      {/* Filter bar + Legend */}
+      {/* Filter bar + Legend (also hosts the A/B-leg Call-ID chips — the
+          summary strip that used to sit here duplicated the results row and
+          was removed in the 2026-09 declutter) */}
       <div
         style={{
           ...CARD,
@@ -676,6 +530,10 @@ export function SipLadder({ messages, correlations, pipelineWarnings }: SipLadde
           >
             {visibleCount} / {layout.messages.length} shown
           </span>
+
+          {/* Per-leg Call-ID chips — click to copy, hover for the full ids */}
+          <LegChip leg="a" callIds={Array.from(layout.aLegCallIds)} />
+          <LegChip leg="b" callIds={Array.from(layout.bLegCallIds)} />
         </div>
 
         {/* Color legend */}

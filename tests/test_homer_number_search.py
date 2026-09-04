@@ -401,9 +401,17 @@ def test_response_shape_unchanged_with_results(api, monkeypatch):
         loki_json=_loki_one_invite())
     assert r.status_code == 200, r.text
     body = r.json()
-    assert set(body.keys()) == {"data", "correlations", "pipeline_warnings"}
+    # Envelope: original keys unchanged + the two additive cursor-paging
+    # fields (always present). correlation_truncated stays present-only-when-
+    # true, so it is absent here.
+    assert set(body.keys()) == {
+        "data", "correlations", "pipeline_warnings", "oldest_ts_ns", "has_more",
+    }
     assert body["correlations"] == {}
     assert body["pipeline_warnings"] == []
+    # Under-limit Step-1 fetch (1 << 500) -> the whole window was seen.
+    assert body["has_more"] is False
+    assert body["oldest_ts_ns"] == 1781107707709698000
     assert len(body["data"]) == 1
     m = body["data"][0]
     assert m["callid"] == CALLID
@@ -437,6 +445,189 @@ def test_correlate_step2_query_is_not_polluted_by_needles(api, monkeypatch):
     assert mock.requests[1].url.params["limit"] == "1000"
     # Single-leg call, no X-CID found: self-group correlation only.
     assert r.json()["correlations"] == {CALLID: [CALLID]}
+
+
+# ---- cursor paging: oldest_ts_ns / has_more / before_ns --------------------
+#
+# Contract (frontend pages by re-issuing the SAME search with before_ns =
+# previous page's oldest_ts_ns; before_ns is a STRICT timestamp_ns <
+# before_ns bound, chosen over shrinking end_time because end_time parses at
+# microsecond precision while timestamps are nanosecond):
+#   * oldest_ts_ns  int|null — true min timestamp_ns over RETURNED data
+#   * has_more      bool     — Step-1 base fetch came back at INITIAL_LIMIT
+#   * adjacent pages share ZERO message rows (strict bound, enforced
+#     server-side even if the upstream store's end boundary were inclusive)
+
+# Inside the [START, END) test window — a before_ns cursor at/below START_NS
+# short-circuits (nothing older can exist), so paging fixtures must sit
+# strictly within the searched window.
+BASE_TS = START_NS + 60 * 1_000_000_000  # 1 minute into the window
+STEP_NS = 1_000_000  # 1 ms apart
+
+
+def _raw_invite(i):
+    """Minimal INVITE with a UNIQUE topmost Via branch + CSeq per row so the
+    dedup pipeline (branch-keyed) preserves every fixture row distinctly."""
+    return (
+        "INVITE sip:+17744045256@34.24.133.82 SIP/2.0\r\n"
+        f"Via: SIP/2.0/UDP 67.231.13.185:5060;branch=z9hG4bKpage{i:04d}\r\n"
+        "From: <sip:+16174544217@67.231.13.185>;tag=abc\r\n"
+        "To: <sip:+17744045256@34.24.133.82>\r\n"
+        f"Call-ID: {CALLID}\r\n"
+        f"CSeq: {100 + i} INVITE\r\n"
+        "Content-Length: 0\r\n\r\n"
+    )
+
+
+def _loki_rows(indices):
+    """qryn payload with one row per index: timestamp BASE_TS + i*STEP_NS."""
+    return {
+        "data": {
+            "result": [
+                {
+                    "stream": {
+                        "type": "sip",
+                        "method": "INVITE",
+                        "call_id": CALLID,
+                        "from": "<sip:+16174544217@67.231.13.185>;tag=abc",
+                        "to": "<sip:+17744045256@34.24.133.82>",
+                        "src_ip": "67.231.13.185",
+                        "dst_ip": "34.24.133.82",
+                        "node": "100",
+                    },
+                    "values": [
+                        [str(BASE_TS + i * STEP_NS), _raw_invite(i)]
+                        for i in indices
+                    ],
+                }
+            ]
+        }
+    }
+
+
+@needs_web
+def test_has_more_true_when_base_fetch_hits_limit(api, monkeypatch):
+    # Exactly INITIAL_LIMIT (500) rows back from Step 1 => window truncated.
+    r, _mock = _search(
+        api, monkeypatch, number="6174544217",
+        loki_json=_loki_rows(range(500)))
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["has_more"] is True
+    assert len(body["data"]) == 500
+    assert body["oldest_ts_ns"] == BASE_TS  # min over what was returned
+
+
+@needs_web
+def test_has_more_false_under_limit(api, monkeypatch):
+    r, _mock = _search(
+        api, monkeypatch, number="6174544217",
+        loki_json=_loki_rows(range(499)))
+    assert r.status_code == 200, r.text
+    assert r.json()["has_more"] is False
+
+
+@needs_web
+def test_oldest_ts_ns_is_true_min_of_returned(api, monkeypatch):
+    # Rows arrive in arbitrary (shuffled) order; oldest_ts_ns must be the
+    # exact min of the returned set, not first/last row order.
+    r, _mock = _search(
+        api, monkeypatch, number="6174544217",
+        loki_json=_loki_rows([7, 2, 9, 4, 11]))
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["oldest_ts_ns"] == BASE_TS + 2 * STEP_NS
+    assert body["oldest_ts_ns"] == min(m["timestamp_ns"] for m in body["data"])
+
+
+@needs_web
+def test_oldest_ts_ns_null_when_empty(api, monkeypatch):
+    r, _mock = _search(api, monkeypatch, number="6174544217")  # empty upstream
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["oldest_ts_ns"] is None
+    assert body["has_more"] is False
+
+
+@needs_web
+def test_before_ns_clamps_upstream_window(api, monkeypatch):
+    # The strict bound propagates upstream: qryn Step 1 is queried with
+    # end = before_ns (< the requested end_time window), start untouched.
+    cursor = END_NS - 5 * STEP_NS
+    r, mock = _search(api, monkeypatch, number="6174544217", before_ns=cursor)
+    assert r.status_code == 200, r.text
+    params = mock.requests[0].url.params
+    assert params["start"] == str(START_NS)
+    assert params["end"] == str(cursor)
+    assert params["limit"] == "500"
+
+
+@needs_web
+def test_before_ns_adjacent_pages_share_zero_rows(api, monkeypatch):
+    # Page 1: upstream (limit-truncated) hands back only the NEWEST 3 of 6.
+    r1, _m1 = _search(
+        api, monkeypatch, number="6174544217",
+        loki_json=_loki_rows([3, 4, 5]))
+    assert r1.status_code == 200, r1.text
+    page1 = r1.json()
+    cursor = page1["oldest_ts_ns"]
+    assert cursor == BASE_TS + 3 * STEP_NS
+    page1_ts = {m["timestamp_ns"] for m in page1["data"]}
+
+    # Page 2: same search + before_ns=cursor. The mock returns ALL 6 rows —
+    # deliberately simulating an upstream whose end boundary is INCLUSIVE (or
+    # ignored): the server-side strict filter must still enforce
+    # timestamp_ns < before_ns, so the boundary row (== cursor) and everything
+    # newer are excluded and the two pages are disjoint.
+    r2, _m2 = _search(
+        api, monkeypatch, number="6174544217", before_ns=cursor,
+        loki_json=_loki_rows(range(6)))
+    assert r2.status_code == 200, r2.text
+    page2 = r2.json()
+    page2_ts = {m["timestamp_ns"] for m in page2["data"]}
+    assert page2_ts == {BASE_TS, BASE_TS + STEP_NS, BASE_TS + 2 * STEP_NS}
+    assert page1_ts & page2_ts == set()          # dedup-safety: zero overlap
+    assert all(ts < cursor for ts in page2_ts)   # strictly older
+    assert page2["oldest_ts_ns"] == BASE_TS
+
+
+@needs_web
+def test_before_ns_at_or_before_window_start_short_circuits(api, monkeypatch):
+    # Cursor paged past start_time: nothing older can exist — empty envelope,
+    # NO upstream I/O at all.
+    r, mock = _search(
+        api, monkeypatch, number="6174544217", before_ns=START_NS)
+    assert r.status_code == 200, r.text
+    assert r.json() == {
+        "data": [],
+        "correlations": {},
+        "pipeline_warnings": [],
+        "oldest_ts_ns": None,
+        "has_more": False,
+    }
+    assert mock.requests == []
+
+
+@needs_web
+@pytest.mark.parametrize("bad", [0, -1])
+def test_before_ns_must_be_positive_422(api, monkeypatch, bad):
+    r, mock = _search(api, monkeypatch, number="6174544217", before_ns=bad)
+    assert r.status_code == 422, r.text
+    assert mock.requests == []
+
+
+@needs_web
+def test_paging_fields_present_on_correlate_path(api, monkeypatch):
+    # The correlate=True return paths flow through the same _respond
+    # envelope: paging fields ride along, correlations unchanged.
+    r, _mock = _search(
+        api, monkeypatch, number="6174544217", correlate=True,
+        loki_json=_loki_one_invite())
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["has_more"] is False
+    assert body["oldest_ts_ns"] == 1781107707709698000
+    assert body["correlations"] == {CALLID: [CALLID]}
 
 
 # ---- defense-in-depth: builder refuses un-normalized needles ---------------

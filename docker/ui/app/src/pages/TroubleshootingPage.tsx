@@ -11,6 +11,17 @@
  * the time range uses relative presets that resolve to concrete instants at
  * Search time (same idiom as the CDR page's filter bar).
  *
+ * Results columns (2026-09 redesign): Time (compact 24h+ms) · From→To ·
+ * Orig/Term carrier (derived client-side from the group's endpoint aliases)
+ * · Result · Attestation · Duration · Zone (HEP capture node id → zone).
+ * Call-IDs live in the expanded ladder's filter-bar chips; the Network Path
+ * moved into the expanded frame as `.dlx5-pathline`.
+ *
+ * Cursor paging: the search response carries `oldest_ts_ns` + `has_more`;
+ * Next re-issues the COMMITTED search with `before_ns` via `withPageCursor`
+ * (the one pinned-contract seam), Prev pops a client-side cursor stack
+ * (page 1 = the original search). New search resets to page 1.
+ *
  * Daylight console treatment (see the DAYLIGHT CONSOLE block in index.css and
  * the page-scoped `dlx5-*` primitives in styles/dl-troubleshoot.css).
  *
@@ -287,11 +298,11 @@ function displayUser(value: string): string {
   return looksLikePhone(value) ? fmt(value) : value;
 }
 
-/** Format an ISO date string into date + time parts (microsecond precision) for
- *  the two-line time cell. JavaScript Date only has millisecond precision, so we
- *  extract the fractional seconds directly from the ISO string
- *  (e.g. "2026-05-20T06:44:42.123456Z"). */
-function fmtDateParts(iso: string): { date: string; time: string } {
+/** Compact single-line timestamp for the results table: "Sep 4 04:52:02.885"
+ *  — 24h clock, millisecond precision (microseconds are ladder-level detail),
+ *  no AM/PM. Fractional seconds come from the ISO string directly (stored
+ *  precision is µs; Date truncates to ms anyway). */
+function fmtCompactTs(iso: string): string {
   try {
     const d = new Date(iso);
     const date = new Intl.DateTimeFormat('en-US', {
@@ -299,19 +310,137 @@ function fmtDateParts(iso: string): { date: string; time: string } {
       day: 'numeric',
     }).format(d);
     const time = new Intl.DateTimeFormat('en-US', {
-      hour: 'numeric',
+      hour: '2-digit',
       minute: '2-digit',
       second: '2-digit',
-      hour12: true,
+      hourCycle: 'h23',
     }).format(d);
-    // Extract fractional seconds from the ISO string directly (up to 6 digits)
-    // since Date.getMilliseconds() truncates to 3 digits
-    const fracMatch = iso.match(/\.(\d+)Z?$/);
-    const frac = fracMatch ? fracMatch[1].padEnd(6, '0').slice(0, 6) : '000000';
-    return { date, time: time.replace(/(\d{2})\s*(AM|PM)/i, `$1.${frac} $2`) };
+    const fracMatch = iso.match(/\.(\d+)/);
+    const ms = (fracMatch ? fracMatch[1] : '').padEnd(3, '0').slice(0, 3);
+    return `${date} ${time}.${ms}`;
   } catch {
-    return { date: iso, time: '' };
+    return iso;
   }
+}
+
+// ─── Zone derivation (HEP capture node id → zone) ────────────────────────────
+
+/** HEP capture-id → zone (docker/homer/CLAUDE.md capture-id matrix):
+ *  SBC = 1xx, FS = 2xx, FS-2 hot standby = 2x1. All of one call's messages
+ *  are captured in a single zone, so any mapped id decides it. */
+const NODE_ZONES: Record<string, string> = {
+  '100': 'East', '200': 'East', '201': 'East',
+  '110': 'West', '210': 'West', '211': 'West',
+  '120': 'Central', '220': 'Central', '221': 'Central',
+};
+
+interface ZoneInfo {
+  label: string;
+  /** False when no capture id mapped — `label` is then the raw node id. */
+  known: boolean;
+}
+
+/** Zone for a call group: first message node id that maps wins (a `node` can
+ *  be comma-joined, e.g. "100,200", when several nodes captured the same wire
+ *  message). Unmapped ids fall back to showing the raw id; no node → null. */
+function deriveZone(messages: ReadonlyArray<HomerSearchResult>): ZoneInfo | null {
+  let raw: string | null = null;
+  for (const msg of messages) {
+    if (!msg.node) continue;
+    if (raw === null) raw = msg.node;
+    for (const id of msg.node.split(',')) {
+      const zone = NODE_ZONES[id.trim()];
+      if (zone) return { label: zone, known: true };
+    }
+  }
+  return raw === null ? null : { label: raw, known: false };
+}
+
+// ─── ORIG / TERM carrier derivation (from HEP endpoint aliases) ──────────────
+//
+// heplify-server aliases wire IPs to node names before storage (see
+// docker/homer/scripts/ip-alias.lua): platform nodes carry SBC/VIP/
+// FreeSWITCH/Services tokens; carriers are "BW-*" / "Sinch-*"; a customer
+// PBX (trunk source) stays a raw IP. The same src/dst data that fed the old
+// NETWORK PATH cell derives the two carrier columns:
+//   ORIG = source alias of the EARLIEST externally-sourced INVITE request
+//   TERM = destination alias of the OUTERMOST (last) externally-destined
+//          INVITE request — under carrier failover the final attempt is the
+//          one that actually terminated the call.
+
+/** True for our own nodes (SBC / VIP / FreeSWITCH / FS / Services — zone-
+ *  prefixed or not). Mirrors sipLadderUtils.classifyNodeRole token rules. */
+function isPlatformNode(alias: string): boolean {
+  const upper = alias.toUpperCase();
+  if (
+    upper.includes('SBC') ||
+    upper.includes('VIP') ||
+    upper.includes('FREESWITCH') ||
+    upper.includes('SERVICES')
+  ) {
+    return true;
+  }
+  return /(^|[^A-Z0-9])FS($|[^A-Z0-9])/.test(upper);
+}
+
+/** Known PoP-code expansions for the compact carrier fold. Codes not listed
+ *  render as-is (aliases are already human-cased: "Denver", "Chicago"). */
+const POP_NAMES: Record<string, string> = {
+  DAL: 'Dallas',
+  ATL: 'Atlanta',
+  CHI: 'Chicago',
+  DEN: 'Denver',
+};
+
+/**
+ * Compact carrier label for an external endpoint alias — same folding
+ * vocabulary as pages/calls/callsFormat.ts ("BW·Dallas", "Sinch·Denver"),
+ * adapted to HEP aliases ("BW-DAL", "Sinch-Atlanta-LD", "BW-TC2-DAL").
+ * Non-carrier external endpoints (customer PBX IPs) render verbatim.
+ */
+function carrierEndpointLabel(alias: string): string {
+  const dash = alias.indexOf('-');
+  const head = dash === -1 ? alias : alias.slice(0, dash);
+  const headLower = head.toLowerCase();
+  if (headLower !== 'bw' && headLower !== 'bandwidth' && headLower !== 'sinch') {
+    return alias; // customer PBX / raw IP — show the raw value
+  }
+  const carrier = headLower === 'sinch' ? 'Sinch' : 'BW';
+  if (dash === -1) return carrier;
+  const pop = alias
+    .slice(dash + 1)
+    .split('-')
+    .filter(Boolean)
+    .map((tok) => POP_NAMES[tok.toUpperCase()] ?? tok)
+    .join(' ');
+  return pop ? `${carrier}·${pop}` : carrier;
+}
+
+interface CarrierEndpoints {
+  /** External alias sourcing the earliest inbound INVITE, or null. */
+  orig: string | null;
+  /** External alias receiving the outermost B-leg INVITE, or null
+   *  (inbound-only / failed call — no terminating leg ever left us). */
+  term: string | null;
+}
+
+/** Scans a call group's messages (already time-sorted ascending) for the
+ *  external endpoints of its ingress and egress INVITEs. */
+function deriveCarrierEndpoints(
+  messages: ReadonlyArray<HomerSearchResult>,
+): CarrierEndpoints {
+  let orig: string | null = null;
+  let term: string | null = null;
+  for (const msg of messages) {
+    if (msg.status !== null || msg.method.toUpperCase() !== 'INVITE') continue;
+    if (orig === null && msg.src_ip && !isPlatformNode(msg.src_ip)) {
+      orig = msg.src_ip;
+    }
+    if (msg.dst_ip && !isPlatformNode(msg.dst_ip)) {
+      term = msg.dst_ip; // last external-destined INVITE wins (failover)
+    }
+  }
+  return { orig, term };
 }
 
 // ─── Call grouping ───────────────────────────────────────────────────────────
@@ -694,18 +823,17 @@ function ResultsTable({ callGroups, correlations, pipelineWarnings, windowStartI
     <div className="dlx5-tablewrap">
       {/* min-width keeps the nowrap columns readable; narrower panels PAN
           inside the wrap (visible scrollbar) instead of crushing/overflowing. */}
-      <table style={{ width: '100%', minWidth: 940, borderCollapse: 'collapse', fontSize: '0.78rem', color: INK_SOFT }}>
+      <table style={{ width: '100%', minWidth: 960, borderCollapse: 'collapse', fontSize: '0.78rem', color: INK_SOFT }}>
         <thead>
           <tr>
             <th className="dl-th" style={{ padding: '10px 10px 10px 20px' }}>Time</th>
             <th className="dl-th" style={{ padding: '10px 10px' }}>From → To</th>
-            <th className="dl-th" style={{ padding: '10px 10px' }}>Call-ID</th>
-            <th className="dl-th dlx5-col-path" style={{ padding: '10px 10px' }}>Network Path</th>
+            <th className="dl-th" style={{ padding: '10px 10px' }}>Orig</th>
+            <th className="dl-th" style={{ padding: '10px 10px' }}>Term</th>
             <th className="dl-th" style={{ padding: '10px 10px' }}>Result</th>
             <th className="dl-th" style={{ padding: '10px 10px' }}>Attestation</th>
             <th className="dl-th" style={{ padding: '10px 10px' }}>Duration</th>
-            <th className="dl-th" style={{ padding: '10px 10px' }}>Msgs</th>
-            <th className="dl-th" style={{ padding: '10px 10px' }}>Node</th>
+            <th className="dl-th" style={{ padding: '10px 10px' }}>Zone</th>
             <th className="dl-th" style={{ padding: '10px 16px 10px 8px', width: 72 }} aria-label="Expand" />
           </tr>
         </thead>
@@ -745,7 +873,11 @@ function ResultsTable({ callGroups, correlations, pipelineWarnings, windowStartI
             const grafanaLink = `/grafana/d/sip-search/sip-search?${params.toString()}`;
 
             const isExpanded = expandedIdx === idx;
-            const ts = fmtDateParts(row.timestamp);
+            // Client-side derivations off the group's messages (same data
+            // that fed the old NETWORK PATH cell — src/dst endpoint aliases
+            // + HEP capture node ids).
+            const endpoints = deriveCarrierEndpoints(group.messages);
+            const zone = deriveZone(group.messages);
 
             return (
               <React.Fragment key={`${row.callid}-${idx}`}>
@@ -755,14 +887,18 @@ function ResultsTable({ callGroups, correlations, pipelineWarnings, windowStartI
                   style={{ cursor: 'pointer' }}
                   title="Click to expand SIP ladder"
                 >
-                  {/* Time — two lines so microsecond precision doesn't widen the table */}
-                  <td style={{ padding: '8px 10px 8px 20px', whiteSpace: 'nowrap' }}>
-                    <div style={{ color: INK_SOFT, fontSize: '0.74rem', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
-                      {ts.date}
-                    </div>
-                    <div style={{ color: INK_DIM, fontFamily: MONO, fontSize: '0.66rem', fontVariantNumeric: 'tabular-nums' }}>
-                      {ts.time}
-                    </div>
+                  {/* Time — compact single line, 24h, ms precision */}
+                  <td
+                    style={{
+                      padding: '9px 10px 9px 20px',
+                      whiteSpace: 'nowrap',
+                      fontFamily: MONO,
+                      fontSize: '0.7rem',
+                      color: INK_SOFT,
+                      fontVariantNumeric: 'tabular-nums',
+                    }}
+                  >
+                    {fmtCompactTs(row.timestamp)}
                   </td>
 
                   {/* From → To */}
@@ -776,28 +912,20 @@ function ResultsTable({ callGroups, correlations, pipelineWarnings, windowStartI
                     </span>
                   </td>
 
-                  {/* Call-ID */}
+                  {/* Orig carrier — external source of the ingress INVITE */}
                   <td
-                    style={{
-                      padding: '9px 10px',
-                      fontFamily: MONO,
-                      fontSize: '0.7rem',
-                      color: INK_DIM,
-                      maxWidth: 110,
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                    }}
-                    title={group.callIds.join('\n')}
+                    style={{ padding: '9px 10px', fontFamily: MONO, fontSize: '0.7rem', color: INK_DIM, whiteSpace: 'nowrap' }}
+                    title={endpoints.orig ?? 'No externally-sourced INVITE captured'}
                   >
-                    {row.callid}
+                    {endpoints.orig !== null ? carrierEndpointLabel(endpoints.orig) : '—'}
                   </td>
 
-                  {/* Network path: src → dst */}
-                  <td className="dlx5-col-path" style={{ padding: '9px 10px', fontFamily: MONO, fontSize: '0.7rem', color: INK_DIM, whiteSpace: 'nowrap' }}>
-                    {row.src_ip}
-                    <span style={{ color: '#b6c2d4', margin: '0 6px' }}>→</span>
-                    {row.dst_ip}
+                  {/* Term carrier — external destination of the egress INVITE */}
+                  <td
+                    style={{ padding: '9px 10px', fontFamily: MONO, fontSize: '0.7rem', color: INK_DIM, whiteSpace: 'nowrap' }}
+                    title={endpoints.term ?? 'No terminating leg (inbound-only or failed call)'}
+                  >
+                    {endpoints.term !== null ? carrierEndpointLabel(endpoints.term) : '—'}
                   </td>
 
                   {/* Result */}
@@ -815,14 +943,18 @@ function ResultsTable({ callGroups, correlations, pipelineWarnings, windowStartI
                     {group.durationSec !== null ? fmtCallDuration(group.durationSec) : '—'}
                   </td>
 
-                  {/* Message count */}
-                  <td style={{ padding: '9px 10px', fontVariantNumeric: 'tabular-nums', color: INK_DIM }}>
-                    {group.messages.length}
-                  </td>
-
-                  {/* Node */}
-                  <td style={{ padding: '9px 10px', fontFamily: MONO, fontSize: '0.7rem', color: INK_FAINT, whiteSpace: 'nowrap' }}>
-                    {row.node ?? '—'}
+                  {/* Zone (from the HEP capture node id) */}
+                  <td style={{ padding: '9px 10px', whiteSpace: 'nowrap' }}>
+                    {zone !== null ? (
+                      <span
+                        className={zone.known ? 'dlx5-zone' : 'dlx5-zone dlx5-zone-raw'}
+                        title={zone.known ? `${zone.label} zone` : `Unrecognized HEP capture node id ${zone.label}`}
+                      >
+                        {zone.label}
+                      </span>
+                    ) : (
+                      <span style={{ color: '#b6c2d4' }}>—</span>
+                    )}
                   </td>
 
                   {/* Explicit open-ladder affordance (label + rotating chevron) */}
@@ -840,7 +972,7 @@ function ResultsTable({ callGroups, correlations, pipelineWarnings, windowStartI
 
                 {isExpanded && (
                   <tr>
-                    <td colSpan={10} className="dlx5-expand-cell">
+                    <td colSpan={9} className="dlx5-expand-cell">
                       {/* Sticky containment plane: exactly one visible card
                           wide (100cqw), pinned at the left fold — the ladder
                           frame and the Grafana control never leave the screen
@@ -871,6 +1003,16 @@ function ResultsTable({ callGroups, correlations, pipelineWarnings, windowStartI
                               already resets it (default = edge-only, safe). */}
                           <PcapExportControl key={row.callid} callId={row.callid} />
                           <div className="dlx5-ladderframe-body">
+                            {/* Network Path — moved here from its old results
+                                column (where the summary strip used to sit):
+                                the ingress hop's endpoint aliases, one clean
+                                mono line above the ladder. */}
+                            <div className="dlx5-pathline" title="Network path — first captured hop of this call">
+                              <span className="dlx5-pathline-label">Network Path</span>
+                              {row.src_ip}
+                              <span className="dlx5-pathline-arrow" aria-hidden="true">→</span>
+                              {row.dst_ip}
+                            </div>
                             <SipLadder
                               messages={group.messages}
                               correlations={correlations}
@@ -894,12 +1036,35 @@ function ResultsTable({ callGroups, correlations, pipelineWarnings, windowStartI
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 /** The search committed by the last Search click — powers the results-header
- *  summary and the Grafana fallback window (frozen at commit time). */
+ *  summary, the Grafana fallback window, and cursor paging (all frozen at
+ *  commit time — paging re-issues these EXACT params, never live form state). */
 interface CommittedSearch {
   /** e.g. `for numbers containing (617) 454-4217 · Call-ID containing “x@y”` */
   summary: string;
   startIso: string;
   endIso: string;
+  /** The exact request of page 1 — every page re-issues this + a cursor. */
+  baseParams: HomerSearchParams;
+}
+
+/**
+ * THE one place paging attaches its cursor to the committed search — PINNED
+ * CONTRACT with POST /homer/search (docker/api/src/routers/homer.py):
+ * the response carries `oldest_ts_ns` (cursor) + `has_more`; the next page
+ * re-issues the SAME search with `before_ns = oldest_ts_ns` (strict
+ * `timestamp_ns < before_ns` server-side). `before_ns` is the implemented
+ * mechanism; if it were ever dropped, the one-line fallback is deriving a
+ * shrunken end window instead:
+ *   `{ ...base, end_time: new Date(Math.floor(beforeNs / 1e6)).toISOString() }`
+ * (lossy — end_time parses at µs precision vs ns timestamps — which is
+ * exactly why before_ns exists).
+ */
+function withPageCursor(
+  base: HomerSearchParams,
+  beforeNs: number | null,
+): HomerSearchParams {
+  if (beforeNs === null) return base; // page 1 — the original search
+  return { ...base, before_ns: beforeNs };
 }
 
 export function TroubleshootingPage() {
@@ -916,6 +1081,10 @@ export function TroubleshootingPage() {
   const [endLocal, setEndLocal] = useState(() => toDatetimeLocal(new Date()));
   const [hasSearched, setHasSearched] = useState(false);
   const [lastSearch, setLastSearch] = useState<CommittedSearch | null>(null);
+  // Cursor paging: the stack of `before_ns` cursors that produced the pages
+  // AFTER page 1 (page = stack length + 1). Prev pops; page 1 = empty stack
+  // = the original committed search. Reset on every new search.
+  const [cursorStack, setCursorStack] = useState<number[]>([]);
   // Shared desktop sidebar collapse — same localStorage key as AppLayout, so
   // the state carries across navigation between shells.
   const { collapsed, toggleCollapsed } = useSidebarCollapse();
@@ -969,8 +1138,10 @@ export function TroubleshootingPage() {
       summary: derived.segments.map((s) => `${s.label} ${s.needle}`).join(' · '),
       startIso: params.start_time,
       endIso: params.end_time,
+      baseParams: params,
     });
     setHasSearched(true);
+    setCursorStack([]); // new search always starts at page 1
     runSearch(params);
   }, [canSearch, derived, omni, fromUser, toUser, rangePreset, startLocal, endLocal, runSearch]);
 
@@ -985,6 +1156,7 @@ export function TroubleshootingPage() {
     setEndLocal(toDatetimeLocal(new Date()));
     setHasSearched(false);
     setLastSearch(null);
+    setCursorStack([]);
     resetSearch();
   }, [resetSearch]);
 
@@ -1010,6 +1182,31 @@ export function TroubleshootingPage() {
     [results, correlations],
   );
 
+  // ── Cursor paging handlers (hooks — still above any early return) ──
+  // Next: push this page's oldest_ts_ns and re-issue the COMMITTED search
+  // bounded below it. Prev: pop and re-issue with the previous cursor
+  // (empty stack = the original page-1 search). Both go through
+  // withPageCursor — the single seam pinned to the backend contract.
+  const handleNextPage = useCallback(() => {
+    if (!lastSearch) return;
+    const oldest = searchData?.oldest_ts_ns;
+    if (searchData?.has_more !== true || typeof oldest !== 'number' || oldest <= 0) return;
+    setCursorStack((stack) => [...stack, oldest]);
+    runSearch(withPageCursor(lastSearch.baseParams, oldest));
+  }, [lastSearch, searchData, runSearch]);
+
+  const handlePrevPage = useCallback(() => {
+    if (!lastSearch || cursorStack.length === 0) return;
+    const popped = cursorStack.slice(0, -1);
+    setCursorStack(popped);
+    runSearch(
+      withPageCursor(
+        lastSearch.baseParams,
+        popped.length > 0 ? popped[popped.length - 1] : null,
+      ),
+    );
+  }, [lastSearch, cursorStack, runSearch]);
+
   // ── Derived values (after all hooks) ──
   const totalMessages = results.length;
   const totalCalls = callGroups.length;
@@ -1020,6 +1217,19 @@ export function TroubleshootingPage() {
         ? searchMutation.error.message
         : 'Search failed')
     : null;
+
+  // Cursor-paging readouts. `page` is authoritative from the cursor stack
+  // (it already reflects the page being FETCHED during a transition). Next
+  // needs both contract fields: has_more true AND a usable cursor. No totals
+  // exist for trace search — the pager is Prev / "Page N" / Next only.
+  const page = cursorStack.length + 1;
+  const canNextPage =
+    searchData?.has_more === true &&
+    typeof searchData.oldest_ts_ns === 'number' &&
+    searchData.oldest_ts_ns > 0;
+  // Deep pages keep the pager through a fetch error so Prev can step back to
+  // a good page (Next self-disables — an errored response has no cursor).
+  const showPager = hasSearched && (page > 1 || (!isError && canNextPage));
 
   const isCustomRange = rangePreset === 'custom';
   // While a preset is active the pickers show its live preview (recomputed
@@ -1050,7 +1260,9 @@ export function TroubleshootingPage() {
           The --collapsed modifier animates the 240px offset to 0 in sync
           with the sidebar slide. */}
       <div className={collapsed ? 'dl-scope dlx5-canvas dlx5-canvas--collapsed' : 'dl-scope dlx5-canvas'}>
-        <div className="dl-shell">
+        {/* dlx5-shell-wide: page-scoped 1800px cap matching the Calls &
+            Quality page (dlx4-shell-wide) — the shared .dl-shell stays 1200. */}
+        <div className="dl-shell dlx5-shell-wide">
           {/* ── Quiet console header ─────────────────────────────────── */}
           <header className="dl-header fx-load">
             <div className="dl-header-id">
@@ -1341,20 +1553,55 @@ export function TroubleshootingPage() {
               {!isLoading && !isError && hasSearched && results.length === 0 && (
                 <div style={{ padding: 20 }}>
                   <div className="dl-empty">
-                    No SIP traces matched. Try a wider time range, fewer digits
-                    (any 3+ digit partial matches), or drop an Advanced filter.
+                    {page > 1
+                      ? `No older traces on page ${page} — the result set ended. Step back with Prev.`
+                      : 'No SIP traces matched. Try a wider time range, fewer digits (any 3+ digit partial matches), or drop an Advanced filter.'}
                   </div>
                 </div>
               )}
 
+              {/* key={page}: a page swap is new data under the same component —
+                  remount so an expanded ladder from the outgoing page can never
+                  point at a different call on the incoming one. */}
               {!isLoading && !isError && callGroups.length > 0 && lastSearch && (
                 <ResultsTable
+                  key={page}
                   callGroups={callGroups}
                   correlations={correlations}
                   pipelineWarnings={pipelineWarnings}
                   windowStartIso={lastSearch.startIso}
                   windowEndIso={lastSearch.endIso}
                 />
+              )}
+
+              {/* Cursor pager — Prev / "Page N" / Next (no totals exist for
+                  trace search; Next disables when the server reports the
+                  window exhausted). Page 1 with nothing older: no pager. */}
+              {showPager && (
+                <nav className="dlx5-pager" aria-label="Trace result pages">
+                  <button
+                    type="button"
+                    className="dlx5-pgbtn"
+                    aria-label="Previous page"
+                    disabled={isLoading || page <= 1}
+                    onClick={handlePrevPage}
+                  >
+                    Prev
+                  </button>
+                  <span className="dlx5-pg-cur">Page {page.toLocaleString()}</span>
+                  <button
+                    type="button"
+                    className="dlx5-pgbtn"
+                    aria-label="Next page (older traces)"
+                    disabled={isLoading || !canNextPage}
+                    onClick={handleNextPage}
+                  >
+                    Next
+                  </button>
+                  {canNextPage && (
+                    <span className="dlx5-pager-note">older traces exist in this window</span>
+                  )}
+                </nav>
               )}
             </div>
           </div>
