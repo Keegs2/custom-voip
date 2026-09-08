@@ -62,7 +62,7 @@ All are read by `ExportConfig.from_env()`. Defaults in parentheses.
 | `CDR_EXPORT_BATCH_SIZE` | `5000` | Max CDRs per file. |
 | `CDR_EXPORT_LAG_SECONDS` | `120` | Only export rows with `end_time < now() - lag`, so in-flight ingests have settled. |
 | `CDR_EXPORT_SKIP_EMPTY` | `true` | If no rows are due, do nothing (don't ship an empty file). |
-| `CDR_EXPORT_INTERVAL_SECONDS` | `3600` | `run-loop` cadence. |
+| `CDR_EXPORT_INTERVAL_SECONDS` | `900` | `run-loop` cadence (15 min). |
 | `CDR_EXPORT_LOCK_TTL_SECONDS` | `900` | Single-instance lease TTL (`cdr_export_lock`). A crashed runner auto-recovers after this. Keep it safely longer than a worst-case cycle. |
 
 ### Filename

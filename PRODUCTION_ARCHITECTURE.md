@@ -955,7 +955,7 @@ Dedicated `voip-cdr-exporter` container (services VM):
 | Transport | FTP to FileMage `10.142.0.71` (→ Equinox); `CDR_EXPORT_ENABLED` gate (default false) |
 | Format | Full-column CSV **including quality columns** (decision 2026-09-04: keep full) |
 | Watermark | `exported_at` stamp — advance only on successful upload |
-| Cadence / batching | interval 3600s, batch 5000, freshness lag 120s, lock TTL 900s (all env-tunable, `docker-compose.services.yml`) |
+| Cadence / batching | interval 900s (15 min), batch 5000, freshness lag 120s, lock TTL 900s (all env-tunable, `docker-compose.services.yml`) |
 
 ### 8.6 Backups (pointer)
 

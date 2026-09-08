@@ -65,7 +65,7 @@ class ExportConfig:
     # (mod_json_cdr POSTs still landing) have settled before a row is shipped.
     lag_seconds: int = 120
     skip_empty: bool = True
-    interval_seconds: int = 3600  # run-loop cadence
+    interval_seconds: int = 900  # run-loop cadence
     # Single-instance lease TTL. A runner claims cdr_export_lock for this long;
     # a crashed runner auto-recovers once the lease expires. Kept safely longer
     # than a worst-case cycle (select + build + FTP upload + mark).
@@ -97,7 +97,7 @@ class ExportConfig:
             batch_size=_env_int("CDR_EXPORT_BATCH_SIZE", 5000),
             lag_seconds=_env_int("CDR_EXPORT_LAG_SECONDS", 120),
             skip_empty=_env_bool("CDR_EXPORT_SKIP_EMPTY", True),
-            interval_seconds=_env_int("CDR_EXPORT_INTERVAL_SECONDS", 3600),
+            interval_seconds=_env_int("CDR_EXPORT_INTERVAL_SECONDS", 900),
             lock_ttl_seconds=_env_int("CDR_EXPORT_LOCK_TTL_SECONDS", 900),
             filename_prefix=os.getenv("CDR_EXPORT_FILENAME_PREFIX", "CDR_"),
             filename_ext=os.getenv("CDR_EXPORT_FILENAME_EXT", ".csv"),
