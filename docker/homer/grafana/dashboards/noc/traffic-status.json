@@ -1246,7 +1246,7 @@
       "id": 43,
       "type": "stat",
       "title": "Active dialogs — now",
-      "description": "Live signaling concurrency: sum(kamailio_dialog_active_dialogs) across the SBCs, honouring the Zone filter. This is SIP dialog state (what Kamailio is tracking) as opposed to media legs (freeswitch_calls_active) — the two should track closely; a divergence points at leaked dialogs or media/signaling mismatch.",
+      "description": "Live signaling concurrency: sum(kamailio_dialog_active_dialogs) across the SBCs, honouring the Zone filter. This is SIP dialog state (what Kamailio is tracking) as opposed to media legs. One off-net call = 2 Kamailio dialogs (A-leg + B-leg) = 2 FreeSWITCH channels, so `gap` = dialogs − freeswitch_channels_total should sit near 0 (on-net calls push it negative). Amber when gap > 10: that is the vmalert SbcDialogLeak line (for: 2h30m — strictly longer than the 2h Kamailio dialog timeout, so post-failover ghost dialogs on the ex-active SBC never page; a gap that persists past 2h30m is a real leak). See docker/vmalert/rules/teardown.yml.",
       "gridPos": {
         "h": 4,
         "w": 4,
@@ -1267,6 +1267,16 @@
           "expr": "sum(kamailio_dialog_active_dialogs{zone=~\"$zonere\"})",
           "range": true,
           "legendFormat": "dialogs"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "voip-metrics-vm"
+          },
+          "expr": "sum(kamailio_dialog_active_dialogs{zone=~\"$zonere\"}) - sum(freeswitch_channels_total{zone=~\"$zonere\"})",
+          "range": true,
+          "legendFormat": "gap"
         }
       ],
       "options": {
@@ -1278,7 +1288,7 @@
           "values": false
         },
         "orientation": "auto",
-        "textMode": "value",
+        "textMode": "value_and_name",
         "colorMode": "background",
         "graphMode": "area",
         "justifyMode": "center"
@@ -1303,7 +1313,38 @@
             ]
           }
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "gap"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "thresholds"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "orange",
+                      "value": 10
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
       }
     },
     {
@@ -1381,7 +1422,7 @@
       "id": 45,
       "type": "timeseries",
       "title": "Concurrency over time — media vs signaling",
-      "description": "Live concurrency: media (FreeSWITCH calls_active) vs signaling (SBC dialog_active_dialogs), both fleet-wide. They should track closely; a persistent gap points at leaked dialogs or a media/signaling mismatch. All zones.",
+      "description": "Live concurrency, fleet-wide: media (FreeSWITCH calls_active = bridged call pairs, and channels_total = legs) vs signaling (SBC dialog_active_dialogs). One off-net call = 2 FS channels = 2 Kamailio dialogs, so `gap (dialogs − FS channels)` should hover near 0 (on-net calls push it negative; calls_active runs at ~half the channel count). The dashed amber line at 10 is the vmalert SbcDialogLeak threshold on the gap series (for: 2h30m). After an SBC failover the gap is EXPECTED to bulge and decay within the 2h dialog timeout (ghost dialogs on the ex-active SBC); a gap that stays above the line longer than that is a persistent leak → alert. See docker/vmalert/rules/teardown.yml. All zones.",
       "gridPos": {
         "h": 6,
         "w": 8,
@@ -1412,12 +1453,31 @@
           "expr": "sum(kamailio_dialog_active_dialogs)",
           "range": true,
           "legendFormat": "signaling (SBC dialogs)"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "voip-metrics-vm"
+          },
+          "expr": "sum(freeswitch_channels_total)",
+          "range": true,
+          "legendFormat": "media (FS channels)"
+        },
+        {
+          "refId": "D",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "voip-metrics-vm"
+          },
+          "expr": "sum(kamailio_dialog_active_dialogs) - sum(freeswitch_channels_total)",
+          "range": true,
+          "legendFormat": "gap (dialogs − FS channels)"
         }
       ],
       "fieldConfig": {
         "defaults": {
           "unit": "short",
-          "min": 0,
           "decimals": 0,
           "color": {
             "mode": "palette-classic"
@@ -1428,7 +1488,10 @@
             "lineWidth": 2,
             "fillOpacity": 10,
             "showPoints": "never",
-            "spanNulls": false
+            "spanNulls": false,
+            "thresholdsStyle": {
+              "mode": "dashed"
+            }
           },
           "thresholds": {
             "mode": "absolute",
@@ -1436,6 +1499,10 @@
               {
                 "color": "green",
                 "value": null
+              },
+              {
+                "color": "orange",
+                "value": 10
               }
             ]
           }
@@ -1468,6 +1535,50 @@
                   "mode": "fixed",
                   "fixedColor": "purple"
                 }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "media (FS channels)"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "light-blue"
+                }
+              },
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    6,
+                    4
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "gap (dialogs − FS channels)"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "orange"
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
               }
             ]
           }
@@ -2320,7 +2431,7 @@
       "description": "Live Kamailio shared-memory utilisation per SBC: kamailio_shmem_used_size / kamailio_shmem_total_size, one line per reporting_instance. Green < 70%, amber >= 70%, red >= 85%. Rising shmem is an early warning of a dialog/tm leak or an under-provisioned SBC before it starts dropping calls.",
       "gridPos": {
         "h": 5,
-        "w": 12,
+        "w": 8,
         "x": 0,
         "y": 33
       },
@@ -2404,7 +2515,7 @@
       "gridPos": {
         "h": 5,
         "w": 6,
-        "x": 12,
+        "x": 8,
         "y": 33
       },
       "datasource": {
@@ -2464,10 +2575,80 @@
       }
     },
     {
+      "id": 101,
+      "type": "stat",
+      "title": "Oldest live channel — per FS",
+      "description": "Age of the OLDEST live channel on each FreeSWITCH: max by (freeswitch_node)(freeswitch_channel_max_age_seconds), honouring the Zone filter (ops_metrics.py, from `show channels as json` created_epoch). Legitimate RCF calls rarely run past 2h; amber at 7200s = a leg that most likely missed its BYE (post-failover teardown failure) and is waiting on RTP timeout / session timer. vmalert FsStaleChannels pages when freeswitch_channels_stale (count of legs > 2h) stays > 0 for 15m. Triage: `show channels` on that FS, `uuid_kill <uuid>` for a confirmed-stuck leg. 0 = idle.",
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 14,
+        "y": 33
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "voip-metrics-vm"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "voip-metrics-vm"
+          },
+          "expr": "max by (freeswitch_node) (freeswitch_channel_max_age_seconds{zone=~\"$zonere\"})",
+          "instant": true,
+          "range": false,
+          "format": "time_series",
+          "legendFormat": "{{freeswitch_node}}"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "value_and_name",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "wideLayout": true
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "decimals": 0,
+          "noValue": "0",
+          "mappings": [],
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 7200
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
       "id": 53,
       "type": "stat",
       "title": "Dialogs per SBC — now",
-      "description": "Live signaling concurrency broken out per SBC: sum by (reporting_instance)(kamailio_dialog_active_dialogs), honouring the Zone filter. Shows how dialog load is distributed across the SBC fleet — a lopsided SBC points at an NLB imbalance or a stuck peer.",
+      "description": "Live signaling concurrency broken out per SBC: sum by (reporting_instance)(kamailio_dialog_active_dialogs), honouring the Zone filter. In steady state only the zone's ACTIVE SBC is non-zero (true active/standby). After a failover the EX-active SBC keeps the dialogs it was tracking as ghosts — nobody sends it the BYE — and they decay to 0 within the 2h Kamailio dialog timeout; that decay is normal. A non-zero count that persists on the standby beyond 2h, or a gap vs FS channels that persists (Active dialogs — now: `gap`), is a leak: vmalert SbcDialogLeak (for: 2h30m) covers it. No static amber line here on purpose — the baseline is the FS channel count, not a number; use the `gap` field on Active dialogs — now / the concurrency panel. Triage: `kamcmd dlg.list` on the SBC holding the dialogs, Homer for 481/408 on BYE.",
       "gridPos": {
         "h": 5,
         "w": 6,

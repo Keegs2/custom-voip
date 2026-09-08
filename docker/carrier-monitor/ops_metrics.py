@@ -57,7 +57,23 @@ EMITTED METRICS (names/labels fixed by the reconciled registry — do NOT rename
   freeswitch_channels_total{freeswitch_node}                    gauge
   freeswitch_sessions_total{freeswitch_node}                    counter
   freeswitch_calls_active{freeswitch_node}                      gauge
+  freeswitch_channel_max_age_seconds{freeswitch_node}           gauge
+  freeswitch_channels_stale{freeswitch_node}                    gauge
   freeswitch_esl_scrape_ok{freeswitch_node}                     gauge (1 ok / 0 fail)
+
+STALE-CHANNEL SIGNAL (freeswitch_channel_max_age_seconds / freeswitch_channels_stale)
+------------------------------------------------------------------------------------
+Teardown observability. From the SAME `show channels as json` payload (no extra
+ESL verb, no extra series per channel): every row carries `created_epoch` (the
+channels table column, switch_core_sqldb.c), so per node we derive
+  freeswitch_channel_max_age_seconds = now - min(created_epoch)   (0 when idle)
+  freeswitch_channels_stale          = count(age > OPS_METRICS_STALE_SECONDS)
+with OPS_METRICS_STALE_SECONDS defaulting to 7200 (2h). A leg older than that is
+almost never a legitimate RCF call; it is the signature of a failed teardown (a
+BYE that got 481/408 after an SBC flip, so the leg waits for RTP timeout / the
+session timer). vmalert's FsStaleChannels alert (docker/vmalert/rules/
+teardown.yml) pages on the stale count; the NOC wall shows the max age per FS.
+Two more unlabelled-by-call series per node — cardinality stays bounded.
 
 mod_prometheus REPLACEMENT (freeswitch_sessions_total / freeswitch_calls_active)
 -------------------------------------------------------------------------------
@@ -147,6 +163,11 @@ def _default_node() -> str:
 FREESWITCH_NODE = (
     os.environ.get("FREESWITCH_NODE", "").strip() or _default_node()
 )
+
+# A live channel older than this (seconds) counts as STALE in
+# freeswitch_channels_stale. 7200 = 2h: the same figure as the Kamailio dialog
+# default_timeout, so "stale" here and "ghost aged out" on the SBC line up.
+STALE_CHANNEL_SECONDS = _get_int("OPS_METRICS_STALE_SECONDS", 7200, minimum=1)
 
 
 # --------------------------------------------------------------------------- #
@@ -280,9 +301,33 @@ def _empty_buckets():
     return {(d, o): 0 for d in _DIRECTIONS for o in _ONNET}
 
 
-def parse_channels(raw: str):
+def _channel_age(row, now: float):
     """
-    Parse a `show channels as json` payload into (buckets, total, bridged).
+    Age in seconds of one `show channels` row from its `created_epoch` column
+    (FreeSWITCH channels table: `created_epoch INTEGER`, unix seconds).
+
+    Returns a float >= 0, or None when the field is missing/garbage so the
+    caller can leave that row out of the age figures (it still counts toward
+    total). Clamped at 0 so a clock skew between FS and this sidecar can never
+    produce a negative age. Never raises.
+    """
+    raw = row.get("created_epoch")
+    if raw is None:
+        return None
+    try:
+        created = float(str(raw).strip())
+    except (ValueError, TypeError):
+        return None
+    if created <= 0:
+        # FS writes 0 for a channel that has not been fully created yet.
+        return None
+    return max(0.0, now - created)
+
+
+def parse_channels(raw: str, now=None):
+    """
+    Parse a `show channels as json` payload into
+    (buckets, total, bridged, max_age, stale).
 
     - buckets : dict {(direction, on_net): count} over the bounded label grid.
     - total   : total channel count.
@@ -290,6 +335,13 @@ def parse_channels(raw: str):
                 from a present-and-non-empty `call_uuid` (FreeSWITCH sets
                 call_uuid on both legs of a bridge; an unbridged channel has an
                 empty call_uuid). This is a live proxy for connected-call legs.
+    - max_age : age in seconds of the OLDEST live channel (now - min
+                created_epoch), 0 when there are no channels / no usable
+                created_epoch. Feeds freeswitch_channel_max_age_seconds.
+    - stale   : number of channels older than STALE_CHANNEL_SECONDS. Feeds
+                freeswitch_channels_stale.
+
+    `now` (unix seconds) defaults to time.time(); tests pass a fixed value.
 
     FreeSWITCH renders `show channels as json` as:
         {"row_count": N, "rows": [ {..per-channel fields..}, ... ]}
@@ -302,31 +354,43 @@ def parse_channels(raw: str):
     buckets = _empty_buckets()
     total = 0
     bridged = 0
+    max_age = 0.0
+    stale = 0
 
     if not raw or not raw.strip():
-        return buckets, total, bridged
+        return buckets, total, bridged, max_age, stale
 
     try:
         doc = json.loads(raw)
     except (ValueError, TypeError):
         # e.g. FreeSWITCH returned "-ERR ..." or an empty-result sentinel.
         LOG.debug("channels payload was not JSON (%d bytes)", len(raw))
-        return buckets, total, bridged
+        return buckets, total, bridged, max_age, stale
 
     if not isinstance(doc, dict):
-        return buckets, total, bridged
+        return buckets, total, bridged, max_age, stale
 
     rows = doc.get("rows")
     if rows is None:
         # Idle switch: {"row_count": 0} with no rows array. Zero is correct.
-        return buckets, total, bridged
+        return buckets, total, bridged, max_age, stale
     if not isinstance(rows, list):
-        return buckets, total, bridged
+        return buckets, total, bridged, max_age, stale
+
+    if now is None:
+        now = time.time()
 
     for row in rows:
         if not isinstance(row, dict):
             continue
         total += 1
+
+        age = _channel_age(row, now)
+        if age is not None:
+            if age > max_age:
+                max_age = age
+            if age > STALE_CHANNEL_SECONDS:
+                stale += 1
         direction = _norm_direction(row.get("direction"))
         # The on_net channel variable. `show channels` flattens exported channel
         # variables into row keys, so it appears as row["on_net"] when set.
@@ -340,7 +404,7 @@ def parse_channels(raw: str):
         if call_uuid is not None and str(call_uuid).strip():
             bridged += 1
 
-    return buckets, total, bridged
+    return buckets, total, bridged, max_age, stale
 
 
 # --------------------------------------------------------------------------- #
@@ -358,12 +422,16 @@ def _render(
     scrape_ok: bool,
     sessions_total: int,
     calls_active: int,
+    max_age: float = 0.0,
+    stale: int = 0,
 ) -> str:
     """Render all metrics into a Prometheus text exposition string.
 
     `sessions_total` (counter) and `calls_active` (gauge) are the
     mod_prometheus-replacement figures; they are passed in (rather than read from
     the module globals) so a caller can render a specific snapshot atomically.
+    `max_age` / `stale` are the teardown figures from parse_channels (default 0
+    so the seeded pre-first-poll sample stays valid).
     """
     node = FREESWITCH_NODE
     lines = []
@@ -427,6 +495,32 @@ def _render(
     lines.append("# TYPE freeswitch_calls_active gauge")
     lines.append(
         'freeswitch_calls_active{freeswitch_node="%s"} %d' % (node, calls_active)
+    )
+
+    # freeswitch_channel_max_age_seconds{freeswitch_node} — teardown signal.
+    # GAUGE: now - min(created_epoch) over live channels; 0 when idle. Feeds
+    # the NOC "Oldest live channel — per FS" panel (amber at 7200).
+    lines.append(
+        "# HELP freeswitch_channel_max_age_seconds Age in seconds of the oldest "
+        "live FreeSWITCH channel (now - min created_epoch); 0 when idle."
+    )
+    lines.append("# TYPE freeswitch_channel_max_age_seconds gauge")
+    lines.append(
+        'freeswitch_channel_max_age_seconds{freeswitch_node="%s"} %d'
+        % (node, int(max_age))
+    )
+
+    # freeswitch_channels_stale{freeswitch_node} — teardown signal.
+    # GAUGE: live channels older than STALE_CHANNEL_SECONDS (default 7200).
+    # Feeds vmalert FsStaleChannels (teardown.yml).
+    lines.append(
+        "# HELP freeswitch_channels_stale Live FreeSWITCH channels older than "
+        "OPS_METRICS_STALE_SECONDS (default 7200 = 2h) — stuck-leg / failed-"
+        "teardown signal."
+    )
+    lines.append("# TYPE freeswitch_channels_stale gauge")
+    lines.append(
+        'freeswitch_channels_stale{freeswitch_node="%s"} %d' % (node, stale)
     )
 
     # freeswitch_esl_scrape_ok{freeswitch_node}
@@ -552,7 +646,7 @@ def _refresh_sample() -> bool:
         return False
 
     try:
-        buckets, total, bridged = parse_channels(out)
+        buckets, total, bridged, max_age, stale = parse_channels(out)
     except Exception as exc:  # noqa: BLE001 - parser is defensive; last-resort guard
         LOG.error("failed to parse channels (serving last-good, ok=0): %s", exc)
         _mark_scrape_failed()
@@ -565,13 +659,15 @@ def _refresh_sample() -> bool:
     sample = _render(
         buckets, total, bridged, scrape_ok=True,
         sessions_total=sessions_total, calls_active=calls_active,
+        max_age=max_age, stale=stale,
     )
     with _SAMPLE_LOCK:
         _CACHED_SAMPLE = sample
     LOG.debug(
         "metrics refreshed: total=%d bridged=%d sessions_total=%d "
-        "calls_active=%d node=%s",
-        total, bridged, sessions_total, calls_active, FREESWITCH_NODE,
+        "calls_active=%d max_age=%ds stale=%d node=%s",
+        total, bridged, sessions_total, calls_active, int(max_age), stale,
+        FREESWITCH_NODE,
     )
     return True
 

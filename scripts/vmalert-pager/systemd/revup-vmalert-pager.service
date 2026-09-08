@@ -1,0 +1,14 @@
+# vmalert → page relay (see vmalert_pager.sh header). Polls voip-vmalert's
+# /api/v1/alerts on the services VM and emits ONE specific revup-alert page
+# line per newly-firing alert (closes the teardown.yml "no notifier" delivery
+# gap); OnFailure adds the generic page if the pager itself errors.
+# Placement: /etc/systemd/system/ (installed by install_vmalert_pager.sh)
+[Unit]
+Description=revup vmalert alert pager
+After=docker.service
+OnFailure=revup-alert@%p.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/revup/vmalert-pager.env
+ExecStart=/opt/revup/scripts/vmalert-pager/vmalert_pager.sh

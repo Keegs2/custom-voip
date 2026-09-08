@@ -43,6 +43,34 @@ and syslog shipping (which carries the `revup-alert` lines). On the
 - On any VM with the agent: `logger -p user.err -t revup-alert -- "test page — ignore"` → expect an email (and PagerDuty incident) within ~2–5 min.
 - `sudo systemctl stop google-cloud-ops-agent && sleep 660 && sudo systemctl start google-cloud-ops-agent` is NOT a VM-down test (hypervisor metrics continue); to test VM-down semantics use a scratch VM, not production.
 
+## vmalert alerts → pages
+
+vmalert (`voip-vmalert` on the services VM) evaluates the `alert:` rules in
+`docker/vmalert/rules/*.yml` (teardown: `SipByeFailureShare`,
+`FsStaleChannels`, `SbcDialogLeak`) but has no `-notifier.url` and there is
+no Alertmanager. `scripts/vmalert-pager/` closes that gap by reusing the
+`revup-alert` log-match path above: a 60s systemd timer polls
+`http://127.0.0.1:8880/api/v1/alerts` (the port compose already publishes)
+and, for each alert that transitions to `firing` (keyed `alertname|zone`),
+emits ONE `revup-alert` (user.err) line:
+
+`vmalert <alertname> FIRING zone=<zone> host=<host>: <summary annotation>`
+
+`pending` never pages; a clear logs an INFO line under `revup-vmalert-pager`
+(never the alert tag). If the vmalert API stays unreachable for 5
+consecutive polls it pages once ("vmalert API unreachable"). State lives in
+`/run/revup/vmalert-pager.state`; tunables in optional
+`/etc/revup/vmalert-pager.env` (see the script header).
+
+- Install/refresh (services VM, single line):
+  `cd /opt/revup && sudo git pull && sudo bash scripts/vmalert-pager/install_vmalert_pager.sh`
+- Check it ran: `sudo systemctl start revup-vmalert-pager.service && journalctl -u revup-vmalert-pager -n 5 --no-pager && sudo cat /run/revup/vmalert-pager.state`
+- End-to-end page test: do not lower a rule threshold in production — use
+  the same synthetic line as the pipeline test above,
+  `logger -p user.err -t revup-alert -- "TEST vmalert pager — ignore"`
+  (identical tag/priority to what the pager emits). Parser/transition logic
+  is unit-tested offline: `bash scripts/vmalert-pager/test/run_tests.sh`.
+
 ## Notes / limitations (honest)
 
 - **SBC failover pages need health-check logging enabled** (one-time, operator

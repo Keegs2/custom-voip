@@ -389,7 +389,11 @@ external NLB failover policy; (3) set `SBC_SIGNALING_VIP` on BOTH SBCs and
 restart them one at a time (in-flight dialogs carry the old `SBC_INTERNAL_IP`
 inner Route — the kept listen/alias keeps terminating them); (4) flip the media
 VM's `SBC_PROXY_IP` to the ILB VIP and `SBC_PROXY_IP_FAILOVER` to sbc-1's direct
-VPC IP. Never set the var before the ILB answers on the VIP: new dialogs would
+VPC IP; (5) the Services VM's `SBC_PROXY_IP` (East `.env`) to the East ILB VIP
+`10.142.0.250` too — `esl_client.py` originates API calls as
+`sofia/external/<to>@$SBC_PROXY_IP:5060`, and with sbc-1's direct IP every
+API-originated call fails while sbc-1 is down even though the standby is active.
+Never set the var before the ILB answers on the VIP: new dialogs would
 carry an inner Route that nothing serves.
 
 #### Strict active/standby FreeSWITCH pair — `FREESWITCH_IP_2` (optional, per zone)
