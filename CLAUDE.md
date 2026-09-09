@@ -292,6 +292,7 @@ These env vars are set per-VM in `/opt/revup/.env`. Getting any of them wrong br
 | `BANDWIDTH_TC1_NY` etc. | (defaults) | Optional — TC1/TC2 PoP IPs (`BANDWIDTH_TC1_NY/TC1_ATL/TC2_DAL/TC2_LA`), env-templated with East defaults |
 | `SINCH_DENVER_IP` | `206.146.100.24` (default) | Optional — Sinch Denver origination IP (trust + dispatcher group 6), env-templated with production default |
 | `SINCH_CHICAGO_IP` | `206.146.101.39` (default) | Optional — Sinch Chicago origination IP (trust + dispatcher group 7), env-templated with production default |
+| `VIP_EGRESS` | `off` (default) | Optional — `on` (dedicated signaling-VIP mode only; entrypoint forces off otherwise) makes carrier-bound INVITEs that arrived on the signaling ILB VIP egress from the external NLB VIP (`$fs` guard in `route[TO_CARRIER]`), joining the already VIP-sourced ACK/BYE/response class. Direct-IP ingress (FS failover attempts, ESL originates) keeps own-public-IP egress, so the 6 SBC public IPs STAY whitelisted at carriers. Enable on both SBCs of a zone |
 
 ### Media VM (FreeSWITCH + Redis)
 | Variable | Example | Purpose |

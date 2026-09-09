@@ -391,6 +391,36 @@ VIP From URI. `socket=` must match a real `listen=` bind exactly or
 dispatcher REJECTS the list at load and kamailio won't start
 (dispatch.c:472-490 `grep_sock_info`); the VIP bind exists unconditionally.
 
+**Carrier-bound INVITE egress — `VIP_EGRESS` gate (default off):** the initial
+INVITE relayed by `route[TO_CARRIER]` (plus tm's CANCEL / ACK-for-error and
+any `failure_route[CARRIER_FAILURE]` re-relay) belongs to the SAME NIC-sourced
+class as the probes above: no forced socket, `mhomed=1` picks the
+`udp:SBC_INTERNAL_IP:5060` socket, and GCE NAT puts THIS SBC's own public IP on
+the wire — while the FS-originated ACK-for-2xx / BYE / re-INVITE (rr `r2`
+double-pop, §8.7/§8.10) and every response already egress from the external VIP.
+With `VIP_EGRESS=on` (entrypoint renders `#!define VIP_EGRESS`; dedicated
+signaling-VIP mode only — it is forced off with a warning when
+`SBC_SIGNALING_VIP` is unset), Step 9 of `route[TO_CARRIER]` runs
+`if ($Ri == "SIGNALING_VIP") { $fs = "udp:ADVERTISE_IP:5060"; }` right before
+`t_relay()`: an INVITE that arrived on the signaling ILB VIP is by construction
+on the ILB-active SBC, which shares the external NLB's backends/health check/
+failover policy, so the carrier's replies to a VIP-sourced INVITE return to the
+same SBC. Core `get_send_socket2()` honors the forced socket before the
+`mhomed` lookup, tm reuses the branch's `dst` for CANCEL/ACK, and `fake_req()`
+clones `force_send_socket` into failure-route re-relays — the whole INVITE
+transaction leaves from the VIP. INVITEs that arrived on the SBC's direct VPC
+IP (FreeSWITCH's `SBC_PROXY_IP_FAILOVER` attempts, direct-IP ESL originates,
+ops tests) keep today's own-public-IP egress with symmetric replies, and the
+probes (groups 2-5/8-9) stay NIC-sourced so the STANDBY's carrier health stays
+readable — therefore the **6 SBC public IPs must STAY whitelisted** at the
+carriers; the win is that steady-state INVITEs join the VIP class. Residual: the
+ILB/external-NLB split-brain window of one health-check interval during a flip
+(already "setups in flight are lost" territory); a `VIP_EGRESS tripwire` WARN in
+`failure_route[CARRIER_FAILURE]` (local 408 with no reply at all) flags it.
+Enable on both SBCs of a zone. Full source citations are in the `$fs` comment
+block in `kamailio.cfg`. NB: the receive-socket pv is `$Ri` (there is no `$Rip`
+in 5.8).
+
 **Sinch ORIGINATION groups 6-7 — VIP-sourced probes + standby reads Inactive
 by design:** the orig TGs (DNVTCOZIGR2_3278 / CHCGIL24GR4_7412) are
 registered with our NLB VIPs (the addresses Sinch sends calls to), not the
@@ -458,6 +488,7 @@ Set in `.env` file on each SBC VM. Passed via `docker-compose.sbc.yml`.
 | `BANDWIDTH_TC2_LA` | No (default 67.231.4.138) | — | TC2 Los Angeles PoP (TC2 in-trunk failover target, dispatcher group 5 keepalive). |
 | `SINCH_DENVER_IP` | No (default 206.146.100.24) | — | Sinch Denver origination PoP (Trunk Group DNVTCOZIGR2_3278, test TN 5305480845). Static inbound trust + attribution + dispatcher group 6 keepalive. Origination-only — never an egress target. |
 | `SINCH_CHICAGO_IP` | No (default 206.146.101.39) | — | Sinch Chicago origination PoP (Trunk Group CHCGIL24GR4_7412, test TN 5305480846). Static inbound trust + attribution + dispatcher group 7 keepalive. Origination-only — never an egress target. |
+| `VIP_EGRESS` | No (default off) | on | Carrier-bound INVITE egress from the external NLB VIP for INVITEs received on the signaling ILB VIP (`if ($Ri == "SIGNALING_VIP") { $fs = "udp:ADVERTISE_IP:5060"; }` in `route[TO_CARRIER]` Step 9, compiled in via `#!define VIP_EGRESS` + `SBC_SIGVIP_DEDICATED`). on/true/1 = ON, anything else = OFF; entrypoint forces OFF (warning) when `SBC_SIGNALING_VIP` is unset. Direct-IP ingress keeps own-public-IP egress — the 6 SBC public IPs stay whitelisted. Enable on both SBCs of a zone. See "Carrier-bound INVITE egress" in §5 Dispatcher Configuration. |
 
 ## 7. SIP Call Flows
 

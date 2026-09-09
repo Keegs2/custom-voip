@@ -283,6 +283,17 @@ from the SBC's own external IP (not the VIP). Bandwidth must whitelist these IPs
 to accept outbound traffic. The VIP is in SIP headers (From, Contact, Via) so
 in-dialog responses route back through the Geo LB.
 
+**`VIP_EGRESS=on` (SBC env, default off, dedicated signaling-VIP mode only):**
+Kamailio forces the send socket of carrier-bound INVITEs that arrived on the
+signaling ILB VIP to the external VIP (`$fs` guard in `route[TO_CARRIER]`), so
+in steady state the INVITE's packet source is the zone VIP too — the same source
+ACK/BYE and all responses already use. The 6 SBC public IPs MUST STAY in the
+origination list: INVITEs that arrive on an SBC's direct VPC IP (FreeSWITCH's
+`SBC_PROXY_IP_FAILOVER` attempts, direct-IP ESL originates) and the OPTIONS
+keepalive probes still egress from each SBC's own public IP. The win is one
+carrier-facing source for the common case, not fewer whitelisted IPs. Enable on
+both SBCs of a zone; see `docker/kamailio/kamailio.cfg`.
+
 ### Failover Behavior
 
 Failover is handled by GCP, not Bandwidth:
