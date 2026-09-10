@@ -52,6 +52,47 @@ else
   SBC_SIGVIP_MODE=fallback
 fi
 
+# SBC_PEER_INTERNAL_IP: OPTIONAL VPC IP of the OTHER SBC in this zone's
+# active/standby pair (on sbc-1 it is sbc-2's SBC_INTERNAL_IP and vice versa:
+# East 10.142.0.100/101, West 10.138.0.100/101, Central 10.128.0.100/101).
+# Enables the PEER REPLY HAND-OFF (kamailio.cfg reply_route, CLAUDE.md §8.12):
+# a reply this SBC has no transaction for, received from an external source
+# on the external VIP socket, is handed raw to the peer whose tm owns it,
+# gated on the peer's liveness (dispatcher group 10 OPTIONS probe).
+#
+# DEFAULT (unset/empty): the mode define renders as a comment, every
+# `#!ifdef SBC_PEER_HANDOFF` block compiles OUT, and the group-10 dispatcher
+# line renders as a comment — byte-identical to the pre-feature config
+# (rolling-safe). The __SBC_PEER_IP__ token then renders as SBC_INTERNAL_IP
+# (a valid address, only referenced from compiled-out blocks — same posture
+# as __FS_IP_2__). VALIDATION: the value must be a dotted-quad IPv4 address
+# and must NOT equal SBC_INTERNAL_IP (a self-probe would gate the hand-off on
+# our own liveness and hand replies to ourselves); anything else logs a
+# WARNING and is treated as unset. Set it on BOTH SBCs of the zone, each
+# pointing at the other. Same line-replacement mechanism as
+# SBC_SIGVIP_DEDICATED / STIR_SHAKEN_SIGN.
+SBC_PEER_MODE=off
+if [ -n "${SBC_PEER_INTERNAL_IP:-}" ]; then
+  if ! printf '%s' "${SBC_PEER_INTERNAL_IP}" | grep -Eq '^((25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\.){3}(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])$'; then
+    echo "WARNING: SBC_PEER_INTERNAL_IP='${SBC_PEER_INTERNAL_IP}' is not a dotted-quad IPv4 address — treating as unset (peer reply hand-off OFF)" >&2
+    SBC_PEER_INTERNAL_IP=""
+  elif [ "${SBC_PEER_INTERNAL_IP}" = "${SBC_INTERNAL_IP}" ]; then
+    echo "WARNING: SBC_PEER_INTERNAL_IP equals SBC_INTERNAL_IP (${SBC_INTERNAL_IP}) — the peer must be the OTHER SBC of the pair; treating as unset (peer reply hand-off OFF)" >&2
+    SBC_PEER_INTERNAL_IP=""
+  fi
+fi
+if [ -n "${SBC_PEER_INTERNAL_IP:-}" ]; then
+  SBC_PEER_MODE=on
+  SBC_PEER_ECHO="${SBC_PEER_INTERNAL_IP}"
+  SBC_PEER_MODE_DEFINE="#!define SBC_PEER_HANDOFF"
+  SBC_PEER_DISPATCHER_LINE="10 sip:${SBC_PEER_INTERNAL_IP}:5060 0 0 weight=100;duid=sbc-peer"
+else
+  SBC_PEER_INTERNAL_IP="${SBC_INTERNAL_IP}"
+  SBC_PEER_ECHO="<unset>"
+  SBC_PEER_MODE_DEFINE="# SBC_PEER_INTERNAL_IP not set — peer reply hand-off compiled out (no SBC_PEER_HANDOFF blocks, no peerhealth htable)"
+  SBC_PEER_DISPATCHER_LINE="# SBC_PEER_INTERNAL_IP not set — no peer liveness destination (peer reply hand-off off)"
+fi
+
 # FREESWITCH_IP_2: OPTIONAL second FreeSWITCH media node (VPC/media-subnet IP,
 # same address family as FREESWITCH_IP) for the STRICT ACTIVE/STANDBY media
 # pair — the FS mirror of the SBC pair model. When set (and different from
@@ -339,6 +380,14 @@ sed -i "s|__SBC_INTERNAL_IP__|${SBC_INTERNAL_IP}|g" "$CONFIG"
 # '|', '&' or '\'.
 sed -i "s|__SIGNALING_VIP__|${SBC_SIGNALING_VIP}|g" "$CONFIG"
 sed -i "s|__SBC_SIGVIP_MODE_DEFINE__|${SBC_SIGVIP_MODE_DEFINE}|" "$CONFIG"
+# Peer reply hand-off (active/standby pair). The IP is SBC_PEER_INTERNAL_IP
+# when valid, else SBC_INTERNAL_IP (then only referenced from compiled-out
+# blocks). The mode define (cfg) and the group-10 line (dispatcher.list) are
+# fixed literals with no '|', '&' or '\'. __SBC_PEER_IP__ and
+# __SBC_PEER_MODE_DEFINE__ share no substring, so order is irrelevant.
+sed -i "s|__SBC_PEER_IP__|${SBC_PEER_INTERNAL_IP}|g" "$CONFIG"
+sed -i "s|__SBC_PEER_MODE_DEFINE__|${SBC_PEER_MODE_DEFINE}|" "$CONFIG"
+sed -i "s|__SBC_PEER_DISPATCHER_LINE__|${SBC_PEER_DISPATCHER_LINE}|" "$DISPATCH"
 sed -i "s|__BANDWIDTH_PRIMARY_IP__|${BANDWIDTH_PRIMARY_IP}|g" "$CONFIG"
 sed -i "s|__BANDWIDTH_SECONDARY_IP__|${BANDWIDTH_SECONDARY_IP}|g" "$CONFIG"
 sed -i "s|__INTERNAL_SUBNET__|${INTERNAL_SUBNET}|g" "$CONFIG"
@@ -405,6 +454,7 @@ sed -i "s|__SINCH_LD_IP__|${SINCH_LD_IP}|g" "$DISPATCH"
 sed -i "s|__SINCH_TF_IP__|${SINCH_TF_IP}|g" "$DISPATCH"
 
 echo "Kamailio config templated: ADVERTISE_IP=${EXTERNAL_SIP_IP}, FS=${FREESWITCH_IP}, FS2=${FREESWITCH_IP_2} (${FS_HA_MODE}), FS_PUBLIC_IP=${FS_PUBLIC_IP}, DB=${DB_HOST}:${DB_PORT}, Homer=${HOMER_IP}, HEP_ID=${HEP_CAPTURE_ID}, SBC_ID=${SBC_ID}, SBC_INTERNAL_IP=${SBC_INTERNAL_IP}, SIGNALING_VIP=${SBC_SIGNALING_VIP} (${SBC_SIGVIP_MODE}), BW_PRIMARY=${BANDWIDTH_PRIMARY_IP}, BW_SECONDARY=${BANDWIDTH_SECONDARY_IP}, SINCH_DENVER=${SINCH_DENVER_IP}, SINCH_CHICAGO=${SINCH_CHICAGO_IP}, SINCH_LD=${SINCH_LD_IP}, SINCH_TF=${SINCH_TF_IP}, INTERNAL_SUBNET=${INTERNAL_SUBNET}, MEDIA_SUBNET=${MEDIA_SUBNET}, FS_AWARE_OPTIONS=${FS_AWARE_OPTIONS}, STIR_SHAKEN_SIGN=${STIR_SHAKEN_SIGN}, E164_EGRESS=${E164_EGRESS}, STIR_SHAKEN_VERIFY=${STIR_SHAKEN_VERIFY}, STIR_CERT_URL=${STIR_CERT_URL}, STIR_VERIFY_CERT_MODE=${STIR_VERIFY_CERT_MODE}, STIR_VERIFY_CA_FILE=${STIR_VERIFY_CA_FILE:-<unset>}"
+echo "Kamailio peer reply hand-off: SBC_PEER_HANDOFF=${SBC_PEER_MODE} (peer=${SBC_PEER_ECHO}; on = transaction-less external replies received on the VIP socket are handed raw to the peer while dispatcher group 10 reads it UP, off = today's stateless via2 forward)"
 
 # Add the NLB VIP (EXTERNAL_SIP_IP / ADVERTISE_IP) to the loopback interface.
 #

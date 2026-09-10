@@ -176,7 +176,11 @@ __FS2_DISPATCHER_LINE__
 # return through the external NLB to the ACTIVE SBC only. Active SBC: reply
 # matches its transaction -> groups 6/7 go UP. STANDBY SBC: its replies land
 # on the active (no transaction there, dropped) -> the standby marks 6/7
-# Inactive PERMANENTLY. That is fine: carrier_trunk_health is up-on->=1-SBC
+# Inactive PERMANENTLY — UNLESS the peer reply hand-off is on
+# (SBC_PEER_INTERNAL_IP set, group 10 below): the active then hands those
+# transaction-less OPTIONS replies raw to the standby, whose tm matches them
+# and reads 6/7 Active too (the passive verification signal, CLAUDE.md
+# §8.12). Without it, that is fine: carrier_trunk_health is up-on->=1-SBC
 # (bool_or across SBCs), and migration 45's passive/traffic state stays the
 # safety net. Side effect: one dispatcher:dst-down event per standby boot
 # for each of these two duids (a single dsmon gen bump + one carrier-monitor
@@ -218,6 +222,27 @@ __FS2_DISPATCHER_LINE__
 # Same termination-only/keepalive notes as Group 8. IP templated by
 # entrypoint.sh from SINCH_TF_IP (default 206.146.100.26).
 9 sip:__SINCH_TF_IP__:5060 0 0 weight=100;duid=sinch-denver-tf
+
+# ============================================================
+# Group 10: Peer SBC liveness (peer reply hand-off — SBC_PEER_HANDOFF only)
+# ============================================================
+# The OTHER SBC of this zone's active/standby pair (its VPC IP, from
+# SBC_PEER_INTERNAL_IP). NOT a carrier: carrier-monitor's CARRIER_SETIDS
+# ({2,3,6,7,8,9}) excludes it, and the :5060 port keeps it out of the FS
+# (:5080) event-route match; kamailio.cfg's event routes match it by EXACT
+# URI to maintain peerhealth=>up, the liveness gate of the reply_route peer
+# hand-off (CLAUDE.md §8.12). Same OPTIONS probing as group 1
+# (ds_probing_mode=1 probes every destination; flags 0). No socket= /
+# ping_from= attrs: the probe leaves the NIC socket via mhomed, so the peer
+# sees it from our SBC_INTERNAL_IP -> IS_INTERNAL_SOURCE -> flag 5 -> its
+# OPTIONS handler answers 200 with no flood tracking, and its FS-aware 503
+# arm is skipped for internal sources — a healthy peer with a dead FS still
+# reads UP, which is correct: the peer's tm is what must be alive. A 2xx is
+# accepted unconditionally by ds_options_callback (dispatch.c:3857-3858),
+# independent of ds_ping_reply_codes. When SBC_PEER_INTERNAL_IP is
+# unset/invalid, entrypoint.sh renders the line below as a comment (no
+# group 10 at all — byte-identical behavior).
+__SBC_PEER_DISPATCHER_LINE__
 
 # ============================================================
 # Notes:

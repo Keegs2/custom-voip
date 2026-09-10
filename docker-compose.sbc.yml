@@ -50,6 +50,15 @@ services:
       # decided only by GCP health checks) BEFORE pointing the media VM's
       # SBC_PROXY_IP at the ILB.
       - SBC_SIGNALING_VIP=${SBC_SIGNALING_VIP:-}
+      # Peer reply hand-off (active/standby pair). OPTIONAL — the OTHER SBC's
+      # VPC IP (sbc-1 -> sbc-2's SBC_INTERNAL_IP and vice versa). A carrier
+      # reply this SBC has no transaction for (failback with in-flight
+      # VIP-sourced INVITEs on the demoted peer, maintenance drain, the
+      # standby's VIP-sourced Sinch probes) is handed raw to the peer whose
+      # tm owns it, gated on the peer's liveness (dispatcher group 10).
+      # Unset/empty, non-IPv4, or == SBC_INTERNAL_IP (warned) = compiled out,
+      # byte-identical config. Set on BOTH SBCs, each pointing at the other.
+      - SBC_PEER_INTERNAL_IP=${SBC_PEER_INTERNAL_IP:-}
       # Per-zone Bandwidth egress PoPs (East defaults; West swaps primary<->secondary)
       - BANDWIDTH_PRIMARY_IP=${BANDWIDTH_PRIMARY_IP:-67.231.2.12}
       - BANDWIDTH_SECONDARY_IP=${BANDWIDTH_SECONDARY_IP:-216.82.238.134}
