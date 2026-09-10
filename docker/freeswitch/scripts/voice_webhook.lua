@@ -794,6 +794,17 @@ local function execute_dial(verb)
         end
     end
 
+    -- STIR/SHAKEN (docker/kamailio/CLAUDE.md §8.13): Kamailio OWNS the Identity
+    -- header at every egress. mod_sofia would otherwise emit this channel's
+    -- inherited `sip_h_identity` TWICE on the bridged B-leg (the dedicated
+    -- SIPTAG_IDENTITY_STR path + the generic sip_h_* copy loop). Nothing in
+    -- these scripts reads it, and X-In-Identity is the SOLE carrier of the
+    -- inbound Identity chain across the B2BUA, so delete the var before any
+    -- bridge: an empty value deletes a channel variable
+    -- (switch_channel_set_variable) and FS variable names are case-insensitive.
+    -- Belt-and-braces only — Kamailio strips every Identity copy at the border
+    -- regardless. sip_copy_custom_headers is deliberately untouched.
+    session:setVariable("sip_h_identity", "")
     local combined_dial = table.concat(dial_strings, "|")
 
     log_info(uuid, string.format("Dial: bridge string=%s", combined_dial))

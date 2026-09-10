@@ -1077,6 +1077,18 @@ local function terminate_rcf(dest, ctx)
     -- This prevents the dialplan fallback 404 from masking bridge failures
     set_var("lua_routed", "true")
 
+    -- STIR/SHAKEN (docker/kamailio/CLAUDE.md §8.13): Kamailio OWNS the Identity
+    -- header at every egress. mod_sofia would otherwise emit this channel's
+    -- inherited `sip_h_identity` TWICE on the bridged B-leg (the dedicated
+    -- SIPTAG_IDENTITY_STR path + the generic sip_h_* copy loop). Nothing in
+    -- these scripts reads it, and X-In-Identity is the SOLE carrier of the
+    -- inbound Identity chain across the B2BUA, so delete the var before any
+    -- bridge: an empty value deletes a channel variable
+    -- (switch_channel_set_variable) and FS variable names are case-insensitive.
+    -- Belt-and-braces only — Kamailio strips every Identity copy at the border
+    -- regardless. sip_copy_custom_headers is deliberately untouched.
+    session:setVariable("sip_h_identity", "")
+
     -- RFC 4028 session timers: export to B-leg so mod_sofia includes
     -- Session-Expires and Min-SE in the outbound INVITE.
     -- CRITICAL: set_var() only sets on the A-leg. export via session:execute
@@ -1528,6 +1540,18 @@ local function terminate_trunk(dest, ctx)
         local pbx_ip = endpoint_ips[1]
 
         set_var("sip_h_X-PBX-Dest", pbx_ip)
+
+        -- STIR/SHAKEN (docker/kamailio/CLAUDE.md §8.13): Kamailio OWNS the Identity
+        -- header at every egress. mod_sofia would otherwise emit this channel's
+        -- inherited `sip_h_identity` TWICE on the bridged B-leg (the dedicated
+        -- SIPTAG_IDENTITY_STR path + the generic sip_h_* copy loop). Nothing in
+        -- these scripts reads it, and X-In-Identity is the SOLE carrier of the
+        -- inbound Identity chain across the B2BUA, so delete the var before any
+        -- bridge: an empty value deletes a channel variable
+        -- (switch_channel_set_variable) and FS variable names are case-insensitive.
+        -- Belt-and-braces only — Kamailio strips every Identity copy at the border
+        -- regardless. sip_copy_custom_headers is deliberately untouched.
+        session:setVariable("sip_h_identity", "")
 
         local dial_string = string.format(
             "{ignore_early_media=false,sip_enable_soa=false,call_timeout=60" ..
