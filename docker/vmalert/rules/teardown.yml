@@ -37,8 +37,10 @@
 # method and are not scraped by xhttp_prom), so there is no per-method timeout
 # counter to use. The tm-timeout case still surfaces via signals 2 and 3.
 #
-# DELIVERY: vmalert has NO -notifier.url in docker-compose.services.yml (no
-# Alertmanager is deployed). The `alert:` rules below are evaluated every 30s
+# DELIVERY: vmalert runs with -notifier.blackhole in docker-compose.services.yml
+# (no Alertmanager is deployed; WITHOUT that flag vmalert refuses to start at
+# all once a rule file contains `alert:` rules — a crash loop that also stops
+# every recording rule). The `alert:` rules below are evaluated every 30s
 # and are visible in vmalert's UI/API (:8880 /api/v1/alerts) and, via
 # -remoteWrite.url, as the ALERTS{alertname,alertstate,zone} /
 # ALERTS_FOR_STATE series in VictoriaMetrics (Grafana can panel them). They
