@@ -2428,6 +2428,79 @@
       }
     },
     {
+      "id": 75,
+      "type": "timeseries",
+      "title": "Abnormal teardown per hour",
+      "description": "Calls per hour whose hangup_cause says the leg was NOT torn down by a BYE but by a timer: MEDIA_TIMEOUT (RTP silence, 60s), RECOVERY_ON_TIMER_EXPIRE (session timer, <=30m), ALLOTTED_TIMEOUT (bridge/originate timeout). A cluster of these right after an SBC failover = BYEs that got 481/408 (see vmalert SipByeFailureShare / FsStaleChannels in docker/vmalert/rules/teardown.yml). One line per cause. Scoped to the selected range + zone, same SQL shape as Top hangup causes.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 72
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "voip-cdr-pg"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "voip-cdr-pg"
+          },
+          "format": "time_series",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT $__timeGroup(start_time, '1h') AS time, hangup_cause AS metric, count(*) AS calls FROM cdrs WHERE $__timeFilter(start_time) AND hangup_cause IN ('MEDIA_TIMEOUT','RECOVERY_ON_TIMER_EXPIRE','ALLOTTED_TIMEOUT') AND CASE WHEN freeswitch_node LIKE 'west%' THEN 'west' WHEN freeswitch_node LIKE 'central%' THEN 'central' WHEN COALESCE(freeswitch_node,'') = '' THEN 'unknown' ELSE 'east' END LIKE '$zone' GROUP BY 1, 2 ORDER BY 1;"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "bars",
+            "lineWidth": 1,
+            "fillOpacity": 60,
+            "stacking": {
+              "group": "A",
+              "mode": "normal"
+            },
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "calcs": [
+            "sum"
+          ],
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
       "id": 30,
       "type": "stat",
       "title": "Rated-call quality snapshot",

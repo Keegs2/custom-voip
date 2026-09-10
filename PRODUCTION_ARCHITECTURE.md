@@ -88,7 +88,7 @@ restore proven in a real recovery).
 
 | Failure | Detection | Recovery | Behavior |
 |---------|-----------|----------|----------|
-| Active SBC dies | NLB fs-aware HC, ~10–12s | Auto (failover backends), auto failback | Both planes (carrier VIP + signaling ILB) flip to standby SBC. Established calls survive (`;fs=` stateless dispatch); setups in flight during the ~6s flip are lost. |
+| Active SBC dies | NLB fs-aware HC, ~10–12s | Auto (failover backends), auto failback | Both planes (carrier VIP + signaling ILB) flip to standby SBC. Established calls survive (`;fs=` stateless dispatch); setups in flight during the ~10–12s flip are lost (their CANCELs now draw 481 from the new active). Dialog entries the ex-active owned linger there as gauge-only ghosts ≤2h (§4.8). |
 | Standby SBC dies | HC + `sbc_failover.tf` log alert | Page (redundancy degraded) | No traffic impact; zone runs unprotected until restored |
 | Active FS dies | Dispatcher OPTIONS 3×5s; fs-watchdog pages | Auto (alg 8 → FS-2), auto failback | That FS's active calls are lost; new calls land on FS-2. East ESL/API originates fail while FS-1 is down (open item §12.3) |
 | Both FS in a zone down | `/healthz` → 503 on both SBCs | Auto | Zone drains at the NLB + DNS; carriers re-route to remaining zone VIPs |
@@ -330,7 +330,7 @@ call flow.
 | `DATABASE_URL` | `postgresql://api:...@host.docker.internal:6432/voip` (PgBouncer on host; `statement_cache_size=0`) |
 | `JWT_SECRET_KEY` | Required — API crashes without it |
 | `FREESWITCH_ESL_HOST` / `_PASSWORD` | 192.168.10.2 (East FS-1 — pinned, §12.3) |
-| `SBC_PROXY_IP` | ESL-originate routing target |
+| `SBC_PROXY_IP` | 10.142.0.250 — East signaling ILB VIP; ESL-originate bridge target (`sofia/external/<to>@$SBC_PROXY_IP:5060`, `esl_client.py`). Must NOT be SBC-1's direct IP: no failover — API originates fail while SBC-1 is down |
 | `CDR_EXPORT_*` (+`CDR_EXPORT_ENABLED`) | Equinox FTP export (§8.5) |
 | `BANDWIDTH_API_*` / `BANDWIDTH_ACCOUNT_ID` / `SIP_PEER_ID` | TN inventory sync |
 | `CARRIER_STATUS_TOKEN` / `LIVE_TRUNK_STATS_TOKEN` / `OPS_AGENT_TOKEN` | shared secrets with ops-agents |
@@ -485,7 +485,8 @@ run identical config; "active" is decided only by health checks):
 | Planes flipping together | External carrier VIP + internal signaling ILB VIP (§3.2/§3.3 share primary group SBC-1, standby group SBC-2) |
 | Health check | HTTP :8080 `/healthz` (fs-aware + maint-aware), 5s interval / 2 threshold ⇒ ~10–12s detection |
 | Policy | `failover-ratio=0`, `drop-traffic-if-unhealthy`, `no-connection-drain-on-failover`; automatic failback |
-| Mid-call survival | Established calls survive a flip — stateless `;fs=` in-dialog dispatch (§4.3) + stateless FS→carrier BYE forward. Setups in flight during the ~6s flip are lost (standard HA semantic). |
+| Mid-call survival | Established calls survive a flip — stateless `;fs=` in-dialog dispatch (§4.3) + stateless FS→carrier BYE forward. Setups in flight during the ~10–12s flip (HC 5s × 2) are lost (standard HA semantic); the carrier's CANCEL for one gets `481` from the new active (flag-5 sources only, §12) instead of a silent drop. |
+| Post-flip residue | Dialog state is per-SBC (`db_mode=0`, no DMQ): every dialog the ex-active owned becomes a ghost there (its BYE lands on the new active) and inflates `dlg.stats_active` / `kamailio_dialog_active_dialogs` / `carrier_trunk` gauges on that SBC until `default_timeout` (2h, §4.8). Gauges only — never `dlg.end_dlg`-sweep them (sends BYEs). `docs/SBC_ACTIVE_STANDBY_RUNBOOK.md` §0. |
 | Verified | Planned-failover + kill drills in all 3 zones, 2026-08-27 (`docs/SBC_ACTIVE_STANDBY_RUNBOOK.md`) |
 | Side-effects of single-active | `bw_dedup` catches cross-edge duplicates deterministically; `bw_cps`/pike see full zone load; dialog gauges accurate on the active SBC |
 
@@ -606,7 +607,7 @@ the maintenance plane.
 | tm | pass_provisional_replies / auto_inv_100 | 1 / 1 | 183 early media passthrough; auto 100 Trying |
 | rr | enable_full_lr / enable_double_rr / append_fromtag | 1 / 1 / 1 | Loose routing + double RR (§4.3) |
 | dialog | dlg_match_mode | 1 | SIP-element fallback matching — required for the `$dlg_var(fs_port)` owner fallback in TO_FS_INDIALOG |
-| dialog | timeout | 12h | Reap dialogs that never got a BYE |
+| dialog | default_timeout | 7200s (2h) | Bound on ghost entries whose BYE never reached this SBC — chiefly every dialog the ex-active owned at a failover flip. NOT a max call length: the timer re-arms on every sequential request (session-timer re-INVITEs ~900s). Expiry is silent (no BYE) by design. Was 12h. |
 | pike | sampling + PIKE_THRESHOLD / PIKE_TIMEOUT | 1s window, 50 req/s, 300s block | Per-IP flood gate (env-tunable) |
 | dispatcher | ds_ping_interval / probing / thresholds | 5s / mode 1 / 3+3 | §4.4 — also keeps GCE UDP pinholes open |
 | dispatcher | ds_ping_reply_codes | 2xx, 404, 405, 480, 500 | 500 = Sinch orig OPTIONS standard answer |
@@ -1199,6 +1200,9 @@ Honest list — verified 2026-09-04. Remove entries here as they close.
 | 9 | `zz_test_alert.tf` + `infra/test/` | Throwaway alert-pipeline test + scratch dir, untracked — delete or commit deliberately. |
 | 10 | OpenTofu import | East resources not yet imported into state (Phase 5); fleet is hand-managed in GCP until then. |
 | 11 | `lb-health-check` tag hygiene | Shared-project tag overlap with the ted project flagged in the 2026-08 firewall audit — confirm scoping. |
+| 12 | CANCEL 481 covers flag-5 sources only | Post-flip CANCELs with no transaction get `481` only from static carrier IPs / FS / SIPp. Trunk PBXs and DB-admitted carriers (trust is per-INVITE) still get the silent drop → ~32s retransmit train. Fix: an htable of recently-authenticated sources consulted on bare CANCEL. |
+| 13 | re-INVITE/ACK still on stateful `t_relay` | Only BYE is forwarded statelessly. Safe under active/standby; a flip mid-transaction strands one session-timer refresh, which then tears the call down (no orphan). |
+| 14 | SBC failover drill logs empty | Runbook §8 has no rows despite drills run 2026-08-26/27 — no recorded evidence of established-call survival/teardown. Next drill per zone must fill the new evidence columns. |
 
 ---
 

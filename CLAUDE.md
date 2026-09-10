@@ -238,7 +238,8 @@ Each zone's 2 SBCs run as a TRUE active/standby HA pair — NOT active/active. D
 
 - **Both traffic planes fail over together:** the external carrier VIP AND a per-zone internal "signaling VIP" (internal passthrough NLB, `SBC_SIGNALING_VIP`: East 10.142.0.250 / West 10.138.0.250 / Central 10.128.0.250) share the same primary group (SBC-1), standby group (SBC-2 in `*sbc-standby-group`), HTTP :8080 `/healthz` fs-aware health check (5s/2 ≈ 10-12s detection; East/Central `*-sbc-fs-aware-hc`, West `west-sbc-healthz-hc`), and policy (`failover-ratio=0`, `drop-traffic-if-unhealthy`, `no-connection-drain-on-failover`). Failback is automatic.
 - **Passthrough-LB health probes are VIP-addressed** (dst = forwarding-rule IP, from 209.85.152.0/22 + 209.85.204.0/22 + 35.191.0.0/16) — Kamailio binds :8080 on the external VIP and (dedicated mode) the signaling VIP for exactly this. Before those binds (pre-2026-08-26) the health checks NEVER passed and zones rode NLB fail-open invisibly.
-- **FS targets the signaling VIP** (`SBC_PROXY_IP`), and the inner Record-Route entry renders the signaling VIP — so FS-side in-dialog requests always reach the ACTIVE SBC, and a mid-call SBC death no longer strands the FS→carrier direction. The `;fs=` stateless dispatch (§8.10) + stateless FS→carrier BYE forward are what make established calls survive a flip; setups in flight during the ~6s flip are lost (industry-standard HA semantic).
+- **FS targets the signaling VIP** (`SBC_PROXY_IP`), and the inner Record-Route entry renders the signaling VIP — so FS-side in-dialog requests always reach the ACTIVE SBC, and a mid-call SBC death no longer strands the FS→carrier direction. The `;fs=` stateless dispatch (§8.10) + stateless FS→carrier BYE forward are what make established calls survive a flip; setups in flight during the ~10-12s flip are lost (industry-standard HA semantic).
+- **Post-flip teardown:** established calls tear down statelessly on EITHER SBC; the dialog entries the ex-active owned age out silently at `default_timeout=7200` (≤2h) — gauges only (`dlg.stats_active`, `kamailio_dialog_active_dialogs`, `carrier_trunk`), never `dlg.end_dlg`-sweep them (sends BYEs); an in-flight setup's CANCEL gets `481` from the new active (flag-5 sources). `docker/kamailio/CLAUDE.md` §8.11.
 - **`SBC_SIGNALING_VIP` unset ⇒ byte-identical legacy behavior** (renders as SBC_INTERNAL_IP, no extra listen/alias) — rolling-safe. Never set it before the zone's ILB exists; set it on BOTH SBCs before repointing FS.
 - **Single active SBC side-effects:** bw_dedup now catches cross-edge duplicate INVITEs deterministically; bw_cps/pike counters see full zone load (limits env-tunable); dialog gauges are accurate on the active SBC.
 - **Ops:** `docs/SBC_ACTIVE_STANDBY_RUNBOOK.md` (drills, failure modes, rollback, migration record). IaC blueprint: `infra/OPENTOFU_PLAN.md` §18. Alerting: `infra/monitoring/sbc_failover.tf`.
@@ -312,7 +313,7 @@ These env vars are set per-VM in `/opt/revup/.env`. Getting any of them wrong br
 | `FREESWITCH_ESL_HOST` | `192.168.10.2` | FS media VM VPC IP — ESL commands |
 | `FREESWITCH_ESL_PASSWORD` | (secret) | Must match FS ESL_PASSWORD |
 | `JWT_SECRET_KEY` | (secret) | Required — API crashes without it |
-| `SBC_PROXY_IP` | `10.142.0.100` | Primary SBC — for ESL originate routing |
+| `SBC_PROXY_IP` | `10.142.0.250` | Zone signaling ILB VIP — ESL/API originate bridge target (always the ACTIVE SBC). Was SBC-1's direct IP, which had no failover. |
 
 ## GCP Production Topology (3 zones — East / West / Central, all LIVE 2026-07-23)
 

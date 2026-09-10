@@ -1,0 +1,55 @@
+{
+  "status": "success",
+  "data": {
+    "alerts": [
+      {
+        "state": "firing",
+        "name": "SipByeFailureShare",
+        "value": "0.3125",
+        "labels": {
+          "alertgroup": "noc_teardown",
+          "alertname": "SipByeFailureShare",
+          "component": "sbc",
+          "severity": "warning",
+          "zone": "east"
+        },
+        "annotations": {
+          "summary": "BYEs are failing in zone east (31.25% non-2xx over 10m)",
+          "description": "BYEs are failing (481/408) in zone east — teardown regression, typically after an SBC flip (in-dialog BYE landing on an SBC/FS that no longer knows the dialog). Check Homer for 481 on BYE in this zone and compare against the active-SBC election row. Affected channels will hang until RTP timeout (60s) or the session timer (<=30m); the dialog side ages out at the 2h dialog timeout. Runbook: docs/SBC_ACTIVE_STANDBY_RUNBOOK.md."
+        },
+        "activeAt": "2026-09-08T14:02:30Z",
+        "id": "7010326211404150420",
+        "rule_id": "4693811349981523776",
+        "group_id": "13098129017296486071",
+        "expression": "(sum by (zone) (rate(kamailio_core_rcv_replies_4xx_bye[10m])) ...) > 0.20",
+        "source": "",
+        "restored": false,
+        "stabilizing": false
+      },
+      {
+        "state": "pending",
+        "name": "FsStaleChannels",
+        "value": "2",
+        "labels": {
+          "alertgroup": "noc_teardown",
+          "alertname": "FsStaleChannels",
+          "component": "freeswitch",
+          "severity": "warning",
+          "zone": "west"
+        },
+        "annotations": {
+          "summary": "2 FreeSWITCH channel(s) older than 2h in zone west",
+          "description": "2 FreeSWITCH channel(s) older than 2h in zone west — legitimate RCF calls this long are rare."
+        },
+        "activeAt": "2026-09-08T14:10:00Z",
+        "id": "1234567890123456789",
+        "rule_id": "2234567890123456789",
+        "group_id": "13098129017296486071",
+        "expression": "sum by (zone) (freeswitch_channels_stale * freeswitch_esl_scrape_ok) > 0",
+        "source": "",
+        "restored": false,
+        "stabilizing": false
+      }
+    ]
+  }
+}

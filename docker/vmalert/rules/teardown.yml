@@ -1,0 +1,187 @@
+# vmalert rules — call TEARDOWN observability (BYE failures, stale channels,
+# dialog leaks). Companion to sip_health.yml, which records only INVITE reply
+# classes: before this file a 481/408 on a BYE was invisible to every metric,
+# panel and alert.
+# ---------------------------------------------------------------------------
+# See traffic.yml header for the load path, naming convention, and the 30s
+# interval rationale.
+#
+# WHY: after an SBC active/standby flip (docs/SBC_ACTIVE_STANDBY_RUNBOOK.md)
+# the failure mode that matters is a call that SET UP fine but cannot be TORN
+# DOWN — a BYE that gets 481 (dialog unknown) / 408 (timeout), leaving FS legs
+# up until RTP timeout (60s) or the session timer (<=30m), and Kamailio dialog
+# state that never closes. Three signals, cheapest first:
+#   1. BYE reply classes (Kamailio core stats, per zone) — the direct signal.
+#   2. Stale FS channels (ops_metrics.py, age > 2h) — the consequence.
+#   3. Kamailio dialogs >> FS channels for LONGER than the dialog timeout —
+#      a persistent leak, as opposed to expected post-flip ghosts.
+#
+# METRIC NAMES (verified against Kamailio 5.8 source, src/modules/kex/
+# core_stats.c: DECLARE_STATS(bye) expands STAT_NAME(bye, N) =
+# "rcv_replies_Nxx_bye", N in 1..6, registered under stat group "core";
+# xhttp_prom_stats="all" prepends "kamailio_core_" and adds NO _total suffix —
+# same convention as the kamailio_core_rcv_replies_Nxx_invite series that
+# sip_health.yml already records):
+#   kamailio_core_rcv_replies_{1,2,3,4,5,6}xx_bye   replies RECEIVED to BYE
+#   kamailio_core_rcv_requests_bye                   BYEs received (either dir)
+# Deliberately NOT recorded: 1xx (a non-INVITE transaction gets no meaningful
+# provisional — Kamailio never forwards one for BYE) and 3xx (nobody redirects
+# a BYE; the counter is structurally 0). Recording them would add 2 x zones
+# permanently-zero series for nothing.
+#
+# KNOWN BLIND SPOT: these are RECEIVED replies. A 408 that Kamailio's tm
+# module generates LOCALLY when the relayed BYE times out (no reply from FS or
+# the carrier) is not a received reply and is not counted here. Kamailio 5.8's
+# tm module exports NO statistics-framework counters at all (only the tm.stats
+# RPC, whose rpl_generated / completed_4xx figures are aggregate across every
+# method and are not scraped by xhttp_prom), so there is no per-method timeout
+# counter to use. The tm-timeout case still surfaces via signals 2 and 3.
+#
+# DELIVERY: vmalert has NO -notifier.url in docker-compose.services.yml (no
+# Alertmanager is deployed). The `alert:` rules below are evaluated every 30s
+# and are visible in vmalert's UI/API (:8880 /api/v1/alerts) and, via
+# -remoteWrite.url, as the ALERTS{alertname,alertstate,zone} /
+# ALERTS_FOR_STATE series in VictoriaMetrics (Grafana can panel them). They
+# PAGE via the vmalert pager (scripts/vmalert-pager/, systemd timer on the
+# services VM, every 60s): it polls /api/v1/alerts and, for each alert that
+# transitions to `firing` (keyed alertname|zone), emits ONE syslog line
+#   revup-alert (user.err): "vmalert <alertname> FIRING zone=<zone> host=<h>: <summary>"
+# which the Ops Agent ships to the GCM log-match policy
+# (infra/monitoring/main.tf revup_alert_log) → email/Slack — the platform's
+# one metric-derived page path. `pending` never pages; when the alert clears
+# the pager logs an INFO recovery line under its own tag (revup-vmalert-pager,
+# never the alert tag). The `summary` annotation is what lands in the page,
+# so keep it one line and specific; `description` is the fallback.
+groups:
+  - name: noc_teardown
+    interval: 30s
+    rules:
+      # ----- BYE reply-class rates (mirror of zone:kamailio_invite_replies) -----
+      - record: zone:kamailio_bye_replies:rate5m
+        labels:
+          class: 2xx
+        expr: sum by (zone) (rate(kamailio_core_rcv_replies_2xx_bye[5m]))
+
+      - record: zone:kamailio_bye_replies:rate5m
+        labels:
+          class: 4xx
+        expr: sum by (zone) (rate(kamailio_core_rcv_replies_4xx_bye[5m]))
+
+      - record: zone:kamailio_bye_replies:rate5m
+        labels:
+          class: 5xx
+        expr: sum by (zone) (rate(kamailio_core_rcv_replies_5xx_bye[5m]))
+
+      - record: zone:kamailio_bye_replies:rate5m
+        labels:
+          class: 6xx
+        expr: sum by (zone) (rate(kamailio_core_rcv_replies_6xx_bye[5m]))
+
+      # ----- Alert 1: BYEs failing --------------------------------------------
+      # Share of non-2xx BYE replies over 10m > 20% AND at least 0.05 BYE
+      # replies/s (= 30 BYEs in the window) so a single bad call in a quiet
+      # zone can never trip it. Ratio-of-sums per zone, not a ratio of the
+      # recorded 5m series, because the alert window is 10m.
+      - alert: SipByeFailureShare
+        expr: |
+          (
+              sum by (zone) (rate(kamailio_core_rcv_replies_4xx_bye[10m]))
+            + sum by (zone) (rate(kamailio_core_rcv_replies_5xx_bye[10m]))
+            + sum by (zone) (rate(kamailio_core_rcv_replies_6xx_bye[10m]))
+          )
+          /
+          (
+              sum by (zone) (rate(kamailio_core_rcv_replies_2xx_bye[10m]))
+            + sum by (zone) (rate(kamailio_core_rcv_replies_4xx_bye[10m]))
+            + sum by (zone) (rate(kamailio_core_rcv_replies_5xx_bye[10m]))
+            + sum by (zone) (rate(kamailio_core_rcv_replies_6xx_bye[10m]))
+          ) > 0.20
+          and
+          (
+              sum by (zone) (rate(kamailio_core_rcv_replies_2xx_bye[10m]))
+            + sum by (zone) (rate(kamailio_core_rcv_replies_4xx_bye[10m]))
+            + sum by (zone) (rate(kamailio_core_rcv_replies_5xx_bye[10m]))
+            + sum by (zone) (rate(kamailio_core_rcv_replies_6xx_bye[10m]))
+          ) >= 0.05
+        for: 10m
+        labels:
+          severity: warning
+          component: sbc
+        annotations:
+          summary: "BYEs are failing in zone {{ $labels.zone }} ({{ $value | humanizePercentage }} non-2xx over 10m)"
+          description: >-
+            BYEs are failing (481/408) in zone {{ $labels.zone }} — teardown
+            regression, typically after an SBC flip (in-dialog BYE landing on
+            an SBC/FS that no longer knows the dialog). Check Homer for 481 on
+            BYE in this zone and compare against the active-SBC election row.
+            Affected channels will hang until RTP timeout (60s) or the session
+            timer (<=30m); the dialog side ages out at the 2h dialog timeout.
+            Runbook: docs/SBC_ACTIVE_STANDBY_RUNBOOK.md.
+
+      # ----- Alert 2: stale FreeSWITCH channels -------------------------------
+      # freeswitch_channels_stale{freeswitch_node} (ops_metrics.py) = live
+      # channels older than OPS_METRICS_STALE_SECONDS (default 7200 = 2h).
+      # Multiplying by freeswitch_esl_scrape_ok (same labelset, same scrape)
+      # zeroes the count while ESL is unreachable: the exporter serves its
+      # LAST-GOOD body then, and a frozen stale count must not page for a
+      # dead FS (fs-watchdog pages that). sum (not max) by zone so $value is
+      # the actual number of stuck legs in the zone.
+      - alert: FsStaleChannels
+        expr: sum by (zone) (freeswitch_channels_stale * freeswitch_esl_scrape_ok) > 0
+        for: 15m
+        labels:
+          severity: warning
+          component: freeswitch
+        annotations:
+          summary: "{{ $value }} FreeSWITCH channel(s) older than 2h in zone {{ $labels.zone }}"
+          description: >-
+            {{ $value }} FreeSWITCH channel(s) older than 2h in zone
+            {{ $labels.zone }} — legitimate RCF calls this long are rare; check
+            `show channels` on the zone's active FS for stuck legs (post-failover
+            teardown: a BYE that never reached this leg). Per-node age is on the
+            Traffic Status wall ("Oldest live channel — per FS"). Clear a
+            confirmed-stuck leg with `uuid_kill <uuid>` via fs_cli.
+
+      # ----- Alert 3: SBC dialog leak (ghost-bounded) -------------------------
+      # DERIVATION (docker/kamailio/kamailio.cfg): request_route does
+      # setflag(4) on EVERY initial INVITE (~line 1444) before branching on
+      # source, and modparam("dialog","dlg_flag",4) makes the dialog module
+      # track each flagged INVITE. An off-net RCF call therefore creates TWO
+      # Kamailio dialogs on the active SBC (A-leg carrier->FS, B-leg
+      # FS->carrier) and TWO FreeSWITCH channels (inbound leg + bridged
+      # outbound leg): dialogs == channels in steady state. An on-net call is
+      # one A-leg dialog vs two FS channels (FS higher — the wrong direction
+      # for this alert, so on-net traffic can only mask, never trigger).
+      #
+      # GHOSTS: kamailio_dialog_active_dialogs is per-SBC. Normally only the
+      # active SBC is non-zero (the standby, and the standby FS's
+      # freeswitch_channels_total, report 0). After a flip the EX-active SBC
+      # still holds every dialog it was tracking — nobody will ever send it
+      # the BYE — and those entries age out only at the dialog module's
+      # default_timeout, which this branch sets to 7200s (2h). So for up to
+      # 2h after a flip dialogs > channels is EXPECTED. `for: 2h30m` is
+      # strictly longer than that timeout: the ghost bulge is gone before the
+      # alert can fire, and only a divergence that PERSISTS pages.
+      # Threshold 10 absorbs the natural skew (ringing/early legs, the
+      # 10s/30s poll-vs-scrape offset, calls mid-teardown).
+      # If a zone has no FS series at all (both FS down) the subtraction has
+      # no result and this stays silent — FS death is paged by fs-watchdog.
+      - alert: SbcDialogLeak
+        expr: |
+          sum by (zone) (kamailio_dialog_active_dialogs)
+          - sum by (zone) (freeswitch_channels_total) > 10
+        for: 2h30m
+        labels:
+          severity: warning
+          component: sbc
+        annotations:
+          summary: "SBC dialog leak in zone {{ $labels.zone }}: {{ $value }} more Kamailio dialogs than FreeSWITCH channels for > 2h30m"
+          description: >-
+            Zone {{ $labels.zone }} has had {{ $value }} more active Kamailio
+            dialogs than live FreeSWITCH channels for longer than the 2h dialog
+            timeout — this is NOT the normal post-failover ghost decay (that
+            clears within 2h). Dialogs are being created and never closed:
+            check "Dialogs per SBC — now" on Traffic Status (which SBC holds
+            them), `kamcmd dlg.list` on that SBC, and Homer for BYEs that get
+            481/408 (see SipByeFailureShare). Runbook:
+            docs/SBC_ACTIVE_STANDBY_RUNBOOK.md.

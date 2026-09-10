@@ -1,0 +1,31 @@
+{
+  "status": "success",
+  "data": {
+    "alerts": [
+      {
+        "state": "pending",
+        "name": "FsStaleChannels",
+        "value": "2",
+        "labels": {
+          "alertgroup": "noc_teardown",
+          "alertname": "FsStaleChannels",
+          "component": "freeswitch",
+          "severity": "warning",
+          "zone": "west"
+        },
+        "annotations": {
+          "summary": "2 FreeSWITCH channel(s) older than 2h in zone west",
+          "description": "2 FreeSWITCH channel(s) older than 2h in zone west — legitimate RCF calls this long are rare."
+        },
+        "activeAt": "2026-09-08T14:10:00Z",
+        "id": "1234567890123456789",
+        "rule_id": "2234567890123456789",
+        "group_id": "13098129017296486071",
+        "expression": "sum by (zone) (freeswitch_channels_stale * freeswitch_esl_scrape_ok) > 0",
+        "source": "",
+        "restored": false,
+        "stabilizing": false
+      }
+    ]
+  }
+}
