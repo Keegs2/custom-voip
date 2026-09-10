@@ -66,6 +66,13 @@ services:
       # a dead-FS zone drains via carrier/DNS failover (the fail-open NLB can't).
       # Default 1 (ON). Set to 0 to force legacy always-200 with no code change.
       - FS_AWARE_OPTIONS=${FS_AWARE_OPTIONS:-1}
+      # E.164 egress normalization (PR #114). DARK BY DEFAULT (off). When
+      # E164_EGRESS=on, route[TO_CARRIER] normalizes From/Contact/PAI/Diversion
+      # users to +E.164 (entrypoint renders `#!define E164_EGRESS`). This
+      # passthrough was missing in #114 — the .env value never reached the
+      # container, so the gate silently stayed off (entrypoint logged
+      # E164_EGRESS=off with E164_EGRESS=on in .env). Accepts on/true/1.
+      - E164_EGRESS=${E164_EGRESS:-off}
       # UDP MTU / oversized-INVITE UDP->TCP fallback (core udp_mtu +
       # udp_mtu_try_proto=TCP). DEFAULT 0 = OFF (dark). The param is GLOBAL
       # (also affects FS- and PBX-bound UDP sends) and Bandwidth TCP support is
