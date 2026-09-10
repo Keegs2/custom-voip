@@ -146,6 +146,23 @@ else
   STIR_SHAKEN_SIGN=off
 fi
 
+# E.164 egress normalization toggle. DEFAULT OFF (dark). Same compile-time
+# line-replacement mechanism as STIR_SHAKEN_SIGN: substitute the __E164_EGRESS__
+# placeholder LINE with the real `#!define E164_EGRESS` (ON) or a comment (OFF),
+# so the `#!ifdef E164_EGRESS` normalization blocks in route[TO_CARRIER] (and
+# route[TN_E164] itself) are compiled in/out. Accepts on/true/1 as ON; anything
+# else is OFF (fail-safe: a typo never silently changes the carrier wire).
+case "${E164_EGRESS:-off}" in
+  on|true|1)
+    E164_EGRESS_DEFINE="#!define E164_EGRESS"
+    E164_EGRESS=on
+    ;;
+  *)
+    E164_EGRESS_DEFINE="# E164_EGRESS disabled via env (default off) — egress TNs relay unmodified"
+    E164_EGRESS=off
+    ;;
+esac
+
 # STIR/SHAKEN inbound verification toggle (RESERVED — Phase 2B, no verify code
 # yet). DEFAULT OFF. Defined here only so the env contract is consistent; the
 # emitted define currently gates nothing (no `#!ifdef STIR_SHAKEN_VERIFY` block
@@ -300,6 +317,9 @@ sed -i "s|__FS_AWARE_OPTIONS_DEFINE__|${FS_AWARE_OPTIONS_DEFINE}|" "$CONFIG"
 # '&' or '\', so the s|..|..| delimiter is safe.
 sed -i "s|__STIR_SHAKEN_SIGN_DEFINE__|${STIR_SHAKEN_SIGN_DEFINE}|" "$CONFIG"
 sed -i "s|__STIR_SHAKEN_VERIFY_DEFINE__|${STIR_SHAKEN_VERIFY_DEFINE}|" "$CONFIG"
+# E.164 egress toggle: same line-replacement pattern; the replacement string is
+# a fixed literal (a #!define or a comment) with no '|', '&' or '\'.
+sed -i "s|__E164_EGRESS__|${E164_EGRESS_DEFINE}|" "$CONFIG"
 # UDP MTU fallback toggle + value. Both replacement strings are fixed literals
 # (the define/comment line and a sanitized integer) with no '|', '&' or '\'.
 # The value is substituted even when the toggle is OFF (renders 0 inside the
@@ -343,7 +363,7 @@ sed -i "s|__SINCH_CHICAGO_IP__|${SINCH_CHICAGO_IP}|g" "$CONFIG" "$DISPATCH"
 sed -i "s|__SINCH_LD_IP__|${SINCH_LD_IP}|g" "$DISPATCH"
 sed -i "s|__SINCH_TF_IP__|${SINCH_TF_IP}|g" "$DISPATCH"
 
-echo "Kamailio config templated: ADVERTISE_IP=${EXTERNAL_SIP_IP}, FS=${FREESWITCH_IP}, FS2=${FREESWITCH_IP_2} (${FS_HA_MODE}), FS_PUBLIC_IP=${FS_PUBLIC_IP}, DB=${DB_HOST}:${DB_PORT}, Homer=${HOMER_IP}, HEP_ID=${HEP_CAPTURE_ID}, SBC_ID=${SBC_ID}, SBC_INTERNAL_IP=${SBC_INTERNAL_IP}, SIGNALING_VIP=${SBC_SIGNALING_VIP} (${SBC_SIGVIP_MODE}), BW_PRIMARY=${BANDWIDTH_PRIMARY_IP}, BW_SECONDARY=${BANDWIDTH_SECONDARY_IP}, SINCH_DENVER=${SINCH_DENVER_IP}, SINCH_CHICAGO=${SINCH_CHICAGO_IP}, SINCH_LD=${SINCH_LD_IP}, SINCH_TF=${SINCH_TF_IP}, INTERNAL_SUBNET=${INTERNAL_SUBNET}, MEDIA_SUBNET=${MEDIA_SUBNET}, FS_AWARE_OPTIONS=${FS_AWARE_OPTIONS}, STIR_SHAKEN_SIGN=${STIR_SHAKEN_SIGN}, STIR_SHAKEN_VERIFY=${STIR_SHAKEN_VERIFY}, STIR_CERT_URL=${STIR_CERT_URL}, STIR_VERIFY_CERT_MODE=${STIR_VERIFY_CERT_MODE}, STIR_VERIFY_CA_FILE=${STIR_VERIFY_CA_FILE:-<unset>}"
+echo "Kamailio config templated: ADVERTISE_IP=${EXTERNAL_SIP_IP}, FS=${FREESWITCH_IP}, FS2=${FREESWITCH_IP_2} (${FS_HA_MODE}), FS_PUBLIC_IP=${FS_PUBLIC_IP}, DB=${DB_HOST}:${DB_PORT}, Homer=${HOMER_IP}, HEP_ID=${HEP_CAPTURE_ID}, SBC_ID=${SBC_ID}, SBC_INTERNAL_IP=${SBC_INTERNAL_IP}, SIGNALING_VIP=${SBC_SIGNALING_VIP} (${SBC_SIGVIP_MODE}), BW_PRIMARY=${BANDWIDTH_PRIMARY_IP}, BW_SECONDARY=${BANDWIDTH_SECONDARY_IP}, SINCH_DENVER=${SINCH_DENVER_IP}, SINCH_CHICAGO=${SINCH_CHICAGO_IP}, SINCH_LD=${SINCH_LD_IP}, SINCH_TF=${SINCH_TF_IP}, INTERNAL_SUBNET=${INTERNAL_SUBNET}, MEDIA_SUBNET=${MEDIA_SUBNET}, FS_AWARE_OPTIONS=${FS_AWARE_OPTIONS}, STIR_SHAKEN_SIGN=${STIR_SHAKEN_SIGN}, E164_EGRESS=${E164_EGRESS}, STIR_SHAKEN_VERIFY=${STIR_SHAKEN_VERIFY}, STIR_CERT_URL=${STIR_CERT_URL}, STIR_VERIFY_CERT_MODE=${STIR_VERIFY_CERT_MODE}, STIR_VERIFY_CA_FILE=${STIR_VERIFY_CA_FILE:-<unset>}"
 
 # Add the NLB VIP (EXTERNAL_SIP_IP / ADVERTISE_IP) to the loopback interface.
 #

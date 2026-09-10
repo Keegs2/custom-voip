@@ -553,7 +553,9 @@ else
 end
 
 -- X-Original-CID: Kamailio reads this to build P-Asserted-Identity
-session:setVariable("sip_h_X-Original-CID", original_cid or outbound_did_10)
+-- ("" is truthy in Lua — guard it explicitly so an empty PBX caller ID falls
+-- back to the trunk DID, matching the effective_caller_id branch above)
+session:setVariable("sip_h_X-Original-CID", (original_cid ~= "" and original_cid) or outbound_did_10)
 
 -- Diversion header: indicates the call originated from a trunk DID
 session:setVariable("sip_h_Diversion",
