@@ -416,6 +416,17 @@ services:
       - "-rule=/etc/vmalert/rules/*.yml"
       - "-evaluationInterval=30s"
       - "-httpListenAddr=:8880"
+      # REQUIRED once any rule file carries `alert:` rules (teardown.yml):
+      # vmalert's manager.update() is FATAL at startup with "config contains
+      # alerting rules but neither -notifier.url nor -notifier.config nor
+      # -notifier.blackhole aren't set" — `-dryRun` does NOT exercise this
+      # check, so it only shows up as a crash loop on the VM, taking every
+      # recording rule (NOC wall ASR/failure tiles) down with it. Blackhole
+      # = evaluate alerting rules, expose them on /api/v1/alerts and as the
+      # ALERTS{} series via -remoteWrite.url, send nothing (there is no
+      # Alertmanager; scripts/vmalert-pager/ relays firing alerts to the
+      # revup-alert log-match page). Mutually exclusive with -notifier.url.
+      - "-notifier.blackhole"
     ports:
       - "8880:8880"
     volumes:
