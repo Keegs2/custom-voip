@@ -354,6 +354,10 @@ Media VM additionally supports (optional): `BRIDGE_PROGRESS_TIMEOUT=10` — per-
 `progress_timeout` (max seconds to wait for carrier 180/183 before failing over to the
 next SBC/carrier; ringing then continues to call_timeout).
 
+Media VM also supports (optional): `RCF_FROM_PASSTHROUGH=on|off` (default `on`) — when on, an RCF DID with `pass_caller_id=true` sends the ORIGINAL caller's number and display name in the carrier-bound From (Diversion stays the RCF DID; **P-Asserted-Identity is unchanged** — the From display travels in the dedicated `X-From-Name` header so it no longer moves the PAI display off the RCF line name). `off` restores the RCF-DID-in-From behavior byte for byte. Carrier acceptance of a non-account TN in From is UNVERIFIED — canary one RCF call per carrier (Bandwidth + Sinch) before fleet-wide; flip to `off` + recreate the FS container if a carrier 403s.
+
+Media VM also supports (optional): `FS_NODE_ID` — the node name recorded in the CDR channel variable `fs_node` (e.g. `east-fs-1`). Unset ⇒ `<FS_ZONE>-fs`. Set it on zones running a second FS (fs-2) so CDRs distinguish the two.
+
 > **All of these are now templated** in `entrypoint.sh` / `docker-compose.sbc.yml`, each
 > with an East default so an unset value reproduces current East behavior:
 > - `SBC_INTERNAL_IP` (`__SBC_INTERNAL_IP__`) powers the inner Record-Route, the

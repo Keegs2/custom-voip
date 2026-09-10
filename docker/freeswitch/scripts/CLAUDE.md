@@ -278,6 +278,76 @@ depth, three layers:
 3. **Kamailio whitelist**: any value not exactly A/B/C is coerced to B;
    absent header → B.
 
+### STIR outcome hand-back — channel variable `stir_outcome`
+
+Kamailio composes the ACTUAL Identity set at egress and can fail open at several
+points, so the CDR's `stir_attest_intent` (set here, BEFORE the bridge) is intent,
+not outcome. Kamailio therefore echoes what it really emitted as
+`X-Stir-Outcome: eff=..;mode=..;identities=..;base=..;div=..;stripped=..` on every
+non-100 reply of the carrier leg and of the `X-PBX-Dest` leg
+(`docker/kamailio/CLAUDE.md` §8.14 — full contract and guards live there).
+
+`inbound_router.lua`, `trunk_outbound.lua` and `api_outbound.lua` call
+`stir_outcome_reset()` before and `stir_outcome_capture()` after EVERY bridge
+attempt (the RCF 4-attempt failover loop included), and pin the verbatim value in
+the A-leg channel variable **`stir_outcome`** — the name and value format are a
+contract with the CDR ingest; do not change either.
+
+**No `import` variable is involved.** mod_sofia exports the reply header on the
+B-leg (`sofia.c:6775-6784` → `sofia_glue.c:959-965`; the name filter
+`sofia_test_extra_headers`, `mod_sofia.h:1137`, admits `X-` but not `X-FS-`) as
+`sip_ph_X-Stir-Outcome` on 18x / `sip_rh_X-Stir-Outcome` on finals, then copies it
+to the partner leg with `switch_ivr_transfer_variable(…, "~sip_rh_"/"~sip_ph_")`
+(`sofia.c:6787-6798`, gated only by `sip_copy_custom_headers`, default on). That
+works even while the originate is FAILING, because the B-leg's `signal_bond` points
+at the A-leg from B-leg creation (`switch_core_session.c:711`).
+`import` would NOT help: `switch_ivr_originate()` only reaches
+`switch_process_import()` with a usable `peer_channel` on the success path
+(`switch_ivr_originate.c:3903`); the failure-path call at `:3835` is guarded by
+`if (caller_channel && peer_channel)` and `peer_channel` is NULL there for every
+ordinary failed bridge (assigned non-NULL only inside the attended-transfer
+`if (holding)` block, `:3616-3642`).
+
+`stir_outcome_capture()` CONSUMES the `sip_rh_`/`sip_ph_` slots after reading
+(an empty `setVariable` deletes a channel variable, `switch_channel.c:1497-1499`),
+because mod_sofia re-emits those variables as real headers on the responses this
+channel sends (`mod_sofia.c:960/2473/2656/570`) and mod_json_cdr serialises every
+channel variable into the CDR with no allow-list (`switch_ivr.c:3304-3323`).
+
+**Gap:** `voice_webhook.lua`'s `<Dial>` legs and the legacy `outbound_api.lua` do
+not capture it; their CDRs keep `stir_outcome` empty.
+
+### RCF From pass-through — `RCF_FROM_PASSTHROUGH` + `X-From-Name`
+
+With `RCF_FROM_PASSTHROUGH=on` (default, `docker-compose.media.yml`) AND the RCF
+DID's `pass_caller_id=true`, `terminate_rcf` puts the ORIGINAL CALLER in the
+carrier-bound From — number via `origination_caller_id_number`, display name via
+the dedicated `sip_h_X-From-Name` header. `Diversion` stays the RCF DID and
+**P-Asserted-Identity is unchanged in both modes**: Kamailio builds the PAI display
+from `X-Original-CID-Name` (always the RCF line name) and prefers `X-From-Name`
+only for the From display, so the two can no longer move together.
+`pass_caller_id=false`, a non-TN caller (anonymous / Restricted / empty), or
+`RCF_FROM_PASSTHROUGH=off` is byte-identical to the pre-2026-09 behavior — no
+`X-From-Name` header is emitted at all. Digit form follows the DID's: 10-digit for
+a NANP caller, full +E.164 otherwise. `rcf_from_passthrough` (true/false) is
+recorded as a CDR breadcrumb.
+
+Display names are passed through `sip_display_safe()` first: `$fn` is inserted into
+the UNQUOTED display-name production by Kamailio (`pv_set_xto_attr()` case 3 adds
+no quotes), so `< > @ , ; : " \` and control bytes are removed. With the
+pass-through the name is CARRIER-supplied, not admin-supplied — that is why the
+sanitiser exists. Kamailio additionally spoof-strips `X-From-Name`,
+`X-Original-CID` and `X-Original-CID-Name` at every external ingress.
+
+### `fs_node` / `fs_zone` channel variables
+
+Set at the top of `inbound_router.lua`, `trunk_outbound.lua` and
+`api_outbound.lua` so the CDR ingest can attribute a row to a node.
+`FreeSWITCH-Hostname` is an EVENT header and never a channel variable (which is
+why `cdrs.freeswitch_node` was NULL on every production row), and
+`switch.conf.xml` pins `switchname` to the same value on every node. `FS_NODE_ID`
+(optional) distinguishes fs-1 from fs-2 within a zone; otherwise `<zone>-fs`.
+
 ### outbound_api.lua
 
 **Legacy/alternative outbound API handler.** Similar to api_outbound.lua but simpler:

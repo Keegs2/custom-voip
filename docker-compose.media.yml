@@ -46,6 +46,20 @@ services:
       # N seconds (bounds PDD); once ringing starts the call may ring to call_timeout.
       # Default 10 per CLAUDE.md — tune after live testing.
       - BRIDGE_PROGRESS_TIMEOUT=${BRIDGE_PROGRESS_TIMEOUT:-10}
+      # RCF carrier-leg From header: on (default) = pass the ORIGINAL caller's
+      # number + display name in From when the DID has pass_caller_id=true
+      # (Diversion stays the RCF DID; P-Asserted-Identity is UNCHANGED — the
+      # From display travels in the dedicated X-From-Name header); off =
+      # always the RCF DID in From (the pre-2026-09 behavior, byte for byte).
+      # Carrier acceptance of a non-account TN in From is UNVERIFIED — canary
+      # one RCF call each via Bandwidth and Sinch before fleet-wide; if a
+      # carrier 403s, set RCF_FROM_PASSTHROUGH=off in /opt/revup/.env and
+      # recreate the container.
+      - RCF_FROM_PASSTHROUGH=${RCF_FROM_PASSTHROUGH:-on}
+      # Optional node name recorded in the CDR channel variable fs_node
+      # (e.g. east-fs-1). Unset => "<FS_ZONE>-fs". Set it where a zone runs a
+      # second FreeSWITCH (fs-2) so CDRs can tell the two apart.
+      - FS_NODE_ID=${FS_NODE_ID:-}
     volumes:
       - ./docker/freeswitch/conf:/usr/local/freeswitch/conf
       - ./docker/freeswitch/scripts:/usr/local/freeswitch/scripts
