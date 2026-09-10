@@ -80,6 +80,18 @@ services:
       # canary passes; full activation criteria in kamailio.cfg. entrypoint.sh
       # sanitizes non-numeric/<=0 to OFF.
       - UDP_MTU=${UDP_MTU:-0}
+      # VIP egress: carrier-bound INVITEs that arrived on the signaling ILB VIP
+      # leave from the zone's EXTERNAL NLB VIP (route[TO_CARRIER] forces $fs)
+      # instead of this SBC's own public IP, so steady-state INVITEs join the
+      # VIP-sourced class (ACK/BYE/responses already are). DEFAULT off (dark =
+      # byte-identical to today). REQUIRES SBC_SIGNALING_VIP (dedicated mode) —
+      # entrypoint forces it off with a warning otherwise. Enable on BOTH SBCs
+      # of a zone. The 6 SBC public IPs MUST STAY whitelisted at the carriers
+      # (direct-IP failover INVITEs + OPTIONS probes still use them). Bandwidth
+      # already lists the VIPs as origination hosts; Sinch TERM trunk groups
+      # must have them registered first. Mechanism + caveats: kamailio.cfg
+      # route[TO_CARRIER] Step 9.
+      - VIP_EGRESS=${VIP_EGRESS:-off}
       # STIR/SHAKEN outbound signing (secsipid). DARK BY DEFAULT (off). When
       # STIR_SHAKEN_SIGN=on, Kamailio signs the outbound Identity/PASSporT in
       # route[TO_CARRIER] using the cert at STIR_CERT_URL (x5u) + the private key

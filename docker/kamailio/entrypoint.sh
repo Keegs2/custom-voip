@@ -175,6 +175,43 @@ else
   STIR_SHAKEN_VERIFY=off
 fi
 
+# VIP_EGRESS: carrier-bound INVITE egress from the zone's EXTERNAL NLB VIP
+# (route[TO_CARRIER] forces $fs = udp:ADVERTISE_IP:5060 before t_relay for
+# INVITEs that arrived on the signaling ILB VIP), so steady-state INVITEs join
+# the VIP-sourced class (ACK/BYE/responses already are). DEFAULT OFF (dark):
+# INVITEs keep egressing from the NIC socket (mhomed) = this SBC's own public
+# IP, byte-identical to today. Same compile-time line-replacement mechanism as
+# STIR_SHAKEN_SIGN: the __VIP_EGRESS__ placeholder LINE becomes the real
+# `#!define VIP_EGRESS` (ON) or a comment (OFF), so the `#!ifdef VIP_EGRESS`
+# blocks compile in/out. Accepts on/true/1 as ON; anything else is OFF
+# (fail-safe: a typo can never silently move the carrier-facing source IP).
+# REQUIRES DEDICATED SIGNALING-VIP MODE (SBC_SIGVIP_MODE=dedicated, computed
+# above from SBC_SIGNALING_VIP): the cfg guard keys on the ILB-VIP ingress
+# socket to know it is on the NLB-active SBC. In legacy/pair mode the external
+# NLB 5-tuple-hashes carrier replies across BOTH SBCs, so ~50% of VIP-sourced
+# INVITEs would have their replies stranded on the peer — therefore ON without
+# a signaling VIP is forced OFF here with a loud warning (and the cfg block is
+# compiled out anyway via SBC_SIGVIP_DEDICATED). Enable on BOTH SBCs of a zone
+# (identical config; the per-INVITE guard, not the operator, picks the socket).
+# The 6 SBC public IPs must STAY whitelisted at the carriers (direct-IP
+# failover INVITEs + OPTIONS probes still use them).
+case "${VIP_EGRESS:-off}" in
+  on|true|1)
+    if [ "${SBC_SIGVIP_MODE}" = "dedicated" ]; then
+      VIP_EGRESS_DEFINE="#!define VIP_EGRESS"
+      VIP_EGRESS=on
+    else
+      echo "WARNING: VIP_EGRESS=${VIP_EGRESS} requested but SBC_SIGNALING_VIP is unset/legacy (SBC_SIGVIP_MODE=${SBC_SIGVIP_MODE}) — FORCING VIP_EGRESS=off. In pair mode the external NLB 5-tuple-hashes carrier replies across both SBCs (~50% of VIP-sourced INVITEs would strand). Set SBC_SIGNALING_VIP (dedicated mode) on both SBCs first." >&2
+      VIP_EGRESS_DEFINE="# VIP_EGRESS requested but FORCED OFF: no dedicated signaling VIP (SBC_SIGVIP_MODE=${SBC_SIGVIP_MODE}) — carrier-bound INVITEs egress from the NIC socket (this SBC's own public IP)"
+      VIP_EGRESS=off
+    fi
+    ;;
+  *)
+    VIP_EGRESS_DEFINE="# VIP_EGRESS disabled via env (default off) — carrier-bound INVITEs egress from the NIC socket (this SBC's own public IP)"
+    VIP_EGRESS=off
+    ;;
+esac
+
 # UDP_MTU: oversized-request UDP->TCP fallback (core udp_mtu +
 # udp_mtu_try_proto=TCP — see the activation criteria comment in kamailio.cfg).
 # DEFAULT OFF (0): ship-dark safety valve for STIR-signed INVITEs that exceed
@@ -326,6 +363,10 @@ sed -i "s|__E164_EGRESS__|${E164_EGRESS_DEFINE}|" "$CONFIG"
 # compiled-out #!ifdef block) so no placeholder ever survives templating.
 sed -i "s|__UDP_MTU_DEFINE__|${UDP_MTU_DEFINE}|" "$CONFIG"
 sed -i "s|__UDP_MTU_VALUE__|${UDP_MTU}|g" "$CONFIG"
+# VIP egress toggle: same line-replacement pattern as the toggles above; the
+# replacement string is a fixed literal (a #!define or a comment) with no '|',
+# '&' or '\'.
+sed -i "s|__VIP_EGRESS__|${VIP_EGRESS_DEFINE}|" "$CONFIG"
 # STIR x5u URL + key path. x5u is an ATIS-1000074 §5.3.1 URL (https, no query
 # string / fragment / userinfo), so it contains no '|', '&', or '\' — safe for
 # the s|..|..| delimiter and literal in the replacement. Escape defensively
@@ -389,6 +430,7 @@ else
   echo "Adding ${VIP}/32 to loopback"
   ip addr add "${VIP}/32" dev lo 2>/dev/null || true
 fi
+echo "Kamailio VIP egress: VIP_EGRESS=${VIP_EGRESS} (SBC_SIGVIP_MODE=${SBC_SIGVIP_MODE}; carrier-bound INVITE send socket: on = udp:${EXTERNAL_SIP_IP}:5060 [external VIP] for signaling-VIP ingress, off = NIC via mhomed [own public IP])"
 
 # Add the signaling VIP (internal passthrough NLB) to loopback — dedicated
 # mode only. Same rationale/mechanism as the external VIP above: the internal
