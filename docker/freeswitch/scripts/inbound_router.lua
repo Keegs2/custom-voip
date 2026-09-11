@@ -122,19 +122,29 @@ bridge_progress_timeout = math.floor(bridge_progress_timeout)
 -- ================================================================
 -- RCF From-header pass-through gate (RCF_FROM_PASSTHROUGH=on|off)
 -- ================================================================
--- When ON (default — operator decision) AND the RCF DID has
--- pass_caller_id=true, the carrier-bound From number/display name is the
--- ORIGINAL caller (see terminate_rcf "SIP From"). When OFF, From is always
--- the RCF DID exactly as before this gate existed. Carrier acceptance of a
--- non-account TN in From is UNVERIFIED for Bandwidth and Sinch — canary one
--- RCF call per carrier before fleet-wide; flip to off in /opt/revup/.env +
--- recreate the container if a carrier 403s. Read via os.getenv like
--- BRIDGE_PROGRESS_TIMEOUT (passed through docker-compose.media.yml).
-local rcf_from_passthrough = true
+-- DEFAULT OFF. Only the exact values on|true|1 (case-insensitive, trimmed)
+-- enable it; unset, empty, or anything else = OFF, so a media VM that has
+-- merely `git pull`ed this bind-mounted script inside a running container
+-- (no such env var) behaves EXACTLY as before this gate existed: From is
+-- always the RCF DID (CLAUDE.md: "Outbound From stays the terminal DID for
+-- Bandwidth auth").
+-- When ON AND the RCF DID has pass_caller_id=true, the carrier-bound From
+-- number/display name is the ORIGINAL caller (see terminate_rcf "SIP From").
+-- Enable PER ZONE, and only after BOTH of these hold:
+--   1. the zone's SBCs run the #120+#122 Kamailio build FIRST — the base
+--      RCF-V1 kamailio.cfg has no strip for the X-From-Name header this gate
+--      emits, so an older SBC would forward the caller's display name to the
+--      carrier verbatim;
+--   2. one live canary RCF call per carrier PoP (Bandwidth Dallas + LA)
+--      confirms the carrier accepts a non-account TN in From (UNVERIFIED).
+-- Read via os.getenv like BRIDGE_PROGRESS_TIMEOUT (passed through
+-- docker-compose.media.yml; set RCF_FROM_PASSTHROUGH=on in /opt/revup/.env
+-- + recreate the container).
+local rcf_from_passthrough = false
 do
-    local v = tostring(os.getenv("RCF_FROM_PASSTHROUGH") or "on"):lower():match("^%s*(.-)%s*$")
-    if v == "off" or v == "false" or v == "0" or v == "no" then
-        rcf_from_passthrough = false
+    local v = tostring(os.getenv("RCF_FROM_PASSTHROUGH") or ""):lower():match("^%s*(.-)%s*$")
+    if v == "on" or v == "true" or v == "1" then
+        rcf_from_passthrough = true
     end
 end
 
@@ -1091,7 +1101,8 @@ local function terminate_rcf(dest, ctx)
     -- in 10-digit format for termination auth") with the original caller
     -- carried only in PAI/RPID. That requirement is UNVERIFIED for
     -- Bandwidth (IP-peered termination) and Sinch, so the change is gated:
-    --   RCF_FROM_PASSTHROUGH env (default on) AND the DID's pass_caller_id.
+    --   RCF_FROM_PASSTHROUGH env (DEFAULT OFF; only on|true|1 enables) AND
+    --   the DID's pass_caller_id.
     --   pass_caller_id=true  -> From number = original caller; From display
     --                           = original caller's name, handed over in the
     --                           DEDICATED X-From-Name header; Diversion = the
@@ -1108,8 +1119,12 @@ local function terminate_rcf(dest, ctx)
     -- there). X-From-Name exists precisely to keep the two apart: Kamailio
     -- prefers it for $fn and never uses it for PAI, and it is absent
     -- whenever the pass-through is not active.
-    -- MUST be canaried (one RCF call each via Bandwidth and Sinch) before
-    -- fleet-wide; flip RCF_FROM_PASSTHROUGH=off + recreate if a carrier 403s.
+    -- Ships DARK: enable per zone (RCF_FROM_PASSTHROUGH=on in the media VM's
+    -- .env + recreate) only after (1) that zone's SBCs are on the #120+#122
+    -- Kamailio build — the base RCF-V1 kamailio.cfg does not strip
+    -- X-From-Name, so an older SBC would leak the caller's display name to
+    -- the carrier — and (2) one live canary RCF call per carrier PoP
+    -- (Bandwidth Dallas + LA) confirms acceptance of a non-account TN in From.
     --
     -- Digit form = the same form the DID used: to_10digit for a NANP caller
     -- (Kamailio E164_EGRESS TN_E164 turns 10/11-digit into +E.164; gate off

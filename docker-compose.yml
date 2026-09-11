@@ -99,8 +99,8 @@ services:
       - HOMER_IP=${HOMER_IP:-127.0.0.1}
       - SBC_PROXY_IP=${SBC_PROXY_IP:-127.0.0.1}
       - TEST_MODE=${TEST_MODE:-false}
-      # RCF From pass-through gate (see docker-compose.media.yml)
-      - RCF_FROM_PASSTHROUGH=${RCF_FROM_PASSTHROUGH:-on}
+      # RCF From pass-through gate — DEFAULT OFF (see docker-compose.media.yml)
+      - RCF_FROM_PASSTHROUGH=${RCF_FROM_PASSTHROUGH:-off}
     volumes:
       - ./docker/freeswitch/conf:/usr/local/freeswitch/conf
       - ./docker/freeswitch/scripts:/usr/local/freeswitch/scripts

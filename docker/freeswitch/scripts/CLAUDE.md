@@ -319,16 +319,26 @@ not capture it; their CDRs keep `stir_outcome` empty.
 
 ### RCF From pass-through — `RCF_FROM_PASSTHROUGH` + `X-From-Name`
 
-With `RCF_FROM_PASSTHROUGH=on` (default, `docker-compose.media.yml`) AND the RCF
-DID's `pass_caller_id=true`, `terminate_rcf` puts the ORIGINAL CALLER in the
+With `RCF_FROM_PASSTHROUGH=on` (**default OFF** — `docker-compose.media.yml`
+renders `:-off`, and the Lua enables only on the exact values `on|true|1`; unset =
+OFF, so a bare `git pull` of this bind-mounted script inside a running container
+changes nothing) AND the RCF DID's `pass_caller_id=true`, `terminate_rcf` puts the ORIGINAL CALLER in the
 carrier-bound From — number via `origination_caller_id_number`, display name via
 the dedicated `sip_h_X-From-Name` header. `Diversion` stays the RCF DID and
 **P-Asserted-Identity is unchanged in both modes**: Kamailio builds the PAI display
 from `X-Original-CID-Name` (always the RCF line name) and prefers `X-From-Name`
 only for the From display, so the two can no longer move together.
 `pass_caller_id=false`, a non-TN caller (anonymous / Restricted / empty), or
-`RCF_FROM_PASSTHROUGH=off` is byte-identical to the pre-2026-09 behavior — no
-`X-From-Name` header is emitted at all. Digit form follows the DID's: 10-digit for
+`RCF_FROM_PASSTHROUGH` off/unset is byte-identical to the pre-2026-09 behavior — no
+`X-From-Name` header is emitted at all.
+
+**Enabling it (per zone, HARD ordering):** (1) the zone's SBCs must run the
+#120+#122 Kamailio build FIRST — the base RCF-V1 `kamailio.cfg` has no strip for
+`X-From-Name`, so an older SBC would forward the caller's display name to the
+carrier verbatim; (2) one live canary RCF call per carrier PoP (Bandwidth Dallas +
+LA) must confirm the carrier accepts a non-account TN in From (UNVERIFIED today);
+then set `RCF_FROM_PASSTHROUGH=on` in that zone's media-VM `.env` and recreate the
+container. Rollback = remove the line + recreate. Digit form follows the DID's: 10-digit for
 a NANP caller, full +E.164 otherwise. `rcf_from_passthrough` (true/false) is
 recorded as a CDR breadcrumb.
 
