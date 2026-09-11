@@ -1187,8 +1187,13 @@ def test_migration47_absent_stir_outcome_is_null(trunks_db, client):
 
 def test_migration47_b_leg_updates_a_row_and_inserts_nothing(trunks_db, client):
     """A B-leg CDR must UPDATE its A-leg's two stir columns and never add a
-    billable row. Exercises the real `$1::varchar / $2::text / $3::text` UPDATE
-    and the `start_time > now() - interval '7 days'` bound."""
+    billable row. Exercises the real `$1::varchar / $2::text / $3::text` UPDATE,
+    which is a bare `WHERE uuid = $1` point lookup with NO time predicate —
+    deliberately (see `_apply_b_leg_stir_outcome`): uuid is unique (the INSERT's
+    NOT EXISTS guard) and indexed (idx_cdrs_uuid), cdrs is retention-bounded to
+    90 days, compression starts at 1 day so no window would avoid decompressing
+    a chunk, and a `start_time` bound would silently drop legitimate updates
+    from mod_json_cdr disk-fallback CDRs re-ingested days later."""
     db = trunks_db["db"]
 
     async def go():
