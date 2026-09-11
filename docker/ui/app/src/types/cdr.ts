@@ -1,11 +1,17 @@
 import type { TrafficGrade } from './customer';
+import type { StirBadgeFields } from './stir';
 
 export type ProductType = 'rcf' | 'api' | 'trunk';
 export type CallDirection = 'inbound' | 'outbound';
 /** Deployment zone — one self-contained SIP stack per GCP region. */
 export type CdrZone = 'east' | 'west' | 'central';
 
-export interface Cdr {
+/**
+ * CDR row. Extends the shared STIR badge payload (`stir_attestation`,
+ * `stir_eff_actual`, `stir_outcome`, `stir_badge`, `stir_badge_source`) —
+ * present on GET /cdrs and GET /cdrs/{uuid} since migration 47.
+ */
+export interface Cdr extends StirBadgeFields {
   uuid: string;
   start_time: string;
   answer_time?: string | null;
@@ -77,6 +83,8 @@ export interface Cdr {
 
   // SIP / network metadata
   sbc_id?: string | null;
+  /** FreeSWITCH node that produced the CDR (`fs_node` var / zone-derived). */
+  freeswitch_node?: string | null;
   sip_from_user?: string | null;
   sip_to_user?: string | null;
   sip_user_agent?: string | null;

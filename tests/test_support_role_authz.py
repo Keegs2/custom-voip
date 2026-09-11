@@ -43,6 +43,12 @@ asyncpg = pytest.importorskip("asyncpg", reason="asyncpg required for authz test
 httpx = pytest.importorskip("httpx", reason="httpx required for authz tests")
 
 REPO = Path(__file__).resolve().parents[1]
+
+# cdrs-column migrations (23, 47, ...) — see tests/cdr_schema.py. Applying the
+# REAL files keeps this module's inline CREATE TABLE cdrs from going stale
+# every time a migration adds a column the CDR endpoints select.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from cdr_schema import apply_cdr_column_migrations  # noqa: E402
 API_SRC = REPO / "docker" / "api" / "src"
 MIG_SUPPORT_ROLE = REPO / "docker" / "postgres" / "init" / "39_users_support_role.sql"
 
@@ -328,6 +334,7 @@ def authz_db():
             # The REAL migration under test — applied twice (idempotent).
             await conn.execute(MIG_SUPPORT_ROLE.read_text())
             await conn.execute(MIG_SUPPORT_ROLE.read_text())
+            await apply_cdr_column_migrations(conn)
 
             # Two tenants with distinct financial rows.
             cust_a = await conn.fetchrow(

@@ -71,6 +71,10 @@ MIG_CARRIER_TRUNKS = REPO / "docker" / "postgres" / "init" / "40_carrier_trunks.
 MIG_CARRIER_PRIORITIES = REPO / "docker" / "postgres" / "init" / "42_carrier_priorities.sql"
 MIG_SINCH_TERMINATION = REPO / "docker" / "postgres" / "init" / "44_sinch_termination.sql"
 
+# cdrs-column migrations (23, 47, ...) live in ONE place so a new column does
+# not have to be hand-added to every module's inline CREATE TABLE cdrs.
+from cdr_schema import apply_cdr_column_migrations  # noqa: E402
+
 sys.path.insert(0, str(API_SRC))
 
 # The EXACT sqlops lookup from the Kamailio SBC config, with $si rendered the
@@ -123,7 +127,10 @@ PG_BIN = _find_pg_bin()
 # plain table (no TimescaleDB — partitioning is irrelevant here) carrying every
 # column of the ingest INSERT EXCEPT inbound_carrier/inbound_carrier_pop: those
 # two must come from migration 40's ALTERs, proving the migration wires the
-# ingest end-to-end.
+# ingest end-to-end. Likewise stir_outcome/stir_eff_actual are NOT inline —
+# they come from the REAL 47_cdr_stir_outcome.sql via
+# tests/cdr_schema.apply_cdr_column_migrations(), which owns the list of
+# cdrs-column migrations for every scratch schema in the suite.
 _BASE_SCHEMA = """
 CREATE ROLE api LOGIN PASSWORD 'api_secret';
 CREATE ROLE freeswitch LOGIN;         -- Kamailio sqlops role (DB_USER default)
@@ -317,6 +324,10 @@ def trunks_db():
             await conn.execute(MIG_CARRIER_PRIORITIES.read_text())
             await conn.execute(MIG_SINCH_TERMINATION.read_text())
             await conn.execute(MIG_SINCH_TERMINATION.read_text())
+            # The cdrs-only migrations (23 on-net, 47 STIR outcome), each twice
+            # — so the ingest INSERT's $50-$57 bind against columns that came
+            # from the REAL migration files, not a hand-copied DDL.
+            await apply_cdr_column_migrations(conn)
         await owner.close()
         db.pool = await asyncpg.create_pool(
             host=pg.sock, port=pg.port, user="api", password="api_secret",
@@ -1123,5 +1134,112 @@ def test_ingest_absent_inbound_carrier_is_null(trunks_db, client):
         assert row is not None
         assert row["inbound_carrier"] is None
         assert row["inbound_carrier_pop"] is None
+
+    _run(go())
+
+
+# ---------------------------------------------------------------------------
+# Migration 47 (cdrs.stir_outcome / stir_eff_actual) — REAL PostgreSQL.
+#
+# These live here, not in tests/test_cdr_stir_outcome.py, because this is the
+# only module with a real scratch `cdrs` that has the REAL migration applied
+# (via tests/cdr_schema.apply_cdr_column_migrations) AND the real cdrs router
+# mounted. That combination is what actually proves the `::text` binds and the
+# B-leg UPDATE against live asyncpg — test_cdr_stir_outcome.py is DB-free and
+# can only assert the SQL text.
+# ---------------------------------------------------------------------------
+
+def test_migration47_ingest_stores_stir_outcome(trunks_db, client):
+    """A-leg `stir_outcome` var -> raw string + eff= token on the row."""
+    db = trunks_db["db"]
+
+    async def go():
+        r = await client.post("/v1/cdrs/ingest", json=_ingest_payload(
+            "ct-stir-a-1",
+            {"stir_outcome": "eff=div;mode=relay;identities=1;base=1;div=1;stripped=0"},
+        ))
+        assert r.status_code == 200, r.text
+        assert r.json()["status"] == "ok"
+
+        row = await db.fetch_one(
+            "SELECT stir_outcome, stir_eff_actual FROM cdrs WHERE uuid = $1",
+            "ct-stir-a-1")
+        assert row["stir_outcome"] == "eff=div;mode=relay;identities=1;base=1;div=1;stripped=0"
+        assert row["stir_eff_actual"] == "div"
+
+    _run(go())
+
+
+def test_migration47_absent_stir_outcome_is_null(trunks_db, client):
+    """Legacy call / call that never reached the carrier -> both NULL."""
+    db = trunks_db["db"]
+
+    async def go():
+        r = await client.post("/v1/cdrs/ingest", json=_ingest_payload("ct-stir-a-legacy"))
+        assert r.json()["status"] == "ok"
+        row = await db.fetch_one(
+            "SELECT stir_outcome, stir_eff_actual FROM cdrs WHERE uuid = $1",
+            "ct-stir-a-legacy")
+        assert row["stir_outcome"] is None and row["stir_eff_actual"] is None
+
+    _run(go())
+
+
+def test_migration47_b_leg_updates_a_row_and_inserts_nothing(trunks_db, client):
+    """A B-leg CDR must UPDATE its A-leg's two stir columns and never add a
+    billable row. Exercises the real `$1::varchar / $2::text / $3::text` UPDATE
+    and the `start_time > now() - interval '7 days'` bound."""
+    db = trunks_db["db"]
+
+    async def go():
+        r = await client.post("/v1/cdrs/ingest", json=_ingest_payload("ct-stir-a-2"))
+        assert r.json()["status"] == "ok"
+        before = await db.fetch_one("SELECT COUNT(*) AS n FROM cdrs")
+
+        b_leg = {
+            "core-uuid": "ct-core-1",
+            "switchname": "voiceplatform",
+            "variables": {
+                "uuid": "ct-stir-b-2",
+                "direction": "outbound",
+                "originating_leg_uuid": "ct-stir-a-2",
+                "sip_rh_X-Stir-Outcome": "eff=C;mode=gateway-C;identities=1;base=1;div=0;stripped=0",
+            },
+            "callflow": [{"caller_profile": {
+                "uuid": "ct-stir-b-2",
+                "originator": {"originator_caller_profiles": [{"uuid": "ct-stir-a-2"}]},
+            }}],
+        }
+        r = await client.post("/v1/cdrs/ingest", json=b_leg)
+        assert r.status_code == 200, r.text
+        assert r.json()["status"] == "b_leg" and r.json()["detail"] == "updated"
+
+        after = await db.fetch_one("SELECT COUNT(*) AS n FROM cdrs")
+        assert after["n"] == before["n"], "a B-leg CDR must never insert a row"
+        assert await db.fetch_one(
+            "SELECT 1 FROM cdrs WHERE uuid = $1", "ct-stir-b-2") is None
+
+        row = await db.fetch_one(
+            "SELECT stir_eff_actual FROM cdrs WHERE uuid = $1", "ct-stir-a-2")
+        assert row["stir_eff_actual"] == "C"
+
+    _run(go())
+
+
+def test_migration47_b_leg_for_unknown_a_leg_is_a_noop(trunks_db, client):
+    """A-leg row not there (ingest race / out-of-order) -> 200, no insert."""
+    db = trunks_db["db"]
+
+    async def go():
+        before = await db.fetch_one("SELECT COUNT(*) AS n FROM cdrs")
+        r = await client.post("/v1/cdrs/ingest", json={
+            "variables": {"uuid": "ct-stir-b-orphan", "direction": "outbound",
+                          "originating_leg_uuid": "ct-stir-a-does-not-exist",
+                          "stir_outcome": "eff=A;mode=reorig"},
+        })
+        assert r.status_code == 200, r.text
+        assert r.json()["detail"] == "a-leg row not found"
+        after = await db.fetch_one("SELECT COUNT(*) AS n FROM cdrs")
+        assert after["n"] == before["n"]
 
     _run(go())

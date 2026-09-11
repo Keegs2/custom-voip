@@ -46,7 +46,7 @@
       "id": 1,
       "type": "piechart",
       "title": "Signed attestation mix ($__range)",
-      "description": "Share of outbound carrier legs by the attestation WE signed, over the selected range: sum by (attestation) (increase(kamailio_stir_attest_signed{zone=~\"$zone\"}[$__range])). Colour-mapped to the UI: A green, B amber, C gray, div blue, unsigned red. Honours the Zone filter.",
+      "description": "Share of outbound carrier legs by the attestation Kamailio ACTUALLY put on the wire, over the selected range: sum by (attestation) (increase(kamailio_stir_attest_signed{zone=~\"$zone\"}[$__range])). Colour-mapped to the UI: A green, B amber, C gray, div blue, base-only orange, unsigned red. Honours the Zone filter. Label set emitted by Kamailio's kamailio_stir_attest_signed{attestation=…}: div, A, B, C, base-only, unsigned — the ACTUAL wire outcome (same vocabulary as the CDR stir_eff_actual column / X-Stir-Outcome eff= token). div = relayed the inbound Identity + chained a div PASSporT; A/B/C = we originated a base PASSporT at that level; base-only = a base PASSporT went out but no div could be chained; unsigned = nothing signed (fail-open / signing off). Queries are value-agnostic (sum by (attestation)) — a new label appears automatically; only the colour overrides name specific labels.",
       "gridPos": { "h": 8, "w": 8, "x": 0, "y": 3 },
       "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
       "targets": [
@@ -78,7 +78,8 @@
           { "matcher": { "id": "byName", "options": "B" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "yellow" } } ] },
           { "matcher": { "id": "byName", "options": "C" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "text" } } ] },
           { "matcher": { "id": "byName", "options": "div" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "blue" } } ] },
-          { "matcher": { "id": "byName", "options": "unsigned" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } } ] }
+          { "matcher": { "id": "byName", "options": "unsigned" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } } ] },
+          { "matcher": { "id": "byName", "options": "base-only" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } } ] }
         ]
       }
     },
@@ -86,7 +87,7 @@
       "id": 2,
       "type": "stat",
       "title": "% div — chained (best outcome, $__range)",
-      "description": "Fraction of signed outbound legs that chained onto a preserved inbound Identity (attestation=div) over the range: sum(increase(...{attestation=\"div\"}[$__range])) / sum(increase(...[$__range])). Higher = more calls where we relayed the upstream attestation intact (the best STIR outcome). Honours the Zone filter.",
+      "description": "Fraction of outbound legs whose ACTUAL wire outcome was attestation=div — we relayed the upstream Identity intact and chained our div PASSporT (the best STIR outcome) — over the range: sum(increase(...{attestation=\"div\"}[$__range])) / sum(increase(...[$__range])). Higher is better. Honours the Zone filter. Label set emitted by Kamailio's kamailio_stir_attest_signed{attestation=…}: div, A, B, C, base-only, unsigned — the ACTUAL wire outcome (same vocabulary as the CDR stir_eff_actual column / X-Stir-Outcome eff= token). div = relayed the inbound Identity + chained a div PASSporT; A/B/C = we originated a base PASSporT at that level; base-only = a base PASSporT went out but no div could be chained; unsigned = nothing signed (fail-open / signing off). Queries are value-agnostic (sum by (attestation)) — a new label appears automatically; only the colour overrides name specific labels.",
       "gridPos": { "h": 4, "w": 4, "x": 8, "y": 3 },
       "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
       "targets": [
@@ -125,7 +126,7 @@
       "id": 3,
       "type": "stat",
       "title": "% C — unsigned-inbound forwards ($__range)",
-      "description": "Fraction of signed outbound legs signed as gateway attestation C (RCF forward of an unsigned inbound call) over the range: sum(increase(...{attestation=\"C\"}[$__range])) / sum(increase(...[$__range])). Expected non-zero for RCF traffic; a sudden climb means more inbound calls arrived without a usable Identity. Honours the Zone filter.",
+      "description": "Fraction of outbound legs Kamailio ACTUALLY signed as gateway attestation C (an RCF forward whose inbound carried no usable Identity, so nothing could be chained) over the range: sum(increase(...{attestation=\"C\"}[$__range])) / sum(increase(...[$__range])). Expected non-zero for RCF traffic; a sudden climb means more inbound calls are arriving without a usable Identity (upstream regression) or our relay path is failing. Label set emitted by Kamailio's kamailio_stir_attest_signed{attestation=…}: div, A, B, C, base-only, unsigned — the ACTUAL wire outcome (same vocabulary as the CDR stir_eff_actual column / X-Stir-Outcome eff= token). div = relayed the inbound Identity + chained a div PASSporT; A/B/C = we originated a base PASSporT at that level; base-only = a base PASSporT went out but no div could be chained; unsigned = nothing signed (fail-open / signing off). Queries are value-agnostic (sum by (attestation)) — a new label appears automatically; only the colour overrides name specific labels.",
       "gridPos": { "h": 4, "w": 4, "x": 12, "y": 3 },
       "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
       "targets": [
@@ -164,7 +165,7 @@
       "id": 4,
       "type": "stat",
       "title": "% unsigned (fail-open, $__range)",
-      "description": "Fraction of outbound legs where NOTHING was signed (attestation=unsigned) over the range — fail-open path or signing disabled. Green < 5%, amber >= 5%, red >= 20%. This is the compliance-risk number: sustained non-trivial 'unsigned' means calls are leaving without a PASSporT. Honours the Zone filter.",
+      "description": "Fraction of outbound legs where NOTHING was signed on the wire (attestation=unsigned) over the range — fail-open path or signing disabled. Green < 5%, amber >= 5%, red >= 20%. This is the compliance-risk number: sustained non-trivial 'unsigned' means calls are leaving without a PASSporT. NOTE: base-only is NOT unsigned — a base PASSporT did go out; it is counted in the mix pie, not here. Honours the Zone filter. Label set emitted by Kamailio's kamailio_stir_attest_signed{attestation=…}: div, A, B, C, base-only, unsigned — the ACTUAL wire outcome (same vocabulary as the CDR stir_eff_actual column / X-Stir-Outcome eff= token). div = relayed the inbound Identity + chained a div PASSporT; A/B/C = we originated a base PASSporT at that level; base-only = a base PASSporT went out but no div could be chained; unsigned = nothing signed (fail-open / signing off). Queries are value-agnostic (sum by (attestation)) — a new label appears automatically; only the colour overrides name specific labels.",
       "gridPos": { "h": 4, "w": 4, "x": 16, "y": 3 },
       "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
       "targets": [
@@ -210,7 +211,7 @@
       "id": 5,
       "type": "stat",
       "title": "Total signed ($__range)",
-      "description": "Total outbound carrier legs Kamailio ran the signing block on over the range: sum(increase(kamailio_stir_attest_signed{zone=~\"$zone\"}[$__range])). The denominator for the % stats and the attestation-mix pie. Honours the Zone filter.",
+      "description": "Total outbound carrier legs Kamailio ran the signing block on over the range (every label: div, A, B, C, base-only, unsigned): sum(increase(kamailio_stir_attest_signed{zone=~\"$zone\"}[$__range])). The denominator for the % stats and the attestation-mix pie. Honours the Zone filter.",
       "gridPos": { "h": 4, "w": 4, "x": 20, "y": 3 },
       "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
       "targets": [
@@ -415,7 +416,7 @@
       "id": 10,
       "type": "timeseries",
       "title": "Signed calls per hour — by attestation level",
-      "description": "Count of calls per hour by ACTUAL STIR/SHAKEN attestation LEVEL — A full / B partial / C gateway / unsigned — from the Postgres `call_attestations` table (NOT the raw metric). Unlike the metric-backed panels above, `div` is folded into the level it carries: a forwarded A-attested call (`signed_attestation='div'`) is counted as its preserved `inbound_attest` (A/B/C), so the stack reports the pure carried level. `div` only appears when the forward had no recorded inbound level (visibly flagged, not miscounted). NOTE: this panel is platform-wide — `call_attestations` lives only on the East primary and records EVERY zone's calls (all CDRs are written there via the API), so the **Zone picker does NOT apply here** (the metric-backed panels above still honour it). A growing 'unsigned' band or a collapse in A is the earliest sign of a signing-key / cert-URL fault or an upstream Identity regression.",
+      "description": "Count of calls per hour by STIR/SHAKEN attestation LEVEL from Postgres (NOT the raw metric). Prefers the ACTUAL wire outcome recorded on the CDR (cdrs.stir_eff_actual — the eff= token of Kamailio's X-Stir-Outcome, migration 47; labels div, A, B, C, base-only, unsigned) and falls back to the INTENT-derived call_attestations.signed_attestation for calls that predate the outcome hand-off. On the intent fallback, `div` is folded into the level it carries (the preserved inbound_attest, A/B/C) so the stack reports the pure carried level; on the actual path `div` is shown as `div` because that IS the wire result. Any label not named in the colour overrides still renders (palette colour). The cdrs lookup is bounded on TIME as well as uuid (c.start_time between $__timeFrom() - 2 days and $__timeTo() + 1 hour) so TimescaleDB prunes chunks with a constant predicate; without it every attestation row in the range index-probes EVERY weekly cdrs chunk. The bound cannot produce a wrong number: a cdrs row outside it simply misses the join and the COALESCE falls back to the INTENT value, exactly as it does for pre-migration-47 calls. (Only relevant for CDRs re-ingested from the mod_json_cdr disk fallback long after the call.) NOTE: platform-wide — call_attestations/cdrs live on the East primary and record EVERY zone's calls, so the **Zone picker does NOT apply here** (the metric-backed panels above still honour it). A growing 'unsigned' band or a collapse in A/div is the earliest sign of a signing-key / cert-URL fault or an upstream Identity regression.",
       "gridPos": { "h": 8, "w": 16, "x": 0, "y": 11 },
       "datasource": { "type": "postgres", "uid": "voip-cdr-pg" },
       "targets": [
@@ -425,7 +426,7 @@
           "format": "time_series",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT $__timeGroupAlias(created_at, '1h'), CASE WHEN signed_attestation = 'div' THEN COALESCE(inbound_attest, 'div') ELSE signed_attestation END AS metric, COUNT(*) AS value FROM call_attestations WHERE $__timeFilter(created_at) GROUP BY 1, 2 ORDER BY 1"
+          "rawSql": "SELECT $__timeGroupAlias(ca.created_at, '1h'), COALESCE(oc.stir_eff_actual, CASE WHEN ca.signed_attestation = 'div' THEN COALESCE(ca.inbound_attest, 'div') ELSE ca.signed_attestation END, 'unknown') AS metric, COUNT(*) AS value FROM call_attestations ca LEFT JOIN LATERAL (SELECT c.stir_eff_actual FROM cdrs c WHERE c.uuid = ca.call_id AND c.start_time >= $__timeFrom()::timestamptz - interval '2 days' AND c.start_time <= $__timeTo()::timestamptz + interval '1 hour' ORDER BY c.start_time DESC LIMIT 1) oc ON true WHERE $__timeFilter(ca.created_at) GROUP BY 1, 2 ORDER BY 1"
         }
       ],
       "fieldConfig": {
@@ -450,7 +451,8 @@
           { "matcher": { "id": "byName", "options": "B" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "yellow" } } ] },
           { "matcher": { "id": "byName", "options": "C" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "text" } } ] },
           { "matcher": { "id": "byName", "options": "unsigned" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } } ] },
-          { "matcher": { "id": "byName", "options": "div" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "blue" } } ] }
+          { "matcher": { "id": "byName", "options": "div" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "blue" } } ] },
+          { "matcher": { "id": "byName", "options": "base-only" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } } ] }
         ]
       },
       "options": {
@@ -538,7 +540,7 @@
       "id": 13,
       "type": "table",
       "title": "Attestation counts by zone (SBC) — $__range",
-      "description": "Per-zone (SBC_ID) signed-attestation breakdown over the range: sum by (zone, attestation) (increase(kamailio_stir_attest_signed{zone=~\"$zone\"}[$__range])), pivoted to one row per SBC with a column per attestation class. Lets you confirm each SBC/region is signing and spot a single zone that has slipped to 'unsigned'. Honours the Zone filter.",
+      "description": "Per-zone (SBC_ID) breakdown of the ACTUAL wire attestation over the range: sum by (zone, attestation) (increase(kamailio_stir_attest_signed{zone=~\"$zone\"}[$__range])), pivoted to one row per SBC with a column per attestation label (div, A, B, C, base-only, unsigned — columns appear/disappear with the data, nothing is hard-coded). Lets you confirm each SBC/region is signing and spot a single zone that has slipped to 'unsigned' or 'base-only'. Honours the Zone filter.",
       "gridPos": { "h": 8, "w": 16, "x": 8, "y": 19 },
       "datasource": { "type": "prometheus", "uid": "voip-metrics-vm" },
       "targets": [
@@ -597,6 +599,13 @@
             "properties": [
               { "id": "custom.cellOptions", "value": { "type": "color-background", "mode": "gradient" } },
               { "id": "color", "value": { "mode": "continuous-blues" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "base-only" },
+            "properties": [
+              { "id": "custom.cellOptions", "value": { "type": "color-background", "mode": "gradient" } },
+              { "id": "color", "value": { "mode": "continuous-YlRd" } }
             ]
           }
         ]
