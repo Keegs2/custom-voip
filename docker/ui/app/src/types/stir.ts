@@ -15,11 +15,43 @@ export type AttestationLevel = 'A' | 'B' | 'C' | 'div';
 export type VerstatSource = 'carrier' | 'self';
 
 /**
+ * Attestation label as Kamailio ACTUALLY emitted it on the wire — the
+ * `eff=` token of `stir_outcome` (mirrors the `attestation` label set of the
+ * `kamailio_stir_attest_signed` metric). Open-ended (`string`) on purpose:
+ * the API stores the token value-agnostically, so a new label never breaks
+ * the UI — unknown values render muted.
+ */
+export type StirEffActual = 'div' | 'A' | 'B' | 'C' | 'base-only' | 'unsigned' | (string & {});
+
+/** Which fact the badge is showing. */
+export type StirBadgeSource = 'actual' | 'intent';
+
+/**
+ * Shared STIR badge payload — emitted by ONE serializer on every endpoint
+ * that carries an attestation (calls list, call detail, per-call attestation,
+ * Homer trace search). Two facts exist per call:
+ *   INTENT  — `stir_attestation` (== `signed_attestation`), derived at ingest
+ *             from what FreeSWITCH asked Kamailio to sign.
+ *   ACTUAL  — `stir_eff_actual`, the `eff=` token of the `X-Stir-Outcome`
+ *             Kamailio handed back (what really went on the wire).
+ * `stir_badge` = actual when present, else intent; `stir_badge_source` says
+ * which. All optional: absent on old/cached responses (pre-migration-47 API).
+ */
+export interface StirBadgeFields {
+  stir_attestation?: AttestationLevel | string | null;
+  stir_eff_actual?: StirEffActual | null;
+  /** Raw `eff=..;mode=..;identities=..;base=..;div=..;stripped=..` string. */
+  stir_outcome?: string | null;
+  stir_badge?: StirEffActual | AttestationLevel | string | null;
+  stir_badge_source?: StirBadgeSource | null;
+}
+
+/**
  * Per-call attestation — `GET /v1/cdrs/{call_id}/attestation`.
  * The endpoint is tenant-scoped server-side and returns 404 when a call has no
  * attestation record (older calls, unsigned calls, purely on-net calls).
  */
-export interface CallAttestation {
+export interface CallAttestation extends StirBadgeFields {
   call_id: string;
   customer_id: number;
   /** The attestation level we (the platform) signed the outbound leg with. */
@@ -52,7 +84,7 @@ export interface CallAttestation {
  * already knows its Call-ID, and — unlike the tenant-scoped detail endpoint —
  * `inbound_signed` may be `null` here (unknown on legacy captures).
  */
-export interface MessageAttestation {
+export interface MessageAttestation extends StirBadgeFields {
   /** The attestation level we (the platform) signed the outbound leg with — the primary badge. */
   signed_attestation: AttestationLevel;
   /** The attestation level we intended to sign with (before any downgrade). */

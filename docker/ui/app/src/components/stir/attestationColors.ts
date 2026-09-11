@@ -11,7 +11,7 @@
  *   - Verstat:      Passed = green,  Failed = red,  No-TN / none = gray
  */
 
-import type { AttestationLevel, VerstatSource } from '../../types/stir';
+import type { AttestationLevel, StirBadgeFields, StirBadgeSource, VerstatSource } from '../../types/stir';
 
 export interface ColorToken {
   /** Foreground / text colour. */
@@ -40,9 +40,75 @@ export function attestColor(level: AttestationLevel | string | null | undefined)
       return GRAY;
     case 'div':
       return BLUE;
+    // Wire-outcome labels (Kamailio `eff=` token): base PASSporT only, or
+    // nothing signed at all (fail-open) — the compliance-risk one is red.
+    case 'base-only':
+      return AMBER;
+    case 'unsigned':
+      return RED;
     default:
       return GRAY;
   }
+}
+
+// ── Badge resolution (ACTUAL wire outcome vs INTENT) ─────────────────────────
+
+export interface ResolvedStirBadge {
+  /** The level to render, or null when nothing is known. */
+  level: string | null;
+  /** 'actual' = confirmed on the wire by Kamailio; 'intent' = what we asked for. */
+  source: StirBadgeSource | null;
+  /** Human note for tooltips — spells out the confidence of the badge. */
+  note: string;
+  /** Parsed `mode=` of the outcome string when present (relay, reorig, ...). */
+  mode: string | null;
+}
+
+/** Tooltip phrasing shared by every badge site. */
+export const INTENT_ONLY_NOTE = 'intent, not confirmed on wire';
+export const ACTUAL_NOTE = 'confirmed on wire (Kamailio outcome)';
+
+/** `k=v;k=v` -> value of `key`, or null. Tolerates garbage. */
+export function outcomeToken(outcome: string | null | undefined, key: string): string | null {
+  if (!outcome) return null;
+  for (const piece of outcome.split(';')) {
+    const eq = piece.indexOf('=');
+    if (eq <= 0) continue;
+    if (piece.slice(0, eq).trim().toLowerCase() === key) {
+      const v = piece.slice(eq + 1).trim();
+      return v || null;
+    }
+  }
+  return null;
+}
+
+/**
+ * Resolve which attestation to show for a call and how confident it is.
+ *
+ * Prefers the API's own `stir_badge` / `stir_badge_source` (one serializer
+ * server-side). Falls back — for cached/older responses that predate
+ * migration 47 — to `stir_eff_actual` if present, else the intent-derived
+ * `signed_attestation`, so the badge never regresses to blank.
+ */
+export function resolveStirBadge(
+  att: (StirBadgeFields & { signed_attestation?: AttestationLevel | string | null }) | null | undefined,
+): ResolvedStirBadge {
+  if (!att) return { level: null, source: null, note: 'No attestation on record', mode: null };
+  const mode = outcomeToken(att.stir_outcome, 'mode');
+  if (att.stir_badge && att.stir_badge_source) {
+    return {
+      level: att.stir_badge,
+      source: att.stir_badge_source,
+      note: att.stir_badge_source === 'actual' ? ACTUAL_NOTE : INTENT_ONLY_NOTE,
+      mode,
+    };
+  }
+  if (att.stir_eff_actual) {
+    return { level: att.stir_eff_actual, source: 'actual', note: ACTUAL_NOTE, mode };
+  }
+  const intent = att.stir_attestation ?? att.signed_attestation ?? null;
+  if (intent) return { level: intent, source: 'intent', note: INTENT_ONLY_NOTE, mode };
+  return { level: null, source: null, note: 'No attestation on record', mode };
 }
 
 /**
@@ -84,6 +150,10 @@ export function attestDescription(level: AttestationLevel | string | null | unde
       return 'Gateway attestation';
     case 'div':
       return 'Diversion (forwarded call)';
+    case 'base-only':
+      return 'Base PASSporT only (no div chained)';
+    case 'unsigned':
+      return 'Nothing signed on the wire';
     default:
       return 'Not attested';
   }

@@ -26,6 +26,7 @@ from pydantic import BaseModel, Field
 
 from auth.dependencies import require_support_or_admin
 from db import database as db
+from services.stir_outcome import badge_fields as stir_badge_fields
 
 # Pure (stdlib-only) post-processing pipeline: dedup, SIP-causality ordering,
 # hairpin marking, seq assignment.  Lives in a separate module so unit tests
@@ -658,13 +659,24 @@ async def _fetch_attestations_by_callid(
     if not call_ids:
         return {}
     try:
+        # The ACTUAL wire outcome (stir_outcome / stir_eff_actual, migration
+        # 47) lives on the cdrs row; LATERAL by uuid (idx_cdrs_uuid) so the
+        # badge — actual when present, else intent — ships in the same
+        # object. Same shared serializer as the CDR endpoints
+        # (services.stir_outcome.badge_fields).
         rows = await db.fetch_all(
             """
-            SELECT sip_call_id, signed_attestation, attest_intent,
-                   inbound_signed, inbound_attest, inbound_verstat,
-                   verstat_source
-            FROM call_attestations
-            WHERE sip_call_id = ANY($1::text[])
+            SELECT ca.sip_call_id, ca.signed_attestation, ca.attest_intent,
+                   ca.inbound_signed, ca.inbound_attest, ca.inbound_verstat,
+                   ca.verstat_source,
+                   oc.stir_outcome, oc.stir_eff_actual
+            FROM call_attestations ca
+            LEFT JOIN LATERAL (
+                SELECT c.stir_outcome, c.stir_eff_actual FROM cdrs c
+                WHERE c.uuid = ca.call_id
+                ORDER BY c.start_time DESC LIMIT 1
+            ) oc ON true
+            WHERE ca.sip_call_id = ANY($1::text[])
             """,
             call_ids,
         )
@@ -680,7 +692,10 @@ async def _fetch_attestations_by_callid(
     for r in rows:
         cid = r["sip_call_id"]
         if cid:
-            out[cid] = {f: r[f] for f in _ATTEST_FIELDS}
+            att = {f: r[f] for f in _ATTEST_FIELDS}
+            att.update(stir_badge_fields(
+                r["signed_attestation"], r["stir_eff_actual"], r["stir_outcome"]))
+            out[cid] = att
     return out
 
 
@@ -801,7 +816,15 @@ async def search_sip_traces(
                     legacy call) or the (failure-isolated, batched) lookup
                     errored. Shape:
                       {signed_attestation, attest_intent, inbound_signed,
-                       inbound_attest, inbound_verstat, verstat_source}
+                       inbound_attest, inbound_verstat, verstat_source,
+                       stir_attestation, stir_eff_actual, stir_outcome,
+                       stir_badge, stir_badge_source}
+                    The last five are the shared STIR badge payload
+                    (services.stir_outcome.badge_fields): stir_badge is the
+                    ACTUAL wire level (cdrs.stir_eff_actual, migration 47)
+                    when Kamailio reported one, else the INTENT-derived
+                    signed_attestation; stir_badge_source says which
+                    ("actual" | "intent" | null).
 
     Display order is derived from hard SIP-causality rules (a response never
     precedes its request at the same hop; a forwarded request copy at hop N+1

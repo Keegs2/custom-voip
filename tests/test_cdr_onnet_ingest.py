@@ -11,7 +11,8 @@ Run:
 Focus: the four additive on-net columns (origin_customer_id,
 terminating_customer_id, on_net, on_net_hops) are extracted from FreeSWITCH
 `variables`, bound as $50-$53, the two inbound-carrier attribution columns
-(inbound_carrier, inbound_carrier_pop — migration 40) as $54-$55, and that the
+(inbound_carrier, inbound_carrier_pop — migration 40) as $54-$55, the two
+STIR-outcome columns (migration 47) as $56-$57, and that the
 always-return-200 ingest contract and off-net backward-compatibility
 (on_net=false) are intact.
 """
@@ -72,16 +73,19 @@ def _base_variables(**overrides):
 
 
 # Column order in the INSERT (must match cdrs.py). The tail is: the four
-# on-net columns ($50..$53) then the two inbound-carrier columns ($54..$55),
-# so negative indices from the end are -6..-1.
-IDX_ORIGIN = -6
-IDX_TERMINATING = -5
-IDX_ON_NET = -4
-IDX_ON_NET_HOPS = -3
-IDX_INBOUND_CARRIER = -2
-IDX_INBOUND_CARRIER_POP = -1
+# on-net columns ($50..$53), the two inbound-carrier columns ($54..$55), then
+# the two STIR-outcome columns ($56..$57, migration 47), so negative indices
+# from the end are -8..-1.
+IDX_ORIGIN = -8
+IDX_TERMINATING = -7
+IDX_ON_NET = -6
+IDX_ON_NET_HOPS = -5
+IDX_INBOUND_CARRIER = -4
+IDX_INBOUND_CARRIER_POP = -3
+IDX_STIR_OUTCOME = -2
+IDX_STIR_EFF_ACTUAL = -1
 
-PARAM_COUNT = 55
+PARAM_COUNT = 57
 
 
 def _run(body):
@@ -163,7 +167,7 @@ def test_insert_param_count_matches_placeholders(cap):
     )}
     _run(body)
     placeholders = set(re.findall(r"\$(\d+)", cap.sql))
-    # highest placeholder index must equal the param count (55)
+    # highest placeholder index must equal the param count (57)
     assert max(int(x) for x in placeholders) == len(cap.params) == PARAM_COUNT
 
 

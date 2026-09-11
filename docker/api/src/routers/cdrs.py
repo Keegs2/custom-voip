@@ -4,9 +4,12 @@ from typing import Literal, Optional
 from datetime import datetime, timedelta, timezone
 from db import database as db
 from auth.dependencies import get_support_read_filter, require_admin
+from services import stir_outcome as stir_oc
+import asyncpg
 import logging
 import math
 import re
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -287,6 +290,241 @@ def _stir_bool_or_none(value) -> Optional[bool]:
     return None
 
 
+def _sip_code_from_proto(value) -> Optional[int]:
+    """'sip:200' -> 200 (FreeSWITCH proto_specific_hangup_cause format)."""
+    if value is None:
+        return None
+    s = str(value).strip().lower()
+    if s.startswith("sip:"):
+        return _safe_int(s[4:])
+    return None
+
+
+def _derive_sip_code(variables: dict, answered: bool) -> Optional[int]:
+    """SIP status that ended the call, with a DOCUMENTED precedence.
+
+    Why a chain: mod_sofia only sets `sip_term_status` on the leg that
+    RECEIVED the BYE (sofia.c sofia_handle_sip_i_bye) or whose nua dialog
+    terminated with a status. When the B-leg (callee) hangs up first,
+    FreeSWITCH SENDS the BYE on the A-leg, so the A-leg CDR — the only one
+    ingested — carries no `sip_term_status` and sip_code was NULL on most
+    answered calls in production.
+
+    Precedence (first hit wins):
+      1. sip_term_status                         — this leg's own terminating
+         status: sofia.c:1036 (`sofia_handle_sip_i_bye`, the leg that RECEIVED
+         the BYE) and sofia.c:8743 (`nua_callstate_terminated`). Never mirrored
+         to the partner.
+      2. proto_specific_hangup_cause ("sip:N")   — the same fact in the core's
+         generic form; sofia.c:1037 / :8745 set it alongside (1).
+      3. last_bridge_proto_specific_hangup_cause — a partner's
+         `proto_specific_hangup_cause`, pushed onto THIS channel when that
+         partner hangs up: switch_channel.c:3432-3434 in
+         `switch_channel_perform_hangup()`
+         (`switch_channel_set_variable_partner(channel,
+          "last_bridge_" SWITCH_PROTO_SPECIFIC_HANGUP_CAUSE_VARIABLE, var)`).
+         IMPORTANT — this is written by EVERY originate attempt, not only the
+         one that answered: the peer's signal bond to this A-leg is set at
+         peer CREATION (switch_core_session.c:711), `_set_variable_partner`
+         resolves the target through that bond, a 4xx/5xx final sets the
+         peer's `proto_specific_hangup_cause` to "sip:N" before it hangs up
+         (sofia.c:6871-6873), and the push in `perform_hangup` is
+         unconditional. So after a failover sequence 503 -> answered the
+         A-leg carries a STALE "sip:503" unless the answered peer later
+         overwrites it — and a peer that SENDS the BYE has no proto cause to
+         push (the push is skipped when the var is unset). Hence:
+           * answered:   accept it only if it is a 2xx (the answered peer
+                         received the BYE -> "sip:200" is fresh and consistent);
+                         any non-2xx here can only be a leftover from a failed
+                         earlier attempt and is ignored.
+           * unanswered: accept any code — the LAST attempt's peer wrote it
+                         last (each push overwrites), so it is the final
+                         failure code (e.g. "sip:503", "sip:486").
+      4. answered (answer_epoch > 0)             — the INVITE transaction
+         completed with 200 OK and nothing above recorded a fresh status
+         (FS-side teardown: media timeout, uuid_kill, sched_hangup, ...).
+         Record 200.
+      5. sip_invite_failure_status               — unanswered failure on either
+         leg. mod_sofia sets it on BOTH the failing leg and its partner
+         (sofia.c:6657-6660 `sofia_handle_sip_r_invite`, status >= 400), which
+         is how an A-leg learns its B-leg's failure code. CAUTION: the success
+         branch (sofia.c:6681-6682) clears it on the PARTNER ONLY, never on the
+         local leg — so a leg that failed an early attempt and then succeeded
+         keeps a stale value. That is exactly why this sits BELOW the
+         `answered` rule: on an answered call the stale code can never win.
+      6. None
+
+    Verified against FreeSWITCH master (src/mod/endpoints/mod_sofia/sofia.c,
+    src/switch_channel.c, src/switch_core_session.c) — see the per-step
+    citations.
+    """
+    code = _safe_int(variables.get("sip_term_status"))
+    if code is not None:
+        return code
+    code = _sip_code_from_proto(variables.get("proto_specific_hangup_cause"))
+    if code is not None:
+        return code
+    partner = _sip_code_from_proto(
+        variables.get("last_bridge_proto_specific_hangup_cause"))
+    if answered:
+        # Step 3 (answered branch): only a 2xx from the partner is consistent
+        # with an answered call. Anything else is a failed earlier originate
+        # attempt's code that the answered peer never overwrote (it SENT the
+        # BYE, so it had no proto cause to push) — step 4 wins instead.
+        if partner is not None and 200 <= partner < 300:
+            return partner
+        return 200
+    if partner is not None:
+        return partner
+    return _safe_int(variables.get("sip_invite_failure_status"))
+
+
+# Media-VM VPC subnets -> zone (CLAUDE.md GCP topology). Used ONLY as the last
+# fallback for freeswitch_node (matched against `local_media_ip`).
+_MEDIA_SUBNET_ZONES = (
+    ("192.168.10.", "east"),
+    ("192.168.20.", "west"),
+    ("192.168.30.", "central"),
+)
+
+
+def _zone_from_media_ip(ip) -> Optional[str]:
+    if not ip:
+        return None
+    s = str(ip).strip()
+    for prefix, zone in _MEDIA_SUBNET_ZONES:
+        if s.startswith(prefix):
+            return zone
+    return None
+
+
+def _derive_fs_node(body: dict, variables: dict) -> Optional[str]:
+    """Which FreeSWITCH node produced this CDR (was NULL on every prod row).
+
+    `FreeSWITCH-Hostname` is an EVENT header — switch_event.c:2006 in
+    `switch_event_prep_for_delivery_detailed()`, and NOTHING in the tree ever
+    calls switch_channel_set_variable() with that name — so
+    `variables["FreeSWITCH-Hostname"]` does not exist in a mod_json_cdr body
+    and the column was NULL on every production row.
+
+    What the body really carries at TOP LEVEL (verified: the only seven
+    `cJSON_AddItemToObject(cdr, ...)` calls in switch_ivr_generate_json_cdr,
+    src/switch_ivr.c:3335-3566) is `core-uuid` (:3345, hyphen — not
+    `core_uuid`), `switchname` (:3346, one word, NOT inside `variables`),
+    `channel_data`, `callStats`, `variables`, `app_log`, `callflow`.
+    `switchname` is `switch_core_get_switchname()`, which our
+    conf/autoload_configs/switch.conf.xml:70 pins to "voiceplatform" on EVERY
+    node — so it is not zone-identifying and is skipped when it has that value.
+
+    Fallback chain:
+      1. variables.fs_node        — explicit, set by the FS Lua scripts
+                                    (FS_NODE_ID or "<FS_ZONE>-fs"); preferred.
+                                    This is the ONLY source that can tell
+                                    fs-1 from fs-2 within a zone (FS_NODE_ID).
+      2. variables.fs_zone        — zone-only, if the scripts export it
+      3. body.switchname          — ONLY if it is not the shared default
+      4. zone from local_media_ip — the core's `local_sdp_ip`, i.e. the
+                                    address FS actually BOUND media to
+                                    (rtp-ip = $${local_ip_v4}), which on the
+                                    media VMs is the voip-media subnet address:
+                                    192.168.10.x = east, .20.x = west,
+                                    .30.x = central -> "<zone>-fs". Only set
+                                    once media is negotiated, so ANSWERED calls
+                                    resolve here; failed/unanswered calls do
+                                    not. Zone granularity only.
+      5. None                     — dashboards render NULL as "unknown"
+                                    (call-quality.json zone CASE:
+                                    LIKE 'west%' / LIKE 'central%' /
+                                    '' -> 'unknown' / ELSE 'east').
+
+    Deliberately NOT consulted:
+      * `sip_local_network_addr` (mod_sofia: `extsipip ? extsipip : sipip`)
+        and `advertised_media_ip` (the ext-rtp-ip written into the SDP): on
+        this deployment BOTH sofia profiles set ext-sip-ip/ext-rtp-ip to the
+        VM's PUBLIC IP (conf/sofia/internal.xml:51-52, external.xml:39-40,
+        from EXTERNAL_SIP_IP/EXTERNAL_RTP_IP in freeswitch.xml:65-66), so those
+        vars never carry a 192.168.x address and could never match.
+      * `body.core-uuid`: an opaque per-process uuid that changes on every
+        restart. Every zone CASE in call-quality.json is
+        `LIKE 'west%' ... LIKE 'central%' ... ELSE 'east'`, so any non-empty
+        string that is not a zone name is COUNTED AS EAST — a West/Central
+        failed call (no media yet, so step 4 misses) would be misattributed
+        to East instead of staying "unknown". Returning None is the honest
+        answer until the Lua `fs_node` var is live everywhere.
+
+    Truncated to 50 chars: cdrs.freeswitch_node is VARCHAR(50).
+    """
+    for key in ("fs_node", "fs_zone"):
+        v = variables.get(key)
+        if v is not None and str(v).strip():
+            return str(v).strip()[:50]
+    switchname = body.get("switchname")
+    if switchname and str(switchname).strip().lower() not in ("voiceplatform", "freeswitch"):
+        return str(switchname).strip()[:50]
+    zone = _zone_from_media_ip(variables.get("local_media_ip"))
+    if zone:
+        return f"{zone}-fs"
+    return None
+
+
+async def _apply_b_leg_stir_outcome(a_uuid: str, b_uuid: str, variables: dict) -> dict:
+    """B-leg CDR (mod_json_cdr log-b-leg=true): UPDATE the A-leg row's STIR
+    outcome columns by A-leg uuid. NEVER inserts. If the A-leg row is not
+    there yet (ingest race) this is a retry-free no-op with a log line —
+    FreeSWITCH always gets a 200 either way.
+
+    NO time predicate, deliberately. It is tempting to add
+    `AND start_time > now() - interval 'N days'` for chunk exclusion, but:
+      * `uuid` is a point lookup on idx_cdrs_uuid and matches at most one row
+        (the INSERT's `WHERE NOT EXISTS (... uuid = $1)` keeps it unique), and
+        `cdrs` carries a 90-day retention policy (05_schema_cdr.sql:98) — about
+        13 weekly chunks — so the unbounded probe is cheap;
+      * it would NOT avoid decompression anyway: the compression policy fires
+        at 1 day (05_schema_cdr.sql:95), so any window wider than a day already
+        includes compressed chunks;
+      * it WOULD silently drop legitimate updates from the mod_json_cdr disk
+        fallback, which can be re-ingested via /ingest/bulk days or weeks after
+        the call.
+    On a TimescaleDB older than 2.11 an UPDATE that lands on a compressed chunk
+    raises; that is caught below and logged, and the ingest still returns 200.
+    """
+    raw, eff = stir_oc.extract_outcome(variables)
+    if raw is None:
+        logger.info("CDR ingest: B-leg uuid=%s (A-leg %s) carries no STIR "
+                    "outcome; nothing to apply", b_uuid, a_uuid or "?")
+        return {"status": "b_leg", "detail": "no stir_outcome", "uuid": b_uuid,
+                "a_leg_uuid": a_uuid or None}
+    if not a_uuid:
+        logger.warning("CDR ingest: B-leg uuid=%s carries stir_outcome=%r but "
+                       "no resolvable A-leg uuid; dropped", b_uuid, raw)
+        return {"status": "b_leg", "detail": "unresolved A-leg uuid",
+                "uuid": b_uuid, "a_leg_uuid": None}
+    try:
+        result = await db.execute(
+            """
+            UPDATE cdrs
+               SET stir_outcome    = $2::text,
+                   stir_eff_actual = $3::text
+             WHERE uuid = $1::varchar
+            """,
+            str(a_uuid), raw, eff,
+        )
+    except Exception:
+        logger.exception("CDR ingest: B-leg stir_outcome UPDATE failed for "
+                         "A-leg uuid=%s (ignored)", a_uuid)
+        return {"status": "b_leg", "detail": "update failed", "uuid": b_uuid,
+                "a_leg_uuid": a_uuid}
+    if result and result.strip().endswith(" 0"):
+        logger.info("CDR ingest: B-leg uuid=%s stir_outcome=%r — A-leg row %s "
+                    "not present yet (race); no-op, not retried", b_uuid, raw, a_uuid)
+        return {"status": "b_leg", "detail": "a-leg row not found", "uuid": b_uuid,
+                "a_leg_uuid": a_uuid}
+    logger.info("CDR ingest: B-leg uuid=%s applied stir_outcome=%r (eff=%s) to "
+                "A-leg %s", b_uuid, raw, eff, a_uuid)
+    return {"status": "b_leg", "detail": "updated", "uuid": b_uuid,
+            "a_leg_uuid": a_uuid, "stir_eff_actual": eff}
+
+
 async def _store_call_attestation(call_uuid: str, customer_id: int, variables: dict) -> None:
     """Derive and UPSERT the STIR/SHAKEN attestation row for one call.
 
@@ -386,6 +624,138 @@ async def _store_call_attestation(call_uuid: str, customer_id: int, variables: d
         )
 
 
+# ---------------------------------------------------------------------------
+# The CDR INSERT — built once at import.
+#
+# The cdrs table uses a composite PK (id, start_time) for TimescaleDB
+# hypertable partitioning, so ON CONFLICT on uuid is not available; the
+# `WHERE NOT EXISTS` sub-select is the duplicate guard. Every parameter gets an
+# explicit ::type cast so asyncpg never needs to infer PostgreSQL types
+# (AmbiguousParameterError when values are None; PgBouncer transaction mode).
+#
+# DEPLOY-ORDER RESILIENCE (migration 47): `stir_outcome` / `stir_eff_actual`
+# are the LAST entries of BOTH the column list and the value list ($56/$57),
+# so the pre-47 statement is the identical text with those two tails omitted —
+# nothing is renumbered, $1..$55 bind exactly as before. If the API build
+# reaches production before 47 is applied, the full INSERT raises
+# UndefinedColumnError; `_execute_cdr_insert` then retries with the pre-47
+# statement so the billable row still lands (the two STIR columns are the
+# only thing lost) and logs the condition at ERROR, rate-limited. The startup
+# guard (db/schema_check.py) and GET /health/detailed name the remedy.
+# ---------------------------------------------------------------------------
+def _cdr_insert_sql(with_stir_outcome: bool) -> str:
+    stir_cols = ",\n                stir_outcome, stir_eff_actual" if with_stir_outcome else ""
+    stir_vals = ",\n                $56::text,    $57::text" if with_stir_outcome else ""
+    return f"""
+            INSERT INTO cdrs (
+                uuid, customer_id, product_type, trunk_id, direction,
+                caller_id, destination, destination_prefix,
+                start_time, answer_time, end_time,
+                duration_ms, billable_ms,
+                hangup_cause, sip_code, carrier_used, traffic_grade,
+                freeswitch_node,
+                mos, quality_pct, jitter_min_ms, jitter_max_ms, jitter_avg_ms,
+                packet_loss_count, packet_total_count, packet_loss_pct,
+                flaw_total, r_factor,
+                rtp_audio_in_raw_bytes, rtp_audio_in_media_bytes,
+                rtp_audio_out_raw_bytes, rtp_audio_out_media_bytes,
+                rtp_audio_in_packet_count, rtp_audio_out_packet_count,
+                rtp_audio_in_jitter_burst_rate, rtp_audio_in_jitter_loss_rate,
+                rtp_audio_in_mean_interval,
+                read_codec, write_codec,
+                read_rate, write_rate,
+                sip_from_user, sip_to_user,
+                hangup_cause_q850, sip_hangup_disposition,
+                sip_user_agent, network_addr, bridge_uuid,
+                sbc_id,
+                origin_customer_id, terminating_customer_id, on_net, on_net_hops,
+                inbound_carrier, inbound_carrier_pop{stir_cols}
+            )
+            SELECT
+                $1::varchar,  $2::int,       $3::varchar,  $4::int,       $5::varchar,
+                $6::varchar,  $7::varchar,   $8::varchar,
+                $9::timestamptz, $10::timestamptz, $11::timestamptz,
+                $12::int,     $13::int,
+                $14::varchar, $15::int,      $16::varchar,  $17::varchar,
+                $18::varchar,
+                $19::numeric, $20::numeric,  $21::numeric,  $22::numeric, $23::numeric,
+                $24::int,     $25::int,      $26::numeric,
+                $27::int,     $28::numeric,
+                $29::bigint,  $30::bigint,
+                $31::bigint,  $32::bigint,
+                $33::int,     $34::int,
+                $35::numeric, $36::numeric,
+                $37::numeric,
+                $38::varchar, $39::varchar,
+                $40::int,     $41::int,
+                $42::varchar, $43::varchar,
+                $44::smallint, $45::varchar,
+                $46::varchar, $47::varchar, $48::varchar,
+                $49::varchar,
+                $50::int,     $51::int,      $52::bool,     $53::smallint,
+                $54::varchar, $55::varchar{stir_vals}
+            WHERE NOT EXISTS (
+                SELECT 1 FROM cdrs WHERE uuid = $1::varchar
+            )
+            """
+
+
+_CDR_INSERT_SQL = _cdr_insert_sql(with_stir_outcome=True)          # binds $1..$57
+_CDR_INSERT_SQL_PRE47 = _cdr_insert_sql(with_stir_outcome=False)   # binds $1..$55
+_CDR_INSERT_PRE47_PARAM_COUNT = 55
+_STIR_OUTCOME_COLUMNS = ("stir_outcome", "stir_eff_actual")
+
+# Rate limit for the fallback log line: one ERROR per interval per worker,
+# the rest at DEBUG — a busy zone in the deploy window must not flood logs
+# with one stack per call, but the condition must stay visible.
+_PRE47_LOG_INTERVAL_SEC = 300.0
+_pre47_last_logged_mono = 0.0
+_pre47_fallback_count = 0
+
+
+def _is_missing_stir_outcome_column(exc: BaseException) -> bool:
+    """True iff the UndefinedColumnError is about one of the migration-47
+    columns ('column "stir_outcome" of relation "cdrs" does not exist')."""
+    msg = str(exc)
+    return any(col in msg for col in _STIR_OUTCOME_COLUMNS)
+
+
+def _note_pre47_fallback(call_uuid: str, exc: BaseException) -> None:
+    global _pre47_last_logged_mono, _pre47_fallback_count
+    _pre47_fallback_count += 1
+    now = time.monotonic()
+    if now - _pre47_last_logged_mono >= _PRE47_LOG_INTERVAL_SEC:
+        _pre47_last_logged_mono = now
+        logger.error(
+            "CDR ingest: cdrs is missing the migration-47 columns (%s) — inserting "
+            "uuid=%s WITHOUT stir_outcome/stir_eff_actual (%d fallback(s) so far in "
+            "this worker). The API build is ahead of the database; apply on the East "
+            "primary: sudo -u postgres psql -d voip -f "
+            "/opt/revup/docker/postgres/init/47_cdr_stir_outcome.sql "
+            "(next reminder in %ds)",
+            exc, call_uuid, _pre47_fallback_count, int(_PRE47_LOG_INTERVAL_SEC),
+        )
+    else:
+        logger.debug("CDR ingest: pre-47 fallback INSERT for uuid=%s (%d so far)",
+                     call_uuid, _pre47_fallback_count)
+
+
+async def _execute_cdr_insert(call_uuid: str, params: tuple) -> str:
+    """Run the CDR INSERT; on a missing migration-47 column retry without it.
+
+    Any OTHER UndefinedColumnError (or any other error) propagates unchanged
+    to _process_cdr_body's catch-all, exactly as before.
+    """
+    try:
+        return await db.execute(_CDR_INSERT_SQL, *params)
+    except asyncpg.exceptions.UndefinedColumnError as exc:
+        if not _is_missing_stir_outcome_column(exc):
+            raise
+        _note_pre47_fallback(call_uuid, exc)
+        return await db.execute(_CDR_INSERT_SQL_PRE47,
+                                *params[:_CDR_INSERT_PRE47_PARAM_COUNT])
+
+
 async def _process_cdr_body(body: dict) -> dict:
     """Extract fields from a parsed FreeSWITCH JSON CDR and insert into the database.
 
@@ -413,6 +783,22 @@ async def _process_cdr_body(body: dict) -> dict:
         if not call_uuid:
             logger.warning("CDR ingest: missing uuid in variables and callflow")
             return {"status": "error", "detail": "missing uuid"}
+
+        # ---- B-leg CDR? (mod_json_cdr log-b-leg=true) ---------------------
+        # BILLING-CRITICAL: a body classified here is never INSERTed, so a
+        # false positive is a lost billable row. Detection is exactly
+        # mod_json_cdr's own a/b predicate (an originator caller profile,
+        # rendered as callflow[].caller_profile.originator) plus
+        # `originating_leg_uuid`, which FreeSWITCH sets on originated PEER
+        # channels only. `signal_bond` / `bridge_uuid` (both legs),
+        # `other_leg_unique_id` (not a FreeSWITCH variable at all) and
+        # `direction=outbound` (API-originated A-legs) are deliberately NOT
+        # detectors — see services/stir_outcome.py for the source citations.
+        # `call_uuid` is passed so a self-referential classification falls back
+        # to the INSERT path rather than dropping the row.
+        a_leg_uuid = stir_oc.b_leg_a_uuid(body, own_uuid=str(call_uuid))
+        if a_leg_uuid is not None:
+            return await _apply_b_leg_stir_outcome(a_leg_uuid, str(call_uuid), variables)
 
         direction = str(variables.get("direction", "inbound"))
         product_type = str(variables.get("product_type", "trunk"))
@@ -506,16 +892,22 @@ async def _process_cdr_body(body: dict) -> dict:
         hangup_cause = variables.get("hangup_cause")
         if hangup_cause is not None:
             hangup_cause = str(hangup_cause)
-        sip_code = _safe_int(variables.get("sip_term_status"))
+        # sip_code: documented precedence chain (see _derive_sip_code) —
+        # `sip_term_status` alone was NULL on most answered calls because the
+        # A-leg only carries it when IT received the BYE.
+        sip_code = _derive_sip_code(variables, answered=answer_time is not None)
         carrier_used = variables.get("carrier_used")
         if carrier_used is not None:
             carrier_used = str(carrier_used)
         traffic_grade = variables.get("traffic_grade")
         if traffic_grade is not None:
             traffic_grade = str(traffic_grade)
-        freeswitch_node = variables.get("FreeSWITCH-Hostname")
-        if freeswitch_node is not None:
-            freeswitch_node = str(freeswitch_node)
+        # freeswitch_node: `FreeSWITCH-Hostname` is an event header, not a
+        # channel var (it was NULL on every production row). Fallback chain
+        # documented in _derive_fs_node: answered calls resolve to "<zone>-fs"
+        # from local_media_ip; failed/unanswered calls stay NULL ("unknown")
+        # until the FS Lua exports `fs_node`.
+        freeswitch_node = _derive_fs_node(body, variables)
 
         # Extract a destination prefix (up to first 6 digits after +) for
         # rate-lookup caching.  e.g. "+17743260301" -> "+17743"
@@ -621,6 +1013,14 @@ async def _process_cdr_body(body: dict) -> dict:
         if inbound_carrier_pop is not None:
             inbound_carrier_pop = str(inbound_carrier_pop).strip()[:50] or None
 
+        # ---- STIR/SHAKEN egress OUTCOME (migration 47) --------------------
+        # The ACTUAL wire result Kamailio handed back (X-Stir-Outcome ->
+        # `stir_outcome` channel var, or the auto-captured
+        # `sip_rh_X-Stir-Outcome`). Raw string + the `eff=` token. The
+        # INTENT-derived attestation (call_attestations) is untouched; the
+        # badge prefers this when present. See services/stir_outcome.py.
+        stir_outcome_raw, stir_eff_actual = stir_oc.extract_outcome(variables)
+
         # ---- Logging: summarize what we extracted -------------------------
         extracted = []
         dropped = []
@@ -653,6 +1053,9 @@ async def _process_cdr_body(body: dict) -> dict:
             "on_net": on_net, "on_net_hops": on_net_hops,
             "inbound_carrier": inbound_carrier,
             "inbound_carrier_pop": inbound_carrier_pop,
+            "freeswitch_node": freeswitch_node,
+            "stir_outcome": stir_outcome_raw,
+            "stir_eff_actual": stir_eff_actual,
         }
         for fname, fval in field_checks.items():
             if fval is not None:
@@ -669,66 +1072,9 @@ async def _process_cdr_body(body: dict) -> dict:
         )
 
         # ---- Insert with duplicate guard ----------------------------------
-        # The cdrs table uses a composite PK (id, start_time) for TimescaleDB
-        # hypertable partitioning, so ON CONFLICT on uuid is not available.
-        # Instead we use a NOT EXISTS subquery to skip duplicates.
-        #
-        # IMPORTANT: every parameter gets an explicit ::type cast so asyncpg
-        # never needs to infer PostgreSQL types.  This prevents
-        # AmbiguousParameterError when values are None.
-        result = await db.execute(
-            """
-            INSERT INTO cdrs (
-                uuid, customer_id, product_type, trunk_id, direction,
-                caller_id, destination, destination_prefix,
-                start_time, answer_time, end_time,
-                duration_ms, billable_ms,
-                hangup_cause, sip_code, carrier_used, traffic_grade,
-                freeswitch_node,
-                mos, quality_pct, jitter_min_ms, jitter_max_ms, jitter_avg_ms,
-                packet_loss_count, packet_total_count, packet_loss_pct,
-                flaw_total, r_factor,
-                rtp_audio_in_raw_bytes, rtp_audio_in_media_bytes,
-                rtp_audio_out_raw_bytes, rtp_audio_out_media_bytes,
-                rtp_audio_in_packet_count, rtp_audio_out_packet_count,
-                rtp_audio_in_jitter_burst_rate, rtp_audio_in_jitter_loss_rate,
-                rtp_audio_in_mean_interval,
-                read_codec, write_codec,
-                read_rate, write_rate,
-                sip_from_user, sip_to_user,
-                hangup_cause_q850, sip_hangup_disposition,
-                sip_user_agent, network_addr, bridge_uuid,
-                sbc_id,
-                origin_customer_id, terminating_customer_id, on_net, on_net_hops,
-                inbound_carrier, inbound_carrier_pop
-            )
-            SELECT
-                $1::varchar,  $2::int,       $3::varchar,  $4::int,       $5::varchar,
-                $6::varchar,  $7::varchar,   $8::varchar,
-                $9::timestamptz, $10::timestamptz, $11::timestamptz,
-                $12::int,     $13::int,
-                $14::varchar, $15::int,      $16::varchar,  $17::varchar,
-                $18::varchar,
-                $19::numeric, $20::numeric,  $21::numeric,  $22::numeric, $23::numeric,
-                $24::int,     $25::int,      $26::numeric,
-                $27::int,     $28::numeric,
-                $29::bigint,  $30::bigint,
-                $31::bigint,  $32::bigint,
-                $33::int,     $34::int,
-                $35::numeric, $36::numeric,
-                $37::numeric,
-                $38::varchar, $39::varchar,
-                $40::int,     $41::int,
-                $42::varchar, $43::varchar,
-                $44::smallint, $45::varchar,
-                $46::varchar, $47::varchar, $48::varchar,
-                $49::varchar,
-                $50::int,     $51::int,      $52::bool,     $53::smallint,
-                $54::varchar, $55::varchar
-            WHERE NOT EXISTS (
-                SELECT 1 FROM cdrs WHERE uuid = $1::varchar
-            )
-            """,
+        # Statement + casts + duplicate guard + pre-47 fallback documented on
+        # _cdr_insert_sql / _execute_cdr_insert above.
+        params = (
             str(call_uuid),         # $1  uuid
             int(customer_id),       # $2  customer_id
             str(product_type),      # $3  product_type
@@ -784,7 +1130,11 @@ async def _process_cdr_body(body: dict) -> dict:
             on_net_hops,            # $53 on_net_hops (int | None)
             inbound_carrier,        # $54 inbound_carrier (str | None)
             inbound_carrier_pop,    # $55 inbound_carrier_pop (str | None)
+            # ---- migration 47 — MUST stay the last two (see _cdr_insert_sql)
+            stir_outcome_raw,       # $56 stir_outcome (str | None) — raw X-Stir-Outcome
+            stir_eff_actual,        # $57 stir_eff_actual (str | None) — its eff= token
         )
+        result = await _execute_cdr_insert(str(call_uuid), params)
 
         # ---- STIR/SHAKEN attestation (companion table, failure-isolated) --
         # Derive + UPSERT the attestation row from the raw stir_* channel vars.
@@ -906,7 +1256,10 @@ async def ingest_cdr_bulk(request: Request):
     # gets a complete per-item failure list for targeted retry.
     MAX_ERROR_DETAIL_CHARS = 500
 
-    results = {"ok": 0, "duplicate": 0, "error": 0, "total": len(body)}
+    # `b_leg`: B-leg CDRs (mod_json_cdr log-b-leg=true) never insert — they
+    # only UPDATE their A-leg's STIR outcome columns — so they are tallied
+    # separately, never as ok/duplicate/error.
+    results = {"ok": 0, "duplicate": 0, "error": 0, "b_leg": 0, "total": len(body)}
     failed: list[dict] = []
 
     for i, cdr_body in enumerate(body):
@@ -918,7 +1271,7 @@ async def ingest_cdr_bulk(request: Request):
 
         result = await _process_cdr_body(cdr_body)
         status = result.get("status", "error")
-        if status in ("ok", "duplicate", "error"):
+        if status in ("ok", "duplicate", "error", "b_leg"):
             results[status] += 1
         else:
             results["error"] += 1
@@ -940,8 +1293,9 @@ async def ingest_cdr_bulk(request: Request):
     ]
 
     logger.info(
-        "CDR bulk ingest: processed %d CDRs (ok=%d, duplicate=%d, error=%d)",
+        "CDR bulk ingest: processed %d CDRs (ok=%d, duplicate=%d, error=%d, b_leg=%d)",
         results["total"], results["ok"], results["duplicate"], results["error"],
+        results["b_leg"],
     )
     return results
 
@@ -963,6 +1317,49 @@ async def ingest_cdr_bulk(request: Request):
 # per the CDR Search contract. Literal -> FastAPI rejects any other value
 # with a 422 and documents the enum in OpenAPI.
 Zone = Literal["east", "west", "central"]
+
+# ---------------------------------------------------------------------------
+# STIR badge — ONE serializer for every CDR-shaped response.
+#
+# INTENT lives in call_attestations (signed_attestation, derived at ingest);
+# ACTUAL lives on the cdrs row (stir_outcome / stir_eff_actual, migration 47).
+# Both are joined by uuid (cdrs.idx_cdrs_uuid / call_attestations PK) and
+# folded into the shared badge payload by services.stir_outcome.badge_fields
+# so the calls list, call detail, per-call attestation and Homer trace search
+# all emit the same five stir_* keys.
+# ---------------------------------------------------------------------------
+# Scalar sub-select (NOT a join): the CDR filter builder emits unqualified
+# column names (customer_id, ...) that would become ambiguous under a JOIN
+# with call_attestations, which also has customer_id.
+_STIR_INTENT_SUBSELECT = (
+    "(SELECT ca.signed_attestation FROM call_attestations ca "
+    "WHERE ca.call_id = cdrs.uuid) AS stir_attestation"
+)
+
+# From a call_attestations row (aliased `ca`) to its cdrs row's ACTUAL outcome.
+_STIR_OUTCOME_LATERAL = (
+    "LEFT JOIN LATERAL (SELECT c.stir_outcome, c.stir_eff_actual FROM cdrs c "
+    "WHERE c.uuid = ca.call_id ORDER BY c.start_time DESC LIMIT 1) oc ON true"
+)
+
+
+def _serialize_cdr_row(row) -> dict:
+    """Shared CDR row -> response dict (list + detail endpoints).
+
+    Converts the ms durations to seconds (historical contract) and folds the
+    stir_* columns into the shared badge payload. `stir_attestation` must be
+    selected via _STIR_INTENT_SUBSELECT; `stir_outcome` / `stir_eff_actual`
+    come straight off the row.
+    """
+    cdr = dict(row)
+    cdr["duration_seconds"] = (cdr.pop("duration_ms") or 0) / 1000
+    cdr["billable_seconds"] = (cdr.pop("billable_ms") or 0) / 1000
+    cdr.update(stir_oc.badge_fields(
+        cdr.pop("stir_attestation", None),
+        cdr.get("stir_eff_actual"),
+        cdr.get("stir_outcome"),
+    ))
+    return cdr
 
 
 def _as_utc(dt: Optional[datetime]) -> Optional[datetime]:
@@ -1154,7 +1551,10 @@ async def query_cdrs(
                sip_from_user, sip_to_user, hangup_cause_q850,
                sip_hangup_disposition, sip_user_agent,
                network_addr, bridge_uuid, sbc_id,
-               inbound_carrier, inbound_carrier_pop, on_net
+               inbound_carrier, inbound_carrier_pop, on_net,
+               freeswitch_node,
+               stir_outcome, stir_eff_actual,
+               {_STIR_INTENT_SUBSELECT}
         FROM cdrs
         {where_sql}
         ORDER BY start_time DESC LIMIT ${idx} OFFSET ${idx + 1}
@@ -1166,9 +1566,7 @@ async def query_cdrs(
     # Convert to dicts and format times
     cdrs = []
     for r in results:
-        cdr = dict(r)
-        cdr["duration_seconds"] = (cdr.pop("duration_ms") or 0) / 1000
-        cdr["billable_seconds"] = (cdr.pop("billable_ms") or 0) / 1000
+        cdr = _serialize_cdr_row(r)
         cdrs.append(cdr)
 
     return {"cdrs": cdrs, "count": len(cdrs), "total": total,
@@ -1291,7 +1689,7 @@ async def get_cdr(
     lookup itself, so a foreign-owned CDR is indistinguishable from a missing
     one. Admins and support (customer_filter None) read any CDR.
     """
-    query = """
+    query = f"""
         SELECT uuid, customer_id, product_type, trunk_id, direction,
                caller_id, destination, destination_prefix,
                start_time, answer_time, end_time,
@@ -1312,7 +1710,9 @@ async def get_cdr(
                sip_from_user, sip_to_user, hangup_cause_q850,
                sip_hangup_disposition, sip_user_agent,
                network_addr, bridge_uuid, sbc_id,
-               inbound_carrier, inbound_carrier_pop, on_net
+               inbound_carrier, inbound_carrier_pop, on_net,
+               stir_outcome, stir_eff_actual,
+               {_STIR_INTENT_SUBSELECT}
         FROM cdrs WHERE uuid = $1
     """
     values: list = [cdr_uuid]
@@ -1324,9 +1724,7 @@ async def get_cdr(
     if not result:
         raise HTTPException(status_code=404, detail="CDR not found")
 
-    cdr = dict(result)
-    cdr["duration_seconds"] = (cdr.pop("duration_ms") or 0) / 1000
-    cdr["billable_seconds"] = (cdr.pop("billable_ms") or 0) / 1000
+    cdr = _serialize_cdr_row(result)
     # Convert Decimal types to float for JSON serialization
     for key in ("mos", "quality_pct", "jitter_min_ms", "jitter_max_ms",
                 "jitter_avg_ms", "packet_loss_pct", "r_factor",
@@ -1356,33 +1754,31 @@ async def get_cdr_attestation(
     """
     # Scope the lookup itself by customer for tenants so a foreign-owned
     # row is indistinguishable from a missing one (no existence leak).
+    # The ACTUAL wire outcome lives on the cdrs row (migration 47); joined
+    # LATERAL by uuid (indexed) so the badge is served from ONE payload.
+    base_sql = f"""
+            SELECT ca.call_id, ca.customer_id, ca.signed_attestation,
+                   ca.attest_intent, ca.inbound_signed, ca.inbound_attest,
+                   ca.inbound_verstat, ca.verstat_source, ca.created_at,
+                   oc.stir_outcome, oc.stir_eff_actual
+            FROM call_attestations ca
+            {_STIR_OUTCOME_LATERAL}
+            WHERE ca.call_id = $1
+    """
     if customer_filter is not None:
-        row = await db.fetch_one(
-            """
-            SELECT call_id, customer_id, signed_attestation, attest_intent,
-                   inbound_signed, inbound_attest, inbound_verstat,
-                   verstat_source, created_at
-            FROM call_attestations
-            WHERE call_id = $1 AND customer_id = $2
-            """,
-            call_id, customer_filter,
-        )
+        row = await db.fetch_one(base_sql + " AND ca.customer_id = $2",
+                                 call_id, customer_filter)
     else:
-        row = await db.fetch_one(
-            """
-            SELECT call_id, customer_id, signed_attestation, attest_intent,
-                   inbound_signed, inbound_attest, inbound_verstat,
-                   verstat_source, created_at
-            FROM call_attestations
-            WHERE call_id = $1
-            """,
-            call_id,
-        )
+        row = await db.fetch_one(base_sql, call_id)
 
     if not row:
         raise HTTPException(status_code=404, detail="Attestation not found")
 
-    return dict(row)
+    out = dict(row)
+    out.update(stir_oc.badge_fields(
+        out.get("signed_attestation"), out.pop("stir_eff_actual", None),
+        out.pop("stir_outcome", None)))
+    return out
 
 
 @router.post("/{cdr_uuid}/rate")

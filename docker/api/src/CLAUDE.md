@@ -17,6 +17,7 @@ src/
   db/
     __init__.py
     database.py              # asyncpg connection pool, query helpers
+    schema_check.py          # Deploy-order guard: are the migration-47 cdrs columns present? (startup CRITICAL + /health/detailed)
     redis_client.py          # Async Redis client, caching, CPS rate limiting
   models/
     __init__.py              # Empty -- Pydantic models are defined inline in routers
@@ -49,7 +50,8 @@ src/
 
 ### Startup (lifespan context manager)
 1. `init_db()` -- creates asyncpg connection pool (parses `DATABASE_URL` with regex)
-2. `init_redis()` -- creates redis-py async client with retry logic (5 attempts, 2s backoff)
+2. `schema_check.run_startup_check()` -- probes `information_schema.columns` for `cdrs.stir_outcome` / `cdrs.stir_eff_actual` (migration 47, bound by the ingest INSERT). Missing → logs **CRITICAL** with the exact `sudo -u postgres psql -d voip -f /opt/revup/docker/postgres/init/47_cdr_stir_outcome.sql` remedy; DB unreachable → WARNING. Never raises — the API keeps serving.
+3. `init_redis()` -- creates redis-py async client with retry logic (5 attempts, 2s backoff)
 
 ### Shutdown
 1. `close_db()` -- closes asyncpg pool
@@ -84,7 +86,7 @@ Handles authentication and user management. Contains inline Pydantic models:
 - UCaaS access computed from `account_type` + `ucaas_enabled` flag
 
 ### health.py
-Two endpoints, no auth. Both check DB (`SELECT 1`) and Redis (`ping`). Returns `healthy` or `degraded`.
+Two endpoints, no auth. Both check DB (`SELECT 1`) and Redis (`ping`). Returns `healthy` or `degraded`. `/health/detailed` additionally reports `components.schema` via `db.schema_check.check_cdr_schema()` (time-bounded): `healthy`, `degraded: cdrs is missing column(s) … <remedy>`, or `unknown: <error>`. `/health` (Docker healthcheck) deliberately does NOT include it.
 
 ### customers.py
 CRUD for the `customers` table. Account types: `rcf`, `api`, `trunk`, `hybrid`, `ucaas`.
@@ -127,6 +129,7 @@ CDR ingestion and querying. The largest router file.
   - Extracts ~55 columns including full RTP quality metrics (jitter, packet loss, MOS, codec info), the on-net set `origin_customer_id`/`terminating_customer_id`/`on_net`/`on_net_hops` (records both parties of an internal call; `customer_id` stays the terminal so `rate_cdr()` is unchanged; off-net → `origin==customer`, `on_net=false`), and the inbound-carrier attribution pair `inbound_carrier`/`inbound_carrier_pop` (FS channel vars, migration 40; absent/empty → NULL)
   - Explicit `::type` casts on all INSERT parameters for asyncpg/PgBouncer compatibility (the INSERT binds 55 positional params, `$1`–`$55`; on-net columns are `$50::int`/`$51::int`/`$52::bool`/`$53::smallint`, inbound-carrier columns `$54::varchar`/`$55::varchar`)
   - Duplicate detection via `WHERE NOT EXISTS` (the cdrs table uses a composite PK for TimescaleDB)
+  - **Pre-47 fallback** (`_cdr_insert_sql` / `_execute_cdr_insert`): `stir_outcome`/`stir_eff_actual` are the LAST two entries of the column and value lists, so on `asyncpg.UndefinedColumnError` for either the INSERT is retried without them (`params[:55]`) and the condition logged at ERROR once per 300s — the billable row lands even if the API build is ahead of migration 47. Other missing columns are NOT swallowed.
   - Always returns 200 to prevent FreeSWITCH retry storms
 - **Query**: `GET /v1/cdrs` with filters (customer, trunk, product_type, direction, destination, date range, rated_only). Defaults to last 24 hours.
 - **Summary**: `GET /v1/cdrs/summary` grouped by day, hour, or destination prefix.

@@ -62,6 +62,7 @@ import {
   attestLabel,
   attestDescription,
   verstatVerdict,
+  resolveStirBadge,
 } from '../components/stir/attestationColors';
 import '../styles/dl-troubleshoot.css';
 
@@ -492,19 +493,42 @@ interface AttestTone {
  *  `attestationColors` palette (A=green, B=amber, C=gray, div=azure) but with
  *  ink-dark variants legible on white (the shared tokens are tuned for the
  *  dark surfaces they still serve elsewhere). */
-const ATTEST_TONES: Record<'A' | 'B' | 'C' | 'div' | 'none', AttestTone> = {
+const ATTEST_TONES: Record<'A' | 'B' | 'C' | 'div' | 'base-only' | 'unsigned' | 'none', AttestTone> = {
   A: { text: '#15803d', bg: 'rgba(22,163,74,0.1)', border: 'rgba(22,163,74,0.26)' },
   B: { text: '#b45309', bg: 'rgba(180,83,9,0.09)', border: 'rgba(180,83,9,0.26)' },
   C: { text: '#5d6f8c', bg: 'rgba(93,111,140,0.08)', border: 'rgba(93,111,140,0.2)' },
   div: { text: '#1d63dd', bg: 'rgba(47,125,246,0.09)', border: 'rgba(47,125,246,0.26)' },
+  // Wire-outcome labels (Kamailio `eff=`): a base PASSporT went out but no div
+  // could be chained (amber), or nothing was signed at all (red — the
+  // compliance-risk case).
+  'base-only': { text: '#b45309', bg: 'rgba(180,83,9,0.09)', border: 'rgba(180,83,9,0.26)' },
+  unsigned: { text: '#b91c1c', bg: 'rgba(220,38,38,0.08)', border: 'rgba(220,38,38,0.26)' },
   none: { text: '#8b99b0', bg: 'rgba(93,111,140,0.08)', border: 'rgba(93,111,140,0.2)' },
 };
 
+const KNOWN_TONES = new Set<string>(['A', 'B', 'C', 'div', 'base-only', 'unsigned']);
+
 function attestTone(level: string | null | undefined): AttestTone {
-  if (level === 'A' || level === 'B' || level === 'C' || level === 'div') {
-    return ATTEST_TONES[level];
+  if (level && KNOWN_TONES.has(level)) {
+    return ATTEST_TONES[level as keyof typeof ATTEST_TONES];
   }
   return ATTEST_TONES.none;
+}
+
+/**
+ * Subtle "not confirmed on wire" marker appended to an intent-only badge: a
+ * hollow ring glyph, muted, with the explanation in the tooltip. Badges
+ * confirmed by Kamailio's outcome carry no marker — silence means verified.
+ */
+function IntentMark() {
+  return (
+    <span
+      aria-label="intent, not confirmed on wire"
+      style={{ color: INK_FAINT, marginLeft: 3, fontSize: '0.62rem', fontWeight: 600, lineHeight: 1 }}
+    >
+      ◌
+    </span>
+  );
 }
 
 interface AttestationBadgeProps {
@@ -551,13 +575,23 @@ function AttestationBadge({ attestation }: AttestationBadgeProps) {
   const sourceText = attestation.verstat_source
     ? ` [${attestation.verstat_source}]`
     : '';
+  // Which fact the badge shows: the ACTUAL wire outcome Kamailio reported
+  // (stir_badge_source='actual') or, for calls that predate the outcome
+  // hand-off, the INTENT we asked for. Intent-only badges get a subtle marker
+  // + tooltip; confirmed ones carry none.
+  const badge = resolveStirBadge(attestation);
+  const isIntent = badge.source === 'intent';
+  const wireLine =
+    badge.source === 'actual'
+      ? `On wire: ${attestLabel(badge.level)} (${attestDescription(badge.level)})${badge.mode ? ` · mode=${badge.mode}` : ''} — ${badge.note}`
+      : `Signed (intent): ${attestLabel(badge.level)} (${attestDescription(badge.level)}) — ${badge.note}`;
   const title = [
     `Caller: ${callerAttest}`,
     `Verification: ${verstatGlyph} ${verstatText}${sourceText}`,
-    `Signed: ${attestLabel(attestation.signed_attestation)} (${attestDescription(attestation.signed_attestation)})`,
+    wireLine,
   ].join('\n');
 
-  const signed = attestation.signed_attestation;
+  const signed = badge.level;
 
   // `div` is only the *mechanism*. The meaningful signal is the attestation the
   // call actually carries — the caller's preserved level (`inbound_attest`). So
@@ -576,15 +610,15 @@ function AttestationBadge({ attestation }: AttestationBadgeProps) {
         <span style={{ color: carried.text }}>{attestLabel(attestation.inbound_attest)}</span>
         <span style={{ color: INK_FAINT, margin: '0 1px' }}>→</span>
         <span style={{ color: divTone.text }}>div</span>
+        {isIntent && <IntentMark />}
       </span>
     );
   }
 
-  // Base A/B/C/div(no-caller): the single semantic-coloured letter, as before.
-  // Any out-of-band value (e.g. a runtime "unsigned") isn't part of the
-  // AttestationLevel union — render it as a muted "unsigned" rather than a hard
-  // semantic colour.
-  const isKnownLevel = signed === 'A' || signed === 'B' || signed === 'C' || signed === 'div';
+  // Base A/B/C/div(no-caller) plus the wire-outcome labels base-only/unsigned:
+  // the single semantic-coloured label. Any other value (a label this build
+  // doesn't know yet) renders muted rather than in a hard semantic colour.
+  const isKnownLevel = !!signed && KNOWN_TONES.has(signed);
   const tone = isKnownLevel ? attestTone(signed) : ATTEST_TONES.none;
   return (
     <span
@@ -592,7 +626,8 @@ function AttestationBadge({ attestation }: AttestationBadgeProps) {
       title={title}
       style={{ background: tone.bg, borderColor: tone.border, color: tone.text }}
     >
-      {isKnownLevel ? attestLabel(signed) : 'unsigned'}
+      {signed ? attestLabel(signed) : 'unsigned'}
+      {isIntent && <IntentMark />}
     </span>
   );
 }
