@@ -152,16 +152,21 @@ end
 -- SIP display-name hardening
 -- ================================================================
 -- A display name we hand to Kamailio in X-From-Name / X-Original-CID-Name is
--- rendered into TWO different SIP productions, one of which is UNQUOTED:
---   * From display  -- Kamailio assigns `$fn = $hdr(...)`, and pv_set_xto_attr()
---     case 3 (modules/pv/pv_core.c) inserts the value VERBATIM as the
---     display-name, adding NO quotes. A value containing '<' '>' '@' ','
---     ';' ':' would restructure the From header (a second angle-addr, a
---     forged URI, a bogus header parameter).
---   * PAI display   -- appended inside an explicit \"...\" quoted-string, where
---     '"' and '\\' are the escapes.
--- So the structural set is stripped for BOTH, and CR/LF/control bytes become
--- spaces (header injection). This matters because with the From pass-through
+-- rendered into TWO SIP quoted-string productions:
+--   * From display  -- Kamailio assigns `$fn = "\"" + $hdr(...) + "\""`;
+--     pv_set_xto_attr() case 3 (modules/pv/pv_core.c) inserts the value
+--     VERBATIM (it adds no quotes itself — the cfg supplies them). Inside a
+--     quoted-string only '"' and '\\' are structural (escapes), so THIS
+--     function MUST keep stripping both, or a name could close the quotes
+--     early and a following '<' '>' '@' ',' ';' ':' would restructure the
+--     From header (a second angle-addr, a forged URI, a bogus parameter).
+--   * PAI display   -- appended inside an explicit \"...\" quoted-string, same
+--     two escapes.
+-- So the quote/escape pair AND the structural set are stripped for BOTH, and
+-- CR/LF/control bytes become spaces (header injection). An empty result never
+-- reaches the wire: X-Original-CID-Name is only emitted when non-empty and
+-- X-From-Name falls back to the From number (sanitize_display_name).
+-- This matters because with the From pass-through
 -- the name is CARRIER-SUPPLIED (the A-leg caller's display name) -- before it,
 -- the only source was the admin-provisioned RCF line name.
 -- Well-formed names ("Main Office", "Smith & Co.") are byte-identical through

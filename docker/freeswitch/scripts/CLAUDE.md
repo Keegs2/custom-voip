@@ -342,9 +342,13 @@ container. Rollback = remove the line + recreate. Digit form follows the DID's: 
 a NANP caller, full +E.164 otherwise. `rcf_from_passthrough` (true/false) is
 recorded as a CDR breadcrumb.
 
-Display names are passed through `sip_display_safe()` first: `$fn` is inserted into
-the UNQUOTED display-name production by Kamailio (`pv_set_xto_attr()` case 3 adds
-no quotes), so `< > @ , ; : " \` and control bytes are removed. With the
+Display names are passed through `sip_display_safe()` first. Kamailio now assigns
+`$fn = "\"" + $hdr(X-From-Name) + "\""` (and the same for the `X-Original-CID-Name`
+fallback) — `pv_set_xto_attr()` case 3 inserts the value verbatim and adds no quotes
+of its own, so the cfg supplies the RFC 3261 quoted-string and the Lua MUST keep
+stripping `"` and `\` (the only escapes inside a quoted-string) plus `< > @ , ; :`
+and control bytes. An empty sanitised name never produces `""`: `X-Original-CID-Name`
+is emitted only when non-empty and `X-From-Name` falls back to the From number. With the
 pass-through the name is CARRIER-supplied, not admin-supplied — that is why the
 sanitiser exists. Kamailio additionally spoof-strips `X-From-Name`,
 `X-Original-CID` and `X-Original-CID-Name` at every external ingress.
