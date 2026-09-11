@@ -291,7 +291,13 @@ non-100 reply of the carrier leg and of the `X-PBX-Dest` leg
 `stir_outcome_reset()` before and `stir_outcome_capture()` after EVERY bridge
 attempt (the RCF 4-attempt failover loop included), and pin the verbatim value in
 the A-leg channel variable **`stir_outcome`** — the name and value format are a
-contract with the CDR ingest; do not change either.
+contract with the CDR ingest; do not change either. The reset clears only the raw
+`sip_rh_`/`sip_ph_` slots; `stir_outcome` **retains the last non-empty value** and
+is overwritten only by a newer non-empty capture, so the final attempt's outcome
+wins when one arrives and an attempt with no hand-back (tm-generated 408 /
+failure_route 503 never run `onreply_route`; a §8.12 peer-handed-off reply fails
+Kamailio's `!IS_INTERNAL_SOURCE` guard) does not blank a real earlier outcome.
+`stir_outcome_attempt` names the attempt the stored value came from.
 
 **No `import` variable is involved.** mod_sofia exports the reply header on the
 B-leg (`sofia.c:6775-6784` → `sofia_glue.c:959-965`; the name filter

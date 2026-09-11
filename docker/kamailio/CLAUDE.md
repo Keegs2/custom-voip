@@ -1056,14 +1056,38 @@ on (`t_reply.c:1977` → `2058` → `msg_translator.c:2446-2458`
 
 **FreeSWITCH side.** `inbound_router.lua` / `trunk_outbound.lua` /
 `api_outbound.lua` call `stir_outcome_reset()` before and `stir_outcome_capture()`
-after EVERY bridge attempt (the RCF 4-attempt failover loop included), so a failed
-attempt's outcome can never be attributed to a later one. No `import` variable is
-involved: mod_sofia exports the reply header on the B-leg
+after EVERY bridge attempt (the RCF 4-attempt failover loop included). The reset
+clears only the RAW `sip_rh_`/`sip_ph_` capture slots, so a header left over from
+attempt N can never be read as N+1's; the CDR variable `stir_outcome` **retains the
+last non-empty outcome** and is overwritten only when a newer non-empty one is
+captured — the FINAL attempt's outcome wins whenever one arrives, and an attempt
+with no hand-back leaves the previous real outcome in place rather than an empty
+field (which the ingest would silently replace with FS intent).
+`stir_outcome_attempt` records which attempt the stored value came from. No
+`import` variable is involved: mod_sofia exports the reply header on the B-leg
 (`sofia.c:6775-6784` → `sofia_glue.c:959-965`) and copies it to the partner with
 `switch_ivr_transfer_variable(…, "~sip_rh_"/"~sip_ph_")` (`sofia.c:6787-6798`),
 which works even while the originate is failing because the B-leg's `signal_bond`
 is set at creation (`switch_core_session.c:711`). The capture consumes the raw
 `sip_rh_`/`sip_ph_` variables so they cannot be re-emitted later or reach the CDR.
+
+**Hand-back blind spots (why retention matters).** Two classes of final reply
+carry NO `X-Stir-Outcome`, so the attempt they end contributes nothing to the CDR:
+
+1. **Locally generated finals never run `onreply_route`.** tm's `fr_inv_timer`
+   408 (dead SBC / silent carrier — the FS `progress_timeout` case) and every
+   `failure_route` `send_reply()` (e.g. the 503 in `CARRIER_FAILURE`) are built by
+   tm, not received, so `REPLY_HANDLER` never sees them.
+2. **§8.12 peer-handed-off replies.** A carrier reply that landed on the OTHER
+   SBC during a failback/drain window is `send_data()`-relayed to the owner from
+   the sibling's internal IP; `REPLY_HANDLER`'s `!route(IS_INTERNAL_SOURCE)` guard
+   (correct — it keeps FS-sourced A-leg replies clean) then skips the append, so
+   that reply reaches FS without the header.
+
+In both cases the CDR keeps the last real outcome (with `stir_outcome_attempt`
+naming the attempt it came from) or, if no attempt ever handed one back, stays
+empty and the ingest falls back to intent. Fail-soft by design; never affects the
+call.
 
 **Deploy order — HARD requirement (X-From-Name deploy-window leak).** #122 adds
 the `X-From-Name` header (FS → Kamailio, From-display-only hand-off for the RCF

@@ -234,8 +234,24 @@ end
 local STIR_OUTCOME_RH = "sip_rh_X-Stir-Outcome"
 local STIR_OUTCOME_PH = "sip_ph_X-Stir-Outcome"
 
--- Clear both capture slots AND the CDR var before every bridge attempt, so a
--- failed earlier attempt's outcome can never be attributed to a later one.
+-- Clear the two RAW capture slots before every bridge attempt, so a reply
+-- header left over from attempt N can never be read as attempt N+1's.
+-- The CDR var `stir_outcome` is deliberately NOT cleared: it RETAINS the last
+-- non-empty outcome and is only overwritten when a newer non-empty one is
+-- captured, so the FINAL attempt's outcome wins whenever one arrives, and an
+-- attempt that produces NO hand-back leaves the previous real outcome in
+-- place instead of an EMPTY CDR field (which the ingest would silently
+-- replace with FS intent). Two hand-back BLIND SPOTS make that matter:
+--   1. Locally generated finals never run onreply_route: tm's fr_inv_timer
+--      408 (dead SBC / carrier silence, the progress_timeout case) and a
+--      failure_route send_reply(503) carry no X-Stir-Outcome.
+--   2. A docker/kamailio/CLAUDE.md 8.12 peer-handed-off reply reaches the
+--      owner SBC from the SIBLING SBC's internal IP; REPLY_HANDLER's
+--      `!route(IS_INTERNAL_SOURCE)` guard then skips the header, so a reply
+--      that crossed the pair during a failback window hands nothing back.
+-- `stir_outcome_attempt` (set by the capture) records WHICH attempt the
+-- stored value came from, so a retained earlier-attempt outcome is
+-- distinguishable in the CDR from the winning attempt's.
 -- An empty value DELETES a channel variable (switch_channel.c:1497-1499
 -- `if (zstr(value)) switch_event_del_header(...)`), and the Lua binding hands
 -- the value straight through (switch_cpp.cpp:770-776) -- this is a real
@@ -244,12 +260,13 @@ local function stir_outcome_reset()
     pcall(function()
         session:setVariable(STIR_OUTCOME_RH, "")
         session:setVariable(STIR_OUTCOME_PH, "")
-        session:setVariable("stir_outcome", "")
     end)
 end
 
 -- Read the outcome for the attempt that just finished (final reply wins over
--- provisional), pin it in `stir_outcome`, then CONSUME the raw slots.
+-- provisional), pin it in `stir_outcome` (overwriting any earlier attempt's
+-- value; an EMPTY read keeps the earlier value — see stir_outcome_reset),
+-- then CONSUME the raw slots.
 -- Consuming matters: mod_sofia RE-EMITS any sip_rh_*/sip_ph_* channel variable
 -- as a real header on responses THIS channel sends (mod_sofia.c:960 200 OK,
 -- :2473 180, :2656 183, :570 error responses -> sofia_glue_get_extra_headers()),
@@ -271,13 +288,16 @@ local function stir_outcome_capture(uuid, label)
     end)
     if v ~= "" then
         v = v:match("^%s*(.-)%s*$") or v
-        pcall(function() session:setVariable("stir_outcome", v) end)
+        pcall(function()
+            session:setVariable("stir_outcome", v)
+            session:setVariable("stir_outcome_attempt", tostring(label))
+        end)
         freeswitch.consoleLog("INFO", string.format(
             "[%s] STIR outcome (%s, from %s reply): %s\n", uuid, tostring(label), src, v))
     else
         freeswitch.consoleLog("DEBUG", string.format(
-            "[%s] STIR outcome (%s): no X-Stir-Outcome on any reply (local failure / pre-hand-back SBC)\n",
-            uuid, tostring(label)))
+            "[%s] STIR outcome (%s): no X-Stir-Outcome on any reply (local failure / peer-handed-off reply / pre-hand-back SBC) — keeping stir_outcome=%q from attempt %q\n",
+            uuid, tostring(label), get_var("stir_outcome", ""), get_var("stir_outcome_attempt", "")))
     end
     return v
 end
