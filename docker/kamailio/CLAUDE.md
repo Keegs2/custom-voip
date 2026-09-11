@@ -958,7 +958,8 @@ why a PBX-supplied Identity is kept on trunk origination).
 | Trunk origination, no PBX Identity | our base (A/B) ×1 |
 | Trunk origination WITH a PBX-supplied Identity | PBX chain ×1 + our base (A/B) ×1 |
 | Inbound DID delivered to a trunk PBX (`X-PBX-Dest`) | inbound chain ×1, no div |
-| RCF forward landing on-net on a trunk DID (`ctx.hops > 0`) | inbound chain ×1 + our `ppt=div` ×1 — `terminate_trunk` marks the leg `X-Attestation: div` + `Diversion: <last forwarding RCF DID>` + re-asserts `X-In-Identity`; a DIRECT trunk inbound (`hops == 0`) still gets chain ×1, no div |
+| RCF forward landing on-net on a trunk DID (`ctx.hops > 0`), pass-through | inbound chain ×1 + our `ppt=div` ×1 — `terminate_trunk` marks the leg `X-Attestation: div` + `Diversion: <last forwarding RCF DID>`; a DIRECT trunk inbound (`hops == 0`) still gets chain ×1, no div |
+| RCF forward landing on-net on a trunk DID, MASKED (`pass_caller_id=false` somewhere in the chain) | inbound chain ×1 ONLY (`mode=pbx-chainonly`, `eff=base-only`) — the PBX leg runs the same `route[STIR_BASE_ORIG]` check as the carrier leg (under `STIR_MASKED_REORIG`): base `orig.tn` != the presented (masking) From user ⇒ a div could never verify (RFC 8946 §5), so none is signed. Undecodable base ⇒ conservative chain + div with a WARN. The carrier leg re-originates at A in the same situation; a PBX delivery is not an origination, so chain-only is the honest set |
 
 Signing OFF: every egress still strips FS copies and re-emits the inbound
 chain once (`eff=unsigned`).
@@ -974,7 +975,7 @@ could have gone out `base-only` or `unsigned` and nothing downstream would know.
 **Contract (do not change the name or the format — the CDR ingest parses it).**
 
 ```
-X-Stir-Outcome: eff=<div|A|B|C|base-only|unsigned>;mode=<relay|passthrough-div|reorig|gateway-C|base|pbx>;identities=<n>;base=<n>;div=<0|1>;stripped=<n>
+X-Stir-Outcome: eff=<div|A|B|C|base-only|unsigned>;mode=<relay|passthrough-div|reorig|gateway-C|base|pbx|pbx-chainonly>;identities=<n>;base=<n>;div=<0|1>;stripped=<n>
 ```
 
 FreeSWITCH lands the verbatim value in the A-leg channel variable **`stir_outcome`**.
