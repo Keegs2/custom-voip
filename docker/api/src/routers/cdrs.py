@@ -5,9 +5,11 @@ from datetime import datetime, timedelta, timezone
 from db import database as db
 from auth.dependencies import get_support_read_filter, require_admin
 from services import stir_outcome as stir_oc
+import asyncpg
 import logging
 import math
 import re
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -622,6 +624,138 @@ async def _store_call_attestation(call_uuid: str, customer_id: int, variables: d
         )
 
 
+# ---------------------------------------------------------------------------
+# The CDR INSERT — built once at import.
+#
+# The cdrs table uses a composite PK (id, start_time) for TimescaleDB
+# hypertable partitioning, so ON CONFLICT on uuid is not available; the
+# `WHERE NOT EXISTS` sub-select is the duplicate guard. Every parameter gets an
+# explicit ::type cast so asyncpg never needs to infer PostgreSQL types
+# (AmbiguousParameterError when values are None; PgBouncer transaction mode).
+#
+# DEPLOY-ORDER RESILIENCE (migration 47): `stir_outcome` / `stir_eff_actual`
+# are the LAST entries of BOTH the column list and the value list ($56/$57),
+# so the pre-47 statement is the identical text with those two tails omitted —
+# nothing is renumbered, $1..$55 bind exactly as before. If the API build
+# reaches production before 47 is applied, the full INSERT raises
+# UndefinedColumnError; `_execute_cdr_insert` then retries with the pre-47
+# statement so the billable row still lands (the two STIR columns are the
+# only thing lost) and logs the condition at ERROR, rate-limited. The startup
+# guard (db/schema_check.py) and GET /health/detailed name the remedy.
+# ---------------------------------------------------------------------------
+def _cdr_insert_sql(with_stir_outcome: bool) -> str:
+    stir_cols = ",\n                stir_outcome, stir_eff_actual" if with_stir_outcome else ""
+    stir_vals = ",\n                $56::text,    $57::text" if with_stir_outcome else ""
+    return f"""
+            INSERT INTO cdrs (
+                uuid, customer_id, product_type, trunk_id, direction,
+                caller_id, destination, destination_prefix,
+                start_time, answer_time, end_time,
+                duration_ms, billable_ms,
+                hangup_cause, sip_code, carrier_used, traffic_grade,
+                freeswitch_node,
+                mos, quality_pct, jitter_min_ms, jitter_max_ms, jitter_avg_ms,
+                packet_loss_count, packet_total_count, packet_loss_pct,
+                flaw_total, r_factor,
+                rtp_audio_in_raw_bytes, rtp_audio_in_media_bytes,
+                rtp_audio_out_raw_bytes, rtp_audio_out_media_bytes,
+                rtp_audio_in_packet_count, rtp_audio_out_packet_count,
+                rtp_audio_in_jitter_burst_rate, rtp_audio_in_jitter_loss_rate,
+                rtp_audio_in_mean_interval,
+                read_codec, write_codec,
+                read_rate, write_rate,
+                sip_from_user, sip_to_user,
+                hangup_cause_q850, sip_hangup_disposition,
+                sip_user_agent, network_addr, bridge_uuid,
+                sbc_id,
+                origin_customer_id, terminating_customer_id, on_net, on_net_hops,
+                inbound_carrier, inbound_carrier_pop{stir_cols}
+            )
+            SELECT
+                $1::varchar,  $2::int,       $3::varchar,  $4::int,       $5::varchar,
+                $6::varchar,  $7::varchar,   $8::varchar,
+                $9::timestamptz, $10::timestamptz, $11::timestamptz,
+                $12::int,     $13::int,
+                $14::varchar, $15::int,      $16::varchar,  $17::varchar,
+                $18::varchar,
+                $19::numeric, $20::numeric,  $21::numeric,  $22::numeric, $23::numeric,
+                $24::int,     $25::int,      $26::numeric,
+                $27::int,     $28::numeric,
+                $29::bigint,  $30::bigint,
+                $31::bigint,  $32::bigint,
+                $33::int,     $34::int,
+                $35::numeric, $36::numeric,
+                $37::numeric,
+                $38::varchar, $39::varchar,
+                $40::int,     $41::int,
+                $42::varchar, $43::varchar,
+                $44::smallint, $45::varchar,
+                $46::varchar, $47::varchar, $48::varchar,
+                $49::varchar,
+                $50::int,     $51::int,      $52::bool,     $53::smallint,
+                $54::varchar, $55::varchar{stir_vals}
+            WHERE NOT EXISTS (
+                SELECT 1 FROM cdrs WHERE uuid = $1::varchar
+            )
+            """
+
+
+_CDR_INSERT_SQL = _cdr_insert_sql(with_stir_outcome=True)          # binds $1..$57
+_CDR_INSERT_SQL_PRE47 = _cdr_insert_sql(with_stir_outcome=False)   # binds $1..$55
+_CDR_INSERT_PRE47_PARAM_COUNT = 55
+_STIR_OUTCOME_COLUMNS = ("stir_outcome", "stir_eff_actual")
+
+# Rate limit for the fallback log line: one ERROR per interval per worker,
+# the rest at DEBUG — a busy zone in the deploy window must not flood logs
+# with one stack per call, but the condition must stay visible.
+_PRE47_LOG_INTERVAL_SEC = 300.0
+_pre47_last_logged_mono = 0.0
+_pre47_fallback_count = 0
+
+
+def _is_missing_stir_outcome_column(exc: BaseException) -> bool:
+    """True iff the UndefinedColumnError is about one of the migration-47
+    columns ('column "stir_outcome" of relation "cdrs" does not exist')."""
+    msg = str(exc)
+    return any(col in msg for col in _STIR_OUTCOME_COLUMNS)
+
+
+def _note_pre47_fallback(call_uuid: str, exc: BaseException) -> None:
+    global _pre47_last_logged_mono, _pre47_fallback_count
+    _pre47_fallback_count += 1
+    now = time.monotonic()
+    if now - _pre47_last_logged_mono >= _PRE47_LOG_INTERVAL_SEC:
+        _pre47_last_logged_mono = now
+        logger.error(
+            "CDR ingest: cdrs is missing the migration-47 columns (%s) — inserting "
+            "uuid=%s WITHOUT stir_outcome/stir_eff_actual (%d fallback(s) so far in "
+            "this worker). The API build is ahead of the database; apply on the East "
+            "primary: sudo -u postgres psql -d voip -f "
+            "/opt/revup/docker/postgres/init/47_cdr_stir_outcome.sql "
+            "(next reminder in %ds)",
+            exc, call_uuid, _pre47_fallback_count, int(_PRE47_LOG_INTERVAL_SEC),
+        )
+    else:
+        logger.debug("CDR ingest: pre-47 fallback INSERT for uuid=%s (%d so far)",
+                     call_uuid, _pre47_fallback_count)
+
+
+async def _execute_cdr_insert(call_uuid: str, params: tuple) -> str:
+    """Run the CDR INSERT; on a missing migration-47 column retry without it.
+
+    Any OTHER UndefinedColumnError (or any other error) propagates unchanged
+    to _process_cdr_body's catch-all, exactly as before.
+    """
+    try:
+        return await db.execute(_CDR_INSERT_SQL, *params)
+    except asyncpg.exceptions.UndefinedColumnError as exc:
+        if not _is_missing_stir_outcome_column(exc):
+            raise
+        _note_pre47_fallback(call_uuid, exc)
+        return await db.execute(_CDR_INSERT_SQL_PRE47,
+                                *params[:_CDR_INSERT_PRE47_PARAM_COUNT])
+
+
 async def _process_cdr_body(body: dict) -> dict:
     """Extract fields from a parsed FreeSWITCH JSON CDR and insert into the database.
 
@@ -938,68 +1072,9 @@ async def _process_cdr_body(body: dict) -> dict:
         )
 
         # ---- Insert with duplicate guard ----------------------------------
-        # The cdrs table uses a composite PK (id, start_time) for TimescaleDB
-        # hypertable partitioning, so ON CONFLICT on uuid is not available.
-        # Instead we use a NOT EXISTS subquery to skip duplicates.
-        #
-        # IMPORTANT: every parameter gets an explicit ::type cast so asyncpg
-        # never needs to infer PostgreSQL types.  This prevents
-        # AmbiguousParameterError when values are None.
-        result = await db.execute(
-            """
-            INSERT INTO cdrs (
-                uuid, customer_id, product_type, trunk_id, direction,
-                caller_id, destination, destination_prefix,
-                start_time, answer_time, end_time,
-                duration_ms, billable_ms,
-                hangup_cause, sip_code, carrier_used, traffic_grade,
-                freeswitch_node,
-                mos, quality_pct, jitter_min_ms, jitter_max_ms, jitter_avg_ms,
-                packet_loss_count, packet_total_count, packet_loss_pct,
-                flaw_total, r_factor,
-                rtp_audio_in_raw_bytes, rtp_audio_in_media_bytes,
-                rtp_audio_out_raw_bytes, rtp_audio_out_media_bytes,
-                rtp_audio_in_packet_count, rtp_audio_out_packet_count,
-                rtp_audio_in_jitter_burst_rate, rtp_audio_in_jitter_loss_rate,
-                rtp_audio_in_mean_interval,
-                read_codec, write_codec,
-                read_rate, write_rate,
-                sip_from_user, sip_to_user,
-                hangup_cause_q850, sip_hangup_disposition,
-                sip_user_agent, network_addr, bridge_uuid,
-                sbc_id,
-                origin_customer_id, terminating_customer_id, on_net, on_net_hops,
-                inbound_carrier, inbound_carrier_pop,
-                stir_outcome, stir_eff_actual
-            )
-            SELECT
-                $1::varchar,  $2::int,       $3::varchar,  $4::int,       $5::varchar,
-                $6::varchar,  $7::varchar,   $8::varchar,
-                $9::timestamptz, $10::timestamptz, $11::timestamptz,
-                $12::int,     $13::int,
-                $14::varchar, $15::int,      $16::varchar,  $17::varchar,
-                $18::varchar,
-                $19::numeric, $20::numeric,  $21::numeric,  $22::numeric, $23::numeric,
-                $24::int,     $25::int,      $26::numeric,
-                $27::int,     $28::numeric,
-                $29::bigint,  $30::bigint,
-                $31::bigint,  $32::bigint,
-                $33::int,     $34::int,
-                $35::numeric, $36::numeric,
-                $37::numeric,
-                $38::varchar, $39::varchar,
-                $40::int,     $41::int,
-                $42::varchar, $43::varchar,
-                $44::smallint, $45::varchar,
-                $46::varchar, $47::varchar, $48::varchar,
-                $49::varchar,
-                $50::int,     $51::int,      $52::bool,     $53::smallint,
-                $54::varchar, $55::varchar,
-                $56::text,    $57::text
-            WHERE NOT EXISTS (
-                SELECT 1 FROM cdrs WHERE uuid = $1::varchar
-            )
-            """,
+        # Statement + casts + duplicate guard + pre-47 fallback documented on
+        # _cdr_insert_sql / _execute_cdr_insert above.
+        params = (
             str(call_uuid),         # $1  uuid
             int(customer_id),       # $2  customer_id
             str(product_type),      # $3  product_type
@@ -1055,9 +1130,11 @@ async def _process_cdr_body(body: dict) -> dict:
             on_net_hops,            # $53 on_net_hops (int | None)
             inbound_carrier,        # $54 inbound_carrier (str | None)
             inbound_carrier_pop,    # $55 inbound_carrier_pop (str | None)
+            # ---- migration 47 — MUST stay the last two (see _cdr_insert_sql)
             stir_outcome_raw,       # $56 stir_outcome (str | None) — raw X-Stir-Outcome
             stir_eff_actual,        # $57 stir_eff_actual (str | None) — its eff= token
         )
+        result = await _execute_cdr_insert(str(call_uuid), params)
 
         # ---- STIR/SHAKEN attestation (companion table, failure-isolated) --
         # Derive + UPSERT the attestation row from the raw stir_* channel vars.

@@ -4,6 +4,7 @@ import asyncio
 from fastapi import APIRouter
 from db import database as db
 from db import redis_client as cache
+from db import schema_check
 
 router = APIRouter()
 
@@ -52,7 +53,8 @@ async def health_check():
 @router.get("/health/detailed")
 async def detailed_health():
     """Detailed health check including dependencies."""
-    status = {"api": "healthy", "database": "unknown", "redis": "unknown"}
+    status = {"api": "healthy", "database": "unknown", "redis": "unknown",
+              "schema": "unknown"}
 
     # Check database
     try:
@@ -66,6 +68,18 @@ async def detailed_health():
     status["redis"] = "healthy" if redis_status == "ok" else (
         "unavailable" if redis_status == "unavailable" else redis_detail
     )
+
+    # Schema guard (deploy-order): the CDR ingest INSERT names migration-47
+    # columns; if the API build is ahead of the DB this says so, with the
+    # remedy. Time-bounded like the DB probe. NOT part of /health, so a
+    # missing migration can never make Docker restart-loop the API.
+    try:
+        schema = await asyncio.wait_for(schema_check.check_cdr_schema(),
+                                        timeout=_DB_CHECK_TIMEOUT_SEC)
+    except Exception as e:  # noqa: BLE001 — wait_for timeout; probe itself never raises
+        schema = {"status": "unknown", "missing": [], "remedy": [],
+                  "error": str(e) or type(e).__name__}
+    status["schema"] = schema_check.describe(schema)
 
     overall = all(v == "healthy" for v in status.values())
     return {"status": "healthy" if overall else "degraded", "components": status}

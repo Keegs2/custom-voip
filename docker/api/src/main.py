@@ -11,6 +11,7 @@ from starlette.middleware.cors import CORSMiddleware
 import logging
 
 from db.database import init_db, close_db
+from db import schema_check
 from db.redis_client import init_redis, close_redis
 from routers import (
     rcf, calls, trunks, cdrs, customers, health,
@@ -37,6 +38,11 @@ async def lifespan(app: FastAPI):
     # Initialize database pool
     await init_db()
     logger.info("Database pool initialized")
+
+    # Deploy-order guard: the CDR ingest INSERT names migration-47 columns.
+    # LOUD (CRITICAL + exact remedy) when the DB is behind the code, but never
+    # fatal — every other endpoint must keep serving. See db/schema_check.py.
+    await schema_check.run_startup_check()
 
     # Initialize Redis
     await init_redis()

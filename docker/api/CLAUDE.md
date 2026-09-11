@@ -115,7 +115,7 @@ Docker healthcheck: `curl -sf http://127.0.0.1:8000/health` every 15s.
 
 `GET /health` checks API + DB (via `SELECT 1`) + Redis (via `ping`). Returns `{"status": "healthy"}` or `{"status": "degraded"}` with per-component status.
 
-`GET /health/detailed` returns the same but with error messages when components are unhealthy.
+`GET /health/detailed` returns the same but with error messages when components are unhealthy, plus a `schema` component from `db/schema_check.py` (are the migration-47 `cdrs` columns the ingest INSERT binds present? `healthy` / `degraded: … <remedy psql command>` / `unknown: …`).
 
 ## FreeSWITCH Integration
 
@@ -142,6 +142,7 @@ FreeSWITCH `mod_json_cdr` POSTs CDRs to `/v1/cdrs/ingest` after each call. The e
   One-off backfill of legacy NULL rows (NOT a migration — run once on the East primary, off-peak, in time-bounded batches because UPDATEs on compressed TimescaleDB chunks decompress them; zone comes from `sbc_id` "`{zone}-sbc-n`", else from the SBC's VPC IP in `network_addr`):
   `UPDATE cdrs SET freeswitch_node = CASE WHEN sbc_id ~ '^(east|west|central)-' THEN split_part(sbc_id, '-', 1) || '-fs' WHEN network_addr LIKE '10.142.%' THEN 'east-fs' WHEN network_addr LIKE '10.138.%' THEN 'west-fs' WHEN network_addr LIKE '10.128.%' THEN 'central-fs' END WHERE freeswitch_node IS NULL AND start_time >= '<batch-start>' AND start_time < '<batch-end>' AND (sbc_id ~ '^(east|west|central)-' OR network_addr LIKE '10.1%');`
 - Handles duplicate detection via `WHERE NOT EXISTS (SELECT 1 FROM cdrs WHERE uuid = $1)`
+- **Deploy-order guard (migration 47):** the INSERT is built by `_cdr_insert_sql(with_stir_outcome)` with `stir_outcome`/`stir_eff_actual` as the LAST entries of both lists ($56/$57), so the pre-47 statement is the same text minus those tails (nothing renumbered). If the API build reaches production before `47_cdr_stir_outcome.sql` is applied, `_execute_cdr_insert` catches `asyncpg.UndefinedColumnError` naming one of the two columns, retries with the pre-47 statement and `params[:55]` (the billable row lands; only the two STIR columns are lost), and logs at ERROR once per 300s per worker (DEBUG in between). Any OTHER missing column still surfaces as `status=error`. `db/schema_check.py` probes `information_schema.columns` for the two columns at startup (lifespan, after `init_db()`) and logs **CRITICAL** with the exact remedy (`sudo -u postgres psql -d voip -f /opt/revup/docker/postgres/init/47_cdr_stir_outcome.sql`) without crashing the API; `GET /health/detailed` exposes the same probe as `components.schema` (`healthy` / `degraded: …remedy…` / `unknown: …`). `/health` (the Docker healthcheck) is untouched so a missing migration can never restart-loop the API.
 - Always returns 200 to prevent FreeSWITCH retry storms
 - No auth required (called over internal Docker network)
 
