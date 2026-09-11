@@ -93,6 +93,141 @@ local function set_var(name, value)
     end
 end
 
+-- ================================================================
+-- fs_node / fs_zone: which FreeSWITCH node produced this call
+-- ================================================================
+-- Plain channel variables, so mod_json_cdr carries them in the CDR
+-- `variables` object (switch_ivr.c:3304-3323 serialises every channel
+-- variable, no allow-list) and the ingest can store cdrs.freeswitch_node.
+-- WHY: the ingest used to read `FreeSWITCH-Hostname`, which is an EVENT
+-- header and NEVER a channel variable, so the column was NULL on every
+-- production row; and switch.conf.xml pins `switchname` to the same value
+-- ("voiceplatform") on every node, so the CDR body's switchname is not
+-- zone-identifying either. FS_NODE_ID (optional) distinguishes fs-1 from
+-- fs-2 within a zone; otherwise "<zone>-fs". The ingest keeps its
+-- media-IP / switchname / core-uuid fallbacks, so this is the PREFERRED
+-- source, not the only one. Set on every CDR-producing entry script
+-- (inbound_router / trunk_outbound / api_outbound) so the field is not
+-- populated for inbound RCF only.
+do
+    local fs_zone_cdr = os.getenv("FS_ZONE") or "east"
+    if fs_zone_cdr ~= "east" and fs_zone_cdr ~= "west" and fs_zone_cdr ~= "central" then
+        fs_zone_cdr = "east"
+    end
+    local node_id = os.getenv("FS_NODE_ID")
+    if not node_id or node_id == "" then
+        node_id = fs_zone_cdr .. "-fs"
+    end
+    set_var("fs_node", node_id)
+    set_var("fs_zone", fs_zone_cdr)
+end
+
+-- ================================================================
+-- STIR outcome hand-back (docker/kamailio/CLAUDE.md 8.14)
+-- ================================================================
+-- Kamailio echoes the Identity set it ACTUALLY composed on the carrier /
+-- PBX leg back to FS as `X-Stir-Outcome` on every non-100 reply
+-- (eff=..;mode=..;identities=..;base=..;div=..;stripped=..). The A-leg CDR
+-- contract with the ingest is the channel variable `stir_outcome` (set
+-- below, verbatim header value) -- do not rename it or change the format.
+--
+-- HOW THE VALUE REACHES THIS A-LEG (no `import`, no B-leg access needed):
+-- on every 180/183 and every status > 199 -- INCLUDING a 4xx/5xx/6xx that
+-- FAILS the originate -- mod_sofia's outbound nua_r_invite handler exports
+-- the reply's unknown X-/P- headers as B-leg channel variables
+-- (sofia.c:6775-6784 -> sofia_glue_set_extra_headers(), sofia_glue.c:959-965;
+-- name filter sofia_test_extra_headers, mod_sofia.h:1137 -- "X-" and not
+-- "X-FS-" qualifies, so X-Stir-Outcome does) under the VERBATIM header name:
+-- sip_ph_X-Stir-Outcome on 18x, sip_rh_X-Stir-Outcome on finals. It then
+-- copies them onto the partner leg with switch_ivr_transfer_variable(session,
+-- other_session, "~sip_rh_" / "~sip_ph_") (sofia.c:6787-6798; "~" = prefix
+-- match, switch_ivr.c:2327-2346), gated only by sip_copy_custom_headers
+-- (default ON, deliberately untouched here). The partner lookup succeeds even
+-- while the originate is still failing because the B-leg's signal_bond is set
+-- to this A-leg's uuid at B-leg CREATION (switch_core_session.c:711). So the
+-- value is on THIS channel by the time session:execute("bridge") returns,
+-- without ever touching the (already released) peer session.
+--
+-- WHY NOT the `import` channel variable: switch_ivr_originate() only reaches
+-- switch_process_import() with a usable peer_channel on the SUCCESS path
+-- (switch_ivr_originate.c:3903). The failure-path call at :3835 is guarded by
+-- `if (caller_channel && peer_channel)`, and peer_channel is NULL there for
+-- every ordinary failed bridge -- it is assigned non-NULL only inside the
+-- attended-transfer `if (holding)` block at :3616-3642. `import` would
+-- therefore capture nothing on exactly the failing attempts we most want
+-- labelled, while adding an `import` variable to every CDR
+-- (mod_json_cdr serialises every channel variable -- switch_ivr.c:3304-3323).
+local STIR_OUTCOME_RH = "sip_rh_X-Stir-Outcome"
+local STIR_OUTCOME_PH = "sip_ph_X-Stir-Outcome"
+
+-- Clear the two RAW capture slots before every bridge attempt, so a reply
+-- header left over from attempt N can never be read as attempt N+1's.
+-- The CDR var `stir_outcome` is deliberately NOT cleared: it RETAINS the last
+-- non-empty outcome and is only overwritten when a newer non-empty one is
+-- captured, so the FINAL attempt's outcome wins whenever one arrives, and an
+-- attempt that produces NO hand-back leaves the previous real outcome in
+-- place instead of an EMPTY CDR field (which the ingest would silently
+-- replace with FS intent). Two hand-back BLIND SPOTS make that matter:
+--   1. Locally generated finals never run onreply_route: tm's fr_inv_timer
+--      408 (dead SBC / carrier silence, the progress_timeout case) and a
+--      failure_route send_reply(503) carry no X-Stir-Outcome.
+--   2. A docker/kamailio/CLAUDE.md 8.12 peer-handed-off reply reaches the
+--      owner SBC from the SIBLING SBC's internal IP; REPLY_HANDLER's
+--      `!route(IS_INTERNAL_SOURCE)` guard then skips the header, so a reply
+--      that crossed the pair during a failback window hands nothing back.
+-- `stir_outcome_attempt` (set by the capture) records WHICH attempt the
+-- stored value came from, so a retained earlier-attempt outcome is
+-- distinguishable in the CDR from the winning attempt's.
+-- An empty value DELETES a channel variable (switch_channel.c:1497-1499
+-- `if (zstr(value)) switch_event_del_header(...)`), and the Lua binding hands
+-- the value straight through (switch_cpp.cpp:770-776) -- this is a real
+-- delete, not a stored empty string, so get_var()'s default applies.
+local function stir_outcome_reset()
+    pcall(function()
+        session:setVariable(STIR_OUTCOME_RH, "")
+        session:setVariable(STIR_OUTCOME_PH, "")
+    end)
+end
+
+-- Read the outcome for the attempt that just finished (final reply wins over
+-- provisional), pin it in `stir_outcome` (overwriting any earlier attempt's
+-- value; an EMPTY read keeps the earlier value — see stir_outcome_reset),
+-- then CONSUME the raw slots.
+-- Consuming matters: mod_sofia RE-EMITS any sip_rh_*/sip_ph_* channel variable
+-- as a real header on responses THIS channel sends (mod_sofia.c:960 200 OK,
+-- :2473 180, :2656 183, :570 error responses -> sofia_glue_get_extra_headers()),
+-- and mod_json_cdr dumps every channel variable into the CDR with no
+-- allow-list. Kamailio's core reply_route strips X-Stir-Outcome off every reply
+-- it relays (so the A-leg 18x/200 sent DURING the bridge cannot leak it to the
+-- carrier); this is the FS-side half of the same defence, and it keeps the raw
+-- header out of the CDR.
+local function stir_outcome_capture(uuid, label)
+    local v = get_var(STIR_OUTCOME_RH, "")
+    local src = "final"
+    if v == "" then
+        v = get_var(STIR_OUTCOME_PH, "")
+        src = "provisional"
+    end
+    pcall(function()
+        session:setVariable(STIR_OUTCOME_RH, "")
+        session:setVariable(STIR_OUTCOME_PH, "")
+    end)
+    if v ~= "" then
+        v = v:match("^%s*(.-)%s*$") or v
+        pcall(function()
+            session:setVariable("stir_outcome", v)
+            session:setVariable("stir_outcome_attempt", tostring(label))
+        end)
+        freeswitch.consoleLog("INFO", string.format(
+            "[%s] STIR outcome (%s, from %s reply): %s\n", uuid, tostring(label), src, v))
+    else
+        freeswitch.consoleLog("DEBUG", string.format(
+            "[%s] STIR outcome (%s): no X-Stir-Outcome on any reply (local failure / peer-handed-off reply / pre-hand-back SBC) — keeping stir_outcome=%q from attempt %q\n",
+            uuid, tostring(label), get_var("stir_outcome", ""), get_var("stir_outcome_attempt", "")))
+    end
+    return v
+end
+
 local function hangup(cause, log_msg)
     if log_msg then
         freeswitch.consoleLog("INFO", log_msg .. "\n")
@@ -564,9 +699,11 @@ if webhook_url then
 else
     -- No webhook - simple bridge to destination
     -- Execute bridge
+    stir_outcome_reset()
     pcall(function()
         session:execute("bridge", dial_string)
     end)
+    stir_outcome_capture(uuid, "primary")
 
     -- Check if bridge succeeded. originate_disposition is the authoritative
     -- FreeSWITCH variable ("SUCCESS" on connect, a failure cause otherwise).
@@ -596,9 +733,11 @@ else
 
             set_var("carrier_used", "carrier_secondary")
 
+            stir_outcome_reset()
             pcall(function()
                 session:execute("bridge", dial_string)
             end)
+            stir_outcome_capture(uuid, "secondary")
         end
     end
 end

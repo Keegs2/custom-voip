@@ -120,6 +120,189 @@ end
 bridge_progress_timeout = math.floor(bridge_progress_timeout)
 
 -- ================================================================
+-- RCF From-header pass-through gate (RCF_FROM_PASSTHROUGH=on|off)
+-- ================================================================
+-- DEFAULT OFF. Only the exact values on|true|1 (case-insensitive, trimmed)
+-- enable it; unset, empty, or anything else = OFF, so a media VM that has
+-- merely `git pull`ed this bind-mounted script inside a running container
+-- (no such env var) behaves EXACTLY as before this gate existed: From is
+-- always the RCF DID (CLAUDE.md: "Outbound From stays the terminal DID for
+-- Bandwidth auth").
+-- When ON AND the RCF DID has pass_caller_id=true, the carrier-bound From
+-- number/display name is the ORIGINAL caller (see terminate_rcf "SIP From").
+-- Enable PER ZONE, and only after BOTH of these hold:
+--   1. the zone's SBCs run the #120+#122 Kamailio build FIRST — the base
+--      RCF-V1 kamailio.cfg has no strip for the X-From-Name header this gate
+--      emits, so an older SBC would forward the caller's display name to the
+--      carrier verbatim;
+--   2. one live canary RCF call per carrier PoP (Bandwidth Dallas + LA)
+--      confirms the carrier accepts a non-account TN in From (UNVERIFIED).
+-- Read via os.getenv like BRIDGE_PROGRESS_TIMEOUT (passed through
+-- docker-compose.media.yml; set RCF_FROM_PASSTHROUGH=on in /opt/revup/.env
+-- + recreate the container).
+local rcf_from_passthrough = false
+do
+    local v = tostring(os.getenv("RCF_FROM_PASSTHROUGH") or ""):lower():match("^%s*(.-)%s*$")
+    if v == "on" or v == "true" or v == "1" then
+        rcf_from_passthrough = true
+    end
+end
+
+-- ================================================================
+-- SIP display-name hardening
+-- ================================================================
+-- A display name we hand to Kamailio in X-From-Name / X-Original-CID-Name is
+-- rendered into TWO SIP quoted-string productions:
+--   * From display  -- Kamailio assigns `$fn = "\"" + $hdr(...) + "\""`;
+--     pv_set_xto_attr() case 3 (modules/pv/pv_core.c) inserts the value
+--     VERBATIM (it adds no quotes itself — the cfg supplies them). Inside a
+--     quoted-string only '"' and '\\' are structural (escapes), so THIS
+--     function MUST keep stripping both, or a name could close the quotes
+--     early and a following '<' '>' '@' ',' ';' ':' would restructure the
+--     From header (a second angle-addr, a forged URI, a bogus parameter).
+--   * PAI display   -- appended inside an explicit \"...\" quoted-string, same
+--     two escapes.
+-- So the quote/escape pair AND the structural set are stripped for BOTH, and
+-- CR/LF/control bytes become spaces (header injection). An empty result never
+-- reaches the wire: X-Original-CID-Name is only emitted when non-empty and
+-- X-From-Name falls back to the From number (sanitize_display_name).
+-- This matters because with the From pass-through
+-- the name is CARRIER-SUPPLIED (the A-leg caller's display name) -- before it,
+-- the only source was the admin-provisioned RCF line name.
+-- Well-formed names ("Main Office", "Smith & Co.") are byte-identical through
+-- this function, so applying it to the RCF line name changes nothing real.
+local function sip_display_safe(name)
+    local s = tostring(name or "")
+    s = s:gsub("%c", " ")            -- CR/LF/control -> space (header injection)
+    s = s:gsub('["\\<>@,;:]', "")    -- quoted-string escapes + angle-addr/URI/param delimiters
+    s = s:gsub("%s+", " ")           -- collapse runs (a raw TAB became a space above)
+    s = s:gsub("^%s+", "")
+    s = s:gsub("%s+$", "")
+    return s
+end
+
+-- As above, plus a 64-char cap and a fallback when nothing printable is left
+-- (the cap is applied ONLY to caller-supplied names; the RCF line name keeps
+-- its historical uncapped rendering via sip_display_safe()). Never nil.
+local function sanitize_display_name(name, fallback)
+    local s = sip_display_safe(name)
+    if #s > 64 then
+        s = s:sub(1, 64)
+        s = s:gsub("%s+$", "")
+    end
+    if s == "" then
+        s = sip_display_safe(fallback)
+    end
+    return s
+end
+
+-- ================================================================
+-- STIR outcome hand-back (docker/kamailio/CLAUDE.md 8.14)
+-- ================================================================
+-- Kamailio echoes the Identity set it ACTUALLY composed on the carrier /
+-- PBX leg back to FS as `X-Stir-Outcome` on every non-100 reply
+-- (eff=..;mode=..;identities=..;base=..;div=..;stripped=..). The A-leg CDR
+-- contract with the ingest is the channel variable `stir_outcome` (set
+-- below, verbatim header value) -- do not rename it or change the format.
+--
+-- HOW THE VALUE REACHES THIS A-LEG (no `import`, no B-leg access needed):
+-- on every 180/183 and every status > 199 -- INCLUDING a 4xx/5xx/6xx that
+-- FAILS the originate -- mod_sofia's outbound nua_r_invite handler exports
+-- the reply's unknown X-/P- headers as B-leg channel variables
+-- (sofia.c:6775-6784 -> sofia_glue_set_extra_headers(), sofia_glue.c:959-965;
+-- name filter sofia_test_extra_headers, mod_sofia.h:1137 -- "X-" and not
+-- "X-FS-" qualifies, so X-Stir-Outcome does) under the VERBATIM header name:
+-- sip_ph_X-Stir-Outcome on 18x, sip_rh_X-Stir-Outcome on finals. It then
+-- copies them onto the partner leg with switch_ivr_transfer_variable(session,
+-- other_session, "~sip_rh_" / "~sip_ph_") (sofia.c:6787-6798; "~" = prefix
+-- match, switch_ivr.c:2327-2346), gated only by sip_copy_custom_headers
+-- (default ON, deliberately untouched here). The partner lookup succeeds even
+-- while the originate is still failing because the B-leg's signal_bond is set
+-- to this A-leg's uuid at B-leg CREATION (switch_core_session.c:711). So the
+-- value is on THIS channel by the time session:execute("bridge") returns,
+-- without ever touching the (already released) peer session.
+--
+-- WHY NOT the `import` channel variable: switch_ivr_originate() only reaches
+-- switch_process_import() with a usable peer_channel on the SUCCESS path
+-- (switch_ivr_originate.c:3903). The failure-path call at :3835 is guarded by
+-- `if (caller_channel && peer_channel)`, and peer_channel is NULL there for
+-- every ordinary failed bridge -- it is assigned non-NULL only inside the
+-- attended-transfer `if (holding)` block at :3616-3642. `import` would
+-- therefore capture nothing on exactly the failing attempts we most want
+-- labelled, while adding an `import` variable to every CDR
+-- (mod_json_cdr serialises every channel variable -- switch_ivr.c:3304-3323).
+local STIR_OUTCOME_RH = "sip_rh_X-Stir-Outcome"
+local STIR_OUTCOME_PH = "sip_ph_X-Stir-Outcome"
+
+-- Clear the two RAW capture slots before every bridge attempt, so a reply
+-- header left over from attempt N can never be read as attempt N+1's.
+-- The CDR var `stir_outcome` is deliberately NOT cleared: it RETAINS the last
+-- non-empty outcome and is only overwritten when a newer non-empty one is
+-- captured, so the FINAL attempt's outcome wins whenever one arrives, and an
+-- attempt that produces NO hand-back leaves the previous real outcome in
+-- place instead of an EMPTY CDR field (which the ingest would silently
+-- replace with FS intent). Two hand-back BLIND SPOTS make that matter:
+--   1. Locally generated finals never run onreply_route: tm's fr_inv_timer
+--      408 (dead SBC / carrier silence, the progress_timeout case) and a
+--      failure_route send_reply(503) carry no X-Stir-Outcome.
+--   2. A docker/kamailio/CLAUDE.md 8.12 peer-handed-off reply reaches the
+--      owner SBC from the SIBLING SBC's internal IP; REPLY_HANDLER's
+--      `!route(IS_INTERNAL_SOURCE)` guard then skips the header, so a reply
+--      that crossed the pair during a failback window hands nothing back.
+-- `stir_outcome_attempt` (set by the capture) records WHICH attempt the
+-- stored value came from, so a retained earlier-attempt outcome is
+-- distinguishable in the CDR from the winning attempt's.
+-- An empty value DELETES a channel variable (switch_channel.c:1497-1499
+-- `if (zstr(value)) switch_event_del_header(...)`), and the Lua binding hands
+-- the value straight through (switch_cpp.cpp:770-776) -- this is a real
+-- delete, not a stored empty string, so get_var()'s default applies.
+local function stir_outcome_reset()
+    pcall(function()
+        session:setVariable(STIR_OUTCOME_RH, "")
+        session:setVariable(STIR_OUTCOME_PH, "")
+    end)
+end
+
+-- Read the outcome for the attempt that just finished (final reply wins over
+-- provisional), pin it in `stir_outcome` (overwriting any earlier attempt's
+-- value; an EMPTY read keeps the earlier value — see stir_outcome_reset),
+-- then CONSUME the raw slots.
+-- Consuming matters: mod_sofia RE-EMITS any sip_rh_*/sip_ph_* channel variable
+-- as a real header on responses THIS channel sends (mod_sofia.c:960 200 OK,
+-- :2473 180, :2656 183, :570 error responses -> sofia_glue_get_extra_headers()),
+-- and mod_json_cdr dumps every channel variable into the CDR with no
+-- allow-list. Kamailio's core reply_route strips X-Stir-Outcome off every reply
+-- it relays (so the A-leg 18x/200 sent DURING the bridge cannot leak it to the
+-- carrier); this is the FS-side half of the same defence, and it keeps the raw
+-- header out of the CDR.
+local function stir_outcome_capture(uuid, label)
+    local v = get_var(STIR_OUTCOME_RH, "")
+    local src = "final"
+    if v == "" then
+        v = get_var(STIR_OUTCOME_PH, "")
+        src = "provisional"
+    end
+    pcall(function()
+        session:setVariable(STIR_OUTCOME_RH, "")
+        session:setVariable(STIR_OUTCOME_PH, "")
+    end)
+    if v ~= "" then
+        v = v:match("^%s*(.-)%s*$") or v
+        pcall(function()
+            session:setVariable("stir_outcome", v)
+            session:setVariable("stir_outcome_attempt", tostring(label))
+        end)
+        freeswitch.consoleLog("INFO", string.format(
+            "[%s] STIR outcome (%s, from %s reply): %s\n", uuid, tostring(label), src, v))
+    else
+        freeswitch.consoleLog("DEBUG", string.format(
+            "[%s] STIR outcome (%s): no X-Stir-Outcome on any reply (local failure / peer-handed-off reply / pre-hand-back SBC) — keeping stir_outcome=%q from attempt %q\n",
+            uuid, tostring(label), get_var("stir_outcome", ""), get_var("stir_outcome_attempt", "")))
+    end
+    return v
+end
+
+-- ================================================================
 -- SBC TCP health pre-check with cross-call result caching
 -- ================================================================
 -- A TCP connect to the SBC on :5060 detects a dead SBC in <1 second
@@ -261,6 +444,35 @@ if fs_zone ~= "east" and fs_zone ~= "west" and fs_zone ~= "central" then
         "[inbound_router] FS_ZONE '%s' is not east/west/central — using east\n",
         tostring(fs_zone)))
     fs_zone = "east"
+end
+
+-- ================================================================
+-- fs_node / fs_zone: which FreeSWITCH node produced this call
+-- ================================================================
+-- Plain channel variables, so mod_json_cdr carries them in the CDR
+-- `variables` object (switch_ivr.c:3304-3323 serialises every channel
+-- variable, no allow-list) and the ingest can store cdrs.freeswitch_node.
+-- WHY: the ingest used to read `FreeSWITCH-Hostname`, which is an EVENT
+-- header and NEVER a channel variable, so the column was NULL on every
+-- production row (the "calls unknown" legend on the Call Quality board);
+-- and switch.conf.xml pins `switchname` to the same value ("voiceplatform")
+-- on every node, so the CDR body's switchname is not zone-identifying
+-- either. FS_NODE_ID (optional) distinguishes fs-1 from fs-2 within a zone;
+-- otherwise "<zone>-fs". The ingest keeps its media-IP / switchname /
+-- core-uuid fallbacks, so this is the PREFERRED source, not the only one.
+-- The same block is in trunk_outbound.lua and api_outbound.lua so the field
+-- is not populated for inbound RCF only. (`session` is guaranteed here: the
+-- script returns at the top when there is none, so this can never run under
+-- a session-less luarun.) Changing switch.conf.xml's `switchname` per node
+-- would also fix the body fallback, but it moves FreeSWITCH-Switchname on
+-- every event (ESL metrics exporter, Homer aliasing) — a separate change.
+do
+    local node_id = os.getenv("FS_NODE_ID")
+    if not node_id or node_id == "" then
+        node_id = fs_zone .. "-fs"
+    end
+    set_var("fs_node", node_id)
+    set_var("fs_zone", fs_zone)
 end
 
 -- Sanitize a carrier/pop token for cache/dial-string/header safety:
@@ -898,23 +1110,109 @@ local function terminate_rcf(dest, ctx)
     -- without needing to pack everything into the dial string {} block.
     --
     -- SIP headers produced (after Kamailio processing):
-    --   From: <sip:RCF_DID@public_ip>           (via outbound_caller_id_number)
+    --   From: "<name>" <sip:FROM@public_ip>      (FROM = original caller when
+    --                                             pass_caller_id=true AND
+    --                                             RCF_FROM_PASSTHROUGH=on,
+    --                                             else the RCF DID — see below)
     --   P-Asserted-Identity: <sip:orig@ip>       (via X-Original-CID -> Kamailio)
     --   Remote-Party-ID: <sip:orig@ip>           (via sip_h_Remote-Party-ID)
-    --   Diversion: <sip:RCF_DID@ip>;reason=unconditional
+    --   Diversion: <sip:RCF_DID@ip>;reason=unconditional   (ALWAYS the RCF DID)
     -- ================================================================
 
-    -- Set outbound caller ID for carrier authorization (SIP From header).
-    -- Bandwidth requires the RCF DID in 10-digit format for termination auth.
+    -- ================================================================
+    -- SIP From (carrier-facing) — pass_caller_id-gated pass-through
+    -- ================================================================
+    -- HISTORY: From was ALWAYS the RCF DID ("Bandwidth requires the RCF DID
+    -- in 10-digit format for termination auth") with the original caller
+    -- carried only in PAI/RPID. That requirement is UNVERIFIED for
+    -- Bandwidth (IP-peered termination) and Sinch, so the change is gated:
+    --   RCF_FROM_PASSTHROUGH env (DEFAULT OFF; only on|true|1 enables) AND
+    --   the DID's pass_caller_id.
+    --   pass_caller_id=true  -> From number = original caller; From display
+    --                           = original caller's name, handed over in the
+    --                           DEDICATED X-From-Name header; Diversion = the
+    --                           RCF DID. RFC 8224 §6.2 verifiers match the
+    --                           PASSporT orig (= PAI = original caller)
+    --                           against From — this makes From agree with it.
+    --   pass_caller_id=false -> EXACTLY the pre-change behavior: From and
+    --                           PAI = the masking DID, display = the RCF
+    --                           line name (X-Original-CID-Name).
+    -- P-ASSERTED-IDENTITY IS UNTOUCHED IN BOTH MODES. Kamailio builds BOTH
+    -- the From display ($fn) and the PAI display from X-Original-CID-Name, so
+    -- overloading that header to carry the caller's name would silently
+    -- change the PAI display too (customers today see the RCF line name
+    -- there). X-From-Name exists precisely to keep the two apart: Kamailio
+    -- prefers it for $fn and never uses it for PAI, and it is absent
+    -- whenever the pass-through is not active.
+    -- Ships DARK: enable per zone (RCF_FROM_PASSTHROUGH=on in the media VM's
+    -- .env + recreate) only after (1) that zone's SBCs are on the #120+#122
+    -- Kamailio build — the base RCF-V1 kamailio.cfg does not strip
+    -- X-From-Name, so an older SBC would leak the caller's display name to
+    -- the carrier — and (2) one live canary RCF call per carrier PoP
+    -- (Bandwidth Dallas + LA) confirms acceptance of a non-account TN in From.
+    --
+    -- Digit form = the same form the DID used: to_10digit for a NANP caller
+    -- (Kamailio E164_EGRESS TN_E164 turns 10/11-digit into +E.164; gate off
+    -- renders it verbatim) and full +E.164 for a non-NANP caller (TN_E164
+    -- passes '+' numbers through — never a bare 12-digit run). A non-numeric
+    -- original caller (anonymous / Restricted / empty) keeps the DID in From
+    -- so the carrier never sees From: anonymous@ (PAI/RPID unchanged).
+    --
+    -- HOW FS BUILDS From: the exported origination_caller_id_* below is what
+    -- wins (switch_ivr_originate.c: export vars are copied into var_event at
+    -- ~1635 BEFORE effective_caller_id_* is mirrored at ~1649, and the first
+    -- origination_caller_id_number header wins at ~2652); the FusionPBX-style
+    -- outbound_caller_id_* vars are set for CDR/ops parity (no FS core
+    -- consumer). Both are set to the same value.
     local outbound_did = to_10digit(normalized_did)
-    session:setVariable("outbound_caller_id_number", outbound_did)
-    session:setVariable("outbound_caller_id_name", outbound_did)
-
     local outbound_original_cid = to_10digit(original_caller_number)
     -- E.164 versions for SIP identity headers (PAI, RPID, Diversion)
     -- Carriers require +1 prefix per E.164; bare 10-digit leaks into PAI otherwise
     local e164_original_cid = normalize_did(original_caller_number)
     local e164_did = normalize_did(normalized_did)
+    local rcf_name = routing.rcf_name
+
+    local from_passthrough = rcf_from_passthrough and pass_caller_id
+    local from_number = outbound_did
+    local from_name = outbound_did
+    -- X-Original-CID-Name feeds the PAI display (and, absent X-From-Name, the
+    -- From display): ALWAYS the RCF line name, exactly as before this gate.
+    local cid_display_name = sip_display_safe(rcf_name)
+    -- X-From-Name feeds ONLY the From display, and only while the
+    -- pass-through is active (nil => the header is never emitted => Kamailio
+    -- falls back to X-Original-CID-Name, i.e. today's behavior byte for byte).
+    local from_display_name = nil
+    if from_passthrough then
+        -- NANP caller -> 10-digit (the form the RCF DID uses; Kamailio's
+        -- E164_EGRESS TN_E164 lifts 10/11-digit to +E.164, and with the gate
+        -- off it renders verbatim, matching today's RCF-DID rendering).
+        -- Non-NANP caller -> full +E.164 (TN_E164 passes '+' through, so this
+        -- can never degrade into a bare 12-digit run).
+        if e164_original_cid:match("^%+1%d%d%d%d%d%d%d%d%d%d$") then
+            from_number = outbound_original_cid
+        -- Length bounds mirror Kamailio route[TN_E164]'s +E.164 passthrough
+        -- test EXACTLY ("^[+][1-9][0-9]{7,14}$" = '+' plus 8..15 digits), so
+        -- anything we put in From is a shape TN_E164 recognises.
+        elseif e164_original_cid:match("^%+[1-9]%d+$") and #e164_original_cid >= 9 and #e164_original_cid <= 16 then
+            from_number = e164_original_cid
+        else
+            -- anonymous / Restricted / empty / non-numeric: keep the RCF DID
+            -- in From so the carrier never sees From: anonymous@ .
+            from_passthrough = false
+            freeswitch.consoleLog("WARNING", string.format(
+                "[%s] From pass-through: original caller %q is not a usable TN — keeping the RCF DID in From\n",
+                uuid, tostring(original_caller_number)))
+        end
+    end
+    if from_passthrough then
+        from_name = sanitize_display_name(original_caller_name, from_number)
+        from_display_name = from_name
+    end
+    session:setVariable("outbound_caller_id_number", from_number)
+    session:setVariable("outbound_caller_id_name", from_name)
+    -- CDR/ops breadcrumb: which From mode this leg actually used.
+    set_var("rcf_from_passthrough", from_passthrough and "true" or "false")
+
     if pass_caller_id then
         -- Preserve original caller ID so the called party sees who is calling
         session:setVariable("effective_caller_id_number", outbound_original_cid)
@@ -938,19 +1236,30 @@ local function terminate_rcf(dest, ctx)
         session:setVariable("sip_h_X-Original-CID", masking_e164)
     end
 
-    -- X-Original-CID-Name: Display name for P-Asserted-Identity
-    -- Uses the RCF line name configured in the portal (e.g. "Main Office")
-    local rcf_name = routing.rcf_name
-    if rcf_name and rcf_name ~= "" then
-        session:setVariable("sip_h_X-Original-CID-Name", rcf_name)
+    -- X-Original-CID-Name: the RCF line name configured in the portal (e.g.
+    -- "Main Office"). Kamailio puts it on P-Asserted-Identity always, and on
+    -- the From display whenever X-From-Name is absent — i.e. unchanged.
+    if cid_display_name and cid_display_name ~= "" then
+        session:setVariable("sip_h_X-Original-CID-Name", cid_display_name)
+    end
+
+    -- X-From-Name: From-display-only override, emitted ONLY while the
+    -- pass-through is active. Kamailio prefers it for $fn and NEVER uses it
+    -- for PAI, so the PAI display stays the RCF line name in both modes.
+    -- Kamailio strips it from the carrier-bound INVITE (TO_CARRIER internal
+    -- X-* cleanup) and spoof-strips any wire-supplied copy at every ingress.
+    if from_display_name and from_display_name ~= "" then
+        session:setVariable("sip_h_X-From-Name", from_display_name)
     end
 
     freeswitch.consoleLog("INFO", string.format(
-        "[inbound_router] CID setup (FusionPBX-style): outbound_cid=%s effective_cid=%s original=%s pass=%s\n",
-        normalized_did,
+        "[inbound_router] CID setup (FusionPBX-style): from=%s from_passthrough=%s effective_cid=%s original=%s pass=%s did=%s\n",
+        from_number,
+        tostring(from_passthrough),
         pass_caller_id and original_caller_number or normalized_did,
         original_caller_number,
-        tostring(pass_caller_id)
+        tostring(pass_caller_id),
+        normalized_did
     ))
 
     if is_local_forward then
@@ -1059,9 +1368,11 @@ local function terminate_rcf(dest, ctx)
         set_var("stir_verstat_source", get_var("sip_h_X-Verstat-Source", ""))
         set_var("stir_inbound_attest", get_var("sip_h_X-Inbound-Attest", ""))
 
-        -- Export caller ID to B-leg for Bandwidth From header auth.
-        pcall(function() session:execute("export", "origination_caller_id_number=" .. outbound_did) end)
-        pcall(function() session:execute("export", "origination_caller_id_name=" .. outbound_did) end)
+        -- Export the From identity to the B-leg. This exported pair is what
+        -- mod_sofia renders as the From header (see "SIP From" above):
+        -- original caller when the pass-through is active, else the RCF DID.
+        pcall(function() session:execute("export", "origination_caller_id_number=" .. from_number) end)
+        pcall(function() session:execute("export", "origination_caller_id_name=" .. from_name) end)
 
         freeswitch.consoleLog("INFO", string.format(
             "[%s] RCF Bridge (PSTN): %s -> %s via proxy (carrier=%s, pass_cid=%s, failover_sbc=%s)\n",
@@ -1161,9 +1472,11 @@ local function terminate_rcf(dest, ctx)
 
     if is_local_forward then
         -- Local extension: single bridge attempt (no SBC/carrier failover)
+        stir_outcome_reset()
         pcall(function()
             session:execute("bridge", dial_string)
         end)
+        stir_outcome_capture(uuid, "local")
     else
         local term_trunks = get_termination_trunks(fs_zone)
 
@@ -1255,9 +1568,11 @@ local function terminate_rcf(dest, ctx)
                     uuid, i, total_attempts, attempt.label, normalized_did, forward_to, attempt.sbc, attempt.ip
                 ))
 
+                stir_outcome_reset()
                 pcall(function()
                     session:execute("bridge", attempt_dial)
                 end)
+                stir_outcome_capture(uuid, attempt.label)
             end
 
             -- Same disposition contract as the legacy loop (see its comments):
@@ -1342,9 +1657,11 @@ local function terminate_rcf(dest, ctx)
                     uuid, i, attempt.label, normalized_did, forward_to, attempt.sbc, attempt.carrier
                 ))
 
+                stir_outcome_reset()
                 pcall(function()
                     session:execute("bridge", attempt_dial)
                 end)
+                stir_outcome_capture(uuid, attempt.label)
             end
 
             -- Determine whether THIS bridge connected. originate_disposition is
@@ -1533,6 +1850,65 @@ local function terminate_trunk(dest, ctx)
         end
         set_var("effective_caller_id_number", original_caller)
 
+        -- ================================================================
+        -- ON-NET RCF -> trunk-DID delivery: mark the PBX leg DIVERTED
+        -- ================================================================
+        -- Reached through >=1 RCF forwarding hop (ctx.hops > 0; the chain
+        -- loop records the LAST forwarding RCF DID in ctx.last_rcf_did). Set
+        -- on this leg exactly what terminate_rcf sets on a diverted carrier
+        -- leg so Kamailio's X-PBX-Dest div arm (kamailio.cfg "STIR egress
+        -- (pbx ..)", gated on X-Attestation=div AND a Diversion header AND a
+        -- base chain) is no longer dormant:
+        --   sip_h_Diversion      <- terminate_rcf "Diversion header indicates
+        --                           the call was forwarded" (there: the
+        --                           10-digit DID, which Kamailio E164_EGRESS
+        --                           normalizes on the carrier leg; the PBX leg
+        --                           has no normalizer, so use +E.164 here)
+        --   sip_h_X-Attestation  <- terminate_rcf 'session:setVariable(
+        --                           "sip_h_X-Attestation", "div")'
+        -- (No X-Original-CID here: on the PBX path Kamailio derives the STIR
+        --  orig claim from $fU -- the From user, i.e. effective_caller_id_number
+        --  set above -- and X-Original-CID is read ONLY in route[TO_CARRIER].
+        --  remove_hf_re("^[Xx]-") strips it before the PBX, so setting it would
+        --  be a header nothing reads plus a channel variable in every CDR.)
+        --   sip_h_X-In-Identity  <- already on this A-leg (mod_sofia stored
+        --                           the inbound X-In-Identity header as
+        --                           sip_h_X-In-Identity) and copied to the
+        --                           bridged leg with every other sip_h_*
+        --                           variable — nothing to re-set here (the
+        --                           old self-reassignment was a no-op).
+        --   stir_attest_intent / stir_inbound_signed / stir_verstat* /
+        --   stir_inbound_attest <- terminate_rcf "STIR/SHAKEN CDR facts"
+        -- Display name (same pass_caller_id gate as the carrier leg's From):
+        -- passing -> the composed presented name (original caller, sanitized);
+        -- masked  -> the masking hop's RCF line name (ctx.masking_name), or the
+        -- masking DID digits when the line has no name. A DIRECT trunk inbound
+        -- (hops == 0) is byte-for-byte unchanged: none of this runs.
+        local diverted_via = ctx.last_rcf_did
+        if (tonumber(ctx.hops) or 0) > 0 and diverted_via and diverted_via ~= "" then
+            local div_e164 = normalize_did(diverted_via)
+            session:setVariable("sip_h_Diversion",
+                "<sip:" .. div_e164 .. "@" .. external_sip_ip .. ">;reason=unconditional")
+            session:setVariable("sip_h_X-Attestation", "div")
+            if ctx.pass_effective then
+                set_var("effective_caller_id_name",
+                    sanitize_display_name(ctx.presented_name, original_caller))
+            else
+                set_var("effective_caller_id_name",
+                    sanitize_display_name(ctx.masking_name, ctx.presented_cid))
+            end
+            local in_identity = get_var("sip_h_X-In-Identity", nil)
+            set_var("stir_attest_intent", "div")
+            set_var("stir_inbound_signed", (in_identity and in_identity ~= "") and "1" or "0")
+            set_var("stir_verstat", get_var("sip_h_X-Verstat", ""))
+            set_var("stir_verstat_source", get_var("sip_h_X-Verstat-Source", ""))
+            set_var("stir_inbound_attest", get_var("sip_h_X-Inbound-Attest", ""))
+            freeswitch.consoleLog("INFO", string.format(
+                "[%s] On-net RCF->trunk delivery marked div: Diversion=%s hops=%s pass=%s presented=%s inbound_signed=%s\n",
+                uuid, div_e164, tostring(ctx.hops), tostring(ctx.pass_effective),
+                tostring(ctx.presented_cid), (in_identity and in_identity ~= "") and "1" or "0"))
+        end
+
         -- Build dial string to customer PBX through Kamailio SBC
         -- Same pattern as RCF: FS -> Kamailio (sbc_proxy_ip:5060) -> PBX
         -- X-PBX-Dest header tells Kamailio where to relay the call
@@ -1569,7 +1945,12 @@ local function terminate_trunk(dest, ctx)
         -- Mark as lua-routed
         set_var("lua_routed", "true")
 
+        -- X-Stir-Outcome arrives on this leg's replies via Kamailio's
+        -- onreply_route[PBX_REPLY_HANDLER] (mode=pbx) — same A-leg capture
+        -- as the carrier loop.
+        stir_outcome_reset()
         session:execute("bridge", dial_string)
+        stir_outcome_capture(uuid, "pbx " .. tostring(pbx_ip))
 
         -- Check bridge result. originate_disposition is the authoritative
         -- success/failure indicator ("SUCCESS" on connect, a failure cause
@@ -1682,6 +2063,10 @@ if product_type == "rcf" then
             ctx.pass_effective = false
             ctx.presented_cid = cur.did
             ctx.presented_name = cur.did
+            -- Masking hop's RCF line name — used ONLY by terminate_trunk for
+            -- the on-net PBX leg's display name (terminate_rcf keeps using the
+            -- TERMINAL line's name via X-Original-CID-Name, unchanged).
+            ctx.masking_name = cur.product_name
         end
 
         local fwd = cur.forward_to
@@ -1763,6 +2148,10 @@ if product_type == "rcf" then
             cur = resolved
             -- loop again
         else
+            -- The RCF DID that forwarded onto this other-product terminal is
+            -- the DIVERTING number of the delivery leg (terminate_trunk marks
+            -- the PBX leg div + Diversion from it; RFC 8946 div.tn).
+            ctx.last_rcf_did = cur.did
             dispatch_terminal(resolved, ctx)
             break
         end
