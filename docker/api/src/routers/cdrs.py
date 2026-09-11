@@ -315,20 +315,33 @@ def _derive_sip_code(variables: dict, answered: bool) -> Optional[int]:
          to the partner.
       2. proto_specific_hangup_cause ("sip:N")   — the same fact in the core's
          generic form; sofia.c:1037 / :8745 set it alongside (1).
-      3. last_bridge_proto_specific_hangup_cause — the bonded partner's
-         `proto_specific_hangup_cause`, pushed across at hangup:
-         switch_channel.c:3432-3434 in `switch_channel_perform_hangup()`
+      3. last_bridge_proto_specific_hangup_cause — a partner's
+         `proto_specific_hangup_cause`, pushed onto THIS channel when that
+         partner hangs up: switch_channel.c:3432-3434 in
+         `switch_channel_perform_hangup()`
          (`switch_channel_set_variable_partner(channel,
           "last_bridge_" SWITCH_PROTO_SPECIFIC_HANGUP_CAUSE_VARIABLE, var)`).
-         It lands on the partner of whichever leg hangs up FIRST, so on the
-         A-leg it appears exactly when the B-leg (callee) hung up first:
-         B-leg received BYE -> "sip:200"; carrier failure -> "sip:503".
-         Only the SUCCESSFUL, bonded B-leg can write it — failed originate
-         attempts never bond — so it cannot leak a failover attempt's code
-         onto an answered call.
+         IMPORTANT — this is written by EVERY originate attempt, not only the
+         one that answered: the peer's signal bond to this A-leg is set at
+         peer CREATION (switch_core_session.c:711), `_set_variable_partner`
+         resolves the target through that bond, a 4xx/5xx final sets the
+         peer's `proto_specific_hangup_cause` to "sip:N" before it hangs up
+         (sofia.c:6871-6873), and the push in `perform_hangup` is
+         unconditional. So after a failover sequence 503 -> answered the
+         A-leg carries a STALE "sip:503" unless the answered peer later
+         overwrites it — and a peer that SENDS the BYE has no proto cause to
+         push (the push is skipped when the var is unset). Hence:
+           * answered:   accept it only if it is a 2xx (the answered peer
+                         received the BYE -> "sip:200" is fresh and consistent);
+                         any non-2xx here can only be a leftover from a failed
+                         earlier attempt and is ignored.
+           * unanswered: accept any code — the LAST attempt's peer wrote it
+                         last (each push overwrites), so it is the final
+                         failure code (e.g. "sip:503", "sip:486").
       4. answered (answer_epoch > 0)             — the INVITE transaction
-         completed with 200 OK and nothing above recorded a status (FS-side
-         teardown: media timeout, ESL kill, ...). Record 200.
+         completed with 200 OK and nothing above recorded a fresh status
+         (FS-side teardown: media timeout, uuid_kill, sched_hangup, ...).
+         Record 200.
       5. sip_invite_failure_status               — unanswered failure on either
          leg. mod_sofia sets it on BOTH the failing leg and its partner
          (sofia.c:6657-6660 `sofia_handle_sip_r_invite`, status >= 400), which
@@ -340,7 +353,8 @@ def _derive_sip_code(variables: dict, answered: bool) -> Optional[int]:
       6. None
 
     Verified against FreeSWITCH master (src/mod/endpoints/mod_sofia/sofia.c,
-    src/switch_channel.c) — see the per-step citations.
+    src/switch_channel.c, src/switch_core_session.c) — see the per-step
+    citations.
     """
     code = _safe_int(variables.get("sip_term_status"))
     if code is not None:
@@ -348,12 +362,18 @@ def _derive_sip_code(variables: dict, answered: bool) -> Optional[int]:
     code = _sip_code_from_proto(variables.get("proto_specific_hangup_cause"))
     if code is not None:
         return code
-    code = _sip_code_from_proto(
+    partner = _sip_code_from_proto(
         variables.get("last_bridge_proto_specific_hangup_cause"))
-    if code is not None:
-        return code
     if answered:
+        # Step 3 (answered branch): only a 2xx from the partner is consistent
+        # with an answered call. Anything else is a failed earlier originate
+        # attempt's code that the answered peer never overwrote (it SENT the
+        # BYE, so it had no proto cause to push) — step 4 wins instead.
+        if partner is not None and 200 <= partner < 300:
+            return partner
         return 200
+    if partner is not None:
+        return partner
     return _safe_int(variables.get("sip_invite_failure_status"))
 
 

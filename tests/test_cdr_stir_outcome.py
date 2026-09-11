@@ -481,6 +481,58 @@ def test_sip_code_unanswered_failure_and_none():
     assert cdrs._derive_sip_code({"proto_specific_hangup_cause": "q850:16"}, answered=False) is None
 
 
+def test_sip_code_answered_ignores_stale_failover_code_from_earlier_attempt():
+    """REGRESSION. Attempt 1 -> 503, attempt 2 answered, then FS-initiated
+    teardown (uuid_kill / media timeout / sched_hangup): the A-leg has no
+    `sip_term_status` and no `proto_specific_hangup_cause`, but STILL carries
+    `last_bridge_proto_specific_hangup_cause=sip:503` — the failed peer pushed
+    it at its hangup (signal bond set at peer creation,
+    switch_core_session.c:711; push unconditional, switch_channel.c:3432-3434)
+    and the answered peer SENT the BYE so it had no proto cause to overwrite
+    it with. An answered call must record 200, never the stale 503."""
+    v = {
+        "last_bridge_proto_specific_hangup_cause": "sip:503",
+        "sip_invite_failure_status": "503",          # also stale (local leg)
+        "sip_hangup_disposition": "send_bye",
+        "hangup_cause": "NORMAL_CLEARING",
+    }
+    assert cdrs._derive_sip_code(v, answered=True) == 200
+
+
+def test_sip_code_answered_accepts_partner_2xx():
+    """Answered, callee hung up first -> its `sip:200` was received via BYE
+    and pushed fresh; a 2xx from the partner is consistent and accepted."""
+    assert cdrs._derive_sip_code(
+        {"last_bridge_proto_specific_hangup_cause": "sip:200"}, answered=True) == 200
+    # any 2xx, not just 200
+    assert cdrs._derive_sip_code(
+        {"last_bridge_proto_specific_hangup_cause": "sip:202"}, answered=True) == 202
+
+
+def test_sip_code_unanswered_keeps_last_bridge_failure_code():
+    """Unanswered: the LAST attempt's peer wrote last_bridge_* last, so it is
+    the real final failure code — unchanged behaviour, no sip_term_status."""
+    assert cdrs._derive_sip_code(
+        {"last_bridge_proto_specific_hangup_cause": "sip:503"}, answered=False) == 503
+
+
+def test_sip_code_unanswered_invite_failure_status_486():
+    assert cdrs._derive_sip_code({"sip_invite_failure_status": "486"}, answered=False) == 486
+
+
+def test_ingest_binds_sip_code_200_for_answered_call_with_stale_last_bridge(cap):
+    """End-to-end through the ingest: the failover-then-answered CDR shape."""
+    body = {"variables": _a_leg_vars(
+        last_bridge_proto_specific_hangup_cause="sip:503",
+        sip_invite_failure_status="503",
+        sip_hangup_disposition="send_bye",
+    )}
+    _run(body)
+    _, p = cap.inserts[0]
+    assert p[9] is not None      # $10 answer_time -> answered
+    assert p[14] == 200          # $15 sip_code, NOT 503
+
+
 def test_ingest_binds_sip_code_200_for_answered_send_bye(cap):
     body = {"variables": _a_leg_vars(sip_hangup_disposition="send_bye")}
     _run(body)
