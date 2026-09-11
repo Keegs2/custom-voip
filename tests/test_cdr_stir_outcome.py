@@ -253,8 +253,7 @@ def test_outbound_direction_alone_is_an_a_leg():
 
 @pytest.mark.parametrize("var", ["signal_bond", "bridge_uuid"])
 def test_bridge_partner_vars_never_classify_an_a_leg_as_b(var):
-    """BILLING-CRITICAL. switch_ivr_bridge.c sets BOTH `bridge_uuid` (:1763 and
-    :1766) and `signal_bond` (:1764 and :1767) on BOTH legs of every bridge, so
+    """BILLING-CRITICAL. switch_ivr_bridge.c sets BOTH `bridge_uuid` (:1699-1700) and `signal_bond` (:1764 and :1767) on BOTH legs of every bridge, so
     either one used as a DETECTOR would classify every bridged RCF A-leg as a
     B-leg and silently drop its billable row. They are resolvers only."""
     body = {"variables": _a_leg_vars(**{var: "the-other-leg"})}

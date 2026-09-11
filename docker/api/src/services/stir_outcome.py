@@ -209,7 +209,7 @@ def badge_fields(
 #
 # Signals deliberately NOT used as detectors:
 #  * `signal_bond`  — switch_ivr_bridge.c:1764 AND :1767 set it on BOTH legs.
-#  * `bridge_uuid`  — switch_ivr_bridge.c:1763 AND :1766 set it on BOTH legs.
+#  * `bridge_uuid`  — switch_ivr_bridge.c:1699-1700 set it on BOTH legs.
 #    Either one as a detector would classify EVERY bridged RCF A-leg as a B-leg
 #    and drop the billable row. They are A-leg-uuid RESOLVERS only.
 #  * `other_leg_unique_id` — DOES NOT EXIST in FreeSWITCH. `Other-Leg-Unique-ID`
