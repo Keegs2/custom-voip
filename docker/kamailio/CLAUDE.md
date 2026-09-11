@@ -1064,6 +1064,32 @@ which works even while the originate is failing because the B-leg's `signal_bond
 is set at creation (`switch_core_session.c:711`). The capture consumes the raw
 `sip_rh_`/`sip_ph_` variables so they cannot be re-emitted later or reach the CDR.
 
+**Deploy order — HARD requirement (X-From-Name deploy-window leak).** #122 adds
+the `X-From-Name` header (FS → Kamailio, From-display-only hand-off for the RCF
+From pass-through, `RCF_FROM_PASSTHROUGH`). The base RCF-V1 `kamailio.cfg` has NO
+strip for it: an SBC on the pre-#122 build forwards it to the carrier verbatim,
+i.e. the ORIGINAL CALLER's display name leaks to Bandwidth/Sinch in an internal
+header. The Lua is bind-mounted and re-read per call, so a media-VM `git pull`
+takes effect inside the running container immediately. Therefore, per zone:
+
+1. Rebuild + recreate BOTH SBCs of the zone on the #120+#122 image (standby
+   first, then active — `docker compose -f docker-compose.sbc.yml -f
+   docker-compose.stir-key.yml build kamailio && … up -d kamailio`). Confirm
+   with a forwarded test call that the carrier-facing INVITE in Homer carries no
+   `X-From-Name` / `X-Original-CID-Name` / `X-Stir-Outcome`.
+2. Only THEN `git pull` the zone's media VM(s). `RCF_FROM_PASSTHROUGH` ships
+   DARK (default off; only `on|true|1` enables), so this step alone changes no
+   From header.
+3. Only THEN, per carrier PoP (Bandwidth Dallas + LA), place ONE live canary RCF
+   call with `RCF_FROM_PASSTHROUGH=on` on a single media VM and confirm the
+   carrier accepts a non-account TN in From (no 403/603, call completes, Homer
+   shows `From: "<caller name>" <sip:+1<caller>@VIP>` and `Diversion` = the RCF
+   DID). Then enable it in that zone's media-VM `.env` + recreate.
+
+Never set `RCF_FROM_PASSTHROUGH=on` on a media VM whose zone still has an SBC on
+the older build. Rollback at any step: remove the variable + recreate the FS
+container (From reverts to the RCF DID; no SBC change needed).
+
 **Known gap.** `voice_webhook.lua`'s `<Dial>` legs and the legacy
 `outbound_api.lua` do not capture the outcome; their CDRs keep `stir_outcome`
 empty and the ingest falls back to intent.
