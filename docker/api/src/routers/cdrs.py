@@ -378,7 +378,7 @@ def _derive_sip_code(variables: dict, answered: bool) -> Optional[int]:
 
 
 # Media-VM VPC subnets -> zone (CLAUDE.md GCP topology). Used ONLY as the last
-# fallback for freeswitch_node and for the one-off backfill of legacy rows.
+# fallback for freeswitch_node (matched against `local_media_ip`).
 _MEDIA_SUBNET_ZONES = (
     ("192.168.10.", "east"),
     ("192.168.20.", "west"),
@@ -416,26 +416,39 @@ def _derive_fs_node(body: dict, variables: dict) -> Optional[str]:
 
     Fallback chain:
       1. variables.fs_node        — explicit, set by the FS Lua scripts
-                                    (FS_NODE_ID or "<FS_ZONE>-fs"); preferred
+                                    (FS_NODE_ID or "<FS_ZONE>-fs"); preferred.
+                                    This is the ONLY source that can tell
+                                    fs-1 from fs-2 within a zone (FS_NODE_ID).
       2. variables.fs_zone        — zone-only, if the scripts export it
       3. body.switchname          — ONLY if it is not the shared default
-      4. zone from the FS VPC IP  — local_media_ip (core, set once media is
-                                    up) / sip_local_network_addr (mod_sofia) /
-                                    advertised_media_ip. Both sofia profiles
-                                    bind sip-ip/rtp-ip to $${local_ip_v4},
-                                    which on the media VMs is the voip-media
-                                    subnet address: 192.168.10.x = east,
-                                    .20.x = west, .30.x = central. NOTE this
-                                    is ZONE granularity — it cannot tell FS-1
-                                    (x.2) from FS-2 (x.3); use fs_node for that.
-      5. body.core-uuid           — opaque, but per-FS-PROCESS, so it at least
-                                    partitions rows by node. CAVEAT: it changes
-                                    on every FreeSWITCH restart, so do NOT
-                                    GROUP BY this column expecting stable node
-                                    cardinality — it is a last-resort
-                                    "something, not NULL" value for forensics.
-                                    Setting `fs_node` on the FS side removes it
-                                    from the picture entirely.
+      4. zone from local_media_ip — the core's `local_sdp_ip`, i.e. the
+                                    address FS actually BOUND media to
+                                    (rtp-ip = $${local_ip_v4}), which on the
+                                    media VMs is the voip-media subnet address:
+                                    192.168.10.x = east, .20.x = west,
+                                    .30.x = central -> "<zone>-fs". Only set
+                                    once media is negotiated, so ANSWERED calls
+                                    resolve here; failed/unanswered calls do
+                                    not. Zone granularity only.
+      5. None                     — dashboards render NULL as "unknown"
+                                    (call-quality.json zone CASE:
+                                    LIKE 'west%' / LIKE 'central%' /
+                                    '' -> 'unknown' / ELSE 'east').
+
+    Deliberately NOT consulted:
+      * `sip_local_network_addr` (mod_sofia: `extsipip ? extsipip : sipip`)
+        and `advertised_media_ip` (the ext-rtp-ip written into the SDP): on
+        this deployment BOTH sofia profiles set ext-sip-ip/ext-rtp-ip to the
+        VM's PUBLIC IP (conf/sofia/internal.xml:51-52, external.xml:39-40,
+        from EXTERNAL_SIP_IP/EXTERNAL_RTP_IP in freeswitch.xml:65-66), so those
+        vars never carry a 192.168.x address and could never match.
+      * `body.core-uuid`: an opaque per-process uuid that changes on every
+        restart. Every zone CASE in call-quality.json is
+        `LIKE 'west%' ... LIKE 'central%' ... ELSE 'east'`, so any non-empty
+        string that is not a zone name is COUNTED AS EAST — a West/Central
+        failed call (no media yet, so step 4 misses) would be misattributed
+        to East instead of staying "unknown". Returning None is the honest
+        answer until the Lua `fs_node` var is live everywhere.
 
     Truncated to 50 chars: cdrs.freeswitch_node is VARCHAR(50).
     """
@@ -446,13 +459,9 @@ def _derive_fs_node(body: dict, variables: dict) -> Optional[str]:
     switchname = body.get("switchname")
     if switchname and str(switchname).strip().lower() not in ("voiceplatform", "freeswitch"):
         return str(switchname).strip()[:50]
-    for key in ("local_media_ip", "sip_local_network_addr", "advertised_media_ip"):
-        zone = _zone_from_media_ip(variables.get(key))
-        if zone:
-            return f"{zone}-fs"
-    core_uuid = body.get("core-uuid")
-    if core_uuid and str(core_uuid).strip():
-        return str(core_uuid).strip()[:50]
+    zone = _zone_from_media_ip(variables.get("local_media_ip"))
+    if zone:
+        return f"{zone}-fs"
     return None
 
 
@@ -761,7 +770,9 @@ async def _process_cdr_body(body: dict) -> dict:
             traffic_grade = str(traffic_grade)
         # freeswitch_node: `FreeSWITCH-Hostname` is an event header, not a
         # channel var (it was NULL on every production row). Fallback chain
-        # documented in _derive_fs_node.
+        # documented in _derive_fs_node: answered calls resolve to "<zone>-fs"
+        # from local_media_ip; failed/unanswered calls stay NULL ("unknown")
+        # until the FS Lua exports `fs_node`.
         freeswitch_node = _derive_fs_node(body, variables)
 
         # Extract a destination prefix (up to first 6 digits after +) for

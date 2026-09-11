@@ -553,22 +553,45 @@ def test_ingest_binds_sip_code_null_for_unanswered_no_status(cap):
 # ---------------------------------------------------------------------------
 
 def test_fs_node_prefers_explicit_var():
-    assert cdrs._derive_fs_node({"switchname": "voiceplatform"},
-                                {"fs_node": "west-fs-2", "sip_local_network_addr": "192.168.10.2"}) == "west-fs-2"
+    """`fs_node` from the Lua (FS_NODE_ID or "<zone>-fs") always wins — it is
+    the only source that can tell fs-1 from fs-2 within a zone."""
+    assert cdrs._derive_fs_node({"switchname": "voiceplatform", "core-uuid": "abc"},
+                                {"fs_node": "west-fs-2", "local_media_ip": "192.168.10.2"}) == "west-fs-2"
     assert cdrs._derive_fs_node({}, {"fs_zone": "central"}) == "central"
 
 
-def test_fs_node_ignores_shared_default_switchname_then_uses_media_ip():
+def test_fs_node_ignores_shared_default_switchname_then_uses_local_media_ip():
+    """Answered call: `local_media_ip` is the address FS BOUND media to
+    (rtp-ip = local_ip_v4 = the voip-media VPC address) -> zone."""
     assert cdrs._derive_fs_node({"switchname": "voiceplatform"},
-                                {"sip_local_network_addr": "192.168.20.2"}) == "west-fs"
+                                {"local_media_ip": "192.168.20.5"}) == "west-fs"
     assert cdrs._derive_fs_node({"switchname": "voiceplatform"},
                                 {"local_media_ip": "192.168.30.3"}) == "central-fs"
-    assert cdrs._derive_fs_node({}, {"advertised_media_ip": "192.168.10.2"}) == "east-fs"
+    assert cdrs._derive_fs_node({}, {"local_media_ip": "192.168.10.2"}) == "east-fs"
 
 
-def test_fs_node_uses_distinct_switchname_and_core_uuid_fallbacks():
+def test_fs_node_failed_call_with_only_public_ips_and_core_uuid_is_none():
+    """REGRESSION. A FAILED West/Central call has no local media yet, and the
+    sofia-side vars carry the PUBLIC IP (both profiles set ext-sip-ip /
+    ext-rtp-ip to EXTERNAL_SIP_IP/EXTERNAL_RTP_IP). The old `core-uuid`
+    fallback returned an opaque uuid, which every call-quality.json zone CASE
+    (`LIKE 'west%' ... LIKE 'central%' ... ELSE 'east'`) counts as EAST. The
+    honest answer is None -> "unknown"."""
+    body = {"switchname": "voiceplatform", "core-uuid": "5f0c6b1e-2a4d-4c8e-9f3b-7d1e8a2c4b60"}
+    variables = {
+        "sip_local_network_addr": "8.229.177.165",   # west-fs PUBLIC IP (ext-sip-ip)
+        "advertised_media_ip": "8.229.177.165",      # ext-rtp-ip
+        "sip_network_ip": "10.138.0.250",            # signaling VIP the INVITE came from
+    }
+    assert cdrs._derive_fs_node(body, variables) is None
+    # and never any of the public-IP sofia vars, even with a private-looking value
+    assert cdrs._derive_fs_node({}, {"sip_local_network_addr": "192.168.20.2"}) is None
+    assert cdrs._derive_fs_node({}, {"advertised_media_ip": "192.168.20.2"}) is None
+
+
+def test_fs_node_uses_distinct_switchname_but_never_core_uuid():
     assert cdrs._derive_fs_node({"switchname": "west-fs"}, {}) == "west-fs"
-    assert cdrs._derive_fs_node({"switchname": "voiceplatform", "core-uuid": "abc"}, {}) == "abc"
+    assert cdrs._derive_fs_node({"switchname": "voiceplatform", "core-uuid": "abc"}, {}) is None
     assert cdrs._derive_fs_node({}, {}) is None
     # the old (never-present) event header name is NOT consulted
     assert cdrs._derive_fs_node({}, {"FreeSWITCH-Hostname": "fs-media-v2"}) is None
@@ -576,7 +599,25 @@ def test_fs_node_uses_distinct_switchname_and_core_uuid_fallbacks():
 
 def test_ingest_binds_freeswitch_node(cap):
     body = {"switchname": "voiceplatform",
-            "variables": _a_leg_vars(sip_local_network_addr="192.168.10.2")}
+            "variables": _a_leg_vars(local_media_ip="192.168.10.2")}
     _run(body)
     _, p = cap.inserts[0]
     assert p[17] == "east-fs"    # $18 freeswitch_node
+
+
+def test_ingest_binds_freeswitch_node_null_for_failed_call_without_fs_node(cap):
+    body = {"switchname": "voiceplatform", "core-uuid": "core-west-1",
+            "variables": _a_leg_vars(answer_epoch="0", billsec="0",
+                                     sip_local_network_addr="8.229.177.165",
+                                     advertised_media_ip="8.229.177.165")}
+    _run(body)
+    _, p = cap.inserts[0]
+    assert p[17] is None         # $18 freeswitch_node -> "unknown" on the board
+
+
+def test_ingest_binds_freeswitch_node_from_fs_node_var(cap):
+    body = {"switchname": "voiceplatform", "core-uuid": "core-west-1",
+            "variables": _a_leg_vars(fs_node="west-fs", fs_zone="west")}
+    _run(body)
+    _, p = cap.inserts[0]
+    assert p[17] == "west-fs"
