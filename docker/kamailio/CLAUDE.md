@@ -247,6 +247,18 @@ Handles BYE, re-INVITE, ACK, UPDATE, etc. for established calls. (CANCEL never g
    ADVERTISE_IP. The Contact/headers use ADVERTISE_IP (NLB VIP for SIP); only the
    SDP `c=`/media addressing uses FS_PUBLIC_IP because RTP bypasses the NLB.
 
+8.5. **STIR/SHAKEN — Identity ownership + signing** (Step 8.5, after the X-CID
+   re-add; plain lumps after `msg_apply_changes()`/`record_route_preset()`):
+   read `X-Attestation` / `X-In-Identity`, then `remove_hf("Identity")` (ALL
+   FS-emitted copies), strip the internal STIR X-headers, and compose the wire
+   Identity set: the preserved inbound chain once (`route[STIR_EMIT_CHAIN]`) +
+   at most one PASSporT of ours (base A/B/C via `secsipid_add_identity`, or a
+   `div` via `secsipid_sign`), all TN claims digits-only via
+   `route[STIR_TN_CANON]`. Masked RCF forwards re-originate (attest A, no
+   chain) under `STIR_MASKED_REORIG`. Ends with the
+   `prom_counter_inc("stir_attest_signed", ...)` outcome label and the
+   `STIR egress: identities=N (base=B, div=D) ...` NOTICE line. See §8.13.
+
 9. **Relay with callbacks**: `t_on_branch(TO_CARRIER_BRANCH)`, `t_on_failure(CARRIER_FAILURE)`, `t_on_reply(REPLY_HANDLER)`.
 
 ### 4.4 route[RELAY]
@@ -844,6 +856,112 @@ Each zone's SBC pair is active/standby by NLB health check (identical config on 
 **Dark when unset.** `SBC_PEER_INTERNAL_IP` unset, non-IPv4, or `== SBC_INTERNAL_IP` (WARNING) ⇒ every `#!ifdef SBC_PEER_HANDOFF` block compiles out, no `peerhealth` htable, the group-10 line renders as a comment — byte-identical config (render-diffed against pristine). Works in dedicated AND legacy signaling-VIP modes (the guard keys on the external VIP bind, present in both).
 
 **Verify (passive).** Once live on both SBCs: the STANDBY's `kamcmd dispatcher.list` shows Sinch orig groups 6/7 `AP` (Active) instead of the documented Inactive-forever; group 10 is `AP` on both SBCs. The active logs `peer hand-off: … handed raw to peer` at INFO for INVITE/CANCEL (DBG for OPTIONS). Homer: a handed-off reply is traced twice by design — the stateless-residue `sip_trace()` on the receiver plus `TMCB_RESPONSE_IN` on the owner. Drill: with both SBCs up, a call whose B-leg INVITE was VIP-sourced on the standby (failback window) completes with ONE carrier INVITE — no `VIP_EGRESS tripwire`, no alternate-PoP re-INVITE.
+
+### 8.13 STIR/SHAKEN Identity handling — Kamailio owns Identity at every egress (2026-09-10)
+
+**Symptom that drove this:** the 2026-09-10 production capture of a carrier-bound
+RCF forward carried THREE byte-identical T-Mobile `ppt=shaken` Identity headers
+plus one `ppt=div` of ours whose claims were `"+15087282017"` / `["+18004444444"]`
+(with a `+`), while T-Mobile's base carried `"15087282017"` (digits only).
+Cause: mod_sofia emits the A-leg's `sip_h_identity` TWICE on the bridged B-leg
+(the dedicated `SIPTAG_IDENTITY_STR(identity)` path, `sofia_glue.c` ~1143/~1695,
+plus the generic `sip_h_*` extra-header loop, ~908-945/~1697), and the old
+Step 8.5 re-emitted the preserved chain on top without ever removing `Identity`.
+The div branch's `{re.subst,/^\+?/+/}` also failed on any `+`-less input
+(empty regex match → `core/re.c:456` "Matched string is empty" → assignment
+failed → int 0 → the `!= ""` guard evaluated false → base-only relay while the
+counter/log still said `div`).
+
+**Invariants (enforced in `kamailio.cfg`; the Lua side is belt-and-braces):**
+
+1. **Kamailio owns Identity at every egress.** Every route that forwards an
+   FS-originated INVITE off-platform does `remove_hf("Identity")` (textops
+   `ki_remove_hf` iterates `msg->headers` and `del_lump()`s EVERY match) BEFORE
+   composing the wire set: `route[TO_CARRIER]` Step 8.5, the `X-PBX-Dest`
+   trunk-delivery leg, and FS-originated in-dialog re-INVITEs in
+   `route[WITHINDIALOG]`. FS copies are never trusted. The Lua scripts
+   additionally `session:setVariable("sip_h_identity", "")` before every bridge
+   (`inbound_router.lua` terminate_rcf/terminate_trunk, `trunk_outbound.lua`,
+   `api_outbound.lua`, `outbound_api.lua`, `voice_webhook.lua`) so FS emits
+   ZERO copies; `sip_copy_custom_headers` is untouched.
+2. **The inbound chain is re-emitted exactly once, from `X-In-Identity`**
+   (captured at ingress with the 4-cap `'|'`-join: Bandwidth static branch,
+   `route[CARRIER_TRUST]`, and — new — `route[TRUNK_AUTH]` for PBX-supplied
+   Identity), original order, byte-for-byte (`route[STIR_EMIT_CHAIN]`). We
+   never rewrite an upstream PASSporT (RFC 8224 §5). This runs with
+   `STIR_SHAKEN_SIGN` OFF too — ownership is independent of signing.
+3. **Claims are digits-only.** Every TN we put in a PASSporT we sign goes
+   through `route[STIR_TN_CANON]` (strip user params, strip one leading `+`,
+   NANP → `1NXXNXXXXXX`, anything else → `""` so the caller gates) — RFC 8224
+   §8.3 / RFC 8225 §5.2.1 / ATIS-1000074. libsecsipid embeds `origTN`/`destTN`
+   verbatim (`secsipidx secsipid.go getIdentityPrvKey`: `Orig{TN: origTN}`,
+   `Dest{TN: []string{destTN}}`) and `secsipid_mod.c` passes the cfg strings
+   straight through, so the caller MUST canonicalize. Wire headers
+   (From/PAI/Diversion/R-URI) stay +E.164 under `E164_EGRESS` — different
+   thing. `orig` AND `dest` are gated (never sign `""`/`"+"`/`"0"`); the
+   guards are anchored regex tests on real strings.
+4. **div only on pass-through retargets; masked forwards re-originate.** RFC
+   8946 §5 requires div orig == base orig and RFC 8224 §6.2 makes the verifier
+   match orig to From/PAI, so a masked RCF forward (`pass_caller_id=false`,
+   `X-Original-CID` = the RCF DID) can never verify as a chain. Under
+   `STIR_MASKED_REORIG` (SBC `.env` → `docker-compose.sbc.yml` `environment:`
+   → entrypoint; default ON; `off|false|0` disables — it MUST be listed in the
+   compose `environment:` block or the container never sees the `.env` value)
+   `route[STIR_BASE_ORIG]` decodes the first chain element's payload
+   (`{s.select,0,|}{s.select,1,.}` → `{s.decode.base64urlt}` → `re.subst`
+   backref → canon) and, when it differs from the presented TN, Step 8.5 drops
+   the chain and signs ONE fresh base PASSporT at attest A (we own the DID).
+   Undecodable base → conservative pass-through (chain + div) with a WARN.
+   Unsigned inbound + div still signs base C (Granite 2026-08-05 policy,
+   unchanged — including the masked-unsigned case; promoting that to A is an
+   operator call).
+5. **Outcome-true observability.** `$var(stir_eff)` (→ the
+   `kamailio_stir_attest_signed{attestation}` label) is set only after a
+   successful sign: `div`, `A`/`B`/`C`, `base-only` (chain on the wire, our
+   div not), `unsigned`. Label set is now `{A,B,C,div,base-only,unsigned}`
+   (`base-only` counts as "signed" in the noc-home `attestation!="unsigned"`
+   share — an upstream SHAKEN Identity IS on the wire). Every egress ends with
+   `xlog L_NOTICE "STIR egress: identities=N (base=B, div=D) chain=.. own_base=..
+   mode=relay|passthrough-div|reorig|gateway-C|base eff=.. fs_copies_stripped=.."`
+   (`"STIR egress (pbx <ip>): ..."` on the PBX leg) — grep it for the truth.
+   The FS/CDR/UI "A→div" badge is still INTENT-based (`stir_attest_intent`,
+   `stir_inbound_signed` channel vars set before the bridge); making it
+   outcome-based needs the SBC to hand the outcome back to FS (e.g. a header on
+   the first non-100 reply consumed by the B-leg → exported to the A-leg CDR
+   vars) — deliberately out of scope here.
+
+**Lump-order rules honoured:** in TO_CARRIER the strips/appends are plain lumps
+AFTER `msg_apply_changes()` and `record_route_preset()` (same position as the
+X-CID re-add — §8.2/§8.4 unaffected); on the PBX leg they sit next to the
+existing `remove_hf_re("^[Xx]-")` BEFORE `record_route()` (no
+`msg_apply_changes()` on that path); in WITHINDIALOG the strip follows the
+existing Contact re-add. Verified with the render gate (`kamailio -c` exit 0 in
+STIR on/E164 on/VIP on/dedicated, STIR on/E164 off/legacy, STIR off, and
+STIR on/`STIR_MASKED_REORIG=off`) and the transformation chain was executed at
+runtime on 5.8.8 with synthetic PASSporTs before shipping.
+
+**RFC / ATIS map:** RFC 8224 §4 (Identity syntax, multiple headers), §5.1
+(authentication service on INVITE), §6.2 (orig vs From/PAI), §8.3 (TN
+canonicalization); RFC 8225 §5.2.1 (`tn` claims); RFC 8946 §4/§5 (div chained
+onto a base with equal orig, never bare); ATIS-1000074 §5.2.3 (A/B/C);
+ATIS-1000085 (div profile); RFC 9060 / ATIS-1000092 (delegate certificates —
+why a PBX-supplied Identity is kept on trunk origination).
+
+**Expected wire Identity set per scenario (signing ON):**
+
+| Scenario | Wire Identity set |
+|---|---|
+| RCF pass-through forward of a signed inbound call | inbound chain ×1 (original order) + our `ppt=div` ×1 |
+| RCF forward of an unsigned inbound call | our base `attest=C` ×1 |
+| RCF masked forward (`pass_caller_id=false`) of a signed call | our base `attest=A` ×1 (chain dropped; `STIR_MASKED_REORIG` off → chain ×1 + div ×1) |
+| API origination | our base (A if ownership verified, else B) ×1 |
+| Trunk origination, no PBX Identity | our base (A/B) ×1 |
+| Trunk origination WITH a PBX-supplied Identity | PBX chain ×1 + our base (A/B) ×1 |
+| Inbound DID delivered to a trunk PBX (`X-PBX-Dest`) | inbound chain ×1, no div |
+| RCF forward landing on-net on a trunk DID | inbound chain ×1 (div arm dormant until `terminate_trunk` marks the leg div + Diversion) |
+
+Signing OFF: every egress still strips FS copies and re-emits the inbound
+chain once (`eff=unsigned`).
 
 ## 9. How to Modify
 

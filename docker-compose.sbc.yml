@@ -109,6 +109,13 @@ services:
       # in git. STIR_SHAKEN_VERIFY is reserved for Phase 2B (no verify code yet).
       - STIR_SHAKEN_SIGN=${STIR_SHAKEN_SIGN:-off}
       - STIR_SHAKEN_VERIFY=${STIR_SHAKEN_VERIFY:-off}
+      # Masked-forward re-origination (CLAUDE.md 8.13 inv. 4). DEFAULT ON: a
+      # masked RCF forward (pass_caller_id=false) of a signed call drops the
+      # inbound chain and signs ONE fresh base at attest A instead of an
+      # unverifiable chain+div. Set STIR_MASKED_REORIG=off in /opt/revup/.env
+      # + recreate to restore chain+div. Must be passed through here — the
+      # entrypoint reads it from the container env, not from the .env file.
+      - STIR_MASKED_REORIG=${STIR_MASKED_REORIG:-on}
       - STIR_CERT_URL=${STIR_CERT_URL:-}
       - STIR_KEY_PATH=${STIR_KEY_PATH:-}
       # STIR/SHAKEN inbound VERIFY trust anchors (Phase 2B). Govern whether a

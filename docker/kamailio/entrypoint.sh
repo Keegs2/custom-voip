@@ -216,6 +216,27 @@ else
   STIR_SHAKEN_VERIFY=off
 fi
 
+# STIR/SHAKEN masked-forward re-origination toggle. DEFAULT ON. Same
+# compile-time line-replacement mechanism as STIR_SHAKEN_SIGN: the
+# __STIR_MASKED_REORIG_DEFINE__ placeholder LINE becomes `#!define
+# STIR_MASKED_REORIG` (ON) or a comment (OFF). ON => route[TO_CARRIER] Step 8.5
+# decodes the inbound base PASSporT's orig.tn and, when a div-marked leg
+# presents a DIFFERENT calling TN (masked RCF forward, pass_caller_id=false),
+# signs ONE fresh base PASSporT at attest A instead of a chain that can never
+# verify (RFC 8946 §5 / RFC 8224 §6.2). Only off|false|0 turns it OFF; it is
+# referenced only inside the STIR_SHAKEN_SIGN block, so with signing OFF it
+# changes nothing.
+case "${STIR_MASKED_REORIG:-on}" in
+  off|false|0)
+    STIR_MASKED_REORIG_DEFINE="# STIR_MASKED_REORIG disabled via env — masked RCF forwards keep chain + div"
+    STIR_MASKED_REORIG=off
+    ;;
+  *)
+    STIR_MASKED_REORIG_DEFINE="#!define STIR_MASKED_REORIG"
+    STIR_MASKED_REORIG=on
+    ;;
+esac
+
 # VIP_EGRESS: carrier-bound INVITE egress from the zone's EXTERNAL NLB VIP
 # (route[TO_CARRIER] forces $fs = udp:ADVERTISE_IP:5060 before t_relay for
 # INVITEs that arrived on the signaling ILB VIP), so steady-state INVITEs join
@@ -403,6 +424,9 @@ sed -i "s|__FS_AWARE_OPTIONS_DEFINE__|${FS_AWARE_OPTIONS_DEFINE}|" "$CONFIG"
 # '&' or '\', so the s|..|..| delimiter is safe.
 sed -i "s|__STIR_SHAKEN_SIGN_DEFINE__|${STIR_SHAKEN_SIGN_DEFINE}|" "$CONFIG"
 sed -i "s|__STIR_SHAKEN_VERIFY_DEFINE__|${STIR_SHAKEN_VERIFY_DEFINE}|" "$CONFIG"
+# Masked-forward re-origination toggle: same fixed-literal replacement (no
+# '|', '&' or '\' in either string).
+sed -i "s|__STIR_MASKED_REORIG_DEFINE__|${STIR_MASKED_REORIG_DEFINE}|" "$CONFIG"
 # E.164 egress toggle: same line-replacement pattern; the replacement string is
 # a fixed literal (a #!define or a comment) with no '|', '&' or '\'.
 sed -i "s|__E164_EGRESS__|${E164_EGRESS_DEFINE}|" "$CONFIG"
