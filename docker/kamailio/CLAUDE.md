@@ -904,7 +904,9 @@ counter/log still said `div`).
    8946 §5 requires div orig == base orig and RFC 8224 §6.2 makes the verifier
    match orig to From/PAI, so a masked RCF forward (`pass_caller_id=false`,
    `X-Original-CID` = the RCF DID) can never verify as a chain. Under
-   `STIR_MASKED_REORIG` (entrypoint default ON; `off|false|0` disables)
+   `STIR_MASKED_REORIG` (SBC `.env` → `docker-compose.sbc.yml` `environment:`
+   → entrypoint; default ON; `off|false|0` disables — it MUST be listed in the
+   compose `environment:` block or the container never sees the `.env` value)
    `route[STIR_BASE_ORIG]` decodes the first chain element's payload
    (`{s.select,0,|}{s.select,1,.}` → `{s.decode.base64urlt}` → `re.subst`
    backref → canon) and, when it differs from the presented TN, Step 8.5 drops
