@@ -889,7 +889,11 @@ counter/log still said `div`).
    `route[CARRIER_TRUST]`, and — new — `route[TRUNK_AUTH]` for PBX-supplied
    Identity), original order, byte-for-byte (`route[STIR_EMIT_CHAIN]`). We
    never rewrite an upstream PASSporT (RFC 8224 §5). This runs with
-   `STIR_SHAKEN_SIGN` OFF too — ownership is independent of signing.
+   `STIR_SHAKEN_SIGN` OFF too — ownership is independent of signing. Known /
+   accepted: `'|'` cannot occur in a well-formed Identity value, so a
+   PBX-supplied SINGLE header containing a literal pipe (`Identity: a|b`) is
+   captured as one element and re-emitted as TWO `Identity:` headers (`a`,
+   `b`) — both already invalid PASSporTs, so nothing verifiable is lost.
 3. **Claims are digits-only.** Every TN we put in a PASSporT we sign goes
    through `route[STIR_TN_CANON]` (strip user params, strip one leading `+`,
    NANP → `1NXXNXXXXXX`, anything else → `""` so the caller gates) — RFC 8224
@@ -924,11 +928,13 @@ counter/log still said `div`).
    `xlog L_NOTICE "STIR egress: identities=N (base=B, div=D) chain=.. own_base=..
    mode=relay|passthrough-div|reorig|gateway-C|base eff=.. fs_copies_stripped=.."`
    (`"STIR egress (pbx <ip>): ..."` on the PBX leg) — grep it for the truth.
-   The FS/CDR/UI "A→div" badge is still INTENT-based (`stir_attest_intent`,
-   `stir_inbound_signed` channel vars set before the bridge); making it
-   outcome-based needs the SBC to hand the outcome back to FS (e.g. a header on
-   the first non-100 reply consumed by the B-leg → exported to the A-leg CDR
-   vars) — deliberately out of scope here.
+   The FS/CDR/UI badge is OUTCOME-based since #122: Kamailio hands the actual
+   composed set back on every non-100 reply as `X-Stir-Outcome` (§8.14), FS
+   pins it in the A-leg channel variable `stir_outcome`, and #121's ingest
+   stores it (`cdrs.stir_outcome` / `stir_eff_actual`) and prefers it over the
+   FS intent (`stir_attest_intent`, `stir_inbound_signed`) when rendering the
+   badge (`stir_badge_source=actual`); intent remains the fallback when no
+   hand-back arrived (see the §8.14 blind spots).
 
 **Lump-order rules honoured:** in TO_CARRIER the strips/appends are plain lumps
 AFTER `msg_apply_changes()` and `record_route_preset()` (same position as the
@@ -958,10 +964,167 @@ why a PBX-supplied Identity is kept on trunk origination).
 | Trunk origination, no PBX Identity | our base (A/B) ×1 |
 | Trunk origination WITH a PBX-supplied Identity | PBX chain ×1 + our base (A/B) ×1 |
 | Inbound DID delivered to a trunk PBX (`X-PBX-Dest`) | inbound chain ×1, no div |
-| RCF forward landing on-net on a trunk DID | inbound chain ×1 (div arm dormant until `terminate_trunk` marks the leg div + Diversion) |
+| RCF forward landing on-net on a trunk DID (`ctx.hops > 0`), pass-through | inbound chain ×1 + our `ppt=div` ×1 — `terminate_trunk` marks the leg `X-Attestation: div` + `Diversion: <last forwarding RCF DID>`; a DIRECT trunk inbound (`hops == 0`) still gets chain ×1, no div |
+| RCF forward landing on-net on a trunk DID, MASKED (`pass_caller_id=false` somewhere in the chain) | inbound chain ×1 ONLY (`mode=pbx-chainonly`, `eff=base-only`) — the PBX leg runs the same `route[STIR_BASE_ORIG]` check as the carrier leg (under `STIR_MASKED_REORIG`): base `orig.tn` != the presented (masking) From user ⇒ a div could never verify (RFC 8946 §5), so none is signed. Undecodable base ⇒ conservative chain + div with a WARN. The carrier leg re-originates at A in the same situation; a PBX delivery is not an origination, so chain-only is the honest set |
 
 Signing OFF: every egress still strips FS copies and re-emits the inbound
 chain once (`eff=unsigned`).
+
+### 8.14 STIR outcome hand-back — `X-Stir-Outcome` (Kamailio → FreeSWITCH, replies only)
+
+**Problem.** The CDR's STIR fields were FreeSWITCH's *intent* (`stir_attest_intent`
+and friends, set before the bridge). Kamailio composes the ACTUAL Identity set at
+egress and can fail open at half a dozen points (`secsipid_sign` error, undecodable
+base PASSporT, non-NANP claim, `STIR_SHAKEN_SIGN=off`). So a call logged as `div`
+could have gone out `base-only` or `unsigned` and nothing downstream would know.
+
+**Contract (do not change the name or the format — the CDR ingest parses it).**
+
+```
+X-Stir-Outcome: eff=<div|A|B|C|base-only|unsigned>;mode=<relay|passthrough-div|reorig|gateway-C|base|pbx|pbx-chainonly>;identities=<n>;base=<n>;div=<0|1>;stripped=<n>
+```
+
+FreeSWITCH lands the verbatim value in the A-leg channel variable **`stir_outcome`**.
+
+`eff` has ONE meaning on both legs: `unsigned` = nothing went on the wire, `base-only` =
+only a relayed upstream chain did, `div`/`A`/`B`/`C` = a PASSporT of ours did. The carrier
+leg normalises `unsigned` → `base-only` when `base > 0` right before composing the string
+(the `prom_counter_inc("stir_attest_signed", …)` label and the `STIR egress:` NOTICE keep
+the raw `$var(stir_eff)`; only the hand-back is normalised).
+
+**Where it is composed.** Two egress points, each AFTER its Identity set is final:
+
+| Egress | Composed at | Armed with |
+|---|---|---|
+| Carrier B-leg | `route[TO_CARRIER]` Step 8.5, just before `t_relay()` | `t_on_reply("REPLY_HANDLER")` |
+| `X-PBX-Dest` trunk delivery | the PBX branch of `request_route`, just before `t_relay()` | `t_on_reply("PBX_REPLY_HANDLER")` |
+
+Both store the string in the **transaction-scoped** `$avp(stir_outcome)`.
+
+**Why an AVP and why it survives into the reply route.** `$var()` is per-process
+scratch and is not visible in a reply route. `build_cell()` *moves* the current AVP
+lists into the new transaction — `tm/h_table.c:354-371` does
+`old = set_avp_list(...); new_cell->…= *old; *old = 0;` for uri/user from/to plus
+the xavp lists — so a write made BEFORE `t_relay()` (i.e. before the cell exists) is
+inherited, and writes after it land in the cell because the "current" list now IS the
+cell's. `reply_received()` swaps those same lists back in at `tm/t_reply.c:2538-2552`
+*before* `run_top_route(onreply_rt.rlist[onreply_route], p_msg, &ctx)` at 2577, and
+restores them at 2607-2615. A bare `$avp(x)` defaults to `AVP_CLASS_URI |
+AVP_TRACK_FROM` (`core/usr_avp.c:253-256`), which is one of the moved lists. The
+`failure_route[CARRIER_FAILURE]` re-relays (alt-PoP / cross-trunk / 422) run in the
+same transaction and keep the value — correct, because they reuse the Identity set
+composed on that message.
+
+**Direction guard.** `defined $avp(stir_outcome) && $rs != "100" &&
+!route(IS_INTERNAL_SOURCE)`:
+
+* `defined` rather than `!= $null`: an AVP holding `""` or integer `0` compares
+  EQUAL to `$null` (`core/rvalue.c:1290-1292` / `1054-1058` — undef is coerced to the
+  left operand's type), so `!= $null` is a value test, not an existence test.
+* `$rs != "100"` is load-bearing: tm runs the named onreply route for a 100 too —
+  there is no status guard at `t_reply.c:2527-2528`; 100s are only dropped later at
+  relay time (`t_reply.c:1633`, `relay_100=0` default, `tm/config.c:98`).
+* `!route(IS_INTERNAL_SOURCE)` reads `$si`, which in a reply route is the source of
+  the REPLY (`modules/pv/pv_core.c:705` reads `msg->rcv.src_ip` of the current
+  message) — i.e. the carrier/PBX. Replies coming FROM FreeSWITCH (A-legs that share
+  `REPLY_HANDLER` via `route[RELAY]`) never get the header, and those transactions
+  have no AVP anyway.
+
+`append_hf()` is legal here (`textops.c:212-215`, `ANY_ROUTE`) and the lump reaches
+the wire because tm builds the relayed reply from the SAME `sip_msg` this route ran
+on (`t_reply.c:1977` → `2058` → `msg_translator.c:2446-2458`
+`process_lumps(msg->add_rm, …)`).
+
+**Spoof-strip / leak-strip.** `X-Stir-Outcome` is internal, one-directional
+(Kamailio → FS), and never appears toward a carrier or a PBX:
+
+* **Requests:** stripped at every ingress cluster that strips the other internal STIR
+  annotations — the carrier-source branch of `request_route`, `route[TRUNK_AUTH]`,
+  `route[CARRIER_TRUST]`, and `route[TO_CARRIER]`'s pre-relay cleanup. The PBX
+  delivery path's `remove_hf_re("^[Xx]-")` covers it by construction.
+* **Replies:** stripped in the **core** `reply_route{}` — on EVERY received reply,
+  every source, stateful or not. Two reasons it must live there:
+  1. a carrier reply carrying a forged copy would be exported by mod_sofia as
+     `sip_rh_X-Stir-Outcome` and land in the CDR as a forged outcome;
+  2. mod_sofia RE-EMITS `sip_rh_*`/`sip_ph_*` channel variables as real headers on
+     the responses that channel sends (`mod_sofia.c:960` 200 OK, `:2473` 180,
+     `:2656` 183, `:570` error responses), so the value handed to FS on the B-leg
+     rides the A-leg's own 18x/200 back toward the ORIGINATING carrier. That A-leg
+     reply is emitted during the bridge, before any script can intervene — only the
+     core reply route sees it.
+
+  The core reply route runs BEFORE tm: `core/receive.c:582-607` runs
+  `onreply_rt.rlist[DEFAULT_RT]`, then `:623 forward_reply(msg)` →
+  `core/forward.c:784-787` calls each module's `response_f` → tm's is
+  `reply_received` (`tm/tm.c:532`). No clone happens in between, so the core route's
+  remove lump and the named route's append lump are on the same `msg->add_rm` and
+  both apply.
+
+**FreeSWITCH side.** `inbound_router.lua` / `trunk_outbound.lua` /
+`api_outbound.lua` call `stir_outcome_reset()` before and `stir_outcome_capture()`
+after EVERY bridge attempt (the RCF 4-attempt failover loop included). The reset
+clears only the RAW `sip_rh_`/`sip_ph_` capture slots, so a header left over from
+attempt N can never be read as N+1's; the CDR variable `stir_outcome` **retains the
+last non-empty outcome** and is overwritten only when a newer non-empty one is
+captured — the FINAL attempt's outcome wins whenever one arrives, and an attempt
+with no hand-back leaves the previous real outcome in place rather than an empty
+field (which the ingest would silently replace with FS intent).
+`stir_outcome_attempt` records which attempt the stored value came from. No
+`import` variable is involved: mod_sofia exports the reply header on the B-leg
+(`sofia.c:6775-6784` → `sofia_glue.c:959-965`) and copies it to the partner with
+`switch_ivr_transfer_variable(…, "~sip_rh_"/"~sip_ph_")` (`sofia.c:6787-6798`),
+which works even while the originate is failing because the B-leg's `signal_bond`
+is set at creation (`switch_core_session.c:711`). The capture consumes the raw
+`sip_rh_`/`sip_ph_` variables so they cannot be re-emitted later or reach the CDR.
+
+**Hand-back blind spots (why retention matters).** Two classes of final reply
+carry NO `X-Stir-Outcome`, so the attempt they end contributes nothing to the CDR:
+
+1. **Locally generated finals never run `onreply_route`.** tm's `fr_inv_timer`
+   408 (dead SBC / silent carrier — the FS `progress_timeout` case) and every
+   `failure_route` `send_reply()` (e.g. the 503 in `CARRIER_FAILURE`) are built by
+   tm, not received, so `REPLY_HANDLER` never sees them.
+2. **§8.12 peer-handed-off replies.** A carrier reply that landed on the OTHER
+   SBC during a failback/drain window is `send_data()`-relayed to the owner from
+   the sibling's internal IP; `REPLY_HANDLER`'s `!route(IS_INTERNAL_SOURCE)` guard
+   (correct — it keeps FS-sourced A-leg replies clean) then skips the append, so
+   that reply reaches FS without the header.
+
+In both cases the CDR keeps the last real outcome (with `stir_outcome_attempt`
+naming the attempt it came from) or, if no attempt ever handed one back, stays
+empty and the ingest falls back to intent. Fail-soft by design; never affects the
+call.
+
+**Deploy order — HARD requirement (X-From-Name deploy-window leak).** #122 adds
+the `X-From-Name` header (FS → Kamailio, From-display-only hand-off for the RCF
+From pass-through, `RCF_FROM_PASSTHROUGH`). The base RCF-V1 `kamailio.cfg` has NO
+strip for it: an SBC on the pre-#122 build forwards it to the carrier verbatim,
+i.e. the ORIGINAL CALLER's display name leaks to Bandwidth/Sinch in an internal
+header. The Lua is bind-mounted and re-read per call, so a media-VM `git pull`
+takes effect inside the running container immediately. Therefore, per zone:
+
+1. Rebuild + recreate BOTH SBCs of the zone on the #120+#122 image (standby
+   first, then active — `docker compose -f docker-compose.sbc.yml -f
+   docker-compose.stir-key.yml build kamailio && … up -d kamailio`). Confirm
+   with a forwarded test call that the carrier-facing INVITE in Homer carries no
+   `X-From-Name` / `X-Original-CID-Name` / `X-Stir-Outcome`.
+2. Only THEN `git pull` the zone's media VM(s). `RCF_FROM_PASSTHROUGH` ships
+   DARK (default off; only `on|true|1` enables), so this step alone changes no
+   From header.
+3. Only THEN, per carrier PoP (Bandwidth Dallas + LA), place ONE live canary RCF
+   call with `RCF_FROM_PASSTHROUGH=on` on a single media VM and confirm the
+   carrier accepts a non-account TN in From (no 403/603, call completes, Homer
+   shows `From: "<caller name>" <sip:+1<caller>@VIP>` and `Diversion` = the RCF
+   DID). Then enable it in that zone's media-VM `.env` + recreate.
+
+Never set `RCF_FROM_PASSTHROUGH=on` on a media VM whose zone still has an SBC on
+the older build. Rollback at any step: remove the variable + recreate the FS
+container (From reverts to the RCF DID; no SBC change needed).
+
+**Known gap.** `voice_webhook.lua`'s `<Dial>` legs and the legacy
+`outbound_api.lua` do not capture the outcome; their CDRs keep `stir_outcome`
+empty and the ingest falls back to intent.
+
 
 ## 9. How to Modify
 
