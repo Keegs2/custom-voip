@@ -1871,9 +1871,12 @@ local function terminate_trunk(dest, ctx)
         --  set above -- and X-Original-CID is read ONLY in route[TO_CARRIER].
         --  remove_hf_re("^[Xx]-") strips it before the PBX, so setting it would
         --  be a header nothing reads plus a channel variable in every CDR.)
-        --   sip_h_X-In-Identity  <- terminate_rcf "Echo the inbound SHAKEN
-        --                           Identity as the div base" (re-set from
-        --                           what we RECEIVED; omitted when absent)
+        --   sip_h_X-In-Identity  <- already on this A-leg (mod_sofia stored
+        --                           the inbound X-In-Identity header as
+        --                           sip_h_X-In-Identity) and copied to the
+        --                           bridged leg with every other sip_h_*
+        --                           variable — nothing to re-set here (the
+        --                           old self-reassignment was a no-op).
         --   stir_attest_intent / stir_inbound_signed / stir_verstat* /
         --   stir_inbound_attest <- terminate_rcf "STIR/SHAKEN CDR facts"
         -- Display name (same pass_caller_id gate as the carrier leg's From):
@@ -1895,9 +1898,6 @@ local function terminate_trunk(dest, ctx)
                     sanitize_display_name(ctx.masking_name, ctx.presented_cid))
             end
             local in_identity = get_var("sip_h_X-In-Identity", nil)
-            if in_identity and in_identity ~= "" then
-                session:setVariable("sip_h_X-In-Identity", in_identity)
-            end
             set_var("stir_attest_intent", "div")
             set_var("stir_inbound_signed", (in_identity and in_identity ~= "") and "1" or "0")
             set_var("stir_verstat", get_var("sip_h_X-Verstat", ""))

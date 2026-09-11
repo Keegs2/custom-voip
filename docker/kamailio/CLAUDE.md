@@ -889,7 +889,11 @@ counter/log still said `div`).
    `route[CARRIER_TRUST]`, and — new — `route[TRUNK_AUTH]` for PBX-supplied
    Identity), original order, byte-for-byte (`route[STIR_EMIT_CHAIN]`). We
    never rewrite an upstream PASSporT (RFC 8224 §5). This runs with
-   `STIR_SHAKEN_SIGN` OFF too — ownership is independent of signing.
+   `STIR_SHAKEN_SIGN` OFF too — ownership is independent of signing. Known /
+   accepted: `'|'` cannot occur in a well-formed Identity value, so a
+   PBX-supplied SINGLE header containing a literal pipe (`Identity: a|b`) is
+   captured as one element and re-emitted as TWO `Identity:` headers (`a`,
+   `b`) — both already invalid PASSporTs, so nothing verifiable is lost.
 3. **Claims are digits-only.** Every TN we put in a PASSporT we sign goes
    through `route[STIR_TN_CANON]` (strip user params, strip one leading `+`,
    NANP → `1NXXNXXXXXX`, anything else → `""` so the caller gates) — RFC 8224
@@ -924,11 +928,13 @@ counter/log still said `div`).
    `xlog L_NOTICE "STIR egress: identities=N (base=B, div=D) chain=.. own_base=..
    mode=relay|passthrough-div|reorig|gateway-C|base eff=.. fs_copies_stripped=.."`
    (`"STIR egress (pbx <ip>): ..."` on the PBX leg) — grep it for the truth.
-   The FS/CDR/UI "A→div" badge is still INTENT-based (`stir_attest_intent`,
-   `stir_inbound_signed` channel vars set before the bridge); making it
-   outcome-based needs the SBC to hand the outcome back to FS (e.g. a header on
-   the first non-100 reply consumed by the B-leg → exported to the A-leg CDR
-   vars) — deliberately out of scope here.
+   The FS/CDR/UI badge is OUTCOME-based since #122: Kamailio hands the actual
+   composed set back on every non-100 reply as `X-Stir-Outcome` (§8.14), FS
+   pins it in the A-leg channel variable `stir_outcome`, and #121's ingest
+   stores it (`cdrs.stir_outcome` / `stir_eff_actual`) and prefers it over the
+   FS intent (`stir_attest_intent`, `stir_inbound_signed`) when rendering the
+   badge (`stir_badge_source=actual`); intent remains the fallback when no
+   hand-back arrived (see the §8.14 blind spots).
 
 **Lump-order rules honoured:** in TO_CARRIER the strips/appends are plain lumps
 AFTER `msg_apply_changes()` and `record_route_preset()` (same position as the
