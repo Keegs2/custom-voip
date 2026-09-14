@@ -922,8 +922,8 @@
     {
       "id": 62,
       "type": "timeseries",
-      "title": "Inbound calls per hour — by zone",
-      "description": "Calls OFFERED into the platform from carriers, counted at the SBC on each admitted initial INVITE (Kamailio `kamailio_trunk_cps{direction=\"inbound\"}`), aggregated into FIXED ONE-HOUR buckets. Unlike a picker-relative panel, bar height does NOT rescale with the time range — one bar is always one clock hour, and the number is an exact integer call count. Bars are drawn ENDING at their timestamp, so a bar between the 13:00 and 14:00 gridlines is the 13:00-14:00 hour. Buckets tile exactly: VictoriaMetrics' non-extrapolating increase() baselines each window on the last sample BEFORE it, so consecutive hours neither double-count nor drop a call. A call landing within ~15s of an hour boundary may be attributed to the next bar (it is counted at the scrape that observes it) — never twice, never zero. The stacked height IS the fleet total; the 'Total' series is hidden from the chart but kept in the legend and tooltip.\n\nTHE CURRENT HOUR IS NOT SHOWN. Grafana rounds the query range DOWN to whole hours, so the newest bar is always the last COMPLETED hour: at 14:23 the rightmost bar is 13:00-14:00 and the last 23 minutes are not on this chart at all. A 'missing' current-hour bar is NORMAL and is NOT a traffic collapse — this panel is 0-59 minutes behind real time by design. For live traffic use 'CPS over time — by zone (1m rate)'; hourly bars have no incident resolution (a 3-minute flood or a 20-minute outage just makes one bar slightly high or low). Renders 25 bars, not 24 — the leftmost covers the hour that ended 24h ago. Bars are wall-clock-hour aligned in every US timezone; across a DST change an hour label repeats (fall) or is skipped (spring), values still correct.\n\nCOUNTED EXACTLY ONCE PER CALL: the counter sits after `t_precheck_trans()` (absorbs INVITE retransmissions), after `bw_dedup` (482 Merged on the duplicate INVITEs Bandwidth sends from multiple edges), and after the `bw_cps` 503 backstop. On-net forwards are counted once at ingress and never re-counted per chain hop. Calls that later fail, are abandoned, or are hard-rejected on-net (603/483) still count as OFFERED — pair with 'Live ASR (5m)' to read completion. This is an offered-call count, NOT a billing figure.\n\nNOT INCLUDED — this is carrier ingress, not total platform volume: customer-originated SIP-trunk and API Calling traffic (`route[TRUNK_AUTH]` emits no counter today), runtime DB-admitted carriers (`carrier_trunks` — deliberately no metric, a DB-sourced carrier name is not a bounded label), and SIPp load-test ingress. `direction=\"outbound\"` is deliberately NOT plotted: it is an ATTEMPT counter (the FreeSWITCH failover loop fires up to 8 bridge attempts per call) and the carrier B-leg of an RCF forward is the same call already counted inbound.\n\nACCURACY UNDER FAULTS: an SBC active/standby flip costs nothing (the ex-active's counter goes flat, the new active's climbs). A Kamailio container restart resets its counter to 0; that is corrected per-series before the zones are summed, losing at most 15s (one scrape) of that one SBC's calls in the hour containing the restart. If a zone's link blips, vmagent replays its on-disk queue with original timestamps and VictoriaMetrics auto-resets its response cache on backfill — the affected bar SELF-CORRECTS upward on the next refresh, so an unexpectedly low recent bar may simply be data still in flight. A zone with NO BAR has stopped reporting entirely: that is missing data, not zero calls (an idle-but-healthy zone draws a zero-height bar, not a gap). Zone colours are deliberately NON-STATUS (blue / violet / teal): on this board green, amber and red always mean health, never a zone.",
+      "title": "Inbound calls per $__interval — by zone",
+      "description": "Calls OFFERED into the platform from carriers, counted at the SBC on each admitted initial INVITE (Kamailio `kamailio_trunk_cps{direction=\"inbound\"}`), aggregated into FIXED, EQUAL-WIDTH buckets. THE BUCKET IS NO LONGER ALWAYS ONE HOUR — it auto-scales with the **Volume window** ($volwin) picker at the top of the board, and the title always names the bucket actually in force: **24h -> 1h bars (25 of them) · 7d -> 6h bars (29) · 30d -> 1d bars (31)**, because 168 hourly bars at 7d or 720 at 30d are unreadable on a wall. Bar height is an exact integer call count for whatever bucket is in force and does NOT rescale with the dashboard time picker — this panel ignores the picker and follows the **Volume window** picker instead (Grafana shows the window as a badge in this panel's header). Bars are drawn ENDING at their timestamp, so at the 24h setting a bar between the 13:00 and 14:00 gridlines is the 13:00-14:00 hour. Buckets tile exactly at EVERY window: the PromQL range and the query step are the same value (`increase(...[$__interval])`, and Grafana sets step = $__interval), and VictoriaMetrics' non-extrapolating increase() baselines each window on the last sample BEFORE it, so consecutive buckets neither double-count nor drop a call. A call landing within ~15s of a bucket boundary may be attributed to the next bar (it is counted at the scrape that observes it) — never twice, never zero. The stacked height IS the fleet total; the 'Total' series is hidden from the chart but kept in the legend and tooltip.\n\nTHE CURRENT, IN-PROGRESS BUCKET IS NEVER SHOWN — AND THAT BLIND SPOT GROWS WITH THE WINDOW. Grafana floors the query range down to whole buckets, so the newest bar is always the last COMPLETED bucket. At **24h** that costs up to 59 minutes: at 14:23 the rightmost bar is 13:00-14:00 and the last 23 minutes are not on this chart at all. At **7d** the bucket is 6 hours, so up to 6 hours of the most recent traffic is missing. At **30d** THE BUCKET IS A FULL DAY: the rightmost bar is YESTERDAY, and everything that has happened today — up to 23h59m of calls — is not plotted at all. A 30d wall that looks like it 'stopped a day ago' is CORRECT AND EXPECTED, not a traffic collapse, and the same goes for a missing newest bar at any window. The corollary is that the 7d and 30d settings can tell you NOTHING about today: for that, switch back to 24h, read the 'Calls — last 1h / last 24h' tiles (trailing windows ending now, so they DO include the current minute), or use 'CPS over time — by zone (1m rate)'. At every window these bars have no incident resolution — a 3-minute flood or a 20-minute outage just makes one bar slightly high or low. Bars are wall-clock aligned in every US timezone; across a DST change an hour label repeats (fall) or is skipped (spring), values still correct.\n\nCOUNTED EXACTLY ONCE PER CALL: the counter sits after `t_precheck_trans()` (absorbs INVITE retransmissions), after `bw_dedup` (482 Merged on the duplicate INVITEs Bandwidth sends from multiple edges), and after the `bw_cps` 503 backstop. On-net forwards are counted once at ingress and never re-counted per chain hop. Calls that later fail, are abandoned, or are hard-rejected on-net (603/483) still count as OFFERED — pair with 'Live ASR (5m)' to read completion. This is an offered-call count, NOT a billing figure, and 30d is a rolling 30 days, not a calendar month.\n\nNOT INCLUDED — this is carrier ingress, not total platform volume: customer-originated SIP-trunk and API Calling traffic (`route[TRUNK_AUTH]` emits no counter today), runtime DB-admitted carriers (`carrier_trunks` — deliberately no metric, a DB-sourced carrier name is not a bounded label), and SIPp load-test ingress. `direction=\"outbound\"` is deliberately NOT plotted: it is an ATTEMPT counter (the FreeSWITCH failover loop fires up to 8 bridge attempts per call) and the carrier B-leg of an RCF forward is the same call already counted inbound.\n\nACCURACY UNDER FAULTS: an SBC active/standby flip costs nothing (the ex-active's counter goes flat, the new active's climbs). A Kamailio container restart resets its counter to 0; that is corrected per-series before the zones are summed, losing at most 15s (one scrape) of that one SBC's calls in the bucket containing the restart. If a zone's link blips, vmagent replays its on-disk queue with original timestamps and VictoriaMetrics auto-resets its response cache on backfill — the affected bar SELF-CORRECTS upward on the next refresh, so an unexpectedly low recent bar may simply be data still in flight. A zone with NO BAR has stopped reporting entirely: that is missing data, not zero calls (an idle-but-healthy zone draws a zero-height bar, not a gap); at 7d/30d a bar can also be short simply because the metrics plane was not reporting for that whole bucket. Zone colours are deliberately NON-STATUS (blue / violet / teal): on this board green, amber and red always mean health, never a zone.\n\nTHIS PANEL WILL NOT MATCH THE 'Calls — last N' TILES ABOVE, AND THAT IS CORRECT. The tiles count a trailing window anchored on RIGHT NOW and include the period in progress; these bars cover only whole COMPLETED buckets and stop at the last bucket boundary — so the two differ at BOTH ends. Read the tiles for 'how many calls in the last N', and these bars for 'how did completed periods compare'. The legend's Total column sums the visible bars and will likewise not equal the tile.",
       "gridPos": {
         "h": 8,
         "w": 24,
@@ -934,7 +934,9 @@
         "type": "prometheus",
         "uid": "voip-metrics-vm"
       },
-      "timeFrom": "24h",
+      "timeFrom": "$volwin",
+      "maxDataPoints": 24,
+      "interval": "1h",
       "targets": [
         {
           "refId": "A",
@@ -942,7 +944,7 @@
             "type": "prometheus",
             "uid": "voip-metrics-vm"
           },
-          "expr": "sum by (zone) (increase(kamailio_trunk_cps{direction=\"inbound\"}[1h]))",
+          "expr": "sum by (zone) (increase(kamailio_trunk_cps{direction=\"inbound\"}[$__interval]))",
           "range": true,
           "interval": "1h",
           "legendFormat": "{{zone}}"
@@ -953,7 +955,7 @@
             "type": "prometheus",
             "uid": "voip-metrics-vm"
           },
-          "expr": "sum(increase(kamailio_trunk_cps{direction=\"inbound\"}[1h]))",
+          "expr": "sum(increase(kamailio_trunk_cps{direction=\"inbound\"}[$__interval]))",
           "range": true,
           "interval": "1h",
           "legendFormat": "Total"
@@ -977,7 +979,7 @@
             "gradientMode": "none",
             "showPoints": "never",
             "spanNulls": false,
-            "axisLabel": "calls / hour",
+            "axisLabel": "calls per bar",
             "axisSoftMin": 0,
             "stacking": {
               "mode": "normal",
@@ -1134,10 +1136,10 @@
       "title": "Total CPS — now (1m)",
       "description": "Fleet-wide calls per second right now: sum(rate(kamailio_trunk_cps[1m])) across all SBCs/zones. Rated capacity is ~500 CPS/zone; amber at 350, red at 500 on the all-zones view. Live from VictoriaMetrics (Kamailio mod_prometheus).\n\nServed by vmalert recording rule `zone:kamailio_trunk_cps:rate1m` (30s eval). Raw fallback query: `sum(rate(kamailio_trunk_cps[1m]))`. Recorded series only exist from the recording-rule deploy timestamp onward - on a now-6h wall any pre-deploy gap ages out within 6h.",
       "gridPos": {
-        "h": 4,
-        "w": 4,
+        "h": 6,
+        "w": 3,
         "x": 0,
-        "y": 14
+        "y": 18
       },
       "datasource": {
         "type": "prometheus",
@@ -1207,7 +1209,7 @@
       "gridPos": {
         "h": 4,
         "w": 4,
-        "x": 4,
+        "x": 0,
         "y": 14
       },
       "datasource": {
@@ -1264,15 +1266,275 @@
       }
     },
     {
+      "id": 63,
+      "type": "stat",
+      "title": "Calls — last 1h",
+      "description": "Total inbound calls offered by carriers across the whole fleet in the trailing 60 minutes. Second rung of the now -> 1h -> 24h -> 7d -> 30d ladder: the shift-level number, and the one that should track the sum of the last hour of bars in the chart above.\n\nSame counter the hourly bar chart above plots, so the same boundaries apply: CARRIER INGRESS ONLY — customer-originated SIP-trunk / API Calling traffic (`route[TRUNK_AUTH]` emits no counter), runtime DB-admitted carriers (`carrier_trunks`) and SIPp load-test ingress are all excluded, and `direction=\"outbound\"` is deliberately not added (it is an attempt counter, and an RCF forward's carrier B-leg is the same call already counted inbound). OFFERED, not completed: calls that later fail, are abandoned, or are hard-rejected on-net (603/483) still count — pair with 'Live ASR (5m)' to read completion. This is an offered-call count, NOT a billing figure.\n\nCounted exactly once per call (after `t_precheck_trans()`, after `bw_dedup`, after the `bw_cps` 503 backstop); on-net forwards are counted once at ingress, never per chain hop. Kamailio container restarts reset the counter to 0 — increase() corrects that per-series before the SBCs are summed. Unlike the bar chart this is a TRAILING window ending NOW, not a completed clock bucket, so it includes the in-progress minute and the value creeps continuously rather than stepping. Deliberately uncoloured: this is a VOLUME number, not a health signal — nothing on this tile ever turns amber or red.\n\nVictoriaMetrics retention is 12 months, so the window itself is always covered; but if the metrics plane (or a zone's vmagent) has been reporting for less than this window, the figure is a partial-window undercount, not a traffic drop.\n\nFIXED WINDOW — this tile does NOT follow the dashboard time picker or the Volume window selector; it always counts the trailing 60 minutes ending right now, INCLUDING the period in progress (which is why it will not equal the sum of the bars below — those stop at the last completed bucket). FLEET-WIDE — it deliberately IGNORES the Zone filter and always counts all three zones, matching the bars below; the Zone picker applies to the per-zone diagnostic panels lower on this board. An SBC restart inside the window loses at most 15s (one scrape) of that one SBC's calls, and under active/standby those calls are usually counted on its peer instead. An empty tile means the metrics plane is not reporting — it does NOT mean zero calls.",
+      "gridPos": {
+        "h": 4,
+        "w": 5,
+        "x": 4,
+        "y": 14
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "voip-metrics-vm"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "voip-metrics-vm"
+          },
+          "expr": "sum(increase(kamailio_trunk_cps{direction=\"inbound\"}[1h]))",
+          "instant": true,
+          "range": false,
+          "legendFormat": "calls"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "locale",
+          "decimals": 0,
+          "noValue": "no data",
+          "mappings": [],
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#E0E6F0"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#E0E6F0",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 64,
+      "type": "stat",
+      "title": "Calls — last 24h",
+      "description": "Total inbound calls offered by carriers across the whole fleet in the trailing 24 hours — the day figure. Equals the whole bar chart above plus the in-progress hour the chart floors off, so it reads slightly higher than the visible bars sum to; that difference is expected, not a discrepancy.\n\nSame counter the hourly bar chart above plots, so the same boundaries apply: CARRIER INGRESS ONLY — customer-originated SIP-trunk / API Calling traffic (`route[TRUNK_AUTH]` emits no counter), runtime DB-admitted carriers (`carrier_trunks`) and SIPp load-test ingress are all excluded, and `direction=\"outbound\"` is deliberately not added (it is an attempt counter, and an RCF forward's carrier B-leg is the same call already counted inbound). OFFERED, not completed: calls that later fail, are abandoned, or are hard-rejected on-net (603/483) still count — pair with 'Live ASR (5m)' to read completion. This is an offered-call count, NOT a billing figure.\n\nCounted exactly once per call (after `t_precheck_trans()`, after `bw_dedup`, after the `bw_cps` 503 backstop); on-net forwards are counted once at ingress, never per chain hop. Kamailio container restarts reset the counter to 0 — increase() corrects that per-series before the SBCs are summed. Unlike the bar chart this is a TRAILING window ending NOW, not a completed clock bucket, so it includes the in-progress minute and the value creeps continuously rather than stepping. Deliberately uncoloured: this is a VOLUME number, not a health signal — nothing on this tile ever turns amber or red.\n\nVictoriaMetrics retention is 12 months, so the window itself is always covered; but if the metrics plane (or a zone's vmagent) has been reporting for less than this window, the figure is a partial-window undercount, not a traffic drop.\n\nFIXED WINDOW — this tile does NOT follow the dashboard time picker or the Volume window selector; it always counts the trailing 24 hours ending right now, INCLUDING the period in progress (which is why it will not equal the sum of the bars below — those stop at the last completed bucket). FLEET-WIDE — it deliberately IGNORES the Zone filter and always counts all three zones, matching the bars below; the Zone picker applies to the per-zone diagnostic panels lower on this board. An SBC restart inside the window loses at most 15s (one scrape) of that one SBC's calls, and under active/standby those calls are usually counted on its peer instead. An empty tile means the metrics plane is not reporting — it does NOT mean zero calls.",
+      "gridPos": {
+        "h": 4,
+        "w": 5,
+        "x": 9,
+        "y": 14
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "voip-metrics-vm"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "voip-metrics-vm"
+          },
+          "expr": "sum(increase(kamailio_trunk_cps{direction=\"inbound\"}[24h]))",
+          "instant": true,
+          "range": false,
+          "legendFormat": "calls"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "locale",
+          "decimals": 0,
+          "noValue": "no data",
+          "mappings": [],
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#E0E6F0"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#E0E6F0",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 65,
+      "type": "stat",
+      "title": "Calls — last 7d",
+      "description": "Total inbound calls offered by carriers across the whole fleet in the trailing 7 days — the week figure, the one to compare week over week for growth or for a customer-visible outage that the live tiles have already forgotten.\n\nSame counter the hourly bar chart above plots, so the same boundaries apply: CARRIER INGRESS ONLY — customer-originated SIP-trunk / API Calling traffic (`route[TRUNK_AUTH]` emits no counter), runtime DB-admitted carriers (`carrier_trunks`) and SIPp load-test ingress are all excluded, and `direction=\"outbound\"` is deliberately not added (it is an attempt counter, and an RCF forward's carrier B-leg is the same call already counted inbound). OFFERED, not completed: calls that later fail, are abandoned, or are hard-rejected on-net (603/483) still count — pair with 'Live ASR (5m)' to read completion. This is an offered-call count, NOT a billing figure.\n\nCounted exactly once per call (after `t_precheck_trans()`, after `bw_dedup`, after the `bw_cps` 503 backstop); on-net forwards are counted once at ingress, never per chain hop. Kamailio container restarts reset the counter to 0 — increase() corrects that per-series before the SBCs are summed. Unlike the bar chart this is a TRAILING window ending NOW, not a completed clock bucket, so it includes the in-progress minute and the value creeps continuously rather than stepping. Deliberately uncoloured: this is a VOLUME number, not a health signal — nothing on this tile ever turns amber or red.\n\nVictoriaMetrics retention is 12 months, so the window itself is always covered; but if the metrics plane (or a zone's vmagent) has been reporting for less than this window, the figure is a partial-window undercount, not a traffic drop.\n\nFIXED WINDOW — this tile does NOT follow the dashboard time picker or the Volume window selector; it always counts the trailing 7 days ending right now, INCLUDING the period in progress (which is why it will not equal the sum of the bars below — those stop at the last completed bucket). FLEET-WIDE — it deliberately IGNORES the Zone filter and always counts all three zones, matching the bars below; the Zone picker applies to the per-zone diagnostic panels lower on this board. An SBC restart inside the window loses at most 15s (one scrape) of that one SBC's calls, and under active/standby those calls are usually counted on its peer instead. An empty tile means the metrics plane is not reporting — it does NOT mean zero calls.\n\nHISTORY FLOOR — a short number here can be missing data, not a traffic drop. The metrics store began recording 2026-07-29; VictoriaMetrics retention is 12 months, so retention is not the limit — the age of the metrics plane is. If this window reaches past the start of history, VictoriaMetrics returns only what exists, with no error and no warning, and this tile reads LOW without saying so. The same applies after any rebuild of the services VM or the victoriametrics_data volume, which truncates history to the rebuild date. Confirm with `min(tfirst_over_time(kamailio_trunk_cps[365d]))` on the services VM before reading a low number as a decline.",
+      "gridPos": {
+        "h": 4,
+        "w": 5,
+        "x": 14,
+        "y": 14
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "voip-metrics-vm"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "voip-metrics-vm"
+          },
+          "expr": "sum(increase(kamailio_trunk_cps{direction=\"inbound\"}[7d]))",
+          "instant": true,
+          "range": false,
+          "legendFormat": "calls"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "locale",
+          "decimals": 0,
+          "noValue": "no data",
+          "mappings": [],
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#E0E6F0"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#E0E6F0",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 66,
+      "type": "stat",
+      "title": "Calls — last 30d",
+      "description": "Total inbound calls offered by carriers across the whole fleet in the trailing 30 days — the month figure. Rolling 30 days ending now, NOT a calendar month, so it is not a billing period boundary and will not tie out against an invoice.\n\nSame counter the hourly bar chart above plots, so the same boundaries apply: CARRIER INGRESS ONLY — customer-originated SIP-trunk / API Calling traffic (`route[TRUNK_AUTH]` emits no counter), runtime DB-admitted carriers (`carrier_trunks`) and SIPp load-test ingress are all excluded, and `direction=\"outbound\"` is deliberately not added (it is an attempt counter, and an RCF forward's carrier B-leg is the same call already counted inbound). OFFERED, not completed: calls that later fail, are abandoned, or are hard-rejected on-net (603/483) still count — pair with 'Live ASR (5m)' to read completion. This is an offered-call count, NOT a billing figure.\n\nCounted exactly once per call (after `t_precheck_trans()`, after `bw_dedup`, after the `bw_cps` 503 backstop); on-net forwards are counted once at ingress, never per chain hop. Kamailio container restarts reset the counter to 0 — increase() corrects that per-series before the SBCs are summed. Unlike the bar chart this is a TRAILING window ending NOW, not a completed clock bucket, so it includes the in-progress minute and the value creeps continuously rather than stepping. Deliberately uncoloured: this is a VOLUME number, not a health signal — nothing on this tile ever turns amber or red.\n\nVictoriaMetrics retention is 12 months, so the window itself is always covered; but if the metrics plane (or a zone's vmagent) has been reporting for less than this window, the figure is a partial-window undercount, not a traffic drop.\n\nFIXED WINDOW — this tile does NOT follow the dashboard time picker or the Volume window selector; it always counts the trailing 30 days ending right now, INCLUDING the period in progress (which is why it will not equal the sum of the bars below — those stop at the last completed bucket). FLEET-WIDE — it deliberately IGNORES the Zone filter and always counts all three zones, matching the bars below; the Zone picker applies to the per-zone diagnostic panels lower on this board. An SBC restart inside the window loses at most 15s (one scrape) of that one SBC's calls, and under active/standby those calls are usually counted on its peer instead. An empty tile means the metrics plane is not reporting — it does NOT mean zero calls.\n\nHISTORY FLOOR — a short number here can be missing data, not a traffic drop. The metrics store began recording 2026-07-29; VictoriaMetrics retention is 12 months, so retention is not the limit — the age of the metrics plane is. If this window reaches past the start of history, VictoriaMetrics returns only what exists, with no error and no warning, and this tile reads LOW without saying so. The same applies after any rebuild of the services VM or the victoriametrics_data volume, which truncates history to the rebuild date. Confirm with `min(tfirst_over_time(kamailio_trunk_cps[365d]))` on the services VM before reading a low number as a decline.",
+      "gridPos": {
+        "h": 4,
+        "w": 5,
+        "x": 19,
+        "y": 14
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "voip-metrics-vm"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "voip-metrics-vm"
+          },
+          "expr": "sum(increase(kamailio_trunk_cps{direction=\"inbound\"}[30d]))",
+          "instant": true,
+          "range": false,
+          "legendFormat": "calls"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "locale",
+          "decimals": 0,
+          "noValue": "no data",
+          "mappings": [],
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#E0E6F0"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#E0E6F0",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
       "id": 40,
       "type": "stat",
       "title": "Live ASR (5m)",
       "description": "Live answer-seizure ratio from Kamailio INVITE reply classes over the last 5 minutes: 2xx / (2xx + 4xx + 5xx + 6xx). Honours the Zone filter. Green >= 50%, amber < 50%, red < 30%. This is the live signaling ASR, independent of CDR write lag.\n\nServed by vmalert recording rule `zone:kamailio_invite_replies:rate5m (class label)` (30s eval). Raw fallback query: `2xx rate / clamp_min(2xx+4xx+5xx+6xx rates, 0.001) over rate(kamailio_core_rcv_replies_Nxx_invite[5m])`. Recorded series only exist from the recording-rule deploy timestamp onward - on a now-6h wall any pre-deploy gap ages out within 6h.",
       "gridPos": {
-        "h": 4,
-        "w": 4,
-        "x": 8,
-        "y": 14
+        "h": 6,
+        "w": 3,
+        "x": 0,
+        "y": 31
       },
       "datasource": {
         "type": "prometheus",
@@ -1342,10 +1604,10 @@
       "title": "Live failure % (5m)",
       "description": "Live INVITE failure fraction from Kamailio reply classes over 5m: (4xx + 5xx + 6xx) / (2xx + 4xx + 5xx + 6xx). Honours the Zone filter. Green < 10%, amber >= 10%, red >= 25%. Same denominator as Live ASR; the earliest live sign of a carrier/routing fault.\n\nServed by vmalert recording rule `zone:kamailio_invite_replies:rate5m (class label)` (30s eval). Raw fallback query: `(4xx+5xx+6xx rates) / clamp_min(2xx+4xx+5xx+6xx rates, 0.001) over rate(kamailio_core_rcv_replies_Nxx_invite[5m])`. Recorded series only exist from the recording-rule deploy timestamp onward - on a now-6h wall any pre-deploy gap ages out within 6h.",
       "gridPos": {
-        "h": 4,
-        "w": 4,
-        "x": 12,
-        "y": 14
+        "h": 7,
+        "w": 3,
+        "x": 14,
+        "y": 24
       },
       "datasource": {
         "type": "prometheus",
@@ -1415,10 +1677,10 @@
       "title": "On-net % — now",
       "description": "Live share of active FreeSWITCH channels that are on-net (short-circuited internally, no carrier egress): sum(freeswitch_channels_active{on_net=\"true\"}) / sum(freeswitch_channels_active{on_net=~\"true|false\"}). Higher = more carrier hairpin avoided (cost + quality win). Live gauge, all zones.",
       "gridPos": {
-        "h": 4,
-        "w": 4,
-        "x": 16,
-        "y": 14
+        "h": 6,
+        "w": 3,
+        "x": 13,
+        "y": 31
       },
       "datasource": {
         "type": "prometheus",
@@ -1481,10 +1743,10 @@
       "title": "Active dialogs — now",
       "description": "Live signaling concurrency: sum(kamailio_dialog_active_dialogs) across the SBCs, honouring the Zone filter. This is SIP dialog state (what Kamailio is tracking) as opposed to media legs. One off-net call = 2 Kamailio dialogs (A-leg + B-leg) = 2 FreeSWITCH channels, so `gap` = dialogs − freeswitch_channels_total should sit near 0 (on-net calls push it negative). Amber when gap > 10: that is the vmalert SbcDialogLeak line (for: 2h30m — strictly longer than the 2h Kamailio dialog timeout, so post-failover ghost dialogs on the ex-active SBC never page; a gap that persists past 2h30m is a real leak). See docker/vmalert/rules/teardown.yml.",
       "gridPos": {
-        "h": 4,
-        "w": 4,
-        "x": 20,
-        "y": 14
+        "h": 5,
+        "w": 3,
+        "x": 15,
+        "y": 37
       },
       "datasource": {
         "type": "prometheus",
@@ -1587,8 +1849,8 @@
       "description": "Live calls-per-second per zone: sum by (zone)(rate(kamailio_trunk_cps[1m])), one line per zone. Watch load balance across East / West / Central. All zones shown regardless of the Zone filter.\n\nServed by vmalert recording rule `zone:kamailio_trunk_cps:rate1m` (30s eval). Raw fallback query: `sum by (zone) (rate(kamailio_trunk_cps[1m]))`. Recorded series only exist from the recording-rule deploy timestamp onward - on a now-6h wall any pre-deploy gap ages out within 6h.",
       "gridPos": {
         "h": 6,
-        "w": 8,
-        "x": 0,
+        "w": 7,
+        "x": 3,
         "y": 18
       },
       "datasource": {
@@ -1658,8 +1920,8 @@
       "description": "Live concurrency, fleet-wide: media (FreeSWITCH calls_active = bridged call pairs, and channels_total = legs) vs signaling (SBC dialog_active_dialogs). One off-net call = 2 FS channels = 2 Kamailio dialogs, so `gap (dialogs − FS channels)` should hover near 0 (on-net calls push it negative; calls_active runs at ~half the channel count). The dashed amber line at 10 is the vmalert SbcDialogLeak threshold on the gap series (for: 2h30m). After an SBC failover the gap is EXPECTED to bulge and decay within the 2h dialog timeout (ghost dialogs on the ex-active SBC); a gap that stays above the line longer than that is a persistent leak → alert. See docker/vmalert/rules/teardown.yml. All zones.",
       "gridPos": {
         "h": 6,
-        "w": 8,
-        "x": 8,
+        "w": 7,
+        "x": 10,
         "y": 18
       },
       "datasource": {
@@ -1840,8 +2102,8 @@
       "description": "Calls per second per media node = seizures per 1-minute bucket / 60, one series per freeswitch_node. Shows how call-start load is distributed across the FreeSWITCH fleet. Honours the Zone filter. Live from VictoriaMetrics.\n\nServed by vmalert recording rule `node:freeswitch_sessions:rate1m` (30s eval). Raw fallback query: `sum by (freeswitch_node) (rate(freeswitch_sessions_total{zone=~\"$zonere\"}[1m]))`. Recorded series only exist from the recording-rule deploy timestamp onward - on a now-6h wall any pre-deploy gap ages out within 6h.",
       "gridPos": {
         "h": 6,
-        "w": 8,
-        "x": 16,
+        "w": 7,
+        "x": 17,
         "y": 18
       },
       "datasource": {
@@ -1911,7 +2173,7 @@
       "description": "Live inbound active calls per CARRIER trunk (Bandwidth PoP) from Kamailio's dialog profile: kamailio_trunk_active_calls{direction=\"inbound\"}, summed by the bounded carrier `trunk` label, instant snapshot. Honours the Zone filter.",
       "gridPos": {
         "h": 7,
-        "w": 8,
+        "w": 7,
         "x": 0,
         "y": 24
       },
@@ -2005,8 +2267,8 @@
       "description": "Live outbound active calls per CARRIER trunk (Bandwidth PoP) from Kamailio's dialog profile: kamailio_trunk_active_calls{direction=\"outbound\"}, summed by the bounded carrier `trunk` label, instant snapshot. Honours the Zone filter.",
       "gridPos": {
         "h": 7,
-        "w": 8,
-        "x": 8,
+        "w": 7,
+        "x": 7,
         "y": 24
       },
       "datasource": {
@@ -2099,8 +2361,8 @@
       "description": "Live Kamailio INVITE reply rate by response class over 5m: 2xx / 3xx / 4xx / 5xx / 6xx, sum(rate(kamailio_core_rcv_replies_Nxx_invite[5m])). Honours the Zone filter. A growing 4xx/5xx/6xx band is the earliest LIVE sign of a carrier/routing fault — this is the live replacement for the old CDR SIP-class panel.\n\nServed by vmalert recording rule `zone:kamailio_invite_replies:rate5m (class label)` (30s eval). Raw fallback query: `sum(rate(kamailio_core_rcv_replies_Nxx_invite{zone=~\"$zonere\"}[5m])) per class`. Recorded series only exist from the recording-rule deploy timestamp onward - on a now-6h wall any pre-deploy gap ages out within 6h.",
       "gridPos": {
         "h": 7,
-        "w": 8,
-        "x": 16,
+        "w": 7,
+        "x": 17,
         "y": 24
       },
       "datasource": {
@@ -2286,8 +2548,8 @@
       "description": "The Live ASR stat as a trend line: 2xx / (2xx + 4xx + 5xx + 6xx) from Kamailio INVITE reply classes over 5m, honouring the Zone filter. Watch for a sustained dip below 50% (amber) / 30% (red).\n\nServed by vmalert recording rule `zone:kamailio_invite_replies:rate5m (class label)` (30s eval). Raw fallback query: `2xx rate / clamp_min(2xx+4xx+5xx+6xx rates, 0.001) over rate(kamailio_core_rcv_replies_Nxx_invite[5m])`. Recorded series only exist from the recording-rule deploy timestamp onward - on a now-6h wall any pre-deploy gap ages out within 6h.",
       "gridPos": {
         "h": 6,
-        "w": 8,
-        "x": 0,
+        "w": 6,
+        "x": 3,
         "y": 31
       },
       "datasource": {
@@ -2369,8 +2631,8 @@
       "description": "Live Bandwidth carrier trunk reachability from the SBCs' Kamailio-dispatcher OPTIONS probes (carrier_trunk_health, keyed by duid). The ONLY panel on this wall not sourced from VictoriaMetrics — it reads voip-cdr-pg, but the health view is poller-fresh (~3-15s), NOT call-derived. 🟢 UP (reachable from >=1 SBC) · 🔴 DOWN (dead on every SBC) · 🟠 STALE (no fresh probe in 90s). Proactive — a dead carrier shows even at zero call volume.",
       "gridPos": {
         "h": 6,
-        "w": 8,
-        "x": 8,
+        "w": 4,
+        "x": 9,
         "y": 31
       },
       "datasource": {
@@ -2664,7 +2926,7 @@
       "description": "Live Kamailio shared-memory utilisation per SBC: kamailio_shmem_used_size / kamailio_shmem_total_size, one line per reporting_instance. Green < 70%, amber >= 70%, red >= 85%. Rising shmem is an early warning of a dialog/tm leak or an under-provisioned SBC before it starts dropping calls.",
       "gridPos": {
         "h": 5,
-        "w": 8,
+        "w": 7,
         "x": 0,
         "y": 37
       },
@@ -2747,8 +3009,8 @@
       "description": "Live count of source IPs currently blocked by Kamailio's pike (flood-detection) module: sum(kamailio_pike_blocked_ips). Green at 0; any non-zero is an active flood/attack indicator worth eyeballing. Fleet-wide.",
       "gridPos": {
         "h": 5,
-        "w": 6,
-        "x": 8,
+        "w": 4,
+        "x": 7,
         "y": 37
       },
       "datasource": {
@@ -2815,7 +3077,7 @@
       "gridPos": {
         "h": 5,
         "w": 4,
-        "x": 14,
+        "x": 11,
         "y": 37
       },
       "datasource": {
@@ -3098,6 +3360,38 @@
             "selected": false,
             "text": "Central",
             "value": "central"
+          }
+        ]
+      },
+      {
+        "name": "volwin",
+        "label": "Volume window",
+        "description": "Time window for the 'Inbound calls' bar chart ONLY. It is read by that one panel's relative-time override (timeFrom) and by nothing else on this board: it does NOT move the dashboard time picker, and every other panel keeps the picker's range (default now-6h) and its own live semantics. The bar BUCKET auto-scales with the choice so the chart always draws ~30 readable bars instead of 168 or 720 hairlines: 24h -> 1h bars (24) · 7d -> 6h bars (28) · 30d -> 1d bars (30). Coarser buckets enlarge the chart's blind spot — the current, in-progress bucket is never drawn, so at 30d the newest bar is YESTERDAY. CAVEAT: a panel relative-time override only applies while the DASHBOARD time range is relative; if someone drag-zooms the wall or picks an absolute range, this picker silently stops applying and the bar chart follows the picker instead. Reset the picker to a relative range (e.g. Last 6 hours) to get it back.",
+        "type": "custom",
+        "hide": 0,
+        "multi": false,
+        "includeAll": false,
+        "query": "24h, 7d, 30d",
+        "current": {
+          "selected": true,
+          "text": "24h",
+          "value": "24h"
+        },
+        "options": [
+          {
+            "selected": true,
+            "text": "24h",
+            "value": "24h"
+          },
+          {
+            "selected": false,
+            "text": "7d",
+            "value": "7d"
+          },
+          {
+            "selected": false,
+            "text": "30d",
+            "value": "30d"
           }
         ]
       }
